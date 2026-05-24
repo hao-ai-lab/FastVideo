@@ -55,7 +55,7 @@ python -m torch.distributed.run \
     --nproc_per_node "${NUM_GPUS}" \
     --master_addr "${MASTER_ADDR}" \
     --master_port "${MASTER_PORT}" \
-    fastvideo/train/entrypoint/train.py \
+    -m fastvideo.train.entrypoint.train \
     --config "${CONFIG}" \
     "$@" \
     2>&1 | tee "${LOG_FILE}"
