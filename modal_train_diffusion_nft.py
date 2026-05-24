@@ -43,6 +43,7 @@ DEFAULT_TRAIN_BATCH_SIZE = 6
 DEFAULT_GRADIENT_ACCUMULATION_STEPS = 48
 DEFAULT_NUM_FRAMES = 1
 DEFAULT_NUM_LATENT_T = 0
+DEFAULT_LOG_SAMPLE_MAX_VIDEOS = 2
 DEFAULT_PREPROCESS_BATCH_SIZE = 128
 DEFAULT_PREPROCESS_NUM_GPUS = 1
 DEFAULT_DATASET = "pickscore"
@@ -127,6 +128,7 @@ def train(
     gradient_accumulation_steps: int = DEFAULT_GRADIENT_ACCUMULATION_STEPS,
     num_frames: int = DEFAULT_NUM_FRAMES,
     num_latent_t: int = DEFAULT_NUM_LATENT_T,
+    log_sample_max_videos: int = DEFAULT_LOG_SAMPLE_MAX_VIDEOS,
     preprocess_batch_size: int = DEFAULT_PREPROCESS_BATCH_SIZE,
     preprocess_num_gpus: int = DEFAULT_PREPROCESS_NUM_GPUS,
     dataset: str = DEFAULT_DATASET,
@@ -172,6 +174,7 @@ def train(
     max_prompts_mode = str(max_prompts).strip().lower()
     preprocess_batch_size = int(preprocess_batch_size)
     preprocess_num_gpus = int(preprocess_num_gpus)
+    log_sample_max_videos = int(log_sample_max_videos)
     if preprocess_batch_size <= 0:
         raise ValueError("--preprocess-batch-size must be positive")
     if preprocess_num_gpus != 1:
@@ -379,6 +382,9 @@ def train(
         )
         method_config["inner_epochs"] = int(inner_epochs)
         method_config["train_batch_size"] = int(train_batch_size)
+        method_config["log_sample_max_videos"] = int(
+            log_sample_max_videos
+        )
         if reward == "multi_reward":
             method_config["nft_beta"] = 0.1
             method_config["sample_timesteps"] = list(range(1000, 0, -40))
@@ -483,6 +489,7 @@ def train(
         f"gradient_accumulation_steps={gradient_accumulation_steps} "
         f"num_frames={num_frames} "
         f"num_latent_t={num_latent_t} "
+        f"log_sample_max_videos={log_sample_max_videos} "
         f"preprocess_batch_size={preprocess_batch_size} "
         f"preprocess_num_gpus={preprocess_num_gpus} "
         f"dataset={dataset} "
@@ -516,6 +523,8 @@ def train(
         str(int(num_frames)),
         "--training.data.num_latent_t",
         str(int(num_latent_t)),
+        "--method.log_sample_max_videos",
+        str(int(log_sample_max_videos)),
         "--method.num_samples_per_prompt",
         str(int(num_samples_per_prompt)),
         "--method.collection_batch_size",
@@ -549,6 +558,7 @@ def main(
     gradient_accumulation_steps: int = DEFAULT_GRADIENT_ACCUMULATION_STEPS,
     num_frames: int = DEFAULT_NUM_FRAMES,
     num_latent_t: int = DEFAULT_NUM_LATENT_T,
+    log_sample_max_videos: int = DEFAULT_LOG_SAMPLE_MAX_VIDEOS,
     preprocess_batch_size: int = DEFAULT_PREPROCESS_BATCH_SIZE,
     preprocess_num_gpus: int = DEFAULT_PREPROCESS_NUM_GPUS,
     dataset: str = DEFAULT_DATASET,
@@ -564,6 +574,7 @@ def main(
         gradient_accumulation_steps=gradient_accumulation_steps,
         num_frames=num_frames,
         num_latent_t=num_latent_t,
+        log_sample_max_videos=log_sample_max_videos,
         preprocess_batch_size=preprocess_batch_size,
         preprocess_num_gpus=preprocess_num_gpus,
         dataset=dataset,

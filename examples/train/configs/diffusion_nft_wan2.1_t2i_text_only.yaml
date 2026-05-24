@@ -33,6 +33,7 @@ method:
   adv_mode: all
   global_std: true
   kl_weight: 0.0
+  log_sample_max_videos: 2
 
   # Real DiffusionNFT reward package by default.
   reward_backend: diffusion_nft
@@ -86,6 +87,10 @@ training:
 callbacks:
   grad_clip:
     max_grad_norm: 1.0
+  log_rl_samples:
+    every_steps: 1
+    max_videos: 2
+    fps: 16
 
 pipeline:
   flow_shift: 8

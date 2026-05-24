@@ -87,6 +87,9 @@ class DiffusionNFTMethod(TrainingMethod):
         self._attn_kind: Literal["dense", "vsa"] = self._infer_attn_kind()
         self._media_type = self._parse_media_type()
         self._validate_rollout_setup()
+        self._is_main = not (
+            dist.is_available() and dist.is_initialized()
+        ) or dist.get_rank() == 0
 
         self.student.init_preprocessors(self.training_config)
 
@@ -197,10 +200,22 @@ class DiffusionNFTMethod(TrainingMethod):
                 "method.train_batch_size must be <= "
                 "method.num_samples_per_prompt"
             )
+        log_sample_max_videos = get_optional_int(
+            self.method_config,
+            "log_sample_max_videos",
+            where="method.log_sample_max_videos",
+        )
+        self._log_sample_max_videos = (
+            4
+            if log_sample_max_videos is None
+            else max(0, int(log_sample_max_videos))
+        )
 
         self._queue: list[_NFTQueuedBatch] = []
         self._collection_round = 0
         self._pending_collection_metrics: dict[str, LogScalar] = {}
+        self._latest_sample_videos: torch.Tensor | None = None
+        self._latest_sample_prompts: list[str] | None = None
 
         self._init_optimizer()
 
@@ -253,11 +268,13 @@ class DiffusionNFTMethod(TrainingMethod):
         if self._pending_collection_metrics:
             step_metrics.update(self._pending_collection_metrics)
             self._pending_collection_metrics = {}
-        return (
-            loss_map,
-            {"_fv_backward": (queued.timestep, training_batch.attn_metadata)},
-            step_metrics,
-        )
+        outputs: dict[str, Any] = {
+            "_fv_backward": (queued.timestep, training_batch.attn_metadata)
+        }
+        if self._is_main and self._latest_sample_videos is not None:
+            outputs["sample_videos"] = self._latest_sample_videos
+            outputs["sample_prompts"] = self._latest_sample_prompts or []
+        return loss_map, outputs, step_metrics
 
     def backward(
         self,
@@ -476,6 +493,7 @@ class DiffusionNFTMethod(TrainingMethod):
         timings["time/collection_sample_sec"] = 0.0
         timings["time/collection_decode_sec"] = 0.0
         timings["time/collection_reward_sec"] = 0.0
+        captured_samples = False
         collection_batch_size = min(
             self._collection_batch_size, len(prompts)
         )
@@ -505,6 +523,16 @@ class DiffusionNFTMethod(TrainingMethod):
             timings["time/collection_decode_sec"] += (
                 time.perf_counter() - t0
             )
+            if (
+                self._is_main
+                and self._log_sample_max_videos > 0
+                and not captured_samples
+            ):
+                self._capture_sample_media(
+                    media,
+                    prompts[start:end],
+                )
+                captured_samples = True
 
             t0 = time.perf_counter()
             chunk_rewards = self._reward_fn(
@@ -571,6 +599,27 @@ class DiffusionNFTMethod(TrainingMethod):
             timings["time/collection_reward_sec"],
             timings["time/collection_queue_build_sec"],
         )
+
+    def _capture_sample_media(
+        self,
+        media: torch.Tensor,
+        prompts: list[str],
+    ) -> None:
+        n = min(int(media.shape[0]), self._log_sample_max_videos)
+        if n <= 0:
+            return
+        samples = media[:n].detach().float().clamp(0, 1)
+        if samples.ndim == 4:
+            samples = samples.unsqueeze(2)
+        if samples.ndim != 5:
+            raise ValueError(
+                "DiffusionNFT sample logging expected media with shape "
+                f"(B,C,H,W) or (B,C,F,H,W), got {tuple(samples.shape)}"
+            )
+        self._latest_sample_videos = (
+            (samples * 255.0).round().to(torch.uint8).cpu()
+        )
+        self._latest_sample_prompts = [str(p) for p in prompts[:n]]
 
     def _slice_raw_batch(
         self,
