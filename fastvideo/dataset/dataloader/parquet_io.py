@@ -73,8 +73,14 @@ class ParquetDatasetWriter:
         self.out_dir = out_dir
         self.samples_per_file = max(int(samples_per_file), 1)
         self.compression = compression
+        self.rank = int(os.getenv("RANK", "0") or 0)
         os.makedirs(self.out_dir, exist_ok=True)
         self._tables: list[pa.Table] = []
+
+    def _worker_dir(self, worker_id: int = 0) -> str:
+        return os.path.join(
+            self.out_dir, f"rank_{self.rank}", f"worker_{worker_id}"
+        )
 
     def append_table(self, table: pa.Table) -> None:
         """Append a non-empty table to the internal buffer.
@@ -129,7 +135,7 @@ class ParquetDatasetWriter:
                 self._tables = [combined]
                 return 0
             # Last flush: write the small remainder as a final file in worker_0
-            worker_dir = os.path.join(self.out_dir, "worker_0")
+            worker_dir = self._worker_dir(0)
             os.makedirs(worker_dir, exist_ok=True)
             # Determine next index
             num_parquets = 0
@@ -154,7 +160,7 @@ class ParquetDatasetWriter:
         if remainder_table is not None and len(remainder_table) > 0:
             if write_remainder:
                 # Write the remainder as a final small file (worker_0)
-                worker_dir = os.path.join(self.out_dir, "worker_0")
+                worker_dir = self._worker_dir(0)
                 os.makedirs(worker_dir, exist_ok=True)
                 num_parquets = 0
                 for _, _, files in os.walk(worker_dir):
@@ -179,7 +185,7 @@ class ParquetDatasetWriter:
         num_workers = max(int(num_workers), 1)
         chunks_per_worker = (total_chunks + num_workers - 1) // num_workers
 
-        work_ranges: list[tuple[int, int, pa.Table, int, str, int, str]] = []
+        work_ranges: list[tuple[int, int, pa.Table, int, int, str, int, str]] = []
         for worker_id in range(num_workers):
             start_chunk = worker_id * chunks_per_worker
             end_chunk = min((worker_id + 1) * chunks_per_worker, total_chunks)
@@ -190,6 +196,7 @@ class ParquetDatasetWriter:
                         end_chunk,
                         table_to_write,
                         worker_id,
+                        self.rank,
                         self.out_dir,
                         self.samples_per_file,
                         self.compression,
@@ -217,6 +224,7 @@ def _process_chunk_range(args: Any) -> int:
             - end_chunk (int): exclusive end chunk index
             - table (pa.Table): concatenated table containing all rows to write
             - worker_id (int): numeric worker identifier
+            - rank (int): distributed preprocessing rank
             - output_dir (str): base output directory
             - samples_per_file (int): rows per chunk file
             - compression (str): compression codec for Parquet
@@ -224,11 +232,22 @@ def _process_chunk_range(args: Any) -> int:
     Returns:
         int: Total number of rows written by this worker.
     """
-    start_chunk, end_chunk, table, worker_id, output_dir, samples_per_file, compression = args
+    (
+        start_chunk,
+        end_chunk,
+        table,
+        worker_id,
+        rank,
+        output_dir,
+        samples_per_file,
+        compression,
+    ) = args
     total_written = 0
     num_samples = len(table)
 
-    worker_dir = os.path.join(output_dir, f"worker_{worker_id}")
+    worker_dir = os.path.join(
+        output_dir, f"rank_{rank}", f"worker_{worker_id}"
+    )
     os.makedirs(worker_dir, exist_ok=True)
 
     # Offset to continue numbering if files exist
@@ -259,6 +278,5 @@ def _process_chunk_range(args: Any) -> int:
             raise
 
     return total_written
-
 
 

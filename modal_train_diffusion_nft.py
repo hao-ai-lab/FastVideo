@@ -41,9 +41,11 @@ DEFAULT_TRAIN_BATCH_SIZE = 6
 DEFAULT_GRADIENT_ACCUMULATION_STEPS = 48
 DEFAULT_NUM_FRAMES = 1
 DEFAULT_NUM_LATENT_T = 0
+DEFAULT_PREPROCESS_BATCH_SIZE = 128
+DEFAULT_PREPROCESS_NUM_GPUS = DEFAULT_NUM_GPUS
 DEFAULT_DATASET = "pickscore"
 DEFAULT_REWARD = "pickscore"
-DEFAULT_MAX_PROMPTS = 0
+DEFAULT_MAX_PROMPTS = "quarter"
 MULTI_REWARD_NAMES = ("pickscore", "hpsv2", "clipscore")
 
 data_vol = modal.Volume.from_name("fastvideo-data")
@@ -123,9 +125,11 @@ def train(
     gradient_accumulation_steps: int = DEFAULT_GRADIENT_ACCUMULATION_STEPS,
     num_frames: int = DEFAULT_NUM_FRAMES,
     num_latent_t: int = DEFAULT_NUM_LATENT_T,
+    preprocess_batch_size: int = DEFAULT_PREPROCESS_BATCH_SIZE,
+    preprocess_num_gpus: int = DEFAULT_PREPROCESS_NUM_GPUS,
     dataset: str = DEFAULT_DATASET,
     reward: str = DEFAULT_REWARD,
-    max_prompts: int = DEFAULT_MAX_PROMPTS,
+    max_prompts: str = DEFAULT_MAX_PROMPTS,
 ):
     from datetime import datetime, timezone
     import os
@@ -163,17 +167,42 @@ def train(
     diffusion_nft_root = Path(DIFFUSION_NFT_ROOT)
     dataset = dataset.strip().lower()
     reward = reward.strip().lower()
-    prompt_suffix = "full" if max_prompts <= 0 else f"first{max_prompts}"
-    dataset_root = (
-        Path(MODAL_DATA_ROOT)
-        / f"diffusion_nft_{dataset}_text_only_f{num_frames}_{prompt_suffix}"
-    )
+    max_prompts_mode = str(max_prompts).strip().lower()
+    preprocess_batch_size = int(preprocess_batch_size)
+    preprocess_num_gpus = int(preprocess_num_gpus)
+    if preprocess_batch_size <= 0:
+        raise ValueError("--preprocess-batch-size must be positive")
+    if preprocess_num_gpus <= 0 or preprocess_num_gpus > DEFAULT_NUM_GPUS:
+        raise ValueError(
+            f"--preprocess-num-gpus must be in [1, {DEFAULT_NUM_GPUS}]"
+        )
+
+    def resolve_max_prompts(total_prompts: int) -> int:
+        if max_prompts_mode in {"", "0", "all", "full", "none"}:
+            return 0
+        estimated_prompt_batches = (
+            int(max_train_steps) * int(gradient_accumulation_steps)
+        )
+        if max_prompts_mode in {"tenth", "1/10"}:
+            return max(1, min(total_prompts, estimated_prompt_batches // 10))
+        if max_prompts_mode in {"quarter", "1/4"}:
+            return max(1, min(total_prompts, estimated_prompt_batches // 4))
+        if max_prompts_mode in {"half", "1/2"}:
+            return max(1, min(total_prompts, estimated_prompt_batches // 2))
+        if max_prompts_mode in {"steps", "used"}:
+            return max(1, min(total_prompts, estimated_prompt_batches))
+        value = int(max_prompts_mode)
+        if value < 0:
+            raise ValueError(
+                "--max-prompts must be >= 0, tenth, quarter, half, "
+                "steps, or full"
+            )
+        return min(total_prompts, value)
+
+    prompt_suffix = "pending"
+    dataset_root = Path(MODAL_DATA_ROOT)
     parquet_dir = dataset_root / "combined_parquet_dataset"
-    prompt_file = (
-        Path(MODAL_DATA_ROOT)
-        / "prompts"
-        / f"diffusion_nft_{dataset}_{prompt_suffix}_train.txt"
-    )
+    prompt_file = Path(MODAL_DATA_ROOT) / "prompts" / "pending.txt"
 
     def has_parquet(path: Path) -> bool:
         return path.exists() and any(path.rglob("*.parquet"))
@@ -248,6 +277,8 @@ def train(
         os.environ["DIFFUSION_NFT_ROOT"] = str(diffusion_nft_root)
 
     def prepare_prompt_file() -> int:
+        nonlocal dataset_root, parquet_dir, prompt_file, prompt_suffix
+
         source = diffusion_nft_root / "dataset" / dataset / "train.txt"
         if not source.is_file():
             raise RuntimeError(
@@ -259,8 +290,24 @@ def train(
             for line in source.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        if max_prompts > 0:
-            prompts = prompts[:max_prompts]
+        prompt_limit = resolve_max_prompts(len(prompts))
+        prompt_suffix = (
+            "full"
+            if prompt_limit <= 0
+            else f"first{prompt_limit}"
+        )
+        dataset_root = (
+            Path(MODAL_DATA_ROOT)
+            / f"diffusion_nft_{dataset}_text_only_f{num_frames}_{prompt_suffix}"
+        )
+        parquet_dir = dataset_root / "combined_parquet_dataset"
+        prompt_file = (
+            Path(MODAL_DATA_ROOT)
+            / "prompts"
+            / f"diffusion_nft_{dataset}_{prompt_suffix}_train.txt"
+        )
+        if prompt_limit > 0:
+            prompts = prompts[:prompt_limit]
         if not prompts:
             raise RuntimeError(f"No prompts found in {source}")
         prompt_file.parent.mkdir(parents=True, exist_ok=True)
@@ -268,7 +315,8 @@ def train(
             "\n".join(prompts) + "\n", encoding="utf-8"
         )
         print(
-            f"Prepared {len(prompts)} prompt(s) from {source}",
+            f"Prepared {len(prompts)} prompt(s) from {source} "
+            f"(max_prompts={max_prompts_mode})",
             flush=True,
         )
         return len(prompts)
@@ -313,7 +361,8 @@ def train(
         cmd = [
             "torchrun",
             "--nnodes=1",
-            "--nproc_per_node=1",
+            "--nproc_per_node",
+            str(preprocess_num_gpus),
             "--master_port=29541",
             "fastvideo/pipelines/preprocess/v1_preprocess.py",
             "--model_path",
@@ -321,7 +370,7 @@ def train(
             "--data_merge_path",
             str(prompt_file),
             "--preprocess_video_batch_size",
-            "2",
+            str(preprocess_batch_size),
             "--seed",
             "42",
             "--max_height",
@@ -374,9 +423,12 @@ def train(
         f"gradient_accumulation_steps={gradient_accumulation_steps} "
         f"num_frames={num_frames} "
         f"num_latent_t={num_latent_t} "
+        f"preprocess_batch_size={preprocess_batch_size} "
+        f"preprocess_num_gpus={preprocess_num_gpus} "
         f"dataset={dataset} "
         f"reward={reward} "
-        f"max_prompts={max_prompts or 'full'}",
+        f"max_prompts={max_prompts_mode} "
+        f"resolved_prompts={expected_prompt_rows}",
         flush=True,
     )
 
@@ -433,9 +485,11 @@ def main(
     gradient_accumulation_steps: int = DEFAULT_GRADIENT_ACCUMULATION_STEPS,
     num_frames: int = DEFAULT_NUM_FRAMES,
     num_latent_t: int = DEFAULT_NUM_LATENT_T,
+    preprocess_batch_size: int = DEFAULT_PREPROCESS_BATCH_SIZE,
+    preprocess_num_gpus: int = DEFAULT_PREPROCESS_NUM_GPUS,
     dataset: str = DEFAULT_DATASET,
     reward: str = DEFAULT_REWARD,
-    max_prompts: int = DEFAULT_MAX_PROMPTS,
+    max_prompts: str = DEFAULT_MAX_PROMPTS,
 ):
     train.remote(
         max_train_steps=max_train_steps,
@@ -446,6 +500,8 @@ def main(
         gradient_accumulation_steps=gradient_accumulation_steps,
         num_frames=num_frames,
         num_latent_t=num_latent_t,
+        preprocess_batch_size=preprocess_batch_size,
+        preprocess_num_gpus=preprocess_num_gpus,
         dataset=dataset,
         reward=reward,
         max_prompts=max_prompts,
