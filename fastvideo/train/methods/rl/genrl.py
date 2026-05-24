@@ -43,7 +43,11 @@ from fastvideo.train.methods.rl.utils.diffusion import (
 from fastvideo.train.methods.rl.utils.embeddings import (
     compute_text_embeddings,
 )
+from fastvideo.train.methods.rl.utils.evaluation import (
+    eval_once,
+)
 from fastvideo.train.methods.rl.utils.rewards import (
+    clear_reward_models,
     move_reward_models,
     multi_score,
     reward_models_on_device,
@@ -101,6 +105,7 @@ class GenRLMethod(TrainingMethod):
 
         # Parse RL config.
         self._parse_config(mc)
+        self._validate_config()
 
         # Init student preprocessors (VAE, text encoder).
         self.student.init_preprocessors(tc)
@@ -135,6 +140,14 @@ class GenRLMethod(TrainingMethod):
         self._world_size = wg.world_size
         self._rank = wg.rank
         self._is_main = wg.rank == 0
+        total_samples = self._world_size * self._sample_batch_size
+        if total_samples % self._num_video_per_prompt != 0:
+            raise ValueError(
+                "world_size * sample_batch_size must be divisible by "
+                "num_video_per_prompt for DistributedKRepeatSampler. Got "
+                f"{self._world_size} * {self._sample_batch_size} and "
+                f"{self._num_video_per_prompt}."
+            )
 
         train_dl, test_dl, train_sampler = (
             build_prompt_dataloaders(
@@ -241,14 +254,43 @@ class GenRLMethod(TrainingMethod):
         self._loss_reweighting = mc.get(
             "loss_reweighting"
         )
+        self._loss_reweighting_clip = mc.get(
+            "loss_reweighting_clip"
+        )
+        self._loss_reweighting_clip = (
+            None
+            if self._loss_reweighting_clip is None
+            else float(self._loss_reweighting_clip)
+        )
         self._weight_advantages = bool(
             mc.get("weight_advantages", False)
         )
         self._max_grad_norm = float(
             mc.get("max_grad_norm", 1.0)
         )
+        self._optimizer_step_per_timestep = bool(
+            mc.get("optimizer_step_per_timestep", True)
+        )
+        self._accumulate_ppo_microbatches = bool(
+            mc.get("accumulate_ppo_microbatches", False)
+        )
+        self._log_post_update_kl = bool(
+            mc.get("log_post_update_kl", True)
+        )
         self._train_batch_size = int(
             mc.get("train_batch_size", 8)
+        )
+        self._eval_every_steps = int(
+            mc.get("eval_every_steps", 0)
+        )
+        self._eval_num_batches = int(
+            mc.get("eval_num_batches", 1)
+        )
+        self._eval_guidance_scale = float(
+            mc.get("eval_guidance_scale", self._guidance_scale)
+        )
+        self._eval_num_steps = int(
+            mc.get("eval_num_steps", self._num_inference_steps)
         )
 
         # Data / dimensions.
@@ -266,6 +308,51 @@ class GenRLMethod(TrainingMethod):
 
         # Reward config.
         self._reward_cfg = dict(mc.get("reward_fn", {}))
+
+    def _validate_config(self) -> None:
+        """Fail early on unsupported RL config combinations."""
+        if not self._reward_cfg:
+            raise ValueError(
+                "method.reward_fn must contain at least one reward."
+            )
+
+        if self._beta > 0 and not self._has_reference_policy():
+            raise ValueError(
+                "method.beta > 0 requires either a configured reference "
+                "model or a LoRA student with disable_adapter()."
+            )
+
+        if self._kl_reward > 0 and not self._has_reference_policy():
+            raise ValueError(
+                "method.kl_reward > 0 requires either a configured reference "
+                "model or a LoRA student with disable_adapter()."
+            )
+
+        if self._loss_reweighting not in {
+            None,
+            "longcat",
+            "flash_tgr",
+        }:
+            raise ValueError(
+                "method.loss_reweighting must be one of null, "
+                "'longcat', or 'flash_tgr'."
+            )
+
+        if self._sde_window_range is not None:
+            if len(self._sde_window_range) != 2:
+                raise ValueError(
+                    "method.sde_window_range must contain exactly two values."
+                )
+            start, end = self._sde_window_range
+            if start < 0 or end <= start:
+                raise ValueError(
+                    "method.sde_window_range must satisfy 0 <= start < end."
+                )
+            if end > self._num_inference_steps:
+                raise ValueError(
+                    "method.sde_window_range end cannot exceed "
+                    "method.num_inference_steps."
+                )
 
     # ------------------------------------------------------------------
     # Setup helpers
@@ -348,6 +435,18 @@ class GenRLMethod(TrainingMethod):
             for p in self.student.transformer.parameters()
             if p.requires_grad
         ]
+        if not params:
+            raise ValueError(
+                "GenRL student transformer has no trainable parameters. "
+                "For LoRA, check models.student.use_lora and "
+                "lora_target_modules. For full tuning, check "
+                "models.student.trainable."
+            )
+        trainable_count = sum(p.numel() for p in params)
+        logger.info(
+            "GenRL trainable transformer parameters: %.2fM",
+            trainable_count / 1e6,
+        )
         self._transformer_params = params
         (
             self._optimizer,
@@ -459,11 +558,23 @@ class GenRLMethod(TrainingMethod):
                         if self._reference
                         else None
                     ),
+                    lora_model=self._get_lora_ref_transformer(),
                     tracker=self.tracker,
+                    async_reward_scoring=(
+                        not self._reward_on_gpu
+                    ),
                 )
             )
         torch.cuda.synchronize()
         t_sample_end = time.perf_counter()
+        if self._reward_on_gpu:
+            t_reward_clear = time.perf_counter()
+            clear_reward_models(self._reward_cfg)
+            torch.cuda.synchronize()
+            logger.info(
+                "[rewards] clear_after_sample=%.1fs",
+                time.perf_counter() - t_reward_clear,
+            )
 
         # 2. Prepare samples (advantages).
         t_adv_start = time.perf_counter()
@@ -481,6 +592,54 @@ class GenRLMethod(TrainingMethod):
         torch.cuda.synchronize()
         t_ppo_end = time.perf_counter()
         all_metrics.update(ppo_metrics)
+
+        if (
+            self._eval_every_steps > 0
+            and iteration % self._eval_every_steps == 0
+        ):
+            t_eval_start = time.perf_counter()
+            eval_ctx = (
+                reward_models_on_device(
+                    self._reward_cfg, device
+                )
+                if self._reward_on_gpu
+                else contextlib.nullcontext()
+            )
+            with eval_ctx:
+                eval_metrics = eval_once(
+                    model=self.student,
+                    scheduler=self._scheduler,
+                    test_dataloader=self._test_dataloader,
+                    text_encoder=self.student.text_encoder,
+                    tokenizer=self.student.tokenizer,
+                    sample_neg_prompt_embeds=(
+                        self._sample_neg_embeds
+                    ),
+                    eval_reward_fn=self._reward_fn,
+                    global_step=iteration,
+                    ema_callback=None,
+                    eval_num_steps=self._eval_num_steps,
+                    eval_guidance_scale=(
+                        self._eval_guidance_scale
+                    ),
+                    height=self._height,
+                    width=self._width,
+                    num_frames=self._num_frames,
+                    device=device,
+                    world_size=self._world_size,
+                    rank=self._rank,
+                    is_main_process=self._is_main,
+                    tracker=None,
+                    max_batches=self._eval_num_batches,
+                    seed=self._seed + 1_000_000,
+                )
+            if self._reward_on_gpu:
+                clear_reward_models(self._reward_cfg)
+            all_metrics.update(eval_metrics)
+            torch.cuda.synchronize()
+            all_metrics["time/eval_sec"] = (
+                time.perf_counter() - t_eval_start
+            )
 
         logger.info(
             "[GenRL step %d] TIMING: "
@@ -746,6 +905,23 @@ class GenRLMethod(TrainingMethod):
                 )[:need]
                 mask[false_idx[perm]] = True
 
+        global_count = (
+            _gather_tensor(
+                mask.sum().view(1), self._world_size
+            )
+            .sum()
+            .item()
+        )
+        actual_batch_size = (
+            global_count
+            / (num_batches * self._world_size)
+        )
+        if self._is_main and self.tracker:
+            self.tracker.log(
+                {"actual_batch_size": actual_batch_size},
+                global_step,
+            )
+
         samples_t = {
             k: v[mask] for k, v in samples_t.items()
         }
@@ -831,6 +1007,107 @@ class GenRLMethod(TrainingMethod):
             info: dict[str, list] = defaultdict(list)
             _ppo_batch_times: list[float] = []
 
+            if (
+                self._accumulate_ppo_microbatches
+                and len(batched_list) > 1
+            ):
+                probe_args = None
+                for j in self._train_timesteps:
+                    if self._optimizer_step_per_timestep:
+                        self._optimizer.zero_grad()
+
+                    for sample in batched_list:
+                        torch.cuda.synchronize()
+                        _ppo_batch_t0 = time.perf_counter()
+                        embeds = sample["prompt_embeds"]
+                        neg_embeds = (
+                            self._train_neg_embeds[
+                                : len(embeds)
+                            ]
+                            if self._use_cfg
+                            else None
+                        )
+                        loss, loss_metrics = (
+                            self._compute_ppo_loss_and_metrics(
+                                sample, j, embeds, neg_embeds
+                            )
+                        )
+                        loss_scale = len(batched_list)
+                        if not self._optimizer_step_per_timestep:
+                            loss_scale *= num_ts
+
+                        timestep_j = sample["timesteps"][:, j]
+                        with set_forward_context(
+                            current_timestep=timestep_j,
+                            attn_metadata=None,
+                        ):
+                            (loss / loss_scale).backward()
+
+                        for key, value in loss_metrics.items():
+                            info[key].append(value)
+                        if probe_args is None:
+                            probe_args = (
+                                sample,
+                                j,
+                                embeds,
+                                neg_embeds,
+                            )
+                        torch.cuda.synchronize()
+                        _ppo_batch_times.append(
+                            time.perf_counter() - _ppo_batch_t0
+                        )
+
+                    if self._optimizer_step_per_timestep:
+                        grad_norm = clip_grad_norm_if_needed(
+                            self.student.transformer,
+                            self._max_grad_norm,
+                        )
+                        self._optimizer.step()
+                        self._lr_scheduler.step()
+                        info["grad_norm"].append(grad_norm)
+                        info["learning_rate"].append(
+                            float(
+                                self._optimizer.param_groups[0]["lr"]
+                            )
+                        )
+                        if probe_args is not None:
+                            self._log_post_update_probe(
+                                info, *probe_args
+                            )
+                        self._optimizer.zero_grad()
+
+                if not self._optimizer_step_per_timestep:
+                    grad_norm = clip_grad_norm_if_needed(
+                        self.student.transformer,
+                        self._max_grad_norm,
+                    )
+                    self._optimizer.step()
+                    self._lr_scheduler.step()
+                    info["grad_norm"].append(grad_norm)
+                    info["learning_rate"].append(
+                        float(self._optimizer.param_groups[0]["lr"])
+                    )
+                    if probe_args is not None:
+                        self._log_post_update_probe(
+                            info, *probe_args
+                        )
+                    self._optimizer.zero_grad()
+
+                if _ppo_batch_times:
+                    logger.info(
+                        "[GenRL PPO] inner_epoch=%d  "
+                        "accumulated_micro_batches=%d  "
+                        "micro_batch_times=%s  "
+                        "total=%.1fs",
+                        inner_epoch,
+                        len(batched_list),
+                        [f"{t:.1f}s" for t in _ppo_batch_times],
+                        sum(_ppo_batch_times),
+                    )
+                for k, v in info.items():
+                    all_info[k].extend(v)
+                continue
+
             for sample in batched_list:
                 torch.cuda.synchronize()
                 _ppo_batch_t0 = time.perf_counter()
@@ -847,154 +1124,14 @@ class GenRLMethod(TrainingMethod):
                 self._optimizer.zero_grad()
 
                 for j in self._train_timesteps:
-                    # Reference model output (for KL).
-                    prev_mean_ref = None
-                    dt_sqrt_ref = None
-                    if self._beta > 0:
-                        ref_model = self._get_ref_model()
-                        if ref_model is not None:
-                            with torch.no_grad():
-                                (
-                                    _,
-                                    _,
-                                    prev_mean_ref,
-                                    _,
-                                    dt_sqrt_ref,
-                                    _,
-                                    _,
-                                ) = compute_log_prob(
-                                    ref_model,
-                                    self._scheduler,
-                                    sample,
-                                    j,
-                                    embeds,
-                                    neg_embeds,
-                                    self._guidance_scale,
-                                    self._use_cfg,
-                                    self._noise_level,
-                                    self._sde_type,
-                                    self._diffusion_clip,
-                                    self._diffusion_clip_value,
-                                )
+                    if self._optimizer_step_per_timestep:
+                        self._optimizer.zero_grad()
 
-                    # Policy forward.
-                    (
-                        _prev_sample,
-                        log_prob,
-                        prev_sample_mean,
-                        std_dev_t,
-                        dt_sqrt,
-                        sigma,
-                        sigma_max,
-                    ) = compute_log_prob(
-                        self.student,
-                        self._scheduler,
-                        sample,
-                        j,
-                        embeds,
-                        neg_embeds,
-                        self._guidance_scale,
-                        self._use_cfg,
-                        self._noise_level,
-                        self._sde_type,
-                        self._diffusion_clip,
-                        self._diffusion_clip_value,
-                    )
-
-                    # PPO loss.
-                    advantages = torch.clamp(
-                        sample["advantages"][:, j],
-                        -self._adv_clip_max,
-                        self._adv_clip_max,
-                    )
-                    ratio = torch.exp(
-                        log_prob
-                        - sample["log_probs"][:, j]
-                    )
-                    unclipped = -advantages * ratio
-                    clipped = -advantages * torch.clamp(
-                        ratio,
-                        1.0 - self._clip_range,
-                        1.0 + self._clip_range,
-                    )
-                    policy_loss = torch.mean(
-                        torch.maximum(unclipped, clipped)
-                    )
-
-                    # Loss reweighting.
-                    rw_scale = 1.0
-                    rw_scale_kl = 1.0
-                    if (
-                        self._loss_reweighting
-                        == "longcat"
-                        and self._sde_type == "flow_sde"
-                    ):
-                        rw_scale = (
-                            torch.sqrt(
-                                sigma
-                                / (
-                                    1
-                                    - torch.where(
-                                        sigma == 1,
-                                        torch.tensor(
-                                            sigma_max,
-                                            device=(
-                                                sigma.device
-                                            ),
-                                            dtype=(
-                                                sigma.dtype
-                                            ),
-                                        ),
-                                        sigma,
-                                    )
-                                )
-                            )
-                            / dt_sqrt
+                    loss, loss_metrics = (
+                        self._compute_ppo_loss_and_metrics(
+                            sample, j, embeds, neg_embeds
                         )
-                        rw_scale = torch.mean(rw_scale)
-                        rw_scale_kl = rw_scale**2
-
-                    # KL loss.
-                    if (
-                        self._beta > 0
-                        and prev_mean_ref is not None
-                    ):
-                        if (
-                            self._sde_type == "flow_sde"
-                        ):
-                            kl_denom = (
-                                std_dev_t * dt_sqrt_ref
-                            ) ** 2
-                        elif (
-                            self._sde_type == "flow_cps"
-                        ):
-                            kl_denom = 0.5
-                        else:
-                            msg = (
-                                "Unknown sde_type: "
-                                f"{self._sde_type}"
-                            )
-                            raise ValueError(msg)
-                        kl_loss = (
-                            (
-                                prev_sample_mean
-                                - prev_mean_ref
-                            )
-                            ** 2
-                        ).mean(
-                            dim=(1, 2, 3), keepdim=True
-                        ) / (
-                            2 * kl_denom
-                        )
-                        kl_loss = torch.mean(kl_loss)
-                        loss = (
-                            rw_scale * policy_loss
-                            + self._beta
-                            * kl_loss
-                            * rw_scale_kl
-                        )
-                    else:
-                        loss = rw_scale * policy_loss
+                    )
 
                     # Backward with gradient accumulation.
                     timestep_j = sample["timesteps"][
@@ -1004,51 +1141,49 @@ class GenRLMethod(TrainingMethod):
                         current_timestep=timestep_j,
                         attn_metadata=None,
                     ):
-                        (loss / num_ts).backward()
+                        if self._optimizer_step_per_timestep:
+                            loss.backward()
+                        else:
+                            (loss / num_ts).backward()
 
-                    # Track.
-                    info["approx_kl"].append(
-                        0.5
-                        * torch.mean(
-                            (
-                                log_prob
-                                - sample["log_probs"][
-                                    :, j
-                                ]
+                    for key, value in loss_metrics.items():
+                        info[key].append(value)
+
+                    if self._optimizer_step_per_timestep:
+                        grad_norm = clip_grad_norm_if_needed(
+                            self.student.transformer,
+                            self._max_grad_norm,
+                        )
+                        self._optimizer.step()
+                        self._lr_scheduler.step()
+                        info["grad_norm"].append(grad_norm)
+                        info["learning_rate"].append(
+                            float(
+                                self._optimizer.param_groups[0]["lr"]
                             )
-                            ** 2
                         )
-                        .detach()
-                        .item()
-                    )
-                    info["clip_frac"].append(
-                        torch.mean(
-                            (
-                                torch.abs(ratio - 1.0)
-                                > self._clip_range
-                            ).float()
+                        self._log_post_update_probe(
+                            info,
+                            sample,
+                            j,
+                            embeds,
+                            neg_embeds,
                         )
-                        .detach()
-                        .item()
-                    )
-                    info["policy_loss"].append(
-                        policy_loss.detach().item()
-                    )
-                    if self._beta > 0 and prev_mean_ref is not None:
-                        info["kl_loss"].append(
-                            kl_loss.detach().item()
-                        )
-                    info["loss"].append(
-                        loss.detach().item()
-                    )
+                        self._optimizer.zero_grad()
 
-                # Clip + step after all timesteps.
-                clip_grad_norm_if_needed(
-                    self.student.transformer,
-                    self._max_grad_norm,
-                )
-                self._optimizer.step()
-                self._optimizer.zero_grad()
+                if not self._optimizer_step_per_timestep:
+                    # Clip + step after accumulating all train timesteps.
+                    grad_norm = clip_grad_norm_if_needed(
+                        self.student.transformer,
+                        self._max_grad_norm,
+                    )
+                    self._optimizer.step()
+                    self._lr_scheduler.step()
+                    info["grad_norm"].append(grad_norm)
+                    info["learning_rate"].append(
+                        float(self._optimizer.param_groups[0]["lr"])
+                    )
+                    self._optimizer.zero_grad()
                 torch.cuda.synchronize()
                 _ppo_batch_times.append(
                     time.perf_counter() - _ppo_batch_t0
@@ -1076,6 +1211,232 @@ class GenRLMethod(TrainingMethod):
         )
         return metrics
 
+    def _log_post_update_probe(
+        self,
+        info: dict[str, list],
+        sample: dict[str, torch.Tensor],
+        j: int,
+        embeds: torch.Tensor,
+        neg_embeds: torch.Tensor | None,
+    ) -> None:
+        """Recompute one log-prob after optimizer.step for diagnostics."""
+        if not self._log_post_update_kl:
+            return
+
+        with torch.no_grad():
+            (
+                _,
+                post_log_prob,
+                _,
+                _,
+                _,
+                _,
+                _,
+            ) = compute_log_prob(
+                self.student,
+                self._scheduler,
+                sample,
+                j,
+                embeds,
+                neg_embeds,
+                self._guidance_scale,
+                self._use_cfg,
+                self._noise_level,
+                self._sde_type,
+                self._diffusion_clip,
+                self._diffusion_clip_value,
+            )
+        delta = post_log_prob - sample["log_probs"][:, j]
+        info["post_update_approx_kl"].append(
+            0.5 * torch.mean(delta**2).detach().item()
+        )
+        info["post_update_logprob_delta_abs"].append(
+            torch.mean(torch.abs(delta)).detach().item()
+        )
+
+    def _compute_ppo_loss_and_metrics(
+        self,
+        sample: dict[str, torch.Tensor],
+        j: int,
+        embeds: torch.Tensor,
+        neg_embeds: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        """Compute one PPO/GRPO loss term and detached diagnostics."""
+        prev_mean_ref = None
+        dt_sqrt_ref = None
+        if self._beta > 0:
+            ref_model, ref_ctx = self._get_reference_logprob_context()
+            if ref_model is not None:
+                with torch.no_grad(), ref_ctx:
+                    (
+                        _,
+                        _,
+                        prev_mean_ref,
+                        _,
+                        dt_sqrt_ref,
+                        _,
+                        _,
+                    ) = compute_log_prob(
+                        ref_model,
+                        self._scheduler,
+                        sample,
+                        j,
+                        embeds,
+                        neg_embeds,
+                        self._guidance_scale,
+                        self._use_cfg,
+                        self._noise_level,
+                        self._sde_type,
+                        self._diffusion_clip,
+                        self._diffusion_clip_value,
+                    )
+
+        (
+            _prev_sample,
+            log_prob,
+            prev_sample_mean,
+            std_dev_t,
+            dt_sqrt,
+            sigma,
+            sigma_max,
+        ) = compute_log_prob(
+            self.student,
+            self._scheduler,
+            sample,
+            j,
+            embeds,
+            neg_embeds,
+            self._guidance_scale,
+            self._use_cfg,
+            self._noise_level,
+            self._sde_type,
+            self._diffusion_clip,
+            self._diffusion_clip_value,
+        )
+
+        advantages = torch.clamp(
+            sample["advantages"][:, j],
+            -self._adv_clip_max,
+            self._adv_clip_max,
+        )
+        logprob_delta = log_prob - sample["log_probs"][:, j]
+        ratio = torch.exp(logprob_delta)
+        unclipped = -advantages * ratio
+        clipped = -advantages * torch.clamp(
+            ratio,
+            1.0 - self._clip_range,
+            1.0 + self._clip_range,
+        )
+        policy_loss = torch.mean(
+            torch.maximum(unclipped, clipped)
+        )
+
+        rw_scale, rw_scale_kl = self._compute_reweight_scales(
+            sigma=sigma,
+            sigma_max=sigma_max,
+            dt_sqrt=dt_sqrt,
+        )
+
+        metrics = {
+            "approx_kl": (
+                0.5 * torch.mean(logprob_delta**2).detach().item()
+            ),
+            "logprob_delta_abs": (
+                torch.mean(torch.abs(logprob_delta)).detach().item()
+            ),
+            "advantage_abs": (
+                torch.mean(torch.abs(advantages)).detach().item()
+            ),
+            "rw_scale": float(
+                rw_scale.detach().item()
+                if isinstance(rw_scale, torch.Tensor)
+                else rw_scale
+            ),
+            "clip_frac": (
+                torch.mean(
+                    (torch.abs(ratio - 1.0) > self._clip_range).float()
+                )
+                .detach()
+                .item()
+            ),
+            "clip_frac_gt_one": (
+                torch.mean(
+                    (ratio - 1.0 > self._clip_range).float()
+                )
+                .detach()
+                .item()
+            ),
+            "clip_frac_lt_one": (
+                torch.mean(
+                    (1.0 - ratio > self._clip_range).float()
+                )
+                .detach()
+                .item()
+            ),
+            "policy_loss": policy_loss.detach().item(),
+        }
+
+        if self._beta > 0 and prev_mean_ref is not None:
+            if self._sde_type == "flow_sde":
+                kl_denom = (std_dev_t * dt_sqrt_ref) ** 2
+            elif self._sde_type == "flow_cps":
+                kl_denom = 0.5
+            else:
+                msg = f"Unknown sde_type: {self._sde_type}"
+                raise ValueError(msg)
+            kl_loss = ((prev_sample_mean - prev_mean_ref) ** 2).mean(
+                dim=(1, 2, 3),
+                keepdim=True,
+            ) / (2 * kl_denom)
+            kl_loss = torch.mean(kl_loss)
+            loss = (
+                rw_scale * policy_loss
+                + self._beta * kl_loss * rw_scale_kl
+            )
+            metrics["kl_loss"] = kl_loss.detach().item()
+        else:
+            loss = rw_scale * policy_loss
+
+        metrics["loss"] = loss.detach().item()
+        return loss, metrics
+
+    def _compute_reweight_scales(
+        self,
+        *,
+        sigma: torch.Tensor,
+        sigma_max: float,
+        dt_sqrt: torch.Tensor,
+    ) -> tuple[torch.Tensor | float, torch.Tensor | float]:
+        """Return policy/KL loss scales for the selected timestep."""
+        if self._loss_reweighting == "flash_tgr":
+            return 1.0, 1.0
+
+        if (
+            self._loss_reweighting != "longcat"
+            or self._sde_type != "flow_sde"
+        ):
+            return 1.0, 1.0
+
+        safe_sigma = torch.where(
+            sigma == 1,
+            torch.tensor(
+                sigma_max,
+                device=sigma.device,
+                dtype=sigma.dtype,
+            ),
+            sigma,
+        )
+        rw_scale = torch.sqrt(
+            sigma / (1 - safe_sigma)
+        ) / dt_sqrt
+        rw_scale = torch.mean(rw_scale)
+        if self._loss_reweighting_clip is not None:
+            rw_scale = torch.clamp(
+                rw_scale,
+                max=self._loss_reweighting_clip,
+            )
+        return rw_scale, rw_scale**2
+
     # ------------------------------------------------------------------
     # Reference model
     # ------------------------------------------------------------------
@@ -1086,3 +1447,29 @@ class GenRLMethod(TrainingMethod):
             return self._reference
         # LoRA case: caller should use disable_adapter.
         return None
+
+    def _get_lora_ref_transformer(self):
+        """Get LoRA transformer that can disable adapters for sampling KL."""
+        transformer = getattr(self.student, "transformer", None)
+        if transformer is None:
+            return None
+        if hasattr(transformer, "disable_adapter"):
+            return transformer
+        return None
+
+    def _has_reference_policy(self) -> bool:
+        return (
+            self._reference is not None
+            or self._get_lora_ref_transformer() is not None
+        )
+
+    def _get_reference_logprob_context(self):
+        """Return model/context for reference log-prob computation."""
+        if self._reference is not None:
+            return self._reference, contextlib.nullcontext()
+
+        lora_ref = self._get_lora_ref_transformer()
+        if lora_ref is not None:
+            return self.student, lora_ref.disable_adapter()
+
+        return None, contextlib.nullcontext()

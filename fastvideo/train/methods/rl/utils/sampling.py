@@ -4,6 +4,7 @@ compute rewards."""
 
 from __future__ import annotations
 
+import hashlib
 import time
 from collections.abc import Callable
 from typing import Any
@@ -31,8 +32,15 @@ def create_generator(
     """Create deterministic generators seeded by prompt."""
     generators = []
     for prompt in prompts:
+        prompt_seed = int.from_bytes(
+            hashlib.blake2b(
+                prompt.encode("utf-8"),
+                digest_size=8,
+            ).digest(),
+            "big",
+        )
         g = torch.Generator(device=device)
-        g.manual_seed(base_seed + hash(prompt) % (2**31))
+        g.manual_seed(base_seed + prompt_seed % (2**31))
         generators.append(g)
     return generators
 
@@ -72,13 +80,13 @@ def sample_epoch(
     ref_transformer: torch.nn.Module | None = None,
     lora_model: Any | None = None,
     tracker: Any | None = None,
+    async_reward_scoring: bool = True,
 ) -> tuple[
     list[dict[str, Any]],
     list[torch.Tensor],
     list[list[str]],
 ]:
-    """Run one sampling epoch: generate videos, compute
-    rewards asynchronously.
+    """Run one sampling epoch: generate videos and compute rewards.
 
     Returns:
         Tuple of (samples, all_videos, all_prompts):
@@ -131,7 +139,7 @@ def sample_epoch(
         if same_latent:
             gen = create_generator(
                 prompts,
-                base_seed=epoch * SEED_EPOCH_STRIDE + i,
+                base_seed=seed + epoch * SEED_EPOCH_STRIDE + i,
                 device=device,
             )
         else:
@@ -188,19 +196,25 @@ def sample_epoch(
             .repeat(sample_batch_size, 1)
         )
 
+        videos_cpu = videos.detach().cpu()
+
         # Collect decoded videos and prompts for logging.
-        all_videos.append(videos)
+        all_videos.append(videos_cpu)
         all_prompts.append(list(prompts))
 
-        # Async reward computation.
-        rewards_future = executor.submit(
-            reward_fn,
-            videos,
-            prompts,
-            prompt_metadata,
-            True,
-        )
-        time.sleep(0)
+        if async_reward_scoring:
+            rewards = executor.submit(
+                reward_fn,
+                videos_cpu,
+                prompts,
+                prompt_metadata,
+                True,
+            )
+            time.sleep(0)
+        else:
+            rewards = (videos_cpu, list(prompts), prompt_metadata)
+
+        del videos
 
         logger.info(
             "[sample_epoch] batch %d/%d: "
@@ -225,7 +239,7 @@ def sample_epoch(
                 "next_latents": latents[:, 1:],
                 "log_probs": log_probs,
                 "kl": kl,
-                "rewards": rewards_future,
+                "rewards": rewards,
             }
         )
 
@@ -233,7 +247,14 @@ def sample_epoch(
     torch.cuda.synchronize()
     _t_reward_wait = time.perf_counter()
     for sample in samples:
-        rewards, _ = sample["rewards"].result()
+        if async_reward_scoring:
+            rewards, _ = sample["rewards"].result()
+        else:
+            videos_cpu, prompts, prompt_metadata = sample["rewards"]
+            torch.cuda.empty_cache()
+            rewards, _ = reward_fn(
+                videos_cpu, prompts, prompt_metadata, True
+            )
         sample["rewards"] = {
             key: torch.as_tensor(value, device=device).float()
             for key, value in rewards.items()
