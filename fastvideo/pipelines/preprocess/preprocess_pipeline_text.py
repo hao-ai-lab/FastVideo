@@ -83,6 +83,8 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                     fastvideo_args,
                     encoder_index=[0],
                     return_attention_mask=True,
+                    truncation=True,
+                    padding=True,
                 )
                 prompt_embeds = prompt_embeds_list[0]
                 prompt_attention_masks = prompt_masks_list[0]
