@@ -33,6 +33,8 @@ WANDB_SECRET_NAME = "wandb-adamlee00"
 HF_SECRET_NAME = "hf-adamlee00"
 DEFAULT_GPU_TYPE = "A100-80GB"
 DEFAULT_NUM_GPUS = 4
+DEFAULT_HSDP_REPLICATE_DIM = 1
+DEFAULT_HSDP_SHARD_DIM = DEFAULT_NUM_GPUS
 DEFAULT_MAX_TRAIN_STEPS = 100
 DEFAULT_NUM_SAMPLES_PER_PROMPT = 24
 DEFAULT_COLLECTION_BATCH_SIZE = 6
@@ -447,6 +449,10 @@ def train(
         str(int(max_train_steps)),
         "--training.distributed.num_gpus",
         str(DEFAULT_NUM_GPUS),
+        "--training.distributed.hsdp_replicate_dim",
+        str(DEFAULT_HSDP_REPLICATE_DIM),
+        "--training.distributed.hsdp_shard_dim",
+        str(DEFAULT_HSDP_SHARD_DIM),
         "--training.loop.gradient_accumulation_steps",
         str(int(gradient_accumulation_steps)),
         "--training.data.num_frames",

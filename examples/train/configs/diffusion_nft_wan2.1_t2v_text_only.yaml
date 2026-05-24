@@ -41,7 +41,7 @@ training:
     sp_size: 1
     tp_size: 1
     hsdp_replicate_dim: 1
-    hsdp_shard_dim: 1
+    hsdp_shard_dim: 4
 
   data:
     data_path: data/train_text_only_diffusion_nft_preprocessed
