@@ -11,11 +11,29 @@ from torch.distributed import ProcessGroup, ReduceOp
 
 class DistributedAutograd:
     """Collection of autograd functions for distributed operations.
-    
+
     This class provides custom autograd functions for distributed operations like all_reduce,
     all_gather, and all_to_all. Each operation is implemented as a static inner class with
     proper forward and backward implementations.
     """
+
+    # Dedicated stream for SP all-to-all collectives. Lazily created on first
+    # use to avoid touching CUDA before the device is selected. NCCL kernels
+    # issued on this stream no longer serialize with compute on the default
+    # stream, freeing GPU launch queue pressure.
+    #
+    # NOTE: we intentionally do NOT call .record_stream() on the input/output
+    # tensors. PyTorch's NCCL backend now defaults TORCH_NCCL_AVOID_RECORD_STREAMS=1
+    # and handles cross-stream lifetime via its own mechanism — calling
+    # record_stream() explicitly forces the deprecated slow path and inflates
+    # caching-allocator bookkeeping by 2× per collective.
+    _comm_stream: "torch.cuda.Stream | None" = None
+
+    @staticmethod
+    def _get_comm_stream() -> "torch.cuda.Stream":
+        if DistributedAutograd._comm_stream is None:
+            DistributedAutograd._comm_stream = torch.cuda.Stream()
+        return DistributedAutograd._comm_stream
 
     class AllReduce(torch.autograd.Function):
         """Differentiable all_reduce operation.
@@ -120,12 +138,70 @@ class DistributedAutograd:
 
             return None, grad_input.movedim(0, ctx.dim), None, None, None
 
+    @staticmethod
+    def _all_to_all_4D_forward(group: ProcessGroup, input_: Tensor, world_size: int, scatter_dim: int,
+                               gather_dim: int) -> Tensor:
+        """Pure forward logic for 4D all-to-all. Used by both the autograd
+        Function and the inference fast-path that bypasses autograd."""
+        if world_size == 1:
+            return input_
+
+        assert input_.dim() == 4, f"input must be 4D tensor, got {input_.dim()} and shape {input_.shape}"
+
+        comm = DistributedAutograd._get_comm_stream()
+        curr = torch.cuda.current_stream()
+
+        if scatter_dim == 2 and gather_dim == 1:
+            bs, shard_seqlen, hn, hd = input_.shape
+            shard_hn = hn // world_size
+
+            input_ = input_.transpose(0, 2).contiguous()  # hn, shard_seqlen, bs, hd
+            output = torch.empty_like(input_)
+
+            # Issue NCCL on the dedicated comm stream so it doesn't serialize
+            # with compute on the default stream. No record_stream — see the
+            # _comm_stream class docstring for why.
+            comm.wait_stream(curr)
+            with torch.cuda.stream(comm):
+                dist.all_to_all_single(output, input_, group=group)  # hn, shard_seqlen, bs, hd
+            curr.wait_stream(comm)
+
+            output = torch.cat(output.split(shard_hn), dim=1)  # sharded hn, seqlen, bs, hd
+
+            output = output.transpose(0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
+
+            return output
+        elif scatter_dim == 1 and gather_dim == 2:
+            bs, seqlen, shard_hn, hd = input_.shape
+            shard_seqlen = seqlen // world_size
+
+            input_ = input_.transpose(0, 2).contiguous()  # shard_hn, seqlen, bs, hd
+
+            input_ = input_.reshape(shard_hn, world_size, shard_seqlen, bs,
+                                    hd).transpose(0, 1).reshape(shard_hn * world_size, shard_seqlen, bs,
+                                                                hd).contiguous()
+
+            output = torch.empty_like(input_)
+
+            comm.wait_stream(curr)
+            with torch.cuda.stream(comm):
+                dist.all_to_all_single(output, input_, group=group)
+            curr.wait_stream(comm)
+
+            output = output.transpose(0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
+
+            return output
+        else:
+            raise RuntimeError(
+                f"Invalid scatter_dim={scatter_dim}, gather_dim={gather_dim}. "
+                f"Only (scatter_dim=2, gather_dim=1) and (scatter_dim=1, gather_dim=2) are supported.")
+
     class AllToAll4D(torch.autograd.Function):
         """Differentiable all_to_all operation specialized for 4D tensors.
-        
+
         This operation is particularly useful for attention operations where we need to
         redistribute data across ranks for efficient parallel processing.
-        
+
         The operation supports two modes:
         1. scatter_dim=2, gather_dim=1: Used for redistributing attention heads
         2. scatter_dim=1, gather_dim=2: Used for redistributing sequence dimensions
@@ -138,49 +214,7 @@ class DistributedAutograd:
             ctx.world_size = world_size
             ctx.scatter_dim = scatter_dim
             ctx.gather_dim = gather_dim
-
-            if world_size == 1:
-                return input_
-
-            assert input_.dim() == 4, f"input must be 4D tensor, got {input_.dim()} and shape {input_.shape}"
-
-            if scatter_dim == 2 and gather_dim == 1:
-                bs, shard_seqlen, hn, hd = input_.shape
-                seqlen = shard_seqlen * world_size
-                shard_hn = hn // world_size
-
-                input_ = input_.transpose(0, 2).contiguous()  # hn, shard_seqlen, bs, hd
-                output = torch.empty_like(input_)
-
-                dist.all_to_all_single(output, input_, group=group)  # hn, shard_seqlen, bs, hd
-
-                output = torch.cat(output.split(shard_hn), dim=1)  # sharded hn, seqlen, bs, hd
-
-                output = output.transpose(0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
-
-                return output
-            elif scatter_dim == 1 and gather_dim == 2:
-                bs, seqlen, shard_hn, hd = input_.shape
-                hn = shard_hn * world_size
-                shard_seqlen = seqlen // world_size
-
-                input_ = input_.transpose(0, 2).contiguous()  # shard_hn, seqlen, bs, hd
-
-                input_ = input_.reshape(shard_hn, world_size, shard_seqlen, bs,
-                                        hd).transpose(0, 1).reshape(shard_hn * world_size, shard_seqlen, bs,
-                                                                    hd).contiguous()
-
-                output = torch.empty_like(input_)
-
-                dist.all_to_all_single(output, input_, group=group)
-
-                output = output.transpose(0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
-
-                return output
-            else:
-                raise RuntimeError(
-                    f"Invalid scatter_dim={scatter_dim}, gather_dim={gather_dim}. "
-                    f"Only (scatter_dim=2, gather_dim=1) and (scatter_dim=1, gather_dim=2) are supported.")
+            return DistributedAutograd._all_to_all_4D_forward(group, input_, world_size, scatter_dim, gather_dim)
 
         @staticmethod
         def backward(ctx: Any, grad_output: Tensor) -> tuple[None, Tensor, None, None, None]:
@@ -234,8 +268,17 @@ class DeviceCommunicatorBase:
         return DistributedAutograd.Slice.apply(self.device_group, input_, self.world_size, dim, scale_grad)
 
     def all_to_all_4D(self, input_: torch.Tensor, scatter_dim: int = 2, gather_dim: int = 1) -> torch.Tensor:
-        """Performs a 4D all-to-all operation with gradient support."""
-        return DistributedAutograd.AllToAll4D.apply(self.device_group, input_, self.world_size, scatter_dim, gather_dim)
+        """Performs a 4D all-to-all operation with gradient support.
+
+        In inference (no grad enabled), bypasses the autograd.Function dispatch
+        overhead by calling the forward helper directly. The autograd path is
+        only used when a backward pass might be needed.
+        """
+        if torch.is_grad_enabled():
+            return DistributedAutograd.AllToAll4D.apply(self.device_group, input_, self.world_size, scatter_dim,
+                                                        gather_dim)
+        return DistributedAutograd._all_to_all_4D_forward(self.device_group, input_, self.world_size, scatter_dim,
+                                                          gather_dim)
 
     def gather(self, input_: torch.Tensor, dst: int = 0, dim: int = -1) -> torch.Tensor | None:
         """
