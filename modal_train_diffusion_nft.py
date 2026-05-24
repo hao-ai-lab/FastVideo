@@ -42,7 +42,7 @@ DEFAULT_GRADIENT_ACCUMULATION_STEPS = 48
 DEFAULT_NUM_FRAMES = 1
 DEFAULT_NUM_LATENT_T = 0
 DEFAULT_PREPROCESS_BATCH_SIZE = 128
-DEFAULT_PREPROCESS_NUM_GPUS = DEFAULT_NUM_GPUS
+DEFAULT_PREPROCESS_NUM_GPUS = 1
 DEFAULT_DATASET = "pickscore"
 DEFAULT_REWARD = "pickscore"
 DEFAULT_MAX_PROMPTS = "quarter"
@@ -172,9 +172,10 @@ def train(
     preprocess_num_gpus = int(preprocess_num_gpus)
     if preprocess_batch_size <= 0:
         raise ValueError("--preprocess-batch-size must be positive")
-    if preprocess_num_gpus <= 0 or preprocess_num_gpus > DEFAULT_NUM_GPUS:
+    if preprocess_num_gpus != 1:
         raise ValueError(
-            f"--preprocess-num-gpus must be in [1, {DEFAULT_NUM_GPUS}]"
+            "FastVideo text preprocessing currently supports "
+            "--preprocess-num-gpus 1 only."
         )
 
     def resolve_max_prompts(total_prompts: int) -> int:
