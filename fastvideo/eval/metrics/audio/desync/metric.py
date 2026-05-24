@@ -181,7 +181,8 @@ class DeSyncMetric(BaseMetric):
         video = sample.get("video")
         audio_path = sample.get("audio")
         if video is None or audio_path is None:
-            return self._skip(sample, "missing 'video' or 'audio'")
+            missing = [k for k, v in (("video", video), ("audio", audio_path)) if v is None]
+            return self._skip(sample, f"missing {', '.join(repr(k) for k in missing)}")
 
         # Prefer the per-sample fps the pool decoded at; fall back to the
         # constructor override. Without either, the audio/video windows can't

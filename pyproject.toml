@@ -139,14 +139,18 @@ test = [
 # Eval extras. See fastvideo/eval/README.md for which install path
 # covers which metrics. detectron2 (vbench color/object_class/etc.) is
 # CUDA-version-pinned and not cleanly pip-installable — install it
-# separately as documented in the README.
+# separately as documented in the README. decord has no aarch64 wheels
+# (upstream effectively unmaintained); it's split into its own extra so
+# the main eval extras install on ARM systems too. eval/io/video.py has
+# a PyAV fallback that covers the video-decode path without decord.
 eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
 eval-physics-iq = []
-eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "decord", "pytorchvideo"]
+eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "pytorchvideo"]
 eval = [
-    "decord", "lpips", "ptlflow", "qwen-vl-utils",
+    "lpips", "ptlflow", "qwen-vl-utils",
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
 ]
+eval-fast-decode = ["decord"]
 eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "qwen-omni-utils"]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
