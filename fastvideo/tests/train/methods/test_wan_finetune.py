@@ -56,8 +56,11 @@ def _build_synthetic_batch(
     return {
         "text_embedding":
         torch.randn(batch_size, 16, 4096, device=device, dtype=dtype),
+        # float32 mask, matching the production dataloader
+        # (``fastvideo/dataset/utils.py`` emits ``torch.ones``/``zeros``).
+        # ``prepare_batch`` casts to training dtype either way.
         "text_attention_mask":
-        torch.ones(batch_size, 16, device=device, dtype=dtype),
+        torch.ones(batch_size, 16, device=device),
         # vae_latent in (B, C, T, H, W); ``prepare_batch`` will
         # truncate T to ``training.data.num_latent_t``.
         "vae_latent":
@@ -66,7 +69,8 @@ def _build_synthetic_batch(
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_wan_finetune_single_train_step() -> None:
+def test_wan_finetune_single_train_step(
+        monkeypatch: pytest.MonkeyPatch) -> None:
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
 
@@ -74,6 +78,18 @@ def test_wan_finetune_single_train_step() -> None:
 
     device = torch.device("cuda:0")
     dtype = torch.bfloat16
+
+    # This smoke test feeds a synthetic ``raw_batch`` straight into
+    # ``single_train_step``, so the parquet train dataloader that
+    # ``init_preprocessors`` builds is never iterated.  Stub it out so
+    # construction does not require a real ``training.data.data_path``:
+    # the minimal fixture deliberately omits one, and the Modal CI job
+    # mounts model weights rather than a parquet dataset.
+    monkeypatch.setattr(
+        "fastvideo.train.utils.dataloader."
+        "build_parquet_t2v_train_dataloader",
+        lambda *args, **kwargs: None,
+    )
 
     model = WanModel(
         init_from=cfg.models["student"]["init_from"],
