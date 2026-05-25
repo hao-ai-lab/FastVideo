@@ -30,16 +30,14 @@ try:
     from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
     from fastvideo.utils import is_vmoba_available
     vmoba_attn_available = is_vmoba_available()
-except (ImportError, RuntimeError):
+except ImportError:
     vmoba_attn_available = False
-    VMOBAAttentionBackend = None  # type: ignore
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (VideoSparseAttentionBackend)
     vsa_available = True
-except (ImportError, RuntimeError):
+except ImportError:
     vsa_available = False
-    VideoSparseAttentionBackend = None  # type: ignore
 
 logger = init_logger(__name__)
 

@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Smoke / preflight tests for the Flux2 Klein T2I pipeline.
 
-The default test is CPU-safe and validates import, registry, preset, and config
-wiring. The optional load/generate smoke is activated with CUDA plus
+The preflight validates import, registry, preset, and config wiring in an
+environment with the expected optional packages. The load/generate smoke is
+activated with CUDA plus
 ``FLUX2_MODEL_DIR=/path/to/black-forest-labs__FLUX.2-klein-4B``.
 """
 from __future__ import annotations
@@ -19,7 +20,7 @@ MODEL_DIR = Path(os.getenv("FLUX2_MODEL_DIR", ""))
 
 
 def test_flux2_klein_typed_surface_preflight() -> None:
-    """No-GPU preflight: imports + registry + preset wiring are intact."""
+    """Import + registry + preset wiring preflight."""
     import fastvideo.registry as registry
     from fastvideo.api.presets import get_preset, get_presets_for_family
     from fastvideo.configs.pipelines.flux_2 import Flux2KleinPipelineConfig

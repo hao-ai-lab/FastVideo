@@ -912,20 +912,17 @@ def set_random_seed(seed: int) -> None:
 
 @lru_cache(maxsize=1)
 def is_vsa_available() -> bool:
-    try:
-        return importlib.util.find_spec("fastvideo_kernel.ops") is not None
-    except (ImportError, RuntimeError):
-        return False
+    return importlib.util.find_spec("fastvideo_kernel.ops") is not None
 
 
 @lru_cache(maxsize=1)
 def is_vmoba_available() -> bool:
+    if importlib.util.find_spec("fastvideo_kernel.vmoba") is None:
+        return False
     try:
-        if importlib.util.find_spec("fastvideo_kernel.vmoba") is None:
-            return False
         import flash_attn
         return flash_attn.__version__ >= "2.7.4"
-    except (ImportError, RuntimeError):
+    except Exception:
         return False
 
 

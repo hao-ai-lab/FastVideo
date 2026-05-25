@@ -144,6 +144,39 @@ fastvideo.png: 1024x1024 RGB
 pixel max_abs_diff=5 mean_abs_diff=0.480136 median_abs_diff=0.0 rmse=0.694312
 ```
 
+Modal `L40S:2` current-changes rerun `ap-CtccuhEHUwQy4Zv08nmrom` applied
+`/root/data/flux2_l40s2_current/runner/flux2-current.patch` to commit
+`69d22881a266306ad3bdbe820508ac17c13d2798` with
+`FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA`, `FLUX2_TP_SIZE=2`, and two visible
+L40S devices.
+
+```text
+tests/local_tests/flux2/test_flux2_component_parity.py -v -s: 3 passed
+tests/local_tests/pipelines/test_flux2_pipeline_smoke.py -v -s: 2 passed
+tests/local_tests/pipelines/test_flux2_pipeline_parity.py -v -s: 2 passed
+```
+
+The pipeline parity file covered both strict single-GPU latent parity and true
+TP2 latent parity. The strict path reported zero max/mean/median diff for all
+four trajectory steps and final latents. The TP2 path instantiated FastVideo
+with `num_gpus=2`, `tp_size=2`, `sp_size=1`, and `executor_world_size=2`.
+
+```text
+TP2 final diff max=2.107544 mean=0.020110 median=0.015625
+TP2 abs-mean drift diffusers=1.319441 fastvideo=1.319235
+```
+
+The same Modal run also regenerated the same-prompt Diffusers and FastVideo PNGs
+with the current changes. Artifacts were downloaded locally under
+`flux2_image_compare_results_l40s2_current/`.
+
+```text
+official_diffusers.png: 1024x1024 RGB
+fastvideo.png: 1024x1024 RGB
+comparison_grid.png: 3072x1058 RGB
+pixel max_abs_diff=5 mean_abs_diff=0.480136 median_abs_diff=0.0 rmse=0.694312
+```
+
 ## Scope Notes
 
 - **Validated**: Flux2 Klein (distilled, 4-step, Qwen3 text encoder, no guidance).
