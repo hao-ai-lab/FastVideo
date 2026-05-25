@@ -28,6 +28,29 @@ cd fastvideo-kernel
 ./build.sh --rocm
 ```
 
+### Optional: FA4 CuTe block-sparse backend (VSA-256 fastpath)
+
+The VSA-256 fastpath (tile volume 256, on NVIDIA Blackwell / sm_100) routes to the
+FlashAttention-4 CuTe-DSL block-sparse kernel exposed as `flash_attn.cute`. This is
+an **optional** dependency: it is imported lazily, and `video_sparse_attn`
+transparently falls back to the Triton backend when it is absent (so the package is
+fully usable without it).
+
+The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`,
+`flash_attn.cute.interface._flash_attn_fwd`) are provided upstream by
+[Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention). Pin to
+commit `c19cd20e`: the wrapper targets that revision's `_flash_attn_fwd` signature
+(`m_block_size` / `n_block_size`); later upstream revisions reshaped it into a
+`tile_mn` tuple and are not drop-in compatible.
+
+```bash
+pip install "nvidia-cutlass-dsl>=4.5.0" torchvision
+pip install "git+https://github.com/Dao-AILab/flash-attention.git@c19cd20e#subdirectory=flash_attn/cute"
+```
+
+The CuTe kernel JIT-compiles on first use. Verified on Blackwell (sm_100) against
+`tests/test_vsa256_forward*.py`.
+
 ## Usage
 
 ### Sliding Tile Attention (STA) & Video Sparse Attention (VSA)
