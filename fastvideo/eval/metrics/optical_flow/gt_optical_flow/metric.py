@@ -53,7 +53,9 @@ class GtOpticalFlowMetric(BaseMetric):
         self.max_mag_pct = max_mag_pct
         self.grid_size = grid_size
         self._model = None
-        self._chunk_size = 16
+        # One frame-pair per DPFlow forward: the cost volume is ~4 GB
+        # per pair at 1080p, so batching OOMs. Bump for low-res inputs.
+        self._chunk_size = 1
 
     def to(self, device: str | torch.device) -> GtOpticalFlowMetric:
         super().to(device)

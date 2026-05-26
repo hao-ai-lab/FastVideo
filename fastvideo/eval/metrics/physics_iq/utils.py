@@ -86,63 +86,32 @@ def as_numpy_video(source: Any) -> tuple[np.ndarray, str]:
     raise TypeError(f"Unsupported Physics-IQ video source type: {type(source)!r}")
 
 
-def unpack_batch_value(value: Any) -> list[Any]:
-    if isinstance(value, torch.Tensor):
-        if value.ndim == 4:
-            return [value]
-        if value.ndim == 5:
-            return [value[idx] for idx in range(value.shape[0])]
-        raise ValueError(f"Unsupported tensor rank for Physics-IQ metric: {value.ndim}")
-    if isinstance(value, np.ndarray):
-        if value.ndim == 4:
-            return [value]
-        if value.ndim == 5:
-            return [value[idx] for idx in range(value.shape[0])]
-        raise ValueError(f"Unsupported ndarray rank for Physics-IQ metric: {value.ndim}")
-    if isinstance(value, str | Path):
-        return [value]
-    if isinstance(value, list):
-        return value
-    raise TypeError(f"Unsupported batched Physics-IQ value type: {type(value)!r}")
-
-
-def prepare_pair_batch(
+def prepare_pair(
     sample: dict[str, Any],
     *,
     prep_kwargs: dict[str, Any] | None = None,
-) -> list[PreparedPhysicsIQPair]:
+) -> PreparedPhysicsIQPair:
+    """Resolve a sample into a prepared (gen, ref) pair.
+
+    Caches the result on ``sample['_physics_iq_pair']`` so other physics_iq
+    sub-metrics on the same sample reuse it instead of re-decoding.
+    """
     prepared = sample.get("_physics_iq_pair")
     if prepared is not None:
-        return [prepared]
+        return prepared
 
     if "reference" not in sample:
         raise KeyError("Physics-IQ pair metrics require sample['reference'].")
 
-    videos = unpack_batch_value(sample["video"])
-    references = unpack_batch_value(sample["reference"])
-    generated_masks = unpack_batch_value(sample["video_mask"]) if "video_mask" in sample else [None] * len(videos)
-    reference_masks = unpack_batch_value(
-        sample["reference_mask"]) if "reference_mask" in sample else [None] * len(videos)
-
-    if not (len(videos) == len(references) == len(generated_masks) == len(reference_masks)):
-        raise ValueError("Physics-IQ pair metric inputs must have the same batch size.")
-
-    prep_kwargs = prep_kwargs or {}
-    return [
-        prepare_pair_inputs(
-            video,
-            reference,
-            generated_mask=generated_mask,
-            reference_mask=reference_mask,
-            **prep_kwargs,
-        ) for video, reference, generated_mask, reference_mask in zip(
-            videos,
-            references,
-            generated_masks,
-            reference_masks,
-            strict=False,
-        )
-    ]
+    prepared = prepare_pair_inputs(
+        sample["video"],
+        sample["reference"],
+        generated_mask=sample.get("video_mask"),
+        reference_mask=sample.get("reference_mask"),
+        **(prep_kwargs or {}),
+    )
+    sample["_physics_iq_pair"] = prepared
+    return prepared
 
 
 def select_window(frames: np.ndarray, *, target_frames: int, selection: str = "first") -> np.ndarray:

@@ -34,9 +34,24 @@ image = (modal.Image.from_registry(
     "FastVideo/performance-tracking",
 }))
 
+dreamverse_image = (image.run_commands(
+    "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"
+).apt_install("nodejs").run_commands("node --version && npm --version"))
+
 
 def run_test(pytest_command: str):
     """Helper function to run a test suite with custom pytest command"""
+    run_test_command(f'uv pip install -e ".[test]" && {pytest_command}',
+                     build_kernel=True)
+
+
+def run_test_command(test_command: str, build_kernel: bool):
+    """Helper function to run a test suite with custom test command.
+
+    Most FastVideo CI suites need the custom kernel build. App-level tests like
+    DreamVerse's mock-backend UI checks do not, so keep the kernel build
+    optional to avoid unrelated CUDA/kernel setup in that CI path.
+    """
     import subprocess
     import sys
     import os
@@ -58,6 +73,12 @@ def run_test(pytest_command: str):
         checkout_command = f"git checkout {git_commit}"
         print(f"Using direct commit checkout: {checkout_command}")
 
+    build_kernel_command = """
+    cd fastvideo-kernel &&
+    ./build.sh &&
+    cd .. &&
+    """ if build_kernel else ""
+
     command = f"""
     source $HOME/.local/bin/env &&
     source /opt/venv/bin/activate &&
@@ -65,11 +86,8 @@ def run_test(pytest_command: str):
     cd /FastVideo &&
     {checkout_command} &&
     git submodule update --init --recursive &&
-    cd fastvideo-kernel &&
-    ./build.sh &&
-    cd .. &&
-    uv pip install -e ".[test]" &&
-    {pytest_command}
+    {build_kernel_command}
+    {test_command}
     """
 
     result = subprocess.run(["/bin/bash", "-c", command],
@@ -214,8 +232,38 @@ def run_self_forcing_tests():
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_unit_test():
     run_test(
-        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ --ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py --ignore=./fastvideo/tests/train/models -vs"
+        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ --ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py --ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs"
     )
+
+
+# TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?
+@app.function(gpu="L40S:1", image=dreamverse_image, timeout=1800)
+def run_dreamverse_app_tests():
+    run_test_command(
+        """
+        uv pip install -e ".[test,dreamverse]" &&
+        export PYTHONPATH=/FastVideo/apps/dreamverse:$PYTHONPATH &&
+        pytest apps/dreamverse/dreamverse/tests -q &&
+        cd apps/dreamverse/web &&
+        npm ci &&
+        npm run typecheck &&
+        npm test &&
+        npx playwright install --with-deps chromium &&
+        bash -c '
+            set -e
+            BACKEND_PORT="${BACKEND_PORT:-8009}"
+            python -m uvicorn dreamverse.mock_server:app --host 127.0.0.1 --port "$BACKEND_PORT" &
+            MOCK_SERVER_PID=$!
+            trap "kill $MOCK_SERVER_PID 2>/dev/null || true" EXIT
+            for i in {1..30}; do
+                curl -fsS "http://127.0.0.1:$BACKEND_PORT/healthz" && break
+                sleep 1
+            done
+            curl -fsS "http://127.0.0.1:$BACKEND_PORT/healthz"
+            BACKEND_HOST=127.0.0.1 BACKEND_PORT="$BACKEND_PORT" CI=1 npm run e2e
+        '
+        """,
+        build_kernel=False)
 
 
 @app.function(gpu="L40S:1",
@@ -228,7 +276,7 @@ def run_unit_test():
               volumes={"/root/data": model_vol})
 def run_train_framework_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/train/models -vs"
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs"
     )
 
 
@@ -254,17 +302,24 @@ def run_lora_extraction_tests():
               ],
               volumes={"/root/data": model_vol})
 def run_performance_tests():
-    # Dashboard runs after compare_baseline regardless of regression result so
-    # the trend view is always available when investigating a failed gate.
+    # compare_baseline.py runs only after pytest passes, so normalized_perf_*.json
+    # artifacts are emitted for rolling-baseline failures, not fixed-threshold
+    # pytest failures. dashboard.py still runs on red CI for observability.
     run_test(
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
         "hf auth login --token $HF_API_KEY && "
-        "pytest ./fastvideo/tests/performance -vs && "
-        "{ python ./fastvideo/tests/performance/compare_baseline.py; "
+        "pytest ./fastvideo/tests/performance -vs; "
+        "PYTEST_RC=$?; "
+        "PERF_RC=0; "
+        "if [ $PYTEST_RC -eq 0 ]; then "
+        "python ./fastvideo/tests/performance/compare_baseline.py; "
         "PERF_RC=$?; "
+        "fi; "
         "python ./fastvideo/tests/performance/dashboard.py || true; "
-        "exit $PERF_RC; }")
+        "FINAL_RC=$PYTEST_RC; "
+        "if [ $FINAL_RC -eq 0 ]; then FINAL_RC=$PERF_RC; fi; "
+        "exit $FINAL_RC")
 
 
 @app.function(gpu="L40S:1",

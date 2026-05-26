@@ -17,9 +17,12 @@ class LPIPSMetric(BaseMetric):
     needs_gpu = True
     dependencies = ["lpips"]
 
-    def __init__(self, net: str = "alex") -> None:
+    def __init__(self, net: str = "alex", chunk_size: int = 8) -> None:
         super().__init__()
         self.net = net
+        # Chunk the per-frame forward: AlexNet feature maps at 1080p
+        # peak ~60 GB on a 121-frame clip; chunk=8 caps it at ~5 GB.
+        self._chunk_size = chunk_size
         self._model: Any = None
 
     def to(self, device: str | torch.device) -> LPIPSMetric:
@@ -39,8 +42,9 @@ class LPIPSMetric(BaseMetric):
         if self._model is None:
             self.setup()
 
-        gen = sample["video"].float().to(self.device)  # (T, C, H, W)
-        ref = sample["reference"].float().to(self.device)
+        gen = sample["video"].float().to(self.device, non_blocking=True)
+        ref = sample["reference"].float().to(self.device, non_blocking=True)
+
         n = min(gen.shape[0], ref.shape[0])
         gen, ref = gen[:n] * 2.0 - 1.0, ref[:n] * 2.0 - 1.0
 

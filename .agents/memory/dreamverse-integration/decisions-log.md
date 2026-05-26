@@ -8,6 +8,8 @@ follow-up actions see [open-threads.md](open-threads.md).
 
 **Last updated:** 2026-05-06 (added D-21 — chunk-stutter root cause is software libx264 encoding consuming ~22% of segment wall-time, NOT a migration regression; verified by 3 parallel explore agents that NVFP4 + torch.compile coverage matches FastVideo-internal exactly; landed opt-in NVENC build path in install_native_ffmpeg.sh + `--nvenc`/`--no-nvenc` flag in dreamverse-deploy.sh + `apps/dreamverse/server/benchmarks/benchmark_av_streaming.py` regression test + memory dir update; default codec stays `libx264` for backward compat, opt-in via `--nvenc`. Earlier: added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep; added D-17 — strategy reversal: abandon 6-PR split in favor of single mega-PR #1288 on `will/ltx2_sr_port`; added D-18 — Option B+ chosen: Dreamverse FE+product-server move into FastVideo as `apps/dreamverse/` subfolder while generic backend stays at `fastvideo.entrypoints.streaming.*`; integration-review.md deprecated, integration-plan.md is the executable migration plan; added D-19 — D-18 executed: 5 commits land on `will/dreamverse-monorepo`, fix-up commits corrected the integration-plan's invalid "delete generic-merged, import public substitutes" assumption — generic-merged files carried product-local instead, e2e passes against migrated code with /proc-verified evidence; added D-20 — segment-2 BrokenPipe root cause was a TWO-direction silent drop of LTX-2 audio kwargs in public `VideoGenerator`).
 
+**Update 2026-05:** Dreamverse frontend tooling migrated from standalone pnpm to standalone npm. `apps/dreamverse/web/package-lock.json` is authoritative; see PR #1385.
+
 ## Status legend
 
 - ✅ **Resolved** — decision made and implementation complete (or no implementation needed)
@@ -297,14 +299,14 @@ Playwright (8/8 PASS in 5.1s):
 - **Python ML library** stays at root: `fastvideo/`, `fastvideo-kernel/`.
 - **Generic backend** stays at `fastvideo.entrypoints.streaming.*` (already there per #1257/#1258/#1284/#1286/#1288).
 - **Dreamverse product** moves into `apps/dreamverse/{server,web,prompts,serve_configs,scripts}/`.
-- **Tooling**: uv workspace for Python (`[tool.uv.workspace] members = ["apps/dreamverse/server"]`), standalone pnpm for the FE (no root `package.json`), split CI workflows with path-filter triggers.
+- **Tooling**: uv workspace for Python (`[tool.uv.workspace] members = ["apps/dreamverse/server"]`), standalone npm for the FE (no root `package.json`), split CI workflows with path-filter triggers.
 
 **Rationale:**
 
 - Drops the cross-repo coordination overhead identified in the post-#1286 rebase cycle (D-17 handled by consolidating into mega-PR; D-18 prevents the next round of cross-repo coordination from happening).
 - Keeps the architectural separation Option D recommended (FastVideo owns reusable runtime; product owns product). The boundary is now `apps/dreamverse/` directory rather than two repos.
 - Single repo means atomic cross-cutting refactors (e.g. GpuPool API change + Dreamverse adoption) ship as one PR.
-- OSS precedents support the shape (chainlit uv-workspace + pnpm; open-webui Python + Svelte with paths-ignore CI). The librarian explicitly noted no precedent for "Python ML library + Next.js product merged into library namespace" — but this isn't that pattern. Dreamverse goes into a sibling directory, NOT into `fastvideo.entrypoints.dreamverse.*`. Library namespace stays clean.
+- OSS precedents support the shape (chainlit uv-workspace + frontend package manager; open-webui Python + Svelte with paths-ignore CI). The librarian explicitly noted no precedent for "Python ML library + Next.js product merged into library namespace" — but this isn't that pattern. Dreamverse goes into a sibling directory, NOT into `fastvideo.entrypoints.dreamverse.*`. Library namespace stays clean.
 
 **Why not Option D (separate repos):**
 

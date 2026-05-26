@@ -4,6 +4,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SERVER_ROOT = Path(__file__).resolve().parent
 _FASTVIDEO_DREAMVERSE_HOME = os.environ.get("FASTVIDEO_DREAMVERSE_HOME")
+_FASTVIDEO_DREAMVERSE_FRONTEND_ROOT = os.environ.get("FASTVIDEO_DREAMVERSE_FRONTEND_ROOT")
 _XDG_STATE_HOME = os.environ.get("XDG_STATE_HOME")
 _DEFAULT_STATE_ROOT = (Path(_FASTVIDEO_DREAMVERSE_HOME) if _FASTVIDEO_DREAMVERSE_HOME else
                        (Path(_XDG_STATE_HOME) if _XDG_STATE_HOME else Path.home() / ".local/state") /
@@ -16,18 +17,39 @@ _APP_ROOT = _REPO_ROOT
 
 def _resolve_frontend_root() -> Path:
     for candidate in (
+            Path(_FASTVIDEO_DREAMVERSE_FRONTEND_ROOT) if _FASTVIDEO_DREAMVERSE_FRONTEND_ROOT else None,
             _APP_ROOT / "web",
             _APP_ROOT / "prod-ui",
     ):
-        if candidate.is_dir():
+        if candidate is not None and candidate.is_dir():
             return candidate
+    if _FASTVIDEO_DREAMVERSE_FRONTEND_ROOT:
+        return Path(_FASTVIDEO_DREAMVERSE_FRONTEND_ROOT)
     return _APP_ROOT / "web"
+
+
+def _resolve_frontend_static_dir_candidates() -> tuple[str, ...]:
+    roots = (
+        FRONTEND_ROOT,
+        Path.cwd() / "apps/dreamverse/web",
+        Path.cwd() / "web",
+        Path("/opt/FastVideo/apps/dreamverse/web"),
+    )
+    candidates: list[str] = []
+    seen: set[Path] = set()
+    for root in roots:
+        resolved_root = root.resolve(strict=False)
+        if resolved_root in seen:
+            continue
+        seen.add(resolved_root)
+        candidates.extend(str(resolved_root / dirname) for dirname in ("out", "dist"))
+    return tuple(candidates)
 
 
 FRONTEND_ROOT = _resolve_frontend_root()
 _CLIENT_PROMPTS_ROOT = FRONTEND_ROOT / "prompts"
 _CLIENT_PROMPTS_LOCAL_ROOT = FRONTEND_ROOT / "prompts.local"
-FRONTEND_STATIC_DIR_CANDIDATES = tuple(str(FRONTEND_ROOT / dirname) for dirname in ("out", "dist"))
+FRONTEND_STATIC_DIR_CANDIDATES = _resolve_frontend_static_dir_candidates()
 
 # Model registry
 MODEL_REGISTRY = {

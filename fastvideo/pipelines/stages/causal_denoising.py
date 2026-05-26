@@ -20,6 +20,27 @@ except ImportError:
 logger = init_logger(__name__)
 
 
+def _get_transformer_attr(transformer, name: str, default):
+    # Currently used only for causal KV-cache runtime settings:
+    # `local_attn_size` and `sink_size`.
+    #
+    # Causal Wan/MatrixGame expose these directly on the transformer. Some
+    # wrapper-style DiTs keep the executable module under transformer.model. Do
+    # not fall back to transformer.config for these two values: config is only
+    # the construction source and does not control them at runtime.
+    value = getattr(transformer, name, None)
+    if value is not None:
+        return value
+
+    inner_model = getattr(transformer, "model", None)
+    if inner_model is not None:
+        value = getattr(inner_model, name, None)
+        if value is not None:
+            return value
+
+    return default
+
+
 class CausalDMDDenosingStage(DenoisingStage):
     """
     Denoising stage for causal diffusion.
@@ -36,10 +57,8 @@ class CausalDMDDenosingStage(DenoisingStage):
         self.num_frames_per_block = self.transformer.config.arch_config.num_frames_per_block
         self.sliding_window_num_frames = self.transformer.config.arch_config.sliding_window_num_frames
 
-        try:
-            self.local_attn_size = getattr(self.transformer.model, "local_attn_size", -1)  # type: ignore
-        except Exception:
-            self.local_attn_size = -1
+        self.local_attn_size = _get_transformer_attr(self.transformer, "local_attn_size", -1)
+        self.sink_size = _get_transformer_attr(self.transformer, "sink_size", 0)
 
     def forward(
         self,

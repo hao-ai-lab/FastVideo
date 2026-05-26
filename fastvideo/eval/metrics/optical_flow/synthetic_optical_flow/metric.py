@@ -94,7 +94,8 @@ class SyntheticOpticalFlowMetric(BaseMetric):
         self._calibration: ThirdPersonCalibration | None = (_resolve_calibration(calibration_path)
                                                             if calibration_path else None)
         self._model = None
-        self._chunk_size = 16
+        # One frame-pair per DPFlow forward; see ``gt_optical_flow``.
+        self._chunk_size = 1
 
     def to(self, device: str | torch.device) -> SyntheticOpticalFlowMetric:
         super().to(device)
@@ -114,10 +115,6 @@ class SyntheticOpticalFlowMetric(BaseMetric):
         actions = sample.get("actions")
         if actions is None:
             return self._skip(sample, "missing 'actions' (keyboard + mouse)")
-        if isinstance(actions, list):
-            actions = actions[0] if actions else None
-            if actions is None:
-                return self._skip(sample, "empty 'actions' list")
 
         cal_obj = sample.get("calibration")
         cal = self._calibration if cal_obj is None else _resolve_calibration(cal_obj)

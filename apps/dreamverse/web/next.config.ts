@@ -6,10 +6,13 @@ const backendHost = process.env.BACKEND_HOST || '127.0.0.1';
 const backendPort = Number(process.env.BACKEND_PORT) || 8009;
 const backendUrl = `http://${backendHost}:${backendPort}`;
 const configDir = path.dirname(fileURLToPath(import.meta.url));
+const staticExport = process.env.NEXT_OUTPUT_EXPORT === '1';
 
 const nextConfig: NextConfig = {
+  ...(staticExport ? { output: 'export' as const } : {}),
+  ...(staticExport ? { images: { unoptimized: true } } : {}),
   outputFileTracingRoot: path.join(configDir, '..', '..', '..'),
-  async rewrites() {
+  ...(staticExport ? {} : { async rewrites() {
     return [
       { 
         source: '/ws', 
@@ -48,7 +51,7 @@ const nextConfig: NextConfig = {
         destination: `${backendUrl}/curated-presets/:path*`,
       },
     ];
-  },
+  } }),
   webpack: (config) => {
     config.module.rules.push({
       test: /\.jsonl$/,

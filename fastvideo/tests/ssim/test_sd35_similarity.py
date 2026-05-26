@@ -57,7 +57,7 @@ SD35_PARAMS = {
     "num_inference_steps": 8,
     "guidance_scale": 6.0,
     "seed": 0,
-    "neg_prompt": "lowres, blurry",
+    "neg_prompt": "",
 }
 
 _SD35_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(

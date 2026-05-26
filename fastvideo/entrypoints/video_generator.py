@@ -9,11 +9,14 @@ diffusion models.
 import os
 import re
 import shutil
+import subprocess
 import threading
 import time
 import tempfile
+import types
 import warnings
 from collections.abc import Mapping
+from contextlib import suppress
 from copy import deepcopy
 from typing import Any
 
@@ -27,14 +30,25 @@ from fastvideo.api.compat import (
     expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
+    legacy_generate_call_to_request,
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
     request_to_pipeline_overrides,
     request_to_sampling_param,
 )
-from fastvideo.api.results import GenerationResult
-from fastvideo.api.schema import GenerationRequest, GeneratorConfig
+from fastvideo.api.results import (
+    GenerationResult,
+    VideoFinalEvent,
+    VideoProgressEvent,
+)
+from fastvideo.api.schema import (
+    GenerationRequest,
+    GeneratorConfig,
+    InputConfig,
+    OutputConfig,
+    SamplingConfig,
+)
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -42,7 +56,22 @@ from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import align_to, shallow_asdict
 from fastvideo.worker.executor import Executor
 
+fcntl: types.ModuleType | None
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 logger = init_logger(__name__)
+_FFMPEG_ENCODER_OPTION_CACHE: dict[tuple[str, str, str], bool] = {}
+
+_BATCH_EXTRA_PASSTHROUGH_KEYS: tuple[str, ...] = (
+    "ltx2_audio_latents",
+    "ltx2_audio_clean_latent",
+    "ltx2_audio_denoise_mask",
+    "audio_num_frames",
+    "video_position_offset_sec",
+)
 
 _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "num_gpus",
@@ -66,6 +95,7 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "enable_torch_compile",
     "torch_compile_kwargs",
     "output_type",
+    "nvfp4_fa4",
 })
 
 
@@ -135,6 +165,10 @@ class VideoGenerator:
         move to VideoGenerator.from_config(...).
         """
         log_queue = kwargs.pop("log_queue", None)
+        if kwargs.pop("nvfp4_fa4", False):
+            import os
+            os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
+            os.environ.setdefault("CUTE_DSL_ENABLE_TVM_FFI", "1")
         typed_config = kwargs.pop("config", None)
         if typed_config is not None:
             if model_path is not None:
@@ -252,6 +286,76 @@ class VideoGenerator:
             if log_queue:
                 self.executor.clear_log_queue()
 
+    async def generate_async(
+        self,
+        request: GenerationRequest | Mapping[str, Any],
+        *,
+        log_queue=None,
+    ):
+        """Async generation that yields typed :class:`VideoEvent`s.
+
+        Three consumers share this substrate:
+
+        * Streaming server (:mod:`fastvideo.entrypoints.streaming`) —
+          pipes :class:`VideoPartialEvent` frames into fMP4.
+        * Stateless OpenAI server — ignores progress events, forwards
+          :class:`VideoFinalEvent` as the HTTP response body.
+        * Dynamo native backend
+          (``components/src/dynamo/fastvideo/``) — wraps each event as
+          an ``NvVideosResponse`` chunk.
+
+        The aggregated code path shipped here yields a single
+        :class:`VideoProgressEvent` at start and one
+        :class:`VideoFinalEvent` at end. Future work will thread
+        per-step progress events through the pipeline's denoise loop
+        so streaming consumers don't have to wait on a materialized
+        final.
+        """
+        import asyncio
+
+        normalized = normalize_generation_request(request)
+        total_steps = max(1, normalized.sampling.num_inference_steps)
+        yield VideoProgressEvent(step=0, total_steps=total_steps, stage="denoise")
+
+        if log_queue:
+            self.executor.set_log_queue(log_queue)
+        try:
+            result = await asyncio.to_thread(self._generate_request_impl, normalized)
+        finally:
+            if log_queue:
+                self.executor.clear_log_queue()
+
+        if isinstance(result, list):
+            # Prompt-batch expansion — emit one Final per sub-result.
+            for sub in result:
+                yield await asyncio.to_thread(_final_event_from_result, sub)
+            return
+        yield await asyncio.to_thread(_final_event_from_result, result)
+
+    @staticmethod
+    def default_health_check_request() -> GenerationRequest:
+        """Return the minimal typed request Dynamo uses for probes.
+
+        256x256, 8 frames, 1 inference step -- fast enough to be a
+        viable liveness check, non-trivial enough to exercise the
+        DiT -> VAE -> decode path. Consumers adapt this shape to their
+        transport's health-check payload (see
+        ``docs/design/server_contracts/dynamo.md``).
+        """
+        return GenerationRequest(
+            prompt="health check",
+            inputs=InputConfig(),
+            sampling=SamplingConfig(
+                num_frames=8,
+                height=256,
+                width=256,
+                fps=24,
+                num_inference_steps=1,
+                guidance_scale=1.0,
+            ),
+            output=OutputConfig(save_video=False, return_frames=False),
+        )
+
     def generate_video(
         self,
         prompt: str | None = None,
@@ -298,13 +402,38 @@ class VideoGenerator:
             self.executor.set_log_queue(log_queue)
 
         try:
-            return self._generate_video_impl(
-                prompt=prompt,
-                sampling_param=sampling_param,
+            extra_overrides: dict[str, Any] = {}
+            for _ek in _BATCH_EXTRA_PASSTHROUGH_KEYS:
+                if _ek in kwargs:
+                    extra_overrides[_ek] = kwargs.pop(_ek)
+
+            request = legacy_generate_call_to_request(
+                prompt,
+                sampling_param,
                 mouse_cond=mouse_cond,
                 keyboard_cond=keyboard_cond,
                 grid_sizes=grid_sizes,
-                **kwargs,
+                legacy_kwargs=kwargs,
+            )
+
+            fastvideo_args = self.fastvideo_args
+            pipeline_overrides = request_to_pipeline_overrides(request)
+            if pipeline_overrides:
+                fastvideo_args = deepcopy(self.fastvideo_args)
+                for key, value in pipeline_overrides.items():
+                    if not hasattr(fastvideo_args.pipeline_config, key):
+                        raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
+                    setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+
+            resolved_sampling_param = request_to_sampling_param(
+                request,
+                model_path=self.fastvideo_args.model_path,
+            )
+            return self._generate_video_impl(
+                prompt=request.prompt,
+                sampling_param=resolved_sampling_param,
+                fastvideo_args=fastvideo_args,
+                **extra_overrides,
             )
         finally:
             if log_queue:
@@ -383,7 +512,13 @@ class VideoGenerator:
         if grid_sizes is not None:
             kwargs['grid_sizes'] = grid_sizes
 
+        extra_overrides: dict[str, Any] = {}
+        for _ek in _BATCH_EXTRA_PASSTHROUGH_KEYS:
+            if _ek in kwargs:
+                extra_overrides[_ek] = kwargs.pop(_ek)
+
         sampling_param.update(kwargs)
+        kwargs["_extra_overrides"] = extra_overrides
 
         if fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
             prompt_txt_path = sampling_param.prompt_path or fastvideo_args.prompt_txt
@@ -581,6 +716,10 @@ class VideoGenerator:
             VSA_sparsity=fastvideo_args.VSA_sparsity,
         )
 
+        extra_overrides = kwargs.pop("_extra_overrides", {})
+        for _ek, _ev in extra_overrides.items():
+            batch.extra[_ek] = _ev
+
         # Run inference
         start_time = time.perf_counter()
 
@@ -653,6 +792,7 @@ class VideoGenerator:
         is_latent_output = fastvideo_args.output_type == "latent"
         audio_only = bool(output_batch.extra.get("audio_only"))
 
+        postprocess_start = time.perf_counter()
         frames: list[np.ndarray] | None
         if is_latent_output or audio_only:
             frames = None if is_latent_output else []
@@ -663,35 +803,90 @@ class VideoGenerator:
                 x = torchvision.utils.make_grid(x, nrow=6)
                 x = x.permute(1, 2, 0).squeeze(-1)
                 x = (x * 255).to(torch.uint8)
-                frames.append(x.cpu().numpy())
+                frames.append(x.contiguous().cpu().numpy())
+        postprocess_time = time.perf_counter() - postprocess_start
+        logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
+        if logging_info is not None:
+            logging_info.add_stage_execution_time("PostDecodeFrameProcessStage", postprocess_time)
 
         save_to_disk = batch.save_video and not is_latent_output
+        save_video_time = 0.0
+        audio_mux_time = 0.0
         if save_to_disk:
             if audio_only:
                 # Audio-only workload: write a standalone .wav rather than
                 # muxing the audio into a placeholder mp4 (which forces
                 # ffmpeg to round 8x8 placeholder frames up to 16x16).
                 output_path = self._rewrite_extension(output_path, ".wav")
+                save_start = time.perf_counter()
                 self._write_pcm_wav(
                     output_path,
                     output_batch.extra["audio"],
                     int(output_batch.extra["audio_sample_rate"]),
                 )
+                save_video_time = time.perf_counter() - save_start
                 logger.info("Saved audio to %s", output_path)
             elif self._is_image_workload():
                 # Image workloads (t2i, i2i, …): save the first frame as PNG.
                 assert frames is not None  # implied by save_to_disk and not audio_only
+                save_start = time.perf_counter()
                 imageio.imwrite(output_path, frames[0])
+                save_video_time = time.perf_counter() - save_start
                 logger.info("Saved image to %s", output_path)
             else:
                 assert frames is not None  # implied by save_to_disk and not audio_only
-                imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
-                logger.info("Saved video to %s", output_path)
                 audio = output_batch.extra.get("audio")
                 audio_sample_rate = output_batch.extra.get("audio_sample_rate")
-                if (audio is not None and audio_sample_rate is not None
-                        and not self._mux_audio(output_path, audio, audio_sample_rate)):
-                    logger.warning("Audio mux failed; saved video without audio.")
+                if audio is not None and audio_sample_rate is not None:
+                    # Single-pass save path: encode video+audio once, avoiding
+                    # second-pass remux overhead. AudioMuxStage remains 0.0 on
+                    # success because audio is already present in the saved MP4.
+                    save_start = time.perf_counter()
+                    save_ok = self._save_video_with_audio_ffmpeg_pipe(
+                        output_path=output_path,
+                        frames=frames,
+                        fps=batch.fps,
+                        audio=audio,
+                        sample_rate=int(audio_sample_rate),
+                    )
+                    if not save_ok:
+                        logger.warning("ffmpeg pipe save failed; trying PyAV single-pass save.")
+                        save_ok = self._save_video_with_audio_single_pass(
+                            output_path=output_path,
+                            frames=frames,
+                            fps=batch.fps,
+                            audio=audio,
+                            sample_rate=int(audio_sample_rate),
+                        )
+                    save_video_time = time.perf_counter() - save_start
+                    if save_ok:
+                        audio_mux_time = 0.0
+                    else:
+                        logger.warning("Single-pass save failed; falling back to two-step save/mux.")
+                        save_start = time.perf_counter()
+                        imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                        save_video_time = time.perf_counter() - save_start
+                        mux_start = time.perf_counter()
+                        mux_ok = self._mux_audio(output_path, audio, int(audio_sample_rate))
+                        audio_mux_time = time.perf_counter() - mux_start
+                        if not mux_ok:
+                            logger.warning("Audio mux failed; saved video without audio.")
+                else:
+                    save_start = time.perf_counter()
+                    imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                    save_video_time = time.perf_counter() - save_start
+                    audio_mux_time = 0.0
+                logger.info("Saved video to %s", output_path)
+
+            logger.info("VideoSaveStage completed in %.3f s", save_video_time)
+            if logging_info is not None:
+                logging_info.add_stage_execution_time("VideoSaveStage", save_video_time)
+            logger.info("AudioMuxStage completed in %.3f s", audio_mux_time)
+            if logging_info is not None:
+                logging_info.add_stage_execution_time("AudioMuxStage", audio_mux_time)
+
+        e2e_time = time.perf_counter() - start_time
+        logger.info("End-to-end latency: %.2f seconds", e2e_time)
 
         result: dict[str, Any] = {
             "prompts": prompt,
@@ -702,8 +897,10 @@ class VideoGenerator:
             # `return_frames` (which gates the video-shaped buffers).
             "audio": output_batch.extra.get("audio"),
             "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
+            "ltx2_audio_latents": output_batch.extra.get("ltx2_audio_latents"),
             "size": (target_height, target_width, batch.num_frames),
             "generation_time": gen_time,
+            "e2e_latency": e2e_time,
             "logging_info": logging_info,
             "trajectory": output_batch.trajectory_latents,
             "trajectory_timesteps": output_batch.trajectory_timesteps,
@@ -774,6 +971,211 @@ class VideoGenerator:
             f.setframerate(sample_rate)
             f.writeframes(audio_int16.tobytes())
         return num_channels
+
+    @classmethod
+    def _save_video_with_audio_single_pass(
+        cls,
+        output_path: str,
+        frames: list[np.ndarray],
+        fps: int,
+        audio: torch.Tensor | np.ndarray,
+        sample_rate: int,
+    ) -> bool:
+        """Encode video+audio into MP4 in one pass using PyAV."""
+        try:
+            import av
+        except ImportError:
+            logger.warning("PyAV not installed; cannot use single-pass save.")
+            return False
+
+        if not frames:
+            return False
+
+        output = None
+        try:
+            audio_int16, num_channels = cls._audio_to_int16(audio)
+            layout = "stereo" if num_channels == 2 else "mono"
+            output = av.open(output_path, mode="w")
+            video_stream = output.add_stream("libx264", rate=fps)
+            video_stream.width = int(frames[0].shape[1])
+            video_stream.height = int(frames[0].shape[0])
+            video_stream.pix_fmt = "yuv420p"
+            video_stream.options = {
+                "preset": "ultrafast",
+                "tune": "zerolatency",
+            }
+
+            audio_stream = output.add_stream("aac", rate=sample_rate, layout=layout)
+
+            for frame_np in frames:
+                vframe = av.VideoFrame.from_ndarray(np.ascontiguousarray(frame_np), format="rgb24")
+                for packet in video_stream.encode(vframe):
+                    output.mux(packet)
+            for packet in video_stream.encode():
+                output.mux(packet)
+
+            # AAC commonly uses 1024 samples/frame. Pad the tail frame to avoid
+            # shape errors in PyAV/FFmpeg.
+            chunk_size = 1024
+            for start in range(0, audio_int16.shape[0], chunk_size):
+                chunk = audio_int16[start:start + chunk_size]
+                if chunk.shape[0] < chunk_size:
+                    pad = np.zeros((chunk_size - chunk.shape[0], chunk.shape[1]), dtype=chunk.dtype)
+                    chunk = np.concatenate([chunk, pad], axis=0)
+                chunk_planar = np.ascontiguousarray(chunk.T)
+                aframe = av.AudioFrame.from_ndarray(chunk_planar, format="s16p", layout=layout)
+                aframe.sample_rate = sample_rate
+                for packet in audio_stream.encode(aframe):
+                    output.mux(packet)
+            for packet in audio_stream.encode():
+                output.mux(packet)
+
+            output.close()
+            return True
+        except Exception as e:
+            logger.warning("Single-pass video+audio save failed: %s", e)
+            if output is not None:
+                with suppress(Exception):
+                    output.close()
+            return False
+
+    @staticmethod
+    def _ffmpeg_encoder_supports_option(ffmpeg_bin: str, codec: str, option_name: str) -> bool:
+        """Best-effort check whether ffmpeg encoder supports an option."""
+        cache_key = (ffmpeg_bin, codec, option_name)
+        cached = _FFMPEG_ENCODER_OPTION_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            result = subprocess.run(
+                [
+                    ffmpeg_bin,
+                    "-hide_banner",
+                    "-h",
+                    f"encoder={codec}",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                _FFMPEG_ENCODER_OPTION_CACHE[cache_key] = False
+                return False
+            haystack = f"{result.stdout}\n{result.stderr}"
+            supported = f"-{option_name}" in haystack
+            _FFMPEG_ENCODER_OPTION_CACHE[cache_key] = supported
+            return supported
+        except Exception:
+            _FFMPEG_ENCODER_OPTION_CACHE[cache_key] = False
+            return False
+
+    @classmethod
+    def _save_video_with_audio_ffmpeg_pipe(
+        cls,
+        output_path: str,
+        frames: list[np.ndarray],
+        fps: int,
+        audio: torch.Tensor | np.ndarray,
+        sample_rate: int,
+    ) -> bool:
+        """Encode video+audio using ffmpeg via rawvideo stdin + WAV input."""
+        ffmpeg_bin = shutil.which(os.getenv("FASTVIDEO_FFMPEG_BIN", "ffmpeg"))
+        if ffmpeg_bin is None:
+            logger.warning("ffmpeg not found; cannot use ffmpeg pipe save.")
+            return False
+
+        if not frames:
+            return False
+
+        height = int(frames[0].shape[0])
+        width = int(frames[0].shape[1])
+        codec = os.getenv("FASTVIDEO_VIDEO_CODEC", "libx264")
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                wav_path = os.path.join(tmpdir, "audio.wav")
+                try:
+                    cls._write_pcm_wav(wav_path, audio, sample_rate)
+                except ValueError as e:
+                    logger.warning("Unexpected audio tensor for ffmpeg pipe save: %s", e)
+                    return False
+
+                cmd = [
+                    ffmpeg_bin,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgb24",
+                    "-s:v",
+                    f"{width}x{height}",
+                    "-r",
+                    str(fps),
+                    "-i",
+                    "pipe:0",
+                    "-i",
+                    wav_path,
+                    "-c:v",
+                    codec,
+                ]
+
+                if codec.endswith("_nvenc"):
+                    nvenc_options = [
+                        ("preset", os.getenv("FASTVIDEO_NVENC_PRESET", "p1")),
+                        ("tune", os.getenv("FASTVIDEO_NVENC_TUNE", "ull")),
+                        ("rc", os.getenv("FASTVIDEO_NVENC_RC", "constqp")),
+                        ("qp", os.getenv("FASTVIDEO_NVENC_QP", "28")),
+                        ("bf", os.getenv("FASTVIDEO_NVENC_BF", "0")),
+                    ]
+                    for option_name, option_value in nvenc_options:
+                        if cls._ffmpeg_encoder_supports_option(ffmpeg_bin, codec, option_name):
+                            cmd += [f"-{option_name}", option_value]
+                else:
+                    cmd += ["-preset", os.getenv("FASTVIDEO_X264_PRESET", "ultrafast")]
+
+                cmd += [
+                    "-c:a",
+                    "aac",
+                    "-pix_fmt",
+                    os.getenv("FASTVIDEO_OUTPUT_PIX_FMT", "yuv420p"),
+                    "-shortest",
+                    "-movflags",
+                    "+faststart",
+                    output_path,
+                ]
+
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+                if proc.stdin is None:
+                    proc.kill()
+                    proc.wait()
+                    logger.warning("ffmpeg stdin unavailable.")
+                    return False
+                if fcntl is not None and hasattr(fcntl, "F_SETPIPE_SZ"):
+                    with suppress(OSError):
+                        fcntl.fcntl(proc.stdin.fileno(), fcntl.F_SETPIPE_SZ, 1048576)
+
+                try:
+                    ts_start = time.perf_counter()
+                    for frame in frames:
+                        proc.stdin.write(frame.tobytes())
+                    proc.stdin.close()
+                    logger.info("Wrote frames to ffmpeg stdin in %.3f s", time.perf_counter() - ts_start)
+                    rc = proc.wait()
+                    if rc != 0:
+                        logger.warning("ffmpeg pipe save failed with return code %d", rc)
+                        return False
+                    return True
+                except Exception:
+                    proc.kill()
+                    proc.wait()
+                    raise
+        except Exception as e:
+            logger.warning("ffmpeg pipe save failed: %s", e)
+            return False
 
     @classmethod
     def _mux_audio(
@@ -862,3 +1264,34 @@ class VideoGenerator:
         """
         self.executor.shutdown()
         del self.executor
+
+
+def _final_event_from_result(result: GenerationResult) -> VideoFinalEvent:
+    """Build a :class:`VideoFinalEvent` from a terminal result.
+
+    Streaming consumers prefer ``frames`` for the MSE-backed path;
+    server-side consumers prefer encoded ``video_bytes``. We carry both
+    — whichever the pipeline actually produced — and attach the full
+    :class:`GenerationResult` so callers that want the complete object
+    don't have to keep a second reference.
+    """
+    video_bytes: bytes | None = None
+    if result.video_path and os.path.isfile(result.video_path):
+        try:
+            with open(result.video_path, "rb") as f:
+                video_bytes = f.read()
+        except OSError:
+            video_bytes = None
+    metadata = {
+        "generation_time": result.generation_time,
+        "peak_memory_mb": result.peak_memory_mb,
+        "video_path": result.video_path,
+    }
+    return VideoFinalEvent(
+        video_bytes=video_bytes,
+        tensor=result.samples,
+        frames=result.frames,
+        metadata=metadata,
+        continuation_state=result.state,
+        result=result,
+    )

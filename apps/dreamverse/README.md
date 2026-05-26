@@ -43,13 +43,36 @@ See `apps/dreamverse/docker/README.md` for Docker build and run option details.
 ## Optional: Building FFmpeg For Better Performance
 
 For full streaming performance in a non-Docker install, build a custom FFmpeg
-binary:
+binary from a FastVideo source checkout. The command below is repo-relative,
+so run it from the repository root:
 
 ```bash
 bash apps/dreamverse/scripts/install_native_ffmpeg.sh
 ```
 
-This builds and installs into `~/opt/ffmpeg-native/` and writes
+The installer supports Linux `x86_64` and `aarch64`. It prefers conda-forge
+triplet compilers when those commands are on `PATH`, otherwise it falls back to
+system `gcc`/`g++` (plain venv). On `x86_64`, x264's hand-tuned SIMD also
+requires `nasm`; install via whichever path fits your host:
+
+```bash
+sudo apt install nasm                       # Debian/Ubuntu
+conda install -c conda-forge nasm           # inside an active conda env
+```
+
+No sudo and no conda? Build `nasm` from source (~30s, installs into `$HOME`):
+
+```bash
+(
+  mkdir -p "$HOME/src" "$HOME/opt" && cd "$HOME/src"
+  curl -fsSL -O https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/nasm-2.16.03.tar.gz
+  tar -xf nasm-2.16.03.tar.gz && cd nasm-2.16.03
+  ./configure --prefix="$HOME/opt/nasm" && make -j"$(nproc)" && make install
+)
+export PATH="$HOME/opt/nasm/bin:$PATH"      # add to ~/.bashrc to persist
+```
+
+The installer writes to `~/opt/ffmpeg-native/` and emits
 `apps/dreamverse/scripts/ffmpeg-env.sh`. Source it before starting the backend
 so Dreamverse uses the custom FFmpeg binary:
 
@@ -59,8 +82,7 @@ dreamverse-server
 ```
 
 Docker images already run this FFmpeg build during image creation and source the
-generated environment file at container startup. The installer supports Linux
-`x86_64` and `aarch64`.
+generated environment file at container startup.
 
 ## Launch Dreamverse
 
@@ -77,11 +99,10 @@ Install the web dependencies once from the FastVideo checkout:
 
 ```bash
 cd apps/dreamverse/web
-pnpm install --frozen-lockfile
+npm ci
 ```
 
-The frontend package also has an npm lockfile, but the bundled launch scripts
-use `pnpm`.
+The frontend package uses `package-lock.json`; use npm for installs and scripts.
 
 ## Quick Start: Local GPU
 
@@ -137,7 +158,7 @@ Start the frontend:
 
 ```bash
 cd apps/dreamverse/web
-BACKEND_HOST=localhost BACKEND_PORT=8009 pnpm run dev
+BACKEND_HOST=localhost BACKEND_PORT=8009 npm run dev
 ```
 
 Open `http://localhost:5299`.
@@ -173,14 +194,14 @@ Run the frontend tests:
 
 ```bash
 cd apps/dreamverse/web
-pnpm test
+npm test
 ```
 
 Run the frontend e2e tests:
 
 ```bash
 cd apps/dreamverse/web
-pnpm run e2e
+npm run e2e
 ```
 
 ## Troubleshooting
@@ -216,7 +237,7 @@ Only one GPU is used
 Frontend cannot connect to backend
 
 - confirm the backend is running on `8009`; if not, point the frontend at it
-  with `BACKEND_HOST=<host> BACKEND_PORT=<port> pnpm run dev`
+  with `BACKEND_HOST=<host> BACKEND_PORT=<port> npm run dev`
 - confirm `http://localhost:8009/healthz` responds before starting the frontend
 - confirm `http://localhost:8009/readyz` returns `200` before clicking Generate
 - use `apps/dreamverse/scripts/smoke_local.sh` for a repeatable local startup

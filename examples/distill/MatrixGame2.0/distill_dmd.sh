@@ -8,18 +8,18 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Model paths for Self-Forcing DMD distillation.
-GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
-REAL_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"  # Teacher
-FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"  # Critic
+GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers"
+REAL_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"  # Teacher
+FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"  # Critic
 
-DATA_DIR="data/matrixgame"
+DATA_DIR="data/matrixgame2"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"
 NUM_GPUS=1
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_sf"
-  --output_dir "checkpoints/matrixgame_sf_${RUN_NAME}"
+  --tracker_project_name "matrixgame2_sf"
+  --output_dir "checkpoints/matrixgame2_sf_${RUN_NAME}"
   --wandb_run_name "${RUN_NAME}_test"
   --max_train_steps 5
   --train_batch_size 1
@@ -28,7 +28,7 @@ training_args=(
   --num_latent_t 21
   --num_height 352
   --num_width 640
-  # --enable_gradient_checkpointing_type "full"
+  --enable_gradient_checkpointing_type "full"
   --simulate_generator_forward
   --num_frames 81
   --num_frame_per_block 3  # Frame generation block size for self-forcing
@@ -114,7 +114,7 @@ self_forcing_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/matrixgame_self_forcing_distillation_pipeline.py \
+    fastvideo/training/matrixgame2_self_forcing_distillation_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

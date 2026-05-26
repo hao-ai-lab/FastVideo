@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=matrixgame_sf_dmd
+#SBATCH --job-name=matrixgame2_sf_dmd
 #SBATCH --partition=main
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=logs/slurm/matrixgame_sf_dmd_%j.out
-#SBATCH --error=logs/slurm/matrixgame_sf_dmd_%j.err
+#SBATCH --output=logs/slurm/matrixgame2_sf_dmd_%j.out
+#SBATCH --error=logs/slurm/matrixgame2_sf_dmd_%j.err
 #SBATCH --exclusive
 
 set -euo pipefail
@@ -56,16 +56,16 @@ echo "TOTAL_GPUS: ${TOTAL_GPUS}"
 RUN_NAME="$(date +"%m%d_%H%M")"
 echo "RUN_NAME: ${RUN_NAME}"
 
-GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
-REAL_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
-FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
+GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers"
+REAL_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
+FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
 
-DATA_DIR="data/matrixgame"
+DATA_DIR="data/matrixgame2"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"
 
 training_args=(
-  --tracker_project_name "matrixgame_sf"
-  --output_dir "checkpoints/matrixgame_sf_${RUN_NAME}"
+  --tracker_project_name "matrixgame2_sf"
+  --output_dir "checkpoints/matrixgame2_sf_${RUN_NAME}"
   --wandb_run_name "${RUN_NAME}_test"
   --max_train_steps 1200
   --train_batch_size 1
@@ -156,7 +156,7 @@ srun python -m torch.distributed.run \
   --node_rank "${SLURM_PROCID}" \
   --rdzv_backend=c10d \
   --rdzv_endpoint="${MASTER_ADDR}:${MASTER_PORT}" \
-  fastvideo/training/matrixgame_self_forcing_distillation_pipeline.py \
+  fastvideo/training/matrixgame2_self_forcing_distillation_pipeline.py \
   "${parallel_args[@]}" \
   "${model_args[@]}" \
   "${dataset_args[@]}" \
