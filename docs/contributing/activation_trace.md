@@ -85,6 +85,124 @@ Each line in `/tmp/fv_trace.jsonl` is a JSON record:
 5. The first divergent line identifies the first layer where FastVideo and the
    upstream produce different outputs. Start debugging there.
 
+## Performance impact
+
+When the master toggle is off, overhead is nil. When on, the cost is
+proportional to how broadly the layer regex matches.
+
+### What runs when tracing is on
+
+For every match against `model.named_modules()`, FastVideo registers an
+`ActivationStatHook` that runs after the module's forward returns:
+
+1. Walks the (possibly nested) output `tuple` / `list` / `dict` and extracts
+   every `torch.Tensor` leaf.
+2. Computes each enabled stat on the tensor's `.detach().float()` view — the
+   cast is required for bf16 inputs because some reductions are not stable
+   in bf16.
+3. Writes one JSON record per tensor to the line-buffered JSONL sink.
+
+Cost is roughly `O(num_matched_modules × num_output_tensors × num_stats × tensor_numel)`
+per forward, dominated by `tensor_numel` for value-stats (`abs_mean`, `sum`,
+`min`, `max`, `mean`, `std`). The `shape` and `dtype` stats are O(1).
+
+### Cost-shaping knobs
+
+The default config (empty `FASTVIDEO_TRACE_LAYERS` is treated as `.*`, default
+two stats, all steps) is intentionally blunt — useful only for a one-shot
+smoke run. For real debugging, scope down:
+
+| Knob | Effect |
+|---|---|
+| Tighten `FASTVIDEO_TRACE_LAYERS` to a regex matching <50 modules | Linear reduction in hook count |
+| Drop unused stats from `FASTVIDEO_TRACE_STATS` (`mean`, `std`, `min`, `max`) if you only need divergence detection | One full reduction per stat saved per matched module per forward |
+| Set `FASTVIDEO_TRACE_STEPS="0,15,31"` for a 32-step run | ~10x reduction vs all-steps (the hook still fires but exits early when the step doesn't match) |
+| Use `shape` + `dtype` only on layers where you only care about layout | Skips tensor reductions entirely on those layers |
+
+### Disk
+
+Output is line-buffered (`open(..., buffering=1)`), so every record flushes
+on write. A typical 32-step run that traces 40 DiT blocks with 4 stats
+writes roughly 5K records — about 1 MB of JSONL. Point
+`FASTVIDEO_TRACE_OUTPUT` at a fast local disk for parity runs; slow network
+mounts will dominate runtime once tracing is on.
+
+## Troubleshooting
+
+### "I set the env var but no JSONL file appears"
+
+Three things to check, in order:
+
+1. **Toggle semantics.** `FASTVIDEO_TRACE_ACTIVATIONS` uses a strict
+   not-equal-to-`"0"` test. Setting it to `1`, `true`, or even `""` all
+   enable tracing. Only an unset variable or `FASTVIDEO_TRACE_ACTIVATIONS=0`
+   disables it.
+2. **Module exposure.** The hook attaches to `pipeline.modules.get("transformer")`
+   at the end of `post_init`. If your pipeline does not expose a module
+   under that key (e.g. a non-standard custom pipeline whose DiT is
+   reachable only via `pipeline.modules["sr_transformer"]`), the trace is
+   silently a no-op. Check the
+   `Activation trace attached to N modules` log line at startup; if
+   `N=0`, either the regex didn't match anything or the expected module
+   isn't exposed.
+3. **Output path failure.** The parent of `FASTVIDEO_TRACE_OUTPUT` is
+   auto-created. If creation fails (permissions, read-only mount),
+   `JsonlSink.__init__` raises at startup — look for an `OSError` early
+   in the log.
+
+### "My regex isn't filtering the way I expect"
+
+`FASTVIDEO_TRACE_LAYERS` is compiled with `re.compile(spec)` and matched
+with `pattern.search(name)`. Two consequences:
+
+- `search`, not `fullmatch`. `block.layers` matches
+  `transformer.block.layers.0.attn`. Anchor with `^...$` if you want
+  exact matches.
+- Module names use Python dot notation (`transformer.block.layers.0`),
+  not slashes. The `.` in your regex is a metacharacter — escape it as
+  `\.` if you want a literal dot.
+
+Run once with `FASTVIDEO_LOGGING_LEVEL=DEBUG` to see the
+`Activation trace attached to N modules (pattern=...)` line. `N` is the
+ground truth for how many modules survived your regex.
+
+### "Stats are NaN or `<error: ...>` for some layers"
+
+Some outputs hit numerical edge cases:
+
+- `mean` / `std` on a 0-dim tensor returns NaN.
+- `abs_mean` on an empty tensor or one full of `inf` returns NaN.
+- Non-tensor outputs (e.g. a Python `bool` from a verification gate) are
+  silently skipped — the hook only walks `torch.Tensor` leaves.
+
+Dropping `mean`/`std` and using `abs_mean`/`max` is more robust. For
+layout-only debugging, `shape`+`dtype` never fail.
+
+### "Tracing slows the run by 5x"
+
+You're probably matching too broadly. An empty `FASTVIDEO_TRACE_LAYERS` is
+treated as `.*` and matches every named module — for a 15B-param DiT
+that's hundreds of submodules, each running stat reductions on every
+forward. Tighten to a single block depth: `^transformer\.blocks\.\d+$`
+typically matches a few dozen modules, which is a manageable trace.
+
+### "Trace records are missing tensors I expect"
+
+The hook walks `tuple` / `list` / `dict` outputs recursively but does
+**not** unpack custom dataclasses or named tuples — those are silently
+skipped. If your module returns
+`BlockOutput(hidden_states=..., attn_logits=...)`, no records are
+emitted. Workaround: either return a plain `dict` (`{"hidden_states": ..., "attn_logits": ...}`)
+or attach the hook to a deeper module that already returns a raw tensor.
+
+### "I want tracing inside a `torch.compile`'d region"
+
+Module forward hooks run on the eager wrapper. If the entire module is
+compiled, the hook sees only the wrapped op's output, not internal FX
+nodes. This is by design — Extension 1 (FX backend rewrite) in
+[Future extensions](#future-extensions-design-only-not-yet-implemented)
+is the planned path when inside-graph granularity is required.
+
 ## Architecture (Extension 0: module forward hooks)
 
 At pipeline initialization, `attach_activation_trace()` reads the env vars once.
