@@ -6,7 +6,7 @@ This guide explains how to add and run tests in FastVideo. The testing suite is 
 
 * **Unit Tests**: Located in `fastvideo/tests/api`, `fastvideo/tests/dataset`, `fastvideo/tests/entrypoints`, `fastvideo/tests/workflow`, and the CPU-only subset of `fastvideo/tests/train` (callbacks, utils). These test individual functions and classes.
 * **Component Tests**: Located in `fastvideo/tests/encoders`, `fastvideo/tests/transformers`, and `fastvideo/tests/vaes`. These verify the loading and basic functionality of model components.
-* **Train Framework Tests** (GPU): Located in `fastvideo/tests/train/models`. Cover model loading + forward smoke for the new `fastvideo/train/` framework. Triggered via `/test train-framework` or as part of the Full Suite.
+* **Train Framework Tests** (GPU): Located in `fastvideo/tests/train/models` (model loading + forward smoke) and `fastvideo/tests/train/methods` (per-method single training step). Cover the new `fastvideo/train/` framework end-to-end on real checkpoints with tiny synthetic batches. Triggered via `/test train-framework` or as part of the Full Suite.
 * **SSIM Tests**: Located in `fastvideo/tests/ssim`. These are regression tests that compare generated videos against reference videos using the Structural Similarity Index Measure (SSIM) to detect quality degradation.
 * **Training Tests**: Located in `fastvideo/tests/training`. These validate training loops, loss calculations, and specific training techniques like LoRA, Distillation, and VSA.
 * **Inference Tests**: Located in `fastvideo/tests/inference`. These test specialized inference pipelines and optimizations (e.g., VSA, V-MoBA).
