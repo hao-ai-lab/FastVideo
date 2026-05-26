@@ -36,6 +36,8 @@ from fastvideo.train.methods.fine_tuning.finetune import (
 from fastvideo.train.models.wan import WanModel
 from fastvideo.train.utils.config import load_run_config
 
+from .grad_norm_regression import check_grad_norm_regression
+
 
 _FIXTURE = str(
     Path(__file__).resolve().parent.parent / "fixtures"
@@ -139,3 +141,7 @@ def test_wan_finetune_single_train_step(
     assert any_nonzero, (
         "all layer-0 grads are exactly zero; backward did not "
         "reach the first transformer block")
+
+    # 5a-ii: device-keyed grad-norm regression on top of the same harness.
+    # Skips when the current GPU has no seeded reference.
+    check_grad_norm_regression("test_wan_finetune", model.transformer)

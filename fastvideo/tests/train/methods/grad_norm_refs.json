@@ -1,0 +1,10 @@
+{
+  "test_wan_causal_dfsft": {
+    "GB200": 2.9781,
+    "L40S": 3.2562
+  },
+  "test_wan_finetune": {
+    "GB200": 1.6486,
+    "L40S": 1.6467
+  }
+}

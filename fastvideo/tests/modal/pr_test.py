@@ -282,6 +282,28 @@ def run_train_framework_tests():
 
 @app.function(gpu="L40S:1",
               image=image,
+              timeout=1800,
+              secrets=[
+                  modal.Secret.from_dict(
+                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
+              ],
+              volumes={"/root/data": model_vol})
+def seed_grad_norm_references():
+    """Record the per-method grad-norm reference for the CI GPU (L40S).
+
+    Phase 2 / 5a-ii one-off seeding entrypoint. ``FASTVIDEO_GRADNORM_UPDATE=1``
+    makes ``check_grad_norm_regression`` record the measured norm instead of
+    asserting; ``-rs`` surfaces the recorded value in the log so it can be
+    copied into ``fastvideo/tests/train/methods/grad_norm_refs.json``. Re-run on
+    any new runner GPU to seed its key.
+    """
+    run_test(
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && FASTVIDEO_GRADNORM_UPDATE=1 pytest ./fastvideo/tests/train/methods -vs -rs"
+    )
+
+
+@app.function(gpu="L40S:1",
+              image=image,
               timeout=3600,
               secrets=[
                   modal.Secret.from_dict(
