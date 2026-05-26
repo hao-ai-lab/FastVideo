@@ -111,9 +111,12 @@ DREAMVERSE_MAX_AUTOTUNE=1 \
 
 ### Autoscaling and cost safety
 
-The current deployed script is capped with `max_containers=1`. If uncapped, concurrent requests could
-spawn multiple containers, while `max_containers=1` queued requests onto one
-container instead of multiplying B200 cost.
+The current deployed script keeps exactly one B200 container warm by setting
+`min_containers=1` and `max_containers=1`. `min_containers=1` prevents Modal
+from scaling the deployment down to zero after idle periods, which avoids paying
+the expensive torch-compile/startup-warmup cost again on the next request.
+`max_containers=1` caps concurrency so concurrent requests queue onto the warm
+container instead of spawning additional B200 containers and multiplying cost.
 
 ### Common gotchas
 

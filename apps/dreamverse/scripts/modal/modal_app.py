@@ -39,6 +39,7 @@ dreamverse_state = modal.Volume.from_name("dreamverse-state", create_if_missing=
     memory=65536,
     timeout=7200,
     startup_timeout=4800,
+    min_containers=1,
     max_containers=1,
     secrets=[modal.Secret.from_name("dreamverse-api-keys")],
     volumes={
