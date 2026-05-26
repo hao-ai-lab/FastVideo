@@ -22,6 +22,7 @@ image = image.env({
     "FASTVIDEO_ENABLE_STARTUP_WARMUP": "1",
     "FASTVIDEO_GPU_COUNT": "1",
     "ENABLE_TORCH_COMPILE": "1",
+    "DREAMVERSE_MAX_AUTOTUNE": os.environ.get("DREAMVERSE_MAX_AUTOTUNE", "0"),
     "STREAM_MODE": "av_fmp4",
 })
 

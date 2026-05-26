@@ -97,6 +97,17 @@ knobs below live in the image or `modal_app.py` unless you intentionally change 
 - `FASTVIDEO_ENABLE_DEVTOOLS`: enable Dreamverse devtools behavior.
 - `FASTVIDEO_PROMPT_PROVIDER` / `FASTVIDEO_PROMPT_*_MODEL`: try prompt-rewriter provider or model choices.
 - `FASTVIDEO_ENABLE_STARTUP_WARMUP`: trade slower startup for a warmer first request.
+- `DREAMVERSE_MAX_AUTOTUNE`: opt into PyTorch Inductor max-autotune for the compiled Dreamverse runtime.
+
+The Modal wrapper we provide defaults to torch compile without Inductor max-autotune.
+This shortens compile/warmup time and reduces cost. If you prefer
+the fastest generation, opt into max-autotune via:
+
+```bash
+DREAMVERSE_IMAGE=ghcr.io/<org>/<repo>/dreamverse:<tag> \
+DREAMVERSE_MAX_AUTOTUNE=1 \
+  modal deploy apps/dreamverse/scripts/modal/modal_app.py
+```
 
 ### Autoscaling and cost safety
 
