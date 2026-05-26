@@ -23,8 +23,17 @@ class LTX2VideoArchConfig(DiTArchConfig):
     _compile_conditions: list = field(default_factory=lambda: [is_ltx2_blocks])
 
     # Parameter name mapping for weight conversion (hf/comfy -> FastVideo)
+    # The leading ``to_gate_compress``->``to_gate_logits`` rules load the
+    # LTX-2.3 gated-attention checkpoint weights (named ``to_gate_compress``
+    # upstream) into the FastVideo ``to_gate_logits`` parameter. They are
+    # no-ops for LTX-2.0 checkpoints, which contain no ``to_gate_compress``
+    # weights, so the default behavior is unchanged.
     param_names_mapping: dict = field(
         default_factory=lambda: {
+            r"^model\.diffusion_model\.(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
+            r"^diffusion_model\.(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
+            r"^model\.(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
+            r"^(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
             r"^model\.diffusion_model\.(.*)$": r"model.\1",
             r"^diffusion_model\.(.*)$": r"model.\1",
             r"^model\.(.*)$": r"model.\1",
@@ -44,6 +53,9 @@ class LTX2VideoArchConfig(DiTArchConfig):
     attention_type: str = "default"
     rope_type: str = "split"
     double_precision_rope: bool = True
+    # LTX-2.3 gated extensions. All default OFF == LTX-2.0 behavior.
+    cross_attention_adaln: bool = False
+    caption_proj_before_connector: bool = False
 
     positional_embedding_theta: float = 10000.0
     positional_embedding_max_pos: list[int] = field(default_factory=lambda: [20, 2048, 2048])
@@ -64,6 +76,27 @@ class LTX2VideoArchConfig(DiTArchConfig):
     audio_cross_attention_dim: int = 2048
     audio_positional_embedding_max_pos: list[int] = field(default_factory=lambda: [20])
     av_ca_timestep_scale_multiplier: int = 1
+    # LTX-2.3 gated self-attention (distinct from the VSA-QAT to_gate_compress
+    # gate). Default OFF == LTX-2.0 behavior.
+    apply_gated_attention: bool = False
+
+    # Text connector/feature extractor compatibility fields carried in some
+    # transformer configs (used by the LTX-2.3 text stack). Defaults match
+    # the LTX-2.0 connector layout.
+    caption_projection_first_linear: bool = True
+    caption_proj_input_norm: bool = True
+    caption_projection_second_linear: bool = True
+    connector_num_attention_heads: int = 30
+    connector_attention_head_dim: int = 128
+    connector_num_layers: int = 2
+    audio_connector_num_attention_heads: int = 30
+    audio_connector_attention_head_dim: int = 128
+    audio_connector_num_layers: int = 2
+
+    # STG perturbation block index differs across model versions.
+    # LTX-2.0 defaults to block 29; LTX-2.3 (caption_proj_before_connector)
+    # uses block 28. ``None`` resolves in __post_init__.
+    stg_block_idx: int | None = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -72,6 +105,8 @@ class LTX2VideoArchConfig(DiTArchConfig):
             self.in_channels = self.num_channels_latents * patch_volume
         if self.out_channels is None:
             self.out_channels = self.in_channels
+        if self.stg_block_idx is None:
+            self.stg_block_idx = 28 if self.caption_proj_before_connector else 29
 
 
 @dataclass
