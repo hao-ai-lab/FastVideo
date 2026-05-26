@@ -363,7 +363,32 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
 
     def prepare_for_compile(self) -> None:
         # Load Gemma outside Dynamo so torch.compile does not trace HF file-system checks.
-        _ = self.gemma_model
+        model = self.gemma_model
+        # Run one tiny eager forward before torch.compile. FastVideo calls the text encoder with
+        # Transformers' output_hidden_states path, which wraps each Gemma layer
+        # forward method and restores it by setting an instance-level forward
+        # attribute. If that attribute appears after Dynamo captures guards, the
+        # next text-encoder call recompiles; doing it here makes the first
+        # compiled call see the stable layer state.
+        token_id = getattr(model.config, "eos_token_id", None)
+        if isinstance(token_id, (list, tuple)):
+            token_id = token_id[0] if token_id else None
+        if token_id is None:
+            token_id = getattr(model.config, "pad_token_id", 0)
+        input_ids = torch.full(
+            (1, 1),
+            int(token_id or 0),
+            dtype=torch.long,
+            device=model.device,
+        )
+        attention_mask = torch.ones_like(input_ids)
+        with torch.no_grad():
+            model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+                return_dict=True,
+            )
 
     @property
     def gemma_model(self) -> Gemma3ForConditionalGeneration:

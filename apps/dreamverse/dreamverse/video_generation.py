@@ -280,6 +280,7 @@ class VideoGenerationWorker:
                 compile=CompileConfig(
                     enabled=enable_compile,
                     text_encoder_enabled=enable_compile,
+                    vae_enabled=enable_compile,
                     backend="inductor",
                     fullgraph=True,
                     mode="max-autotune-no-cudagraphs",

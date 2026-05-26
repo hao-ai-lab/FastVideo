@@ -16,11 +16,12 @@ if not IMAGE:
 
 image = modal.Image.from_registry(IMAGE)
 image = image.env({
+    "DREAMVERSE_IMAGE": IMAGE,
     "HF_HOME": "/root/.cache/huggingface",
     "FASTVIDEO_DREAMVERSE_HOME": "/var/lib/dreamverse",
-    "FASTVIDEO_ENABLE_STARTUP_WARMUP": "0",
+    "FASTVIDEO_ENABLE_STARTUP_WARMUP": "1",
     "FASTVIDEO_GPU_COUNT": "1",
-    "ENABLE_TORCH_COMPILE": "0",
+    "ENABLE_TORCH_COMPILE": "1",
     "STREAM_MODE": "av_fmp4",
 })
 
