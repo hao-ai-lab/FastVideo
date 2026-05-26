@@ -77,8 +77,13 @@ class ImageBindScoreMetric(BaseMetric):
 
         video_path = _video_source(sample)
         audio_path = sample.get("audio")
-        if video_path is None or audio_path is None:
-            return self._skip(sample, "missing 'video_path'/'video.source' or 'audio'")
+        missing = []
+        if video_path is None:
+            missing.append("'video_path' or 'video' with a path source")
+        if audio_path is None:
+            missing.append("'audio'")
+        if missing:
+            return self._skip(sample, f"missing {', '.join(missing)}")
 
         import decord
         from imagebind import data as ib_data

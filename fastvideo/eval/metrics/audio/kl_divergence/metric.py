@@ -122,7 +122,8 @@ class KLDivergenceMetric(BaseMetric):
         gen_path = sample.get("audio")
         ref_path = sample.get("reference_audio")
         if gen_path is None or ref_path is None:
-            return self._skip(sample, "missing 'audio' or 'reference_audio'")
+            missing = [k for k, v in (("audio", gen_path), ("reference_audio", ref_path)) if v is None]
+            return self._skip(sample, f"missing {', '.join(repr(k) for k in missing)}")
 
         gt_logits = _collect_logits(self._model, ref_path, self.device)
         pred_logits = _collect_logits(self._model, gen_path, self.device)
