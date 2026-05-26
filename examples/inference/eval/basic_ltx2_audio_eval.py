@@ -62,14 +62,33 @@ def main() -> None:
 
     print("\n=== Audio scores ===")
     for name in METRICS:
-        r = results[name]
+        r = None
+
+        # per-sample metric
+        if hasattr(results, "__contains__") and name in results:
+            r = results[name]
+
+        # corpus-level metric (e.g. audio.frechet_distance)
+        elif hasattr(results, "corpus") and name in results.corpus:
+            r = results.corpus[name]
+
+        if r is None:
+            print(f"  {name}: MISSING")
+            continue
+
         if r.score is None:
-            print(f"  {name}: SKIPPED ({r.details.get('skipped', 'no score')})")
+            skipped = (
+                r.details.get("skipped", "no score")
+                if isinstance(r.details, dict)
+                else "no score"
+            )
+            print(f"  {name}: SKIPPED ({skipped})")
         else:
             print(f"  {name}: {r.score:.4f}")
-            if r.details:
-                for k, v in r.details.items():
-                    print(f"      {k}: {v}")
+
+        if r.details:
+            for k, v in r.details.items():
+                print(f"      {k}: {v}")
 
 
 if __name__ == "__main__":
