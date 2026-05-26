@@ -5,6 +5,7 @@ import asyncio
 import multiprocessing as mp
 import os
 import subprocess
+import sys
 import time
 import traceback
 from dataclasses import dataclass
@@ -497,32 +498,51 @@ class GPUSlot:
 
         response_fut = loop.run_in_executor(None, lambda: self.response_queue.get(timeout=timeout))
 
+        # Process-death watcher.  On Unix we use loop.add_reader() on the
+        # sentinel fd — kernel-level, ~10 ms latency, zero polling cost.
+        # On Windows the default ProactorEventLoop does NOT implement
+        # add_reader (raises NotImplementedError), so we fall back to
+        # multiprocessing.connection.wait() in an executor thread (also
+        # blocks on the Win32 sentinel handle, but uses a thread instead
+        # of being integrated into the event loop's selector).
         death_fut: asyncio.Future | None = None
         sentinel_fd = process.sentinel if process is not None else None
+        _is_windows = sys.platform == "win32"
 
         if sentinel_fd is not None:
-            death_fut = loop.create_future()
+            if _is_windows:
+                # mp.connection.wait accepts process.sentinel on both Unix
+                # and Windows; run it in a thread so the loop stays free.
+                death_fut = loop.run_in_executor(
+                    None, mp.connection.wait, [sentinel_fd])
+            else:
+                death_fut = loop.create_future()
 
-            def _on_death() -> None:
-                try:
-                    loop.remove_reader(sentinel_fd)
-                except (ValueError, OSError):
-                    pass
-                if death_fut is not None and not death_fut.done():
-                    death_fut.set_result(None)
+                def _on_death() -> None:
+                    try:
+                        loop.remove_reader(sentinel_fd)
+                    except (ValueError, OSError):
+                        pass
+                    if death_fut is not None and not death_fut.done():
+                        death_fut.set_result(None)
 
-            loop.add_reader(sentinel_fd, _on_death)
+                loop.add_reader(sentinel_fd, _on_death)
 
         waiters = [response_fut] + ([death_fut] if death_fut is not None else [])
         try:
             done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            if (sentinel_fd is not None and death_fut is not None and not death_fut.done()):
-                try:
-                    loop.remove_reader(sentinel_fd)
-                except (ValueError, OSError):
-                    pass
-                death_fut.cancel()
+            if death_fut is not None and not death_fut.done():
+                if _is_windows:
+                    # Cancel the executor wait so the thread doesn't sit
+                    # blocked on a sentinel that may never trigger this run.
+                    death_fut.cancel()
+                else:
+                    try:
+                        loop.remove_reader(sentinel_fd)
+                    except (ValueError, OSError):
+                        pass
+                    death_fut.cancel()
 
         if (death_fut is not None and death_fut in done and response_fut not in done):
             try:
