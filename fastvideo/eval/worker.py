@@ -131,16 +131,18 @@ class EvalWorker:
                     m.accumulate(sample)
                 elif not is_ref:
                     results[name] = m.compute(sample)
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
                 # In skip_missing_deps mode, compute/accumulate-time failures
-                # (lazy imports of missing libs like torchcodec, runtime model
-                # init that can't find a checkpoint, etc.) drop the metric for
-                # the remainder of this Evaluator instead of bringing the whole
-                # run down. Strict mode re-raises.
+                # whose root cause is a missing dependency (lazy import of a
+                # lib like torchcodec) or a missing resource (model checkpoint
+                # not on disk) drop the metric for the remainder of this
+                # Evaluator instead of bringing the whole run down. Strict
+                # mode re-raises. Programmer bugs, OOM, and other runtime
+                # failures are intentionally NOT caught here — they surface.
                 if not self._skip_missing_deps:
                     raise
                 import logging
-                logging.getLogger(__name__).warning("eval: dropping %s after %s: %s", name, type(e).__name__, e)
+                logging.getLogger(__name__).exception("eval: dropping %s after %s: %s", name, type(e).__name__, e)
                 broken.append(name)
         for n in broken:
             self._metrics.pop(n, None)
