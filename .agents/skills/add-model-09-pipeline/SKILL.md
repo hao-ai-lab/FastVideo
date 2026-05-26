@@ -157,6 +157,13 @@ Debug pipeline drift in this order:
    channel order, sample rate, FPS, and final slicing.
 7. Add targeted stage-level diagnostics to identify the first divergent stage.
 
+If stage diagnostics show the first bad stage is transformer/denoising or a
+mid-DiT block, enable activation trace before adding ad hoc pipeline prints; see
+`docs/contributing/activation_trace.md` and `../add-model-08-trace/SKILL.md`.
+Keep `FASTVIDEO_TRACE_LAYERS`, `FASTVIDEO_TRACE_STATS`, and
+`FASTVIDEO_TRACE_STEPS` identical across reruns so pipeline parity traces diff
+one-to-one.
+
 If the first divergence belongs to component implementation, strict loading, or
 conversion mapping, stop pipeline edits and return `next_step=return_to_phase_6`
 with the exact failing evidence. Do not patch conversion from this skill.

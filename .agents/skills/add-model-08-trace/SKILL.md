@@ -1,6 +1,6 @@
 ---
 name: add-model-08-trace
-description: Use during /add-model Phase 6 when component parity has failed and root cause requires layer-by-layer divergence analysis. Instruments both the official reference and FastVideo port with forward hooks to find the first numerical divergence point.
+description: Use during /add-model Phase 6 when component parity has failed and root cause requires layer-by-layer divergence analysis. Uses FastVideo activation trace first, falling back to custom hooks only for boundaries or stats the utility cannot observe.
 ---
 
 # Add-Model Trace
@@ -38,104 +38,90 @@ Required inputs before starting:
 - Shared deterministic test inputs (same tensors on both sides).
 - The component parity test file path and its current failure output.
 
-## Hard Rules: Instrumentation Hierarchy
+## Primary Path: FastVideo Activation Trace
 
-Apply these in priority order. Use the highest-priority method that works for
-the target site.
+Use FastVideo's first-class activation trace before writing custom hooks:
+`fastvideo/hooks/activation_trace.py`, documented in
+`docs/contributing/activation_trace.md`.
 
-### (1) Forward hooks (PREFERRED)
+Pipeline runs attach trace to the transformer during pipeline initialization.
+Component-only parity harnesses may call `attach_activation_trace(model)` from
+local test/debug code; do not add trace calls to production model code.
+
+Prefix the failing parity command with a tight layer regex:
+
+```bash
+FASTVIDEO_TRACE_ACTIVATIONS=1 \
+FASTVIDEO_TRACE_LAYERS="^block\.layers\.[0-9]+$" \
+FASTVIDEO_TRACE_STATS="abs_mean,sum,max,shape" \
+FASTVIDEO_TRACE_STEPS="0" \
+FASTVIDEO_TRACE_OUTPUT="/tmp/opencode/fv_trace.jsonl" \
+pytest tests/local_tests -k "parity" -v -s
+```
+
+Match the layer regex to the actual `model.named_modules()` names. Empty or
+broad regexes are expensive; prefer block-level names first, then narrow to
+submodules after the first divergent block is known.
+
+## Trace Compare Contract
+
+One JSONL file per side. FastVideo output should use `FASTVIDEO_TRACE_OUTPUT`;
+the upstream harness should emit the same JSONL shape:
+
+```json
+{"module":"block.layers.0","tensor":"out","step":0,"abs_mean":0.0123,"sum":1.0,"max":0.5,"shape":[1,16,32]}
+```
+
+Compare rows by `(module, step, tensor)`. The first row whose `shape`,
+`abs_mean`, or `max` diverges beyond the component tolerance is the first broken
+boundary. Keep `FASTVIDEO_TRACE_LAYERS`, `FASTVIDEO_TRACE_STATS`, and
+`FASTVIDEO_TRACE_STEPS` identical between sides; if row order differs, sort or
+normalize before diffing.
+
+## Drill-Down Loop
+
+**Initial run:** trace every top-level block (`^block\.layers\.[0-9]+$` or the
+family's equivalent). Identify the first block index where `abs_mean` or `max`
+drifts beyond tolerance while earlier blocks match.
+
+**Drill run:** tighten `FASTVIDEO_TRACE_LAYERS` to submodules inside the first
+divergent block: attention output, MLP projections, norm outputs, modality
+adapters, or other named boundaries exposed by `named_modules()`.
+
+**Iterate:** if the first divergent operation is a free function or tensor op not
+visible as an `nn.Module`, use the fallback instrumentation hierarchy below.
+
+The loop ends when the first divergent submodule or operation is identified with
+a file:line citation in the official source.
+
+## Fallback Instrumentation Hierarchy
+
+Use these only when activation trace cannot observe the needed boundary or
+statistic.
+
+### (1) Custom forward hooks
 
 `module.register_forward_hook(...)` and `register_forward_pre_hook(...)`.
 Always within `try/finally` with `handle.remove()`. Zero source residue.
 
-```python
-handle = module.register_forward_hook(fn)
-try:
-    output = model(inputs)
-finally:
-    handle.remove()
-```
-
-### (2) Runtime monkey-patch (PREFERRED over source edits)
+### (2) Runtime monkey-patch
 
 `module.attr = wrapped_func` or `cls.method = wrapped_method`, restored via
-`try/finally` (save original first). Use for free functions and non-Module
-sites such as activation functions (`swiglu`, `apply_rotary_emb`) that cannot
-be hooked as `nn.Module` submodules.
-
-```python
-original = cls.method
-cls.method = wrapped
-try:
-    output = model(inputs)
-finally:
-    cls.method = original
-```
+`try/finally` (save original first). Use for free functions and non-Module sites
+such as activation functions (`swiglu`, `apply_rotary_emb`).
 
 ### (3) Source edits in FastVideo's own code
 
 Only when (1) and (2) are insufficient. Track all edits within a single named
 `git stash` boundary OR a temporary branch. Run `git diff` before closing the
-investigation to confirm the stash or branch is clean. The cleanup gate
-enforces this.
+investigation to confirm cleanup.
 
 ### (4) Source edits in official repo source
 
-Allowed if EITHER:
-
-- (a) The official repo is a git-tracked clone (e.g. `daVinci-MagiHuman/` at
-  the repo root): use `git diff` in the clone path to verify cleanup.
-- (b) It's installed editable (`pip install -e .`): use `git diff` in the
-  editable source path to verify cleanup.
-
-If the official repo is installed non-editable in site-packages: back up the
-target file (`cp original.py original.py.trace-backup`) before editing, then
-restore from backup at the end (or `pip install --force-reinstall <pkg>`).
-The cleanup gate verifies via diff-against-backup or zero-diff-in-clone.
-
-## Logging Contract
-
-One log file per side. Paths:
-
-```
-/tmp/opencode/<family>_<component>_up_layers.log
-/tmp/opencode/<family>_<component>_fv_layers.log
-```
-
-Format: one line per captured tensor, space-separated:
-
-```
-<name> <shape> <abs_mean> <sum> <min> <max>
-```
-
-Example:
-
-```
-block[00] (1,512,1024) 0.012345 6.3210 -0.4321 0.4321
-```
-
-Keep the format diff-friendly. Running `diff /tmp/opencode/x_up.log
-/tmp/opencode/x_fv.log` should highlight the first divergent line directly.
-Retain side-by-side stdout output alongside the per-side files for human
-review.
-
-## Drill-Down Loop
-
-**Initial run:** attach hooks to every top-level block (`model.block.layers[i]`
-or equivalent). Identify the first block index `NN` where abs_mean relative
-drift exceeds 0.5% compared to the previous block.
-
-**Drill run:** set `<FAMILY>_DEBUG_DRILL_LAYER=NN` and re-run. The script
-attaches submodule hooks inside block `NN`: attention output, mlp.pre_norm,
-mlp.up_gate_proj, mlp.down_proj input (via pre-hook) and output, mlp output,
-attn_post_norm (if present), mlp_post_norm (if present).
-
-**Iterate:** if the drill run points to a free function (e.g. an activation
-not wrapped in an `nn.Module`), switch to a monkey-patch (method 2) to
-intercept its output via the next module's pre-hook.
-
-The loop ends when the first divergent submodule is identified with a
-file:line citation in the official source.
+Allowed only when hook and monkey-patch approaches cannot capture the site.
+For git-tracked or editable official clones, use `git diff` in the clone path to
+verify cleanup. For non-editable site-packages, back up the target file before
+editing and restore it before handoff.
 
 ## Hypothesis Toggles
 
@@ -194,11 +180,13 @@ Escalate to the calling bucket skill when:
 
 Return to the calling subagent with:
 
-- File paths to per-side logs (`/tmp/opencode/<family>_<component>_{up,fv}_layers.log`).
-- The identified first divergent layer or submodule name.
+- FastVideo trace JSONL path and upstream trace JSONL path.
+- Trace settings used: `FASTVIDEO_TRACE_LAYERS`, `FASTVIDEO_TRACE_STATS`, and
+  `FASTVIDEO_TRACE_STEPS`.
+- The first divergent `(module, step, tensor)` row and observed drift.
 - The upstream file:line citation where the divergence originates.
-- Hypothesis verdict if an A/B toggle was used (e.g. "PATCH_LINEAR=1 closes
-  the gap, confirming dtype-cast difference in PackedExpertLinear").
+- Fallback hook/patch verdict if activation trace could not observe the boundary.
+- Hypothesis verdict if an A/B toggle was used, for example `PATCH_LINEAR=1`.
 - Cleanup-gate status: `[cleanup-gate] PASS` or a list of unresolved items.
 
 The calling agent uses this to scope the production fix in the FastVideo
@@ -206,10 +194,14 @@ component file.
 
 ## References
 
-- `templates/block_trace_debug.py` in this skill directory: the canonical
-  template this skill generalizes.
+- `docs/contributing/activation_trace.md` for canonical activation-trace env vars,
+  JSONL output, cost model, and troubleshooting.
+- `fastvideo/hooks/activation_trace.py` for the implementation and
+  `attach_activation_trace(model)` entry point.
+- `templates/block_trace_debug.py` in this skill directory: fallback custom-hook
+  template when activation trace cannot observe the needed boundary or stat.
 - `tests/local_tests/transformers/_debug_magi_human_block_parity.py` in the
-  FastVideo3 repo: the worked magi-human example this skill was extracted from.
+  FastVideo3 repo: historical worked example for custom hook/patch debugging.
 - `add-model/SKILL.md` Phase 6: the calling context for this skill.
 - `add-model-03-port-dit/SKILL.md`, `add-model-04-port-vae/SKILL.md`,
   `add-model-05-port-encoder/SKILL.md`, `add-model-06-port-generic/SKILL.md`:
