@@ -2,7 +2,7 @@
 
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import Image from "next/image";
-import { Film, ArrowUp, X, Loader2, ArrowLeft } from "lucide-react";
+import { Film, ArrowUp, X, Loader2, ArrowLeft, ImagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import LeaveSessionModal, { shouldShowLeaveWarning } from "@/components/LeaveSessionModal";
 import SpeechToTextButton from "@/components/SpeechToTextButton";
@@ -32,6 +32,10 @@ interface Props {
 	onBackFromViewing?: () => void;
 	onSpeechTranscript?: (text: string) => void;
 	onSpeechInterimChange?: (text: string) => void;
+	initialImageName?: string | null;
+	initialImageDataUrl?: string | null;
+	initialImageError?: string;
+	onInitialImageChange?: (file: File | null) => void;
 }
 
 export default function ChatBar({
@@ -56,7 +60,26 @@ export default function ChatBar({
 	onBackFromViewing = () => {},
 	onSpeechTranscript,
 	onSpeechInterimChange,
+	initialImageName = null,
+	initialImageDataUrl = null,
+	initialImageError = "",
+	onInitialImageChange,
 }: Props) {
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const handlePickImage = useCallback(() => {
+		fileInputRef.current?.click();
+	}, []);
+	const handleFileChange = useCallback(
+		(event: React.ChangeEvent<HTMLInputElement>) => {
+			const file = event.target.files?.[0] ?? null;
+			onInitialImageChange?.(file);
+			if (fileInputRef.current) fileInputRef.current.value = "";
+		},
+		[onInitialImageChange],
+	);
+	const handleClearImage = useCallback(() => {
+		onInitialImageChange?.(null);
+	}, [onInitialImageChange]);
 	const [sttBusy, setSttBusy] = useState(false);
 	const [leaveModalOpen, setLeaveModalOpen] = useState(false);
 	const showSpinner = isGenerating || rewritingSeedPrompts;
@@ -346,6 +369,37 @@ export default function ChatBar({
 				</div>
 			)}
 
+			{!sessionStarted && (initialImageDataUrl || initialImageError) && (
+				<div className="flex flex-col items-center gap-1.5 px-2 text-xs">
+					{initialImageDataUrl && (
+						<div className="group relative inline-flex flex-col items-center gap-1">
+							<div className="relative h-20 w-20 overflow-hidden rounded-xl border border-input bg-card/70 shadow-sm">
+								{/* eslint-disable-next-line @next/next/no-img-element */}
+								<img
+									src={initialImageDataUrl}
+									alt={initialImageName ?? "Initial frame preview"}
+									className="h-full w-full object-cover"
+								/>
+								<button
+									type="button"
+									aria-label="Remove image"
+									onClick={handleClearImage}
+									className="absolute right-1 top-1 rounded-full bg-black/60 p-0.5 text-white opacity-80 transition-opacity hover:opacity-100"
+								>
+									<X className="size-3" />
+								</button>
+							</div>
+							{initialImageName && (
+								<span className="max-w-[18ch] truncate text-muted-foreground" title={initialImageName}>{initialImageName}</span>
+							)}
+						</div>
+					)}
+					{initialImageError && (
+						<span className="text-rose-600 dark:text-rose-400">{initialImageError}</span>
+					)}
+				</div>
+			)}
+
 			<div
 				className={cn(
 					"flex min-w-0 items-center gap-1.5 rounded-4xl border py-2.5 pl-5 pr-2.5 shadow-md backdrop-blur-sm transition-all duration-200",
@@ -368,6 +422,28 @@ export default function ChatBar({
 						(isBusy || sttBusy) && "cursor-not-allowed opacity-50",
 					)}
 				/>
+				{!sessionStarted && onInitialImageChange && (
+					<>
+						<input
+							ref={fileInputRef}
+							type="file"
+							accept="image/jpeg,image/png,image/webp"
+							className="hidden"
+							onChange={handleFileChange}
+						/>
+						<Button
+							variant="outline"
+							aria-label="Add initial image"
+							title="Add initial image (I2V)"
+							onClick={handlePickImage}
+							disabled={isBusy}
+							size="icon-sm"
+							className="shrink-0 rounded-full"
+						>
+							<ImagePlus className="size-5" />
+						</Button>
+					</>
+				)}
 				{onSpeechTranscript && <SpeechToTextButton disabled={isBusy} onTranscript={onSpeechTranscript} onInterimChange={onSpeechInterimChange} onBusyChange={setSttBusy} />}
 				{!sessionStarted ? (
 					<Button

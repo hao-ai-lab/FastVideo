@@ -9,7 +9,10 @@ chunk as a ``StreamEvent`` via the caller-supplied ``publish``
 callback.  Knows nothing about multiprocessing queues, the GPU pool,
 or individual users — the caller decides what "publish" means.
 """
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # Unix-only; the only use site (F_SETPIPE_SZ) is hasattr-gated below
 import os
 import shutil
 import subprocess

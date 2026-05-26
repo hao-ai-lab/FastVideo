@@ -595,6 +595,94 @@ describe.skip('App websocket integration', () => {
     expect(initMessage.auto_extension_enabled).toBe(false);
     expect(initMessage.loop_generation_enabled).toBe(false);
     expect(initMessage.initial_rollout_prompt).toBe('');
+    expect(initMessage.initial_image).toBeNull();
+  });
+
+  it('attaches the uploaded initial image to the session_init_v2 payload', async () => {
+    const outbound: any[] = [];
+    server.on('connection', (socket) => {
+      socket.on('message', (rawMessage) => {
+        outbound.push(JSON.parse(rawMessage as string));
+      });
+    });
+
+    const user = userEvent.setup();
+    const { container } = render(<Page />);
+
+    expect(
+      await screen.findByRole('button', { name: 'Add initial image' }),
+    ).toBeInTheDocument();
+
+    const fileInput = container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+
+    const imageBytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    const imageFile = new File([imageBytes], 'starting-frame.png', {
+      type: 'image/png',
+    });
+    await user.upload(fileInput!, imageFile);
+
+    await waitFor(() => {
+      const preview = container.querySelector(
+        'img[alt="starting-frame.png"]',
+      ) as HTMLImageElement | null;
+      expect(preview).not.toBeNull();
+      expect(preview!.src.startsWith('data:image/png;base64,')).toBe(true);
+    });
+
+    const generateButton = await screen.findByRole('button', { name: 'Generate' });
+    await waitFor(() => expect(generateButton).toBeEnabled());
+    await user.click(generateButton);
+
+    await waitFor(() => {
+      expect(outbound.some((message) => message.type === 'session_init_v2')).toBe(true);
+    });
+
+    const initMessage = outbound.find((message) => message.type === 'session_init_v2');
+    expect(initMessage.initial_image).toBeTruthy();
+    expect(initMessage.initial_image.mime_type).toBe('image/png');
+    expect(initMessage.initial_image.name).toBe('starting-frame.png');
+    expect(initMessage.initial_image.data_url.startsWith('data:image/png;base64,')).toBe(true);
+  });
+
+  it('rejects an oversized initial image without attaching it to the payload', async () => {
+    const outbound: any[] = [];
+    server.on('connection', (socket) => {
+      socket.on('message', (rawMessage) => {
+        outbound.push(JSON.parse(rawMessage as string));
+      });
+    });
+
+    const user = userEvent.setup();
+    const { container } = render(<Page />);
+
+    const fileInput = container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+
+    const oversized = new File([new Uint8Array(16 * 1024 * 1024)], 'big.png', {
+      type: 'image/png',
+    });
+    await user.upload(fileInput!, oversized);
+
+    expect(await screen.findByText(/15 MB or smaller/i)).toBeInTheDocument();
+    expect(container.querySelector('img[alt="big.png"]')).toBeNull();
+
+    const generateButton = await screen.findByRole('button', { name: 'Generate' });
+    await waitFor(() => expect(generateButton).toBeEnabled());
+    await user.click(generateButton);
+
+    await waitFor(() => {
+      expect(outbound.some((message) => message.type === 'session_init_v2')).toBe(true);
+    });
+
+    const initMessage = outbound.find((message) => message.type === 'session_init_v2');
+    expect(initMessage.initial_image).toBeNull();
   });
 
   it('starts a streaming session from a custom initial prompt without using curated prompts', async () => {

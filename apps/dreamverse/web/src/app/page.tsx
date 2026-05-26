@@ -341,6 +341,8 @@ export default function Page() {
 	const [isMobileShareCapable, setIsMobileShareCapable] = useState(false);
 	const [videoMuted, setVideoMuted] = useState(true);
 	const [timeoutModalOpen, setTimeoutModalOpen] = useState(false);
+	const [initialImage, setInitialImage] = useState<{ data_url: string; mime_type: string; name: string } | null>(null);
+	const [initialImageError, setInitialImageError] = useState<string>("");
 	useEffect(() => {
 		setIsMobileShareCapable(typeof navigator.canShare === "function" && window.matchMedia("(pointer: coarse)").matches);
 	}, []);
@@ -1759,6 +1761,39 @@ export default function Page() {
 		resetPlaybackState();
 	}
 
+	const SUPPORTED_INITIAL_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+	const MAX_INITIAL_IMAGE_BYTES = 15 * 1024 * 1024;
+	async function handleInitialImageChange(file: File | null) {
+		if (!file) {
+			setInitialImage(null);
+			setInitialImageError("");
+			return;
+		}
+		if (!SUPPORTED_INITIAL_IMAGE_TYPES.has(file.type)) {
+			setInitialImage(null);
+			setInitialImageError("Image must be JPEG, PNG, or WebP.");
+			return;
+		}
+		if (file.size > MAX_INITIAL_IMAGE_BYTES) {
+			setInitialImage(null);
+			setInitialImageError("Image must be 15 MB or smaller.");
+			return;
+		}
+		try {
+			const dataUrl = await new Promise<string>((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onload = () => resolve(String(reader.result ?? ""));
+				reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+				reader.readAsDataURL(file);
+			});
+			setInitialImage({ data_url: dataUrl, mime_type: file.type, name: file.name });
+			setInitialImageError("");
+		} catch {
+			setInitialImage(null);
+			setInitialImageError("Could not read image file.");
+		}
+	}
+
 	function buildProjectInitPayload(type: "session_init_v2" | "project_init_v1") {
 		const segmentPrompts = getSessionInitPrompts();
 		setSeedPrompts(segmentPrompts);
@@ -1768,7 +1803,7 @@ export default function Page() {
 			preset_label: getInitialPresetLabel(),
 			curated_prompts: segmentPrompts,
 			initial_rollout_prompt: normalizeInitialPrompt(pendingInitialPromptRef.current),
-			initial_image: null,
+			initial_image: initialImage,
 			single_clip_mode: false,
 			enhancement_enabled: sessionStore.get().enhancementEnabled,
 			auto_extension_enabled: sessionStore.get().autoExtensionEnabled,
@@ -2792,6 +2827,10 @@ export default function Page() {
 							onStartNewProject={handleStartNewProject}
 							onSpeechTranscript={handleLivePromptSpeechTranscript}
 							onSpeechInterimChange={handleLivePromptSpeechInterim}
+							initialImageName={initialImage?.name ?? null}
+							initialImageDataUrl={initialImage?.data_url ?? null}
+							initialImageError={initialImageError}
+							onInitialImageChange={handleInitialImageChange}
 						/>
 					</motion.div>
 				</div>

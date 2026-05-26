@@ -62,12 +62,12 @@ dependencies = [
     "omegaconf",
 
     # System & Monitoring Tools
-    "gpustat",
+    # "gpustat",  # Windows: gpustat 1.1.1 is sdist-only and pulls in setuptools_scm/vcs_versioning that crashes Python 3.12 subprocess; not on inference path.
     "watch",
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.2.6",
+    # "fastvideo-kernel==0.2.6",  # Windows: depends on triton which has no win_amd64 wheels; install from C:\workspace\world\FastVideo\fastvideo-kernel\ if needed.
     "wheel",
 
     # Training Dependencies
@@ -168,9 +168,23 @@ streaming = [
 dreamverse = [
     "uvicorn[standard]==0.41.0",
     "cerebras-cloud-sdk",
-    "flash-attn-cute @ git+https://github.com/XOR-op/flash-attention.git@fa4-compile#subdirectory=flash_attn/cute",
-    "flashinfer-python",
     "openai>=1.40",
+]
+
+# Optional FA4 (flash_attn.cute) kernels. Built from a git fork, needs
+# CUDA toolchain + matching compute capability. fastvideo.attention.backends.flash_attn
+# falls back to FA3 → FA2 when absent, so omitting this is safe; install
+# only when the FA4 backend is required (typically H100/B200 prod).
+dreamverse-fa4 = [
+    "flash-attn-cute @ git+https://github.com/XOR-op/flash-attention.git@fa4-compile#subdirectory=flash_attn/cute",
+]
+
+# Optional FP4 quantized linear layers. Provided by flashinfer; sdist-only,
+# its build backend uses os.symlink which needs Developer Mode on Windows.
+# fastvideo.layers.fp4linear gates imports with try/except, so omitting
+# this is safe unless explicitly running FP4 paths.
+dreamverse-fp4 = [
+    "flashinfer-python",
 ]
 
 rocm = [
