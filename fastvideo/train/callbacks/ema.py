@@ -47,9 +47,11 @@ class EMACallback(Callback):
         *,
         decay: float = 0.9999,
         start_iter: int = 0,
+        update_interval: int = 1,
     ) -> None:
         self._decay = float(decay)
         self._start_iter = int(start_iter)
+        self._update_interval = max(1, int(update_interval))
         self._ema_started = False
         self.student_ema: EMA_FSDP | None = None
 
@@ -78,9 +80,10 @@ class EMACallback(Callback):
         )
         logger.info(
             "EMA callback enabled (decay=%s, "
-            "start_iter=%d).",
+            "start_iter=%d, update_interval=%d).",
             self._decay,
             self._start_iter,
+            self._update_interval,
         )
 
     def on_training_step_end(
@@ -93,6 +96,8 @@ class EMACallback(Callback):
             return
 
         if iteration < self._start_iter:
+            return
+        if (iteration - self._start_iter) % self._update_interval != 0:
             return
         if not self._ema_started:
             logger.info(
