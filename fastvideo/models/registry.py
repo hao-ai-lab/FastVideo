@@ -72,6 +72,8 @@ _TEXT_ENCODER_MODELS = {
     ("encoders", "reason1", "Reason1TextEncoder"),
     "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
     "Qwen3ForCausalLM": ("encoders", "qwen3", "Qwen3ForCausalLM"),
+    "Mistral3ForConditionalGeneration":
+    ("encoders", "mistral3", "Mistral3ForConditionalGeneration"),
     "TransformersModel": ("encoders", "qwen3", "Qwen3ForCausalLM"),
 }
 

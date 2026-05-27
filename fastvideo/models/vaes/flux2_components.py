@@ -171,6 +171,7 @@ class Attention(nn.Module):
         if self.upcast_softmax:
             query = query.float()
             key = key.float()
+            value = value.float()
         hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, scale=self.scale)
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, height * width, self.inner_dim)
         hidden_states = hidden_states.to(self.to_out[0].weight.dtype)

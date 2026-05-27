@@ -328,6 +328,15 @@ def _register_configs() -> None:
         default_preset="stable_audio_open_small",
     )
 
+    def _is_flux2_klein(path: str) -> bool:
+        path_lower = path.lower()
+        return "flux.2-klein" in path_lower or "flux2-klein" in path_lower or "flux2klein" in path_lower
+
+    def _is_flux2_full(path: str) -> bool:
+        path_lower = path.lower()
+        is_flux2 = "flux.2" in path_lower or "flux2" in path_lower or "flux_2" in path_lower or "flux-2" in path_lower
+        return is_flux2 and "klein" not in path_lower
+
     # Flux2 Klein (distilled, 4-step, no guidance)
     register_configs(
         sampling_param_cls=None,
@@ -338,30 +347,24 @@ def _register_configs() -> None:
             "black-forest-labs/FLUX.2-klein-9B",
         ],
         model_detectors=[
-            lambda path: (
-                "flux.2-klein" in path.lower()
-                or "flux2-klein" in path.lower()
-                or "flux2klein" in path.lower()
-            ),
+            _is_flux2_klein,
         ],
         model_family="flux2",
         default_preset="flux2_klein_4b",
     )
-    # Flux2 (full, with guidance) — scaffold only; not validated end-to-end
+    # Flux2 (full, Mistral3 text encoder, embedded guidance)
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=Flux2PipelineConfig,
         workload_types=(WorkloadType.T2I, ),
-        hf_model_paths=[],
+        hf_model_paths=[
+            "black-forest-labs/FLUX.2-dev",
+        ],
         model_detectors=[
-            lambda path: (
-                "flux2" in path.lower()
-                or "flux_2" in path.lower()
-                or "flux-2" in path.lower()
-            )
-            and "klein" not in path.lower(),
+            _is_flux2_full,
         ],
         model_family="flux2",
+        default_preset="flux2_dev",
     )
 
     # Hunyuan 1.5 (specific)
@@ -880,15 +883,19 @@ def get_model_info(
     if workload_type is None:
         workload_type = WorkloadType.T2V
 
-    if os.path.exists(model_path):
-        config = verify_model_config_and_directory(model_path)
-    else:
-        config = maybe_download_model_index(model_path)
+    config_info = _get_config_info(model_path, raise_on_missing=True)
+    assert config_info is not None, "config_info must be resolved"
 
-    pipeline_name = config.get("_class_name")
     if override_pipeline_cls_name:
-        logger.info("Overriding pipeline class name from %s to %s", pipeline_name, override_pipeline_cls_name)
         pipeline_name = override_pipeline_cls_name
+        logger.info("Using override pipeline class name %s", pipeline_name)
+    else:
+        if os.path.exists(model_path):
+            config = verify_model_config_and_directory(model_path)
+        else:
+            config = maybe_download_model_index(model_path)
+
+        pipeline_name = config.get("_class_name")
 
     if pipeline_name is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
@@ -896,9 +903,6 @@ def get_model_info(
 
     pipeline_registry = get_pipeline_registry(pipeline_type)
     pipeline_cls = pipeline_registry.resolve_pipeline_cls(pipeline_name, pipeline_type, workload_type)
-
-    config_info = _get_config_info(model_path, raise_on_missing=True)
-    assert config_info is not None, "config_info must be resolved"
 
     sampling_param_cls = config_info.sampling_param_cls or SamplingParam
 

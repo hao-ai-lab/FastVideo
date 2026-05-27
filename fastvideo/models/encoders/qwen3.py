@@ -153,6 +153,7 @@ class Qwen3Attention(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
@@ -173,7 +174,31 @@ class Qwen3Attention(nn.Module):
         q = q.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
         k = k.reshape(batch_size, seq_len, self.num_kv_heads, self.head_dim)
 
-        attn_output = self.attn(q, k, v)
+        if attention_mask is None:
+            attn_output = self.attn(q, k, v)
+        else:
+            q_sdpa = q.transpose(1, 2)
+            k_sdpa = k.transpose(1, 2)
+            v_sdpa = v.transpose(1, 2)
+            causal_mask = torch.ones(
+                seq_len,
+                seq_len,
+                device=q.device,
+                dtype=torch.bool,
+            ).tril()
+            key_mask = attention_mask.to(device=q.device, dtype=torch.bool)
+            attn_mask = causal_mask[None, None, :, :] & key_mask[:, None, None, :]
+            attn_output = torch.nn.functional.scaled_dot_product_attention(
+                q_sdpa,
+                k_sdpa,
+                v_sdpa,
+                attn_mask=attn_mask,
+                dropout_p=0.0,
+                is_causal=False,
+                scale=self.scaling,
+                enable_gqa=self.num_heads != self.num_kv_heads,
+            ).transpose(1, 2)
+
         attn_output = attn_output.reshape(batch_size, seq_len, -1)
 
         output, _ = self.o_proj(attn_output)
@@ -228,6 +253,7 @@ class Qwen3DecoderLayer(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         residual: torch.Tensor | None,
+        attention_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if residual is None:
             residual = hidden_states
@@ -235,7 +261,11 @@ class Qwen3DecoderLayer(nn.Module):
         else:
             hidden_states, residual = self.input_layernorm(hidden_states, residual)
 
-        hidden_states = self.self_attn(positions=positions, hidden_states=hidden_states)
+        hidden_states = self.self_attn(
+            positions=positions,
+            hidden_states=hidden_states,
+            attention_mask=attention_mask,
+        )
 
         hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
@@ -251,6 +281,8 @@ class Qwen3ForCausalLM(TextEncoder):
     - QK-Norm for better training stability
     - output_hidden_states for Klein (layers 9, 18, 27)
     """
+
+    supports_hf_from_pretrained = True
 
     def __init__(self, config: Qwen3TextConfig) -> None:
         super().__init__(config)
@@ -286,6 +318,28 @@ class Qwen3ForCausalLM(TextEncoder):
         )
 
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+    @classmethod
+    def from_pretrained_local(
+        cls,
+        model_path: str,
+        model_config: Qwen3TextConfig,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> nn.Module:
+        from transformers import AutoModelForCausalLM
+
+        if device.type == "cpu" and torch.cuda.is_available():
+            from fastvideo.distributed import get_local_torch_device
+
+            device = get_local_torch_device()
+
+        return AutoModelForCausalLM.from_pretrained(
+            model_path,
+            local_files_only=True,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+        ).eval().to(device)
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -329,7 +383,12 @@ class Qwen3ForCausalLM(TextEncoder):
                     if residual is None
                     else (hidden_states + residual,)
                 )
-            hidden_states, residual = layer(position_ids, hidden_states, residual)
+            hidden_states, residual = layer(
+                position_ids,
+                hidden_states,
+                residual,
+                attention_mask=attention_mask,
+            )
 
         hidden_states, _ = self.norm(hidden_states, residual)
 

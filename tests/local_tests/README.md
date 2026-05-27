@@ -23,6 +23,7 @@ tests/local_tests/<family>/
 
 | Family | Workload | Dir |
 |---|---|---|
+| Flux2 | T2I | [`flux2/`](./flux2/) |
 | Hunyuan GameCraft | T2V / I2V | [`gamecraft/`](./gamecraft/) |
 | GEN3C | T2V | [`gen3c/`](./gen3c/) |
 | Kandinsky-5 | T2V | [`kandinsky5/`](./kandinsky5/) |

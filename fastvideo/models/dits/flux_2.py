@@ -988,6 +988,8 @@ class Flux2Transformer2DModel(BaseDiT):
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor = None,
         timestep: torch.LongTensor = None,
+        img_ids: torch.Tensor = None,
+        txt_ids: torch.Tensor = None,
         guidance: torch.Tensor = None,
         freqs_cis: torch.Tensor = None,
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
@@ -1047,21 +1049,22 @@ class Flux2Transformer2DModel(BaseDiT):
 
         # 3. Compute RoPE positional embeddings when not provided externally
         if freqs_cis is None:
-            if input_was_5d:
-                img_h, img_w = h, w
-            else:
-                img_seq_len = hidden_states.shape[1]
-                img_h = img_w = int(img_seq_len ** 0.5)
+            if txt_ids is None or img_ids is None:
+                if input_was_5d:
+                    img_h, img_w = h, w
+                else:
+                    img_seq_len = hidden_states.shape[1]
+                    img_h = img_w = int(img_seq_len ** 0.5)
 
-            txt_len = encoder_hidden_states.shape[1]
-            txt_ids = torch.cartesian_prod(
-                torch.arange(1), torch.arange(1),
-                torch.arange(1), torch.arange(txt_len),
-            ).to(device=hidden_states.device)
-            img_ids = torch.cartesian_prod(
-                torch.arange(1), torch.arange(img_h),
-                torch.arange(img_w), torch.arange(1),
-            ).to(device=hidden_states.device)
+                txt_len = encoder_hidden_states.shape[1]
+                txt_ids = torch.cartesian_prod(
+                    torch.arange(1), torch.arange(1),
+                    torch.arange(1), torch.arange(txt_len),
+                ).to(device=hidden_states.device)
+                img_ids = torch.cartesian_prod(
+                    torch.arange(1), torch.arange(img_h),
+                    torch.arange(img_w), torch.arange(1),
+                ).to(device=hidden_states.device)
             freqs_cis = compute_flux2_freqs_cis_from_ids(
                 self.rotary_emb, txt_ids, img_ids, device=hidden_states.device,
             )

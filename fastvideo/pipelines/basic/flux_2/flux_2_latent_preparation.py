@@ -73,9 +73,7 @@ class Flux2LatentPreparationStage(LatentPreparationStage):
         device = get_local_torch_device()
         generator = batch.generator
         latents = batch.latents
-        num_frames = (
-            latent_num_frames if latent_num_frames is not None else batch.num_frames
-        )
+        num_frames = (latent_num_frames if latent_num_frames is not None else batch.num_frames)
         height = batch.height
         width = batch.width
 
@@ -108,10 +106,8 @@ class Flux2LatentPreparationStage(LatentPreparationStage):
             bcthw_shape = shape
 
         if isinstance(generator, list) and len(generator) != batch_size:
-            raise ValueError(
-                f"You have passed a list of generators of length {len(generator)}, "
-                f"but requested an effective batch size of {batch_size}."
-            )
+            raise ValueError(f"You have passed a list of generators of length {len(generator)}, "
+                             f"but requested an effective batch size of {batch_size}.")
 
         if latents is None:
             latents = randn_tensor(
@@ -124,16 +120,19 @@ class Flux2LatentPreparationStage(LatentPreparationStage):
                 latents = latents * self.scheduler.init_noise_sigma
         else:
             latents = latents.to(device)
-            is_longcat_refine = (
-                batch.refine_from is not None or batch.stage1_video is not None
-            )
-            if (not is_longcat_refine) and hasattr(
-                self.scheduler, "init_noise_sigma"
-            ):
+            is_longcat_refine = (batch.refine_from is not None or batch.stage1_video is not None)
+            if (not is_longcat_refine) and hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
 
         batch.latents = latents
         batch.raw_latent_shape = bcthw_shape
+        latent_ids = torch.cartesian_prod(
+            torch.arange(num_frames, device=device),
+            torch.arange(latent_h, device=device),
+            torch.arange(latent_w, device=device),
+            torch.arange(1, device=device),
+        )
+        batch.extra["flux2_img_ids"] = latent_ids.unsqueeze(0).expand(batch_size, -1, -1)
         # Flux2 mu depends on image_seq_len; use packed spatial size
         batch.n_tokens = latent_h * latent_w
         return batch
