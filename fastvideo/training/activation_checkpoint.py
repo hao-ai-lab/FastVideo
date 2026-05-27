@@ -101,6 +101,28 @@ def _is_attention_forward(func) -> bool:
     return ("flash_attn" in s and ("forward" in s or "fwd" in s)) or "_scaled_dot_product" in s
 
 
+# Decision cache keyed by op: the set of distinct ops in a training step is tiny,
+# so the string matching below runs once per unique op instead of once per call.
+_ATTN_ONLY_SAVE_CACHE: dict = {}
+
+
+def _attn_only_must_save(func) -> bool:
+    """MUST_SAVE the attention forward output and any functional collective
+    (`_c10d_functional.*` — e.g. FSDP2's all_gather_into_tensor / reduce_scatter).
+    Recomputing a collective in backward re-issues communication: expensive, and
+    a cross-rank ordering hazard that can deadlock. Everything else (the GEMM/FFN
+    mm) is cheap to recompute and is not saved."""
+    try:
+        if func in _ATTN_ONLY_SAVE_CACHE:
+            return _ATTN_ONLY_SAVE_CACHE[func]
+    except TypeError:
+        # Unhashable func: decide live, don't cache.
+        return _is_attention_forward(func) or "_c10d_functional" in str(func)
+    res = _is_attention_forward(func) or "_c10d_functional" in str(func)
+    _ATTN_ONLY_SAVE_CACHE[func] = res
+    return res
+
+
 def _apply_activation_checkpointing_attn_only(module: torch.nn.Module) -> torch.nn.Module:
     """Per-block selective checkpointing that MUST_SAVE only the attention
     forward output (small — ~221 MB/block at seq 72k) and any collective output
@@ -111,11 +133,8 @@ def _apply_activation_checkpointing_attn_only(module: torch.nn.Module) -> torch.
     Orthogonal to torch.compile."""
     from torch.utils.checkpoint import (CheckpointPolicy, create_selective_checkpoint_contexts)
 
-    _reduce_scatter = torch.ops._c10d_functional.reduce_scatter_tensor.default
-
     def _attn_only_policy(ctx, func, *args, **kwargs):
-        save = _is_attention_forward(func) or func == _reduce_scatter
-        return CheckpointPolicy.MUST_SAVE if save else CheckpointPolicy.PREFER_RECOMPUTE
+        return (CheckpointPolicy.MUST_SAVE if _attn_only_must_save(func) else CheckpointPolicy.PREFER_RECOMPUTE)
 
     def _ctx_fn():
         return create_selective_checkpoint_contexts(_attn_only_policy)
