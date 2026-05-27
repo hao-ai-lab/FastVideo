@@ -122,6 +122,7 @@ class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
     expand_timesteps: bool = True
 
     def __post_init__(self) -> None:
+        assert not (self.ti2v_task and self.lucy_edit_task)
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
         self.dit_config.expand_timesteps = self.expand_timesteps
@@ -173,6 +174,7 @@ class LucyEditDevConfig(Wan2_2_TI2V_5B_Config):
     lucy_edit_task: bool = True
 
     def __post_init__(self) -> None:
+        assert not (self.ti2v_task and self.lucy_edit_task)
         # Lucy uses Wan2.2's enhanced 48-channel VAE latents. Denoising
         # concatenates noise + video latents, matching the 96-channel
         # transformer input declared above.

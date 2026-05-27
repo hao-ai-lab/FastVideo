@@ -28,6 +28,7 @@ def test_lucy_edit_registry_and_preset() -> None:
     assert get_default_preset("decart-ai/Lucy-Edit-Dev") == "lucy_edit_dev"
     assert get_default_preset("decart-ai/Lucy-Edit-1.1-Dev") == "lucy_edit_dev"
     assert get_pipeline_config_cls_from_name("decart-ai/Lucy-Edit-Dev") is LucyEditDevConfig
+    assert get_pipeline_config_cls_from_name("decart-ai/Lucy-Edit-1.1-Dev") is LucyEditDevConfig
 
     sampling_param = SamplingParam.from_pretrained("decart-ai/Lucy-Edit-Dev")
     assert sampling_param.height == 480
@@ -36,6 +37,14 @@ def test_lucy_edit_registry_and_preset() -> None:
     assert sampling_param.fps == 24
     assert sampling_param.guidance_scale == 5.0
     assert sampling_param.negative_prompt == ""
+
+    sampling_param_1_1 = SamplingParam.from_pretrained("decart-ai/Lucy-Edit-1.1-Dev")
+    assert sampling_param_1_1.height == 480
+    assert sampling_param_1_1.width == 832
+    assert sampling_param_1_1.num_frames == 81
+    assert sampling_param_1_1.fps == 24
+    assert sampling_param_1_1.guidance_scale == 5.0
+    assert sampling_param_1_1.negative_prompt == ""
 
     # FastVideo has no V2V workload enum today; model_index dispatches Lucy by pipeline class name.
     registry = get_pipeline_registry(PipelineType.BASIC)

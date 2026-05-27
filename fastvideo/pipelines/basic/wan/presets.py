@@ -273,6 +273,7 @@ LUCY_EDIT_DEV = InferencePreset(
     version=1,
     model_family="wan",
     description="Lucy Edit Dev 5B video editing",
+    workload_type="t2v",
     stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
