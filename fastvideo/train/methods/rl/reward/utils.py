@@ -24,11 +24,17 @@ def prepare_images(
 
     if images.ndim == 4:
         # Image batch: (N, C, H, W) or (N, H, W, C)
-        if images.shape[1] in (1, 3):
+        if images.shape[-1] in (1, 3):
+            pass
+        elif images.shape[1] in (1, 3):
             images = images.transpose(0, 2, 3, 1)
     elif images.ndim == 5:
-        # Video batch: (N, F, C, H, W) or (N, C, F, H, W)
-        if images.shape[2] in (1, 3):
+        # Video batch: (N, F, H, W, C), (N, F, C, H, W),
+        # or (N, C, F, H, W). Check channel-last first because
+        # one-frame videos have shape[1] == 1.
+        if images.shape[-1] in (1, 3):
+            pass
+        elif images.shape[2] in (1, 3):
             # (N, F, C, H, W) -> (N, F, H, W, C)
             images = images.transpose(0, 1, 3, 4, 2)
         elif images.shape[1] in (1, 3):

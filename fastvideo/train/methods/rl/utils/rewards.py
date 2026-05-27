@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import gc
 import importlib
 import inspect
 import time
@@ -20,9 +21,11 @@ from fastvideo.train.methods.rl.reward import (
     videoalign_ta_score,
 )
 from fastvideo.train.methods.rl.reward.hpsv3 import (
+    _HPSV3_INFERENCERS,
     set_hpsv3_device,
 )
 from fastvideo.train.methods.rl.reward.videoalign import (
+    _VIDEOALIGN_INFERENCERS,
     set_videoalign_device,
 )
 
@@ -154,6 +157,28 @@ def move_reward_models(reward_cfg, device) -> None:
         set_videoalign_device(device)
 
 
+def clear_reward_models(reward_cfg) -> None:
+    """Drop cached GPU-backed reward models before PPO training."""
+    cleared = False
+    if _has_reward(
+        reward_cfg,
+        {"hpsv3_general", "hpsv3_percentile"},
+    ):
+        _HPSV3_INFERENCERS.clear()
+        cleared = True
+    if _has_reward(
+        reward_cfg,
+        {"videoalign_mq", "videoalign_ta"},
+    ):
+        _VIDEOALIGN_INFERENCERS.clear()
+        cleared = True
+    if cleared:
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+
+
 @contextmanager
 def reward_models_on_device(reward_cfg, device):
     """Temporarily move reward models to device."""
@@ -173,10 +198,9 @@ def reward_models_on_device(reward_cfg, device):
             _t2 = time.perf_counter()
             move_reward_models(reward_cfg, "cpu")
             if use_cuda:
-                import gc
-
                 gc.collect()
                 torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
             _t3 = time.perf_counter()
             logger.info(
                 "[rewards] move_to_cpu+gc=%.1fs",
