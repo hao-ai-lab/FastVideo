@@ -118,6 +118,15 @@ class MatrixGame3DenoisingStage(DenoisingStage):
             batch.keyboard_cond = batch.keyboard_cond.to(device=device, dtype=target_dtype)
             batch.mouse_cond = batch.mouse_cond.to(device=device, dtype=target_dtype)
 
+        # MG3 currently assumes batch_size=1 for camera-trajectory derivation. If a
+        # future caller batches multiple action streams, build_extrinsics_from_actions
+        # must be made per-batch-item; until then, fail loudly rather than silently
+        # using item-0's trajectory for the whole batch.
+        assert batch.keyboard_cond.shape[0] == 1, (
+            "MatrixGame3 denoising stage requires batch_size=1 for action conditioning; "
+            f"got batch.keyboard_cond.shape[0]={batch.keyboard_cond.shape[0]}. "
+            "If batched action streams are needed, update build_extrinsics_from_actions "
+            "to handle per-batch-item trajectories.")
         extrinsics_all = build_extrinsics_from_actions(batch.keyboard_cond[0], batch.mouse_cond[0]).to(device)
         all_latents: list[torch.Tensor] = []
 
