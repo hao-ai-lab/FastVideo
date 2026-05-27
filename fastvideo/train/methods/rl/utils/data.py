@@ -154,12 +154,19 @@ class DistributedKRepeatSampler(Sampler):
         self.rank = rank
         self.seed = seed
         self.total_samples = num_replicas * batch_size
+        if self.batch_size % self.k != 0:
+            raise ValueError(
+                "batch_size must be divisible by k so each rank receives "
+                "whole prompt groups. Got "
+                f"batch_size={batch_size}, k={k}."
+            )
         assert self.total_samples % self.k == 0, (
             f"k cannot divide n*b: k={k} "
             f"num_replicas={num_replicas} "
             f"batch_size={batch_size}"
         )
         self.m = self.total_samples // self.k
+        self.groups_per_rank = self.batch_size // self.k
         self.epoch = 0
 
     def __iter__(self):
@@ -169,28 +176,14 @@ class DistributedKRepeatSampler(Sampler):
             indices = torch.randperm(
                 len(self.dataset), generator=g
             )[: self.m].tolist()
-            repeated = [
-                idx
-                for idx in indices
+            start = self.rank * self.groups_per_rank
+            end = start + self.groups_per_rank
+            rank_groups = indices[start:end]
+            yield [
+                (self.epoch, idx)
+                for idx in rank_groups
                 for _ in range(self.k)
             ]
-            shuffled_idx = torch.randperm(
-                len(repeated), generator=g
-            ).tolist()
-            shuffled = [
-                repeated[i] for i in shuffled_idx
-            ]
-            per_card = []
-            for i in range(self.num_replicas):
-                start = i * self.batch_size
-                end = start + self.batch_size
-                per_card.append(
-                    [
-                        (self.epoch, idx)
-                        for idx in shuffled[start:end]
-                    ]
-                )
-            yield per_card[self.rank]
 
     def set_epoch(self, epoch: int):
         self.epoch = epoch
