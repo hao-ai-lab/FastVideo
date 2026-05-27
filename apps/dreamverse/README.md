@@ -2,6 +2,8 @@
 
 Dreamverse is the FastVideo realtime video generation & editing platform. It lives in this monorepo under `apps/dreamverse/`.
 
+**Deploy on:** [local GPU](#quick-start-local-gpu) · [self-hosted B200 (SSH)](#server-b200-deployment-ssh) · [Docker](docker/README.md) · [Modal](scripts/modal/README.md)
+
 ## Install Dreamverse
 
 You can install Dreamverse using one of the methods below.
