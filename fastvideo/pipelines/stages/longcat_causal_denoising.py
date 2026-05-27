@@ -22,7 +22,10 @@ import torch
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.dits.longcat import longcat_to_training_velocity
+from fastvideo.models.dits.longcat import (
+    build_longcat_causal_block_ranges,
+    longcat_to_training_velocity,
+)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.longcat_causal_dmd_denoising import (
     LongCatCausalDMDDenoisingStage, )
@@ -55,11 +58,11 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
         b, _, t, _, _ = latents.shape
         device = latents.device
 
-        if t % self.chunk_size != 0:
-            raise ValueError(
-                f"num_latent_frames ({t}) must be divisible by chunk_size "
-                f"({self.chunk_size}) for LongCat causal denoising")
-        num_blocks = t // self.chunk_size
+        block_ranges = build_longcat_causal_block_ranges(
+            num_frames=t,
+            chunk_size=self.chunk_size,
+        )
+        num_blocks = len(block_ranges)
 
         prompt_embeds = batch.prompt_embeds[0]
         prompt_attention_mask = (batch.prompt_attention_mask[0]
@@ -77,14 +80,13 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
             getattr(fastvideo_args.pipeline_config, "context_noise", 0.0))
 
         cache_state: dict | None = None
-        start_index = 0
 
         with self.progress_bar(total=num_blocks *
                                num_inference_steps) as progress_bar:
-            for _ in range(num_blocks):
-                current_latents = latents[:, :,
-                                          start_index:start_index +
-                                          self.chunk_size, :, :].clone()
+            for start_index, end_index in block_ranges:
+                block_frames = end_index - start_index
+                current_latents = latents[:, :, start_index:end_index, :, :]
+                current_latents = current_latents.clone()
 
                 # Reset scheduler per block so its multi-step history
                 # starts fresh for the new chunk.
@@ -144,15 +146,14 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                         return_dict=False,
                     )[0]
                     current_latents = updated_flat.unflatten(
-                        0, (b, self.chunk_size)).permute(
+                        0, (b, block_frames)).permute(
                             0, 2, 1, 3, 4).contiguous()
 
                     if progress_bar is not None:
                         progress_bar.update()
 
                 # Write the denoised block back.
-                latents[:, :, start_index:start_index +
-                        self.chunk_size, :, :] = current_latents
+                latents[:, :, start_index:end_index, :, :] = current_latents
 
                 # Refresh KV cache with clean denoised context.
                 t_context = torch.full(
@@ -199,11 +200,9 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                 cache_state = self._write_chunk_to_buffer(
                     cache_state=cache_state,
                     new_chunk=new_chunk,
-                    new_frames=self.chunk_size,
+                    new_frames=block_frames,
                     num_frames_total=t,
                     device=device,
                 )
-
-                start_index += self.chunk_size
 
         return replace(batch, latents=latents)

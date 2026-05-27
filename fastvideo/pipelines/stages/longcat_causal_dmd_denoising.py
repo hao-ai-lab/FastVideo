@@ -31,7 +31,10 @@ from diffusers.utils.torch_utils import randn_tensor
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.dits.longcat import longcat_to_training_velocity
+from fastvideo.models.dits.longcat import (
+    build_longcat_causal_block_ranges,
+    longcat_to_training_velocity,
+)
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
@@ -75,11 +78,11 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
         b, _, t, _, _ = latents.shape
         device = latents.device
 
-        if t % self.chunk_size != 0:
-            raise ValueError(
-                f"num_latent_frames ({t}) must be divisible by chunk_size "
-                f"({self.chunk_size}) for LongCat causal DMD denoising")
-        num_blocks = t // self.chunk_size
+        block_ranges = build_longcat_causal_block_ranges(
+            num_frames=t,
+            chunk_size=self.chunk_size,
+        )
+        num_blocks = len(block_ranges)
 
         # LongCat uses a single text encoder; prompt_embeds is a list.
         prompt_embeds = batch.prompt_embeds[0]
@@ -107,14 +110,13 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
 
         # Lazy-allocated KV buffer state.
         cache_state: dict[str, Any] | None = None
-        start_index = 0
 
         with self.progress_bar(total=num_blocks *
                                len(dmd_timesteps)) as progress_bar:
-            for _ in range(num_blocks):
-                current_latents = latents[:, :,
-                                          start_index:start_index +
-                                          self.chunk_size, :, :].clone()
+            for start_index, end_index in block_ranges:
+                block_frames = end_index - start_index
+                current_latents = latents[:, :, start_index:end_index, :, :]
+                current_latents = current_latents.clone()
                 # Track the original noisy latents (BTCHW) for DMD
                 # noise->video conversion across inner steps.
                 noise_latents_btchw = current_latents.permute(
@@ -194,8 +196,7 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                         progress_bar.update()
 
                 # Write the denoised block back to the full latent tensor.
-                latents[:, :, start_index:start_index +
-                        self.chunk_size, :, :] = current_latents
+                latents[:, :, start_index:end_index, :, :] = current_latents
 
                 # Refresh KV cache with the clean denoised context so the
                 # next block can attend to it. Mirrors the training-side
@@ -246,12 +247,10 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                 cache_state = self._write_chunk_to_buffer(
                     cache_state=cache_state,
                     new_chunk=new_chunk,
-                    new_frames=self.chunk_size,
+                    new_frames=block_frames,
                     num_frames_total=t,
                     device=device,
                 )
-
-                start_index += self.chunk_size
 
         return replace(batch, latents=latents)
 

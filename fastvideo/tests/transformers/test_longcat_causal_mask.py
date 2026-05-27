@@ -9,6 +9,7 @@ from fastvideo.configs.models.dits.longcat import (
 from fastvideo.models.dits import longcat as longcat_module
 from fastvideo.models.dits.longcat import (
     LongCatTransformer3DModel,
+    build_longcat_causal_block_ranges,
     build_longcat_block_causal_mask,
 )
 from fastvideo.train.methods.distribution_matching.self_forcing import (
@@ -98,6 +99,25 @@ def test_longcat_self_forcing_rejects_chunk_block_mismatch():
             student=Student(),  # type: ignore[arg-type]
             chunk_size=3,
         )
+
+
+def test_longcat_causal_stage_remainder_goes_in_first_block():
+    assert build_longcat_causal_block_ranges(
+        num_frames=20,
+        chunk_size=3,
+    ) == [(0, 5), (5, 8), (8, 11), (11, 14), (14, 17), (17, 20)]
+    assert build_longcat_causal_block_ranges(
+        num_frames=21,
+        chunk_size=3,
+    ) == [
+        (0, 3),
+        (3, 6),
+        (6, 9),
+        (9, 12),
+        (12, 15),
+        (15, 18),
+        (18, 21),
+    ]
 
 
 class _UnexpectedAttention(torch.nn.Module):

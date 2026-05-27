@@ -66,6 +66,35 @@ def longcat_to_training_velocity(pred: torch.Tensor) -> torch.Tensor:
     return -pred
 
 
+def build_longcat_causal_block_ranges(
+    *,
+    num_frames: int,
+    chunk_size: int,
+) -> list[tuple[int, int]]:
+    """Match self-forcing rollout: the first block absorbs any remainder."""
+    if num_frames <= 0:
+        raise ValueError("num_frames must be > 0")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be > 0")
+
+    remaining = num_frames % chunk_size
+    num_blocks = num_frames // chunk_size
+    if num_blocks == 0:
+        num_blocks = 1
+        remaining = num_frames
+
+    ranges = []
+    for block_idx in range(num_blocks):
+        if block_idx == 0:
+            start = 0
+            end = remaining + chunk_size if remaining else chunk_size
+        else:
+            start = remaining + block_idx * chunk_size
+            end = remaining + (block_idx + 1) * chunk_size
+        ranges.append((int(start), int(min(end, num_frames))))
+    return [(start, end) for start, end in ranges if start < end]
+
+
 # ============================================================================
 # Embeddings
 # ============================================================================

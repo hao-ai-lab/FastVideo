@@ -2,8 +2,8 @@
 """LongCat streaming model plugin for self-forcing rollouts.
 
 KV cache management mirrors :class:`WanCausalModel` 's pattern: a
-fixed-size buffer per layer, pre-allocated to fit the full rollout
-(``training.data.num_frames``), with a write pointer that advances
+fixed-size buffer per layer, pre-allocated to fit the latent rollout,
+with a write pointer that advances
 chunk-by-chunk via in-place ``.copy_()``. Old positions are never
 overwritten, so backward (under gradient checkpointing) can safely
 re-read the same slice even after later forwards have advanced the
@@ -11,7 +11,7 @@ pointer — no per-forward clone of the K/V tensors is needed.
 
 Switching from a growing dict + ``torch.cat`` per chunk to a
 pre-allocated buffer keeps peak memory constant at
-``num_frames * tokens_per_frame * 2 (K+V) * num_layers`` instead of
+``num_latent_frames * tokens_per_frame * 2 (K+V) * num_layers`` instead of
 growing linearly with the number of chunks.
 """
 from __future__ import annotations
@@ -162,6 +162,7 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
                         cache_state=cache_state,
                         new_chunk=new_chunk,
                         new_frames=num_chunk_frames,
+                        num_frames_total=int(batch.latents.shape[1]),
                         device=noisy_latents.device,
                     ))
                 return None
@@ -219,12 +220,13 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
         cache_state: _LongCatStreamingCache | None,
         new_chunk: dict[int, tuple[torch.Tensor, torch.Tensor]],
         new_frames: int,
+        num_frames_total: int,
         device: torch.device,
     ) -> _LongCatStreamingCache:
         """Copy the new chunk's K/V into the pre-allocated buffer.
 
         Lazy-allocates the buffer on the first call from the first
-        chunk's K/V shape and ``training_config.data.num_frames``.
+        chunk's K/V shape and the latent rollout length.
         Subsequent calls are pure in-place ``.copy_()`` into the next
         slot, plus an advance of ``write_idx`` — no allocation, no
         ``torch.cat``, no eviction.
@@ -248,18 +250,12 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
         tokens_per_frame = new_tokens // new_frames
 
         if cache_state is None:
-            # First chunk: allocate a fixed-size buffer sized for the
-            # full rollout. We use training_config.data.num_frames as
-            # the upper bound.
-            tc = self.training_config
-            if tc is None:
-                raise RuntimeError(
-                    "training_config is required for LongCat streaming "
-                    "KV cache allocation")
-            total_frames = int(tc.data.num_frames)
+            # First chunk: allocate a fixed-size buffer for the latent
+            # rollout, not the source video's pixel-frame count.
+            total_frames = int(num_frames_total)
             if total_frames <= 0:
                 raise ValueError(
-                    "training.num_frames must be > 0 for streaming "
+                    "num_frames_total must be > 0 for streaming "
                     f"KV cache; got {total_frames}")
             max_tokens = tokens_per_frame * total_frames
             B = int(sample_k.shape[0])
