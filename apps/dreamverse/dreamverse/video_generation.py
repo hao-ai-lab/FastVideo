@@ -25,6 +25,7 @@ from dreamverse.config import (
     MODEL_CONFIG,
     NUM_FRAMES,
     NUM_INFERENCE_STEPS,
+    DREAMVERSE_MAX_AUTOTUNE,
 )
 
 # Multi-frame decoded continuation defaults from
@@ -257,6 +258,7 @@ class VideoGenerationWorker:
                              or self.current_model_config["model_path"])
 
         enable_compile = os.getenv("ENABLE_TORCH_COMPILE", "1") == "1"
+        compile_mode = "max-autotune-no-cudagraphs" if DREAMVERSE_MAX_AUTOTUNE else None
 
         components = ComponentConfig(
             config_root=config_model_path,
@@ -280,9 +282,10 @@ class VideoGenerationWorker:
                 compile=CompileConfig(
                     enabled=enable_compile,
                     text_encoder_enabled=enable_compile,
+                    vae_enabled=enable_compile,
                     backend="inductor",
                     fullgraph=True,
-                    mode="max-autotune-no-cudagraphs",
+                    mode=compile_mode,
                     dynamic=False,
                 ),
                 use_fsdp_inference=False,
