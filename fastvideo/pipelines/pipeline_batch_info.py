@@ -149,6 +149,14 @@ class ForwardBatch:
     movement_distance: float | None = None
     camera_rotation: str | None = None
 
+    # Stable-Video-Infinity image conditioning
+    svi_first_frames: list[PIL.Image.Image] | None = None  # Motion frames forwarded across clips
+    svi_random_ref_frame: PIL.Image.Image | None = None  # Reference frame for ref-padded slots
+    svi_ref_pad_num: int | None = None  # -1=tile ref; 0=zero pad; k>0=ref for first k, zero rest
+    svi_ref_pad_cfg: bool = False  # widens y-mask to len(first_frames) instead of frame 0 only
+    svi_num_clips: int = 1  # >1 enables motion-frame chaining
+    svi_num_motion_frames: int = 1  # Tail frames carried clip K -> K+1 (1=Shot/Tom, 5=Film)
+
     # Latent dimensions
     height_latents: list[int] | int | None = None
     width_latents: list[int] | int | None = None
