@@ -93,6 +93,14 @@ dreamverse-server --port 8009
 dreamverse-mock-server --port 8009
 ```
 
+> **Expect a slow first boot.** With `torch.compile` and startup warmup enabled
+> (the default), the backend compiles the segment 1 and segment 2 inference
+> paths before it reports ready — this can take **tens of minutes on a cold
+> cache**, regardless of how you deploy (local, server, Docker, or Modal).
+> `/healthz` responds as soon as the process is up; `/readyz` stays `503` until
+> warmup finishes. For a faster, uncompiled startup while testing, set
+> `FASTVIDEO_ENABLE_STARTUP_WARMUP=0` before starting the backend.
+
 ## Frontend Setup
 
 Install the web dependencies once from the FastVideo checkout:
@@ -162,6 +170,32 @@ BACKEND_HOST=localhost BACKEND_PORT=8009 npm run dev
 ```
 
 Open `http://localhost:5299`.
+
+## Server B200 deployment (SSH)
+
+Deploying on a remote GPU host (for example a B200 box) is a local install run
+over SSH, plus a few server-specific concerns. Two paths:
+
+### Option A: Native (source install)
+
+SSH in, then follow [Install → From source](#method-2-from-source) and
+(recommended) [Building FFmpeg](#optional-building-ffmpeg-for-better-performance),
+then start the backend as in [Quick Start: Local GPU](#quick-start-local-gpu).
+For a remote host, a few things differ from localhost:
+
+- Bind all interfaces: `dreamverse-server --host 0.0.0.0 --port 8009`.
+- Point the frontend/client at the host: `BACKEND_HOST=<b200-host> BACKEND_PORT=8009 npm run dev`.
+- Keep the backend alive across SSH sessions (`tmux` / `systemd` / `nohup`).
+- Expose / firewall port `8009`, or front it with a reverse proxy + auth.
+
+### Option B: Docker (on the server)
+
+SSH in, then follow [Install → Using Docker](#method-3-using-docker) and the run
+steps in [`docker/README.md`](docker/README.md):
+
+```bash
+CEREBRAS_API_KEY="<key>" GROQ_API_KEY="<key>" apps/dreamverse/docker/docker_run.sh
+```
 
 ## Quick Start: Mock Backend (For UI development)
 
