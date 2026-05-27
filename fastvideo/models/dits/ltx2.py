@@ -2902,6 +2902,8 @@ class LTX2Transformer3DModel(BaseDiT):
         audio_encoder_hidden_states: torch.Tensor | None = None,
         audio_timestep: torch.Tensor | None = None,
         audio_encoder_attention_mask: torch.Tensor | None = None,
+        video_sigma: torch.Tensor | None = None,
+        audio_sigma: torch.Tensor | None = None,
         skip_cross_modal_attn: bool = False,
         skip_video_self_attn_blocks: list[int] | None = None,
         skip_audio_self_attn_blocks: list[int] | None = None,
@@ -2928,6 +2930,12 @@ class LTX2Transformer3DModel(BaseDiT):
         # Patchify video latents
         video_shape = VideoLatentShape.from_torch_shape(hidden_states.shape)
         latents = self.patchifier.patchify(hidden_states)
+        # LTX-2.3 cross-attention AdaLN consumes a per-sample sigma timestep.
+        # When the denoising stage does not supply one (LTX-2.0, or any caller
+        # that omits it) derive it from the video timestep. The downstream
+        # ``prompt_adaln`` is None for LTX-2.0 so this value is ignored there.
+        if video_sigma is None:
+            video_sigma = timestep[:, 0] if timestep.ndim > 1 else timestep
 
         # Shard video latents and timestep across SP ranks
         video_original_seq_len = latents.shape[1]
@@ -2966,6 +2974,7 @@ class LTX2Transformer3DModel(BaseDiT):
             positions=positions,
             context=encoder_hidden_states,
             context_mask=encoder_attention_mask,
+            sigma=video_sigma,
         )
         if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
             video_head = latents.flatten()[:8].float().tolist()
@@ -2989,6 +2998,11 @@ class LTX2Transformer3DModel(BaseDiT):
         if audio_hidden_states is not None and audio_encoder_hidden_states is not None and audio_timestep is not None:
             audio_shape = AudioLatentShape.from_torch_shape(audio_hidden_states.shape)
             audio_latents = self.audio_patchifier.patchify(audio_hidden_states)
+            if audio_sigma is None:
+                audio_sigma = (
+                    audio_timestep[:, 0]
+                    if audio_timestep.ndim > 1 else audio_timestep
+                )
 
             # Shard audio latents and timestep across SP ranks
             audio_original_seq_len = audio_latents.shape[1]
@@ -3011,6 +3025,7 @@ class LTX2Transformer3DModel(BaseDiT):
                 positions=audio_positions,
                 context=audio_encoder_hidden_states,
                 context_mask=audio_encoder_attention_mask,
+                sigma=audio_sigma,
             )
             if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
                 audio_head = audio_latents.flatten()[:8].float().tolist()
