@@ -2,7 +2,7 @@
 #
 # Usage:
 #   torchrun --nnodes=1 --nproc_per_node=4 \
-#     fastvideo/train/entrypoint/train.py \
+#     -m fastvideo.train.entrypoint.train \
 #     --config examples/train/configs/genrl_wan2.1_t2v_1.3B_ocr.yaml
 
 models:
@@ -21,7 +21,7 @@ method:
   reward_module: null
 
   # ---- Data ----
-  prompt_dataset_path: data/ocr
+  prompt_dataset_path: GenRL/datasets/ocr
   prompt_fn: general_ocr
 
   # ---- Sampling ----
@@ -50,7 +50,8 @@ method:
   num_inner_epochs: 1
   clip_range: 1.0e-3
   adv_clip_max: 5.0
-  beta: 3.0e-4
+  # No frozen reference model is configured in this launch.
+  beta: 0.0
   use_cfg: true
   loss_reweighting: longcat
   weight_advantages: false
