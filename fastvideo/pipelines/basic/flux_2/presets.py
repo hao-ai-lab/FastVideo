@@ -18,6 +18,24 @@ _DENOISE_STAGE = PresetStageSpec(
     }),
 )
 
+FLUX2_DEV = InferencePreset(
+    name="flux2_dev",
+    version=1,
+    model_family="flux2",
+    description="Flux2 full T2I with embedded guidance",
+    workload_type="t2i",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "height": 1024,
+        "width": 1024,
+        "num_frames": 1,
+        "fps": 1,
+        "seed": 0,
+        "guidance_scale": 4.0,
+        "num_inference_steps": 50,
+    },
+)
+
 FLUX2_KLEIN_4B = InferencePreset(
     name="flux2_klein_4b",
     version=1,
@@ -54,4 +72,4 @@ FLUX2_KLEIN_9B = InferencePreset(
     },
 )
 
-ALL_PRESETS = (FLUX2_KLEIN_4B, FLUX2_KLEIN_9B)
+ALL_PRESETS = (FLUX2_DEV, FLUX2_KLEIN_4B, FLUX2_KLEIN_9B)

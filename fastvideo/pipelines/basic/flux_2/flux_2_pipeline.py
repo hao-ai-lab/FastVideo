@@ -14,12 +14,13 @@ from fastvideo.pipelines.basic.flux_2.flux_2_latent_preparation import (
     Flux2LatentPreparationStage, )
 from fastvideo.pipelines.basic.flux_2.flux_2_timestep_preparation import (
     Flux2TimestepPreparationStage, )
+from fastvideo.pipelines.basic.flux_2.flux_2_text_encoding import (
+    Flux2TextEncodingStage, )
 from fastvideo.pipelines.stages import (
     ConditioningStage,
     DecodingStage,
     DenoisingStage,
     InputValidationStage,
-    TextEncodingStage,
 )
 
 logger = init_logger(__name__)
@@ -48,7 +49,7 @@ class Flux2Pipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(
             stage_name="prompt_encoding_stage",
-            stage=TextEncodingStage(
+            stage=Flux2TextEncodingStage(
                 text_encoders=[self.get_module("text_encoder")],
                 tokenizers=[self.get_module("tokenizer")],
             ),

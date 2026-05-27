@@ -2,14 +2,16 @@
 # pyright: reportArgumentType=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportMissingTypeArgument=false
 """Flux2 component parity tests.
 
-Compares FastVideo's Flux2 components (DiT, VAE, Qwen3 text encoder)
-against Diffusers/transformers references using the published
-``black-forest-labs/FLUX.2-klein-4B`` weights.
+Compares FastVideo's Flux2 components (DiT, VAE, Qwen3 and Mistral3 text
+encoders) against Diffusers/transformers references using the published
+``black-forest-labs/FLUX.2-klein-4B`` and ``black-forest-labs/FLUX.2-dev``
+weights.
 
 All tests are skip-marked (CUDA + weight directory required).
 Run locally with:
 
     FLUX2_MODEL_DIR=/path/to/weights pytest tests/local_tests/flux2/ -v -s
+    FLUX2_FULL_MODEL_DIR=/path/to/full/weights pytest tests/local_tests/flux2/ -v -s
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ MODEL_DIR = Path(
         "/FastVideo/official_weights/black-forest-labs__FLUX.2-klein-4B",
     )
 )
+FULL_MODEL_DIR = Path(os.getenv("FLUX2_FULL_MODEL_DIR", ""))
 
 
 def _load_json(path: Path) -> dict:
@@ -105,6 +108,12 @@ def _iter_pretrained_safetensors(model_dir: Path):
         f"Missing safetensors checkpoint in {model_dir} "
         "(expected model.safetensors or diffusion_pytorch_model.safetensors)"
     )
+
+
+def _require_full_model_dir() -> Path:
+    if not FULL_MODEL_DIR.exists():
+        pytest.skip("Set FLUX2_FULL_MODEL_DIR to activate full Flux2 component parity")
+    return FULL_MODEL_DIR
 
 
 # -----------------------------------------------------------------
@@ -370,6 +379,119 @@ def test_flux2_transformer_parity():
         torch.cuda.empty_cache()
 
 
+def test_flux2_full_transformer_guidance_parity():
+    """Numerical forward parity for full Flux2 transformer with embedded guidance."""
+    model_dir = _require_full_model_dir()
+    transformer_dir = model_dir / "transformer"
+    if not transformer_dir.exists():
+        pytest.skip(f"Flux2 full transformer dir not found: {transformer_dir}")
+
+    from diffusers import Flux2Transformer2DModel as RefTransformer
+
+    from fastvideo.configs.models.dits.flux_2 import Flux2Config
+    from fastvideo.forward_context import set_forward_context
+    from fastvideo.models.registry import ModelRegistry
+
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+
+    device = torch.device(os.getenv("FLUX2_FULL_TRANSFORMER_DEVICE", "cpu"))
+    if device.type == "cuda" and not torch.cuda.is_available():
+        pytest.skip("FLUX2_FULL_TRANSFORMER_DEVICE=cuda requested but CUDA is unavailable")
+    dtype = torch.bfloat16
+    torch.manual_seed(0)
+
+    cfg = _load_json(transformer_dir / "config.json")
+    cfg.pop("_class_name", None)
+    cfg.pop("_diffusers_version", None)
+
+    fv_cls, _ = ModelRegistry.resolve_model_cls("Flux2Transformer2DModel")
+    dit_cfg = Flux2Config()
+    dit_cfg.update_model_arch(cfg)
+
+    in_channels = dit_cfg.in_channels
+    joint_dim = dit_cfg.joint_attention_dim
+    B, img_h, img_w, txt_len = 1, 2, 2, 8
+    seq_len = img_h * img_w
+    hidden_cpu = torch.randn(B, seq_len, in_channels, dtype=torch.float32)
+    enc_cpu = torch.randn(B, txt_len, joint_dim, dtype=torch.float32)
+    timestep_cpu = torch.tensor([0.5], dtype=torch.float32)
+    guidance_cpu = torch.tensor([4.0], dtype=torch.float32)
+    txt_ids_cpu = torch.cartesian_prod(
+        torch.arange(1), torch.arange(1), torch.arange(1), torch.arange(txt_len),
+    )
+    img_ids_cpu = torch.cartesian_prod(
+        torch.arange(1), torch.arange(img_h), torch.arange(img_w), torch.arange(1),
+    )
+
+    ref = RefTransformer.from_pretrained(
+        str(transformer_dir),
+        local_files_only=True,
+        torch_dtype=dtype,
+        low_cpu_mem_usage=False,
+    ).eval()
+    if device.type != "cpu":
+        ref = ref.to(device)
+    with torch.no_grad():
+        ref_out = ref(
+            hidden_states=hidden_cpu.to(device=device, dtype=dtype),
+            encoder_hidden_states=enc_cpu.to(device=device, dtype=dtype),
+            timestep=timestep_cpu.to(device=device, dtype=dtype),
+            img_ids=img_ids_cpu.to(device=device),
+            txt_ids=txt_ids_cpu.to(device=device),
+            guidance=guidance_cpu.to(device=device, dtype=dtype),
+            return_dict=False,
+        )[0].detach().float().cpu()
+
+    del ref
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+    old_default_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    try:
+        fv = fv_cls(config=dit_cfg, hf_config=dict(cfg)).eval()
+    finally:
+        torch.set_default_dtype(old_default_dtype)
+    fv_sd = {}
+    for k, v in _iter_pretrained_safetensors(transformer_dir):
+        fv_sd[k] = v
+    fv.load_state_dict(fv_sd, strict=True)
+    fv = fv.to(device=device, dtype=dtype)
+
+    with torch.no_grad():
+        with set_forward_context(current_timestep=0, attn_metadata=None):
+            fv_out = fv(
+                hidden_states=hidden_cpu.to(device=device, dtype=dtype),
+                encoder_hidden_states=enc_cpu.to(device=device, dtype=dtype),
+                timestep=timestep_cpu.to(device=device, dtype=dtype),
+                guidance=guidance_cpu.to(device=device, dtype=dtype),
+                img_ids=img_ids_cpu.to(device=device),
+                txt_ids=txt_ids_cpu.to(device=device),
+            ).detach().float().cpu()
+
+    assert fv_out.shape == (B, seq_len, in_channels), (
+        f"Expected output shape {(B, seq_len, in_channels)}, got {fv_out.shape}"
+    )
+    assert torch.isfinite(fv_out).all(), "FastVideo full DiT output contains non-finite values"
+    assert torch.isfinite(ref_out).all(), "Diffusers full DiT output contains non-finite values"
+
+    diff = (ref_out - fv_out).abs()
+    print(
+        f"[FLUX2 FULL DIT] diff max={diff.max().item():.6f} "
+        f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}"
+    )
+    _print_assert_close_means("FLUX2 FULL DIT", ref_out, fv_out)
+    assert_close(ref_out, fv_out, atol=1e-5, rtol=1e-5)
+
+    del fv
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+
 # -----------------------------------------------------------------
 # VAE parity
 # -----------------------------------------------------------------
@@ -435,6 +557,74 @@ def test_flux2_vae_encode_decode_parity():
     _print_assert_close_means("FLUX2 VAE encode", ref_latents, fv_latents)
     assert_close(ref_latents, fv_latents, atol=1e-4, rtol=1e-4)
     _print_assert_close_means("FLUX2 VAE decode", ref_dec, fv_dec)
+    assert_close(ref_dec, fv_dec, atol=1e-4, rtol=1e-4)
+
+    del fv
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+
+def test_flux2_full_vae_encode_decode_parity():
+    """Encode/decode parity for the full Flux2 VAE config and weights."""
+    model_dir = _require_full_model_dir()
+    vae_dir = model_dir / "vae"
+    if not vae_dir.exists():
+        pytest.skip(f"Flux2 full VAE dir not found: {vae_dir}")
+
+    from diffusers import AutoencoderKLFlux2 as RefVAE
+
+    from fastvideo.configs.models.vaes.flux2vae import Flux2VAEConfig
+    from fastvideo.models.registry import ModelRegistry
+
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    dtype = torch.float32
+    torch.manual_seed(0)
+
+    ref = RefVAE.from_pretrained(
+        str(vae_dir), local_files_only=True, torch_dtype=dtype,
+    ).eval().to(device)
+
+    x = torch.randn(1, 3, 64, 64, device=device, dtype=dtype)
+
+    with torch.no_grad():
+        ref_latents = ref.encode(x).latent_dist.mean.detach().float().cpu()
+        ref_dec = ref.decode(
+            ref_latents.to(device=device, dtype=dtype)
+        ).sample.detach().float().cpu()
+
+    del ref
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+    cfg = _load_json(vae_dir / "config.json")
+    cfg.pop("_class_name", None)
+    cfg.pop("_diffusers_version", None)
+
+    fv_cls, _ = ModelRegistry.resolve_model_cls("AutoencoderKLFlux2")
+    vae_cfg = Flux2VAEConfig()
+    vae_cfg.update_model_arch(cfg)
+    fv = fv_cls(vae_cfg).eval()
+
+    weight_path = vae_dir / "diffusion_pytorch_model.safetensors"
+    fv_sd = safetensors_load_file(str(weight_path), device="cpu")
+    fv.load_state_dict(fv_sd, strict=True)
+    fv = fv.to(device=device, dtype=dtype)
+
+    with torch.no_grad():
+        fv_latents = fv.encode(x).mean.detach().float().cpu()
+        fv_dec_output = fv.decode(fv_latents.to(device=device, dtype=dtype))
+        fv_dec_sample = getattr(fv_dec_output, "sample", fv_dec_output)
+        fv_dec = fv_dec_sample.detach().float().cpu()
+
+    _print_assert_close_means("FLUX2 FULL VAE encode", ref_latents, fv_latents)
+    assert_close(ref_latents, fv_latents, atol=1e-4, rtol=1e-4)
+    _print_assert_close_means("FLUX2 FULL VAE decode", ref_dec, fv_dec)
     assert_close(ref_dec, fv_dec, atol=1e-4, rtol=1e-4)
 
     del fv
@@ -551,6 +741,122 @@ def test_flux2_qwen3_text_encoder_parity():
         f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}"
     )
     _print_assert_close_means("FLUX2 QWEN3", ref_embeds, fv_embeds)
+    assert_close(ref_embeds, fv_embeds, atol=1e-5, rtol=1e-5)
+
+    del fv
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+
+def test_flux2_mistral3_text_encoder_parity():
+    """Hidden-state parity for the full Flux2 Mistral3 HF passthrough path."""
+    model_dir = _require_full_model_dir()
+    text_encoder_dir = model_dir / "text_encoder"
+    tokenizer_dir = model_dir / "tokenizer"
+    if not text_encoder_dir.exists():
+        pytest.skip(f"Flux2 full text_encoder dir not found: {text_encoder_dir}")
+    if not tokenizer_dir.exists():
+        pytest.skip(f"Flux2 full tokenizer dir not found: {tokenizer_dir}")
+
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+
+    from fastvideo.configs.models.encoders.mistral3 import Mistral3TextConfig
+    from fastvideo.models.encoders.mistral3 import Mistral3ForConditionalGeneration
+    from fastvideo.pipelines.basic.flux_2.flux_2_text_encoding import (
+        FLUX2_SYSTEM_MESSAGE,
+        _format_flux2_full_input,
+    )
+
+    device = torch.device(os.getenv("FLUX2_MISTRAL3_DEVICE", "cpu"))
+    if device.type == "cuda" and not torch.cuda.is_available():
+        pytest.skip("FLUX2_MISTRAL3_DEVICE=cuda requested but CUDA is unavailable")
+    dtype = torch.bfloat16
+    torch.manual_seed(0)
+
+    processor = AutoProcessor.from_pretrained(str(tokenizer_dir), local_files_only=True)
+    messages = _format_flux2_full_input(["a photo of a cat"], FLUX2_SYSTEM_MESSAGE)
+    toks = processor.apply_chat_template(
+        messages,
+        add_generation_prompt=False,
+        tokenize=True,
+        return_dict=True,
+        return_tensors="pt",
+        padding="max_length",
+        truncation=True,
+        max_length=64,
+    )
+    input_ids = toks["input_ids"].to(device=device)
+    attention_mask = toks["attention_mask"].to(device=device)
+
+    ref = AutoModelForImageTextToText.from_pretrained(
+        str(text_encoder_dir),
+        local_files_only=True,
+        torch_dtype=dtype,
+        low_cpu_mem_usage=True,
+    ).eval()
+    if device.type != "cpu":
+        ref = ref.to(device)
+
+    with torch.no_grad():
+        ref_out = ref(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            use_cache=False,
+        )
+        ref_embeds = torch.stack(
+            [ref_out.hidden_states[k] for k in (10, 20, 30)], dim=1
+        )
+        ref_embeds = ref_embeds.permute(0, 2, 1, 3).reshape(
+            input_ids.shape[0],
+            input_ids.shape[1],
+            -1,
+        ).detach().float().cpu()
+
+    del ref
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+    cfg_raw = _load_json(text_encoder_dir / "config.json")
+    for k in ("_name_or_path", "transformers_version", "model_type", "torch_dtype"):
+        cfg_raw.pop(k, None)
+
+    fv_cfg = Mistral3TextConfig()
+    fv_cfg.update_model_arch(cfg_raw)
+    fv = Mistral3ForConditionalGeneration.from_pretrained_local(
+        str(text_encoder_dir),
+        fv_cfg,
+        dtype=dtype,
+        device=device,
+    )
+    assert fv.__class__.__module__.startswith("transformers"), (
+        "Flux2 Mistral3 should load through the exact HuggingFace passthrough path"
+    )
+
+    with torch.no_grad():
+        fv_out = fv(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            use_cache=False,
+        )
+        fv_embeds = torch.stack(
+            [fv_out.hidden_states[k] for k in (10, 20, 30)], dim=1
+        )
+        fv_embeds = fv_embeds.permute(0, 2, 1, 3).reshape(
+            input_ids.shape[0],
+            input_ids.shape[1],
+            -1,
+        ).detach().float().cpu()
+
+    diff = (ref_embeds - fv_embeds).abs()
+    print(
+        f"[FLUX2 MISTRAL3] diff max={diff.max().item():.6f} "
+        f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}"
+    )
+    _print_assert_close_means("FLUX2 MISTRAL3", ref_embeds, fv_embeds)
     assert_close(ref_embeds, fv_embeds, atol=1e-5, rtol=1e-5)
 
     del fv

@@ -52,6 +52,7 @@ def main() -> None:
     generator = VideoGenerator.from_pretrained(
         args.model_path,
         num_gpus=args.num_gpus,
+        workload_type="t2i",
         use_fsdp_inference=False,
         dit_cpu_offload=False,
         vae_cpu_offload=True,

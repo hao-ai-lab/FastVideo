@@ -573,13 +573,39 @@ class TokenizerLoader(ComponentLoader):
                 # If parsing fails, fall through to AutoTokenizer below.
                 pass
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            resolved_model_path,  # "<path to model>/tokenizer"
-            # in v0, this was same string as encoder_name "ClipTextModel"
-            # TODO(will): pass these tokenizer kwargs from inference args? Maybe
-            # other method of config?
-            local_files_only=os.path.isdir(resolved_model_path),
-        )
+        if os.path.exists(os.path.join(resolved_model_path, "processor_config.json")):
+            processor = AutoProcessor.from_pretrained(
+                resolved_model_path,
+                local_files_only=os.path.isdir(resolved_model_path),
+                trust_remote_code=fastvideo_args.trust_remote_code,
+            )
+            logger.info(
+                "Loaded tokenizer/processor from %s: %s",
+                resolved_model_path,
+                processor.__class__.__name__,
+            )
+            return processor
+
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                resolved_model_path,  # "<path to model>/tokenizer"
+                # in v0, this was same string as encoder_name "ClipTextModel"
+                # TODO(will): pass these tokenizer kwargs from inference args? Maybe
+                # other method of config?
+                local_files_only=os.path.isdir(resolved_model_path),
+            )
+        except (OSError, ValueError):
+            tokenizer = AutoProcessor.from_pretrained(
+                resolved_model_path,
+                local_files_only=os.path.isdir(resolved_model_path),
+                trust_remote_code=fastvideo_args.trust_remote_code,
+            )
+            logger.info(
+                "Loaded tokenizer/processor from %s: %s",
+                resolved_model_path,
+                tokenizer.__class__.__name__,
+            )
+            return tokenizer
         padding_side = None
         if hasattr(fastvideo_args.pipeline_config, "text_encoder_configs"):
             try:
