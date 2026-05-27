@@ -30,6 +30,7 @@ device_reference_folder = resolve_device_reference_folder(
         ("H200", "H200"),
     ),
     device_name=get_cuda_device_name(),
+    fallback_device_prefix="L40S",
     logger=logger,
 )
 
@@ -37,8 +38,8 @@ device_reference_folder = resolve_device_reference_folder(
 MATRIXGAME3_PARAMS = {
     "num_gpus": 1,
     "model_path": "FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers",
-    "height": 720,
-    "width": 1280,
+    "height": 352,
+    "width": 640,
     "num_frames": 57,
     "num_inference_steps": 3,
     "guidance_scale": 5.0,
