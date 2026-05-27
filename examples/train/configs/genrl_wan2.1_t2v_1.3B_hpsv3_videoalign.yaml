@@ -1,20 +1,35 @@
-# GenRL / Video GRPO: Wan 2.1 T2V 1.3B with LongCat reweighting.
+# GenRL / Video GRPO: Wan 2.1 T2V 1.3B with HPSv3 and VideoAlign rewards.
 #
 # Ported from GenRL/config/longcat.yaml.
 #
-# - Student:   trainable (LoRA or full finetune)
-# - Reference: frozen copy for KL penalty (optional, only for full finetune with beta > 0)
+# - Student: trainable full-parameter model by default.
+# - LoRA is still available via models.student.use_lora=true.
+# - Full fine-tuning with beta > 0 requires models.reference and much
+#   more memory; keep beta at 0.0 for the 4xH100 probe run.
 #
 # Usage:
-#   torchrun --nnodes=1 --nproc_per_node=8 \
-#     fastvideo/train/entrypoint/train.py \
-#     --config examples/train/configs/genrl_wan2.1_t2v_1.3B_longcat.yaml
+#   torchrun --nnodes=1 --nproc_per_node=4 \
+#     -m fastvideo.train.entrypoint.train \
+#     --config examples/train/configs/genrl_wan2.1_t2v_1.3B_hpsv3_videoalign.yaml
 
 models:
   student:
     _target_: fastvideo.train.models.wan.wan_genrl.GenRLWanModel
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
+    # Set true for LoRA. LoRA can use method.beta with disable_adapter().
+    use_lora: false
+    lora_r: 128
+    lora_alpha: 64
+    lora_init_weights: gaussian
+    lora_path: null
+    lora_target_modules:
+      - to_k
+      - to_out
+      - to_q
+      - to_v
+      - ffn.fc_in
+      - ffn.fc_out
     enable_gradient_checkpointing_type: full
 
 method:
@@ -30,13 +45,20 @@ method:
   reward_on_gpu: true
 
   # ---- Data ----
-  prompt_dataset_path: data/filtered_prompts
+  prompt_dataset_path: GenRL/datasets/filtered_prompts
   prompt_fn: filtered_prompts
 
   # ---- Sampling ----
   sample_batch_size: 4
   eval_batch_size: 2
-  num_batches_per_epoch: 1
+  # Sample multiple rollout microbatches, average their PPO losses, then
+  # apply one optimizer update. This reduces reward/advantage variance.
+  num_batches_per_epoch: 4
+  accumulate_ppo_microbatches: true
+  eval_every_steps: 20
+  eval_num_batches: 1
+  eval_num_steps: 16
+  eval_guidance_scale: 4.5
   num_inference_steps: 16
   guidance_scale: 4.5
   num_video_per_prompt: 4
@@ -57,12 +79,21 @@ method:
   # ---- PPO training ----
   train_batch_size: 4
   num_inner_epochs: 1
-  clip_range: 1.0e-3
+  clip_range: 1.0e-4
   adv_clip_max: 5.0
-  beta: 3.0e-4
+  # Official LoRA LongCat uses beta: 3.0e-4 with disable_adapter().
+  # For full fine-tuning on 4 H100s, avoid a second frozen Wan copy.
+  beta: 0.0
   use_cfg: true
-  loss_reweighting: longcat
+  # Flash-GRPO-style temporal gradient rectification: avoid the large
+  # LongCat sigma/dt multiplier while debugging full-FT stability.
+  loss_reweighting: flash_tgr
+  loss_reweighting_clip: null
   weight_advantages: true
+  # Match official GenRL PPO cadence. With sde_window_size: 1 this is
+  # equivalent to one optimizer step per sampled trajectory timestep.
+  optimizer_step_per_timestep: true
+  log_post_update_kl: true
   max_grad_norm: 1.0
   seed: 42
 
@@ -77,8 +108,9 @@ training:
     num_gpus: 4
     sp_size: 1
     tp_size: 1
-    hsdp_replicate_dim: 4
-    hsdp_shard_dim: 1
+    # Full fine-tuning needs FSDP/HSDP sharding across all 4 GPUs.
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
 
   data:
     # Not used by GenRL (prompt dataloaders are in method config)
@@ -91,7 +123,9 @@ training:
     num_frames: 81
 
   optimizer:
-    learning_rate: 1.0e-4
+    # Full-parameter visual GRPO is much more sensitive than LoRA.
+    # DanceGRPO reports 5e-6 to 2e-5 as the practical range.
+    learning_rate: 1.0e-5
     betas: [0.9, 0.999]
     weight_decay: 1.0e-4
     lr_scheduler: constant
@@ -109,7 +143,8 @@ training:
 
   tracker:
     project_name: VideoRL
-    run_name: wan_2_1_t2v_1_3b_longcat
+    # Leave blank so W&B auto-generates a unique display name per run.
+    run_name: ""
 
   model:
     enable_gradient_checkpointing_type: full
@@ -119,6 +154,7 @@ callbacks:
   ema:
     decay: 0.9
     start_iter: 0
+    update_interval: 8
   log_rl_samples:
     every_steps: 1
     max_videos: 4
