@@ -82,6 +82,7 @@ class ComponentLoader(ABC):
             "transformer_2": (TransformerLoader, "diffusers"),
             "transformer_3": (TransformerLoader, "diffusers"),
             "vae": (VAELoader, "diffusers"),
+            "light_vae": (VAELoader, "diffusers"),
             "audio_vae": (AudioDecoderLoader, "diffusers"),
             "audio_decoder": (AudioDecoderLoader, "diffusers"),
             "vocoder": (VocoderLoader, "diffusers"),
@@ -791,6 +792,11 @@ class VAELoader(ComponentLoader):
         # strictly so missing/unexpected keys are surfaced early.
         strict_load = class_name == "AutoencoderKL"
         vae.load_state_dict(loaded, strict=strict_load)
+        if (class_name == "AutoencoderKLWan"
+                and getattr(vae.config, "use_light_vae", False)
+                and target_device.type == "cuda"
+                and hasattr(vae, "optimize_memory_format")):
+            vae.optimize_memory_format()
 
         return vae.eval()
 
