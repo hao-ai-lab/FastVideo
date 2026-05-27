@@ -336,8 +336,28 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         output_parallel = self.base_layer.quant_method.apply(
             self.base_layer, input_parallel)
 
-        if self.set_lora:
-            output_parallel = self.apply_lora(output_parallel, input_parallel)
+        if not self.merged and not self.disable_lora:
+            lora_A = self.lora_A
+            lora_B = self.lora_B
+            if lora_A is None or lora_B is None:
+                raise RuntimeError(
+                    "LoRA weights (lora_A, lora_B) must be initialized "
+                    "before forward pass when LoRA is enabled."
+                )
+            if isinstance(lora_B, DTensor):
+                lora_B = lora_B.to_local()
+                lora_A = lora_A.to_local()
+
+            lora_A_sliced = self.slice_lora_a_weights(
+                lora_A.to(input_parallel, non_blocking=True))
+            lora_B_sliced = self.slice_lora_b_weights(
+                lora_B.to(output_parallel, non_blocking=True))
+            delta = input_parallel @ lora_A_sliced.T @ lora_B_sliced.T
+            if self.lora_alpha != self.lora_rank:
+                delta = delta * (
+                    self.lora_alpha / self.lora_rank  # type: ignore
+                )
+            output_parallel = output_parallel + delta
 
         if self.base_layer.reduce_results and self.base_layer.tp_size > 1:
             output_ = tensor_model_parallel_all_reduce(output_parallel)
