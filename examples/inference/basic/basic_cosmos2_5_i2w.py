@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from fastvideo import VideoGenerator
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
     sampling_param = SamplingParam.from_pretrained(model_path)
 
     # image2world example from official repo
-    image_path = "images/bus_terminal.jpg"
+    image_path = "assets/images/bus_terminal.jpg"
 
     prompt = (
         "A nighttime city bus terminal gradually shifts from stillness to subtle movement. "
@@ -47,5 +47,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 

@@ -25,11 +25,15 @@ class FakeTextEncoder(torch.nn.Module):
     def __init__(self, hidden_size=8):
         super().__init__()
         self.hidden_size = hidden_size
+        self.last_output_hidden_states = None
 
-    def forward(self, input_ids, attention_mask, output_hidden_states=True):
+    def forward(self, input_ids, attention_mask, output_hidden_states=False):
+        self.last_output_hidden_states = bool(output_hidden_states)
         B, T = input_ids.shape
         last_hidden_state = torch.arange(B * T * self.hidden_size, dtype=torch.float32).view(B, T, self.hidden_size)
-        return types.SimpleNamespace(last_hidden_state=last_hidden_state)
+        hidden_states = (last_hidden_state, ) if output_hidden_states else None
+        return types.SimpleNamespace(last_hidden_state=last_hidden_state,
+                                     hidden_states=hidden_states)
 
 def id_preprocess(x: str) -> str:
     return x
@@ -126,3 +130,29 @@ def test_forward_integration_cfg_off_and_on():
     assert len(out2.negative_prompt_embeds) == 2
     assert len(out2.prompt_attention_mask) == 2
     assert len(out2.negative_attention_mask) == 2
+
+
+def test_encode_text_hidden_state_flag_follows_encoder_config():
+    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    stage = make_stage(num_encoders=1, hidden_size=hidden)
+    cfg = fastvideo_args.pipeline_config.text_encoder_configs[0].arch_config
+
+    cfg.output_hidden_states = False
+    stage.encode_text("a", fastvideo_args, encoder_index=[0])
+    assert stage.text_encoders[0].last_output_hidden_states is False
+
+    cfg.output_hidden_states = True
+    stage.encode_text("a", fastvideo_args, encoder_index=[0])
+    assert stage.text_encoders[0].last_output_hidden_states is True
+
+
+def test_encode_text_does_not_force_hidden_states_for_ltx2_prefix():
+    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    fastvideo_args.pipeline_config.dit_config.prefix = "ltx2"
+    cfg = fastvideo_args.pipeline_config.text_encoder_configs[0].arch_config
+    cfg.output_hidden_states = False
+
+    stage = make_stage(num_encoders=1, hidden_size=hidden)
+    stage.encode_text("a", fastvideo_args, encoder_index=[0])
+
+    assert stage.text_encoders[0].last_output_hidden_states is False

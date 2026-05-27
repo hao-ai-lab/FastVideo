@@ -2,8 +2,7 @@ import collections
 from enum import Enum
 
 import torch
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper)
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (checkpoint_wrapper)
 
 TRANSFORMER_BLOCK_NAMES = [
     "blocks",
@@ -30,15 +29,13 @@ _SELECTIVE_ACTIVATION_CHECKPOINTING_OPS = {
 }
 
 
-def apply_activation_checkpointing(
-        module: torch.nn.Module,
-        checkpointing_type: str = CheckpointType.FULL,
-        n_layer: int = 1) -> torch.nn.Module:
+def apply_activation_checkpointing(module: torch.nn.Module,
+                                   checkpointing_type: str = CheckpointType.FULL,
+                                   n_layer: int = 1) -> torch.nn.Module:
     if checkpointing_type == CheckpointType.FULL:
         module = _apply_activation_checkpointing_blocks(module)
     elif checkpointing_type == CheckpointType.OPS:
-        module = _apply_activation_checkpointing_ops(
-            module, _SELECTIVE_ACTIVATION_CHECKPOINTING_OPS)
+        module = _apply_activation_checkpointing_ops(module, _SELECTIVE_ACTIVATION_CHECKPOINTING_OPS)
     elif checkpointing_type == CheckpointType.BLOCK_SKIP:
         module = _apply_activation_checkpointing_blocks(module, n_layer)
     else:
@@ -48,9 +45,8 @@ def apply_activation_checkpointing(
     return module
 
 
-def _apply_activation_checkpointing_blocks(module: torch.nn.Module,
-                                           n_layer: int | None = None
-                                           ) -> torch.nn.Module:
+def _apply_activation_checkpointing_blocks(module: torch.nn.Module, n_layer: int | None = None) -> torch.nn.Module:
+    applied = False
     for transformer_block_name in TRANSFORMER_BLOCK_NAMES:
         blocks: torch.nn.Module = getattr(module, transformer_block_name, None)
         if blocks is None:
@@ -59,13 +55,14 @@ def _apply_activation_checkpointing_blocks(module: torch.nn.Module,
             if n_layer is None or index % n_layer == 0:
                 block = checkpoint_wrapper(block, preserve_rng_state=False)
                 blocks.register_module(layer_id, block)
+        applied = True
+    if not applied:
+        raise ValueError("Activation checkpointing is not applied successfully")
     return module
 
 
-def _apply_activation_checkpointing_ops(module: torch.nn.Module,
-                                        ops) -> torch.nn.Module:
-    from torch.utils.checkpoint import (CheckpointPolicy,
-                                        create_selective_checkpoint_contexts)
+def _apply_activation_checkpointing_ops(module: torch.nn.Module, ops) -> torch.nn.Module:
+    from torch.utils.checkpoint import (CheckpointPolicy, create_selective_checkpoint_contexts)
 
     def _get_custom_policy(meta: dict[str, int]) -> CheckpointPolicy:
 
@@ -75,8 +72,7 @@ def _apply_activation_checkpointing_ops(module: torch.nn.Module,
             if func == torch.ops.aten.mm.default:
                 meta[mm_count_key] += 1
             # Saves output of all compute ops, except every second mm
-            to_save = func in ops and not (func == torch.ops.aten.mm.default
-                                           and meta[mm_count_key] % 2 == 0)
+            to_save = func in ops and not (func == torch.ops.aten.mm.default and meta[mm_count_key] % 2 == 0)
             return CheckpointPolicy.MUST_SAVE if to_save else CheckpointPolicy.PREFER_RECOMPUTE
 
         return _custom_policy
@@ -85,6 +81,4 @@ def _apply_activation_checkpointing_ops(module: torch.nn.Module,
         meta: dict[str, int] = collections.defaultdict(int)
         return create_selective_checkpoint_contexts(_get_custom_policy(meta))
 
-    return checkpoint_wrapper(module,
-                              context_fn=selective_checkpointing_context_fn,
-                              preserve_rng_state=False)
+    return checkpoint_wrapper(module, context_fn=selective_checkpointing_context_fn, preserve_rng_state=False)

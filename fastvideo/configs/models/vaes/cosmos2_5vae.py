@@ -138,16 +138,13 @@ class Cosmos25VAEArchConfig(VAEArchConfig):
 
         m = re.match(r"^(encoder|decoder)\.middle\.0\.(.*)$", key)
         if m:
-            return map_residual_subkey(f"{m.group(1)}.mid_block.resnets.0",
-                                       m.group(2))
+            return map_residual_subkey(f"{m.group(1)}.mid_block.resnets.0", m.group(2))
         m = re.match(r"^(encoder|decoder)\.middle\.1\.(.*)$", key)
         if m:
-            return map_attn_subkey(f"{m.group(1)}.mid_block.attentions.0",
-                                   m.group(2))
+            return map_attn_subkey(f"{m.group(1)}.mid_block.attentions.0", m.group(2))
         m = re.match(r"^(encoder|decoder)\.middle\.2\.(.*)$", key)
         if m:
-            return map_residual_subkey(f"{m.group(1)}.mid_block.resnets.1",
-                                       m.group(2))
+            return map_residual_subkey(f"{m.group(1)}.mid_block.resnets.1", m.group(2))
 
         m = re.match(r"^encoder\.downsamples\.(\d+)\.(.*)$", key)
         if m:
@@ -198,10 +195,8 @@ class Cosmos25VAEArchConfig(VAEArchConfig):
     spatial_compression_ratio: int = 8
 
     def __post_init__(self):
-        self.scaling_factor: torch.Tensor = 1.0 / torch.tensor(
-            self.latents_std).view(1, self.z_dim, 1, 1, 1)
-        self.shift_factor: torch.Tensor = torch.tensor(self.latents_mean).view(
-            1, self.z_dim, 1, 1, 1)
+        self.scaling_factor: torch.Tensor = 1.0 / torch.tensor(self.latents_std).view(1, self.z_dim, 1, 1, 1)
+        self.shift_factor: torch.Tensor = torch.tensor(self.latents_mean).view(1, self.z_dim, 1, 1, 1)
         self.temporal_compression_ratio = self.scale_factor_temporal
         self.spatial_compression_ratio = self.scale_factor_spatial
 
@@ -210,8 +205,7 @@ class Cosmos25VAEArchConfig(VAEArchConfig):
 class Cosmos25VAEConfig(VAEConfig):
     """Cosmos2.5 VAE config."""
 
-    arch_config: Cosmos25VAEArchConfig = field(
-        default_factory=Cosmos25VAEArchConfig)
+    arch_config: Cosmos25VAEArchConfig = field(default_factory=Cosmos25VAEArchConfig)
 
     use_feature_cache: bool = True
     use_tiling: bool = False
@@ -219,5 +213,4 @@ class Cosmos25VAEConfig(VAEConfig):
     use_parallel_tiling: bool = False
 
     def __post_init__(self):
-        self.blend_num_frames = (self.tile_sample_min_num_frames -
-                                 self.tile_sample_stride_num_frames) * 2
+        self.blend_num_frames = (self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames) * 2

@@ -11,8 +11,32 @@ import torch
 from fastvideo.configs.models import DiTConfig, VAEConfig
 from fastvideo.configs.models.dits.base import DiTArchConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput, T5Config
+from fastvideo.configs.models.encoders.base import TextEncoderArchConfig
+from fastvideo.configs.models.encoders.t5 import T5ArchConfig
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+
+
+@dataclass
+class LongCatT5ArchConfig(T5ArchConfig):
+    """T5 arch that pads tokenizer output to ``max_length``.
+
+    LongCat's denoising stage concatenates positive and negative
+    attention masks along the batch dimension for CFG, which requires
+    uniform seq length. The shared :class:`T5ArchConfig` dropped the
+    ``"padding": "max_length"`` tokenizer kwarg so other DiTs could run
+    with variable-length masks; LongCat still needs the uniform
+    contract.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.tokenizer_kwargs["padding"] = "max_length"
+
+
+@dataclass
+class LongCatT5Config(T5Config):
+    arch_config: TextEncoderArchConfig = field(default_factory=LongCatT5ArchConfig)
 
 
 @dataclass
@@ -74,11 +98,8 @@ def umt5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     seq_lens = mask.gt(0).sum(dim=1).long()
     assert torch.isnan(hidden_state).sum() == 0
     prompt_embeds = [u[:v] for u, v in zip(hidden_state, seq_lens, strict=True)]
-    prompt_embeds_tensor: torch.Tensor = torch.stack([
-        torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))])
-        for u in prompt_embeds
-    ],
-                                                     dim=0)
+    prompt_embeds_tensor: torch.Tensor = torch.stack(
+        [torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))]) for u in prompt_embeds], dim=0)
     return prompt_embeds_tensor
 
 
@@ -94,8 +115,7 @@ class LongCatT2V480PConfig(PipelineConfig):
       - scheduler: FlowMatchEulerDiscreteScheduler
     """
 
-    dit_config: DiTConfig = field(
-        default_factory=lambda: DiTConfig(arch_config=LongCatDiTArchConfig()))
+    dit_config: DiTConfig = field(default_factory=lambda: DiTConfig(arch_config=LongCatDiTArchConfig()))
 
     # VAE config: Wan VAE with encoder+decoder enabled
     vae_config: VAEConfig = field(default_factory=WanVAEConfig)
@@ -105,17 +125,14 @@ class LongCatT2V480PConfig(PipelineConfig):
     # Precision defaults
     dit_precision: str = "bf16"
     vae_precision: str = "bf16"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("bf16", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
 
-    # Text encoding (UMT5 uses T5-like config; postprocess to fixed 512)
-    text_encoder_configs: tuple[T5Config, ...] = field(
-        default_factory=lambda: (T5Config(), ))
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (longcat_preprocess_text, ))
+    # UMT5 uses T5-like config; postprocess pads to 512. LongCatT5Config
+    # restores ``padding="max_length"`` for the CFG concat contract.
+    text_encoder_configs: tuple[T5Config, ...] = field(default_factory=lambda: (LongCatT5Config(), ))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (longcat_preprocess_text, ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda:
-                                               (umt5_postprocess_text, ))
+                                  ...] = field(default_factory=lambda: (umt5_postprocess_text, ))
 
     # LongCat-specific runtime toggles (consumed by pipeline/stages)
     enable_kv_cache: bool = True
@@ -342,6 +359,4 @@ def get_bucket_config(resolution, scale_factor_spatial):
         elif scale_factor_spatial == 256:
             return ASPECT_RATIO_960_F256
 
-    raise ValueError(
-        f"Unsupported resolution '{resolution}' or scale_factor_spatial '{scale_factor_spatial}'"
-    )
+    raise ValueError(f"Unsupported resolution '{resolution}' or scale_factor_spatial '{scale_factor_spatial}'")

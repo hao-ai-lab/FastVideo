@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.configs.models.encoders.base import (TextEncoderArchConfig,
-                                                    TextEncoderConfig)
+from fastvideo.configs.models.encoders.base import (TextEncoderArchConfig, TextEncoderConfig)
 
 
 def _is_transformer_layer(n: str, m) -> bool:
@@ -42,16 +41,22 @@ class T5ArchConfig(TextEncoderArchConfig):
     text_len: int = 512
     dtype: str | None = None
     gradient_checkpointing: bool = False
-    stacked_params_mapping: list[tuple[str, str,
-                                       str]] = field(default_factory=lambda: [
-                                           # (param_name, shard_name, shard_id)
-                                           (".qkv_proj", ".q", "q"),
-                                           (".qkv_proj", ".k", "k"),
-                                           (".qkv_proj", ".v", "v"),
-                                       ])
+    # Extra fields present in upstream HF T5Config but unused by FastVideo's
+    # encoder. Declared here so `update_model_arch` doesn't reject them when
+    # loading repos like `stabilityai/stable-audio-open-1.0` that ship the
+    # full HF config.
+    n_positions: int = 512
+    decoder_start_token_id: int = 0
+    output_past: bool = True
+    task_specific_params: dict | None = None
+    stacked_params_mapping: list[tuple[str, str, str]] = field(default_factory=lambda: [
+        # (param_name, shard_name, shard_id)
+        (".qkv_proj", ".q", "q"),
+        (".qkv_proj", ".k", "k"),
+        (".qkv_proj", ".v", "v"),
+    ])
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda:
-        [_is_transformer_layer, _is_embeddings, _is_final_layernorm])
+        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_layernorm])
 
     # Referenced from https://github.com/huggingface/transformers/blob/main/src/transformers/models/t5/configuration_t5.py
     def __post_init__(self):
@@ -63,7 +68,6 @@ class T5ArchConfig(TextEncoderArchConfig):
             self.dense_act_fn = "gelu_new"
 
         self.tokenizer_kwargs = {
-            "padding": "max_length",
             "truncation": True,
             "max_length": self.text_len,
             "add_special_tokens": True,
@@ -97,7 +101,6 @@ class T5Config(TextEncoderConfig):
 @dataclass
 class T5LargeConfig(TextEncoderConfig):
     """T5 Large configuration for your specific model."""
-    arch_config: TextEncoderArchConfig = field(
-        default_factory=T5LargeArchConfig)
+    arch_config: TextEncoderArchConfig = field(default_factory=T5LargeArchConfig)
 
     prefix: str = "t5"

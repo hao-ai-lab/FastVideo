@@ -7,9 +7,7 @@ import pytest
 import torch
 
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.distributed.parallel_state import (
-    get_sp_parallel_rank,
-    get_sp_world_size)
+from fastvideo.distributed.parallel_state import get_sp_parallel_rank, get_sp_world_size
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -24,9 +22,7 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join("data", BASE_MODEL_PATH) # store in the large /workspace disk on Runpod
-                                  )
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH))
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 CONFIG_PATH = os.path.join(TRANSFORMER_PATH, "config.json")
 
@@ -41,9 +37,7 @@ REFERENCE_LATENT = 93.23263549804688
 @pytest.mark.usefixtures("distributed_setup")
 @pytest.mark.skip(reason="Skipping test_hunyuanvideo_distributed")
 def test_hunyuanvideo_distributed():
-    logger.info(
-        f"Initializing process: rank={RANK}, local_rank={LOCAL_RANK}, world_size={WORLD_SIZE}"
-    )
+    logger.info(f"Initializing process: rank={RANK}, local_rank={LOCAL_RANK}, world_size={WORLD_SIZE}")
 
     torch.cuda.set_device(f"cuda:{LOCAL_RANK}")
 
@@ -51,9 +45,7 @@ def test_hunyuanvideo_distributed():
     sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()
 
-    logger.info(
-        f"Process rank {RANK} initialized with SP rank {sp_rank} in SP world size {sp_world_size}"
-    )
+    logger.info(f"Process rank {RANK} initialized with SP rank {sp_rank} in SP world size {sp_world_size}")
 
     config = json.load(open(CONFIG_PATH))
     # remove   "_class_name": "HunyuanVideoTransformer3DModel",   "_diffusers_version": "0.32.0.dev0",
@@ -62,9 +54,11 @@ def test_hunyuanvideo_distributed():
     config.pop("_diffusers_version")
 
     precision_str = "bf16"
-    args = FastVideoArgs(model_path=TRANSFORMER_PATH,
-                         dit_cpu_offload=True,
-                         pipeline_config=PipelineConfig(dit_config=HunyuanVideoConfig(), dit_precision=precision_str))
+    args = FastVideoArgs(
+        model_path=TRANSFORMER_PATH,
+        dit_cpu_offload=True,
+        pipeline_config=PipelineConfig(dit_config=HunyuanVideoConfig(), dit_precision=precision_str),
+    )
     args.device = torch.device(f"cuda:{LOCAL_RANK}")
 
     loader = TransformerLoader()
@@ -78,23 +72,12 @@ def test_hunyuanvideo_distributed():
     device = torch.device(f"cuda:{LOCAL_RANK}")
 
     # Video latents [B, C, T, H, W]
-    hidden_states = torch.randn(batch_size,
-                                16,
-                                8,
-                                16,
-                                16,
-                                device=device,
-                                dtype=torch.bfloat16)
+    hidden_states = torch.randn(batch_size, 16, 8, 16, 16, device=device, dtype=torch.bfloat16)
     chunk_per_rank = hidden_states.shape[2] // sp_world_size
-    hidden_states = hidden_states[:, :, sp_rank * chunk_per_rank:(sp_rank + 1) *
-                                  chunk_per_rank]
+    hidden_states = hidden_states[:, :, sp_rank * chunk_per_rank : (sp_rank + 1) * chunk_per_rank]
 
     # Text embeddings [B, L, D] (including global token)
-    encoder_hidden_states = torch.randn(batch_size,
-                                        seq_len + 1,
-                                        4096,
-                                        device=device,
-                                        dtype=torch.bfloat16)
+    encoder_hidden_states = torch.randn(batch_size, seq_len + 1, 4096, device=device, dtype=torch.bfloat16)
 
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=torch.bfloat16)
@@ -117,7 +100,5 @@ def test_hunyuanvideo_distributed():
 
     # Check if latents are similar
     diff_output_latents = abs(REFERENCE_LATENT - latent)
-    logger.info(
-        f"Reference latent: {REFERENCE_LATENT}, Current latent: {latent}"
-    )
+    logger.info(f"Reference latent: {REFERENCE_LATENT}, Current latent: {latent}")
     assert diff_output_latents < 1e-4, f"Output latents differ significantly: max diff = {diff_output_latents}"

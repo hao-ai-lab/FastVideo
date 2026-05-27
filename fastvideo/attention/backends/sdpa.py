@@ -3,8 +3,7 @@
 import torch
 from dataclasses import dataclass
 from fastvideo.attention.backends.abstract import (  # FlashAttentionMetadata,
-    AttentionBackend, AttentionImpl, AttentionMetadata,
-    AttentionMetadataBuilder)
+    AttentionBackend, AttentionImpl, AttentionMetadata, AttentionMetadataBuilder)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -46,12 +45,11 @@ class SDPAMetadataBuilder(AttentionMetadataBuilder):
         pass
 
     def build(  # type: ignore
-        self,
-        current_timestep: int,
-        attn_mask: torch.Tensor,
+            self,
+            current_timestep: int,
+            attn_mask: torch.Tensor,
     ) -> SDPAMetadata:
-        return SDPAMetadata(current_timestep=current_timestep,
-                            attn_mask=attn_mask)
+        return SDPAMetadata(current_timestep=current_timestep, attn_mask=attn_mask)
 
 
 class SDPAImpl(AttentionImpl):
@@ -82,9 +80,8 @@ class SDPAImpl(AttentionImpl):
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
 
-        attn_mask = attn_metadata.attn_mask if (
-            attn_metadata is not None
-            and hasattr(attn_metadata, "attn_mask")) else None
+        attn_mask = attn_metadata.attn_mask if (attn_metadata is not None
+                                                and hasattr(attn_metadata, "attn_mask")) else None
         attn_kwargs = {
             "attn_mask": attn_mask,
             "dropout_p": self.dropout,
@@ -93,7 +90,6 @@ class SDPAImpl(AttentionImpl):
         }
         if query.shape[1] != key.shape[1]:
             attn_kwargs["enable_gqa"] = True
-        output = torch.nn.functional.scaled_dot_product_attention(
-            query, key, value, **attn_kwargs)
+        output = torch.nn.functional.scaled_dot_product_attention(query, key, value, **attn_kwargs)
         output = output.transpose(1, 2)
         return output

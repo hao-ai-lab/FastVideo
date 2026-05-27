@@ -50,8 +50,7 @@ class WorkflowBase(ABC):
         # TODO: pipeline_config should be: dict[str, PipelineConfig]
         # pipeline_type should be included in the PipelineConfig
         # pipeline_config[pipeline_name] = (pipeline_type, fastvideo_args)
-        self._pipeline_configs: dict[str, tuple[PipelineType,
-                                                FastVideoArgs]] = {}
+        self._pipeline_configs: dict[str, tuple[PipelineType, FastVideoArgs]] = {}
         self._pipelines: dict[str, ComposedPipelineBase] = {}
         self._components: dict[str, Any] = {}
         self.register_pipelines()
@@ -74,9 +73,7 @@ class WorkflowBase(ABC):
             self._pipelines[pipeline_name] = pipeline
             setattr(self, pipeline_name, pipeline)
 
-    def add_pipeline_config(
-            self, pipeline_name: str,
-            pipeline_config: tuple[PipelineType, FastVideoArgs]) -> None:
+    def add_pipeline_config(self, pipeline_name: str, pipeline_config: tuple[PipelineType, FastVideoArgs]) -> None:
         """
         Register a pipeline configuration for later instantiation.
         
@@ -159,8 +156,7 @@ class WorkflowBase(ABC):
         pass
 
     @classmethod
-    def get_workflow_cls(
-            cls, fastvideo_args: FastVideoArgs) -> Optional["WorkflowBase"]:
+    def get_workflow_cls(cls, fastvideo_args: FastVideoArgs) -> Optional["WorkflowBase"]:
         """
         Factory method to get the appropriate workflow class based on execution mode.
         
@@ -177,10 +173,7 @@ class WorkflowBase(ABC):
             or None if no workflow is available for the given mode.
         """
         if fastvideo_args.mode == ExecutionMode.PREPROCESS:
-            from fastvideo.workflow.preprocess.preprocess_workflow import (
-                PreprocessWorkflow)
+            from fastvideo.workflow.preprocess.preprocess_workflow import (PreprocessWorkflow)
             return PreprocessWorkflow.get_workflow_cls(fastvideo_args)
         else:
-            raise ValueError(
-                f"Execution mode: {fastvideo_args.mode} is not supported in workflow."
-            )
+            raise ValueError(f"Execution mode: {fastvideo_args.mode} is not supported in workflow.")

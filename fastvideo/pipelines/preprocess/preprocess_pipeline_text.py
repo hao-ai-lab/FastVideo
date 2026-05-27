@@ -16,15 +16,13 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
 
 from fastvideo.dataset import gettextdataset
-from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter,
-                                                     records_to_table)
+from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter, records_to_table)
 from fastvideo.dataset.dataloader.record_schema import text_only_record_creator
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_text_only
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
-    BasePreprocessPipeline)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (BasePreprocessPipeline)
 from fastvideo.pipelines.stages import TextEncodingStage
 
 logger = init_logger(__name__)
@@ -89,17 +87,13 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                 assert prompt_embeds.shape[0] == prompt_attention_masks.shape[0]
 
                 logger.info("===== prompt_embeds: %s", prompt_embeds.shape)
-                logger.info("===== prompt_attention_masks: %s",
-                            prompt_attention_masks.shape)
+                logger.info("===== prompt_attention_masks: %s", prompt_attention_masks.shape)
 
                 # Prepare batch data for Parquet dataset
                 batch_data = []
 
                 # Add progress bar for saving outputs
-                save_pbar = tqdm(enumerate(valid_data["path"]),
-                                 desc="Saving outputs",
-                                 unit="item",
-                                 leave=False)
+                save_pbar = tqdm(enumerate(valid_data["path"]), desc="Saving outputs", unit="item", leave=False)
 
                 for idx, text_path in save_pbar:
                     text_name = os.path.basename(text_path).split(".")[0]
@@ -116,11 +110,8 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                     batch_data.append(record)
 
                 if batch_data:
-                    write_pbar = tqdm(total=1,
-                                      desc="Writing to Parquet dataset",
-                                      unit="batch")
-                    table = records_to_table(batch_data,
-                                             pyarrow_schema_text_only)
+                    write_pbar = tqdm(total=1, desc="Writing to Parquet dataset", unit="batch")
+                    table = records_to_table(batch_data, pyarrow_schema_text_only)
                     write_pbar.update(1)
                     write_pbar.close()
 
@@ -153,8 +144,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
         self.local_rank = int(os.getenv("RANK", 0))
         os.makedirs(args.output_dir, exist_ok=True)
         # Create directory for combined data
-        self.combined_parquet_dir = os.path.join(args.output_dir,
-                                                 "combined_parquet_dataset")
+        self.combined_parquet_dir = os.path.join(args.output_dir, "combined_parquet_dataset")
         os.makedirs(self.combined_parquet_dir, exist_ok=True)
 
         # Loading text dataset

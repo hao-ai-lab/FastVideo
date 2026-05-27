@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from typing import Iterable
+from typing import Any, Iterable
 
 import torch
 from torch import nn
-from transformers import Gemma3ForConditionalGeneration
+from transformers import AutoTokenizer, Gemma3ForConditionalGeneration
 
 from fastvideo.configs.models.encoders import BaseEncoderOutput, TextEncoderConfig
 from fastvideo.models.encoders.base import TextEncoder
@@ -21,6 +21,7 @@ from fastvideo.models.dits.ltx2 import (
 )
 from fastvideo.models.loader.weight_utils import default_weight_loader
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.distributed import get_local_torch_device
 
 
 def _debug_log_line(message: str) -> None:
@@ -360,6 +361,35 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
                 continue
             yield name, param
 
+    def prepare_for_compile(self) -> None:
+        # Load Gemma outside Dynamo so torch.compile does not trace HF file-system checks.
+        model = self.gemma_model
+        # Run one tiny eager forward before torch.compile. FastVideo calls the text encoder with
+        # Transformers' output_hidden_states path, which wraps each Gemma layer
+        # forward method and restores it by setting an instance-level forward
+        # attribute. If that attribute appears after Dynamo captures guards, the
+        # next text-encoder call recompiles; doing it here makes the first
+        # compiled call see the stable layer state.
+        token_id = getattr(model.config, "eos_token_id", None)
+        if isinstance(token_id, (list, tuple)):
+            token_id = token_id[0] if token_id else None
+        if token_id is None:
+            token_id = getattr(model.config, "pad_token_id", 0)
+        input_ids = torch.full(
+            (1, 1),
+            int(token_id or 0),
+            dtype=torch.long,
+            device=model.device,
+        )
+        attention_mask = torch.ones_like(input_ids)
+        with torch.no_grad():
+            model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+
     @property
     def gemma_model(self) -> Gemma3ForConditionalGeneration:
         if self._gemma_model is None:
@@ -447,6 +477,60 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
 
         return encoded, encoded_for_audio, attention_mask.squeeze(-1)
 
+    @torch.no_grad()
+    def preprocess_text_embeddings(
+        self,
+        prompts: str | list[str],
+        tokenizer: AutoTokenizer,
+        tokenizer_kwargs: dict[str, Any] | None = None,
+        padding_side: str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute pre-connector text embeddings for LTX-2 training preprocessing."""
+        if isinstance(prompts, str):
+            prompts = [prompts]
+
+        model = self.gemma_model
+        kwargs: dict[str, Any] = {
+            "padding": "max_length",
+            "truncation": True,
+            "return_tensors": "pt",
+        }
+        if tokenizer_kwargs is not None:
+            kwargs.update(tokenizer_kwargs)
+        if "max_length" not in kwargs:
+            kwargs["max_length"] = self.config.arch_config.text_len
+
+        original_padding_side = tokenizer.padding_side
+        target_padding_side = padding_side or self.padding_side
+        tokenizer.padding_side = target_padding_side
+        try:
+            text_inputs = tokenizer(prompts, **kwargs)
+        finally:
+            tokenizer.padding_side = original_padding_side
+
+        input_ids = text_inputs["input_ids"].to(device=model.device)
+        attention_mask = text_inputs["attention_mask"].to(device=model.device)
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        prompt_embeds = self._run_feature_extractor(
+            outputs.hidden_states,
+            attention_mask,
+            padding_side=target_padding_side,
+        )
+        return prompt_embeds, attention_mask
+
+    def run_connectors(
+        self,
+        encoded_input: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Apply embedding connectors to precomputed Gemma features."""
+        return self._run_connectors(encoded_input, attention_mask)
+
     def forward(
         self,
         input_ids: torch.Tensor | None,
@@ -462,8 +546,14 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             attention_mask = torch.ones_like(input_ids)
 
         model = self.gemma_model
-        input_ids = input_ids.to(device=model.device)
-        attention_mask = attention_mask.to(device=model.device)
+        target_device = get_local_torch_device()
+        # Do not invoke model.to() inside the compiled forward path.
+        # _parse_to returns a non-Tensor torch.device, which Dynamo cannot
+        # trace under fullgraph=True. The model is already moved to device
+        # when first loaded (see gemma_model property + prepare_for_compile),
+        # so this guard is a runtime no-op and Dynamo can DCE it.
+        if model.device != target_device:
+            model.to(device=target_device)
         outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,

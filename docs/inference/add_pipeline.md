@@ -101,14 +101,17 @@ Replace standard attention with FastVideo's optimized attention:
 ```python
 # Local attention patterns
 from fastvideo.attention import LocalAttention
-from fastvideo.attention.backends.abstract import _Backend
+from fastvideo.platforms.interface import AttentionBackendEnum
 self.attn = LocalAttention(
     num_heads=num_heads,
     head_size=head_dim,
     dropout_rate=0.0,
     softmax_scale=None,
     causal=False,
-    supported_attention_backends=(_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+    supported_attention_backends=(
+        AttentionBackendEnum.FLASH_ATTN,
+        AttentionBackendEnum.TORCH_SDPA,
+    )
 )
 
 # Distributed attention for long sequences
@@ -119,14 +122,21 @@ self.attn = DistributedAttention(
     dropout_rate=0.0,
     softmax_scale=None,
     causal=False,
-    supported_attention_backends=(_Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+    supported_attention_backends=(
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+        AttentionBackendEnum.FLASH_ATTN,
+        AttentionBackendEnum.TORCH_SDPA,
+    )
 )
 ```
 
 #### Define supported backend selection
 
 ```python
-   _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+_supported_attention_backends = (
+    AttentionBackendEnum.FLASH_ATTN,
+    AttentionBackendEnum.TORCH_SDPA,
+)
 ```
 
 ### Registering Models

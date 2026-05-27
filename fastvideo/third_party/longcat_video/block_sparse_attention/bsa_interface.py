@@ -366,10 +366,7 @@ def attn_bwd_bsa_varlen_triton(
     arg_k = k
     arg_k = arg_k * (sm_scale * RCP_LN2)
     
-    if min(chunk_size_q, chunk_size_k) >= 128:
-        PRE_BLOCK = 128
-    else:
-        PRE_BLOCK = min(chunk_size_q, chunk_size_k)
+    PRE_BLOCK = 128 if min(chunk_size_q, chunk_size_k) >= 128 else min(chunk_size_q, chunk_size_k)
         
     assert N_CTX % PRE_BLOCK == 0
     pre_grid = (N_CTX // PRE_BLOCK, BATCH * N_HEAD)

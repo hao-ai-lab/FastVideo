@@ -1,151 +1,83 @@
 # FastVideo CLI Inference
 
-The FastVideo CLI provides a quick way to access the FastVideo inference pipeline for video generation. For more advanced usage,
-see the Python interface [here](examples/basic.md).
+The FastVideo CLI is config-first. Inference runs are driven by a nested JSON or
+YAML config, with optional dotted-path overrides on the command line. The
+contract matches training: use an explicit subcommand plus `--config`, then add
+any dotted overrides you need.
 
 ## Basic Usage
 
-The basic command to generate a video is:
-
 ```bash
-fastvideo generate --model-path {MODEL_PATH} --prompt {PROMPT}
+fastvideo generate --config config.yaml
+fastvideo serve --config serve.yaml
 ```
 
-### Required Parameters
-
-- `--model-path {MODEL_PATH}`: Path to the model or model ID
-- `--prompt {PROMPT}`: Text description for the video you want to generate
-
-## Common Arguments
-
-To see all the options, you can use the `--help` flag:
+## View All Arguments
 
 ```bash
 fastvideo generate --help
 ```
 
-### Hardware Configuration
+The subcommands intentionally expose only `--config`. Any per-run CLI changes
+must use dotted override paths such as:
 
-- `--num-gpus {NUM_GPUS}`: Number of GPUs to use
-- `--tp-size {TP_SIZE}`: Tensor parallelism size (only for the encoder, should not be larger than 1 if text encoder offload is enabled, as layerwise offload + prefetch is faster)
-- `--sp-size {SP_SIZE}`: Sequence parallelism size (Typically should match the number of GPUs)
+- `--generator.engine.num_gpus 2`
+- `--request.sampling.seed 42`
+- `--server.port 9000`
 
-#### Video Configuration
-
-- `--height {HEIGHT}`: Height of the generated video
-- `--width {WIDTH}`: Width of the generated video
-- `--num-frames {NUM_FRAMES}`: Number of frames to generate
-- `--fps {FPS}`: Frames per second for the saved video
-
-#### Generation Parameters
-
-- `--num-inference-steps {STEPS}`: Number of denoising steps
-- `--negative-prompt {PROMPT}`: Negative prompt to guide generation away from certain concepts
-- `--seed {SEED}`: Random seed for reproducible generation
-
-#### Output Options
-
-- `--output-path {PATH}`: Directory to save the generated video
-- `--save-video`: Whether to save the video to disk
-- `--return-frames`: Whether to return the raw frames
-
-## Using Configuration Files
-
-Instead of specifying all parameters on the command line, you can use a configuration file:
+## Using Config Files
 
 ```bash
-fastvideo generate --config {CONFIG_FILE_PATH}
+fastvideo generate --config config.yaml
 ```
 
-The config file should be in JSON or YAML format with the same parameter names as the CLI options. Command-line arguments will take precedence over settings in the configuration file, allowing you to override specific values while keeping the rest from the config file.
+Config files can be JSON or YAML. Dotted CLI overrides take precedence over
+config-file values.
 
-Example configuration file (config.json):
-
-```json
-{
-    "model_path": "FastVideo/FastHunyuan-diffusers",
-    "prompt": "A beautiful woman in a red dress walking down a street",
-    "output_path": "outputs/",
-    "num_gpus": 2,
-    "sp_size": 2,
-    "tp_size": 1,
-    "num_frames": 45,
-    "height": 720,
-    "width": 1280,
-    "num_inference_steps": 6,
-    "seed": 1024,
-    "fps": 24,
-    "precision": "bf16",
-    "vae_precision": "fp16",
-    "vae_tiling": true,
-    "vae_sp": true,
-    "vae_config": {
-        "load_encoder": false,
-        "load_decoder": true,
-        "tile_sample_min_height": 256,
-        "tile_sample_min_width": 256
-    },
-    "text_encoder_precisions": [
-        "fp16",
-        "fp16"
-    ],
-    "mask_strategy_file_path": null,
-    "enable_torch_compile": false
-}
-```
-
-Or using YAML format (config.yaml):
+Example `config.yaml`:
 
 ```yaml
-model_path: "FastVideo/FastHunyuan-diffusers"
-prompt: "A beautiful woman in a red dress walking down a street"
-output_path: "outputs/"
-num_gpus: 2
-sp_size: 2
-tp_size: 1
-num_frames: 45
-height: 720
-width: 1280
-num_inference_steps: 6
-seed: 1024
-fps: 24
-precision: "bf16"
-vae_precision: "fp16"
-vae_tiling: true
-vae_sp: true
-vae_config:
-  load_encoder: false
-  load_decoder: true
-  tile_sample_min_height: 256
-  tile_sample_min_width: 256
-text_encoder_precisions:
-  - "fp16"
-  - "fp16"
-mask_strategy_file_path: null
-enable_torch_compile: false
+generator:
+  model_path: FastVideo/FastHunyuan-diffusers
+  engine:
+    num_gpus: 2
+    parallelism:
+      sp_size: 2
+      tp_size: 1
+request:
+  prompt: A capybara lounging in a hammock
+  sampling:
+    num_frames: 45
+    height: 720
+    width: 1280
+    num_inference_steps: 6
+    seed: 1024
+  output:
+    output_path: outputs/
 ```
+
+Notes:
+
+- `generator` and `request` are the top-level keys for generation configs.
+- `serve` configs use `generator`, `server`, and optional `default_request`.
+- Prompt text files belong under `request.inputs.prompt_path`.
 
 ## Examples
 
-Generating a simple video:
+Simple generation:
 
 ```bash
-fastvideo generate --model-path FastVideo/FastHunyuan-diffusers --prompt "A cat playing with a ball of yarn" --num-frames 45 --height 720 --width 1280 --num-inference-steps 6 --seed 1024 --output-path outputs/
+fastvideo generate --config config.yaml
 ```
 
-Using a negative prompt to avoid certain elements:
+Config + dotted override:
 
 ```bash
-fastvideo generate --model-path FastVideo/FastHunyuan-diffusers --prompt "A beautiful forest landscape" --negative-prompt "people, buildings, roads"
+fastvideo generate --config config.yaml --request.prompt "A panda skiing at sunset"
 ```
 
-Combining command line arguments and a configuration file:
+Helper wrapper with positional config path:
 
 ```bash
-fastvideo generate --config config.json --prompt "A capybara lounging in a hammock"
+bash scripts/inference/run.sh scripts/inference/inference_wan.yaml
 ```
-
-## Troubleshooting
-
-- If you encounter CUDA out-of-memory errors, try reducing the video dimensions or number of frames, or the number of inference steps.
-- For reproducible results, set the same seed value between runs.

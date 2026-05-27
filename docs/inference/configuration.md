@@ -1,4 +1,3 @@
-
 # Configuration
 
 ## Multi-GPU Setup
@@ -18,7 +17,8 @@ generator = VideoGenerator.from_pretrained(
 - `PipelineConfig`: Initialization time parameters
 - `SamplingParam`: Generation time parameters
 
-You can customize various parameters when generating videos using the `PipelineConfig` and `SamplingParam` class:
+You can customize generation behavior using `PipelineConfig` and
+`SamplingParam`:
 
 ```python
 from fastvideo import VideoGenerator, SamplingParam, PipelineConfig
@@ -27,12 +27,12 @@ def main():
     model_name = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
     config = PipelineConfig.from_pretrained(model_name)
     config.vae_precision = "fp16"
-    config.dit_cpu_offload = True
 
     # Create the generator
     generator = VideoGenerator.from_pretrained(
         model_name,
         num_gpus=1,
+        dit_layerwise_offload=True,  # FastVideoArgs option
         pipeline_config=config
     )
 
@@ -61,15 +61,52 @@ def main():
         prompt, 
         sampling_param=sampling_param, 
         output_path="my_videos/",  # Controls where videos are saved
-        return_frames=True,  # Also return frames from this call (defaults to False)
         save_video=True
     )
 
-    # If return_frames=True, video contains the generated frames as a NumPy array
-    print(f"Generated {len(video)} frames")
+    # If return_frames=True, frames are available in video["frames"]
+    print(f"Generated {len(video['frames'])} frames")
 
 if __name__ == '__main__':
     main()
+```
+
+## JSON/YAML Config Files (CLI)
+
+The inference CLI is config-first. Use an explicit subcommand with `--config`,
+then apply optional dotted overrides on top, matching the training CLI style.
+By default, CLI generation uses `return_frames=false` unless you set
+`request.output.return_frames: true` in config or via a dotted override.
+
+```bash
+fastvideo generate --config config.yaml
+```
+
+Example nested config:
+
+```yaml
+generator:
+  model_path: FastVideo/FastHunyuan-diffusers
+  engine:
+    num_gpus: 2
+    parallelism:
+      sp_size: 2
+request:
+  prompt: A capybara relaxing in a hammock
+  sampling:
+    num_frames: 45
+    height: 720
+    width: 1280
+    num_inference_steps: 6
+    seed: 1024
+  output:
+    output_path: outputs/
+```
+
+Override individual values from the CLI with dotted paths:
+
+```bash
+fastvideo generate --config config.yaml --request.sampling.seed 42
 ```
 
 ## Performance Optimization

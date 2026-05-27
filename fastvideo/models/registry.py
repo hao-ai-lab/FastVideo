@@ -25,26 +25,35 @@ logger = init_logger(__name__)
 _TEXT_TO_VIDEO_DIT_MODELS = {
     "HunyuanVideoTransformer3DModel":
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
+    "HunyuanGameCraftTransformer3DModel":
+    ("dits", "hunyuangamecraft", "HunyuanGameCraftTransformer3DModel"),
     "HunyuanVideo15Transformer3DModel":
     ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
     "HYWorldTransformer3DModel":
     ("dits", "hyworld", "HYWorldTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
-    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
     "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
     "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
     "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
     "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
+    "SD3Transformer2DModel": ("dits", "sd3", "SD3Transformer2DModel"),
+    "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
+    "Gen3CTransformer3DModel": ("dits", "gen3c", "Gen3CTransformer3DModel"),
+    "Kandinsky5Transformer3DModel": ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
-    "MatrixGameWanModel": ("dits", "matrixgame", "MatrixGameWanModel"),
-    "CausalMatrixGameWanModel": ("dits", "matrixgame", "CausalMatrixGameWanModel"),
+    "MatrixGame2WanModel": ("dits", "matrixgame2", "MatrixGame2WanModel"),
+    "CausalMatrixGame2WanModel": ("dits", "matrixgame2", "CausalMatrixGame2WanModel"),
+    # Legacy aliases for older HF model_index.json files
+    "MatrixGameWanModel": ("dits", "matrixgame2", "MatrixGame2WanModel"),
+    "CausalMatrixGameWanModel": ("dits", "matrixgame2", "CausalMatrixGame2WanModel"),
+    "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
 }
 
 # Text-to-image DiT models (2D image generation)
@@ -54,10 +63,11 @@ _TEXT_TO_IMAGE_DIT_MODELS = {
 
 _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
+    "CLIPTextModelWithProjection":
+    ("encoders", "clip", "CLIPTextModelWithProjection"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
-    "T5EncoderModel": ("encoders", "t5", "T5EncoderModel"),
-    "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
+    "T5EncoderModel": ("encoders", "t5_hf", "T5EncoderModel"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
     "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),
     "Reason1TextEncoder": ("encoders", "reason1", "Reason1TextEncoder"),
@@ -77,11 +87,18 @@ _VAE_MODELS = {
     "AutoencoderKL": ("vaes", "autoencoderkl", "AutoencoderKL"),  # Generic 2D VAE
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLCausal3D": ("vaes", "gamecraftvae", "GameCraftVAE"),
     "AutoencoderKLHYWorld": ("vaes", "hyworldvae", "AutoencoderKLHYWorld"),
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
+    "AutoencoderKL": ("vaes", "autoencoder_kl", "AutoencoderKL"),
+    "AutoencoderKLGen3CTokenizer":
+    ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
     "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
+    # `stable-audio-open-1.0/vae/config.json` ships `_class_name="AutoencoderOobleck"`
+    # (Diffusers' name); FastVideo's class is `OobleckVAE`.
+    "AutoencoderOobleck": ("vaes", "oobleck", "OobleckVAE"),
 }
 
 _AUDIO_MODELS = {
@@ -105,6 +122,12 @@ _SCHEDULERS = {
     ("schedulers", "scheduling_rcm", "RCMScheduler"),
 }
 
+_UPSAMPLERS = {
+    "SRTo720pUpsampler": ("upsamplers", "hunyuan15", "SRTo720pUpsampler"),
+    "SRTo1080pUpsampler": ("upsamplers", "hunyuan15", "SRTo1080pUpsampler"),
+    "LTX2LatentUpsampler": ("upsamplers", "ltx2_upsampler", "LTX2LatentUpsampler"),
+}
+
 _LEGACY_FAST_VIDEO_MODELS = {
     **_TEXT_TO_VIDEO_DIT_MODELS,
     **_IMAGE_TO_VIDEO_DIT_MODELS,
@@ -114,6 +137,7 @@ _LEGACY_FAST_VIDEO_MODELS = {
     **_VAE_MODELS,
     **_AUDIO_MODELS,
     **_SCHEDULERS,
+    **_UPSAMPLERS,
 }
 
 MODELS_PATH = os.path.dirname(__file__)

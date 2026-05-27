@@ -7,8 +7,7 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import HunyuanVideoConfig
-from fastvideo.configs.models.encoders import (BaseEncoderOutput,
-                                               CLIPTextConfig, LlamaConfig)
+from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPTextConfig, LlamaConfig)
 from fastvideo.configs.models.vaes import HunyuanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
@@ -41,8 +40,7 @@ def llama_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
     hidden_state_skip_layer = 2
     assert outputs.hidden_states is not None
     hidden_states: tuple[torch.Tensor, ...] = outputs.hidden_states
-    last_hidden_state: torch.tensor = hidden_states[-(hidden_state_skip_layer +
-                                                      1)]
+    last_hidden_state: torch.tensor = hidden_states[-(hidden_state_skip_layer + 1)]
     crop_start = prompt_template_video.get("crop_start", -1)
     last_hidden_state = last_hidden_state[:, crop_start:]
     return last_hidden_state
@@ -71,24 +69,23 @@ class HunyuanConfig(PipelineConfig):
     flow_shift: int = 7
 
     # Text encoding stage
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (LlamaConfig(), CLIPTextConfig()))
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (llama_preprocess_text, clip_preprocess_text))
-    postprocess_text_funcs: tuple[
-        Callable[[BaseEncoderOutput], torch.tensor],
-        ...] = field(default_factory=lambda:
-                     (llama_postprocess_text, clip_postprocess_text))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (LlamaConfig(), CLIPTextConfig()))
+    preprocess_text_funcs: tuple[Callable[[str], str],
+                                 ...] = field(default_factory=lambda: (llama_preprocess_text, clip_preprocess_text))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],
+                                  ...] = field(default_factory=lambda: (llama_postprocess_text, clip_postprocess_text))
 
     # Precision for each component
     dit_precision: str = "bf16"
     vae_precision: str = "fp16"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("fp16", "fp16"))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp16", "fp16"))
 
     def __post_init__(self):
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
+        if self.text_encoder_configs:
+            # Hunyuan postprocess consumes intermediate LLaMA hidden states.
+            self.text_encoder_configs[0].arch_config.output_hidden_states = True
 
 
 @dataclass

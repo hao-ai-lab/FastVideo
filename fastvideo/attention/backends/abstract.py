@@ -2,7 +2,7 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/attention/backends/abstract.py
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
 if TYPE_CHECKING:
@@ -53,18 +53,18 @@ class AttentionMetadata:
     """Attention metadata for prefill and decode batched together."""
     # Current step of diffusion process
     current_timestep: int
+    VSA_sparsity: float = field(default=0.0, kw_only=True)
 
-    def asdict_zerocopy(self,
-                        skip_fields: set[str] | None = None) -> dict[str, Any]:
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+    def asdict_zerocopy(self, skip_fields: set[str] | None = None) -> dict[str, Any]:
         """Similar to dataclasses.asdict, but avoids deepcopying."""
         if skip_fields is None:
             skip_fields = set()
         # Note that if we add dataclasses as fields, they will need
         # similar handling.
-        return {
-            field.name: getattr(self, field.name)
-            for field in fields(self) if field.name not in skip_fields
-        }
+        return {field.name: getattr(self, field.name) for field in fields(self) if field.name not in skip_fields}
 
 
 T = TypeVar("T", bound=AttentionMetadata)
@@ -86,7 +86,7 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
     @abstractmethod
     def build(
         self,
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> AttentionMetadata:
         """Build attention metadata with on-device tensors."""
         raise NotImplementedError
@@ -125,8 +125,7 @@ class AttentionImpl(ABC, Generic[T]):
     ) -> None:
         raise NotImplementedError
 
-    def preprocess_qkv(self, qkv: torch.Tensor,
-                       attn_metadata: T) -> torch.Tensor:
+    def preprocess_qkv(self, qkv: torch.Tensor, attn_metadata: T) -> torch.Tensor:
         """Preprocess QKV tensor before performing attention operation.
 
         Default implementation returns the tensor unchanged.

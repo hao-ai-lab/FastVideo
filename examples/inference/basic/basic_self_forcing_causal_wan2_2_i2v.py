@@ -2,7 +2,7 @@
 
 from fastvideo import VideoGenerator, SamplingParam
 import json
-# from fastvideo.configs.sample import SamplingParam
+# from fastvideo.api.sampling_param import SamplingParam
 
 OUTPUT_PATH = "video_samples_self_forcing_causal_wan2_2_14B_i2v"
 def main():
@@ -31,7 +31,7 @@ def main():
     sampling_param.height = 480
     sampling_param.seed = 1000
 
-    with open("prompts/mixkit_i2v.jsonl", "r") as f:
+    with open("assets/prompts/mixkit_i2v.jsonl", "r") as f:
         prompt_image_pairs = json.load(f)
 
     for prompt_image_pair in prompt_image_pairs:

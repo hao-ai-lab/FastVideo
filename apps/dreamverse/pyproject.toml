@@ -1,0 +1,41 @@
+[project]
+name = "dreamverse"
+version = "0.1.0"
+description = "Dreamverse application with FastAPI backend and Next.js frontend."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "fastvideo>=0.1.7",
+    "pillow>=10.0",
+    "uvicorn[standard]>=0.30,<1",
+]
+
+[project.optional-dependencies]
+server = [
+    "cerebras-cloud-sdk",
+    "flash-attn-cute @ git+https://github.com/XOR-op/flash-attention.git@fa4-compile#subdirectory=flash_attn/cute",
+    "flashinfer-python",
+    "openai>=1.40",
+]
+safety = [
+    "fasttext>=0.9.2",
+]
+test = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+dreamverse-server = "dreamverse.server_entry:cli"
+dreamverse-mock-server = "dreamverse.mock_server:cli"
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+fastvideo = { workspace = true }
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: requires real GPU + model weights; skip in CI",
+]

@@ -28,6 +28,11 @@ For an example running DMD+VSA inference:
 python examples/inference/basic/basic_dmd.py
 ```
 
+For the typed config/request path added during the inference API refactor:
+```
+python examples/inference/basic/basic_dmd_new_api.py
+```
+
 ## Basic Walkthrough
 
 All you need to generate videos using multi-gpus from state-of-the-art diffusion pipelines is the following few lines!

@@ -4,6 +4,7 @@ import os
 import pathlib
 
 import datasets
+import numpy as np
 from torch.utils.data import IterableDataset
 
 from fastvideo.distributed import (get_sp_world_size, get_world_rank,
@@ -138,6 +139,16 @@ class ValidationDataset(IterableDataset):
                 else:
                     sample["video"] = load_video(video_path)
 
+            if sample.get("ref_video", None) is not None:
+                ref_video_path = sample["ref_video"]
+                ref_video_path = os.path.join(self.dir, ref_video_path)
+                if not pathlib.Path(ref_video_path).is_file():
+                    logger.warning("Reference video file %s does not exist.",
+                                   ref_video_path)
+                    sample.pop("ref_video", None)
+                else:
+                    sample["ref_video"] = ref_video_path
+
             if sample.get("control_image_path", None) is not None:
                 control_image_path = sample["control_image_path"]
                 control_image_path = os.path.join(self.dir, control_image_path)
@@ -159,6 +170,37 @@ class ValidationDataset(IterableDataset):
                                    control_video_path)
                 else:
                     sample["control_video"] = load_video(control_video_path)
+
+            if sample.get("action_path", None) is not None:
+                action_path = sample["action_path"]
+                action_path = os.path.join(self.dir, action_path)
+                sample["action_path"] = action_path
+                if not pathlib.Path(action_path).is_file():
+                    logger.warning("Action file %s does not exist.",
+                                   action_path)
+                else:
+                    action_data = np.load(action_path, allow_pickle=True)
+                    num_frames = sample["num_frames"]
+                    if isinstance(action_data,
+                                  np.ndarray) and action_data.dtype == object:
+                        action_data = action_data.item()
+                    if isinstance(action_data, dict):
+                        kb_length = len(action_data["keyboard"])
+                        ms_length = len(action_data["mouse"])
+                        assert kb_length >= num_frames, (
+                            f"keyboard length {kb_length} is smaller than "
+                            f"num_frames {num_frames} for {action_path}.")
+                        assert ms_length >= num_frames, (
+                            f"mouse length {ms_length} is smaller than "
+                            f"num_frames {num_frames} for {action_path}.")
+                        sample["keyboard_cond"] = action_data["keyboard"][:num_frames]
+                        sample["mouse_cond"] = action_data["mouse"][:num_frames]
+                    else:
+                        kb_length = len(action_data)
+                        assert kb_length >= num_frames, (
+                            f"keyboard length {kb_length} is smaller than "
+                            f"num_frames {num_frames} for {action_path}.")
+                        sample["keyboard_cond"] = action_data[:num_frames]
 
             sample = {k: v for k, v in sample.items() if v is not None}
             yield sample

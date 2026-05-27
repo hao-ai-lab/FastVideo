@@ -4,7 +4,7 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
-MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init/"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=1
@@ -14,7 +14,6 @@ NUM_GPUS=1
 training_args=(
   --tracker_project_name "wan_ode_init"
   --output_dir "wan_ode_init_crush_smol"
-  --override_transformer_cls_name "CausalWanTransformer3DModel"
   --wandb_run_name "wan_ode_init_crush_smol"
   --max_train_steps 6000
   --train_batch_size 1
@@ -34,7 +33,7 @@ parallel_args=(
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 1
+  --hsdp_shard_dim $NUM_GPUS
 )
 
 # Model arguments
@@ -51,20 +50,17 @@ dataset_args=(
 
 # Validation arguments
 validation_args=(
-  --log_validation
-  --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 50
-  --validation_sampling_steps "50"
-  --validation_guidance_scale "6.0"
+  --log-visualization
+  --visualization-steps 100
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 6e-6
+  --learning_rate 1e-5
   --mixed_precision "bf16"
   --weight_only_checkpointing_steps 1000
   --training_state_checkpointing_steps 1000
-  --weight_decay 1e-4
+  --weight_decay 0.01
   --max_grad_norm 1.0
 )
 

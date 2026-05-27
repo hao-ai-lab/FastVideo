@@ -39,8 +39,7 @@ class LongCatKVCacheInitStage(PipelineStage):
         """Initialize KV cache from conditioning latents."""
 
         # Check if KV cache is enabled
-        use_kv_cache = getattr(fastvideo_args.pipeline_config, 'use_kv_cache',
-                               True)
+        use_kv_cache = getattr(fastvideo_args.pipeline_config, 'use_kv_cache', True)
         if not use_kv_cache:
             batch.kv_cache_dict = {}
             batch.use_kv_cache = False
@@ -48,8 +47,7 @@ class LongCatKVCacheInitStage(PipelineStage):
             return batch
 
         batch.use_kv_cache = True
-        offload_kv_cache = getattr(fastvideo_args.pipeline_config,
-                                   'offload_kv_cache', False)
+        offload_kv_cache = getattr(fastvideo_args.pipeline_config, 'offload_kv_cache', False)
 
         # Get conditioning latents
         num_cond_latents = batch.num_cond_latents
@@ -61,27 +59,19 @@ class LongCatKVCacheInitStage(PipelineStage):
         # Extract conditioning latents
         cond_latents = batch.latents[:, :, :num_cond_latents].clone()
 
-        logger.info(
-            "Initializing KV cache for %d conditioning latents, shape: %s",
-            num_cond_latents, cond_latents.shape)
+        logger.info("Initializing KV cache for %d conditioning latents, shape: %s", num_cond_latents,
+                    cond_latents.shape)
 
         # Timestep = 0 for conditioning (they are "clean")
         B = cond_latents.shape[0]
         T_cond = cond_latents.shape[2]
-        timestep = torch.zeros(B,
-                               T_cond,
-                               device=cond_latents.device,
-                               dtype=cond_latents.dtype)
+        timestep = torch.zeros(B, T_cond, device=cond_latents.device, dtype=cond_latents.dtype)
 
         # Empty prompt embeddings (cross-attn will be skipped)
         max_seq_len = 512
         # Get caption dimension from transformer config
         caption_dim = self.transformer.config.caption_channels
-        empty_embeds = torch.zeros(B,
-                                   max_seq_len,
-                                   caption_dim,
-                                   device=cond_latents.device,
-                                   dtype=cond_latents.dtype)
+        empty_embeds = torch.zeros(B, max_seq_len, caption_dim, device=cond_latents.device, dtype=cond_latents.dtype)
 
         # Get transformer dtype
         if hasattr(self.transformer, 'module'):
@@ -116,8 +106,7 @@ class LongCatKVCacheInitStage(PipelineStage):
         # After this, batch.latents contains ONLY noise frames
         batch.latents = batch.latents[:, :, num_cond_latents:]
 
-        logger.info(
-            "KV cache initialized: %d blocks, offload=%s, remaining latents shape: %s",
-            len(kv_cache_dict), offload_kv_cache, batch.latents.shape)
+        logger.info("KV cache initialized: %d blocks, offload=%s, remaining latents shape: %s", len(kv_cache_dict),
+                    offload_kv_cache, batch.latents.shape)
 
         return batch

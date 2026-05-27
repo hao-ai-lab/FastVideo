@@ -23,9 +23,7 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join("data", BASE_MODEL_PATH) # store in the large /workspace disk on Runpod
-                                  )
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH))
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 
 
@@ -34,22 +32,25 @@ def test_wan_transformer():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision = torch.bfloat16
     precision_str = "bf16"
-    args = FastVideoArgs(model_path=TRANSFORMER_PATH,
-                         dit_cpu_offload=True,
-                         pipeline_config=PipelineConfig(dit_config=WanVideoConfig(), dit_precision=precision_str))
+    args = FastVideoArgs(
+        model_path=TRANSFORMER_PATH,
+        dit_cpu_offload=True,
+        pipeline_config=PipelineConfig(dit_config=WanVideoConfig(), dit_precision=precision_str),
+    )
     args.device = device
 
     loader = TransformerLoader()
     model2 = loader.load(TRANSFORMER_PATH, args).to(dtype=precision)
 
-    model1 = WanTransformer3DModel.from_pretrained(
-        TRANSFORMER_PATH, device=device,
-        torch_dtype=precision).to(device, dtype=precision).requires_grad_(False)
+    model1 = (
+        WanTransformer3DModel.from_pretrained(TRANSFORMER_PATH, device=device, torch_dtype=precision)
+        .to(device, dtype=precision)
+        .requires_grad_(False)
+    )
 
     total_params = sum(p.numel() for p in model1.parameters())
     # Calculate weight sum for model1 (converting to float64 to avoid overflow)
-    weight_sum_model1 = sum(
-        p.to(torch.float64).sum().item() for p in model1.parameters())
+    weight_sum_model1 = sum(p.to(torch.float64).sum().item() for p in model1.parameters())
     # Also calculate mean for more stable comparison
     weight_mean_model1 = weight_sum_model1 / total_params
     logger.info("Model 1 weight sum: %s", weight_sum_model1)
@@ -57,8 +58,7 @@ def test_wan_transformer():
 
     # Calculate weight sum for model2 (converting to float64 to avoid overflow)
     total_params_model2 = sum(p.numel() for p in model2.parameters())
-    weight_sum_model2 = sum(
-        p.to(torch.float64).sum().item() for p in model2.parameters())
+    weight_sum_model2 = sum(p.to(torch.float64).sum().item() for p in model2.parameters())
     # Also calculate mean for more stable comparison
     weight_mean_model2 = weight_sum_model2 / total_params_model2
     logger.info("Model 2 weight sum: %s", weight_sum_model2)
@@ -78,20 +78,10 @@ def test_wan_transformer():
     seq_len = 30
 
     # Video latents [B, C, T, H, W]
-    hidden_states = torch.randn(batch_size,
-                                16,
-                                21,
-                                160,
-                                90,
-                                device=device,
-                                dtype=precision)
+    hidden_states = torch.randn(batch_size, 16, 21, 160, 90, device=device, dtype=precision)
 
     # Text embeddings [B, L, D] (including global token)
-    encoder_hidden_states = torch.randn(batch_size,
-                                        seq_len + 1,
-                                        4096,
-                                        device=device,
-                                        dtype=precision)
+    encoder_hidden_states = torch.randn(batch_size, seq_len + 1, 4096, device=device, dtype=precision)
 
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=precision)
@@ -100,7 +90,7 @@ def test_wan_transformer():
         data_type="dummy",
     )
 
-    with torch.amp.autocast('cuda', dtype=precision):
+    with torch.amp.autocast("cuda", dtype=precision):
         output1 = model1(
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,
@@ -108,13 +98,13 @@ def test_wan_transformer():
             return_dict=False,
         )[0]
         with set_forward_context(
-                current_timestep=0,
-                attn_metadata=None,
-                forward_batch=forward_batch,
+            current_timestep=0,
+            attn_metadata=None,
+            forward_batch=forward_batch,
         ):
-            output2 = model2(hidden_states=hidden_states,
-                             encoder_hidden_states=encoder_hidden_states,
-                             timestep=timestep)
+            output2 = model2(
+                hidden_states=hidden_states, encoder_hidden_states=encoder_hidden_states, timestep=timestep
+            )
 
     # Check if outputs have the same shape
     assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"

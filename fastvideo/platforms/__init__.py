@@ -75,12 +75,9 @@ def npu_platform_plugin() -> str | None:
             is_npu = True
             logger.info("NPU is available")
     except ImportError:
-        logger.error(
-            "NPU detection failed: PyTorch or PyTorch_NPU is not installed")
+        logger.error("NPU detection failed: PyTorch or PyTorch_NPU is not installed")
     except AttributeError:
-        logger.error(
-            "NPU detection failed: PyTorch has no 'npu' attribute (use Ascend-adapted PyTorch)"
-        )
+        logger.error("NPU detection failed: PyTorch has no 'npu' attribute (use Ascend-adapted PyTorch)")
     except Exception as e:
         logger.error("NPU detection failed: unknown error - %s", str(e))
 
@@ -106,7 +103,7 @@ def rocm_platform_plugin() -> str | None:
         finally:
             amdsmi.amdsmi_shut_down()
     except Exception as e:
-        logger.info("ROCm platform is unavailable: %s", e)
+        logger.debug("ROCm platform is unavailable: %s", e)
 
     return "fastvideo.platforms.rocm.RocmPlatform" if is_rocm else None
 
@@ -183,8 +180,7 @@ def __getattr__(name: str):
     elif name in globals():
         return globals()[name]
     else:
-        raise AttributeError(
-            f"No attribute named '{name}' exists in {__name__}.")
+        raise AttributeError(f"No attribute named '{name}' exists in {__name__}.")
 
 
 __all__ = ['Platform', 'PlatformEnum', 'current_platform', "_init_trace"]

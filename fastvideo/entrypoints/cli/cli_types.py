@@ -19,8 +19,6 @@ class CLISubcommand:
         """Validate the arguments for this command"""
         pass
 
-    def subparser_init(
-            self,
-            subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
+    def subparser_init(self, subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
         """Initialize the subparser for this command"""
         raise NotImplementedError

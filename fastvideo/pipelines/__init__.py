@@ -24,10 +24,8 @@ class PipelineWithLoRA(LoRAPipeline, ComposedPipelineBase):
     pass
 
 
-def build_pipeline(
-        fastvideo_args: FastVideoArgs,
-        pipeline_type: PipelineType | str = PipelineType.BASIC
-) -> PipelineWithLoRA:
+def build_pipeline(fastvideo_args: FastVideoArgs,
+                   pipeline_type: PipelineType | str = PipelineType.BASIC) -> PipelineWithLoRA:
     """
     Only works with valid hf diffusers configs. (model_index.json)
     We want to build a pipeline based on the inference args mode_path:
@@ -41,9 +39,8 @@ def build_pipeline(
     # fastvideo_args.downloaded_model_path = model_path
     logger.info("Model path: %s", model_path)
 
-    logger.info(
-        "Building pipeline of type: %s", pipeline_type.value if isinstance(
-            pipeline_type, PipelineType) else pipeline_type)
+    logger.info("Building pipeline of type: %s",
+                pipeline_type.value if isinstance(pipeline_type, PipelineType) else pipeline_type)
 
     model_info = get_model_info(
         model_path=model_path,

@@ -4,13 +4,15 @@ from copy import deepcopy
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.basic.wan.wan_dmd_pipeline import WanDMDPipeline
 from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.utils import is_vsa_available
 
-vsa_available = is_vsa_available()
+try:
+    vsa_available = is_vsa_available()
+except Exception:
+    vsa_available = False
 
 logger = init_logger(__name__)
 
@@ -24,8 +26,7 @@ class WanDistillationPipeline(DistillationPipeline):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize Wan-specific scheduler."""
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
         """
@@ -56,8 +57,7 @@ def main(args) -> None:
     logger.info("Starting Wan distillation pipeline...")
 
     # Create pipeline with original args
-    pipeline = WanDistillationPipeline.from_pretrained(
-        args.pretrained_model_name_or_path, args=args)
+    pipeline = WanDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
 
     args = pipeline.training_args
     # Start training

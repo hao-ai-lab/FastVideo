@@ -31,9 +31,6 @@ class InferenceArgs:
                 "image_path": ("STRING", {
                     "default": "X://insert/path/here.mp4"
                 }),
-                "enable_teacache": ([True, False], {
-                    "default": False
-                }),
             }
         }
 
@@ -57,7 +54,6 @@ class InferenceArgs:
         seed,
         fps,
         image_path,
-        enable_teacache,
     ):
         raw_args = {
             "height": height,
@@ -69,7 +65,6 @@ class InferenceArgs:
             "seed": seed,
             "fps": fps,
             "image_path": image_path,
-            "enable_teacache": enable_teacache,
         }
 
         # Filter out keys where value is -99999, handling different types properly

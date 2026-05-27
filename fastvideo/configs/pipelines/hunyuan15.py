@@ -8,10 +8,10 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import HunyuanVideo15Config
-from fastvideo.configs.models.encoders import (BaseEncoderOutput,
-                                               Qwen2_5_VLConfig, T5Config)
+from fastvideo.configs.models.encoders import (BaseEncoderOutput, Qwen2_5_VLConfig, T5Config)
 from fastvideo.configs.models.vaes import Hunyuan15VAEConfig
-from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.models.upsamplers import SRTo720pUpsamplerConfig, SRTo1080pUpsamplerConfig
+from fastvideo.configs.pipelines.base import PipelineConfig, UpsamplerConfig
 
 PROMPT_TEMPLATE_TOKEN_LENGTH = 108
 
@@ -38,11 +38,7 @@ def extract_glyph_texts(prompt: str) -> str | None:
     result = [match[0] or match[1] for match in matches]
     result = list(dict.fromkeys(result)) if len(result) > 1 else result
 
-    if result:
-        formatted_result = ". ".join([f'Text "{text}"'
-                                      for text in result]) + ". "
-    else:
-        formatted_result = None
+    formatted_result = ". ".join([f'Text "{text}"' for text in result]) + ". " if result else None
 
     return formatted_result
 
@@ -59,13 +55,7 @@ def format_text_input(prompt: str, system_message: str) -> list[dict[str, Any]]:
         List[Dict[str, Any]]: List of chat conversation.
     """
 
-    template = [{
-        "role": "system",
-        "content": system_message
-    }, {
-        "role": "user",
-        "content": prompt if prompt else " "
-    }]
+    template = [{"role": "system", "content": system_message}, {"role": "user", "content": prompt if prompt else " "}]
 
     return template
 
@@ -75,9 +65,7 @@ def qwen_preprocess_text(prompt: str) -> list[dict[str, Any]]:
     return output
 
 
-def qwen_postprocess_text(
-        outputs: BaseEncoderOutput,
-        mask: torch.tensor) -> tuple[torch.tensor, torch.tensor]:
+def qwen_postprocess_text(outputs: BaseEncoderOutput, mask: torch.tensor) -> tuple[torch.tensor, torch.tensor]:
     assert outputs.hidden_states is not None
     output = outputs.hidden_states[-3]
     output = output[:, PROMPT_TEMPLATE_TOKEN_LENGTH:]
@@ -108,27 +96,33 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
     flow_shift: int = 5
 
     # Text encoding stage
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (Qwen2_5_VLConfig(), T5Config()))
-    preprocess_text_funcs: tuple[Callable[[Any], Any], ...] = field(
-        default_factory=lambda: (qwen_preprocess_text, byt5_preprocess_text))
-    postprocess_text_funcs: tuple[Callable[..., Any], ...] = field(
-        default_factory=lambda: (qwen_postprocess_text, byt5_postprocess_text))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (Qwen2_5_VLConfig(), T5Config()))
+    preprocess_text_funcs: tuple[Callable[[Any], Any],
+                                 ...] = field(default_factory=lambda: (qwen_preprocess_text, byt5_preprocess_text))
+    postprocess_text_funcs: tuple[Callable[..., Any],
+                                  ...] = field(default_factory=lambda: (qwen_postprocess_text, byt5_postprocess_text))
 
     # Precision for each component
     dit_precision: str = "bf16"
     vae_precision: str = "fp16"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("bf16", "fp32"))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", "fp32"))
     text_encoder_crop_start: int = PROMPT_TEMPLATE_TOKEN_LENGTH
-    text_encoder_max_lengths: tuple[int, ...] = field(
-        default_factory=lambda: (1000 + PROMPT_TEMPLATE_TOKEN_LENGTH, 256))
+    text_encoder_max_lengths: tuple[int,
+                                    ...] = field(default_factory=lambda: (1000 + PROMPT_TEMPLATE_TOKEN_LENGTH, 256))
 
     vae_tiling: bool = True
 
     def __post_init__(self):
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
+        if self.text_encoder_configs:
+            # Hunyuan1.5 Qwen postprocess consumes intermediate hidden states.
+            self.text_encoder_configs[0].arch_config.output_hidden_states = True
+
+
+@dataclass
+class Hunyuan15I2V480PStepDistilledConfig(Hunyuan15T2V480PConfig):
+    flow_shift: int = 7
 
 
 @dataclass
@@ -137,3 +131,23 @@ class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
 
     # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 9
+
+
+@dataclass
+class Hunyuan15I2V720PConfig(Hunyuan15T2V720PConfig):
+    """Base configuration for HunYuan pipeline architecture."""
+
+    # HunyuanConfig-specific parameters with defaults
+    flow_shift: int = 7
+
+
+@dataclass
+class Hunyuan15SR1080PConfig(Hunyuan15T2V720PConfig):
+    """Base configuration for HunYuan pipeline architecture."""
+
+    # HunyuanConfig-specific parameters with defaults
+    flow_shift: int = 7
+    flow_shift_sr: int = 2
+    upsampler_config: tuple[UpsamplerConfig, ...] = field(
+        default_factory=lambda: (SRTo720pUpsamplerConfig(), SRTo1080pUpsamplerConfig()))
+    upsampler_precision: str = "fp32"

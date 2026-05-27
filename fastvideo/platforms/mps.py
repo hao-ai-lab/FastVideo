@@ -4,8 +4,7 @@ import torch
 
 from fastvideo.logger import init_logger
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.platforms.interface import (DeviceCapability, Platform,
-                                           PlatformEnum)
+from fastvideo.platforms.interface import (DeviceCapability, Platform, PlatformEnum)
 
 logger = init_logger(__name__)
 
@@ -18,8 +17,7 @@ class MpsPlatform(Platform):
     device_control_env_var: str = "MPS_VISIBLE_DEVICES"
 
     @classmethod
-    def get_device_capability(cls,
-                              device_id: int = 0) -> DeviceCapability | None:
+    def get_device_capability(cls, device_id: int = 0) -> DeviceCapability | None:
         raise NotImplementedError
 
     @classmethod
@@ -37,22 +35,19 @@ class MpsPlatform(Platform):
     @classmethod
     def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         if enforce_eager:
-            logger.warning(
-                "To see benefits of async output processing, enable MPS "
-                "graph. Since, enforce-eager is enabled, async output "
-                "processor cannot be used")
+            logger.warning("To see benefits of async output processing, enable MPS "
+                           "graph. Since, enforce-eager is enabled, async output "
+                           "processor cannot be used")
             return False
         return True
 
     @classmethod
-    def get_current_memory_usage(cls,
-                                 device: torch.types.Device | None = None
-                                 ) -> float:
+    def get_current_memory_usage(cls, device: torch.types.Device | None = None) -> float:
         return 0.0
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
-                             head_size: int, dtype: torch.dtype) -> str:
+    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
+                             dtype: torch.dtype) -> str:
         # MPS supports SDPA (Scaled Dot-Product Attention) which is the most compatible
         logger.info("Using Torch SDPA backend for MPS.")
         return "fastvideo.attention.backends.sdpa.SDPABackend"

@@ -1,0 +1,103 @@
+# Debugging
+
+This page collects practical debugging steps for FastVideo inference issues.
+
+## Collect Environment Info
+
+From the repository root, run:
+
+```bash
+python collect_env.py
+```
+
+Attach the output when filing a GitHub issue.
+
+## Increase Logging
+
+FastVideo logging level is controlled by environment variables:
+
+```bash
+FASTVIDEO_LOGGING_LEVEL=DEBUG \
+FASTVIDEO_STAGE_LOGGING=1 \
+python your_script.py
+```
+
+Useful variables:
+
+- `FASTVIDEO_LOGGING_LEVEL`: `DEBUG`, `INFO`, `WARNING`, `ERROR`
+- `FASTVIDEO_STAGE_LOGGING`: print per-stage timings during pipeline execution
+- `FASTVIDEO_ATTENTION_BACKEND`: force an attention backend (for example
+  `TORCH_SDPA`, `FLASH_ATTN`, `SAGE_ATTN_THREE`, or
+  `ATTN_QAT_INFER`, or `ATTN_QAT_TRAIN`)
+
+## Layer-by-Layer Activation Tracing
+
+For numerical-divergence debugging — typically when porting a new model and
+needing to find the first layer where FastVideo and an upstream reference
+produce different outputs — use the env-gated activation trace mode:
+
+```bash
+FASTVIDEO_TRACE_ACTIVATIONS=1 \
+FASTVIDEO_TRACE_LAYERS="^transformer\.blocks\.\d+$" \
+FASTVIDEO_TRACE_OUTPUT=/tmp/fv_trace.jsonl \
+python your_script.py
+```
+
+The trace dumps per-tensor stats (`abs_mean`, `sum`, `shape`, etc.) to a
+JSONL file. Run the same workload with tracing on the upstream side, then
+`diff` the two files to localize the first divergent layer.
+
+See [Activation Trace Mode](../contributing/activation_trace.md) for the
+full guide (env var reference, JSONL output schema, parity-debug workflow,
+performance impact, and troubleshooting).
+
+## Common Failure Modes
+
+### Out-of-memory
+
+Try, in order:
+
+1. Reduce `height`, `width`, `num_frames`, or `num_inference_steps`.
+2. Enable offloading flags such as `dit_layerwise_offload` (single GPU) or
+   `use_fsdp_inference` (multi-GPU).
+3. Enable `vae_cpu_offload`, `image_encoder_cpu_offload`, and
+   `text_encoder_cpu_offload`.
+
+See [Inference Offloading](../inference/offloading.md) for recommended
+combinations.
+
+### Attention backend import errors
+
+If forcing a backend fails, verify optional dependencies are installed:
+
+- `FLASH_ATTN`: `flash-attn`
+- `VIDEO_SPARSE_ATTN`: `fastvideo-kernel`
+- `SLIDING_TILE_ATTN`: STA legacy workflow in
+  `sta_do_not_delete` + `fastvideo-kernel`
+- `SAGE_ATTN`: SageAttention package
+- `SAGE_ATTN_THREE`: upstream `sageattn3` package
+- `ATTN_QAT_INFER`: `fastvideo-kernel` checkout/source install that exposes
+  `attn_qat_infer`
+- `ATTN_QAT_TRAIN`: `fastvideo-kernel` install exposing `fastvideo_kernel`
+
+As a fallback, use:
+
+```bash
+export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
+```
+
+### Configuration parsing errors
+
+When using `--config`, keep keys aligned with CLI argument names (underscores or
+hyphens are both accepted). For nested config values, use nested objects
+(`vae_config`, `dit_config`) rather than dotted keys.
+
+## Issue Template
+
+When opening an issue, include:
+
+- exact command or Python snippet,
+- model ID/path,
+- full traceback,
+- `collect_env.py` output,
+- whether the problem reproduces with `FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA`.
