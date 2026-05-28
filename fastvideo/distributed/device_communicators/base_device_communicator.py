@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/device_communicators/base_device_communicator.py
 
+import threading
 from typing import Any
 
 import torch
@@ -17,23 +18,34 @@ class DistributedAutograd:
     proper forward and backward implementations.
     """
 
-    # Dedicated stream for SP all-to-all collectives. Lazily created on first
-    # use to avoid touching CUDA before the device is selected. NCCL kernels
-    # issued on this stream no longer serialize with compute on the default
-    # stream, freeing GPU launch queue pressure.
+    # Dedicated streams for SP all-to-all collectives, cached PER DEVICE.
+    # CUDA streams are device-bound, so a single global stream would crash
+    # the second device in any multi-GPU / single-process multi-device
+    # context. Lazily created on first use to avoid touching CUDA before
+    # the device is selected; protected by a lock for thread-safe init.
+    # NCCL kernels issued on these streams no longer serialize with compute
+    # on the default stream, freeing GPU launch queue pressure.
     #
     # NOTE: we intentionally do NOT call .record_stream() on the input/output
     # tensors. PyTorch's NCCL backend now defaults TORCH_NCCL_AVOID_RECORD_STREAMS=1
     # and handles cross-stream lifetime via its own mechanism — calling
     # record_stream() explicitly forces the deprecated slow path and inflates
     # caching-allocator bookkeeping by 2× per collective.
-    _comm_stream: "torch.cuda.Stream | None" = None
+    _comm_streams: "dict[torch.device, torch.cuda.Stream]" = {}
+    _comm_streams_lock = threading.Lock()
 
     @staticmethod
-    def _get_comm_stream() -> "torch.cuda.Stream":
-        if DistributedAutograd._comm_stream is None:
-            DistributedAutograd._comm_stream = torch.cuda.Stream()
-        return DistributedAutograd._comm_stream
+    def _get_comm_stream(device: torch.device) -> "torch.cuda.Stream":
+        stream = DistributedAutograd._comm_streams.get(device)
+        if stream is not None:
+            return stream
+        with DistributedAutograd._comm_streams_lock:
+            stream = DistributedAutograd._comm_streams.get(device)
+            if stream is None:
+                with torch.cuda.device(device):
+                    stream = torch.cuda.Stream(device=device)
+                DistributedAutograd._comm_streams[device] = stream
+        return stream
 
     class AllReduce(torch.autograd.Function):
         """Differentiable all_reduce operation.
@@ -146,10 +158,16 @@ class DistributedAutograd:
         if world_size == 1:
             return input_
 
-        assert input_.dim() == 4, f"input must be 4D tensor, got {input_.dim()} and shape {input_.shape}"
+        if input_.dim() != 4:
+            raise ValueError(f"input must be 4D tensor, got {input_.dim()} and shape {input_.shape}")
 
-        comm = DistributedAutograd._get_comm_stream()
-        curr = torch.cuda.current_stream()
+        # Stream-scheduling path only meaningful on CUDA tensors. CPU inputs
+        # (used by some unit-test paths) fall through to a plain
+        # dist.all_to_all_single without the dedicated-stream wrap.
+        use_cuda = input_.is_cuda
+        if use_cuda:
+            comm = DistributedAutograd._get_comm_stream(input_.device)
+            curr = torch.cuda.current_stream(device=input_.device)
 
         if scatter_dim == 2 and gather_dim == 1:
             bs, shard_seqlen, hn, hd = input_.shape
@@ -160,11 +178,14 @@ class DistributedAutograd:
 
             # Issue NCCL on the dedicated comm stream so it doesn't serialize
             # with compute on the default stream. No record_stream — see the
-            # _comm_stream class docstring for why.
-            comm.wait_stream(curr)
-            with torch.cuda.stream(comm):
-                dist.all_to_all_single(output, input_, group=group)  # hn, shard_seqlen, bs, hd
-            curr.wait_stream(comm)
+            # _comm_streams class docstring for why.
+            if use_cuda:
+                comm.wait_stream(curr)
+                with torch.cuda.stream(comm):
+                    dist.all_to_all_single(output, input_, group=group)  # hn, shard_seqlen, bs, hd
+                curr.wait_stream(comm)
+            else:
+                dist.all_to_all_single(output, input_, group=group)
 
             output = torch.cat(output.split(shard_hn), dim=1)  # sharded hn, seqlen, bs, hd
 
@@ -183,10 +204,13 @@ class DistributedAutograd:
 
             output = torch.empty_like(input_)
 
-            comm.wait_stream(curr)
-            with torch.cuda.stream(comm):
+            if use_cuda:
+                comm.wait_stream(curr)
+                with torch.cuda.stream(comm):
+                    dist.all_to_all_single(output, input_, group=group)
+                curr.wait_stream(comm)
+            else:
                 dist.all_to_all_single(output, input_, group=group)
-            curr.wait_stream(comm)
 
             output = output.transpose(0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
 
