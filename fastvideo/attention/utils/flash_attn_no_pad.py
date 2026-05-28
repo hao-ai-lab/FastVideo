@@ -237,14 +237,18 @@ if _FA_VARLEN_VERSION == "2":
         x = rearrange(qkv, "b s three h d -> b s (three h d)")
         x_unpad, indices, cu_seqlens, max_s, _ = unpad_input(x, key_padding_mask)
         x_unpad = rearrange(x_unpad, "nnz (three h d) -> nnz three h d", three=3, h=h)
-        out_unpad, lse_unpad, _ = flash_attn_varlen_qkvpacked_func(
-            x_unpad, cu_seqlens, max_s, dropout_p,
-            softmax_scale=softmax_scale, causal=causal,
-            deterministic=deterministic, return_attn_probs=True)
+        out_unpad, lse_unpad, _ = flash_attn_varlen_qkvpacked_func(x_unpad,
+                                                                   cu_seqlens,
+                                                                   max_s,
+                                                                   dropout_p,
+                                                                   softmax_scale=softmax_scale,
+                                                                   causal=causal,
+                                                                   deterministic=deterministic,
+                                                                   return_attn_probs=True)
         # Pad out: [nnz, h, d] -> [b, s, h, d]
-        out_padded = rearrange(
-            pad_input(rearrange(out_unpad, "nnz h d -> nnz (h d)"), indices, b, s),
-            "b s (h d) -> b s h d", h=h)
+        out_padded = rearrange(pad_input(rearrange(out_unpad, "nnz h d -> nnz (h d)"), indices, b, s),
+                               "b s (h d) -> b s h d",
+                               h=h)
         # Pad lse: FA2 varlen returns [nheads, total_q]. Transpose to [total_q,
         # nheads], pad to [b, s, nheads], permute to [b, nheads, s] — statically
         # shaped so register_fake matches.
@@ -274,7 +278,7 @@ if _FA_VARLEN_VERSION == "2":
         ctx.mark_non_differentiable(lse)
         # FA2's varlen backward requires a concrete float for softmax_scale.
         if softmax_scale is None:
-            softmax_scale = qkv.shape[-1] ** -0.5  # head_dim from qkv's last dim
+            softmax_scale = qkv.shape[-1]**-0.5  # head_dim from qkv's last dim
         ctx.softmax_scale = softmax_scale
         ctx.causal = causal
         ctx.dropout_p = dropout_p
@@ -305,15 +309,26 @@ if _FA_VARLEN_VERSION == "2":
         dk_unpad = torch.empty_like(k_unpad)
         dv_unpad = torch.empty_like(v_unpad)
         _fa2_varlen_backward(
-            dout_unpad, q_unpad, k_unpad, v_unpad, out_unpad, lse_unpad,
-            dq_unpad, dk_unpad, dv_unpad,
-            cu_seqlens_q=cu_seqlens, cu_seqlens_k=cu_seqlens,
-            max_seqlen_q=max_s, max_seqlen_k=max_s,
+            dout_unpad,
+            q_unpad,
+            k_unpad,
+            v_unpad,
+            out_unpad,
+            lse_unpad,
+            dq_unpad,
+            dk_unpad,
+            dv_unpad,
+            cu_seqlens_q=cu_seqlens,
+            cu_seqlens_k=cu_seqlens,
+            max_seqlen_q=max_s,
+            max_seqlen_k=max_s,
             dropout_p=ctx.dropout_p,
             softmax_scale=ctx.softmax_scale,
             causal=ctx.causal,
-            window_size_left=-1, window_size_right=-1,
-            softcap=0.0, alibi_slopes=None,
+            window_size_left=-1,
+            window_size_right=-1,
+            softcap=0.0,
+            alibi_slopes=None,
             deterministic=ctx.deterministic,
             rng_state=None,
         )
@@ -352,26 +367,30 @@ if _FA_VARLEN_VERSION == "2":
         deterministic: bool,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         b, sq, h, d = query.shape
-        sk = key.shape[1]
-        q_unpad, q_indices, cu_seqlens_q, max_seqlen_q, _ = unpad_input(
-            rearrange(query, "b s h d -> b s (h d)"), query_padding_mask)
-        k_unpad, _, cu_seqlens_k, max_seqlen_k, _ = unpad_input(
-            rearrange(key, "b s h d -> b s (h d)"), key_padding_mask)
-        v_unpad, _, _, _, _ = unpad_input(
-            rearrange(value, "b s h d -> b s (h d)"), key_padding_mask)
+        q_unpad, q_indices, cu_seqlens_q, max_seqlen_q, _ = unpad_input(rearrange(query, "b s h d -> b s (h d)"),
+                                                                        query_padding_mask)
+        k_unpad, _, cu_seqlens_k, max_seqlen_k, _ = unpad_input(rearrange(key, "b s h d -> b s (h d)"),
+                                                                key_padding_mask)
+        v_unpad, _, _, _, _ = unpad_input(rearrange(value, "b s h d -> b s (h d)"), key_padding_mask)
         q_unpad = rearrange(q_unpad, "nnz (h d) -> nnz h d", h=h)
         k_unpad = rearrange(k_unpad, "nnz (h d) -> nnz h d", h=h)
         v_unpad = rearrange(v_unpad, "nnz (h d) -> nnz h d", h=h)
-        out_unpad, lse_unpad, _ = flash_attn_varlen_func_impl(
-            q_unpad, k_unpad, v_unpad,
-            cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
-            dropout_p=dropout_p, softmax_scale=softmax_scale,
-            causal=causal, deterministic=deterministic,
-            return_attn_probs=True)
+        out_unpad, lse_unpad, _ = flash_attn_varlen_func_impl(q_unpad,
+                                                              k_unpad,
+                                                              v_unpad,
+                                                              cu_seqlens_q,
+                                                              cu_seqlens_k,
+                                                              max_seqlen_q,
+                                                              max_seqlen_k,
+                                                              dropout_p=dropout_p,
+                                                              softmax_scale=softmax_scale,
+                                                              causal=causal,
+                                                              deterministic=deterministic,
+                                                              return_attn_probs=True)
         # Pad out: [nnz_q, h, d] -> [b, sq, h, d]
-        out_padded = rearrange(
-            pad_input(rearrange(out_unpad, "nnz h d -> nnz (h d)"), q_indices, b, sq),
-            "b s (h d) -> b s h d", h=h)
+        out_padded = rearrange(pad_input(rearrange(out_unpad, "nnz h d -> nnz (h d)"), q_indices, b, sq),
+                               "b s (h d) -> b s h d",
+                               h=h)
         # Pad lse: [h, nnz_q] -> [b, h, sq]
         lse_padded = pad_input(lse_unpad.t().contiguous(), q_indices, b, sq).permute(0, 2, 1).contiguous()
         return out_padded, lse_padded
@@ -396,15 +415,14 @@ if _FA_VARLEN_VERSION == "2":
         return out, lse
 
     def _flash_attn_varlen_qk_no_pad_setup_context(ctx, inputs, output):
-        (query, key, value, query_padding_mask, key_padding_mask,
-         causal, dropout_p, softmax_scale, deterministic) = inputs
+        (query, key, value, query_padding_mask, key_padding_mask, causal, dropout_p, softmax_scale,
+         deterministic) = inputs
         out, lse = output
-        ctx.save_for_backward(query, key, value, out, lse,
-                              query_padding_mask, key_padding_mask)
+        ctx.save_for_backward(query, key, value, out, lse, query_padding_mask, key_padding_mask)
         # Auxiliary output, not differentiable — see default-path note.
         ctx.mark_non_differentiable(lse)
         if softmax_scale is None:
-            softmax_scale = query.shape[-1] ** -0.5
+            softmax_scale = query.shape[-1]**-0.5
         ctx.softmax_scale = softmax_scale
         ctx.causal = causal
         ctx.dropout_p = dropout_p
@@ -412,8 +430,7 @@ if _FA_VARLEN_VERSION == "2":
 
     def _flash_attn_varlen_qk_no_pad_backward(ctx, grad_out, grad_lse):
         del grad_lse
-        (query, key, value, out_padded, lse_padded,
-         query_padding_mask, key_padding_mask) = ctx.saved_tensors
+        (query, key, value, out_padded, lse_padded, query_padding_mask, key_padding_mask) = ctx.saved_tensors
         b, sq, h, d = query.shape
         sk = key.shape[1]
 
@@ -423,10 +440,10 @@ if _FA_VARLEN_VERSION == "2":
         # final repad of dk/dv also reuses k_indices). Avoids ~4
         # redundant `unpad_input` calls + their GPU→CPU `.max().item()`
         # syncs.
-        q_unpad, q_indices, cu_seqlens_q, max_seqlen_q, _ = unpad_input(
-            rearrange(query, "b s h d -> b s (h d)"), query_padding_mask)
-        k_unpad, k_indices, cu_seqlens_k, max_seqlen_k, _ = unpad_input(
-            rearrange(key, "b s h d -> b s (h d)"), key_padding_mask)
+        q_unpad, q_indices, cu_seqlens_q, max_seqlen_q, _ = unpad_input(rearrange(query, "b s h d -> b s (h d)"),
+                                                                        query_padding_mask)
+        k_unpad, k_indices, cu_seqlens_k, max_seqlen_k, _ = unpad_input(rearrange(key, "b s h d -> b s (h d)"),
+                                                                        key_padding_mask)
         q_unpad = rearrange(q_unpad, "nnz (h d) -> nnz h d", h=h).contiguous()
         k_unpad = rearrange(k_unpad, "nnz (h d) -> nnz h d", h=h).contiguous()
         v_unpad = value.flatten(0, 1)[k_indices].view(-1, h, d).contiguous()
@@ -440,15 +457,26 @@ if _FA_VARLEN_VERSION == "2":
         dk_unpad = torch.empty_like(k_unpad)
         dv_unpad = torch.empty_like(v_unpad)
         _fa2_varlen_backward(
-            dout_unpad, q_unpad, k_unpad, v_unpad, out_unpad, lse_unpad,
-            dq_unpad, dk_unpad, dv_unpad,
-            cu_seqlens_q=cu_seqlens_q, cu_seqlens_k=cu_seqlens_k,
-            max_seqlen_q=max_seqlen_q, max_seqlen_k=max_seqlen_k,
+            dout_unpad,
+            q_unpad,
+            k_unpad,
+            v_unpad,
+            out_unpad,
+            lse_unpad,
+            dq_unpad,
+            dk_unpad,
+            dv_unpad,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_k=cu_seqlens_k,
+            max_seqlen_q=max_seqlen_q,
+            max_seqlen_k=max_seqlen_k,
             dropout_p=ctx.dropout_p,
             softmax_scale=ctx.softmax_scale,
             causal=ctx.causal,
-            window_size_left=-1, window_size_right=-1,
-            softcap=0.0, alibi_slopes=None,
+            window_size_left=-1,
+            window_size_right=-1,
+            softcap=0.0,
+            alibi_slopes=None,
             deterministic=ctx.deterministic,
             rng_state=None,
         )
@@ -474,25 +502,34 @@ if _FA_VARLEN_VERSION == "2":
 
     # ---------- public dispatchers (FA2: autograd flows through the op) -----
 
-    def flash_attn_no_pad_compilable(qkv, key_padding_mask, causal=False,
-                                     dropout_p=0.0, softmax_scale=None,
+
+    def flash_attn_no_pad_compilable(qkv,
+                                     key_padding_mask,
+                                     causal=False,
+                                     dropout_p=0.0,
+                                     softmax_scale=None,
                                      deterministic=False):
         """dynamo-traceable wrapper around ``flash_attn_no_pad`` (registered op,
         full register_autograd on FA2 — both inference and training go through
         the op, no graph break on either)."""
-        out, _ = torch.ops.fastvideo._flash_attn_no_pad_forward(
-            qkv, key_padding_mask, causal, dropout_p, softmax_scale, deterministic)
+        out, _ = torch.ops.fastvideo._flash_attn_no_pad_forward(qkv, key_padding_mask, causal, dropout_p, softmax_scale,
+                                                                deterministic)
         return out
 
-    def flash_attn_varlen_qk_no_pad_compilable(query, key, value, query_padding_mask,
-                                               key_padding_mask, causal=False,
-                                               dropout_p=0.0, softmax_scale=None,
+    def flash_attn_varlen_qk_no_pad_compilable(query,
+                                               key,
+                                               value,
+                                               query_padding_mask,
+                                               key_padding_mask,
+                                               causal=False,
+                                               dropout_p=0.0,
+                                               softmax_scale=None,
                                                deterministic=False):
         """dynamo-traceable wrapper around ``flash_attn_varlen_qk_no_pad`` (registered
         op, full register_autograd on FA2)."""
-        out, _ = torch.ops.fastvideo._flash_attn_varlen_qk_no_pad_forward(
-            query, key, value, query_padding_mask, key_padding_mask,
-            causal, dropout_p, softmax_scale, deterministic)
+        out, _ = torch.ops.fastvideo._flash_attn_varlen_qk_no_pad_forward(query, key, value, query_padding_mask,
+                                                                          key_padding_mask, causal, dropout_p,
+                                                                          softmax_scale, deterministic)
         return out
 
 else:
@@ -515,8 +552,12 @@ else:
         deterministic: bool,
     ) -> torch.Tensor:
         return flash_attn_no_pad(  # type: ignore[no-untyped-call]
-            qkv, key_padding_mask, causal=causal, dropout_p=dropout_p,
-            softmax_scale=softmax_scale, deterministic=deterministic)
+            qkv,
+            key_padding_mask,
+            causal=causal,
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            deterministic=deterministic)
 
     @torch.library.register_fake("fastvideo::_flash_attn_no_pad_forward")
     def _flash_attn_no_pad_forward_fake(
@@ -548,11 +589,15 @@ else:
         deterministic: bool,
     ) -> torch.Tensor:
         return flash_attn_varlen_qk_no_pad(  # type: ignore[no-untyped-call]
-            query, key, value,
+            query,
+            key,
+            value,
             query_padding_mask=query_padding_mask,
             key_padding_mask=key_padding_mask,
-            causal=causal, dropout_p=dropout_p,
-            softmax_scale=softmax_scale, deterministic=deterministic)
+            causal=causal,
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            deterministic=deterministic)
 
     @torch.library.register_fake("fastvideo::_flash_attn_varlen_qk_no_pad_forward")
     def _flash_attn_varlen_qk_no_pad_forward_fake(
@@ -570,28 +615,41 @@ else:
         del causal, dropout_p, softmax_scale, deterministic
         return query.new_empty(query.shape)
 
-    def flash_attn_no_pad_compilable(qkv, key_padding_mask, causal=False,
-                                     dropout_p=0.0, softmax_scale=None,
+    def flash_attn_no_pad_compilable(qkv,
+                                     key_padding_mask,
+                                     causal=False,
+                                     dropout_p=0.0,
+                                     softmax_scale=None,
                                      deterministic=False):
         if torch.is_grad_enabled() and qkv.requires_grad:
-            return flash_attn_no_pad(qkv, key_padding_mask, causal=causal,
-                                     dropout_p=dropout_p, softmax_scale=softmax_scale,
+            return flash_attn_no_pad(qkv,
+                                     key_padding_mask,
+                                     causal=causal,
+                                     dropout_p=dropout_p,
+                                     softmax_scale=softmax_scale,
                                      deterministic=deterministic)
-        return torch.ops.fastvideo._flash_attn_no_pad_forward(
-            qkv, key_padding_mask, causal, dropout_p, softmax_scale, deterministic)
+        return torch.ops.fastvideo._flash_attn_no_pad_forward(qkv, key_padding_mask, causal, dropout_p, softmax_scale,
+                                                              deterministic)
 
-    def flash_attn_varlen_qk_no_pad_compilable(query, key, value, query_padding_mask,
-                                               key_padding_mask, causal=False,
-                                               dropout_p=0.0, softmax_scale=None,
+    def flash_attn_varlen_qk_no_pad_compilable(query,
+                                               key,
+                                               value,
+                                               query_padding_mask,
+                                               key_padding_mask,
+                                               causal=False,
+                                               dropout_p=0.0,
+                                               softmax_scale=None,
                                                deterministic=False):
-        if torch.is_grad_enabled() and (query.requires_grad or key.requires_grad
-                                        or value.requires_grad):
-            return flash_attn_varlen_qk_no_pad(
-                query, key, value,
-                query_padding_mask=query_padding_mask,
-                key_padding_mask=key_padding_mask,
-                causal=causal, dropout_p=dropout_p,
-                softmax_scale=softmax_scale, deterministic=deterministic)
-        return torch.ops.fastvideo._flash_attn_varlen_qk_no_pad_forward(
-            query, key, value, query_padding_mask, key_padding_mask,
-            causal, dropout_p, softmax_scale, deterministic)
+        if torch.is_grad_enabled() and (query.requires_grad or key.requires_grad or value.requires_grad):
+            return flash_attn_varlen_qk_no_pad(query,
+                                               key,
+                                               value,
+                                               query_padding_mask=query_padding_mask,
+                                               key_padding_mask=key_padding_mask,
+                                               causal=causal,
+                                               dropout_p=dropout_p,
+                                               softmax_scale=softmax_scale,
+                                               deterministic=deterministic)
+        return torch.ops.fastvideo._flash_attn_varlen_qk_no_pad_forward(query, key, value, query_padding_mask,
+                                                                        key_padding_mask, causal, dropout_p,
+                                                                        softmax_scale, deterministic)

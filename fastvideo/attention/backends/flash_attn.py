@@ -10,7 +10,6 @@ from fastvideo.attention.utils.flash_attn_default import (
     flash_attn_func_compilable,
 )
 
-
 from fastvideo.attention.backends.abstract import (
     AttentionBackend,
     AttentionImpl,

@@ -29,7 +29,6 @@ backend (`attention/backends/flash_attn.py`) just imports
 
 import torch
 
-
 # Pick the same backend the rest of FastVideo picked for `flash_attn_func`
 # (FA4/cute → FA3 → FA2). Mirror the precedence used in
 # `attention/utils/flash_attn_no_pad.py` so the two probes always agree.
@@ -49,7 +48,6 @@ except ImportError:
         from flash_attn import flash_attn_func as flash_attn_2_func
         flash_attn_func = flash_attn_2_func
         fa_version = "2"
-
 
 if fa_version == "2":
     # Scope: this op covers exactly the q/k/v + softmax_scale + causal call
@@ -80,8 +78,7 @@ if fa_version == "2":
         # `return_attn_probs=True` asks FA2 to also return softmax_lse +
         # S_dmask. We need softmax_lse to feed the backward; S_dmask is the
         # dropout mask (always None here since dropout_p is fixed at 0).
-        out, softmax_lse, _ = _fa_default(q, k, v, softmax_scale=softmax_scale,
-                                          causal=causal, return_attn_probs=True)
+        out, softmax_lse, _ = _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal, return_attn_probs=True)
         return out, softmax_lse
 
     @torch.library.register_fake("fastvideo::_flash_attn_default_forward")
@@ -116,7 +113,7 @@ if fa_version == "2":
         # the default here so the value saved on ctx (and passed to backward) is
         # always a real float — matches what FA2's own autograd.Function does.
         if softmax_scale is None:
-            softmax_scale = q.shape[-1] ** -0.5
+            softmax_scale = q.shape[-1]**-0.5
         ctx.softmax_scale = softmax_scale
         ctx.causal = causal
 
@@ -135,8 +132,15 @@ if fa_version == "2":
         # all of them explicitly. `rng_state=None` is correct for our
         # `dropout_p=0` configuration.
         _fa2_backward(
-            grad_out, q, k, v, out, lse,
-            dq, dk, dv,
+            grad_out,
+            q,
+            k,
+            v,
+            out,
+            lse,
+            dq,
+            dk,
+            dv,
             dropout_p=0.0,
             softmax_scale=ctx.softmax_scale,
             causal=ctx.causal,
