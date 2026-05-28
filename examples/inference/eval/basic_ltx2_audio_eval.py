@@ -22,6 +22,7 @@ import torch
 
 from fastvideo import VideoGenerator
 from fastvideo.eval import create_evaluator
+from pathlib import Path
 
 PROMPT = (
     "A warm sunny backyard. The camera starts in a tight cinematic close-up "
@@ -39,22 +40,29 @@ METRICS = [
 
 
 def main() -> None:
-    generator = VideoGenerator.from_pretrained(
-        "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
-    )
-
     output_path = "outputs_video/ltx2_audio_eval/output.mp4"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-        num_frames=121,
-        height=1088,
-        width=1920,
-    )
-    generator.shutdown()
-    torch.cuda.empty_cache()
+
+    if Path(output_path).exists():
+        print(f"[eval] using existing video: {output_path}")
+    else:
+        print("[eval] generating LTX2 video...")
+
+        generator = VideoGenerator.from_pretrained(
+            "Davids048/LTX2-Base-Diffusers",
+            num_gpus=1,
+        )
+
+        generator.generate_video(
+            prompt=PROMPT,
+            output_path=output_path,
+            save_video=True,
+            num_frames=121,
+            height=1088,
+            width=1920,
+        )
+
+        generator.shutdown()
+        torch.cuda.empty_cache()
 
     print(f"\n[eval] building evaluator: {METRICS}")
     evaluator = create_evaluator(metrics=METRICS)
