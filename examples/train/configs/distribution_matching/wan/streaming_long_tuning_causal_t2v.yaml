@@ -1,16 +1,13 @@
-# Self-Forcing distillation: Wan 2.1 T2V 1.3B Causal
+# Full Wan 2.1 T2V 1.3B LongLive-style streaming long tuning.
 #
-# - Teacher: frozen pretrained Wan 2.1 T2V 1.3B
-# - Student: trainable causal Wan model
-# - Critic:  trainable, initialized from pretrained weights
-# - Training: streaming rollout with SDE sampling
+# Matches the official LongLive 240-latent streaming setup in the
+# fastvideo/train config schema.
 
 models:
   student:
     _target_: fastvideo.train.models.wan.WanCausalModel
-    init_from: wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers
+    init_from: mignonjia/LongLive-1.0-Stage-1-Diffusers
     trainable: true
-    transformer_override_safetensor: /mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors
   teacher:
     _target_: fastvideo.train.models.wan.WanModel
     init_from: Wan-AI/Wan2.1-T2V-14B-Diffusers
@@ -23,12 +20,12 @@ models:
     disable_custom_init_weights: true
 
 method:
-  _target_: fastvideo.train.methods.distribution_matching.self_forcing.SelfForcingMethod
+  _target_: fastvideo.train.methods.distribution_matching.streaming_long_tuning.StreamingLongTuningMethod
   rollout_mode: simulate
   generator_update_interval: 5
   # Clean uses standard CFG for DMD real score:
-  # uncond + scale * (cond - uncond). Self-Forcing training uses
-  # cond + 3.0 * (cond - uncond), so 4.0 matches its guidance_scale=3.0.
+  # uncond + scale * (cond - uncond). Self-Forcing/LongLive training uses
+  # cond + 3.0 * (cond - uncond), so 4.0 matches their guidance_scale=3.0.
   real_score_guidance_scale: 4.0
   dmd_denoising_steps: [1000, 750, 500, 250]
   warp_denoising_step: true
@@ -40,8 +37,31 @@ method:
   enable_gradient_in_rollout: true
   start_gradient_frame: 0
 
+  streaming_training: true
+  streaming_chunk_size: 21
+  streaming_max_length: 240
+  streaming_min_new_frame: 18
+  train_first_chunk: true
+  streaming_debug_log: true
+
+  multi_phased_distill_schedule:
+    # - stage: self_forcing
+    #   start_step: 0
+    #   end_step: 700
+    #   num_latent_t: 21
+    #   streaming_training: false
+    - stage: streaming_long
+      start_step: 0
+      end_step: 3000
+      num_latent_t: 240
+      streaming_training: true
+      streaming_chunk_size: 21
+      streaming_max_length: 240
+      streaming_min_new_frame: 18
+      train_first_chunk: true
+
   # Critic optimizer
-  fake_score_learning_rate: 4.0e-7
+  fake_score_learning_rate: 2.0e-6
   fake_score_betas: [0.0, 0.999]
   fake_score_lr_scheduler: constant
 
@@ -58,31 +78,31 @@ training:
     dataloader_num_workers: 4
     train_batch_size: 1
     training_cfg_rate: 0.0
-    seed: 1000
-    num_latent_t: 21
+    seed: 0
+    num_latent_t: 240
     num_height: 480
     num_width: 832
-    num_frames: 81
+    num_frames: 957
 
   optimizer:
-    learning_rate: 2.0e-6
+    learning_rate: 1.0e-5
     betas: [0.0, 0.999]
     weight_decay: 0.01
     lr_scheduler: constant
     lr_warmup_steps: 0
 
   loop:
-    max_train_steps: 4000
+    max_train_steps: 3000
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/wan2.1_causal_self_forcing
-    training_state_checkpointing_steps: 1000
-    checkpoints_total_limit: 3
+    output_dir: outputs/wan2.1_1.3b_longlive_official_vidprom_240
+    training_state_checkpointing_steps: 0
+    checkpoints_total_limit: 0
 
   tracker:
-    project_name: self-forcing-wan
-    run_name: wan2.1_causal_self_forcing
+    project_name: longlive
+    run_name: wan2.1_1.3b_longlive_official_vidprom_240
 
   model:
     enable_gradient_checkpointing_type: full
@@ -95,17 +115,16 @@ callbacks:
     max_grad_norm: 1.0
   validation:
     pipeline_target: fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline.WanCausalDMDPipeline
-    dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
-    every_steps: 50
+    dataset_file: examples/train/validation_files/validation_8_t2v.json
+    every_steps: 100
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]
-    num_frames: 81
+    num_frames: 957
 
 pipeline:
   flow_shift: 5
   dit_config:
-    # Use a positive local_attn_size for validation videos longer than
-    # 81 frames, otherwise the full-cache path can exceed the allocated KV cache.
-    # local_attn_size includes sink latents, e.g. 12 = 3 sink + 9 rolling window.
-    local_attn_size: -1
-    sink_size: 0
+    # local_attn_size includes sink latents: 12 = 3 sink + 9 rolling window.
+    # Use a positive local_attn_size for validation videos longer than 81 frames.
+    local_attn_size: 12
+    sink_size: 3
