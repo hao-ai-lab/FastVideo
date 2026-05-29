@@ -475,6 +475,9 @@ class LTX2DenoisingStage(PipelineStage):
         for step_index in tqdm(range(len(sigmas) - 1)):
             sigma = sigmas[step_index]
             sigma_next = sigmas[step_index + 1]
+            # Per-sample sigma for LTX-2.3 cross-attention AdaLN prompt
+            # timestep. Ignored by LTX-2.0 (prompt_adaln is None).
+            sigma_batch = sigma.reshape(1).expand(latents.shape[0])
             timestep = timestep_template * sigma
             audio_timestep = (audio_timestep_template * sigma if audio_timestep_template is not None else None)
             latent_model_input = latents.to(target_dtype)
@@ -507,6 +510,8 @@ class LTX2DenoisingStage(PipelineStage):
                         audio_hidden_states=audio_latents,
                         audio_encoder_hidden_states=audio_context_p,
                         audio_timestep=audio_timestep,
+                        video_sigma=sigma_batch,
+                        audio_sigma=sigma_batch,
                         video_position_offset_sec=video_position_offset_sec,
                     )
                 if isinstance(pos_outputs, tuple):
@@ -534,6 +539,8 @@ class LTX2DenoisingStage(PipelineStage):
                                 audio_hidden_states=audio_latents,
                                 audio_encoder_hidden_states=audio_context_n,
                                 audio_timestep=audio_timestep,
+                                video_sigma=sigma_batch,
+                                audio_sigma=sigma_batch,
                                 video_position_offset_sec=video_position_offset_sec,
                             )
                         if isinstance(neg_outputs, tuple):
@@ -553,6 +560,8 @@ class LTX2DenoisingStage(PipelineStage):
                                 audio_hidden_states=audio_latents,
                                 audio_encoder_hidden_states=audio_context_p,
                                 audio_timestep=audio_timestep,
+                                video_sigma=sigma_batch,
+                                audio_sigma=sigma_batch,
                                 skip_cross_modal_attn=True,
                                 video_position_offset_sec=video_position_offset_sec,
                             )
@@ -573,6 +582,8 @@ class LTX2DenoisingStage(PipelineStage):
                                 audio_hidden_states=audio_latents,
                                 audio_encoder_hidden_states=audio_context_p,
                                 audio_timestep=audio_timestep,
+                                video_sigma=sigma_batch,
+                                audio_sigma=sigma_batch,
                                 skip_video_self_attn_blocks=(stg_blocks_video if do_stg_video else None),
                                 skip_audio_self_attn_blocks=(stg_blocks_audio if do_stg_audio else None),
                                 video_position_offset_sec=video_position_offset_sec,
