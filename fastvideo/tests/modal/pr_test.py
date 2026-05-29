@@ -289,13 +289,20 @@ def run_train_framework_tests():
               ],
               volumes={"/root/data": model_vol})
 def seed_grad_norm_references():
-    """Record the per-method grad-norm reference for the CI GPU (L40S).
+    """Record the per-method grad-norm reference for the **CI GPU (L40S only)**.
 
-    Phase 2 / 5a-ii one-off seeding entrypoint. ``FASTVIDEO_GRADNORM_UPDATE=1``
-    makes ``check_grad_norm_regression`` record the measured norm instead of
-    asserting; ``-rs`` surfaces the recorded value in the log so it can be
-    copied into ``fastvideo/tests/train/methods/grad_norm_refs.json``. Re-run on
-    any new runner GPU to seed its key.
+    Phase 2 / 5a-ii one-off seeding entrypoint. Pinned to ``gpu="L40S:1"`` (the
+    Modal CI runner), so this function only seeds the ``L40S`` key in
+    ``fastvideo/tests/train/methods/grad_norm_refs.json``.
+
+    ``FASTVIDEO_GRADNORM_UPDATE=1`` makes ``check_grad_norm_regression`` record
+    the measured norm instead of asserting; ``-rs`` surfaces the recorded value
+    in the log so it can be copied into the JSON.
+
+    To seed any other device (e.g. our local Blackwell dev box → ``GB200``
+    key), run the same env-var + pytest invocation directly on that
+    workstation — see the module docstring of ``grad_norm_regression.py`` for
+    the local command and the ``_DEVICE_MAPPINGS`` table.
     """
     run_test(
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && FASTVIDEO_GRADNORM_UPDATE=1 pytest ./fastvideo/tests/train/methods -vs -rs"

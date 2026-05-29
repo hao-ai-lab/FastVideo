@@ -13,12 +13,23 @@ fixture), and the synthetic ``raw_batch`` is built *after* that call, so the
 forward/backward is reproducible within bf16 reduction noise on a given GPU.
 
 Why device-keyed: grad norms differ across GPU architectures (kernels,
-accumulation order), so a single golden value can't cover every runner. CI runs
-this suite on L40S; B200/GB200 is our local dev GPU.
+accumulation order), so a single golden value can't cover every runner. The
+JSON currently carries refs for the two GPUs we actually run on — ``L40S`` (CI)
+and ``GB200`` (our Blackwell dev box; ``B200`` maps to the same key).
 
-To seed (or refresh) the reference for the current GPU, run the test with
-``FASTVIDEO_GRADNORM_UPDATE=1`` — it records the measured norm into
-``grad_norm_refs.json`` and skips the assertion for that run.
+Seeding a reference for the current device:
+
+- **CI / L40S** — invoke ``modal run`` against ``seed_grad_norm_references`` in
+  ``fastvideo/tests/modal/pr_test.py`` (pinned to ``gpu="L40S:1"``), then copy
+  the recorded value from the log into ``grad_norm_refs.json``.
+- **Local / non-L40S GPUs** — on that workstation::
+
+      FASTVIDEO_GRADNORM_UPDATE=1 \\
+          pytest fastvideo/tests/train/methods -vs -rs
+
+  The harness writes the measured norm into ``grad_norm_refs.json`` under the
+  device's key and skips the assertion for that run. Append a new substring
+  entry to ``_DEVICE_MAPPINGS`` first for any device not already listed.
 """
 
 from __future__ import annotations
@@ -37,14 +48,13 @@ _UPDATE_ENV = "FASTVIDEO_GRADNORM_UPDATE"
 # scale regressions), not micro-drift from reduction nondeterminism.
 _DEFAULT_RTOL = 0.10
 
-# GPU-name substring -> reference key. First match wins.
+# GPU-name substring -> reference key. First match wins. Only devices with
+# seeded references in ``grad_norm_refs.json`` are listed here — to add a new
+# GPU, append an entry, then seed the reference (see module docstring).
 _DEVICE_MAPPINGS: tuple[tuple[str, str], ...] = (
     ("L40S", "L40S"),
     ("GB200", "GB200"),
-    ("B200", "GB200"),
-    ("H100", "H100"),
-    ("H200", "H200"),
-    ("A100", "A100"),
+    ("B200", "GB200"),  # same Blackwell arch as GB200
 )
 
 
@@ -55,10 +65,15 @@ def _device_name() -> str:
 
 
 def resolve_device_key(device_name: str | None = None) -> str | None:
-    """Map a CUDA device name to its reference key, or None if unsupported."""
+    """Map a CUDA device name to its reference key, or None if unsupported.
+
+    The substring match is case-insensitive so it survives driver/environment
+    differences in how ``torch.cuda.get_device_name`` capitalizes the model.
+    """
     name = device_name if device_name is not None else _device_name()
+    name_lower = name.lower()
     for pattern, key in _DEVICE_MAPPINGS:
-        if pattern in name:
+        if pattern.lower() in name_lower:
             return key
     return None
 
@@ -69,26 +84,35 @@ def layer0_grad_norm(transformer) -> float:
     Block 0 is the reference surface 5a-i already isolates: its grad is the
     *last* one produced during backprop, so a healthy value implies the whole
     forward + chain-rule path is intact.
+
+    Accumulates the squared sums on the GPU and does a single CPU-GPU sync
+    (``.item()``) at the end, rather than one per parameter.
     """
     blocks = getattr(transformer, "blocks", None)
     assert blocks is not None and len(blocks) > 0, (
         "transformer is expected to expose a non-empty ``.blocks``")
-    sq_sum = 0.0
-    for p in blocks[0].parameters():
-        if p.requires_grad and p.grad is not None:
-            sq_sum += p.grad.detach().float().pow(2).sum().item()
-    return sq_sum**0.5
+    grads = [
+        p.grad for p in blocks[0].parameters()
+        if p.requires_grad and p.grad is not None
+    ]
+    if not grads:
+        return 0.0
+    sq_sum = torch.zeros((), device=grads[0].device, dtype=torch.float32)
+    for g in grads:
+        sq_sum += g.detach().float().pow(2).sum()
+    return sq_sum.sqrt().item()
 
 
 def _load_refs() -> dict[str, dict[str, float]]:
     if _REFS_PATH.exists():
-        return json.loads(_REFS_PATH.read_text())
+        return json.loads(_REFS_PATH.read_text(encoding="utf-8"))
     return {}
 
 
 def _save_refs(refs: dict[str, dict[str, float]]) -> None:
     _REFS_PATH.write_text(
-        json.dumps(refs, indent=2, sort_keys=True) + "\n")
+        json.dumps(refs, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8")
 
 
 def check_grad_norm_regression(
