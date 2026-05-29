@@ -41,12 +41,16 @@ DEFAULT_COLLECTION_BATCH_SIZE = 6
 DEFAULT_INNER_EPOCHS = 1
 DEFAULT_TRAIN_BATCH_SIZE = 6
 DEFAULT_GRADIENT_ACCUMULATION_STEPS = 60
+DEFAULT_LEARNING_RATE = -1.0
+DEFAULT_SAMPLE_NUM_STEPS = 0
+DEFAULT_SAMPLE_FLOW_SHIFT = -1.0
+DEFAULT_SAMPLE_GUIDANCE_SCALE = -1.0
 DEFAULT_NUM_FRAMES = 77
 DEFAULT_NUM_LATENT_T = 0
 DEFAULT_LOG_SAMPLE_MAX_VIDEOS = 2
 DEFAULT_PREPROCESS_BATCH_SIZE = 128
 DEFAULT_PREPROCESS_NUM_GPUS = 1
-DEFAULT_DATASET = "pickscore"
+DEFAULT_DATASET = "world-r1-enhanced"
 DEFAULT_REWARD = "videoalign"
 DEFAULT_MAX_PROMPTS = "quarter"
 IMAGE_MULTI_REWARD_NAMES = ("pickscore", "hpsv2", "clipscore")
@@ -149,6 +153,10 @@ def train(
     inner_epochs: int = DEFAULT_INNER_EPOCHS,
     train_batch_size: int = DEFAULT_TRAIN_BATCH_SIZE,
     gradient_accumulation_steps: int = DEFAULT_GRADIENT_ACCUMULATION_STEPS,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    sample_num_steps: int = DEFAULT_SAMPLE_NUM_STEPS,
+    sample_flow_shift: float = DEFAULT_SAMPLE_FLOW_SHIFT,
+    sample_guidance_scale: float = DEFAULT_SAMPLE_GUIDANCE_SCALE,
     num_frames: int = DEFAULT_NUM_FRAMES,
     num_latent_t: int = DEFAULT_NUM_LATENT_T,
     log_sample_max_videos: int = DEFAULT_LOG_SAMPLE_MAX_VIDEOS,
@@ -198,8 +206,23 @@ def train(
     preprocess_batch_size = int(preprocess_batch_size)
     preprocess_num_gpus = int(preprocess_num_gpus)
     log_sample_max_videos = int(log_sample_max_videos)
+    learning_rate = float(learning_rate)
+    sample_num_steps = int(sample_num_steps)
+    sample_flow_shift = float(sample_flow_shift)
+    sample_guidance_scale = float(sample_guidance_scale)
     if preprocess_batch_size <= 0:
         raise ValueError("--preprocess-batch-size must be positive")
+    if learning_rate < 0.0 and learning_rate != DEFAULT_LEARNING_RATE:
+        raise ValueError("--learning-rate must be >= 0")
+    if sample_num_steps < 0:
+        raise ValueError("--sample-num-steps must be >= 0")
+    if sample_flow_shift < 0.0 and sample_flow_shift != DEFAULT_SAMPLE_FLOW_SHIFT:
+        raise ValueError("--sample-flow-shift must be >= 0")
+    if (
+        sample_guidance_scale < 0.0
+        and sample_guidance_scale != DEFAULT_SAMPLE_GUIDANCE_SCALE
+    ):
+        raise ValueError("--sample-guidance-scale must be >= 0")
     if preprocess_num_gpus != 1:
         raise ValueError(
             "FastVideo text preprocessing currently supports "
@@ -389,17 +412,95 @@ def train(
     def prepare_prompt_file() -> int:
         nonlocal dataset_root, parquet_dir, prompt_file, prompt_suffix
 
-        source = diffusion_nft_root / "dataset" / dataset / "train.txt"
-        if not source.is_file():
-            raise RuntimeError(
-                f"DiffusionNFT dataset {dataset!r} does not provide "
-                f"{source}. The launcher expects a train.txt prompt file."
+        source_label = ""
+        if dataset in {
+            "world-r1",
+            "world-r1-final",
+            "world_r1",
+            "world_r1_final",
+        }:
+            from datasets import load_dataset
+
+            rows = load_dataset(
+                "microsoft/World-R1",
+                "final",
+                split="train",
             )
-        prompts = [
-            line.strip()
-            for line in source.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+            prompts = [
+                str(row["prompt"]).strip()
+                for row in rows
+                if str(row.get("prompt", "")).strip()
+            ]
+            source_label = "microsoft/World-R1 final/train"
+        elif dataset in {
+            "world-r1-dynamic",
+            "world_r1_dynamic",
+            "world-r1-final-dynamic",
+            "world_r1_final_dynamic",
+        }:
+            from datasets import load_dataset
+
+            rows = load_dataset(
+                "microsoft/World-R1",
+                "final",
+                split="dynamic",
+            )
+            prompts = [
+                str(row["prompt"]).strip()
+                for row in rows
+                if str(row.get("prompt", "")).strip()
+            ]
+            source_label = "microsoft/World-R1 final/dynamic"
+        elif dataset in {
+            "world-r1-enhanced",
+            "world_r1_enhanced",
+        }:
+            from datasets import load_dataset
+
+            rows = load_dataset(
+                "microsoft/World-R1",
+                "enhanced",
+                split="train",
+            )
+            prompts = [
+                str(row["prompt"]).strip()
+                for row in rows
+                if str(row.get("prompt", "")).strip()
+            ]
+            source_label = "microsoft/World-R1 enhanced/train"
+        elif dataset in {
+            "world-r1-enhanced-dynamic",
+            "world_r1_enhanced_dynamic",
+        }:
+            from datasets import load_dataset
+
+            rows = load_dataset(
+                "microsoft/World-R1",
+                "enhanced",
+                split="dynamic",
+            )
+            prompts = [
+                str(row["prompt"]).strip()
+                for row in rows
+                if str(row.get("prompt", "")).strip()
+            ]
+            source_label = "microsoft/World-R1 enhanced/dynamic"
+        else:
+            source = diffusion_nft_root / "dataset" / dataset / "train.txt"
+            if not source.is_file():
+                raise RuntimeError(
+                    f"Dataset {dataset!r} is not a built-in video prompt "
+                    "dataset and does not provide "
+                    f"{source}. Use world-r1-enhanced, world-r1-final, "
+                    "or a DiffusionNFT dataset directory with train.txt."
+                )
+            prompts = [
+                line.strip()
+                for line in source.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            source_label = str(source)
+
         prompt_limit = resolve_max_prompts(len(prompts))
         prompt_suffix = (
             "full"
@@ -432,7 +533,7 @@ def train(
             "\n".join(prompts) + "\n", encoding="utf-8"
         )
         print(
-            f"Prepared {len(prompts)} prompt(s) from {source} "
+            f"Prepared {len(prompts)} prompt(s) from {source_label} "
             f"(max_prompts={max_prompts_mode})",
             flush=True,
         )
@@ -455,6 +556,7 @@ def train(
         distributed_config = training_config.setdefault("distributed", {})
         data_config = training_config.setdefault("data", {})
         loop_config = training_config.setdefault("loop", {})
+        optimizer_config = training_config.setdefault("optimizer", {})
         checkpoint_config = training_config.setdefault("checkpoint", {})
         tracker_config = training_config.setdefault("tracker", {})
 
@@ -471,6 +573,14 @@ def train(
         method_config["log_sample_max_videos"] = int(
             log_sample_max_videos
         )
+        if sample_num_steps > 0:
+            method_config["sample_num_steps"] = int(sample_num_steps)
+        if sample_flow_shift >= 0.0:
+            method_config["sample_flow_shift"] = float(sample_flow_shift)
+        if sample_guidance_scale >= 0.0:
+            method_config["sample_guidance_scale"] = float(
+                sample_guidance_scale
+            )
         if reward in {"multi_reward", "image_multi_reward"}:
             method_config["nft_beta"] = 0.1
 
@@ -490,6 +600,8 @@ def train(
         loop_config["gradient_accumulation_steps"] = int(
             gradient_accumulation_steps
         )
+        if learning_rate >= 0.0:
+            optimizer_config["learning_rate"] = float(learning_rate)
         checkpoint_config["output_dir"] = output_dir
         tracker_config["run_name"] = Path(output_dir).name
 
@@ -574,6 +686,10 @@ def train(
         f"inner_epochs={inner_epochs} "
         f"train_batch_size={train_batch_size} "
         f"gradient_accumulation_steps={gradient_accumulation_steps} "
+        f"learning_rate={learning_rate if learning_rate >= 0 else 'config'} "
+        f"sample_num_steps={sample_num_steps if sample_num_steps > 0 else 'config'} "
+        f"sample_flow_shift={sample_flow_shift if sample_flow_shift >= 0 else 'config'} "
+        f"sample_guidance_scale={sample_guidance_scale if sample_guidance_scale >= 0 else 'config'} "
         f"num_frames={num_frames} "
         f"num_latent_t={num_latent_t} "
         f"log_sample_max_videos={log_sample_max_videos} "
@@ -643,6 +759,10 @@ def main(
     inner_epochs: int = DEFAULT_INNER_EPOCHS,
     train_batch_size: int = DEFAULT_TRAIN_BATCH_SIZE,
     gradient_accumulation_steps: int = DEFAULT_GRADIENT_ACCUMULATION_STEPS,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    sample_num_steps: int = DEFAULT_SAMPLE_NUM_STEPS,
+    sample_flow_shift: float = DEFAULT_SAMPLE_FLOW_SHIFT,
+    sample_guidance_scale: float = DEFAULT_SAMPLE_GUIDANCE_SCALE,
     num_frames: int = DEFAULT_NUM_FRAMES,
     num_latent_t: int = DEFAULT_NUM_LATENT_T,
     log_sample_max_videos: int = DEFAULT_LOG_SAMPLE_MAX_VIDEOS,
@@ -659,6 +779,10 @@ def main(
         inner_epochs=inner_epochs,
         train_batch_size=train_batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
+        learning_rate=learning_rate,
+        sample_num_steps=sample_num_steps,
+        sample_flow_shift=sample_flow_shift,
+        sample_guidance_scale=sample_guidance_scale,
         num_frames=num_frames,
         num_latent_t=num_latent_t,
         log_sample_max_videos=log_sample_max_videos,

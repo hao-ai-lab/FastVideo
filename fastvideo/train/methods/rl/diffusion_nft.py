@@ -29,6 +29,9 @@ from fastvideo.train.methods.rl.reward.diffusion_nft import (
     build_diffusion_nft_reward_fn,
 )
 from fastvideo.train.methods.rl.utils.rewards import move_reward_models
+from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
+    FlowUniPCMultistepScheduler,
+)
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.config import (
     get_optional_float,
@@ -93,6 +96,7 @@ class DiffusionNFTMethod(TrainingMethod):
         ) or dist.get_rank() == 0
 
         self.student.init_preprocessors(self.training_config)
+        self._sampling_scheduler = self._build_sampling_scheduler()
 
         self._sample_num_steps = get_optional_int(
             self.method_config,
@@ -431,11 +435,28 @@ class DiffusionNFTMethod(TrainingMethod):
             device=self.student.device,
         )
 
+    def _build_sampling_scheduler(self) -> FlowUniPCMultistepScheduler:
+        flow_shift = get_optional_float(
+            self.method_config,
+            "sample_flow_shift",
+            where="method.sample_flow_shift",
+        )
+        if flow_shift is None:
+            flow_shift = float(
+                getattr(
+                    self.training_config.pipeline_config,
+                    "flow_shift",
+                    3.0,
+                )
+                or 3.0
+            )
+        return FlowUniPCMultistepScheduler(shift=float(flow_shift))
+
     def _scheduler_timesteps_for_num_steps(
         self,
         num_steps: int,
     ) -> torch.Tensor:
-        scheduler = self.student.noise_scheduler
+        scheduler = self._sampling_scheduler
         original_timesteps = scheduler.timesteps
         original_sigmas = scheduler.sigmas
         original_step_index = scheduler.step_index
@@ -794,7 +815,7 @@ class DiffusionNFTMethod(TrainingMethod):
             generator=self.cuda_generator,
         )
 
-        scheduler = self.student.noise_scheduler
+        scheduler = self._sampling_scheduler
         original_timesteps = scheduler.timesteps
         original_sigmas = scheduler.sigmas
         original_step_index = scheduler.step_index
@@ -805,18 +826,16 @@ class DiffusionNFTMethod(TrainingMethod):
 
         try:
             if self._sample_timesteps_are_explicit:
-                scheduler.set_timesteps(
-                    timesteps=[
-                        float(t)
-                        for t in self._sample_timesteps.detach().cpu()
-                    ],
-                    device=latents.device,
+                raise ValueError(
+                    "method.sample_timesteps is not supported with "
+                    "Wan UniPC sampling. Use method.sample_num_steps "
+                    "instead."
                 )
-            else:
-                scheduler.set_timesteps(
-                    int(self._sample_num_steps or len(self._sample_timesteps)),
-                    device=latents.device,
-                )
+            scheduler.set_timesteps(
+                int(self._sample_num_steps or len(self._sample_timesteps)),
+                device=latents.device,
+            )
+            scheduler.set_begin_index(0)
             timesteps = scheduler.timesteps.to(device=latents.device)
 
             self.student.transformer.eval()
