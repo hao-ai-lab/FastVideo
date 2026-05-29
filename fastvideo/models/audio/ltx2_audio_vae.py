@@ -1534,14 +1534,100 @@ class Vocoder(nn.Module):
 # =============================================================================
 
 
+def _build_stft_basis(filter_length: int,
+                      win_length: int) -> torch.Tensor:
+    """Hann-windowed FFT basis used by ``_STFTFn`` as a Conv1d kernel.
+
+    Returns a ``(2*(filter_length//2 + 1), 1, filter_length)`` float32 tensor
+    that ``F.conv1d`` projects a 1-D waveform onto, producing real (rows
+    ``[:n_freqs]``) and imaginary (rows ``[n_freqs:]``) STFT coefficients.
+
+    Initialising the buffer deterministically here, rather than relying on a
+    ``register_buffer(torch.zeros(...))`` placeholder, makes the BWE mel
+    front-end safe against ``VocoderLoader``'s ``strict=False`` load: a
+    checkpoint that omits ``forward_basis`` no longer leaves the buffer at
+    zero (which would silently feed a constant-zero magnitude into BWE).
+    """
+    n_freqs = filter_length // 2 + 1
+    # FFT matrix: row k is e^{-2*pi*j*k*n / filter_length} for n in [0, filter_length)
+    fft_matrix = torch.fft.fft(torch.eye(filter_length, dtype=torch.float32))
+    fft_basis = fft_matrix[:n_freqs]  # (n_freqs, filter_length) complex
+    window = torch.hann_window(win_length,
+                               periodic=True,
+                               dtype=torch.float32)
+    if win_length < filter_length:
+        pad_left = (filter_length - win_length) // 2
+        pad_right = filter_length - win_length - pad_left
+        window = F.pad(window, (pad_left, pad_right))
+    elif win_length > filter_length:
+        window = window[:filter_length]
+    windowed_basis = fft_basis * window.unsqueeze(0)
+    forward_basis = torch.cat(
+        [windowed_basis.real, windowed_basis.imag],
+        dim=0,
+    ).unsqueeze(1).contiguous()
+    return forward_basis
+
+
+def _build_mel_basis(sampling_rate: int,
+                     n_fft: int,
+                     n_mel_channels: int,
+                     fmin: float = 0.0,
+                     fmax: float | None = None) -> torch.Tensor:
+    """Slaney-normalised triangular mel filterbank (librosa-compatible defaults).
+
+    Returns a ``(n_mel_channels, n_fft // 2 + 1)`` float32 tensor of weights
+    that maps an STFT magnitude spectrogram to mel bands.  Like
+    ``_build_stft_basis``, this deterministic initialisation makes the
+    ``mel_basis`` buffer safe under ``VocoderLoader``'s ``strict=False`` load.
+    """
+    if fmax is None:
+        fmax = sampling_rate / 2.0
+    n_freqs = n_fft // 2 + 1
+    fft_freqs = torch.linspace(0.0,
+                               sampling_rate / 2.0,
+                               n_freqs,
+                               dtype=torch.float32)
+
+    def _hz_to_mel(hz: float) -> float:
+        return 2595.0 * math.log10(1.0 + hz / 700.0)
+
+    def _mel_to_hz(mel: torch.Tensor) -> torch.Tensor:
+        return 700.0 * (torch.pow(torch.tensor(10.0), mel / 2595.0) - 1.0)
+
+    mel_lo = _hz_to_mel(fmin)
+    mel_hi = _hz_to_mel(fmax)
+    mel_edges_hz = _mel_to_hz(
+        torch.linspace(mel_lo,
+                       mel_hi,
+                       n_mel_channels + 2,
+                       dtype=torch.float32))
+
+    weights = torch.zeros(n_mel_channels, n_freqs, dtype=torch.float32)
+    for i in range(n_mel_channels):
+        f_lo = mel_edges_hz[i]
+        f_ctr = mel_edges_hz[i + 1]
+        f_hi = mel_edges_hz[i + 2]
+        lower = (fft_freqs - f_lo) / (f_ctr - f_lo)
+        upper = (f_hi - fft_freqs) / (f_hi - f_ctr)
+        weights[i] = torch.clamp(torch.minimum(lower, upper), min=0.0)
+    enorm = 2.0 / (mel_edges_hz[2:n_mel_channels + 2] -
+                   mel_edges_hz[:n_mel_channels])
+    return weights * enorm.unsqueeze(1)
+
+
 class _STFTFn(nn.Module):
     def __init__(self, filter_length: int, hop_length: int, win_length: int) -> None:
         super().__init__()
         self.hop_length = hop_length
         self.win_length = win_length
-        n_freqs = filter_length // 2 + 1
-        self.register_buffer("forward_basis", torch.zeros(n_freqs * 2, 1, filter_length))
-        self.register_buffer("inverse_basis", torch.zeros(n_freqs * 2, 1, filter_length))
+        forward_basis = _build_stft_basis(filter_length, win_length)
+        # ``inverse_basis`` is kept for state-dict compatibility but is
+        # currently unused at runtime.  Initialise it to the same windowed
+        # FFT basis so a checkpoint that omits it produces sane fallback
+        # behaviour rather than a silent zero buffer.
+        self.register_buffer("forward_basis", forward_basis)
+        self.register_buffer("inverse_basis", forward_basis.clone())
 
     def forward(self, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if y.dim() == 2:
@@ -1563,11 +1649,16 @@ class MelSTFT(nn.Module):
         hop_length: int,
         win_length: int,
         n_mel_channels: int,
+        sampling_rate: int,
     ) -> None:
         super().__init__()
         self.stft_fn = _STFTFn(filter_length, hop_length, win_length)
-        n_freqs = filter_length // 2 + 1
-        self.register_buffer("mel_basis", torch.zeros(n_mel_channels, n_freqs))
+        # Deterministic Slaney-normalised mel filterbank — see ``_build_mel_basis``
+        # for why this replaces the prior ``torch.zeros(...)`` placeholder.
+        self.register_buffer(
+            "mel_basis",
+            _build_mel_basis(sampling_rate, filter_length, n_mel_channels),
+        )
 
     def mel_spectrogram(
         self, y: torch.Tensor
@@ -1785,6 +1876,7 @@ class VocoderConfigurator:
                 hop_length=bwe_cfg.get("hop_length", 80),
                 win_length=bwe_cfg.get("n_fft", 512),
                 n_mel_channels=bwe_cfg.get("num_mels", 64),
+                sampling_rate=bwe_cfg.get("input_sampling_rate", 16000),
             )
             return VocoderWithBWE(
                 vocoder=base_vocoder,
