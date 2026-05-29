@@ -58,7 +58,7 @@ class _NFTQueuedBatch:
 
 
 class DiffusionNFTMethod(TrainingMethod):
-    """Online DiffusionNFT training for one-frame Wan rollouts.
+    """Online DiffusionNFT training for Wan image/video rollouts.
 
     Required roles:
     - ``student``: trainable policy model.
@@ -94,14 +94,31 @@ class DiffusionNFTMethod(TrainingMethod):
 
         self.student.init_preprocessors(self.training_config)
 
-        self._sample_timesteps = self._parse_timestep_list(
-            "sample_timesteps", default=[1000, 750, 500, 250]
+        self._sample_num_steps = get_optional_int(
+            self.method_config,
+            "sample_num_steps",
+            where="method.sample_num_steps",
+        )
+        if self._sample_num_steps is not None and self._sample_num_steps <= 0:
+            raise ValueError("method.sample_num_steps must be > 0")
+        explicit_sample_timesteps = self.method_config.get(
+            "sample_timesteps"
+        )
+        self._sample_timesteps_are_explicit = (
+            explicit_sample_timesteps is not None
+        )
+        self._sample_timesteps = (
+            self._parse_timestep_list("sample_timesteps", default=[])
+            if self._sample_timesteps_are_explicit
+            else self._scheduler_timesteps_for_num_steps(
+                int(self._sample_num_steps or 16)
+            )
         )
         self._train_timesteps = self._build_train_timestep_list()
         self._sample_guidance_scale = require_non_negative_float(
             self.method_config,
             "sample_guidance_scale",
-            default=1.0,
+            default=4.5,
             where="method.sample_guidance_scale",
         )
         self._configure_student_negative_conditioning()
@@ -121,17 +138,6 @@ class DiffusionNFTMethod(TrainingMethod):
             default=self._num_samples_per_prompt,
             where="method.collection_batch_size",
         )
-        if self._collection_batch_size > self._num_samples_per_prompt:
-            raise ValueError(
-                "method.collection_batch_size must be <= "
-                "method.num_samples_per_prompt"
-            )
-        if self._num_samples_per_prompt % self._collection_batch_size != 0:
-            raise ValueError(
-                "method.num_samples_per_prompt must be divisible by "
-                "method.collection_batch_size so collected chunks have "
-                "a stable latent shape"
-            )
         self._inner_epochs = require_positive_int(
             self.method_config,
             "inner_epochs",
@@ -420,16 +426,49 @@ class DiffusionNFTMethod(TrainingMethod):
                 f"method.{key} must be a non-empty list"
             )
         return torch.tensor(
-            [int(x) for x in raw],
-            dtype=torch.long,
+            [float(x) for x in raw],
+            dtype=torch.float32,
             device=self.student.device,
         )
+
+    def _scheduler_timesteps_for_num_steps(
+        self,
+        num_steps: int,
+    ) -> torch.Tensor:
+        scheduler = self.student.noise_scheduler
+        original_timesteps = scheduler.timesteps
+        original_sigmas = scheduler.sigmas
+        original_step_index = scheduler.step_index
+        original_begin_index = scheduler.begin_index
+        original_num_inference_steps = getattr(
+            scheduler, "num_inference_steps", None
+        )
+        try:
+            scheduler.set_timesteps(
+                int(num_steps),
+                device=self.student.device,
+            )
+            return scheduler.timesteps.detach().clone().to(
+                device=self.student.device,
+                dtype=torch.float32,
+            )
+        finally:
+            scheduler.timesteps = original_timesteps
+            scheduler.sigmas = original_sigmas
+            scheduler._step_index = original_step_index
+            scheduler._begin_index = original_begin_index
+            if original_num_inference_steps is not None:
+                scheduler.num_inference_steps = (
+                    original_num_inference_steps
+                )
 
     def _build_train_timestep_list(self) -> torch.Tensor:
         explicit = self.method_config.get("train_timesteps")
         if explicit is not None:
-            return self._parse_timestep_list(
-                "train_timesteps", default=[]
+            return self._nearest_training_timesteps(
+                self._parse_timestep_list(
+                    "train_timesteps", default=[]
+                )
             )
         fraction = get_optional_float(
             self.method_config,
@@ -448,7 +487,30 @@ class DiffusionNFTMethod(TrainingMethod):
                 int(len(self._sample_timesteps) * fraction),
             ),
         )
-        return self._sample_timesteps[:count]
+        return self._nearest_training_timesteps(
+            self._sample_timesteps[:count]
+        )
+
+    def _nearest_training_timesteps(
+        self,
+        timesteps: torch.Tensor,
+    ) -> torch.Tensor:
+        base_timesteps = self.student.noise_scheduler.timesteps.to(
+            device=self.student.device,
+            dtype=torch.float32,
+        )
+        requested = timesteps.to(
+            device=self.student.device,
+            dtype=torch.float32,
+        )
+        indices = torch.argmin(
+            (
+                base_timesteps.unsqueeze(0)
+                - requested.unsqueeze(1)
+            ).abs(),
+            dim=1,
+        )
+        return base_timesteps.index_select(0, indices)
 
     def _repeat_raw_batch(
         self,
@@ -506,6 +568,9 @@ class DiffusionNFTMethod(TrainingMethod):
         sample_batches: list[TrainingBatch] = []
         clean_chunks: list[torch.Tensor] = []
         reward_chunks: dict[str, list[torch.Tensor]] = {}
+        media_means: list[torch.Tensor] = []
+        media_stds: list[torch.Tensor] = []
+        clean_latent_stds: list[torch.Tensor] = []
         timings["time/collection_sample_sec"] = 0.0
         timings["time/collection_decode_sec"] = 0.0
         timings["time/collection_reward_sec"] = 0.0
@@ -513,45 +578,52 @@ class DiffusionNFTMethod(TrainingMethod):
         collection_batch_size = min(
             self._collection_batch_size, len(prompts)
         )
-        try:
-            move_reward_models(self._reward_model_cfg, self.student.device)
-            for start in range(0, len(prompts), collection_batch_size):
-                end = min(start + collection_batch_size, len(prompts))
-                chunk_batch = self._slice_raw_batch(
-                    repeated_batch, start, end
-                )
-                sample_batch = self.student.prepare_batch(
-                    chunk_batch,
-                    generator=self.cuda_generator,
-                    latents_source="zeros",
-                )
-                sample_batches.append(sample_batch)
+        for start in range(0, len(prompts), collection_batch_size):
+            end = min(start + collection_batch_size, len(prompts))
+            chunk_batch = self._slice_raw_batch(
+                repeated_batch, start, end
+            )
+            sample_batch = self.student.prepare_batch(
+                chunk_batch,
+                generator=self.cuda_generator,
+                latents_source="zeros",
+            )
+            sample_batches.append(sample_batch)
 
-                t0 = time.perf_counter()
-                clean = self._sample_clean_latents(sample_batch)
-                self._sync_cuda()
-                timings["time/collection_sample_sec"] += (
-                    time.perf_counter() - t0
-                )
-                clean_chunks.append(clean)
+            t0 = time.perf_counter()
+            clean = self._sample_clean_latents(sample_batch)
+            self._sync_cuda()
+            timings["time/collection_sample_sec"] += (
+                time.perf_counter() - t0
+            )
+            clean_chunks.append(clean)
+            clean_latent_stds.append(clean.detach().float().std())
 
-                t0 = time.perf_counter()
-                media = self._decode_media(clean)
-                self._sync_cuda()
-                timings["time/collection_decode_sec"] += (
-                    time.perf_counter() - t0
+            t0 = time.perf_counter()
+            media = self._decode_media(clean)
+            self._sync_cuda()
+            timings["time/collection_decode_sec"] += (
+                time.perf_counter() - t0
+            )
+            media_float = media.detach().float()
+            media_means.append(media_float.mean())
+            media_stds.append(media_float.std())
+            if (
+                self._is_main
+                and self._log_sample_max_videos > 0
+                and not captured_samples
+            ):
+                self._capture_sample_media(
+                    media,
+                    prompts[start:end],
                 )
-                if (
-                    self._is_main
-                    and self._log_sample_max_videos > 0
-                    and not captured_samples
-                ):
-                    self._capture_sample_media(
-                        media,
-                        prompts[start:end],
-                    )
-                    captured_samples = True
+                captured_samples = True
 
+            try:
+                move_reward_models(
+                    self._reward_model_cfg,
+                    self.student.device,
+                )
                 t0 = time.perf_counter()
                 chunk_rewards = self._reward_fn(
                     media,
@@ -566,10 +638,10 @@ class DiffusionNFTMethod(TrainingMethod):
                     reward_chunks.setdefault(key, []).append(
                         value.detach().to(device=self.student.device)
                     )
-        finally:
-            move_reward_models(self._reward_model_cfg, "cpu")
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            finally:
+                move_reward_models(self._reward_model_cfg, "cpu")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         sample_batch = self._concat_sample_batches(sample_batches)
         clean_latents = torch.cat(clean_chunks, dim=0)
@@ -604,6 +676,11 @@ class DiffusionNFTMethod(TrainingMethod):
             "collection/round": float(self._collection_round),
             "collection/queued_batches": float(len(self._queue)),
             "collection/sample_batches": float(len(sample_batches)),
+            "sample/media_mean": self._mean_metric(media_means),
+            "sample/media_std": self._mean_metric(media_stds),
+            "sample/clean_latent_std": self._mean_metric(
+                clean_latent_stds
+            ),
             **reward_metrics,
             **timings,
         }
@@ -621,6 +698,13 @@ class DiffusionNFTMethod(TrainingMethod):
             timings["time/collection_reward_sec"],
             timings["time/collection_queue_build_sec"],
         )
+
+    def _mean_metric(self, values: list[torch.Tensor]) -> float:
+        if not values:
+            return 0.0
+        stacked = torch.stack([value.detach().float() for value in values])
+        mean, _std = self._distributed_mean_std(stacked)
+        return mean
 
     def _capture_sample_media(
         self,
@@ -668,7 +752,9 @@ class DiffusionNFTMethod(TrainingMethod):
         embeds = [batch.encoder_hidden_states for batch in batches]
         masks = [batch.encoder_attention_mask for batch in batches]
         if raw_shape is None or any(
-            batch.raw_latent_shape != raw_shape for batch in batches
+            batch.raw_latent_shape is None
+            or batch.raw_latent_shape[1:] != raw_shape[1:]
+            for batch in batches
         ):
             raise RuntimeError("Collected sample batches changed latent shape")
         if any(embed is None for embed in embeds) or any(
@@ -676,12 +762,15 @@ class DiffusionNFTMethod(TrainingMethod):
         ):
             raise RuntimeError("Collected sample batch missing text embeds")
         batch = TrainingBatch()
-        batch.raw_latent_shape = raw_shape
         batch.encoder_hidden_states = torch.cat(
             [embed for embed in embeds if embed is not None], dim=0
         )
         batch.encoder_attention_mask = torch.cat(
             [mask for mask in masks if mask is not None], dim=0
+        )
+        batch.raw_latent_shape = (
+            batch.encoder_hidden_states.shape[0],
+            *raw_shape[1:],
         )
         return batch
 
@@ -697,81 +786,69 @@ class DiffusionNFTMethod(TrainingMethod):
                 "prepare_batch() did not set raw_latent_shape"
             )
 
+        model_dtype = batch.latents.dtype
         latents = torch.randn(
             batch.latents.shape,
             device=batch.latents.device,
-            dtype=batch.latents.dtype,
+            dtype=torch.float32,
             generator=self.cuda_generator,
         )
 
-        self.student.transformer.eval()
-        for i, timestep in enumerate(self._sample_timesteps):
-            timestep_batch = timestep.expand(latents.shape[0]).to(
-                device=latents.device
-            )
-            batch.timesteps = timestep_batch
-            batch.raw_latent_shape = raw_latent_shape
-            pred = self._guided_predict_noise(
-                self.student,
-                latents,
-                timestep_batch,
-                batch,
-                guidance_scale=self._sample_guidance_scale,
-            )
-            pred_x0 = prediction_to_x0(
-                self.student, pred, latents, timestep_batch
-            )
-            if i < len(self._sample_timesteps) - 1:
-                next_timestep = self._sample_timesteps[i + 1].expand(
-                    latents.shape[0]
-                ).to(device=latents.device)
-                latents = self._flow_euler_step(
-                    latents,
-                    pred,
-                    timestep_batch,
-                    next_timestep,
+        scheduler = self.student.noise_scheduler
+        original_timesteps = scheduler.timesteps
+        original_sigmas = scheduler.sigmas
+        original_step_index = scheduler.step_index
+        original_begin_index = scheduler.begin_index
+        original_num_inference_steps = getattr(
+            scheduler, "num_inference_steps", None
+        )
+
+        try:
+            if self._sample_timesteps_are_explicit:
+                scheduler.set_timesteps(
+                    timesteps=[
+                        float(t)
+                        for t in self._sample_timesteps.detach().cpu()
+                    ],
+                    device=latents.device,
                 )
             else:
-                latents = pred_x0
-        return latents.detach()
+                scheduler.set_timesteps(
+                    int(self._sample_num_steps or len(self._sample_timesteps)),
+                    device=latents.device,
+                )
+            timesteps = scheduler.timesteps.to(device=latents.device)
 
-    def _sigma_for_timestep(
-        self,
-        timestep: torch.Tensor,
-        *,
-        device: torch.device,
-        dtype: torch.dtype,
-    ) -> torch.Tensor:
-        scheduler = self.student.noise_scheduler
-        sigmas = scheduler.sigmas.to(device=device, dtype=dtype)
-        timesteps = scheduler.timesteps.to(device=device)
-        timestep = timestep.to(device=device)
-        sigma_idx = torch.argmin(
-            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(),
-            dim=1,
-        )
-        return sigmas.index_select(0, sigma_idx)
-
-    def _flow_euler_step(
-        self,
-        latents: torch.Tensor,
-        pred: torch.Tensor,
-        timestep: torch.Tensor,
-        next_timestep: torch.Tensor,
-    ) -> torch.Tensor:
-        sigma = self._sigma_for_timestep(
-            timestep,
-            device=latents.device,
-            dtype=torch.float32,
-        )
-        next_sigma = self._sigma_for_timestep(
-            next_timestep,
-            device=latents.device,
-            dtype=torch.float32,
-        )
-        view_shape = (latents.shape[0],) + (1,) * (latents.ndim - 1)
-        dt = (next_sigma - sigma).view(view_shape).to(latents.dtype)
-        return latents + dt * pred
+            self.student.transformer.eval()
+            for timestep in timesteps:
+                timestep_batch = timestep.expand(latents.shape[0]).to(
+                    device=latents.device
+                )
+                batch.timesteps = timestep_batch
+                batch.raw_latent_shape = raw_latent_shape
+                pred = self._guided_predict_noise(
+                    self.student,
+                    latents.to(model_dtype),
+                    timestep_batch,
+                    batch,
+                    guidance_scale=self._sample_guidance_scale,
+                )
+                latents = scheduler.step(
+                    pred.float(),
+                    timestep,
+                    latents.float(),
+                    return_dict=False,
+                )[0]
+            return latents.detach()
+        finally:
+            scheduler.timesteps = original_timesteps
+            scheduler.sigmas = original_sigmas
+            scheduler._step_index = original_step_index
+            scheduler._begin_index = original_begin_index
+            if original_num_inference_steps is not None:
+                scheduler.num_inference_steps = (
+                    original_num_inference_steps
+                )
 
     @torch.no_grad()
     def _guided_predict_noise(
@@ -817,53 +894,10 @@ class DiffusionNFTMethod(TrainingMethod):
             ``media_type=image``: ``(B, C, H, W)`` first-frame tensor.
             ``media_type=video``: ``(B, C, F, H, W)`` video tensor.
         """
-        vae = self.student.vae
         latents = clean_latents.permute(0, 2, 1, 3, 4).to(
             self.student.device
         )
-        cfg = getattr(vae, "config", None)
-        if not bool(getattr(vae, "handles_latent_denorm", False)):
-            if (
-                cfg is not None
-                and hasattr(cfg, "latents_mean")
-                and hasattr(cfg, "latents_std")
-            ):
-                latents_mean = torch.tensor(
-                    cfg.latents_mean,
-                    device=latents.device,
-                    dtype=latents.dtype,
-                ).view(1, -1, 1, 1, 1)
-                latents_std = torch.tensor(
-                    cfg.latents_std,
-                    device=latents.device,
-                    dtype=latents.dtype,
-                ).view(1, -1, 1, 1, 1)
-                latents = latents * latents_std + latents_mean
-            elif hasattr(vae, "scaling_factor"):
-                scaling_factor = vae.scaling_factor
-                if torch.is_tensor(scaling_factor):
-                    latents = latents / scaling_factor.to(
-                        latents.device, latents.dtype
-                    )
-                else:
-                    latents = latents / scaling_factor
-                shift_factor = getattr(vae, "shift_factor", None)
-                if shift_factor is not None:
-                    if torch.is_tensor(shift_factor):
-                        latents = latents + shift_factor.to(
-                            latents.device, latents.dtype
-                        )
-                    else:
-                        latents = latents + shift_factor
-
-        vae = vae.to(self.student.device)
-        with torch.autocast(
-            device_type=self.student.device.type, dtype=torch.bfloat16
-        ):
-            decoded = vae.decode(latents)
-        if isinstance(decoded, tuple):
-            decoded = decoded[0]
-        decoded = (decoded / 2 + 0.5).clamp(0, 1)
+        decoded = self.student.decode_latents(latents)
         if self._media_type == "image":
             return decoded[:, :, 0].contiguous()
         return decoded.contiguous()
@@ -1043,6 +1077,7 @@ class DiffusionNFTMethod(TrainingMethod):
                         0, idx
                     ).detach()
                 )
+                clean = clean.to(dtype=embeds.dtype)
                 adv = advantages.index_select(0, idx).detach()
                 for timestep_idx in timestep_perm:
                     timestep_value = train_timesteps[timestep_idx]
@@ -1102,7 +1137,10 @@ class DiffusionNFTMethod(TrainingMethod):
         batch.encoder_hidden_states = encoder_hidden_states
         batch.encoder_attention_mask = encoder_attention_mask
         batch.timesteps = timestep
-        batch.raw_latent_shape = raw_latent_shape
+        batch.raw_latent_shape = (
+            encoder_hidden_states.shape[0],
+            *raw_latent_shape[1:],
+        )
         batch.conditional_dict = {
             "encoder_hidden_states": encoder_hidden_states,
             "encoder_attention_mask": encoder_attention_mask,

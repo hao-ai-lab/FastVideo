@@ -40,7 +40,7 @@ DEFAULT_NUM_SAMPLES_PER_PROMPT = 24
 DEFAULT_COLLECTION_BATCH_SIZE = 6
 DEFAULT_INNER_EPOCHS = 1
 DEFAULT_TRAIN_BATCH_SIZE = 6
-DEFAULT_GRADIENT_ACCUMULATION_STEPS = 36
+DEFAULT_GRADIENT_ACCUMULATION_STEPS = 60
 DEFAULT_NUM_FRAMES = 77
 DEFAULT_NUM_LATENT_T = 0
 DEFAULT_LOG_SAMPLE_MAX_VIDEOS = 2
@@ -473,7 +473,6 @@ def train(
         )
         if reward in {"multi_reward", "image_multi_reward"}:
             method_config["nft_beta"] = 0.1
-            method_config["sample_timesteps"] = list(range(1000, 0, -40))
 
         distributed_config["num_gpus"] = DEFAULT_NUM_GPUS
         distributed_config["tp_size"] = 1

@@ -287,6 +287,8 @@ class WanModel(ModelBase):
         b, t = clean_latents.shape[:2]
         if timestep.ndim == 1 and timestep.shape[0] == b:
             timestep = timestep.view(b, 1).expand(b, t)
+        if timestep.ndim == 2:
+            timestep = timestep.flatten(0, 1)
         noisy = self.noise_scheduler.add_noise(
             clean_latents.flatten(0, 1),
             noise.flatten(0, 1),
@@ -354,8 +356,12 @@ class WanModel(ModelBase):
     def _init_timestep_mechanics(self) -> None:
         assert self.training_config is not None
         tc = self.training_config
-        self.timestep_shift = float(tc.pipeline_config.flow_shift  # type: ignore[union-attr]
-                                    )
+        flow_shift = getattr(tc.pipeline_config, "flow_shift", None)
+        if flow_shift is not None:
+            self.timestep_shift = float(flow_shift)
+            self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
+                shift=self.timestep_shift
+            )
         self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
         # min/max timestep ratios now come from method_config;
         # default to full range.

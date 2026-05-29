@@ -9,13 +9,14 @@ models:
     _target_: fastvideo.train.models.wan.WanModel
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
+    flow_shift: 3.0
 
 method:
   _target_: fastvideo.train.methods.rl.diffusion_nft.DiffusionNFTMethod
   media_type: video
 
-  sample_timesteps: [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100]
-  sample_guidance_scale: 1.0
+  sample_num_steps: 16
+  sample_guidance_scale: 4.5
   num_samples_per_prompt: 24
   collection_batch_size: 6
   inner_epochs: 1
@@ -67,7 +68,7 @@ training:
 
   loop:
     max_train_steps: 100
-    gradient_accumulation_steps: 36
+    gradient_accumulation_steps: 60
 
   checkpoint:
     output_dir: outputs/wan2.1_diffusion_nft_video_text_only
@@ -90,4 +91,4 @@ callbacks:
     fps: 16
 
 pipeline:
-  flow_shift: 8
+  flow_shift: 3.0
