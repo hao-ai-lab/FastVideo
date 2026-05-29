@@ -352,11 +352,21 @@ def _get_inferencer(
             inference_mod = _patch_videoalign_modules()
             VideoVLMRewardInference = inference_mod.VideoVLMRewardInference
         except ImportError as exc:
+            videoalign_dir = os.path.join(
+                os.path.dirname(__file__),
+                "VideoAlign",
+            )
+            if not os.path.isdir(videoalign_dir):
+                msg = (
+                    "VideoAlign not found. Ensure the "
+                    "VideoAlign submodule is checked out "
+                    "under fastvideo/train/methods/rl/"
+                    "reward/VideoAlign."
+                )
+                raise ImportError(msg) from exc
             msg = (
-                "VideoAlign not found. Ensure the "
-                "VideoAlign submodule is checked out "
-                "under fastvideo/train/methods/rl/"
-                "reward/VideoAlign"
+                "Failed to import VideoAlign runtime dependencies. "
+                f"Original import error: {exc}"
             )
             raise ImportError(msg) from exc
 

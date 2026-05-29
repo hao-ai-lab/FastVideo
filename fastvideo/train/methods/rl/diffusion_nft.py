@@ -28,6 +28,7 @@ from fastvideo.train.methods.rl.objectives.diffusion_nft import (
 from fastvideo.train.methods.rl.reward.diffusion_nft import (
     build_diffusion_nft_reward_fn,
 )
+from fastvideo.train.methods.rl.utils.rewards import move_reward_models
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.config import (
     get_optional_float,
@@ -216,6 +217,7 @@ class DiffusionNFTMethod(TrainingMethod):
         self._pending_collection_metrics: dict[str, LogScalar] = {}
         self._latest_sample_videos: torch.Tensor | None = None
         self._latest_sample_prompts: list[str] | None = None
+        self._reward_model_cfg: dict[str, float] = {}
 
         self._init_optimizer()
 
@@ -229,11 +231,25 @@ class DiffusionNFTMethod(TrainingMethod):
 
     def on_train_start(self) -> None:
         super().on_train_start()
+        self._reward_model_cfg = self._normalize_reward_model_cfg(
+            self.method_config.get("reward_fn")
+        )
         self._reward_fn = build_diffusion_nft_reward_fn(
             self.method_config.get("reward_fn"),
             device=self.student.device,
             backend=str(self.method_config.get("reward_backend", "auto")),
         )
+
+    def _normalize_reward_model_cfg(
+        self,
+        reward_config: Any,
+    ) -> dict[str, float]:
+        raw_rewards = reward_config or {}
+        if isinstance(raw_rewards, dict) and "rewards" in raw_rewards:
+            raw_rewards = raw_rewards["rewards"]
+        if not isinstance(raw_rewards, dict):
+            return {}
+        return {str(key): float(value) for key, value in raw_rewards.items()}
 
     def single_train_step(
         self,
@@ -497,57 +513,63 @@ class DiffusionNFTMethod(TrainingMethod):
         collection_batch_size = min(
             self._collection_batch_size, len(prompts)
         )
-        for start in range(0, len(prompts), collection_batch_size):
-            end = min(start + collection_batch_size, len(prompts))
-            chunk_batch = self._slice_raw_batch(
-                repeated_batch, start, end
-            )
-            sample_batch = self.student.prepare_batch(
-                chunk_batch,
-                generator=self.cuda_generator,
-                latents_source="zeros",
-            )
-            sample_batches.append(sample_batch)
+        try:
+            move_reward_models(self._reward_model_cfg, self.student.device)
+            for start in range(0, len(prompts), collection_batch_size):
+                end = min(start + collection_batch_size, len(prompts))
+                chunk_batch = self._slice_raw_batch(
+                    repeated_batch, start, end
+                )
+                sample_batch = self.student.prepare_batch(
+                    chunk_batch,
+                    generator=self.cuda_generator,
+                    latents_source="zeros",
+                )
+                sample_batches.append(sample_batch)
 
-            t0 = time.perf_counter()
-            clean = self._sample_clean_latents(sample_batch)
-            self._sync_cuda()
-            timings["time/collection_sample_sec"] += (
-                time.perf_counter() - t0
-            )
-            clean_chunks.append(clean)
+                t0 = time.perf_counter()
+                clean = self._sample_clean_latents(sample_batch)
+                self._sync_cuda()
+                timings["time/collection_sample_sec"] += (
+                    time.perf_counter() - t0
+                )
+                clean_chunks.append(clean)
 
-            t0 = time.perf_counter()
-            media = self._decode_media(clean)
-            self._sync_cuda()
-            timings["time/collection_decode_sec"] += (
-                time.perf_counter() - t0
-            )
-            if (
-                self._is_main
-                and self._log_sample_max_videos > 0
-                and not captured_samples
-            ):
-                self._capture_sample_media(
+                t0 = time.perf_counter()
+                media = self._decode_media(clean)
+                self._sync_cuda()
+                timings["time/collection_decode_sec"] += (
+                    time.perf_counter() - t0
+                )
+                if (
+                    self._is_main
+                    and self._log_sample_max_videos > 0
+                    and not captured_samples
+                ):
+                    self._capture_sample_media(
+                        media,
+                        prompts[start:end],
+                    )
+                    captured_samples = True
+
+                t0 = time.perf_counter()
+                chunk_rewards = self._reward_fn(
                     media,
                     prompts[start:end],
+                    metadata[start:end],
                 )
-                captured_samples = True
-
-            t0 = time.perf_counter()
-            chunk_rewards = self._reward_fn(
-                media,
-                prompts[start:end],
-                metadata[start:end],
-            )
-            self._sync_cuda()
-            timings["time/collection_reward_sec"] += (
-                time.perf_counter() - t0
-            )
-            for key, value in chunk_rewards.items():
-                reward_chunks.setdefault(key, []).append(
-                    value.detach().to(device=self.student.device)
+                self._sync_cuda()
+                timings["time/collection_reward_sec"] += (
+                    time.perf_counter() - t0
                 )
+                for key, value in chunk_rewards.items():
+                    reward_chunks.setdefault(key, []).append(
+                        value.detach().to(device=self.student.device)
+                    )
+        finally:
+            move_reward_models(self._reward_model_cfg, "cpu")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         sample_batch = self._concat_sample_batches(sample_batches)
         clean_latents = torch.cat(clean_chunks, dim=0)

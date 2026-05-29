@@ -55,6 +55,12 @@ VIDEO_MULTI_REWARD_NAMES = (
     "videoalign_mq",
     "videoalign_ta",
 )
+VIDEO_BALANCED_REWARD_WEIGHTS = {
+    "videoalign_ta": 1.0,
+    "videoalign_mq": 1.0,
+    "videoalign_vq": 0.75,
+    "hpsv3_general": 0.25,
+}
 GENRL_REWARD_NAMES = (
     "video_ocr",
     "hpsv3_general",
@@ -101,6 +107,8 @@ image = (
         "python -c 'import cv2, imageio; print(\"video io ok\")'",
         "python -c 'import cloudpickle, pyarrow, torchdata; "
         "print(\"training deps ok\")'",
+        "python -c 'import trl, peft, datasets, fire; "
+        "print(\"reward deps ok\")'",
     )
     .env(
         {
@@ -315,6 +323,13 @@ def train(
     def resolve_reward_map() -> tuple[dict[str, float], str]:
         if reward in {"videoalign", "video_reward", "video_multi_reward"}:
             reward_map = {name: 1.0 for name in VIDEO_MULTI_REWARD_NAMES}
+        elif reward in {
+            "videoalign_hpsv3",
+            "video_reward_hpsv3",
+            "balanced_video",
+            "quality_video",
+        }:
+            reward_map = dict(VIDEO_BALANCED_REWARD_WEIGHTS)
         elif reward in {"multi_reward", "image_multi_reward"}:
             reward_map = {name: 1.0 for name in IMAGE_MULTI_REWARD_NAMES}
         else:
