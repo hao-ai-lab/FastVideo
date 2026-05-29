@@ -197,6 +197,12 @@ Tolerance guide:
 Element-wise `assert_close` alone is not enough for deep full-DiT parity. Also
 log global abs-mean drift and per-modality summaries.
 
+When a non-skip component parity run is numerically red after weight/input
+checks, invoke `../add-model-08-trace/SKILL.md` before adding bespoke forward
+hooks. Use `docs/contributing/activation_trace.md` to keep
+`FASTVIDEO_TRACE_LAYERS`, `FASTVIDEO_TRACE_STATS`, and `FASTVIDEO_TRACE_STEPS`
+identical across FastVideo and upstream traces.
+
 Useful local commands:
 
 ```bash

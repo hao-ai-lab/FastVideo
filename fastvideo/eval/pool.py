@@ -13,10 +13,7 @@ from __future__ import annotations
 
 import queue
 import threading
-from pathlib import Path
 from typing import Any
-
-import torch
 
 from fastvideo.eval.types import Video
 
@@ -139,27 +136,19 @@ class VideoPool:
             self._ready_q.put((idx, decoded))
 
     def _decode(self, sample: dict) -> dict:
-        """Materialize and normalize ``video`` / ``reference`` entries.
+        """Materialize :class:`Video` instances by populating ``.frames``.
 
-        * ``Video`` instance → populate ``.frames`` via decode.
-        * ``str`` / ``Path`` under ``video`` / ``reference`` → decoded
-          ``(T, C, H, W)`` tensor.
-        * ``(1, T, C, H, W)`` tensor under ``video`` / ``reference`` →
-          squeezed to ``(T, C, H, W)`` (back-compat with callers that
-          still pass a leading batch dim).
-        * Everything else passes through unchanged.
+        Any value that is a ``Video`` with a source path and no frames
+        yet gets decoded.  Every other value passes through unchanged —
+        wrap paths in :class:`Video` (or use
+        :func:`fastvideo.eval.io.as_video` / :func:`samples_from`) to
+        make them decode-eligible.
         """
         from fastvideo.eval.io.video import load_video
 
         out = dict(sample)
         for key, val in sample.items():
-            if isinstance(val, Video):
-                if val.frames is None and val.source is not None:
-                    val.frames = load_video(val.source)
+            if isinstance(val, Video) and val.frames is None and val.source is not None:
+                val.frames = load_video(val.source)
                 out[key] = val
-            elif key in ("video", "reference"):
-                if isinstance(val, str | Path):
-                    out[key] = load_video(str(val))
-                elif isinstance(val, torch.Tensor) and val.dim() == 5 and val.shape[0] == 1:
-                    out[key] = val.squeeze(0)
         return out

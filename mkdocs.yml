@@ -178,6 +178,7 @@ nav:
     - Testing: contributing/testing.md
     - Performance Benchmarks: contributing/performance_benchmarks.md
     - Profiling: contributing/profiling.md
+    - Activation Trace: contributing/activation_trace.md
     - Coding Agents: contributing/coding_agents.md
     - Dreamverse Development: contributing/dreamverse-development.md
     - Attention Backend Development: contributing/attention_backend.md

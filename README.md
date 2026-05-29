@@ -42,6 +42,8 @@ FastVideo has the following features:
   - Support H100, A100, 4090
   - Support Linux, Windows, MacOS
   - See this [page](https://hao-ai-lab.github.io/FastVideo/inference/support_matrix/) for full list of supported models, hardware assumptions, and optimization compatibility.
+- Realtime video generation & editing
+  - [Dreamverse](apps/dreamverse/README.md): stream and "vibe direct" video in realtime ([live demo](https://dreamverse.fastvideo.org/)), deployable on local GPU, a self-hosted B200 server, Docker, or serverless Modal
 
 ## Getting Started
 
@@ -68,6 +70,19 @@ See below for recipes and datasets:
 | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | [FastWan2.1-T2V-1.3B](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers) | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P)       | [FastVideo Synthetic Wan2.1 480P](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x448x832_600k)     |
 | [FastWan2.2-TI2V-5B](https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-Diffusers)   | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free) | [FastVideo Synthetic Wan2.2 720P](https://huggingface.co/datasets/FastVideo/Wan2.2-Syn-121x704x1280_32k) |
+
+## Dreamverse — Realtime Video Generation & Editing
+
+[Dreamverse](apps/dreamverse/README.md) is FastVideo's realtime video generation
+and editing platform — "vibe directing" a video as it streams. It lives in the
+monorepo under [`apps/dreamverse/`](apps/dreamverse/) and ships its own backend
+(`dreamverse-server`) plus a web UI.
+
+Try the [live demo](https://dreamverse.fastvideo.org/), read the
+[blog](https://haoailab.com/blogs/dreamverse/), or run it yourself. Dreamverse
+deploys on a local GPU, a self-hosted B200 server over SSH, Docker, or
+serverless [Modal](apps/dreamverse/scripts/modal/README.md) — see the
+[Dreamverse README](apps/dreamverse/README.md).
 
 ## Inference
 

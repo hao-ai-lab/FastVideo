@@ -361,6 +361,23 @@ def resize(
     if resize_mode == "default":
         image = image.resize((width, height),
                              resample=PIL_INTERPOLATION[resample])
+    elif resize_mode == "crop":
+        src_w, src_h = image.size
+        target_ratio = height / width
+        src_ratio = src_h / src_w
+
+        if src_ratio > target_ratio:
+            crop_h = int(src_w * target_ratio)
+            crop_w = src_w
+        else:
+            crop_h = src_h
+            crop_w = int(src_h / target_ratio)
+
+        top = max(0, (src_h - crop_h) // 2)
+        left = max(0, (src_w - crop_w) // 2)
+        image = image.crop((left, top, left + crop_w, top + crop_h))
+        image = image.resize((width, height),
+                             resample=PIL_INTERPOLATION[resample])
     else:
         raise ValueError(f"resize_mode {resize_mode} is not supported")
     return image
@@ -410,4 +427,3 @@ def preprocess_reference_image_for_clip(image: PIL.Image.Image, device: torch.de
     denormalized_tensor = resized_tensor.mul_(0.5).add_(0.5)
 
     return TF.to_pil_image(denormalized_tensor)
-
