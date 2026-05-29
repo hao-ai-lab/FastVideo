@@ -15,8 +15,9 @@ method:
   _target_: fastvideo.train.methods.rl.diffusion_nft.DiffusionNFTMethod
   media_type: video
 
-  sample_num_steps: 16
-  sample_guidance_scale: 4.5
+  sample_num_steps: 50
+  sample_flow_shift: 8.0
+  sample_guidance_scale: 6.0
   num_samples_per_prompt: 24
   collection_batch_size: 6
   inner_epochs: 1

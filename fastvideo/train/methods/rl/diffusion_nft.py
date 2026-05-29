@@ -17,6 +17,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
+from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
@@ -839,17 +840,17 @@ class DiffusionNFTMethod(TrainingMethod):
             timesteps = scheduler.timesteps.to(device=latents.device)
 
             self.student.transformer.eval()
-            for timestep in timesteps:
+            for step_index, timestep in enumerate(timesteps):
                 timestep_batch = timestep.expand(latents.shape[0]).to(
                     device=latents.device
                 )
                 batch.timesteps = timestep_batch
                 batch.raw_latent_shape = raw_latent_shape
-                pred = self._guided_predict_noise(
-                    self.student,
+                pred = self._guided_predict_noise_for_sampling(
                     latents.to(model_dtype),
                     timestep_batch,
                     batch,
+                    step_index=step_index,
                     guidance_scale=self._sample_guidance_scale,
                 )
                 latents = scheduler.step(
@@ -868,6 +869,60 @@ class DiffusionNFTMethod(TrainingMethod):
                 scheduler.num_inference_steps = (
                     original_num_inference_steps
                 )
+
+    @torch.no_grad()
+    def _guided_predict_noise_for_sampling(
+        self,
+        latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        step_index: int,
+        guidance_scale: float,
+    ) -> torch.Tensor:
+        if self._attn_kind != "dense":
+            return self._guided_predict_noise(
+                self.student,
+                latents,
+                timestep,
+                batch,
+                guidance_scale=guidance_scale,
+            )
+
+        cond = batch.conditional_dict
+        if cond is None:
+            raise RuntimeError("Missing conditional_dict in TrainingBatch")
+        dtype = latents.dtype
+        device_type = self.student.device.type
+        hidden_states = latents.permute(0, 2, 1, 3, 4)
+
+        def predict(text_dict: dict[str, torch.Tensor]) -> torch.Tensor:
+            with (
+                torch.autocast(device_type, dtype=dtype),
+                set_forward_context(
+                    current_timestep=step_index,
+                    attn_metadata=None,
+                ),
+            ):
+                out = self.student.transformer(
+                    hidden_states.to(dtype),
+                    text_dict["encoder_hidden_states"].to(dtype),
+                    timestep,
+                )
+            return out.permute(0, 2, 1, 3, 4)
+
+        if guidance_scale == 1.0:
+            return predict(cond)
+
+        uncond = getattr(batch, "unconditional_dict", None)
+        if uncond is None:
+            raise RuntimeError(
+                "Missing unconditional_dict; negative conditioning "
+                "may have failed"
+            )
+        cond_pred = predict(cond)
+        uncond_pred = predict(uncond)
+        return uncond_pred + guidance_scale * (cond_pred - uncond_pred)
 
     @torch.no_grad()
     def _guided_predict_noise(
