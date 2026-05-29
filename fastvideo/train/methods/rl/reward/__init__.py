@@ -11,6 +11,7 @@ from fastvideo.train.methods.rl.reward.ocr import (
 from fastvideo.train.methods.rl.reward.videoalign import (
     videoalign_mq_score,
     videoalign_ta_score,
+    videoalign_vq_score,
 )
 from fastvideo.train.methods.rl.reward.diffusion_nft import (
     build_diffusion_nft_reward_fn,
@@ -23,4 +24,5 @@ __all__ = [
     "video_ocr_score",
     "videoalign_mq_score",
     "videoalign_ta_score",
+    "videoalign_vq_score",
 ]

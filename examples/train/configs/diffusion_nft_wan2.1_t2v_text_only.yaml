@@ -29,12 +29,14 @@ method:
   kl_weight: 0.0
   log_sample_max_videos: 2
 
-  # Mirrors the default DiffusionNFT preference run: real Flow-GRPO
-  # reward package, PickScore prompts/reward, CFG-free guidance=1.0.
-  reward_backend: diffusion_nft
+  # Video DiffusionNFT uses video-native rewards by default:
+  # VideoAlign visual quality, motion quality, and text alignment.
+  reward_backend: genrl
   reward_fn:
     rewards:
-      pickscore: 1.0
+      videoalign_vq: 1.0
+      videoalign_mq: 1.0
+      videoalign_ta: 1.0
 
 training:
   distributed:
@@ -65,7 +67,7 @@ training:
 
   loop:
     max_train_steps: 100
-    gradient_accumulation_steps: 16
+    gradient_accumulation_steps: 36
 
   checkpoint:
     output_dir: outputs/wan2.1_diffusion_nft_video_text_only

@@ -27,6 +27,10 @@ def prediction_to_x0(
     timestep: torch.Tensor,
 ) -> torch.Tensor:
     """Convert a Wan noise/flow prediction into x0 latents."""
+    if timestep.ndim == 1 and pred_noise.ndim >= 5:
+        batch, frames = pred_noise.shape[:2]
+        if timestep.shape[0] == batch:
+            timestep = timestep.view(batch, 1).expand(batch, frames)
     return pred_noise_to_pred_video(
         pred_noise=pred_noise.flatten(0, 1),
         noise_input_latent=noisy_latents.flatten(0, 1),

@@ -285,6 +285,8 @@ class WanModel(ModelBase):
         timestep: torch.Tensor,
     ) -> torch.Tensor:
         b, t = clean_latents.shape[:2]
+        if timestep.ndim == 1 and timestep.shape[0] == b:
+            timestep = timestep.view(b, 1).expand(b, t)
         noisy = self.noise_scheduler.add_noise(
             clean_latents.flatten(0, 1),
             noise.flatten(0, 1),

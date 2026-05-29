@@ -434,6 +434,37 @@ def videoalign_mq_score(
     return _score
 
 
+def videoalign_vq_score(
+    device,
+    checkpoint_path: str | None = None,
+):
+    """Return Visual Quality reward fn (color)."""
+
+    def _score(images, prompts, metadata, only_strict=False):
+        inf = _get_inferencer(device, checkpoint_path)
+        images_np = prepare_images(images)
+        batch_scores = []
+
+        for b in range(len(images_np)):
+            frames = images_np[b]
+            if frames.ndim == 3:
+                frames = frames[np.newaxis]
+            path = _save_video_to_temp(frames)
+            try:
+                results = inf.reward([path], [""], use_norm=True)
+                vq = float(results[0].get("VQ", 0))
+                batch_scores.append(vq)
+            finally:
+                os.remove(path)
+
+        reward = torch.tensor(
+            batch_scores, device=device
+        ).float()
+        return {"avg": reward}, {}
+
+    return _score
+
+
 def videoalign_ta_score(
     device,
     checkpoint_path: str | None = None,

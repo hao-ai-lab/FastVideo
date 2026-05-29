@@ -40,16 +40,30 @@ DEFAULT_NUM_SAMPLES_PER_PROMPT = 24
 DEFAULT_COLLECTION_BATCH_SIZE = 6
 DEFAULT_INNER_EPOCHS = 1
 DEFAULT_TRAIN_BATCH_SIZE = 6
-DEFAULT_GRADIENT_ACCUMULATION_STEPS = 48
-DEFAULT_NUM_FRAMES = 1
+DEFAULT_GRADIENT_ACCUMULATION_STEPS = 36
+DEFAULT_NUM_FRAMES = 77
 DEFAULT_NUM_LATENT_T = 0
 DEFAULT_LOG_SAMPLE_MAX_VIDEOS = 2
 DEFAULT_PREPROCESS_BATCH_SIZE = 128
 DEFAULT_PREPROCESS_NUM_GPUS = 1
 DEFAULT_DATASET = "pickscore"
-DEFAULT_REWARD = "pickscore"
+DEFAULT_REWARD = "videoalign"
 DEFAULT_MAX_PROMPTS = "quarter"
-MULTI_REWARD_NAMES = ("pickscore", "hpsv2", "clipscore")
+IMAGE_MULTI_REWARD_NAMES = ("pickscore", "hpsv2", "clipscore")
+VIDEO_MULTI_REWARD_NAMES = (
+    "videoalign_vq",
+    "videoalign_mq",
+    "videoalign_ta",
+)
+GENRL_REWARD_NAMES = (
+    "video_ocr",
+    "hpsv3_general",
+    "hpsv3_percentile",
+    "videoalign_vq",
+    "videoalign_mq",
+    "videoalign_ta",
+)
+VIDEOALIGN_CKPT_ROOT = f"{MODAL_CACHE_ROOT}/VideoReward"
 
 data_vol = modal.Volume.from_name("fastvideo-data")
 runs_vol = modal.Volume.from_name("fastvideo-runs")
@@ -98,6 +112,7 @@ image = (
             "HF_HUB_CACHE": f"{MODAL_CACHE_ROOT}/huggingface",
             "TRANSFORMERS_CACHE": f"{MODAL_CACHE_ROOT}/huggingface",
             "DIFFUSION_NFT_ROOT": DIFFUSION_NFT_ROOT,
+            "VIDEOALIGN_CHECKPOINT_PATH": VIDEOALIGN_CKPT_ROOT,
             "FASTVIDEO_ATTENTION_BACKEND": "FLASH_ATTN",
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
         }
@@ -297,6 +312,65 @@ def train(
         os.environ["PYTHONPATH"] = os.pathsep.join(paths)
         os.environ["DIFFUSION_NFT_ROOT"] = str(diffusion_nft_root)
 
+    def resolve_reward_map() -> tuple[dict[str, float], str]:
+        if reward in {"videoalign", "video_reward", "video_multi_reward"}:
+            reward_map = {name: 1.0 for name in VIDEO_MULTI_REWARD_NAMES}
+        elif reward in {"multi_reward", "image_multi_reward"}:
+            reward_map = {name: 1.0 for name in IMAGE_MULTI_REWARD_NAMES}
+        else:
+            reward_map = {reward: 1.0}
+        backend = (
+            "genrl"
+            if any(name in GENRL_REWARD_NAMES for name in reward_map)
+            else "diffusion_nft"
+        )
+        return reward_map, backend
+
+    def ensure_videoalign_checkpoint(reward_map: dict[str, float]) -> None:
+        if not any(name.startswith("videoalign_") for name in reward_map):
+            return
+        ckpt_root = Path(VIDEOALIGN_CKPT_ROOT)
+        has_video_reward_files = (
+            (ckpt_root / "model_config.json").exists()
+            and any(ckpt_root.glob("checkpoint-*"))
+        )
+        if has_video_reward_files:
+            print(
+                f"Using cached VideoAlign checkpoint at {ckpt_root}",
+                flush=True,
+            )
+            return
+        if ckpt_root.exists():
+            raise RuntimeError(
+                "VideoAlign checkpoint path exists but looks incomplete: "
+                f"{ckpt_root}. Move it aside or set "
+                "VIDEOALIGN_CHECKPOINT_PATH to a complete "
+                "KlingTeam/VideoReward checkout."
+            )
+        ckpt_root.parent.mkdir(parents=True, exist_ok=True)
+        tmp_root = (
+            ckpt_root.parent
+            / (
+                "VideoReward.clone."
+                f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+            )
+        )
+        subprocess.run(["git", "lfs", "install"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "https://huggingface.co/KlingTeam/VideoReward",
+                str(tmp_root),
+            ],
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+            check=True,
+        )
+        tmp_root.rename(ckpt_root)
+        os.environ["VIDEOALIGN_CHECKPOINT_PATH"] = str(ckpt_root)
+        cache_vol.commit()
+
     def prepare_prompt_file() -> int:
         nonlocal dataset_root, parquet_dir, prompt_file, prompt_suffix
 
@@ -352,10 +426,7 @@ def train(
     def prepare_run_config(output_dir: str) -> Path:
         import yaml
 
-        if reward == "multi_reward":
-            reward_map = {name: 1.0 for name in MULTI_REWARD_NAMES}
-        else:
-            reward_map = {reward: 1.0}
+        reward_map, reward_backend = resolve_reward_map()
 
         config_path = repo / CONFIG_PATH
         run_config_dir = repo / "outputs" / "diffusion_nft_run_configs"
@@ -372,7 +443,7 @@ def train(
         checkpoint_config = training_config.setdefault("checkpoint", {})
         tracker_config = training_config.setdefault("tracker", {})
 
-        method_config["reward_backend"] = "diffusion_nft"
+        method_config["reward_backend"] = reward_backend
         method_config["reward_fn"] = {"rewards": reward_map}
         method_config["num_samples_per_prompt"] = int(
             num_samples_per_prompt
@@ -385,7 +456,7 @@ def train(
         method_config["log_sample_max_videos"] = int(
             log_sample_max_videos
         )
-        if reward == "multi_reward":
+        if reward in {"multi_reward", "image_multi_reward"}:
             method_config["nft_beta"] = 0.1
             method_config["sample_timesteps"] = list(range(1000, 0, -40))
 
@@ -470,6 +541,8 @@ def train(
 
     preflight_runtime()
     ensure_diffusion_nft_repo()
+    selected_reward_map, _selected_reward_backend = resolve_reward_map()
+    ensure_videoalign_checkpoint(selected_reward_map)
     expected_prompt_rows = prepare_prompt_file()
     ensure_text_only_dataset(expected_prompt_rows)
 

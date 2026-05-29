@@ -35,7 +35,7 @@ method:
   kl_weight: 0.0
   log_sample_max_videos: 2
 
-  # Real DiffusionNFT reward package by default.
+  # Image/debug path uses the real DiffusionNFT reward package.
   reward_backend: diffusion_nft
   reward_fn:
     rewards:
@@ -70,7 +70,7 @@ training:
 
   loop:
     max_train_steps: 100
-    gradient_accumulation_steps: 16
+    gradient_accumulation_steps: 36
 
   checkpoint:
     output_dir: outputs/wan2.1_diffusion_nft_text_only

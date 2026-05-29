@@ -703,18 +703,53 @@ class DiffusionNFTMethod(TrainingMethod):
                 next_timestep = self._sample_timesteps[i + 1].expand(
                     latents.shape[0]
                 ).to(device=latents.device)
-                noise = torch.randn(
-                    pred_x0.shape,
-                    device=pred_x0.device,
-                    dtype=pred_x0.dtype,
-                    generator=self.cuda_generator,
-                )
-                latents = self.student.add_noise(
-                    pred_x0, noise, next_timestep
+                latents = self._flow_euler_step(
+                    latents,
+                    pred,
+                    timestep_batch,
+                    next_timestep,
                 )
             else:
                 latents = pred_x0
         return latents.detach()
+
+    def _sigma_for_timestep(
+        self,
+        timestep: torch.Tensor,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        scheduler = self.student.noise_scheduler
+        sigmas = scheduler.sigmas.to(device=device, dtype=dtype)
+        timesteps = scheduler.timesteps.to(device=device)
+        timestep = timestep.to(device=device)
+        sigma_idx = torch.argmin(
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(),
+            dim=1,
+        )
+        return sigmas.index_select(0, sigma_idx)
+
+    def _flow_euler_step(
+        self,
+        latents: torch.Tensor,
+        pred: torch.Tensor,
+        timestep: torch.Tensor,
+        next_timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        sigma = self._sigma_for_timestep(
+            timestep,
+            device=latents.device,
+            dtype=torch.float32,
+        )
+        next_sigma = self._sigma_for_timestep(
+            next_timestep,
+            device=latents.device,
+            dtype=torch.float32,
+        )
+        view_shape = (latents.shape[0],) + (1,) * (latents.ndim - 1)
+        dt = (next_sigma - sigma).view(view_shape).to(latents.dtype)
+        return latents + dt * pred
 
     @torch.no_grad()
     def _guided_predict_noise(
@@ -816,9 +851,45 @@ class DiffusionNFTMethod(TrainingMethod):
         prompts: list[str],
         reward_details: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, dict[str, LogScalar]]:
-        rewards = reward_details["avg"].detach().float()
+        local_rewards = reward_details["avg"].detach().float()
+        rewards = local_rewards
+        all_prompts = prompts
+        rank = 0
+        rank_lengths = [len(prompts)]
+        if dist.is_available() and dist.is_initialized():
+            world_size = dist.get_world_size()
+            rank = dist.get_rank()
+            gathered_prompts: list[list[str] | None] = [
+                None for _ in range(world_size)
+            ]
+            dist.all_gather_object(gathered_prompts, prompts)
+            gathered_rewards: list[list[float] | None] = [
+                None for _ in range(world_size)
+            ]
+            dist.all_gather_object(
+                gathered_rewards,
+                local_rewards.detach().cpu().tolist(),
+            )
+            all_prompts = [
+                prompt
+                for rank_prompts in gathered_prompts
+                for prompt in (rank_prompts or [])
+            ]
+            rank_lengths = [
+                len(rank_prompts or [])
+                for rank_prompts in gathered_prompts
+            ]
+            rewards = torch.tensor(
+                [
+                    score
+                    for rank_rewards in gathered_rewards
+                    for score in (rank_rewards or [])
+                ],
+                device=local_rewards.device,
+                dtype=torch.float32,
+            )
         advantages = torch.zeros_like(rewards)
-        prompt_array = np.array(prompts)
+        prompt_array = np.array(all_prompts)
         prompt_stds: list[float] = []
         global_std = rewards.std(unbiased=False).clamp_min(1e-4)
         for prompt in np.unique(prompt_array):
@@ -842,7 +913,10 @@ class DiffusionNFTMethod(TrainingMethod):
                 0, indices, (prompt_rewards - mean) / std
             )
 
-        return advantages, self._reward_metrics(
+        start = sum(rank_lengths[:rank])
+        end = start + rank_lengths[rank]
+        local_advantages = advantages[start:end].to(local_rewards.device)
+        return local_advantages, self._reward_metrics(
             reward_details, prompt_stds
         )
 
@@ -920,9 +994,17 @@ class DiffusionNFTMethod(TrainingMethod):
 
         queue: list[_NFTQueuedBatch] = []
         total = clean_latents.shape[0]
+        train_timesteps = self._train_timesteps.to(
+            device=clean_latents.device
+        )
         for _inner_epoch in range(self._inner_epochs):
             perm = torch.randperm(
                 total,
+                device=clean_latents.device,
+                generator=self.cuda_generator,
+            )
+            timestep_perm = torch.randperm(
+                len(train_timesteps),
                 device=clean_latents.device,
                 generator=self.cuda_generator,
             )
@@ -940,58 +1022,42 @@ class DiffusionNFTMethod(TrainingMethod):
                     ).detach()
                 )
                 adv = advantages.index_select(0, idx).detach()
-                timestep = self._sample_train_timestep(
-                    clean.shape[0], clean.device
-                )
-                noise = torch.randn(
-                    clean.shape,
-                    device=clean.device,
-                    dtype=clean.dtype,
-                    generator=self.cuda_generator,
-                )
-                noisy = self.student.add_noise(clean, noise, timestep)
-                old_batch = self._make_training_batch_from_tensors(
-                    embeds,
-                    mask,
-                    timestep,
-                    raw_shape,
-                )
-                old_pred = self.student.predict_noise(
-                    noisy,
-                    timestep,
-                    old_batch,
-                    conditional=True,
-                    attn_kind=self._attn_kind,
-                ).detach()
-                queue.append(
-                    _NFTQueuedBatch(
-                        clean_latents=clean,
-                        noisy_latents=noisy.detach(),
-                        old_prediction=old_pred,
-                        timestep=timestep.detach(),
-                        advantages=adv,
-                        encoder_hidden_states=embeds,
-                        encoder_attention_mask=mask,
-                        raw_latent_shape=raw_shape,
+                for timestep_idx in timestep_perm:
+                    timestep_value = train_timesteps[timestep_idx]
+                    timestep = timestep_value.expand(clean.shape[0])
+                    noise = torch.randn(
+                        clean.shape,
+                        device=clean.device,
+                        dtype=clean.dtype,
+                        generator=self.cuda_generator,
                     )
-                )
+                    noisy = self.student.add_noise(clean, noise, timestep)
+                    old_batch = self._make_training_batch_from_tensors(
+                        embeds,
+                        mask,
+                        timestep,
+                        raw_shape,
+                    )
+                    old_pred = self.student.predict_noise(
+                        noisy,
+                        timestep,
+                        old_batch,
+                        conditional=True,
+                        attn_kind=self._attn_kind,
+                    ).detach()
+                    queue.append(
+                        _NFTQueuedBatch(
+                            clean_latents=clean,
+                            noisy_latents=noisy.detach(),
+                            old_prediction=old_pred,
+                            timestep=timestep.detach(),
+                            advantages=adv,
+                            encoder_hidden_states=embeds,
+                            encoder_attention_mask=mask,
+                            raw_latent_shape=raw_shape,
+                        )
+                    )
         return queue
-
-    def _sample_train_timestep(
-        self,
-        batch_size: int,
-        device: torch.device,
-    ) -> torch.Tensor:
-        idx = torch.randint(
-            0,
-            len(self._train_timesteps),
-            (batch_size,),
-            device=device,
-            generator=self.cuda_generator,
-        )
-        return self._train_timesteps.to(device=device).index_select(
-            0, idx
-        )
 
     def _make_training_batch(
         self, queued: _NFTQueuedBatch

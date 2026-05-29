@@ -204,8 +204,9 @@ def build_diffusion_nft_reward_fn(
     ``reward_config`` accepts either ``{"name": weight}`` or
     ``{"rewards": {"name": weight}}``. Built-ins are
     ``jpeg_incompressibility``, ``jpeg_compressibility``, and
-    ``mean_luminance``. Unknown names delegate to the local
-    DiffusionNFT/Flow-GRPO reward package.
+    ``mean_luminance``. Video reward names delegate to FastVideo's
+    GenRL reward package; other unknown names delegate to the local
+    DiffusionNFT/Flow-GRPO image reward package.
     """
     raw_rewards: Any = reward_config or {
         "jpeg_incompressibility": 1.0
@@ -223,6 +224,7 @@ def build_diffusion_nft_reward_fn(
         "hpsv3_percentile",
         "videoalign_mq",
         "videoalign_ta",
+        "videoalign_vq",
     }
     if backend not in {"auto", "diffusion_nft", "genrl"}:
         raise ValueError(

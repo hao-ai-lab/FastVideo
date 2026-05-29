@@ -19,6 +19,7 @@ from fastvideo.train.methods.rl.reward import (
     video_ocr_score,
     videoalign_mq_score,
     videoalign_ta_score,
+    videoalign_vq_score,
 )
 from fastvideo.train.methods.rl.reward.hpsv3 import (
     _HPSV3_INFERENCERS,
@@ -37,6 +38,7 @@ _BUILTIN_REWARDS: dict[str, Callable] = {
     "hpsv3_percentile": hpsv3_percentile_score,
     "videoalign_mq": videoalign_mq_score,
     "videoalign_ta": videoalign_ta_score,
+    "videoalign_vq": videoalign_vq_score,
 }
 
 _GPU_REWARD_NAMES = {
@@ -44,6 +46,7 @@ _GPU_REWARD_NAMES = {
     "hpsv3_percentile",
     "videoalign_mq",
     "videoalign_ta",
+    "videoalign_vq",
 }
 
 
@@ -152,7 +155,7 @@ def move_reward_models(reward_cfg, device) -> None:
         set_hpsv3_device(device)
     if _has_reward(
         reward_cfg,
-        {"videoalign_mq", "videoalign_ta"},
+        {"videoalign_mq", "videoalign_ta", "videoalign_vq"},
     ):
         set_videoalign_device(device)
 
@@ -168,7 +171,7 @@ def clear_reward_models(reward_cfg) -> None:
         cleared = True
     if _has_reward(
         reward_cfg,
-        {"videoalign_mq", "videoalign_ta"},
+        {"videoalign_mq", "videoalign_ta", "videoalign_vq"},
     ):
         _VIDEOALIGN_INFERENCERS.clear()
         cleared = True
