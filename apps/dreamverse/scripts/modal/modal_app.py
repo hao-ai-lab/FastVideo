@@ -61,7 +61,13 @@ dreamverse_state = modal.Volume.from_name("dreamverse-state", create_if_missing=
 )
 @modal.web_server(8009, startup_timeout=4800)
 def serve():
-    missing = [k for k in _REQUIRED_SECRET_KEYS if not os.environ.get(k)]
+    # ``or ""`` collapses ``None`` (unset) into an empty string, ``.strip()``
+    # collapses whitespace-only values (e.g. ``"   "``) — both should be
+    # treated as missing.
+    missing = [
+        k for k in _REQUIRED_SECRET_KEYS
+        if not (os.environ.get(k) or "").strip()
+    ]
     if missing:
         raise RuntimeError(
             "dreamverse-api-keys secret is missing required entries: "
