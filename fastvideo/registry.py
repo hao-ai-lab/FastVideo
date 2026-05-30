@@ -786,7 +786,7 @@ def _register_configs() -> None:
         default_preset="sd35_medium",
     )
 
-    # GLM-Image (image generation)
+    # GLM-Image
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=GlmImageConfig,
@@ -794,6 +794,8 @@ def _register_configs() -> None:
             "zai-org/GLM-Image",
         ],
         model_detectors=[lambda path: "glmimage" in path.lower() or "glm-image" in path.lower()],
+        workload_types=(WorkloadType.T2I, ),
+        model_family="glm_image",
     )
 
 

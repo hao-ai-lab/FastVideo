@@ -7,12 +7,9 @@ from PIL import Image
 from fastvideo import VideoGenerator
 
 OUTPUT_PATH = "image_output"
+CONDITION_IMAGE = "assets/images/couple.jpg"
 
-PROMPT = (
-    "A beautiful landscape photography with rolling hills, "
-    "a winding river, and a vibrant sunset in the background. "
-    "Warm golden light, photorealistic style."
-)
+PROMPT = "Change the background to a snowy mountain landscape at golden hour."
 
 
 def main() -> None:
@@ -23,9 +20,11 @@ def main() -> None:
     )
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
+    condition = Image.open(CONDITION_IMAGE).convert("RGB")
 
     result = generator.generate_video(
         prompt=PROMPT,
+        pil_image=condition,
         output_path=OUTPUT_PATH,
         save_video=False,
         return_frames=True,
@@ -38,8 +37,8 @@ def main() -> None:
     frames = result.get("frames") if isinstance(result, dict) else None
     if frames:
         img = Image.fromarray(frames[0])
-        img.save(os.path.join(OUTPUT_PATH, "landscape.png"))
-        print(f"Saved image to {OUTPUT_PATH}/landscape.png")
+        img.save(os.path.join(OUTPUT_PATH, "edited.png"))
+        print(f"Saved image to {OUTPUT_PATH}/edited.png")
 
     generator.shutdown()
 

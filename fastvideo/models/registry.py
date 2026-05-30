@@ -84,7 +84,6 @@ _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
 }
 
 _VAE_MODELS = {
-    "AutoencoderKL": ("vaes", "autoencoderkl", "AutoencoderKL"),  # Generic 2D VAE
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
     "AutoencoderKLCausal3D": ("vaes", "gamecraftvae", "GameCraftVAE"),

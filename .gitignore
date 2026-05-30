@@ -128,3 +128,8 @@ apps/dreamverse/web/.env.production.local
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
+/reference/glm_image/
+/reference/transformers/
+/reference/diffusers/
+/official_weights/
+/converted_weights/

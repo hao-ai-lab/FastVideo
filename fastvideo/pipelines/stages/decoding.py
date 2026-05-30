@@ -215,14 +215,6 @@ class DecodingStage(PipelineStage):
                 decoded_frames = self.decode(cur_latent, fastvideo_args)
                 batch.trajectory_decoded.append(decoded_frames.cpu().float())
 
-        # Apply post-decoding hook if configured (used by GLM-Image and other
-        # pipelines that need custom processing after VAE decoding).
-        post_decoding_hook = getattr(fastvideo_args.pipeline_config,
-                                     'post_decoding', None)
-        if post_decoding_hook is not None:
-            logger.debug("Applying post_decoding hook")
-            frames = post_decoding_hook(frames)
-
         # Convert to float32 for compatibility
         frames = frames.to(torch.float32)
 

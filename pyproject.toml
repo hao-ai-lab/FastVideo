@@ -32,7 +32,7 @@ dependencies = [
     "torchaudio",
 
     # Acceleration & Optimization
-    "accelerate>=1.0.1",
+    "accelerate==1.0.1",
 
     # Computer Vision & Image Processing
     "opencv-python==4.10.0.84",
