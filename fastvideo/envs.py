@@ -287,9 +287,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
 
     # CFG gating fraction for stale-uncond reuse (Adaptive Guidance / LinearAG
     # variant — Castillo et al. 2023, arXiv:2312.12487).  Float in [0, 1].
-    # Interpretation: for step index `i < num_inference_steps * X`, run both
+    # Interpretation: for step index `i < len(timesteps) * X`, run both
     # cond and uncond forwards and refresh delta_cached = cond - uncond.
-    # Once `i >= num_inference_steps * X`, skip the uncond forward and reuse
+    # Once `i >= len(timesteps) * X`, skip the uncond forward and reuse
     # the cached delta:  noise_pred = cond + (guidance_scale - 1) * delta.
     #
     # Edge cases:
