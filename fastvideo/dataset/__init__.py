@@ -10,6 +10,7 @@ from fastvideo.dataset.preprocessing_datasets import VideoCaptionMergedDataset, 
 from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255,
                                          TemporalRandomCrop)
 from fastvideo.dataset.validation_dataset import ValidationDataset
+from fastvideo.dataset.rl_prompt_dataset import build_rl_prompt_dataloader
 
 
 def getdataset(args) -> VideoCaptionMergedDataset:
@@ -51,4 +52,5 @@ __all__ = [
     "ValidationDataset",
     "VideoCaptionMergedDataset",
     "TextDataset",
+    "build_rl_prompt_dataloader",
 ]

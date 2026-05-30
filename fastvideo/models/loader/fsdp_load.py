@@ -187,6 +187,7 @@ def maybe_load_fsdp_model(
                 f"Unexpected param or buffer {n} on meta device.")
         # Avoid unintended computation graph accumulation during inference
         if isinstance(p, torch.nn.Parameter):
+            
             p.requires_grad = False
 
     # NVFP4 weight prequantization. We detect by the registered
