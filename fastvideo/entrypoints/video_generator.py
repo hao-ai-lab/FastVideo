@@ -461,6 +461,9 @@ class VideoGenerator:
     def generate_video_batch(self, request_kwargs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Generate multiple legacy video requests, batching compatible items."""
         work_items: list[_GenerationWorkItem] = []
+        fastvideo_args_by_pipeline_override: dict[tuple[tuple[str, str], ...], FastVideoArgs] = {
+            (): self.fastvideo_args
+        }
         for raw_kwargs in request_kwargs:
             kwargs = dict(raw_kwargs)
             prompt = kwargs.pop("prompt", None)
@@ -480,13 +483,37 @@ class VideoGenerator:
                 if _ek in kwargs:
                     extra_overrides[_ek] = kwargs.pop(_ek)
 
-            sampling_param.update(kwargs)
-            output_path = self._prepare_output_path(sampling_param.output_path, prompt)
+            request = legacy_generate_call_to_request(
+                prompt,
+                sampling_param,
+                legacy_kwargs=kwargs,
+            )
+            if not isinstance(request.prompt, str):
+                raise TypeError(f"`prompt` must be a string, but got {type(request.prompt)}")
+
+            fastvideo_args = self.fastvideo_args
+            pipeline_overrides = request_to_pipeline_overrides(request)
+            if pipeline_overrides:
+                override_key = tuple((key, repr(value)) for key, value in sorted(pipeline_overrides.items()))
+                fastvideo_args = fastvideo_args_by_pipeline_override.get(override_key)
+                if fastvideo_args is None:
+                    fastvideo_args = deepcopy(self.fastvideo_args)
+                    for key, value in pipeline_overrides.items():
+                        if not hasattr(fastvideo_args.pipeline_config, key):
+                            raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
+                        setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+                    fastvideo_args_by_pipeline_override[override_key] = fastvideo_args
+
+            resolved_sampling_param = request_to_sampling_param(
+                request,
+                model_path=self.fastvideo_args.model_path,
+            )
+            output_path = self._prepare_output_path(resolved_sampling_param.output_path, request.prompt)
             work_items.append(
                 self._prepare_generation_work_item(
-                    prompt=prompt,
-                    sampling_param=sampling_param,
-                    fastvideo_args=self.fastvideo_args,
+                    prompt=request.prompt,
+                    sampling_param=resolved_sampling_param,
+                    fastvideo_args=fastvideo_args,
                     output_path=output_path,
                     _extra_overrides=extra_overrides,
                 ))
