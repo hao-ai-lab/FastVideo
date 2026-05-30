@@ -771,9 +771,13 @@ class ActionModule(nn.Module):
         ) % self.vae_time_compression_ratio == 0
         N_feats = int((N_frames - 1) / self.vae_time_compression_ratio) + 1
 
-        # Lazy initialization of freqs on first forward pass
-        if self._freqs_cos is None or self._freqs_sin is None:
-            self._freqs_cos, self._freqs_sin = self.get_rotary_pos_embed(
+        # Lazy initialization of freqs on first forward pass. Cache on the
+        # compute device so the per-call `.to(xq.device)` in _apply_rotary_emb_qk
+        # is a no-op (avoids an H2D copy every forward, which also breaks
+        # CUDA-graph capture).
+        if (self._freqs_cos is None or self._freqs_sin is None
+                or self._freqs_cos.device != x.device):
+            _fc, _fs = self.get_rotary_pos_embed(
                 7500,
                 self.patch_size[1],
                 self.patch_size[2],
@@ -781,6 +785,8 @@ class ActionModule(nn.Module):
                 self.mouse_qk_dim_list,
                 start_offset=0,
             )
+            self._freqs_cos = _fc.to(x.device)
+            self._freqs_sin = _fs.to(x.device)
 
         # Defined freqs_cis early so it's available for both mouse and keyboard
         freqs_cis = (self._freqs_cos, self._freqs_sin)
