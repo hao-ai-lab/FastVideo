@@ -67,7 +67,8 @@ FastVideo files inspected:
       - added async scheduler tests for compatible grouping and incompatible
         fallback.
 - [x] Stage 5 remote validation passed on Modal L40S.
-- [ ] Stage 5 commit.
+- [x] Stage 5 commit: `4c6a9dc2`
+      (`[feat]: add OpenAI video batching scheduler`).
 - [ ] After approval, implement remaining stages with commits and remote Modal validation.
 - [ ] Produce final Markdown write-up with test and benchmark results and commit it.
 
@@ -222,8 +223,7 @@ Files changed/added:
   - Added scheduler grouping and incompatible fallback tests using a fake
     generator.
 
-Pending for Stage 5:
-- Commit Stage 5 if validation passes.
+Stage 5 is complete.
 
 Validation attempt:
 - Modal app: `ap-2PJ4b5eKPnxR9HTEb9x3UM`
@@ -296,7 +296,9 @@ Current local implementation state:
 - Stage 2 code is committed as `fe5572f3`.
 - Stage 2 state commit is `39cb1d43`; branch is pushed to origin through
   Stage 2.
-- Stage 5 code is local, remote validated, and ready to commit.
+- Stage 5 code is committed as `4c6a9dc2`.
+- The state-file update recording that commit is the only local change before
+  GPU parity/benchmark work.
 
 Important constraints:
 - Do not edit unrelated untracked files already present in the worktree.
@@ -306,4 +308,4 @@ Important constraints:
   test environment.
 
 Next step:
-Commit the Stage 5 slice, then begin GPU parity and benchmark validation.
+Push Stage 5, then begin GPU parity and benchmark validation.
