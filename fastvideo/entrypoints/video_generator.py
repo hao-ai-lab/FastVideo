@@ -18,6 +18,7 @@ import warnings
 from collections.abc import Mapping
 from contextlib import suppress
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any
 
 import imageio
@@ -26,6 +27,8 @@ import torch
 import torchvision
 from einops import rearrange
 
+from fastvideo.batching.admission import BatchAdmissionController
+from fastvideo.batching.signature import can_dynamic_batch
 from fastvideo.api.compat import (
     expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
@@ -115,6 +118,17 @@ def _infer_latent_batch_size(batch: ForwardBatch) -> int:
         raise ValueError("Cannot infer batch size from batch; no prompt or prompt_embeds found")
     latent_batch_size *= batch.num_videos_per_prompt
     return latent_batch_size
+
+
+@dataclass
+class _GenerationWorkItem:
+    prompt: str
+    sampling_param: SamplingParam
+    fastvideo_args: FastVideoArgs
+    batch: ForwardBatch
+    output_path: str
+    target_height: int
+    target_width: int
 
 
 class VideoGenerator:
@@ -444,6 +458,41 @@ class VideoGenerator:
             if log_queue:
                 self.executor.clear_log_queue()
 
+    def generate_video_batch(self, request_kwargs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Generate multiple legacy video requests, batching compatible items."""
+        work_items: list[_GenerationWorkItem] = []
+        for raw_kwargs in request_kwargs:
+            kwargs = dict(raw_kwargs)
+            prompt = kwargs.pop("prompt", None)
+            if prompt is None:
+                raise ValueError("Each batched generation request must include prompt")
+            if not isinstance(prompt, str):
+                raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
+
+            sampling_param = kwargs.pop("sampling_param", None)
+            if sampling_param is None:
+                sampling_param = SamplingParam.from_pretrained(self.fastvideo_args.model_path)
+            else:
+                sampling_param = deepcopy(sampling_param)
+
+            extra_overrides: dict[str, Any] = {}
+            for _ek in _BATCH_EXTRA_PASSTHROUGH_KEYS:
+                if _ek in kwargs:
+                    extra_overrides[_ek] = kwargs.pop(_ek)
+
+            sampling_param.update(kwargs)
+            output_path = self._prepare_output_path(sampling_param.output_path, prompt)
+            work_items.append(
+                self._prepare_generation_work_item(
+                    prompt=prompt,
+                    sampling_param=sampling_param,
+                    fastvideo_args=self.fastvideo_args,
+                    output_path=output_path,
+                    _extra_overrides=extra_overrides,
+                ))
+
+        return self._generate_prepared_work_items(work_items)
+
     def _generate_request_impl(
         self,
         request: GenerationRequest,
@@ -539,6 +588,26 @@ class VideoGenerator:
                 raise ValueError(f"No prompts found in file: {prompt_txt_path}")
 
             logger.info("Found %d prompts in %s", len(prompts), prompt_txt_path)
+
+            if self._dynamic_batching_enabled(fastvideo_args):
+                work_items: list[_GenerationWorkItem] = []
+                for batch_prompt in prompts:
+                    item_kwargs = dict(kwargs)
+                    item_kwargs["output_path"] = self._prepare_output_path(sampling_param.output_path, batch_prompt)
+                    work_items.append(
+                        self._prepare_generation_work_item(
+                            prompt=batch_prompt,
+                            sampling_param=sampling_param,
+                            fastvideo_args=fastvideo_args,
+                            **item_kwargs,
+                        ))
+
+                results = self._generate_prepared_work_items(work_items)
+                for i, (result, batch_prompt) in enumerate(zip(results, prompts, strict=True)):
+                    result["prompt_index"] = i
+                    result["prompt"] = batch_prompt
+                logger.info("Completed batch processing. Generated %d videos successfully.", len(results))
+                return results
 
             results = []
             for i, batch_prompt in enumerate(prompts):
@@ -659,6 +728,379 @@ class VideoGenerator:
             new_output_path = os.path.join(output_dir, new_name)
             counter += 1
         return new_output_path
+
+    def _dynamic_batching_enabled(self, fastvideo_args: FastVideoArgs) -> bool:
+        batching_mode = getattr(fastvideo_args, "batching_mode", "disabled")
+        batching_max_size = getattr(fastvideo_args, "batching_max_size", 1)
+        return batching_mode == "dynamic" and batching_max_size > 1
+
+    def _prepare_generation_work_item(
+        self,
+        prompt: str | list[str],
+        sampling_param: SamplingParam,
+        fastvideo_args: FastVideoArgs,
+        **kwargs,
+    ) -> _GenerationWorkItem:
+        if isinstance(prompt, str):
+            prompt_for_output = prompt.strip()
+            prompt_value: str | list[str] = prompt_for_output
+        elif isinstance(prompt, list) and all(isinstance(item, str) for item in prompt):
+            prompt_value = [item.strip() for item in prompt]
+            prompt_for_output = prompt_value[0] if prompt_value else ""
+        else:
+            raise TypeError(f"`prompt` must be a string or list of strings, but got {type(prompt)}")
+
+        sampling_param = deepcopy(sampling_param)
+        output_path = kwargs["output_path"]
+        sampling_param.prompt = prompt_value
+        if sampling_param.negative_prompt is not None:
+            sampling_param.negative_prompt = sampling_param.negative_prompt.strip()
+
+        if sampling_param.height <= 0 or sampling_param.width <= 0 or sampling_param.num_frames <= 0:
+            raise ValueError(f"Height, width, and num_frames must be positive integers, got "
+                             f"height={sampling_param.height}, width={sampling_param.width}, "
+                             f"num_frames={sampling_param.num_frames}")
+
+        target_height = align_to(sampling_param.height, 16)
+        target_width = align_to(sampling_param.width, 16)
+        latents_size = [(sampling_param.num_frames - 1) // 4 + 1, sampling_param.height // 8, sampling_param.width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+
+        debug_str = f"""
+                      height: {target_height}
+                       width: {target_width}
+                video_length: {sampling_param.num_frames}
+                      prompt: {sampling_param.prompt}
+                      image_path: {sampling_param.image_path}
+                  neg_prompt: {sampling_param.negative_prompt}
+                        seed: {sampling_param.seed}
+                 infer_steps: {sampling_param.num_inference_steps}
+       num_videos_per_prompt: {sampling_param.num_videos_per_prompt}
+              guidance_scale: {sampling_param.guidance_scale}
+                    n_tokens: {n_tokens}
+                  flow_shift: {fastvideo_args.pipeline_config.flow_shift}
+     embedded_guidance_scale: {fastvideo_args.pipeline_config.embedded_cfg_scale}
+                  save_video: {sampling_param.save_video}
+                  output_path: {output_path}
+        """ # type: ignore[attr-defined]
+        logger.info(debug_str)
+
+        batch = ForwardBatch(
+            **shallow_asdict(sampling_param),
+            eta=0.0,
+            n_tokens=n_tokens,
+            VSA_sparsity=fastvideo_args.VSA_sparsity,
+        )
+
+        extra_overrides = kwargs.get("_extra_overrides", {})
+        for _ek, _ev in extra_overrides.items():
+            batch.extra[_ek] = _ev
+
+        return _GenerationWorkItem(
+            prompt=prompt_for_output,
+            sampling_param=sampling_param,
+            fastvideo_args=fastvideo_args,
+            batch=batch,
+            output_path=output_path,
+            target_height=target_height,
+            target_width=target_width,
+        )
+
+    def _run_forward_batch(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> tuple[ForwardBatch, float, float]:
+        start_time = time.perf_counter()
+        result_container = {"output_batch": ForwardBatch(data_type=batch.data_type)}
+        thread_error: dict[str, BaseException | None] = {"error": None}
+        thread_error_traceback: dict[str, str] = {"traceback": ""}
+
+        def execute_forward_thread():
+            import traceback
+            try:
+                result_container["output_batch"] = self.executor.execute_forward(batch, fastvideo_args)
+            except BaseException as error:  # noqa: BLE001
+                thread_error["error"] = error
+                thread_error_traceback["traceback"] = traceback.format_exc()
+
+        thread = threading.Thread(target=execute_forward_thread)
+        thread.start()
+        thread.join()
+
+        if thread_error["error"] is not None:
+            raise RuntimeError("Forward execution thread failed.\n"
+                               f"{thread_error_traceback['traceback']}") from thread_error["error"]
+
+        output_batch = result_container["output_batch"]
+        if output_batch.output is None:
+            raise RuntimeError("Forward execution returned no output tensor. "
+                               "This usually means the executor/pipeline failed earlier.")
+
+        gen_time = time.perf_counter() - start_time
+        logger.info("Generated successfully in %.2f seconds", gen_time)
+        return output_batch, gen_time, start_time
+
+    def _samples_from_output(
+        self,
+        work_item: _GenerationWorkItem,
+        output_batch: ForwardBatch,
+    ) -> torch.Tensor:
+        output = output_batch.output
+        if output is None:
+            raise RuntimeError("Forward execution returned no output tensor.")
+        fastvideo_args = work_item.fastvideo_args
+        sampling_param = work_item.sampling_param
+        latent_batch_size = _infer_latent_batch_size(work_item.batch)
+        skip_pixel_prealloc = fastvideo_args.output_type == "latent"
+        expected_shape = (
+            latent_batch_size,
+            3,
+            sampling_param.num_frames,
+            sampling_param.height,
+            sampling_param.width,
+        )
+        if skip_pixel_prealloc:
+            return output.cpu()
+        samples = torch.empty(expected_shape, device="cpu", pin_memory=fastvideo_args.pin_cpu_memory)
+        if output.shape == samples.shape:
+            samples.copy_(output)
+            return samples
+        logger.warning("Output shape %s does not match expected shape %s; use slow path", output.shape, samples.shape)
+        return output.cpu()
+
+    def _postprocess_generation_output(
+        self,
+        work_item: _GenerationWorkItem,
+        output_batch: ForwardBatch,
+        gen_time: float,
+        start_time: float,
+    ) -> dict[str, Any]:
+        batch = work_item.batch
+        fastvideo_args = work_item.fastvideo_args
+        output_path = work_item.output_path
+        samples = self._samples_from_output(work_item, output_batch)
+        logging_info = output_batch.logging_info
+
+        is_latent_output = fastvideo_args.output_type == "latent"
+        audio_only = bool(output_batch.extra.get("audio_only"))
+
+        postprocess_start = time.perf_counter()
+        frames: list[np.ndarray] | None
+        if is_latent_output or audio_only:
+            frames = None if is_latent_output else []
+        else:
+            videos = rearrange(samples, "b c t h w -> t b c h w")
+            frames = []
+            for x in videos:
+                x = torchvision.utils.make_grid(x, nrow=6)
+                x = x.permute(1, 2, 0).squeeze(-1)
+                x = (x * 255).to(torch.uint8)
+                frames.append(x.contiguous().cpu().numpy())
+        postprocess_time = time.perf_counter() - postprocess_start
+        logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
+        if logging_info is not None:
+            logging_info.add_stage_execution_time("PostDecodeFrameProcessStage", postprocess_time)
+
+        save_to_disk = batch.save_video and not is_latent_output
+        save_video_time = 0.0
+        audio_mux_time = 0.0
+        if save_to_disk:
+            if audio_only:
+                output_path = self._rewrite_extension(output_path, ".wav")
+                save_start = time.perf_counter()
+                self._write_pcm_wav(
+                    output_path,
+                    output_batch.extra["audio"],
+                    int(output_batch.extra["audio_sample_rate"]),
+                )
+                save_video_time = time.perf_counter() - save_start
+                logger.info("Saved audio to %s", output_path)
+            elif self._is_image_workload():
+                assert frames is not None
+                save_start = time.perf_counter()
+                imageio.imwrite(output_path, frames[0])
+                save_video_time = time.perf_counter() - save_start
+                logger.info("Saved image to %s", output_path)
+            else:
+                assert frames is not None
+                audio = output_batch.extra.get("audio")
+                audio_sample_rate = output_batch.extra.get("audio_sample_rate")
+                if audio is not None and audio_sample_rate is not None:
+                    save_start = time.perf_counter()
+                    save_ok = self._save_video_with_audio_ffmpeg_pipe(
+                        output_path=output_path,
+                        frames=frames,
+                        fps=batch.fps,
+                        audio=audio,
+                        sample_rate=int(audio_sample_rate),
+                    )
+                    if not save_ok:
+                        logger.warning("ffmpeg pipe save failed; trying PyAV single-pass save.")
+                        save_ok = self._save_video_with_audio_single_pass(
+                            output_path=output_path,
+                            frames=frames,
+                            fps=batch.fps,
+                            audio=audio,
+                            sample_rate=int(audio_sample_rate),
+                        )
+                    save_video_time = time.perf_counter() - save_start
+                    if save_ok:
+                        audio_mux_time = 0.0
+                    else:
+                        logger.warning("Single-pass save failed; falling back to two-step save/mux.")
+                        save_start = time.perf_counter()
+                        imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                        save_video_time = time.perf_counter() - save_start
+                        mux_start = time.perf_counter()
+                        mux_ok = self._mux_audio(output_path, audio, int(audio_sample_rate))
+                        audio_mux_time = time.perf_counter() - mux_start
+                        if not mux_ok:
+                            logger.warning("Audio mux failed; saved video without audio.")
+                else:
+                    save_start = time.perf_counter()
+                    imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                    save_video_time = time.perf_counter() - save_start
+                    audio_mux_time = 0.0
+                logger.info("Saved video to %s", output_path)
+
+            logger.info("VideoSaveStage completed in %.3f s", save_video_time)
+            if logging_info is not None:
+                logging_info.add_stage_execution_time("VideoSaveStage", save_video_time)
+            logger.info("AudioMuxStage completed in %.3f s", audio_mux_time)
+            if logging_info is not None:
+                logging_info.add_stage_execution_time("AudioMuxStage", audio_mux_time)
+
+        e2e_time = time.perf_counter() - start_time
+        logger.info("End-to-end latency: %.2f seconds", e2e_time)
+
+        return {
+            "prompts": work_item.prompt,
+            "samples": samples if batch.return_frames else None,
+            "frames": frames if batch.return_frames else None,
+            "audio": output_batch.extra.get("audio"),
+            "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
+            "ltx2_audio_latents": output_batch.extra.get("ltx2_audio_latents"),
+            "size": (work_item.target_height, work_item.target_width, batch.num_frames),
+            "generation_time": gen_time,
+            "e2e_latency": e2e_time,
+            "logging_info": logging_info,
+            "trajectory": output_batch.trajectory_latents,
+            "trajectory_timesteps": output_batch.trajectory_timesteps,
+            "trajectory_decoded": output_batch.trajectory_decoded,
+            "video_path": output_path if save_to_disk else None,
+            "peak_memory_mb": output_batch.extra.get("peak_memory_mb"),
+        }
+
+    def _split_output_batch(
+        self,
+        output_batch: ForwardBatch,
+        *,
+        index: int,
+        batch_size: int,
+    ) -> ForwardBatch:
+        extra = {}
+        for key, value in (output_batch.extra or {}).items():
+            if torch.is_tensor(value) and value.ndim > 0 and value.shape[0] == batch_size:
+                extra[key] = value[index:index + 1]
+            elif isinstance(value, list) and len(value) == batch_size:
+                extra[key] = value[index]
+            else:
+                extra[key] = value
+
+        result = ForwardBatch(
+            data_type=output_batch.data_type,
+            output=(output_batch.output[index:index + 1] if output_batch.output is not None else None),
+            logging_info=output_batch.logging_info,
+            extra=extra,
+        )
+        if output_batch.trajectory_latents is not None:
+            result.trajectory_latents = output_batch.trajectory_latents[index:index + 1]
+        result.trajectory_timesteps = output_batch.trajectory_timesteps
+        if output_batch.trajectory_decoded is not None:
+            result.trajectory_decoded = [
+                decoded[index:index + 1] if torch.is_tensor(decoded) and decoded.shape[0] == batch_size else decoded
+                for decoded in output_batch.trajectory_decoded
+            ]
+        return result
+
+    def _merge_work_items(self, work_items: list[_GenerationWorkItem]) -> _GenerationWorkItem:
+        first = work_items[0]
+        sampling_param = deepcopy(first.sampling_param)
+        prompts = [item.prompt for item in work_items]
+        sampling_param.prompt = prompts
+        sampling_param.seed = work_items[0].sampling_param.seed
+
+        merged = self._prepare_generation_work_item(
+            prompts,
+            sampling_param,
+            first.fastvideo_args,
+            output_path=first.output_path,
+            _extra_overrides=first.batch.extra,
+        )
+        merged.batch.seeds = [int(item.sampling_param.seed) for item in work_items]
+        merged.batch.extra["dynamic_batch_size"] = len(work_items)
+        merged.batch.extra["dynamic_batch_output_paths"] = [item.output_path for item in work_items]
+        return merged
+
+    def _can_merge_work_items(
+        self,
+        base: _GenerationWorkItem,
+        candidate: _GenerationWorkItem,
+        admission: BatchAdmissionController,
+        current_group: list[_GenerationWorkItem],
+    ) -> bool:
+        if candidate.fastvideo_args is not base.fastvideo_args:
+            return False
+        compatibility = can_dynamic_batch(
+            base.sampling_param,
+            candidate.sampling_param,
+            base_extra=base.batch.extra,
+            candidate_extra=candidate.batch.extra,
+        )
+        if not compatibility.can_batch:
+            return False
+        current_requests = [item.sampling_param for item in current_group]
+        return admission.reject_reason_for_candidate(current_requests, candidate.sampling_param) is None
+
+    def _generate_prepared_work_items(
+        self,
+        work_items: list[_GenerationWorkItem],
+    ) -> list[dict[str, Any]]:
+        if not work_items:
+            return []
+        fastvideo_args = work_items[0].fastvideo_args
+        if not self._dynamic_batching_enabled(fastvideo_args):
+            return [self._execute_single_work_item(item) for item in work_items]
+
+        admission = BatchAdmissionController(fastvideo_args)
+        results: list[dict[str, Any]] = []
+        index = 0
+        while index < len(work_items):
+            group = [work_items[index]]
+            index += 1
+            while index < len(work_items) and len(group) < fastvideo_args.batching_max_size:
+                candidate = work_items[index]
+                if not self._can_merge_work_items(group[0], candidate, admission, group):
+                    break
+                group.append(candidate)
+                index += 1
+
+            if len(group) == 1:
+                results.append(self._execute_single_work_item(group[0]))
+                continue
+
+            merged = self._merge_work_items(group)
+            output_batch, gen_time, start_time = self._run_forward_batch(merged.batch, merged.fastvideo_args)
+            batch_size = len(group)
+            for item_index, item in enumerate(group):
+                split_batch = self._split_output_batch(output_batch, index=item_index, batch_size=batch_size)
+                results.append(self._postprocess_generation_output(item, split_batch, gen_time, start_time))
+        return results
+
+    def _execute_single_work_item(self, work_item: _GenerationWorkItem) -> dict[str, Any]:
+        output_batch, gen_time, start_time = self._run_forward_batch(work_item.batch, work_item.fastvideo_args)
+        return self._postprocess_generation_output(work_item, output_batch, gen_time, start_time)
 
     def _generate_single_video(
         self,
