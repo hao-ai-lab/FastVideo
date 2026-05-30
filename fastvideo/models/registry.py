@@ -42,7 +42,6 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
     "Gen3CTransformer3DModel": ("dits", "gen3c", "Gen3CTransformer3DModel"),
     "Kandinsky5Transformer3DModel": ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
-    "FluxTransformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
     "Flux2Transformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
 }
 
@@ -74,7 +73,6 @@ _TEXT_ENCODER_MODELS = {
     "Qwen3ForCausalLM": ("encoders", "qwen3", "Qwen3ForCausalLM"),
     "Mistral3ForConditionalGeneration":
     ("encoders", "mistral3", "Mistral3ForConditionalGeneration"),
-    "TransformersModel": ("encoders", "qwen3", "Qwen3ForCausalLM"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {

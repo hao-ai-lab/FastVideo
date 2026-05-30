@@ -635,15 +635,10 @@ class Flux2TransformerBlock(nn.Module):
         ) * norm_encoder_hidden_states + c_shift_msa
 
         # Attention on concatenated img + txt stream
-        attn_kwargs = {
-            k: v for k, v in joint_attention_kwargs.items()
-            if k not in ("_debug_double_enc", "_double_block_index")
-        }
         attention_outputs = self.attn(
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
             freqs_cis=freqs_cis,
-            **attn_kwargs,
         )
 
         attn_output, context_attn_output = attention_outputs
@@ -660,34 +655,18 @@ class Flux2TransformerBlock(nn.Module):
 
         # Process attention outputs for the text stream (`encoder_hidden_states`).
         context_attn_output = c_gate_msa * context_attn_output
-        debug_enc = joint_attention_kwargs.get("_debug_double_enc")
-        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
-            debug_enc["context_attn_output"].append(context_attn_output.detach().clone())
         encoder_hidden_states = encoder_hidden_states + context_attn_output
-
-        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
-            debug_enc["after_attn"].append(encoder_hidden_states.detach().clone())
 
         norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
         norm_encoder_hidden_states = (
             norm_encoder_hidden_states * (1 + c_scale_mlp) + c_shift_mlp
         )
-        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
-            debug_enc["before_ff"].append(norm_encoder_hidden_states.detach().clone())
 
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
-        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
-            debug_enc["context_ff_output"].append(context_ff_output.detach().clone())
-            debug_enc["c_gate_mlp"].append(c_gate_mlp.detach().clone())
         context_ff_update = c_gate_mlp * context_ff_output
-        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
-            debug_enc["context_ff_update"].append(context_ff_update.detach().clone())
         encoder_hidden_states = encoder_hidden_states + context_ff_update
         if encoder_hidden_states.dtype == torch.float16:
             encoder_hidden_states = encoder_hidden_states.clip(-65504, 65504)
-
-        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
-            debug_enc["after_ff"].append(encoder_hidden_states.detach().clone())
 
         return encoder_hidden_states, hidden_states
 
@@ -995,7 +974,7 @@ class Flux2Transformer2DModel(BaseDiT):
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> torch.Tensor:
         """
-        The [`FluxTransformer2DModel`] forward method.
+        The [`Flux2Transformer2DModel`] forward method.
 
         Args:
             hidden_states (`torch.Tensor` of shape `(batch_size, image_sequence_length, in_channels)`):
@@ -1011,11 +990,7 @@ class Flux2Transformer2DModel(BaseDiT):
 
         """
         # 0. Handle input arguments
-        if joint_attention_kwargs is not None:
-            joint_attention_kwargs = joint_attention_kwargs.copy()
-            lora_scale = joint_attention_kwargs.pop("scale", 1.0)
-        else:
-            lora_scale = 1.0
+        joint_attention_kwargs = joint_attention_kwargs.copy() if joint_attention_kwargs is not None else {}
 
         # Pipeline passes prompt_embeds as a list (one per text encoder); use first
         if isinstance(encoder_hidden_states, (list, tuple)):
@@ -1071,8 +1046,6 @@ class Flux2Transformer2DModel(BaseDiT):
 
         # 4. Double Stream Transformer Blocks
         for index_block, block in enumerate(self.transformer_blocks):
-            if joint_attention_kwargs is not None:
-                joint_attention_kwargs["_double_block_index"] = index_block
             encoder_hidden_states, hidden_states = block(
                 hidden_states=hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
