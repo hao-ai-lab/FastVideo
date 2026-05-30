@@ -42,7 +42,7 @@ FastVideo files inspected:
       batching admission rules, compatibility signatures, and focused unit
       tests have been added locally.
 - [x] Stage 1 remote validation passed on Modal L40S.
-- [ ] Stage 1 commit.
+- [x] Stage 1 commit: `3d3157fb` (`[feat]: add generation batching primitives`).
 - [ ] After approval, implement remaining stages with commits and remote Modal validation.
 - [ ] Produce final Markdown write-up with test and benchmark results and commit it.
 
@@ -126,8 +126,7 @@ Files changed/added:
 - `fastvideo/tests/api/test_compat_translation.py`
   - Added batching config translation coverage.
 
-Pending for Stage 1:
-- Commit Stage 1 once remote validation passes.
+Stage 1 is complete.
 
 Validation attempt:
 - Modal L40S command:
@@ -176,8 +175,9 @@ If this port lands cleanly, create a runtime batching SOP covering:
 Current branch: `multimodal-gen-batching`.
 
 Current local implementation state:
-- Stage 1 code is present locally and remote validated.
-- Stage 1 commit is the next action.
+- Stage 1 code is committed as `3d3157fb`.
+- The state-file update recording that commit is intentionally the only local
+  change before Stage 2 begins.
 
 Important constraints:
 - Do not edit unrelated untracked files already present in the worktree.
@@ -187,5 +187,7 @@ Important constraints:
   test environment.
 
 Next step:
-Commit the Stage 1 slice, then begin Stage 2 generator/executor merge-split
-work.
+Begin Stage 2 generator/executor merge-split work. The immediate target is to
+refactor `VideoGenerator._generate_single_video()` into preparation,
+execution, and postprocess helpers, then add internal batch merge/split support
+without changing the default `batching_max_size=1` behavior.
