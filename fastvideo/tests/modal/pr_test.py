@@ -5,6 +5,12 @@ import modal
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
+# Build cache for Flash Attention 3 (Hopper sm90+). FA3 is not in the default
+# fastvideo-dev image, and a source build from flash-attention/hopper takes
+# ~90 min on the Modal container CPU. Cached artifacts are keyed on
+# IMAGE_VERSION so an image bump (different torch/cuda ABI) invalidates the
+# cache and triggers a fresh build automatically.
+fa3_cache_vol = modal.Volume.from_name("fa3-build-cache", create_if_missing=True)
 image_version = os.getenv("IMAGE_VERSION")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
@@ -334,3 +340,92 @@ def run_api_server_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/entrypoints/test_openai_api_integration.py -vs"
     )
+
+
+@app.function(
+    gpu="H100:2",
+    image=image,
+    # Cold FA3 source build is ~90 min (293 templated nvcc kernels at
+    # MAX_JOBS=8 on the Modal container CPU); cache hit drops install to ~30 s.
+    timeout=10800,
+    secrets=[
+        modal.Secret.from_dict({
+            "HF_API_KEY": os.environ.get("HF_API_KEY", ""),
+            "IMAGE_VERSION": os.environ.get("IMAGE_VERSION", ""),
+        })
+    ],
+    volumes={
+        "/root/data": model_vol,
+        "/fa3_cache": fa3_cache_vol,
+    },
+)
+def run_performance_tests_h100():
+    """Run inference perf tests on H100:2 with Flash Attention 3 enabled.
+
+    FA3 (Hopper sm90+) is not in the default fastvideo-dev image. This
+    function installs it via a three-tier strategy:
+      1. already-present  — image baked it in (future-proof; not today)
+      2. cache restore    — Modal Volume hit; ~30 s copy
+      3. source build     — flash-attention/hopper HEAD; ~90 min nvcc compile,
+                            then transactional save to the cache volume
+
+    The cache key includes IMAGE_VERSION so an image bump (different
+    torch/cuda ABI) triggers a rebuild. After install, an assertion verifies
+    ``fa_version == '3'`` so a silent fallback to FA2 fails the job.
+
+    Pytest then runs the entire ``fastvideo/tests/performance`` suite, so
+    any benchmark whose ``required_gpus <= 2`` will exercise FA3 on Hopper.
+    """
+    fa3_install = (
+        "SP=$(python -c 'import site; print(site.getsitepackages()[0])') && "
+        "CACHE_DIR=/fa3_cache/site-packages-${IMAGE_VERSION:-unknown} && "
+        "CACHE_MARKER=$CACHE_DIR/.INSTALLED && "
+        "if python -c 'import flash_attn_interface' 2>/dev/null; then "
+        "  echo '[fa3] already present in image'; "
+        "elif [ -f \"$CACHE_MARKER\" ]; then "
+        "  echo '[fa3] cache hit at' $CACHE_DIR && "
+        "  cp -r $CACHE_DIR/. $SP/ && "
+        "  python -c 'import flash_attn_interface' && "
+        "  echo '[fa3] restored from cache'; "
+        "else "
+        "  echo '[fa3] cache miss; building flash-attention/hopper (~90 min)' && "
+        "  uv pip install -q ninja && "
+        "  git clone --depth 1 https://github.com/Dao-AILab/flash-attention.git /tmp/flash-attention && "
+        "  ( cd /tmp/flash-attention/hopper && MAX_JOBS=8 python setup.py install ) && "
+        "  python -c 'import flash_attn_interface' && "
+        "  STAGE=/fa3_cache/staging-$$ && mkdir -p $STAGE && "
+        "  for pat in 'flash_attn_interface*' 'flash_attn_3*'; do "
+        "    find $SP -maxdepth 1 -name \"$pat\" -exec cp -r {} $STAGE/ \\; 2>/dev/null; "
+        "  done && "
+        "  rm -rf $CACHE_DIR && mv $STAGE $CACHE_DIR && touch $CACHE_MARKER && "
+        "  echo '[fa3] cache saved to' $CACHE_DIR; "
+        "fi"
+    )
+    verify_fa3 = (
+        "python -c \"from fastvideo.attention.backends.flash_attn import fa_version; "
+        "assert fa_version == '3', f'expected fa_version=3, got {fa_version}'\""
+    )
+    try:
+        run_test(
+            "export HF_HOME='/root/data/.cache' && "
+            "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
+            "hf auth login --token $HF_API_KEY && "
+            f"{fa3_install} && "
+            f"{verify_fa3} && "
+            "pytest ./fastvideo/tests/performance -vs; "
+            "PYTEST_RC=$?; "
+            "PERF_RC=0; "
+            "if [ $PYTEST_RC -eq 0 ]; then "
+            "python ./fastvideo/tests/performance/compare_baseline.py; "
+            "PERF_RC=$?; "
+            "fi; "
+            "python ./fastvideo/tests/performance/dashboard.py || true; "
+            "FINAL_RC=$PYTEST_RC; "
+            "if [ $FINAL_RC -eq 0 ]; then FINAL_RC=$PERF_RC; fi; "
+            "exit $FINAL_RC"
+        )
+    finally:
+        try:
+            fa3_cache_vol.commit()
+        except Exception as exc:
+            print(f"[fa3] cache volume commit failed: {exc}")
