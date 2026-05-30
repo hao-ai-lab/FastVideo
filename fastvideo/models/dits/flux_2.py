@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from diffusers.models.activations import get_activation
 from diffusers.models.attention import AttentionModuleMixin
 
 from fastvideo.configs.models.dits.flux_2 import Flux2Config
@@ -35,7 +36,7 @@ class TimestepEmbedding(nn.Module):
         self.act = nn.SiLU()
         time_embed_dim_out = out_dim if out_dim is not None else time_embed_dim
         self.linear_2 = nn.Linear(time_embed_dim, time_embed_dim_out, sample_proj_bias)
-        self.post_act = None if post_act_fn is None else None
+        self.post_act = None if post_act_fn is None else get_activation(post_act_fn)
 
     def forward(self, sample: torch.Tensor, condition: Optional[torch.Tensor] = None) -> torch.Tensor:
         if condition is not None and self.cond_proj is not None:
@@ -994,6 +995,12 @@ class Flux2Transformer2DModel(BaseDiT):
 
         # Pipeline passes prompt_embeds as a list (one per text encoder); use first
         if isinstance(encoder_hidden_states, (list, tuple)):
+            if len(encoder_hidden_states) > 1:
+                logger.warning(
+                    "Flux 2 received %d encoder outputs but uses only the first; "
+                    "indices >= 1 are dropped. Wire multi-encoder support or pass only one.",
+                    len(encoder_hidden_states),
+                )
             encoder_hidden_states = encoder_hidden_states[0]
 
         num_txt_tokens = encoder_hidden_states.shape[1]
@@ -1028,8 +1035,10 @@ class Flux2Transformer2DModel(BaseDiT):
                 if input_was_5d:
                     img_h, img_w = h, w
                 else:
-                    img_seq_len = hidden_states.shape[1]
-                    img_h = img_w = int(img_seq_len ** 0.5)
+                    raise ValueError(
+                        "Flux 2 4D input requires explicit txt_ids and img_ids "
+                        "with real image dimensions; square-image fallback removed."
+                    )
 
                 txt_len = encoder_hidden_states.shape[1]
                 txt_ids = torch.cartesian_prod(

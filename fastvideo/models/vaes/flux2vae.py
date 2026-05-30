@@ -32,7 +32,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
     """
 
     _supports_gradient_checkpointing = True
-    _no_split_modules = ["BasicTransformerBlock", "ResnetBlock2D"]
+    _no_split_modules = ["Attention", "ResnetBlock2D"]
 
     def __init__(
         self,
