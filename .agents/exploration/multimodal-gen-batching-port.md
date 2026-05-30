@@ -54,7 +54,8 @@ FastVideo files inspected:
       - removed the standard denoising stage batch-size-1 assertion,
       - added focused CPU-light tests with fake forward execution.
 - [x] Stage 2 remote validation passed on Modal L40S.
-- [ ] Stage 2 commit.
+- [x] Stage 2 commit: `fe5572f3`
+      (`[feat]: add generator dynamic batching path`).
 - [ ] After approval, implement remaining stages with commits and remote Modal validation.
 - [ ] Produce final Markdown write-up with test and benchmark results and commit it.
 
@@ -162,8 +163,7 @@ Files changed/added:
 - `fastvideo/tests/stages/test_input_validation_batching.py`
   - Added seed preservation and prompt-list seed fanout tests.
 
-Pending for Stage 2:
-- Commit Stage 2 if validation passes.
+Stage 2 is complete.
 
 Validation attempt:
 - Modal app: `ap-vsU8ZgjMvfGgpRBWk4IfCV`
@@ -241,7 +241,9 @@ Current branch: `multimodal-gen-batching`.
 
 Current local implementation state:
 - Stage 1 code is committed as `3d3157fb`; state commit is `ce758820`.
-- Stage 2 code is local, remote validated, and ready to commit.
+- Stage 2 code is committed as `fe5572f3`.
+- The state-file update recording that commit is the only local change before
+  Stage 5 begins.
 
 Important constraints:
 - Do not edit unrelated untracked files already present in the worktree.
@@ -251,5 +253,9 @@ Important constraints:
   test environment.
 
 Next step:
-Commit the Stage 2 slice, then move to Stage 5 OpenAI server queue
-integration.
+Begin Stage 5 OpenAI server queue integration:
+- add a queue/scheduler object that groups compatible queued API requests,
+- start/stop it from API server lifespan,
+- route `video_api.create_video` through the scheduler when dynamic batching is
+  enabled,
+- keep image/reference requests sequential via compatibility fallback.
