@@ -94,6 +94,11 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "pin_cpu_memory",
     "enable_torch_compile",
     "torch_compile_kwargs",
+    "batching_mode",
+    "batching_max_size",
+    "batching_delay_ms",
+    "batching_config",
+    "enable_batching_metrics",
     "output_type",
     "nvfp4_fa4",
 })

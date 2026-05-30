@@ -169,6 +169,14 @@ class FastVideoArgs:
     # Prompt text file for batch processing
     prompt_txt: str | None = None
 
+    # Dynamic multimodal generation batching. Defaults preserve the historical
+    # one-request-at-a-time execution path.
+    batching_mode: str = "disabled"
+    batching_max_size: int = 1
+    batching_delay_ms: float = 0.0
+    batching_config: str | None = None
+    enable_batching_metrics: bool = False
+
     # LTX-2 VAE tiling overrides
     ltx2_vae_tiling: bool | None = None
     ltx2_vae_spatial_tile_size_in_pixels: int | None = None
@@ -445,6 +453,37 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.prompt_txt,
             help="Path to a text file containing prompts (one per line) for batch processing",
+        )
+        parser.add_argument(
+            "--batching-mode",
+            type=str,
+            choices=["disabled", "dynamic"],
+            default=FastVideoArgs.batching_mode,
+            help="Request batching mode for inference serving.",
+        )
+        parser.add_argument(
+            "--batching-max-size",
+            type=int,
+            default=FastVideoArgs.batching_max_size,
+            help="Maximum number of compatible generation requests to execute as one batch.",
+        )
+        parser.add_argument(
+            "--batching-delay-ms",
+            type=float,
+            default=FastVideoArgs.batching_delay_ms,
+            help="Maximum queue delay in milliseconds before dispatching a dynamic batch.",
+        )
+        parser.add_argument(
+            "--batching-config",
+            type=str,
+            default=FastVideoArgs.batching_config,
+            help="Optional JSON batching admission rule file.",
+        )
+        parser.add_argument(
+            "--enable-batching-metrics",
+            action=StoreBoolean,
+            default=FastVideoArgs.enable_batching_metrics,
+            help="Log dynamic batching utilization and rejection metrics.",
         )
 
         # LTX-2 VAE tiling overrides
@@ -752,6 +791,13 @@ class FastVideoArgs:
         assert isinstance(self.workload_type,
                           WorkloadType), f"Workload type must be a WorkloadType enum, got {type(self.workload_type)}"
         assert self.workload_type in WorkloadType.choices(), f"Invalid workload type: {self.workload_type}"
+
+        if self.batching_mode not in {"disabled", "dynamic"}:
+            raise ValueError(f"batching_mode must be 'disabled' or 'dynamic', got {self.batching_mode!r}")
+        if self.batching_max_size < 1:
+            raise ValueError("batching_max_size must be >= 1")
+        if self.batching_delay_ms < 0:
+            raise ValueError("batching_delay_ms must be >= 0")
 
         if self.mode in [ExecutionMode.DISTILLATION, ExecutionMode.FINETUNING] and self.inference_mode:
             logger.warning("Mode is 'training' but inference_mode is True. Setting inference_mode to False.")
