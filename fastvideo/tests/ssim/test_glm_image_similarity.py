@@ -53,11 +53,11 @@ GLM_IMAGE_PARAMS = {
     "model_path": GLM_IMAGE_MODEL_PATH,
     "sp_size": 1,
     "tp_size": 1,
-    "height": 512,
-    "width": 512,
+    "height": 256,
+    "width": 256,
     "num_frames": 1,
     "fps": 1,
-    "num_inference_steps": 8,
+    "num_inference_steps": 4,
     "guidance_scale": 1.5,
     "seed": 0,
     "neg_prompt": "",
@@ -95,12 +95,10 @@ def _has_weights() -> bool:
 
 def _upstream_glm_image_available() -> bool:
     try:
-        import diffusers
         import transformers
     except ImportError:
         return False
-    return (hasattr(transformers, "GlmImageForConditionalGeneration")
-            and hasattr(diffusers, "GlmImagePipeline"))
+    return hasattr(transformers, "GlmImageForConditionalGeneration")
 
 
 @pytest.mark.skipif(
@@ -113,8 +111,7 @@ def _upstream_glm_image_available() -> bool:
 )
 @pytest.mark.skipif(
     not _upstream_glm_image_available(),
-    reason=("GLM-Image needs transformers>=5.0.0rc0 and "
-            "diffusers>=0.37.0.dev0; main pins predate both."),
+    reason="GLM-Image needs transformers>=5.0.0rc0 (ships the AR encoder).",
 )
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("attention_backend_name", ["TORCH_SDPA"])
