@@ -1,6 +1,6 @@
 # Exploration Log: Multimodal Generation Batching Port
 
-## Status: implementation in progress
+## Status: complete with documented dynamic parity limitation
 
 ## Context
 User requested a staged plan, approval before implementation, and then a port of
@@ -77,8 +77,10 @@ FastVideo files inspected:
       8-step batch size 2 workload.
 - [x] Commit GPU helper, parity fixes, and benchmark state:
       `9c6eb355` (`[fix]: harden dynamic generation batching`).
-- [ ] Commit final Markdown write-up with test and benchmark results.
-- [ ] Push branch to origin after final report commit.
+- [x] Commit final Markdown write-up with test and benchmark results:
+      `2304837e` (`[docs]: record multimodal batching validation report`).
+- [x] Push branch to origin after final report commit.
+- [x] Final changed-file validation passed on Modal L40S.
 
 ## Findings
 Upstream SGLang batching is not just a larger prompt list. It has four pieces:
@@ -494,9 +496,16 @@ Current local implementation state:
 - Stage 2 state commit is `39cb1d43`; branch is pushed to origin through
   Stage 2.
 - Stage 5 code is committed as `4c6a9dc2`.
-- The GPU validation helper script, `generate_video_batch()` compat fix,
-  prompt-list tokenizer padding fix, prompt-list single-text-encode parity fix,
-  unit tests, and this state update are local and uncommitted.
+- Stage 5 state commit is `1bea1dee`.
+- GPU helper, parity hardening fixes, and benchmark state are committed as
+  `9c6eb355`.
+- Final report is committed as `2304837e`.
+- Branch was pushed to origin through `2304837e`.
+- Final changed-file validation passed on Modal app
+  `ap-1mFqrE5eCwPkEKnffQcQou` from commit
+  `2304837ed1bc0e1cd733d61f864d6cb1e7682b26`:
+  `119 passed, 14 warnings`, and pre-commit passed.
+- No code changes remain after the final validation report/state update.
 
 Important constraints:
 - Do not edit unrelated untracked files already present in the worktree.
@@ -506,5 +515,5 @@ Important constraints:
   test environment.
 
 Next step:
-Commit the final Markdown report, run any final remote hook check needed for
-the report/state files, then push `multimodal-gen-batching` to origin.
+Push `multimodal-gen-batching` to origin if the final docs-only state update is
+not already present there.
