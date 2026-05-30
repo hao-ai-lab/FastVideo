@@ -24,6 +24,7 @@ the sequential path.
 - `4c6a9dc2` - `[feat]: add OpenAI video batching scheduler`
 - `1bea1dee` - `[misc]: record batching stage 5 state`
 - `9c6eb355` - `[fix]: harden dynamic generation batching`
+- `2304837e` - `[docs]: record multimodal batching validation report`
 
 ## Implementation
 
@@ -99,6 +100,7 @@ Focused tests and hooks:
 | Batch compat fix | `ap-gmob40FWTO5knEPA39s3bd` | `pytest fastvideo/tests/entrypoints/test_video_generator.py -q && pre-commit run --files ...` | `23 passed`, pre-commit passed |
 | Text padding fix | `ap-IJIJjdLogSGkzeN4sCP46E` | entrypoint and text encoding tests plus pre-commit | `28 passed`, pre-commit passed |
 | Single-text-encode fix | `ap-DIIEE6Wy0I728fqsc63C6s` | entrypoint and text encoding tests plus pre-commit | `29 passed`, pre-commit passed |
+| Final changed-file suite | `ap-1mFqrE5eCwPkEKnffQcQou` | batching, generator, text encoding, OpenAI API, compat, and input-validation tests plus pre-commit | `119 passed`, pre-commit passed |
 
 ## Parity
 
@@ -176,4 +178,3 @@ the request.
 - A future exact-parity mode could preserve the scheduler/admission queue but
   execute denoising per request. That would satisfy strict numerical parity but
   would give up most batching speedup.
-
