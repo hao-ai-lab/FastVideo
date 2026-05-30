@@ -741,13 +741,21 @@ class VideoGenerator:
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
         latent_batch_size = _infer_latent_batch_size(batch)
-        # When ``output_type == "latent"`` the forward output has latent
-        # shape (e.g. ``[B, C_latent, T_latent, H_latent, W_latent]``)
-        # rather than the pre-allocation's pixel shape. Skip the pinned
-        # ~50 MB buffer entirely; we always fall through to the
-        # ``samples = output_batch.output.cpu()`` branch below in that
-        # mode. ``skip_pixel_prealloc`` also gates the slow-path warning.
-        skip_pixel_prealloc = fastvideo_args.output_type == "latent"
+        # ``samples`` is consumed in exactly one place — the result dict
+        # (``"samples": samples if batch.return_frames else None``,
+        # ~line 888). Post-decode frame building reads
+        # ``output_batch.output`` directly (the GPU ``vid_u8`` path from
+        # the previous commit), not ``samples``. So when
+        # ``return_frames=False`` the pinned ~50 MB fp32 alloc + D->H
+        # copy are dead weight — the typical generate flow
+        # (``save_video=True``, ``return_frames=False``) hits this on
+        # every call.
+        # ``output_type == "latent"`` keeps its existing branch (shape
+        # mismatch falls through to ``.cpu()`` below) for callers that
+        # *do* ask for the latent samples via ``return_frames=True``.
+        # ``skip_pixel_prealloc`` also gates the slow-path warning.
+        needs_samples_out = batch.return_frames
+        skip_pixel_prealloc = (fastvideo_args.output_type == "latent" or not needs_samples_out)
         if skip_pixel_prealloc:
             samples = torch.empty(0, device='cpu')
         else:
@@ -766,7 +774,13 @@ class VideoGenerator:
             raise RuntimeError("Forward execution returned no output tensor. "
                                "This usually means the executor/pipeline failed earlier.")
 
-        if output_batch.output.shape == samples.shape:
+        if not needs_samples_out:
+            # Nothing downstream reads ``samples`` (result dict returns
+            # None at ~line 888 because ``return_frames=False``); leave
+            # it as the empty placeholder allocated above and skip the
+            # fp32 D->H copy entirely.
+            pass
+        elif output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
         else:
             if not skip_pixel_prealloc:
@@ -797,13 +811,27 @@ class VideoGenerator:
         if is_latent_output or audio_only:
             frames = None if is_latent_output else []
         else:
-            videos = rearrange(samples, "b c t h w -> t b c h w")
-            frames = []
-            for x in videos:
-                x = torchvision.utils.make_grid(x, nrow=6)
-                x = x.permute(1, 2, 0).squeeze(-1)
-                x = (x * 255).to(torch.uint8)
-                frames.append(x.contiguous().cpu().numpy())
+            # Quantize on the source device (typically CUDA) BEFORE the
+            # device->host copy. `samples` above is just the pinned-CPU
+            # mirror of `output_batch.output` (`samples.copy_(output)` or
+            # `output.cpu()`) with no intervening preprocessing, so reading
+            # `output_batch.output` here is the same data — but its
+            # non-blocking D->H had not completed, so the first op that
+            # touched `samples` blocked on the full fp32 video transfer
+            # (which scales with resolution x frames x batch and can be
+            # large) and then ran a single-threaded per-frame CPU
+            # *255/cast loop. Casting to uint8 on-device first makes the
+            # transfer 4x smaller and moves the elementwise work onto the
+            # GPU. clamp_() also fixes a latent overflow bug: VAE output
+            # slightly outside [0, 1] wrapped mod 256 in the old unclamped
+            # cast. (Equivalence is SSIM-gated, not bit-exact: float->uint8
+            # differs <=1 LSB CPU vs GPU.)
+            src = output_batch.output
+            vid_u8 = (src * 255).clamp_(0, 255).to(torch.uint8)
+            vid_u8 = rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
+            frames = [
+                torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8
+            ]
         postprocess_time = time.perf_counter() - postprocess_start
         logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
         if logging_info is not None:
