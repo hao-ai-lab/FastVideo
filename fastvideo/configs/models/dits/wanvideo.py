@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
+from typing import Literal
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
@@ -19,6 +20,11 @@ class WanVideoArchConfig(DiTArchConfig):
             r"^condition_embedder\.text_embedder\.linear_2\.(.*)$": r"condition_embedder.text_embedder.fc_out.\1",
             r"^condition_embedder\.time_embedder\.linear_1\.(.*)$": r"condition_embedder.time_embedder.mlp.fc_in.\1",
             r"^condition_embedder\.time_embedder\.linear_2\.(.*)$": r"condition_embedder.time_embedder.mlp.fc_out.\1",
+            # AnyFlow dual-timestep checkpoints expose delta_embedder weights with the
+            # same internal layout as time_embedder. The regex is harmless on plain
+            # Wan checkpoints (no delta_embedder keys to match).
+            r"^condition_embedder\.delta_embedder\.linear_1\.(.*)$": r"condition_embedder.delta_embedder.mlp.fc_in.\1",
+            r"^condition_embedder\.delta_embedder\.linear_2\.(.*)$": r"condition_embedder.delta_embedder.mlp.fc_out.\1",
             r"^condition_embedder\.time_proj\.(.*)$": r"condition_embedder.time_modulation.linear.\1",
             r"^condition_embedder\.image_embedder\.ff\.net\.0\.proj\.(.*)$":
             r"condition_embedder.image_embedder.ff.fc_in.\1",
@@ -82,6 +88,14 @@ class WanVideoArchConfig(DiTArchConfig):
     sink_size: int = 0  # Size of the attention sink, we keep the first `sink_size` frames unchanged when rolling the KV cache
     num_frames_per_block: int = 3
     sliding_window_num_frames: int = 21
+
+    # AnyFlow dual-timestep conditioning. Defaults preserve bit-identity with
+    # the legacy single-timestep forward (no delta_embedder allocated, no
+    # extra computation on the embedder forward path).
+    r_embedder: bool = False
+    r_embedder_fusion: Literal["additive", "gated"] = "additive"
+    r_embedder_gate_value: float = 0.25
+    r_embedder_deltatime_type: Literal["r", "t-r"] = "r"
 
     def __post_init__(self):
         super().__post_init__()
