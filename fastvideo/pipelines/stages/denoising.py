@@ -212,6 +212,7 @@ class DenoisingStage(PipelineStage):
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
         trajectory_latents: list[torch.Tensor] = []
+        is_lucy_edit = fastvideo_args.pipeline_config.lucy_edit_task
 
         # Hoisted out of the per-step loop: depends only on inputs that
         # are constant across denoising steps.
@@ -229,6 +230,13 @@ class DenoisingStage(PipelineStage):
         # latent_model_input.  Shape is fixed by latents and is never
         # written to, so we allocate once.
         v2v_zero_pad = torch.zeros_like(latents) if batch.video_latent is not None else None
+        lucy_timestep_seq_len = None
+        if is_lucy_edit:
+            patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+            assert patch_size[0] == 1, "Lucy Edit timestep expansion assumes temporal patch size 1"
+            lucy_timestep_seq_len = (
+                latents.shape[2] * (latents.shape[3] // patch_size[1]) * (latents.shape[4] // patch_size[2])
+            )
 
         # CFG gating / stale-uncond reuse setup (Adaptive Guidance LinearAG
         # variant, Castillo et al. 2023).  When envs.FASTVIDEO_CFG_GATE_STEP
@@ -309,14 +317,25 @@ class DenoisingStage(PipelineStage):
                 # Expand latents for V2V/I2V
                 latent_model_input = latents.to(target_dtype)
                 if batch.video_latent is not None:
-                    latent_model_input = torch.cat([latent_model_input, batch.video_latent, v2v_zero_pad],
-                                                   dim=1).to(target_dtype)
+                    if is_lucy_edit:
+                        latent_model_input = torch.cat(
+                            [latent_model_input, batch.video_latent],
+                            dim=1,
+                        ).to(target_dtype)
+                    else:
+                        latent_model_input = torch.cat(
+                            [latent_model_input, batch.video_latent, v2v_zero_pad],
+                            dim=1,
+                        ).to(target_dtype)
                 elif batch.image_latent is not None:
                     assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
                     latent_model_input = torch.cat([latent_model_input, batch.image_latent], dim=1).to(target_dtype)
 
                 assert not torch.isnan(latent_model_input).any(), "latent_model_input contains nan"
-                if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+                if is_lucy_edit:
+                    assert lucy_timestep_seq_len is not None
+                    t_expand = t.repeat(latent_model_input.shape[0], lucy_timestep_seq_len)
+                elif fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
                     timestep = torch.stack([t]).to(get_local_torch_device())
                     temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
                     temp_ts = torch.cat([temp_ts, temp_ts.new_ones(seq_len - temp_ts.size(0)) * timestep])

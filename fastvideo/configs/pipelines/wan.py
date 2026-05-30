@@ -6,9 +6,11 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
+from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConfig, T5Config,
                                                WAN2_1ControlCLIPVisionConfig)
 from fastvideo.configs.models.vaes import WanVAEConfig
+from fastvideo.configs.models.vaes.wanvae import WanVAEArchConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
 
@@ -120,6 +122,62 @@ class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
     expand_timesteps: bool = True
 
     def __post_init__(self) -> None:
+        assert not (self.ti2v_task and self.lucy_edit_task)
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
+        self.dit_config.expand_timesteps = self.expand_timesteps
+
+
+@dataclass
+class LucyEditDevConfig(Wan2_2_TI2V_5B_Config):
+    """Configuration for Decart Lucy Edit Dev video editing."""
+
+    dit_config: DiTConfig = field(default_factory=lambda: WanVideoConfig(arch_config=WanVideoArchConfig(
+        num_attention_heads=24,
+        in_channels=96,
+        out_channels=48,
+        ffn_dim=14336,
+        num_layers=30,
+    )))
+    vae_config: VAEConfig = field(default_factory=lambda: WanVAEConfig(arch_config=WanVAEArchConfig(
+        base_dim=160,
+        decoder_base_dim=256,
+        z_dim=48,
+        in_channels=12,
+        out_channels=12,
+        scale_factor_spatial=16,
+        patch_size=2,
+        is_residual=True,
+        clip_output=False,
+        latents_mean=(
+            -0.2289, -0.0052, -0.1323, -0.2339, -0.2799, 0.0174,
+            0.1838, 0.1557, -0.1382, 0.0542, 0.2813, 0.0891,
+            0.1570, -0.0098, 0.0375, -0.1825, -0.2246, -0.1207,
+            -0.0698, 0.5109, 0.2665, -0.2108, -0.2158, 0.2502,
+            -0.2055, -0.0322, 0.1109, 0.1567, -0.0729, 0.0899,
+            -0.2799, -0.1230, -0.0313, -0.1649, 0.0117, 0.0723,
+            -0.2839, -0.2083, -0.0520, 0.3748, 0.0152, 0.1957,
+            0.1433, -0.2944, 0.3573, -0.0548, -0.1681, -0.0667,
+        ),
+        latents_std=(
+            0.4765, 1.0364, 0.4514, 1.1677, 0.5313, 0.4990,
+            0.4818, 0.5013, 0.8158, 1.0344, 0.5894, 1.0901,
+            0.6885, 0.6165, 0.8454, 0.4978, 0.5759, 0.3523,
+            0.7135, 0.6804, 0.5833, 1.4146, 0.8986, 0.5659,
+            0.7069, 0.5338, 0.4889, 0.4917, 0.4069, 0.4999,
+            0.6866, 0.4093, 0.5709, 0.6065, 0.6415, 0.4944,
+            0.5726, 1.2042, 0.5458, 1.6887, 0.3971, 1.0600,
+            0.3943, 0.5537, 0.5444, 0.4089, 0.7468, 0.7744,
+        ),
+    )))
+    ti2v_task: bool = False
+    lucy_edit_task: bool = True
+
+    def __post_init__(self) -> None:
+        assert not (self.ti2v_task and self.lucy_edit_task)
+        # Lucy uses Wan2.2's enhanced 48-channel VAE latents. Denoising
+        # concatenates noise + video latents, matching the 96-channel
+        # transformer input declared above.
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
         self.dit_config.expand_timesteps = self.expand_timesteps
