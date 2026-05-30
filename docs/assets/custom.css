@@ -42,6 +42,57 @@ img {
     margin: 0 auto;
 }
 
+/* ===== Advanced Tuning Guide (standalone, full-bleed page) ===== */
+.md-content__inner:has(.adv-tuning-guide-wrap) > h1 {
+  display: none;
+}
+
+.md-content:has(.adv-tuning-guide-wrap) ~ .md-sidebar--secondary {
+  display: none;
+}
+
+.md-content:has(.adv-tuning-guide-wrap) {
+  max-width: none;
+}
+
+.md-content__inner:has(.adv-tuning-guide-wrap) {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.adv-tuning-guide-wrap {
+  width: calc(100vw - 26rem);
+  max-width: none;
+  overflow: hidden;
+  background: #fff;
+  margin-right: 1rem;
+}
+
+.adv-tuning-guide-frame {
+  width: 100%;
+  height: 1250px; /* fallback before postMessage adjusts to actual content height */
+  border: 0;
+  display: block;
+  background: #fff;
+}
+
+/* ===== Quick Start embedded guide ===== */
+.quick-start-guide-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  background: #fff;
+}
+
+.quick-start-guide-frame {
+  width: 100%;
+  height: 1205px; /* fallback before postMessage adjusts to actual content height */
+  border: 0;
+  display: block;
+  background: #fff;
+}
+
 .md-typeset .copy-page-button.md-button {
     float: right;
     margin: 0 0 1rem 1rem;

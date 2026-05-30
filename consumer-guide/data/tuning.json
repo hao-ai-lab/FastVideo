@@ -1,0 +1,103 @@
+{
+  "_comment": "Single data source for the Advanced Tuning page (app/tuning/adv_page.tsx). Each benchmark run is one real measured configuration. The page filters by workload + GPU and never estimates benchmark values.",
+  "defaults": {
+    "model_id": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+    "workload_type": "t2v",
+    "gpu": "rtx5090",
+    "num_gpus": 1,
+    "height": 480,
+    "width": 832,
+    "num_frames": 81,
+    "fps": 24,
+    "num_inference_steps": 40,
+    "guidance_scale": 5,
+    "embedded_cfg_scale": 6,
+    "flow_shift": null,
+    "seed": -1,
+    "attention_backend": "VIDEO_SPARSE_ATTN",
+    "VSA_sparsity": 0,
+    "dmd_denoising_steps": "1000,757,522",
+    "dit_cpu_offload": false,
+    "dit_layerwise_offload": false,
+    "vae_cpu_offload": false,
+    "text_encoder_cpu_offload": false,
+    "image_encoder_cpu_offload": false,
+    "pin_cpu_memory": false,
+    "use_fsdp_inference": false
+  },
+  "workloads": [
+    { "id": "t2v", "name": "Text to Video", "icon": "Film" },
+    { "id": "i2v", "name": "Image to Video", "icon": "Sparkles" },
+    { "id": "ti2v", "name": "Text+Image to Video", "icon": "Layers" },
+    { "id": "game", "name": "Game", "icon": "Zap" }
+  ],
+  "gpus": [
+    { "id": "rtx4090", "name": "RTX 4090", "vram": "24GB" },
+    { "id": "rtx5090", "name": "RTX 5090", "vram": "32GB" }
+  ],
+  "resolutionPresets": [
+    { "height": 480, "width": 832, "label": "480p (832x480)" },
+    { "height": 720, "width": 1280, "label": "720p (1280x720)" },
+    { "height": 1080, "width": 1920, "label": "1080p (1920x1080)" }
+  ],
+  "framePresets": [
+    { "frames": 49, "label": "49 frames (~2s @24fps)" },
+    { "frames": 81, "label": "81 frames (~3.4s @24fps)" },
+    { "frames": 121, "label": "121 frames (~5s @24fps)" }
+  ],
+  "attentionBackends": [
+    { "id": "FLASH_ATTN", "name": "Flash Attention", "shortName": "Flash", "desc": "Best quality-speed trade-off", "speed": "Baseline" },
+    { "id": "VIDEO_SPARSE_ATTN", "name": "Video Sparse Attention", "shortName": "VSA", "desc": "~30% faster, minimal quality loss", "speed": "Fast" },
+    { "id": "SAGE_ATTN", "name": "Sage Attention", "shortName": "SAGE", "desc": "~40% faster, visible at high motion", "speed": "Faster" },
+    { "id": "SLA_ATTN", "name": "Sparse-Linear Attention", "shortName": "SLA", "desc": "Requires SLA-tuned model checkpoint", "speed": "Fast" }
+  ],
+  "models": [
+    { "id": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers", "name": "FastWan2.1 T2V", "size": "1.3B", "workload": "t2v", "dmdMode": true, "dmdNote": "FastWan DMD uses 3-step distillation for faster generation." },
+    { "id": "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers", "name": "FastWan2.2 TI2V FullAttn", "size": "5B", "workload": "ti2v", "dmdMode": true, "dmdNote": "FastWan DMD uses 3-step distillation for faster generation." },
+    { "id": "Wan-AI/Wan2.2-TI2V-5B-Diffusers", "name": "Wan2.2 TI2V", "size": "5B", "workload": "ti2v" },
+    { "id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers", "name": "Wan2.2 T2V", "size": "A14B", "workload": "t2v" },
+    { "id": "Wan-AI/Wan2.2-I2V-A14B-Diffusers", "name": "Wan2.2 I2V", "size": "A14B", "workload": "i2v" },
+    { "id": "hunyuanvideo-community/HunyuanVideo", "name": "HunyuanVideo", "size": "13B", "workload": "t2v" },
+    { "id": "FastVideo/FastHunyuan-diffusers", "name": "FastHunyuan", "size": "13B", "workload": "t2v" },
+    { "id": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "name": "Wan2.1 T2V", "size": "1.3B", "workload": "t2v" },
+    { "id": "Wan-AI/Wan2.1-T2V-14B-Diffusers", "name": "Wan2.1 T2V", "size": "14B", "workload": "t2v" },
+    { "id": "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers", "name": "Wan2.1 I2V 480P", "size": "14B", "workload": "i2v" },
+    { "id": "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers", "name": "Wan2.1 I2V 720P", "size": "14B", "workload": "i2v" },
+    { "id": "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers", "name": "TurboWan2.1 T2V", "size": "1.3B", "workload": "t2v" },
+    { "id": "loayrashid/TurboWan2.1-T2V-14B-Diffusers", "name": "TurboWan2.1 T2V", "size": "14B", "workload": "t2v" },
+    { "id": "loayrashid/TurboWan2.2-I2V-A14B-Diffusers", "name": "TurboWan2.2 I2V", "size": "A14B", "workload": "i2v" },
+    { "id": "FastVideo/LongCat-Video-T2V-Diffusers", "name": "LongCat T2V", "size": "13.6B", "workload": "t2v" },
+    { "id": "FastVideo/Matrix-Game-2.0-Base-Diffusers", "name": "Matrix Game 2.0 Base", "size": "1.3B", "workload": "game", "keyboardDim": 4 },
+    { "id": "FastVideo/Matrix-Game-2.0-GTA-Diffusers", "name": "Matrix Game 2.0 GTA", "size": "1.3B", "workload": "game", "keyboardDim": 2 },
+    { "id": "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers", "name": "Matrix Game 2.0 TempleRun", "size": "1.3B", "workload": "game", "keyboardDim": 7 }
+  ],
+  "runs": [
+    { "model": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 40, "attention": "VIDEO_SPARSE_ATTN", "generationSeconds": 22.91, "runtimeSeconds": 139.44 },
+    { "model": "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 40, "attention": "VIDEO_SPARSE_ATTN", "generationSeconds": 17.39, "runtimeSeconds": 116.57 },
+    { "model": "Wan-AI/Wan2.2-TI2V-5B-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 40, "attention": "FLASH_ATTN", "generationSeconds": 71.01, "runtimeSeconds": 223.29 },
+    { "model": "Wan-AI/Wan2.2-T2V-A14B-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 40, "attention": "FLASH_ATTN", "generationSeconds": 782.09, "runtimeSeconds": 1144.85 },
+    { "model": "Wan-AI/Wan2.2-I2V-A14B-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 40, "attention": "FLASH_ATTN", "generationSeconds": 827.48, "runtimeSeconds": 1169.64 },
+    { "model": "hunyuanvideo-community/HunyuanVideo", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 40, "attention": "FLASH_ATTN", "generationSeconds": 575.39, "runtimeSeconds": 713.74 },
+    { "model": "FastVideo/FastHunyuan-diffusers", "gpu": "rtx5090", "height": 720, "width": 1280, "frames": 81, "steps": 50, "attention": "FLASH_ATTN", "generationSeconds": 1389.71, "runtimeSeconds": 1492.36 },
+    { "model": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 40, "attention": "FLASH_ATTN", "generationSeconds": 155.86, "runtimeSeconds": 227.07 },
+    { "model": "Wan-AI/Wan2.1-T2V-14B-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 40, "attention": "FLASH_ATTN", "generationSeconds": 780.44, "runtimeSeconds": 954.84 },
+    { "model": "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 40, "attention": "FLASH_ATTN", "generationSeconds": 842.11, "runtimeSeconds": 1058.56 },
+    { "model": "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers", "gpu": "rtx5090", "height": 720, "width": 1280, "frames": 81, "steps": 40, "attention": "FLASH_ATTN", "generationSeconds": 2832.76, "runtimeSeconds": 3026.41 },
+    { "model": "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 4, "attention": "SLA_ATTN", "generationSeconds": 16.16, "runtimeSeconds": 92.77 },
+    { "model": "loayrashid/TurboWan2.1-T2V-14B-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 4, "attention": "SLA_ATTN", "generationSeconds": 60.35, "runtimeSeconds": 604.26 },
+    { "model": "loayrashid/TurboWan2.2-I2V-A14B-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 81, "steps": 4, "attention": "SLA_ATTN", "runtimeSeconds": 364.0 },
+    { "model": "FastVideo/LongCat-Video-T2V-Diffusers", "gpu": "rtx5090", "height": 480, "width": 832, "frames": 93, "steps": 40, "attention": "FLASH_ATTN", "generationSeconds": 915.89, "runtimeSeconds": 1061.24 },
+    { "model": "FastVideo/Matrix-Game-2.0-Base-Diffusers", "gpu": "rtx5090", "height": 352, "width": 640, "frames": 81, "steps": 3, "attention": "FLASH_ATTN", "generationSeconds": 12.29, "runtimeSeconds": 247.2 },
+    { "model": "FastVideo/Matrix-Game-2.0-GTA-Diffusers", "gpu": "rtx5090", "height": 352, "width": 640, "frames": 81, "steps": 3, "attention": "FLASH_ATTN", "generationSeconds": 13.03, "runtimeSeconds": 212.37 },
+    { "model": "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers", "gpu": "rtx5090", "height": 352, "width": 640, "frames": 81, "steps": 3, "attention": "FLASH_ATTN", "generationSeconds": 12.85, "runtimeSeconds": 176.79 },
+    { "model": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers", "gpu": "rtx4090", "height": 480, "width": 832, "frames": 81, "steps": 3, "attention": "VIDEO_SPARSE_ATTN", "generationSeconds": 32.42 },
+    { "model": "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers", "gpu": "rtx4090", "height": 480, "width": 832, "frames": 81, "steps": 3, "attention": "VIDEO_SPARSE_ATTN", "generationSeconds": 22.78 },
+    { "model": "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers", "gpu": "rtx4090", "height": 480, "width": 832, "frames": 81, "steps": 3, "attention": "FLASH_ATTN", "generationSeconds": 17.81 },
+    { "model": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "gpu": "rtx4090", "height": 480, "width": 832, "frames": 81, "steps": 3, "attention": "FLASH_ATTN", "generationSeconds": 28.62 },
+    { "model": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "gpu": "rtx4090", "height": 480, "width": 832, "frames": 81, "steps": 3, "attention": "SAGE_ATTN", "generationSeconds": 24.62 },
+    { "model": "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers", "gpu": "rtx4090", "height": 480, "width": 832, "frames": 81, "steps": 3, "attention": "SLA_ATTN", "generationSeconds": 20.13 },
+    { "model": "FastVideo/Matrix-Game-2.0-Base-Diffusers", "gpu": "rtx4090", "height": 480, "width": 832, "frames": 81, "steps": 3, "attention": "FLASH_ATTN", "generationSeconds": 23.81 },
+    { "model": "FastVideo/Matrix-Game-2.0-GTA-Diffusers", "gpu": "rtx4090", "height": 480, "width": 832, "frames": 81, "steps": 3, "attention": "FLASH_ATTN", "generationSeconds": 24.24 },
+    { "model": "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers", "gpu": "rtx4090", "height": 480, "width": 832, "frames": 81, "steps": 3, "attention": "FLASH_ATTN", "generationSeconds": 23.38 }
+  ]
+}
