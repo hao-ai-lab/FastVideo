@@ -71,10 +71,14 @@ FastVideo files inspected:
       (`[feat]: add OpenAI video batching scheduler`).
 - [x] Added GPU parity/benchmark helper script:
       `fastvideo/tests/batching/run_dynamic_batching_parity.py`.
-- [ ] Remote GPU parity run.
-- [ ] Remote benchmark runs.
-- [ ] Commit GPU helper, parity fixes, benchmark results, and final report.
-- [ ] Produce final Markdown write-up with test and benchmark results and commit it.
+- [x] Remote GPU parity run completed; dynamic batched denoising did not meet
+      near-bit-identical tolerance and is documented as a limitation.
+- [x] Remote benchmark runs completed for batch size 2, batch size 4, and an
+      8-step batch size 2 workload.
+- [x] Commit GPU helper, parity fixes, and benchmark state:
+      `9c6eb355` (`[fix]: harden dynamic generation batching`).
+- [ ] Commit final Markdown write-up with test and benchmark results.
+- [ ] Push branch to origin after final report commit.
 
 ## Findings
 Upstream SGLang batching is not just a larger prompt list. It has four pieces:
@@ -338,6 +342,11 @@ Benchmark run, batch size 2, 8 denoise steps:
   - Dynamic average: `2.4006625770s`; throughput `0.8331033354 req/s`
   - Throughput improvement: about `10.7%`.
 
+Final report:
+- Created `.agents/exploration/multimodal-gen-batching-final-report.md`.
+- Includes implementation summary, commit list, remote validation results,
+  dynamic parity results, benchmark tables, and limitations/follow-up.
+
 ### Stage 6: GPU Parity And Benchmark Validation
 Parity attempt:
 - Modal app: `ap-UTIijf9LTsX3ua9Czvm5dq`
@@ -497,5 +506,5 @@ Important constraints:
   test environment.
 
 Next step:
-Rerun GPU parity with the helper script, then run sequential and dynamic
-benchmark modes for comparison.
+Commit the final Markdown report, run any final remote hook check needed for
+the report/state files, then push `multimodal-gen-batching` to origin.
