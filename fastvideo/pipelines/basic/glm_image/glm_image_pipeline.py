@@ -1,18 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""
-GLM-Image diffusion pipeline implementation.
-"""
-
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
+from fastvideo.pipelines.basic.glm_image.stages import (
+    GlmImageBeforeDenoisingStage,
+    GlmImageConditionEncodingStage,
+    GlmImageDecodingStage,
+    GlmImageDenoisingStage,
+)
 from fastvideo.pipelines.stages import InputValidationStage
-from fastvideo.pipelines.stages.glm_image_before_denoising import (
-    GlmImageBeforeDenoisingStage, )
-from fastvideo.pipelines.stages.glm_image_denoising import GlmImageDenoisingStage
-from fastvideo.pipelines.stages.glm_image_decoding import GlmImageDecodingStage
 
 logger = init_logger(__name__)
 
@@ -26,20 +24,14 @@ class GlmImagePipeline(LoRAPipeline, ComposedPipelineBase):
         "vae",
         "transformer",
         "scheduler",
-        "vision_language_encoder",  # AR model for prior tokens - critical for quality
-        "processor",  # Processor for AR model
+        "vision_language_encoder",
+        "processor",
     ]
 
     _optional_config_modules: list[str] = []
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
-        # Initial shift, will be updated dynamically in BeforeDenoisingStage
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=1.0)
-
-        # Validate configuration if provided
-        if fastvideo_args.pipeline_config is not None:
-            # Basic validation or usage if needed, otherwise just pass
-            pass
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         self.add_stage(
@@ -56,8 +48,15 @@ class GlmImagePipeline(LoRAPipeline, ComposedPipelineBase):
                 processor=self.get_module("processor"),
                 transformer=self.get_module("transformer"),
                 scheduler=self.get_module("scheduler"),
-                vision_language_encoder=self.get_module(
-                    "vision_language_encoder"),
+                vision_language_encoder=self.get_module("vision_language_encoder"),
+            ),
+        )
+
+        self.add_stage(
+            stage_name="glm_image_condition_encoding_stage",
+            stage=GlmImageConditionEncodingStage(
+                vae=self.get_module("vae"),
+                transformer=self.get_module("transformer"),
             ),
         )
 

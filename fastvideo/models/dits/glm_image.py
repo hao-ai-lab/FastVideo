@@ -1,11 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-# Adapted from SGLang: https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/runtime/models/dits/glm_image.py
-"""GLM-Image Transformer 2D Model.
-
-This module implements the diffusion transformer (DiT) decoder for GLM-Image.
-The model takes tokens from the autoregressive vision-language encoder and
-denoises them into high-fidelity images.
-"""
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -19,31 +12,25 @@ from fastvideo.layers.layernorm import ScaleResidualLayerNormScaleShift
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 from fastvideo.layers.visual_embedding import Timesteps
-from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
-logger = init_logger(__name__)
 
-
-# =============================================================================
-# KV Cache (for future use with caching)
-# =============================================================================
 class GlmImageLayerKVCache:
-    """KV cache for GlmImage model per layer."""
 
     def __init__(self):
         self.k_cache = None
         self.v_cache = None
-        self.mode: Optional[str] = None  # "write", "read", "skip"
+        self.mode: Optional[str] = None
 
     def store(self, k: torch.Tensor, v: torch.Tensor):
+        # Append along seq (dim=1).
         if self.k_cache is None:
             self.k_cache = k
             self.v_cache = v
         else:
-            self.k_cache = torch.cat([self.k_cache, k], dim=2)
-            self.v_cache = torch.cat([self.v_cache, v], dim=2)
+            self.k_cache = torch.cat([self.k_cache, k], dim=1)
+            self.v_cache = torch.cat([self.v_cache, v], dim=1)
 
     def get(self):
         return self.k_cache, self.v_cache
@@ -55,7 +42,6 @@ class GlmImageLayerKVCache:
 
 
 class GlmImageKVCache:
-    """Container for all layers' KV caches."""
 
     def __init__(self, num_layers: int):
         self.num_layers = num_layers
@@ -81,10 +67,6 @@ class GlmImageKVCache:
 # Timestep and Text Projection
 # =============================================================================
 class GlmImageTimestepEmbedding(nn.Module):
-    """
-    Replacement for diffusers TimestepEmbedding using ReplicatedLinear.
-    Structure: linear_1 -> act(silu) -> linear_2
-    """
 
     def __init__(
         self,
@@ -113,10 +95,6 @@ class GlmImageTimestepEmbedding(nn.Module):
 
 
 class GlmImageTextProjection(nn.Module):
-    """
-    Replacement for diffusers PixArtAlphaTextProjection using ReplicatedLinear.
-    Structure: linear_1 -> act_1 -> linear_2
-    """
 
     def __init__(
         self,
@@ -145,7 +123,6 @@ class GlmImageTextProjection(nn.Module):
 
 
 class GlmImageCombinedTimestepSizeEmbeddings(nn.Module):
-    """Combined timestep and size embeddings using Timesteps class."""
 
     def __init__(
         self,
@@ -185,15 +162,14 @@ class GlmImageCombinedTimestepSizeEmbeddings(nn.Module):
             target_size.size(0), -1
         )
 
-        # (B, 2 * condition_dim)
         condition_proj = torch.cat([crop_coords_proj, target_size_proj], dim=1)
 
         timesteps_emb = self.timestep_embedder(
             timesteps_proj.to(dtype=hidden_dtype)
-        )  # (B, embedding_dim)
+        )
         condition_emb = self.condition_embedder(
             condition_proj.to(dtype=hidden_dtype)
-        )  # (B, embedding_dim)
+        )
 
         conditioning = timesteps_emb + condition_emb
         return conditioning
@@ -203,7 +179,6 @@ class GlmImageCombinedTimestepSizeEmbeddings(nn.Module):
 # Image Projector
 # =============================================================================
 class GlmImageImageProjector(nn.Module):
-    """Projects latent patches to hidden dimension."""
 
     def __init__(
         self,
@@ -240,7 +215,6 @@ class GlmImageImageProjector(nn.Module):
 # AdaLayerNorm
 # =============================================================================
 class GlmImageAdaLayerNormZero(nn.Module):
-    """Ada Layer Norm with 12-way modulation using ReplicatedLinear."""
 
     def __init__(self, embedding_dim: int, dim: int) -> None:
         super().__init__()
@@ -302,7 +276,6 @@ class GlmImageAdaLayerNormZero(nn.Module):
 # Attention
 # =============================================================================
 class GlmImageAttention(nn.Module):
-    """GLM-Image attention using LocalAttention backend with ReplicatedLinear."""
 
     def __init__(
         self,
@@ -400,10 +373,11 @@ class GlmImageAttention(nn.Module):
             if kv_cache.mode == "write":
                 kv_cache.store(key, value)
             elif kv_cache.mode == "read":
+                # Prepend cached condition k/v along seq (dim=1).
                 k_cache, v_cache = kv_cache.get()
-                key = torch.cat([k_cache, key], dim=2) if k_cache is not None else key
+                key = torch.cat([k_cache, key], dim=1) if k_cache is not None else key
                 value = (
-                    torch.cat([v_cache, value], dim=2) if v_cache is not None else value
+                    torch.cat([v_cache, value], dim=1) if v_cache is not None else value
                 )
             elif kv_cache.mode == "skip":
                 pass
@@ -425,7 +399,6 @@ class GlmImageAttention(nn.Module):
 # Transformer Block
 # =============================================================================
 class GlmImageTransformerBlock(nn.Module):
-    """GLM-Image Transformer block with fused residual+norm operations."""
 
     def __init__(
         self,
@@ -504,7 +477,6 @@ class GlmImageTransformerBlock(nn.Module):
         )
 
         # 3. Feedforward (fused residual + norm + scale/shift)
-        # Fix: hidden_states is the "residual" (base stream), attn_hidden_states is the "x" (modulated by gate)
         norm_hidden_states, hidden_states = self.norm2(
             hidden_states,
             attn_hidden_states,
@@ -534,18 +506,25 @@ class GlmImageTransformerBlock(nn.Module):
 # Rotary Positional Embedding
 # =============================================================================
 class GlmImageRotaryPosEmbed(nn.Module):
-    """2D rotary positional embeddings for image patches."""
 
     def __init__(self, dim: int, patch_size: int, theta: float = 10000.0) -> None:
         super().__init__()
         self.dim = dim
         self.patch_size = patch_size
         self.theta = theta
+        self._cache_key: tuple | None = None
+        self._cache_value: tuple[torch.Tensor, torch.Tensor] | None = None
 
     def forward(self, hidden_states: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        batch_size, num_channels, height, width = hidden_states.shape
-        height, width = height // self.patch_size, width // self.patch_size
+        _, _, raw_h, raw_w = hidden_states.shape
+        height = raw_h // self.patch_size
+        width = raw_w // self.patch_size
         device = hidden_states.device
+
+        cache_key = (height, width, device.type,
+                     device.index if device.index is not None else -1)
+        if self._cache_key == cache_key and self._cache_value is not None:
+            return self._cache_value
 
         dim_h, dim_w = self.dim // 2, self.dim // 2
         h_inv_freq = 1.0 / (
@@ -553,7 +532,7 @@ class GlmImageRotaryPosEmbed(nn.Module):
             ** (
                 torch.arange(0, dim_h, 2, dtype=torch.float32, device=device)[
                     : (dim_h // 2)
-                ].float()
+                ]
                 / dim_h
             )
         )
@@ -562,36 +541,26 @@ class GlmImageRotaryPosEmbed(nn.Module):
             ** (
                 torch.arange(0, dim_w, 2, dtype=torch.float32, device=device)[
                     : (dim_w // 2)
-                ].float()
+                ]
                 / dim_w
             )
         )
         h_seq = torch.arange(height, device=device)
         w_seq = torch.arange(width, device=device)
-        freqs_h = torch.outer(h_seq, h_inv_freq)
-        freqs_w = torch.outer(w_seq, w_inv_freq)
+        freqs_h = torch.outer(h_seq, h_inv_freq).unsqueeze(1).expand(height, width, -1)
+        freqs_w = torch.outer(w_seq, w_inv_freq).unsqueeze(0).expand(height, width, -1)
 
-        # Create position matrices for height and width
-        freqs_h = freqs_h.unsqueeze(1)
-        freqs_w = freqs_w.unsqueeze(0)
-        # Broadcast freqs_h and freqs_w to [height, width, dim//4]
-        freqs_h = freqs_h.expand(height, width, -1)
-        freqs_w = freqs_w.expand(height, width, -1)
-
-        # Concatenate along last dimension to get [height, width, dim//2]
-        freqs = torch.cat([freqs_h, freqs_w], dim=-1)
-        freqs = freqs.reshape(height * width, -1)  # [height * width, dim//2]
-        return (freqs.cos(), freqs.sin())
+        freqs = torch.cat([freqs_h, freqs_w], dim=-1).reshape(height * width, -1)
+        result = (freqs.cos(), freqs.sin())
+        self._cache_key = cache_key
+        self._cache_value = result
+        return result
 
 
 # =============================================================================
 # Final AdaLayerNorm
 # =============================================================================
 class GlmImageAdaLayerNormContinuous(nn.Module):
-    """
-    GlmImage-only final AdaLN: LN(x) -> Linear(cond) -> chunk -> affine.
-    Matches Megatron: **no activation** before the Linear on conditioning embedding.
-    """
 
     def __init__(
         self,
@@ -616,7 +585,6 @@ class GlmImageAdaLayerNormContinuous(nn.Module):
     def forward(
         self, x: torch.Tensor, conditioning_embedding: torch.Tensor
     ) -> torch.Tensor:
-        # *** NO SiLU here ***
         emb = self.linear(conditioning_embedding.to(x.dtype))
         scale, shift = torch.chunk(emb, 2, dim=1)
         x = self.norm(x) * (1 + scale)[:, None, :] + shift[:, None, :]
@@ -627,12 +595,7 @@ class GlmImageAdaLayerNormContinuous(nn.Module):
 # Main Model
 # =============================================================================
 class GlmImageTransformer2DModel(BaseDiT):
-    """
-    GLM-Image Transformer 2D Model.
-    
-    Aligned with SGLang implementation for numerical consistency.
-    """
-    
+
     _fsdp_shard_conditions = GlmImageDiTConfig().arch_config._fsdp_shard_conditions
     _compile_conditions = GlmImageDiTConfig().arch_config._fsdp_shard_conditions
     _supported_attention_backends = (
@@ -651,7 +614,6 @@ class GlmImageTransformer2DModel(BaseDiT):
     ):
         super().__init__(config=config, hf_config=hf_config)
 
-        self.config_data = config  # Store config
         arch_config = config.arch_config
 
         self.in_channels = arch_config.in_channels
@@ -668,7 +630,6 @@ class GlmImageTransformer2DModel(BaseDiT):
         pooled_projection_dim = 2 * 2 * arch_config.condition_dim
         inner_dim = arch_config.num_attention_heads * arch_config.attention_head_dim
 
-        # Required by BaseDiT
         self.hidden_size = inner_dim
         self.num_channels_latents = arch_config.out_channels
 
@@ -685,7 +646,7 @@ class GlmImageTransformer2DModel(BaseDiT):
             input_dim=arch_config.text_embed_dim,
             mlp_hidden_dim=inner_dim,
             output_dim=inner_dim,
-            act_type="gelu_pytorch_tanh",
+            act_type="gelu",
         )
         self.prior_token_embedding = nn.Embedding(
             arch_config.prior_vq_quantizer_codebook_size, inner_dim
@@ -737,9 +698,9 @@ class GlmImageTransformer2DModel(BaseDiT):
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        timestep: torch.LongTensor,
         prior_token_id: torch.Tensor,
         prior_token_drop: torch.Tensor,
+        timestep: torch.LongTensor,
         target_size: torch.Tensor,
         crop_coords: torch.Tensor,
         attention_kwargs: Optional[Dict[str, Any]] = None,
@@ -759,9 +720,6 @@ class GlmImageTransformer2DModel(BaseDiT):
 
         batch_size, num_channels, height, width = hidden_states.shape
 
-        # SGLang does timestep -= 1.0
-        timestep = timestep - 1.0
-
         if isinstance(encoder_hidden_states, list):
             encoder_hidden_states = encoder_hidden_states[0]
 
@@ -778,10 +736,11 @@ class GlmImageTransformer2DModel(BaseDiT):
         hidden_states = self.image_projector(hidden_states)
         encoder_hidden_states = self.glyph_projector(encoder_hidden_states)
         prior_embedding = self.prior_token_embedding(prior_token_id)
-        # Using boolean indexing for sample-level dropping
-        if prior_token_drop.any():
-             # Create a mask for the batch dimension
-             prior_embedding[prior_token_drop] *= 0.0
+        # Zero dropped priors by multiply: boolean indexing + .any() syncs each step.
+        keep = (~prior_token_drop).to(prior_embedding.dtype)
+        while keep.dim() < prior_embedding.dim():
+            keep = keep.unsqueeze(-1)
+        prior_embedding = prior_embedding * keep
         prior_hidden_states = self.prior_projector(prior_embedding)
         hidden_states = hidden_states + prior_hidden_states
 

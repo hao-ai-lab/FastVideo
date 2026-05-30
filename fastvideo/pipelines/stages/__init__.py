@@ -46,9 +46,6 @@ from fastvideo.pipelines.stages.longcat_video_vae_encoding import LongCatVideoVA
 from fastvideo.pipelines.stages.longcat_kv_cache_init import LongCatKVCacheInitStage
 from fastvideo.pipelines.stages.longcat_vc_denoising import LongCatVCDenoisingStage
 
-# GLM-Image stages
-from fastvideo.pipelines.stages.glm_image_before_denoising import GlmImageBeforeDenoisingStage
-
 __all__ = [
     "PipelineStage",
     "InputValidationStage",
@@ -104,6 +101,4 @@ __all__ = [
     "LongCatVideoVAEEncodingStage",
     "LongCatKVCacheInitStage",
     "LongCatVCDenoisingStage",
-    # GLM-Image stages
-    "GlmImageBeforeDenoisingStage",
 ]
