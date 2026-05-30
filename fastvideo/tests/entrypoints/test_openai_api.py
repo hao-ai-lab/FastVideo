@@ -1,10 +1,14 @@
 """Unit tests for the OpenAI-compatible API server helpers (no GPU needed)."""
 
+import asyncio
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
+from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.entrypoints.openai.batching import VideoBatchScheduler
 from fastvideo.api.parser import parse_config
 from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.protocol import (
@@ -20,6 +24,112 @@ from fastvideo.entrypoints.openai.utils import (
     merge_image_input_list,
     parse_size,
 )
+
+
+class _FakeBatchGenerator:
+
+    def __init__(self):
+        self.calls = []
+
+    def generate_video_batch(self, request_kwargs):
+        self.calls.append([dict(item) for item in request_kwargs])
+        return [{"prompts": item["prompt"], "video_path": item["output_path"]} for item in request_kwargs]
+
+
+def _batch_scheduler_args(**overrides):
+    defaults = dict(
+        model_path="test-model",
+        batching_mode="dynamic",
+        batching_max_size=2,
+        batching_delay_ms=25.0,
+        enable_batching_metrics=False,
+        pipeline_config=PipelineConfig(),
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def test_video_batch_scheduler_groups_compatible_requests(tmp_path):
+    async def run():
+        generator = _FakeBatchGenerator()
+        scheduler = VideoBatchScheduler(generator, _batch_scheduler_args())
+        await scheduler.start()
+        try:
+            first = {
+                "prompt": "first",
+                "height": 256,
+                "width": 256,
+                "num_frames": 1,
+                "num_inference_steps": 2,
+                "seed": 1,
+                "output_path": str(tmp_path / "first.mp4"),
+                "save_video": False,
+            }
+            second = {
+                "prompt": "second",
+                "height": 256,
+                "width": 256,
+                "num_frames": 1,
+                "num_inference_steps": 2,
+                "seed": 2,
+                "output_path": str(tmp_path / "second.mp4"),
+                "save_video": False,
+            }
+            results = await asyncio.gather(
+                scheduler.submit("req-1", first),
+                scheduler.submit("req-2", second),
+            )
+        finally:
+            await scheduler.stop()
+        return generator.calls, results
+
+    calls, results = asyncio.run(run())
+
+    assert len(calls) == 1
+    assert [item["prompt"] for item in calls[0]] == ["first", "second"]
+    assert [result["prompts"] for result in results] == ["first", "second"]
+
+
+def test_video_batch_scheduler_keeps_incompatible_requests_separate(tmp_path):
+    async def run():
+        generator = _FakeBatchGenerator()
+        scheduler = VideoBatchScheduler(generator, _batch_scheduler_args())
+        await scheduler.start()
+        try:
+            text_only = {
+                "prompt": "first",
+                "height": 256,
+                "width": 256,
+                "num_frames": 1,
+                "num_inference_steps": 2,
+                "seed": 1,
+                "output_path": str(tmp_path / "first.mp4"),
+                "save_video": False,
+            }
+            image_conditioned = {
+                "prompt": "second",
+                "height": 256,
+                "width": 256,
+                "num_frames": 1,
+                "num_inference_steps": 2,
+                "seed": 2,
+                "image_path": str(tmp_path / "input.png"),
+                "output_path": str(tmp_path / "second.mp4"),
+                "save_video": False,
+            }
+            results = await asyncio.gather(
+                scheduler.submit("req-1", text_only),
+                scheduler.submit("req-2", image_conditioned),
+            )
+        finally:
+            await scheduler.stop()
+        return generator.calls, results
+
+    calls, results = asyncio.run(run())
+
+    assert len(calls) == 2
+    assert [[item["prompt"] for item in call] for call in calls] == [["first"], ["second"]]
+    assert [result["prompts"] for result in results] == ["first", "second"]
 
 # ---------------------------------------------------------------------------
 # parse_size

@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from fastvideo.api.presets import validate_preset_selection
 from fastvideo.api.schema import GenerationRequest
+from fastvideo.entrypoints.openai.batching import VideoBatchScheduler
 from fastvideo.entrypoints.openai.state import (
     DEFAULT_OUTPUT_DIR,
     clear_state,
@@ -59,11 +60,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     generator = VideoGenerator.from_fastvideo_args(args)
     logger.info("Model loaded successfully.")
 
-    set_state(generator, args, output_dir, default_request=default_request)
+    video_batch_scheduler: VideoBatchScheduler | None = None
+    if args.batching_mode == "dynamic" and args.batching_max_size > 1:
+        video_batch_scheduler = VideoBatchScheduler(generator, args)
+        await video_batch_scheduler.start()
+        logger.info(
+            "Started dynamic video batch scheduler: max_size=%d delay_ms=%.2f",
+            args.batching_max_size,
+            args.batching_delay_ms,
+        )
+
+    set_state(
+        generator,
+        args,
+        output_dir,
+        default_request=default_request,
+        video_batch_scheduler=video_batch_scheduler,
+    )
 
     yield  # server is running
 
     logger.info("Shutting down — releasing model resources ...")
+    if video_batch_scheduler is not None:
+        await video_batch_scheduler.stop()
     generator.shutdown()
     clear_state()
     logger.info("Shutdown complete.")
