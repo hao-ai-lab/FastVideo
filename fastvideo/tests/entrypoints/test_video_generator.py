@@ -235,6 +235,55 @@ def test_generate_prepared_work_items_falls_back_for_incompatible_requests(monke
     assert [result["prompts"] for result in results] == ["one", "two"]
 
 
+def test_generate_video_batch_routes_compat_kwargs(monkeypatch, tmp_path):
+    vg = _new_video_generator()
+    vg.fastvideo_args = _batching_fastvideo_args()
+    calls = []
+
+    def fake_device_memory(gpu_id):
+        return 48.0
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append((batch, fastvideo_args))
+        output = torch.zeros((len(batch.prompt), 4, 1, 1, 1), dtype=torch.float32)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(
+        "fastvideo.batching.admission.BatchAdmissionController._get_device_memory_gb",
+        staticmethod(fake_device_memory),
+    )
+    monkeypatch.setattr(vg, "_run_forward_batch", fake_run_forward)
+
+    results = vg.generate_video_batch([
+        {
+            "prompt": "one",
+            "height": 8,
+            "width": 8,
+            "num_frames": 1,
+            "embedded_cfg_scale": 7.5,
+            "save_video": False,
+            "return_frames": True,
+            "output_path": str(tmp_path / "one.mp4"),
+        },
+        {
+            "prompt": "two",
+            "height": 8,
+            "width": 8,
+            "num_frames": 1,
+            "embedded_cfg_scale": 7.5,
+            "save_video": False,
+            "return_frames": True,
+            "output_path": str(tmp_path / "two.mp4"),
+        },
+    ])
+
+    assert len(calls) == 1
+    batch, fastvideo_args = calls[0]
+    assert batch.prompt == ["one", "two"]
+    assert fastvideo_args.pipeline_config.embedded_cfg_scale == 7.5
+    assert [result["prompts"] for result in results] == ["one", "two"]
+
+
 def test_from_config_normalizes_and_translates(monkeypatch):
     captured = _patch_from_fastvideo_args(monkeypatch)
     _patch_fastvideo_args_from_kwargs(monkeypatch)

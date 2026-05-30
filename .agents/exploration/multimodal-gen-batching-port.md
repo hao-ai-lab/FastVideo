@@ -69,7 +69,11 @@ FastVideo files inspected:
 - [x] Stage 5 remote validation passed on Modal L40S.
 - [x] Stage 5 commit: `4c6a9dc2`
       (`[feat]: add OpenAI video batching scheduler`).
-- [ ] After approval, implement remaining stages with commits and remote Modal validation.
+- [x] Added GPU parity/benchmark helper script:
+      `fastvideo/tests/batching/run_dynamic_batching_parity.py`.
+- [ ] Remote GPU parity run.
+- [ ] Remote benchmark runs.
+- [ ] Commit GPU helper, parity fixes, benchmark results, and final report.
 - [ ] Produce final Markdown write-up with test and benchmark results and commit it.
 
 ## Findings
@@ -278,8 +282,192 @@ Planned remote validation after implementation:
 - Before/after benchmark suite with dynamic batching disabled vs enabled and
   sequential prompt-file baseline vs dynamic server batching.
 
+GPU validation helper:
+- `fastvideo/tests/batching/run_dynamic_batching_parity.py`
+- Supports:
+  - `--mode parity`: sequential `generate_video()` for each request vs one
+    `generate_video_batch()` call in the same checkout; compares latent tensors.
+  - `--mode sequential`: benchmark current sequential behavior.
+  - `--mode dynamic`: benchmark dynamic batching behavior.
+- Defaults use Wan2.1 T2V 1.3B, latent output, 256x256, 9 frames, 2 steps,
+  batch size 2. Final parity/benchmark runs may override these if the model
+  requires a larger valid shape.
+
+Benchmark run, batch size 2:
+- Modal app: `ap-V0fkFaplHrGYto9hFWvRmc`
+- Command:
+  `python fastvideo/tests/batching/run_dynamic_batching_parity.py --mode sequential --warmup-runs 1 --measurement-runs 3 --output-json /tmp/fastvideo_dynamic_batching/sequential.json && python fastvideo/tests/batching/run_dynamic_batching_parity.py --mode dynamic --warmup-runs 1 --measurement-runs 3 --output-json /tmp/fastvideo_dynamic_batching/dynamic.json`
+- Workload:
+  - Wan2.1 T2V 1.3B, one L40S, latent output, 256x256, 9 frames, 2 denoise
+    steps, two prompts, `guidance_scale=1.0`.
+- Results:
+  - Sequential baseline times: `[2.1736583650, 2.1744417920, 2.1720341440]`
+  - Sequential average: `2.1733781003s`; throughput `0.9202264437 req/s`
+  - Dynamic times: `[2.1407064020, 2.1398537520, 2.1382482180]`
+  - Dynamic average: `2.1396027907s`; throughput `0.9347529405 req/s`
+  - Throughput improvement: about `1.6%`.
+
+Benchmark run, batch size 4:
+- Modal app: `ap-K5tj5fWQKByZ0Sl9wn6OGC`
+- Command:
+  `python fastvideo/tests/batching/run_dynamic_batching_parity.py --mode sequential --batch-size 4 --warmup-runs 1 --measurement-runs 3 ... && python fastvideo/tests/batching/run_dynamic_batching_parity.py --mode dynamic --batch-size 4 --warmup-runs 1 --measurement-runs 3 ...`
+- Workload:
+  - Wan2.1 T2V 1.3B, one L40S, latent output, 256x256, 9 frames, 2 denoise
+    steps, four prompts, `guidance_scale=1.0`.
+- Results:
+  - Sequential baseline times: `[4.3420497740, 4.3434355840, 4.3416078150]`
+  - Sequential average: `4.3423643910s`; throughput `0.9211571485 req/s`
+  - Dynamic times: `[4.2617743810, 4.4826704910, 4.2678945680]`
+  - Dynamic average: `4.3374464800s`; throughput `0.9222015807 req/s`
+  - Throughput improvement: about `0.1%`.
+  - Interpretation: with exact per-prompt text encoding and only two denoise
+    steps, this small synthetic benchmark is dominated by text/launch overhead,
+    so dynamic denoising has little room to help.
+
+Benchmark run, batch size 2, 8 denoise steps:
+- Modal app: `ap-yPsbXeIc6YbCG7NvAueN4t`
+- Command:
+  `python fastvideo/tests/batching/run_dynamic_batching_parity.py --mode sequential --num-inference-steps 8 --warmup-runs 1 --measurement-runs 2 ... && python fastvideo/tests/batching/run_dynamic_batching_parity.py --mode dynamic --num-inference-steps 8 --warmup-runs 1 --measurement-runs 2 ...`
+- Workload:
+  - Wan2.1 T2V 1.3B, one L40S, latent output, 256x256, 9 frames, 8 denoise
+    steps, two prompts, `guidance_scale=1.0`.
+- Results:
+  - Sequential baseline times: `[2.7835521810, 2.5315261900]`
+  - Sequential average: `2.6575391855s`; throughput `0.7525759210 req/s`
+  - Dynamic times: `[2.4052083240, 2.3961168300]`
+  - Dynamic average: `2.4006625770s`; throughput `0.8331033354 req/s`
+  - Throughput improvement: about `10.7%`.
+
+### Stage 6: GPU Parity And Benchmark Validation
+Parity attempt:
+- Modal app: `ap-UTIijf9LTsX3ua9Czvm5dq`
+- Command:
+  `python fastvideo/tests/batching/run_dynamic_batching_parity.py --mode parity --output-json /tmp/fastvideo_dynamic_batching/parity.json`
+- Result:
+  - Failed before tensor comparison.
+  - Sequential `generate_video()` accepted the legacy request kwarg
+    `embedded_cfg_scale`, but `generate_video_batch()` tried to apply all
+    request kwargs directly to `SamplingParam.update()` and rejected
+    `embedded_cfg_scale`.
+- Fix applied locally:
+  - `VideoGenerator.generate_video_batch()` now routes each request through
+    `legacy_generate_call_to_request()`, `request_to_sampling_param()`, and
+    `request_to_pipeline_overrides()`, matching `generate_video()`.
+  - Identical pipeline overrides reuse one resolved `FastVideoArgs` object so
+    compatible requests can still merge; different overrides remain separated
+    by the existing object-identity compatibility guard.
+  - Added a unit test covering `generate_video_batch()` with
+    `embedded_cfg_scale`.
+
+Focused validation for the compat fix:
+- Modal app: `ap-gmob40FWTO5knEPA39s3bd`
+- Command:
+  `pytest fastvideo/tests/entrypoints/test_video_generator.py -q && pre-commit run --files fastvideo/entrypoints/video_generator.py fastvideo/tests/entrypoints/test_video_generator.py fastvideo/tests/batching/run_dynamic_batching_parity.py .agents/exploration/multimodal-gen-batching-port.md`
+- Result:
+  - Tests passed: `23 passed, 14 warnings`.
+  - Pre-commit passed: yapf, ruff, codespell, mypy, filename spaces, and
+    suggestion hooks.
+
+Parity rerun:
+- Modal app: `ap-C8JZ6i4R7mv6NOBTBDCRTc`
+- Command:
+  `python fastvideo/tests/batching/run_dynamic_batching_parity.py --mode parity --output-json /tmp/fastvideo_dynamic_batching/parity.json`
+- Result:
+  - Failed in the batched forward path before tensor comparison.
+  - The Wan tokenizer received a prompt list with variable token lengths and
+    `return_tensors="pt"` but no padding, causing Hugging Face tokenization to
+    reject non-rectangular `input_ids`.
+- Fix applied locally:
+  - `TextEncodingStage.encode_text()` now adds tokenizer `padding=True` when
+    encoding multiple processed prompts and no explicit padding mode is already
+    configured.
+  - Added a unit test to cover default padding insertion for prompt-list text
+    encoding.
+
+Focused validation attempt for padding fix:
+- Modal app: `ap-MFeCHJF61EuAgsZro5cAb4`
+- Command:
+  `pytest fastvideo/tests/entrypoints/test_video_generator.py fastvideo/tests/stages/test_text_encoding.py -q && pre-commit run --files ...`
+- Result:
+  - Product tests mostly passed, but the new test had a misplaced assertion
+    referencing `out2` outside its original test.
+- Fix applied locally:
+  - Moved the prompt/negative attention-mask assertions back into
+    `test_forward_integration_cfg_off_and_on()` and left the padding test
+    scoped to tokenizer kwargs.
+
+Focused validation clean rerun:
+- Modal app: `ap-IJIJjdLogSGkzeN4sCP46E`
+- Command:
+  `pytest fastvideo/tests/entrypoints/test_video_generator.py fastvideo/tests/stages/test_text_encoding.py -q && pre-commit run --files ...`
+- Result:
+  - Tests passed: `28 passed, 14 warnings`.
+  - Pre-commit passed: yapf, ruff, codespell, mypy, filename spaces, and
+    suggestion hooks.
+
+Parity rerun after padding fix:
+- Modal app: `ap-MMEOgUNlqYzeoYaD2blJVh`
+- Command:
+  `python fastvideo/tests/batching/run_dynamic_batching_parity.py --mode parity --output-json /tmp/fastvideo_dynamic_batching/parity.json`
+- Result:
+  - Batched forward completed successfully.
+  - Tensor parity was not close enough:
+    - request 0 max abs diff `0.0625`, mean abs diff `0.0048387293`
+    - request 1 max abs diff `0.1708983183`, mean abs diff `0.0173878949`
+    - aggregate max abs diff `0.1708983183`, mean abs diff `0.0111133121`
+    - `torch.allclose(..., atol=1e-4, rtol=1e-4)` failed.
+- Follow-up fix applied locally:
+  - `TextEncodingStage.forward()` now preserves the existing single-prompt text
+    encoding path for prompt-list batches by encoding each prompt separately
+    and concatenating postprocessed embeddings/masks. This keeps denoising
+    batched while removing tokenizer padding/sequence-length drift from the
+    parity path.
+  - Added a unit test proving prompt-list `forward()` uses one tokenizer call
+    per prompt, while direct `encode_text(list)` still supports padded batched
+    tokenization.
+
+Focused validation for single-text-encode parity fix:
+- Modal app: `ap-DIIEE6Wy0I728fqsc63C6s`
+- Command:
+  `pytest fastvideo/tests/entrypoints/test_video_generator.py fastvideo/tests/stages/test_text_encoding.py -q && pre-commit run --files ...`
+- Result:
+  - Tests passed: `29 passed, 14 warnings`.
+  - Pre-commit passed: yapf, ruff, codespell, mypy, filename spaces, and
+    suggestion hooks.
+
+Parity rerun after single-text-encode fix:
+- Modal app: `ap-fYT25LrzvFbUZv50JhxmWC`
+- Command:
+  `python fastvideo/tests/batching/run_dynamic_batching_parity.py --mode parity --output-json /tmp/fastvideo_dynamic_batching/parity.json`
+- Result:
+  - Batched forward completed successfully.
+  - Tensor parity improved only slightly and is still not near bit-identical:
+    - request 0 max abs diff `0.0380859375`, mean abs diff
+      `0.0047932155`
+    - request 1 max abs diff `0.1457520127`, mean abs diff
+      `0.0196863897`
+    - aggregate max abs diff `0.1457520127`, mean abs diff
+      `0.0122398026`
+    - `torch.allclose(..., atol=1e-4, rtol=1e-4)` failed.
+- Interpretation:
+  - Since the prompt-list path now reuses the same single-prompt text encoding
+    calls, the remaining drift is likely from batched Wan denoising/model math
+    rather than tokenization.
+  - Keep this as a documented limitation in the final report unless a later
+    exact-denoising mode is added.
+
 ## Mistakes / Dead Ends
-None yet.
+- First GPU parity attempt found the `generate_video_batch()` legacy-compat
+  gap described in Stage 6. This was a useful pre-parity functional bug, not a
+  numerical mismatch.
+- Second GPU parity attempt found that prompt-list tokenizer calls need padding
+  for variable-length Wan prompts.
+- Third GPU parity attempt completed but exposed non-negligible numerical drift.
+  The next hypothesis is text-encoder sequence/padding drift; the local fix now
+  preserves the single-prompt text-encoding path for merged requests.
+- Fourth GPU parity attempt still showed non-negligible drift, so dynamic
+  batched denoising is not near bit-identical to sequential denoising for this
+  Wan latent test.
 
 ## Proposed Standardization
 If this port lands cleanly, create a runtime batching SOP covering:
@@ -297,8 +485,9 @@ Current local implementation state:
 - Stage 2 state commit is `39cb1d43`; branch is pushed to origin through
   Stage 2.
 - Stage 5 code is committed as `4c6a9dc2`.
-- The state-file update recording that commit is the only local change before
-  GPU parity/benchmark work.
+- The GPU validation helper script, `generate_video_batch()` compat fix,
+  prompt-list tokenizer padding fix, prompt-list single-text-encode parity fix,
+  unit tests, and this state update are local and uncommitted.
 
 Important constraints:
 - Do not edit unrelated untracked files already present in the worktree.
@@ -308,4 +497,5 @@ Important constraints:
   test environment.
 
 Next step:
-Push Stage 5, then begin GPU parity and benchmark validation.
+Rerun GPU parity with the helper script, then run sequential and dynamic
+benchmark modes for comparison.

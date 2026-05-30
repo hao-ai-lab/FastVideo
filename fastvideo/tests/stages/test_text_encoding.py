@@ -13,7 +13,13 @@ class TensorDict(dict):
         return TensorDict({k: v.to(device) for k, v in self.items()})
 
 class FakeTokenizer:
+    def __init__(self):
+        self.calls = []
+        self.texts = []
+
     def __call__(self, texts, **kwargs):
+        self.calls.append(kwargs)
+        self.texts.append(list(texts))
         B = len(texts)
         seq_len = int(kwargs.get("max_length", 4))
         return TensorDict({
@@ -130,6 +136,35 @@ def test_forward_integration_cfg_off_and_on():
     assert len(out2.negative_prompt_embeds) == 2
     assert len(out2.prompt_attention_mask) == 2
     assert len(out2.negative_attention_mask) == 2
+
+def test_encode_text_adds_padding_for_prompt_lists():
+    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    stage = make_stage(num_encoders=1, hidden_size=hidden)
+
+    stage.encode_text(["short", "a longer prompt"], fastvideo_args, encoder_index=[0])
+
+    assert stage.tokenizers[0].calls[-1]["padding"] is True
+
+
+def test_forward_prompt_list_preserves_single_prompt_text_encoding_path():
+    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    stage = make_stage(num_encoders=1, hidden_size=hidden)
+    batch = ForwardBatch(
+        data_type="video",
+        prompt=["short", "a longer prompt"],
+        negative_prompt="",
+        do_classifier_free_guidance=False,
+        prompt_embeds=[],
+        negative_prompt_embeds=None,
+        prompt_attention_mask=[],
+        negative_attention_mask=None,
+    )
+
+    out = stage.forward(batch, fastvideo_args)
+
+    assert stage.tokenizers[0].texts == [["short"], ["a longer prompt"]]
+    assert out.prompt_embeds[0].shape == (2, hidden)
+    assert out.prompt_attention_mask[0].shape == (2, 4)
 
 
 def test_encode_text_hidden_state_flag_follows_encoder_config():

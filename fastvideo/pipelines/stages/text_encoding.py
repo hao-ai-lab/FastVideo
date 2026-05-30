@@ -61,12 +61,20 @@ class TextEncodingStage(PipelineStage):
         assert batch.prompt is not None
         prompt_text: str | list[str] = batch.prompt
         all_indices: list[int] = list(range(len(self.text_encoders)))
-        prompt_embeds_list, prompt_masks_list = self.encode_text(
-            prompt_text,
-            fastvideo_args,
-            encoder_index=all_indices,
-            return_attention_mask=True,
-        )
+        if isinstance(prompt_text, list):
+            prompt_embeds_list, prompt_masks_list = self._encode_prompt_list_individually(
+                prompt_text,
+                fastvideo_args,
+                encoder_index=all_indices,
+                return_attention_mask=True,
+            )
+        else:
+            prompt_embeds_list, prompt_masks_list = self.encode_text(
+                prompt_text,
+                fastvideo_args,
+                encoder_index=all_indices,
+                return_attention_mask=True,
+            )
         if self._last_audio_embeds is not None:
             batch.extra["ltx2_audio_prompt_embeds"] = self._last_audio_embeds
 
@@ -82,12 +90,20 @@ class TextEncodingStage(PipelineStage):
             negative_prompt: str | list[str] = batch.negative_prompt
             if isinstance(batch.prompt, list) and isinstance(negative_prompt, str):
                 negative_prompt = [negative_prompt] * len(batch.prompt)
-            neg_embeds_list, neg_masks_list = self.encode_text(
-                negative_prompt,
-                fastvideo_args,
-                encoder_index=all_indices,
-                return_attention_mask=True,
-            )
+            if isinstance(negative_prompt, list):
+                neg_embeds_list, neg_masks_list = self._encode_prompt_list_individually(
+                    negative_prompt,
+                    fastvideo_args,
+                    encoder_index=all_indices,
+                    return_attention_mask=True,
+                )
+            else:
+                neg_embeds_list, neg_masks_list = self.encode_text(
+                    negative_prompt,
+                    fastvideo_args,
+                    encoder_index=all_indices,
+                    return_attention_mask=True,
+                )
             if self._last_audio_embeds is not None:
                 batch.extra["ltx2_audio_negative_embeds"] = self._last_audio_embeds
 
@@ -99,6 +115,63 @@ class TextEncodingStage(PipelineStage):
                     batch.negative_attention_mask.append(nm)
 
         return batch
+
+    def _encode_prompt_list_individually(
+        self,
+        texts: list[str],
+        fastvideo_args: FastVideoArgs,
+        *,
+        encoder_index: list[int],
+        return_attention_mask: bool,
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+        per_prompt_embeds: list[list[torch.Tensor]] = []
+        per_prompt_masks: list[list[torch.Tensor]] = []
+        per_prompt_audio_embeds: list[list[torch.Tensor] | None] = []
+
+        for text in texts:
+            embeds, masks = self.encode_text(
+                text,
+                fastvideo_args,
+                encoder_index=encoder_index,
+                return_attention_mask=return_attention_mask,
+            )
+            per_prompt_embeds.append(embeds)
+            per_prompt_masks.append(masks)
+            per_prompt_audio_embeds.append(self._last_audio_embeds)
+
+        merged_embeds = [
+            torch.cat([prompt_embeds[encoder_pos] for prompt_embeds in per_prompt_embeds], dim=0)
+            for encoder_pos in range(len(per_prompt_embeds[0]))
+        ]
+        merged_masks = [
+            self._cat_attention_masks([prompt_masks[encoder_pos] for prompt_masks in per_prompt_masks])
+            for encoder_pos in range(len(per_prompt_masks[0]))
+        ]
+        if per_prompt_audio_embeds and all(audio_embeds is not None for audio_embeds in per_prompt_audio_embeds):
+            audio_embed_lists = [audio_embeds for audio_embeds in per_prompt_audio_embeds if audio_embeds is not None]
+            self._last_audio_embeds = [
+                torch.cat([audio_embeds[encoder_pos] for audio_embeds in audio_embed_lists], dim=0)
+                for encoder_pos in range(len(audio_embed_lists[0]))
+            ]
+        else:
+            self._last_audio_embeds = None
+        return merged_embeds, merged_masks
+
+    @staticmethod
+    def _cat_attention_masks(masks: list[torch.Tensor]) -> torch.Tensor:
+        base_shape = masks[0].shape[1:]
+        if all(mask.shape[1:] == base_shape for mask in masks):
+            return torch.cat(masks, dim=0)
+        if all(mask.ndim == 2 for mask in masks):
+            max_length = max(mask.shape[1] for mask in masks)
+            padded_masks = []
+            for mask in masks:
+                pad_width = max_length - mask.shape[1]
+                if pad_width > 0:
+                    mask = torch.nn.functional.pad(mask, (0, pad_width), value=0)
+                padded_masks.append(mask)
+            return torch.cat(padded_masks, dim=0)
+        raise ValueError(f"Cannot concatenate attention masks with shapes: {[list(mask.shape) for mask in masks]}")
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify text encoding stage inputs."""
@@ -232,6 +305,9 @@ class TextEncodingStage(PipelineStage):
                     embeds_list.append(prompt_embeds)
                     attn_masks_list.append(attention_mask)
                     return self.return_embeds(embeds_list, attn_masks_list, return_type, return_attention_mask, indices)
+
+            if len(processed_texts) > 1 and "padding" not in tok_kwargs:
+                tok_kwargs["padding"] = True
 
             # If tokenizer is a multimodal processor (e.g. Qwen2_5_VLProcessor),
             # use its inner tokenizer for text-only encoding.
