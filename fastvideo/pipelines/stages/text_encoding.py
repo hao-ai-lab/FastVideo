@@ -78,9 +78,12 @@ class TextEncodingStage(PipelineStage):
 
         # Encode negative prompt if CFG is enabled
         if batch.do_classifier_free_guidance:
-            assert isinstance(batch.negative_prompt, str)
+            assert isinstance(batch.negative_prompt, str | list)
+            negative_prompt: str | list[str] = batch.negative_prompt
+            if isinstance(batch.prompt, list) and isinstance(negative_prompt, str):
+                negative_prompt = [negative_prompt] * len(batch.prompt)
             neg_embeds_list, neg_masks_list = self.encode_text(
-                batch.negative_prompt,
+                negative_prompt,
                 fastvideo_args,
                 encoder_index=all_indices,
                 return_attention_mask=True,
