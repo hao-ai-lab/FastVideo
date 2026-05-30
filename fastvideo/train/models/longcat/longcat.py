@@ -7,6 +7,7 @@ from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
+from fastvideo.models.dits.longcat import longcat_to_training_velocity
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.wan.wan import WanModel
 
@@ -26,10 +27,16 @@ class LongCatModel(WanModel):
 
         validated = float(flow_shift)
         if validated == 0.0:
-            raise ValueError("LongCat training does not support flow_shift=0.0 because "
-                             "it collapses FlowMatch training timesteps. Use 12.0 to "
-                             "match the released LongCat scheduler config.")
+            raise ValueError(
+                "LongCat training does not support flow_shift=0.0 because "
+                "it collapses FlowMatch training timesteps. Use 12.0 to "
+                "match the released LongCat scheduler config.")
         return validated
+
+    @staticmethod
+    def _to_training_velocity(pred: torch.Tensor) -> torch.Tensor:
+        """Adapt native LongCat output to FastVideo's training target sign."""
+        return longcat_to_training_velocity(pred)
 
     def __init__(
         self,
@@ -129,4 +136,4 @@ class LongCatModel(WanModel):
             cfg_uncond=cfg_uncond,
             attn_kind=attn_kind,
         )
-        return -pred
+        return self._to_training_velocity(pred)
