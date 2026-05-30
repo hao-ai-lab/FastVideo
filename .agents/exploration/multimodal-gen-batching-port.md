@@ -43,6 +43,18 @@ FastVideo files inspected:
       tests have been added locally.
 - [x] Stage 1 remote validation passed on Modal L40S.
 - [x] Stage 1 commit: `3d3157fb` (`[feat]: add generation batching primitives`).
+- [x] Stage 1 state commit: `ce758820`
+      (`[misc]: record batching stage 1 state`).
+- [x] Stage 2 local implementation:
+      - added generator prepared-work-item merge/split helpers,
+      - added `generate_video_batch()` for later server queue use,
+      - enabled prompt-file dynamic batching,
+      - preserved explicit per-request seeds for prompt-list batches,
+      - repeated negative prompts for CFG with prompt lists,
+      - removed the standard denoising stage batch-size-1 assertion,
+      - added focused CPU-light tests with fake forward execution.
+- [x] Stage 2 remote validation passed on Modal L40S.
+- [ ] Stage 2 commit.
 - [ ] After approval, implement remaining stages with commits and remote Modal validation.
 - [ ] Produce final Markdown write-up with test and benchmark results and commit it.
 
@@ -128,6 +140,59 @@ Files changed/added:
 
 Stage 1 is complete.
 
+### Stage 2: Generator Merge/Split And Batch-Safe Standard Stages
+Files changed/added:
+- `fastvideo/entrypoints/video_generator.py`
+  - Added `_GenerationWorkItem`, forward execution helper, output
+    postprocessing helper, output split helper, work-item merge/grouping logic,
+    and `generate_video_batch()`.
+  - `prompt_txt` / `SamplingParam.prompt_path` now uses dynamic batching when
+    `batching_mode=dynamic` and `batching_max_size>1`; otherwise it keeps the
+    prior sequential behavior.
+- `fastvideo/pipelines/stages/input_validation.py`
+  - Preserves `ForwardBatch.seeds` when already supplied by a merged batch.
+  - Generates one seed per prompt for prompt-list batches.
+- `fastvideo/pipelines/stages/text_encoding.py`
+  - Expands a single negative prompt across a prompt list for CFG.
+- `fastvideo/pipelines/stages/denoising.py`
+  - Removed the explicit standard-path `shape[0] == 1` assertion.
+- `fastvideo/tests/entrypoints/test_video_generator.py`
+  - Added fake-forward tests for merged compatible requests and sequential
+    fallback on incompatible requests.
+- `fastvideo/tests/stages/test_input_validation_batching.py`
+  - Added seed preservation and prompt-list seed fanout tests.
+
+Pending for Stage 2:
+- Commit Stage 2 if validation passes.
+
+Validation attempt:
+- Modal app: `ap-vsU8ZgjMvfGgpRBWk4IfCV`
+- Result:
+  - Tests failed before pre-commit: `1 failed, 50 passed, 14 warnings`.
+  - Failure was an existing entrypoint test using a `SimpleNamespace` test
+    double without new batching fields.
+- Fix applied locally:
+  - `_dynamic_batching_enabled()` now defaults missing batching fields to
+    disabled / max size 1.
+
+Validation rerun:
+- Modal app: `ap-Y6B6cRSzW9frq4IIU7Tyqj`
+- Result:
+  - Tests passed: `51 passed, 14 warnings`.
+  - Pre-commit failed only on Ruff `F841` for an unused `sampling_param`
+    local in `VideoGenerator._postprocess_generation_output()`.
+- Fix applied locally:
+  - Removed the unused local.
+
+Validation clean rerun:
+- Modal app: `ap-0LrnrxcMw4Ni3M9YJ6gtZv`
+- Command:
+  `pytest fastvideo/tests/batching fastvideo/tests/api/test_compat_translation.py fastvideo/tests/entrypoints/test_video_generator.py fastvideo/tests/stages/test_input_validation_batching.py -q && pre-commit run --files ...`
+- Result:
+  - Tests passed: `51 passed, 14 warnings`.
+  - Pre-commit passed: yapf, ruff, codespell, mypy, filename spaces, and
+    suggestion hooks.
+
 Validation attempt:
 - Modal L40S command:
   `pytest fastvideo/tests/batching fastvideo/tests/api/test_compat_translation.py -q && pre-commit run --files ...`
@@ -175,9 +240,8 @@ If this port lands cleanly, create a runtime batching SOP covering:
 Current branch: `multimodal-gen-batching`.
 
 Current local implementation state:
-- Stage 1 code is committed as `3d3157fb`.
-- The state-file update recording that commit is intentionally the only local
-  change before Stage 2 begins.
+- Stage 1 code is committed as `3d3157fb`; state commit is `ce758820`.
+- Stage 2 code is local, remote validated, and ready to commit.
 
 Important constraints:
 - Do not edit unrelated untracked files already present in the worktree.
@@ -187,7 +251,5 @@ Important constraints:
   test environment.
 
 Next step:
-Begin Stage 2 generator/executor merge-split work. The immediate target is to
-refactor `VideoGenerator._generate_single_video()` into preparation,
-execution, and postprocess helpers, then add internal batch merge/split support
-without changing the default `batching_max_size=1` behavior.
+Commit the Stage 2 slice, then move to Stage 5 OpenAI server queue
+integration.
