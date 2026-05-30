@@ -56,6 +56,18 @@ FastVideo files inspected:
 - [x] Stage 2 remote validation passed on Modal L40S.
 - [x] Stage 2 commit: `fe5572f3`
       (`[feat]: add generator dynamic batching path`).
+- [x] Stage 2 state commit: `39cb1d43`
+      (`[misc]: record batching stage 2 state`).
+- [x] Stage 5 local implementation:
+      - added `VideoBatchScheduler` for OpenAI video requests,
+      - stores the scheduler in OpenAI server state,
+      - starts/stops the scheduler in API server lifespan,
+      - routes `video_api._run_generation()` through the scheduler when
+        dynamic batching is enabled,
+      - added async scheduler tests for compatible grouping and incompatible
+        fallback.
+- [x] Stage 5 remote validation passed on Modal L40S.
+- [ ] Stage 5 commit.
 - [ ] After approval, implement remaining stages with commits and remote Modal validation.
 - [ ] Produce final Markdown write-up with test and benchmark results and commit it.
 
@@ -193,6 +205,46 @@ Validation clean rerun:
   - Pre-commit passed: yapf, ruff, codespell, mypy, filename spaces, and
     suggestion hooks.
 
+### Stage 5: OpenAI Server Queue Integration
+Files changed/added:
+- `fastvideo/entrypoints/openai/batching.py`
+  - Added `VideoBatchScheduler`, an async FIFO queue with batching delay,
+    compatibility checks, background dispatch, and per-request futures.
+- `fastvideo/entrypoints/openai/state.py`
+  - Added global scheduler storage and accessor.
+- `fastvideo/entrypoints/openai/api_server.py`
+  - Starts the scheduler during lifespan when `batching_mode=dynamic` and
+    `batching_max_size>1`; stops it before generator shutdown.
+- `fastvideo/entrypoints/openai/video_api.py`
+  - `_run_generation()` submits to the scheduler when enabled; otherwise keeps
+    the prior direct executor-thread path.
+- `fastvideo/tests/entrypoints/test_openai_api.py`
+  - Added scheduler grouping and incompatible fallback tests using a fake
+    generator.
+
+Pending for Stage 5:
+- Commit Stage 5 if validation passes.
+
+Validation attempt:
+- Modal app: `ap-2PJ4b5eKPnxR9HTEb9x3UM`
+- Command:
+  `pytest fastvideo/tests/entrypoints/test_openai_api.py -q && pre-commit run --files ...`
+- Result:
+  - Tests passed: `61 passed, 14 warnings`.
+  - Pre-commit failed only on mypy for assigning to an `exc` variable outside
+    an `except` block in `openai/batching.py`.
+- Fix applied locally:
+  - Renamed that local variable to `error`.
+
+Validation clean rerun:
+- Modal app: `ap-sgV5gRsGJeHE4g9a1Dswk3`
+- Command:
+  `pytest fastvideo/tests/entrypoints/test_openai_api.py -q && pre-commit run --files ...`
+- Result:
+  - Tests passed: `61 passed, 14 warnings`.
+  - Pre-commit passed: yapf, ruff, codespell, mypy, filename spaces, and
+    suggestion hooks.
+
 Validation attempt:
 - Modal L40S command:
   `pytest fastvideo/tests/batching fastvideo/tests/api/test_compat_translation.py -q && pre-commit run --files ...`
@@ -242,8 +294,9 @@ Current branch: `multimodal-gen-batching`.
 Current local implementation state:
 - Stage 1 code is committed as `3d3157fb`; state commit is `ce758820`.
 - Stage 2 code is committed as `fe5572f3`.
-- The state-file update recording that commit is the only local change before
-  Stage 5 begins.
+- Stage 2 state commit is `39cb1d43`; branch is pushed to origin through
+  Stage 2.
+- Stage 5 code is local, remote validated, and ready to commit.
 
 Important constraints:
 - Do not edit unrelated untracked files already present in the worktree.
@@ -253,9 +306,4 @@ Important constraints:
   test environment.
 
 Next step:
-Begin Stage 5 OpenAI server queue integration:
-- add a queue/scheduler object that groups compatible queued API requests,
-- start/stop it from API server lifespan,
-- route `video_api.create_video` through the scheduler when dynamic batching is
-  enabled,
-- keep image/reference requests sequential via compatibility fallback.
+Commit the Stage 5 slice, then begin GPU parity and benchmark validation.
