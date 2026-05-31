@@ -10,10 +10,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fastvideo.models.vaes.common import DiagonalGaussianDistribution
+
 
 @dataclass
 class AutoencoderKLOutput:
-    latent_dist: "DiagonalGaussianDistribution"
+    latent_dist: DiagonalGaussianDistribution
 
     def __getitem__(self, idx: int):
         return (self.latent_dist,)[idx]
@@ -31,50 +33,6 @@ class DecoderOutput:
 
     def __getitem__(self, idx: int):
         return (self.sample, self.commit_loss)[idx]
-
-
-class DiagonalGaussianDistribution:
-    def __init__(self, parameters: torch.Tensor, deterministic: bool = False):
-        self.parameters = parameters
-        self.mean, self.logvar = torch.chunk(parameters, 2, dim=1)
-        self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
-        self.deterministic = deterministic
-        self.std = torch.exp(0.5 * self.logvar)
-        self.var = torch.exp(self.logvar)
-        if self.deterministic:
-            self.var = self.std = torch.zeros_like(self.mean, device=self.parameters.device, dtype=self.parameters.dtype)
-
-    def sample(self, generator: Optional[torch.Generator] = None) -> torch.Tensor:
-        sample = torch.randn(
-            self.mean.shape,
-            generator=generator,
-            device=self.parameters.device,
-            dtype=self.parameters.dtype,
-        )
-        return self.mean + self.std * sample
-
-    def kl(self, other: Optional["DiagonalGaussianDistribution"] = None) -> torch.Tensor:
-        if self.deterministic:
-            return torch.zeros(1, device=self.parameters.device, dtype=self.parameters.dtype)
-        if other is None:
-            return 0.5 * torch.sum(torch.pow(self.mean, 2) + self.var - 1.0 - self.logvar, dim=[1, 2, 3])
-        return 0.5 * torch.sum(
-            torch.pow(self.mean - other.mean, 2) / other.var
-            + self.var / other.var
-            - 1.0
-            - self.logvar
-            + other.logvar,
-            dim=[1, 2, 3],
-        )
-
-    def nll(self, sample: torch.Tensor, dims: Tuple[int, ...] = (1, 2, 3)) -> torch.Tensor:
-        if self.deterministic:
-            return torch.zeros(1, device=self.parameters.device, dtype=self.parameters.dtype)
-        logtwopi = torch.log(torch.tensor(2.0 * torch.pi, device=sample.device, dtype=sample.dtype))
-        return 0.5 * torch.sum(logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var, dim=dims)
-
-    def mode(self) -> torch.Tensor:
-        return self.mean
 
 
 def get_activation(act_fn: str) -> nn.Module:

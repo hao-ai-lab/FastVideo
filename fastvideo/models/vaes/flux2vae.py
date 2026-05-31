@@ -6,7 +6,10 @@ from typing import Dict, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 from fastvideo.configs.models.vaes.flux2vae import Flux2VAEConfig
-from fastvideo.models.vaes.common import ParallelTiledVAE
+from fastvideo.models.vaes.common import (
+    DiagonalGaussianDistribution,
+    ParallelTiledVAE,
+)
 from fastvideo.models.vaes.flux2_components import (
     ADDED_KV_ATTENTION_PROCESSORS,
     CROSS_ATTENTION_PROCESSORS,
@@ -16,7 +19,6 @@ from fastvideo.models.vaes.flux2_components import (
     AutoencoderKLOutput,
     Decoder,
     DecoderOutput,
-    DiagonalGaussianDistribution,
     Encoder,
 )
 
