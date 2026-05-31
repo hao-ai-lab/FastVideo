@@ -161,13 +161,14 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
 
             outputs = self.vision_language_encoder.generate(**inputs, max_new_tokens=max_new, do_sample=True)
             gen_tokens = outputs[0][inputs.input_ids.shape[-1]:]
-            if len(gen_tokens) >= large_start + large_count:
+            if gen_tokens.shape[0] >= large_start + large_count:
                 large_tokens = gen_tokens[large_start:large_start + large_count]
             else:
-                available = gen_tokens[large_start:] if len(gen_tokens) > large_start else gen_tokens
+                available = gen_tokens[large_start:]
                 large_tokens = torch.zeros(large_count, dtype=gen_tokens.dtype, device=gen_tokens.device)
-                large_tokens[:min(len(available), large_count)] = available[:large_count]
-                logger.warning("AR generated %d tokens, expected %d. Padding with zeros.", len(gen_tokens),
+                if available.shape[0] > 0:
+                    large_tokens[:min(available.shape[0], large_count)] = available[:large_count]
+                logger.warning("AR generated %d tokens, expected %d. Padding with zeros.", gen_tokens.shape[0],
                                large_start + large_count)
             batch.prior_token_id = _upsample_d32_to_d16(large_tokens, up_h, up_w)
             batch.prior_token_drop = torch.zeros(batch.prior_token_id.shape, dtype=torch.bool, device=device)

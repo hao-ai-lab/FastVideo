@@ -133,7 +133,7 @@ class GlmImageDenoisingStage(DenoisingStage):
         prior_token_id = batch.prior_token_id[:1]
         drop_keep = torch.zeros((1, ), dtype=torch.bool, device=device)
         drop_all = torch.ones((1, ), dtype=torch.bool, device=device)
-        cache_len = kv_caches[0].k_cache.shape[1]
+        cache_len = kv_caches[0].k_cache.shape[1] if kv_caches[0].k_cache is not None else 0
 
         def _mask(row: int, with_cache: bool):
             if not sdpa:
