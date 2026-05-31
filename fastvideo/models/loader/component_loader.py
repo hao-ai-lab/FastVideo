@@ -95,6 +95,8 @@ class ComponentLoader(ABC):
             "image_processor": (ImageProcessorLoader, "transformers"),
             "feature_extractor": (ImageProcessorLoader, "transformers"),
             "image_encoder": (ImageEncoderLoader, "transformers"),
+            "vision_language_encoder": (VisionLanguageEncoderLoader, "transformers"),
+            "processor": (ProcessorLoader, "transformers"),
             "upsampler": (UpsamplerLoader, "diffusers"),
             "upsampler_2": (UpsamplerLoader, "diffusers"),
             # Stable Audio's `StableAudioMultiConditioner` bundles T5 +
@@ -506,6 +508,39 @@ class ImageEncoderLoader(TextEncoderLoader):
             fastvideo_args,
             fastvideo_args.pipeline_config.image_encoder_precision,
         )
+
+
+class VisionLanguageEncoderLoader(ComponentLoader):
+    """Loader for vision-language autoregressive encoders."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        from fastvideo.distributed.parallel_state import get_local_torch_device
+        from fastvideo.models.encoders.glm_image_ar_loader import (
+            GlmImageARLoader)
+
+        logger.info("Loading vision-language encoder from %s", model_path)
+        target_device = get_local_torch_device()
+        loader = GlmImageARLoader(
+            model_path,
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=fastvideo_args.trust_remote_code,
+        ).to(target_device).eval()
+        return loader
+
+
+class ProcessorLoader(ComponentLoader):
+    """Loader for HF processors that pair with vision-language encoders."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        from transformers import AutoProcessor
+
+        logger.info("Loading processor from %s", model_path)
+        processor = AutoProcessor.from_pretrained(
+            model_path,
+            trust_remote_code=fastvideo_args.trust_remote_code,
+        )
+        logger.info("Loaded processor: %s", processor.__class__.__name__)
+        return processor
 
 
 class ImageProcessorLoader(ComponentLoader):

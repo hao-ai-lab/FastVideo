@@ -51,6 +51,7 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V480PConfig,
     WanT2V720PConfig,
 )
+from fastvideo.configs.pipelines.glm_image import GlmImageConfig
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
 from fastvideo.api.sampling_param import SamplingParam
@@ -276,8 +277,8 @@ def _register_configs() -> None:
             "FastVideo/LTX2-Diffusers",
         ],
         model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower())
-            and "distilled" not in path.lower() and "2.3" not in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" not in path.lower() and
+            "2.3" not in path.lower(),
         ],
         model_family="ltx2",
         default_preset="ltx2_base",
@@ -810,6 +811,18 @@ def _register_configs() -> None:
         ],
         model_family="sd35",
         default_preset="sd35_medium",
+    )
+
+    # GLM-Image
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=GlmImageConfig,
+        hf_model_paths=[
+            "zai-org/GLM-Image",
+        ],
+        model_detectors=[lambda path: "glmimage" in path.lower() or "glm-image" in path.lower()],
+        workload_types=(WorkloadType.T2I, ),
+        model_family="glm_image",
     )
 
 
