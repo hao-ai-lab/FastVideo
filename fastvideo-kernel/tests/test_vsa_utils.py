@@ -160,7 +160,7 @@ class TestBuildVsaMetadata:
         """build_vsa_metadata returns all expected keys."""
         meta = build_vsa_metadata((8, 16, 16), device="cpu")
         expected_keys = {
-            "tile_indices", "reverse_tile_indices",
+            "tile_partition_indices", "reverse_tile_partition_indices",
             "variable_block_sizes", "non_pad_index",
             "num_tiles", "max_block_size",
         }
@@ -169,8 +169,8 @@ class TestBuildVsaMetadata:
     def test_types(self):
         """Return types are correct."""
         meta = build_vsa_metadata((8, 16, 16), device="cpu")
-        assert isinstance(meta["tile_indices"], torch.Tensor)
-        assert isinstance(meta["reverse_tile_indices"], torch.Tensor)
+        assert isinstance(meta["tile_partition_indices"], torch.Tensor)
+        assert isinstance(meta["reverse_tile_partition_indices"], torch.Tensor)
         assert isinstance(meta["variable_block_sizes"], torch.Tensor)
         assert isinstance(meta["non_pad_index"], torch.Tensor)
         assert isinstance(meta["num_tiles"], tuple)
@@ -191,8 +191,8 @@ class TestBuildVsaMetadata:
         shape = (8, 16, 16)
         meta = build_vsa_metadata(shape, device="cpu")
         n = math.prod(shape)
-        assert meta["tile_indices"].shape == (n,)
-        assert meta["reverse_tile_indices"].shape == (n,)
+        assert meta["tile_partition_indices"].shape == (n,)
+        assert meta["reverse_tile_partition_indices"].shape == (n,)
         assert meta["variable_block_sizes"].sum().item() == n
         assert meta["non_pad_index"].shape[0] == n
 

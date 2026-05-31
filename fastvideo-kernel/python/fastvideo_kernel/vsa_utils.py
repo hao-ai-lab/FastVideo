@@ -85,7 +85,6 @@ def construct_variable_block_sizes(
     ).reshape(-1)
 
 
-@functools.lru_cache(maxsize=10)
 def get_non_pad_index(
     variable_block_sizes: torch.LongTensor,
     max_block_size: int,
@@ -116,7 +115,7 @@ def build_vsa_metadata(
         device: Target device for index tensors.
 
     Returns:
-        Dict with keys: tile_indices, reverse_tile_indices,
+        Dict with keys: tile_partition_indices, reverse_tile_partition_indices,
         variable_block_sizes, non_pad_index, num_tiles, max_block_size.
     """
     if isinstance(device, str):
@@ -137,8 +136,8 @@ def build_vsa_metadata(
     npi = get_non_pad_index(vbs, max_block_size)
 
     return {
-        "tile_indices": tile_indices,
-        "reverse_tile_indices": reverse_tile_indices,
+        "tile_partition_indices": tile_indices,
+        "reverse_tile_partition_indices": reverse_tile_indices,
         "variable_block_sizes": vbs,
         "non_pad_index": npi,
         "num_tiles": num_tiles,
