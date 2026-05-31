@@ -41,7 +41,7 @@ MOCK_FPS = 24
 MOCK_DURATION_SECONDS = 5.0
 MOCK_STREAM_CHUNK_SIZE_BYTES = 256 * 1024
 MOCK_STREAM_CHUNK_DELAY_MS = 15
-MOCK_AV_MIME = 'video/mp4; codecs="avc1.42E01E"'
+MOCK_AV_MIME = 'video/mp4; codecs="avc1.42E01E,mp4a.40.2"'
 FFMPEG_BIN = shutil.which(os.getenv("FASTVIDEO_FFMPEG_BIN", "ffmpeg"))
 MOCK_SEGMENT_BYTES: bytes | None = None
 
@@ -75,9 +75,14 @@ def _build_mock_segment_bytes() -> bytes:
         "lavfi",
         "-i",
         f"testsrc2=size={MOCK_FRAME_WIDTH}x{MOCK_FRAME_HEIGHT}:rate={MOCK_FPS}",
+        # Silent stereo AAC track. We don't need audible content — the FE's
+        # audio-decode coverage only needs a real AAC track present
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=48000",
         "-t",
         f"{MOCK_DURATION_SECONDS}",
-        "-an",
         "-c:v",
         "libx264",
         "-preset",
@@ -90,6 +95,12 @@ def _build_mock_segment_bytes() -> bytes:
         "baseline",
         "-level",
         "3.0",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ar",
+        "48000",
         "-movflags",
         "+empty_moov+default_base_moof+frag_keyframe",
         "-frag_duration",
