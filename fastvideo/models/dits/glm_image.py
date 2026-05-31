@@ -737,7 +737,7 @@ class GlmImageTransformer2DModel(BaseDiT):
         encoder_hidden_states = self.glyph_projector(encoder_hidden_states)
         prior_embedding = self.prior_token_embedding(prior_token_id)
         # Zero dropped priors by multiply: boolean indexing + .any() syncs each step.
-        keep = (~prior_token_drop).to(prior_embedding.dtype)
+        keep = (~prior_token_drop).to(device=prior_embedding.device, dtype=prior_embedding.dtype)
         while keep.dim() < prior_embedding.dim():
             keep = keep.unsqueeze(-1)
         prior_embedding = prior_embedding * keep

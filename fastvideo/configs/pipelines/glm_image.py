@@ -18,8 +18,8 @@ def glm_image_t5_postprocess(outputs: BaseEncoderOutput) -> torch.Tensor:
 
     assert torch.isnan(hidden_state).sum() == 0, "T5 hidden states contain NaN"
 
-    prompt_embeds = [u[:v] for u, v in zip(hidden_state, seq_lens, strict=True)]
     max_len = 512
+    prompt_embeds = [u[:min(v, max_len)] for u, v in zip(hidden_state, seq_lens, strict=True)]
     prompt_embeds_tensor: torch.Tensor = torch.stack(
         [torch.cat([u, u.new_zeros(max_len - u.size(0), u.size(1))]) for u in prompt_embeds], dim=0)
 

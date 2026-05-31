@@ -42,6 +42,8 @@ class GlmImageConditionEncodingStage(PipelineStage):
         cond_img = self.image_processor.preprocess(batch.pil_image, cond_h, cond_w).to(device=device,
                                                                                        dtype=torch.float32)
         latent = self.vae.encode(cond_img).latent_dist.mode()
+        # NOTE: at runtime self.vae.config is a diffusers FrozenDict with flat
+        # latents_mean/latents_std fields. Access the flat fields directly.
         cfg = self.vae.config
         mean = torch.tensor(cfg.latents_mean, device=device, dtype=torch.float32).view(1, -1, 1, 1)
         std = torch.tensor(cfg.latents_std, device=device, dtype=torch.float32).view(1, -1, 1, 1)
