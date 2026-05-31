@@ -11,6 +11,7 @@ This page describes the various options for speeding up generation times in Fast
   - [Sliding Tile Attention (Archived)](#sliding-tile-attention-archived)
   - [Sage Attention](#sage-attention)
   - [Sage Attention 3](#sage-attention-3)
+- [Adaptive Guidance (CFG gating)](#adaptive-guidance-cfg-gating)
 
 - [torch.compile](#torch-compile)
 
@@ -298,3 +299,37 @@ for backend in ["TORCH_SDPA", "FLASH_ATTN", "SAGE_ATTN"]:
 ```
 
 Note: reinstantiate `VideoGenerator` after changing `FASTVIDEO_ATTENTION_BACKEND`.
+
+## Adaptive Guidance (CFG gating)
+
+CFG gating accelerates classifier-free guidance by reusing the cached
+`noise_pred_cond - noise_pred_uncond` delta after a configurable fraction of
+the denoising schedule, skipping the unconditional model forward for the
+remaining steps. The technique is the LinearAG variant of Adaptive Guidance
+(Castillo et al. 2023, [arXiv:2312.12487](https://arxiv.org/abs/2312.12487)).
+
+### Enabling
+
+Set the `FASTVIDEO_CFG_GATE_STEP` environment variable to a float in `[0, 1]`:
+
+| Value | Behavior |
+|-------|----------|
+| `1.0` (default) | Disabled — legacy two-pass CFG every step. |
+| `0.5` | Cache the delta after `len(timesteps) * 0.5` steps; reuse for the rest. |
+| `0.0` | Cache from the very first step (most aggressive). |
+
+```bash
+export FASTVIDEO_CFG_GATE_STEP=0.5
+```
+
+### Trade-offs
+
+- **Memory**: one extra model-output-sized tensor per rank held during the
+  gating window.
+- **Quality**: VBench-measured quality is preserved within noise on 4 of 5
+  dimensions at `FASTVIDEO_CFG_GATE_STEP=0.5` for Wan T2V 1.3B per the PR's
+  reported numbers (see [#1372](https://github.com/hao-ai-lab/FastVideo/pull/1372)).
+- **Speed**: ~22% e2e on 4xL40S and ~24% on 1xH100 at the same settings.
+
+Default behavior is byte-for-byte equivalent to the legacy two-pass CFG path;
+the feature is fully opt-in.
