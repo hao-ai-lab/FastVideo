@@ -153,6 +153,14 @@ class FastVideoArgs:
 
     disable_autocast: bool = False
 
+    # Batched classifier-free guidance: run cond + uncond as a single
+    # batch=2 DiT forward per denoise step instead of two sequential
+    # batch=1 forwards. Output-identical (SSIM=1.0); reduces per-step
+    # launch + memory-traffic overhead. Disable to fall back to the
+    # legacy sequential path (e.g. for debugging or for entry points
+    # that aren't covered by the batched path yet).
+    use_batched_cfg: bool = True
+
     # VSA parameters
     VSA_sparsity: float = 0.0  # inference/validation sparsity
 
@@ -537,6 +545,17 @@ class FastVideoArgs:
             default=FastVideoArgs.enable_torch_compile,
             help="Use torch.compile to speed up DiT inference." +
             "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
+        )
+        parser.add_argument(
+            "--use-batched-cfg",
+            action=StoreBoolean,
+            default=FastVideoArgs.use_batched_cfg,
+            help="Run classifier-free guidance as a single batch=2 DiT "
+            "forward per step (cond+uncond stacked) instead of two "
+            "sequential batch=1 forwards. Output-identical at SSIM=1.0; "
+            "reduces per-step launch + memory overhead. Falls back to "
+            "the sequential path when V2V/I2V/TI2V/action/camera "
+            "conditioning is present.",
         )
         parser.add_argument(
             "--torch-compile-kwargs",

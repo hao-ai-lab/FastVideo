@@ -81,6 +81,7 @@ class EngineConfig:
     enable_stage_verification: bool = True
     use_fsdp_inference: bool = False
     disable_autocast: bool = False
+    use_batched_cfg: bool = True
     quantization: QuantizationConfig | None = None
 
 

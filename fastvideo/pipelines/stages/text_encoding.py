@@ -57,15 +57,29 @@ class TextEncodingStage(PipelineStage):
         assert len(self.tokenizers) == len(self.text_encoders)
         assert len(self.text_encoders) == len(fastvideo_args.pipeline_config.text_encoder_configs)
 
-        # Encode positive prompt with all available encoders
+        # Encode positive prompt with all available encoders.
+        #
+        # For DiTs whose canonical diffusers pipeline uses the
+        # padding="max_length" + trim+zero-pad recipe (Wan, Cosmos),
+        # we force padding="max_length" at the tokenizer call so the
+        # T5 encoder sees padded input — matching the training
+        # distribution AND giving matched shapes for CFG cat
+        # downstream. For all other DiTs (HunyuanVideo and friends)
+        # we keep FV's current variable-length default so we don't
+        # change their behaviour.
         assert batch.prompt is not None
         prompt_text: str | list[str] = batch.prompt
         all_indices: list[int] = list(range(len(self.text_encoders)))
+        _zero_pad_recipe_dits = {"WanVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig"}
+        _dit_cfg_mro_names = {cls.__name__ for cls in type(fastvideo_args.pipeline_config.dit_config).__mro__}
+        _use_canonical_recipe = bool(_zero_pad_recipe_dits & _dit_cfg_mro_names)
+        _cfg_padding = ("max_length" if (batch.do_classifier_free_guidance and _use_canonical_recipe) else None)
         prompt_embeds_list, prompt_masks_list = self.encode_text(
             prompt_text,
             fastvideo_args,
             encoder_index=all_indices,
             return_attention_mask=True,
+            padding=_cfg_padding,
         )
         if self._last_audio_embeds is not None:
             batch.extra["ltx2_audio_prompt_embeds"] = self._last_audio_embeds
@@ -76,7 +90,8 @@ class TextEncodingStage(PipelineStage):
             for am in prompt_masks_list:
                 batch.prompt_attention_mask.append(am)
 
-        # Encode negative prompt if CFG is enabled
+        # Encode negative prompt if CFG is enabled. Same padding policy
+        # as the positive prompt so shapes line up for CFG cat.
         if batch.do_classifier_free_guidance:
             assert isinstance(batch.negative_prompt, str)
             neg_embeds_list, neg_masks_list = self.encode_text(
@@ -84,11 +99,61 @@ class TextEncodingStage(PipelineStage):
                 fastvideo_args,
                 encoder_index=all_indices,
                 return_attention_mask=True,
+                padding=_cfg_padding,
             )
             if self._last_audio_embeds is not None:
                 batch.extra["ltx2_audio_negative_embeds"] = self._last_audio_embeds
 
             assert batch.negative_prompt_embeds is not None
+
+            # CFG diffusers-canonical trim+pad-with-zeros. Verified
+            # from diffusers source:
+            #   - Wan: pipeline_wan.py:187-190 trims T5 output to per-
+            #     sample real length then re-pads with explicit zeros.
+            #   - Cosmos: pipeline_cosmos_text2world.py:233-235 sets
+            #     `prompt_embeds[i, length:] = 0` after the encoder.
+            #   - HunyuanVideo: pipeline_hunyuan_video.py
+            #     _get_llama_prompt_embeds uses encoder output AS-IS,
+            #     padded positions retain T5's natural values.
+            # Already gated above via `_use_canonical_recipe`: the
+            # tokenizer was variable-length for non-Wan/Cosmos pipelines,
+            # so the encoder output already matches FV's current default.
+            # Skip the trim+zero-pad in that case to preserve existing
+            # behaviour.
+            if not _use_canonical_recipe:
+                for ne in neg_embeds_list:
+                    batch.negative_prompt_embeds.append(ne)
+                if batch.negative_attention_mask is not None:
+                    for nm in neg_masks_list:
+                        batch.negative_attention_mask.append(nm)
+                return batch
+            for idx, (pe, ne) in enumerate(zip(prompt_embeds_list, neg_embeds_list, strict=True)):
+                if pe.dim() < 2 or ne.dim() < 2:
+                    continue
+                pe_mask = prompt_masks_list[idx] if idx < len(prompt_masks_list) else None
+                ne_mask = neg_masks_list[idx] if idx < len(neg_masks_list) else None
+                pe_real_len = (int(pe_mask.gt(0).sum(dim=-1).max().item()) if pe_mask is not None else pe.shape[1])
+                ne_real_len = (int(ne_mask.gt(0).sum(dim=-1).max().item()) if ne_mask is not None else ne.shape[1])
+                # Pad to the FULL tokenizer max_length (= shape after
+                # padding="max_length"), matching diffusers. Both pe and
+                # ne come out of the tokenizer at this shape already
+                # since we forced padding="max_length" upstream, but be
+                # defensive in case any encoder bypasses that.
+                target_len = max(pe.shape[1], ne.shape[1], pe_real_len, ne_real_len)
+                prompt_embeds_list[idx] = self._trim_then_zero_pad(pe, pe_real_len, target_len)
+                neg_embeds_list[idx] = self._trim_then_zero_pad(ne, ne_real_len, target_len)
+                if pe_mask is not None and idx < len(prompt_masks_list):
+                    prompt_masks_list[idx] = self._trim_then_zero_pad(pe_mask, pe_real_len, target_len)
+                if ne_mask is not None and idx < len(neg_masks_list):
+                    neg_masks_list[idx] = self._trim_then_zero_pad(ne_mask, ne_real_len, target_len)
+            # Replace pos entries that were appended above with the
+            # trimmed-and-padded versions.
+            batch.prompt_embeds.clear()
+            batch.prompt_embeds.extend(prompt_embeds_list)
+            if batch.prompt_attention_mask is not None:
+                batch.prompt_attention_mask.clear()
+                batch.prompt_attention_mask.extend(prompt_masks_list)
+
             for ne in neg_embeds_list:
                 batch.negative_prompt_embeds.append(ne)
             if batch.negative_attention_mask is not None:
@@ -96,6 +161,21 @@ class TextEncodingStage(PipelineStage):
                     batch.negative_attention_mask.append(nm)
 
         return batch
+
+    @staticmethod
+    def _trim_then_zero_pad(t: torch.Tensor, real_len: int, target_len: int) -> torch.Tensor:
+        """Diffusers-style trim+pad: cut tensor to ``real_len`` along
+        dim 1, then zero-pad to ``target_len``. Idempotent when
+        ``real_len == target_len == t.shape[1]``."""
+        if t.shape[1] == target_len and real_len == target_len:
+            return t
+        trimmed = t[:, :real_len]
+        if trimmed.shape[1] == target_len:
+            return trimmed
+        pad_amount = target_len - trimmed.shape[1]
+        trailing = trimmed.dim() - 2
+        pad_spec = (0, 0) * trailing + (0, pad_amount)
+        return torch.nn.functional.pad(trimmed, pad_spec, value=0)
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify text encoding stage inputs."""

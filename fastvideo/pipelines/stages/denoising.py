@@ -99,10 +99,13 @@ class DenoisingStage(PipelineStage):
             },
         )
 
-        # Setup precision and autocast settings
-        # TODO(will): make the precision configurable for inference
-        # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
-        target_dtype = torch.bfloat16
+        # Setup precision and autocast settings. Honor
+        # pipeline_config.dit_precision so callers can opt into fp32
+        # (e.g. numerical-precision-floor diagnostics for batched-CFG).
+        # Default bf16 preserves pre-PR behaviour.
+        from fastvideo.utils import PRECISION_TO_TYPE as _PRECISION_TO_TYPE
+        _dit_precision = getattr(fastvideo_args.pipeline_config, "dit_precision", "bf16")
+        target_dtype = _PRECISION_TO_TYPE.get(_dit_precision, torch.bfloat16)
         autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Get timesteps and calculate warmup steps
@@ -244,22 +247,11 @@ class DenoisingStage(PipelineStage):
         _cfg_gate_active = _cfg_gate_fraction < 1.0 and batch.do_classifier_free_guidance
         _is_rank0 = get_world_group().local_rank == 0
         if _cfg_gate_active:
-            # Use len(timesteps), not num_inference_steps: the loop iterates
-            # over timesteps directly, and for schedulers with order > 1
-            # (e.g. DPM-Solver++ 2M, Heun) len(timesteps) is a multiple of
-            # num_inference_steps. Using num_inference_steps would cause the
-            # gate to fire at fraction/order of the loop instead of fraction.
             _cfg_gate_step_idx = int(len(timesteps) * _cfg_gate_fraction)
             if _is_rank0:
                 logger.info("CFG gating enabled: fraction=%.3f, gate_step=%d/%d", _cfg_gate_fraction,
                             _cfg_gate_step_idx, len(timesteps))
             if batch.guidance_rescale > 0.0 and _is_rank0:
-                # guidance_rescale rescales CFG output stats to match cond
-                # stats (Lin et al. §3.4).  When `delta_cached` goes stale,
-                # the rescaling still computes but is no longer guaranteed
-                # to preserve the original quality semantics.  Warn so the
-                # caller knows this combo is unvalidated; tighten or
-                # fallback once VBench data lands.
                 logger.warning(
                     "CFG gating (fraction=%.3f) combined with guidance_rescale=%.3f is unvalidated; "
                     "quality may degrade beyond CFG-gating-alone expectations.", _cfg_gate_fraction,
@@ -268,10 +260,70 @@ class DenoisingStage(PipelineStage):
             _cfg_gate_step_idx = len(timesteps) + 1  # never gates
         delta_cached: torch.Tensor | None = None
         delta_cached_model_id: int | None = None
-        # Telemetry — logged at end of denoising loop on rank 0.
         _cfg_gate_fresh_uncond = 0
         _cfg_gate_reused_delta = 0
         _cfg_gate_invalidations = 0
+
+        # Batched classifier-free guidance precomputation.
+        # When enabled, the per-step cond + uncond pair runs as a single
+        # batch=2 DiT forward instead of two sequential batch=1 forwards.
+        # Disabled (sequential fallback) when V2V/I2V/TI2V or action /
+        # camera conditioning is present, OR when CFG gating is active
+        # (AG #1372 expects to selectively skip the uncond forward —
+        # batched=2 forces both passes every step, defeating AG's perf
+        # win). When AG is inactive, batched-CFG composes cleanly.
+        _cfg_conditioning_present = (batch.video_latent is not None or batch.image_latent is not None
+                                     or batch.pil_image is not None or len(batch.image_embeds) > 0
+                                     or batch.mouse_cond is not None or batch.keyboard_cond is not None
+                                     or batch.c2ws_plucker_emb is not None or batch.camera_states is not None)
+        use_batched_cfg = (fastvideo_args.use_batched_cfg and batch.do_classifier_free_guidance
+                           and not _cfg_conditioning_present and not _cfg_gate_active)
+
+        if use_batched_cfg:
+            assert neg_prompt_embeds is not None
+
+            def _shapes_match(neg_list: list[torch.Tensor] | None, pos_list: list[torch.Tensor] | None) -> bool:
+                if neg_list is None and pos_list is None:
+                    return True
+                if neg_list is None or pos_list is None:
+                    return False
+                if len(neg_list) != len(pos_list):
+                    return False
+                return all(n.shape[1:] == p.shape[1:] for n, p in zip(neg_list, pos_list, strict=True))
+
+            if not (_shapes_match(neg_prompt_embeds, prompt_embeds)
+                    and _shapes_match(batch.clip_embedding_neg, batch.clip_embedding_pos)
+                    and _shapes_match(batch.negative_attention_mask, batch.prompt_attention_mask)):
+                logger.info("use_batched_cfg disabled for this generation: pos/neg conditioning "
+                            "shapes differ. Falling back to sequential CFG.")
+                use_batched_cfg = False
+
+        if use_batched_cfg:
+            assert neg_prompt_embeds is not None
+            prompt_embeds_combined: list[torch.Tensor] = [
+                torch.cat([n, p], dim=0) for n, p in zip(neg_prompt_embeds, prompt_embeds, strict=True)
+            ]
+
+            def _cat_list_or_none(neg_val: list[torch.Tensor] | None,
+                                  pos_val: list[torch.Tensor] | None) -> list[torch.Tensor] | None:
+                if neg_val is None and pos_val is None:
+                    return None
+                assert neg_val is not None and pos_val is not None
+                return [torch.cat([n, p], dim=0) for n, p in zip(neg_val, pos_val, strict=True)]
+
+            combined_cond_kwargs = self.prepare_extra_func_kwargs(
+                self.transformer.forward,
+                {
+                    "encoder_hidden_states_2": _cat_list_or_none(batch.clip_embedding_neg, batch.clip_embedding_pos),
+                    "encoder_attention_mask": _cat_list_or_none(batch.negative_attention_mask,
+                                                                batch.prompt_attention_mask),
+                },
+            )
+            guidance_expand_cfg = guidance_expand.repeat(2) if guidance_expand is not None else None
+        else:
+            prompt_embeds_combined = None  # type: ignore[assignment]
+            combined_cond_kwargs = None  # type: ignore[assignment]
+            guidance_expand_cfg = None
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -385,88 +437,110 @@ class DenoisingStage(PipelineStage):
                     # support torch dynamo compilation. They pass in
                     # attn_metadata, vllm_config, and num_tokens. We can pass in
                     # fastvideo_args or training_args, and attn_metadata.
-                    batch.is_cfg_negative = False
-                    with set_forward_context(
-                            current_timestep=i,
-                            attn_metadata=attn_metadata,
-                            forward_batch=batch,
-                            # fastvideo_args=fastvideo_args
-                    ):
-                        # Run transformer
-                        noise_pred = current_model(
-                            latent_model_input,
-                            prompt_embeds,
-                            t_expand,
-                            guidance=guidance_expand,
-                            **image_kwargs,
-                            **pos_cond_kwargs,
-                            **action_kwargs,
-                            **camera_kwargs,
-                            **timesteps_r_kwarg,
-                        )
-
-                    if batch.do_classifier_free_guidance:
-                        # CFG gating: invalidate cached delta when the underlying
-                        # transformer changes (Wan2.2 high/low-noise expert
-                        # switch at `boundary_timestep`).  delta_cached is tied
-                        # to the model that produced it; reusing it across the
-                        # boundary is silently wrong.
-                        if delta_cached_model_id is not None and delta_cached_model_id != id(current_model):
-                            delta_cached = None
-                            delta_cached_model_id = None
-                            _cfg_gate_invalidations += 1
-
-                        _use_cached_delta = (i >= _cfg_gate_step_idx and delta_cached is not None)
-
-                        noise_pred_text = noise_pred
-                        if _use_cached_delta:
-                            # Reuse frozen delta = cond - uncond from the last
-                            # fresh compute.  Algebra:
-                            #   pred = uncond + s * (cond - uncond)
-                            #        = cond + (s - 1) * (cond - uncond)
-                            #        = cond + (s - 1) * delta_cached
-                            noise_pred = noise_pred_text + (current_guidance_scale - 1.0) * delta_cached
-                            _cfg_gate_reused_delta += 1
-                        else:
-                            batch.is_cfg_negative = True
-                            with set_forward_context(
-                                    current_timestep=i,
-                                    attn_metadata=attn_metadata,
-                                    forward_batch=batch,
-                            ):
-                                noise_pred_uncond = current_model(
-                                    latent_model_input,
-                                    neg_prompt_embeds,
-                                    t_expand,
-                                    guidance=guidance_expand,
-                                    **image_kwargs,
-                                    **neg_cond_kwargs,
-                                    **action_kwargs,
-                                    **camera_kwargs,
-                                    **timesteps_r_kwarg,
-                                )
-                            _cfg_gate_fresh_uncond += 1
-
-                            # Refresh cache only when gating is active; under the
-                            # default (FASTVIDEO_CFG_GATE_STEP=1.0, _cfg_gate_step_idx
-                            # > len(timesteps)) we never reuse, so skip the
-                            # tensor allocation.
-                            if _cfg_gate_step_idx <= len(timesteps):
-                                delta_cached = noise_pred_text - noise_pred_uncond
-                                delta_cached_model_id = id(current_model)
-                                noise_pred = noise_pred_uncond + current_guidance_scale * delta_cached
-                            else:
-                                noise_pred = noise_pred_uncond + current_guidance_scale * (noise_pred_text -
-                                                                                           noise_pred_uncond)
-
-                        # Apply guidance rescale if needed
-                        if batch.guidance_rescale > 0.0:
-                            # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
-                            noise_pred = self.rescale_noise_cfg(
-                                noise_pred,
-                                noise_pred_text,
-                                guidance_rescale=batch.guidance_rescale,
+                    if use_batched_cfg:
+                        # Single batch=2 forward: [uncond, cond] stacked
+                        # along batch dim. AG (CFG gating) was already
+                        # excluded from this branch via _cfg_gate_active
+                        # in the gate above — batched-CFG forces both
+                        # forwards every step, so AG's delta-cache reuse
+                        # has no place here.
+                        batch.is_cfg_negative = False
+                        latent_model_input_cfg = torch.cat([latent_model_input, latent_model_input], dim=0)
+                        t_expand_cfg = t_expand.repeat(2) if t_expand.dim() == 1 else t_expand.repeat(2, 1)
+                        timesteps_r_kwarg_cfg = timesteps_r_kwarg
+                        if "timestep_r" in timesteps_r_kwarg and timesteps_r_kwarg["timestep_r"] is not None:
+                            timesteps_r_kwarg_cfg = {"timestep_r": timesteps_r_kwarg["timestep_r"].repeat(2)}
+                        with set_forward_context(
+                                current_timestep=i,
+                                attn_metadata=attn_metadata,
+                                forward_batch=batch,
+                        ):
+                            noise_pred_cfg = current_model(
+                                latent_model_input_cfg,
+                                prompt_embeds_combined,
+                                t_expand_cfg,
+                                guidance=guidance_expand_cfg,
+                                **image_kwargs,
+                                **combined_cond_kwargs,
+                                **action_kwargs,
+                                **camera_kwargs,
+                                **timesteps_r_kwarg_cfg,
                             )
+                        noise_pred_uncond, noise_pred_text = noise_pred_cfg.chunk(2, dim=0)
+                        noise_pred = noise_pred_uncond + current_guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    else:
+                        batch.is_cfg_negative = False
+                        with set_forward_context(
+                                current_timestep=i,
+                                attn_metadata=attn_metadata,
+                                forward_batch=batch,
+                        ):
+                            noise_pred = current_model(
+                                latent_model_input,
+                                prompt_embeds,
+                                t_expand,
+                                guidance=guidance_expand,
+                                **image_kwargs,
+                                **pos_cond_kwargs,
+                                **action_kwargs,
+                                **camera_kwargs,
+                                **timesteps_r_kwarg,
+                            )
+
+                        if batch.do_classifier_free_guidance:
+                            # CFG gating: invalidate cached delta when the underlying
+                            # transformer changes (Wan2.2 high/low-noise expert
+                            # switch at `boundary_timestep`).
+                            if delta_cached_model_id is not None and delta_cached_model_id != id(current_model):
+                                delta_cached = None
+                                delta_cached_model_id = None
+                                _cfg_gate_invalidations += 1
+
+                            _use_cached_delta = (i >= _cfg_gate_step_idx and delta_cached is not None)
+
+                            noise_pred_text = noise_pred
+                            if _use_cached_delta:
+                                # Reuse frozen delta = cond - uncond.
+                                # pred = cond + (s - 1) * delta_cached
+                                noise_pred = noise_pred_text + (current_guidance_scale - 1.0) * delta_cached
+                                _cfg_gate_reused_delta += 1
+                            else:
+                                batch.is_cfg_negative = True
+                                with set_forward_context(
+                                        current_timestep=i,
+                                        attn_metadata=attn_metadata,
+                                        forward_batch=batch,
+                                ):
+                                    noise_pred_uncond = current_model(
+                                        latent_model_input,
+                                        neg_prompt_embeds,
+                                        t_expand,
+                                        guidance=guidance_expand,
+                                        **image_kwargs,
+                                        **neg_cond_kwargs,
+                                        **action_kwargs,
+                                        **camera_kwargs,
+                                        **timesteps_r_kwarg,
+                                    )
+                                _cfg_gate_fresh_uncond += 1
+
+                                # Refresh cache only when gating is active.
+                                if _cfg_gate_step_idx <= len(timesteps):
+                                    delta_cached = noise_pred_text - noise_pred_uncond
+                                    delta_cached_model_id = id(current_model)
+                                    noise_pred = noise_pred_uncond + current_guidance_scale * delta_cached
+                                else:
+                                    noise_pred = noise_pred_uncond + current_guidance_scale * (noise_pred_text -
+                                                                                               noise_pred_uncond)
+
+                    # Apply guidance rescale if needed (CFG-only path)
+                    if batch.do_classifier_free_guidance and batch.guidance_rescale > 0.0:
+                        # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
+                        noise_pred = self.rescale_noise_cfg(
+                            noise_pred,
+                            noise_pred_text,
+                            guidance_rescale=batch.guidance_rescale,
+                        )
                     # Compute the previous noisy sample
                     latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
                     if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
