@@ -17,7 +17,7 @@ from fastvideo.layers.layernorm import RMSNorm, FP32LayerNorm
 from fastvideo.layers.activation import get_act_fn
 from fastvideo.layers.rotary_embedding_3d import RotaryPositionalEmbedding3D
 from fastvideo.attention.layer import DistributedAttention, LocalAttention
-from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.third_party.longcat_video.block_sparse_attention.bsa_interface import flash_attn_bsa_3d
 
@@ -206,6 +206,17 @@ class CaptionEmbedder(nn.Module):
                 encoder_attention_mask = encoder_attention_mask.squeeze(1).squeeze(1)
             elif len(encoder_attention_mask.shape) == 3:
                 encoder_attention_mask = encoder_attention_mask.squeeze(1)
+
+            seq_len = int(y.shape[1])
+            mask_len = int(encoder_attention_mask.shape[1])
+            if mask_len < seq_len:
+                encoder_attention_mask = F.pad(
+                    encoder_attention_mask,
+                    (0, seq_len - mask_len),
+                    value=0,
+                )
+            elif mask_len > seq_len:
+                encoder_attention_mask = encoder_attention_mask[:, :seq_len]
             
             # Zero out padded tokens if requested
             if self.text_tokens_zero_pad:
@@ -602,7 +613,7 @@ class LongCatCrossAttention(nn.Module):
             return out
 
         # === Standard cross-attention ===
-        # Project Q, K, V (standard cross-attention like WanVideo/StepVideo/Cosmos)
+        # Project Q, K, V (standard cross-attention like WanVideo/Cosmos)
         q, _ = self.to_q(x)
         k, _ = self.to_k(context)
         v, _ = self.to_v(context)
@@ -929,7 +940,7 @@ class FinalLayer(nn.Module):
 # Main Model
 # ============================================================================
 
-class LongCatTransformer3DModel(CachableDiT):
+class LongCatTransformer3DModel(BaseDiT):
     """
     Native LongCat Video Transformer using FastVideo layers.
     """

@@ -27,7 +27,29 @@ Useful variables:
 - `FASTVIDEO_LOGGING_LEVEL`: `DEBUG`, `INFO`, `WARNING`, `ERROR`
 - `FASTVIDEO_STAGE_LOGGING`: print per-stage timings during pipeline execution
 - `FASTVIDEO_ATTENTION_BACKEND`: force an attention backend (for example
-  `TORCH_SDPA` or `FLASH_ATTN`)
+  `TORCH_SDPA`, `FLASH_ATTN`, `SAGE_ATTN_THREE`, or
+  `ATTN_QAT_INFER`, or `ATTN_QAT_TRAIN`)
+
+## Layer-by-Layer Activation Tracing
+
+For numerical-divergence debugging — typically when porting a new model and
+needing to find the first layer where FastVideo and an upstream reference
+produce different outputs — use the env-gated activation trace mode:
+
+```bash
+FASTVIDEO_TRACE_ACTIVATIONS=1 \
+FASTVIDEO_TRACE_LAYERS="^transformer\.blocks\.\d+$" \
+FASTVIDEO_TRACE_OUTPUT=/tmp/fv_trace.jsonl \
+python your_script.py
+```
+
+The trace dumps per-tensor stats (`abs_mean`, `sum`, `shape`, etc.) to a
+JSONL file. Run the same workload with tracing on the upstream side, then
+`diff` the two files to localize the first divergent layer.
+
+See [Activation Trace Mode](../contributing/activation_trace.md) for the
+full guide (env var reference, JSONL output schema, parity-debug workflow,
+performance impact, and troubleshooting).
 
 ## Common Failure Modes
 
@@ -49,8 +71,14 @@ combinations.
 If forcing a backend fails, verify optional dependencies are installed:
 
 - `FLASH_ATTN`: `flash-attn`
-- `SLIDING_TILE_ATTN` and `VIDEO_SPARSE_ATTN`: `fastvideo-kernel`
-- `SAGE_ATTN` / `SAGE_ATTN_THREE`: SageAttention packages
+- `VIDEO_SPARSE_ATTN`: `fastvideo-kernel`
+- `SLIDING_TILE_ATTN`: STA legacy workflow in
+  `sta_do_not_delete` + `fastvideo-kernel`
+- `SAGE_ATTN`: SageAttention package
+- `SAGE_ATTN_THREE`: upstream `sageattn3` package
+- `ATTN_QAT_INFER`: `fastvideo-kernel` checkout/source install that exposes
+  `attn_qat_infer`
+- `ATTN_QAT_TRAIN`: `fastvideo-kernel` install exposing `fastvideo_kernel`
 
 As a fallback, use:
 

@@ -51,3 +51,11 @@ Traces can be visualized using <https://ui.perfetto.dev/>.
 - Keep the profiled step count small; traces can be large and slow down job shutdown while the profiler flushes data.
 - After profiling, clean up trace directories to avoid filling disk storage.
 - When adding new regions, register them in `fastvideo.profiler` and wrap the corresponding code block with `with self.profiler_controller.region("your_region"):` or the `@profile_region` decorator.
+
+## Related: Activation Trace Mode
+
+For per-layer **numerical-divergence** debugging (parity bring-up against an
+upstream reference), use the env-gated [Activation Trace Mode](activation_trace.md)
+instead of the torch profiler. Activation trace dumps per-tensor stats to
+JSONL for offline `diff`-ing; the torch profiler captures kernel timing.
+They solve different problems and can run together if needed.

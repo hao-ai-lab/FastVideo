@@ -112,7 +112,7 @@ def test_hunyuangamecraft_transformer():
 
     encoder_hidden_states = [text_states, text_states_2]
 
-    forward_batch = ForwardBatch(data_type="video", enable_teacache=False)
+    forward_batch = ForwardBatch(data_type="video")
 
     with torch.no_grad():
         with torch.amp.autocast('cuda', dtype=precision):

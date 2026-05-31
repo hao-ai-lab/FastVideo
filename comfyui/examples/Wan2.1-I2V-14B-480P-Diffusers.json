@@ -353,8 +353,7 @@
         1024,
         "fixed",
         24,
-        "X://insert/path/here.mp4",
-        true
+        "X://insert/path/here.mp4"
       ],
       "auto_widget_states": {
         "height": {
@@ -401,11 +400,6 @@
           "isAuto": true,
           "value": "X://insert/path/here.mp4",
           "cachedValue": "X://insert/path/here.mp4"
-        },
-        "enable_teacache": {
-          "isAuto": true,
-          "value": true,
-          "cachedValue": true
         }
       }
     },

@@ -54,7 +54,8 @@ To use this:
 1. **Set Context**: In your pipeline or generation loop, use the `set_forward_context` context manager.
 2. **Access Context**: Inside your attention backend, use `get_forward_context()`.
 
-See [`docs/attention/sta/index.md`](../sta/index.md) (Sliding Tile Attention) for an example of how complex configuration (window sizes) is passed this way.
+See [`docs/attention/sta/index.md`](../sta/index.md) for a legacy STA example
+of passing complex configuration (window sizes) through `ForwardContext`.
 
 ## 3. Adding Compiled Kernels (C++/CUDA)
 

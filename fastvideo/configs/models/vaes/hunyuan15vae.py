@@ -18,8 +18,7 @@ class Hunyuan15VAEArchConfig(VAEArchConfig):
     scaling_factor: float = 1.03682
 
     def __post_init__(self):
-        self.spatial_compression_ratio: int = 2**(len(self.block_out_channels) -
-                                                  1)
+        self.spatial_compression_ratio: int = 2**(len(self.block_out_channels) - 1)
 
 
 @dataclass

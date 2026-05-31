@@ -133,10 +133,7 @@ class Qwen2_5_VisionRotaryEmbedding(nn.Module):
         self.dim = dim
 
     def init_weights(self, buffer_device: Optional[torch.device] = None):
-        if buffer_device is None:
-            device = self.inv_freq.device
-        else:
-            device = buffer_device
+        device = self.inv_freq.device if buffer_device is None else buffer_device
         self.inv_freq = 1.0 / (10000.0 ** (torch.arange(0, self.dim, 2, dtype=torch.float) / self.dim)).to(device)
 
     def forward(self, seqlen: int) -> torch.Tensor:
@@ -451,10 +448,7 @@ class Qwen2_5_VisionTransformerPretrainedModel(nn.Module):
         cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
 
         for layer_num, blk in enumerate(self.blocks):
-            if layer_num in self.fullatt_block_indexes:
-                cu_seqlens_now = cu_seqlens
-            else:
-                cu_seqlens_now = cu_window_seqlens
+            cu_seqlens_now = cu_seqlens if layer_num in self.fullatt_block_indexes else cu_window_seqlens
             if self.gradient_checkpointing and self.training:
                 hidden_states = self._gradient_checkpointing_func(
                     blk.__call__, hidden_states, cu_seqlens_now, rotary_pos_emb
@@ -492,10 +486,7 @@ class Qwen2_5_VLRotaryEmbedding(nn.Module):
         self.original_inv_freq = self.inv_freq
 
     def init_weights(self, buffer_device: Optional[torch.device] = None):
-        if buffer_device is None:
-            device = self.inv_freq.device
-        else:
-            device = buffer_device
+        device = self.inv_freq.device if buffer_device is None else buffer_device
         inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device)
         self.inv_freq = inv_freq
 
@@ -1573,10 +1564,7 @@ class Qwen2_5_VLForConditionalGenerationSimple(nn.Module):
                             video_grid_thw[video_index][1],
                             video_grid_thw[video_index][2],
                         )
-                        if second_per_grid_ts is not None:
-                            second_per_grid_t = second_per_grid_ts[video_index]
-                        else:
-                            second_per_grid_t = 1.0
+                        second_per_grid_t = second_per_grid_ts[video_index] if second_per_grid_ts is not None else 1.0
                         video_index += 1
                         remain_videos -= 1
                         ed = ed_video
@@ -2029,10 +2017,7 @@ def get_rope_index(
                         video_grid_thw[video_index][1],
                         video_grid_thw[video_index][2],
                     )
-                    if second_per_grid_ts is not None:
-                        second_per_grid_t = second_per_grid_ts[video_index]
-                    else:
-                        second_per_grid_t = 1.0
+                    second_per_grid_t = second_per_grid_ts[video_index] if second_per_grid_ts is not None else 1.0
                     video_index += 1
                     remain_videos -= 1
                     ed = ed_video

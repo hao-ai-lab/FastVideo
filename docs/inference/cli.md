@@ -1,26 +1,16 @@
 # FastVideo CLI Inference
 
-The FastVideo CLI exposes the same core inference controls as the Python API.
+The FastVideo CLI is config-first. Inference runs are driven by a nested JSON or
+YAML config, with optional dotted-path overrides on the command line. The
+contract matches training: use an explicit subcommand plus `--config`, then add
+any dotted overrides you need.
 
 ## Basic Usage
 
-Use either:
-
-1. `--model-path` + `--prompt`
-2. `--model-path` + `--prompt-txt` (batch prompts, one line per prompt)
-3. `--config` (JSON/YAML)
-
 ```bash
-fastvideo generate --model-path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-  --prompt "A cat playing with a ball of yarn"
+fastvideo generate --config config.yaml
+fastvideo serve --config serve.yaml
 ```
-
-```bash
-fastvideo generate --model-path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-  --prompt-txt prompts.txt
-```
-
-You cannot provide both `--prompt` and `--prompt-txt` in the same run.
 
 ## View All Arguments
 
@@ -28,44 +18,12 @@ You cannot provide both `--prompt` and `--prompt-txt` in the same run.
 fastvideo generate --help
 ```
 
-Arguments come from:
+The subcommands intentionally expose only `--config`. Any per-run CLI changes
+must use dotted override paths such as:
 
-- FastVideo runtime args (`FastVideoArgs`)
-- Sampling args (`SamplingParam`)
-- Pipeline config args (`PipelineConfig`)
-
-## Common Arguments
-
-### Parallelism
-
-- `--num-gpus`
-- `--sp-size`
-- `--tp-size`
-
-### Sampling
-
-- `--num-frames`
-- `--height` / `--width`
-- `--num-inference-steps`
-- `--guidance-scale`
-- `--seed`
-- `--negative-prompt`
-
-### Output
-
-- `--output-path`
-- `--save-video` / `--no-save-video`
-- `--return-frames`
-
-### Offloading and Performance
-
-- `--dit-layerwise-offload`
-- `--use-fsdp-inference`
-- `--text-encoder-cpu-offload`
-- `--image-encoder-cpu-offload`
-- `--vae-cpu-offload`
-- `--enable-torch-compile`
-- `--torch-compile-kwargs`
+- `--generator.engine.num_gpus 2`
+- `--request.sampling.seed 42`
+- `--server.port 9000`
 
 ## Using Config Files
 
@@ -73,50 +31,53 @@ Arguments come from:
 fastvideo generate --config config.yaml
 ```
 
-Config files can be JSON or YAML. CLI flags override config-file values.
+Config files can be JSON or YAML. Dotted CLI overrides take precedence over
+config-file values.
 
 Example `config.yaml`:
 
 ```yaml
-model_path: "FastVideo/FastHunyuan-diffusers"
-prompt: "A capybara lounging in a hammock"
-output_path: "outputs/"
-num_gpus: 2
-sp_size: 2
-tp_size: 1
-num_frames: 45
-height: 720
-width: 1280
-num_inference_steps: 6
-seed: 1024
-dit_precision: "bf16"
-vae_precision: "fp16"
-vae_tiling: true
-vae_sp: true
-enable_torch_compile: false
+generator:
+  model_path: FastVideo/FastHunyuan-diffusers
+  engine:
+    num_gpus: 2
+    parallelism:
+      sp_size: 2
+      tp_size: 1
+request:
+  prompt: A capybara lounging in a hammock
+  sampling:
+    num_frames: 45
+    height: 720
+    width: 1280
+    num_inference_steps: 6
+    seed: 1024
+  output:
+    output_path: outputs/
 ```
 
 Notes:
 
-- Use `dit_precision` / `vae_precision` (not `precision`).
-- Nested config objects are supported, for example `vae_config` and
-  `dit_config`.
+- `generator` and `request` are the top-level keys for generation configs.
+- `serve` configs use `generator`, `server`, and optional `default_request`.
+- Prompt text files belong under `request.inputs.prompt_path`.
 
 ## Examples
 
 Simple generation:
 
 ```bash
-fastvideo generate \
-  --model-path FastVideo/FastHunyuan-diffusers \
-  --prompt "A cat playing with a ball of yarn" \
-  --num-frames 45 --height 720 --width 1280 \
-  --num-inference-steps 6 --seed 1024 \
-  --output-path outputs/
+fastvideo generate --config config.yaml
 ```
 
-Config + CLI override:
+Config + dotted override:
 
 ```bash
-fastvideo generate --config config.yaml --prompt "A panda skiing at sunset"
+fastvideo generate --config config.yaml --request.prompt "A panda skiing at sunset"
+```
+
+Helper wrapper with positional config path:
+
+```bash
+bash scripts/inference/run.sh scripts/inference/inference_wan.yaml
 ```

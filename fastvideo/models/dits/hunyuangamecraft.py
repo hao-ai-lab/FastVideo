@@ -20,7 +20,7 @@ from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import ModulateProjection, PatchEmbed, TimestepEmbedder, unpatchify
-from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.hunyuanvideo import (
     MMDoubleStreamBlock,
     MMSingleStreamBlock,
@@ -178,7 +178,7 @@ class CameraNet(nn.Module):
         return camera_states * self.scale
 
 
-class HunyuanGameCraftTransformer3DModel(CachableDiT):
+class HunyuanGameCraftTransformer3DModel(BaseDiT):
     """
     HunyuanGameCraft Transformer - ported from official implementation.
     """

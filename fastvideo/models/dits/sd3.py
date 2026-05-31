@@ -148,10 +148,7 @@ class SD3PatchEmbed(nn.Module):
         self.base_size = height // patch_size
         self.interpolation_scale = interpolation_scale
 
-        if pos_embed_max_size:
-            grid_size = pos_embed_max_size
-        else:
-            grid_size = int(num_patches**0.5)
+        grid_size = pos_embed_max_size or int(num_patches ** 0.5)
 
         if pos_embed_type is None:
             self.pos_embed = None

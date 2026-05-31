@@ -43,8 +43,7 @@ class StageValidators:
     @staticmethod
     def divisible_by(value: Any, divisor: int) -> bool:
         """Check if value is divisible by divisor."""
-        return value is not None and isinstance(value,
-                                                int) and value % divisor == 0
+        return value is not None and isinstance(value, int) and value % divisor == 0
 
     @staticmethod
     def is_tensor(value: Any) -> bool:
@@ -243,8 +242,7 @@ class StageValidators:
         """Return a validator that checks if value is a positive integer divisible by divisor."""
 
         def validator(value: Any) -> bool:
-            return (isinstance(value, int) and value > 0
-                    and StageValidators.divisible_by(value, divisor))
+            return (isinstance(value, int) and value > 0 and StageValidators.divisible_by(value, divisor))
 
         return validator
 
@@ -262,8 +260,7 @@ class StageValidators:
         """Return a validator that checks if value is a list of tensors with at least min_dims dimensions and no NaN values."""
 
         def validator(value: Any) -> bool:
-            return StageValidators.list_of_tensors_with_min_dims(
-                value, min_dims)
+            return StageValidators.list_of_tensors_with_min_dims(value, min_dims)
 
         return validator
 
@@ -326,10 +323,8 @@ class VerificationResult:
         self._checks: dict[str, bool] = {}
         self._failures: dict[str, list[ValidationFailure]] = {}
 
-    def add_check(
-        self, field_name: str, value: Any,
-        validators: Callable[[Any], bool] | list[Callable[[Any], bool]]
-    ) -> 'VerificationResult':
+    def add_check(self, field_name: str, value: Any,
+                  validators: Callable[[Any], bool] | list[Callable[[Any], bool]]) -> 'VerificationResult':
         """
         Add a validation check for a field.
         
@@ -370,10 +365,9 @@ class VerificationResult:
                 # If any validator raises an exception, consider the check failed
                 all_passed = False
                 validator_name = getattr(validator, '__name__', str(validator))
-                failure = ValidationFailure(
-                    validator_name=validator_name,
-                    actual_value=value,
-                    error_msg=f"Exception during validation: {str(e)}")
+                failure = ValidationFailure(validator_name=validator_name,
+                                            actual_value=value,
+                                            error_msg=f"Exception during validation: {str(e)}")
                 failures.append(failure)
 
         self._checks[field_name] = all_passed
@@ -382,8 +376,7 @@ class VerificationResult:
 
         return self
 
-    def _create_validation_failure(self, validator: Callable,
-                                   value: Any) -> ValidationFailure:
+    def _create_validation_failure(self, validator: Callable, value: Any) -> ValidationFailure:
         """Create a ValidationFailure with detailed information."""
         validator_name = getattr(validator, '__name__', str(validator))
 
@@ -405,8 +398,7 @@ class VerificationResult:
         # Handle specific validator types and check for NaN values
         if validator_name == 'is_tensor':
             expected = "torch.Tensor without NaN values"
-            if isinstance(value,
-                          torch.Tensor) and torch.isnan(value).any().item():
+            if isinstance(value, torch.Tensor) and torch.isnan(value).any().item():
                 error_msg = f"tensor contains {torch.isnan(value).sum().item()} NaN values"
         elif validator_name == 'positive_int':
             expected = "positive integer"
@@ -428,17 +420,14 @@ class VerificationResult:
             expected = "list"
         elif validator_name == 'none_or_tensor':
             expected = "None or tensor without NaN values"
-            if isinstance(value,
-                          torch.Tensor) and torch.isnan(value).any().item():
+            if isinstance(value, torch.Tensor) and torch.isnan(value).any().item():
                 error_msg = f"tensor contains {torch.isnan(value).sum().item()} NaN values"
         elif validator_name == 'list_of_tensors':
             expected = "non-empty list of tensors without NaN values"
             if isinstance(value, list) and len(value) > 0:
                 nan_count = 0
                 for item in value:
-                    if isinstance(
-                            item,
-                            torch.Tensor) and torch.isnan(item).any().item():
+                    if isinstance(item, torch.Tensor) and torch.isnan(item).any().item():
                         nan_count += torch.isnan(item).sum().item()
                 if nan_count > 0:
                     error_msg = f"list contains tensors with total {nan_count} NaN values"
@@ -447,9 +436,7 @@ class VerificationResult:
             if isinstance(value, list) and len(value) > 0:
                 nan_count = 0
                 for item in value:
-                    if isinstance(
-                            item,
-                            torch.Tensor) and torch.isnan(item).any().item():
+                    if isinstance(item, torch.Tensor) and torch.isnan(item).any().item():
                         nan_count += torch.isnan(item).sum().item()
                 if nan_count > 0:
                     error_msg = f"list contains tensors with total {nan_count} NaN values"

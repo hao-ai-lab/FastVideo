@@ -95,28 +95,9 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
 
 
 def get_parquet_files_and_length(path: str):
-    path = os.path.abspath(path)
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Dataset path does not exist: {path}. "
-            "Expected a directory containing *.parquet files.")
-    if not os.path.isdir(path):
-        raise NotADirectoryError(
-            f"Dataset path is not a directory: {path}. "
-            "Expected a directory containing *.parquet files.")
-    has_parquet_file = False
-    for _, _, files in os.walk(path):
-        if any(file.endswith(".parquet") for file in files):
-            has_parquet_file = True
-            break
-    if not has_parquet_file:
-        raise FileNotFoundError(
-            "No parquet files found under dataset path: "
-            f"{path}. "
-            "Please verify this path points to preprocessed parquet data.")
-
+    dataset_root = os.path.realpath(os.path.expanduser(path))
     # Check if cached info exists
-    cache_dir = os.path.join(path, "map_style_cache")
+    cache_dir = os.path.join(dataset_root, "map_style_cache")
     cache_file = os.path.join(cache_dir, "file_info.pkl")
 
     # Only rank 0 checks for cache and scans files if needed
@@ -131,12 +112,39 @@ def get_parquet_files_and_length(path: str):
             try:
                 with open(cache_file, "rb") as f:
                     file_names_sorted, lengths_sorted = pickle.load(f)
-                if len(file_names_sorted) == 0:
-                    raise ValueError(
-                        "Cached parquet metadata is empty in "
-                        f"{cache_file}.")
-                cache_loaded = True
-                logger.info("Successfully loaded cached file info")
+                file_names_sorted = tuple(
+                    os.path.realpath(
+                        os.path.join(os.getcwd(), p)
+                        if not os.path.isabs(p) else p)
+                    for p in file_names_sorted)
+                files_outside_dataset_root = [
+                    file_path for file_path in file_names_sorted
+                    if os.path.commonpath([dataset_root, file_path
+                                           ]) != dataset_root
+                ]
+                missing_files = [
+                    file_path for file_path in file_names_sorted
+                    if not os.path.exists(file_path)
+                ]
+                if files_outside_dataset_root:
+                    logger.warning(
+                        "Cached parquet file list points outside dataset root "
+                        "(%s). Cache will be rebuilt. First out-of-root file: %s",
+                        dataset_root,
+                        files_outside_dataset_root[0],
+                    )
+                    cache_loaded = False
+                elif missing_files:
+                    logger.warning(
+                        "Cached parquet file list contains %d missing files. "
+                        "Cache will be rebuilt. First missing file: %s",
+                        len(missing_files),
+                        missing_files[0],
+                    )
+                    cache_loaded = False
+                else:
+                    cache_loaded = True
+                    logger.info("Successfully loaded cached file info")
             except Exception as e:
                 logger.error("Error loading cached file info: %s", str(e))
                 logger.info("Falling back to scanning files")
@@ -147,10 +155,10 @@ def get_parquet_files_and_length(path: str):
             logger.info("Scanning parquet files to get lengths")
             lengths = []
             file_names = []
-            for root, _, files in os.walk(path):
+            for root, _, files in os.walk(dataset_root):
                 for file in sorted(files):
                     if file.endswith('.parquet'):
-                        file_path = os.path.join(root, file)
+                        file_path = os.path.realpath(os.path.join(root, file))
                         file_names.append(file_path)
             if len(file_names) == 0:
                 raise FileNotFoundError(
@@ -335,11 +343,16 @@ class LatentsParquetMapStyleDataset(Dataset):
             for idx in indices
         ]
 
+        # Inject sample indices for deterministic CFG dropout
+        # that is reproducible across checkpoint resume.
+        for row, idx in zip(rows, indices):
+            row["_sample_index"] = idx
+
         batch = collate_rows_from_parquet_schema(rows,
                                                  self.parquet_schema,
                                                  self.text_padding_length,
                                                  cfg_rate=self.cfg_rate,
-                                                 rng=self.rng)
+                                                 seed=self.seed)
         return batch
 
     def __len__(self):
@@ -379,7 +392,6 @@ def build_parquet_map_style_dataloader(
         collate_fn=passthrough,
         num_workers=num_data_workers,
         pin_memory=True,
-        pin_memory_device=current_platform.device_name,
         persistent_workers=num_data_workers > 0,
     )
     return dataset, loader

@@ -1,7 +1,7 @@
 from fastvideo import VideoGenerator
 from fastvideo.models.dits.lingbotworld.cam_utils import prepare_camera_embedding
 
-# from fastvideo.configs.sample import SamplingParam
+# from fastvideo.api.sampling_param import SamplingParam
 OUTPUT_PATH = "video_samples_lingbotworld"
 def main():
     # FastVideo will automatically use the optimal default arguments for the

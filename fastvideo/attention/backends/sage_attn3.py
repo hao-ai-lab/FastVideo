@@ -3,9 +3,7 @@
 import torch
 from sageattn3 import sageattn3_blackwell
 
-from fastvideo.attention.backends.abstract import (AttentionBackend,
-                                                   AttentionImpl,
-                                                   AttentionMetadata,
+from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder)
 from fastvideo.logger import init_logger
 

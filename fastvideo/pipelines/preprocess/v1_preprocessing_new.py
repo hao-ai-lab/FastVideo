@@ -1,13 +1,8 @@
-from fastvideo.distributed import (
-    maybe_init_distributed_environment_and_model_parallel)
+from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.workflow.workflow_base import WorkflowBase
-
-import os
-
-os.environ["MASTER_PORT"] = "29513"
 
 logger = init_logger(__name__)
 

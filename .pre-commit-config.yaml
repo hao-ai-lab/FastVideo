@@ -7,22 +7,14 @@ exclude: |
     fastvideo-kernel/.*|
     assets/.*|
     tests/.*|
-    demo/.*|
-    predict\.py|
     scripts/.*|
-    assets/prompts/.*|
-    fastvideo/data_preprocess/.*|
     fastvideo/dataset/.*|
     fastvideo/models/.*|
-    fastvideo/sample/.*|
-    fastvideo/train\.py|
-    fastvideo/utils/.*|
+    ^apps/dreamverse/web/.*|
     examples/.*|
-    .github/workflows/fastvideo-publish.yml|
-    .github/workflows/sta-publish.yml|
-    .github/workflows/vsa-publish.yml|
-    .github/workflows/build-image-template.yml|
-    docs/source/inference/support_matrix.md
+    \.agents/.*|
+    .github/workflows/publish-fastvideo.yml|
+    .github/workflows/_template-build-image.yml
   )
 repos:
 - repo: https://github.com/google/yapf
@@ -60,7 +52,7 @@ repos:
   hooks:
   - id: mypy
     args: [--python-version, '3.10', --follow-imports, "skip", "--disable-error-code", "union-attr", "--disable-error-code", "override" ]
-    additional_dependencies: [types-cachetools, types-setuptools, types-PyYAML, types-requests]
+    additional_dependencies: [types-aiofiles, types-cachetools, types-setuptools, types-PyYAML, types-requests]
 - repo: local
   hooks:
   - id: check-filenames

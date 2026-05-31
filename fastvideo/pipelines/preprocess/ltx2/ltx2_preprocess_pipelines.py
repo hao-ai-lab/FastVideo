@@ -35,8 +35,7 @@ from fastvideo.models.audio.ltx2_audio_vae import LTX2AudioEncoder
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, PreprocessBatch
-from fastvideo.pipelines.preprocess.preprocess_stages import (
-    TextTransformStage, VideoTransformStage)
+from fastvideo.pipelines.preprocess.preprocess_stages import (TextTransformStage, VideoTransformStage)
 from fastvideo.pipelines.stages import EncodingStage, PipelineStage
 
 logger = init_logger(__name__)
@@ -73,16 +72,14 @@ class LTX2TextPrecomputeStage(PipelineStage):
             if not isinstance(prompt, str):
                 prompt = str(prompt)
             processed_prompt = self.preprocess_text_fn(prompt)
-            prompts.append(
-                processed_prompt if processed_prompt is not None else "")
+            prompts.append(processed_prompt if processed_prompt is not None else "")
 
-        prompt_embeds, prompt_attention_mask = (
-            self.text_encoder.preprocess_text_embeddings(
-                prompts=prompts,
-                tokenizer=self.tokenizer,
-                tokenizer_kwargs=self.tokenizer_kwargs,
-                padding_side=self.padding_side,
-            ))
+        prompt_embeds, prompt_attention_mask = (self.text_encoder.preprocess_text_embeddings(
+            prompts=prompts,
+            tokenizer=self.tokenizer,
+            tokenizer_kwargs=self.tokenizer_kwargs,
+            padding_side=self.padding_side,
+        ))
         batch.prompt_embeds = [prompt_embeds]
         batch.prompt_attention_mask = [prompt_attention_mask]
         return batch
@@ -148,8 +145,7 @@ class LTX2AudioEncodingStage(PipelineStage):
                 audio_latents.append(None)
                 continue
 
-            fps = float(batch.fps[idx]) if batch.fps[idx] else float(
-                self.fallback_fps)
+            fps = float(batch.fps[idx]) if batch.fps[idx] else float(self.fallback_fps)
             if fps <= 0:
                 fps = float(self.fallback_fps)
             target_duration = float(batch.num_frames[idx]) / fps
@@ -160,12 +156,10 @@ class LTX2AudioEncodingStage(PipelineStage):
                 continue
 
             waveform, sample_rate = audio_data
-            waveform = waveform.unsqueeze(0).to(device=self.audio_device,
-                                                dtype=self.audio_dtype)
-            mel = self.audio_processor.waveform_to_mel(
-                waveform,
-                waveform_sample_rate=sample_rate).to(device=self.audio_device,
-                                                     dtype=self.audio_dtype)
+            waveform = waveform.unsqueeze(0).to(device=self.audio_device, dtype=self.audio_dtype)
+            mel = self.audio_processor.waveform_to_mel(waveform,
+                                                       waveform_sample_rate=sample_rate).to(device=self.audio_device,
+                                                                                            dtype=self.audio_dtype)
             latents = self.audio_encoder(mel).squeeze(0).detach().cpu()
             audio_latents.append(latents)
 
@@ -185,13 +179,10 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
             if tokenizer.pad_token is None and tokenizer.eos_token is not None:
                 tokenizer.pad_token = tokenizer.eos_token
 
-    def _load_ltx2_audio_encoder(
-            self) -> tuple[torch.nn.Module, AudioProcessor]:
+    def _load_ltx2_audio_encoder(self) -> tuple[torch.nn.Module, AudioProcessor]:
         audio_vae_path = os.path.join(self.model_path, "audio_vae")
         if not os.path.isdir(audio_vae_path):
-            raise FileNotFoundError(
-                f"Expected audio_vae directory for LTX-2 audio preprocessing: {audio_vae_path}"
-            )
+            raise FileNotFoundError(f"Expected audio_vae directory for LTX-2 audio preprocessing: {audio_vae_path}")
 
         config = get_diffusers_config(model=audio_vae_path)
         audio_encoder = LTX2AudioEncoder(config).to(
@@ -199,8 +190,7 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
             dtype=torch.float32,
         )
 
-        safetensors_list = glob.glob(
-            os.path.join(audio_vae_path, "*.safetensors"))
+        safetensors_list = glob.glob(os.path.join(audio_vae_path, "*.safetensors"))
         loaded: dict[str, torch.Tensor] = {}
         for sf_file in safetensors_list:
             loaded.update(safetensors_load_file(sf_file))
@@ -213,13 +203,11 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
                 encoder_state[name] = tensor
 
         target_module = getattr(audio_encoder, "model", audio_encoder)
-        missing, unexpected = target_module.load_state_dict(encoder_state,
-                                                            strict=False)
+        missing, unexpected = target_module.load_state_dict(encoder_state, strict=False)
         if missing:
             logger.warning("Missing LTX-2 audio encoder keys: %s", missing[:8])
         if unexpected:
-            logger.warning("Unexpected LTX-2 audio encoder keys: %s",
-                           unexpected[:8])
+            logger.warning("Unexpected LTX-2 audio encoder keys: %s", unexpected[:8])
         target_module.eval()
 
         audio_processor = AudioProcessor(
@@ -253,8 +241,7 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
             stage=LTX2TextPrecomputeStage(
                 text_encoder=text_encoder,
                 tokenizer=tokenizer,
-                preprocess_text_fn=fastvideo_args.pipeline_config.
-                preprocess_text_funcs[0],
+                preprocess_text_fn=fastvideo_args.pipeline_config.preprocess_text_funcs[0],
                 tokenizer_kwargs=tokenizer_kwargs,
                 padding_side=encoder_config.arch_config.padding_side,
             ),

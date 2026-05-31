@@ -43,9 +43,7 @@ class LongCatVideoContinuationPipeline(LoRAPipeline, ComposedPipelineBase):
     - Concatenates conditioning back after denoising
     """
 
-    _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
-    ]
+    _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize LongCat-specific components."""
@@ -62,8 +60,7 @@ class LongCatVideoContinuationPipeline(LoRAPipeline, ComposedPipelineBase):
             chunk_q = getattr(pipeline_config, 'bsa_chunk_q', None)
             chunk_k = getattr(pipeline_config, 'bsa_chunk_k', None)
 
-            effective_bsa_params = dict(bsa_params_cfg) if isinstance(
-                bsa_params_cfg, dict) else {}
+            effective_bsa_params = dict(bsa_params_cfg) if isinstance(bsa_params_cfg, dict) else {}
             if sparsity is not None:
                 effective_bsa_params['sparsity'] = sparsity
             if cdf_threshold is not None:
@@ -97,8 +94,7 @@ class LongCatVideoContinuationPipeline(LoRAPipeline, ComposedPipelineBase):
         """Set up VC-specific pipeline stages."""
 
         # 1. Input validation
-        self.add_stage(stage_name="input_validation_stage",
-                       stage=InputValidationStage())
+        self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         # 2. Text encoding
         self.add_stage(stage_name="prompt_encoding_stage",
@@ -108,40 +104,33 @@ class LongCatVideoContinuationPipeline(LoRAPipeline, ComposedPipelineBase):
                        ))
 
         # 3. Video VAE encoding (encodes conditioning frames)
-        self.add_stage(
-            stage_name="video_vae_encoding_stage",
-            stage=LongCatVideoVAEEncodingStage(vae=self.get_module("vae")))
+        self.add_stage(stage_name="video_vae_encoding_stage",
+                       stage=LongCatVideoVAEEncodingStage(vae=self.get_module("vae")))
 
         # 4. Timestep preparation
         self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
+                       stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")))
 
         # 5. Latent preparation (reuse I2V stage - it handles video_latent too)
         self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LongCatVCLatentPreparationStage(
-                           scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer")))
+                       stage=LongCatVCLatentPreparationStage(scheduler=self.get_module("scheduler"),
+                                                             transformer=self.get_module("transformer")))
 
         # 6. KV cache initialization (optional, based on config)
         # This is always added but will skip if use_kv_cache=False
         self.add_stage(stage_name="kv_cache_init_stage",
-                       stage=LongCatKVCacheInitStage(
-                           transformer=self.get_module("transformer")))
+                       stage=LongCatKVCacheInitStage(transformer=self.get_module("transformer")))
 
         # 7. Denoising with VC and KV cache support
         self.add_stage(stage_name="denoising_stage",
-                       stage=LongCatVCDenoisingStage(
-                           transformer=self.get_module("transformer"),
-                           transformer_2=self.get_module("transformer_2", None),
-                           scheduler=self.get_module("scheduler"),
-                           vae=self.get_module("vae"),
-                           pipeline=self))
+                       stage=LongCatVCDenoisingStage(transformer=self.get_module("transformer"),
+                                                     transformer_2=self.get_module("transformer_2", None),
+                                                     scheduler=self.get_module("scheduler"),
+                                                     vae=self.get_module("vae"),
+                                                     pipeline=self))
 
         # 8. Decoding
-        self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae"),
-                                           pipeline=self))
+        self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae"), pipeline=self))
 
 
 class LongCatVCLatentPreparationStage(LongCatI2VLatentPreparationStage):

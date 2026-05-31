@@ -48,8 +48,7 @@ class WorkerWrapperBase:
         if self.rpc_rank in rank_mapping:
             self.rpc_rank = rank_mapping[self.rpc_rank]
 
-    def update_environment_variables(self, envs_list: list[dict[str,
-                                                                str]]) -> None:
+    def update_environment_variables(self, envs_list: list[dict[str, str]]) -> None:
         envs = envs_list[self.rpc_rank]
         key = 'CUDA_VISIBLE_DEVICES'
         if key in envs and key in os.environ:
@@ -65,8 +64,7 @@ class WorkerWrapperBase:
         """
         kwargs = all_kwargs[self.rpc_rank]
         self.fastvideo_args = kwargs.get("fastvideo_args")
-        assert self.fastvideo_args is not None, (
-            "fastvideo_args is required to initialize the worker")
+        assert self.fastvideo_args is not None, ("fastvideo_args is required to initialize the worker")
 
         self.worker = Worker(**kwargs)
         assert self.worker is not None

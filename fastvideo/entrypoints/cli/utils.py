@@ -13,13 +13,10 @@ logger = init_logger(__name__)
 class RaiseNotImplementedAction(argparse.Action):
 
     def __call__(self, parser, namespace, values, option_string=None):
-        raise NotImplementedError(
-            f"The {option_string} option is not yet implemented")
+        raise NotImplementedError(f"The {option_string} option is not yet implemented")
 
 
-def launch_distributed(num_gpus: int,
-                       args: list[str],
-                       master_port: int | None = None) -> int:
+def launch_distributed(num_gpus: int, args: list[str], master_port: int | None = None) -> int:
     """
     Launch a distributed job with the given arguments
     
@@ -31,15 +28,10 @@ def launch_distributed(num_gpus: int,
 
     current_env = os.environ.copy()
     python_executable = sys.executable
-    project_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "../../../.."))
-    main_script = os.path.join(project_root,
-                               "fastvideo/sample/v1_fastvideo_inference.py")
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+    main_script = os.path.join(project_root, "fastvideo/sample/v1_fastvideo_inference.py")
 
-    cmd = [
-        python_executable, "-m", "torch.distributed.run",
-        f"--nproc_per_node={num_gpus}"
-    ]
+    cmd = [python_executable, "-m", "torch.distributed.run", f"--nproc_per_node={num_gpus}"]
 
     if master_port is not None:
         cmd.append(f"--master_port={master_port}")

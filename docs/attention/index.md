@@ -5,13 +5,16 @@ FastVideo provides highly optimized custom attention kernels to accelerate video
 ## Supported Kernels
 
 * **[Video Sparse Attention (VSA)](vsa/index.md)**: Sparse attention mechanism selecting top-k blocks.
-* **[Sliding Tile Attention (STA)](sta/index.md)**: Optimized attention for window-based video generation.
+* **[Sliding Tile Attention (STA)](sta/index.md)**: STA kernel support is kept in
+  `fastvideo-kernel`; full FastVideo STA pipeline workflow is archived in
+  `sta_do_not_delete`.
 * **Backend development guide**: See the developer guide at
   [Attention Backend Development](../contributing/attention_backend.md).
 
 ## General Build Instructions
 
-These instructions apply to building the `fastvideo-kernel` package from source, which includes both STA and VSA kernels.
+These instructions apply to building the `fastvideo-kernel` package from
+source, which includes both STA and VSA kernels.
 
 ### Prerequisites
 

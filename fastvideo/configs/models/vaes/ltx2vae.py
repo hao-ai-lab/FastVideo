@@ -16,6 +16,7 @@ class LTX2VAEArchConfig(VAEArchConfig):
     in_channels: int = 3
     out_channels: int = 3
     latent_channels: int = 128
+    z_dim: int = 128  # follow num_channels_latents
     encoder_blocks: list = field(default_factory=list)
     decoder_blocks: list = field(default_factory=list)
     patch_size: int = 4

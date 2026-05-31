@@ -43,8 +43,7 @@ def get_env_variable_attn_backend() -> AttentionBackendEnum | None:
     * None otherwise
     '''
     backend_name = os.environ.get(STR_BACKEND_ENV_VAR)
-    return (None
-            if backend_name is None else backend_name_to_enum(backend_name))
+    return (None if backend_name is None else backend_name_to_enum(backend_name))
 
 
 # Global state allows a particular choice of backend
@@ -57,8 +56,7 @@ def get_env_variable_attn_backend() -> AttentionBackendEnum | None:
 forced_attn_backend: AttentionBackendEnum | None = None
 
 
-def global_force_attn_backend(
-        attn_backend: AttentionBackendEnum | None) -> None:
+def global_force_attn_backend(attn_backend: AttentionBackendEnum | None) -> None:
     '''
     Force all attention operations to use a specified backend.
 
@@ -87,8 +85,7 @@ def get_attn_backend(
     supported_attention_backends: tuple[AttentionBackendEnum, ...]
     | None = None,
 ) -> type[AttentionBackend]:
-    return _cached_get_attn_backend(head_size, dtype,
-                                    supported_attention_backends)
+    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends)
 
 
 @cache
@@ -106,8 +103,7 @@ def _cached_get_attn_backend(
     if not supported_attention_backends:
         raise ValueError("supported_attention_backends is empty")
     selected_backend = None
-    backend_by_global_setting: AttentionBackendEnum | None = (
-        get_global_forced_attn_backend())
+    backend_by_global_setting: AttentionBackendEnum | None = (get_global_forced_attn_backend())
     if backend_by_global_setting is not None:
         selected_backend = backend_by_global_setting
     else:
@@ -121,17 +117,14 @@ def _cached_get_attn_backend(
 
     if selected_backend not in supported_attention_backends:
         selected_backend = None
-    attention_cls = current_platform.get_attn_backend_cls(
-        selected_backend, head_size, dtype)
+    attention_cls = current_platform.get_attn_backend_cls(selected_backend, head_size, dtype)
     if not attention_cls:
-        raise ValueError(
-            f"Invalid attention backend for {current_platform.device_name}")
+        raise ValueError(f"Invalid attention backend for {current_platform.device_name}")
     return cast(type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
 
 
 @contextmanager
-def global_force_attn_backend_context_manager(
-        attn_backend: AttentionBackendEnum) -> Generator[None, None, None]:
+def global_force_attn_backend_context_manager(attn_backend: AttentionBackendEnum) -> Generator[None, None, None]:
     '''
     Globally force a FastVideo attention backend override within a
     context manager, reverting the global attention backend

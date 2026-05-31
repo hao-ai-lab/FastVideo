@@ -12,11 +12,11 @@ logger = init_logger(__name__)
 
 class AttentionBackendEnum(enum.Enum):
     FLASH_ATTN = enum.auto()
-    SLIDING_TILE_ATTN = enum.auto()
     TORCH_SDPA = enum.auto()
     SAGE_ATTN = enum.auto()
     SAGE_ATTN_THREE = enum.auto()
     VIDEO_SPARSE_ATTN = enum.auto()
+    BSA_ATTN = enum.auto()
     VMOBA_ATTN = enum.auto()
     SLA_ATTN = enum.auto()
     SAGE_SLA_ATTN = enum.auto()
@@ -115,8 +115,8 @@ class Platform:
         return self._enum == PlatformEnum.NPU
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
-                             head_size: int, dtype: torch.dtype) -> str:
+    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
+                             dtype: torch.dtype) -> str:
         """Get the attention backend class of a device."""
         return ""
 
@@ -223,14 +223,11 @@ class Platform:
         """
         if cls.supported_quantization and \
             quant not in cls.supported_quantization:
-            raise ValueError(
-                f"{quant} quantization is currently not supported in "
-                f"{cls.device_name}.")
+            raise ValueError(f"{quant} quantization is currently not supported in "
+                             f"{cls.device_name}.")
 
     @classmethod
-    def get_current_memory_usage(cls,
-                                 device: torch.types.Device | None = None
-                                 ) -> float:
+    def get_current_memory_usage(cls, device: torch.types.Device | None = None) -> float:
         """
         Return the memory usage in bytes.
         """

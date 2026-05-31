@@ -7,6 +7,13 @@ CUDA kernels for FastVideo video generation.
 ### Standard Installation (Local Development)
 This will automatically detect your GPU architecture. If an NVIDIA Hopper (H100/sm_90a) GPU is detected, ThunderKittens kernels will be enabled. Otherwise, they will be skipped, and the package will use Triton fallbacks at runtime.
 
+Before installation, set CUDA toolchain paths:
+
+```bash
+export CUDA_HOME=/usr/local/cuda
+export CUDACXX=$CUDA_HOME/bin/nvcc
+```
+
 ```bash
 git submodule update --init --recursive
 cd fastvideo-kernel
@@ -20,6 +27,29 @@ If you are in a rocm environment without the compilation toolchaine of CUDA.
 cd fastvideo-kernel
 ./build.sh --rocm
 ```
+
+### Optional: FA4 CuTe block-sparse backend (VSA-256 fastpath)
+
+The VSA-256 fastpath (tile volume 256, on NVIDIA Blackwell / sm_100) routes to the
+FlashAttention-4 CuTe-DSL block-sparse kernel exposed as `flash_attn.cute`. This is
+an **optional** dependency: it is imported lazily, and `video_sparse_attn`
+transparently falls back to the Triton backend when it is absent (so the package is
+fully usable without it).
+
+The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`,
+`flash_attn.cute.interface._flash_attn_fwd`) are provided upstream by
+[Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention). Pin to
+commit `c19cd20e`: the wrapper targets that revision's `_flash_attn_fwd` signature
+(`m_block_size` / `n_block_size`); later upstream revisions reshaped it into a
+`tile_mn` tuple and are not drop-in compatible.
+
+```bash
+pip install "nvidia-cutlass-dsl>=4.5.0" torchvision
+pip install "git+https://github.com/Dao-AILab/flash-attention.git@c19cd20e#subdirectory=flash_attn/cute"
+```
+
+The CuTe kernel JIT-compiles on first use. Verified on Blackwell (sm_100) against
+`tests/test_vsa256_forward*.py`.
 
 ## Usage
 
@@ -62,6 +92,8 @@ This package also includes kernels from [TurboDiffusion](https://github.com/thu-
   - Any CUDA GPU for Triton-based fallbacks.
 - **Build**:
   - CUDA Toolkit 12.3+
+  - `CUDA_HOME` must be set (for example, `/usr/local/cuda`)
+  - `CUDACXX` must be set (for example, `$CUDA_HOME/bin/nvcc`)
   - C++20 compatible compiler (GCC 10+, Clang 11+)
 
 ## Acknowledgement

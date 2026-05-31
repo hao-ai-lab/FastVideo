@@ -9,17 +9,22 @@ try:
     from fastvideo_kernel import video_sparse_attn
 except ImportError:
     video_sparse_attn = None
+try:
+    from fastvideo_kernel import video_sparse_attn_bshd
+except ImportError:
+    video_sparse_attn_bshd = None
 
 from typing import Any
 
-from fastvideo.attention.backends.abstract import (AttentionBackend,
-                                                   AttentionImpl,
-                                                   AttentionMetadata,
+from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder)
 from fastvideo.distributed import get_sp_group
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+# VSA tile shape. The tile volume picks the kernel path automatically in
+# forward(): (4,4,4)=64 -> existing TK/Triton path (default, unchanged);
+# (4,8,8)=256 -> FA4 CuTe block-sparse attention fastpath (Blackwell).
 VSA_TILE_SIZE = (4, 4, 4)
 
 
@@ -31,14 +36,12 @@ def get_tile_partition_indices(
 ) -> torch.LongTensor:
     T, H, W = dit_seq_shape
     ts, hs, ws = tile_size
-    indices = torch.arange(T * H * W, device=device,
-                           dtype=torch.long).reshape(T, H, W)
+    indices = torch.arange(T * H * W, device=device, dtype=torch.long).reshape(T, H, W)
     ls = []
     for t in range(math.ceil(T / ts)):
         for h in range(math.ceil(H / hs)):
             for w in range(math.ceil(W / ws)):
-                ls.append(indices[t * ts:min(t * ts + ts, T),
-                                  h * hs:min(h * hs + hs, H),
+                ls.append(indices[t * ts:min(t * ts + ts, T), h * hs:min(h * hs + hs, H),
                                   w * ws:min(w * ws + ws, W)].flatten())
     index = torch.cat(ls, dim=0)
     return index
@@ -50,8 +53,7 @@ def get_reverse_tile_partition_indices(
     tile_size: tuple[int, int, int],
     device: torch.device,
 ) -> torch.LongTensor:
-    return torch.argsort(
-        get_tile_partition_indices(dit_seq_shape, tile_size, device))
+    return torch.argsort(get_tile_partition_indices(dit_seq_shape, tile_size, device))
 
 
 @functools.lru_cache(maxsize=10)
@@ -104,10 +106,8 @@ def get_non_pad_index(
     n_win = variable_block_sizes.shape[0]
     device = variable_block_sizes.device
     starts_pad = torch.arange(n_win, device=device) * max_block_size
-    index_pad = starts_pad[:, None] + torch.arange(max_block_size,
-                                                   device=device)[None, :]
-    index_mask = torch.arange(
-        max_block_size, device=device)[None, :] < variable_block_sizes[:, None]
+    index_pad = starts_pad[:, None] + torch.arange(max_block_size, device=device)[None, :]
+    index_mask = torch.arange(max_block_size, device=device)[None, :] < variable_block_sizes[:, None]
     return index_pad[index_mask]
 
 
@@ -140,21 +140,32 @@ class VideoSparseAttentionBackend(AttentionBackend):
 class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
     dit_seq_shape: list[int]
-    VSA_sparsity: float
     num_tiles: list[int]
     total_seq_length: int
     tile_partition_indices: torch.LongTensor
     reverse_tile_partition_indices: torch.LongTensor
     variable_block_sizes: torch.LongTensor
     non_pad_index: torch.LongTensor
+    # Precomputed fancy index that fuses ``x[:, non_pad_index][:, reverse_tile_partition_indices]``
+    # in postprocess_output().  Avoids materializing the intermediate
+    # ``[B, len(non_pad_index), H, D]`` tensor on every layer.
+    untile_combined_index: torch.LongTensor
+    # Per-step shared padded buffer used by tile().  Lazily populated on
+    # the first layer's call and reused by every subsequent VSA layer in
+    # the same denoising step.  Scoping to metadata (not class/instance)
+    # makes the reuse thread-safe across concurrent requests and keeps
+    # the "pad positions are zero" invariant trivially true (the buffer
+    # is freshly zeroed alongside ``non_pad_index`` so the index set
+    # cannot drift between calls).
+    tile_buf: torch.Tensor | None = None
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
-    def prepare(self):
+    def prepare(self) -> None:
         pass
 
     def build(  # type: ignore
@@ -167,23 +178,18 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
         **kwargs: dict[str, Any],
     ) -> VideoSparseAttentionMetadata:
         patch_size = patch_size
-        dit_seq_shape = (raw_latent_shape[0] // patch_size[0],
-                         raw_latent_shape[1] // patch_size[1],
+        dit_seq_shape = (raw_latent_shape[0] // patch_size[0], raw_latent_shape[1] // patch_size[1],
                          raw_latent_shape[2] // patch_size[2])
 
-        num_tiles = (math.ceil(dit_seq_shape[0] / VSA_TILE_SIZE[0]),
-                     math.ceil(dit_seq_shape[1] / VSA_TILE_SIZE[1]),
+        num_tiles = (math.ceil(dit_seq_shape[0] / VSA_TILE_SIZE[0]), math.ceil(dit_seq_shape[1] / VSA_TILE_SIZE[1]),
                      math.ceil(dit_seq_shape[2] / VSA_TILE_SIZE[2]))
         total_seq_length = math.prod(dit_seq_shape)
 
-        tile_partition_indices = get_tile_partition_indices(
-            dit_seq_shape, VSA_TILE_SIZE, device)
-        reverse_tile_partition_indices = get_reverse_tile_partition_indices(
-            dit_seq_shape, VSA_TILE_SIZE, device)
-        variable_block_sizes = construct_variable_block_sizes(
-            dit_seq_shape, num_tiles, device)
-        non_pad_index = get_non_pad_index(variable_block_sizes,
-                                          math.prod(VSA_TILE_SIZE))
+        tile_partition_indices = get_tile_partition_indices(dit_seq_shape, VSA_TILE_SIZE, device)
+        reverse_tile_partition_indices = get_reverse_tile_partition_indices(dit_seq_shape, VSA_TILE_SIZE, device)
+        variable_block_sizes = construct_variable_block_sizes(dit_seq_shape, num_tiles, device)
+        non_pad_index = get_non_pad_index(variable_block_sizes, math.prod(VSA_TILE_SIZE))
+        untile_combined_index = non_pad_index[reverse_tile_partition_indices]
 
         return VideoSparseAttentionMetadata(
             current_timestep=current_timestep,
@@ -194,7 +200,8 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             tile_partition_indices=tile_partition_indices,  # type: ignore
             reverse_tile_partition_indices=reverse_tile_partition_indices,
             variable_block_sizes=variable_block_sizes,
-            non_pad_index=non_pad_index)
+            non_pad_index=non_pad_index,
+            untile_combined_index=untile_combined_index)
 
 
 class VideoSparseAttentionImpl(AttentionImpl):
@@ -213,43 +220,59 @@ class VideoSparseAttentionImpl(AttentionImpl):
         sp_group = get_sp_group()
         self.sp_size = sp_group.world_size
 
-    def tile(self, x: torch.Tensor, num_tiles: list[int],
-             tile_partition_indices: torch.LongTensor,
-             non_pad_index: torch.LongTensor) -> torch.Tensor:
+    def tile(self, x: torch.Tensor, attn_metadata: VideoSparseAttentionMetadata) -> torch.Tensor:
+        """Tile ``x`` into ``attn_metadata.tile_buf`` and return it.
+
+        The returned tensor aliases the per-metadata buffer and is only
+        valid until the next ``tile()`` / ``preprocess_qkv`` call on the
+        same ``attn_metadata``.  Callers must consume (or copy) the
+        result before invoking another VSA layer with the same metadata.
+        Today both call sites materialize copies via
+        ``.transpose(...).contiguous()`` inside ``forward()``, so the
+        contract holds; future callers must preserve it.
+        """
+        num_tiles = attn_metadata.num_tiles
         t_padded_size = num_tiles[0] * VSA_TILE_SIZE[0]
         h_padded_size = num_tiles[1] * VSA_TILE_SIZE[1]
         w_padded_size = num_tiles[2] * VSA_TILE_SIZE[2]
+        target_shape = (x.shape[0], t_padded_size * h_padded_size * w_padded_size, x.shape[-2], x.shape[-1])
 
-        x_padded = torch.zeros(
-            (x.shape[0], t_padded_size * h_padded_size * w_padded_size,
-             x.shape[-2], x.shape[-1]),
-            device=x.device,
-            dtype=x.dtype)
-        x_padded[:, non_pad_index] = x[:, tile_partition_indices]
-        return x_padded
+        # Reuse the per-step buffer stashed on metadata (lazily allocated
+        # on the first VSA layer's call within a denoising step).  Pad
+        # positions are zero from the initial torch.zeros and never
+        # written to.  Scoping to metadata makes reuse safe across
+        # concurrent requests and keeps the "pad positions are zero"
+        # invariant trivially true: ``non_pad_index`` is fixed within
+        # a single metadata instance.
+        buf = attn_metadata.tile_buf
+        if (buf is None or buf.shape != target_shape or buf.dtype != x.dtype or buf.device != x.device):
+            buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
+            attn_metadata.tile_buf = buf
 
-    def untile(self, x: torch.Tensor,
-               reverse_tile_partition_indices: torch.LongTensor,
-               non_pad_index: torch.LongTensor) -> torch.Tensor:
-        x = x[:, non_pad_index][:, reverse_tile_partition_indices]
-        return x
+        buf[:, attn_metadata.non_pad_index] = x[:, attn_metadata.tile_partition_indices]
+        return buf
+
+    def untile(self, x: torch.Tensor, untile_combined_index: torch.LongTensor) -> torch.Tensor:
+        # Single fancy index using precomputed combined indices; avoids
+        # the intermediate ``[B, len(non_pad_index), H, D]`` tensor that
+        # the two-step ``x[:, non_pad_index][:, reverse_tile_partition_indices]``
+        # would allocate on every layer.
+        return x[:, untile_combined_index]
 
     def preprocess_qkv(
         self,
         qkv: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
-        return self.tile(qkv, attn_metadata.num_tiles,
-                         attn_metadata.tile_partition_indices,
-                         attn_metadata.non_pad_index)
+        """Tile QKV; aliasing contract: see ``tile()``."""
+        return self.tile(qkv, attn_metadata)
 
     def postprocess_output(
         self,
         output: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
-        return self.untile(output, attn_metadata.reverse_tile_partition_indices,
-                           attn_metadata.non_pad_index)
+        return self.untile(output, attn_metadata.untile_combined_index)
 
     def forward(  # type: ignore[override]
         self,
@@ -259,27 +282,34 @@ class VideoSparseAttentionImpl(AttentionImpl):
         gate_compress: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
+        VSA_sparsity = attn_metadata.VSA_sparsity
+        block_elements = math.prod(VSA_TILE_SIZE)
+        cur_topk = math.ceil((1 - VSA_sparsity) * (attn_metadata.total_seq_length / block_elements))
+
+        # 256-element tiles auto-route to the FA4 CuTe BSHD fastpath, which
+        # consumes [B, S, H, D] directly -- skip the transpose round-trip.
+        if block_elements == 256 and video_sparse_attn_bshd is not None:
+            return video_sparse_attn_bshd(query,
+                                          key,
+                                          value,
+                                          attn_metadata.variable_block_sizes,
+                                          attn_metadata.variable_block_sizes,
+                                          cur_topk,
+                                          block_size=VSA_TILE_SIZE,
+                                          compress_attn_weight=gate_compress)
+
+        if video_sparse_attn is None:
+            raise NotImplementedError("video_sparse_attn is not installed")
+        # Default 64-element-tile path (unchanged): BHSD round-trip.
         query = query.transpose(1, 2).contiguous()
         key = key.transpose(1, 2).contiguous()
         value = value.transpose(1, 2).contiguous()
         gate_compress = gate_compress.transpose(1, 2).contiguous()
-
-        VSA_sparsity = attn_metadata.VSA_sparsity
-
-        cur_topk = math.ceil(
-            (1 - VSA_sparsity) *
-            (attn_metadata.total_seq_length / math.prod(VSA_TILE_SIZE)))
-
-        if video_sparse_attn is None:
-            raise NotImplementedError("video_sparse_attn is not installed")
-        hidden_states = video_sparse_attn(
-            query,
-            key,
-            value,
-            attn_metadata.variable_block_sizes,
-            attn_metadata.variable_block_sizes,
-            cur_topk,
-            block_size=VSA_TILE_SIZE,
-            compress_attn_weight=gate_compress).transpose(1, 2)
-
-        return hidden_states
+        return video_sparse_attn(query,
+                                 key,
+                                 value,
+                                 attn_metadata.variable_block_sizes,
+                                 attn_metadata.variable_block_sizes,
+                                 cur_topk,
+                                 block_size=VSA_TILE_SIZE,
+                                 compress_attn_weight=gate_compress).transpose(1, 2)

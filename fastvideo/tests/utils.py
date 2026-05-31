@@ -7,9 +7,40 @@ from fastvideo.logger import init_logger
 import numpy as np
 import torch
 from pytorch_msssim import ms_ssim, ssim
-from torchvision.io import read_video
 
 logger = init_logger(__name__)
+
+
+def _read_video_frames(path: str) -> torch.Tensor:
+    """Read video frames as a ``(T, C, H, W)`` uint8 tensor.
+
+    Tries ``torchvision.io.read_video`` first (available in older
+    torchvision) and falls back to PyAV when the function has been
+    removed (torchvision >= 0.26).
+    """
+    try:
+        from torchvision.io import read_video
+
+        frames, _, _ = read_video(
+            path,
+            pts_unit="sec",
+            output_format="TCHW",
+        )
+        return frames
+    except (ImportError, AttributeError):
+        pass
+
+    import av
+
+    container = av.open(path)
+    frames = []
+    for frame in container.decode(video=0):
+        arr = frame.to_ndarray(format="rgb24")
+        frames.append(torch.from_numpy(arr).permute(2, 0, 1))
+    container.close()
+    if not frames:
+        raise RuntimeError(f"No video frames decoded from {path}")
+    return torch.stack(frames)
 
 
 def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
@@ -27,12 +58,8 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
     if not os.path.exists(video2_path):
         raise FileNotFoundError(f"Video2 not found: {video2_path}")
 
-    frames1, _, _ = read_video(video1_path,
-                               pts_unit='sec',
-                               output_format="TCHW")
-    frames2, _, _ = read_video(video2_path,
-                               pts_unit='sec',
-                               output_format="TCHW")
+    frames1 = _read_video_frames(video1_path)
+    frames2 = _read_video_frames(video2_path)
 
     # Ensure same number of frames
     min_frames = min(frames1.shape[0], frames2.shape[0])
@@ -50,14 +77,11 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
 
     # Process each frame individually
     for i in range(min_frames):
-        img1 = frames1[i:i + 1]
-        img2 = frames2[i:i + 1]
+        img1 = frames1[i : i + 1]
+        img2 = frames2[i : i + 1]
 
         with torch.no_grad():
-            if use_ms_ssim:
-                value = ms_ssim(img1, img2, data_range=1.0)
-            else:
-                value = ssim(img1, img2, data_range=1.0)
+            value = ms_ssim(img1, img2, data_range=1.0) if use_ms_ssim else ssim(img1, img2, data_range=1.0)
 
             ssim_values.append(value.item())
 
@@ -74,14 +98,14 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
 
         return mean_ssim, min_ssim, max_ssim
     else:
-        print('No SSIM values calculated')
+        print("No SSIM values calculated")
         return 0, 0, 0
 
 
 def compare_folders(reference_folder, generated_folder, use_ms_ssim=True):
     """
     Compare videos with the same filename between reference_folder and generated_folder
-    
+
     Example usage:
         results = compare_folders(reference_folder, generated_folder,
                               args.use_ms_ssim)
@@ -100,10 +124,8 @@ def compare_folders(reference_folder, generated_folder, use_ms_ssim=True):
         else:
             print("\nNo valid SSIM values to average")
     """
-    
-    reference_videos = [
-        f for f in os.listdir(reference_folder) if f.endswith('.mp4')
-    ]
+
+    reference_videos = [f for f in os.listdir(reference_folder) if f.endswith(".mp4")]
 
     results = {}
 
@@ -114,27 +136,23 @@ def compare_folders(reference_folder, generated_folder, use_ms_ssim=True):
         if os.path.exists(gen_path):
             print(f"\nComparing {video_name}...")
             try:
-                ssim_value = compute_video_ssim_torchvision(
-                    ref_path, gen_path, use_ms_ssim)
+                ssim_value = compute_video_ssim_torchvision(ref_path, gen_path, use_ms_ssim)
                 results[video_name] = ssim_value
             except Exception as e:
                 print(f"Error comparing {video_name}: {e}")
                 results[video_name] = None
         else:
-            print(
-                f"\nSkipping {video_name} - no matching file in generated folder"
-            )
+            print(f"\nSkipping {video_name} - no matching file in generated folder")
 
     return results
 
-def write_ssim_results(output_dir, ssim_values, reference_path, generated_path,
-                       num_inference_steps, prompt):
+
+def write_ssim_results(output_dir, ssim_values, reference_path, generated_path, num_inference_steps, prompt):
     """
     Write SSIM results to a JSON file in the same directory as the generated videos.
     """
     try:
-        logger.info(
-            f"Attempting to write SSIM results to directory: {output_dir}")
+        logger.info(f"Attempting to write SSIM results to directory: {output_dir}")
 
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
@@ -147,16 +165,13 @@ def write_ssim_results(output_dir, ssim_values, reference_path, generated_path,
             "max_ssim": max_ssim,
             "reference_video": reference_path,
             "generated_video": generated_path,
-            "parameters": {
-                "num_inference_steps": num_inference_steps,
-                "prompt": prompt
-            }
+            "parameters": {"num_inference_steps": num_inference_steps, "prompt": prompt},
         }
 
         test_name = f"steps{num_inference_steps}_{prompt[:100]}"
         result_file = os.path.join(output_dir, f"{test_name}_ssim.json")
         logger.info(f"Writing JSON results to: {result_file}")
-        with open(result_file, 'w') as f:
+        with open(result_file, "w") as f:
             json.dump(result, f, indent=2)
 
         logger.info(f"SSIM results written to {result_file}")

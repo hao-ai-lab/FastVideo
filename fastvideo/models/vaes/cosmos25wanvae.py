@@ -258,10 +258,7 @@ class Cosmos25Resample(nn.Module):
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None and feat_cache[idx] == "Rep":
                     cache_x = torch.cat([torch.zeros_like(cache_x).to(cache_x.device), cache_x], dim=2)
 
-                if feat_cache[idx] == "Rep":
-                    x = self.time_conv(x)
-                else:
-                    x = self.time_conv(x, feat_cache[idx])
+                x = self.time_conv(x) if feat_cache[idx] == "Rep" else self.time_conv(x, feat_cache[idx])
                 feat_cache[idx] = cache_x
                 feat_idx[0] += 1
 
@@ -407,10 +404,7 @@ class Cosmos25Encoder3d(nn.Module):
             x = self.conv1(x)
 
         for layer in self.downsamples:
-            if feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)  # type: ignore[misc]
-            else:
-                x = layer(x)  # type: ignore[misc]
+            x = layer(x, feat_cache, feat_idx) if feat_cache is not None else layer(x)  # type: ignore[misc]
 
         for layer in self.middle:
             if isinstance(layer, Cosmos25ResidualBlock) and feat_cache is not None:
@@ -494,10 +488,7 @@ class Cosmos25Decoder3d(nn.Module):
                 x = layer(x)  # type: ignore[misc]
 
         for layer in self.upsamples:
-            if feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)  # type: ignore[misc]
-            else:
-                x = layer(x)  # type: ignore[misc]
+            x = layer(x, feat_cache, feat_idx) if feat_cache is not None else layer(x)  # type: ignore[misc]
 
         for layer in self.head:
             if isinstance(layer, Cosmos25CausalConv3d) and feat_cache is not None:
