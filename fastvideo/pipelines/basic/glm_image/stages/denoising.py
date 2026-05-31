@@ -61,7 +61,7 @@ class GlmImageDenoisingStage(DenoisingStage):
         return batch
 
     def _denoise_t2i(self, batch, latents, prompt_embeds, text_attention_mask, timesteps, do_cfg, guidance_scale,
-                     text_seq_length, image_seq_length, sdpa, device, dtype):
+                     text_seq_length, image_seq_length, sdpa, device, dtype) -> None:
         num_inference_steps = batch.num_inference_steps
         bs = 2 if do_cfg else 1
         target_size = torch.tensor([[batch.height, batch.width]], device=device, dtype=torch.long).repeat(bs, 1)
@@ -123,7 +123,7 @@ class GlmImageDenoisingStage(DenoisingStage):
         batch.latents = latents.unsqueeze(2)
 
     def _denoise_i2i(self, batch, latents, prompt_embeds, text_attention_mask, timesteps, do_cfg, guidance_scale,
-                     text_seq_length, image_seq_length, sdpa, kv_caches, device, dtype):
+                     text_seq_length, image_seq_length, sdpa, kv_caches, device, dtype) -> None:
         """Two separate transformer calls (cond reads the cache, uncond skips it):
         the cache mode is one global flag with batch-1 k/v, so a 2-row CFG call
         cannot express both."""
