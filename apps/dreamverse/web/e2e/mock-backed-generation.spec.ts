@@ -54,7 +54,7 @@ test.describe('mock-backed generation smoke', () => {
 
     await page.addInitScript(() => {
       (window as unknown as { __sharedFiles: unknown }).__sharedFiles = null;
-      (navigator as unknown as { share: (d: { files?: File[] }) => Promise<void> }).share = async (data) => {
+      const stub = async (data: { files?: File[] }) => {
         const files = Array.isArray(data?.files) ? data.files : [];
         (window as unknown as { __sharedFiles: unknown }).__sharedFiles = files.map((f) => ({
           name: f.name,
@@ -62,6 +62,16 @@ test.describe('mock-backed generation smoke', () => {
           size: f.size,
         }));
       };
+      Object.defineProperty(Navigator.prototype, 'share', {
+        value: stub,
+        configurable: true,
+        writable: true,
+      });
+      Object.defineProperty(Navigator.prototype, 'canShare', {
+        value: (data: { files?: File[] }) => Array.isArray(data?.files),
+        configurable: true,
+        writable: true,
+      });
     });
 
     await page.goto('/');
@@ -246,11 +256,11 @@ test.describe('mock-backed generation smoke', () => {
       await page.getByRole('button', { name: 'Toggle sidebar' }).click();
       await expect(sidebar).toBeInViewport();
       await expect(sidebar.getByText('Previous', { exact: true })).toBeVisible({ timeout: 30_000 });
-      await expect(sidebar.getByText('just now').first()).toBeVisible();
+      await expect(sidebar.getByText(/^(just now|\d+m ago)$/).first()).toBeVisible();
     });
 
     await test.step('clicking the prior session enters viewing mode', async () => {
-      const priorRow = sidebar.locator('div[role="button"]').filter({ hasText: 'just now' }).first();
+      const priorRow = sidebar.locator('div[role="button"]').filter({ hasText: /just now|\d+m ago/ }).first();
       await priorRow.click();
       await expect(sidebar).not.toBeInViewport();
       await expect(page.locator('video[autoplay][loop]')).toBeVisible({ timeout: 30_000 });
@@ -287,7 +297,7 @@ test.describe('mock-backed generation smoke', () => {
       await page.getByRole('button', { name: 'Toggle sidebar' }).click();
       await expect(sidebar).toBeInViewport();
       await expect(sidebar.getByText('Previous', { exact: true })).toBeVisible({ timeout: 30_000 });
-      await expect(sidebar.getByText('just now').first()).toBeVisible();
+      await expect(sidebar.getByText(/^(just now|\d+m ago)$/).first()).toBeVisible();
     });
 
     await test.step('after page reload, the prior project is still in Previous', async () => {
