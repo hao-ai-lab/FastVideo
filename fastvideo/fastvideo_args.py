@@ -133,8 +133,23 @@ class FastVideoArgs:
     pin_cpu_memory: bool = True
 
     # Compilation
+    # ``enable_torch_compile`` covers the DiT path (transformer,
+    # transformer_2, and the LTX-2 stage-2 transformer_refine).
+    # Per-component flags below let callers compile additional submodules
+    # independently; ``False`` leaves the component eager.
     enable_torch_compile: bool = False
+    enable_torch_compile_text_encoder: bool = False
+    enable_torch_compile_vae: bool = False
+    enable_torch_compile_audio_vae: bool = False
+    # ``torch_compile_kwargs`` is the master kwargs dict (applied to every
+    # compiled submodule unless a per-component dict below is non-empty,
+    # in which case the per-component dict overrides entirely — matching
+    # the FastVideo-internal precedent).
     torch_compile_kwargs: dict[str, Any] = field(default_factory=dict)
+    torch_compile_kwargs_dit: dict[str, Any] = field(default_factory=dict)
+    torch_compile_kwargs_text_encoder: dict[str, Any] = field(default_factory=dict)
+    torch_compile_kwargs_vae: dict[str, Any] = field(default_factory=dict)
+    torch_compile_kwargs_audio_vae: dict[str, Any] = field(default_factory=dict)
 
     disable_autocast: bool = False
 
@@ -161,6 +176,38 @@ class FastVideoArgs:
     ltx2_vae_temporal_tile_size_in_frames: int | None = None
     ltx2_vae_temporal_tile_overlap_in_frames: int | None = None
     ltx2_initial_latent_path: str | None = None
+    ltx2_audio_latent_path: str | None = None
+    # Generic stage-2 refine surface (preferred user-facing API). The
+    # ltx2_refine_* fields below remain the runtime carriers; these
+    # generic ones let CLI / typed-config callers set the same values
+    # without binding to a specific model family. ``None`` here means
+    # "fall back to the model_index.json default and/or the
+    # ltx2_refine_* runtime carrier".
+    refine_enabled: bool | None = None
+    refine_upsampler_path: str | None = None
+    refine_transformer_path: str | None = None
+    refine_lora_path: str | None = None
+    refine_num_inference_steps: int | None = None
+    refine_guidance_scale: float | None = None
+    refine_add_noise: bool | None = None
+    refine_noise_path: str | None = None
+    refine_audio_noise_path: str | None = None
+    # LTX-2 stage-2 spatial refinement (the SR pipeline). When enabled the
+    # transformer runs once at half resolution, the latents are upsampled
+    # by the LTX2 latent upsampler, then a short stage-2 distilled
+    # denoising pass refines the upsampled latents. Behaviour is opt-in
+    # and isolated to LTX-2 today.
+    ltx2_refine_enabled: bool = False
+    ltx2_refine_upsampler_path: str | None = None
+    ltx2_refine_transformer_path: str | None = None
+    ltx2_refine_lora_path: str | None = None
+    ltx2_refine_num_inference_steps: int = 3
+    ltx2_refine_guidance_scale: float = 1.0
+    ltx2_refine_add_noise: bool = True
+    ltx2_refine_noise_path: str | None = None
+    ltx2_refine_audio_noise_path: str | None = None
+    ltx2_legacy_native_noise_order: bool = False
+    ltx2_use_distilled_sigmas: bool = True
 
     # model paths for correct deallocation
     model_paths: dict[str, str] = field(default_factory=dict)
@@ -172,6 +219,15 @@ class FastVideoArgs:
 
     override_text_encoder_safetensors: str | None = None  # path to safetensors file for text encoder override
     override_text_encoder_quant: QuantizationMethods = None
+    # Typed transformer quantization carrier. The typed inference API
+    # accepts ``engine.quantization.transformer_quant: "NVFP4"`` and the
+    # compat layer resolves the name to a concrete ``QuantizationConfig``
+    # instance (e.g. ``NVFP4Config()``); ``__post_init__`` then pins it on
+    # ``pipeline_config.dit_config.quant_config`` so the loader can detect
+    # FP4 layers via the standard ``get_quant_method`` path. ``None``
+    # leaves whatever value the caller already set on ``dit_config``
+    # untouched.
+    transformer_quant: Any | None = None
 
     override_transformer_cls_name: str | None = None
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
@@ -199,7 +255,50 @@ class FastVideoArgs:
                 logger.error("Failed to load V-MoBA config from %s: %s", self.moba_config_path, e)
                 raise
         self._apply_ltx2_vae_overrides()
+        self._resolve_refine_args()
+        self._apply_transformer_quant()
         self.check_fastvideo_args()
+
+    def _apply_transformer_quant(self) -> None:
+        """Pin the typed ``transformer_quant`` instance onto ``dit_config``.
+
+        ``transformer_quant`` is populated by the typed compat layer when
+        a caller writes ``engine.quantization.transformer_quant: "NVFP4"``
+        in their config. We pin it here rather than at request time so
+        the model loader sees the quant_config when constructing the
+        DiT (linear layers attach their quant_method during ``__init__``).
+        """
+        if self.transformer_quant is None or self.pipeline_config is None:
+            return
+        dit_config = getattr(self.pipeline_config, "dit_config", None)
+        if dit_config is None:
+            return
+        # Don't overwrite if the caller already set it explicitly on
+        # dit_config (e.g. via ``pipeline_config.dit_config.quant_config = NVFP4Config()``);
+        # the explicit setter wins.
+        if getattr(dit_config, "quant_config", None) is None:
+            dit_config.quant_config = self.transformer_quant
+
+    def _resolve_refine_args(self) -> None:
+        """Map generic refine_* args to LTX-2-specific refine fields."""
+        if self.refine_enabled is not None:
+            self.ltx2_refine_enabled = self.refine_enabled
+        if self.refine_upsampler_path is not None:
+            self.ltx2_refine_upsampler_path = self.refine_upsampler_path
+        if self.refine_transformer_path is not None:
+            self.ltx2_refine_transformer_path = self.refine_transformer_path
+        if self.refine_lora_path is not None:
+            self.ltx2_refine_lora_path = self.refine_lora_path
+        if self.refine_num_inference_steps is not None:
+            self.ltx2_refine_num_inference_steps = self.refine_num_inference_steps
+        if self.refine_guidance_scale is not None:
+            self.ltx2_refine_guidance_scale = self.refine_guidance_scale
+        if self.refine_add_noise is not None:
+            self.ltx2_refine_add_noise = self.refine_add_noise
+        if self.refine_noise_path is not None:
+            self.ltx2_refine_noise_path = self.refine_noise_path
+        if self.refine_audio_noise_path is not None:
+            self.ltx2_refine_audio_noise_path = self.refine_audio_noise_path
 
     def _apply_ltx2_vae_overrides(self) -> None:
         if self.pipeline_config is None:
@@ -844,6 +943,13 @@ class TrainingArgs(FastVideoArgs):
     dfake_gen_update_ratio: int = 5  # self-forcing: how often to train generator vs critic
     min_timestep_ratio: float = 0.2
     max_timestep_ratio: float = 0.98
+    # CFG scale applied to the real (teacher) score in the DMD loss, using the
+    # parameterization `x = x_cond + w * (x_cond - x_uncond)`. This differs
+    # from the Ho & Salimans form `x_uncond + w * (x_cond - x_uncond)` by an
+    # offset of 1: `w_here = w_standard - 1`. So `w=0` recovers the
+    # conditional output, `w=-1` recovers the unconditional output, and the
+    # default 3.5 corresponds to a standard CFG scale of 4.5. Matches the
+    # original DMD2 reference implementation.
     real_score_guidance_scale: float = 3.5
     fake_score_learning_rate: float = 0.0  # separate learning rate for fake_score_transformer, if 0.0, use learning_rate
     fake_score_lr_scheduler: str = "constant"  # separate lr scheduler for fake_score_transformer, if not set, use lr_scheduler
@@ -1104,7 +1210,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--real-score-guidance-scale",
                             type=float,
                             default=TrainingArgs.real_score_guidance_scale,
-                            help="Teacher guidance scale")
+                            help=("Teacher CFG scale for the real score in the DMD loss. Uses "
+                                  "the parameterization x_cond + w * (x_cond - x_uncond), so "
+                                  "w=0 -> cond, w=-1 -> uncond, and the relation to standard "
+                                  "CFG is w_standard = w + 1 (default 3.5 == standard 4.5)."))
         parser.add_argument("--fake-score-learning-rate",
                             type=float,
                             default=TrainingArgs.fake_score_learning_rate,

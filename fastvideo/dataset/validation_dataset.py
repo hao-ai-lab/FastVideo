@@ -139,6 +139,16 @@ class ValidationDataset(IterableDataset):
                 else:
                     sample["video"] = load_video(video_path)
 
+            if sample.get("ref_video", None) is not None:
+                ref_video_path = sample["ref_video"]
+                ref_video_path = os.path.join(self.dir, ref_video_path)
+                if not pathlib.Path(ref_video_path).is_file():
+                    logger.warning("Reference video file %s does not exist.",
+                                   ref_video_path)
+                    sample.pop("ref_video", None)
+                else:
+                    sample["ref_video"] = ref_video_path
+
             if sample.get("control_image_path", None) is not None:
                 control_image_path = sample["control_image_path"]
                 control_image_path = os.path.join(self.dir, control_image_path)

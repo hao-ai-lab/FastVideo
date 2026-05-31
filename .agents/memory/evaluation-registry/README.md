@@ -12,7 +12,7 @@ _Last updated: 2026-03-02_
 
 | Metric | Category | Status | Location | Trust |
 |--------|----------|--------|----------|-------|
-| **FVD** | Distribution | ✅ Implemented | `benchmarks/fvd/` | High |
+| **FVD** | Distribution | ✅ Implemented | `fastvideo/eval/metrics/common/fvd/` | High |
 | **SSIM** | Reference | ✅ Implemented | `fastvideo/tests/ssim/` | High |
 | **LPIPS** | Perceptual | ✅ Implemented | `scripts/lora_extraction/` | Medium |
 | **Loss trajectory** | Training signal | ✅ Implemented | W&B `train_loss` | Medium |
@@ -27,8 +27,8 @@ _Last updated: 2026-03-02_
 ### FVD — Fréchet Video Distance
 
 **Category**: Distribution-level quality metric
-**Status**: ✅ Fully implemented in `benchmarks/fvd/`
-**Trust**: High — standard protocol, I3D feature extractor
+**Status**: ✅ Registered as the `common.fvd` eval metric in `fastvideo/eval/metrics/common/fvd/`
+**Trust**: High — standard protocol, I3D feature extractor (CLIP / VideoMAE backbones also available, research-grade)
 
 #### What It Measures
 FVD measures the distance between the **distribution** of generated videos and
@@ -59,30 +59,39 @@ Lower FVD = generated videos are more statistically similar to real videos.
 #### How to Use
 
 ```python
-# Programmatic
-from benchmarks.fvd import compute_fvd_with_config, FVDConfig
+# Programmatic — drive the metric directly for custom kwargs
+from fastvideo.eval import get_metric
 
-config = FVDConfig.fvd2048_16f()  # Standard: 2048 videos, 16 frames
-results = compute_fvd_with_config('data/real/', 'outputs/gen/', config)
-print(f"FVD: {results['fvd']:.2f}")
+metric = get_metric("common.fvd", extractor="i3d")  # or "clip" / "videomae"
+metric.to("cuda")
+metric.setup()
+metric.reset()
+
+# First sample carries the reference set; later samples reuse the cache.
+metric.accumulate({"video": gen_tensors[0], "reference": real_tensors})
+for gen in gen_tensors[1:]:
+    metric.accumulate({"video": gen})
+
+result = metric.finalize()
+print(f"FVD: {result.score:.2f}")
 ```
 
 ```bash
-# CLI
-python -m benchmarks.fvd.cli \
-    --real-path data/real/ \
-    --gen-path outputs/gen/ \
-    --protocol fvd2048_16f
+# CLI — folder of generated mp4s vs a reference folder
+python examples/inference/eval/eval_fvd.py \
+    --gen-dir       outputs/gen/ \
+    --reference-dir data/real/ \
+    --extractor     i3d \
+    --output        fvd_scores.json
 ```
 
-**Preset protocols**:
-| Protocol | Videos | Frames | Use Case |
-|----------|--------|--------|----------|
-| `fvd2048_16f` | 2048 | 16 | Standard benchmark (papers) |
-| `fvd2048_128f` | 2048 | 128 | Long video evaluation |
-| `quick_test` | 100 | 16 | Fast dev iteration |
+**Feature extractors**: `i3d` (default, standard FVD spec used in papers),
+`clip`, `videomae` (research-grade; not directly comparable to published
+FVD numbers).
 
-**Feature extractors**: `i3d` (default, standard), `clip`, `videomae`
+**Protocol**: standard FVD uses 2048 generated + 2048 reference videos at
+16 frames each. A warning fires below 256 — the score becomes
+statistically unreliable.
 
 #### Interpretation
 | FVD Range | Interpretation |

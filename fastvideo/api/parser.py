@@ -11,8 +11,13 @@ from typing import Any, Literal, TypeVar, Union, get_args, get_origin, get_type_
 import yaml
 
 from fastvideo.api.errors import ConfigValidationError
-from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
-from fastvideo.api.schema import RunConfig, ServeConfig
+from fastvideo.api.overrides import apply_overrides, normalize_overrides
+from fastvideo.api.request_metadata import (
+    bind_generation_request_raw,
+    bind_run_config_raw,
+    bind_serve_config_raw,
+)
+from fastvideo.api.schema import GenerationRequest, RunConfig, ServeConfig
 
 T = TypeVar("T")
 _UNION_ORIGINS = {types.UnionType, Union}
@@ -31,7 +36,14 @@ def parse_config(config_type: type[T], raw: Mapping[str, Any] | T) -> T:
         return raw
     if not isinstance(raw, Mapping):
         raise ConfigValidationError("", f"expected mapping for {config_type.__name__}")
-    return _SchemaParser().parse_dataclass(config_type, raw, "")
+    parsed = _SchemaParser().parse_dataclass(config_type, raw, "")
+    if config_type is GenerationRequest:
+        return bind_generation_request_raw(parsed, raw)
+    if config_type is RunConfig:
+        return bind_run_config_raw(parsed, raw)
+    if config_type is ServeConfig:
+        return bind_serve_config_raw(parsed, raw)
+    return parsed
 
 
 def config_to_dict(config: Any) -> Any:
@@ -52,7 +64,7 @@ def load_config(
 ) -> T:
     """Load a typed config object from YAML or JSON."""
     raw = load_raw_config(path)
-    normalized_overrides = _normalize_overrides(overrides)
+    normalized_overrides = normalize_overrides(overrides)
     if normalized_overrides:
         raw = apply_overrides(raw, normalized_overrides)
     return parse_config(config_type, raw)
@@ -94,14 +106,6 @@ def _load_raw_mapping(handle: Any, config_path: Path) -> Any:
     if suffix == ".json":
         return json.load(handle)
     raise ValueError(f"Unsupported config file format: {config_path}")
-
-
-def _normalize_overrides(overrides: list[str] | Mapping[str, Any] | None, ) -> dict[str, Any] | None:
-    if not overrides:
-        return None
-    if isinstance(overrides, list):
-        return parse_cli_overrides(overrides)
-    return dict(overrides)
 
 
 class _SchemaParser:

@@ -49,8 +49,12 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
-    "MatrixGameWanModel": ("dits", "matrixgame", "MatrixGameWanModel"),
-    "CausalMatrixGameWanModel": ("dits", "matrixgame", "CausalMatrixGameWanModel"),
+    "MatrixGame2WanModel": ("dits", "matrixgame2", "MatrixGame2WanModel"),
+    "CausalMatrixGame2WanModel": ("dits", "matrixgame2", "CausalMatrixGame2WanModel"),
+    # Legacy aliases for older HF model_index.json files
+    "MatrixGameWanModel": ("dits", "matrixgame2", "MatrixGame2WanModel"),
+    "CausalMatrixGameWanModel": ("dits", "matrixgame2", "CausalMatrixGame2WanModel"),
+    "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
@@ -88,6 +92,9 @@ _VAE_MODELS = {
     ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
     "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
+    # `stable-audio-open-1.0/vae/config.json` ships `_class_name="AutoencoderOobleck"`
+    # (Diffusers' name); FastVideo's class is `OobleckVAE`.
+    "AutoencoderOobleck": ("vaes", "oobleck", "OobleckVAE"),
 }
 
 _AUDIO_MODELS = {
@@ -114,6 +121,7 @@ _SCHEDULERS = {
 _UPSAMPLERS = {
     "SRTo720pUpsampler": ("upsamplers", "hunyuan15", "SRTo720pUpsampler"),
     "SRTo1080pUpsampler": ("upsamplers", "hunyuan15", "SRTo1080pUpsampler"),
+    "LTX2LatentUpsampler": ("upsamplers", "ltx2_upsampler", "LTX2LatentUpsampler"),
 }
 
 _LEGACY_FAST_VIDEO_MODELS = {

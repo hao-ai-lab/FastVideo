@@ -33,8 +33,36 @@ class OffloadConfig:
 
 @dataclass
 class CompileConfig:
+    """Typed ``torch.compile`` configuration.
+
+    ``backend``/``fullgraph``/``mode``/``dynamic`` are the four most
+    common ``torch.compile`` knobs. ``extras`` holds any remaining
+    ``torch.compile`` kwargs (e.g. ``options``, ``disable``).
+
+    The ``enabled`` switch covers the DiT transformer path (including
+    ``transformer_2`` and the LTX-2 stage-2 ``transformer_refine``).
+    Per-component flags below are independent overlays — set to ``True``
+    to compile that component, ``None`` to leave it eager. Each
+    ``*_kwargs`` dict overrides the master ``backend``/``fullgraph``/
+    ``mode``/``dynamic``/``extras`` for that component when non-empty;
+    leaving it empty inherits the master kwargs.
+    """
+
     enabled: bool = False
-    kwargs: dict[str, Any] = field(default_factory=dict)
+    backend: str | None = None
+    fullgraph: bool | None = None
+    mode: str | None = None
+    dynamic: bool | None = None
+    extras: dict[str, Any] = field(default_factory=dict)
+
+    text_encoder_enabled: bool | None = None
+    vae_enabled: bool | None = None
+    audio_vae_enabled: bool | None = None
+
+    dit_kwargs: dict[str, Any] = field(default_factory=dict)
+    text_encoder_kwargs: dict[str, Any] = field(default_factory=dict)
+    vae_kwargs: dict[str, Any] = field(default_factory=dict)
+    audio_vae_kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -73,10 +101,12 @@ class ComponentConfig:
 @dataclass
 class PipelineSelection:
     workload_type: Literal["t2v", "i2v", "t2i", "i2i"] | None = None
-    profile: str | None = None
-    profile_version: str | None = None
+    preset: str | None = None
+    preset_version: int | None = None
     components: ComponentConfig = field(default_factory=ComponentConfig)
-    profile_overrides: dict[str, Any] = field(default_factory=dict)
+    vae_tiling: bool | None = None
+    """Tile-based VAE decode. ``None`` keeps the model's default."""
+    preset_overrides: dict[str, Any] = field(default_factory=dict)
     experimental: dict[str, Any] = field(default_factory=dict)
 
 
@@ -181,10 +211,72 @@ class RunConfig:
 
 
 @dataclass
+class WarmupConfig:
+    enabled: bool = True
+    prompt: str = ("A cinematic drone shot over coastal cliffs at sunrise, "
+                   "golden light, gentle ocean waves, ultra detailed")
+    timeout_seconds: int = 2400
+
+
+@dataclass
+class GpuPoolConfig:
+    num_workers: int | None = None
+    enable_audio_reencode: bool = True
+    conditioning_num_frames: int = 9
+    conditioning_end_offset: int = 0
+
+
+@dataclass
+class PromptEnhancerConfig:
+    enabled: bool = False
+    provider: Literal["cerebras", "groq"] = "cerebras"
+    model: str = "gpt-oss-120b"
+    timeout_ms: int = 20000
+    system_prompt_dir: str | None = None
+
+
+@dataclass
+class PromptSafetyConfig:
+    enabled: bool = False
+    classifier_path: str | None = None
+
+
+@dataclass
+class StreamingConfig:
+    session_timeout_seconds: int = 300
+    generation_segment_cap: int = 6
+    stream_mode: Literal["av_fmp4", "legacy_jpeg"] = "av_fmp4"
+    warmup: WarmupConfig = field(default_factory=WarmupConfig)
+    pool: GpuPoolConfig = field(default_factory=GpuPoolConfig)
+    prompt: PromptEnhancerConfig = field(default_factory=PromptEnhancerConfig)
+    safety: PromptSafetyConfig = field(default_factory=PromptSafetyConfig)
+
+
+@dataclass
 class ServeConfig:
+    """Typed serve config loaded from ``fastvideo serve --config``.
+
+    ``default_request`` is a full :class:`GenerationRequest` — the same type
+    clients POST to ``/v1/videos``. At request time the server merges it into
+    the incoming body as the operator-pinned baseline.
+
+    Important nuance: only fields the operator **explicitly wrote** in the
+    serve YAML/JSON count as defaults. Although the in-memory object is
+    fully populated (schema defaults fill every unset field), the merge
+    walks ``_fastvideo_explicit_paths`` — populated during parse — so
+    unset fields are *not* forced onto requests. Per-request precedence:
+
+        body (client-explicit) > default_request (operator-explicit)
+                               > hardcoded fallback (e.g. ``fps=24``)
+
+    See :func:`fastvideo.api.compat.explicit_request_updates` for the
+    projection and ``entrypoints/openai/video_api.py::_build_generation_kwargs``
+    for the merge.
+    """
     generator: GeneratorConfig
     server: ServerConfig = field(default_factory=ServerConfig)
     default_request: GenerationRequest = field(default_factory=GenerationRequest)
+    streaming: StreamingConfig | None = None
 
 
 __all__ = [
@@ -195,16 +287,21 @@ __all__ = [
     "GenerationPlan",
     "GenerationRequest",
     "GeneratorConfig",
+    "GpuPoolConfig",
     "InputConfig",
     "OffloadConfig",
     "OutputConfig",
     "ParallelismConfig",
     "PipelineSelection",
     "PlannedStage",
+    "PromptEnhancerConfig",
+    "PromptSafetyConfig",
     "QuantizationConfig",
     "RequestRuntimeConfig",
     "RunConfig",
     "SamplingConfig",
     "ServeConfig",
     "ServerConfig",
+    "StreamingConfig",
+    "WarmupConfig",
 ]

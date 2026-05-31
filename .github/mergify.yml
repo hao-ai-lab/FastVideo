@@ -3,7 +3,7 @@ merge_protections:
     if:
       - base = main
     success_conditions:
-      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model|skill|skills|infra)\\]"
       - "#approved-reviews-by>=1"
       - check-success~=pre-commit
       - check-success=fastcheck-passed
@@ -79,6 +79,22 @@ pull_request_rules:
       label:
         add: ["type: new-model"]
 
+  - name: "label type: infra"
+    conditions:
+      - "title~=(?i)^\\[infra\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: infra"]
+
+  - name: "label type: skill"
+    conditions:
+      - "title~=(?i)^\\[skills?\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: skill"]
+
   # ============================================================
   # Scope labels (from changed files)
   # ============================================================
@@ -105,7 +121,7 @@ pull_request_rules:
           - files~=^fastvideo/pipelines/samplers/
           - files~=^fastvideo/entrypoints/
           - files~=^fastvideo/worker/
-          - files~=^fastvideo/configs/sample/
+          - files~=^fastvideo/api/sampling_param
           - files~=^fastvideo/configs/pipelines/
           - files~=^examples/inference/
       - -closed
@@ -262,7 +278,7 @@ pull_request_rules:
   - name: auto-merge when ready and all checks pass
     conditions:
       - label=ready
-      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model|skill|skills|infra)\\]"
       - "#approved-reviews-by>=1"
       - check-success~=pre-commit
       - check-success=fastcheck-passed
@@ -292,7 +308,7 @@ pull_request_rules:
     conditions:
       - -closed
       - -draft
-      - "-title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - "-title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model|skill|skills|infra)\\]"
     actions:
       comment:
         message: |
@@ -304,11 +320,13 @@ pull_request_rules:
           - `[refactor] Restructure training pipeline`
           - `[perf] Optimize attention kernel`
           - `[ci] Update test infrastructure`
+          - `[infra] Add activation trace hooks`
           - `[docs] Add inference guide`
           - `[misc] Clean up configs`
           - `[new-model] Port Flux2 to FastVideo`
+          - `[skill] Add add-model agent skill`
 
-          Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `doc`, `docs`, `misc`, `chore`, `kernel`, `new-model`
+          Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `infra`, `doc`, `docs`, `misc`, `chore`, `kernel`, `new-model`, `skill`, `skills`
 
           Please update your PR title and the merge protection check will pass automatically.
 

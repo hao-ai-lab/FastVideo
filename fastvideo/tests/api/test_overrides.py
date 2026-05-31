@@ -36,6 +36,20 @@ def test_parse_cli_overrides_casts_supported_scalar_and_collection_types() -> No
     }
 
 
+def test_parse_cli_overrides_normalizes_dashed_dotted_keys() -> None:
+    parsed = parse_cli_overrides([
+        "--generator.engine.num-gpus",
+        "2",
+        "--request.output.output-path",
+        "outputs/custom.mp4",
+    ])
+
+    assert parsed == {
+        "generator.engine.num_gpus": 2,
+        "request.output.output_path": "outputs/custom.mp4",
+    }
+
+
 def test_apply_overrides_merges_nested_dicts_without_mutating_source() -> None:
     original = {
         "generator": {

@@ -1,0 +1,43 @@
+# Run with:
+#   fastvideo generate --config scripts/inference/inference_longcat.yaml
+generator:
+  model_path: FastVideo/LongCat-Video-T2V-Diffusers
+  engine:
+    num_gpus: 1
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      text_encoder: false
+      vae: false
+      pin_cpu_memory: false
+  pipeline:
+    experimental:
+      enable_bsa: false
+request:
+  prompt: >-
+    In a realistic photography style, a white boy around seven or eight years
+    old sits on a park bench, wearing a light blue T-shirt, denim shorts, and
+    white sneakers. He holds an ice cream cone with vanilla and chocolate
+    flavors, and beside him is a medium-sized golden Labrador. Smiling, the
+    boy offers the ice cream to the dog, who eagerly licks it with its tongue.
+    The sun is shining brightly, and the background features a green lawn and
+    several tall trees, creating a warm and loving scene.
+  negative_prompt: >-
+    Bright tones, overexposed, static, blurred details, subtitles, style,
+    works, paintings, images, static, overall gray, worst quality, low
+    quality, JPEG compression residue, ugly, incomplete, extra fingers,
+    poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen
+    limbs, fused fingers, still picture, messy background, three legs, many
+    people in the background, walking backwards
+  sampling:
+    seed: 42
+    num_frames: 93
+    height: 480
+    width: 832
+    fps: 15
+    num_inference_steps: 50
+    guidance_scale: 4.0
+  output:
+    output_path: outputs_video/longcat_t2v

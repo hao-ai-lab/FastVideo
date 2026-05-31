@@ -1,5 +1,5 @@
 from fastvideo import VideoGenerator
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 
 OUTPUT_PATH = "./lora_out"
 def main():

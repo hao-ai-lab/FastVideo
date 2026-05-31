@@ -7,9 +7,17 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
+from fastvideo.api.overrides import apply_overrides, normalize_overrides
 from fastvideo.api.parser import config_to_dict, load_raw_config, parse_config
+from fastvideo.api.request_metadata import (
+    EXPLICIT_PATHS_ATTR,
+    bind_generation_request_raw,
+    get_explicit_paths,
+    reset_tracking_roots,
+)
 from fastvideo.api.schema import (
+    CompileConfig,
+    ContinuationState,
     GenerationRequest,
     GeneratorConfig,
     InputConfig,
@@ -17,11 +25,14 @@ from fastvideo.api.schema import (
     RequestRuntimeConfig,
     SamplingConfig,
 )
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.pipelines.basic.ltx2.stage_overrides import (
+    refine_preset_override_fields,
+    refine_stage_override_fields,
+)
 from fastvideo.utils import shallow_asdict
 
-_EXPLICIT_REQUEST_ATTR = "_fastvideo_explicit_request"
 _INPUT_FIELD_NAMES = {field.name for field in fields(InputConfig)}
 _SAMPLING_FIELD_NAMES = {field.name for field in fields(SamplingConfig)}
 _RUNTIME_FIELD_NAMES = {field.name for field in fields(RequestRuntimeConfig)}
@@ -33,6 +44,10 @@ _LEGACY_REQUEST_ALIASES = {
 _REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset({
     "embedded_cfg_scale",
 })
+# torch.compile kwargs that map to first-class CompileConfig fields.
+_COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
+# LTX-2 refine flat kwargs (init + per-request) known to FastVideoArgs.
+_LTX2_REFINE_FLAT_KEYS = (refine_preset_override_fields() | refine_stage_override_fields())
 
 
 def normalize_generator_config(config: GeneratorConfig | Mapping[str, Any], ) -> GeneratorConfig:
@@ -46,7 +61,7 @@ def load_generator_config_from_file(
     overrides: list[str] | Mapping[str, Any] | None = None,
 ) -> GeneratorConfig:
     raw = load_raw_config(path)
-    normalized_overrides = _normalize_overrides(overrides)
+    normalized_overrides = normalize_overrides(overrides)
 
     if _looks_like_run_or_serve_config(raw):
         if normalized_overrides:
@@ -75,6 +90,8 @@ def legacy_from_pretrained_to_config(
     components: dict[str, Any] = {}
     quantization: dict[str, Any] = {}
     experimental: dict[str, Any] = {}
+    preset_overrides: dict[str, Any] = {}
+    preset_refine: dict[str, Any] = {}
 
     for key, value in kwargs.items():
         if key == "revision":
@@ -101,8 +118,45 @@ def legacy_from_pretrained_to_config(
             offload["pin_cpu_memory"] = value
         elif key == "enable_torch_compile":
             compile_config["enabled"] = value
+        elif key == "enable_torch_compile_text_encoder":
+            compile_config["text_encoder_enabled"] = value
+        elif key == "enable_torch_compile_vae":
+            compile_config["vae_enabled"] = value
+        elif key == "enable_torch_compile_audio_vae":
+            compile_config["audio_vae_enabled"] = value
         elif key == "torch_compile_kwargs":
-            compile_config["kwargs"] = deepcopy(value)
+            remaining: dict[str, Any] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
+            for first_class in _COMPILE_TYPED_KEYS:
+                if first_class in remaining:
+                    compile_config[first_class] = remaining.pop(first_class)
+            if remaining:
+                compile_config["extras"] = remaining
+        elif key in {
+                "torch_compile_kwargs_dit",
+                "torch_compile_kwargs_text_encoder",
+                "torch_compile_kwargs_vae",
+                "torch_compile_kwargs_audio_vae",
+        }:
+            compile_config[key[len("torch_compile_kwargs_"):] +
+                           "_kwargs"] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
+        elif key == "ltx2_vae_tiling":
+            pipeline["vae_tiling"] = value
+        elif key == "config_model_path":
+            components["config_root"] = value
+        elif key == "ltx2_refine_enabled":
+            preset_refine["enabled"] = value
+        elif key == "ltx2_refine_upsampler_path":
+            # Empty string means "no upsampler"; keep typed None.
+            components["upsampler_weights"] = value or None
+        elif key == "ltx2_refine_lora_path":
+            # Empty string means "no refine LoRA"; keep typed None.
+            components["lora_path"] = value or None
+        elif key == "ltx2_refine_add_noise":
+            preset_refine["add_noise"] = value
+        elif key == "ltx2_refine_num_inference_steps":
+            preset_refine["num_inference_steps"] = value
+        elif key == "ltx2_refine_guidance_scale":
+            preset_refine["guidance_scale"] = value
         elif key in {"enable_stage_verification", "use_fsdp_inference", "disable_autocast"}:
             engine[key] = value
         elif key == "override_text_encoder_quant":
@@ -142,6 +196,10 @@ def legacy_from_pretrained_to_config(
 
     if components:
         pipeline["components"] = components
+    if preset_refine:
+        preset_overrides["refine"] = preset_refine
+    if preset_overrides:
+        pipeline["preset_overrides"] = preset_overrides
     if experimental:
         pipeline["experimental"] = experimental
     if pipeline:
@@ -153,16 +211,12 @@ def legacy_from_pretrained_to_config(
 def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, Any], ) -> FastVideoArgs:
     normalized = normalize_generator_config(config)
     unsupported = []
-    if normalized.pipeline.profile is not None:
-        unsupported.append("pipeline.profile")
-    if normalized.pipeline.profile_version is not None:
-        unsupported.append("pipeline.profile_version")
-    if normalized.pipeline.components.config_root is not None:
-        unsupported.append("pipeline.components.config_root")
+    if normalized.pipeline.preset is not None:
+        unsupported.append("pipeline.preset")
+    if normalized.pipeline.preset_version is not None:
+        unsupported.append("pipeline.preset_version")
     if normalized.pipeline.components.vae_weights is not None:
         unsupported.append("pipeline.components.vae_weights")
-    if normalized.pipeline.components.upsampler_weights is not None:
-        unsupported.append("pipeline.components.upsampler_weights")
     if unsupported:
         joined = ", ".join(unsupported)
         raise NotImplementedError(f"VideoGenerator compatibility adapter does not support {joined} yet")
@@ -186,19 +240,43 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         "vae_cpu_offload": engine.offload.vae,
         "pin_cpu_memory": engine.offload.pin_cpu_memory,
         "enable_torch_compile": engine.compile.enabled,
-        "torch_compile_kwargs": deepcopy(engine.compile.kwargs),
+        "torch_compile_kwargs": _compile_config_to_torch_kwargs(engine.compile),
         "enable_stage_verification": engine.enable_stage_verification,
         "use_fsdp_inference": engine.use_fsdp_inference,
         "disable_autocast": engine.disable_autocast,
     }
     if normalized.pipeline.workload_type is not None:
         kwargs["workload_type"] = normalized.pipeline.workload_type
+    if normalized.pipeline.vae_tiling is not None:
+        kwargs["ltx2_vae_tiling"] = normalized.pipeline.vae_tiling
+    if engine.compile.text_encoder_enabled is not None:
+        kwargs["enable_torch_compile_text_encoder"] = (engine.compile.text_encoder_enabled)
+    if engine.compile.vae_enabled is not None:
+        kwargs["enable_torch_compile_vae"] = engine.compile.vae_enabled
+    if engine.compile.audio_vae_enabled is not None:
+        kwargs["enable_torch_compile_audio_vae"] = (engine.compile.audio_vae_enabled)
+    if engine.compile.dit_kwargs:
+        kwargs["torch_compile_kwargs_dit"] = deepcopy(engine.compile.dit_kwargs)
+    if engine.compile.text_encoder_kwargs:
+        kwargs["torch_compile_kwargs_text_encoder"] = deepcopy(engine.compile.text_encoder_kwargs)
+    if engine.compile.vae_kwargs:
+        kwargs["torch_compile_kwargs_vae"] = deepcopy(engine.compile.vae_kwargs)
+    if engine.compile.audio_vae_kwargs:
+        kwargs["torch_compile_kwargs_audio_vae"] = deepcopy(engine.compile.audio_vae_kwargs)
 
     quantization = engine.quantization
     if quantization is not None and quantization.text_encoder_quant is not None:
         kwargs["override_text_encoder_quant"] = quantization.text_encoder_quant
     if quantization is not None and quantization.transformer_quant is not None:
-        kwargs["transformer_quant"] = quantization.transformer_quant
+        # Resolve the typed quant name to a concrete ``QuantizationConfig``
+        # instance and pin it on ``dit_config.quant_config``. The legacy
+        # path expected callers to do this themselves via
+        # ``pipeline_config.dit_config.quant_config = NVFP4Config()``; the
+        # typed surface accepts a string and does the wiring here so
+        # downstream code can rely on a single source of truth.
+        from fastvideo.layers.quantization import get_quantization_config
+        _resolved_quant_cls = get_quantization_config(quantization.transformer_quant)
+        kwargs["transformer_quant"] = _resolved_quant_cls()
 
     components = normalized.pipeline.components
     if components.pipeline_config_path is not None:
@@ -215,8 +293,18 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         kwargs["init_weights_from_safetensors"] = components.transformer_weights
     if components.transformer_2_weights is not None:
         kwargs["init_weights_from_safetensors_2"] = components.transformer_2_weights
+    if components.config_root is not None:
+        kwargs["config_model_path"] = components.config_root
+    if components.upsampler_weights is not None:
+        kwargs["ltx2_refine_upsampler_path"] = components.upsampler_weights
 
-    kwargs.update(deepcopy(normalized.pipeline.profile_overrides))
+    preset_overrides = deepcopy(normalized.pipeline.preset_overrides)
+    refine = preset_overrides.pop("refine", None)
+    if isinstance(refine, Mapping):
+        for key in _LTX2_REFINE_FLAT_KEYS:
+            if key in refine:
+                kwargs[f"ltx2_refine_{key}"] = refine[key]
+    kwargs.update(preset_overrides)
     kwargs.update(deepcopy(normalized.pipeline.experimental))
     return FastVideoArgs.from_kwargs(**kwargs)
 
@@ -224,8 +312,10 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
 def normalize_generation_request(request: GenerationRequest | Mapping[str, Any], ) -> GenerationRequest:
     normalized = (request if isinstance(request, GenerationRequest) else parse_config(GenerationRequest, request))
 
-    if not hasattr(normalized, _EXPLICIT_REQUEST_ATTR):
-        setattr(normalized, _EXPLICIT_REQUEST_ATTR, _serialize_generation_request(normalized))
+    if not hasattr(normalized, EXPLICIT_PATHS_ATTR):
+        # Request wasn't bound through the parser (e.g. constructed
+        # directly). Treat every currently-set field as explicit.
+        bind_generation_request_raw(normalized, _serialize_generation_request(normalized))
     return normalized
 
 
@@ -253,7 +343,7 @@ def legacy_generate_call_to_request(
         raw.setdefault("inputs", {})["grid_sizes"] = grid_sizes
 
     normalized = parse_config(GenerationRequest, raw)
-    setattr(normalized, _EXPLICIT_REQUEST_ATTR, deepcopy(raw))
+    bind_generation_request_raw(normalized, raw)
     return normalized
 
 
@@ -264,16 +354,24 @@ def request_to_sampling_param(
 ) -> SamplingParam:
     if request.plan is not None:
         raise NotImplementedError("GenerationRequest.plan is not wired into VideoGenerator yet")
-    if request.state is not None:
-        raise NotImplementedError("GenerationRequest.state is not wired into VideoGenerator yet")
 
     sampling_param = SamplingParam.from_pretrained(model_path)
-    updates = _explicit_request_updates(request)
+    if request.state is not None:
+        _validate_continuation_state(request.state)
+        sampling_param.continuation_state = request.state
+    if request.output.return_state:
+        sampling_param.return_continuation_state = True
+    updates = explicit_request_updates(request)
 
     for key, value in updates.items():
         if hasattr(sampling_param, key):
             setattr(sampling_param, key, deepcopy(value))
-        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS or _is_supported_as_default_only(key, value):
+        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
+            continue
+        elif value == _SCHEMA_DEFAULT_UPDATES.get(key, _MISSING):
+            # Schema-default field that isn't on SamplingParam; tolerated
+            # because direct GenerationRequest(...) construction has no
+            # way to distinguish "user set" from "schema default".
             continue
         else:
             raise ValueError(f"Request field {key!r} is not supported by sampling params for {model_path}")
@@ -290,10 +388,12 @@ def expand_request_prompt_batch(request: GenerationRequest, ) -> list[Generation
     requests: list[GenerationRequest] = []
     for index, prompt in enumerate(request.prompt):
         single_request = deepcopy(request)
+        # deepcopy preserves the tracking-root cycle, but re-pin roots
+        # defensively so that subsequent setattrs record on the copy.
+        reset_tracking_roots(single_request)
         single_request.prompt = prompt
         _fan_out_batched_input_value(request, single_request, "image_path", index)
         _fan_out_batched_input_value(request, single_request, "video_path", index)
-        _fan_out_explicit_request_metadata(request, single_request, index, prompt)
         requests.append(single_request)
     return requests
 
@@ -302,12 +402,23 @@ def _looks_like_run_or_serve_config(raw: Mapping[str, Any]) -> bool:
     return isinstance(raw.get("generator"), Mapping)
 
 
-def _normalize_overrides(overrides: list[str] | Mapping[str, Any] | None, ) -> dict[str, Any] | None:
-    if not overrides:
-        return None
-    if isinstance(overrides, list):
-        return parse_cli_overrides(overrides)
-    return dict(overrides)
+def _compile_config_to_torch_kwargs(compile_config: CompileConfig, ) -> dict[str, Any]:
+    """Flatten typed ``CompileConfig`` back to a ``torch_compile_kwargs``
+    dict that the legacy ``FastVideoArgs`` path still expects.
+
+    Typed first-class fields (:attr:`backend`, :attr:`fullgraph`,
+    :attr:`mode`, :attr:`dynamic`) are only emitted when the user set
+    them explicitly (non-``None``). ``extras`` is merged on top for any
+    uncommon kwargs.
+    """
+    out: dict[str, Any] = {}
+    for key in _COMPILE_TYPED_KEYS:
+        value = getattr(compile_config, key)
+        if value is not None:
+            out[key] = value
+    if compile_config.extras:
+        out.update(deepcopy(compile_config.extras))
+    return out
 
 
 def _sampling_param_to_request_raw(sampling_param: SamplingParam | None, ) -> dict[str, Any]:
@@ -348,18 +459,81 @@ def _apply_request_field(
 
 def request_to_pipeline_overrides(request: GenerationRequest) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
-    for key, value in _explicit_request_updates(request).items():
+    for key, value in explicit_request_updates(request).items():
         if key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
             overrides[key] = deepcopy(value)
     return overrides
 
 
-def _explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
-    raw = getattr(request, _EXPLICIT_REQUEST_ATTR, None)
-    if raw is None:
-        raw = _serialize_generation_request(request)
+def explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
+    """Project a ``GenerationRequest`` down to *explicitly set* fields only.
 
+    Returns a flat kwargs dict suitable for merging into a generator call.
+    The projection uses ``_fastvideo_explicit_paths`` (populated during
+    ``parse_config`` / raw binding) so schema defaults on the dataclass
+    are **not** emitted — only paths the caller/operator actually wrote.
+
+    This is what makes ``ServeConfig.default_request`` work as an
+    operator-pinned baseline rather than a full override: a YAML with just
+    ``sampling.seed: 42`` yields ``{"seed": 42}``, not the full sampling
+    config with its 15 schema defaults.
+
+    Precondition: the request must carry ``_fastvideo_explicit_paths`` —
+    populated by :func:`fastvideo.api.parser.parse_config` or
+    :func:`fastvideo.api.compat.normalize_generation_request`. Calling on
+    a raw ``GenerationRequest()`` asserts.
+    """
+    assert hasattr(request,
+                   EXPLICIT_PATHS_ATTR), ("GenerationRequest reached explicit_request_updates without tracking; "
+                                          "every entry point must route through normalize_generation_request "
+                                          "or parse_config first")
+    paths = get_explicit_paths(request)
+    raw = _build_sparse_raw_from_paths(request, paths)
     return _extract_request_updates(raw)
+
+
+def _build_sparse_raw_from_paths(
+    request: GenerationRequest,
+    paths: frozenset[str],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for path in paths:
+        parts = path.split(".")
+        value = _read_dotted_path(request, parts)
+        if value is _MISSING:
+            continue
+        _set_dotted_path(result, parts, deepcopy(value))
+    return result
+
+
+def _read_dotted_path(obj: Any, parts: list[str]) -> Any:
+    for part in parts:
+        if is_dataclass(obj) and not isinstance(obj, type):
+            if not hasattr(obj, part):
+                return _MISSING
+            obj = getattr(obj, part)
+        elif isinstance(obj, Mapping):
+            if part not in obj:
+                return _MISSING
+            obj = obj[part]
+        else:
+            return _MISSING
+    return obj
+
+
+def _set_dotted_path(
+    target: dict[str, Any],
+    parts: list[str],
+    value: Any,
+) -> None:
+    cursor = target
+    for part in parts[:-1]:
+        nxt = cursor.get(part)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cursor[part] = nxt
+        cursor = nxt
+    cursor[parts[-1]] = value
 
 
 def _extract_request_updates(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -405,6 +579,40 @@ def _serialize_generation_request(request: GenerationRequest) -> dict[str, Any]:
     return deepcopy(config_to_dict(request))
 
 
+_SCHEMA_DEFAULT_UPDATES = _extract_request_updates(config_to_dict(GenerationRequest()))
+
+_KNOWN_CONTINUATION_KINDS: set[str] = set()
+
+
+def register_continuation_kind(kind: str) -> None:
+    """Register a :class:`ContinuationState.kind` as recognized.
+
+    PR 7 wires the envelope through; per-kind payload deserializers live
+    with each model family (e.g. ``fastvideo.pipelines.basic.ltx2.
+    continuation.LTX2ContinuationState``). The registry lets the
+    public-API compat layer validate the kind early, before the state
+    reaches the pipeline.
+    """
+    if not isinstance(kind, str) or not kind:
+        raise ValueError("ContinuationState kind must be a non-empty string")
+    _KNOWN_CONTINUATION_KINDS.add(kind)
+
+
+def _validate_continuation_state(state: ContinuationState) -> None:
+    if not isinstance(state.kind, str) or not state.kind:
+        raise ValueError("GenerationRequest.state.kind must be a non-empty string; got "
+                         f"{state.kind!r}")
+    if not isinstance(state.payload, Mapping):
+        raise ValueError(f"GenerationRequest.state.payload must be a mapping; got "
+                         f"{type(state.payload).__name__}")
+    if state.kind not in _KNOWN_CONTINUATION_KINDS:
+        known = sorted(_KNOWN_CONTINUATION_KINDS)
+        raise ValueError(f"Unknown ContinuationState kind {state.kind!r}; registered "
+                         f"kinds: {known}. Import the model family that owns this kind "
+                         "(e.g. `import fastvideo.pipelines.basic.ltx2.continuation`) "
+                         "to register it, or drop the state field.")
+
+
 def _fan_out_batched_input_value(
     source_request: GenerationRequest,
     target_request: GenerationRequest,
@@ -418,29 +626,6 @@ def _fan_out_batched_input_value(
     setattr(target_request.inputs, field_name, deepcopy(value[index]))
 
 
-def _fan_out_explicit_request_metadata(
-    source_request: GenerationRequest,
-    target_request: GenerationRequest,
-    index: int,
-    prompt: str,
-) -> None:
-    raw = getattr(source_request, _EXPLICIT_REQUEST_ATTR, None)
-    if raw is None:
-        return
-
-    raw = deepcopy(raw)
-    raw["prompt"] = prompt
-    inputs = raw.get("inputs")
-    if isinstance(inputs, dict):
-        for field_name in ("image_path", "video_path"):
-            value = inputs.get(field_name)
-            if isinstance(value, list):
-                _validate_batched_input_length(source_request.prompt, value, field_name)
-                inputs[field_name] = deepcopy(value[index])
-
-    setattr(target_request, _EXPLICIT_REQUEST_ATTR, raw)
-
-
 def _validate_batched_input_length(
     prompts: str | list[str] | None,
     values: list[Any],
@@ -452,50 +637,15 @@ def _validate_batched_input_length(
         raise ValueError(f"GenerationRequest.inputs.{field_name} must have the same length as request.prompt")
 
 
-def _is_supported_as_default_only(key: str, value: Any) -> bool:
-    default_value = _DEFAULT_REQUEST_UPDATES.get(key, _MISSING)
-    return default_value is not _MISSING and _values_equal(value, default_value)
-
-
-def _collect_non_default_fields(
-    value: Any,
-    default: Any,
-) -> dict[str, Any]:
-    if not (is_dataclass(value) and is_dataclass(default)):
-        return {}
-
-    result: dict[str, Any] = {}
-    for field in fields(value):
-        current = getattr(value, field.name)
-        default_value = getattr(default, field.name)
-        if is_dataclass(current) and is_dataclass(default_value):
-            nested = _collect_non_default_fields(current, default_value)
-            if nested:
-                result[field.name] = nested
-            continue
-        if not _values_equal(current, default_value):
-            result[field.name] = deepcopy(current)
-    return result
-
-
-def _values_equal(left: Any, right: Any) -> bool:
-    if left is right:
-        return True
-    try:
-        return bool(left == right)
-    except Exception:
-        return False
-
-
-_DEFAULT_REQUEST_UPDATES = _extract_request_updates(config_to_dict(GenerationRequest()))
-
 __all__ = [
+    "explicit_request_updates",
     "generator_config_to_fastvideo_args",
     "legacy_from_pretrained_to_config",
     "legacy_generate_call_to_request",
     "load_generator_config_from_file",
     "normalize_generation_request",
     "normalize_generator_config",
+    "register_continuation_kind",
     "request_to_pipeline_overrides",
     "request_to_sampling_param",
 ]

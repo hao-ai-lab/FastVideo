@@ -73,32 +73,40 @@ if __name__ == '__main__':
 
 ## JSON/YAML Config Files (CLI)
 
-The CLI supports `--config` with JSON or YAML. Command-line arguments override
-config file values.
-By default, `fastvideo generate` uses `return_frames=false` unless you set
-`--return-frames` (or `return_frames: true` in config).
+The inference CLI is config-first. Use an explicit subcommand with `--config`,
+then apply optional dotted overrides on top, matching the training CLI style.
+By default, CLI generation uses `return_frames=false` unless you set
+`request.output.return_frames: true` in config or via a dotted override.
 
 ```bash
 fastvideo generate --config config.yaml
 ```
 
-Use CLI argument names as keys (underscore or hyphen is accepted). Example:
+Example nested config:
 
 ```yaml
-model_path: "FastVideo/FastHunyuan-diffusers"
-prompt: "A capybara relaxing in a hammock"
-num_gpus: 2
-sp_size: 2
-num_frames: 45
-height: 720
-width: 1280
-num_inference_steps: 6
-seed: 1024
-dit_precision: "bf16"
-vae_precision: "fp16"
-vae_tiling: true
-vae_sp: true
-enable_torch_compile: false
+generator:
+  model_path: FastVideo/FastHunyuan-diffusers
+  engine:
+    num_gpus: 2
+    parallelism:
+      sp_size: 2
+request:
+  prompt: A capybara relaxing in a hammock
+  sampling:
+    num_frames: 45
+    height: 720
+    width: 1280
+    num_inference_steps: 6
+    seed: 1024
+  output:
+    output_path: outputs/
+```
+
+Override individual values from the CLI with dotted paths:
+
+```bash
+fastvideo generate --config config.yaml --request.sampling.seed 42
 ```
 
 ## Performance Optimization

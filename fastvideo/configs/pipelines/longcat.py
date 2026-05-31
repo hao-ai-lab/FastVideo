@@ -11,8 +11,32 @@ import torch
 from fastvideo.configs.models import DiTConfig, VAEConfig
 from fastvideo.configs.models.dits.base import DiTArchConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput, T5Config
+from fastvideo.configs.models.encoders.base import TextEncoderArchConfig
+from fastvideo.configs.models.encoders.t5 import T5ArchConfig
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+
+
+@dataclass
+class LongCatT5ArchConfig(T5ArchConfig):
+    """T5 arch that pads tokenizer output to ``max_length``.
+
+    LongCat's denoising stage concatenates positive and negative
+    attention masks along the batch dimension for CFG, which requires
+    uniform seq length. The shared :class:`T5ArchConfig` dropped the
+    ``"padding": "max_length"`` tokenizer kwarg so other DiTs could run
+    with variable-length masks; LongCat still needs the uniform
+    contract.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.tokenizer_kwargs["padding"] = "max_length"
+
+
+@dataclass
+class LongCatT5Config(T5Config):
+    arch_config: TextEncoderArchConfig = field(default_factory=LongCatT5ArchConfig)
 
 
 @dataclass
@@ -103,8 +127,9 @@ class LongCatT2V480PConfig(PipelineConfig):
     vae_precision: str = "bf16"
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
 
-    # Text encoding (UMT5 uses T5-like config; postprocess to fixed 512)
-    text_encoder_configs: tuple[T5Config, ...] = field(default_factory=lambda: (T5Config(), ))
+    # UMT5 uses T5-like config; postprocess pads to 512. LongCatT5Config
+    # restores ``padding="max_length"`` for the CFG concat contract.
+    text_encoder_configs: tuple[T5Config, ...] = field(default_factory=lambda: (LongCatT5Config(), ))
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (longcat_preprocess_text, ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
                                   ...] = field(default_factory=lambda: (umt5_postprocess_text, ))

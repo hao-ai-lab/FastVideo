@@ -4,3 +4,6 @@
 [submodule "fastvideo-kernel/include/cutlass"]
 	path = fastvideo-kernel/include/cutlass
 	url = https://github.com/NVIDIA/cutlass.git
+[submodule "fastvideo/third_party/eval/vbench"]
+	path = fastvideo/third_party/eval/vbench
+	url = https://github.com/Vchitect/VBench.git

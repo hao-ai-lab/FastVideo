@@ -10,8 +10,9 @@ from fastvideo.api import (
     GeneratorConfig,
     InputConfig,
     SamplingConfig,
+    load_run_config,
 )
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import WorkloadType
 
@@ -293,6 +294,139 @@ def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
     assert captured["sampling_param"].width == 1280
 
 
+def test_generate_mapping_request_preserves_model_defaults_for_omitted_fields(
+    monkeypatch,
+):
+    generator = _new_runtime_video_generator()
+    captured = {}
+
+    def fake_from_pretrained(cls, model_path):
+        return cls(
+            negative_prompt="model default",
+            num_frames=61,
+            height=448,
+            width=832,
+            fps=16,
+            guidance_scale=3.0,
+        )
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    generator.generate(
+        {
+            "prompt": "hello world",
+        }
+    )
+
+    assert captured["sampling_param"].negative_prompt == "model default"
+    assert captured["sampling_param"].num_frames == 61
+    assert captured["sampling_param"].height == 448
+    assert captured["sampling_param"].width == 832
+    assert captured["sampling_param"].fps == 16
+    assert captured["sampling_param"].guidance_scale == 3.0
+
+
+def test_generate_honors_post_load_request_mutations(monkeypatch, tmp_path):
+    generator = _new_runtime_video_generator()
+    captured = {}
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "request:\n"
+        "  prompt: hello world\n",
+        encoding="utf-8",
+    )
+
+    def fake_from_pretrained(cls, model_path):
+        return cls(seed=1024, num_frames=61, height=448, width=832)
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    config = load_run_config(config_path)
+    config.request.sampling.seed = 7
+
+    generator.generate(config.request)
+
+    assert captured["sampling_param"].seed == 7
+
+
+def test_generate_honors_post_load_mutations_matching_schema_defaults(
+    monkeypatch,
+    tmp_path,
+):
+    generator = _new_runtime_video_generator()
+    captured = {}
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "request:\n"
+        "  prompt: hello world\n",
+        encoding="utf-8",
+    )
+
+    def fake_from_pretrained(cls, model_path):
+        return cls(guidance_scale=3.0)
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    config = load_run_config(config_path)
+    config.request.sampling.guidance_scale = 1.0
+
+    generator.generate(config.request)
+
+    assert captured["sampling_param"].guidance_scale == 1.0
+
+
+def test_generate_removes_deleted_loaded_stage_overrides(monkeypatch, tmp_path):
+    generator = _new_runtime_video_generator()
+    captured = {}
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "request:\n"
+        "  prompt: hello world\n"
+        "  stage_overrides:\n"
+        "    refine:\n"
+        "      t_thresh: 0.8\n",
+        encoding="utf-8",
+    )
+
+    def fake_from_pretrained(cls, model_path):
+        return cls(t_thresh=0.5)
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    config = load_run_config(config_path)
+    del config.request.stage_overrides["refine"]
+
+    generator.generate(config.request)
+
+    assert captured["sampling_param"].t_thresh == 0.5
+
+
 def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
     generator = _new_runtime_video_generator()
     captured = {}
@@ -325,14 +459,15 @@ def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
         )
 
     assert captured["prompt"] == "legacy prompt"
-    assert captured["kwargs"]["num_frames"] == 49
-    assert captured["kwargs"]["output_path"] == "outputs/legacy"
-    assert captured["kwargs"]["save_video"] is False
+    assert captured["sampling_param"].num_frames == 49
+    assert captured["sampling_param"].output_path == "outputs/legacy"
+    assert captured["sampling_param"].save_video is False
     assert result["video_path"] == "outputs/test.mp4"
 
 
-def test_generate_video_legacy_call_preserves_unknown_kwargs(monkeypatch):
+def test_generate_video_legacy_call_routes_compat_kwargs(monkeypatch):
     generator = _new_runtime_video_generator()
+    generator.fastvideo_args.pipeline_config = SimpleNamespace(embedded_cfg_scale=1.0)
     captured = {}
 
     def fake_generate_video_impl(
@@ -358,8 +493,9 @@ def test_generate_video_legacy_call_preserves_unknown_kwargs(monkeypatch):
         )
 
     assert captured["prompt"] == "legacy prompt"
-    assert captured["kwargs"]["neg_prompt"] == "custom negative"
-    assert captured["kwargs"]["embedded_cfg_scale"] == 7.5
+    assert captured["sampling_param"].negative_prompt == "custom negative"
+    assert captured["kwargs"]["fastvideo_args"].pipeline_config.embedded_cfg_scale == 7.5
+    assert not hasattr(captured["sampling_param"], "embedded_cfg_scale")
     assert result["video_path"] == "outputs/test.mp4"
 
 

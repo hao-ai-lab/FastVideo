@@ -57,8 +57,10 @@ uv pip install fastvideo
 
 #### With Conda environment (alternative)
 
+`uv` works inside an active conda env too, so prefer `uv pip` for the actual install:
+
 ```bash
-pip install fastvideo
+uv pip install fastvideo
 ```
 
 ### Installation from Source
@@ -80,7 +82,7 @@ uv pip install -e .
 Alternative with Conda environment:
 
 ```bash
-pip install -e .
+uv pip install -e .
 ```
 
 ## Development Environment Setup

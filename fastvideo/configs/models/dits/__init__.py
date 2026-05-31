@@ -5,6 +5,8 @@ from fastvideo.configs.models.dits.hunyuanvideo import HunyuanVideoConfig
 from fastvideo.configs.models.dits.hunyuanvideo15 import HunyuanVideo15Config
 from fastvideo.configs.models.dits.longcat import LongCatVideoConfig
 from fastvideo.configs.models.dits.ltx2 import LTX2VideoConfig
+from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
+from fastvideo.configs.models.dits.stable_audio import StableAudioConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
 from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
@@ -23,5 +25,7 @@ __all__ = [
     "HYWorldConfig",
     "Kandinsky5VideoConfig",
     "LingBotWorldVideoConfig",
+    "MagiHumanVideoConfig",
+    "StableAudioConfig",
     "WaypointConfig",
 ]

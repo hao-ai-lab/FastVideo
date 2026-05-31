@@ -195,7 +195,7 @@ class CudaPlatformBase(Platform):
             except ImportError as e:
                 logger.error("Failed to import SageSLA Attention backend: %s", str(e))
                 raise ImportError("SageSLA Attention backend requires spas_sage_attn. "
-                                  "Install with: pip install git+https://github.com/thu-ml/SpargeAttn.git") from e
+                                  "Install with: uv pip install git+https://github.com/thu-ml/SpargeAttn.git") from e
         elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
             return "fastvideo.attention.backends.sdpa.SDPABackend"

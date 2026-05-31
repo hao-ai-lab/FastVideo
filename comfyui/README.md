@@ -38,10 +38,10 @@ cp -r /path/to/FastVideo/comfyui /path/to/ComfyUI/custom_nodes/FastVideo
 
 #### Install dependencies:
 
-Currently, the only dependency is `fastvideo`, which can be installed using pip.
+Currently, the only dependency is `fastvideo`, which can be installed with `uv`.
 
 ```bash
-pip install fastvideo
+uv pip install fastvideo
 ```
 
 #### Install missing custom nodes:

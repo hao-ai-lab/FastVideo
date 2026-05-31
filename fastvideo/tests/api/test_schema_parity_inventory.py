@@ -12,7 +12,7 @@ import yaml
 
 from fastvideo.api import RunConfig, ServeConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
 from fastvideo.entrypoints.cli.serve import ServeSubcommand
 from fastvideo.entrypoints.openai import image_api, video_api
@@ -46,22 +46,42 @@ def _flatten_status_section(section: dict, valid_statuses: set[str]) -> set[str]
     return names
 
 
-def _get_extra_dataclass_fields(package_name: str, base_cls: type) -> set[str]:
-    package = importlib.import_module(package_name)
+def _get_extra_dataclass_fields(
+    package_names: str | tuple[str, ...],
+    base_cls: type,
+) -> set[str]:
+    """Collect dataclass fields declared on ``base_cls`` subclasses found
+    under any of the given package roots.
+
+    Accepts either a single package name (string) or a tuple of package
+    roots — the latter supports the PR 6 colocation where each model
+    family's ``PipelineConfig`` subclass moves from
+    ``fastvideo.configs.pipelines.<family>`` to
+    ``fastvideo.pipelines.basic.<family>.pipeline_configs``.
+    """
+    if isinstance(package_names, str):
+        package_names = (package_names, )
+
     base_fields = {f.name for f in dataclasses.fields(base_cls)}
     extras: set[str] = set()
-    for _, modname, _ in pkgutil.iter_modules(package.__path__):
-        if modname == "__pycache__":
+
+    for package_name in package_names:
+        package = importlib.import_module(package_name)
+        if not hasattr(package, "__path__"):
             continue
-        module = importlib.import_module(f"{package_name}.{modname}")
-        for obj in vars(module).values():
-            if (
-                isinstance(obj, type)
-                and dataclasses.is_dataclass(obj)
-                and issubclass(obj, base_cls)
-                and obj is not base_cls
-            ):
-                extras.update(f.name for f in dataclasses.fields(obj) if f.name not in base_fields)
+        for _, modname, is_pkg in pkgutil.walk_packages(
+                package.__path__, prefix=f"{package_name}."):
+            if modname.endswith(".__pycache__"):
+                continue
+            module = importlib.import_module(modname)
+            for obj in vars(module).values():
+                if (isinstance(obj, type)
+                        and dataclasses.is_dataclass(obj)
+                        and issubclass(obj, base_cls)
+                        and obj is not base_cls):
+                    extras.update(
+                        f.name for f in dataclasses.fields(obj)
+                        if f.name not in base_fields)
     return extras
 
 
@@ -175,7 +195,10 @@ def test_pipeline_config_base_fields_are_classified() -> None:
 
 def test_pipeline_config_extension_fields_are_classified() -> None:
     inventory = _load_inventory()
-    expected = _get_extra_dataclass_fields("fastvideo.configs.pipelines", PipelineConfig)
+    expected = _get_extra_dataclass_fields(
+        ("fastvideo.configs.pipelines", "fastvideo.pipelines.basic"),
+        PipelineConfig,
+    )
     actual = _flatten_status_section(
         inventory["surfaces"]["pipeline_config_extensions"],
         set(inventory["status_definitions"]),
@@ -195,7 +218,7 @@ def test_sampling_param_base_fields_are_classified() -> None:
 
 def test_sampling_param_extension_fields_are_classified() -> None:
     inventory = _load_inventory()
-    expected = _get_extra_dataclass_fields("fastvideo.configs.sample", SamplingParam)
+    expected = _get_extra_dataclass_fields("fastvideo.api.sampling_param", SamplingParam)
     actual = _flatten_status_section(
         inventory["surfaces"]["sampling_param_extensions"],
         set(inventory["status_definitions"]),
@@ -235,8 +258,8 @@ def test_cli_dest_inventory_matches_live_parsers() -> None:
 def test_review_gap_fields_are_explicitly_inventory_tracked() -> None:
     inventory = _load_inventory()
 
-    sampling_extensions = inventory["surfaces"]["sampling_param_extensions"]
-    assert "guidance_scale_2" in sampling_extensions["moved"]
+    sampling_base = inventory["surfaces"]["sampling_param_base"]
+    assert "guidance_scale_2" in sampling_base["moved"]
 
     image_request = inventory["surfaces"]["openai_image_request"]
     video_request = inventory["surfaces"]["openai_video_request"]
@@ -247,7 +270,7 @@ def test_review_gap_fields_are_explicitly_inventory_tracked() -> None:
 
 def test_inventory_targets_exist_in_typed_schema() -> None:
     inventory = _load_inventory()
-    target_statuses = {"moved", "profile_owned"}
+    target_statuses = {"moved", "preset_owned"}
 
     for surface in inventory["surfaces"].values():
         for status, entries in surface.items():

@@ -31,7 +31,7 @@ def parse_cli_overrides(overrides: list[str]) -> dict[str, Any]:
                 raise ValueError(f"Missing value for override {token!r}")
             raw_value = overrides[index]
 
-        parsed[key] = _cast_override_value(raw_value)
+        parsed[_normalize_override_key(key)] = _cast_override_value(raw_value)
         index += 1
 
     return parsed
@@ -43,6 +43,15 @@ def apply_overrides(config: Mapping[str, Any], overrides: Mapping[str, Any]) -> 
     for dotted_key, value in overrides.items():
         _apply_single_override(merged, dotted_key, value)
     return merged
+
+
+def normalize_overrides(overrides: list[str] | Mapping[str, Any] | None, ) -> dict[str, Any] | None:
+    """Normalize a CLI list or mapping of overrides into a flat dict."""
+    if not overrides:
+        return None
+    if isinstance(overrides, list):
+        return parse_cli_overrides(overrides)
+    return dict(overrides)
 
 
 def _apply_single_override(config: dict[str, Any], dotted_key: str, value: Any) -> None:
@@ -94,4 +103,8 @@ def _cast_override_value(raw: str) -> Any:
     return raw
 
 
-__all__ = ["apply_overrides", "parse_cli_overrides"]
+def _normalize_override_key(key: str) -> str:
+    return key.replace("-", "_")
+
+
+__all__ = ["apply_overrides", "normalize_overrides", "parse_cli_overrides"]

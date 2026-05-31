@@ -13,6 +13,12 @@ from pathlib import Path
 
 
 VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
+# Additional artefact types stored under the same reference folders. Latent
+# tensors (`.pt`) back the latent-slice regression tests used by flaky
+# pixel-space models (e.g. LTX-2 distilled). Keeping them in the same upload
+# flow means seeding a new test only requires one HF round-trip.
+LATENT_EXTENSIONS = (".pt",)
+REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + LATENT_EXTENSIONS
 HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
 HF_REPO_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO"
 HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE"
@@ -42,9 +48,14 @@ def _default_repo_type() -> str:
     return os.environ.get(HF_REPO_TYPE_ENV_KEY, DEFAULT_REPO_TYPE)
 
 
-def _iter_video_files(root: Path) -> Iterable[Path]:
+def _iter_reference_files(root: Path) -> Iterable[Path]:
+    """Yield video and latent (.pt) references under `root`.
+
+    Used by copy-local and the "has local references" marker probe so that
+    latent-only tests (no mp4) still satisfy readiness checks.
+    """
     for path in root.rglob("*"):
-        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS:
+        if path.is_file() and path.suffix.lower() in REFERENCE_EXTENSIONS:
             yield path
 
 
@@ -139,7 +150,7 @@ def _has_local_reference_videos(base_dir: Path, quality_tier: str) -> bool:
         return False
     tier_root = _reference_tier_root(base_dir, quality_tier)
     for ref_dir in _discover_reference_dirs(tier_root):
-        for _ in _iter_video_files(ref_dir):
+        for _ in _iter_reference_files(ref_dir):
             return True
     return False
 
@@ -158,7 +169,7 @@ def _load_hf_sdk():
         from huggingface_hub import HfApi, snapshot_download
     except ImportError as exc:
         raise RuntimeError(
-            "huggingface_hub is required for download/upload.\nInstall with: pip install huggingface_hub"
+            "huggingface_hub is required for download/upload.\nInstall with: uv pip install huggingface_hub"
         ) from exc
     return HfApi, snapshot_download
 
@@ -173,14 +184,14 @@ def copy_generated_to_reference(
         raise FileNotFoundError(f"Generated directory not found: {generated_dir}")
 
     copied = 0
-    for video_file in _iter_video_files(generated_dir):
-        rel = video_file.relative_to(generated_dir)
+    for ref_file in _iter_reference_files(generated_dir):
+        rel = ref_file.relative_to(generated_dir)
         dst = reference_dir / rel
         if dry_run:
-            print(f"[dry-run] {video_file} -> {dst}")
+            print(f"[dry-run] {ref_file} -> {dst}")
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(video_file, dst)
+            shutil.copy2(ref_file, dst)
             print(f"Copied: {rel}")
         copied += 1
     return copied
@@ -251,6 +262,8 @@ def upload_reference_videos(
     reference_dirs_by_tier: Sequence[tuple[str, Path]],
     token: str,
     private: bool,
+    model_id: str | None = None,
+    force: bool = False,
 ) -> None:
     HfApi, _ = _load_hf_sdk()
     api = HfApi(token=token)
@@ -261,15 +274,44 @@ def upload_reference_videos(
         exist_ok=True,
     )
 
+    try:
+        existing_repo_files = set(
+            api.list_repo_files(repo_id=repo_id, repo_type=repo_type))
+    except Exception:
+        # Fresh repo or list failure — treat as empty so upload can proceed.
+        existing_repo_files = set()
+
     for quality_tier, reference_dir in reference_dirs_by_tier:
         if not reference_dir.exists():
             raise FileNotFoundError(f"Reference directory not found: {reference_dir}")
-        path_in_repo = f"{REFERENCE_VIDEOS_DIRNAME}/{quality_tier}/{reference_dir.name}"
-        print(f"Uploading {reference_dir.name} ({quality_tier}) to {repo_id} ...")
+        base_in_repo = f"{REFERENCE_VIDEOS_DIRNAME}/{quality_tier}/{reference_dir.name}"
+        if model_id:
+            folder_path = reference_dir / model_id
+            if not folder_path.exists():
+                raise FileNotFoundError(
+                    f"Model subfolder not found for upload: {folder_path}")
+            path_in_repo = f"{base_in_repo}/{model_id}"
+        else:
+            folder_path = reference_dir
+            path_in_repo = base_in_repo
+
+        conflicts = sorted(
+            f for f in existing_repo_files
+            if f.startswith(f"{path_in_repo}/") or f == path_in_repo)
+        if conflicts and not force:
+            preview = "\n".join(f"  - {c}" for c in conflicts[:10])
+            more = f"\n  ... and {len(conflicts) - 10} more" if len(conflicts) > 10 else ""
+            raise RuntimeError(
+                f"Refusing to overwrite existing HF files under {path_in_repo} "
+                f"({len(conflicts)} file(s) already present):\n{preview}{more}\n"
+                f"Re-run with --force to overwrite.")
+
+        target_desc = f"{reference_dir.name}/{model_id}" if model_id else reference_dir.name
+        print(f"Uploading {target_desc} ({quality_tier}) to {repo_id}/{path_in_repo} ...")
         api.upload_folder(
             repo_id=repo_id,
             repo_type=repo_type,
-            folder_path=str(reference_dir),
+            folder_path=str(folder_path),
             path_in_repo=path_in_repo,
             token=token,
         )
@@ -500,6 +542,22 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Create/use a private repo instead of public.",
     )
+    upload_parser.add_argument(
+        "--model-id",
+        default=None,
+        help=(
+            "Restrict upload to a single model subfolder "
+            "(reference_videos/<tier>/<device>/<model_id>). "
+            "Use when seeding references for a single new test."),
+    )
+    upload_parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Allow overwriting files that already exist at the target path on "
+            "Hugging Face. Off by default so seeding a new test cannot "
+            "clobber existing references."),
+    )
 
     ensure_parser = subparsers.add_parser(
         "ensure",
@@ -607,6 +665,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             reference_dirs_by_tier=reference_dirs_by_tier,
             token=token,
             private=args.private,
+            model_id=args.model_id,
+            force=args.force,
         )
         print("Upload complete.")
         return 0

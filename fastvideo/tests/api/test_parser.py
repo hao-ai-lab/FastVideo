@@ -8,12 +8,17 @@ from fastvideo.api import (
     ContinuationState,
     GenerationRequest,
     GeneratorConfig,
+    GpuPoolConfig,
     load_run_config,
     load_serve_config,
     parse_config,
     PlannedStage,
+    PromptEnhancerConfig,
+    PromptSafetyConfig,
     RunConfig,
     ServeConfig,
+    StreamingConfig,
+    WarmupConfig,
 )
 
 
@@ -23,7 +28,7 @@ def test_parse_config_builds_nested_typed_config() -> None:
             "model_path": "/models/ltx2",
             "pipeline": {
                 "workload_type": "t2v",
-                "profile": "ltx2_two_stage",
+                "preset": "ltx2_two_stage",
             },
         },
         "request": {
@@ -51,7 +56,7 @@ def test_parse_config_builds_nested_typed_config() -> None:
 
     config = parse_config(RunConfig, raw)
 
-    assert config.generator.pipeline.profile == "ltx2_two_stage"
+    assert config.generator.pipeline.preset == "ltx2_two_stage"
     assert config.request.prompt == ["a fox", "a wolf"]
     assert config.request.state == ContinuationState(
         kind="ltx2_continuation",
@@ -106,7 +111,21 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "vae": True,
                     "pin_cpu_memory": True,
                 },
-                "compile": {"enabled": False, "kwargs": {}},
+                "compile": {
+                    "enabled": False,
+                    "backend": None,
+                    "fullgraph": None,
+                    "mode": None,
+                    "dynamic": None,
+                    "extras": {},
+                    "text_encoder_enabled": None,
+                    "vae_enabled": None,
+                    "audio_vae_enabled": None,
+                    "dit_kwargs": {},
+                    "text_encoder_kwargs": {},
+                    "vae_kwargs": {},
+                    "audio_vae_kwargs": {},
+                },
                 "enable_stage_verification": True,
                 "use_fsdp_inference": False,
                 "disable_autocast": False,
@@ -114,8 +133,8 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
             },
             "pipeline": {
                 "workload_type": None,
-                "profile": None,
-                "profile_version": None,
+                "preset": None,
+                "preset_version": None,
                 "components": {
                     "config_root": None,
                     "pipeline_config_path": None,
@@ -128,7 +147,8 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "override_pipeline_cls_name": None,
                     "override_transformer_cls_name": None,
                 },
-                "profile_overrides": {},
+                "vae_tiling": None,
+                "preset_overrides": {},
                 "experimental": {},
             },
         },
@@ -200,3 +220,96 @@ def test_load_serve_config_supports_json_roundtrip(tmp_path) -> None:
     assert isinstance(loaded, ServeConfig)
     assert loaded.server.port == 9000
     assert loaded.default_request.prompt == "serve default"
+
+
+def test_serve_config_streaming_defaults_to_none() -> None:
+    raw = {"generator": {"model_path": "/models/server"}}
+    loaded = parse_config(ServeConfig, raw)
+    assert loaded.streaming is None
+
+
+def test_serve_config_parses_streaming_block() -> None:
+    raw = {
+        "generator": {"model_path": "/models/server"},
+        "streaming": {
+            "session_timeout_seconds": 120,
+            "generation_segment_cap": 4,
+            "stream_mode": "legacy_jpeg",
+            "warmup": {
+                "enabled": False,
+                "prompt": "warmup prompt",
+                "timeout_seconds": 600,
+            },
+            "pool": {
+                "num_workers": 2,
+                "enable_audio_reencode": False,
+                "conditioning_num_frames": 5,
+                "conditioning_end_offset": 1,
+            },
+            "prompt": {
+                "provider": "groq",
+                "model": "llama-3-70b",
+                "timeout_ms": 10000,
+                "system_prompt_dir": "/opt/prompts",
+            },
+            "safety": {
+                "enabled": True,
+                "classifier_path": "/opt/safety.pt",
+            },
+        },
+    }
+
+    loaded = parse_config(ServeConfig, raw)
+
+    assert isinstance(loaded.streaming, StreamingConfig)
+    assert loaded.streaming.session_timeout_seconds == 120
+    assert loaded.streaming.generation_segment_cap == 4
+    assert loaded.streaming.stream_mode == "legacy_jpeg"
+    assert loaded.streaming.warmup == WarmupConfig(
+        enabled=False, prompt="warmup prompt", timeout_seconds=600)
+    assert loaded.streaming.pool == GpuPoolConfig(
+        num_workers=2,
+        enable_audio_reencode=False,
+        conditioning_num_frames=5,
+        conditioning_end_offset=1,
+    )
+    assert loaded.streaming.prompt == PromptEnhancerConfig(
+        provider="groq",
+        model="llama-3-70b",
+        timeout_ms=10000,
+        system_prompt_dir="/opt/prompts",
+    )
+    assert loaded.streaming.safety == PromptSafetyConfig(
+        enabled=True, classifier_path="/opt/safety.pt")
+
+
+def test_serve_config_streaming_round_trip_through_config_to_dict() -> None:
+    raw = {
+        "generator": {"model_path": "/models/server"},
+        "streaming": {"session_timeout_seconds": 600},
+    }
+    loaded = parse_config(ServeConfig, raw)
+    dumped = config_to_dict(loaded)
+    assert dumped["streaming"]["session_timeout_seconds"] == 600
+    assert dumped["streaming"]["warmup"]["enabled"] is True
+    assert dumped["streaming"]["prompt"]["enabled"] is False
+    assert dumped["streaming"]["prompt"]["provider"] == "cerebras"
+    assert dumped["streaming"]["safety"]["enabled"] is False
+
+
+def test_load_serve_config_with_streaming_from_yaml(tmp_path) -> None:
+    raw = {
+        "generator": {"model_path": "/models/server"},
+        "streaming": {
+            "stream_mode": "av_fmp4",
+            "pool": {"num_workers": 4},
+        },
+    }
+    path = tmp_path / "serve.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    loaded = load_serve_config(path)
+
+    assert loaded.streaming is not None
+    assert loaded.streaming.stream_mode == "av_fmp4"
+    assert loaded.streaming.pool.num_workers == 4
