@@ -49,6 +49,13 @@ class ReloadAck:
 
 
 @dataclass(frozen=True)
+class LoraAck:
+    user_id: str | None
+    style_trigger: str | None
+    style_trigger_position: str | None
+
+
+@dataclass(frozen=True)
 class WarmupComplete:
     user_id: str | None
     timings: dict[str, float]
@@ -117,6 +124,7 @@ WorkerEvent = (StepComplete
                | JoinAck
                | LeaveAck
                | ReloadAck
+               | LoraAck
                | WarmupComplete
                | MediaInit
                | MediaChunk
@@ -154,4 +162,10 @@ class ReloadModelPayload:
     model_config: dict
 
 
-CommandPayload = UserStepPayload | WarmupPayload | ReloadModelPayload
+@dataclass(frozen=True)
+class LoraStackPayload:
+    stack: list[tuple[str, float]]
+    style: str | None
+
+
+CommandPayload = (UserStepPayload | WarmupPayload | ReloadModelPayload | LoraStackPayload)
