@@ -9,8 +9,6 @@ import os
 
 import torch
 
-from fastvideo.models.dits.ltx2 import DEFAULT_LTX2_VOCODER_OUTPUT_SAMPLE_RATE
-
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -20,6 +18,19 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
+
+
+def _resolve_audio_sample_rate(vocoder) -> int:
+    model = getattr(vocoder, "model", vocoder)
+    for attr in ("output_sampling_rate", "output_sample_rate"):
+        if hasattr(model, attr):
+            return int(getattr(model, attr))
+    nested_vocoder = getattr(model, "vocoder", None)
+    if nested_vocoder is not None:
+        for attr in ("output_sampling_rate", "output_sample_rate"):
+            if hasattr(nested_vocoder, attr):
+                return int(getattr(nested_vocoder, attr))
+    return 24000
 
 
 class LTX2AudioDecodingStage(PipelineStage):
@@ -55,7 +66,7 @@ class LTX2AudioDecodingStage(PipelineStage):
 
         # Move to CPU for pickling across process boundary
         batch.extra["audio"] = audio_wave.cpu()
-        batch.extra["audio_sample_rate"] = DEFAULT_LTX2_VOCODER_OUTPUT_SAMPLE_RATE
+        batch.extra["audio_sample_rate"] = _resolve_audio_sample_rate(self.vocoder)
         return batch
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:

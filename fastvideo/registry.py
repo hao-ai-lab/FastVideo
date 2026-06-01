@@ -232,6 +232,9 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "FastVideo/LTX2-Distilled-Diffusers",
+            # LTX-2.3 distilled aliases share the distilled pipeline/preset.
+            "FastVideo/LTX2.3-Distilled-Diffusers",
+            "FastVideo/LTX-2.3-Distilled-Diffusers",
         ],
         model_detectors=[
             lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
@@ -239,7 +242,30 @@ def _register_configs() -> None:
         model_family="ltx2",
         default_preset="ltx2_distilled",
     )
-    # LTX-2 (base)
+    # LTX-2.3 (base) — registered before the LTX-2.0 base entry so its more
+    # specific 2.3 detector wins. Uses the same pipeline config; the new
+    # arch flags are read from the checkpoint config.json.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LTX2T2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "Lightricks/LTX-2.3",
+            "FastVideo/LTX2.3-base",
+            "FastVideo/LTX2.3-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: (any(token in path.lower() for token in (
+                "lightricks/ltx-2.3",
+                "ltx2.3-base",
+                "ltx2.3-diffusers",
+                "ltx-2.3-diffusers",
+            )) and "distilled" not in path.lower()),
+        ],
+        model_family="ltx2",
+        default_preset="ltx2_3_base",
+    )
+    # LTX-2 (base) — excludes 2.3 so the dedicated 2.3 entry above wins.
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=LTX2T2VConfig,
@@ -250,7 +276,8 @@ def _register_configs() -> None:
             "FastVideo/LTX2-Diffusers",
         ],
         model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" not in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" not in path.lower() and
+            "2.3" not in path.lower(),
         ],
         model_family="ltx2",
         default_preset="ltx2_base",
