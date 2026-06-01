@@ -1,24 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""
-End-to-end pipeline smoke test for Ovis-Image-7B.
-
-Runs a full generate_video() call through VideoGenerator and verifies:
-  - Output tensor has the expected shape
-  - Output is finite (no NaN / Inf)
-  - Output file is written to disk when save_video=True
-
-No reference-pipeline comparison is needed here because numerical parity
-with the Diffusers implementation is already covered at the transformer
-level by tests/local_tests/ovis_image/test_ovis_transformer_parity.py.
-
-Usage:
-    # With local weights (fastest)
-    OVIS_WEIGHTS=official_weights/ovis_image \
-        pytest tests/local_tests/pipelines/test_ovis_image_pipeline_smoke.py -vs
-
-    # With HuggingFace Hub weights
-    pytest tests/local_tests/pipelines/test_ovis_image_pipeline_smoke.py -vs
-"""
+"""Smoke test: a full ``generate_video()`` through VideoGenerator yields a
+correctly shaped, finite output and writes a file. Numerical parity lives in the
+component and pipeline parity tests."""
 
 import os
 import tempfile
@@ -75,20 +58,20 @@ def test_ovis_image_pipeline_smoke():
         finally:
             generator.shutdown()
 
-    # --- shape check ---
-    samples = result["samples"]
-    # Expected: (B, C, T, H, W) = (1, 3, 1, 128, 128)
-    assert samples.ndim == 5, f"Expected 5-D tensor, got shape {samples.shape}"
-    assert samples.shape[0] == 1
-    assert samples.shape[2] == num_frames
-    assert samples.shape[3] == height
-    assert samples.shape[4] == width
+        # --- shape check ---
+        samples = result["samples"]
+        # Expected: (B, C, T, H, W) = (1, 3, 1, 128, 128)
+        assert samples.ndim == 5, f"Expected 5-D tensor, got shape {samples.shape}"
+        assert samples.shape[0] == 1
+        assert samples.shape[2] == num_frames
+        assert samples.shape[3] == height
+        assert samples.shape[4] == width
 
-    # --- finite check ---
-    assert torch.isfinite(samples).all(), "Output contains NaN or Inf values"
+        # --- finite check ---
+        assert torch.isfinite(samples).all(), "Output contains NaN or Inf values"
 
-    # --- output file check ---
-    output_files = list(Path(tmpdir).glob("*.mp4")) + list(
-        Path(tmpdir).glob("*.png"))
-    assert len(output_files) > 0, (
-        f"No output file was saved under {tmpdir}. Files: {os.listdir(tmpdir)}")
+        # --- output file check (inside the tmpdir context, before cleanup) ---
+        output_files = list(Path(tmpdir).glob("*.mp4")) + list(
+            Path(tmpdir).glob("*.png"))
+        assert len(output_files) > 0, (
+            f"No output file was saved under {tmpdir}. Files: {os.listdir(tmpdir)}")

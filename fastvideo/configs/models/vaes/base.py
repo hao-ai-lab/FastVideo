@@ -19,8 +19,7 @@ class VAEArchConfig(ArchConfig):
 
     # Additional fields from diffusers AutoencoderKL
     act_fn: str = "silu"
-    block_out_channels: list[int] = field(
-        default_factory=lambda: [128, 256, 512, 512])
+    block_out_channels: list[int] = field(default_factory=lambda: [128, 256, 512, 512])
     down_block_types: list[str] = field(default_factory=list)
     up_block_types: list[str] = field(default_factory=list)
     force_upcast: bool = False

@@ -1,19 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-"""
-Ovis-Image Transformer2D Model — Approach B (FastVideo-native implementation)
-
-Architecture: FLUX-like MM-DiT with:
-  - 6 double-stream (joint) transformer blocks
-  - 27 single-stream transformer blocks
-  - Qwen3 text encoder (2048-dim) projected to shared 3072-dim hidden space
-  - FLUX-style 3D RoPE with axes_dims_rope=[16, 56, 56]
-  - FastVideo DistributedAttention for SP support
-  - ReplicatedLinear layers (FSDP-compatible, TP-ready)
-  - CachableDiT base for TeaCache optimization
-
-Weight attribute names match Diffusers OvisImageTransformer2DModel exactly,
-so param_names_mapping = {} and weights load without any remapping.
-"""
 
 import math
 from typing import Any
@@ -27,18 +12,12 @@ from fastvideo.configs.models.dits import OvisImageTransformer2DModelConfig
 from fastvideo.configs.models.dits.base import DiTConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather, sequence_model_parallel_shard)
-from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
-from fastvideo.layers.linear import ReplicatedLinear
-from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# Helpers: latent packing / unpacking and position IDs
-# ---------------------------------------------------------------------------
 
 
 def _pack_latents(latents: torch.Tensor) -> torch.Tensor:
@@ -75,21 +54,10 @@ def _prepare_txt_ids(seq_len: int, device: torch.device) -> torch.Tensor:
     return ids
 
 
-# ---------------------------------------------------------------------------
-# FLUX-style RoPE
-# ---------------------------------------------------------------------------
-
 
 class OvisImageRoPE(nn.Module):
-    """
-    FLUX-style 3D RoPE for Ovis-Image.
-
-    Splits head_dim across three axes according to axes_dims_rope, computing
-    separate frequency tables per axis and concatenating them.
-
-    Position IDs: [..., 3] where components index (axis0, axis1, axis2).
-    For 2D images: axis0=0, axis1=row, axis2=col.
-    """
+    """FLUX-style 3D RoPE: head_dim split across axes_dims_rope, per-axis freqs
+    concatenated. Position IDs [..., 3] are (axis0, row, col)."""
 
     def __init__(self, head_dim: int, axes_dims: list[int],
                  theta: float = 10000.0):
@@ -108,19 +76,13 @@ class OvisImageRoPE(nn.Module):
             torch.arange(0, half, device=device, dtype=torch.float32) / half))
 
     def forward(self, ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Args:
-            ids: position IDs [..., 3]
-        Returns:
-            (cos, sin) each [..., head_dim]
-        """
         cos_parts, sin_parts = [], []
         for axis_idx, dim in enumerate(self.axes_dims):
             pos = ids[..., axis_idx].float()
             inv_freq = self._freqs_for_axis(dim, ids.device)
             freqs = torch.outer(pos.reshape(-1),
                                 inv_freq).reshape(*pos.shape, -1)
-            # Interleaved pairs [θ0,θ0,θ1,θ1,...] — matches Diffusers repeat_interleave_real=True
+            # Interleaved pairs [θ0,θ0,θ1,θ1,...]: repeat_interleave_real=True
             emb = freqs.repeat_interleave(2, dim=-1)
             cos_parts.append(emb.cos())
             sin_parts.append(emb.sin())
@@ -140,10 +102,8 @@ def _apply_rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor,
     cos = cos.unsqueeze(0).unsqueeze(2)  # [1, seq, 1, head_dim]
     sin = sin.unsqueeze(0).unsqueeze(2)
 
-    # Unbind adjacent pairs: x -> (x_real, x_imag) each [..., head_dim//2]
     q_r, q_i = q.reshape(*q.shape[:-1], -1, 2).unbind(-1)
     k_r, k_i = k.reshape(*k.shape[:-1], -1, 2).unbind(-1)
-    # Rotate: [-imag, real] — matches torch.stack([-x_imag, x_real]).flatten
     q_rot = torch.stack([-q_i, q_r], dim=-1).flatten(-2)
     k_rot = torch.stack([-k_i, k_r], dim=-1).flatten(-2)
 
@@ -151,16 +111,9 @@ def _apply_rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor,
         k.float() * cos + k_rot.float() * sin).to(k.dtype)
 
 
-# ---------------------------------------------------------------------------
-# Adaptive layer norms
-# ---------------------------------------------------------------------------
-
 
 class OvisAdaLayerNormZero(nn.Module):
-    """
-    Adaptive LayerNorm with zero-initialized modulation for double stream blocks.
-    Produces 6 values: (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp).
-    """
+    """AdaLN-Zero producing 6 modulations (shift/scale/gate for msa + mlp)."""
 
     def __init__(self, hidden_size: int):
         super().__init__()
@@ -174,16 +127,12 @@ class OvisAdaLayerNormZero(nn.Module):
         emb = self.linear(F.silu(c))
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             emb.chunk(6, dim=-1))
-        # c is [B, hidden]; x is [B, seq, hidden] — unsqueeze for broadcast
         x_norm = self.norm(x) * (1 + scale_msa.unsqueeze(1)) + shift_msa.unsqueeze(1)
         return x_norm, gate_msa.unsqueeze(1), shift_mlp.unsqueeze(1), scale_mlp.unsqueeze(1), gate_mlp.unsqueeze(1)
 
 
 class OvisAdaLayerNormZeroSingle(nn.Module):
-    """
-    Adaptive LayerNorm with zero-initialized modulation for single stream blocks.
-    Produces 3 values: (shift, scale, gate).
-    """
+    """AdaLN-Zero producing 3 modulations (shift, scale, gate)."""
 
     def __init__(self, hidden_size: int):
         super().__init__()
@@ -195,7 +144,6 @@ class OvisAdaLayerNormZeroSingle(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         emb = self.linear(F.silu(c))
         shift, scale, gate = emb.chunk(3, dim=-1)
-        # c is [B, hidden]; x is [B, seq, hidden] — unsqueeze for broadcast
         x_norm = self.norm(x) * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         return x_norm, gate.unsqueeze(1)
 
@@ -211,41 +159,28 @@ class OvisAdaLayerNormContinuous(nn.Module):
     def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
         emb = self.linear(F.silu(c))
         scale, shift = emb.chunk(2, dim=-1)
-        # c is [B, hidden]; x is [B, seq, hidden] — unsqueeze for broadcast
         return self.norm(x) * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 
-# ---------------------------------------------------------------------------
-# GEGLU feed-forward
-# ---------------------------------------------------------------------------
-
 
 class OvisGEGLUFeedForward(nn.Module):
-    """
-    GEGLU feed-forward used in double stream blocks.
-    Attribute names match Diffusers ff.net structure for weight compatibility.
-    """
+    """Feed-forward for double-stream blocks. The ModuleList indices mirror
+    Diffusers `ff.net` (0=proj, 1=dropout, 2=down) so weights load by name."""
 
     def __init__(self, hidden_size: int, ff_dim: int):
         super().__init__()
-        # Diffusers stores as ff.net[0].proj (GEGLU: gate+up fused) and ff.net[2]
         self.net = nn.ModuleList([
-            _GEGLUGateUp(hidden_size, ff_dim),  # index 0
-            nn.Identity(),                        # index 1 (dropout placeholder)
-            nn.Linear(ff_dim, hidden_size, bias=True),  # index 2
+            _GEGLUGateUp(hidden_size, ff_dim),
+            nn.Identity(),
+            nn.Linear(ff_dim, hidden_size, bias=True),
         ])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.net[0](x)   # GEGLU
-        out = self.net[2](x)  # down projection
-        return out
+        return self.net[2](self.net[0](x))
 
 
 class _GEGLUGateUp(nn.Module):
-    """SwiGLU gate+up projection matching Diffusers FeedForward(activation_fn='swiglu').
-
-    Diffusers SwiGLU: proj -> [hidden, gate], return hidden * silu(gate).
-    """
+    """SwiGLU gate+up projection: proj -> [hidden, gate], return hidden*silu(gate)."""
 
     def __init__(self, in_features: int, out_features: int):
         super().__init__()
@@ -256,17 +191,11 @@ class _GEGLUGateUp(nn.Module):
         return hidden * F.silu(gate)
 
 
-# ---------------------------------------------------------------------------
-# Attention sub-modules (attr names match Diffusers for weight loading)
-# ---------------------------------------------------------------------------
-
 
 class _OvisDoubleAttn(nn.Module):
-    """
-    Joint attention for double stream blocks.
-    Attribute names mirror Diffusers: to_q, to_k, to_v, to_out,
-    add_q_proj, add_k_proj, add_v_proj, to_add_out, norm_q/k, norm_added_q/k.
-    """
+    """Joint attention for double-stream blocks. Attribute names mirror
+    Diffusers (to_q/to_k/to_v/to_out, add_*_proj, to_add_out, norm_*) so weights
+    load by name."""
 
     def __init__(self, hidden_size: int, num_heads: int, head_dim: int,
                  supported_attention_backends, prefix: str):
@@ -274,26 +203,22 @@ class _OvisDoubleAttn(nn.Module):
         self.num_heads = num_heads
         self.head_dim = head_dim
 
-        # Image QKV + output
         self.to_q = nn.Linear(hidden_size, hidden_size, bias=True)
         self.to_k = nn.Linear(hidden_size, hidden_size, bias=True)
         self.to_v = nn.Linear(hidden_size, hidden_size, bias=True)
         self.to_out = nn.ModuleList(
             [nn.Linear(hidden_size, hidden_size, bias=True)])
 
-        # Text QKV + output
         self.add_q_proj = nn.Linear(hidden_size, hidden_size, bias=True)
         self.add_k_proj = nn.Linear(hidden_size, hidden_size, bias=True)
         self.add_v_proj = nn.Linear(hidden_size, hidden_size, bias=True)
         self.to_add_out = nn.Linear(hidden_size, hidden_size, bias=True)
 
-        # QK-Norm
         self.norm_q = RMSNorm(head_dim, eps=1e-6)
         self.norm_k = RMSNorm(head_dim, eps=1e-6)
         self.norm_added_q = RMSNorm(head_dim, eps=1e-6)
         self.norm_added_k = RMSNorm(head_dim, eps=1e-6)
 
-        # Distributed attention (SP-aware)
         self.attn_op = DistributedAttention(
             num_heads=num_heads,
             head_size=head_dim,
@@ -313,7 +238,6 @@ class _OvisDoubleAttn(nn.Module):
         B, img_seq = img.shape[:2]
         txt_seq = txt.shape[1]
 
-        # Image QKV
         img_q = self.to_q(img).view(B, img_seq, self.num_heads, self.head_dim)
         img_k = self.to_k(img).view(B, img_seq, self.num_heads, self.head_dim)
         img_v = self.to_v(img).view(B, img_seq, self.num_heads, self.head_dim)
@@ -321,7 +245,6 @@ class _OvisDoubleAttn(nn.Module):
         img_k = self.norm_k(img_k).to(img_v.dtype)
         img_q, img_k = _apply_rope(img_q, img_k, img_cos, img_sin)
 
-        # Text QKV
         txt_q = self.add_q_proj(txt).view(B, txt_seq, self.num_heads,
                                           self.head_dim)
         txt_k = self.add_k_proj(txt).view(B, txt_seq, self.num_heads,
@@ -332,9 +255,13 @@ class _OvisDoubleAttn(nn.Module):
         txt_k = self.norm_added_k(txt_k).to(txt_v.dtype)
         txt_q, txt_k = _apply_rope(txt_q, txt_k, txt_cos, txt_sin)
 
-        # Joint attention via DistributedAttention
-        img_attn, txt_attn = self.attn_op(img_q, img_k, img_v, txt_q, txt_k,
-                                          txt_v)
+        # Joint attention via DistributedAttention. img is the SP-sharded
+        # stream; txt is replicated across ranks and must be passed as the
+        # replicated_* keyword args — positional slot 4 is original_seq_len.
+        img_attn, txt_attn = self.attn_op(img_q, img_k, img_v,
+                                          replicated_q=txt_q,
+                                          replicated_k=txt_k,
+                                          replicated_v=txt_v)
 
         img_out = self.to_out[0](img_attn.reshape(B, img_seq, -1))
         txt_out = self.to_add_out(txt_attn.reshape(B, txt_seq, -1))
@@ -342,10 +269,7 @@ class _OvisDoubleAttn(nn.Module):
 
 
 class _OvisSingleAttn(nn.Module):
-    """
-    Single-stream attention (merged image+text).
-    Attribute names match Diffusers for weight loading.
-    """
+    """Single-stream attention (merged image+text); attr names match Diffusers."""
 
     def __init__(self, hidden_size: int, num_heads: int, head_dim: int,
                  supported_attention_backends, prefix: str):
@@ -375,40 +299,28 @@ class _OvisSingleAttn(nn.Module):
         q = self.norm_q(q).to(v.dtype)
         k = self.norm_k(k).to(v.dtype)
         q, k = _apply_rope(q, k, cos, sin)
-        # Single stream: pass img+txt jointly, no split
-        attn_out, _ = self.attn_op(q, k, v, None, None, None)
+        # Single stream: img+txt already concatenated, no replicated tokens.
+        attn_out, _ = self.attn_op(q, k, v)
         return attn_out.reshape(B, seq, -1)
 
 
-# ---------------------------------------------------------------------------
-# Double stream block
-# ---------------------------------------------------------------------------
-
 
 class OvisImageDoubleStreamBlock(nn.Module):
-    """
-    FLUX-style joint (double-stream) transformer block.
-
-    Image and text each have their own adaptive LayerNorm and FFN, but share
-    a joint cross-attention. Attribute names match Diffusers for weight compat.
-    """
+    """FLUX-style joint block: image and text each have their own AdaLN + FFN
+    but share a joint attention. Attr names match Diffusers."""
 
     def __init__(self, hidden_size: int, num_heads: int, head_dim: int,
                  ff_dim: int, supported_attention_backends, prefix: str):
         super().__init__()
-
-        # Image stream
         self.norm1 = OvisAdaLayerNormZero(hidden_size)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.ff = OvisGEGLUFeedForward(hidden_size, ff_dim)
 
-        # Text stream
         self.norm1_context = OvisAdaLayerNormZero(hidden_size)
         self.norm2_context = nn.LayerNorm(hidden_size, elementwise_affine=False,
                                           eps=1e-6)
         self.ff_context = OvisGEGLUFeedForward(hidden_size, ff_dim)
 
-        # Joint attention
         self.attn = _OvisDoubleAttn(hidden_size, num_heads, head_dim,
                                     supported_attention_backends,
                                     prefix=f"{prefix}.attn")
@@ -423,22 +335,18 @@ class OvisImageDoubleStreamBlock(nn.Module):
         txt_cos: torch.Tensor,
         txt_sin: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        # Adaptive norms
         img_n, img_gate_msa, img_shift_mlp, img_scale_mlp, img_gate_mlp = (
             self.norm1(img, vec))
         txt_n, txt_gate_msa, txt_shift_mlp, txt_scale_mlp, txt_gate_mlp = (
             self.norm1_context(txt, vec))
 
-        # Joint attention
         img_attn, txt_attn = self.attn(img_n, txt_n, img_cos, img_sin, txt_cos,
                                        txt_sin)
 
-        # Image: residual + norm + MLP
         img = img + img_gate_msa * img_attn
         img_ff_in = self.norm2(img) * (1 + img_scale_mlp) + img_shift_mlp
         img = img + img_gate_mlp * self.ff(img_ff_in)
 
-        # Text: residual + norm + MLP
         txt = txt + txt_gate_msa * txt_attn
         txt_ff_in = self.norm2_context(txt) * (1 + txt_scale_mlp) + txt_shift_mlp
         txt = txt + txt_gate_mlp * self.ff_context(txt_ff_in)
@@ -446,19 +354,10 @@ class OvisImageDoubleStreamBlock(nn.Module):
         return img, txt
 
 
-# ---------------------------------------------------------------------------
-# Single stream block
-# ---------------------------------------------------------------------------
-
 
 class OvisImageSingleStreamBlock(nn.Module):
-    """
-    FLUX-style single-stream transformer block.
-
-    Receives img and txt separately, concatenates txt-first internally (matching
-    Diffusers), processes jointly, then splits and returns (txt, img).
-    Attribute names match Diffusers for weight compat.
-    """
+    """FLUX-style single-stream block: concatenates txt-first, processes jointly,
+    then splits back to (txt, img). Attr names match Diffusers."""
 
     def __init__(self, hidden_size: int, num_heads: int, head_dim: int,
                  mlp_ratio: float, supported_attention_backends, prefix: str):
@@ -469,7 +368,6 @@ class OvisImageSingleStreamBlock(nn.Module):
         self.attn = _OvisSingleAttn(hidden_size, num_heads, head_dim,
                                     supported_attention_backends,
                                     prefix=f"{prefix}.attn")
-        # proj_mlp outputs 2 × mlp_hidden_dim for SiLU gating (matching Diffusers)
         self.proj_mlp = nn.Linear(hidden_size, self.mlp_hidden_dim * 2, bias=True)
         self.proj_out = nn.Linear(hidden_size + self.mlp_hidden_dim, hidden_size,
                                   bias=True)
@@ -483,12 +381,11 @@ class OvisImageSingleStreamBlock(nn.Module):
         sin: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         txt_seq = txt.shape[1]
-        # Concat txt first then img (matching Diffusers convention)
-        x = torch.cat([txt, img], dim=1)
+        x = torch.cat([txt, img], dim=1)  # txt-first, matching Diffusers
         residual = x
 
         x_norm, gate = self.norm(x, temb)
-        # SiLU-gated MLP (not GeLU): proj_mlp → [hidden, gate], silu(gate) * hidden
+        # SiLU-gated MLP: proj_mlp -> [hidden, gate], silu(gate) * hidden
         mlp_out, mlp_gate = self.proj_mlp(x_norm).chunk(2, dim=-1)
         mlp_out = F.silu(mlp_gate) * mlp_out
         attn_out = self.attn(x_norm, cos, sin)
@@ -499,10 +396,6 @@ class OvisImageSingleStreamBlock(nn.Module):
         img_out = x[:, txt_seq:]
         return txt_out, img_out
 
-
-# ---------------------------------------------------------------------------
-# Timestep + pooled text conditioning
-# ---------------------------------------------------------------------------
 
 
 def _timestep_embedding(t: torch.Tensor, dim: int,
@@ -517,11 +410,7 @@ def _timestep_embedding(t: torch.Tensor, dim: int,
 
 
 class OvisTimestepEmbedder(nn.Module):
-    """
-    Timestep MLP matching Diffusers TimestepEmbedding weight names.
-
-    Checkpoint keys: timestep_embedder.linear_1, timestep_embedder.linear_2
-    """
+    """Timestep MLP; linear_1/linear_2 names match the Diffusers checkpoint."""
 
     def __init__(self, in_channels: int, hidden_size: int):
         super().__init__()
@@ -532,29 +421,14 @@ class OvisTimestepEmbedder(nn.Module):
         return self.linear_2(F.silu(self.linear_1(x)))
 
 
-# ---------------------------------------------------------------------------
-# Main model
-# ---------------------------------------------------------------------------
-
 _CFG = OvisImageTransformer2DModelConfig()
 
 
-class OvisImageTransformer2DModel(CachableDiT):
-    """
-    Native FastVideo implementation of the Ovis-Image diffusion transformer.
+class OvisImageTransformer2DModel(BaseDiT):
+    """Native Ovis-Image DiT: FLUX-style MM-DiT (double + single blocks, 3D RoPE,
+    SP-aware DistributedAttention). Weight names match Diffusers exactly, so
+    param_names_mapping is empty and weights load without remapping."""
 
-    Architecture: FLUX-like MM-DiT
-      - 6 double-stream (joint) blocks (transformer_blocks)
-      - 27 single-stream blocks (single_transformer_blocks)
-      - FLUX-style 3D RoPE (axes_dims_rope=[16, 56, 56])
-      - FastVideo DistributedAttention (SP-compatible)
-      - CachableDiT base (TeaCache-ready)
-
-    Weight names match Diffusers OvisImageTransformer2DModel exactly
-    => param_names_mapping = {} (no remapping, weights load directly).
-    """
-
-    # ---- Required CachableDiT class attributes ----
     _fsdp_shard_conditions = _CFG._fsdp_shard_conditions
     _compile_conditions: list = []
     _supported_attention_backends: tuple[
@@ -578,28 +452,23 @@ class OvisImageTransformer2DModel(CachableDiT):
                              if arch.out_channels is not None else in_channels)
         joint_attention_dim: int = arch.joint_attention_dim
 
-        # FastVideo required instance attributes
         self.hidden_size = hidden_size
         self.num_attention_heads = num_heads
-        self.num_channels_latents = arch.num_channels_latents  # 16 (VAE latent ch)
+        self.num_channels_latents = arch.num_channels_latents
         self.out_channels = out_channels
         self.in_channels = in_channels
 
-        ff_dim = hidden_size * 4  # standard MLP ratio
+        ff_dim = hidden_size * 4
 
-        # Input projections (weight names match Diffusers)
         self.x_embedder = nn.Linear(in_channels, hidden_size, bias=True)
-        # Norm applied to text encoder output before projection (matches Diffusers)
+        # Text encoder output is RMSNorm'd before projection (matches Diffusers).
         self.context_embedder_norm = RMSNorm(joint_attention_dim, eps=1e-6)
         self.context_embedder = nn.Linear(joint_attention_dim, hidden_size,
                                           bias=True)
 
-        # Timestep conditioning (purely from timestep, no pooled text)
-        # Matches Diffusers: timestep_embedder.linear_1 / timestep_embedder.linear_2
         self._freq_dim = 256
         self.timestep_embedder = OvisTimestepEmbedder(self._freq_dim, hidden_size)
 
-        # Transformer blocks
         self.transformer_blocks = nn.ModuleList([
             OvisImageDoubleStreamBlock(
                 hidden_size=hidden_size,
@@ -622,21 +491,15 @@ class OvisImageTransformer2DModel(CachableDiT):
             ) for i in range(num_single_layers)
         ])
 
-        # Output (weight names match Diffusers)
         self.norm_out = OvisAdaLayerNormContinuous(hidden_size)
         self.proj_out = nn.Linear(hidden_size, out_channels, bias=True)
 
-        # RoPE
         self.rope = OvisImageRoPE(
             head_dim=head_dim,
             axes_dims=list(arch.axes_dims_rope),
         )
 
         self.__post_init__()
-
-    # ------------------------------------------------------------------
-    # Forward
-    # ------------------------------------------------------------------
 
     def forward(
         self,
@@ -665,24 +528,18 @@ class OvisImageTransformer2DModel(CachableDiT):
 
         B, C, H, W = hidden_states.shape
 
-        # Pack latents: [B, C, H, W] -> [B, img_seq, C*4]
         img_latents = _pack_latents(hidden_states)
-
-        # Project to hidden_size
-        img = self.x_embedder(img_latents)            # [B, img_seq, hidden_size]
-        # Apply RMSNorm before projecting text (matches Diffusers context_embedder_norm)
+        img = self.x_embedder(img_latents)
         enc_norm = self.context_embedder_norm(encoder_hidden_states)
-        txt = self.context_embedder(enc_norm)          # [B, txt_seq, hidden_size]
+        txt = self.context_embedder(enc_norm)
 
         txt_seq = txt.shape[1]
-        img_seq = img.shape[1]
 
-        # Timestep-only conditioning (Diffusers: timestep * 1000 then sinusoidal)
-        # Input timestep is in [0, 1000]; sinusoidal embedding is computed at that scale
+        # Timestep is on the [0, 1000] scale here; Diffusers instead passes
+        # t/1000 and multiplies by 1000 internally, so the embedding matches.
         t_emb = _timestep_embedding(timestep, self._freq_dim).to(img.dtype)
-        temb = self.timestep_embedder(t_emb)           # [B, hidden_size]
+        temb = self.timestep_embedder(t_emb)
 
-        # RoPE position IDs — joint sequence: txt first, img second (matches Diffusers)
         img_ids = kwargs.get("img_ids")
         txt_ids = kwargs.get("txt_ids")
         if img_ids is None:
@@ -690,7 +547,7 @@ class OvisImageTransformer2DModel(CachableDiT):
         if txt_ids is None:
             txt_ids = _prepare_txt_ids(txt_seq, hidden_states.device)
 
-        # Joint RoPE (txt first, then img)
+        # Joint RoPE, txt-first then img (matches Diffusers ordering).
         joint_ids = torch.cat([txt_ids, img_ids], dim=0)
         joint_cos, joint_sin = self.rope(joint_ids)
         joint_cos = joint_cos.to(img.dtype)
@@ -700,32 +557,16 @@ class OvisImageTransformer2DModel(CachableDiT):
         img_cos = joint_cos[txt_seq:]
         img_sin = joint_sin[txt_seq:]
 
-        # TeaCache early exit check
-        forward_context = get_forward_context()
-        forward_batch = getattr(forward_context, "forward_batch", None)
-        enable_teacache = (forward_batch is not None
-                           and getattr(forward_batch, "enable_teacache", False))
-        if enable_teacache:
-            original_img = img.clone()
-
-        # Sequence Parallelism: shard image sequence across SP ranks
         img, _ = sequence_model_parallel_shard(img, dim=1)
 
-        # Double-stream blocks: temb as conditioning
         for block in self.transformer_blocks:
             img, txt = block(img, txt, temb, img_cos, img_sin, txt_cos, txt_sin)
 
-        # Single-stream blocks: blocks handle txt/img concat internally (txt first)
         for block in self.single_transformer_blocks:
             txt, img = block(img, txt, temb, joint_cos, joint_sin)
 
-        # Gather SP shards
         img = sequence_model_parallel_all_gather(img, dim=1)
 
-        if enable_teacache:
-            self.maybe_cache_states(img, original_img)
-
-        # Output (img stream only)
         img = self.norm_out(img, temb)
         img = self.proj_out(img)
 
@@ -734,20 +575,3 @@ class OvisImageTransformer2DModel(CachableDiT):
             output = output.unsqueeze(2)
 
         return output
-
-    # ------------------------------------------------------------------
-    # TeaCache interface (CachableDiT)
-    # ------------------------------------------------------------------
-
-    def maybe_cache_states(self, hidden_states: torch.Tensor,
-                           original_hidden_states: torch.Tensor) -> None:
-        """Cache residual between current and original hidden states."""
-        self.previous_resiual = hidden_states - original_hidden_states
-
-    def should_skip_forward_for_cached_states(self, **kwargs) -> bool:
-        """TeaCache skip decision — not yet calibrated for Ovis-Image."""
-        forward_context = get_forward_context()
-        forward_batch = getattr(forward_context, "forward_batch", None)
-        if forward_batch is None:
-            return False
-        return False  # Always compute for now; calibrate coefficients later

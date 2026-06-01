@@ -7,6 +7,7 @@ This module contains implementations of timestep preparation stages for diffusio
 
 import inspect
 
+import numpy as np
 import torch
 
 from fastvideo.distributed import get_local_torch_device
@@ -201,3 +202,55 @@ class SD35TimestepPreparationStage(TimestepPreparationStage):
                 return batch
 
         return super().forward(batch, fastvideo_args)
+
+
+class OvisImageTimestepPreparationStage(TimestepPreparationStage):
+    """Ovis-Image timesteps with resolution-dependent dynamic shift.
+
+    Derives a per-resolution ``mu`` from the packed image sequence length and
+    feeds ``sigmas = linspace(1, 1/N, N)`` to the scheduler, matching the
+    official pipeline. A fixed ``shift`` would drift the schedule ~300 timesteps
+    at 1024² and change every denoised sample.
+    """
+
+    @staticmethod
+    def _calculate_shift(
+        image_seq_len: int,
+        base_seq_len: int = 256,
+        max_seq_len: int = 4096,
+        base_shift: float = 0.5,
+        max_shift: float = 1.15,
+    ) -> float:
+        m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
+        b = base_shift - m * base_seq_len
+        return image_seq_len * m + b
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        if batch.height is None or batch.width is None:
+            raise ValueError("height/width must be set before timesteps.")
+
+        # Packed image-token count: the VAE applies 8× spatial compression and
+        # the DiT then packs 2×2 latent patches, so each axis contributes
+        # dim // 16 tokens (matches the official pipeline's latents.shape[1]).
+        image_seq_len = (batch.height // 16) * (batch.width // 16)
+
+        cfg = getattr(self.scheduler, "config", None)
+        mu = self._calculate_shift(
+            image_seq_len,
+            int(getattr(cfg, "base_image_seq_len", 256)),
+            int(getattr(cfg, "max_image_seq_len", 4096)),
+            float(getattr(cfg, "base_shift", 0.5)),
+            float(getattr(cfg, "max_shift", 1.15)),
+        )
+
+        num_inference_steps = batch.num_inference_steps
+        sigmas = np.linspace(1.0, 1.0 / num_inference_steps, num_inference_steps)
+
+        device = get_local_torch_device()
+        self.scheduler.set_timesteps(sigmas=sigmas, device=device, mu=mu)
+        batch.timesteps = self.scheduler.timesteps
+        return batch

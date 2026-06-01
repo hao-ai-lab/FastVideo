@@ -1,48 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""
-Training pipeline for Ovis-Image-7B text-to-image model.
-
-Supports:
-  - Full fine-tuning of the transformer (all parameters)
-  - LoRA fine-tuning (set lora_training=True in TrainingArgs)
-  - FSDP sharding (transformer_blocks and single_transformer_blocks are sharded)
-  - Validation generation using OvisImagePipeline
-
-Usage:
-    python -m fastvideo.training.ovis_image_training_pipeline \
-        --pretrained-model-name-or-path official_weights/ovis_image \
-        --data-path dataset.parquet \
-        --train-batch-size 1 \
-        --max-train-steps 1000 \
-        --learning-rate 1e-5
-"""
-
 from copy import deepcopy
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
-from fastvideo.pipelines.basic.ovis_image.ovis_image_pipeline import (
-    OvisImagePipeline)
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
+from fastvideo.pipelines.basic.ovis_image.ovis_image_pipeline import (OvisImagePipeline)
 from fastvideo.training.training_pipeline import TrainingPipeline
 
 logger = init_logger(__name__)
 
 
 class OvisImageTrainingPipeline(TrainingPipeline):
-    """
-    Training pipeline for Ovis-Image text-to-image diffusion model.
-
-    Inherits the full training loop from TrainingPipeline (flow-matching MSE
-    loss, gradient accumulation, LR scheduling, FSDP, checkpointing, etc.)
-    and adds Ovis-Image-specific initialisation:
-
-      - FlowMatchEulerDiscreteScheduler with flow_shift=3.0
-      - Validation using OvisImagePipeline (shared transformer weights)
-
-    Required config modules: scheduler, transformer, text_encoder, tokenizer, vae
-    """
+    """Ovis-Image training: the shared TrainingPipeline loop plus an Ovis
+    FlowMatchEuler scheduler and OvisImagePipeline validation."""
 
     _required_config_modules = [
         "scheduler",
@@ -62,16 +32,11 @@ class OvisImageTrainingPipeline(TrainingPipeline):
             shift=flow_shift,
             use_dynamic_shifting=False,
         )
-        logger.info(
-            "OvisImageTrainingPipeline: scheduler initialised "
-            "(flow_shift=%s)", flow_shift)
+        logger.info("OvisImageTrainingPipeline: scheduler initialised "
+                    "(flow_shift=%s)", flow_shift)
 
-    def initialize_validation_pipeline(self,
-                                       training_args: TrainingArgs) -> None:
-        """
-        Build a validation OvisImagePipeline that shares the trained transformer
-        so validation images reflect the current training state.
-        """
+    def initialize_validation_pipeline(self, training_args: TrainingArgs) -> None:
+        """Build a validation OvisImagePipeline sharing the trained transformer."""
         logger.info("Initialising validation pipeline...")
         args_copy = deepcopy(training_args)
         args_copy.inference_mode = True
@@ -91,8 +56,7 @@ class OvisImageTrainingPipeline(TrainingPipeline):
 
 def main(args: TrainingArgs) -> None:
     logger.info("Starting Ovis-Image training pipeline...")
-    pipeline = OvisImageTrainingPipeline.from_pretrained(
-        args.pretrained_model_name_or_path, args=args)
+    pipeline = OvisImageTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
     pipeline.train()
     logger.info("Ovis-Image training pipeline finished.")
 

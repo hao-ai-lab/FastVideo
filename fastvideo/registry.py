@@ -277,8 +277,8 @@ def _register_configs() -> None:
             "FastVideo/LTX2-Diffusers",
         ],
         model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower())
-            and "distilled" not in path.lower() and "2.3" not in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" not in path.lower() and
+            "2.3" not in path.lower(),
         ],
         model_family="ltx2",
         default_preset="ltx2_base",
@@ -803,9 +803,10 @@ def _register_configs() -> None:
             "AIDC-AI/Ovis-Image-7B",
         ],
         model_detectors=[
-            lambda path: any(token in path.lower()
-                             for token in ("ovis-image", "ovis_image")),
+            lambda path: any(token in path.lower() for token in ("ovis-image", "ovis_image")),
         ],
+        model_family="ovis_image",
+        default_preset="ovis_image_7b",
     )
 
     # SD3.5
@@ -927,6 +928,8 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame3.presets import (
         ALL_PRESETS as MATRIXGAME3_PRESETS, )
+    from fastvideo.pipelines.basic.ovis_image.presets import (
+        ALL_PRESETS as OVIS_IMAGE_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -948,6 +951,7 @@ def _register_presets() -> None:
         LTX2_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
+        OVIS_IMAGE_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,

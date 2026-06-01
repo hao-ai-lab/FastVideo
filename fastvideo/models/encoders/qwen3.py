@@ -1,32 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""
-Qwen3 Text Encoder — Approach B (FastVideo-native implementation)
-
-Architecture (Qwen3-2B as used in Ovis-Image-7B):
-  - Standard transformer decoder (no MLLM vision, pure text)
-  - GQA attention (16 Q heads, 8 KV heads)
-  - QK-Norm: RMSNorm applied to Q and K before attention (Qwen3 specific)
-  - SwiGLU MLP via MergedColumnParallelLinear + RowParallelLinear
-  - RoPE position embeddings (standard, not multi-modal)
-  - Tensor Parallelism via QKVParallelLinear / RowParallelLinear
-  - Quantization support via quant_config
-  - Proper weight loading with stacked_params_mapping
-
-Adapted from fastvideo/models/encoders/qwen2_5.py with the following deltas:
-  1. QK-Norm after Q/K split (Qwen3 adds q_norm, k_norm per attention layer)
-  2. Standard RoPE (not multi-modal / mrope)
-  3. attention_bias=False by default
-"""
+# Qwen3 text encoder (Qwen3-2B, as used in Ovis-Image-7B). Adapted from
+# qwen2_5.py; differs by QK-Norm after the Q/K split, standard (non-mrope) RoPE,
+# and attention_bias=False.
 
 import math
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.configs.models.encoders import BaseEncoderOutput, Qwen3Config
-from fastvideo.distributed import get_tp_rank, get_tp_world_size
+from fastvideo.distributed import get_tp_world_size
 from fastvideo.layers.activation import SiluAndMul
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import (MergedColumnParallelLinear,
@@ -40,10 +25,6 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# RoPE
-# ---------------------------------------------------------------------------
 
 
 class Qwen3RotaryEmbedding(nn.Module):
@@ -66,13 +47,6 @@ class Qwen3RotaryEmbedding(nn.Module):
     def forward(
         self, x: torch.Tensor, position_ids: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Args:
-            x: [B, seq, head_dim] (used only for device/dtype)
-            position_ids: [B, seq]
-        Returns:
-            (cos, sin) each [B, seq, head_dim]
-        """
         inv_freq_expanded = (self.inv_freq[None, :, None].float().expand(
             position_ids.shape[0], -1, 1))
         position_ids_expanded = position_ids[:, None, :].float()
@@ -102,10 +76,6 @@ def _apply_rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor,
     k_rot = k * cos + _rotate_half(k) * sin
     return q_rot.to(q.dtype), k_rot.to(k.dtype)
 
-
-# ---------------------------------------------------------------------------
-# MLP
-# ---------------------------------------------------------------------------
 
 
 class Qwen3MLP(nn.Module):
@@ -138,10 +108,6 @@ class Qwen3MLP(nn.Module):
         x, _ = self.down_proj(x)
         return x
 
-
-# ---------------------------------------------------------------------------
-# Attention
-# ---------------------------------------------------------------------------
 
 
 class Qwen3Attention(nn.Module):
@@ -264,10 +230,6 @@ class Qwen3Attention(nn.Module):
         return attn_out
 
 
-# ---------------------------------------------------------------------------
-# Decoder layer
-# ---------------------------------------------------------------------------
-
 
 class Qwen3DecoderLayer(nn.Module):
 
@@ -309,10 +271,6 @@ class Qwen3DecoderLayer(nn.Module):
         hidden_states = self.mlp(hidden_states)
         return residual + hidden_states
 
-
-# ---------------------------------------------------------------------------
-# Main model
-# ---------------------------------------------------------------------------
 
 
 class Qwen3Model(TextEncoder):

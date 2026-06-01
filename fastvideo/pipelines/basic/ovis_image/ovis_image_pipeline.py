@@ -1,120 +1,103 @@
 # SPDX-License-Identifier: Apache-2.0
-"""
-Ovis-Image text-to-image diffusion pipeline implementation.
 
-This module implements the Ovis-Image T2I pipeline using Diffusers components directly.
-This is Approach A - using existing Diffusers classes for quick integration.
-"""
+import torch
 
+from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        DenoisingStage, InputValidationStage,
-                                        LatentPreparationStage,
-                                        TextEncodingStage,
-                                        TimestepPreparationStage)
+from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, DenoisingStage, InputValidationStage,
+                                        LatentPreparationStage, TextEncodingStage)
+from fastvideo.pipelines.stages.timestep_preparation import (OvisImageTimestepPreparationStage)
+from fastvideo.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
 
 
+class OvisImageDecodingStage(DecodingStage):
+    """VAE decode for the 2D Ovis-Image AutoencoderKL.
+
+    Differs from the generic video `DecodingStage` in two ways the reused
+    diffusers `AutoencoderKL` requires: the singleton temporal axis carried by
+    the shared denoise loop (B, C, 1, H, W) is dropped before the 2D conv decode
+    and restored after, and `decode()` returns a diffusers `DecoderOutput` whose
+    `.sample` must be unwrapped.
+    """
+
+    @torch.no_grad()
+    def decode(self, latents: torch.Tensor, fastvideo_args: FastVideoArgs) -> torch.Tensor:
+        device = get_local_torch_device()
+        self.vae = self.vae.to(device)
+        latents = latents.to(device)
+        if latents.ndim == 5:
+            latents = latents.squeeze(2)
+
+        latents = self._denormalize_latents(latents)
+
+        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = ((vae_dtype != torch.float32) and not fastvideo_args.disable_autocast)
+        with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
+            if fastvideo_args.pipeline_config.vae_tiling:
+                self.vae.enable_tiling()
+            if not vae_autocast_enabled:
+                latents = latents.to(vae_dtype)
+            decoded = self.vae.decode(latents)
+
+        image = decoded.sample if hasattr(decoded, "sample") else decoded
+        image = (image / 2 + 0.5).clamp(0, 1)
+        return image.unsqueeze(2)
+
+
 class OvisImagePipeline(ComposedPipelineBase):
-    """
-    Pipeline for Ovis-Image text-to-image generation.
+    """Ovis-Image-7B text-to-image: native DiT + Qwen3 encoder, reused
+    AutoencoderKL VAE, flow-match scheduler."""
 
-    Ovis-Image is a 7B parameter model optimized for high-quality text rendering
-    in generated images. It uses:
-    - OvisImageTransformer2DModel: 2D diffusion transformer
-    - Qwen3Model: Text encoder based on Ovis2.5-2B
-    - AutoencoderKL: VAE for image encoding/decoding
-    - FlowMatchEulerDiscreteScheduler: Flow-matching scheduler
-    """
-
-    _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
-    ]
+    _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """
-        Initialize pipeline-specific configurations.
+        Ensure a flow-match scheduler is present.
 
-        Sets up the scheduler with Ovis-Image specific parameters.
+        The scheduler normally loads from the model with
+        `use_dynamic_shifting=True`; `OvisImageTimestepPreparationStage` supplies
+        the per-resolution `mu`. Dynamic shifting is left enabled so the timestep
+        schedule matches the reference pipeline.
         """
-        # Use the scheduler from model config
-        # The scheduler is already loaded from the model, we just need to configure it
         if self.modules.get("scheduler") is None:
             self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
                 num_train_timesteps=1000,
                 shift=3.0,
-                use_dynamic_shifting=False,  # Disable for Approach A
+                use_dynamic_shifting=True,
             )
 
-        # Configure scheduler parameters if needed
-        scheduler = self.modules["scheduler"]
-        if hasattr(scheduler, 'config'):
-            # Disable dynamic shifting for Approach A (requires mu parameter)
-            scheduler.config.use_dynamic_shifting = False
-            # Update config if needed based on fastvideo_args
-            if hasattr(fastvideo_args.pipeline_config, 'flow_shift'):
-                scheduler.config.shift = fastvideo_args.pipeline_config.flow_shift
-
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
-        """
-        Set up pipeline stages for Ovis-Image T2I generation.
+        self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
-        Pipeline flow:
-        1. Input validation - check dimensions
-        2. Text encoding - encode prompt with Qwen3
-        3. Conditioning - prepare CFG guidance
-        4. Timestep preparation - setup diffusion schedule
-        5. Latent preparation - initialize noise
-        6. Denoising - iterative denoising with transformer
-        7. Decoding - VAE decode to image
-        """
-
-        # Stage 1: Validate input dimensions
-        self.add_stage(stage_name="input_validation_stage",
-                       stage=InputValidationStage())
-
-        # Stage 2: Encode text prompts with Qwen3 encoder
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
                            text_encoders=[self.get_module("text_encoder")],
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
-        # Stage 3: Prepare conditioning for classifier-free guidance
-        self.add_stage(stage_name="conditioning_stage",
-                       stage=ConditioningStage())
+        self.add_stage(stage_name="conditioning_stage", stage=ConditioningStage())
 
-        # Stage 4: Prepare timesteps for diffusion process
         self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
+                       stage=OvisImageTimestepPreparationStage(scheduler=self.get_module("scheduler")))
 
-        # Stage 5: Prepare initial latent noise
-        # For T2I, num_frames=1 (single image)
-        self.add_stage(
-            stage_name="latent_preparation_stage",
-            stage=LatentPreparationStage(
-                scheduler=self.get_module("scheduler"),
-                transformer=self.get_module("transformer"),
-                use_btchw_layout=False  # Use standard layout
-            ))
-
-        # Stage 6: Denoising loop with OvisImageTransformer2DModel
-        self.add_stage(stage_name="denoising_stage",
-                       stage=DenoisingStage(
-                           transformer=self.get_module("transformer"),
+        self.add_stage(stage_name="latent_preparation_stage",
+                       stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
-                           vae=self.get_module("vae")))
+                           transformer=self.get_module("transformer"),
+                           use_btchw_layout=False,
+                       ))
 
-        # Stage 7: Decode latents to image
-        self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae")))
+        self.add_stage(stage_name="denoising_stage",
+                       stage=DenoisingStage(transformer=self.get_module("transformer"),
+                                            scheduler=self.get_module("scheduler"),
+                                            vae=self.get_module("vae")))
+
+        self.add_stage(stage_name="decoding_stage", stage=OvisImageDecodingStage(vae=self.get_module("vae")))
 
 
-# Entry point for pipeline registry
 EntryClass = OvisImagePipeline
