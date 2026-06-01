@@ -19,3 +19,4 @@ class ReadyPrompt:
     fallback_used: bool = False
     seed_prompt_index: int | None = None
     loop_iteration: int | None = None
+    raw_prompt: str | None = None
