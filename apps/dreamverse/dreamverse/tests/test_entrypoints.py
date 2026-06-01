@@ -175,6 +175,7 @@ def test_mock_server_cli_updates_latency(monkeypatch):
 
 def _lora_client(monkeypatch, captured):
     server_main = _import_server_main(monkeypatch)
+    monkeypatch.setattr(server_main, "DEVTOOLS_ENABLED", True)
     monkeypatch.setattr(server_main, "_available_styles_for_active_model", lambda: ["pixar", "transition"])
     monkeypatch.setattr(
         server_main,
@@ -228,3 +229,11 @@ def test_apply_lora_clamps_and_drops_zero_intensity(monkeypatch):
     assert body["strength"] == 1.0
     assert body["styles"] == {"pixar": 1.0}
     assert captured["stack"] == [("omninft", 1.0), ("pixar", 1.0)]
+
+
+def test_lora_endpoints_hidden_without_devtools(monkeypatch):
+    server_main = _import_server_main(monkeypatch)
+    monkeypatch.setattr(server_main, "DEVTOOLS_ENABLED", False)
+    client = TestClient(server_main.app)
+    assert client.get("/lora/options").status_code == 404
+    assert client.post("/lora", json={"strength": 0.5}).status_code == 404

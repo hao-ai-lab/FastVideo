@@ -116,6 +116,8 @@ class LoraRequest(BaseModel):
 
 @app.get("/lora/options")
 async def lora_options() -> dict:
+    if not DEVTOOLS_ENABLED:
+        raise HTTPException(status_code=404, detail="Not found")
     styles = _available_styles_for_active_model()
     has_base_lora = _resolve_lora_spec("omninft") is not None
     labels = {"none": "None"}
@@ -129,6 +131,8 @@ async def lora_options() -> dict:
 
 @app.post("/lora")
 async def apply_lora(request: LoraRequest) -> dict:
+    if not DEVTOOLS_ENABLED:
+        raise HTTPException(status_code=404, detail="Not found")
     if runtime.gpu_pool is None:
         raise HTTPException(status_code=503, detail="GPU pool not ready")
 

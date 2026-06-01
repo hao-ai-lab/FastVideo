@@ -177,7 +177,7 @@ class BaseLayerWithLoRA(nn.Module):
             return
 
         if not self.merged:
-            raise ValueError("LoRA weights not merged. Please merge them first before unmerging.")
+            return
 
         # avoid precision loss
         if isinstance(self.base_layer.weight, DTensor):

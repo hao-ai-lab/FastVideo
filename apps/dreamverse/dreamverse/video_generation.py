@@ -12,6 +12,7 @@ module import time.
 # mypy: ignore-errors
 import gc
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -398,11 +399,11 @@ class VideoGenerationWorker:
         result = prompt
         for trigger in self.active_style_prepend:
             trigger = (trigger or "").strip()
-            if trigger and trigger not in result:
+            if trigger and not re.search(rf"\b{re.escape(trigger)}\b", result, re.IGNORECASE):
                 result = f"{trigger} {result}".strip()
         for trigger in self.active_style_append:
             trigger = (trigger or "").strip()
-            if trigger and trigger not in result:
+            if trigger and not re.search(rf"\b{re.escape(trigger)}\b", result, re.IGNORECASE):
                 result = f"{result} {trigger}".strip()
         return result
 

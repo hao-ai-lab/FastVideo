@@ -23,6 +23,7 @@ export default function LoraControls() {
   const enabledRef = useRef<Record<string, boolean>>({});
   const intensityRef = useRef<Record<string, number>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     fetch('/lora/options')
@@ -52,6 +53,7 @@ export default function LoraControls() {
   }, []);
 
   const applyNow = () => {
+    const reqId = ++requestIdRef.current;
     const stylesPayload: Record<string, number> = {};
     for (const key of Object.keys(enabledRef.current)) {
       if (enabledRef.current[key]) {
@@ -71,13 +73,17 @@ export default function LoraControls() {
         return response.json();
       })
       .then((data) => {
+        if (reqId !== requestIdRef.current) return;
         const active = Object.keys(data?.styles ?? {});
         const desc = active.length
           ? active.map((k) => `${labels[k] ?? k}@${data.styles[k]}`).join(' + ')
           : 'no style';
         setStatus(`applied OmniNFT@${data.strength} + ${desc}`);
       })
-      .catch((error) => setStatus(`error: ${String(error).slice(0, 120)}`));
+      .catch((error) => {
+        if (reqId !== requestIdRef.current) return;
+        setStatus(`error: ${String(error).slice(0, 120)}`);
+      });
   };
 
   const scheduleApply = () => {
