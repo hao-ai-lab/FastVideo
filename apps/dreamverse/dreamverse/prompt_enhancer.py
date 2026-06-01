@@ -330,6 +330,7 @@ def _parse_json_response(content: str) -> dict[str, Any]:
         r"```(?:json)?\s*([\s\S]*?)```",
         flags=re.IGNORECASE,
     )
+    last_fenced: dict[str, Any] | None = None
     for match in fence_pattern.finditer(text):
         block = match.group(1).strip()
         if not block:
@@ -337,12 +338,16 @@ def _parse_json_response(content: str) -> dict[str, Any]:
         try:
             parsed = json.loads(block)
             if isinstance(parsed, dict):
-                return parsed
+                last_fenced = parsed
         except json.JSONDecodeError:
             continue
+    if last_fenced is not None:
+        return last_fenced
 
-    # Fall back to scanning for the first decodable JSON object in free-form text.
+    # Scan for all decodable JSON objects and return the last — chain-of-thought
+    # models emit draft JSON mid-reasoning; the final answer is always last.
     decoder = json.JSONDecoder()
+    last_parsed: dict[str, Any] | None = None
     for idx, char in enumerate(text):
         if char != "{":
             continue
@@ -351,7 +356,10 @@ def _parse_json_response(content: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, dict):
-            return parsed
+            last_parsed = parsed
+
+    if last_parsed is not None:
+        return last_parsed
 
     raise ValueError("No JSON object found in assistant response.")
 
@@ -1423,8 +1431,7 @@ class PromptEnhancer:
                     "</locked_segments>\n\n"
                     f"<conditioning_prompt>{cleaned}</conditioning_prompt>\n\n"
                     f"Write exactly one new segment ({next_segment_key}) "
-                    "continuing from the locked segments. "
-                    'Respond with valid JSON only as {"next_prompt": "..."}.'  # noqa: E501
+                    "continuing from the locked segments."
                 ),
             }
 
@@ -1457,6 +1464,7 @@ class PromptEnhancer:
                             body=request_body,
                             timeout_seconds=timeout_seconds,
                         )
+                        _enhance_print("INFO", f"raw_response: {response_content}")
                         if is_single_clip_mode:
                             prompt = self._extract_single_clip_prompt(response_content)
                         else:
@@ -1539,7 +1547,7 @@ class PromptEnhancer:
                 f"Write exactly one new segment ({next_segment_key}) "
                 "that continues linearly from the locked segments. "
                 "Infer the next narrative beat from this history. "
-                'Respond with valid JSON only as {"next_prompt": "..."}.'  # noqa: E501
+                'Respond with valid JSON only: {"next_prompt": "<your segment description here>"}.'  # noqa: E501
             ),
         }
 

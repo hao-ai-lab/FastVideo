@@ -249,6 +249,7 @@ export default function Page() {
 		livePromptRewriteMode,
 		sessionExpired,
 		projectResetPending,
+		waitingForSegmentPrompt,
 	} = sessionState;
 
 	const {
@@ -1421,7 +1422,8 @@ export default function Page() {
 		if (!prompt) return;
 		lastSubmitTimeRef.current = now;
 		const rCAR = !uiStore.get().devtoolsMode && !uiStore.get().demoMode;
-		if (rCAR || (sessionStore.get().livePromptRewriteMode && !uiStore.get().demoMode)) {
+		const inManualMode = sessionStore.get().manualContinuationMode;
+		if (!inManualMode && (rCAR || (sessionStore.get().livePromptRewriteMode && !uiStore.get().demoMode))) {
 			if (rewriteStore.get().rewritingSeedPrompts) return;
 			const rewriteSourcePromptWindowPrompts = getActivePromptWindowPrompts();
 			const nextPendingClip = {
@@ -1475,7 +1477,7 @@ export default function Page() {
 			activeClipId: shouldUseArchivedPlaybackFallback() ? streamStore.get().activeClipId : "",
 			activePlaybackStartTime: shouldUseArchivedPlaybackFallback() ? streamStore.get().activePlaybackStartTime : 0,
 		});
-		sessionStore.patch({ livePromptDraft: "" });
+		sessionStore.patch({ livePromptDraft: "", waitingForSegmentPrompt: false });
 	}
 
 	function setLivePromptRewriteMode(enabled: boolean) {
@@ -1725,6 +1727,8 @@ export default function Page() {
 			sessionNotice: preserveSessionNotice ? sessionStore.get().sessionNotice : "",
 			sessionExpired: preserveSessionNotice ? sessionStore.get().sessionExpired : false,
 			projectResetPending: false,
+			manualContinuationMode: false,
+			waitingForSegmentPrompt: false,
 		});
 		rewriteStore.resetSessionState();
 		streamStore.resetSessionState();
@@ -1750,6 +1754,8 @@ export default function Page() {
 			sessionNotice: "",
 			sessionExpired: false,
 			projectResetPending: false,
+			manualContinuationMode: false,
+			waitingForSegmentPrompt: false,
 		});
 		rewriteStore.resetSessionState();
 		streamStore.resetSessionState();
@@ -1773,6 +1779,7 @@ export default function Page() {
 			enhancement_enabled: sessionStore.get().enhancementEnabled,
 			auto_extension_enabled: sessionStore.get().autoExtensionEnabled,
 			loop_generation_enabled: sessionStore.get().loopGenerationEnabled,
+			manual_continuation_mode: sessionStore.get().manualContinuationMode,
 		};
 	}
 
@@ -1952,6 +1959,7 @@ export default function Page() {
 		const initialPrompt = normalizeInitialPrompt(sessionStore.get().livePromptDraft as string);
 		pendingInitialPromptRef.current = initialPrompt;
 		const rCAR = !uiStore.get().devtoolsMode && !uiStore.get().demoMode;
+		const nextManualContinuationMode = Boolean(initialPrompt) && getSessionInitPrompts().length === 0;
 		sessionStore.patch({
 			sessionNotice: "",
 			sessionExpired: false,
@@ -1966,6 +1974,8 @@ export default function Page() {
 			autoExtensionTimeoutHint: "",
 			generationPaused: false,
 			projectResetPending: false,
+			manualContinuationMode: nextManualContinuationMode,
+			waitingForSegmentPrompt: false,
 		});
 		resetPlaybackState();
 		streamStore.patch({
@@ -2783,6 +2793,7 @@ export default function Page() {
 							sessionExpired={sessionExpired as boolean}
 							sessionNotice={sessionNotice as string}
 							projectResetPending={projectResetPending as boolean}
+							waitingForSegmentPrompt={waitingForSegmentPrompt as boolean}
 							onPresetGenerate={handlePresetGenerate}
 							onContinuationInput={handleLivePromptInput}
 							onContinuationKeydown={handleLivePromptKeydown}

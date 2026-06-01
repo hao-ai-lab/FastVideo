@@ -65,13 +65,13 @@ MODEL_REGISTRY = {
     },
 }
 
-DEFAULT_MODEL_ID = "fast-ltx2"
+DEFAULT_MODEL_ID = "fast-ltx23"
 
 # Active model configuration
 MODEL_CONFIG = MODEL_REGISTRY[DEFAULT_MODEL_ID]
 
 # Generation limits
-SESSION_TIMEOUT_SECONDS = 300
+SESSION_TIMEOUT_SECONDS = 1800
 
 # Frame settings
 NUM_FRAMES = 121

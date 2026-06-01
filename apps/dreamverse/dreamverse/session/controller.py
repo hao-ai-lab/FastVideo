@@ -198,6 +198,7 @@ class SessionController:
             auto_extension_enabled = bool(init_data.get("auto_extension_enabled", False))
             loop_generation_enabled = bool(init_data.get("loop_generation_enabled", False))
             single_clip_mode = bool(init_data.get("single_clip_mode", False))
+            manual_continuation_mode = bool(init_data.get("manual_continuation_mode", False))
             rewrite_model = self.prompt_enhancer.resolve_rewrite_model(init_data.get("rewrite_model"))
             rewrite_system_prompt_override = str(init_data.get("rewrite_window_system_prompt") or "").strip()
             rewrite_user_system_prompt_override = str(init_data.get("rewrite_user_system_prompt") or "").strip()
@@ -291,13 +292,19 @@ class SessionController:
             generation_cap_blocked = False
             auto_extension_blocked_segment_idx: int | None = None
             prompt_sources_drained_logged = False
-            generation_paused = bool(initial_rollout_prompt and not single_clip_mode and len(curated_prompts) == 0)
+            generation_paused = bool(
+                not manual_continuation_mode and initial_rollout_prompt and not single_clip_mode
+                and len(curated_prompts) == 0)
             pending_seed_reset = False
             pending_seed_reset_reason = ""
             pending_reset_conditioning = False
             loop_iteration = 0 if generation_paused else 1
             force_curated_restart_segment = False
-            pending_simple_prompt_submission: PromptSubmission | None = None
+            pending_simple_prompt_submission: PromptSubmission | None = (PromptSubmission(
+                prompt_id=str(uuid.uuid4()),
+                raw_prompt=initial_rollout_prompt,
+                created_at_s=time.time(),
+            ) if manual_continuation_mode and initial_rollout_prompt else None)
             single_clip_waiting_for_request = False
             rollout_waiting_for_rewrite = False
             initial_rollout_waiting_for_rewrite = generation_paused
@@ -424,6 +431,7 @@ class SessionController:
                 nonlocal auto_extension_enabled
                 nonlocal loop_generation_enabled
                 nonlocal single_clip_mode
+                nonlocal manual_continuation_mode
                 nonlocal generation_paused
                 nonlocal curated_prompts
                 nonlocal seed_prompt_memory
@@ -458,6 +466,7 @@ class SessionController:
                 next_auto_extension_enabled = bool(payload.get("auto_extension_enabled", False))
                 next_loop_generation_enabled = bool(payload.get("loop_generation_enabled", False))
                 next_single_clip_mode = bool(payload.get("single_clip_mode", False))
+                next_manual_continuation_mode = bool(payload.get("manual_continuation_mode", False))
 
                 next_preset_id = str(payload.get("preset_id") or "").strip()
                 if next_preset_id:
@@ -510,6 +519,7 @@ class SessionController:
                 auto_extension_enabled = next_auto_extension_enabled
                 loop_generation_enabled = next_loop_generation_enabled
                 single_clip_mode = next_single_clip_mode
+                manual_continuation_mode = next_manual_continuation_mode
                 rewrite_model = next_rewrite_model
                 rewrite_system_prompt_override = (next_rewrite_system_prompt_override)
                 rewrite_user_system_prompt_override = (next_rewrite_user_system_prompt_override)
@@ -530,10 +540,16 @@ class SessionController:
                 generation_cap_blocked = False
                 auto_extension_blocked_segment_idx = None
                 prompt_sources_drained_logged = False
-                pending_simple_prompt_submission = None
+                pending_simple_prompt_submission = (PromptSubmission(
+                    prompt_id=str(uuid.uuid4()),
+                    raw_prompt=initial_rollout_prompt,
+                    created_at_s=time.time(),
+                ) if manual_continuation_mode and initial_rollout_prompt else None)
                 single_clip_waiting_for_request = False
                 rollout_waiting_for_rewrite = False
-                generation_paused = bool(initial_rollout_prompt and not single_clip_mode and len(curated_prompts) == 0)
+                generation_paused = bool(
+                    not manual_continuation_mode and initial_rollout_prompt and not single_clip_mode
+                    and len(curated_prompts) == 0)
                 initial_rollout_waiting_for_rewrite = generation_paused
                 rewrite_restart_pending = False
                 loop_iteration = 0
@@ -1130,6 +1146,7 @@ class SessionController:
                                 source=source,
                                 fallback_used=result.fallback_used,
                                 loop_iteration=loop_iteration,
+                                raw_prompt=raw_prompt,
                             ))
                     else:
                         await ready_prompt_queue.put(
@@ -1139,6 +1156,7 @@ class SessionController:
                                 source="user_raw",
                                 fallback_used=False,
                                 loop_iteration=loop_iteration,
+                                raw_prompt=raw_prompt,
                             ))
                         await ws_send_json({
                             "type": "prompt_ready",
@@ -1581,6 +1599,19 @@ class SessionController:
                 total_segments_hint = max(segment_idx, len(curated_prompts))
                 prompt = selected.prompt
                 locked_segment_prompts.append(prompt)
+                try:
+                    _log_path = "/home/hal-kevin/FastVideo/apps/dreamverse/scripts/segment_prompts.log"
+                    _ts = time.strftime("%Y-%m-%d %H:%M:%S")
+                    _lines = [
+                        f"\n=== Segment {segment_idx} [{_ts}] source={selected.source} client={client_id[:8]} ===",
+                    ]
+                    if selected.raw_prompt and selected.raw_prompt != prompt:
+                        _lines.append(f"User:     {selected.raw_prompt}")
+                    _lines.append(f"Rewritten: {prompt}")
+                    with open(_log_path, "a") as _f:
+                        _f.write("\n".join(_lines) + "\n")
+                except Exception:
+                    pass
                 if (auto_extension_blocked_segment_idx is not None
                         and auto_extension_blocked_segment_idx <= segment_idx):
                     auto_extension_blocked_segment_idx = None
