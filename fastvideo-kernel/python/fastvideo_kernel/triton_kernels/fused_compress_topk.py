@@ -58,21 +58,75 @@ def _fused_block_mean_kernel(
     tl.store(out_base, acc.to(tl.bfloat16))
 
 
-def fused_block_mean(
+@triton.jit
+def _fused_block_mean_bwd_kernel(
+    GradOut_ptr,
+    GradX_ptr,
+    VBS_ptr,
+    stride_go_bh,
+    stride_go_blk,
+    stride_gx_bh,
+    stride_gx_seq,
+    num_blocks,
+    BLOCK_ELEMENTS: tl.constexpr,
+    HEAD_DIM: tl.constexpr,
+):
+    """Backward of block mean: broadcast grad_out / vbs to each token in the block.
+
+    Mirrors the forward kernel: one program per (block, bh).
+    GradOut is [B*H, num_blocks, HEAD_DIM].
+    GradX  is [B*H, num_blocks*BLOCK_ELEMENTS, HEAD_DIM].
+    """
+    block_idx = tl.program_id(0)
+    bh_idx = tl.program_id(1)
+
+    if block_idx >= num_blocks:
+        return
+
+    vbs = tl.load(VBS_ptr + block_idx).to(tl.float32)
+
+    go_base = GradOut_ptr + bh_idx * stride_go_bh + block_idx * stride_go_blk
+    dim_offsets = tl.arange(0, HEAD_DIM)
+    grad_val = tl.load(go_base + dim_offsets).to(tl.float32) / vbs
+
+    gx_base = GradX_ptr + bh_idx * stride_gx_bh + block_idx * BLOCK_ELEMENTS * stride_gx_seq
+    grad_out_cast = grad_val.to(tl.bfloat16)
+    for i in range(BLOCK_ELEMENTS):
+        tl.store(gx_base + i * stride_gx_seq + dim_offsets, grad_out_cast)
+
+
+def _fused_block_mean_bwd(
+    grad_output: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+    block_elements: int,
+) -> torch.Tensor:
+    B, H, num_blocks, D = grad_output.shape
+    seq_len = num_blocks * block_elements
+
+    grad_x = torch.empty(B, H, seq_len, D, dtype=grad_output.dtype, device=grad_output.device)
+
+    go_flat = grad_output.contiguous().view(B * H, num_blocks, D)
+    gx_flat = grad_x.view(B * H, seq_len, D)
+
+    grid = (num_blocks, B * H)
+
+    _fused_block_mean_bwd_kernel[grid](
+        go_flat, gx_flat, variable_block_sizes,
+        go_flat.stride(0), go_flat.stride(1),
+        gx_flat.stride(0), gx_flat.stride(1),
+        num_blocks,
+        BLOCK_ELEMENTS=block_elements,
+        HEAD_DIM=D,
+    )
+
+    return grad_x
+
+
+def _fused_block_mean_fwd(
     x: torch.Tensor,
     variable_block_sizes: torch.Tensor,
     block_elements: int,
 ) -> torch.Tensor:
-    """Compute block-wise mean with fp32 accumulation, fused in one kernel.
-
-    Args:
-        x: [B, H, seq_len, D] in bf16
-        variable_block_sizes: [num_blocks] number of valid tokens per block
-        block_elements: tokens per block (e.g. 64)
-
-    Returns:
-        [B, H, num_blocks, D] in bf16
-    """
     B, H, seq_len, D = x.shape
     num_blocks = seq_len // block_elements
     assert seq_len % block_elements == 0
@@ -95,6 +149,42 @@ def fused_block_mean(
     )
 
     return out
+
+
+class _FusedBlockMeanAutograd(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, x, variable_block_sizes, block_elements):
+        ctx.save_for_backward(variable_block_sizes)
+        ctx.block_elements = block_elements
+        return _fused_block_mean_fwd(x, variable_block_sizes, block_elements)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        variable_block_sizes, = ctx.saved_tensors
+        block_elements = ctx.block_elements
+        return _fused_block_mean_bwd(grad_output, variable_block_sizes, block_elements), None, None
+
+
+def fused_block_mean(
+    x: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+    block_elements: int,
+) -> torch.Tensor:
+    """Compute block-wise mean with fp32 accumulation, fused in one kernel.
+
+    Forward: fused Triton kernel (bf16 read → fp32 accumulate → div → bf16 write).
+    Backward: broadcasts grad_output / vbs back to each token position.
+
+    Args:
+        x: [B, H, seq_len, D] in bf16
+        variable_block_sizes: [num_blocks] number of valid tokens per block
+        block_elements: tokens per block (e.g. 64)
+
+    Returns:
+        [B, H, num_blocks, D] in bf16
+    """
+    return _FusedBlockMeanAutograd.apply(x, variable_block_sizes, block_elements)
 
 
 @triton.jit

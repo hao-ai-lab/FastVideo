@@ -13,6 +13,8 @@ Compares:
 
 Reports per-kernel latency (ms), speedup, and numerical accuracy (max abs error,
 cosine similarity for compress; mask match rate for topk).
+
+Also benchmarks backward pass of compress (fused Triton bwd kernel vs. PyTorch autograd).
 """
 
 from __future__ import annotations
@@ -116,14 +118,13 @@ def accuracy_topk(ref_mask: torch.Tensor, test_mask: torch.Tensor) -> dict:
 # Benchmark runner
 # ---------------------------------------------------------------------------
 
-def bench_compress(
+def bench_compress_fwd(
     B: int, H: int, seq_len: int, D: int, block_elements: int,
     dtype: torch.dtype, warmup: int, rep: int,
 ) -> None:
     num_blocks = seq_len // block_elements
     x = torch.randn(B, H, seq_len, D, dtype=dtype, device="cuda")
     vbs = torch.full((num_blocks,), block_elements, dtype=torch.int32, device="cuda")
-    # Make a few blocks partially filled to exercise variable block sizes
     if num_blocks > 4:
         vbs[1] = block_elements - 2
         vbs[-2] = block_elements - 5
@@ -138,7 +139,58 @@ def bench_compress(
     new_ms = do_bench(lambda: fused_block_mean(x, vbs, block_elements), warmup=warmup, rep=rep)
 
     speedup = old_ms / new_ms if new_ms > 0 else float("inf")
-    print(f"  compress  | old: {old_ms:8.3f} ms | new: {new_ms:8.3f} ms | speedup: {speedup:5.2f}x "
+    print(f"  compress fwd | old: {old_ms:8.3f} ms | new: {new_ms:8.3f} ms | speedup: {speedup:5.2f}x "
+          f"| max_abs_err: {acc['max_abs_err']:.2e} | cos_sim: {acc['cosine_sim']:.8f}")
+
+
+def bench_compress_bwd(
+    B: int, H: int, seq_len: int, D: int, block_elements: int,
+    dtype: torch.dtype, warmup: int, rep: int,
+) -> None:
+    num_blocks = seq_len // block_elements
+    vbs = torch.full((num_blocks,), block_elements, dtype=torch.int32, device="cuda")
+    if num_blocks > 4:
+        vbs[1] = block_elements - 2
+        vbs[-2] = block_elements - 5
+
+    # --- Accuracy: compare gradients ---
+    x_old = torch.randn(B, H, seq_len, D, dtype=dtype, device="cuda", requires_grad=True)
+    grad_out = torch.randn(B, H, num_blocks, D, dtype=dtype, device="cuda")
+
+    out_old = pytorch_block_mean(x_old, vbs, block_elements)
+    out_old.backward(grad_out)
+    grad_ref = x_old.grad.clone()
+
+    x_new = x_old.detach().clone().requires_grad_(True)
+    out_new = fused_block_mean(x_new, vbs, block_elements)
+    out_new.backward(grad_out)
+    grad_fused = x_new.grad.clone()
+
+    acc = accuracy_compress(grad_ref, grad_fused)
+
+    # --- Latency: isolate backward-only via retain_graph ---
+    x_o = x_old.detach().clone().requires_grad_(True)
+    out_o = pytorch_block_mean(x_o, vbs, block_elements)
+    loss_o = (out_o * grad_out).sum()
+    for _ in range(warmup):
+        torch.autograd.grad(loss_o, x_o, retain_graph=True)
+    old_ms = do_bench(
+        lambda: torch.autograd.grad(loss_o, x_o, retain_graph=True),
+        warmup=0, rep=rep,
+    )
+
+    x_n = x_old.detach().clone().requires_grad_(True)
+    out_n = fused_block_mean(x_n, vbs, block_elements)
+    loss_n = (out_n * grad_out).sum()
+    for _ in range(warmup):
+        torch.autograd.grad(loss_n, x_n, retain_graph=True)
+    new_ms = do_bench(
+        lambda: torch.autograd.grad(loss_n, x_n, retain_graph=True),
+        warmup=0, rep=rep,
+    )
+
+    speedup = old_ms / new_ms if new_ms > 0 else float("inf")
+    print(f"  compress bwd | old: {old_ms:8.3f} ms | new: {new_ms:8.3f} ms | speedup: {speedup:5.2f}x "
           f"| max_abs_err: {acc['max_abs_err']:.2e} | cos_sim: {acc['cosine_sim']:.8f}")
 
 
@@ -188,7 +240,8 @@ def main() -> None:
         print(f"seq_len={seq_len}, num_blocks={num_blocks}, topk={topk}")
         print("-" * 100)
 
-        bench_compress(B, H, seq_len, D, block_elements, dtype, args.warmup, args.rep)
+        bench_compress_fwd(B, H, seq_len, D, block_elements, dtype, args.warmup, args.rep)
+        bench_compress_bwd(B, H, seq_len, D, block_elements, dtype, args.warmup, args.rep)
         bench_topk(B, H, num_blocks, topk, dtype, args.warmup, args.rep)
 
 
