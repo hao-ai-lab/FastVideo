@@ -9,8 +9,11 @@ section.  The pipeline class is resolved from
 from __future__ import annotations
 
 import contextlib
+import gc
+import json
 import os
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
 import imageio
@@ -46,6 +49,40 @@ logger = init_logger(__name__)
 class _ValidationStepResult:
     videos: list[list[np.ndarray]]
     captions: list[str]
+    ref_videos: list[str | None] = field(default_factory=list)
+    action_paths: list[str | None] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _ValidationMetricStats:
+    sums: dict[str, float] = field(default_factory=dict)
+    counts: dict[str, float] = field(default_factory=dict)
+    per_video: list[dict[str, Any]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _ValidationMetricsConfig:
+    enabled: bool = False
+    names: list[str] = field(default_factory=list)
+    device: str = "cuda"
+    skip_missing_deps: bool = True
+    strict: bool = False
+    unload_after_validation: bool = True
+    loader_threads: int = 1
+    prefetch_factor: int = 2
+    log_prefix: str = "metrics/validation"
+
+
+DEFAULT_VALIDATION_VBENCH_METRICS = [
+    "vbench.imaging_quality",
+    "vbench.aesthetic_quality",
+    "vbench.temporal_flickering",
+    "vbench.motion_smoothness",
+    "vbench.subject_consistency",
+    "vbench.background_consistency",
+    "vbench.dynamic_degree",
+]
 
 
 class ValidationCallback(Callback):
@@ -78,15 +115,61 @@ class ValidationCallback(Callback):
         self.num_frames = (int(num_frames) if num_frames is not None else None)
         self.output_dir = (str(output_dir) if output_dir is not None else None)
         self.sampling_timesteps = ([int(s) for s in sampling_timesteps] if sampling_timesteps is not None else None)
+        metrics_config = pipeline_kwargs.pop("metrics", None)
+        self.metrics_config = self._parse_metrics_config(metrics_config)
         self.pipeline_kwargs = dict(pipeline_kwargs)
 
         # Set after on_train_start.
         self._pipeline: Any | None = None
         self._pipeline_key: tuple[Any, ...] | None = None
         self._sampling_param: SamplingParam | None = None
+        self._metric_evaluator: Any | None = None
         self.tracker: Any = DummyTracker()
         self.validation_random_generator: (torch.Generator | None) = None
         self.seed: int = 0
+
+    @staticmethod
+    def _parse_metrics_config(config: Any) -> _ValidationMetricsConfig:
+        if config is None or config is False:
+            return _ValidationMetricsConfig(enabled=False)
+        if config is True:
+            return _ValidationMetricsConfig(
+                enabled=True,
+                names=list(DEFAULT_VALIDATION_VBENCH_METRICS),
+            )
+        if isinstance(config, str):
+            return _ValidationMetricsConfig(
+                enabled=True,
+                names=[config],
+            )
+        if isinstance(config, list | tuple):
+            return _ValidationMetricsConfig(
+                enabled=bool(config),
+                names=[str(name) for name in config],
+            )
+        if not isinstance(config, dict):
+            raise TypeError("callbacks.validation.metrics must be a bool, string, list, or mapping")
+
+        enabled = bool(config.get("enabled", True))
+        raw_names = config.get("names", config.get("metrics", None))
+        if raw_names is None:
+            names = list(DEFAULT_VALIDATION_VBENCH_METRICS)
+        elif isinstance(raw_names, str):
+            names = [raw_names]
+        else:
+            names = [str(name) for name in raw_names]
+
+        return _ValidationMetricsConfig(
+            enabled=enabled and bool(names),
+            names=names,
+            device=str(config.get("device", "cuda")),
+            skip_missing_deps=bool(config.get("skip_missing_deps", True)),
+            strict=bool(config.get("strict", False)),
+            unload_after_validation=bool(config.get("unload_after_validation", True)),
+            loader_threads=int(config.get("loader_threads", 1)),
+            prefetch_factor=int(config.get("prefetch_factor", 2)),
+            log_prefix=str(config.get("log_prefix", "metrics/validation")),
+        )
 
     # ----------------------------------------------------------
     # Callback hooks
@@ -177,6 +260,7 @@ class ValidationCallback(Callback):
         try:
             transformer.eval()
             num_sp_groups = (self.world_group.world_size // self.sp_group.world_size)
+            sp = self._get_sampling_param()
 
             for num_inference_steps in self.sampling_steps:
                 result = self._run_validation_for_steps(
@@ -187,40 +271,51 @@ class ValidationCallback(Callback):
                 if self.rank_in_sp_group != 0:
                     continue
 
+                os.makedirs(
+                    output_dir,
+                    exist_ok=True,
+                )
+                local_video_filenames = self._save_validation_videos(
+                    result.videos,
+                    output_dir=output_dir,
+                    step=step,
+                    num_inference_steps=num_inference_steps,
+                    fps=sp.fps,
+                )
+                local_metric_stats = self._evaluate_validation_metrics(
+                    video_filenames=local_video_filenames,
+                    captions=result.captions,
+                    ref_videos=result.ref_videos,
+                    action_paths=result.action_paths,
+                    fps=sp.fps,
+                    output_dir=output_dir,
+                    step=step,
+                    num_inference_steps=num_inference_steps,
+                )
+
                 if self.global_rank == 0:
-                    all_videos = list(result.videos)
+                    all_video_filenames = list(local_video_filenames)
                     all_captions = list(result.captions)
+                    all_metric_stats = local_metric_stats
                     for sp_idx in range(1, num_sp_groups):
                         src = (sp_idx * self.sp_world_size)
                         recv_v = (self.world_group.recv_object(src=src))
                         recv_c = (self.world_group.recv_object(src=src))
-                        all_videos.extend(recv_v)
+                        recv_m = (self.world_group.recv_object(src=src))
+                        all_video_filenames.extend(recv_v)
                         all_captions.extend(recv_c)
+                        self._merge_metric_stats(
+                            all_metric_stats,
+                            recv_m,
+                        )
 
-                    os.makedirs(
-                        output_dir,
-                        exist_ok=True,
+                    self._log_validation_metrics(
+                        all_metric_stats,
+                        step=step,
                     )
-                    video_filenames: list[str] = []
-                    sp = self._get_sampling_param()
-                    for i, video in enumerate(all_videos):
-                        fname = os.path.join(
-                            output_dir,
-                            f"validation_step_{step}"
-                            f"_inference_steps_"
-                            f"{num_inference_steps}"
-                            f"_video_{i}.mp4",
-                        )
-                        imageio.mimsave(
-                            fname,
-                            video,
-                            fps=sp.fps,
-                        )
-                        video_filenames.append(fname)
-
                     video_logs = []
                     for fname, cap in zip(
-                            video_filenames,
+                            all_video_filenames,
                             all_captions,
                             strict=True,
                     ):
@@ -242,16 +337,287 @@ class ValidationCallback(Callback):
                         )
                 else:
                     self.world_group.send_object(
-                        result.videos,
+                        local_video_filenames,
                         dst=0,
                     )
                     self.world_group.send_object(
                         result.captions,
                         dst=0,
                     )
+                    self.world_group.send_object(
+                        local_metric_stats,
+                        dst=0,
+                    )
         finally:
             if was_training:
                 transformer.train()
+            self._release_metric_evaluator()
+
+    def _save_validation_videos(
+        self,
+        videos: list[list[np.ndarray]],
+        *,
+        output_dir: str,
+        step: int,
+        num_inference_steps: int,
+        fps: int,
+    ) -> list[str]:
+        filenames: list[str] = []
+        for i, video in enumerate(videos):
+            fname = os.path.join(
+                output_dir,
+                f"validation_step_{step}"
+                f"_inference_steps_{num_inference_steps}"
+                f"_rank_{self.global_rank}"
+                f"_video_{i}.mp4",
+            )
+            imageio.mimsave(
+                fname,
+                video,
+                fps=fps,
+            )
+            filenames.append(fname)
+        return filenames
+
+    # ----------------------------------------------------------
+    # Metric evaluation
+    # ----------------------------------------------------------
+
+    def _metric_device(self) -> str:
+        device = self.metrics_config.device
+        if device == "cuda" and torch.cuda.is_available():
+            local_rank = int(getattr(self.world_group, "local_rank", 0))
+            return f"cuda:{local_rank}"
+        return device
+
+    def _get_metric_evaluator(self) -> Any:
+        if self._metric_evaluator is not None:
+            return self._metric_evaluator
+        from fastvideo.eval import Evaluator
+
+        cfg = self.metrics_config
+        self._metric_evaluator = Evaluator(
+            metrics=cfg.names,
+            device=self._metric_device(),
+            num_gpus=1,
+            loader_threads=cfg.loader_threads,
+            prefetch_factor=cfg.prefetch_factor,
+            pre_upload=False,
+            skip_missing_deps=cfg.skip_missing_deps,
+        )
+        logger.info(
+            "Initialized validation metrics: %s",
+            ", ".join(self._metric_evaluator.metric_names),
+        )
+        return self._metric_evaluator
+
+    def _release_metric_evaluator(self) -> None:
+        if self._metric_evaluator is None:
+            return
+        if self.metrics_config.unload_after_validation:
+            self._metric_evaluator.unload()
+            self._metric_evaluator = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def _evaluate_validation_metrics(
+        self,
+        *,
+        video_filenames: list[str],
+        captions: list[str],
+        ref_videos: list[str | None],
+        action_paths: list[str | None],
+        fps: int,
+        output_dir: str,
+        step: int,
+        num_inference_steps: int,
+    ) -> _ValidationMetricStats:
+        stats = _ValidationMetricStats()
+        if not self.metrics_config.enabled or not video_filenames:
+            return stats
+
+        try:
+            evaluator = self._get_metric_evaluator()
+            from fastvideo.eval import samples_from
+
+            samples = samples_from(
+                video=video_filenames,
+                text_prompts=captions,
+                fps=float(fps),
+            )
+            results = evaluator.evaluate(samples=samples)
+            for filename, metric_results in zip(
+                    video_filenames,
+                    results,
+                    strict=True,
+            ):
+                row: dict[str, Any] = {"path": filename}
+                self._accumulate_metric_results(
+                    stats,
+                    row,
+                    metric_results,
+                )
+                stats.per_video.append(row)
+            for metric_name, metric_result in results.corpus.items():
+                row = {"path": "<corpus>"}
+                self._accumulate_metric_results(
+                    stats,
+                    row,
+                    {metric_name: metric_result},
+                )
+                stats.per_video.append(row)
+        except Exception as exc:
+            message = ("Validation metric evaluation failed on rank "
+                       f"{self.global_rank}: {exc}")
+            logger.exception(message)
+            stats.errors.append(message)
+            if self.metrics_config.strict:
+                raise
+        finally:
+            if self._metric_evaluator is not None:
+                self._metric_evaluator.release_cuda_memory()
+
+        self._write_metric_summary(
+            stats,
+            output_dir=output_dir,
+            step=step,
+            num_inference_steps=num_inference_steps,
+        )
+        return stats
+
+    @staticmethod
+    def _accumulate_metric_results(
+        stats: _ValidationMetricStats,
+        row: dict[str, Any],
+        metric_results: dict[str, Any],
+    ) -> None:
+        for metric_name, metric_result in metric_results.items():
+            score = getattr(metric_result, "score", None)
+            ValidationCallback._accumulate_scalar(
+                stats,
+                row,
+                metric_name,
+                score,
+            )
+            details = getattr(metric_result, "details", {}) or {}
+            if not isinstance(details, dict):
+                continue
+            for detail_name, value in details.items():
+                key = f"{metric_name}.{detail_name}"
+                ValidationCallback._accumulate_scalar(
+                    stats,
+                    row,
+                    key,
+                    value,
+                )
+
+    @staticmethod
+    def _accumulate_scalar(
+        stats: _ValidationMetricStats,
+        row: dict[str, Any],
+        key: str,
+        value: Any,
+    ) -> None:
+        if not isinstance(value, float | int | np.floating | np.integer):
+            return
+        value_float = float(value)
+        if not np.isfinite(value_float):
+            return
+        row[key] = value_float
+        stats.sums[key] = stats.sums.get(key, 0.0) + value_float
+        stats.counts[key] = stats.counts.get(key, 0.0) + 1.0
+
+    @staticmethod
+    def _merge_metric_stats(
+        dst: _ValidationMetricStats,
+        src: _ValidationMetricStats,
+    ) -> None:
+        for key, value in src.sums.items():
+            dst.sums[key] = dst.sums.get(key, 0.0) + float(value)
+        for key, value in src.counts.items():
+            dst.counts[key] = dst.counts.get(key, 0.0) + float(value)
+        dst.per_video.extend(src.per_video)
+        dst.errors.extend(src.errors)
+
+    def _log_validation_metrics(
+        self,
+        stats: _ValidationMetricStats,
+        *,
+        step: int,
+    ) -> None:
+        if stats.errors:
+            message = "Validation metric evaluation failed:\n" + "\n".join(stats.errors)
+            if self.metrics_config.strict:
+                raise RuntimeError(message)
+            logger.warning(message)
+
+        logs: dict[str, float] = {}
+        for key, metric_sum in stats.sums.items():
+            metric_count = stats.counts.get(key, 0.0)
+            if metric_count <= 0:
+                continue
+            value = float(metric_sum / metric_count)
+            if not np.isfinite(value):
+                continue
+            logs[self._metric_log_name(key)] = value
+        if logs:
+            self.tracker.log(
+                logs,
+                step,
+            )
+
+    def _metric_log_name(
+        self,
+        key: str,
+    ) -> str:
+        return f"{self.metrics_config.log_prefix}/{key.replace('.', '/')}"
+
+    def _write_metric_summary(
+        self,
+        stats: _ValidationMetricStats,
+        *,
+        output_dir: str,
+        step: int,
+        num_inference_steps: int,
+    ) -> None:
+        if not self.metrics_config.enabled:
+            return
+        summary_dir = os.path.join(
+            output_dir,
+            "eval",
+            f"step_{step}",
+        )
+        os.makedirs(
+            summary_dir,
+            exist_ok=True,
+        )
+        metrics = {
+            key: float(stats.sums[key] / stats.counts[key])
+            for key in sorted(stats.sums) if stats.counts.get(key, 0.0) > 0
+        }
+        payload = {
+            "step": int(step),
+            "num_inference_steps": int(num_inference_steps),
+            "rank": int(self.global_rank),
+            "metrics": metrics,
+            "per_video": stats.per_video,
+            "errors": stats.errors,
+        }
+        path = os.path.join(
+            summary_dir,
+            f"inference_steps_{num_inference_steps}_rank_{self.global_rank}.json",
+        )
+        with open(
+                path,
+                "w",
+                encoding="utf-8",
+        ) as f:
+            json.dump(
+                payload,
+                f,
+                indent=2,
+            )
 
     # ----------------------------------------------------------
     # Pipeline management
@@ -259,8 +625,50 @@ class ValidationCallback(Callback):
 
     def _get_sampling_param(self) -> SamplingParam:
         if self._sampling_param is None:
-            self._sampling_param = (SamplingParam.from_pretrained(self.training_config.model_path))
+            self._sampling_param = (SamplingParam.from_pretrained(self._pipeline_model_path()))
         return self._sampling_param
+
+    def _pipeline_model_path(self) -> str:
+        tc = self.training_config
+        pipeline_config = getattr(tc, "pipeline_config", None)
+        model_path = getattr(pipeline_config, "_fastvideo_train_model_path", None)
+        return str(model_path or tc.model_path)
+
+    def _validation_pipeline_config(self, transformer: torch.nn.Module) -> Any:
+        tc = self.training_config
+        pipeline_config = deepcopy(tc.pipeline_config)
+        self._sync_runtime_dit_arch_config(
+            pipeline_config,
+            transformer,
+        )
+        return pipeline_config
+
+    @staticmethod
+    def _sync_runtime_dit_arch_config(
+        pipeline_config: Any,
+        transformer: torch.nn.Module,
+    ) -> None:
+        dit_config = getattr(
+            pipeline_config,
+            "dit_config",
+            None,
+        )
+        arch_config = getattr(
+            dit_config,
+            "arch_config",
+            None,
+        )
+        if arch_config is None:
+            return
+
+        for name in ("local_attn_size", "sink_size"):
+            if not hasattr(arch_config, name) or not hasattr(transformer, name):
+                continue
+            setattr(
+                arch_config,
+                name,
+                getattr(transformer, name),
+            )
 
     def _get_pipeline(
         self,
@@ -295,9 +703,18 @@ class ValidationCallback(Callback):
             kwargs["flow_shift"] = float(flow_shift)
 
         self._pipeline = PipelineCls.from_pretrained(
-            tc.model_path,
+            self._pipeline_model_path(),
             **kwargs,
         )
+        if tc.pipeline_config is not None:
+            self._pipeline.fastvideo_args.pipeline_config = self._validation_pipeline_config(transformer)
+            arch_config = self._pipeline.fastvideo_args.pipeline_config.dit_config.arch_config
+            logger.info(
+                "Validation pipeline runtime config: local_attn_size=%s sink_size=%s boundary_ratio=%s",
+                getattr(arch_config, "local_attn_size", None),
+                getattr(arch_config, "sink_size", None),
+                getattr(self._pipeline.fastvideo_args.pipeline_config.dit_config, "boundary_ratio", None),
+            )
 
         scheduler = self._pipeline.get_module("scheduler")
         if (scheduler is not None and type(scheduler).__name__ == "SelfForcingFlowMatchScheduler"):
@@ -375,7 +792,49 @@ class ValidationCallback(Callback):
         if ("image" in validation_batch and validation_batch["image"] is not None):
             batch.pil_image = validation_batch["image"]
 
+        self._attach_action_conditions(
+            batch,
+            validation_batch,
+            sampling_param.num_frames,
+        )
+
         return batch
+
+    def _attach_action_conditions(
+        self,
+        batch: ForwardBatch,
+        validation_batch: dict[str, Any],
+        num_frames: int,
+    ) -> None:
+        for name in ("keyboard_cond", "mouse_cond"):
+            value = validation_batch.get(name)
+            if value is None:
+                continue
+            array = np.asarray(value)
+            if array.size == 0:
+                continue
+            array = array[:num_frames]
+            tensor = torch.as_tensor(
+                array,
+                dtype=torch.bfloat16,
+            )
+            if name == "keyboard_cond":
+                student = getattr(self.method, "student", None)
+                align = getattr(student, "_align_action_feature_dim", None)
+                expected_dim_fn = getattr(student, "_expected_action_dim", None)
+                if align is not None:
+                    expected_dim = int(expected_dim_fn("keyboard")) if expected_dim_fn is not None else 0
+                    tensor = align(
+                        tensor,
+                        name=name,
+                        expected_dim=expected_dim,
+                    )
+            tensor = tensor.unsqueeze(0)
+            setattr(
+                batch,
+                name,
+                tensor,
+            )
 
     # ----------------------------------------------------------
     # Validation loop
@@ -402,6 +861,10 @@ class ValidationCallback(Callback):
             tc,
             model_path=tc.model_path,
         )
+        self._sync_runtime_dit_arch_config(
+            inference_args.pipeline_config,
+            transformer,
+        )
 
         # Propagate sampling_timesteps to pipeline_config so
         # causal/DMD denoising stages can read them.
@@ -410,6 +873,8 @@ class ValidationCallback(Callback):
 
         videos: list[list[np.ndarray]] = []
         captions: list[str] = []
+        ref_videos: list[str | None] = []
+        action_paths: list[str | None] = []
 
         for validation_batch in dataloader:
             batch = self._prepare_validation_batch(
@@ -420,6 +885,10 @@ class ValidationCallback(Callback):
 
             assert (batch.prompt is not None and isinstance(batch.prompt, str))
             captions.append(batch.prompt)
+            ref_video = validation_batch.get("ref_video")
+            ref_videos.append(ref_video if isinstance(ref_video, str) else None)
+            action_path = validation_batch.get("action_path")
+            action_paths.append(action_path if isinstance(action_path, str) else None)
 
             with torch.no_grad():
                 output_batch = pipeline.forward(
@@ -448,6 +917,8 @@ class ValidationCallback(Callback):
         return _ValidationStepResult(
             videos=videos,
             captions=captions,
+            ref_videos=ref_videos,
+            action_paths=action_paths,
         )
 
     # ----------------------------------------------------------

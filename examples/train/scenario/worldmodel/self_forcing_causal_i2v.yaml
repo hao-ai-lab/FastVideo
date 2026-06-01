@@ -41,11 +41,11 @@ method:
 
 training:
   distributed:
-    num_gpus: 4
+    num_gpus: 8
     sp_size: 1
     tp_size: 1
     hsdp_replicate_dim: 1
-    hsdp_shard_dim: 4
+    hsdp_shard_dim: 8
 
   data:
     data_path: data/matrixgame2
@@ -95,6 +95,22 @@ callbacks:
     sampling_timesteps: [1000, 750, 500, 250]
     num_frames: 81
     guidance_scale: 6.0
+    metrics:
+      enabled: true
+      names:
+        - vbench.imaging_quality
+        - vbench.aesthetic_quality
+        - vbench.temporal_flickering
+        - vbench.motion_smoothness
+        - vbench.subject_consistency
+        - vbench.background_consistency
+        - vbench.dynamic_degree
+      skip_missing_deps: true
+      strict: false
+      unload_after_validation: true
 
 pipeline:
   flow_shift: 5
+  dit_config:
+    local_attn_size: 6
+    sink_size: 1

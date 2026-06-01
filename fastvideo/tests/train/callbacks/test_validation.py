@@ -14,11 +14,18 @@ distributed init and is exercised by Phase 2/3 tests.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
 import torch
 
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.callbacks.ema import EMACallback
-from fastvideo.train.callbacks.validation import ValidationCallback
+from fastvideo.train.callbacks.validation import (
+    DEFAULT_VALIDATION_VBENCH_METRICS,
+    ValidationCallback,
+    _ValidationMetricStats,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +78,7 @@ class TestConstructor:
         assert cb._pipeline is None
         assert cb._sampling_param is None
         assert cb.validation_random_generator is None
+        assert cb.metrics_config.enabled is False
 
     def test_string_inputs_are_coerced(self) -> None:
         # YAML often produces strings for numeric fields; the
@@ -102,6 +110,41 @@ class TestConstructor:
             "extra_arg": 123,
             "another": "value",
         }
+
+    def test_metrics_true_uses_default_vbench_subset(self) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics=True,
+        )
+        assert cb.metrics_config.enabled is True
+        assert cb.metrics_config.names == DEFAULT_VALIDATION_VBENCH_METRICS
+        assert "metrics" not in cb.pipeline_kwargs
+
+    def test_metrics_mapping_is_coerced(self) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics={
+                "names": "vbench.aesthetic_quality",
+                "device": "cpu",
+                "skip_missing_deps": False,
+                "strict": True,
+                "unload_after_validation": False,
+                "loader_threads": "2",
+                "prefetch_factor": "3",
+                "log_prefix": "custom/validation",
+            },
+        )
+        assert cb.metrics_config.enabled is True
+        assert cb.metrics_config.names == ["vbench.aesthetic_quality"]
+        assert cb.metrics_config.device == "cpu"
+        assert cb.metrics_config.skip_missing_deps is False
+        assert cb.metrics_config.strict is True
+        assert cb.metrics_config.unload_after_validation is False
+        assert cb.metrics_config.loader_threads == 2
+        assert cb.metrics_config.prefetch_factor == 3
+        assert cb.metrics_config.log_prefix == "custom/validation"
 
 
 # ---------------------------------------------------------------------------
@@ -232,3 +275,89 @@ class TestStateDict:
             {"validation_rng": torch.tensor([1, 2, 3], dtype=torch.uint8)}
         )
         assert cb.validation_random_generator is None
+
+
+# ---------------------------------------------------------------------------
+# E. metric result aggregation
+# ---------------------------------------------------------------------------
+
+
+class TestMetricAggregation:
+
+    def test_accumulates_scores_and_scalar_details(self) -> None:
+        stats = _ValidationMetricStats()
+        row: dict = {"path": "sample.mp4"}
+        ValidationCallback._accumulate_metric_results(
+            stats,
+            row,
+            {
+                "vbench.aesthetic_quality": SimpleNamespace(
+                    name="vbench.aesthetic_quality",
+                    score=0.5,
+                    details={"ignored": [1, 2, 3]},
+                ),
+                "optical_flow.synthetic_optical_flow": SimpleNamespace(
+                    name="optical_flow.synthetic_optical_flow",
+                    score=1.5,
+                    details={"pixel_epe_mean_mean": 2.5},
+                ),
+            },
+        )
+
+        assert stats.sums["vbench.aesthetic_quality"] == 0.5
+        assert stats.counts["vbench.aesthetic_quality"] == 1.0
+        assert stats.sums["optical_flow.synthetic_optical_flow"] == 1.5
+        assert stats.sums["optical_flow.synthetic_optical_flow.pixel_epe_mean_mean"] == 2.5
+        assert "vbench.aesthetic_quality.ignored" not in stats.sums
+        assert row["vbench.aesthetic_quality"] == 0.5
+
+    def test_merges_metric_stats(self) -> None:
+        dst = _ValidationMetricStats(
+            sums={"a": 1.0},
+            counts={"a": 1.0},
+            per_video=[{"path": "a.mp4"}],
+            errors=["first"],
+        )
+        src = _ValidationMetricStats(
+            sums={"a": 2.0, "b": 3.0},
+            counts={"a": 2.0, "b": 1.0},
+            per_video=[{"path": "b.mp4"}],
+            errors=["second"],
+        )
+
+        ValidationCallback._merge_metric_stats(dst, src)
+
+        assert dst.sums == {"a": 3.0, "b": 3.0}
+        assert dst.counts == {"a": 3.0, "b": 1.0}
+        assert dst.per_video == [{"path": "a.mp4"}, {"path": "b.mp4"}]
+        assert dst.errors == ["first", "second"]
+
+    def test_metric_log_name_replaces_dots(self) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics={"names": ["vbench.aesthetic_quality"]},
+        )
+
+        assert (
+            cb._metric_log_name("vbench.aesthetic_quality")
+            == "metrics/validation/vbench/aesthetic_quality"
+        )
+
+    def test_metric_device_uses_local_rank(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics={"names": ["vbench.aesthetic_quality"]},
+        )
+        cb.world_group = SimpleNamespace(local_rank=5)
+        monkeypatch.setattr(
+            torch.cuda,
+            "is_available",
+            lambda: True,
+        )
+
+        assert cb._metric_device() == "cuda:5"
