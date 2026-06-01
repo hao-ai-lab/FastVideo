@@ -69,8 +69,12 @@ MODEL_REGISTRY = {
 
 DEFAULT_MODEL_ID = "fast-ltx2"
 
+ACTIVE_MODEL_ID = (os.getenv("DREAMVERSE_MODEL_ID", "").strip() or DEFAULT_MODEL_ID)
+if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
+    ACTIVE_MODEL_ID = DEFAULT_MODEL_ID
+
 # Active model configuration
-MODEL_CONFIG = MODEL_REGISTRY[DEFAULT_MODEL_ID]
+MODEL_CONFIG = MODEL_REGISTRY[ACTIVE_MODEL_ID]
 
 # Generation limits
 SESSION_TIMEOUT_SECONDS = 300
@@ -181,15 +185,26 @@ AVAILABLE_LORAS = {
         "repo": "vrgamedevgirl84/LTX_2.3_Pixar_Toon_Style_LoRa",
         "trigger": "P1x4r",
         "model": "fast-ltx23",
-        "position": "prepend"
+        "position": "prepend",
+        "label": "Pixar Toon",
     },
     "transition": {
         "repo": "valiantcat/LTX-2.3-Transition-LORA",
         "trigger": "zhuanchang",
         "model": "fast-ltx23",
-        "position": "append"
+        "position": "append",
+        "label": "Transition",
     },
 }
+
+
+def _active_model_key() -> str:
+    return ACTIVE_MODEL_ID
+
+
+def _available_styles_for_active_model() -> list[str]:
+    active = _active_model_key()
+    return [k for k, v in AVAILABLE_LORAS.items() if v.get("model") == active]
 
 
 def _resolve_lora_spec(spec: str) -> str | None:
@@ -222,7 +237,7 @@ def _parse_lora_stack(raw: str) -> list[tuple[str, float]]:
 
 DREAMVERSE_LORA_PATH = _resolve_lora_spec(os.getenv("DREAMVERSE_LORA_PATH", ""))
 DREAMVERSE_LORA_NICKNAME = (os.getenv("DREAMVERSE_LORA_NICKNAME", "omninft").strip() or "omninft")
-DREAMVERSE_LORA_STRENGTH = float(os.getenv("DREAMVERSE_LORA_STRENGTH", "1.0"))
+DREAMVERSE_LORA_STRENGTH = _env_float("DREAMVERSE_LORA_STRENGTH", 1.0)
 DREAMVERSE_LORA_STACK = _parse_lora_stack(os.getenv("DREAMVERSE_LORA_STACK", ""))
 
 

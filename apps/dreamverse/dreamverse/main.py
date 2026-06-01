@@ -20,6 +20,8 @@ from dreamverse.config import (
     FRONTEND_STATIC_DIR_CANDIDATES,
     PROMPT_SAFETY_ENABLED,
     SESSION_LOG_ROOT,
+    _available_styles_for_active_model,
+    _resolve_lora_spec,
 )
 from dreamverse.prompt_enhancer import PromptEnhancer
 from dreamverse.prompt_safety import PromptSafetyFilter
@@ -113,7 +115,15 @@ class LoraRequest(BaseModel):
 
 @app.get("/lora/options")
 async def lora_options() -> dict:
-    return {"styles": ["none", *AVAILABLE_LORAS.keys()]}
+    styles = _available_styles_for_active_model()
+    has_base_lora = _resolve_lora_spec("omninft") is not None
+    labels = {"none": "None"}
+    labels.update({k: AVAILABLE_LORAS[k].get("label", k) for k in styles})
+    return {
+        "styles": ["none", *styles],
+        "labels": labels,
+        "has_base_lora": has_base_lora,
+    }
 
 
 @app.post("/lora")
@@ -123,12 +133,19 @@ async def apply_lora(request: LoraRequest) -> dict:
 
     strength = max(0.0, min(1.0, float(request.strength)))
     style = (request.style or "none").strip().lower()
-    if style not in {"none", *AVAILABLE_LORAS.keys()}:
-        raise HTTPException(status_code=400, detail=f"Unknown style: {style}")
+    allowed_styles = _available_styles_for_active_model()
+    if style not in {"none", *allowed_styles}:
+        raise HTTPException(status_code=400, detail=f"Unknown style for active model: {style}")
 
-    stack: list[tuple[str, float]] = [("omninft", strength)]
-    if style in AVAILABLE_LORAS:
+    stack: list[tuple[str, float]] = []
+    if _resolve_lora_spec("omninft") is not None:
+        stack.append(("omninft", strength))
+    if style in allowed_styles:
         stack.append((style, 1.0))
+
+    if not stack:
+        raise HTTPException(status_code=400,
+                            detail="Active model has no OmniNFT LoRA and no style selected; nothing to apply.")
 
     try:
         triggers = await runtime.gpu_pool.apply_lora_stack(stack, style)
@@ -136,9 +153,10 @@ async def apply_lora(request: LoraRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return {
+        "applied": True,
         "strength": strength,
         "style": style,
-        "trigger": (AVAILABLE_LORAS[style]["trigger"] if style in AVAILABLE_LORAS else None),
+        "trigger": (AVAILABLE_LORAS[style]["trigger"] if style in allowed_styles else None),
         "gpus": {
             str(gpu_id): trigger
             for gpu_id, trigger in triggers.items()

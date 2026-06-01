@@ -73,13 +73,8 @@ def _reset_lora_registry(worker) -> dict:
     pipeline = getattr(worker, "pipeline", None)
     if pipeline is None:
         return {"status": "no_pipeline"}
-    if hasattr(pipeline, "lora_adapters"):
-        try:
-            pipeline.lora_adapters.clear()
-        except Exception:
-            pipeline.lora_adapters = type(pipeline.lora_adapters)()
-    pipeline.cur_adapter_path = ""
     pipeline.cur_adapter_name = ""
+    pipeline.cur_adapter_strength = 1.0
     return {"status": "lora_registry_reset"}
 
 

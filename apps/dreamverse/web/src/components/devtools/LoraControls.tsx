@@ -14,6 +14,7 @@ const STYLE_LABELS: Record<string, string> = {
 
 export default function LoraControls() {
   const [styles, setStyles] = useState<string[]>(['none']);
+  const [labels, setLabels] = useState<Record<string, string>>(STYLE_LABELS);
   const [strength, setStrength] = useState(0.8);
   const [style, setStyle] = useState('none');
   const [status, setStatus] = useState('idle');
@@ -25,6 +26,9 @@ export default function LoraControls() {
       .then((data) => {
         if (data && Array.isArray(data.styles)) {
           setStyles(data.styles);
+        }
+        if (data && data.labels && typeof data.labels === 'object') {
+          setLabels((prev) => ({ ...prev, ...data.labels }));
         }
       })
       .catch(() => setStatus('options unavailable'));
@@ -112,7 +116,7 @@ export default function LoraControls() {
           >
             {styles.map((option) => (
               <option key={option} value={option}>
-                {STYLE_LABELS[option] ?? option}
+                {labels[option] ?? STYLE_LABELS[option] ?? option}
               </option>
             ))}
           </NativeSelect>

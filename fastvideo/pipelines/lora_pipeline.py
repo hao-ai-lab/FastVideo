@@ -102,6 +102,8 @@ class LoRAPipeline(ComposedPipelineBase):
         dict)  # state dicts of loaded lora adapters (includes lora_A, lora_B, and lora_alpha)
     cur_adapter_name: str = ""
     cur_adapter_path: str = ""
+    cur_adapter_strength: float = 1.0
+    lora_adapter_paths: dict[str, str] = {}
     # model_name -> layers
     lora_layers: dict[str, LoRAModelLayers] = {}
     fastvideo_args: FastVideoArgs | TrainingArgs
@@ -117,6 +119,7 @@ class LoRAPipeline(ComposedPipelineBase):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.device = get_local_torch_device()
+        self.lora_adapter_paths = {}
         # build list of trainable transformers
         for transformer_name in self.trainable_transformer_names:
             if (transformer_name in self.modules and self.modules[transformer_name] is not None):
@@ -308,7 +311,8 @@ class LoRAPipeline(ComposedPipelineBase):
             self.convert_to_lora_layers()
         adapter_updated = False
         rank = dist.get_rank()
-        if lora_path is not None and lora_path != self.cur_adapter_path:
+        if lora_path is not None and self.lora_adapter_paths.get(lora_nickname) != lora_path:
+            self.lora_adapters[lora_nickname] = {}
             lora_local_path = maybe_download_lora(lora_path)
             lora_state_dict = load_file(lora_local_path)
 
@@ -354,11 +358,14 @@ class LoRAPipeline(ComposedPipelineBase):
                 self.lora_adapters[lora_nickname][target_name] = weight.to(self.device)
             adapter_updated = True
             self.cur_adapter_path = lora_path
+            self.lora_adapter_paths[lora_nickname] = lora_path
             logger.info("Rank %d: loaded LoRA adapter %s", rank, lora_path)
 
-        if not adapter_updated and self.cur_adapter_name == lora_nickname:
+        if (not adapter_updated and self.cur_adapter_name == lora_nickname and self.cur_adapter_strength == strength
+                and not accumulate):
             return
         self.cur_adapter_name = lora_nickname
+        self.cur_adapter_strength = strength
 
         # Merge the new adapter
         adapted_count = 0
@@ -381,8 +388,7 @@ class LoRAPipeline(ComposedPipelineBase):
                             lora_A = self.lora_adapters[lora_nickname][lora_A_name]
                             lora_B = self.lora_adapters[lora_nickname][lora_B_name]
                             # Simple lookup - alpha stored with same naming scheme as lora_A/lora_B
-                            alpha = (self.lora_adapters[lora_nickname].get(lora_alpha_name)
-                                     if adapter_updated else None)
+                            alpha = self.lora_adapters[lora_nickname].get(lora_alpha_name)
                             try:
                                 layer.set_lora_weights(
                                     lora_A,
