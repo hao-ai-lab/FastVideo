@@ -214,6 +214,52 @@ def bench_topk(
           f"| row_exact_match: {acc['row_exact_match']:.4f} | count_match: {acc['count_match']:.4f}")
 
 
+def bench_topk_neginf(
+    B: int, H: int, num_blocks: int, topk: int,
+    dtype: torch.dtype, inf_ratio: float = 0.3,
+) -> None:
+    """Test topk correctness when a fraction of scores are -inf (masked positions)."""
+    scores = torch.randn(B, H, num_blocks, num_blocks, dtype=dtype, device="cuda")
+    inf_mask = torch.rand(B, H, num_blocks, num_blocks, device="cuda") < inf_ratio
+    scores[inf_mask] = float("-inf")
+
+    ref = pytorch_topk_mask(scores, topk)
+    fused = fused_topk_mask(scores, topk)
+    acc = accuracy_topk(ref, fused)
+
+    status = "PASS" if acc["row_exact_match"] == 1.0 else "FAIL"
+    print(f"  topk -inf | {inf_ratio*100:.0f}% masked | {status} "
+          f"| row_exact_match: {acc['row_exact_match']:.4f} | count_match: {acc['count_match']:.4f}")
+
+
+_MAX_KV_BLOCK_SIZE = 4096
+
+
+def bench_topk_large_kv(
+    B: int, H: int, kv_blocks: int, topk: int,
+    dtype: torch.dtype, warmup: int, rep: int,
+) -> None:
+    """Test topk with large kv_blocks that may exceed Triton block size limit."""
+    import triton
+    kv_block_size = triton.next_power_of_2(kv_blocks)
+    fallback = kv_block_size > _MAX_KV_BLOCK_SIZE
+
+    q_blocks = max(1, kv_blocks // 8)
+    scores = torch.randn(B, H, q_blocks, kv_blocks, dtype=dtype, device="cuda")
+
+    ref = pytorch_topk_mask(scores, topk)
+    fused = fused_topk_mask(scores, topk)
+    acc = accuracy_topk(ref, fused)
+
+    old_ms = do_bench(lambda: pytorch_topk_mask(scores, topk), warmup=warmup, rep=rep)
+    new_ms = do_bench(lambda: fused_topk_mask(scores, topk), warmup=warmup, rep=rep)
+
+    speedup = old_ms / new_ms if new_ms > 0 else float("inf")
+    path = "fallback" if fallback else "triton"
+    print(f"  topk kv={kv_blocks:<5d} | {path:8s} | old: {old_ms:8.3f} ms | new: {new_ms:8.3f} ms "
+          f"| speedup: {speedup:5.2f}x | row_exact_match: {acc['row_exact_match']:.4f}")
+
+
 def main() -> None:
     args = parse_arguments()
     set_seed(args.seed)
@@ -243,6 +289,24 @@ def main() -> None:
         bench_compress_fwd(B, H, seq_len, D, block_elements, dtype, args.warmup, args.rep)
         bench_compress_bwd(B, H, seq_len, D, block_elements, dtype, args.warmup, args.rep)
         bench_topk(B, H, num_blocks, topk, dtype, args.warmup, args.rep)
+
+    # --- Edge case: topk with -inf scores ---
+    print(f"\n{'=' * 100}")
+    print("TopK with -inf scores (masked positions)")
+    print("-" * 100)
+    kv = args.seq_lens[0] // block_elements
+    tk = args.topk if args.topk is not None else max(1, kv // 10)
+    tk = min(tk, kv)
+    for inf_ratio in [0.1, 0.3, 0.5, 0.8]:
+        bench_topk_neginf(B, H, kv, tk, dtype, inf_ratio)
+
+    # --- Edge case: topk with large kv_blocks (Triton block size limit) ---
+    print(f"\n{'=' * 100}")
+    print("TopK with large kv_blocks (Triton block size limit test)")
+    print("-" * 100)
+    for kv_blocks in [1024, 2048, 4096, 8192]:
+        tk = max(1, kv_blocks // 10)
+        bench_topk_large_kv(1, 1, kv_blocks, tk, dtype, args.warmup, args.rep)
 
 
 if __name__ == "__main__":

@@ -27,12 +27,13 @@ def _fused_block_mean_kernel(
     num_blocks,
     BLOCK_ELEMENTS: tl.constexpr,
     HEAD_DIM: tl.constexpr,
+    OUTPUT_DTYPE: tl.constexpr,
 ):
     """Fused block mean: one program computes mean of one block for one (b,h).
 
     X is viewed as [B*H, num_blocks*BLOCK_ELEMENTS, HEAD_DIM] contiguous.
     Out is [B*H, num_blocks, HEAD_DIM] contiguous.
-    Accumulates in fp32, outputs in original dtype.
+    2D load + parallel tl.sum reduction, accumulates in fp32.
     """
     block_idx = tl.program_id(0)
     bh_idx = tl.program_id(1)
@@ -44,18 +45,14 @@ def _fused_block_mean_kernel(
 
     x_base = X_ptr + bh_idx * stride_x_bh + block_idx * BLOCK_ELEMENTS * stride_x_seq
 
+    row_offsets = tl.arange(0, BLOCK_ELEMENTS)
     dim_offsets = tl.arange(0, HEAD_DIM)
-    acc = tl.zeros([HEAD_DIM], dtype=tl.float32)
-
-    for i in range(BLOCK_ELEMENTS):
-        row_ptr = x_base + i * stride_x_seq + dim_offsets
-        x_val = tl.load(row_ptr).to(tl.float32)
-        acc += x_val
-
-    acc = acc / vbs
+    offsets = row_offsets[:, None] * stride_x_seq + dim_offsets[None, :]
+    block_data = tl.load(x_base + offsets).to(tl.float32)
+    acc = tl.sum(block_data, axis=0) / vbs
 
     out_base = Out_ptr + bh_idx * stride_o_bh + block_idx * stride_o_blk + dim_offsets
-    tl.store(out_base, acc.to(tl.bfloat16))
+    tl.store(out_base, acc.to(OUTPUT_DTYPE))
 
 
 @triton.jit
@@ -70,12 +67,14 @@ def _fused_block_mean_bwd_kernel(
     num_blocks,
     BLOCK_ELEMENTS: tl.constexpr,
     HEAD_DIM: tl.constexpr,
+    OUTPUT_DTYPE: tl.constexpr,
 ):
     """Backward of block mean: broadcast grad_out / vbs to each token in the block.
 
     Mirrors the forward kernel: one program per (block, bh).
     GradOut is [B*H, num_blocks, HEAD_DIM].
     GradX  is [B*H, num_blocks*BLOCK_ELEMENTS, HEAD_DIM].
+    2D store writes all BLOCK_ELEMENTS rows in parallel.
     """
     block_idx = tl.program_id(0)
     bh_idx = tl.program_id(1)
@@ -85,14 +84,22 @@ def _fused_block_mean_bwd_kernel(
 
     vbs = tl.load(VBS_ptr + block_idx).to(tl.float32)
 
-    go_base = GradOut_ptr + bh_idx * stride_go_bh + block_idx * stride_go_blk
     dim_offsets = tl.arange(0, HEAD_DIM)
+    go_base = GradOut_ptr + bh_idx * stride_go_bh + block_idx * stride_go_blk
     grad_val = tl.load(go_base + dim_offsets).to(tl.float32) / vbs
 
+    row_offsets = tl.arange(0, BLOCK_ELEMENTS)
     gx_base = GradX_ptr + bh_idx * stride_gx_bh + block_idx * BLOCK_ELEMENTS * stride_gx_seq
-    grad_out_cast = grad_val.to(tl.bfloat16)
-    for i in range(BLOCK_ELEMENTS):
-        tl.store(gx_base + i * stride_gx_seq + dim_offsets, grad_out_cast)
+    offsets = row_offsets[:, None] * stride_gx_seq + dim_offsets[None, :]
+    grad_2d = tl.broadcast_to(grad_val[None, :], [BLOCK_ELEMENTS, HEAD_DIM])
+    tl.store(gx_base + offsets, grad_2d.to(OUTPUT_DTYPE))
+
+
+_TORCH_TO_TRITON_DTYPE = {
+    torch.float16: tl.float16,
+    torch.bfloat16: tl.bfloat16,
+    torch.float32: tl.float32,
+}
 
 
 def _fused_block_mean_bwd(
@@ -117,6 +124,7 @@ def _fused_block_mean_bwd(
         num_blocks,
         BLOCK_ELEMENTS=block_elements,
         HEAD_DIM=D,
+        OUTPUT_DTYPE=_TORCH_TO_TRITON_DTYPE[grad_output.dtype],
     )
 
     return grad_x
@@ -146,6 +154,7 @@ def _fused_block_mean_fwd(
         num_blocks,
         BLOCK_ELEMENTS=block_elements,
         HEAD_DIM=D,
+        OUTPUT_DTYPE=_TORCH_TO_TRITON_DTYPE[x.dtype],
     )
 
     return out
@@ -221,9 +230,14 @@ def _fused_topk_mask_kernel(
 
     # Binary search for threshold: find value T such that count(scores > T) <= topk
     # and count(scores >= T) >= topk
-    # Use +inf/-inf sentinels so min/max ignore padding positions
-    lo = tl.min(tl.where(valid_mask, scores_f32, float("inf")), axis=0)
+    # Exclude -inf from lo so the binary search can converge when masked
+    # scores are present (mid = (-inf + hi) * 0.5 = -inf would stall).
+    finite_mask = valid_mask & (scores_f32 > float("-inf"))
+    lo = tl.min(tl.where(finite_mask, scores_f32, float("inf")), axis=0)
     hi = tl.max(tl.where(valid_mask, scores_f32, float("-inf")), axis=0)
+    # If all valid scores are -inf, lo > hi; threshold stays at -inf and
+    # the tie-breaking logic below selects the first topk positions.
+    lo = tl.minimum(lo, hi)
 
     for _i in range(32):
         mid = (lo + hi) * 0.5
@@ -247,11 +261,25 @@ def _fused_topk_mask_kernel(
     tl.store(mask_base + kv_offsets * stride_m_kv, final_mask, mask=valid_mask)
 
 
+MAX_KV_BLOCK_SIZE = 4096
+
+
+def _pytorch_topk_mask_fallback(
+    scores: torch.Tensor,
+    topk: int,
+) -> torch.Tensor:
+    topk_idx = torch.topk(scores, topk, dim=-1).indices
+    return torch.zeros_like(scores, dtype=torch.bool).scatter_(-1, topk_idx, True)
+
+
 def fused_topk_mask(
     scores: torch.Tensor,
     topk: int,
 ) -> torch.Tensor:
     """Build topk boolean mask from scores using fused Triton kernel.
+
+    Falls back to PyTorch when kv_blocks exceeds the Triton block size
+    limit (MAX_KV_BLOCK_SIZE) to avoid compilation failures.
 
     Args:
         scores: [B, H, q_blocks, kv_blocks] block-level attention scores
@@ -263,9 +291,11 @@ def fused_topk_mask(
     B, H, q_blocks, kv_blocks = scores.shape
     topk = min(topk, kv_blocks)
 
-    mask = torch.zeros(B, H, q_blocks, kv_blocks, dtype=torch.bool, device=scores.device)
-
     KV_BLOCK_SIZE = triton.next_power_of_2(kv_blocks)
+    if KV_BLOCK_SIZE > MAX_KV_BLOCK_SIZE:
+        return _pytorch_topk_mask_fallback(scores, topk)
+
+    mask = torch.zeros(B, H, q_blocks, kv_blocks, dtype=torch.bool, device=scores.device)
 
     scores_flat = scores.contiguous().view(B * H, q_blocks, kv_blocks)
     mask_flat = mask.view(B * H, q_blocks, kv_blocks)
