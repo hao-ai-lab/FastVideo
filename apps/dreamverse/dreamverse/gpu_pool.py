@@ -974,7 +974,7 @@ class GPUPool:
         if not ready_slots:
             raise RuntimeError("No ready GPU workers to apply LoRA stack.")
         results = await asyncio.gather(*(slot.apply_lora_stack(stack, style) for slot in ready_slots))
-        return {slot.gpu_id: ack.style_trigger for slot, ack in zip(ready_slots, results)}
+        return {slot.gpu_id: ack.style_trigger for slot, ack in zip(ready_slots, results, strict=False)}
 
     async def shutdown(self):
         """Shutdown all GPU workers."""
