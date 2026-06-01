@@ -30,12 +30,15 @@ export default defineConfig({
     viewport: { width: 1280, height: 720 },
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
+    video: process.env.CI ? 'retain-on-failure' : 'on',
   },
   projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'webkit',   use: { ...devices['Desktop Safari'] } },
+    { name: 'firefox',  use: { ...devices['Desktop Firefox'] } },
+    { name: 'msedge',   use: { ...devices['Desktop Edge'], channel: 'msedge' } },
+    { name: 'mobile-safari',   use: { ...devices['iPhone 14'] } },
+    { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
   ],
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined
