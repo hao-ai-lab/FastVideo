@@ -2907,6 +2907,7 @@ class LTX2Transformer3DModel(BaseDiT):
         skip_cross_modal_attn: bool = False,
         skip_video_self_attn_blocks: list[int] | None = None,
         skip_audio_self_attn_blocks: list[int] | None = None,
+        video_position_offset_sec: float = 0.0,
         **kwargs,
     ) -> torch.Tensor:
         if isinstance(encoder_hidden_states, list):
@@ -2959,7 +2960,10 @@ class LTX2Transformer3DModel(BaseDiT):
             DEFAULT_LTX2_SCALE_FACTORS,
             fps=fps,
             causal_fix=True,
-        ).to(hidden_states.dtype)
+        )
+        if video_position_offset_sec:
+            positions[:, 0, ...] = positions[:, 0, ...] + float(video_position_offset_sec)
+        positions = positions.to(hidden_states.dtype)
 
         # Pad positions to match padded sequence length for SP cross-attention
         if sp_world_size > 1 and video_padded_seq_len > video_original_seq_len:
