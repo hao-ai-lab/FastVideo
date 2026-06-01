@@ -22,6 +22,7 @@ interface Props {
 	sessionNotice?: string;
 	projectResetPending?: boolean;
 	viewingReadOnly?: boolean;
+	waitingForSegmentPrompt?: boolean;
 	onPresetGenerate?: (presetId: string) => void;
 	onContinuationInput?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
 	onContinuationKeydown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -46,6 +47,7 @@ export default function ChatBar({
 	sessionNotice = "",
 	projectResetPending = false,
 	viewingReadOnly = false,
+	waitingForSegmentPrompt = false,
 	onPresetGenerate = () => {},
 	onContinuationInput = () => {},
 	onContinuationKeydown = () => {},
@@ -65,9 +67,11 @@ export default function ChatBar({
 		? "Starting new project\u2026"
 		: isBusy
 			? "Generating video\u2026"
-			: !sessionStarted
-				? "What video are you imagining?"
-				: "What do you want to edit?";
+			: waitingForSegmentPrompt
+				? "Describe the next scene\u2026"
+				: !sessionStarted
+					? "What video are you imagining?"
+					: "What do you want to edit?";
 	const actionLabel = !sessionStarted ? "Generate" : "Rewrite rollout";
 
 	const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -324,6 +328,12 @@ export default function ChatBar({
 						style={{ maskImage: "linear-gradient(to left, black, transparent)", WebkitMaskImage: "linear-gradient(to left, black, transparent)" }}
 						aria-hidden="true"
 					/>
+				</div>
+			)}
+
+			{waitingForSegmentPrompt && (
+				<div className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-4 py-2.5 text-center text-xs text-sky-700 dark:text-sky-300">
+					Segment complete — describe the next scene to continue
 				</div>
 			)}
 

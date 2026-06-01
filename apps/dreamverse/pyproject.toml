@@ -29,6 +29,9 @@ test = [
 dreamverse-server = "dreamverse.server_entry:cli"
 dreamverse-mock-server = "dreamverse.mock_server:cli"
 
+[tool.setuptools.packages.find]
+include = ["dreamverse*"]
+
 [tool.uv]
 package = false
 

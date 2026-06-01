@@ -243,14 +243,18 @@ export async function applyNormalizedSocketEvent(event: any, context: any): Prom
 		}
 
 		case "prompt/sources_blocked":
-			sessionStore.patch({
-				autoExtensionTimeoutHint: uiStore.get().simpleMode ? "" : "blocked on user input, increase prompt count for smoother experience",
-			});
+			if (sessionStore.get().manualContinuationMode) {
+				sessionStore.patch({ waitingForSegmentPrompt: true, autoExtensionTimeoutHint: "" });
+			} else {
+				sessionStore.patch({
+					autoExtensionTimeoutHint: uiStore.get().simpleMode ? "" : "blocked on user input, increase prompt count for smoother experience",
+				});
+			}
 			return;
 
 		case "prompt/sources_resumed":
 		case "session/auto_extension_updated":
-			sessionStore.patch({ autoExtensionTimeoutHint: "" });
+			sessionStore.patch({ autoExtensionTimeoutHint: "", waitingForSegmentPrompt: false });
 			if (event.type === "session/auto_extension_updated") {
 				console.log("[AutoExtensionUpdated]", {
 					enabled: sessionStore.get().autoExtensionEnabled,

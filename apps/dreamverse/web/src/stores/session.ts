@@ -24,6 +24,8 @@ export interface SessionState {
   livePromptRewriteMode: boolean;
   sessionExpired: boolean;
   projectResetPending: boolean;
+  manualContinuationMode: boolean;
+  waitingForSegmentPrompt: boolean;
 }
 
 const DEFAULT_SESSION_STATE: SessionState = {
@@ -49,6 +51,8 @@ const DEFAULT_SESSION_STATE: SessionState = {
   livePromptRewriteMode: false,
   sessionExpired: false,
   projectResetPending: false,
+  manualContinuationMode: false,
+  waitingForSegmentPrompt: false,
 };
 
 export type SessionStore = ManagedStore<SessionState> & {
