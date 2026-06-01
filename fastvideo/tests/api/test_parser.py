@@ -129,6 +129,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "enable_stage_verification": True,
                 "use_fsdp_inference": False,
                 "disable_autocast": False,
+                "use_batched_cfg": False,
                 "quantization": None,
             },
             "pipeline": {
