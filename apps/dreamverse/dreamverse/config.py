@@ -180,12 +180,14 @@ AVAILABLE_LORAS = {
     "pixar": {
         "repo": "vrgamedevgirl84/LTX_2.3_Pixar_Toon_Style_LoRa",
         "trigger": "P1x4r",
-        "model": "fast-ltx23"
+        "model": "fast-ltx23",
+        "position": "prepend"
     },
     "transition": {
         "repo": "valiantcat/LTX-2.3-Transition-LORA",
         "trigger": "zhuanchang",
-        "model": "fast-ltx23"
+        "model": "fast-ltx23",
+        "position": "append"
     },
 }
 
@@ -210,7 +212,11 @@ def _parse_lora_stack(raw: str) -> list[tuple[str, float]]:
         spec, _, stren = item.partition("@")
         resolved = _resolve_lora_spec(spec)
         if resolved:
-            out.append((resolved, float(stren) if stren.strip() else 1.0))
+            try:
+                strength = float(stren) if stren.strip() else 1.0
+            except ValueError:
+                strength = 1.0
+            out.append((resolved, strength))
     return out
 
 

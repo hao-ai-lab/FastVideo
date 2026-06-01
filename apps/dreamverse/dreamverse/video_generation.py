@@ -69,6 +69,20 @@ DEFAULT_LTX2_AUDIO_HOP_LENGTH = 160
 DEFAULT_LTX2_AUDIO_DOWNSAMPLE = 4
 
 
+def _reset_lora_registry(worker) -> dict:
+    pipeline = getattr(worker, "pipeline", None)
+    if pipeline is None:
+        return {"status": "no_pipeline"}
+    if hasattr(pipeline, "lora_adapters"):
+        try:
+            pipeline.lora_adapters.clear()
+        except Exception:
+            pipeline.lora_adapters = type(pipeline.lora_adapters)()
+    pipeline.cur_adapter_path = ""
+    pipeline.cur_adapter_name = ""
+    return {"status": "lora_registry_reset"}
+
+
 @dataclass
 class StepResult:
     """Output of one generation step.
@@ -348,6 +362,11 @@ class VideoGenerationWorker:
         except Exception as exc:
             print(f"[GPU {self.gpu_id}] unmerge_lora_weights skipped: {exc}")
 
+        try:
+            self.generator.executor.collective_rpc(_reset_lora_registry)
+        except Exception as exc:
+            print(f"[GPU {self.gpu_id}] lora registry reset skipped: {exc}")
+
         resolved_stack: list[tuple[str, float]] = []
         for spec, strength in stack:
             resolved = _resolve_lora_spec(spec)
@@ -369,7 +388,7 @@ class VideoGenerationWorker:
         style_key = (style or "").strip().lower()
         if style_key in AVAILABLE_LORAS:
             self.active_style_trigger = AVAILABLE_LORAS[style_key]["trigger"]
-            self.active_style_position = ("prepend" if style_key == "pixar" else "append")
+            self.active_style_position = AVAILABLE_LORAS[style_key].get("position", "append")
         else:
             self.active_style_trigger = None
             self.active_style_position = None

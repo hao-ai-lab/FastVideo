@@ -28,6 +28,12 @@ export default function LoraControls() {
         }
       })
       .catch(() => setStatus('options unavailable'));
+
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
   }, []);
 
   const applyLora = (nextStrength: number, nextStyle: string) => {
