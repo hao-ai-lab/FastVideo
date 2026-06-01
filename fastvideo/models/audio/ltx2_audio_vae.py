@@ -1634,7 +1634,7 @@ class _STFTFn(nn.Module):
             y = y.unsqueeze(1)
         left_pad = max(0, self.win_length - self.hop_length)
         y = F.pad(y, (left_pad, 0))
-        spec = F.conv1d(y, self.forward_basis, stride=self.hop_length, padding=0)
+        spec = F.conv1d(y, self.forward_basis.to(y.dtype), stride=self.hop_length, padding=0)
         n_freqs = spec.shape[1] // 2
         real, imag = spec[:, :n_freqs], spec[:, n_freqs:]
         magnitude = torch.sqrt(real**2 + imag**2)
