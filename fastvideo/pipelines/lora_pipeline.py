@@ -290,7 +290,11 @@ class LoRAPipeline(ComposedPipelineBase):
                             converted_count += 1
             logger.info("Converted %d layers to LoRA layers", converted_count)
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None = None):  # type: ignore
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None,
+                         strength: float = 1.0,
+                         accumulate: bool = False):  # type: ignore
         """
         Load a LoRA adapter into the pipeline and merge it into the transformer.
         Args:
@@ -386,6 +390,8 @@ class LoRAPipeline(ComposedPipelineBase):
                                     lora_alpha=alpha,
                                     training_mode=self.fastvideo_args.training_mode,
                                     lora_path=lora_path,
+                                    strength=strength,
+                                    accumulate=accumulate,
                                 )
                             except Exception as e:
                                 logger.error(

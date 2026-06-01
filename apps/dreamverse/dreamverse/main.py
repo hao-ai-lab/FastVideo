@@ -6,14 +6,16 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from fastvideo.entrypoints.streaming import build_health_router
 from dreamverse.gpu_pool import GPUPool, get_available_gpus
 from dreamverse.session_logger import SessionEventLogger
 
 from dreamverse.config import (
+    AVAILABLE_LORAS,
     DEVTOOLS_ENABLED,
     FRONTEND_STATIC_DIR_CANDIDATES,
     PROMPT_SAFETY_ENABLED,
@@ -102,6 +104,46 @@ async def websocket_endpoint(websocket: WebSocket):
         session_event_logger=runtime.session_event_logger,
     )
     await controller.run()
+
+
+class LoraRequest(BaseModel):
+    strength: float = 1.0
+    style: str = "none"
+
+
+@app.get("/lora/options")
+async def lora_options() -> dict:
+    return {"styles": ["none", *AVAILABLE_LORAS.keys()]}
+
+
+@app.post("/lora")
+async def apply_lora(request: LoraRequest) -> dict:
+    if runtime.gpu_pool is None:
+        raise HTTPException(status_code=503, detail="GPU pool not ready")
+
+    strength = max(0.0, min(1.0, float(request.strength)))
+    style = (request.style or "none").strip().lower()
+    if style not in {"none", *AVAILABLE_LORAS.keys()}:
+        raise HTTPException(status_code=400, detail=f"Unknown style: {style}")
+
+    stack: list[tuple[str, float]] = [("omninft", strength)]
+    if style in AVAILABLE_LORAS:
+        stack.append((style, 1.0))
+
+    try:
+        triggers = await runtime.gpu_pool.apply_lora_stack(stack, style)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {
+        "strength": strength,
+        "style": style,
+        "trigger": (AVAILABLE_LORAS[style]["trigger"] if style in AVAILABLE_LORAS else None),
+        "gpus": {
+            str(gpu_id): trigger
+            for gpu_id, trigger in triggers.items()
+        },
+    }
 
 
 # Serve an exported frontend bundle when present.

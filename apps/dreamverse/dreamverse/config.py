@@ -57,11 +57,13 @@ MODEL_REGISTRY = {
         "name": "FastLTX2",
         "model_path": "FastVideo/LTX2-Distilled-Diffusers",
         "config_model_path": "FastVideo/LTX2-Distilled-Diffusers",
+        "lora_repo": "FastVideo/LTX2-OmniNFT-LoRA",
     },
     "fast-ltx23": {
         "name": "FastLTX23",
         "model_path": "FastVideo/LTX-2.3-Distilled-Diffusers",
         "config_model_path": "FastVideo/LTX-2.3-Distilled-Diffusers",
+        "lora_repo": "FastVideo/LTX-2.3-OmniNFT-LoRA",
     },
 }
 
@@ -165,6 +167,57 @@ def _optional_env(*names: str) -> str | None:
 DEVTOOLS_ENABLED = _env_bool("FASTVIDEO_ENABLE_DEVTOOLS", False)
 PROMPT_SAFETY_ENABLED = _env_bool("FASTVIDEO_ENABLE_PROMPT_SAFETY", False)
 DREAMVERSE_MAX_AUTOTUNE = _env_bool("DREAMVERSE_MAX_AUTOTUNE", True)
+
+DREAMVERSE_MODEL_PATH = (os.getenv("DREAMVERSE_MODEL_PATH", "").strip() or None)
+if DREAMVERSE_MODEL_PATH:
+    MODEL_CONFIG = {
+        **MODEL_CONFIG,
+        "model_path": DREAMVERSE_MODEL_PATH,
+        "config_model_path": DREAMVERSE_MODEL_PATH,
+    }
+
+AVAILABLE_LORAS = {
+    "pixar": {
+        "repo": "vrgamedevgirl84/LTX_2.3_Pixar_Toon_Style_LoRa",
+        "trigger": "P1x4r",
+        "model": "fast-ltx23"
+    },
+    "transition": {
+        "repo": "valiantcat/LTX-2.3-Transition-LORA",
+        "trigger": "zhuanchang",
+        "model": "fast-ltx23"
+    },
+}
+
+
+def _resolve_lora_spec(spec: str) -> str | None:
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    if spec.lower() == "omninft":
+        return MODEL_CONFIG.get("lora_repo")
+    if spec.lower() in AVAILABLE_LORAS:
+        return AVAILABLE_LORAS[spec.lower()]["repo"]
+    return spec
+
+
+def _parse_lora_stack(raw: str) -> list[tuple[str, float]]:
+    out: list[tuple[str, float]] = []
+    for item in (raw or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        spec, _, stren = item.partition("@")
+        resolved = _resolve_lora_spec(spec)
+        if resolved:
+            out.append((resolved, float(stren) if stren.strip() else 1.0))
+    return out
+
+
+DREAMVERSE_LORA_PATH = _resolve_lora_spec(os.getenv("DREAMVERSE_LORA_PATH", ""))
+DREAMVERSE_LORA_NICKNAME = (os.getenv("DREAMVERSE_LORA_NICKNAME", "omninft").strip() or "omninft")
+DREAMVERSE_LORA_STRENGTH = float(os.getenv("DREAMVERSE_LORA_STRENGTH", "1.0"))
+DREAMVERSE_LORA_STACK = _parse_lora_stack(os.getenv("DREAMVERSE_LORA_STACK", ""))
 
 
 def _resolve_devtools_paths(
