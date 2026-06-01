@@ -110,7 +110,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
 class LoraRequest(BaseModel):
     strength: float = 1.0
-    style: str = "none"
+    styles: dict[str, float] = {}
+    style: str = ""
 
 
 @app.get("/lora/options")
@@ -132,31 +133,47 @@ async def apply_lora(request: LoraRequest) -> dict:
         raise HTTPException(status_code=503, detail="GPU pool not ready")
 
     strength = max(0.0, min(1.0, float(request.strength)))
-    style = (request.style or "none").strip().lower()
     allowed_styles = _available_styles_for_active_model()
-    if style not in {"none", *allowed_styles}:
-        raise HTTPException(status_code=400, detail=f"Unknown style for active model: {style}")
+
+    requested = dict(request.styles) if request.styles else {}
+    if not requested and request.style and request.style.strip().lower() != "none":
+        requested = {request.style: 1.0}
+
+    styles_map: dict[str, float] = {}
+    for name, intensity in requested.items():
+        key = str(name).strip().lower()
+        if key in ("", "none"):
+            continue
+        if key not in allowed_styles:
+            raise HTTPException(status_code=400, detail=f"Unknown style for active model: {key}")
+        value = max(0.0, min(1.0, float(intensity)))
+        if value <= 0.0:
+            continue
+        styles_map[key] = value
 
     stack: list[tuple[str, float]] = []
     if _resolve_lora_spec("omninft") is not None:
         stack.append(("omninft", strength))
-    if style in allowed_styles:
-        stack.append((style, 1.0))
+    for key, intensity in styles_map.items():
+        stack.append((key, intensity))
 
     if not stack:
         raise HTTPException(status_code=400,
                             detail="Active model has no OmniNFT LoRA and no style selected; nothing to apply.")
 
     try:
-        triggers = await runtime.gpu_pool.apply_lora_stack(stack, style)
+        triggers = await runtime.gpu_pool.apply_lora_stack(stack)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return {
         "applied": True,
         "strength": strength,
-        "style": style,
-        "trigger": (AVAILABLE_LORAS[style]["trigger"] if style in allowed_styles else None),
+        "styles": styles_map,
+        "triggers": {
+            key: AVAILABLE_LORAS[key]["trigger"]
+            for key in styles_map
+        },
         "gpus": {
             str(gpu_id): trigger
             for gpu_id, trigger in triggers.items()

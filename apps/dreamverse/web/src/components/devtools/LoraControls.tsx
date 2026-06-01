@@ -4,20 +4,24 @@ import React, { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
-import { NativeSelect } from '@/components/ui/native-select';
 
 const STYLE_LABELS: Record<string, string> = {
   none: 'None',
-  pixar: 'Pixar',
+  pixar: 'Pixar Toon',
   transition: 'Transition',
 };
 
 export default function LoraControls() {
-  const [styles, setStyles] = useState<string[]>(['none']);
+  const [styleKeys, setStyleKeys] = useState<string[]>([]);
   const [labels, setLabels] = useState<Record<string, string>>(STYLE_LABELS);
   const [strength, setStrength] = useState(0.8);
-  const [style, setStyle] = useState('none');
+  const [enabled, setEnabled] = useState<Record<string, boolean>>({});
+  const [intensity, setIntensity] = useState<Record<string, number>>({});
   const [status, setStatus] = useState('idle');
+
+  const strengthRef = useRef(0.8);
+  const enabledRef = useRef<Record<string, boolean>>({});
+  const intensityRef = useRef<Record<string, number>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -25,7 +29,14 @@ export default function LoraControls() {
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (data && Array.isArray(data.styles)) {
-          setStyles(data.styles);
+          const keys = data.styles.filter((s: string) => s !== 'none');
+          setStyleKeys(keys);
+          const initIntensity: Record<string, number> = {};
+          keys.forEach((k: string) => {
+            initIntensity[k] = 1.0;
+          });
+          setIntensity(initIntensity);
+          intensityRef.current = initIntensity;
         }
         if (data && data.labels && typeof data.labels === 'object') {
           setLabels((prev) => ({ ...prev, ...data.labels }));
@@ -40,12 +51,18 @@ export default function LoraControls() {
     };
   }, []);
 
-  const applyLora = (nextStrength: number, nextStyle: string) => {
+  const applyNow = () => {
+    const stylesPayload: Record<string, number> = {};
+    for (const key of Object.keys(enabledRef.current)) {
+      if (enabledRef.current[key]) {
+        stylesPayload[key] = intensityRef.current[key] ?? 1.0;
+      }
+    }
     setStatus('applying…');
     fetch('/lora', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ strength: nextStrength, style: nextStyle }),
+      body: JSON.stringify({ strength: strengthRef.current, styles: stylesPayload }),
     })
       .then(async (response) => {
         if (!response.ok) {
@@ -54,17 +71,20 @@ export default function LoraControls() {
         return response.json();
       })
       .then((data) => {
-        const trigger = data?.trigger ? ` · trigger ${data.trigger}` : '';
-        setStatus(`applied omninft@${data.strength} + ${data.style}${trigger}`);
+        const active = Object.keys(data?.styles ?? {});
+        const desc = active.length
+          ? active.map((k) => `${labels[k] ?? k}@${data.styles[k]}`).join(' + ')
+          : 'no style';
+        setStatus(`applied OmniNFT@${data.strength} + ${desc}`);
       })
       .catch((error) => setStatus(`error: ${String(error).slice(0, 120)}`));
   };
 
-  const scheduleApply = (nextStrength: number, nextStyle: string) => {
+  const scheduleApply = () => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
     }
-    debounceRef.current = setTimeout(() => applyLora(nextStrength, nextStyle), 250);
+    debounceRef.current = setTimeout(applyNow, 250);
   };
 
   return (
@@ -78,12 +98,12 @@ export default function LoraControls() {
             LoRA stack
           </span>
           <span className="block text-sm leading-6 text-muted-foreground">
-            OmniNFT strength + optional style adapter (live).
+            OmniNFT strength + stackable style adapters, each with its own intensity (live).
           </span>
         </div>
         <Badge variant="secondary">{status}</Badge>
       </summary>
-      <div className="grid gap-5 border-t border-border px-5 py-4 md:grid-cols-2">
+      <div className="space-y-5 border-t border-border px-5 py-4">
         <div className="space-y-2">
           <Label htmlFor="lora-strength">
             OmniNFT strength · {strength.toFixed(2)}
@@ -98,29 +118,57 @@ export default function LoraControls() {
             onChange={(event) => {
               const next = Number(event.target.value);
               setStrength(next);
-              scheduleApply(next, style);
+              strengthRef.current = next;
+              scheduleApply();
             }}
             className="w-full accent-sky-400"
           />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="lora-style">Style</Label>
-          <NativeSelect
-            id="lora-style"
-            value={style}
-            onChange={(event) => {
-              const next = event.target.value;
-              setStyle(next);
-              scheduleApply(strength, next);
-            }}
-          >
-            {styles.map((option) => (
-              <option key={option} value={option}>
-                {labels[option] ?? STYLE_LABELS[option] ?? option}
-              </option>
-            ))}
-          </NativeSelect>
-        </div>
+
+        {styleKeys.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No style adapters for the active model.
+          </p>
+        ) : (
+          styleKeys.map((key) => (
+            <div key={key} className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={!!enabled[key]}
+                    onChange={(event) => {
+                      const next = { ...enabledRef.current, [key]: event.target.checked };
+                      enabledRef.current = next;
+                      setEnabled(next);
+                      scheduleApply();
+                    }}
+                    className="accent-sky-400"
+                  />
+                  {labels[key] ?? STYLE_LABELS[key] ?? key}
+                </label>
+                <span className="text-xs text-muted-foreground">
+                  {(intensity[key] ?? 1).toFixed(2)}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={intensity[key] ?? 1}
+                disabled={!enabled[key]}
+                onChange={(event) => {
+                  const next = { ...intensityRef.current, [key]: Number(event.target.value) };
+                  intensityRef.current = next;
+                  setIntensity(next);
+                  scheduleApply();
+                }}
+                className="w-full accent-sky-400 disabled:opacity-40"
+              />
+            </div>
+          ))
+        )}
       </div>
     </details>
   );

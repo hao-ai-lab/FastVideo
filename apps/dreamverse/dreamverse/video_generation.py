@@ -215,8 +215,8 @@ class VideoGenerationWorker:
         self.continuation = ContinuationState()
         self.audio_encoder_module = None
         self.audio_processor_module = None
-        self.active_style_trigger: str | None = None
-        self.active_style_position: str | None = None
+        self.active_style_prepend: list[str] = []
+        self.active_style_append: list[str] = []
 
     def _gpu_mem(self) -> str:
         a = torch.cuda.memory_allocated() / 1024**3
@@ -346,7 +346,6 @@ class VideoGenerationWorker:
     def apply_lora_stack(
         self,
         stack: list[tuple[str, float]],
-        style: str | None = None,
     ) -> tuple[str | None, str | None]:
         """Re-apply a runtime LoRA stack and update the active style trigger."""
         if self.generator is None:
@@ -380,24 +379,32 @@ class VideoGenerationWorker:
             )
         print(f"[GPU {self.gpu_id}] Runtime LoRA stack applied ({len(resolved_stack)})")
 
-        style_key = (style or "").strip().lower()
-        if style_key in AVAILABLE_LORAS:
-            self.active_style_trigger = AVAILABLE_LORAS[style_key]["trigger"]
-            self.active_style_position = AVAILABLE_LORAS[style_key].get("position", "append")
-        else:
-            self.active_style_trigger = None
-            self.active_style_position = None
-        return self.active_style_trigger, self.active_style_position
+        prepend: list[str] = []
+        append: list[str] = []
+        for spec, _ in stack:
+            key = (spec or "").strip().lower()
+            if key in AVAILABLE_LORAS:
+                trigger = AVAILABLE_LORAS[key]["trigger"]
+                if AVAILABLE_LORAS[key].get("position", "append") == "prepend":
+                    prepend.append(trigger)
+                else:
+                    append.append(trigger)
+        self.active_style_prepend = prepend
+        self.active_style_append = append
+        combined = " ".join(prepend + append) or None
+        return combined, None
 
     def _inject_style_trigger(self, prompt: str) -> str:
-        trigger = (self.active_style_trigger or "").strip()
-        if not trigger:
-            return prompt
-        if trigger in prompt:
-            return prompt
-        if self.active_style_position == "append":
-            return f"{prompt} {trigger}".strip()
-        return f"{trigger} {prompt}".strip()
+        result = prompt
+        for trigger in self.active_style_prepend:
+            trigger = (trigger or "").strip()
+            if trigger and trigger not in result:
+                result = f"{trigger} {result}".strip()
+        for trigger in self.active_style_append:
+            trigger = (trigger or "").strip()
+            if trigger and trigger not in result:
+                result = f"{result} {trigger}".strip()
+        return result
 
     def _load_audio_encoder(self, model_root: str) -> None:
         if not ENABLE_AUDIO_RE_ENCODE:

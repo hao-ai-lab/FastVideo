@@ -165,7 +165,6 @@ class ReloadModelPayload:
 @dataclass(frozen=True)
 class LoraStackPayload:
     stack: list[tuple[str, float]]
-    style: str | None
 
 
 CommandPayload = (UserStepPayload | WarmupPayload | ReloadModelPayload | LoraStackPayload)

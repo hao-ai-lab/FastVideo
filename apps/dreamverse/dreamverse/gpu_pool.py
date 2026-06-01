@@ -289,7 +289,7 @@ def gpu_worker_process(
                 try:
                     assert isinstance(cmd.payload, LoraStackPayload), (f"APPLY_LORA requires LoraStackPayload, "
                                                                        f"got {type(cmd.payload).__name__}")
-                    trigger, position = worker.apply_lora_stack(cmd.payload.stack, cmd.payload.style)
+                    trigger, position = worker.apply_lora_stack(cmd.payload.stack)
                     response_queue.put(
                         LoraAck(
                             user_id=cmd.user_id,
@@ -385,7 +385,7 @@ def gpu_worker_process(
                 try:
                     assert isinstance(cmd.payload, LoraStackPayload), (f"APPLY_LORA requires LoraStackPayload, "
                                                                        f"got {type(cmd.payload).__name__}")
-                    trigger, position = worker.apply_lora_stack(cmd.payload.stack, cmd.payload.style)
+                    trigger, position = worker.apply_lora_stack(cmd.payload.stack)
                     response_queue.put(
                         LoraAck(
                             user_id=cmd.user_id,
@@ -773,12 +773,11 @@ class GPUSlot:
     async def apply_lora_stack(
         self,
         stack: list[tuple[str, float]],
-        style: str | None,
     ) -> LoraAck:
         """Re-apply a runtime LoRA stack on this GPU's worker."""
         self._active = True
         user_id = "__lora__"
-        payload = LoraStackPayload(stack=stack, style=style)
+        payload = LoraStackPayload(stack=stack)
         response = await self._send_command_tagged(Command(CommandType.APPLY_LORA, payload=payload, user_id=user_id),
                                                    timeout=120.0)
         match response:
@@ -967,13 +966,12 @@ class GPUPool:
     async def apply_lora_stack(
         self,
         stack: list[tuple[str, float]],
-        style: str | None,
     ) -> dict[int, str | None]:
         """Re-apply a runtime LoRA stack across all ready GPU workers."""
         ready_slots = [slot for slot in self.slots.values() if slot.ready]
         if not ready_slots:
             raise RuntimeError("No ready GPU workers to apply LoRA stack.")
-        results = await asyncio.gather(*(slot.apply_lora_stack(stack, style) for slot in ready_slots))
+        results = await asyncio.gather(*(slot.apply_lora_stack(stack) for slot in ready_slots))
         return {slot.gpu_id: ack.style_trigger for slot, ack in zip(ready_slots, results, strict=False)}
 
     async def shutdown(self):
