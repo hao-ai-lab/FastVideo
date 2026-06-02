@@ -271,9 +271,9 @@ export default function ChatBar({
 						<Button onClick={onStartNewProject} size="sm" className="rounded-full px-5">
 							New Project
 						</Button>
-						<a href="https://docs.google.com/forms/d/e/1FAIpQLSe5zpO1iD8Ds-Ih-fOLm64qd7YZVvuvAyHuJaAfw1hkRHTe_A/viewform?usp=publish-editor" target="_blank" rel="noopener noreferrer">
+						<a href="https://haoailab.com/blogs/dreamverse/" target="_blank" rel="noopener noreferrer">
 							<Button variant="outline" size="sm" className="rounded-full px-5">
-								Join Waitlist
+								Blog
 							</Button>
 						</a>
 					</div>
