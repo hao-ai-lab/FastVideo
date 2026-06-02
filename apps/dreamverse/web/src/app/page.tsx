@@ -325,6 +325,7 @@ export default function Page() {
 	const [ttffValueMs, setTtffValueMs] = useState<number | null>(null);
 	const ttffIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const pendingInitialPromptRef = useRef("");
+	const [initialImageDataUrl, setInitialImageDataUrl] = useState("");
 	const lastArchivedReplayKeyRef = useRef("");
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [currentThumbnail, setCurrentThumbnail] = useState<string | null>(null);
@@ -1793,7 +1794,9 @@ export default function Page() {
 			preset_label: getInitialPresetLabel(),
 			curated_prompts: segmentPrompts,
 			initial_rollout_prompt: normalizeInitialPrompt(pendingInitialPromptRef.current),
-			initial_image: null,
+			initial_image: initialImageDataUrl
+				? { data_url: initialImageDataUrl, mime_type: initialImageDataUrl.split(";")[0].split(":")[1] || "image/png", name: "upload.png" }
+				: null,
 			single_clip_mode: false,
 			enhancement_enabled: sessionStore.get().enhancementEnabled,
 			auto_extension_enabled: manualMode ? false : sessionStore.get().autoExtensionEnabled,
@@ -1977,6 +1980,7 @@ export default function Page() {
 		setCurrentThumbnail(null);
 		const initialPrompt = normalizeInitialPrompt(sessionStore.get().livePromptDraft as string);
 		pendingInitialPromptRef.current = initialPrompt;
+		setInitialImageDataUrl("");
 		const rCAR = !uiStore.get().devtoolsMode && !uiStore.get().demoMode;
 		// The "Steering mode" toggle is authoritative: checked = manual per-segment steering,
 		// unchecked = automatic 6-segment rollout (default).
@@ -2816,6 +2820,9 @@ export default function Page() {
 							continuationDraft={livePromptDraft as string}
 							manualContinuationEnabled={manualContinuationMode as boolean}
 							onModeChange={(manual) => sessionStore.patch({ manualContinuationMode: manual })}
+							initialImageDataUrl={initialImageDataUrl}
+							onImageUpload={(dataUrl) => setInitialImageDataUrl(dataUrl)}
+							onImageClear={() => setInitialImageDataUrl("")}
 							canJoinSession={canStartSession}
 							canSubmitContinuation={canSubmitContinuation}
 							sessionExpired={sessionExpired as boolean}
