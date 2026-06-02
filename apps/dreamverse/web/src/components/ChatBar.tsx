@@ -23,6 +23,8 @@ interface Props {
 	projectResetPending?: boolean;
 	viewingReadOnly?: boolean;
 	waitingForSegmentPrompt?: boolean;
+	manualContinuationEnabled?: boolean;
+	onModeChange?: (manual: boolean) => void;
 	onPresetGenerate?: (presetId: string) => void;
 	onContinuationInput?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
 	onContinuationKeydown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -48,6 +50,8 @@ export default function ChatBar({
 	projectResetPending = false,
 	viewingReadOnly = false,
 	waitingForSegmentPrompt = false,
+	manualContinuationEnabled = false,
+	onModeChange = () => {},
 	onPresetGenerate = () => {},
 	onContinuationInput = () => {},
 	onContinuationKeydown = () => {},
@@ -353,6 +357,44 @@ export default function ChatBar({
 			{projectResetPending && sessionStarted && (
 				<div className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-4 py-2.5 text-center text-xs text-sky-700 dark:text-sky-300">
 					Starting a new project after the current shot finishes. Your GPU session stays active.
+				</div>
+			)}
+
+			{!sessionStarted && (
+				<div className="flex flex-col items-center gap-1.5">
+					<div className="inline-flex rounded-full border border-input bg-card/65 p-0.5 shadow-sm backdrop-blur-sm">
+						<button
+							type="button"
+							onClick={() => onModeChange(false)}
+							aria-pressed={!manualContinuationEnabled}
+							className={cn(
+								"rounded-full px-4 py-1 text-xs font-medium transition-colors",
+								!manualContinuationEnabled
+									? "bg-primary text-primary-foreground shadow-sm"
+									: "text-muted-foreground hover:text-foreground",
+							)}
+						>
+							Auto rollout
+						</button>
+						<button
+							type="button"
+							onClick={() => onModeChange(true)}
+							aria-pressed={manualContinuationEnabled}
+							className={cn(
+								"rounded-full px-4 py-1 text-xs font-medium transition-colors",
+								manualContinuationEnabled
+									? "bg-primary text-primary-foreground shadow-sm"
+									: "text-muted-foreground hover:text-foreground",
+							)}
+						>
+							Steering
+						</button>
+					</div>
+					<p className="text-[11px] text-muted-foreground">
+						{manualContinuationEnabled
+							? "Drive each scene yourself — type what happens next, one segment at a time."
+							: "Automatic 6-segment story rollout."}
+					</p>
 				</div>
 			)}
 

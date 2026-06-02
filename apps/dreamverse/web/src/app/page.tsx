@@ -237,6 +237,7 @@ export default function Page() {
 		enhancementEnabled,
 		promptExtensionError,
 		autoExtensionEnabled,
+		manualContinuationMode,
 		autoExtensionTimeoutHint,
 		loopGenerationEnabled,
 		generationPaused,
@@ -1555,6 +1556,14 @@ export default function Page() {
 		);
 	}
 
+	// Steering (manual continuation) vs the automatic 6-segment rollout — a pre-session
+	// preference honored when the session starts.
+	function handleManualContinuationToggle(event: any) {
+		sessionStore.patch({
+			manualContinuationMode: Boolean(event.currentTarget.checked),
+		});
+	}
+
 	function handleLoopGenerationToggle(event: any) {
 		sessionStore.patch({
 			loopGenerationEnabled: Boolean(event.currentTarget.checked),
@@ -1769,7 +1778,14 @@ export default function Page() {
 	}
 
 	function buildProjectInitPayload(type: "session_init_v2" | "project_init_v1") {
-		const segmentPrompts = getSessionInitPrompts();
+		const manualMode = Boolean(sessionStore.get().manualContinuationMode);
+		let segmentPrompts = getSessionInitPrompts();
+		// Steering mode: a preset/rollout only seeds the FIRST segment; the user
+		// drives every subsequent segment by hand. Force auto/loop off so the
+		// backend waits for the user's next prompt instead of auto-continuing.
+		if (manualMode) {
+			segmentPrompts = segmentPrompts.slice(0, 1);
+		}
 		setSeedPrompts(segmentPrompts);
 		return {
 			type,
@@ -1780,9 +1796,9 @@ export default function Page() {
 			initial_image: null,
 			single_clip_mode: false,
 			enhancement_enabled: sessionStore.get().enhancementEnabled,
-			auto_extension_enabled: sessionStore.get().autoExtensionEnabled,
-			loop_generation_enabled: sessionStore.get().loopGenerationEnabled,
-			manual_continuation_mode: sessionStore.get().manualContinuationMode,
+			auto_extension_enabled: manualMode ? false : sessionStore.get().autoExtensionEnabled,
+			loop_generation_enabled: manualMode ? false : sessionStore.get().loopGenerationEnabled,
+			manual_continuation_mode: manualMode,
 		};
 	}
 
@@ -1962,7 +1978,9 @@ export default function Page() {
 		const initialPrompt = normalizeInitialPrompt(sessionStore.get().livePromptDraft as string);
 		pendingInitialPromptRef.current = initialPrompt;
 		const rCAR = !uiStore.get().devtoolsMode && !uiStore.get().demoMode;
-		const nextManualContinuationMode = Boolean(initialPrompt) && getSessionInitPrompts().length === 0;
+		// The "Steering mode" toggle is authoritative: checked = manual per-segment steering,
+		// unchecked = automatic 6-segment rollout (default).
+		const nextManualContinuationMode = Boolean(sessionStore.get().manualContinuationMode);
 		sessionStore.patch({
 			sessionNotice: "",
 			sessionExpired: false,
@@ -2513,6 +2531,7 @@ export default function Page() {
 				selectedPresetId={selectedPresetId as string}
 				enhancementEnabled={enhancementEnabled as boolean}
 				autoExtensionEnabled={autoExtensionEnabled as boolean}
+				manualContinuationEnabled={manualContinuationMode as boolean}
 				loopGenerationEnabled={loopGenerationEnabled as boolean}
 				canJoinSession={canJoinSession as boolean}
 				canSubmitContinuation={canSubmitContinuation}
@@ -2525,6 +2544,7 @@ export default function Page() {
 				onEnhancementToggle={handleEnhancementToggle}
 				onCuratedPromptLimitChange={handleCuratedPromptLimitChange}
 				onAutoExtensionToggle={handleAutoExtensionToggle}
+				onManualContinuationToggle={handleManualContinuationToggle}
 				onLoopToggle={handleLoopGenerationToggle}
 				onJoin={joinSession}
 				onLeave={leaveSession}
@@ -2794,6 +2814,8 @@ export default function Page() {
 							isGenerating={loadingAnimation as boolean}
 							storyPresets={storyPresets as any[]}
 							continuationDraft={livePromptDraft as string}
+							manualContinuationEnabled={manualContinuationMode as boolean}
+							onModeChange={(manual) => sessionStore.patch({ manualContinuationMode: manual })}
 							canJoinSession={canStartSession}
 							canSubmitContinuation={canSubmitContinuation}
 							sessionExpired={sessionExpired as boolean}
