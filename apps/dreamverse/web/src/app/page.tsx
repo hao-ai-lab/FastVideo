@@ -436,14 +436,40 @@ export default function Page() {
 		const currentActiveClip = activeClip as Record<string, any> | null;
 		if (currentActiveClip?.blob instanceof Blob) return true;
 		if ((completedClips as Record<string, any>[]).some((clip) => clip?.blob instanceof Blob)) return true;
-		// Once playback has started the live AV pipeline holds playable segments, so the user can
-		// download the in-progress video at any time (handleDownloadVideo remuxes live segments).
-		return Boolean(avPlaybackStarted);
-	}, [activeClip, completedClips, avPlaybackStarted]);
+		// Steering only: once playback has started the live AV pipeline holds playable segments, so
+		// the user can download the in-progress video at any time (handleDownloadVideo remuxes live
+		// segments). Auto mode keeps its original blob-gated behavior.
+		return Boolean(manualContinuationMode) && Boolean(avPlaybackStarted);
+	}, [activeClip, completedClips, avPlaybackStarted, manualContinuationMode]);
+
+	// Steering mode scene list (oldest first). Primary source is the user's own words, captured
+	// stably at submit time as `rawText` (the backend later overwrites text/source with the
+	// enhanced prompt, so we never read those). A segment with no user prompt — e.g. a preset's
+	// opening scene — falls back to promptHistory (the actual prompt that drove that segment).
+	const steeringScenes = useMemo(() => {
+		if (!manualContinuationMode) return [] as Record<string, any>[];
+		const userScenes = (promptEvents as Record<string, any>[])
+			.filter((e) => e?.steeringUserPrompt && !e?.steeringFailed && typeof e?.rawText === "string" && e.rawText.trim())
+			.slice()
+			.reverse() // oldest -> newest
+			.map((e) => ({ id: e.promptId, prompt: e.rawText as string }));
+		const scenes: Record<string, any>[] = [];
+		// Preset opening: a leading non-user segment (curated seed) with no user prompt of its own.
+		const userSources = new Set(["user_raw", "user", "user_enhanced", "user_rewrite", "user_enhancement_failed"]);
+		const firstHist = ((promptHistory as Record<string, any>[]).slice().reverse())[0];
+		if (firstHist && !userSources.has(String(firstHist?.source || "")) && typeof firstHist?.prompt === "string" && firstHist.prompt.trim()) {
+			scenes.push({ id: firstHist.id || "scene_open", prompt: firstHist.prompt });
+		}
+		scenes.push(...userScenes);
+		return scenes;
+	}, [manualContinuationMode, promptEvents, promptHistory]);
 
 	const hasEdits = useMemo(
-		() => Boolean(sessionStarted) && (promptEvents as Record<string, any>[]).some((e) => typeof e?.text === "string" && e.text.trim() && String(e?.source || "").trim() === "user_rewrite"),
-		[sessionStarted, promptEvents],
+		() => Boolean(sessionStarted) && (
+			(promptEvents as Record<string, any>[]).some((e) => typeof e?.text === "string" && e.text.trim() && String(e?.source || "").trim() === "user_rewrite")
+			|| (Boolean(manualContinuationMode) && steeringScenes.length > 0)
+		),
+		[sessionStarted, promptEvents, manualContinuationMode, steeringScenes],
 	);
 
 	// Viewing mode: track which clip is selected (defaults to last clip)
@@ -1469,6 +1495,11 @@ export default function Page() {
 			status: "submitted",
 			source: "user_raw",
 			text: prompt,
+			// Stable record of the user's own words for the steering scene list. The backend
+			// later overwrites `text`/`source` with the enhanced prompt via prompt/ready, but
+			// these two fields are never touched by trackPromptEvent.
+			steeringUserPrompt: true,
+			rawText: prompt,
 		});
 		ws.send(
 			JSON.stringify({
@@ -2020,6 +2051,8 @@ export default function Page() {
 				status: "rewrite_requested",
 				source: "user_rewrite",
 				text: initialPrompt,
+				// In steering mode the typed opening is the user's Scene 1 — record it stably.
+				...(nextManualContinuationMode ? { steeringUserPrompt: true, rawText: initialPrompt } : {}),
 			});
 		}
 		setSeedPrompts(getSessionInitPrompts());
@@ -2772,6 +2805,8 @@ export default function Page() {
 					<section className={cn("mx-auto w-full max-w-2xl", hasEdits && "flex-1 min-h-0 overflow-y-auto")}>
 						<Workspace
 							promptEvents={promptEvents as any[]}
+							manualMode={manualContinuationMode as boolean}
+							sceneHistory={steeringScenes as any[]}
 							currentThumbnail={currentThumbnail}
 							originalLabel={pendingInitialPromptRef.current || (selectedPreset as Record<string, any>)?.label || ""}
 							sessionStarted={sessionStarted as boolean}
