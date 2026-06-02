@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
-const FASTVIDEO_REPO_URL = "https://haoailab.com/blogs/dreamverse/";
 const FASTVIDEO_BLOG_URL = "https://haoailab.com/blogs/dreamverse/";
 
 interface Props {
@@ -29,13 +28,13 @@ export default function Header({ timeLeft = null, formatTime = (seconds) => `${s
 							<SidePanelOpenFilled size={20} />
 						</Button>
 					)}
-					<a href={FASTVIDEO_REPO_URL} target="_blank" rel="noopener noreferrer" title="FastVideo on GitHub">
+					<a href="/" title="FastVideo home">
 						<Image src="/logo.svg" alt="FastVideo" width={32} height={32} className="h-8 w-auto sm:h-9 transition-opacity hover:opacity-70" />
 					</a>
 					<div className="hidden sm:flex items-center gap-3">
-						<a href="https://docs.google.com/forms/d/e/1FAIpQLSe5zpO1iD8Ds-Ih-fOLm64qd7YZVvuvAyHuJaAfw1hkRHTe_A/viewform?usp=publish-editor" target="_blank" rel="noopener noreferrer">
+						<a href={FASTVIDEO_BLOG_URL} target="_blank" rel="noopener noreferrer">
 							<Button variant="outline" size="sm" className="gap-1.5 rounded-full px-3 text-xs">
-								Join Waitlist
+								Blog
 								<ExternalLink className="size-3 opacity-60" />
 							</Button>
 						</a>
@@ -53,9 +52,9 @@ export default function Header({ timeLeft = null, formatTime = (seconds) => `${s
 			</div>
 
 			<div className="flex sm:hidden items-center gap-2 px-4 pb-3">
-				<a href="https://docs.google.com/forms/d/e/1FAIpQLSe5zpO1iD8Ds-Ih-fOLm64qd7YZVvuvAyHuJaAfw1hkRHTe_A/viewform?usp=publish-editor" target="_blank" rel="noopener noreferrer">
+				<a href={FASTVIDEO_BLOG_URL} target="_blank" rel="noopener noreferrer">
 					<Button variant="outline" size="sm" className="gap-1.5 rounded-full px-3 text-xs">
-						Join Waitlist
+						Blog
 						<ExternalLink className="size-3 opacity-60" />
 					</Button>
 				</a>
