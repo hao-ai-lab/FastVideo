@@ -13,6 +13,7 @@ from multiprocessing import Process, Queue
 
 from dreamverse.config import (
     DEFAULT_MODEL_ID,
+    DREAMVERSE_SP_SIZE,
     MODEL_REGISTRY,
     STARTUP_WARMUP_ENABLED,
     STARTUP_WARMUP_PROMPT,
@@ -845,8 +846,20 @@ class GPUPool:
     """Manages multiple GPU worker subprocesses."""
 
     def __init__(self, gpu_ids: list[int]):
-        self.gpu_ids = gpu_ids
-        self.slots: dict[int, GPUSlot] = {gpu_id: GPUSlot(gpu_id, str(gpu_id)) for gpu_id in gpu_ids}
+        sp_size = DREAMVERSE_SP_SIZE
+        groups = [gpu_ids[i:i + sp_size] for i in range(0, len(gpu_ids), sp_size)]
+        groups = [g for g in groups if len(g) == sp_size]
+        if not groups:
+            raise RuntimeError(
+                f"Not enough GPUs for DREAMVERSE_SP_SIZE={sp_size}: available={gpu_ids}"
+            )
+        if sp_size > 1:
+            print(f"[INFO] Sequence-parallel slots (sp_size={sp_size}): "
+                  + ", ".join("{" + ",".join(map(str, g)) + "}" for g in groups))
+        self.gpu_ids = [g[0] for g in groups]
+        self.slots: dict[int, GPUSlot] = {
+            g[0]: GPUSlot(g[0], ",".join(str(x) for x in g)) for g in groups
+        }
         self.waiting_list: list[tuple[str, asyncio.Event, WebSocket]] = []
         self.client_gpu_map: dict[str, int] = {}
         self._pool_lock = asyncio.Lock()
