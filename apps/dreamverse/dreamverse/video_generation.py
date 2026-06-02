@@ -265,6 +265,7 @@ class VideoGenerationWorker:
             EngineConfig,
             GeneratorConfig,
             OffloadConfig,
+            ParallelismConfig,
             PipelineSelection,
             QuantizationConfig,
         )
@@ -316,7 +317,7 @@ class VideoGenerationWorker:
                 preset_overrides={
                     "refine": {
                         "enabled": True,
-                        "num_inference_steps": 2,
+                        "num_inference_steps": 3,
                         "guidance_scale": 1.0,
                         "add_noise": True,
                     },
@@ -489,7 +490,7 @@ class VideoGenerationWorker:
             num_inference_steps=NUM_INFERENCE_STEPS,
             guidance_scale=1.0,
             seed=10,
-            ltx2_image_crf=0.0,
+            ltx2_image_crf=(33.0 if image_path and segment_idx == 1 else 0.0),
             image_path=image_path if segment_idx == 1 else None,
             return_continuation_state=False,
         )

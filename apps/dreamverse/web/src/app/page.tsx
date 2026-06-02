@@ -9,7 +9,7 @@ import SessionTimeoutModal from "@/components/SessionTimeoutModal";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import VideoPlayer from "@/components/VideoPlayer";
-import Workspace from "@/components/Workspace";
+import Workspace, { SceneHistoryList } from "@/components/Workspace";
 import { saveProject, saveProjectMetadata, listProjects, loadProjectClips, deleteProject, pruneOldProjects, type StoredProject, type StoredClip } from "@/lib/projectStorage";
 import { isInfrastructureError } from "@/lib/ws/reducer";
 import { useStore } from "@/hooks/useStore";
@@ -80,7 +80,7 @@ function yieldToEventLoop(): Promise<void> {
 
 const HERO_WAVE_LIGHT = ["#2A4A98", "#4878E5", "#6FA0F2", "#B0BCC8", "#E8D99E", "#D8C844", "#C2A620"];
 const HERO_WAVE_DARK = ["#143468", "#1E58B8", "#3892F0", "#80B8E8", "#B8D0EA", "#E2D498", "#DABB50"];
-const HERO_TEXT = "Direct scenes in seconds";
+const HERO_TEXT = "Direct scenes in seconds with";
 
 function HeroTagline() {
 	const ref = useRef<HTMLHeadingElement>(null);
@@ -166,6 +166,8 @@ function HeroTagline() {
 					</span>
 				</Fragment>
 			))}
+			<span data-char className="transition-[color,filter] duration-150">{" "}</span>
+			<img src="/logo.svg" alt="FastVideo" className="inline-block h-[1.1em] w-auto align-middle" />
 		</h1>
 	);
 }
@@ -467,9 +469,8 @@ export default function Page() {
 	const hasEdits = useMemo(
 		() => Boolean(sessionStarted) && (
 			(promptEvents as Record<string, any>[]).some((e) => typeof e?.text === "string" && e.text.trim() && String(e?.source || "").trim() === "user_rewrite")
-			|| (Boolean(manualContinuationMode) && steeringScenes.length > 0)
 		),
-		[sessionStarted, promptEvents, manualContinuationMode, steeringScenes],
+		[sessionStarted, promptEvents],
 	);
 
 	// Viewing mode: track which clip is selected (defaults to last clip)
@@ -2711,6 +2712,7 @@ export default function Page() {
 			/>
 			<Header timeLeft={headerTimeLeft} formatTime={formatTime} onToggleSidebar={() => setSidebarOpen((prev) => !prev)} />
 
+			<div className={cn("flex flex-1 min-h-0 flex-col", sessionStarted && "pb-16 sm:pb-28")}>
 			<div className="relative flex flex-1 min-h-0 flex-col justify-center px-4 pb-2 sm:px-6 sm:pb-12">
 				{isViewingMode && (
 					<>
@@ -2806,7 +2808,6 @@ export default function Page() {
 						<Workspace
 							promptEvents={promptEvents as any[]}
 							manualMode={manualContinuationMode as boolean}
-							sceneHistory={steeringScenes as any[]}
 							currentThumbnail={currentThumbnail}
 							originalLabel={pendingInitialPromptRef.current || (selectedPreset as Record<string, any>)?.label || ""}
 							sessionStarted={sessionStarted as boolean}
@@ -2876,6 +2877,12 @@ export default function Page() {
 						/>
 					</motion.div>
 				</div>
+			</div>
+			{manualContinuationMode && (
+				<div className="px-4 sm:px-6">
+					<SceneHistoryList sceneHistory={steeringScenes as any[]} />
+				</div>
+			)}
 			</div>
 		</main>
 	);
