@@ -207,8 +207,8 @@ export default function VideoPlayer({
 		};
 	}, [generatingNext, sessionStarted]);
 
-	// Drive a ~8s progress bar during generation so the wait has a visible ETA.
-	const GEN_DURATION_MS = 8000;
+	// Drive a ~10.5s progress bar during generation so the wait has a visible ETA.
+	const GEN_DURATION_MS = 10500;
 	const [genProgress, setGenProgress] = useState(0);
 	useEffect(() => {
 		if (!generatingNext) {
@@ -264,7 +264,7 @@ export default function VideoPlayer({
 							</div>
 						)}
 
-						{/* Steering mode: generating the next segment — show a ~8s progress bar so the wait has an ETA.
+						{/* Steering mode: generating the next segment — show a ~10.5s progress bar so the wait has an ETA.
 							Gated on playbackReachedEnd like "Segment complete": scrubbing back hides it, playing to the end re-shows it. */}
 						{sessionStarted && generatingNext && playbackReachedEnd && !mediaAppendError && !inQueue && (
 							<div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-end gap-3 bg-gradient-to-t from-slate-950/85 via-slate-950/15 to-transparent p-5 pb-7 text-center">
