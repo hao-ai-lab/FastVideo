@@ -112,6 +112,8 @@ class _FakeSlot:
             "reset_conditioning": reset_conditioning,
         })
         queue = self._stream_queues[client_id]
+        if self._step_delay_s > 0:
+            await asyncio.sleep(self._step_delay_s)
         await queue.put(MediaInit(
             user_id=client_id,
             segment_idx=segment_idx,
@@ -132,8 +134,6 @@ class _FakeSlot:
             stream_id=f"stream-{segment_idx}",
             chunks=1,
         ))
-        if self._step_delay_s > 0:
-            await asyncio.sleep(self._step_delay_s)
         return {"e2e_latency_ms": 10.0}
 
 
@@ -423,14 +423,6 @@ def test_websocket_flow_emits_required_session_events():
             for event in fake_logger.events
             if event["event"] == "segment_complete"
         )
-        latency = segment_complete.get("latency_ms")
-        assert isinstance(latency, dict)
-        assert set(latency.keys()) == {
-            "total",
-            "worker_e2e",
-            "main_user_step",
-            "overhead",
-        }
         assert isinstance(segment_complete.get("data_size_bytes"), int)
         assert segment_complete["data_size_bytes"] > 0
     finally:

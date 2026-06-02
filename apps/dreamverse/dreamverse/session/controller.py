@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket, WebSocketDisconnect
 from dreamverse.gpu_pool import GPUSlot
 from dreamverse.session_init_image import cleanup_session_init_image, persist_session_init_image
-from dreamverse.worker_ipc import MediaChunk, MediaComplete, MediaInit
+from dreamverse.worker_ipc import MediaChunk, MediaComplete, MediaError, MediaInit
 
 from dreamverse.config import (
     DEFAULT_MODEL_ID,
@@ -155,6 +155,8 @@ class SessionController:
         websocket_reader_task: asyncio.Task | None = None
         prompt_worker_task: asyncio.Task | None = None
         rewrite_seed_prompts_task: asyncio.Task | None = None
+        # Drains worker fMP4 events while the main loop can request the next segment.
+        media_relay_task: asyncio.Task | None = None
         session_init_image = None
 
         async def session_timeout():
@@ -288,9 +290,16 @@ class SessionController:
             locked_segment_prompts: list[str] = []
             seed_prompt_memory: list[str] = list(curated_prompts)
             generated_segment_count = 0
+            # fMP4 relay state:
+            # - stream_* counters and stream_complete_pending gate stream completion.
+            # - segment_total_hints supports ltx2_segment_complete payloads.
+            stream_generated_segment_count = 0
+            media_completed_segment_count = 0
             generation_cap_blocked = False
             auto_extension_blocked_segment_idx: int | None = None
             prompt_sources_drained_logged = False
+            stream_complete_pending = False
+            segment_total_hints: dict[int, int] = {}
             generation_paused = bool(initial_rollout_prompt and not single_clip_mode and len(curated_prompts) == 0)
             pending_seed_reset = False
             pending_seed_reset_reason = ""
@@ -435,9 +444,13 @@ class SessionController:
                 nonlocal pending_reset_conditioning
                 nonlocal force_curated_restart_segment
                 nonlocal generated_segment_count
+                nonlocal stream_generated_segment_count
+                nonlocal media_completed_segment_count
                 nonlocal generation_cap_blocked
                 nonlocal auto_extension_blocked_segment_idx
                 nonlocal prompt_sources_drained_logged
+                nonlocal stream_complete_pending
+                nonlocal segment_total_hints
                 nonlocal pending_simple_prompt_submission
                 nonlocal single_clip_waiting_for_request
                 nonlocal rollout_waiting_for_rewrite
@@ -527,9 +540,13 @@ class SessionController:
                 pending_reset_conditioning = True
                 force_curated_restart_segment = False
                 generated_segment_count = 0
+                stream_generated_segment_count = 0
+                media_completed_segment_count = 0
                 generation_cap_blocked = False
                 auto_extension_blocked_segment_idx = None
                 prompt_sources_drained_logged = False
+                stream_complete_pending = False
+                segment_total_hints.clear()
                 pending_simple_prompt_submission = None
                 single_clip_waiting_for_request = False
                 rollout_waiting_for_rewrite = False
@@ -1313,6 +1330,118 @@ class SessionController:
 
             av_event_queue = slot.register_stream_queue(client_id)
 
+            async def maybe_send_stream_complete() -> None:
+                """Send 'stream-complete' only after every generated segment has completed fMP4 media."""
+                nonlocal project_stream_started
+                nonlocal stream_complete_pending
+                if not project_stream_started or not stream_complete_pending:
+                    return
+                if (stream_generated_segment_count > 0
+                        and media_completed_segment_count < stream_generated_segment_count):
+                    return
+                project_stream_started = False
+                stream_complete_pending = False
+                await ws_send_json({"type": "ltx2_stream_complete"})
+                await log_event("ws_stream_complete")
+
+            async def media_relay_loop() -> None:
+                """Relay fMP4 media from this slot's per-user queue to the browser.
+
+                Generation waits for StepComplete and can then request the next
+                segment. This task independently forwards media events for
+                already-generated segments, and closes the browser stream only
+                after media completion catches up with generated segments.
+                """
+                nonlocal media_completed_segment_count
+                current_media_segment_idx: int | None = None
+                media_chunks_relayed = 0
+                media_bytes_relayed = 0
+                while not stop_event.is_set():
+                    try:
+                        event = await asyncio.wait_for(av_event_queue.get(), timeout=0.1)
+                    except asyncio.TimeoutError:
+                        continue
+
+                    match event:
+                        case MediaInit(mime=mime, stream_id=stream_id):
+                            current_media_segment_idx = event.segment_idx
+                            media_chunks_relayed = 0
+                            media_bytes_relayed = 0
+                            await ws_send_json({
+                                "type": "media_init",
+                                "segment_idx": event.segment_idx,
+                                "mime": mime,
+                                "stream_id": stream_id,
+                                "mode": "av_fmp4",
+                            })
+                        case MediaChunk(
+                            chunk=chunk_bytes,
+                            chunk_offset=chunk_offset,
+                            chunk_length=chunk_length,
+                            uses_shared_buffer=uses_shared,
+                        ):
+                            if (uses_shared and chunk_offset is not None and chunk_length is not None
+                                    and slot.shared_stream_buffer is not None):
+                                start = chunk_offset
+                                end = start + chunk_length
+                                chunk = bytes(slot.shared_stream_buffer[start:end])
+                            else:
+                                chunk = chunk_bytes or b""
+                            if chunk:
+                                if current_media_segment_idx != event.segment_idx:
+                                    current_media_segment_idx = event.segment_idx
+                                    media_chunks_relayed = 0
+                                    media_bytes_relayed = 0
+                                media_chunks_relayed += 1
+                                media_bytes_relayed += len(chunk)
+                                await ws_send_bytes(chunk)
+                        case MediaComplete(stream_id=stream_id, chunks=n):
+                            media_completed_segment_count += 1
+                            if current_media_segment_idx != event.segment_idx:
+                                current_media_segment_idx = event.segment_idx
+                                media_chunks_relayed = 0
+                                media_bytes_relayed = 0
+                            relayed_chunks = n if n is not None else media_chunks_relayed
+                            await ws_send_json({
+                                "type": "media_segment_complete",
+                                "segment_idx": event.segment_idx,
+                                "stream_id": stream_id,
+                                "chunks": relayed_chunks,
+                            })
+                            total_segments_hint = segment_total_hints.get(
+                                event.segment_idx,
+                                max(event.segment_idx, len(curated_prompts)),
+                            )
+                            await ws_send_json({
+                                "type": "ltx2_segment_complete",
+                                "segment_idx": event.segment_idx,
+                                "total_segments": total_segments_hint,
+                            })
+                            await log_event(
+                                "segment_complete",
+                                {
+                                    "segment_idx": event.segment_idx,
+                                    "data_size_bytes": media_bytes_relayed,
+                                },
+                            )
+                            print(f"[GPU {gpu_id}] Segment {event.segment_idx}: "
+                                  f"relayed av chunks={media_chunks_relayed}, "
+                                  f"bytes={media_bytes_relayed / (1024 * 1024):.1f}MB")
+                            await maybe_send_stream_complete()
+                        case MediaError(stream_id=stream_id, message=message):
+                            await ws_send_json({
+                                "type": "error",
+                                "message": f"AV streaming failed for segment {event.segment_idx}: {message}",
+                                "segment_idx": event.segment_idx,
+                                "stream_id": stream_id,
+                            })
+                            stop_event.set()
+                        case _:
+                            print(f"[GPU {gpu_id}] Unknown AV event: "
+                                  f"{type(event).__name__}")
+
+            media_relay_task = asyncio.create_task(media_relay_loop())
+
             while not stop_event.is_set():
                 if pending_project_end:
                     await enter_project_idle()
@@ -1320,6 +1449,13 @@ class SessionController:
                     continue
 
                 if not project_active:
+                    await asyncio.sleep(0.05)
+                    continue
+
+                if (pending_seed_reset and project_stream_started
+                        and media_completed_segment_count < stream_generated_segment_count):
+                    stream_complete_pending = True
+                    await maybe_send_stream_complete()
                     await asyncio.sleep(0.05)
                     continue
 
@@ -1337,6 +1473,10 @@ class SessionController:
                     single_clip_waiting_for_request = False
                     dropped_raw = drain_queue_nowait(raw_prompt_queue)
                     dropped_ready = drain_queue_nowait(ready_prompt_queue)
+                    stream_generated_segment_count = 0
+                    media_completed_segment_count = 0
+                    stream_complete_pending = False
+                    segment_total_hints.clear()
 
                     loop_iteration += 1
                     project_stream_started = True
@@ -1399,9 +1539,8 @@ class SessionController:
                         f"generated_segments={generated_segment_count}); "
                         "waiting for rollout rewrite",
                     )
-                    project_stream_started = False
-                    await ws_send_json({"type": "ltx2_stream_complete"})
-                    await log_event("ws_stream_complete")
+                    stream_complete_pending = True
+                    await maybe_send_stream_complete()
 
                 if generation_cap_blocked:
                     await asyncio.sleep(0.05)
@@ -1612,86 +1751,23 @@ class SessionController:
 
                 t_start = time.perf_counter()
                 timings: dict = {}
-                av_chunks_relayed = 0
-                av_bytes_relayed = 0
-                av_streamed = False
+                segment_total_hints[segment_idx] = total_segments_hint
 
                 step_reset_conditioning = pending_reset_conditioning
                 pending_reset_conditioning = False
                 step_image_path = (str(session_init_image.file_path)
                                    if segment_idx == 1 and session_init_image is not None else None)
-                step_task = asyncio.create_task(
-                    slot.user_step(
+                segment_generation_active = True
+                try:
+                    timings = await slot.user_step(
                         client_id,
                         prompt=prompt,
                         segment_idx=segment_idx,
                         image_path=step_image_path,
                         reset_conditioning=step_reset_conditioning,
-                    ))
-                segment_generation_active = True
-                try:
-                    while not stop_event.is_set() and (not step_task.done() or not av_event_queue.empty()):
-                        try:
-                            event = await asyncio.wait_for(av_event_queue.get(), timeout=0.05)
-                        except asyncio.TimeoutError:
-                            continue
-
-                        if event.segment_idx != segment_idx:
-                            print(f"[GPU {gpu_id}] Ignoring out-of-order AV event: "
-                                  f"event_seg={event.segment_idx}, current_seg={segment_idx}, "
-                                  f"kind={type(event).__name__}")
-                            continue
-
-                        match event:
-                            case MediaInit(mime=mime, stream_id=stream_id):
-                                av_streamed = True
-                                await ws_send_json({
-                                    "type": "media_init",
-                                    "segment_idx": segment_idx,
-                                    "mime": mime,
-                                    "stream_id": stream_id,
-                                    "mode": "av_fmp4",
-                                })
-                            case MediaChunk(
-                                chunk=chunk_bytes,
-                                chunk_offset=chunk_offset,
-                                chunk_length=chunk_length,
-                                uses_shared_buffer=uses_shared,
-                            ):
-                                if (uses_shared and chunk_offset is not None and chunk_length is not None
-                                        and slot.shared_stream_buffer is not None):
-                                    start = chunk_offset
-                                    end = start + chunk_length
-                                    # Copy out of shared buffer for websocket send.
-                                    chunk = bytes(slot.shared_stream_buffer[start:end])
-                                else:
-                                    chunk = chunk_bytes or b""
-                                if chunk:
-                                    av_chunks_relayed += 1
-                                    av_bytes_relayed += len(chunk)
-                                    await ws_send_bytes(chunk)
-                            case MediaComplete(stream_id=stream_id, chunks=n):
-                                await ws_send_json({
-                                    "type": "media_segment_complete",
-                                    "segment_idx": segment_idx,
-                                    "stream_id": stream_id,
-                                    "chunks": n if n is not None else av_chunks_relayed,
-                                })
-                            case _:
-                                print(f"[GPU {gpu_id}] Unknown AV event: "
-                                      f"{type(event).__name__}")
-
-                    if not step_task.done():
-                        step_task.cancel()
-                    else:
-                        timings = await step_task
+                    )
                 finally:
                     segment_generation_active = False
-                    if not step_task.done():
-                        try:
-                            await step_task
-                        except asyncio.CancelledError:
-                            pass
 
                 if stop_event.is_set():
                     break
@@ -1715,51 +1791,28 @@ class SessionController:
                       f"overhead={overhead_vs_worker_ms:.0f}ms, "
                       f"ipc_queue={ipc_queue_str}")
 
-                if not av_streamed:
-                    raise RuntimeError(f"Segment {segment_idx} AV stream did not initialize "
-                                       "(no media_init event)")
+                segment_latency_ms = {
+                    "total": round(main_user_step_ms, 2),
+                    "worker_e2e": round(worker_e2e_ms, 2),
+                    "main_user_step": round(main_user_step_ms, 2),
+                    "overhead": round(overhead_vs_worker_ms, 2),
+                }
                 generated_segment_count += 1
+                stream_generated_segment_count += 1
 
-                print(f"[GPU {gpu_id}] Segment {segment_idx}: "
-                      f"relayed av chunks={av_chunks_relayed}, "
-                      f"bytes={av_bytes_relayed / (1024 * 1024):.1f}MB")
                 _main_print(
                     "INFO",
                     f"Segments generated for client {client_id[:8]}: "
                     f"{generated_segment_count}",
                 )
-                await log_event(
-                    "segment_complete",
-                    {
-                        "segment_idx": segment_idx,
-                        "latency_ms": {
-                            "total": round(main_user_step_ms, 2),
-                            "worker_e2e": round(worker_e2e_ms, 2),
-                            "main_user_step": round(main_user_step_ms, 2),
-                            "overhead": round(overhead_vs_worker_ms, 2),
-                        },
-                        "data_size_bytes": av_bytes_relayed,
-                    },
-                )
                 await ws_send_json({
                     "type": "step_complete",
-                    "latency_ms": {
-                        "total": round(main_user_step_ms, 2),
-                        "worker_e2e": round(worker_e2e_ms, 2),
-                        "main_user_step": round(main_user_step_ms, 2),
-                        "overhead": round(overhead_vs_worker_ms, 2),
-                    },
-                })
-                await ws_send_json({
-                    "type": "ltx2_segment_complete",
-                    "segment_idx": segment_idx,
-                    "total_segments": total_segments_hint,
+                    "latency_ms": segment_latency_ms,
                 })
                 if single_clip_mode and not single_clip_waiting_for_request:
                     single_clip_waiting_for_request = True
-                    project_stream_started = False
-                    await ws_send_json({"type": "ltx2_stream_complete"})
-                    await log_event("ws_stream_complete")
+                    stream_complete_pending = True
+                    await maybe_send_stream_complete()
                     _main_print(
                         "INFO",
                         f"Single-clip session idle for client {client_id[:8]} "
@@ -1792,6 +1845,7 @@ class SessionController:
             await cancel_task(websocket_reader_task)
             await cancel_task(prompt_worker_task)
             await cancel_task(rewrite_seed_prompts_task)
+            await cancel_task(media_relay_task)
 
             if slot is not None and client_id:
                 slot.unregister_stream_queue(client_id)
