@@ -22,7 +22,7 @@ import dreamverse.main as server_main  # noqa: E402
 import dreamverse.runtime as runtime  # noqa: E402
 from dreamverse.config import PROMPT_TIMEOUT_MS  # noqa: E402
 from dreamverse.session_logger import SessionEventLogger  # noqa: E402
-from dreamverse.worker_ipc import MediaChunk, MediaComplete, MediaInit  # noqa: E402
+from dreamverse.worker_ipc import MediaChunk, MediaComplete, MediaError, MediaInit  # noqa: E402
 from dreamverse.session import controller as session_controller  # noqa: E402
 from dreamverse.utils import PROMPT_EXTENSION_FAILURE_USER_MESSAGE  # noqa: E402
 
@@ -79,11 +79,21 @@ class _FakeWebSocket:
 
 
 class _FakeSlot:
-    def __init__(self, step_delay_s: float = 0.0):
+    def __init__(
+        self,
+        step_delay_s: float = 0.0,
+        media_delay_s: float = 0.0,
+        async_media: bool = False,
+        media_error: bool = False,
+    ):
         self.shared_stream_buffer = None
         self._stream_queues: dict[str, asyncio.Queue] = {}
         self.calls: list[dict[str, object]] = []
         self._step_delay_s = max(0.0, float(step_delay_s))
+        self._media_delay_s = max(0.0, float(media_delay_s))
+        self._async_media = async_media
+        self._media_error = media_error
+        self.media_tasks: list[asyncio.Task] = []
 
     async def join_user(self, client_id: str, model_id: str) -> None:
         del client_id, model_id
@@ -95,6 +105,42 @@ class _FakeSlot:
 
     def unregister_stream_queue(self, client_id: str) -> None:
         self._stream_queues.pop(client_id, None)
+
+    async def _emit_media_events(self, client_id: str, segment_idx: int) -> None:
+        if self._media_delay_s > 0:
+            await asyncio.sleep(self._media_delay_s)
+        queue = self._stream_queues.get(client_id)
+        if queue is None:
+            return
+        stream_id = f"stream-{segment_idx}"
+        if self._media_error:
+            await queue.put(MediaError(
+                user_id=client_id,
+                segment_idx=segment_idx,
+                stream_id=stream_id,
+                message="fake media failure",
+            ))
+            return
+        await queue.put(MediaInit(
+            user_id=client_id,
+            segment_idx=segment_idx,
+            stream_id=stream_id,
+            mime='video/mp4; codecs="avc1.640028,mp4a.40.2"',
+            uses_shared_buffer=False,
+        ))
+        await queue.put(MediaChunk(
+            user_id=client_id,
+            segment_idx=segment_idx,
+            stream_id=stream_id,
+            chunk=b"abc123",
+            uses_shared_buffer=False,
+        ))
+        await queue.put(MediaComplete(
+            user_id=client_id,
+            segment_idx=segment_idx,
+            stream_id=stream_id,
+            chunks=1,
+        ))
 
     async def user_step(
         self,
@@ -111,35 +157,33 @@ class _FakeSlot:
             "image_path": image_path,
             "reset_conditioning": reset_conditioning,
         })
-        queue = self._stream_queues[client_id]
+        if client_id not in self._stream_queues:
+            raise KeyError(client_id)
         if self._step_delay_s > 0:
             await asyncio.sleep(self._step_delay_s)
-        await queue.put(MediaInit(
-            user_id=client_id,
-            segment_idx=segment_idx,
-            stream_id=f"stream-{segment_idx}",
-            mime='video/mp4; codecs="avc1.640028,mp4a.40.2"',
-            uses_shared_buffer=False,
-        ))
-        await queue.put(MediaChunk(
-            user_id=client_id,
-            segment_idx=segment_idx,
-            stream_id=f"stream-{segment_idx}",
-            chunk=b"abc123",
-            uses_shared_buffer=False,
-        ))
-        await queue.put(MediaComplete(
-            user_id=client_id,
-            segment_idx=segment_idx,
-            stream_id=f"stream-{segment_idx}",
-            chunks=1,
-        ))
+        if self._async_media:
+            self.media_tasks.append(asyncio.create_task(self._emit_media_events(client_id, segment_idx)))
+            await asyncio.sleep(0)
+        else:
+            await self._emit_media_events(client_id, segment_idx)
         return {"e2e_latency_ms": 10.0}
 
 
 class _FakeGPUPool:
-    def __init__(self, step_delay_s: float = 0.0):
-        self._slot = _FakeSlot(step_delay_s=step_delay_s)
+    def __init__(
+        self,
+        step_delay_s: float = 0.0,
+        media_delay_s: float = 0.0,
+        async_media: bool = False,
+        media_error: bool = False,
+    ):
+        self._slot = _FakeSlot(
+            step_delay_s=step_delay_s,
+            media_delay_s=media_delay_s,
+            async_media=async_media,
+            media_error=media_error,
+        )
+        self.release_calls: list[str] = []
 
     def get_status(self) -> dict[str, int]:
         return {
@@ -153,7 +197,7 @@ class _FakeGPUPool:
         return 0, self._slot
 
     async def release(self, client_id: str) -> None:
-        del client_id
+        self.release_calls.append(client_id)
 
 
 def _make_png_data_url() -> str:
@@ -532,6 +576,115 @@ def test_simple_generate_reuses_session_and_resets_conditioning():
             }
             for payload in step_complete_events
         )
+    finally:
+        runtime.gpu_pool = old_gpu_pool
+        runtime.prompt_enhancer = old_prompt_enhancer
+        runtime.session_event_logger = old_session_logger
+        runtime.prompt_safety_filter = old_prompt_safety_filter
+
+
+def test_stream_complete_waits_for_async_media_tail():
+    old_gpu_pool = runtime.gpu_pool
+    old_prompt_enhancer = runtime.prompt_enhancer
+    old_session_logger = runtime.session_event_logger
+    old_prompt_safety_filter = runtime.prompt_safety_filter
+    try:
+        fake_logger = _FakeSessionLogger()
+        fake_pool = _FakeGPUPool(
+            media_delay_s=0.05,
+            async_media=True,
+        )
+        runtime.gpu_pool = fake_pool
+        runtime.prompt_enhancer = _FakePromptEnhancer()
+        runtime.session_event_logger = fake_logger
+        runtime.prompt_safety_filter = None
+
+        ws = _FakeWebSocket(
+            [
+                (
+                    0.0,
+                    {
+                        "type": "session_init_v2",
+                        "curated_prompts": ["segment one prompt"],
+                        "single_clip_mode": True,
+                        "enhancement_enabled": False,
+                        "auto_extension_enabled": False,
+                        "loop_generation_enabled": False,
+                    },
+                ),
+                (0.25, {"type": "leave"}),
+            ]
+        )
+
+        asyncio.run(server_main.websocket_endpoint(ws))
+
+        message_types = [payload["type"] for payload in ws.sent_json]
+        step_complete_idx = message_types.index("step_complete")
+        media_init_idx = message_types.index("media_init")
+        media_segment_complete_idx = message_types.index("media_segment_complete")
+        stream_complete_idx = message_types.index("ltx2_stream_complete")
+
+        assert step_complete_idx < media_init_idx
+        assert media_init_idx < media_segment_complete_idx
+        assert media_segment_complete_idx < stream_complete_idx
+        assert ws.sent_bytes == [b"abc123"]
+        assert "ws_stream_complete" in [
+            event["event"] for event in fake_logger.events
+        ]
+    finally:
+        runtime.gpu_pool = old_gpu_pool
+        runtime.prompt_enhancer = old_prompt_enhancer
+        runtime.session_event_logger = old_session_logger
+        runtime.prompt_safety_filter = old_prompt_safety_filter
+
+
+def test_media_error_stops_session_and_releases_gpu_slot():
+    old_gpu_pool = runtime.gpu_pool
+    old_prompt_enhancer = runtime.prompt_enhancer
+    old_session_logger = runtime.session_event_logger
+    old_prompt_safety_filter = runtime.prompt_safety_filter
+    try:
+        fake_logger = _FakeSessionLogger()
+        fake_pool = _FakeGPUPool(
+            async_media=True,
+            media_error=True,
+        )
+        runtime.gpu_pool = fake_pool
+        runtime.prompt_enhancer = _FakePromptEnhancer()
+        runtime.session_event_logger = fake_logger
+        runtime.prompt_safety_filter = None
+
+        ws = _FakeWebSocket(
+            [
+                (
+                    0.0,
+                    {
+                        "type": "session_init_v2",
+                        "curated_prompts": [
+                            "segment one prompt",
+                            "segment two prompt",
+                        ],
+                        "enhancement_enabled": False,
+                        "auto_extension_enabled": False,
+                        "loop_generation_enabled": False,
+                    },
+                ),
+                (0.25, {"type": "leave"}),
+            ]
+        )
+
+        asyncio.run(server_main.websocket_endpoint(ws))
+
+        error_messages = [
+            payload
+            for payload in ws.sent_json
+            if payload.get("type") == "error"
+        ]
+        assert error_messages
+        assert error_messages[0]["segment_idx"] == 1
+        assert "AV streaming failed for segment 1" in error_messages[0]["message"]
+        assert [call["segment_idx"] for call in fake_pool._slot.calls] == [1]
+        assert len(fake_pool.release_calls) == 1
     finally:
         runtime.gpu_pool = old_gpu_pool
         runtime.prompt_enhancer = old_prompt_enhancer

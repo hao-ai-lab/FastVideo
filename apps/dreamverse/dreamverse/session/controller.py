@@ -1408,7 +1408,7 @@ class SessionController:
                                 "stream_id": stream_id,
                                 "chunks": relayed_chunks,
                             })
-                            total_segments_hint = segment_total_hints.get(
+                            total_segments_hint = segment_total_hints.pop(
                                 event.segment_idx,
                                 max(event.segment_idx, len(curated_prompts)),
                             )
