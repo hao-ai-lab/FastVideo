@@ -380,13 +380,6 @@ export default function ChatBar({
 				</div>
 			)}
 
-			{!sessionStarted && (
-				<div className="flex flex-col items-center gap-1.5">
-					<p className="text-[11px] text-muted-foreground">
-						Drive each scene yourself — type what happens next, one segment at a time.
-					</p>
-				</div>
-			)}
 
 			{!sessionStarted && initialImageDataUrl && (
 				<div className="flex items-center gap-2 rounded-2xl border border-input bg-card/65 px-3 py-2">
