@@ -174,8 +174,8 @@ export default function VideoPlayer({
 		};
 	}, [generatingNext, sessionStarted]);
 
-	// Drive a ~4.5s progress bar during generation so the wait has a visible ETA.
-	const GEN_DURATION_MS = 4500;
+	// Drive a 12s progress bar during generation so the wait has a visible ETA.
+	const GEN_DURATION_MS = 12000;
 	const [genProgress, setGenProgress] = useState(0);
 	useEffect(() => {
 		if (!generatingNext) {

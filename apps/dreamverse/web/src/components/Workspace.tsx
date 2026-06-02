@@ -8,6 +8,85 @@ import { Check, Clapperboard, Lightbulb, Pencil } from "lucide-react";
 export const WORKSPACE_ORIGINAL_SELECTION_KEY = "original";
 export const WORKSPACE_CURRENT_SELECTION_KEY = "current";
 
+export function SceneHistoryList({ sceneHistory = [] }: { sceneHistory?: Record<string, any>[] }) {
+	const bottomSentinelRef = useRef<HTMLDivElement>(null);
+	const topSentinelRef = useRef<HTMLDivElement>(null);
+	const [showTopFade, setShowTopFade] = useState(false);
+
+	const scenes = useMemo(
+		() => (sceneHistory || []).filter((s) => normalizeText(s?.prompt)),
+		[sceneHistory],
+	);
+
+	const scrollToBottom = useCallback(() => {
+		setTimeout(() => {
+			bottomSentinelRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+		}, 60);
+	}, []);
+
+	useEffect(() => {
+		if (scenes.length > 0) scrollToBottom();
+	}, [scenes.length, scrollToBottom]);
+
+	useEffect(() => {
+		const sentinel = bottomSentinelRef.current;
+		if (!sentinel || typeof ResizeObserver === "undefined") return;
+		let container: HTMLElement | null = sentinel.parentElement;
+		while (container) {
+			const oy = getComputedStyle(container).overflowY;
+			if (oy === "auto" || oy === "scroll") break;
+			container = container.parentElement;
+		}
+		if (!container) return;
+		const ro = new ResizeObserver(() => {
+			const nearBottom = container!.scrollHeight - container!.scrollTop - container!.clientHeight < 96;
+			if (nearBottom) scrollToBottom();
+		});
+		ro.observe(container);
+		return () => ro.disconnect();
+	}, [scenes.length, scrollToBottom]);
+
+	useEffect(() => {
+		const el = topSentinelRef.current;
+		if (!el) return;
+		const observer = new IntersectionObserver(([entry]) => setShowTopFade(!entry.isIntersecting), { threshold: 0.1 });
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, [scenes.length]);
+
+	if (scenes.length === 0) return null;
+
+	return (
+		<section className="relative z-10 flex flex-col mx-auto w-full max-w-2xl max-h-32 overflow-y-auto">
+			<div
+				className={cn(
+					"pointer-events-none sticky top-0 z-20 -mb-12 h-12 bg-linear-to-b from-background to-transparent transition-opacity duration-200",
+					showTopFade ? "opacity-100" : "opacity-0",
+				)}
+				aria-hidden="true"
+			/>
+			<div ref={topSentinelRef} className="h-0 w-0" aria-hidden="true" />
+			<div className="flex flex-col gap-2 pt-12 pb-4">
+				{scenes.map((scene, index) => (
+					<div
+						key={scene.id || index}
+						className="flex items-start gap-3 rounded-xl p-3 transition-colors duration-200 hover:bg-slate-200/50 hover:dark:bg-slate-800/30"
+					>
+						<div className="flex min-w-0 flex-1 flex-col gap-2">
+							<Badge variant="secondary" className="horizontal gap-2 items-center w-fit">
+								<Clapperboard className="size-3 opacity-70" />
+								{`Scene ${index + 1}`}
+							</Badge>
+							<p className="line-clamp-2 text-sm leading-5 text-muted-foreground">{scene.prompt}</p>
+						</div>
+					</div>
+				))}
+			</div>
+			<div ref={bottomSentinelRef} className="h-0 w-0" aria-hidden="true" />
+		</section>
+	);
+}
+
 interface WorkspaceProps {
 	promptEvents?: Record<string, any>[];
 	currentThumbnail?: string | null;
@@ -20,7 +99,6 @@ interface WorkspaceProps {
 	selectedEntryKey?: string;
 	originalClipId?: string;
 	manualMode?: boolean;
-	sceneHistory?: Record<string, any>[];
 }
 
 function normalizeText(value: any): string {
@@ -220,7 +298,7 @@ function ChromaGradient({ sessionStarted = false }: { sessionStarted?: boolean }
 	);
 }
 
-export default function Workspace({ promptEvents = [], currentThumbnail = null, originalLabel = "", sessionStarted = false, onSelectOriginal, onSelectEvent, onSelectCurrent, selectedClipId, selectedEntryKey: selectedEntryKeyProp, originalClipId = "", manualMode = false, sceneHistory = [] }: WorkspaceProps) {
+export default function Workspace({ promptEvents = [], currentThumbnail = null, originalLabel = "", sessionStarted = false, onSelectOriginal, onSelectEvent, onSelectCurrent, selectedClipId, selectedEntryKey: selectedEntryKeyProp, originalClipId = "", manualMode = false }: WorkspaceProps) {
 	const bottomSentinelRef = useRef<HTMLDivElement>(null);
 	const topSentinelRef = useRef<HTMLDivElement>(null);
 	const [showTopFade, setShowTopFade] = useState(false);
@@ -243,13 +321,6 @@ export default function Workspace({ promptEvents = [], currentThumbnail = null, 
 		return WORKSPACE_CURRENT_SELECTION_KEY;
 	}, [selectedEntryKeyProp, selectedClipId, originalClipId, conversationEvents]);
 
-	// Steering mode: an elegant per-segment list of each scene's prompt (oldest first,
-	// already resolved upstream to prefer the user's own prompt).
-	const scenes = useMemo(
-		() => (sceneHistory || []).filter((s) => normalizeText(s?.prompt)),
-		[sceneHistory],
-	);
-
 	const scrollToBottom = useCallback(() => {
 		setTimeout(() => {
 			bottomSentinelRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -261,73 +332,17 @@ export default function Workspace({ promptEvents = [], currentThumbnail = null, 
 	}, [conversationEvents, scrollToBottom]);
 
 	useEffect(() => {
-		if (manualMode && scenes.length > 0) scrollToBottom();
-	}, [manualMode, scenes.length, scrollToBottom]);
-
-	// The scene list lives in a flex-1 area that shrinks when the ChatBar grows (e.g. the
-	// "Segment complete" banner appears). Without re-scrolling, the latest scene gets clipped
-	// behind the ChatBar. Re-pin to the bottom whenever the scroll container resizes — unless
-	// the user has scrolled up to read earlier scenes.
-	useEffect(() => {
-		if (!manualMode) return;
-		const sentinel = bottomSentinelRef.current;
-		if (!sentinel || typeof ResizeObserver === "undefined") return;
-		let container: HTMLElement | null = sentinel.parentElement;
-		while (container) {
-			const oy = getComputedStyle(container).overflowY;
-			if (oy === "auto" || oy === "scroll") break;
-			container = container.parentElement;
-		}
-		if (!container) return;
-		const ro = new ResizeObserver(() => {
-			const nearBottom = container!.scrollHeight - container!.scrollTop - container!.clientHeight < 96;
-			if (nearBottom) scrollToBottom();
-		});
-		ro.observe(container);
-		return () => ro.disconnect();
-	}, [manualMode, scenes.length, scrollToBottom]);
-
-	useEffect(() => {
 		const el = topSentinelRef.current;
 		if (!el) return;
 		const observer = new IntersectionObserver(([entry]) => setShowTopFade(!entry.isIntersecting), { threshold: 0.1 });
 		observer.observe(el);
 		return () => observer.disconnect();
-	}, [conversationEvents.length, manualMode, scenes.length]);
+	}, [conversationEvents.length]);
 
 	if (manualMode) {
 		return (
 			<div className="mt-auto flex flex-col">
 				<ChromaGradient sessionStarted={sessionStarted} />
-				{scenes.length >= 1 && (
-					<section className="relative z-10 flex flex-col h-full">
-						<div
-							className={cn(
-								"pointer-events-none sticky top-0 z-20 -mb-12 h-12 bg-linear-to-b from-background to-transparent transition-opacity duration-200",
-								showTopFade ? "opacity-100" : "opacity-0",
-							)}
-							aria-hidden="true"
-						/>
-						<div ref={topSentinelRef} className="h-0 w-0" aria-hidden="true" />
-						<div className="flex flex-col gap-2 pt-4 pb-4">
-							{scenes.map((scene, index) => (
-								<div
-									key={scene.id || index}
-									className="flex items-start gap-3 rounded-xl p-3 transition-colors duration-200 hover:bg-slate-200/50 hover:dark:bg-slate-800/30"
-								>
-									<div className="flex min-w-0 flex-1 flex-col gap-2">
-										<Badge variant="secondary" className="horizontal gap-2 items-center w-fit">
-											<Clapperboard className="size-3 opacity-70" />
-											{`Scene ${index + 1}`}
-										</Badge>
-										<p className="line-clamp-2 text-sm leading-5 text-muted-foreground">{scene.prompt}</p>
-									</div>
-								</div>
-							))}
-						</div>
-						<div ref={bottomSentinelRef} className="h-0 w-0" aria-hidden="true" />
-					</section>
-				)}
 			</div>
 		);
 	}

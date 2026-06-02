@@ -13,11 +13,12 @@ GXX="$CONDA_PREFIX/bin/aarch64-conda-linux-gnu-g++"
 
 export CUDA_HOME="$CONDA_PREFIX"
 export FASTVIDEO_ENABLE_STARTUP_WARMUP=true
-export DREAMVERSE_MAX_AUTOTUNE=false
+export FASTVIDEO_ENABLE_PROMPT_SAFETY=true
+export DREAMVERSE_MAX_AUTOTUNE=true
 export LTX2_USE_DISTILLED_SIGMAS=0
 export DREAMVERSE_SESSION_TIMEOUT_SECONDS=1800
 export CEREBRAS_API_KEY="${CEREBRAS_API_KEY:-}"  # set this in your env or ~/.env
-export FASTVIDEO_PROMPT_CEREBRAS_MODEL="ifm-k2-think-v2"
+export FASTVIDEO_PROMPT_CEREBRAS_MODEL="gpt-oss-120b"
 export TORCHINDUCTOR_CACHE_DIR="$HOME/.cache/torchinductor"
 export TRITON_CACHE_DIR="$HOME/.triton/cache"
 export TORCH_CUDA_ARCH_LIST="10.0a"
@@ -35,7 +36,9 @@ export LIBRARY_PATH="$CONDA_PREFIX/lib/cuda-compat:$CONDA_PREFIX/lib/stubs"
 # Only libcudart.so.12 at runtime — prevents cuDNN from seeing .so.13
 export LD_LIBRARY_PATH="$CUDA_RT_DIR"
 
-CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
+export FASTVIDEO_GPU_COUNT="${FASTVIDEO_GPU_COUNT:-all}"
+export DREAMVERSE_SP_SIZE="${DREAMVERSE_SP_SIZE:-4}"
 PORT="${DREAMVERSE_PORT:-8009}"
 
 FFMPEG_ENV="$(dirname "$0")/ffmpeg-env.sh"
