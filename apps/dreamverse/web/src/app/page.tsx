@@ -1513,7 +1513,7 @@ export default function Page() {
 			activeClipId: shouldUseArchivedPlaybackFallback() ? streamStore.get().activeClipId : "",
 			activePlaybackStartTime: shouldUseArchivedPlaybackFallback() ? streamStore.get().activePlaybackStartTime : 0,
 		});
-		sessionStore.patch({ livePromptDraft: "", waitingForSegmentPrompt: false });
+		sessionStore.patch({ livePromptDraft: "", waitingForSegmentPrompt: false, sessionNotice: "" });
 	}
 
 	function setLivePromptRewriteMode(enabled: boolean) {
