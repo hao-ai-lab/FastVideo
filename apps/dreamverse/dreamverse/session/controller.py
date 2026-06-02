@@ -292,9 +292,8 @@ class SessionController:
             generation_cap_blocked = False
             auto_extension_blocked_segment_idx: int | None = None
             prompt_sources_drained_logged = False
-            generation_paused = bool(
-                not manual_continuation_mode and initial_rollout_prompt and not single_clip_mode
-                and len(curated_prompts) == 0)
+            generation_paused = bool(not manual_continuation_mode and initial_rollout_prompt and not single_clip_mode
+                                     and len(curated_prompts) == 0)
             pending_seed_reset = False
             pending_seed_reset_reason = ""
             pending_reset_conditioning = False
@@ -547,9 +546,8 @@ class SessionController:
                 ) if manual_continuation_mode and initial_rollout_prompt else None)
                 single_clip_waiting_for_request = False
                 rollout_waiting_for_rewrite = False
-                generation_paused = bool(
-                    not manual_continuation_mode and initial_rollout_prompt and not single_clip_mode
-                    and len(curated_prompts) == 0)
+                generation_paused = bool(not manual_continuation_mode and initial_rollout_prompt
+                                         and not single_clip_mode and len(curated_prompts) == 0)
                 initial_rollout_waiting_for_rewrite = generation_paused
                 rewrite_restart_pending = False
                 loop_iteration = 0
@@ -958,6 +956,7 @@ class SessionController:
                             _resolve_generation_segment_cap(
                                 single_clip_mode=single_clip_mode,
                                 cap=GENERATION_SEGMENT_CAP,
+                                manual_continuation_mode=manual_continuation_mode,
                             ),
                         })
                         continue
@@ -1318,6 +1317,7 @@ class SessionController:
                     _resolve_generation_segment_cap(
                         single_clip_mode=single_clip_mode,
                         cap=GENERATION_SEGMENT_CAP,
+                        manual_continuation_mode=manual_continuation_mode,
                     ),
                 })
                 await ws_send_json({
@@ -1377,6 +1377,7 @@ class SessionController:
                         _resolve_generation_segment_cap(
                             single_clip_mode=single_clip_mode,
                             cap=GENERATION_SEGMENT_CAP,
+                            manual_continuation_mode=manual_continuation_mode,
                         ),
                     })
                     if nonlocal_reason == "loop_restart":
@@ -1406,8 +1407,9 @@ class SessionController:
                     await raw_prompt_queue.put(pending_simple_prompt_submission)
                     pending_simple_prompt_submission = None
 
-                if (not single_clip_mode and not generation_cap_blocked and not rollout_waiting_for_rewrite
-                        and GENERATION_SEGMENT_CAP > 0 and generated_segment_count >= GENERATION_SEGMENT_CAP):
+                if (not single_clip_mode and not manual_continuation_mode and not generation_cap_blocked
+                        and not rollout_waiting_for_rewrite and GENERATION_SEGMENT_CAP > 0
+                        and generated_segment_count >= GENERATION_SEGMENT_CAP):
                     loop_generation_enabled = False
                     rollout_waiting_for_rewrite = True
                     _main_print(
