@@ -15,5 +15,6 @@ def _utc_now_iso() -> str:
 PROMPT_EXTENSION_FAILURE_USER_MESSAGE = ("Prompt extension failed for this request.")
 
 
-def _resolve_generation_segment_cap(*, single_clip_mode: bool, cap: int) -> int:
-    return 0 if single_clip_mode else cap
+def _resolve_generation_segment_cap(*, single_clip_mode: bool, cap: int, manual_continuation_mode: bool = False) -> int:
+    # Steering (manual continuation) lets the user keep going indefinitely, like single-clip mode.
+    return 0 if (single_clip_mode or manual_continuation_mode) else cap
