@@ -94,8 +94,21 @@ export default function VideoPlayer({
 	// segment is still PLAYING (it generates ahead). Only surface the "Segment complete"
 	// overlay once the playhead actually reaches the end of the buffered segment.
 	const [playbackReachedEnd, setPlaybackReachedEnd] = useState(false);
+	// Steering mode: when the user submits the next scene, "waiting" flips off and the
+	// segment is generated (a few seconds of latency) before frames stream. Show a
+	// "Generating next scene…" indicator across that gap so the frozen frame isn't silent.
+	const [generatingNext, setGeneratingNext] = useState(false);
+	const prevWaitingRef = useRef(false);
+	// End of the buffered timeline captured the moment generation starts; the freshly
+	// generated segment extends the buffer past this, which is how we know it landed.
+	const genBoundaryRef = useRef(0);
+
+	// Steering mode: the backend may signal "waiting for next prompt" while the current
+	// segment is still PLAYING (it generates ahead). Track whether the playhead has reached
+	// the end of the buffered segment so end-overlays only show there. Keep tracking through
+	// the generating phase too, so scrubbing back and replaying to the end re-shows them.
 	useEffect(() => {
-		if (!waitingForSegmentPrompt) {
+		if (!waitingForSegmentPrompt && !generatingNext) {
 			setPlaybackReachedEnd(false);
 			return;
 		}
@@ -122,6 +135,7 @@ export default function VideoPlayer({
 		el.addEventListener("seeking", check);
 		el.addEventListener("seeked", check);
 		el.addEventListener("playing", check);
+		el.addEventListener("progress", check);
 		return () => {
 			el.removeEventListener("timeupdate", check);
 			el.removeEventListener("ended", check);
@@ -131,15 +145,10 @@ export default function VideoPlayer({
 			el.removeEventListener("seeking", check);
 			el.removeEventListener("seeked", check);
 			el.removeEventListener("playing", check);
+			el.removeEventListener("progress", check);
 		};
-	}, [waitingForSegmentPrompt]);
+	}, [waitingForSegmentPrompt, generatingNext]);
 
-	// Steering mode: when the user submits the next scene, "waiting" flips off and the
-	// segment is generated (a few seconds of latency) before frames stream. Show a
-	// "Generating next scene…" indicator across that gap so the frozen frame isn't silent.
-	const [generatingNext, setGeneratingNext] = useState(false);
-	const prevWaitingRef = useRef(false);
-	const freezeTimeRef = useRef(0);
 	useEffect(() => {
 		const wasWaiting = prevWaitingRef.current;
 		prevWaitingRef.current = waitingForSegmentPrompt;
@@ -149,10 +158,21 @@ export default function VideoPlayer({
 			return;
 		}
 		if (wasWaiting && sessionStarted) {
-			freezeTimeRef.current = liveVideoEl.current?.currentTime ?? 0;
+			// Snapshot the current end of the buffered timeline; the generated segment will
+			// extend the buffer past this boundary.
+			const el = liveVideoEl.current;
+			let boundary = el?.currentTime ?? 0;
+			try {
+				const b = el?.buffered;
+				if (b && b.length) boundary = Math.max(boundary, b.end(b.length - 1));
+			} catch {
+				/* buffered access can throw mid-append */
+			}
+			genBoundaryRef.current = boundary;
 			setGeneratingNext(true);
 		}
 	}, [waitingForSegmentPrompt, sessionStarted]);
+
 	useEffect(() => {
 		if (!generatingNext) return;
 		if (!sessionStarted) {
@@ -161,21 +181,34 @@ export default function VideoPlayer({
 		}
 		const el = liveVideoEl.current;
 		if (!el) return;
-		const clear = () => setGeneratingNext(false);
-		const onTime = () => {
-			// New segment frames are now playing past the frozen boundary.
-			if (el.currentTime > freezeTimeRef.current + 0.1) setGeneratingNext(false);
+		// Clear the instant the freshly generated segment lands: the buffer grows past the
+		// boundary captured at generation start (or the playhead advances into the new
+		// frames). Deliberately NOT a bare "playing" handler — scrubbing back and replaying
+		// the EXISTING segment must keep "Generating" up until the new frames actually arrive.
+		const check = () => {
+			try {
+				const b = el.buffered;
+				const end = b.length ? b.end(b.length - 1) : 0;
+				if (end > genBoundaryRef.current + 0.25 || el.currentTime > genBoundaryRef.current + 0.1) {
+					setGeneratingNext(false);
+				}
+			} catch {
+				/* buffered access can throw mid-append */
+			}
 		};
-		el.addEventListener("playing", clear);
-		el.addEventListener("timeupdate", onTime);
+		check();
+		el.addEventListener("progress", check);
+		el.addEventListener("timeupdate", check);
+		el.addEventListener("durationchange", check);
 		return () => {
-			el.removeEventListener("playing", clear);
-			el.removeEventListener("timeupdate", onTime);
+			el.removeEventListener("progress", check);
+			el.removeEventListener("timeupdate", check);
+			el.removeEventListener("durationchange", check);
 		};
 	}, [generatingNext, sessionStarted]);
 
-	// Drive a 12s progress bar during generation so the wait has a visible ETA.
-	const GEN_DURATION_MS = 12000;
+	// Drive a ~8s progress bar during generation so the wait has a visible ETA.
+	const GEN_DURATION_MS = 8000;
 	const [genProgress, setGenProgress] = useState(0);
 	useEffect(() => {
 		if (!generatingNext) {
@@ -231,8 +264,9 @@ export default function VideoPlayer({
 							</div>
 						)}
 
-						{/* Steering mode: generating the next segment — show a ~4.5s progress bar so the wait has an ETA. */}
-						{sessionStarted && generatingNext && !mediaAppendError && !inQueue && (
+						{/* Steering mode: generating the next segment — show a ~8s progress bar so the wait has an ETA.
+							Gated on playbackReachedEnd like "Segment complete": scrubbing back hides it, playing to the end re-shows it. */}
+						{sessionStarted && generatingNext && playbackReachedEnd && !mediaAppendError && !inQueue && (
 							<div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-end gap-3 bg-gradient-to-t from-slate-950/85 via-slate-950/15 to-transparent p-5 pb-7 text-center">
 								<p className="text-sm font-medium text-white/95">Generating next scene&hellip;</p>
 								<div className="h-1.5 w-48 overflow-hidden rounded-full bg-white/15 shadow-sm">
