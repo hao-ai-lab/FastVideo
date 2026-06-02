@@ -2964,6 +2964,13 @@ class LTX2Transformer3DModel(BaseDiT):
             positions[:, 0, ...] = positions[:, 0, ...] + float(video_position_offset_sec)
         positions = positions.to(hidden_states.dtype)
 
+        # PR #1422 / will-nbv: honor video_position_offset_sec — shift the video temporal RoPE
+        # positions forward (in seconds) to match the audio continuation pre-roll, else the
+        # param is swallowed by **kwargs and multi-segment continuation accumulates A/V desync.
+        video_position_offset_sec = kwargs.get("video_position_offset_sec", 0.0)
+        if video_position_offset_sec != 0.0:
+            positions[:, 0, :, :] = positions[:, 0, :, :] + video_position_offset_sec
+
         # Pad positions to match padded sequence length for SP cross-attention
         if sp_world_size > 1 and video_padded_seq_len > video_original_seq_len:
             padding_needed = video_padded_seq_len - video_original_seq_len
