@@ -361,12 +361,6 @@ export default function ChatBar({
 				</div>
 			)}
 
-			{waitingForSegmentPrompt && (
-				<div className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-4 py-2.5 text-center text-xs text-sky-700 dark:text-sky-300">
-					Segment complete — describe the next scene to continue
-				</div>
-			)}
-
 			{sessionNotice && (
 				<div
 					className={cn(
