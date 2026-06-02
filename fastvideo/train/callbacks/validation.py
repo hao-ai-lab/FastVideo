@@ -50,7 +50,8 @@ class _ValidationStepResult:
     videos: list[list[np.ndarray]]
     captions: list[str]
     ref_videos: list[str | None] = field(default_factory=list)
-    action_paths: list[str | None] = field(default_factory=list)
+    actions: list[dict[str, Any] | None] = field(default_factory=list)
+    mouse_pitch_signs: list[int | None] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -66,6 +67,8 @@ class _ValidationMetricsConfig:
     enabled: bool = False
     names: list[str] = field(default_factory=list)
     device: str = "cuda"
+    calibration_path: str | None = None
+    mouse_pitch_sign: int = 1
     skip_missing_deps: bool = True
     strict: bool = False
     unload_after_validation: bool = True
@@ -163,6 +166,8 @@ class ValidationCallback(Callback):
             enabled=enabled and bool(names),
             names=names,
             device=str(config.get("device", "cuda")),
+            calibration_path=(str(config["calibration_path"]) if config.get("calibration_path") is not None else None),
+            mouse_pitch_sign=int(config.get("mouse_pitch_sign", 1)),
             skip_missing_deps=bool(config.get("skip_missing_deps", True)),
             strict=bool(config.get("strict", False)),
             unload_after_validation=bool(config.get("unload_after_validation", True)),
@@ -286,7 +291,8 @@ class ValidationCallback(Callback):
                     video_filenames=local_video_filenames,
                     captions=result.captions,
                     ref_videos=result.ref_videos,
-                    action_paths=result.action_paths,
+                    actions=result.actions,
+                    mouse_pitch_signs=result.mouse_pitch_signs,
                     fps=sp.fps,
                     output_dir=output_dir,
                     step=step,
@@ -427,7 +433,8 @@ class ValidationCallback(Callback):
         video_filenames: list[str],
         captions: list[str],
         ref_videos: list[str | None],
-        action_paths: list[str | None],
+        actions: list[dict[str, Any] | None],
+        mouse_pitch_signs: list[int | None],
         fps: int,
         output_dir: str,
         step: int,
@@ -443,8 +450,14 @@ class ValidationCallback(Callback):
 
             samples = samples_from(
                 video=video_filenames,
+                reference=self._available_paths(ref_videos),
                 text_prompts=captions,
                 fps=float(fps),
+                extras=self._validation_metric_extras(
+                    video_filenames=video_filenames,
+                    actions=actions,
+                    mouse_pitch_signs=mouse_pitch_signs,
+                ),
             )
             results = evaluator.evaluate(samples=samples)
             for filename, metric_results in zip(
@@ -618,6 +631,80 @@ class ValidationCallback(Callback):
                 f,
                 indent=2,
             )
+
+    def _validation_metric_extras(
+        self,
+        *,
+        video_filenames: list[str],
+        actions: list[dict[str, Any] | None],
+        mouse_pitch_signs: list[int | None],
+    ) -> list[dict[str, Any]]:
+        extras: list[dict[str, Any]] = []
+        for i, _filename in enumerate(video_filenames):
+            extra: dict[str, Any] = {}
+            action = actions[i] if i < len(actions) else None
+            if action is not None:
+                extra["actions"] = action
+            if self.metrics_config.calibration_path is not None:
+                extra["calibration"] = self.metrics_config.calibration_path
+            mouse_pitch_sign = mouse_pitch_signs[i] if i < len(mouse_pitch_signs) else None
+            extra["mouse_pitch_sign"] = int(mouse_pitch_sign or self.metrics_config.mouse_pitch_sign)
+            extras.append(extra)
+        return extras
+
+    @staticmethod
+    def _available_paths(paths: list[str | None]) -> list[str] | None:
+        if not paths or any(path is None for path in paths):
+            return None
+        return [str(path) for path in paths]
+
+    @staticmethod
+    def _validation_actions(validation_batch: dict[str, Any]) -> dict[str, Any] | None:
+        keyboard = validation_batch.get("keyboard_cond")
+        mouse = validation_batch.get("mouse_cond")
+        if keyboard is not None and mouse is not None:
+            return {
+                "keyboard": np.asarray(keyboard),
+                "mouse": np.asarray(mouse),
+            }
+
+        action_path = validation_batch.get("action_path")
+        if not isinstance(action_path, str) or not os.path.isfile(action_path):
+            return None
+        try:
+            actions_obj = np.load(action_path, allow_pickle=True)
+            if isinstance(actions_obj, np.ndarray) and actions_obj.dtype == object:
+                actions_obj = actions_obj.item()
+        except Exception as exc:
+            logger.warning(
+                "Failed to load validation action file %s for metrics: %s",
+                action_path,
+                exc,
+            )
+            return None
+        if not isinstance(actions_obj, dict):
+            return None
+        keyboard = actions_obj.get("keyboard")
+        mouse = actions_obj.get("mouse")
+        if keyboard is None or mouse is None:
+            return None
+        return {
+            "keyboard": np.asarray(keyboard),
+            "mouse": np.asarray(mouse),
+        }
+
+    def _validation_mouse_pitch_sign(
+        self,
+        validation_batch: dict[str, Any],
+    ) -> int:
+        if validation_batch.get("mouse_pitch_sign") is not None:
+            return int(validation_batch["mouse_pitch_sign"])
+        flipped = validation_batch.get("mouse_pitch_flipped")
+        if isinstance(flipped, str):
+            flipped = flipped.lower() in {"1", "true", "yes", "y"}
+        if bool(flipped):
+            return -1
+        return int(self.metrics_config.mouse_pitch_sign)
 
     # ----------------------------------------------------------
     # Pipeline management
@@ -874,7 +961,8 @@ class ValidationCallback(Callback):
         videos: list[list[np.ndarray]] = []
         captions: list[str] = []
         ref_videos: list[str | None] = []
-        action_paths: list[str | None] = []
+        actions: list[dict[str, Any] | None] = []
+        mouse_pitch_signs: list[int | None] = []
 
         for validation_batch in dataloader:
             batch = self._prepare_validation_batch(
@@ -887,8 +975,8 @@ class ValidationCallback(Callback):
             captions.append(batch.prompt)
             ref_video = validation_batch.get("ref_video")
             ref_videos.append(ref_video if isinstance(ref_video, str) else None)
-            action_path = validation_batch.get("action_path")
-            action_paths.append(action_path if isinstance(action_path, str) else None)
+            actions.append(self._validation_actions(validation_batch))
+            mouse_pitch_signs.append(self._validation_mouse_pitch_sign(validation_batch))
 
             with torch.no_grad():
                 output_batch = pipeline.forward(
@@ -918,7 +1006,8 @@ class ValidationCallback(Callback):
             videos=videos,
             captions=captions,
             ref_videos=ref_videos,
-            action_paths=action_paths,
+            actions=actions,
+            mouse_pitch_signs=mouse_pitch_signs,
         )
 
     # ----------------------------------------------------------

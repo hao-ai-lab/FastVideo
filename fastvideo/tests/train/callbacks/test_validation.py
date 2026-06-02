@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -128,6 +129,8 @@ class TestConstructor:
             metrics={
                 "names": "vbench.aesthetic_quality",
                 "device": "cpu",
+                "calibration_path": "/tmp/calibration.json",
+                "mouse_pitch_sign": "-1",
                 "skip_missing_deps": False,
                 "strict": True,
                 "unload_after_validation": False,
@@ -139,6 +142,8 @@ class TestConstructor:
         assert cb.metrics_config.enabled is True
         assert cb.metrics_config.names == ["vbench.aesthetic_quality"]
         assert cb.metrics_config.device == "cpu"
+        assert cb.metrics_config.calibration_path == "/tmp/calibration.json"
+        assert cb.metrics_config.mouse_pitch_sign == -1
         assert cb.metrics_config.skip_missing_deps is False
         assert cb.metrics_config.strict is True
         assert cb.metrics_config.unload_after_validation is False
@@ -361,3 +366,69 @@ class TestMetricAggregation:
         )
 
         assert cb._metric_device() == "cuda:5"
+
+    def test_metric_extras_include_actions_and_calibration(self) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics={
+                "names": ["optical_flow.synthetic_optical_flow"],
+                "calibration_path": "/tmp/calibration.json",
+                "mouse_pitch_sign": -1,
+            },
+        )
+        actions = {
+            "keyboard": np.zeros((3, 6)),
+            "mouse": np.zeros((3, 2)),
+        }
+
+        extras = cb._validation_metric_extras(
+            video_filenames=["a.mp4", "b.mp4"],
+            actions=[actions, None],
+            mouse_pitch_signs=[None, 1],
+        )
+
+        assert extras[0]["actions"] is actions
+        assert extras[0]["calibration"] == "/tmp/calibration.json"
+        assert extras[0]["mouse_pitch_sign"] == -1
+        assert "actions" not in extras[1]
+        assert extras[1]["mouse_pitch_sign"] == 1
+
+    def test_validation_actions_prefers_loaded_conditions(self) -> None:
+        keyboard = np.zeros((4, 6))
+        mouse = np.zeros((4, 2))
+
+        actions = ValidationCallback._validation_actions(
+            {
+                "keyboard_cond": keyboard,
+                "mouse_cond": mouse,
+            }
+        )
+
+        assert actions is not None
+        assert np.array_equal(actions["keyboard"], keyboard)
+        assert np.array_equal(actions["mouse"], mouse)
+
+    def test_validation_actions_loads_action_path(
+        self,
+        tmp_path,
+    ) -> None:
+        path = tmp_path / "actions.npy"
+        np.save(
+            path,
+            {
+                "keyboard": np.ones((4, 6)),
+                "mouse": np.ones((4, 2)),
+            },
+            allow_pickle=True,
+        )
+
+        actions = ValidationCallback._validation_actions({"action_path": str(path)})
+
+        assert actions is not None
+        assert actions["keyboard"].shape == (4, 6)
+        assert actions["mouse"].shape == (4, 2)
+
+    def test_available_paths_requires_all_paths(self) -> None:
+        assert ValidationCallback._available_paths(["a.mp4", "b.mp4"]) == ["a.mp4", "b.mp4"]
+        assert ValidationCallback._available_paths(["a.mp4", None]) is None
