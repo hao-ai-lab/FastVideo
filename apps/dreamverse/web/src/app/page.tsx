@@ -433,8 +433,11 @@ export default function Page() {
 	const canDownloadVideo = useMemo(() => {
 		const currentActiveClip = activeClip as Record<string, any> | null;
 		if (currentActiveClip?.blob instanceof Blob) return true;
-		return (completedClips as Record<string, any>[]).some((clip) => clip?.blob instanceof Blob);
-	}, [activeClip, completedClips]);
+		if ((completedClips as Record<string, any>[]).some((clip) => clip?.blob instanceof Blob)) return true;
+		// Once playback has started the live AV pipeline holds playable segments, so the user can
+		// download the in-progress video at any time (handleDownloadVideo remuxes live segments).
+		return Boolean(avPlaybackStarted);
+	}, [activeClip, completedClips, avPlaybackStarted]);
 
 	const hasEdits = useMemo(
 		() => Boolean(sessionStarted) && (promptEvents as Record<string, any>[]).some((e) => typeof e?.text === "string" && e.text.trim() && String(e?.source || "").trim() === "user_rewrite"),
