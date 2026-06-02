@@ -172,12 +172,14 @@ class BaseLayerWithLoRA(nn.Module):
 
     @torch.no_grad()
     # @torch.compile(dynamic=True)
-    def unmerge_lora_weights(self) -> None:
+    def unmerge_lora_weights(self, *, if_merged_only: bool = True) -> None:
         if self.disable_lora:
             return
 
         if not self.merged:
-            return
+            if if_merged_only:
+                return
+            raise ValueError("unmerge_lora_weights called but no LoRA is currently merged")
 
         # avoid precision loss
         if isinstance(self.base_layer.weight, DTensor):
