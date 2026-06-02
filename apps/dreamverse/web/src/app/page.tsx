@@ -2734,6 +2734,7 @@ export default function Page() {
 									showLivePlayback={showLivePlayback}
 									defaultMuted={videoMuted}
 									canDownload={canDownloadVideo}
+									waitingForSegmentPrompt={waitingForSegmentPrompt as boolean}
 									onPlaying={markFirstFrameRendered}
 									onDownload={handleDownloadVideo}
 								/>
