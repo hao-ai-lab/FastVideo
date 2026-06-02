@@ -1245,8 +1245,12 @@ class VideoGenerator:
             logger.warning("Audio mux failed: %s", e)
             return False
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None = None) -> None:
-        self.executor.set_lora_adapter(lora_nickname, lora_path)
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None,
+                         strength: float = 1.0,
+                         accumulate: bool = False) -> None:
+        self.executor.set_lora_adapter(lora_nickname, lora_path, strength=strength, accumulate=accumulate)
 
     def unmerge_lora_weights(self) -> None:
         """

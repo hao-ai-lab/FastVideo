@@ -33,6 +33,8 @@ from dreamverse.worker_ipc import (
     InitAck,
     JoinAck,
     LeaveAck,
+    LoraAck,
+    LoraStackPayload,
     MediaChunk,
     MediaComplete,
     MediaInit,
@@ -80,6 +82,7 @@ class CommandType(Enum):
     USER_STEP = "user_step"
     USER_LEAVE = "user_leave"
     RELOAD_MODEL = "reload_model"
+    APPLY_LORA = "apply_lora"
 
 
 @dataclass
@@ -282,6 +285,25 @@ def gpu_worker_process(
                         message=str(e),
                     ))
 
+            elif cmd.type == CommandType.APPLY_LORA:
+                try:
+                    assert isinstance(cmd.payload, LoraStackPayload), (f"APPLY_LORA requires LoraStackPayload, "
+                                                                       f"got {type(cmd.payload).__name__}")
+                    trigger, position = worker.apply_lora_stack(cmd.payload.stack)
+                    response_queue.put(
+                        LoraAck(
+                            user_id=cmd.user_id,
+                            style_trigger=trigger,
+                            style_trigger_position=position,
+                        ))
+                except Exception as e:
+                    print(f"[GPU {gpu_id}] Apply LoRA error: {e}")
+                    traceback.print_exc()
+                    response_queue.put(WorkerError(
+                        user_id=cmd.user_id,
+                        message=str(e),
+                    ))
+
             return True  # Continue loop
 
         if first_cmd is not None:
@@ -353,6 +375,25 @@ def gpu_worker_process(
                     response_queue.put(ReloadAck(user_id=cmd.user_id))
                 except Exception as e:
                     print(f"[GPU {gpu_id}] Reload error: {e}")
+                    traceback.print_exc()
+                    response_queue.put(WorkerError(
+                        user_id=cmd.user_id,
+                        message=str(e),
+                    ))
+
+            elif cmd.type == CommandType.APPLY_LORA:
+                try:
+                    assert isinstance(cmd.payload, LoraStackPayload), (f"APPLY_LORA requires LoraStackPayload, "
+                                                                       f"got {type(cmd.payload).__name__}")
+                    trigger, position = worker.apply_lora_stack(cmd.payload.stack)
+                    response_queue.put(
+                        LoraAck(
+                            user_id=cmd.user_id,
+                            style_trigger=trigger,
+                            style_trigger_position=position,
+                        ))
+                except Exception as e:
+                    print(f"[GPU {gpu_id}] Apply LoRA error: {e}")
                     traceback.print_exc()
                     response_queue.put(WorkerError(
                         user_id=cmd.user_id,
@@ -729,6 +770,25 @@ class GPUSlot:
                 raise RuntimeError(f"Unexpected step response for {user_id[:8]}: "
                                    f"{type(response).__name__}")
 
+    async def apply_lora_stack(
+        self,
+        stack: list[tuple[str, float]],
+    ) -> LoraAck:
+        """Re-apply a runtime LoRA stack on this GPU's worker."""
+        self._active = True
+        user_id = "__lora__"
+        payload = LoraStackPayload(stack=stack)
+        response = await self._send_command_tagged(Command(CommandType.APPLY_LORA, payload=payload, user_id=user_id),
+                                                   timeout=120.0)
+        match response:
+            case LoraAck() as ack:
+                return ack
+            case WorkerError(message=msg):
+                raise RuntimeError(f"Apply LoRA failed on GPU {self.gpu_id}: {msg}")
+            case _:
+                raise RuntimeError(f"Unexpected LoRA response on GPU {self.gpu_id}: "
+                                   f"{type(response).__name__}")
+
     async def leave_user(self, user_id: str) -> None:
         """Remove a user from this GPU."""
         try:
@@ -902,6 +962,17 @@ class GPUPool:
                     })
                 except Exception:
                     pass
+
+    async def apply_lora_stack(
+        self,
+        stack: list[tuple[str, float]],
+    ) -> dict[int, str | None]:
+        """Re-apply a runtime LoRA stack across all ready GPU workers."""
+        ready_slots = [slot for slot in self.slots.values() if slot.ready]
+        if not ready_slots:
+            raise RuntimeError("No ready GPU workers to apply LoRA stack.")
+        results = await asyncio.gather(*(slot.apply_lora_stack(stack) for slot in ready_slots))
+        return {slot.gpu_id: ack.style_trigger for slot, ack in zip(ready_slots, results, strict=False)}
 
     async def shutdown(self):
         """Shutdown all GPU workers."""

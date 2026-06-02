@@ -12,6 +12,7 @@ module import time.
 # mypy: ignore-errors
 import gc
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -20,12 +21,18 @@ import numpy as np
 import torch
 
 from dreamverse.config import (
+    AVAILABLE_LORAS,
     FRAME_HEIGHT,
     FRAME_WIDTH,
     MODEL_CONFIG,
     NUM_FRAMES,
     NUM_INFERENCE_STEPS,
     DREAMVERSE_MAX_AUTOTUNE,
+    DREAMVERSE_LORA_PATH,
+    DREAMVERSE_LORA_NICKNAME,
+    DREAMVERSE_LORA_STRENGTH,
+    DREAMVERSE_LORA_STACK,
+    _resolve_lora_spec,
 )
 
 # Multi-frame decoded continuation defaults from
@@ -61,6 +68,15 @@ ENABLE_AUDIO_RE_ENCODE = os.getenv("ENABLE_AUDIO_RE_ENCODE", "").lower() in ("1"
 DEFAULT_LTX2_AUDIO_SAMPLE_RATE = 16000
 DEFAULT_LTX2_AUDIO_HOP_LENGTH = 160
 DEFAULT_LTX2_AUDIO_DOWNSAMPLE = 4
+
+
+def _reset_lora_registry(worker) -> dict:
+    pipeline = getattr(worker, "pipeline", None)
+    if pipeline is None:
+        return {"status": "no_pipeline"}
+    pipeline.cur_adapter_name = ""
+    pipeline.cur_adapter_strength = 1.0
+    return {"status": "lora_registry_reset"}
 
 
 @dataclass
@@ -200,6 +216,8 @@ class VideoGenerationWorker:
         self.continuation = ContinuationState()
         self.audio_encoder_module = None
         self.audio_processor_module = None
+        self.active_style_prepend: list[str] = []
+        self.active_style_append: list[str] = []
 
     def _gpu_mem(self) -> str:
         a = torch.cuda.memory_allocated() / 1024**3
@@ -307,8 +325,87 @@ class VideoGenerationWorker:
 
         self.generator = VideoGenerator.from_pretrained(config=generator_config)
         print(f"[GPU {self.gpu_id}] After model load: {self._gpu_mem()}")
+
+        lora_stack = DREAMVERSE_LORA_STACK or ([(DREAMVERSE_LORA_PATH,
+                                                 DREAMVERSE_LORA_STRENGTH)] if DREAMVERSE_LORA_PATH else [])
+        for i, (lora_path, lora_strength) in enumerate(lora_stack):
+            nickname = DREAMVERSE_LORA_NICKNAME if i == 0 else f"{DREAMVERSE_LORA_NICKNAME}_{i}"
+            print(f"[GPU {self.gpu_id}] Applying LoRA '{nickname}' from {lora_path} "
+                  f"@{lora_strength} accumulate={i > 0}")
+            self.generator.set_lora_adapter(
+                lora_nickname=nickname,
+                lora_path=lora_path,
+                strength=lora_strength,
+                accumulate=(i > 0),
+            )
+        if lora_stack:
+            print(f"[GPU {self.gpu_id}] LoRA stack applied ({len(lora_stack)})")
+
         self._load_audio_encoder(model_root)
         print(f"[GPU {self.gpu_id}] LTX2 model loaded (warmup pending)")
+
+    def apply_lora_stack(
+        self,
+        stack: list[tuple[str, float]],
+    ) -> tuple[str | None, str | None]:
+        """Re-apply a runtime LoRA stack and update the active style trigger."""
+        if self.generator is None:
+            raise RuntimeError("Generator not initialized; cannot apply LoRA stack.")
+
+        try:
+            self.generator.unmerge_lora_weights()
+        except Exception as exc:
+            print(f"[GPU {self.gpu_id}] unmerge_lora_weights skipped: {exc}")
+
+        try:
+            self.generator.executor.collective_rpc(_reset_lora_registry)
+        except Exception as exc:
+            print(f"[GPU {self.gpu_id}] lora registry reset skipped: {exc}")
+
+        resolved_stack: list[tuple[str, float]] = []
+        for spec, strength in stack:
+            resolved = _resolve_lora_spec(spec)
+            if resolved:
+                resolved_stack.append((resolved, float(strength)))
+
+        for i, (lora_path, lora_strength) in enumerate(resolved_stack):
+            nickname = DREAMVERSE_LORA_NICKNAME if i == 0 else f"{DREAMVERSE_LORA_NICKNAME}_{i}"
+            print(f"[GPU {self.gpu_id}] Re-applying LoRA '{nickname}' from {lora_path} "
+                  f"@{lora_strength} accumulate={i > 0}")
+            self.generator.set_lora_adapter(
+                lora_nickname=nickname,
+                lora_path=lora_path,
+                strength=lora_strength,
+                accumulate=(i > 0),
+            )
+        print(f"[GPU {self.gpu_id}] Runtime LoRA stack applied ({len(resolved_stack)})")
+
+        prepend: list[str] = []
+        append: list[str] = []
+        for spec, _ in stack:
+            key = (spec or "").strip().lower()
+            if key in AVAILABLE_LORAS:
+                trigger = AVAILABLE_LORAS[key]["trigger"]
+                if AVAILABLE_LORAS[key].get("position", "append") == "prepend":
+                    prepend.append(trigger)
+                else:
+                    append.append(trigger)
+        self.active_style_prepend = prepend
+        self.active_style_append = append
+        combined = " ".join(prepend + append) or None
+        return combined, None
+
+    def _inject_style_trigger(self, prompt: str) -> str:
+        result = prompt
+        for trigger in self.active_style_prepend:
+            trigger = (trigger or "").strip()
+            if trigger and not re.search(rf"\b{re.escape(trigger)}\b", result, re.IGNORECASE):
+                result = f"{trigger} {result}".strip()
+        for trigger in self.active_style_append:
+            trigger = (trigger or "").strip()
+            if trigger and not re.search(rf"\b{re.escape(trigger)}\b", result, re.IGNORECASE):
+                result = f"{result} {trigger}".strip()
+        return result
 
     def _load_audio_encoder(self, model_root: str) -> None:
         if not ENABLE_AUDIO_RE_ENCODE:
@@ -377,6 +474,8 @@ class VideoGenerationWorker:
     ) -> StepResult:
         """Execute one generation step; snapshot state for the next segment."""
         timings: dict = {}
+
+        prompt = self._inject_style_trigger(prompt)
 
         request_kwargs = dict(
             prompt=prompt,
