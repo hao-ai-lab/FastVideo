@@ -51,7 +51,9 @@ const DEFAULT_SESSION_STATE: SessionState = {
   livePromptRewriteMode: false,
   sessionExpired: false,
   projectResetPending: false,
-  manualContinuationMode: false,
+  // Steering-only product: every session drives scenes manually. There is no
+  // auto-rollout mode and no UI selector, so this stays true throughout.
+  manualContinuationMode: true,
   waitingForSegmentPrompt: false,
 };
 
