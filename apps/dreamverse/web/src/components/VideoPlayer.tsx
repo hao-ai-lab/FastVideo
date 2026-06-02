@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { PlayFilledAlt } from "@carbon/icons-react";
-import { Download, Loader2, Share } from "lucide-react";
+import { Check, ChevronDown, Download, Loader2, Share } from "lucide-react";
 import { Button } from "@/components/ui/button";
 interface VideoPlayerProps {
 	videoRef?: React.RefCallback<HTMLVideoElement>;
@@ -21,6 +21,7 @@ interface VideoPlayerProps {
 	showLivePlayback?: boolean;
 	defaultMuted?: boolean;
 	rewritePending?: boolean;
+	waitingForSegmentPrompt?: boolean;
 	onPlaying?: () => void;
 	onDownload?: () => void;
 }
@@ -57,6 +58,7 @@ export default function VideoPlayer({
 	showLivePlayback = true,
 	defaultMuted = true,
 	rewritePending = false,
+	waitingForSegmentPrompt = false,
 	onPlaying = () => {},
 	onDownload,
 }: VideoPlayerProps) {
@@ -88,6 +90,106 @@ export default function VideoPlayer({
 		setCanShare(typeof navigator.canShare === "function" && window.matchMedia("(pointer: coarse)").matches);
 	}, []);
 
+	// Steering mode: the backend may signal "waiting for next prompt" while the current
+	// segment is still PLAYING (it generates ahead). Only surface the "Segment complete"
+	// overlay once the playhead actually reaches the end of the buffered segment.
+	const [playbackReachedEnd, setPlaybackReachedEnd] = useState(false);
+	useEffect(() => {
+		if (!waitingForSegmentPrompt) {
+			setPlaybackReachedEnd(false);
+			return;
+		}
+		const el = liveVideoEl.current;
+		if (!el) return;
+		const check = () => {
+			try {
+				const buffered = el.buffered;
+				if (buffered.length === 0) return;
+				const end = buffered.end(buffered.length - 1);
+				// Track proximity both ways: scrubbing back off the end hides the overlay,
+				// playing forward to the end re-shows it.
+				setPlaybackReachedEnd(el.ended || end - el.currentTime <= 0.2);
+			} catch {
+				/* buffered access can throw mid-append */
+			}
+		};
+		check();
+		el.addEventListener("timeupdate", check);
+		el.addEventListener("ended", check);
+		el.addEventListener("waiting", check);
+		el.addEventListener("stalled", check);
+		el.addEventListener("pause", check);
+		el.addEventListener("seeking", check);
+		el.addEventListener("seeked", check);
+		el.addEventListener("playing", check);
+		return () => {
+			el.removeEventListener("timeupdate", check);
+			el.removeEventListener("ended", check);
+			el.removeEventListener("waiting", check);
+			el.removeEventListener("stalled", check);
+			el.removeEventListener("pause", check);
+			el.removeEventListener("seeking", check);
+			el.removeEventListener("seeked", check);
+			el.removeEventListener("playing", check);
+		};
+	}, [waitingForSegmentPrompt]);
+
+	// Steering mode: when the user submits the next scene, "waiting" flips off and the
+	// segment is generated (a few seconds of latency) before frames stream. Show a
+	// "Generating next scene…" indicator across that gap so the frozen frame isn't silent.
+	const [generatingNext, setGeneratingNext] = useState(false);
+	const prevWaitingRef = useRef(false);
+	const freezeTimeRef = useRef(0);
+	useEffect(() => {
+		const wasWaiting = prevWaitingRef.current;
+		prevWaitingRef.current = waitingForSegmentPrompt;
+		if (waitingForSegmentPrompt) {
+			// Back to waiting (next segment finished and is awaiting another prompt).
+			setGeneratingNext(false);
+			return;
+		}
+		if (wasWaiting && sessionStarted) {
+			freezeTimeRef.current = liveVideoEl.current?.currentTime ?? 0;
+			setGeneratingNext(true);
+		}
+	}, [waitingForSegmentPrompt, sessionStarted]);
+	useEffect(() => {
+		if (!generatingNext) return;
+		if (!sessionStarted) {
+			setGeneratingNext(false);
+			return;
+		}
+		const el = liveVideoEl.current;
+		if (!el) return;
+		const clear = () => setGeneratingNext(false);
+		const onTime = () => {
+			// New segment frames are now playing past the frozen boundary.
+			if (el.currentTime > freezeTimeRef.current + 0.1) setGeneratingNext(false);
+		};
+		el.addEventListener("playing", clear);
+		el.addEventListener("timeupdate", onTime);
+		return () => {
+			el.removeEventListener("playing", clear);
+			el.removeEventListener("timeupdate", onTime);
+		};
+	}, [generatingNext, sessionStarted]);
+
+	// Drive a ~4.5s progress bar during generation so the wait has a visible ETA.
+	const GEN_DURATION_MS = 4500;
+	const [genProgress, setGenProgress] = useState(0);
+	useEffect(() => {
+		if (!generatingNext) {
+			setGenProgress(0);
+			return;
+		}
+		const start = performance.now();
+		setGenProgress(0);
+		const id = setInterval(() => {
+			setGenProgress(Math.min((performance.now() - start) / GEN_DURATION_MS, 1));
+		}, 50);
+		return () => clearInterval(id);
+	}, [generatingNext]);
+
 	return (
 		<div className="mx-auto w-full max-w-3xl mb-2 sm:mb-6">
 			<div className="rounded-2xl border border-border bg-card/50 p-2 shadow-lg backdrop-blur-md">
@@ -104,7 +206,7 @@ export default function VideoPlayer({
 								<PlayFilledAlt className="size-10 text-white/25" />
 								<p className="text-sm text-white/50">Your video will appear here</p>
 							</div>
-						) : !avPlaybackStarted && !mediaAppendError && !inQueue && loadingAnimation ? (
+						) : !avPlaybackStarted && !mediaAppendError && !inQueue && !waitingForSegmentPrompt && loadingAnimation ? (
 							<div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-slate-900/60 p-4 backdrop-blur-[2px]">
 								<div className="pointer-events-none absolute inset-0 overflow-hidden">
 									<div className="absolute inset-0 -translate-x-full animate-[shimmer_3s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-white/[0.04] to-transparent" />
@@ -113,6 +215,34 @@ export default function VideoPlayer({
 								<p className="relative text-sm font-medium text-white/90">{generatingLabel(connected, gpuAssigned)}</p>
 							</div>
 						) : null}
+
+						{/* Steering mode: this segment finished — wait gracefully for the user's next scene
+							instead of spinning. The last frame stays visible behind a soft bottom gradient. */}
+						{sessionStarted && waitingForSegmentPrompt && playbackReachedEnd && !mediaAppendError && !inQueue && (
+							<div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-end gap-2 bg-gradient-to-t from-slate-950/85 via-slate-950/15 to-transparent p-5 pb-6 text-center">
+								<div className="flex size-9 items-center justify-center rounded-full border border-white/25 bg-white/10 shadow-lg backdrop-blur-md">
+									<Check className="size-4 text-white/90" />
+								</div>
+								<div className="space-y-0.5">
+									<p className="text-sm font-medium text-white/95">Segment complete</p>
+									<p className="text-xs text-white/65">Describe the next scene below to keep going</p>
+								</div>
+								<ChevronDown className="size-4 animate-bounce text-white/45" />
+							</div>
+						)}
+
+						{/* Steering mode: generating the next segment — show a ~4.5s progress bar so the wait has an ETA. */}
+						{sessionStarted && generatingNext && !mediaAppendError && !inQueue && (
+							<div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-end gap-3 bg-gradient-to-t from-slate-950/85 via-slate-950/15 to-transparent p-5 pb-7 text-center">
+								<p className="text-sm font-medium text-white/95">Generating next scene&hellip;</p>
+								<div className="h-1.5 w-48 overflow-hidden rounded-full bg-white/15 shadow-sm">
+									<div
+										className="h-full rounded-full bg-white/85 transition-[width] duration-100 ease-linear"
+										style={{ width: `${Math.round(genProgress * 100)}%` }}
+									/>
+								</div>
+							</div>
+						)}
 
 						{rewritePending && avPlaybackStarted && (
 							<div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2 bg-gradient-to-t from-black/60 to-transparent px-4 pb-12 pt-8 pointer-events-none">
