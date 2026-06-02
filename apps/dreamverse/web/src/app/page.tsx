@@ -456,12 +456,13 @@ export default function Page() {
 			.reverse() // oldest -> newest
 			.map((e) => ({ id: e.promptId, prompt: e.rawText as string }));
 		const scenes: Record<string, any>[] = [];
-		// Preset opening: a leading non-user segment (curated seed) with no user prompt of its own.
+		// Preset opening segments: curated seeds with no user prompt of their own.
 		const userSources = new Set(["user_raw", "user", "user_enhanced", "user_rewrite", "user_enhancement_failed"]);
-		const firstHist = ((promptHistory as Record<string, any>[]).slice().reverse())[0];
-		if (firstHist && !userSources.has(String(firstHist?.source || "")) && typeof firstHist?.prompt === "string" && firstHist.prompt.trim()) {
-			scenes.push({ id: firstHist.id || "scene_open", prompt: firstHist.prompt });
-		}
+		const curatedHists = (promptHistory as Record<string, any>[])
+			.slice()
+			.reverse() // oldest first
+			.filter((h) => !userSources.has(String(h?.source || "")) && typeof h?.prompt === "string" && (h.prompt as string).trim());
+		scenes.push(...curatedHists.map((h) => ({ id: h.id || "scene_open", prompt: h.prompt })));
 		scenes.push(...userScenes);
 		return scenes;
 	}, [manualContinuationMode, promptEvents, promptHistory]);
@@ -1813,11 +1814,11 @@ export default function Page() {
 	function buildProjectInitPayload(type: "session_init_v2" | "project_init_v1") {
 		const manualMode = Boolean(sessionStore.get().manualContinuationMode);
 		let segmentPrompts = getSessionInitPrompts();
-		// Steering mode: a preset/rollout only seeds the FIRST segment; the user
-		// drives every subsequent segment by hand. Force auto/loop off so the
-		// backend waits for the user's next prompt instead of auto-continuing.
+		// Steering mode: seed the first 2 segments from the preset so there's no
+		// gap between segment 1 and 2; the user drives every subsequent segment.
+		// Force auto/loop off so the backend waits after the seeded prompts run out.
 		if (manualMode) {
-			segmentPrompts = segmentPrompts.slice(0, 1);
+			segmentPrompts = segmentPrompts.slice(0, 2);
 		}
 		setSeedPrompts(segmentPrompts);
 		return {
