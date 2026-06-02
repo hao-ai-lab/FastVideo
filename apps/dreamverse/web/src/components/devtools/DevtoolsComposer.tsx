@@ -34,6 +34,7 @@ interface DevtoolsComposerProps {
   demoMode?: boolean;
   enhancementEnabled?: boolean;
   autoExtensionEnabled?: boolean;
+  manualContinuationEnabled?: boolean;
   loopGenerationEnabled?: boolean;
   curatedPromptLimit?: number;
   maxCuratedPromptCount?: number;
@@ -49,6 +50,7 @@ interface DevtoolsComposerProps {
   onEnhancementToggle?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onCuratedPromptLimitChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onAutoExtensionToggle?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onManualContinuationToggle?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onLoopToggle?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onLivePromptModeToggle?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onSpeechTranscript?: (text: string) => void;
@@ -71,6 +73,7 @@ export default function DevtoolsComposer({
   demoMode = false,
   enhancementEnabled = true,
   autoExtensionEnabled = false,
+  manualContinuationEnabled = false,
   loopGenerationEnabled = false,
   curatedPromptLimit = 0,
   maxCuratedPromptCount = 0,
@@ -86,6 +89,7 @@ export default function DevtoolsComposer({
   onEnhancementToggle = () => {},
   onCuratedPromptLimitChange = () => {},
   onAutoExtensionToggle = () => {},
+  onManualContinuationToggle = () => {},
   onLoopToggle = () => {},
   onLivePromptModeToggle = () => {},
   onSpeechTranscript,
@@ -324,6 +328,28 @@ export default function DevtoolsComposer({
                     </Label>
                     <p className="text-sm text-muted-foreground">
                       Extends the rollout automatically between segments.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    id="devtools-steering-mode"
+                    checked={manualContinuationEnabled}
+                    onCheckedChange={(checked) =>
+                      onManualContinuationToggle({
+                        target: { checked: Boolean(checked) },
+                        currentTarget: { checked: Boolean(checked) },
+                      } as React.ChangeEvent<HTMLInputElement>)
+                    }
+                  />
+                  <div className="space-y-1">
+                    <Label htmlFor="devtools-steering-mode">
+                      Steering mode
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Drive each segment manually — type the next scene to
+                      continue (vs the automatic 6-segment rollout).
                     </p>
                   </div>
                 </div>
