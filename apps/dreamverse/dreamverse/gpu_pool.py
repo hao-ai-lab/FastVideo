@@ -850,16 +850,12 @@ class GPUPool:
         groups = [gpu_ids[i:i + sp_size] for i in range(0, len(gpu_ids), sp_size)]
         groups = [g for g in groups if len(g) == sp_size]
         if not groups:
-            raise RuntimeError(
-                f"Not enough GPUs for DREAMVERSE_SP_SIZE={sp_size}: available={gpu_ids}"
-            )
+            raise RuntimeError(f"Not enough GPUs for DREAMVERSE_SP_SIZE={sp_size}: available={gpu_ids}")
         if sp_size > 1:
-            print(f"[INFO] Sequence-parallel slots (sp_size={sp_size}): "
-                  + ", ".join("{" + ",".join(map(str, g)) + "}" for g in groups))
+            print(f"[INFO] Sequence-parallel slots (sp_size={sp_size}): " + ", ".join("{" + ",".join(map(str, g)) + "}"
+                                                                                      for g in groups))
         self.gpu_ids = [g[0] for g in groups]
-        self.slots: dict[int, GPUSlot] = {
-            g[0]: GPUSlot(g[0], ",".join(str(x) for x in g)) for g in groups
-        }
+        self.slots: dict[int, GPUSlot] = {g[0]: GPUSlot(g[0], ",".join(str(x) for x in g)) for g in groups}
         self.waiting_list: list[tuple[str, asyncio.Event, WebSocket]] = []
         self.client_gpu_map: dict[str, int] = {}
         self._pool_lock = asyncio.Lock()
