@@ -99,7 +99,18 @@ export async function applyNormalizedSocketEvent(event: any, context: any): Prom
 				status: "ready_fallback",
 				source: payload.source || "user_raw",
 				text: payload.prompt,
+				// Steering: this prompt produced no segment — drop it from the scene list.
+				steeringFailed: true,
 			});
+			// Steering recovery: enhancement failed so the backend enqueued nothing AND won't
+			// re-emit prompt_sources_blocked (its drained flag is still set). Put the user back to
+			// "describe the next scene" ourselves so the generating overlay clears and they can retry.
+			if (!uiStore.get().simpleMode && sessionStore.get().manualContinuationMode) {
+				sessionStore.patch({
+					waitingForSegmentPrompt: true,
+					sessionNotice: "Couldn't continue from that prompt — try rephrasing the next scene.",
+				});
+			}
 			console.warn("[PromptEnhanceFallback] Prompt extension failed for this request.");
 			return;
 
@@ -486,6 +497,11 @@ export async function applyNormalizedSocketEvent(event: any, context: any): Prom
 				preservePlaybackOnClose: false,
 				promptExtensionError: "",
 				sessionNotice: errorMessage,
+				// Steering: a blocked/failed prompt produced no segment and the backend won't re-emit
+				// prompt_sources_blocked, so recover the "describe the next scene" state ourselves.
+				...(!uiStore.get().simpleMode && sessionStore.get().manualContinuationMode
+					? { waitingForSegmentPrompt: true }
+					: {}),
 			});
 			rewriteStore.patch({
 				rewritingSeedPrompts: false,
