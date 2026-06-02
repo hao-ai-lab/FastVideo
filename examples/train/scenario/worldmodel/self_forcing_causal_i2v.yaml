@@ -106,6 +106,7 @@ callbacks:
         - vbench.background_consistency
         - vbench.dynamic_degree
         - optical_flow.synthetic_optical_flow
+        - common.fvd
       calibration_path: assets/eval/matrixgame2_synthetic_flow_calibration.json
       skip_missing_deps: true
       strict: false
