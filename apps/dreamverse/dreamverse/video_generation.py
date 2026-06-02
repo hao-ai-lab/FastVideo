@@ -317,7 +317,7 @@ class VideoGenerationWorker:
                 preset_overrides={
                     "refine": {
                         "enabled": True,
-                        "num_inference_steps": 3,
+                        "num_inference_steps": 2,
                         "guidance_scale": 1.0,
                         "add_noise": True,
                     },
