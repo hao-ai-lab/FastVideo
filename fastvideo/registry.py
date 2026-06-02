@@ -510,12 +510,18 @@ def _register_configs() -> None:
             "FastVideo/Matrix-Game-2.0-Base-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
+            "mignonjia/mg_zelda",
+            "mignonjia/mg_zelda_longlive",
+            "mignonjia/mg_bidirectional_zelda",
         ],
         model_detectors=[
             lambda path: any(token in path.lower() for token in (
                 "matrix-game-2",
                 "matrixgame2",
                 "matrix-game-2.0",
+                "mg_zelda",
+                "mg_bidirectional_zelda",
+                "mg-bidirectional-zelda",
             )),
         ],
         model_family="matrixgame",
