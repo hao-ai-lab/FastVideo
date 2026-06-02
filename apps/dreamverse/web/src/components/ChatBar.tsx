@@ -2,7 +2,7 @@
 
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import Image from "next/image";
-import { Film, ArrowUp, X, Loader2, ArrowLeft } from "lucide-react";
+import { Film, ArrowUp, X, Loader2, ArrowLeft, ImagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import LeaveSessionModal, { shouldShowLeaveWarning } from "@/components/LeaveSessionModal";
 import SpeechToTextButton from "@/components/SpeechToTextButton";
@@ -25,6 +25,9 @@ interface Props {
 	waitingForSegmentPrompt?: boolean;
 	manualContinuationEnabled?: boolean;
 	onModeChange?: (manual: boolean) => void;
+	initialImageDataUrl?: string;
+	onImageUpload?: (dataUrl: string, mimeType: string, name: string) => void;
+	onImageClear?: () => void;
 	onPresetGenerate?: (presetId: string) => void;
 	onContinuationInput?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
 	onContinuationKeydown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -52,6 +55,9 @@ export default function ChatBar({
 	waitingForSegmentPrompt = false,
 	manualContinuationEnabled = false,
 	onModeChange = () => {},
+	initialImageDataUrl = "",
+	onImageUpload = () => {},
+	onImageClear = () => {},
 	onPresetGenerate = () => {},
 	onContinuationInput = () => {},
 	onContinuationKeydown = () => {},
@@ -65,6 +71,26 @@ export default function ChatBar({
 }: Props) {
 	const [sttBusy, setSttBusy] = useState(false);
 	const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+
+	const processImageFile = useCallback((file: File) => {
+		if (!file.type.startsWith("image/")) return;
+		const reader = new FileReader();
+		reader.onload = (e) => {
+			const dataUrl = e.target?.result as string;
+			if (dataUrl) onImageUpload(dataUrl, file.type, file.name);
+		};
+		reader.readAsDataURL(file);
+	}, [onImageUpload]);
+
+	const handleImagePaste = useCallback((e: React.ClipboardEvent) => {
+		if (sessionStarted) return;
+		const items = Array.from(e.clipboardData?.items ?? []);
+		const imageItem = items.find((item) => item.type.startsWith("image/"));
+		if (!imageItem) return;
+		const file = imageItem.getAsFile();
+		if (file) processImageFile(file);
+	}, [sessionStarted, processImageFile]);
 	const showSpinner = isGenerating || rewritingSeedPrompts;
 	const isBusy = isGenerating || rewritingSeedPrompts || projectResetPending;
 	const messagePlaceholder = projectResetPending
@@ -398,6 +424,24 @@ export default function ChatBar({
 				</div>
 			)}
 
+			{!sessionStarted && initialImageDataUrl && (
+				<div className="flex items-center gap-2 rounded-2xl border border-input bg-card/65 px-3 py-2">
+					<img src={initialImageDataUrl} alt="Initial frame" className="h-12 w-12 rounded-lg object-cover" />
+					<span className="flex-1 truncate text-xs text-muted-foreground">Starting image set</span>
+					<button type="button" onClick={onImageClear} className="text-muted-foreground hover:text-foreground transition-colors">
+						<X className="size-4" />
+					</button>
+				</div>
+			)}
+
+			<input
+				ref={fileInputRef}
+				type="file"
+				accept="image/png,image/jpeg,image/webp"
+				className="hidden"
+				onChange={(e) => { const f = e.target.files?.[0]; if (f) processImageFile(f); e.target.value = ""; }}
+			/>
+
 			<div
 				className={cn(
 					"flex min-w-0 items-center gap-1.5 rounded-4xl border py-2.5 pl-5 pr-2.5 shadow-md backdrop-blur-sm transition-all duration-200",
@@ -411,6 +455,7 @@ export default function ChatBar({
 					value={continuationDraft}
 					onChange={onContinuationInput}
 					onKeyDown={handleKeyDown}
+					onPaste={handleImagePaste}
 					placeholder={sttBusy ? "Listening\u2026" : messagePlaceholder}
 					maxLength={PROMPT_MAX_LENGTH}
 					disabled={isBusy || sttBusy}
@@ -421,6 +466,19 @@ export default function ChatBar({
 					)}
 				/>
 				{onSpeechTranscript && <SpeechToTextButton disabled={isBusy} onTranscript={onSpeechTranscript} onInterimChange={onSpeechInterimChange} onBusyChange={setSttBusy} />}
+				{!sessionStarted && (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						title="Add starting image"
+						onClick={() => fileInputRef.current?.click()}
+						disabled={isBusy}
+						className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+					>
+						<ImagePlus className="size-4" />
+					</Button>
+				)}
 				{!sessionStarted ? (
 					<Button
 						aria-label={actionLabel}
