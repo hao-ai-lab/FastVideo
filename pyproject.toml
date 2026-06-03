@@ -142,10 +142,13 @@ test = [
 # separately as documented in the README. decord has no aarch64 wheels
 # (upstream effectively unmaintained); it's split into its own extra so
 # the main eval extras install on ARM systems too. eval/io/video.py has
-# a PyAV fallback that covers the video-decode path without decord.
+# a PyAV fallback that covers the video-decode path without decord. The
+# judge.* metrics (eval-judge) call a remote API and need a key, so they
+# are opt-in and intentionally kept out of the default [eval] set.
 eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
 eval-physics-iq = []
 eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "pytorchvideo"]
+eval-judge = ["google-genai"]
 eval = [
     "lpips", "ptlflow", "qwen-vl-utils",
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
