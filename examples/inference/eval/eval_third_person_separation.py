@@ -76,8 +76,10 @@ def main() -> None:
         res = ev.evaluate(samples=samples).corpus[METRIC]
         rows[baseline] = res
         d = res.details
-        wr = "—" if res.score is None else f"{100 * res.score:.1f}%"
-        print(f"| {baseline} | {wr} | {d.get('wins')}/{d.get('losses')}/{d.get('ties')} | {d.get('n')} |")
+        if res.score is None:
+            print(f"| {baseline} | — | — | 0 |")
+        else:
+            print(f"| {baseline} | {100 * res.score:.1f}% | {d['wins']}/{d['losses']}/{d['ties']} | {d['n']} |")
 
     if args.output is not None:
         payload = {b: {"score": r.score, "details": r.details} for b, r in rows.items()}

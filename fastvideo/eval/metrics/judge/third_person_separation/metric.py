@@ -139,7 +139,6 @@ class ThirdPersonSeparationMetric(BaseMetric):
         self._client: Any = None
         self._files: dict[str, Any] = {}  # path -> uploaded Gemini file handle
         self._records: list[dict] = []  # one per accumulated pair
-        self._pairs_seen = 0  # drives A/B counterbalancing
 
     # --- model / client -----------------------------------------------------
     def setup(self) -> None:
@@ -151,7 +150,6 @@ class ThirdPersonSeparationMetric(BaseMetric):
     # --- set-vs-set protocol ------------------------------------------------
     def reset(self) -> None:
         self._records = []
-        self._pairs_seen = 0
         self._files = {}
 
     def accumulate(self, sample: dict) -> None:
@@ -172,7 +170,6 @@ class ThirdPersonSeparationMetric(BaseMetric):
             self._write_cache(cand, base, action_text, rec)
         rec = {**rec, "action": action}
         self._records.append(rec)
-        self._pairs_seen += 1
 
     def finalize(self) -> MetricResult:
         recs = [r for r in self._records if r.get("verdict")]
@@ -186,7 +183,8 @@ class ThirdPersonSeparationMetric(BaseMetric):
 
         # Per-action win-rate, grouped by the raw label (no assumed control scheme).
         per_action: dict[str, dict] = {}
-        for action in sorted({r.get("action") for r in recs if r.get("action")}):
+        labels: set[str] = {str(r["action"]) for r in recs if r.get("action")}
+        for action in sorted(labels):
             gr = [r for r in recs if r.get("action") == action]
             gw = sum(r["verdict"] == "candidate" for r in gr)
             gl = sum(r["verdict"] == "baseline" for r in gr)
@@ -211,14 +209,16 @@ class ThirdPersonSeparationMetric(BaseMetric):
     def merge_from(self, other: BaseMetric) -> None:
         assert isinstance(other, ThirdPersonSeparationMetric)
         self._records.extend(other._records)
-        self._pairs_seen += other._pairs_seen
 
     # --- judging ------------------------------------------------------------
     def _judge_pair(self, cand: str, base: str, image: str | None, action_text: str) -> dict:
         """k counterbalanced comparisons → aggregated per-pair verdict."""
+        # Seed the A/B alternation from the pair itself so it is reproducible and
+        # independent of evaluation order or which subset is being run.
+        seed = int(hashlib.sha1(f"{cand}|{base}".encode()).hexdigest(), 16)
         mapped: list[str] = []
         for i in range(self.k):
-            cand_first = (self._pairs_seen + i) % 2 == 0
+            cand_first = (seed + i) % 2 == 0
             v1, v2 = (cand, base) if cand_first else (base, cand)
             winner = self._one_call(image, v1, v2, action_text)
             if winner == "tie":
@@ -264,7 +264,8 @@ class ThirdPersonSeparationMetric(BaseMetric):
                 return json.loads(resp.text).get("winner", "tie")
             except Exception as exc:  # noqa: BLE001 - transient API errors
                 if attempt == 5:
-                    raise
+                    print(f"[judge] giving up after 6 attempts ({exc}); scoring this call a tie")
+                    break
                 is_429 = "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc)
                 time.sleep(40 if is_429 else 2**attempt)
         return "tie"
@@ -284,7 +285,9 @@ class ThirdPersonSeparationMetric(BaseMetric):
 
     # --- per-pair cache -----------------------------------------------------
     def _cache_path(self, cand: str, base: str, action_text: str) -> Path:
-        h = hashlib.sha1(f"{RUBRIC_ID}|{self.model}|{self.k}|{cand}|{base}|{action_text}".encode()).hexdigest()[:16]
+        # k is intentionally NOT in the key so a larger-k run can reuse an
+        # existing verdict with enough samples (see ``_cached``).
+        h = hashlib.sha1(f"{RUBRIC_ID}|{self.model}|{cand}|{base}|{action_text}".encode()).hexdigest()[:16]
         return get_cache_dir() / "judge" / "third_person_separation" / f"{h}.json"
 
     def _cached(self, cand: str, base: str, action_text: str) -> dict | None:
