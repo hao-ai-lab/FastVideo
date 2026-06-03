@@ -33,6 +33,21 @@ def _tensor_to_pil_list(frames: torch.Tensor) -> list[PIL.Image.Image]:
     return [PIL.Image.fromarray(a) for a in arr]
 
 
+def _validate_multiclip_frames(num_motion: int, num_frames: int) -> None:
+    """num_motion must be < num_frames, else follow-up clips stitch to empty."""
+    if num_motion >= num_frames:
+        raise ValueError(f"svi_num_motion_frames ({num_motion}) must be smaller than num_frames ({num_frames}) "
+                         "for multi-clip generation; otherwise stitched follow-up clips would be empty.")
+
+
+def _stitch_clip_outputs(clip_outputs: list[torch.Tensor], num_motion: int) -> torch.Tensor:
+    """Concat per-clip (B,C,T,H,W) videos on time, dropping each follow-up's leading num_motion frames."""
+    concatenated = [clip_outputs[0]]
+    for video in clip_outputs[1:]:
+        concatenated.append(video[:, :, num_motion:, :, :])
+    return torch.cat(concatenated, dim=2)
+
+
 class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
     """
     Pipeline for Stable-Video-Infinity multi-clip I2V generation on Wan 2.1.
@@ -110,6 +125,9 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
                 batch = stage(batch, fastvideo_args)
             return batch
 
+        num_frames = int(batch.num_frames) if batch.num_frames is not None else 0
+        _validate_multiclip_frames(num_motion, num_frames)
+
         # Multi-clip needs the reference image up front to construct motion frames
         # for clip 0. Run InputValidationStage now to resolve image_path -> pil_image.
         self.input_validation_stage(batch, fastvideo_args)
@@ -156,12 +174,7 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
                 tail = clip_batch.output[0, :, -num_motion:, :, :]
                 motion_frames = _tensor_to_pil_list(tail)
 
-        # Drop the first num_motion frames of each follow-up clip to avoid duplicating
-        # the previous clip's tail in the stitched output.
-        concatenated = [clip_outputs[0]]
-        for video in clip_outputs[1:]:
-            concatenated.append(video[:, :, num_motion:, :, :])
-        batch.output = torch.cat(concatenated, dim=2)
+        batch.output = _stitch_clip_outputs(clip_outputs, num_motion)
         return batch
 
 

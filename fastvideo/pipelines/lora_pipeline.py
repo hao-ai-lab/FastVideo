@@ -325,9 +325,12 @@ class LoRAPipeline(ComposedPipelineBase):
             for name, weight in lora_state_dict.items():
                 # Extract weights (lora_A, lora_B, and lora_alpha)
                 name = name.replace("diffusion_model.", "")
-                name = name.replace("pipe.dit.", "")
+                # Guarded so non-SVI / non-PEFT adapters are provably untouched.
+                if "pipe.dit." in name:
+                    name = name.replace("pipe.dit.", "")
                 name = name.replace(".weight", "")
-                name = name.replace(".default", "")
+                if ".default" in name:
+                    name = name.replace(".default", "")
 
                 if "lora_alpha" in name:
                     # Store alpha with minimal mapping - same processing as lora_A/lora_B
