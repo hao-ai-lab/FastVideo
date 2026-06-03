@@ -130,8 +130,11 @@ def _compute_ssim_main(args) -> int:
         try:
             from torchvision.io import read_video
             frames, _, _ = read_video(path, pts_unit="sec", output_format="TCHW")
-            return frames
-        except (ImportError, AttributeError):
+            if frames.shape[0] > 0:
+                return frames
+        except Exception:
+            # torchvision's backend (FFmpeg/PyAV) can raise more than
+            # ImportError/AttributeError; fall back to the PyAV path below.
             pass
         import av
         container = av.open(path)
@@ -146,6 +149,8 @@ def _compute_ssim_main(args) -> int:
     def _ssim(p1, p2):
         f1, f2 = _read_video_frames(p1), _read_video_frames(p2)
         n = min(f1.shape[0], f2.shape[0])
+        if n == 0:
+            raise RuntimeError(f"no decodable frames to compare: {p1} ({f1.shape[0]}) vs {p2} ({f2.shape[0]})")
         f1 = (f1[:n].float() / 255.0).contiguous()
         f2 = (f2[:n].float() / 255.0).contiguous()
         return [pm_ssim(f1[i:i + 1], f2[i:i + 1], data_range=1.0).item() for i in range(n)]
@@ -157,7 +162,8 @@ def _compute_ssim_main(args) -> int:
 
     rows = []
     for b, p in zip(baseline, patched, strict=True):
-        assert b["i"] == p["i"]
+        if b["i"] != p["i"]:
+            raise ValueError(f"baseline/patched prompt index mismatch: {b['i']} != {p['i']}")
         vals = _ssim(b["mp4"], p["mp4"])
         rows.append({
             "i": b["i"],

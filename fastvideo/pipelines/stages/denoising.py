@@ -79,8 +79,12 @@ class DenoisingStage(PipelineStage):
         across prompts (the bare-transformer path has no pipeline call to reset
         it otherwise).
         """
-        import cache_dit
-        from cache_dit import (BlockAdapter, DBCacheConfig, ForwardPattern, TaylorSeerCalibratorConfig)
+        try:
+            import cache_dit
+            from cache_dit import (BlockAdapter, DBCacheConfig, ForwardPattern, TaylorSeerCalibratorConfig)
+        except ImportError as e:
+            raise ImportError("use_cachedit requires the cache-dit package, which is not installed. Install it with "
+                              "`pip install \"fastvideo[cache]\"` (or `pip install cache-dit`).") from e
 
         cache_config = DBCacheConfig(
             Fn_compute_blocks=fastvideo_args.cachedit_fn_compute_blocks,
@@ -328,6 +332,14 @@ class DenoisingStage(PipelineStage):
                              "blocks, but the layerwise/CPU offload hook assumes every block "
                              "runs each step. Set dit_layerwise_offload=False and "
                              "dit_cpu_offload=False (the model must fit in GPU memory).")
+        # cache-dit skips blocks via data-dependent control flow (a per-step
+        # residual-diff decision), which torch.compile cannot trace without
+        # graph breaks/recompiles. Disallow the combination for now (eager
+        # only); compile support is a follow-up.
+        if fastvideo_args.use_cachedit and fastvideo_args.enable_torch_compile:
+            raise ValueError("use_cachedit is currently incompatible with enable_torch_compile: cache-dit "
+                             "introduces data-dependent control flow that torch.compile cannot trace cleanly. "
+                             "Set enable_torch_compile=False (eager); compile support is a follow-up.")
         # Enable cache-dit on the transformer(s) once, then refresh the cache
         # context each generation so state never leaks across prompts.
         if fastvideo_args.use_cachedit:
