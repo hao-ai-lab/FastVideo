@@ -88,8 +88,7 @@ fi
 git checkout {shlex.quote(git_ref)}
 git submodule update --init --recursive
 {fa3_step}
-uv pip install -e ".[test]"
-uv pip install cache-dit
+uv pip install -e ".[test,cache]"
 cd fastvideo-kernel && ./build.sh && cd ..
 export HF_HOME=/root/data/.cache
 hf auth login --token "$HF_TOKEN"
@@ -120,9 +119,16 @@ def _run_pass(*, use_cachedit: bool, model_id: str, num_gpus: int, preset: dict,
     inner = "/FastVideo/fastvideo/tests/modal/_cachedit_ab_inner.py"
     cmd = (f"source /opt/venv/bin/activate && exec python {inner} "
            f"--config-json {config_path} --results-json {results_path}")
-    subprocess.run(["/bin/bash", "-lc", cmd], check=True)
-    with open(results_path) as f:
-        return json.load(f)
+    try:
+        subprocess.run(["/bin/bash", "-lc", cmd], check=True)
+        with open(results_path) as f:
+            return json.load(f)
+    finally:
+        for p in (config_path, results_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 def _pairwise_ssim(baseline: list[dict], patched: list[dict]) -> list[dict]:
@@ -140,9 +146,16 @@ def _pairwise_ssim(baseline: list[dict], patched: list[dict]) -> list[dict]:
     inner = "/FastVideo/fastvideo/tests/modal/_cachedit_ab_inner.py"
     cmd = (f"source /opt/venv/bin/activate && exec python {inner} --mode compute_ssim "
            f"--baseline-results-json {bpath} --patched-results-json {ppath} --ssim-output-json {spath}")
-    subprocess.run(["/bin/bash", "-lc", cmd], check=True)
-    with open(spath) as f:
-        return json.load(f)
+    try:
+        subprocess.run(["/bin/bash", "-lc", cmd], check=True)
+        with open(spath) as f:
+            return json.load(f)
+    finally:
+        for p in (bpath, ppath, spath):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 def _print_table(rows: list[dict], label: str) -> None:
