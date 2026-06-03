@@ -267,6 +267,11 @@ conversion, route it through `../add-model-07-conversion/SKILL.md` with a retry
 request matching `contracts/conversion_request.md`, then resume the component
 skill with the updated conversion handoff.
 
+When a component failure narrows to layer-by-layer numerical drift, load
+`../add-model-08-trace/SKILL.md` before writing custom hooks. It uses
+`fastvideo/hooks/activation_trace.py`; canonical env vars and JSONL format are
+documented in `docs/contributing/activation_trace.md`.
+
 Phase 6 ends only when every required component handoff reports
 `parity_status=non_skip_pass`, or when a precise blocker or escape hatch is
 recorded in `port_state_file`.

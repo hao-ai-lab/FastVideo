@@ -20,9 +20,11 @@ os.environ.setdefault("GROQ_API_KEY", "dummy")
 
 import dreamverse.main as server_main  # noqa: E402
 import dreamverse.runtime as runtime  # noqa: E402
+from dreamverse.config import PROMPT_TIMEOUT_MS  # noqa: E402
 from dreamverse.session_logger import SessionEventLogger  # noqa: E402
 from dreamverse.worker_ipc import MediaChunk, MediaComplete, MediaInit  # noqa: E402
 from dreamverse.session import controller as session_controller  # noqa: E402
+from dreamverse.utils import PROMPT_EXTENSION_FAILURE_USER_MESSAGE  # noqa: E402
 
 pytestmark = pytest.mark.gpu
 
@@ -338,7 +340,7 @@ def test_session_event_logger_initializes_hostname_folder_and_utc_filename(
     logger = SessionEventLogger(tmp_path)
     assert logger.directory == tmp_path / socket.gethostname()
     assert logger.directory.is_dir()
-    assert re.match(r"^\d{6}_\d{6}\.jsonl$", logger.path.name)
+    assert re.match(r"^\d{6}_\d{6}_\d{6}\.jsonl$", logger.path.name)
     assert logger.path.is_file()
 
 
@@ -833,7 +835,7 @@ def test_initial_custom_rollout_prompt_generates_seed_window_before_streaming():
             "rewrite_instruction": "A moonbase corridor thriller with flooding",
             "rewrite_model": "gpt-4.1-mini",
             "rewrite_temperature": 0.4,
-            "timeout_ms": server_main.PROMPT_TIMEOUT_MS,
+            "timeout_ms": PROMPT_TIMEOUT_MS,
             "system_prompt_override": "Session-specific rewrite prompt",
         }
         assert fake_pool._slot.calls
@@ -1256,7 +1258,7 @@ def test_single5s_enhancement_fallback_does_not_start_generation():
         assert fallback_payloads[0]["prompt_id"] == "simple_custom_prompt"
         assert (
             fallback_payloads[0]["error"]
-            == server_main.PROMPT_EXTENSION_FAILURE_USER_MESSAGE
+            == PROMPT_EXTENSION_FAILURE_USER_MESSAGE
         )
         assert fallback_payloads[0]["source"] == "user_enhancement_failed"
 

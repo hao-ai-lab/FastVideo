@@ -311,7 +311,7 @@ Notes:
   development and CI.
 - Product server release is Docker/deploy workflow, not PyPI.
 
-### Frontend build: standalone pnpm
+### Frontend build: standalone npm
 
 Do not add a root `package.json`.
 
@@ -319,14 +319,14 @@ Keep all frontend tooling under:
 
 ```text
 apps/dreamverse/web/package.json
-apps/dreamverse/web/pnpm-lock.yaml
+apps/dreamverse/web/package-lock.json
 apps/dreamverse/web/playwright.config.*
 ```
 
 Rationale:
 
 - FastVideo remains primarily a Python ML library.
-- Python contributors should not need Node or pnpm for normal work.
+- Python contributors should not need Node or npm for normal work.
 - This intentionally diverges from chainlit's root JS workspace pattern and
   follows the simpler open-webui-style split.
 
@@ -455,31 +455,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # IMPORTANT: pnpm/action-setup MUST run BEFORE setup-node when using
-      # cache: pnpm — setup-node otherwise can't find pnpm to populate cache.
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: pnpm
-          cache-dependency-path: apps/dreamverse/web/pnpm-lock.yaml
+          cache: npm
+          cache-dependency-path: apps/dreamverse/web/package-lock.json
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Typecheck
-        run: pnpm run typecheck --if-present
+        run: npm run typecheck --if-present
 
       - name: Unit tests
-        run: pnpm run test --if-present
+        run: npm run test --if-present
 
       - name: Build
-        run: pnpm run build
+        run: npm run build
 
       # NOTE: Playwright tests require a running backend. Until Phase 4 lands
       # `/healthz`/`/readyz`/`/status`/`/prompt-system-config`/`/curated-presets`
@@ -489,13 +482,13 @@ jobs:
       # `fastvideo.entrypoints.streaming.build_app` and add product routes).
       #
       # - name: Install Playwright browsers
-      #   run: pnpm exec playwright install --with-deps chromium
+      #   run: npm exec -- playwright install --with-deps chromium
       #
       # - name: Playwright (re-enable in Phase 4)
-      #   run: pnpm exec playwright test
+      #   run: npm exec -- playwright test
 ```
 
-**Playwright config update needed** when moving FE: `Dreamverse/apps/web/playwright.config.ts` line 39 currently uses `npm run dev`; change to `pnpm run dev` post-move ([source](file:///home/william5lin/Dreamverse/apps/web/playwright.config.ts#L39)).
+**Playwright config update needed** when moving FE: keep `Dreamverse/apps/web/playwright.config.ts` line 39 on `npm run dev` after the move ([source](file:///home/william5lin/Dreamverse/apps/web/playwright.config.ts#L39)).
 
 #### `.github/workflows/ci-dreamverse-backend.yml`
 
@@ -604,7 +597,7 @@ monorepo CI path.
 | uv workspaces | https://docs.astral.sh/uv/concepts/workspaces/ | Authoritative Python workspace model. |
 | Hatch monorepo | https://hatch.pypa.io/latest/how-to/environment/workspace/ | Alternative workspace model; not selected. |
 | chainlit | https://github.com/Chainlit/chainlit | uv workspace precedent plus **per-language CI split** (separate `check-frontend.yaml` / `check-backend.yaml` workflows path-filtered by directory). Not a PR-level split — independent of D-17 single-mega-PR decision. |
-| open-webui | https://github.com/open-webui/open-webui | Frontend path filtering (`paths-ignore` on backend-only changes) and separate release tracks. **Note:** open-webui has a root `package.json`; we are choosing standalone-pnpm despite the precedent, to avoid forcing Python-only contributors to install Node. |
+| open-webui | https://github.com/open-webui/open-webui | Frontend path filtering (`paths-ignore` on backend-only changes) and separate release tracks. **Note:** open-webui has a root `package.json`; we are choosing standalone npm under `apps/dreamverse/web/` despite the precedent, to avoid forcing Python-only contributors to install Node. |
 | streamlit | https://github.com/streamlit/streamlit | Split Python and JS testing in one repo. |
 | gradio | https://github.com/gradio-app/gradio | Python package plus JS workspace precedent. |
 | full-stack-fastapi-template-nextjs | https://github.com/nemanjam/full-stack-fastapi-template-nextjs | Separate frontend/backend build and deploy workflows. |
@@ -623,8 +616,8 @@ class runs where, because not all tests can run on `ubuntu-latest` CI.
 | **Unit** | (none / `unit`) | `ci-dreamverse-backend.yml` (ubuntu-latest CI) + locally | Pure logic, no GPU, no live service. Mocked FastVideo backends, schema validation, helper functions. | `test_config.py`, `test_rewrite_prompt_payload.py`, `test_session_init_image.py`, the new `test_import_contract.py` |
 | **Integration (fakes)** | `integration` | `ci-dreamverse-backend.yml` + locally | FastAPI test client + in-process fakes/mocks for GPU pool. Validates routes, request/response shapes, session state machine. | `test_health_endpoints.py`, `test_mock_server.py`, `test_entrypoints.py`, `test_prompt_safety.py`, `test_batching.py` (deleted) |
 | **Live-service GPU** | `gpu` (skip-by-default in CI) | **Local GPU4 manual QA** + Buildkite-Modal (when added) | Real `fastvideo serve` process + real model weights + real WebSocket round-trips. Validates LTX-2 streaming, NVFP4 wiring, continuation state, frame emission. | `test_realtime_stress.py` (947 LOC), `test_session_logging.py` (1278 LOC) — these spin up real workers per their current shape |
-| **Frontend unit / build** | (n/a — pnpm) | `ci-dreamverse-frontend.yml` (ubuntu-latest, no GPU) | Vitest + tsc + Next.js build. No backend needed. | `apps/dreamverse/web/src/**/*.test.ts(x)` |
-| **Frontend Playwright E2E** | (n/a — pnpm) | **Local GPU4 manual QA** until Phase 4 lands public health routes; then `ci-dreamverse-frontend.yml` against a mock backend OR a deployed staging | Real browser → real backend WebSocket flow. Requires `/healthz`, `/readyz`, `/status`, `/prompt-system-config`, `/curated-presets`, `/v1/stream`. | `apps/dreamverse/web/e2e/{backend-health,frontend-shell,preset-prompt-generation}.spec.ts` |
+| **Frontend unit / build** | (n/a — npm) | `ci-dreamverse-frontend.yml` (ubuntu-latest, no GPU) | Vitest + tsc + Next.js build. No backend needed. | `apps/dreamverse/web/src/**/*.test.ts(x)` |
+| **Frontend Playwright E2E** | (n/a — npm) | **Local GPU4 manual QA** until Phase 4 lands public health routes; then `ci-dreamverse-frontend.yml` against a mock backend OR a deployed staging | Real browser → real backend WebSocket flow. Requires `/healthz`, `/readyz`, `/status`, `/prompt-system-config`, `/curated-presets`, `/v1/stream`. | `apps/dreamverse/web/e2e/{backend-health,frontend-shell,preset-prompt-generation}.spec.ts` |
 | **FastVideo public contract** | (none) | Existing FastVideo CI (`ci-precommit` + Buildkite for GPU) | Schema/shape guards that this migration must not break. | `fastvideo/tests/contract/test_dreamverse_shape.py`, `test_dynamo_shape.py`, `test_generate_async.py` |
 | **FastVideo SSIM regression** | (Buildkite path-filter) | Buildkite-Modal | Inference-quality gates for ported models. | `fastvideo/tests/ssim/test_*.py` |
 
@@ -709,7 +702,7 @@ CUDA_VISIBLE_DEVICES=4 uv run --locked --package dreamverse-server \
 # Smoke-test from another terminal
 curl -s http://localhost:8009/health | jq .
 curl -s http://localhost:8009/readyz | jq .   # Phase 4+ only
-# Drive the FE against it: cd apps/dreamverse/web && pnpm run dev
+# Drive the FE against it: cd apps/dreamverse/web && npm run dev
 ```
 
 This is the **manual QA gate** for any phase that touches the live-service
@@ -907,7 +900,7 @@ mass move. This should be a small PR.
 6. Add `apps/dreamverse/web/.*` to pre-commit global exclude.
 7. Add `docs/contributing/dreamverse-development.md` with local dev commands:
    backend `uv run --locked --package dreamverse-server --extra test pytest ...`;
-   frontend `cd apps/dreamverse/web && pnpm install && pnpm run build`.
+   frontend `cd apps/dreamverse/web && npm ci && npm run build`.
 8. Run `uv lock` to regenerate `uv.lock` with the new workspace member; commit
    the lock change in the same PR.
 9. Land D-12-A docstring caveat: mark `GpuPool` experimental/server-internal
@@ -990,7 +983,7 @@ These are **explicit shims** — Phase 4 is responsible for their promotion to p
 
 - [`config.py:13`](file:///home/william5lin/Dreamverse/server/config.py#L13): `_APP_ROOT / "apps" / "web"` → `_APP_ROOT / "web"` (since `_APP_ROOT` will resolve to `apps/dreamverse/` in the new layout).
 - [`apps/web/next.config.ts:11`](file:///home/william5lin/Dreamverse/apps/web/next.config.ts#L11): `outputFileTracingRoot: path.resolve(__dirname, "../..")` → `path.resolve(__dirname, "../../..")` (one extra `..` since the FE is one level deeper in the monorepo).
-- [`playwright.config.ts:39`](file:///home/william5lin/Dreamverse/apps/web/playwright.config.ts#L39): `command: "npm run dev"` → `command: "pnpm run dev"` (matches Phase 1 tooling decision).
+- [`playwright.config.ts:39`](file:///home/william5lin/Dreamverse/apps/web/playwright.config.ts#L39): keep `command: "npm run dev"` (matches Phase 1 tooling decision).
 - Any hardcoded `../FastVideo` paths in scripts/configs → make repo-root-relative since they now share a repo.
 
 **Steps:**
@@ -1084,9 +1077,9 @@ scripts, and product docs after backend tests are green.
 
 **Verification gate:**
 
-- `cd apps/dreamverse/web && pnpm install --frozen-lockfile` succeeds.
-- `cd apps/dreamverse/web && pnpm run build` succeeds.
-- `cd apps/dreamverse/web && pnpm run test --if-present` succeeds (Vitest + tsc).
+- `cd apps/dreamverse/web && npm ci` succeeds.
+- `cd apps/dreamverse/web && npm run build` succeeds.
+- `cd apps/dreamverse/web && npm run test --if-present` succeeds (Vitest + tsc).
 - **Frontend CI Playwright is intentionally DEFERRED to Phase 4** — at Phase 3
   the public `build_app` does not yet expose `/healthz`+`/readyz`+`/status`+
   `/prompt-system-config`+`/curated-presets`. The `ci-dreamverse-frontend.yml`
@@ -1094,7 +1087,7 @@ scripts, and product docs after backend tests are green.
   reactivates them. No PR note required.
 - **Manual GPU4 Playwright smoke** (recommended): on this dev node, run
   `apps/dreamverse/web/e2e/frontend-shell.spec.ts` against the GPU4-deployed
-  backend from Phase 2 manual QA + a `pnpm run dev` frontend at port 5274
+  backend from Phase 2 manual QA + a `npm run dev` frontend at port 5274
   to confirm shell hydration. `backend-health.spec.ts` and
   `preset-prompt-generation.spec.ts` will fail until Phase 4 — that is
   expected; document as deferred.
@@ -1249,7 +1242,7 @@ product-specific prompt orchestration.
 | CI cost increase | Medium | Medium | Add Dreamverse path-specific workflows; add `paths-ignore` to broad workflows; rely on Buildkite monorepo diff watch lists. | CI owner |
 | FastVideo PyPI release accidentally includes Dreamverse app | High | Low | Add `apps*` to `[tool.setuptools.packages.find]` and `[tool.wheel]` excludes; verify built wheel contents. | Release owner |
 | Release cadence coupling | Medium | Medium | Keep FastVideo PyPI version release unchanged; Dreamverse uses Docker/Vercel deploy from app paths. | Release owner |
-| Frontend tooling drift | Medium | Medium | Pin pnpm lockfile in `apps/dreamverse/web/`; no root JS workspace. | Frontend owner |
+| Frontend tooling drift | Medium | Medium | Pin npm lockfile in `apps/dreamverse/web/`; no root JS workspace. | Frontend owner |
 | Security surface enlargement | Medium | Medium | Product routes stay in `apps/dreamverse/server`; only generic health/streaming routes go into FastVideo. | Backend owner |
 | Product-specific API leakage into `fastvideo.*` | High | Medium | Enforce import/module boundary; keep curated presets and prompt UX product-local. | Architecture owner |
 | Migration regression | High | Medium | Phase gates; backend before frontend; can stop after any phase with Dreamverse repo still usable until Phase 7. | Migration owner |

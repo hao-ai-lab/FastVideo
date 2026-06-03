@@ -9,6 +9,10 @@ try:
     from fastvideo_kernel import video_sparse_attn
 except ImportError:
     video_sparse_attn = None
+try:
+    from fastvideo_kernel import video_sparse_attn_bshd
+except ImportError:
+    video_sparse_attn_bshd = None
 
 from typing import Any
 
@@ -18,6 +22,9 @@ from fastvideo.distributed import get_sp_group
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+# VSA tile shape. The tile volume picks the kernel path automatically in
+# forward(): (4,4,4)=64 -> existing TK/Triton path (default, unchanged);
+# (4,8,8)=256 -> FA4 CuTe block-sparse attention fastpath (Blackwell).
 VSA_TILE_SIZE = (4, 4, 4)
 
 
@@ -133,7 +140,6 @@ class VideoSparseAttentionBackend(AttentionBackend):
 class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
     dit_seq_shape: list[int]
-    VSA_sparsity: float
     num_tiles: list[int]
     total_seq_length: int
     tile_partition_indices: torch.LongTensor
@@ -156,10 +162,10 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
-    def prepare(self):
+    def prepare(self) -> None:
         pass
 
     def build(  # type: ignore
@@ -276,24 +282,34 @@ class VideoSparseAttentionImpl(AttentionImpl):
         gate_compress: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
-        query = query.transpose(1, 2).contiguous()
-        key = key.transpose(1, 2).contiguous()
-        value = value.transpose(1, 2).contiguous()
-        gate_compress = gate_compress.transpose(1, 2).contiguous()
-
         VSA_sparsity = attn_metadata.VSA_sparsity
+        block_elements = math.prod(VSA_TILE_SIZE)
+        cur_topk = math.ceil((1 - VSA_sparsity) * (attn_metadata.total_seq_length / block_elements))
 
-        cur_topk = math.ceil((1 - VSA_sparsity) * (attn_metadata.total_seq_length / math.prod(VSA_TILE_SIZE)))
-
-        if video_sparse_attn is None:
-            raise NotImplementedError("video_sparse_attn is not installed")
-        hidden_states = video_sparse_attn(query,
+        # 256-element tiles auto-route to the FA4 CuTe BSHD fastpath, which
+        # consumes [B, S, H, D] directly -- skip the transpose round-trip.
+        if block_elements == 256 and video_sparse_attn_bshd is not None:
+            return video_sparse_attn_bshd(query,
                                           key,
                                           value,
                                           attn_metadata.variable_block_sizes,
                                           attn_metadata.variable_block_sizes,
                                           cur_topk,
                                           block_size=VSA_TILE_SIZE,
-                                          compress_attn_weight=gate_compress).transpose(1, 2)
+                                          compress_attn_weight=gate_compress)
 
-        return hidden_states
+        if video_sparse_attn is None:
+            raise NotImplementedError("video_sparse_attn is not installed")
+        # Default 64-element-tile path (unchanged): BHSD round-trip.
+        query = query.transpose(1, 2).contiguous()
+        key = key.transpose(1, 2).contiguous()
+        value = value.transpose(1, 2).contiguous()
+        gate_compress = gate_compress.transpose(1, 2).contiguous()
+        return video_sparse_attn(query,
+                                 key,
+                                 value,
+                                 attn_metadata.variable_block_sizes,
+                                 attn_metadata.variable_block_sizes,
+                                 cur_topk,
+                                 block_size=VSA_TILE_SIZE,
+                                 compress_attn_weight=gate_compress).transpose(1, 2)

@@ -81,7 +81,8 @@ class ClapScoreMetric(BaseMetric):
         audio = sample.get("audio")
         text = sample.get("text_prompt")
         if audio is None or text is None:
-            return self._skip(sample, "missing 'audio' or 'text_prompt'")
+            missing = [k for k, v in (("audio", audio), ("text_prompt", text)) if v is None]
+            return self._skip(sample, f"missing {', '.join(repr(k) for k in missing)}")
 
         audio_emb = self._audio_emb(audio)
         text_emb = self._text_emb(text)

@@ -18,6 +18,7 @@ _CORE_METRICS = (
     "common.psnr",
     "common.ssim",
     "common.lpips",
+    "common.fvd",
     "optical_flow.gt_optical_flow",
     "optical_flow.synthetic_optical_flow",
     "physics_iq",

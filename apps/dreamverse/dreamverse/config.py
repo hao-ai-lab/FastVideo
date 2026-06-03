@@ -4,6 +4,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SERVER_ROOT = Path(__file__).resolve().parent
 _FASTVIDEO_DREAMVERSE_HOME = os.environ.get("FASTVIDEO_DREAMVERSE_HOME")
+_FASTVIDEO_DREAMVERSE_FRONTEND_ROOT = os.environ.get("FASTVIDEO_DREAMVERSE_FRONTEND_ROOT")
 _XDG_STATE_HOME = os.environ.get("XDG_STATE_HOME")
 _DEFAULT_STATE_ROOT = (Path(_FASTVIDEO_DREAMVERSE_HOME) if _FASTVIDEO_DREAMVERSE_HOME else
                        (Path(_XDG_STATE_HOME) if _XDG_STATE_HOME else Path.home() / ".local/state") /
@@ -16,18 +17,39 @@ _APP_ROOT = _REPO_ROOT
 
 def _resolve_frontend_root() -> Path:
     for candidate in (
+            Path(_FASTVIDEO_DREAMVERSE_FRONTEND_ROOT) if _FASTVIDEO_DREAMVERSE_FRONTEND_ROOT else None,
             _APP_ROOT / "web",
             _APP_ROOT / "prod-ui",
     ):
-        if candidate.is_dir():
+        if candidate is not None and candidate.is_dir():
             return candidate
+    if _FASTVIDEO_DREAMVERSE_FRONTEND_ROOT:
+        return Path(_FASTVIDEO_DREAMVERSE_FRONTEND_ROOT)
     return _APP_ROOT / "web"
+
+
+def _resolve_frontend_static_dir_candidates() -> tuple[str, ...]:
+    roots = (
+        FRONTEND_ROOT,
+        Path.cwd() / "apps/dreamverse/web",
+        Path.cwd() / "web",
+        Path("/opt/FastVideo/apps/dreamverse/web"),
+    )
+    candidates: list[str] = []
+    seen: set[Path] = set()
+    for root in roots:
+        resolved_root = root.resolve(strict=False)
+        if resolved_root in seen:
+            continue
+        seen.add(resolved_root)
+        candidates.extend(str(resolved_root / dirname) for dirname in ("out", "dist"))
+    return tuple(candidates)
 
 
 FRONTEND_ROOT = _resolve_frontend_root()
 _CLIENT_PROMPTS_ROOT = FRONTEND_ROOT / "prompts"
 _CLIENT_PROMPTS_LOCAL_ROOT = FRONTEND_ROOT / "prompts.local"
-FRONTEND_STATIC_DIR_CANDIDATES = tuple(str(FRONTEND_ROOT / dirname) for dirname in ("out", "dist"))
+FRONTEND_STATIC_DIR_CANDIDATES = _resolve_frontend_static_dir_candidates()
 
 # Model registry
 MODEL_REGISTRY = {
@@ -35,18 +57,24 @@ MODEL_REGISTRY = {
         "name": "FastLTX2",
         "model_path": "FastVideo/LTX2-Distilled-Diffusers",
         "config_model_path": "FastVideo/LTX2-Distilled-Diffusers",
+        "lora_repo": "FastVideo/LTX2-OmniNFT-LoRA",
     },
     "fast-ltx23": {
         "name": "FastLTX23",
         "model_path": "FastVideo/LTX-2.3-Distilled-Diffusers",
         "config_model_path": "FastVideo/LTX-2.3-Distilled-Diffusers",
+        "lora_repo": "FastVideo/LTX-2.3-OmniNFT-LoRA",
     },
 }
 
 DEFAULT_MODEL_ID = "fast-ltx2"
 
+ACTIVE_MODEL_ID = (os.getenv("DREAMVERSE_MODEL_ID", "").strip() or DEFAULT_MODEL_ID)
+if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
+    ACTIVE_MODEL_ID = DEFAULT_MODEL_ID
+
 # Active model configuration
-MODEL_CONFIG = MODEL_REGISTRY[DEFAULT_MODEL_ID]
+MODEL_CONFIG = MODEL_REGISTRY[ACTIVE_MODEL_ID]
 
 # Generation limits
 SESSION_TIMEOUT_SECONDS = 300
@@ -142,6 +170,76 @@ def _optional_env(*names: str) -> str | None:
 
 DEVTOOLS_ENABLED = _env_bool("FASTVIDEO_ENABLE_DEVTOOLS", False)
 PROMPT_SAFETY_ENABLED = _env_bool("FASTVIDEO_ENABLE_PROMPT_SAFETY", False)
+DREAMVERSE_MAX_AUTOTUNE = _env_bool("DREAMVERSE_MAX_AUTOTUNE", True)
+DREAMVERSE_SP_SIZE = max(1, _env_int("DREAMVERSE_SP_SIZE", 1))
+
+DREAMVERSE_MODEL_PATH = (os.getenv("DREAMVERSE_MODEL_PATH", "").strip() or None)
+if DREAMVERSE_MODEL_PATH:
+    MODEL_CONFIG = {
+        **MODEL_CONFIG,
+        "model_path": DREAMVERSE_MODEL_PATH,
+        "config_model_path": DREAMVERSE_MODEL_PATH,
+    }
+
+AVAILABLE_LORAS = {
+    "pixar": {
+        "repo": "vrgamedevgirl84/LTX_2.3_Pixar_Toon_Style_LoRa",
+        "trigger": "P1x4r",
+        "model": "fast-ltx23",
+        "position": "prepend",
+        "label": "Pixar Toon",
+    },
+    "transition": {
+        "repo": "valiantcat/LTX-2.3-Transition-LORA",
+        "trigger": "zhuanchang",
+        "model": "fast-ltx23",
+        "position": "append",
+        "label": "Transition",
+    },
+}
+
+
+def _active_model_key() -> str:
+    return ACTIVE_MODEL_ID
+
+
+def _available_styles_for_active_model() -> list[str]:
+    active = _active_model_key()
+    return [k for k, v in AVAILABLE_LORAS.items() if v.get("model") == active]
+
+
+def _resolve_lora_spec(spec: str) -> str | None:
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    if spec.lower() == "omninft":
+        return MODEL_CONFIG.get("lora_repo")
+    if spec.lower() in AVAILABLE_LORAS:
+        return AVAILABLE_LORAS[spec.lower()]["repo"]
+    return spec
+
+
+def _parse_lora_stack(raw: str) -> list[tuple[str, float]]:
+    out: list[tuple[str, float]] = []
+    for item in (raw or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        spec, _, stren = item.partition("@")
+        resolved = _resolve_lora_spec(spec)
+        if resolved:
+            try:
+                strength = float(stren) if stren.strip() else 1.0
+            except ValueError:
+                strength = 1.0
+            out.append((resolved, strength))
+    return out
+
+
+DREAMVERSE_LORA_PATH = _resolve_lora_spec(os.getenv("DREAMVERSE_LORA_PATH", ""))
+DREAMVERSE_LORA_NICKNAME = (os.getenv("DREAMVERSE_LORA_NICKNAME", "omninft").strip() or "omninft")
+DREAMVERSE_LORA_STRENGTH = _env_float("DREAMVERSE_LORA_STRENGTH", 1.0)
+DREAMVERSE_LORA_STACK = _parse_lora_stack(os.getenv("DREAMVERSE_LORA_STACK", ""))
 
 
 def _resolve_devtools_paths(

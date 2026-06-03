@@ -18,7 +18,7 @@ import { test, expect, type WebSocket as PWWebSocket } from '@playwright/test';
  *         PLAYWRIGHT_BASE_URL=http://127.0.0.1:5274 \
  *         NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \
  *         PLAYWRIGHT_LONG_RUNNING=1 \
- *         pnpm exec playwright test e2e/long-running-segments.spec.ts
+ *         npm exec -- playwright test e2e/long-running-segments.spec.ts
  *
  * The full run takes ~7-9 minutes on a B200: ~3-4min for torch.compile
  * max-autotune to warm both DiT + text-encoder graphs, then ~30s for

@@ -94,8 +94,12 @@ Run the shared parity-debug loop. The component test command is:
 pytest <parity_test> -v -s
 ```
 
-For numerical drift, narrow the first divergent block with per-block hooks or
-intermediate tensor comparisons before changing layers.
+For numerical drift, use `../add-model-08-trace/SKILL.md` before writing bespoke
+hooks. Start with FastVideo's activation trace (`fastvideo/hooks/activation_trace.py`;
+`docs/contributing/activation_trace.md`) and a block-level regex such as
+`FASTVIDEO_TRACE_LAYERS="^block\.layers\.[0-9]+$"`. Only fall back to custom
+per-block hooks if the needed boundary or statistic is not exposed by
+`FASTVIDEO_TRACE_STATS`.
 
 ## Escape Hatches
 

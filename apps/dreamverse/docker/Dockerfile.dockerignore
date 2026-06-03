@@ -2,6 +2,7 @@
 **/.git/
 .venv/
 **/.venv/
+.*dreamverse*/
 **/__pycache__/
 **/*.pyc
 **/*.pyo
@@ -24,6 +25,9 @@ apps/dreamverse/dreamverse/outputs/
 apps/dreamverse/dreamverse/prompts.local/
 apps/dreamverse/logs/
 outputs/
+outputs_video/
+quality_check_outputs/
+data/
 logs/
 slurm-logs/
 wandb/
@@ -32,7 +36,9 @@ wandb/
 .env.*
 **/prompts.local/
 .codex/
-.agents/exploration/
+.agents/
+.opencode/
+.agent_tmp/
 .vscode/
 .idea/
 *.log

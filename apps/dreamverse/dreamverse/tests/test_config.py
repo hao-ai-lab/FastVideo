@@ -124,10 +124,19 @@ def test_config_uses_local_overlay_paths_when_devtools_enabled(monkeypatch, tmp_
     assert module.CURATED_PRESETS_FALLBACK_FILE_PATH.endswith(
         "apps/dreamverse/web/prompts/selected_ltx2_continuation_story_presets.json"
     )
-    assert module.FRONTEND_STATIC_DIR_CANDIDATES == (
+    assert module.FRONTEND_STATIC_DIR_CANDIDATES[:2] == (
         str(module.FRONTEND_ROOT / "out"),
         str(module.FRONTEND_ROOT / "dist"),
     )
+
+
+def test_config_includes_docker_checkout_static_frontend_candidates(monkeypatch):
+    _set_required_prompt_keys(monkeypatch)
+
+    module = _load_config_module()
+
+    assert "/opt/FastVideo/apps/dreamverse/web/out" in module.FRONTEND_STATIC_DIR_CANDIDATES
+    assert "/opt/FastVideo/apps/dreamverse/web/dist" in module.FRONTEND_STATIC_DIR_CANDIDATES
 
 
 def test_config_enables_prompt_safety_when_requested(monkeypatch):

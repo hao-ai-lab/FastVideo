@@ -58,9 +58,15 @@ def _load_frame_dir(path: Path) -> torch.Tensor:
 
 
 def _load_video_file(path: str) -> torch.Tensor:
-    # Try decord first (faster), fall back to torchvision
+    # Decoder priority: decord (fastest, optional) → PyAV (broadly available
+    # via av on PyPI) → torchvision.io.read_video (removed in 0.20+, kept as
+    # the last-ditch fallback for older stacks).
     try:
         return _load_with_decord(path)
+    except ImportError:
+        pass
+    try:
+        return _load_with_pyav(path)
     except ImportError:
         pass
     return _load_with_torchvision(path)
@@ -75,6 +81,18 @@ def _load_with_decord(path: str) -> torch.Tensor:
     # → (T, C, H, W) float32 [0, 1]
     tensor = torch.from_numpy(frames).permute(0, 3, 1, 2).float() / 255.0
     return tensor
+
+
+def _load_with_pyav(path: str) -> torch.Tensor:
+    import av
+
+    container = av.open(path)
+    try:
+        frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
+    finally:
+        container.close()
+    arr = np.stack(frames)  # (T, H, W, C) uint8
+    return torch.from_numpy(arr).permute(0, 3, 1, 2).float() / 255.0
 
 
 def _load_with_torchvision(path: str) -> torch.Tensor:

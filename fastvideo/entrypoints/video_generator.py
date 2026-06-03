@@ -95,6 +95,7 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "enable_torch_compile",
     "torch_compile_kwargs",
     "output_type",
+    "nvfp4_fa4",
 })
 
 
@@ -164,6 +165,10 @@ class VideoGenerator:
         move to VideoGenerator.from_config(...).
         """
         log_queue = kwargs.pop("log_queue", None)
+        if kwargs.pop("nvfp4_fa4", False):
+            import os
+            os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
+            os.environ.setdefault("CUTE_DSL_ENABLE_TVM_FFI", "1")
         typed_config = kwargs.pop("config", None)
         if typed_config is not None:
             if model_path is not None:
@@ -1240,8 +1245,12 @@ class VideoGenerator:
             logger.warning("Audio mux failed: %s", e)
             return False
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None = None) -> None:
-        self.executor.set_lora_adapter(lora_nickname, lora_path)
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None,
+                         strength: float = 1.0,
+                         accumulate: bool = False) -> None:
+        self.executor.set_lora_adapter(lora_nickname, lora_path, strength=strength, accumulate=accumulate)
 
     def unmerge_lora_weights(self) -> None:
         """

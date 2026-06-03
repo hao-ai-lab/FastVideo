@@ -67,6 +67,36 @@ LTX2_BASE = InferencePreset(
     },
 )
 
+LTX2_3_BASE = InferencePreset(
+    name="ltx2_3_base",
+    version=1,
+    model_family="ltx2",
+    description="LTX-2.3 base at 512x768",
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 10,
+        "height": 512,
+        "width": 768,
+        "num_frames": 121,
+        "fps": 24,
+        # LTX-2.3 base: 30 steps (vs 40 for LTX-2.0 base) + CFG 3.0 + negative
+        # prompt; STG perturbs block 28 (vs 29 for LTX-2.0).
+        "guidance_scale": 3.0,
+        "num_inference_steps": 30,
+        "negative_prompt": _LTX2_NEGATIVE_PROMPT,
+        "ltx2_cfg_scale_video": 3.0,
+        "ltx2_cfg_scale_audio": 7.0,
+        "ltx2_modality_scale_video": 3.0,
+        "ltx2_modality_scale_audio": 3.0,
+        "ltx2_rescale_scale": 0.7,
+        "ltx2_stg_scale_video": 1.0,
+        "ltx2_stg_scale_audio": 1.0,
+        "ltx2_stg_blocks_video": [28],
+        "ltx2_stg_blocks_audio": [28],
+    },
+)
+
 LTX2_DISTILLED = InferencePreset(
     name="ltx2_distilled",
     version=1,
@@ -111,4 +141,4 @@ LTX2_TWO_STAGE = InferencePreset(
     },
 )
 
-ALL_PRESETS = (LTX2_BASE, LTX2_DISTILLED, LTX2_TWO_STAGE)
+ALL_PRESETS = (LTX2_BASE, LTX2_3_BASE, LTX2_DISTILLED, LTX2_TWO_STAGE)
