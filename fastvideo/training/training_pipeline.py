@@ -359,7 +359,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 current_timestep=training_batch.timesteps,
                 patch_size=patch_size,
                 VSA_sparsity=current_vsa_sparsity,
-                device=get_local_torch_device())
+                device=get_local_torch_device(),
+                cache_tile_buf=False)
         elif envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
             if not vmoba_available:
                 raise ImportError("FASTVIDEO_ATTENTION_BACKEND is set to VMOBA_ATTN, "
