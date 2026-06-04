@@ -1024,9 +1024,9 @@ class GenRLMethod(TrainingMethod):
                         _ppo_batch_t0 = time.perf_counter()
                         embeds = sample["prompt_embeds"]
                         neg_embeds = (
-                            self._train_neg_embeds[
-                                : len(embeds)
-                            ]
+                            self._train_neg_embeds[0:1].repeat(
+                                len(embeds), 1, 1
+                            )
                             if self._use_cfg
                             else None
                         )
@@ -1117,9 +1117,9 @@ class GenRLMethod(TrainingMethod):
                 # Get embeddings.
                 embeds = sample["prompt_embeds"]
                 neg_embeds = (
-                    self._train_neg_embeds[
-                        : len(embeds)
-                    ]
+                    self._train_neg_embeds[0:1].repeat(
+                        len(embeds), 1, 1
+                    )
                     if self._use_cfg
                     else None
                 )
