@@ -149,11 +149,15 @@ class DistributedKRepeatSampler(Sampler):
     ):
         self.dataset = dataset
         self.batch_size = batch_size
-        self.k = k
+        self.k = k  # Repeats/videos per prompt.
         self.num_replicas = num_replicas
         self.rank = rank
         self.seed = seed
         self.total_samples = num_replicas * batch_size
+        if self.k <= 0:
+            raise ValueError(
+                f"k must be a positive integer. Got k={k}."
+            )
         if self.batch_size % self.k != 0:
             raise ValueError(
                 "batch_size must be divisible by k so each rank receives "
@@ -165,7 +169,13 @@ class DistributedKRepeatSampler(Sampler):
             f"num_replicas={num_replicas} "
             f"batch_size={batch_size}"
         )
-        self.m = self.total_samples // self.k
+        self.m = self.total_samples // self.k  # Unique prompts across ranks.
+        if len(self.dataset) < self.m:
+            raise ValueError(
+                "dataset must contain at least one prompt per global "
+                "prompt group. Got "
+                f"dataset_size={len(self.dataset)}, required={self.m}."
+            )
         self.groups_per_rank = self.batch_size // self.k
         self.epoch = 0
 
