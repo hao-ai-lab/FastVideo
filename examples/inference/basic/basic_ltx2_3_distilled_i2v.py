@@ -49,6 +49,7 @@ from pathlib import Path
 import torch._inductor.config as _inductor
 
 from fastvideo import VideoGenerator
+from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.utils import maybe_download_model
 
 # Env knobs (set BEFORE importing fastvideo where possible — but
@@ -157,6 +158,14 @@ def main() -> None:
         "dynamic": False,
     }
 
+    # Loading the pipeline config *with model_path* binds model-specific
+    # tuning (notably VAE precision/decoder defaults) into the config. Without
+    # this, the generic pipeline config gives a substantially slower VAE
+    # decode stage. `basic_ltx2_distilled_fast_profile.py` uses the same
+    # pattern.
+    pipeline_config = PipelineConfig.from_pretrained(model_root)
+    pipeline_config.dit_config.quant_config = None
+
     generator = VideoGenerator.from_pretrained(
         model_root,
         num_gpus=1,
@@ -168,6 +177,7 @@ def main() -> None:
         ltx2_refine_num_inference_steps=3,
         ltx2_refine_guidance_scale=1.0,
         ltx2_refine_add_noise=True,
+        pipeline_config=pipeline_config,
         enable_torch_compile=True,
         enable_torch_compile_text_encoder=True,
         torch_compile_kwargs=torch_compile_kwargs,
