@@ -149,17 +149,34 @@ class DistributedKRepeatSampler(Sampler):
     ):
         self.dataset = dataset
         self.batch_size = batch_size
-        self.k = k
+        self.k = k  # Repeats/videos per prompt.
         self.num_replicas = num_replicas
         self.rank = rank
         self.seed = seed
         self.total_samples = num_replicas * batch_size
+        if self.k <= 0:
+            raise ValueError(
+                f"k must be a positive integer. Got k={k}."
+            )
+        if self.batch_size % self.k != 0:
+            raise ValueError(
+                "batch_size must be divisible by k so each rank receives "
+                "whole prompt groups. Got "
+                f"batch_size={batch_size}, k={k}."
+            )
         assert self.total_samples % self.k == 0, (
             f"k cannot divide n*b: k={k} "
             f"num_replicas={num_replicas} "
             f"batch_size={batch_size}"
         )
-        self.m = self.total_samples // self.k
+        self.m = self.total_samples // self.k  # Unique prompts across ranks.
+        if len(self.dataset) < self.m:
+            raise ValueError(
+                "dataset must contain at least one prompt per global "
+                "prompt group. Got "
+                f"dataset_size={len(self.dataset)}, required={self.m}."
+            )
+        self.groups_per_rank = self.batch_size // self.k
         self.epoch = 0
 
     def __iter__(self):
@@ -169,28 +186,14 @@ class DistributedKRepeatSampler(Sampler):
             indices = torch.randperm(
                 len(self.dataset), generator=g
             )[: self.m].tolist()
-            repeated = [
-                idx
-                for idx in indices
+            start = self.rank * self.groups_per_rank
+            end = start + self.groups_per_rank
+            rank_groups = indices[start:end]
+            yield [
+                (self.epoch, idx)
+                for idx in rank_groups
                 for _ in range(self.k)
             ]
-            shuffled_idx = torch.randperm(
-                len(repeated), generator=g
-            ).tolist()
-            shuffled = [
-                repeated[i] for i in shuffled_idx
-            ]
-            per_card = []
-            for i in range(self.num_replicas):
-                start = i * self.batch_size
-                end = start + self.batch_size
-                per_card.append(
-                    [
-                        (self.epoch, idx)
-                        for idx in shuffled[start:end]
-                    ]
-                )
-            yield per_card[self.rank]
 
     def set_epoch(self, epoch: int):
         self.epoch = epoch
