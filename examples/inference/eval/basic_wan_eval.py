@@ -65,10 +65,6 @@ def _print_results(results) -> None:
         else:
             print(f"  {name}: {r.score:.4f}")
 
-        if r.details:
-            for key, value in r.details.items():
-                print(f"      {key}: {value}")
-
 
 def main() -> None:
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
