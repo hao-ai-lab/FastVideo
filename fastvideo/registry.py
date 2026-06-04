@@ -649,7 +649,6 @@ def _register_configs() -> None:
         pipeline_config_cls=WaypointT2VConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
-            "Overworld/Waypoint-1-Small",
             "FastVideo/Waypoint-1-Small-Diffusers",
         ],
         model_detectors=[

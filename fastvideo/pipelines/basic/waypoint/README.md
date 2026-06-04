@@ -20,7 +20,8 @@ The model consists of:
    - Local/global attention windows for efficiency
    - Control conditioning via MLP fusion
 
-2. **VAE (WorldEngineVAE)**: DCAE-based encoder/decoder
+2. **VAE (WorldEngineVAE)**: native FastVideo DCAE-based encoder/decoder
+   (`fastvideo/models/vaes/world_engine_vae.py`)
    - 16 latent channels
    - 16x spatial downsampling
 
@@ -38,7 +39,7 @@ from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput
 
 # Initialize pipeline
 pipeline = WaypointPipeline.from_pretrained(
-    "Overworld/Waypoint-1-Small",
+    "FastVideo/Waypoint-1-Small-Diffusers",
     device="cuda",
     torch_dtype=torch.bfloat16,
 )
@@ -106,11 +107,14 @@ config = WaypointT2VConfig(
 
 - `fastvideo/models/dits/waypoint_transformer.py`: Transformer implementation
 - `fastvideo/configs/models/dits/waypoint_transformer.py`: Transformer config
+- `fastvideo/models/vaes/world_engine_vae.py`: Native WorldEngineVAE implementation
+- `fastvideo/configs/models/vaes/world_engine_vae.py`: VAE config
 - `fastvideo/configs/pipelines/waypoint.py`: Pipeline config
-- `fastvideo/configs/sample/waypoint.py`: Sampling parameters
-- `tests/local_tests/transformers/test_waypoint_transformer.py`: Parity tests
+- `fastvideo/api/waypoint.py`: Sampling parameters (`WaypointSamplingParam`)
+- `tests/local_tests/waypoint/test_waypoint_transformer.py`: Transformer parity test
+- `tests/local_tests/vaes/test_world_engine_vae_parity.py`: VAE parity test
 - `tests/local_tests/pipelines/test_waypoint_pipeline_smoke.py`: Pipeline tests
-- `examples/inference/basic/basic_waypoint_streaming.py`: Example script
+- `examples/inference/basic/basic_waypoint.py`: Example script
 
 ## Hardware Requirements
 

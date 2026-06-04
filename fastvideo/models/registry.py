@@ -95,6 +95,7 @@ _VAE_MODELS = {
     # `stable-audio-open-1.0/vae/config.json` ships `_class_name="AutoencoderOobleck"`
     # (Diffusers' name); FastVideo's class is `OobleckVAE`.
     "AutoencoderOobleck": ("vaes", "oobleck", "OobleckVAE"),
+    "WorldEngineVAE": ("vaes", "world_engine_vae", "WorldEngineVAE"),
 }
 
 _AUDIO_MODELS = {

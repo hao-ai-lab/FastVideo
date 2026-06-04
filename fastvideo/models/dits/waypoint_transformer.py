@@ -36,7 +36,6 @@ except ImportError:
     _FLEX_ATTN_AVAILABLE = False
 
 from fastvideo.attention import DistributedAttention, LocalAttention
-from fastvideo.layers.layernorm import AdaLN, rms_norm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.logger import init_logger
@@ -68,8 +67,43 @@ else:
 
 
 # =============================================================================
-# Helper Functions (rms_norm from fastvideo.layers.layernorm)
+# Helper Functions
 # =============================================================================
+
+
+def rms_norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
+
+
+class AdaLN(nn.Module):
+
+    def __init__(
+        self,
+        d_model: int,
+        bias: bool = False,
+        eps: float = 1e-6,
+        params_dtype: torch.dtype | None = None,
+        prefix: str = "",
+    ):
+        super().__init__()
+        self.eps = eps
+        self.fc = ReplicatedLinear(
+            d_model,
+            2 * d_model,
+            bias=bias,
+            params_dtype=params_dtype,
+            prefix=prefix,
+        )
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        B, L, D = x.shape
+        N = cond.shape[1]
+        h = F.silu(cond)
+        ab, _ = self.fc(h)
+        ab = ab.view(B, N, 1,
+                     2 * D).expand(-1, -1, L // N, -1).reshape(B, L, 2 * D)
+        scale, shift = ab.chunk(2, dim=-1)
+        return rms_norm(x, self.eps) * (1 + scale) + shift
 
 
 def ada_rmsnorm(

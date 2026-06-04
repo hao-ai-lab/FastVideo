@@ -41,10 +41,9 @@ def test_waypoint_transformer_load():
     from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel
     from fastvideo.configs.models.dits.waypoint_transformer import WaypointArchConfig
     
-    weights_path = os.getenv(
-        "WAYPOINT_WEIGHTS_PATH",
-        "official_weights/Waypoint-1-Small/transformer"
-    )
+    weights_path = os.path.join(
+        os.getenv("WAYPOINT_MODEL_PATH", "models/Waypoint-1-Small-Diffusers"),
+        "transformer")
     
     if not os.path.exists(weights_path):
         pytest.skip(f"Waypoint weights not found at {weights_path}")
@@ -58,17 +57,26 @@ def test_waypoint_transformer_load():
     # Create model with default config
     config = WaypointArchConfig()
     model = WaypointWorldModel(config)
-    
-    # Load weights
+
+    # Load weights, applying the same checkpoint->FastVideo key remap the
+    # production loader uses (e.g. mlp.fc1 -> mlp.fc_in).
+    import re
+
     from safetensors.torch import load_file
-    state_dict = load_file(safetensors_path)
-    
+    raw = load_file(safetensors_path)
+    state_dict = {}
+    for key, tensor in raw.items():
+        new_key = key
+        for pat, repl in config.param_names_mapping.items():
+            new_key = re.sub(pat, repl, new_key)
+        state_dict[new_key] = tensor
+
     # Load state dict
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
-    
+
     print(f"Missing keys: {len(missing)}")
     print(f"Unexpected keys: {len(unexpected)}")
-    
+
     # Should have no missing or unexpected keys for transformer weights
     assert len(unexpected) == 0, f"Unexpected keys: {unexpected}"
     
@@ -88,10 +96,9 @@ def test_waypoint_transformer_forward():
     from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel
     from fastvideo.configs.models.dits.waypoint_transformer import WaypointArchConfig
     
-    weights_path = os.getenv(
-        "WAYPOINT_WEIGHTS_PATH",
-        "official_weights/Waypoint-1-Small/transformer"
-    )
+    weights_path = os.path.join(
+        os.getenv("WAYPOINT_MODEL_PATH", "models/Waypoint-1-Small-Diffusers"),
+        "transformer")
     
     if not os.path.exists(weights_path):
         pytest.skip(f"Waypoint weights not found at {weights_path}")
@@ -107,9 +114,17 @@ def test_waypoint_transformer_forward():
     config = WaypointArchConfig()
     model = WaypointWorldModel(config)
     
+    import re
+
     from safetensors.torch import load_file
-    state_dict = load_file(safetensors_path)
-    model.load_state_dict(state_dict, strict=False)
+    raw = load_file(safetensors_path)
+    state_dict = {}
+    for key, tensor in raw.items():
+        new_key = key
+        for pat, repl in config.param_names_mapping.items():
+            new_key = re.sub(pat, repl, new_key)
+        state_dict[new_key] = tensor
+    model.load_state_dict(state_dict, strict=True)
     model = model.to(device=device, dtype=dtype)
     model.eval()
     
@@ -117,8 +132,11 @@ def test_waypoint_transformer_forward():
     batch_size = 1
     n_frames = 1
     channels = config.channels
-    height = config.height
-    width = config.width
+    # Latent grid must satisfy (H//ph)*(W//pw) == tokens_per_frame.
+    ph, pw = config.patch
+    side = int(config.tokens_per_frame**0.5)
+    height = side * ph
+    width = side * pw
     prompt_len = 32
     prompt_dim = config.prompt_embedding_dim
     n_buttons = config.n_buttons
@@ -183,12 +201,10 @@ def test_waypoint_pipeline_import():
     """Test that Waypoint pipeline can be imported."""
     from fastvideo.pipelines.basic.waypoint import WaypointPipeline
     from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput, StreamingContext
-    
-    # Verify pipeline is registered
-    from fastvideo.pipelines.pipeline_registry import _PIPELINE_NAME_TO_ARCHITECTURE_NAME
-    
-    assert "WaypointPipeline" in _PIPELINE_NAME_TO_ARCHITECTURE_NAME
-    assert _PIPELINE_NAME_TO_ARCHITECTURE_NAME["WaypointPipeline"] == "waypoint"
+    from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+
+    # Verify pipeline class is the expected composed pipeline
+    assert issubclass(WaypointPipeline, ComposedPipelineBase)
     
     # Verify CtrlInput works
     ctrl = CtrlInput(button={1, 2, 3}, mouse=(0.5, -0.5), scroll=1)
@@ -216,10 +232,13 @@ def test_waypoint_pipeline_import():
 def test_waypoint_config_loading():
     """Test that Waypoint pipeline config loads correctly."""
     from fastvideo.configs.pipelines.waypoint import WaypointT2VConfig
-    from fastvideo.configs.pipelines.registry import PIPE_NAME_TO_CONFIG
-    
+    from fastvideo.registry import (get_pipeline_config_cls_from_name,
+                                     get_registered_model_paths)
+
     # Check config is registered (key is model path, not pipeline name)
-    assert "Overworld/Waypoint-1-Small" in PIPE_NAME_TO_CONFIG
+    assert "FastVideo/Waypoint-1-Small-Diffusers" in get_registered_model_paths()
+    assert get_pipeline_config_cls_from_name(
+        "FastVideo/Waypoint-1-Small-Diffusers") is WaypointT2VConfig
     
     # Instantiate config
     config = WaypointT2VConfig()
@@ -228,7 +247,7 @@ def test_waypoint_config_loading():
     assert config.is_causal is True
     assert config.base_fps == 60
     assert config.n_buttons == 256
-    assert len(config.scheduler_sigmas) == 4  # HF schedule: 3 denoising steps
+    assert len(config.scheduler_sigmas) == 5  # 5 sigmas = 4 denoising steps
     assert config.scheduler_sigmas[0] == 1.0
     assert config.scheduler_sigmas[-1] == 0.0
     

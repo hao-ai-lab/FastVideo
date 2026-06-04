@@ -5,9 +5,10 @@ from dataclasses import dataclass, field
 
 import torch
 
-from fastvideo.configs.models import DiTConfig, EncoderConfig
+from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits.waypoint_transformer import WaypointConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput, T5Config
+from fastvideo.configs.models.vaes import WorldEngineVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
 
@@ -44,7 +45,8 @@ class WaypointT2VConfig(PipelineConfig):
     # DiT configuration
     dit_config: DiTConfig = field(default_factory=WaypointConfig)
 
-    # VAE is loaded from the model repo (WorldEngineVAE) via dynamic module import.
+    # WorldEngineVAE: native DCAE VAE, loaded through the standard VAELoader path.
+    vae_config: VAEConfig = field(default_factory=WorldEngineVAEConfig)
     vae_tiling: bool = False
     vae_sp: bool = False
 

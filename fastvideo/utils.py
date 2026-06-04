@@ -684,19 +684,9 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
                                                filename="model_index.json",
                                                local_dir=tmp_dir)
 
-            # Load the model_index.json (handle empty or invalid file)
-            with open(model_index_path, encoding="utf-8") as f:
-                raw = f.read().strip()
-            if not raw:
-                raise ValueError(f"model_index.json for {model_name_or_path} is empty. "
-                                 "The Hugging Face repo must contain a valid diffusers "
-                                 "model_index.json.")
-            try:
-                config = json.loads(raw)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"model_index.json for {model_name_or_path} is invalid: {e}. "
-                                 "The repo must contain a valid diffusers model_index.json.") from e
-            config = cast(dict[str, Any], config)
+            # Load the model_index.json
+            with open(model_index_path) as f:
+                config: dict[str, Any] = json.load(f)
 
             # Verify it has the required fields
             if "_class_name" not in config:
@@ -775,8 +765,7 @@ def kill_itself_when_parent_died() -> None:
     import platform
     if platform.system() == "Linux":
         libc = ctypes.CDLL("libc.so.6")
-        sigkill = getattr(signal, "SIGKILL", 9)
-        libc.prctl(PR_SET_PDEATHSIG, sigkill)
+        libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
     # elif platform.system() == "Darwin":
     #     libc = ctypes.CDLL("libc.dylib")
     #     logger.warning("kill_itself_when_parent_died is only supported in linux.")

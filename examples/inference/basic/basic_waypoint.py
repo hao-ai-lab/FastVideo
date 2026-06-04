@@ -13,7 +13,7 @@ OUTPUT_PATH = "video_samples_waypoint"
 
 
 def main():
-    # Match ``WaypointSamplingParam`` (``fastvideo/configs/sample/waypoint.py``):
+    # Match ``WaypointSamplingParam`` (``fastvideo/api/waypoint.py``):
     # 360x640 @ 60fps, 240 frames ~= 4s. Raise KV cache for long autoregressive runs.
     num_frames = 240
     generator = VideoGenerator.from_pretrained(
