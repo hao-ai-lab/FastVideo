@@ -6,18 +6,22 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from fastvideo.entrypoints.streaming import build_health_router
 from dreamverse.gpu_pool import GPUPool, get_available_gpus
 from dreamverse.session_logger import SessionEventLogger
 
 from dreamverse.config import (
+    AVAILABLE_LORAS,
     DEVTOOLS_ENABLED,
     FRONTEND_STATIC_DIR_CANDIDATES,
     PROMPT_SAFETY_ENABLED,
     SESSION_LOG_ROOT,
+    _available_styles_for_active_model,
+    _resolve_lora_spec,
 )
 from dreamverse.prompt_enhancer import PromptEnhancer
 from dreamverse.prompt_safety import PromptSafetyFilter
@@ -102,6 +106,83 @@ async def websocket_endpoint(websocket: WebSocket):
         session_event_logger=runtime.session_event_logger,
     )
     await controller.run()
+
+
+class LoraRequest(BaseModel):
+    strength: float = 1.0
+    styles: dict[str, float] = {}
+    style: str = ""
+
+
+@app.get("/lora/options")
+async def lora_options() -> dict:
+    if not DEVTOOLS_ENABLED:
+        raise HTTPException(status_code=404, detail="Not found")
+    styles = _available_styles_for_active_model()
+    has_base_lora = _resolve_lora_spec("omninft") is not None
+    labels = {"none": "None"}
+    labels.update({k: AVAILABLE_LORAS[k].get("label", k) for k in styles})
+    return {
+        "styles": ["none", *styles],
+        "labels": labels,
+        "has_base_lora": has_base_lora,
+    }
+
+
+@app.post("/lora")
+async def apply_lora(request: LoraRequest) -> dict:
+    if not DEVTOOLS_ENABLED:
+        raise HTTPException(status_code=404, detail="Not found")
+    if runtime.gpu_pool is None:
+        raise HTTPException(status_code=503, detail="GPU pool not ready")
+
+    strength = max(0.0, min(1.0, float(request.strength)))
+    allowed_styles = _available_styles_for_active_model()
+
+    requested = dict(request.styles) if request.styles else {}
+    if not requested and request.style and request.style.strip().lower() != "none":
+        requested = {request.style: 1.0}
+
+    styles_map: dict[str, float] = {}
+    for name, intensity in requested.items():
+        key = str(name).strip().lower()
+        if key in ("", "none"):
+            continue
+        if key not in allowed_styles:
+            raise HTTPException(status_code=400, detail=f"Unknown style for active model: {key}")
+        value = max(0.0, min(1.0, float(intensity)))
+        if value <= 0.0:
+            continue
+        styles_map[key] = value
+
+    stack: list[tuple[str, float]] = []
+    if _resolve_lora_spec("omninft") is not None:
+        stack.append(("omninft", strength))
+    for key, intensity in styles_map.items():
+        stack.append((key, intensity))
+
+    if not stack:
+        raise HTTPException(status_code=400,
+                            detail="Active model has no OmniNFT LoRA and no style selected; nothing to apply.")
+
+    try:
+        triggers = await runtime.gpu_pool.apply_lora_stack(stack)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {
+        "applied": True,
+        "strength": strength,
+        "styles": styles_map,
+        "triggers": {
+            key: AVAILABLE_LORAS[key]["trigger"]
+            for key in styles_map
+        },
+        "gpus": {
+            str(gpu_id): trigger
+            for gpu_id, trigger in triggers.items()
+        },
+    }
 
 
 # Serve an exported frontend bundle when present.
