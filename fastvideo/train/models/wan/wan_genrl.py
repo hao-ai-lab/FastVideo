@@ -41,7 +41,6 @@ def _is_lora_target(
     return any(
         module_name == target
         or module_name.endswith(f".{target}")
-        or target in module_name
         for target in target_modules
     )
 

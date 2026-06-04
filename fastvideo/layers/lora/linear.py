@@ -344,9 +344,10 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
                     "LoRA weights (lora_A, lora_B) must be initialized "
                     "before forward pass when LoRA is enabled."
                 )
+            if isinstance(lora_A, DTensor):
+                lora_A = lora_A.to_local()
             if isinstance(lora_B, DTensor):
                 lora_B = lora_B.to_local()
-                lora_A = lora_A.to_local()
 
             lora_A_sliced = self.slice_lora_a_weights(
                 lora_A.to(input_parallel, non_blocking=True))
@@ -374,12 +375,17 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         return output, output_bias
 
     def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
-        tp_rank = get_tp_rank()
         shard_size = self.base_layer.input_size_per_partition
+        # LoRA A gets its input size from base_layer.weight.shape[1].
+        # If that size is already input_size_per_partition, A is already
+        # sharded; otherwise it is a global tensor and needs TP slicing.
+        if A.shape[1] == shard_size:
+            return A.contiguous()
+
+        tp_rank = get_tp_rank()
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size
-        A = A[:, start_idx:end_idx].contiguous()
-        return A
+        return A[:, start_idx:end_idx].contiguous()
 
     def slice_lora_b_weights(self, B: torch.Tensor) -> torch.Tensor:
         return B
