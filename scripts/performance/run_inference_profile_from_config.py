@@ -58,25 +58,62 @@ def _cuda_profiler_stop() -> None:
         raise RuntimeError(f"cudaProfilerStop failed with CUDA error code {err}")
 
 
-def _worker_cuda_profiler_start(worker_wrapper: Any) -> dict[str, Any]:
-    _cuda_profiler_start()
-    return {
-        "pid": os.getpid(),
-        "rank": getattr(worker_wrapper, "rpc_rank", None),
-        "event": "cudaProfilerStart",
-    }
+def _make_worker_cuda_profiler_start_payload() -> bytes:
+    import cloudpickle
+
+    def worker_cuda_profiler_start(worker_wrapper: Any) -> dict[str, Any]:
+        import ctypes
+        import os
+
+        for name in ("libcudart.so", "libcudart.so.12", "libcudart.so.11.0"):
+            try:
+                lib = ctypes.CDLL(name)
+                break
+            except OSError:
+                lib = None
+        if lib is None:
+            raise RuntimeError("Unable to load CUDA runtime in worker")
+        lib.cudaProfilerStart.restype = ctypes.c_int
+        err = lib.cudaProfilerStart()
+        if err != 0:
+            raise RuntimeError(f"cudaProfilerStart failed with CUDA error code {err}")
+        return {
+            "pid": os.getpid(),
+            "rank": getattr(worker_wrapper, "rpc_rank", None),
+            "event": "cudaProfilerStart",
+        }
+
+    return cloudpickle.dumps(worker_cuda_profiler_start)
 
 
-def _worker_cuda_profiler_stop(worker_wrapper: Any) -> dict[str, Any]:
-    import torch
+def _make_worker_cuda_profiler_stop_payload() -> bytes:
+    import cloudpickle
 
-    torch.cuda.synchronize()
-    _cuda_profiler_stop()
-    return {
-        "pid": os.getpid(),
-        "rank": getattr(worker_wrapper, "rpc_rank", None),
-        "event": "cudaProfilerStop",
-    }
+    def worker_cuda_profiler_stop(worker_wrapper: Any) -> dict[str, Any]:
+        import ctypes
+        import os
+        import torch
+
+        torch.cuda.synchronize()
+        for name in ("libcudart.so", "libcudart.so.12", "libcudart.so.11.0"):
+            try:
+                lib = ctypes.CDLL(name)
+                break
+            except OSError:
+                lib = None
+        if lib is None:
+            raise RuntimeError("Unable to load CUDA runtime in worker")
+        lib.cudaProfilerStop.restype = ctypes.c_int
+        err = lib.cudaProfilerStop()
+        if err != 0:
+            raise RuntimeError(f"cudaProfilerStop failed with CUDA error code {err}")
+        return {
+            "pid": os.getpid(),
+            "rank": getattr(worker_wrapper, "rpc_rank", None),
+            "event": "cudaProfilerStop",
+        }
+
+    return cloudpickle.dumps(worker_cuda_profiler_stop)
 
 
 def _load_config(path: Path) -> dict[str, Any]:
@@ -143,26 +180,24 @@ def _shutdown_executor(generator: Any | None) -> None:
 
 
 def _start_capture(generator: Any) -> list[dict[str, Any]]:
-    import cloudpickle
     from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
+    worker_payload = _make_worker_cuda_profiler_start_payload()
     _cuda_profiler_start()
     responses: list[dict[str, Any]] = []
     if isinstance(generator.executor, MultiprocExecutor):
-        responses = generator.executor.collective_rpc(
-            cloudpickle.dumps(_worker_cuda_profiler_start))
+        responses = generator.executor.collective_rpc(worker_payload)
     return responses
 
 
 def _stop_capture(generator: Any) -> list[dict[str, Any]]:
-    import cloudpickle
     import torch
     from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
+    worker_payload = _make_worker_cuda_profiler_stop_payload()
     responses: list[dict[str, Any]] = []
     if isinstance(generator.executor, MultiprocExecutor):
-        responses = generator.executor.collective_rpc(
-            cloudpickle.dumps(_worker_cuda_profiler_stop))
+        responses = generator.executor.collective_rpc(worker_payload)
     torch.cuda.synchronize()
     _cuda_profiler_stop()
     return responses
