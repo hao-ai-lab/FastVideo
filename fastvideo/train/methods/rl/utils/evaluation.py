@@ -67,6 +67,7 @@ def eval_once(
         ctx = nullcontext()
 
     with ctx:
+        generator = torch.Generator(device=device)
         for batch_idx, (
             _epoch_tag,
             prompts,
@@ -86,7 +87,6 @@ def eval_once(
             ]
 
             with torch.no_grad():
-                generator = torch.Generator(device=device)
                 generator.manual_seed(seed + batch_idx)
                 (
                     videos,

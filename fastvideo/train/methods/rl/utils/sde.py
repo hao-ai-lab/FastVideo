@@ -121,7 +121,7 @@ def sde_step_with_logprob(
         else:
             std_scale = torch.clamp(
                 std_scale,
-                min=torch.finfo(std_scale.dtype).tiny,
+                min=math.sqrt(torch.finfo(std_scale.dtype).tiny),
             )
             log_prob = (
                 -((prev_sample.detach() - prev_sample_mean) ** 2)
