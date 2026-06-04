@@ -280,9 +280,8 @@ def wan_denoising_with_logprob(
                         encoder_hidden_states=prompt_embeds,
                         return_dict=False,
                     )
-                ref_noise = ref_noise.to(dtype)
-                if do_cfg:
-                    with ref_ctx:
+                    ref_noise = ref_noise.to(dtype)
+                    if do_cfg:
                         ref_uncond = ref_model(
                             hidden_states=latents_ori.to(
                                 dtype
@@ -293,11 +292,11 @@ def wan_denoising_with_logprob(
                             ),
                             return_dict=False,
                         )
-                    ref_noise = (
-                        ref_uncond
-                        + guidance_scale
-                        * (ref_noise - ref_uncond)
-                    )
+                        ref_noise = (
+                            ref_uncond
+                            + guidance_scale
+                            * (ref_noise - ref_uncond)
+                        )
 
                 (
                     _,

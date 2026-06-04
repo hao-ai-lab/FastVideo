@@ -107,7 +107,7 @@ srun torchrun \\
     --node_rank \$SLURM_PROCID \\
     --rdzv_backend=c10d \\
     --rdzv_endpoint="\$MASTER_ADDR:\$MASTER_PORT" \\
-    fastvideo/train/entrypoint/train.py \\
+    -m fastvideo.train.entrypoint.train \\
     --config ${CONFIG} \\
     --training.distributed.num_gpus ${TOTAL_GPUS} \\
     ${EXTRA_ARGS[*]:-}
