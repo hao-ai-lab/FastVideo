@@ -168,7 +168,7 @@ def _select_videoalign_frame_indices(
             nframes,
         ).round().long().tolist()
         start_pt = int(frames_each_pts // 2)
-        end_pt = int(nframes - frames_each_pts // 2 - 1)
+        end_pt = int(nframes - frames_each_pts // 2)
         pts = torch.linspace(
             start_pt,
             end_pt,
@@ -313,7 +313,7 @@ def _patch_videoalign_runtime_model(model: Any) -> None:
             and not hasattr(candidate, "embed_tokens")
             and hasattr(language_model, "embed_tokens")
         ):
-            candidate.embed_tokens = language_model.embed_tokens
+            candidate.__dict__["embed_tokens"] = language_model.embed_tokens
 
 
 def set_videoalign_device(device) -> None:

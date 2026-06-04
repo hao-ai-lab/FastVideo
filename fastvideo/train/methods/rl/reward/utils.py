@@ -34,6 +34,9 @@ def prepare_images(
         # one-frame videos have shape[1] == 1.
         if images.shape[-1] in (1, 3):
             pass
+        elif images.shape[1] == 3 and images.shape[2] == 1:
+            # (N, C=3, F=1, H, W) -> (N, F, H, W, C)
+            images = images.transpose(0, 2, 3, 4, 1)
         elif images.shape[2] in (1, 3):
             # (N, F, C, H, W) -> (N, F, H, W, C)
             images = images.transpose(0, 1, 3, 4, 2)

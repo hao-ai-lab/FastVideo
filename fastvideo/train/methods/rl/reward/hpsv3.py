@@ -150,7 +150,7 @@ def _patch_hpsv3_runtime_model(model: Any) -> None:
             and not hasattr(candidate, "embed_tokens")
             and hasattr(language_model, "embed_tokens")
         ):
-            candidate.embed_tokens = language_model.embed_tokens
+            candidate.__dict__["embed_tokens"] = language_model.embed_tokens
 
 
 def _normalize_device(device) -> str:
