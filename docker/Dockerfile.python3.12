@@ -55,11 +55,13 @@ RUN source $HOME/.local/bin/env && \
     echo 'source /opt/venv/bin/activate' >> /root/.bashrc && \
     echo 'if [ -n "$ZSH_VERSION" ] && [ -f ~/.zshrc ]; then . ~/.zshrc; elif [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
 
-# Install FastVideo Unified Kernel
+# Install FastVideo Unified Kernel.
+# This build machine has no GPU, so target Hopper (sm_90a) explicitly instead
+# of probing a live device for the arch (matches the released kernel wheel).
 RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
     cd fastvideo-kernel && \
     git submodule update --init --recursive && \
-    ./build.sh
+    TORCH_CUDA_ARCH_LIST=9.0a ./build.sh
 
 EXPOSE 22
