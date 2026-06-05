@@ -28,6 +28,7 @@ from dreamverse.config import (
     NUM_FRAMES,
     NUM_INFERENCE_STEPS,
     DREAMVERSE_MAX_AUTOTUNE,
+    DREAMVERSE_SP_SIZE,
     DREAMVERSE_LORA_PATH,
     DREAMVERSE_LORA_NICKNAME,
     DREAMVERSE_LORA_STRENGTH,
@@ -289,7 +290,7 @@ class VideoGenerationWorker:
         generator_config = GeneratorConfig(
             model_path=model_root,
             engine=EngineConfig(
-                num_gpus=1,
+                num_gpus=DREAMVERSE_SP_SIZE,
                 offload=OffloadConfig(
                     dit=False,
                     dit_layerwise=False,

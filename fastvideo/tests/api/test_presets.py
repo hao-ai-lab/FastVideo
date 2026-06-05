@@ -334,7 +334,7 @@ class TestLtx2Presets:
         import fastvideo.registry  # noqa: F401
         presets = get_presets_for_family("ltx2")
         names = {p.name for p in presets}
-        assert names == {"ltx2_base", "ltx2_distilled", "ltx2_two_stage"}
+        assert names == {"ltx2_base", "ltx2_3_base", "ltx2_distilled", "ltx2_two_stage"}
 
     def test_ltx2_base_lookup(self) -> None:
         import fastvideo.registry  # noqa: F401
