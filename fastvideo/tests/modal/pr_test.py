@@ -7,9 +7,9 @@ app = modal.App()
 model_vol = modal.Volume.from_name("hf-model-weights")
 # Build cache for Flash Attention 3 (Hopper sm90+). FA3 is not in the default
 # fastvideo-dev image, and a source build from flash-attention/hopper takes
-# ~90 min on the Modal container CPU. Cached artifacts are keyed on
-# IMAGE_VERSION so an image bump (different torch/cuda ABI) invalidates the
-# cache and triggers a fresh build automatically.
+# ~90 min on the Modal container CPU. Cached artifacts are keyed on the
+# torch + CUDA + python ABI (read at runtime), so an image bump that changes
+# any of them misses the cache and triggers a fresh build automatically.
 fa3_cache_vol = modal.Volume.from_name("fa3-build-cache", create_if_missing=True)
 image_version = os.getenv("IMAGE_VERSION")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
@@ -375,16 +375,19 @@ def run_performance_tests_h100():
       3. source build     — flash-attention/hopper HEAD; ~90 min nvcc compile,
                             then transactional save to the cache volume
 
-    The cache key includes IMAGE_VERSION so an image bump (different
-    torch/cuda ABI) triggers a rebuild. After install, an assertion verifies
-    ``fa_version == '3'`` so a silent fallback to FA2 fails the job.
+    The cache key is the torch+CUDA+python ABI (read at runtime), so an image
+    bump that changes the ABI triggers a rebuild. After install, an assertion
+    verifies ``fa_version == '3'`` so a silent fallback to FA2 fails the job.
 
     Pytest then runs the entire ``fastvideo/tests/performance`` suite, so
     any benchmark whose ``required_gpus <= 2`` will exercise FA3 on Hopper.
     """
     fa3_install = (
         "SP=$(python -c 'import site; print(site.getsitepackages()[0])') && "
-        "CACHE_DIR=/fa3_cache/site-packages-${IMAGE_VERSION:-unknown} && "
+        # Key on the build ABI (torch+CUDA+python), not the mutable image tag, so
+        # a torch/CUDA bump misses the cache instead of restoring a stale binary.
+        "FA3_ABI=$(python -c 'import sys, torch; print(f\"py{sys.version_info.major}{sys.version_info.minor}-torch{torch.__version__}-cu{torch.version.cuda}\")') && "
+        "CACHE_DIR=/fa3_cache/fa3-${FA3_ABI} && "
         "CACHE_MARKER=$CACHE_DIR/.INSTALLED && "
         "if python -c 'import flash_attn_interface' 2>/dev/null; then "
         "  echo '[fa3] already present in image'; "
@@ -400,7 +403,9 @@ def run_performance_tests_h100():
         "  ( cd /tmp/flash-attention/hopper && MAX_JOBS=8 python setup.py install ) && "
         "  python -c 'import flash_attn_interface' && "
         "  STAGE=/fa3_cache/staging-$$ && mkdir -p $STAGE && "
-        "  for pat in 'flash_attn_interface*' 'flash_attn_3*'; do "
+        # flash_attn_config is a py_module lazily imported by flash_attn_interface;
+        # drop it and a restored cache imports fine but crashes at the first forward.
+        "  for pat in 'flash_attn_interface*' 'flash_attn_config*' 'flash_attn_3*'; do "
         "    find $SP -maxdepth 1 -name \"$pat\" -exec cp -r {} $STAGE/ \\; 2>/dev/null; "
         "  done && "
         "  rm -rf $CACHE_DIR && mv $STAGE $CACHE_DIR && touch $CACHE_MARKER && "
