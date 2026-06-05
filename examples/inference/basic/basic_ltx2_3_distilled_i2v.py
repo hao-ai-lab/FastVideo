@@ -180,7 +180,15 @@ def main() -> None:
         pipeline_config=pipeline_config,
         enable_torch_compile=True,
         enable_torch_compile_text_encoder=True,
+        # Compile the VAE codec submodules (encoder / decoder) too. The
+        # `LTX2CausalVideoAutoencoder` declares `_compile_conditions` so
+        # `_compile_with_conditions` targets just those submodules and
+        # leaves the surrounding tiling control flow eager — needed for
+        # fullgraph + dynamic=False to succeed. VAE eager decode is
+        # ~1.0s; compiling it brings the stage to ~0.3s.
+        enable_torch_compile_vae=True,
         torch_compile_kwargs=torch_compile_kwargs,
+        torch_compile_kwargs_vae=torch_compile_kwargs,
         # Keep everything resident — no CPU offload for serving-style runs.
         dit_cpu_offload=False,
         text_encoder_cpu_offload=False,
