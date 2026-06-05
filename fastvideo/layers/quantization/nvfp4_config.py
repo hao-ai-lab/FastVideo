@@ -360,7 +360,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
             alpha,
             torch.bfloat16,
             None,
-            backend='auto',
+            backend='cutlass',
         )
 
         if bias is not None:

@@ -59,6 +59,28 @@ def _maybe_convert_model_to_nvfp4(model: nn.Module) -> None:
             return
 
 
+def _maybe_convert_model_to_fp8(model: nn.Module) -> None:
+    """Materialize FP8 weight buffers for FP8-tagged linear layers in-place.
+
+    FP8 counterpart of :func:`_maybe_convert_model_to_nvfp4`. Detects layers
+    whose ``quant_method`` is an :class:`LTX2FP8QuantizeMethod` (attached at
+    construction by :meth:`LTX2FP8Config.get_quant_method`) and, when at least
+    one exists, calls :func:`convert_model_to_fp8` to register the per-layer
+    ``_fp8_weight`` / ``_fp8_weight_scale`` buffers from the loaded bf16
+    weights. Pure-torch (``torch._scaled_mm``), so no optional backend import.
+    """
+    from fastvideo.layers.quantization.ltx2_fp8_config import (
+        LTX2FP8QuantizeMethod, convert_model_to_fp8,
+    )
+
+    for mod in model.modules():
+        if isinstance(getattr(mod, "quant_method", None),
+                      LTX2FP8QuantizeMethod):
+            logger.info("Converting loaded model weights for FP8 linear layers")
+            convert_model_to_fp8(model)
+            return
+
+
 # TODO(PY): move this to utils elsewhere
 @contextlib.contextmanager
 def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
@@ -197,6 +219,7 @@ def maybe_load_fsdp_model(
     # scale buffers from the freshly-loaded bf16 weights. No-op when
     # ``flashinfer`` is not installed (lazy import inside the helper).
     _maybe_convert_model_to_nvfp4(model)
+    _maybe_convert_model_to_fp8(model)
 
     compile_in_loader = enable_torch_compile and training_mode
     if compile_in_loader:

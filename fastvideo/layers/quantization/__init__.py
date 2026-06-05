@@ -2,7 +2,7 @@ from typing import Literal, get_args
 
 from fastvideo.layers.quantization.base_config import QuantizationConfig
 
-QuantizationMethods = Literal[None, "AbsMaxFP8", "NVFP4", "nvfp4_qat"]
+QuantizationMethods = Literal[None, "AbsMaxFP8", "NVFP4", "nvfp4_qat", "LTX2FP8"]
 
 QUANTIZATION_METHODS: list[str] = list(get_args(QuantizationMethods))
 
@@ -51,6 +51,7 @@ def get_quantization_config(quantization: str) -> type[QuantizationConfig]:
 
     # lazy import to avoid triggering `torch.compile` too early
     from .absmax_fp8 import AbsMaxFP8Config
+    from .ltx2_fp8_config import LTX2FP8Config
     from .nvfp4_config import NVFP4Config
     from .nvfp4_qat_config import NVFP4QATConfig
 
@@ -58,6 +59,7 @@ def get_quantization_config(quantization: str) -> type[QuantizationConfig]:
         "AbsMaxFP8": AbsMaxFP8Config,
         "NVFP4": NVFP4Config,
         "nvfp4_qat": NVFP4QATConfig,
+        "LTX2FP8": LTX2FP8Config,
     }
     # Update the `method_to_config` with customized quantization methods.
     method_to_config.update(_CUSTOMIZED_METHOD_TO_QUANT_CONFIG)
