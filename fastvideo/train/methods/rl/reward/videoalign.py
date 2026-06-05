@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import os
 import tempfile
-from importlib import import_module, util
+from importlib import import_module, metadata
 from typing import Any
 
+from huggingface_hub import snapshot_download
 import numpy as np
 import torch
 
@@ -222,6 +223,25 @@ def _torchvision_read_video_available() -> bool:
     return hasattr(torchvision_io, "read_video")
 
 
+def _flash_attn2_available() -> bool:
+    """Return True when Transformers' classic FlashAttention-2 path is usable."""
+    try:
+        metadata.version("flash_attn")
+        flash_attn_mod = import_module("flash_attn")
+        import_module("flash_attn.bert_padding")
+    except (AttributeError, ImportError, metadata.PackageNotFoundError):
+        available = False
+    else:
+        available = hasattr(flash_attn_mod, "flash_attn_func")
+    if available:
+        return True
+    logger.warning(
+        "Classic FlashAttention-2 is unavailable; using SDPA for the "
+        "VideoAlign reward model. Install flash-attn to enable "
+        "FlashAttention-2.")
+    return False
+
+
 def _patch_videoalign_video_reader() -> None:
     """Register an OpenCV reader for torchvision builds without read_video."""
     from fastvideo.train.methods.rl.reward.VideoAlign import vision_process as vision_mod
@@ -255,7 +275,10 @@ def _patch_videoalign_modules() -> Any:
 
     _patch_videoalign_video_reader()
 
-    if util.find_spec("flash_attn") is None:
+    # Transformers' ``flash_attention_2`` path expects classic flash-attn.
+    # FastVideo may have FA4/CuTe installed, which exposes a ``flash_attn``
+    # namespace but not the FA2 metadata/API that Transformers checks.
+    if not _flash_attn2_available():
         for mod in (train_reward_mod, inference_mod):
             original_create = mod.create_model_and_processor
 
@@ -303,21 +326,26 @@ def set_videoalign_device(device) -> None:
             del _VIDEOALIGN_INFERENCERS[old_key]
 
 
+def _resolve_videoalign_checkpoint_path(checkpoint_path: str | None) -> str:
+    """Return a local VideoAlign checkpoint directory."""
+    if checkpoint_path is not None:
+        return os.path.abspath(checkpoint_path)
+    return snapshot_download(
+        repo_id="KlingTeam/VideoReward",
+        repo_type="model",
+        allow_patterns=(
+            "model_config.json",
+            "checkpoint-*/model.pth",
+        ),
+    )
+
+
 def _get_inferencer(
     device,
     checkpoint_path: str | None = None,
 ):
     """Get or create VideoAlign inferencer."""
-    if checkpoint_path is None:
-        checkpoint_path = os.environ.get(
-            "VIDEOALIGN_CHECKPOINT_PATH",
-            os.path.join(
-                os.path.dirname(__file__),
-                "VideoAlign",
-                "checkpoints",
-            ),
-        )
-    checkpoint_path = os.path.abspath(checkpoint_path)
+    checkpoint_path = _resolve_videoalign_checkpoint_path(checkpoint_path)
 
     key = _normalize_device_str(device)
     cache_key = f"{checkpoint_path}:{key}"
