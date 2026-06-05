@@ -1,11 +1,9 @@
 """torch.library.custom_op wrapper around flash_attn_3 so inductor can graph
 through the FA3 call (mirrors the FA4 wrapper in flash_attn_cute.py).
 
-Inference-only: this wrapper returns the output tensor only and does not
-register an autograd implementation. Under torch.compile, a backward pass
-against this op will fail. The softmax_lse returned by flash_attn_3 is
-discarded; bring it back (and add register_autograd / setup_context like
-flash_attn_cute.py does) if training/grad use is needed.
+The custom op has no autograd (softmax_lse discarded), so `flash_attn_func`
+routes grad-requiring inputs to raw FA3 (training) and the no-grad inference
+path through the custom op, where torch.compile can graph through it.
 """
 from __future__ import annotations
 
@@ -54,4 +52,8 @@ def flash_attn_func(
     softmax_scale: float | None = None,
     causal: bool = False,
 ) -> torch.Tensor:
+    # No autograd on the custom op → route grad-requiring inputs (training) to raw FA3.
+    if q.requires_grad or k.requires_grad or v.requires_grad:
+        out = _raw_flash_attn_3_func(q, k, v, softmax_scale=softmax_scale, causal=causal)
+        return out[0] if isinstance(out, tuple) else out
     return torch.ops.fastvideo._flash_attn_3_forward(q, k, v, softmax_scale, causal)
