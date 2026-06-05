@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -17,13 +15,6 @@ from fastvideo.train.methods.rl.reward.utils import (
     prepare_images, )
 
 logger = init_logger(__name__)
-
-# Prefer local HPSv3 submodule over site-packages.
-_HPSV3_ROOT = Path(__file__).resolve().parent / "HPSv3"
-if _HPSV3_ROOT.exists():
-    _hpsv3_path = str(_HPSV3_ROOT)
-    if _hpsv3_path not in sys.path:
-        sys.path.insert(0, _hpsv3_path)
 
 # Global cache of HPSv3 inferencers keyed by device.
 _HPSV3_INFERENCERS: dict[str, Any] = {}
@@ -124,7 +115,9 @@ def _patch_hpsv3_state_dict_loader() -> None:
     if _HPSV3_LOAD_PATCHED:
         return
 
-    from hpsv3.model.qwen2vl_trainer import Qwen2VLRewardModelBT
+    from fastvideo.train.methods.rl.reward.HPSv3.hpsv3.model.qwen2vl_trainer import (
+        Qwen2VLRewardModelBT,
+    )
 
     _patch_load_state_dict(Qwen2VLRewardModelBT)
     try:
@@ -184,7 +177,8 @@ def _get_hpsv3_inferencer(device):
     if key not in _HPSV3_INFERENCERS:
         try:
             _patch_transformers_video_input_alias()
-            from hpsv3 import HPSv3RewardInferencer
+            from fastvideo.train.methods.rl.reward.HPSv3.hpsv3 import HPSv3RewardInferencer
+
             _patch_hpsv3_state_dict_loader()
         except ImportError as exc:
             msg = ("Failed to import HPSv3. Ensure the HPSv3 submodule is "

@@ -5,7 +5,6 @@ text-video alignment."""
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 from importlib import import_module, util
 from typing import Any
@@ -18,11 +17,6 @@ from fastvideo.train.methods.rl.reward.utils import (
     prepare_images, )
 
 logger = init_logger(__name__)
-
-# Add VideoAlign submodule to path for importing.
-_VIDEOALIGN_ROOT = os.path.join(os.path.dirname(__file__), "VideoAlign")
-if os.path.isdir(_VIDEOALIGN_ROOT) and _VIDEOALIGN_ROOT not in sys.path:
-    sys.path.insert(0, _VIDEOALIGN_ROOT)
 
 # Global cache of VideoAlign inferencers.
 _VIDEOALIGN_INFERENCERS: dict[str, Any] = {}
@@ -230,7 +224,8 @@ def _torchvision_read_video_available() -> bool:
 
 def _patch_videoalign_video_reader() -> None:
     """Register an OpenCV reader for torchvision builds without read_video."""
-    vision_mod = import_module("vision_process")
+    from fastvideo.train.methods.rl.reward.VideoAlign import vision_process as vision_mod
+
     if "opencv" not in vision_mod.VIDEO_READER_BACKENDS:
 
         def read_video_opencv(ele):
@@ -250,12 +245,14 @@ def _patch_videoalign_modules() -> Any:
     """Patch VideoAlign for the FastVideo dependency set."""
     global _VIDEOALIGN_PATCHED
 
-    inference_mod = import_module("inference")
+    from fastvideo.train.methods.rl.reward.VideoAlign import inference as inference_mod
+
     if _VIDEOALIGN_PATCHED:
         return inference_mod
 
-    train_reward_mod = import_module("train_reward")
-    trainer_mod = import_module("trainer")
+    from fastvideo.train.methods.rl.reward.VideoAlign import train_reward as train_reward_mod
+    from fastvideo.train.methods.rl.reward.VideoAlign import trainer as trainer_mod
+
     _patch_videoalign_video_reader()
 
     if util.find_spec("flash_attn") is None:
