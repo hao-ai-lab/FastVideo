@@ -6,8 +6,7 @@ from fastvideo.train.methods.rl.reward.hpsv3 import (
     hpsv3_percentile_score,
 )
 from fastvideo.train.methods.rl.reward.ocr import (
-    video_ocr_score,
-)
+    video_ocr_score, )
 from fastvideo.train.methods.rl.reward.videoalign import (
     videoalign_mq_score,
     videoalign_ta_score,

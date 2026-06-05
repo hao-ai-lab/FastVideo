@@ -10,8 +10,7 @@ import torch
 
 from fastvideo.logger import init_logger
 from fastvideo.train.methods.rl.reward.utils import (
-    prepare_images,
-)
+    prepare_images, )
 
 logger = init_logger(__name__)
 
@@ -29,9 +28,7 @@ def _levenshtein_distance(s1: str, s2: str) -> int:
             insertions = prev_row[j + 1] + 1
             deletions = curr_row[j] + 1
             substitutions = prev_row[j] + (c1 != c2)
-            curr_row.append(
-                min(insertions, deletions, substitutions)
-            )
+            curr_row.append(min(insertions, deletions, substitutions))
         prev_row = curr_row
     return prev_row[-1]
 
@@ -49,15 +46,11 @@ def video_ocr_score():
     try:
         from paddleocr import PaddleOCR
     except ImportError as exc:
-        msg = (
-            "paddleocr not installed. "
-            "Install via: pip install paddleocr"
-        )
+        msg = ("paddleocr not installed. "
+               "Install via: pip install paddleocr")
         raise ImportError(msg) from exc
 
-    ocr = PaddleOCR(
-        use_angle_cls=True, lang="en", use_gpu=False
-    )
+    ocr = PaddleOCR(use_angle_cls=True, lang="en", use_gpu=False)
 
     def _score(images, prompts, metadata, only_strict=False):
         images_np = prepare_images(images)
@@ -68,14 +61,10 @@ def video_ocr_score():
             if frames.ndim == 3:
                 frames = frames[np.newaxis]
 
-            expected = _extract_text_from_prompt(
-                prompts[b] if prompts else ""
-            ).lower()
+            expected = _extract_text_from_prompt(prompts[b] if prompts else "").lower()
 
             # Sample every 4th frame.
-            sample_indices = list(
-                range(0, len(frames), 4)
-            )
+            sample_indices = list(range(0, len(frames), 4))
             if not sample_indices:
                 sample_indices = [0]
 
@@ -85,11 +74,7 @@ def video_ocr_score():
                 result = ocr.ocr(frame, cls=True)
                 detected = ""
                 if result and result[0]:
-                    texts = [
-                        line[1][0]
-                        for line in result[0]
-                        if line[1]
-                    ]
+                    texts = [line[1][0] for line in result[0] if line[1]]
                     detected = " ".join(texts).lower()
 
                 if not expected:
@@ -97,12 +82,8 @@ def video_ocr_score():
                 elif not detected:
                     score = 0.0
                 else:
-                    dist = _levenshtein_distance(
-                        detected, expected
-                    )
-                    max_len = max(
-                        len(detected), len(expected)
-                    )
+                    dist = _levenshtein_distance(detected, expected)
+                    max_len = max(len(detected), len(expected))
                     score = 1.0 - (dist / max_len)
                 best_score = max(best_score, score)
 

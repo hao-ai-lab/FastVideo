@@ -6,8 +6,7 @@ from __future__ import annotations
 import torch
 
 from fastvideo.train.methods.rl.utils.sde import (
-    sde_step_with_logprob,
-)
+    sde_step_with_logprob, )
 
 
 def compute_log_prob(
@@ -24,13 +23,13 @@ def compute_log_prob(
     diffusion_clip: bool = False,
     diffusion_clip_value: float = 0.45,
 ) -> tuple[
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    float,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        float,
 ]:
     """Run one diffusion step and return log-probability.
 
@@ -70,11 +69,7 @@ def compute_log_prob(
             timestep_j,
             negative_embeds,
         )
-        noise_pred = (
-            noise_pred_uncond
-            + guidance_scale
-            * (noise_pred_text - noise_pred_uncond)
-        )
+        noise_pred = (noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond))
     else:
         noise_pred = model.forward_transformer_raw(
             latents_j.to(dtype),

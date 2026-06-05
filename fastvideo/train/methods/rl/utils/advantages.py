@@ -21,9 +21,7 @@ def _normalize_rewards(
     epsilon: float = EPSILON,
 ) -> np.ndarray:
     """Normalize rewards to zero mean and unit variance."""
-    return (rewards - rewards.mean()) / (
-        rewards.std() + epsilon
-    )
+    return (rewards - rewards.mean()) / (rewards.std() + epsilon)
 
 
 def _compute_kl_advantages(
@@ -34,9 +32,7 @@ def _compute_kl_advantages(
 ) -> np.ndarray:
     """Compute KL advantages (negative = penalty)."""
     if use_per_prompt and kl_stat_tracker is not None:
-        return kl_stat_tracker.update(
-            prompts, -gathered_kl
-        )
+        return kl_stat_tracker.update(prompts, -gathered_kl)
     return _normalize_rewards(-gathered_kl)
 
 
@@ -69,9 +65,7 @@ def compute_advantages(
     gathered_kl: np.ndarray,
     prompts: list[str] | None,
     stat_tracker: PerPromptStatTracker | None,
-    reward_stat_trackers: (
-        dict[str, PerPromptStatTracker] | None
-    ),
+    reward_stat_trackers: (dict[str, PerPromptStatTracker] | None),
     kl_stat_tracker: PerPromptStatTracker | None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Compute advantages from gathered rewards and KL.
@@ -89,31 +83,23 @@ def compute_advantages(
     if weight_advantages:
         if per_prompt_stat_tracking:
             if reward_stat_trackers is None:
-                msg = (
-                    "reward_stat_trackers required when "
-                    "weight_advantages=True and "
-                    "per_prompt_stat_tracking=True"
-                )
+                msg = ("reward_stat_trackers required when "
+                       "weight_advantages=True and "
+                       "per_prompt_stat_tracking=True")
                 raise ValueError(msg)
 
             weighted_list = []
             for reward_name in reward_fn_cfg:
                 raw_key = f"{reward_name}_raw"
-                adv = reward_stat_trackers[
-                    reward_name
-                ].update(
-                    prompts, gathered_rewards[raw_key]
-                )
+                adv = reward_stat_trackers[reward_name].update(prompts, gathered_rewards[raw_key])
                 weight = reward_fn_cfg[reward_name]
                 weighted_list.append(adv * weight)
 
             if kl_reward > 0:
                 if kl_stat_tracker is None:
-                    msg = (
-                        "kl_stat_tracker required when "
-                        "weight_advantages=True and "
-                        "kl_reward > 0"
-                    )
+                    msg = ("kl_stat_tracker required when "
+                           "weight_advantages=True and "
+                           "kl_reward > 0")
                     raise ValueError(msg)
                 kl_adv = _compute_kl_advantages(
                     gathered_kl,
@@ -121,24 +107,16 @@ def compute_advantages(
                     prompts,
                     use_per_prompt=True,
                 )
-                weighted_list.append(
-                    kl_adv * kl_reward
-                )
+                weighted_list.append(kl_adv * kl_reward)
 
             advantages = sum(weighted_list)
 
             first_name = next(iter(reward_fn_cfg))
-            group_size, trained_num = (
-                reward_stat_trackers[
-                    first_name
-                ].get_stats()
-            )
+            group_size, trained_num = (reward_stat_trackers[first_name].get_stats())
             zero_std_ratios = {}
             for rn in reward_fn_cfg:
                 raw_key = f"{rn}_raw"
-                zero_std_ratios[
-                    f"zero_std_ratio_{rn}"
-                ] = calculate_zero_std_ratio(
+                zero_std_ratios[f"zero_std_ratio_{rn}"] = calculate_zero_std_ratio(
                     prompts,
                     gathered_rewards,
                     reward_key=f"ori_{raw_key}",
@@ -168,28 +146,18 @@ def compute_advantages(
                     None,
                     use_per_prompt=False,
                 )
-                weighted_list.append(
-                    kl_adv * kl_reward
-                )
+                weighted_list.append(kl_adv * kl_reward)
 
             advantages = sum(weighted_list)
 
     elif per_prompt_stat_tracking:
         if stat_tracker is None:
-            msg = (
-                "stat_tracker required when "
-                "per_prompt_stat_tracking=True"
-            )
+            msg = ("stat_tracker required when "
+                   "per_prompt_stat_tracking=True")
             raise ValueError(msg)
-        advantages = stat_tracker.update(
-            prompts, gathered_rewards["avg"]
-        )
-        group_size, trained_num = (
-            stat_tracker.get_stats()
-        )
-        zero_std = calculate_zero_std_ratio(
-            prompts, gathered_rewards
-        )
+        advantages = stat_tracker.update(prompts, gathered_rewards["avg"])
+        group_size, trained_num = (stat_tracker.get_stats())
+        zero_std = calculate_zero_std_ratio(prompts, gathered_rewards)
         log_dict = {
             "group_size": group_size,
             "trained_prompt_num": trained_num,
@@ -197,8 +165,6 @@ def compute_advantages(
         }
         stat_tracker.clear()
     else:
-        advantages = _normalize_rewards(
-            gathered_rewards["avg"]
-        )
+        advantages = _normalize_rewards(gathered_rewards["avg"])
 
     return advantages, log_dict

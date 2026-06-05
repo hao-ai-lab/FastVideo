@@ -528,18 +528,16 @@ class WanModel(ModelBase):
         dtype = self._get_training_dtype()
         device_type = self.device.type
         with (
-            torch.autocast(device_type, dtype=dtype),
-            set_forward_context(
-                current_timestep=timestep,
-                attn_metadata=None,
-            ),
+                torch.autocast(device_type, dtype=dtype),
+                set_forward_context(
+                    current_timestep=timestep,
+                    attn_metadata=None,
+                ),
         ):
             output = self.transformer(
                 hidden_states=latents.to(dtype),
                 timestep=timestep,
-                encoder_hidden_states=(
-                    encoder_hidden_states.to(dtype)
-                ),
+                encoder_hidden_states=(encoder_hidden_states.to(dtype)),
                 return_dict=False,
             )
         return output
@@ -564,17 +562,9 @@ class WanModel(ModelBase):
         vae_config = vae.config
         z_dim = getattr(vae_config, "z_dim", 16)
 
-        latents_mean = (
-            torch.tensor(vae_config.latents_mean)
-            .view(1, z_dim, 1, 1, 1)
-            .to(latents.device, latents.dtype)
-        )
-        latents_std_inv = (
-            1.0
-            / torch.tensor(vae_config.latents_std).view(
-                1, z_dim, 1, 1, 1
-            )
-        ).to(latents.device, latents.dtype)
+        latents_mean = (torch.tensor(vae_config.latents_mean).view(1, z_dim, 1, 1, 1).to(latents.device, latents.dtype))
+        latents_std_inv = (1.0 / torch.tensor(vae_config.latents_std).view(1, z_dim, 1, 1, 1)).to(
+            latents.device, latents.dtype)
         latents = latents / latents_std_inv + latents_mean
 
         # Decode one sample at a time.
@@ -582,9 +572,7 @@ class WanModel(ModelBase):
         videos = []
         with torch.no_grad():
             for idx in range(latents.shape[0]):
-                decoded = vae.decode(
-                    latents[idx : idx + 1].to(vae_dtype)
-                )
+                decoded = vae.decode(latents[idx:idx + 1].to(vae_dtype))
                 if isinstance(decoded, tuple):
                     decoded = decoded[0]
                 videos.append(decoded.float())

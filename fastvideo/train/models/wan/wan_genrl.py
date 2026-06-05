@@ -23,13 +23,11 @@ from fastvideo.distributed import (
 from fastvideo.logger import init_logger
 from fastvideo.train.models.wan.wan import WanModel
 from fastvideo.train.utils.moduleloader import (
-    load_module_from_path,
-)
+    load_module_from_path, )
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
-        TrainingConfig,
-    )
+        TrainingConfig, )
 
 logger = init_logger(__name__)
 
@@ -38,11 +36,7 @@ def _is_lora_target(
     module_name: str,
     target_modules: list[str],
 ) -> bool:
-    return any(
-        module_name == target
-        or module_name.endswith(f".{target}")
-        for target in target_modules
-    )
+    return any(module_name == target or module_name.endswith(f".{target}") for target in target_modules)
 
 
 def _apply_fastvideo_lora(
@@ -97,19 +91,14 @@ def _init_lora_weights(
         torch.nn.init.zeros_(lora_B)
         return
 
-    raise ValueError(
-        "Unsupported GenRLWanModel LoRA init_weights="
-        f"{init_weights!r}. Use 'gaussian' or 'default'."
-    )
+    raise ValueError("Unsupported GenRLWanModel LoRA init_weights="
+                     f"{init_weights!r}. Use 'gaussian' or 'default'.")
 
 
 @contextmanager
 def _disable_lora_adapters(transformer: Any):
     """Temporarily run a LoRA-wrapped transformer as its frozen base model."""
-    lora_layers = [
-        module for module in transformer.modules()
-        if hasattr(module, "disable_lora")
-    ]
+    lora_layers = [module for module in transformer.modules() if hasattr(module, "disable_lora")]
     previous = [bool(module.disable_lora) for module in lora_layers]
     try:
         for module in lora_layers:
@@ -176,28 +165,18 @@ class GenRLWanModel(WanModel):
             init_from=init_from,
             training_config=training_config,
             trainable=trainable,
-            disable_custom_init_weights=(
-                disable_custom_init_weights
-            ),
+            disable_custom_init_weights=(disable_custom_init_weights),
             flow_shift=flow_shift,
-            enable_gradient_checkpointing_type=(
-                enable_gradient_checkpointing_type
-            ),
-            transformer_override_safetensor=(
-                transformer_override_safetensor
-            ),
+            enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
+            transformer_override_safetensor=(transformer_override_safetensor),
         )
         if use_lora:
             if lora_target_modules is None:
-                raise ValueError(
-                    "GenRLWanModel use_lora=True requires "
-                    "lora_target_modules."
-                )
+                raise ValueError("GenRLWanModel use_lora=True requires "
+                                 "lora_target_modules.")
             if lora_path:
-                raise ValueError(
-                    "GenRLWanModel lora_path is not supported for "
-                    "FastVideo LoRA training yet."
-                )
+                raise ValueError("GenRLWanModel lora_path is not supported for "
+                                 "FastVideo LoRA training yet.")
             converted_count = _apply_fastvideo_lora(
                 self.transformer,
                 lora_rank=int(lora_r),
@@ -206,10 +185,8 @@ class GenRLWanModel(WanModel):
                 init_weights=lora_init_weights,
             )
             if converted_count == 0:
-                raise ValueError(
-                    "GenRLWanModel use_lora=True did not match any "
-                    f"FastVideo linear layers: {lora_target_modules}"
-                )
+                raise ValueError("GenRLWanModel use_lora=True did not match any "
+                                 f"FastVideo linear layers: {lora_target_modules}")
             logger.info(
                 "Converted %d GenRL Wan transformer layers to LoRA",
                 converted_count,
@@ -244,9 +221,7 @@ class GenRLWanModel(WanModel):
 
         # Load text encoder and tokenizer.
         model_path = str(training_config.model_path)
-        self._load_text_encoder(
-            model_path, training_config
-        )
+        self._load_text_encoder(model_path, training_config)
 
         # Dummy dataloader for the trainer's outer loop.
         self.dataloader = _InfiniteDummyLoader()
@@ -259,16 +234,10 @@ class GenRLWanModel(WanModel):
     ) -> None:
         from transformers import AutoTokenizer
 
-        logger.info(
-            "Loading tokenizer from %s", model_path
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_path, subfolder="tokenizer"
-        )
+        logger.info("Loading tokenizer from %s", model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path, subfolder="tokenizer")
 
-        logger.info(
-            "Loading text encoder from %s", model_path
-        )
+        logger.info("Loading text encoder from %s", model_path)
         self.text_encoder = load_module_from_path(
             model_path=model_path,
             module_type="text_encoder",

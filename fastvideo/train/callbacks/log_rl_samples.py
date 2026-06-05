@@ -59,10 +59,7 @@ class LogRLSamplesCallback(Callback):
     ) -> None:
         if outputs is None:
             return
-        if (
-            self._every_steps > 0
-            and iteration % self._every_steps != 0
-        ):
+        if (self._every_steps > 0 and iteration % self._every_steps != 0):
             return
 
         videos = outputs.get("sample_videos")
@@ -92,19 +89,11 @@ class LogRLSamplesCallback(Callback):
                 # (3, T, H, W) uint8 -> (T, H, W, 3) numpy.
                 v = videos[i].permute(1, 2, 3, 0)
                 frames = v.numpy().astype(np.uint8)
-                fname = os.path.join(
-                    tmp_dir, f"sample_{step}_{i}.mp4"
-                )
+                fname = os.path.join(tmp_dir, f"sample_{step}_{i}.mp4")
                 imageio.mimsave(fname, frames, fps=self._fps)
 
-                caption = (
-                    prompts[i]
-                    if prompts and i < len(prompts)
-                    else None
-                )
-                art = tracker.video(
-                    fname, caption=caption, fps=self._fps
-                )
+                caption = (prompts[i] if prompts and i < len(prompts) else None)
+                art = tracker.video(fname, caption=caption, fps=self._fps)
                 if art is not None:
                     video_logs.append(art)
 

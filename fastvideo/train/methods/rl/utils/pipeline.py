@@ -20,8 +20,7 @@ from fastvideo.logger import init_logger
 _pipeline_logger = init_logger(__name__)
 
 from fastvideo.train.methods.rl.utils.sde import (
-    sde_step_with_logprob,
-)
+    sde_step_with_logprob, )
 
 
 def wan_denoising_with_logprob(
@@ -46,11 +45,11 @@ def wan_denoising_with_logprob(
     ref_transformer: torch.nn.Module | None = None,
     lora_model: Any | None = None,
 ) -> tuple[
-    torch.Tensor,
-    list[torch.Tensor],
-    list[torch.Tensor],
-    list[torch.Tensor],
-    list[torch.Tensor],
+        torch.Tensor,
+        list[torch.Tensor],
+        list[torch.Tensor],
+        list[torch.Tensor],
+        list[torch.Tensor],
 ]:
     """Run full denoising loop, collecting latent
     trajectories and log-probabilities at each step.
@@ -84,19 +83,12 @@ def wan_denoising_with_logprob(
     batch_size = prompt_embeds.shape[0]
     dtype = prompt_embeds.dtype
 
-    do_cfg = (
-        guidance_scale > 1.0
-        and negative_prompt_embeds is not None
-    )
+    do_cfg = (guidance_scale > 1.0 and negative_prompt_embeds is not None)
 
     # Prepare initial noise.
     vae_config = model.vae.config
-    vae_scale_temporal = getattr(
-        vae_config, "temporal_compression_ratio", 4
-    )
-    vae_scale_spatial = getattr(
-        vae_config, "spatial_compression_ratio", 8
-    )
+    vae_scale_temporal = getattr(vae_config, "temporal_compression_ratio", 4)
+    vae_scale_spatial = getattr(vae_config, "spatial_compression_ratio", 8)
     num_channels = getattr(vae_config, "z_dim", 16)
 
     latent_frames = (num_frames - 1) // vae_scale_temporal + 1
@@ -104,7 +96,11 @@ def wan_denoising_with_logprob(
     latent_w = width // vae_scale_spatial
 
     latent_shape = (
-        1, num_channels, latent_frames, latent_h, latent_w,
+        1,
+        num_channels,
+        latent_frames,
+        latent_h,
+        latent_w,
     )
     if isinstance(generator, list):
         latents = torch.cat([
@@ -113,8 +109,7 @@ def wan_denoising_with_logprob(
                 generator=generator[i],
                 device=device,
                 dtype=torch.float32,
-            )
-            for i in range(batch_size)
+            ) for i in range(batch_size)
         ])
     else:
         latents = torch.randn(
@@ -129,41 +124,25 @@ def wan_denoising_with_logprob(
         )
 
     # Setup scheduler.
-    scheduler.set_timesteps(
-        num_inference_steps, device=device
-    )
+    scheduler.set_timesteps(num_inference_steps, device=device)
     timesteps = scheduler.timesteps
 
     # Window setup.
-    use_window = (
-        sde_window_size > 0
-        and sde_window_range is not None
-    )
+    use_window = (sde_window_size > 0 and sde_window_range is not None)
     if use_window:
-        if (
-            sde_window_range[1] - sde_window_range[0]
-            < sde_window_size
-        ):
-            msg = (
-                f"sde_window_range span "
-                f"({sde_window_range[1] - sde_window_range[0]}) "
-                f"must be >= sde_window_size "
-                f"({sde_window_size})"
-            )
+        if (sde_window_range[1] - sde_window_range[0] < sde_window_size):
+            msg = (f"sde_window_range span "
+                   f"({sde_window_range[1] - sde_window_range[0]}) "
+                   f"must be >= sde_window_size "
+                   f"({sde_window_size})")
             raise ValueError(msg)
         if generator is not None:
-            gen = (
-                generator[0]
-                if isinstance(generator, list)
-                else generator
-            )
-            max_start = (
-                sde_window_range[1] - sde_window_size
-            )
+            gen = (generator[0] if isinstance(generator, list) else generator)
+            max_start = (sde_window_range[1] - sde_window_size)
             start = torch.randint(
                 sde_window_range[0],
                 max_start + 1,
-                (1,),
+                (1, ),
                 generator=gen,
                 device=device,
             ).item()
@@ -208,9 +187,7 @@ def wan_denoising_with_logprob(
                 timestep,
                 negative_prompt_embeds,
             )
-            noise_pred = noise_uncond + guidance_scale * (
-                noise_pred - noise_uncond
-            )
+            noise_pred = noise_uncond + guidance_scale * (noise_pred - noise_uncond)
         torch.cuda.synchronize()
         _denoise_fwd_time += time.perf_counter() - _fwd_t0
 
@@ -252,10 +229,7 @@ def wan_denoising_with_logprob(
         prev_latents = latents.clone()
 
         # Record.
-        in_window = (
-            use_window
-            and sde_window[0] <= i < sde_window[1]
-        )
+        in_window = (use_window and sde_window[0] <= i < sde_window[1])
         should_record = (not use_window) or in_window
 
         if should_record:
@@ -283,20 +257,12 @@ def wan_denoising_with_logprob(
                     ref_noise = ref_noise.to(dtype)
                     if do_cfg:
                         ref_uncond = ref_model(
-                            hidden_states=latents_ori.to(
-                                dtype
-                            ),
+                            hidden_states=latents_ori.to(dtype),
                             timestep=timestep,
-                            encoder_hidden_states=(
-                                negative_prompt_embeds
-                            ),
+                            encoder_hidden_states=(negative_prompt_embeds),
                             return_dict=False,
                         )
-                        ref_noise = (
-                            ref_uncond
-                            + guidance_scale
-                            * (ref_noise - ref_uncond)
-                        )
+                        ref_noise = (ref_uncond + guidance_scale * (ref_noise - ref_uncond))
 
                 (
                     _,
@@ -317,23 +283,13 @@ def wan_denoising_with_logprob(
                     diffusion_clip=diffusion_clip,
                     diffusion_clip_value=diffusion_clip_value,
                 )
-                kl = (prev_latents_mean - ref_prev_mean) ** 2 / (
-                    2 * std_dev_t**2
-                )
-                kl = kl.mean(
-                    dim=tuple(range(1, kl.ndim))
-                )
+                kl = (prev_latents_mean - ref_prev_mean)**2 / (2 * std_dev_t**2)
+                kl = kl.mean(dim=tuple(range(1, kl.ndim)))
                 all_kl.append(kl)
             else:
-                all_kl.append(
-                    torch.zeros(
-                        batch_size, device=device
-                    )
-                )
+                all_kl.append(torch.zeros(batch_size, device=device))
         elif should_record:
-            all_kl.append(
-                torch.zeros(batch_size, device=device)
-            )
+            all_kl.append(torch.zeros(batch_size, device=device))
         torch.cuda.synchronize()
         _denoise_kl_time += time.perf_counter() - _kl_t0
 

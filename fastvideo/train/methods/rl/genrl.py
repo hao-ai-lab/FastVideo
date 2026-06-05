@@ -32,20 +32,15 @@ from fastvideo.train.methods.base import (
     TrainingMethod,
 )
 from fastvideo.train.methods.rl.utils.advantages import (
-    compute_advantages,
-)
+    compute_advantages, )
 from fastvideo.train.methods.rl.utils.data import (
-    build_prompt_dataloaders,
-)
+    build_prompt_dataloaders, )
 from fastvideo.train.methods.rl.utils.diffusion import (
-    compute_log_prob,
-)
+    compute_log_prob, )
 from fastvideo.train.methods.rl.utils.embeddings import (
-    compute_text_embeddings,
-)
+    compute_text_embeddings, )
 from fastvideo.train.methods.rl.utils.evaluation import (
-    eval_once,
-)
+    eval_once, )
 from fastvideo.train.methods.rl.utils.rewards import (
     clear_reward_models,
     move_reward_models,
@@ -53,11 +48,9 @@ from fastvideo.train.methods.rl.utils.rewards import (
     reward_models_on_device,
 )
 from fastvideo.train.methods.rl.utils.sampling import (
-    sample_epoch,
-)
+    sample_epoch, )
 from fastvideo.train.methods.rl.utils.stat_tracking import (
-    PerPromptStatTracker,
-)
+    PerPromptStatTracker, )
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import (
     build_optimizer_and_scheduler,
@@ -111,19 +104,11 @@ class GenRLMethod(TrainingMethod):
         self.student.init_preprocessors(tc)
 
         # Scheduler copy for RL pipeline.
-        self._scheduler = copy.deepcopy(
-            self.student.noise_scheduler
-        )
+        self._scheduler = copy.deepcopy(self.student.noise_scheduler)
 
         # Reward functions.
-        self._reward_on_gpu = bool(
-            mc.get("reward_on_gpu", False)
-        )
-        reward_init_device = (
-            self.student.device
-            if self._reward_on_gpu
-            else torch.device("cpu")
-        )
+        self._reward_on_gpu = bool(mc.get("reward_on_gpu", False))
+        reward_init_device = (self.student.device if self._reward_on_gpu else torch.device("cpu"))
         self._reward_fn = multi_score(
             reward_init_device,
             self._reward_cfg,
@@ -131,9 +116,7 @@ class GenRLMethod(TrainingMethod):
             return_raw_scores=True,
         )
         if self._reward_on_gpu:
-            move_reward_models(
-                self._reward_cfg, self.student.device
-            )
+            move_reward_models(self._reward_cfg, self.student.device)
 
         # Prompt dataloaders.
         wg = get_world_group()
@@ -141,32 +124,22 @@ class GenRLMethod(TrainingMethod):
         self._rank = wg.rank
         self._is_main = wg.rank == 0
         if self._sample_batch_size % self._num_video_per_prompt != 0:
-            raise ValueError(
-                "sample_batch_size per rank must be divisible by "
-                "num_video_per_prompt for DistributedKRepeatSampler so "
-                "each rank receives whole prompt groups. Got "
-                f"{self._sample_batch_size} and "
-                f"{self._num_video_per_prompt}."
-            )
+            raise ValueError("sample_batch_size per rank must be divisible by "
+                             "num_video_per_prompt for DistributedKRepeatSampler so "
+                             "each rank receives whole prompt groups. Got "
+                             f"{self._sample_batch_size} and "
+                             f"{self._num_video_per_prompt}.")
 
-        train_dl, test_dl, train_sampler = (
-            build_prompt_dataloaders(
-                prompt_dataset_path=mc[
-                    "prompt_dataset_path"
-                ],
-                prompt_fn=mc.get(
-                    "prompt_fn", "general_ocr"
-                ),
-                sample_batch_size=self._sample_batch_size,
-                eval_batch_size=self._eval_batch_size,
-                num_video_per_prompt=(
-                    self._num_video_per_prompt
-                ),
-                num_processes=self._world_size,
-                process_index=self._rank,
-                seed=self._seed,
-            )
-        )
+        train_dl, test_dl, train_sampler = (build_prompt_dataloaders(
+            prompt_dataset_path=mc["prompt_dataset_path"],
+            prompt_fn=mc.get("prompt_fn", "general_ocr"),
+            sample_batch_size=self._sample_batch_size,
+            eval_batch_size=self._eval_batch_size,
+            num_video_per_prompt=(self._num_video_per_prompt),
+            num_processes=self._world_size,
+            process_index=self._rank,
+            seed=self._seed,
+        ))
         self._train_dataloader = train_dl
         self._test_dataloader = test_dl
         self._train_sampler = train_sampler
@@ -182,9 +155,7 @@ class GenRLMethod(TrainingMethod):
         self._init_optimizer()
 
         # Async reward executor.
-        self._executor = futures.ThreadPoolExecutor(
-            max_workers=8
-        )
+        self._executor = futures.ThreadPoolExecutor(max_workers=8)
 
         # Training timestep indices.
         self._compute_train_timesteps()
@@ -195,103 +166,42 @@ class GenRLMethod(TrainingMethod):
 
     def _parse_config(self, mc: dict[str, Any]) -> None:
         # Sampling.
-        self._sample_batch_size = int(
-            mc.get("sample_batch_size", 8)
-        )
-        self._eval_batch_size = int(
-            mc.get("eval_batch_size", 2)
-        )
-        self._num_batches_per_epoch = int(
-            mc.get("num_batches_per_epoch", 2)
-        )
-        self._num_inference_steps = int(
-            mc.get("num_inference_steps", 20)
-        )
-        self._guidance_scale = float(
-            mc.get("guidance_scale", 4.5)
-        )
-        self._num_video_per_prompt = int(
-            mc.get("num_video_per_prompt", 4)
-        )
-        self._noise_level = float(
-            mc.get("noise_level", 0.7)
-        )
-        self._sde_type = str(
-            mc.get("sde_type", "flow_sde")
-        )
-        self._sde_window_size = int(
-            mc.get("sde_window_size", 0)
-        )
+        self._sample_batch_size = int(mc.get("sample_batch_size", 8))
+        self._eval_batch_size = int(mc.get("eval_batch_size", 2))
+        self._num_batches_per_epoch = int(mc.get("num_batches_per_epoch", 2))
+        self._num_inference_steps = int(mc.get("num_inference_steps", 20))
+        self._guidance_scale = float(mc.get("guidance_scale", 4.5))
+        self._num_video_per_prompt = int(mc.get("num_video_per_prompt", 4))
+        self._noise_level = float(mc.get("noise_level", 0.7))
+        self._sde_type = str(mc.get("sde_type", "flow_sde"))
+        self._sde_window_size = int(mc.get("sde_window_size", 0))
         raw_range = mc.get("sde_window_range")
-        self._sde_window_range = (
-            tuple(raw_range) if raw_range else None
-        )
-        self._diffusion_clip = bool(
-            mc.get("diffusion_clip", False)
-        )
-        self._diffusion_clip_value = float(
-            mc.get("diffusion_clip_value", 0.45)
-        )
-        self._kl_reward = float(
-            mc.get("kl_reward", 0.0)
-        )
-        self._same_latent = bool(
-            mc.get("same_latent", False)
-        )
+        self._sde_window_range = (tuple(raw_range) if raw_range else None)
+        self._diffusion_clip = bool(mc.get("diffusion_clip", False))
+        self._diffusion_clip_value = float(mc.get("diffusion_clip_value", 0.45))
+        self._kl_reward = float(mc.get("kl_reward", 0.0))
+        self._same_latent = bool(mc.get("same_latent", False))
 
         # Training.
-        self._num_inner_epochs = int(
-            mc.get("num_inner_epochs", 1)
-        )
-        self._clip_range = float(
-            mc.get("clip_range", 1e-3)
-        )
-        self._adv_clip_max = float(
-            mc.get("adv_clip_max", 5.0)
-        )
+        self._num_inner_epochs = int(mc.get("num_inner_epochs", 1))
+        self._clip_range = float(mc.get("clip_range", 1e-3))
+        self._adv_clip_max = float(mc.get("adv_clip_max", 5.0))
         self._beta = float(mc.get("beta", 0.0))
         self._use_cfg = bool(mc.get("use_cfg", True))
-        self._loss_reweighting = mc.get(
-            "loss_reweighting"
-        )
-        self._loss_reweighting_clip = mc.get(
-            "loss_reweighting_clip"
-        )
-        self._loss_reweighting_clip = (
-            None
-            if self._loss_reweighting_clip is None
-            else float(self._loss_reweighting_clip)
-        )
-        self._weight_advantages = bool(
-            mc.get("weight_advantages", False)
-        )
-        self._max_grad_norm = float(
-            mc.get("max_grad_norm", 1.0)
-        )
-        self._optimizer_step_per_timestep = bool(
-            mc.get("optimizer_step_per_timestep", True)
-        )
-        self._accumulate_ppo_microbatches = bool(
-            mc.get("accumulate_ppo_microbatches", False)
-        )
-        self._log_post_update_kl = bool(
-            mc.get("log_post_update_kl", True)
-        )
-        self._train_batch_size = int(
-            mc.get("train_batch_size", 8)
-        )
-        self._eval_every_steps = int(
-            mc.get("eval_every_steps", 0)
-        )
-        self._eval_num_batches = int(
-            mc.get("eval_num_batches", 1)
-        )
-        self._eval_guidance_scale = float(
-            mc.get("eval_guidance_scale", self._guidance_scale)
-        )
-        self._eval_num_steps = int(
-            mc.get("eval_num_steps", self._num_inference_steps)
-        )
+        self._loss_reweighting = mc.get("loss_reweighting")
+        self._loss_reweighting_clip = mc.get("loss_reweighting_clip")
+        self._loss_reweighting_clip = (None
+                                       if self._loss_reweighting_clip is None else float(self._loss_reweighting_clip))
+        self._weight_advantages = bool(mc.get("weight_advantages", False))
+        self._max_grad_norm = float(mc.get("max_grad_norm", 1.0))
+        self._optimizer_step_per_timestep = bool(mc.get("optimizer_step_per_timestep", True))
+        self._accumulate_ppo_microbatches = bool(mc.get("accumulate_ppo_microbatches", False))
+        self._log_post_update_kl = bool(mc.get("log_post_update_kl", True))
+        self._train_batch_size = int(mc.get("train_batch_size", 8))
+        self._eval_every_steps = int(mc.get("eval_every_steps", 0))
+        self._eval_num_batches = int(mc.get("eval_num_batches", 1))
+        self._eval_guidance_scale = float(mc.get("eval_guidance_scale", self._guidance_scale))
+        self._eval_num_steps = int(mc.get("eval_num_steps", self._num_inference_steps))
 
         # Data / dimensions.
         self._height = int(mc.get("height", 480))
@@ -300,9 +210,7 @@ class GenRLMethod(TrainingMethod):
         self._seed = int(mc.get("seed", 42))
 
         # Per-prompt tracking.
-        self._per_prompt_stat_tracking = bool(
-            mc.get("per_prompt_stat_tracking", True)
-        )
+        self._per_prompt_stat_tracking = bool(mc.get("per_prompt_stat_tracking", True))
         if self._num_video_per_prompt == 1:
             self._per_prompt_stat_tracking = False
 
@@ -312,47 +220,33 @@ class GenRLMethod(TrainingMethod):
     def _validate_config(self) -> None:
         """Fail early on unsupported RL config combinations."""
         if not self._reward_cfg:
-            raise ValueError(
-                "method.reward_fn must contain at least one reward."
-            )
+            raise ValueError("method.reward_fn must contain at least one reward.")
 
         if self._beta > 0 and not self._has_reference_policy():
-            raise ValueError(
-                "method.beta > 0 requires either a configured reference "
-                "model or a LoRA student with disable_adapter()."
-            )
+            raise ValueError("method.beta > 0 requires either a configured reference "
+                             "model or a LoRA student with disable_adapter().")
 
         if self._kl_reward > 0 and not self._has_reference_policy():
-            raise ValueError(
-                "method.kl_reward > 0 requires either a configured reference "
-                "model or a LoRA student with disable_adapter()."
-            )
+            raise ValueError("method.kl_reward > 0 requires either a configured reference "
+                             "model or a LoRA student with disable_adapter().")
 
         if self._loss_reweighting not in {
-            None,
-            "longcat",
-            "flash_tgr",
+                None,
+                "longcat",
+                "flash_tgr",
         }:
-            raise ValueError(
-                "method.loss_reweighting must be one of null, "
-                "'longcat', or 'flash_tgr'."
-            )
+            raise ValueError("method.loss_reweighting must be one of null, "
+                             "'longcat', or 'flash_tgr'.")
 
         if self._sde_window_range is not None:
             if len(self._sde_window_range) != 2:
-                raise ValueError(
-                    "method.sde_window_range must contain exactly two values."
-                )
+                raise ValueError("method.sde_window_range must contain exactly two values.")
             start, end = self._sde_window_range
             if start < 0 or end <= start:
-                raise ValueError(
-                    "method.sde_window_range must satisfy 0 <= start < end."
-                )
+                raise ValueError("method.sde_window_range must satisfy 0 <= start < end.")
             if end > self._num_inference_steps:
-                raise ValueError(
-                    "method.sde_window_range end cannot exceed "
-                    "method.num_inference_steps."
-                )
+                raise ValueError("method.sde_window_range end cannot exceed "
+                                 "method.num_inference_steps.")
 
     # ------------------------------------------------------------------
     # Setup helpers
@@ -365,52 +259,24 @@ class GenRLMethod(TrainingMethod):
 
         if self._per_prompt_stat_tracking:
             self._stat_tracker = PerPromptStatTracker(
-                use_global_std=bool(
-                    self.method_config.get(
-                        "global_std", False
-                    )
-                ),
-                max_group_std=bool(
-                    self.method_config.get(
-                        "max_group_std", False
-                    )
-                ),
+                use_global_std=bool(self.method_config.get("global_std", False)),
+                max_group_std=bool(self.method_config.get("max_group_std", False)),
             )
 
-        if (
-            self._weight_advantages
-            and self._per_prompt_stat_tracking
-        ):
+        if (self._weight_advantages and self._per_prompt_stat_tracking):
             self._reward_stat_trackers = {
-                name: PerPromptStatTracker(
-                    use_global_std=bool(
-                        self.method_config.get(
-                            "global_std", False
-                        )
-                    ),
-                    max_group_std=bool(
-                        self.method_config.get(
-                            "max_group_std", False
-                        )
-                    ),
+                name:
+                PerPromptStatTracker(
+                    use_global_std=bool(self.method_config.get("global_std", False)),
+                    max_group_std=bool(self.method_config.get("max_group_std", False)),
                 )
                 for name in self._reward_cfg
             }
             if self._kl_reward > 0:
-                self._kl_stat_tracker = (
-                    PerPromptStatTracker(
-                        use_global_std=bool(
-                            self.method_config.get(
-                                "global_std", False
-                            )
-                        ),
-                        max_group_std=bool(
-                            self.method_config.get(
-                                "max_group_std", False
-                            )
-                        ),
-                    )
-                )
+                self._kl_stat_tracker = (PerPromptStatTracker(
+                    use_global_std=bool(self.method_config.get("global_std", False)),
+                    max_group_std=bool(self.method_config.get("max_group_std", False)),
+                ))
 
     def _compute_negative_embeds(self) -> None:
         device = self.student.device
@@ -421,27 +287,17 @@ class GenRLMethod(TrainingMethod):
             max_sequence_length=512,
             device=device,
         )
-        self._sample_neg_embeds = neg.repeat(
-            self._sample_batch_size, 1, 1
-        )
-        self._train_neg_embeds = neg.repeat(
-            self._train_batch_size, 1, 1
-        )
+        self._sample_neg_embeds = neg.repeat(self._sample_batch_size, 1, 1)
+        self._train_neg_embeds = neg.repeat(self._train_batch_size, 1, 1)
 
     def _init_optimizer(self) -> None:
         tc = self.training_config
-        params = [
-            p
-            for p in self.student.transformer.parameters()
-            if p.requires_grad
-        ]
+        params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         if not params:
-            raise ValueError(
-                "GenRL student transformer has no trainable parameters. "
-                "For LoRA, check models.student.use_lora and "
-                "lora_target_modules. For full tuning, check "
-                "models.student.trainable."
-            )
+            raise ValueError("GenRL student transformer has no trainable parameters. "
+                             "For LoRA, check models.student.use_lora and "
+                             "lora_target_modules. For full tuning, check "
+                             "models.student.trainable.")
         trainable_count = sum(p.numel() for p in params)
         logger.info(
             "GenRL trainable transformer parameters: %.2fM",
@@ -455,9 +311,7 @@ class GenRLMethod(TrainingMethod):
             params=params,
             optimizer_config=tc.optimizer,
             loop_config=tc.loop,
-            learning_rate=float(
-                tc.optimizer.learning_rate
-            ),
+            learning_rate=float(tc.optimizer.learning_rate),
             betas=tc.optimizer.betas,
             scheduler_name=str(tc.optimizer.lr_scheduler),
         )
@@ -466,9 +320,7 @@ class GenRLMethod(TrainingMethod):
         if self._sde_window_size > 0:
             num_ts = self._sde_window_size
         else:
-            num_ts = int(
-                self._num_inference_steps * 0.99
-            )
+            num_ts = int(self._num_inference_steps * 0.99)
         self._num_train_timesteps = num_ts
         self._train_timesteps = list(range(num_ts))
 
@@ -481,9 +333,9 @@ class GenRLMethod(TrainingMethod):
         batch: dict[str, Any],
         iteration: int,
     ) -> tuple[
-        dict[str, torch.Tensor],
-        dict[str, Any],
-        dict[str, LogScalar],
+            dict[str, torch.Tensor],
+            dict[str, Any],
+            dict[str, LogScalar],
     ]:
         """Run one full RL epoch (sample -> train).
 
@@ -500,71 +352,44 @@ class GenRLMethod(TrainingMethod):
         torch.cuda.synchronize()
         t_sample_start = time.perf_counter()
         self.student.transformer.eval()
-        reward_ctx = (
-            contextlib.nullcontext()
-            if self._reward_on_gpu
-            else reward_models_on_device(
-                self._reward_cfg, device
-            )
-        )
+        reward_ctx = (contextlib.nullcontext() if self._reward_on_gpu else reward_models_on_device(
+            self._reward_cfg, device))
         with reward_ctx:
-            samples, batch_videos, batch_prompts = (
-                sample_epoch(
-                    model=self.student,
-                    scheduler=self._scheduler,
-                    train_sampler=self._train_sampler,
-                    train_iter=self._train_iter,
-                    reward_fn=self._reward_fn,
-                    sample_neg_prompt_embeds=(
-                        self._sample_neg_embeds
-                    ),
-                    text_encoder=self.student.text_encoder,
-                    tokenizer=self.student.tokenizer,
-                    executor=self._executor,
-                    epoch=epoch,
-                    global_step=iteration,
-                    sample_batch_size=(
-                        self._sample_batch_size
-                    ),
-                    num_batches_per_epoch=(
-                        self._num_batches_per_epoch
-                    ),
-                    num_inference_steps=(
-                        self._num_inference_steps
-                    ),
-                    guidance_scale=self._guidance_scale,
-                    height=self._height,
-                    width=self._width,
-                    num_frames=self._num_frames,
-                    noise_level=self._noise_level,
-                    sde_type=self._sde_type,
-                    diffusion_clip=self._diffusion_clip,
-                    diffusion_clip_value=(
-                        self._diffusion_clip_value
-                    ),
-                    sde_window_size=(
-                        self._sde_window_size
-                    ),
-                    sde_window_range=(
-                        self._sde_window_range
-                    ),
-                    kl_reward=self._kl_reward,
-                    same_latent=self._same_latent,
-                    seed=self._seed,
-                    device=device,
-                    is_main_process=self._is_main,
-                    ref_transformer=(
-                        self._reference.transformer
-                        if self._reference
-                        else None
-                    ),
-                    lora_model=self._get_lora_ref_transformer(),
-                    tracker=self.tracker,
-                    async_reward_scoring=(
-                        not self._reward_on_gpu
-                    ),
-                )
-            )
+            samples, batch_videos, batch_prompts = (sample_epoch(
+                model=self.student,
+                scheduler=self._scheduler,
+                train_sampler=self._train_sampler,
+                train_iter=self._train_iter,
+                reward_fn=self._reward_fn,
+                sample_neg_prompt_embeds=(self._sample_neg_embeds),
+                text_encoder=self.student.text_encoder,
+                tokenizer=self.student.tokenizer,
+                executor=self._executor,
+                epoch=epoch,
+                global_step=iteration,
+                sample_batch_size=(self._sample_batch_size),
+                num_batches_per_epoch=(self._num_batches_per_epoch),
+                num_inference_steps=(self._num_inference_steps),
+                guidance_scale=self._guidance_scale,
+                height=self._height,
+                width=self._width,
+                num_frames=self._num_frames,
+                noise_level=self._noise_level,
+                sde_type=self._sde_type,
+                diffusion_clip=self._diffusion_clip,
+                diffusion_clip_value=(self._diffusion_clip_value),
+                sde_window_size=(self._sde_window_size),
+                sde_window_range=(self._sde_window_range),
+                kl_reward=self._kl_reward,
+                same_latent=self._same_latent,
+                seed=self._seed,
+                device=device,
+                is_main_process=self._is_main,
+                ref_transformer=(self._reference.transformer if self._reference else None),
+                lora_model=self._get_lora_ref_transformer(),
+                tracker=self.tracker,
+                async_reward_scoring=(not self._reward_on_gpu),
+            ))
         torch.cuda.synchronize()
         t_sample_end = time.perf_counter()
         if self._reward_on_gpu:
@@ -578,33 +403,21 @@ class GenRLMethod(TrainingMethod):
 
         # 2. Prepare samples (advantages).
         t_adv_start = time.perf_counter()
-        samples = self._prepare_samples(
-            samples, epoch, iteration
-        )
+        samples = self._prepare_samples(samples, epoch, iteration)
         t_adv_end = time.perf_counter()
 
         # 3. PPO training.
         torch.cuda.synchronize()
         t_ppo_start = time.perf_counter()
-        ppo_metrics = self._ppo_train(
-            samples, epoch, iteration
-        )
+        ppo_metrics = self._ppo_train(samples, epoch, iteration)
         torch.cuda.synchronize()
         t_ppo_end = time.perf_counter()
         all_metrics.update(ppo_metrics)
 
-        if (
-            self._eval_every_steps > 0
-            and iteration % self._eval_every_steps == 0
-        ):
+        if (self._eval_every_steps > 0 and iteration % self._eval_every_steps == 0):
             t_eval_start = time.perf_counter()
-            eval_ctx = (
-                reward_models_on_device(
-                    self._reward_cfg, device
-                )
-                if self._reward_on_gpu
-                else contextlib.nullcontext()
-            )
+            eval_ctx = (reward_models_on_device(self._reward_cfg, device)
+                        if self._reward_on_gpu else contextlib.nullcontext())
             with eval_ctx:
                 eval_metrics = eval_once(
                     model=self.student,
@@ -612,16 +425,12 @@ class GenRLMethod(TrainingMethod):
                     test_dataloader=self._test_dataloader,
                     text_encoder=self.student.text_encoder,
                     tokenizer=self.student.tokenizer,
-                    sample_neg_prompt_embeds=(
-                        self._sample_neg_embeds
-                    ),
+                    sample_neg_prompt_embeds=(self._sample_neg_embeds),
                     eval_reward_fn=self._reward_fn,
                     global_step=iteration,
                     ema_callback=None,
                     eval_num_steps=self._eval_num_steps,
-                    eval_guidance_scale=(
-                        self._eval_guidance_scale
-                    ),
+                    eval_guidance_scale=(self._eval_guidance_scale),
                     height=self._height,
                     width=self._width,
                     num_frames=self._num_frames,
@@ -637,9 +446,7 @@ class GenRLMethod(TrainingMethod):
                 clear_reward_models(self._reward_cfg)
             all_metrics.update(eval_metrics)
             torch.cuda.synchronize()
-            all_metrics["time/eval_sec"] = (
-                time.perf_counter() - t_eval_start
-            )
+            all_metrics["time/eval_sec"] = (time.perf_counter() - t_eval_start)
 
         logger.info(
             "[GenRL step %d] TIMING: "
@@ -651,37 +458,24 @@ class GenRLMethod(TrainingMethod):
             t_ppo_end - t_ppo_start,
             t_ppo_end - t_sample_start,
         )
-        all_metrics["time/sample_sec"] = (
-            t_sample_end - t_sample_start
-        )
-        all_metrics["time/advantages_sec"] = (
-            t_adv_end - t_adv_start
-        )
-        all_metrics["time/ppo_train_sec"] = (
-            t_ppo_end - t_ppo_start
-        )
+        all_metrics["time/sample_sec"] = (t_sample_end - t_sample_start)
+        all_metrics["time/advantages_sec"] = (t_adv_end - t_adv_start)
+        all_metrics["time/ppo_train_sec"] = (t_ppo_end - t_ppo_start)
 
         # Build outputs dict with sampled videos for
         # logging callbacks.
         outputs: dict[str, Any] = {}
         if self._is_main and batch_videos:
             vids = batch_videos[0]
-            outputs["sample_videos"] = (
-                (vids * 255)
-                .clamp(0, 255)
-                .to(torch.uint8)
-                .cpu()
-            )
-            outputs["sample_prompts"] = (
-                batch_prompts[0] if batch_prompts else []
-            )
+            outputs["sample_videos"] = ((vids * 255).clamp(0, 255).to(torch.uint8).cpu())
+            outputs["sample_prompts"] = (batch_prompts[0] if batch_prompts else [])
 
         # Return dummy loss (everything is internal).
-        dummy_loss = torch.zeros(
-            (), device=device, requires_grad=False
-        )
+        dummy_loss = torch.zeros((), device=device, requires_grad=False)
         return (
-            {"total_loss": dummy_loss},
+            {
+                "total_loss": dummy_loss
+            },
             outputs,
             all_metrics,
         )
@@ -708,9 +502,7 @@ class GenRLMethod(TrainingMethod):
         return []
 
     @property
-    def _optimizer_dict(
-        self,
-    ) -> dict[str, torch.optim.Optimizer]:
+    def _optimizer_dict(self, ) -> dict[str, torch.optim.Optimizer]:
         return {"student": self._optimizer}
 
     @property
@@ -728,9 +520,7 @@ class GenRLMethod(TrainingMethod):
         from fastvideo.utils import set_random_seed
 
         set_random_seed(self._seed)
-        self.cuda_generator = torch.Generator(
-            device=self.student.device
-        ).manual_seed(self._seed + self._rank)
+        self.cuda_generator = torch.Generator(device=self.student.device).manual_seed(self._seed + self._rank)
         self.student.on_train_start()
 
     # ------------------------------------------------------------------
@@ -759,104 +549,61 @@ class GenRLMethod(TrainingMethod):
                     for sk in first
                 }
             else:
-                collated[k] = torch.cat(
-                    [s[k] for s in samples], dim=0
-                )
+                collated[k] = torch.cat([s[k] for s in samples], dim=0)
         samples_t = collated
 
         # Apply KL penalty.
-        samples_t["rewards"]["ori_avg"] = samples_t[
-            "rewards"
-        ]["avg"]
-        kl_penalty = (
-            self._kl_reward * samples_t["kl"]
-        )
-        samples_t["rewards"]["avg"] = (
-            samples_t["rewards"]["avg"].unsqueeze(-1)
-            - kl_penalty
-        )
+        samples_t["rewards"]["ori_avg"] = samples_t["rewards"]["avg"]
+        kl_penalty = (self._kl_reward * samples_t["kl"])
+        samples_t["rewards"]["avg"] = (samples_t["rewards"]["avg"].unsqueeze(-1) - kl_penalty)
 
         # Broadcast raw rewards to timestep dimension.
         num_timesteps = samples_t["kl"].shape[1]
         for rn in self._reward_cfg:
             raw_key = f"{rn}_raw"
-            samples_t["rewards"][f"ori_{raw_key}"] = (
-                samples_t["rewards"][raw_key]
-            )
-            samples_t["rewards"][raw_key] = (
-                samples_t["rewards"][raw_key]
-                .unsqueeze(-1)
-                .expand(-1, num_timesteps)
-            )
+            samples_t["rewards"][f"ori_{raw_key}"] = (samples_t["rewards"][raw_key])
+            samples_t["rewards"][raw_key] = (samples_t["rewards"][raw_key].unsqueeze(-1).expand(-1, num_timesteps))
 
         # Gather rewards / KL across processes.
         gathered_rewards = {
-            k: _gather_tensor(v, self._world_size)
-            .cpu()
-            .numpy()
+            k: _gather_tensor(v, self._world_size).cpu().numpy()
             for k, v in samples_t["rewards"].items()
         }
-        gathered_kl = (
-            _gather_tensor(samples_t["kl"], self._world_size)
-            .cpu()
-            .numpy()
-        )
+        gathered_kl = (_gather_tensor(samples_t["kl"], self._world_size).cpu().numpy())
 
         # Log reward stats.
-        raw_keys = [
-            k
-            for k in gathered_rewards
-            if k.endswith("_raw")
-            and not k.startswith("ori_")
-        ]
-        reward_logs = {
-            f"reward_{k}": float(
-                gathered_rewards[k].mean()
-            )
-            for k in raw_keys
-        }
+        raw_keys = [k for k in gathered_rewards if k.endswith("_raw") and not k.startswith("ori_")]
+        reward_logs = {f"reward_{k}": float(gathered_rewards[k].mean()) for k in raw_keys}
         kl_mean = float(gathered_kl.mean())
         reward_logs["kl"] = kl_mean
-        reward_logs["kl_abs"] = float(
-            np.abs(gathered_kl).mean()
-        )
+        reward_logs["kl_abs"] = float(np.abs(gathered_kl).mean())
         if self._is_main and self.tracker is not None:
             self.tracker.log(reward_logs, global_step)
 
         # Decode prompts for advantage computation.
         prompts = None
         if self._per_prompt_stat_tracking:
-            prompt_ids = (
-                _gather_tensor(
-                    samples_t["prompt_ids"],
-                    self._world_size,
-                )
-                .cpu()
-                .numpy()
-            )
-            prompts = (
-                self.student.tokenizer.batch_decode(
-                    prompt_ids,
-                    skip_special_tokens=True,
-                )
-            )
+            prompt_ids = (_gather_tensor(
+                samples_t["prompt_ids"],
+                self._world_size,
+            ).cpu().numpy())
+            prompts = (self.student.tokenizer.batch_decode(
+                prompt_ids,
+                skip_special_tokens=True,
+            ))
 
         # Compute advantages.
         advantages, adv_log = compute_advantages(
             reward_fn_cfg=self._reward_cfg,
             weight_advantages=self._weight_advantages,
-            per_prompt_stat_tracking=(
-                self._per_prompt_stat_tracking
-            ),
+            per_prompt_stat_tracking=(self._per_prompt_stat_tracking),
             kl_reward=self._kl_reward,
             samples=samples_t,
             gathered_rewards=gathered_rewards,
             gathered_kl=gathered_kl,
             prompts=prompts,
             stat_tracker=self._stat_tracker,
-            reward_stat_trackers=(
-                self._reward_stat_trackers
-            ),
+            reward_stat_trackers=(self._reward_stat_trackers),
             kl_stat_tracker=self._kl_stat_tracker,
         )
         if adv_log and self._is_main and self.tracker:
@@ -876,25 +623,16 @@ class GenRLMethod(TrainingMethod):
         del samples_t["prompt_ids"]
 
         # Filter zero-advantage samples.
-        mask = (
-            samples_t["advantages"].abs().sum(dim=1) != 0
-        )
+        mask = (samples_t["advantages"].abs().sum(dim=1) != 0)
         num_batches = self._num_batches_per_epoch
         true_count = mask.sum()
         if true_count == 0:
-            samples_t["advantages"] = (
-                samples_t["advantages"] + ADVANTAGE_EPSILON
-            )
-            mask = (
-                samples_t["advantages"].abs().sum(dim=1)
-                != 0
-            )
+            samples_t["advantages"] = (samples_t["advantages"] + ADVANTAGE_EPSILON)
+            mask = (samples_t["advantages"].abs().sum(dim=1) != 0)
             true_count = mask.sum()
         if true_count % num_batches != 0:
             false_idx = torch.where(~mask)[0]
-            need = num_batches - (
-                true_count % num_batches
-            )
+            need = num_batches - (true_count % num_batches)
             if len(false_idx) >= need:
                 g = torch.Generator(device=device)
                 g.manual_seed(self._seed + epoch)
@@ -905,26 +643,15 @@ class GenRLMethod(TrainingMethod):
                 )[:need]
                 mask[false_idx[perm]] = True
 
-        global_count = (
-            _gather_tensor(
-                mask.sum().view(1), self._world_size
-            )
-            .sum()
-            .item()
-        )
-        actual_batch_size = (
-            global_count
-            / (num_batches * self._world_size)
-        )
+        global_count = (_gather_tensor(mask.sum().view(1), self._world_size).sum().item())
+        actual_batch_size = (global_count / (num_batches * self._world_size))
         if self._is_main and self.tracker:
             self.tracker.log(
                 {"actual_batch_size": actual_batch_size},
                 global_step,
             )
 
-        samples_t = {
-            k: v[mask] for k, v in samples_t.items()
-        }
+        samples_t = {k: v[mask] for k, v in samples_t.items()}
         return samples_t
 
     # ------------------------------------------------------------------
@@ -939,78 +666,41 @@ class GenRLMethod(TrainingMethod):
     ) -> dict[str, LogScalar]:
         """Run inner PPO training loop."""
         device = self.student.device
-        total_batch_size, num_timesteps = samples[
-            "timesteps"
-        ].shape
+        total_batch_size, num_timesteps = samples["timesteps"].shape
         num_ts = self._num_train_timesteps
-        all_info: dict[str, list[float]] = defaultdict(
-            list
-        )
+        all_info: dict[str, list[float]] = defaultdict(list)
 
         for inner_epoch in range(self._num_inner_epochs):
             # Shuffle samples.
             g = torch.Generator(device=device)
-            g.manual_seed(
-                self._seed
-                + epoch * SEED_EPOCH_STRIDE
-                + inner_epoch
-            )
+            g.manual_seed(self._seed + epoch * SEED_EPOCH_STRIDE + inner_epoch)
             perm = torch.randperm(
                 total_batch_size,
                 device=device,
                 generator=g,
             )
-            samples = {
-                k: v[perm] for k, v in samples.items()
-            }
+            samples = {k: v[perm] for k, v in samples.items()}
             # Shuffle timestep dimension per-sample.
-            perms = torch.stack(
-                [
-                    torch.arange(
-                        num_timesteps, device=device
-                    )
-                    for _ in range(total_batch_size)
-                ]
-            )
-            row_idx = torch.arange(
-                total_batch_size, device=device
-            )[:, None]
+            perms = torch.stack([torch.arange(num_timesteps, device=device) for _ in range(total_batch_size)])
+            row_idx = torch.arange(total_batch_size, device=device)[:, None]
             for key in [
-                "timesteps",
-                "latents",
-                "next_latents",
-                "log_probs",
+                    "timesteps",
+                    "latents",
+                    "next_latents",
+                    "log_probs",
             ]:
-                samples[key] = samples[key][
-                    row_idx, perms
-                ]
+                samples[key] = samples[key][row_idx, perms]
 
             # Batch into micro-batches.
-            micro = (
-                total_batch_size
-                // self._num_batches_per_epoch
-            )
-            batched = {
-                k: v.reshape(
-                    -1, micro, *v.shape[1:]
-                )
-                for k, v in samples.items()
-            }
-            batched_list = [
-                dict(zip(batched, x, strict=False))
-                for x in zip(
-                    *batched.values(), strict=False
-                )
-            ]
+            micro = (total_batch_size // self._num_batches_per_epoch)
+            batched = {k: v.reshape(-1, micro, *v.shape[1:]) for k, v in samples.items()}
+            batched_list = [dict(zip(batched, x, strict=False)) for x in zip(*batched.values(), strict=False)]
 
             self.student.transformer.train()
             info: dict[str, list] = defaultdict(list)
             _ppo_batch_times: list[float] = []
 
-            if (
-                self._accumulate_ppo_microbatches
-                and len(batched_list) > 1
-            ):
+            if (self._accumulate_ppo_microbatches and len(batched_list) > 1):
                 if not self._optimizer_step_per_timestep:
                     self._optimizer.zero_grad()
                 probe_args = None
@@ -1023,26 +713,16 @@ class GenRLMethod(TrainingMethod):
                         torch.cuda.synchronize()
                         _ppo_batch_t0 = time.perf_counter()
                         embeds = sample["prompt_embeds"]
-                        neg_embeds = (
-                            self._train_neg_embeds[0:1].repeat(
-                                len(embeds), 1, 1
-                            )
-                            if self._use_cfg
-                            else None
-                        )
-                        loss, loss_metrics = (
-                            self._compute_ppo_loss_and_metrics(
-                                sample, j, embeds, neg_embeds
-                            )
-                        )
+                        neg_embeds = (self._train_neg_embeds[0:1].repeat(len(embeds), 1, 1) if self._use_cfg else None)
+                        loss, loss_metrics = (self._compute_ppo_loss_and_metrics(sample, j, embeds, neg_embeds))
                         loss_scale = len(batched_list)
                         if not self._optimizer_step_per_timestep:
                             loss_scale *= num_ts
 
                         timestep_j = sample["timesteps"][:, j]
                         with set_forward_context(
-                            current_timestep=timestep_j,
-                            attn_metadata=None,
+                                current_timestep=timestep_j,
+                                attn_metadata=None,
                         ):
                             (loss / loss_scale).backward()
 
@@ -1056,9 +736,7 @@ class GenRLMethod(TrainingMethod):
                                 neg_embeds,
                             )
                         torch.cuda.synchronize()
-                        _ppo_batch_times.append(
-                            time.perf_counter() - _ppo_batch_t0
-                        )
+                        _ppo_batch_times.append(time.perf_counter() - _ppo_batch_t0)
 
                     if self._optimizer_step_per_timestep:
                         grad_norm = clip_grad_norm_if_needed(
@@ -1068,15 +746,9 @@ class GenRLMethod(TrainingMethod):
                         self._optimizer.step()
                         self._lr_scheduler.step()
                         info["grad_norm"].append(grad_norm)
-                        info["learning_rate"].append(
-                            float(
-                                self._optimizer.param_groups[0]["lr"]
-                            )
-                        )
+                        info["learning_rate"].append(float(self._optimizer.param_groups[0]["lr"]))
                         if probe_args is not None:
-                            self._log_post_update_probe(
-                                info, *probe_args
-                            )
+                            self._log_post_update_probe(info, *probe_args)
                         self._optimizer.zero_grad()
 
                 if not self._optimizer_step_per_timestep:
@@ -1087,13 +759,9 @@ class GenRLMethod(TrainingMethod):
                     self._optimizer.step()
                     self._lr_scheduler.step()
                     info["grad_norm"].append(grad_norm)
-                    info["learning_rate"].append(
-                        float(self._optimizer.param_groups[0]["lr"])
-                    )
+                    info["learning_rate"].append(float(self._optimizer.param_groups[0]["lr"]))
                     if probe_args is not None:
-                        self._log_post_update_probe(
-                            info, *probe_args
-                        )
+                        self._log_post_update_probe(info, *probe_args)
                     self._optimizer.zero_grad()
 
                 if _ppo_batch_times:
@@ -1116,13 +784,7 @@ class GenRLMethod(TrainingMethod):
                 _ppo_batch_t0 = time.perf_counter()
                 # Get embeddings.
                 embeds = sample["prompt_embeds"]
-                neg_embeds = (
-                    self._train_neg_embeds[0:1].repeat(
-                        len(embeds), 1, 1
-                    )
-                    if self._use_cfg
-                    else None
-                )
+                neg_embeds = (self._train_neg_embeds[0:1].repeat(len(embeds), 1, 1) if self._use_cfg else None)
 
                 self._optimizer.zero_grad()
 
@@ -1130,19 +792,13 @@ class GenRLMethod(TrainingMethod):
                     if self._optimizer_step_per_timestep:
                         self._optimizer.zero_grad()
 
-                    loss, loss_metrics = (
-                        self._compute_ppo_loss_and_metrics(
-                            sample, j, embeds, neg_embeds
-                        )
-                    )
+                    loss, loss_metrics = (self._compute_ppo_loss_and_metrics(sample, j, embeds, neg_embeds))
 
                     # Backward with gradient accumulation.
-                    timestep_j = sample["timesteps"][
-                        :, j
-                    ]
+                    timestep_j = sample["timesteps"][:, j]
                     with set_forward_context(
-                        current_timestep=timestep_j,
-                        attn_metadata=None,
+                            current_timestep=timestep_j,
+                            attn_metadata=None,
                     ):
                         if self._optimizer_step_per_timestep:
                             loss.backward()
@@ -1160,11 +816,7 @@ class GenRLMethod(TrainingMethod):
                         self._optimizer.step()
                         self._lr_scheduler.step()
                         info["grad_norm"].append(grad_norm)
-                        info["learning_rate"].append(
-                            float(
-                                self._optimizer.param_groups[0]["lr"]
-                            )
-                        )
+                        info["learning_rate"].append(float(self._optimizer.param_groups[0]["lr"]))
                         self._log_post_update_probe(
                             info,
                             sample,
@@ -1183,9 +835,7 @@ class GenRLMethod(TrainingMethod):
                     self._optimizer.step()
                     self._lr_scheduler.step()
                     info["grad_norm"].append(grad_norm)
-                    info["learning_rate"].append(
-                        float(self._optimizer.param_groups[0]["lr"])
-                    )
+                    info["learning_rate"].append(float(self._optimizer.param_groups[0]["lr"]))
                     self._log_post_update_probe(
                         info,
                         sample,
@@ -1195,9 +845,7 @@ class GenRLMethod(TrainingMethod):
                     )
                     self._optimizer.zero_grad()
                 torch.cuda.synchronize()
-                _ppo_batch_times.append(
-                    time.perf_counter() - _ppo_batch_t0
-                )
+                _ppo_batch_times.append(time.perf_counter() - _ppo_batch_t0)
 
             if _ppo_batch_times:
                 logger.info(
@@ -1216,9 +864,7 @@ class GenRLMethod(TrainingMethod):
         metrics: dict[str, LogScalar] = {}
         for k, vals in all_info.items():
             metrics[k] = float(np.mean(vals))
-        metrics["inner_epochs"] = float(
-            self._num_inner_epochs
-        )
+        metrics["inner_epochs"] = float(self._num_inner_epochs)
         return metrics
 
     def _log_post_update_probe(
@@ -1257,12 +903,8 @@ class GenRLMethod(TrainingMethod):
                 self._diffusion_clip_value,
             )
         delta = post_log_prob - sample["log_probs"][:, j]
-        info["post_update_approx_kl"].append(
-            0.5 * torch.mean(delta**2).detach().item()
-        )
-        info["post_update_logprob_delta_abs"].append(
-            torch.mean(torch.abs(delta)).detach().item()
-        )
+        info["post_update_approx_kl"].append(0.5 * torch.mean(delta**2).detach().item())
+        info["post_update_logprob_delta_abs"].append(torch.mean(torch.abs(delta)).detach().item())
 
     def _compute_ppo_loss_and_metrics(
         self,
@@ -1337,9 +979,7 @@ class GenRLMethod(TrainingMethod):
             1.0 - self._clip_range,
             1.0 + self._clip_range,
         )
-        policy_loss = torch.mean(
-            torch.maximum(unclipped, clipped)
-        )
+        policy_loss = torch.mean(torch.maximum(unclipped, clipped))
 
         rw_scale, rw_scale_kl = self._compute_reweight_scales(
             sigma=sigma,
@@ -1348,61 +988,30 @@ class GenRLMethod(TrainingMethod):
         )
 
         metrics = {
-            "approx_kl": (
-                0.5 * torch.mean(logprob_delta**2).detach().item()
-            ),
-            "logprob_delta_abs": (
-                torch.mean(torch.abs(logprob_delta)).detach().item()
-            ),
-            "advantage_abs": (
-                torch.mean(torch.abs(advantages)).detach().item()
-            ),
-            "rw_scale": float(
-                rw_scale.detach().item()
-                if isinstance(rw_scale, torch.Tensor)
-                else rw_scale
-            ),
-            "clip_frac": (
-                torch.mean(
-                    (torch.abs(ratio - 1.0) > self._clip_range).float()
-                )
-                .detach()
-                .item()
-            ),
-            "clip_frac_gt_one": (
-                torch.mean(
-                    (ratio - 1.0 > self._clip_range).float()
-                )
-                .detach()
-                .item()
-            ),
-            "clip_frac_lt_one": (
-                torch.mean(
-                    (1.0 - ratio > self._clip_range).float()
-                )
-                .detach()
-                .item()
-            ),
+            "approx_kl": (0.5 * torch.mean(logprob_delta**2).detach().item()),
+            "logprob_delta_abs": (torch.mean(torch.abs(logprob_delta)).detach().item()),
+            "advantage_abs": (torch.mean(torch.abs(advantages)).detach().item()),
+            "rw_scale": float(rw_scale.detach().item() if isinstance(rw_scale, torch.Tensor) else rw_scale),
+            "clip_frac": (torch.mean((torch.abs(ratio - 1.0) > self._clip_range).float()).detach().item()),
+            "clip_frac_gt_one": (torch.mean((ratio - 1.0 > self._clip_range).float()).detach().item()),
+            "clip_frac_lt_one": (torch.mean((1.0 - ratio > self._clip_range).float()).detach().item()),
             "policy_loss": policy_loss.detach().item(),
         }
 
         if self._beta > 0 and prev_mean_ref is not None:
             if self._sde_type == "flow_sde":
-                kl_denom = (std_dev_t * dt_sqrt_ref) ** 2
+                kl_denom = (std_dev_t * dt_sqrt_ref)**2
             elif self._sde_type == "flow_cps":
                 kl_denom = 0.5
             else:
                 msg = f"Unknown sde_type: {self._sde_type}"
                 raise ValueError(msg)
-            kl_loss = ((prev_sample_mean - prev_mean_ref) ** 2).mean(
+            kl_loss = ((prev_sample_mean - prev_mean_ref)**2).mean(
                 dim=(1, 2, 3),
                 keepdim=True,
             ) / (2 * kl_denom)
             kl_loss = torch.mean(kl_loss)
-            loss = (
-                rw_scale * policy_loss
-                + self._beta * kl_loss * rw_scale_kl
-            )
+            loss = (rw_scale * policy_loss + self._beta * kl_loss * rw_scale_kl)
             metrics["kl_loss"] = kl_loss.detach().item()
         else:
             loss = rw_scale * policy_loss
@@ -1421,10 +1030,7 @@ class GenRLMethod(TrainingMethod):
         if self._loss_reweighting == "flash_tgr":
             return 1.0, 1.0
 
-        if (
-            self._loss_reweighting != "longcat"
-            or self._sde_type != "flow_sde"
-        ):
+        if (self._loss_reweighting != "longcat" or self._sde_type != "flow_sde"):
             return 1.0, 1.0
 
         safe_sigma = torch.where(
@@ -1436,9 +1042,7 @@ class GenRLMethod(TrainingMethod):
             ),
             sigma,
         )
-        rw_scale = torch.sqrt(
-            sigma / (1 - safe_sigma)
-        ) / dt_sqrt
+        rw_scale = torch.sqrt(sigma / (1 - safe_sigma)) / dt_sqrt
         rw_scale = torch.mean(rw_scale)
         if self._loss_reweighting_clip is not None:
             rw_scale = torch.clamp(
@@ -1468,10 +1072,7 @@ class GenRLMethod(TrainingMethod):
         return None
 
     def _has_reference_policy(self) -> bool:
-        return (
-            self._reference is not None
-            or self._get_lora_ref_transformer() is not None
-        )
+        return (self._reference is not None or self._get_lora_ref_transformer() is not None)
 
     def _get_reference_logprob_context(self):
         """Return model/context for reference log-prob computation."""

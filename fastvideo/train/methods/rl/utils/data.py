@@ -18,20 +18,14 @@ class TextPromptDataset(Dataset):
     """Load plain text prompts from train.txt / test.txt."""
 
     def __init__(self, dataset: str, split: str = "train"):
-        self.file_path = os.path.join(
-            dataset, f"{split}.txt"
-        )
+        self.file_path = os.path.join(dataset, f"{split}.txt")
         with open(self.file_path) as f:
-            self.prompts = [
-                line.strip() for line in f.readlines()
-            ]
+            self.prompts = [line.strip() for line in f.readlines()]
 
     def __len__(self) -> int:
         return len(self.prompts)
 
-    def __getitem__(
-        self, idx: int | tuple[int, int]
-    ) -> dict:
+    def __getitem__(self, idx: int | tuple[int, int]) -> dict:
         epoch_tag = None
         if isinstance(idx, tuple):
             epoch_tag, idx = idx
@@ -42,23 +36,11 @@ class TextPromptDataset(Dataset):
         }
 
     @staticmethod
-    def collate_fn(
-        examples: list[dict],
-    ) -> tuple[int | None, list[str], list[dict]]:
-        epoch_tags = [
-            example.get("epoch") for example in examples
-        ]
-        epoch_tag = (
-            epoch_tags[0]
-            if all(tag == epoch_tags[0] for tag in epoch_tags)
-            else None
-        )
-        prompts = [
-            example["prompt"] for example in examples
-        ]
-        metadatas = [
-            example["metadata"] for example in examples
-        ]
+    def collate_fn(examples: list[dict], ) -> tuple[int | None, list[str], list[dict]]:
+        epoch_tags = [example.get("epoch") for example in examples]
+        epoch_tag = (epoch_tags[0] if all(tag == epoch_tags[0] for tag in epoch_tags) else None)
+        prompts = [example["prompt"] for example in examples]
+        metadatas = [example["metadata"] for example in examples]
         return epoch_tag, prompts, metadatas
 
 
@@ -66,9 +48,7 @@ class JsonPromptDataset(Dataset):
     """Load prompts from JSONL files."""
 
     def __init__(self, dataset: str, split: str = "train"):
-        self.file_path = os.path.join(
-            dataset, f"{split}.json"
-        )
+        self.file_path = os.path.join(dataset, f"{split}.json")
         self._prompts: list[str] = []
         self._metadatas: list[dict] = []
         self._load_all_prompts()
@@ -84,11 +64,7 @@ class JsonPromptDataset(Dataset):
                     prompt = item.get("prompt", "")
                     if prompt:
                         self._prompts.append(prompt)
-                        metadata = {
-                            k: v
-                            for k, v in item.items()
-                            if k != "prompt"
-                        }
+                        metadata = {k: v for k, v in item.items() if k != "prompt"}
                         self._metadatas.append(metadata)
                 except json.JSONDecodeError as e:
                     logger.warning(
@@ -99,40 +75,22 @@ class JsonPromptDataset(Dataset):
     def __len__(self) -> int:
         return len(self._prompts)
 
-    def __getitem__(
-        self, idx: int | tuple[int, int]
-    ) -> dict:
+    def __getitem__(self, idx: int | tuple[int, int]) -> dict:
         epoch_tag = None
         if isinstance(idx, tuple):
             epoch_tag, idx = idx
         return {
             "epoch": epoch_tag,
             "prompt": self._prompts[idx],
-            "metadata": (
-                self._metadatas[idx]
-                if self._metadatas
-                else {}
-            ),
+            "metadata": (self._metadatas[idx] if self._metadatas else {}),
         }
 
     @staticmethod
-    def collate_fn(
-        examples: list[dict],
-    ) -> tuple[int | None, list[str], list[dict]]:
-        epoch_tags = [
-            example.get("epoch") for example in examples
-        ]
-        epoch_tag = (
-            epoch_tags[0]
-            if all(tag == epoch_tags[0] for tag in epoch_tags)
-            else None
-        )
-        prompts = [
-            example["prompt"] for example in examples
-        ]
-        metadatas = [
-            example["metadata"] for example in examples
-        ]
+    def collate_fn(examples: list[dict], ) -> tuple[int | None, list[str], list[dict]]:
+        epoch_tags = [example.get("epoch") for example in examples]
+        epoch_tag = (epoch_tags[0] if all(tag == epoch_tags[0] for tag in epoch_tags) else None)
+        prompts = [example["prompt"] for example in examples]
+        metadatas = [example["metadata"] for example in examples]
         return epoch_tag, prompts, metadatas
 
 
@@ -155,27 +113,19 @@ class DistributedKRepeatSampler(Sampler):
         self.seed = seed
         self.total_samples = num_replicas * batch_size
         if self.k <= 0:
-            raise ValueError(
-                f"k must be a positive integer. Got k={k}."
-            )
+            raise ValueError(f"k must be a positive integer. Got k={k}.")
         if self.batch_size % self.k != 0:
-            raise ValueError(
-                "batch_size must be divisible by k so each rank receives "
-                "whole prompt groups. Got "
-                f"batch_size={batch_size}, k={k}."
-            )
-        assert self.total_samples % self.k == 0, (
-            f"k cannot divide n*b: k={k} "
-            f"num_replicas={num_replicas} "
-            f"batch_size={batch_size}"
-        )
+            raise ValueError("batch_size must be divisible by k so each rank receives "
+                             "whole prompt groups. Got "
+                             f"batch_size={batch_size}, k={k}.")
+        assert self.total_samples % self.k == 0, (f"k cannot divide n*b: k={k} "
+                                                  f"num_replicas={num_replicas} "
+                                                  f"batch_size={batch_size}")
         self.m = self.total_samples // self.k  # Unique prompts across ranks.
         if len(self.dataset) < self.m:
-            raise ValueError(
-                "dataset must contain at least one prompt per global "
-                "prompt group. Got "
-                f"dataset_size={len(self.dataset)}, required={self.m}."
-            )
+            raise ValueError("dataset must contain at least one prompt per global "
+                             "prompt group. Got "
+                             f"dataset_size={len(self.dataset)}, required={self.m}.")
         self.groups_per_rank = self.batch_size // self.k
         self.epoch = 0
 
@@ -183,17 +133,11 @@ class DistributedKRepeatSampler(Sampler):
         while True:
             g = torch.Generator()
             g.manual_seed(self.seed + self.epoch)
-            indices = torch.randperm(
-                len(self.dataset), generator=g
-            )[: self.m].tolist()
+            indices = torch.randperm(len(self.dataset), generator=g)[:self.m].tolist()
             start = self.rank * self.groups_per_rank
             end = start + self.groups_per_rank
             rank_groups = indices[start:end]
-            yield [
-                (self.epoch, idx)
-                for idx in rank_groups
-                for _ in range(self.k)
-            ]
+            yield [(self.epoch, idx) for idx in rank_groups for _ in range(self.k)]
 
     def set_epoch(self, epoch: int):
         self.epoch = epoch
@@ -215,26 +159,16 @@ def build_prompt_dataloaders(
         (train_dataloader, test_dataloader, train_sampler)
     """
     if prompt_fn == "general_ocr":
-        train_ds = TextPromptDataset(
-            prompt_dataset_path, "train"
-        )
-        test_ds = TextPromptDataset(
-            prompt_dataset_path, "test"
-        )
+        train_ds = TextPromptDataset(prompt_dataset_path, "train")
+        test_ds = TextPromptDataset(prompt_dataset_path, "test")
         collate = TextPromptDataset.collate_fn
     elif prompt_fn == "filtered_prompts":
-        train_ds = JsonPromptDataset(
-            prompt_dataset_path, "train"
-        )
-        test_ds = JsonPromptDataset(
-            prompt_dataset_path, "test"
-        )
+        train_ds = JsonPromptDataset(prompt_dataset_path, "train")
+        test_ds = JsonPromptDataset(prompt_dataset_path, "test")
         collate = JsonPromptDataset.collate_fn
     else:
-        msg = (
-            f"Unsupported prompt_fn: {prompt_fn}. "
-            "Use 'general_ocr' or 'filtered_prompts'."
-        )
+        msg = (f"Unsupported prompt_fn: {prompt_fn}. "
+               "Use 'general_ocr' or 'filtered_prompts'.")
         raise NotImplementedError(msg)
 
     train_sampler = DistributedKRepeatSampler(

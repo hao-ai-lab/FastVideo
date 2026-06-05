@@ -321,19 +321,15 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
             lora_A = self.lora_A
             lora_B = self.lora_B
             if lora_A is None or lora_B is None:
-                raise RuntimeError(
-                    "LoRA weights (lora_A, lora_B) must be initialized "
-                    "before forward pass when LoRA is enabled."
-                )
+                raise RuntimeError("LoRA weights (lora_A, lora_B) must be initialized "
+                                   "before forward pass when LoRA is enabled.")
             if isinstance(lora_A, DTensor):
                 lora_A = lora_A.to_local()
             if isinstance(lora_B, DTensor):
                 lora_B = lora_B.to_local()
 
-            lora_A_sliced = self.slice_lora_a_weights(
-                lora_A.to(input_parallel, non_blocking=True))
-            lora_B_sliced = self.slice_lora_b_weights(
-                lora_B.to(output_parallel, non_blocking=True))
+            lora_A_sliced = self.slice_lora_a_weights(lora_A.to(input_parallel, non_blocking=True))
+            lora_B_sliced = self.slice_lora_b_weights(lora_B.to(output_parallel, non_blocking=True))
             delta = input_parallel @ lora_A_sliced.T @ lora_B_sliced.T
             if self.lora_alpha != self.lora_rank:
                 delta = delta * (
