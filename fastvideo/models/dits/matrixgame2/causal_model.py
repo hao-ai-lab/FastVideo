@@ -1029,7 +1029,9 @@ class CausalMatrixGame2WanModel(BaseDiT):
             self._block_mask_cache = bm_cache
         _dev = hidden_states.device
         _fsl = post_patch_height * post_patch_width
-        _nfb = self.num_frame_per_block
+        # Use the block size the blocks actually run with (the per-call override),
+        # not the model default, so the mask matches. _nfb is in the cache key.
+        _nfb = effective_num_frame_per_block
         _las = self.local_attn_size
 
         _k = ("main", num_frames, _fsl, _nfb, _las, _dev)
