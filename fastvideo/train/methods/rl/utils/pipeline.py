@@ -16,11 +16,10 @@ from typing import Any
 import torch
 
 from fastvideo.logger import init_logger
-
-_pipeline_logger = init_logger(__name__)
-
 from fastvideo.train.methods.rl.utils.sde import (
     sde_step_with_logprob, )
+
+_pipeline_logger = init_logger(__name__)
 
 
 def wan_denoising_with_logprob(

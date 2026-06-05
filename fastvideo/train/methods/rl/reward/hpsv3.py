@@ -211,9 +211,9 @@ def _extract_reward_scalar(result) -> float:
     """Extract a float from HPSv3 result."""
     if isinstance(result, torch.Tensor):
         return float(result.item())
-    if isinstance(result, (float, int)):
+    if isinstance(result, float | int):
         return float(result)
-    if isinstance(result, (list, np.ndarray)):
+    if isinstance(result, list | np.ndarray):
         return float(np.mean(result))
     return float(result)
 

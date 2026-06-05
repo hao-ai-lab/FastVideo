@@ -317,10 +317,7 @@ class GenRLMethod(TrainingMethod):
         )
 
     def _compute_train_timesteps(self) -> None:
-        if self._sde_window_size > 0:
-            num_ts = self._sde_window_size
-        else:
-            num_ts = int(self._num_inference_steps * 0.99)
+        num_ts = self._sde_window_size if self._sde_window_size > 0 else int(self._num_inference_steps * 0.99)
         self._num_train_timesteps = num_ts
         self._train_timesteps = list(range(num_ts))
 

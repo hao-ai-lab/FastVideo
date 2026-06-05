@@ -21,9 +21,8 @@ logger = init_logger(__name__)
 
 # Add VideoAlign submodule to path for importing.
 _VIDEOALIGN_ROOT = os.path.join(os.path.dirname(__file__), "VideoAlign")
-if os.path.isdir(_VIDEOALIGN_ROOT):
-    if _VIDEOALIGN_ROOT not in sys.path:
-        sys.path.insert(0, _VIDEOALIGN_ROOT)
+if os.path.isdir(_VIDEOALIGN_ROOT) and _VIDEOALIGN_ROOT not in sys.path:
+    sys.path.insert(0, _VIDEOALIGN_ROOT)
 
 # Global cache of VideoAlign inferencers.
 _VIDEOALIGN_INFERENCERS: dict[str, Any] = {}

@@ -104,10 +104,7 @@ def multi_score(
         scores = {}
         for name, fn in reward_fns.items():
             out, _meta = fn(images, prompts, metadata)
-            if isinstance(out, dict):
-                val = out.get("avg", out.get("reward", out))
-            else:
-                val = out
+            val = out.get("avg", out.get("reward", out)) if isinstance(out, dict) else out
             if return_raw_scores:
                 scores[f"{name}_raw"] = val
             scores[name] = val * weights[name]
