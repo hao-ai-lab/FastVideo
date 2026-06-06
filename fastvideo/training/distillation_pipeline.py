@@ -371,7 +371,8 @@ class DistillationPipeline(TrainingPipeline):
                                                                    self.transformer.reverse_param_names_mapping)
                     save_file(diffusers_state_dict, weight_path)
 
-                    config_dict = self.transformer.hf_config
+                    # deepcopy so deleting "dtype" doesn't mutate the live model's hf_config
+                    config_dict = copy.deepcopy(self.transformer.hf_config)
                     if "dtype" in config_dict:
                         del config_dict["dtype"]
                     config_path = os.path.join(ema_save_dir, "config.json")
@@ -398,7 +399,8 @@ class DistillationPipeline(TrainingPipeline):
                                                                      self.transformer_2.reverse_param_names_mapping)
                     save_file(diffusers_state_dict_2, weight_path_2)
 
-                    config_dict_2 = self.transformer_2.hf_config
+                    # deepcopy so deleting "dtype" doesn't mutate the live model's hf_config
+                    config_dict_2 = copy.deepcopy(self.transformer_2.hf_config)
                     if "dtype" in config_dict_2:
                         del config_dict_2["dtype"]
                     config_path_2 = os.path.join(ema_2_save_dir, "config.json")
