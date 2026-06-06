@@ -37,19 +37,6 @@ REQUIRED_GPUS = 1
 device_reference_folder = resolve_inference_device_reference_folder(logger)
 
 FLUX2_MODEL_TO_PARAMS: dict[str, dict[str, object]] = {
-    "black-forest-labs/FLUX.2-dev": {
-        "num_gpus": 1,
-        "model_path": "black-forest-labs/FLUX.2-dev",
-        "height": 1024,
-        "width": 1024,
-        "num_frames": 1,
-        "num_inference_steps": 50,
-        "guidance_scale": 4.0,
-        "seed": 0,
-        "sp_size": 1,
-        "tp_size": 1,
-        "fps": 1,
-    },
     "black-forest-labs/FLUX.2-klein-4B": {
         "num_gpus": 1,
         "model_path": "black-forest-labs/FLUX.2-klein-4B",
@@ -84,7 +71,6 @@ FLUX2_FULL_QUALITY_MODEL_TO_PARAMS: dict[str, dict[str, object]] = {
 }
 
 TEST_PROMPTS: dict[str, str] = {
-    "black-forest-labs/FLUX.2-dev": "a photo of a banana on a wooden table, studio lighting",
     "black-forest-labs/FLUX.2-klein-4B": "a brushed steel espresso machine on a marble counter, morning window light",
     "black-forest-labs/FLUX.2-klein-9B": "a brushed steel espresso machine on a marble counter, morning window light",
 }
