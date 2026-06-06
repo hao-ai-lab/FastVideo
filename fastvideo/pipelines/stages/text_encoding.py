@@ -222,7 +222,8 @@ class TextEncodingStage(PipelineStage):
                     # Qwen2-style tokenizers. Scoped via treat_empty_as_dot so
                     # models that legitimately use "" (e.g. negative_prompt="")
                     # are not affected.
-                    if not processed_text.strip() and getattr(encoder_config, "treat_empty_as_dot", False):
+                    if isinstance(processed_text, str) and not processed_text.strip() and getattr(
+                            encoder_config, "treat_empty_as_dot", False):
                         processed_text = "."
                     processed_texts.append(processed_text)
                 else:
@@ -239,20 +240,31 @@ class TextEncodingStage(PipelineStage):
             tok = getattr(tokenizer, "tokenizer", tokenizer)
 
             if encoder_config.is_chat_model:
-                # Two-step approach matching Diffusers: format with chat
-                # template first, then tokenize the resulting strings.
-                formatted_texts = []
-                for pt in processed_texts:
-                    messages = [{"role": "user", "content": pt}]
-                    formatted = tokenizer.apply_chat_template(
-                        messages,
-                        tokenize=False,
-                        add_generation_prompt=True,
-                        enable_thinking=False,
-                    )
-                    formatted_texts.append(formatted)
-                text_inputs = tokenizer(
-                    formatted_texts, **tok_kwargs).to(target_device)
+                already_chat_formatted = bool(processed_texts) and isinstance(processed_texts[0], list)
+                if already_chat_formatted:
+                    text_inputs = tokenizer.apply_chat_template(
+                        processed_texts,
+                        tokenize=True,
+                        return_dict=True,
+                        return_tensors="pt",
+                        padding=tok_kwargs.get("padding"),
+                        truncation=tok_kwargs.get("truncation", True),
+                        max_length=tok_kwargs.get("max_length"),
+                    ).to(target_device)
+                else:
+                    # Two-step approach matching Diffusers: format with chat
+                    # template first, then tokenize the resulting strings.
+                    formatted_texts = []
+                    for pt in processed_texts:
+                        messages = [{"role": "user", "content": pt}]
+                        formatted = tokenizer.apply_chat_template(
+                            messages,
+                            tokenize=False,
+                            add_generation_prompt=True,
+                            enable_thinking=False,
+                        )
+                        formatted_texts.append(formatted)
+                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(target_device)
             else:
                 text_inputs = tok(processed_texts, **tok_kwargs).to(target_device)
 
