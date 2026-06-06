@@ -111,7 +111,7 @@ image = (
         "python -c 'import cv2, imageio; print(\"video io ok\")'",
         "python -c 'import cloudpickle, pyarrow, torchdata; "
         "print(\"training deps ok\")'",
-        "python -c 'import trl, peft, datasets, fire; "
+        "python -c 'import trl, peft, datasets, fire, pandas, matplotlib; "
         "print(\"reward deps ok\")'",
     )
     .env(

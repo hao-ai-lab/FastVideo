@@ -62,6 +62,8 @@ dependencies = [
     "cloudpickle",
     "omegaconf",
     "fire>=0.7.0",
+    "matplotlib>=3.10.0",
+    "pandas>=2.2.0",
 
     # System & Monitoring Tools
     "gpustat",
