@@ -26,6 +26,7 @@ except ImportError:
     flash_attn = None
     print("Flash Attention is not installed. Falling to SDPA.")
 
+
 def create_model_and_processor(
     model_config,
     peft_lora_config,
@@ -34,24 +35,19 @@ def create_model_and_processor(
     differentiable=False,
 ):
     # create model
-    torch_dtype = (
-        model_config.torch_dtype
-        if model_config.torch_dtype in ["auto", None]
-        else getattr(torch, model_config.torch_dtype)
-    )
+    torch_dtype = (model_config.torch_dtype if model_config.torch_dtype in ["auto", None] else getattr(
+        torch, model_config.torch_dtype))
     quantization_config = get_quantization_config(model_config)
-    model_kwargs = dict(
-        revision=model_config.model_revision,
-        device_map=get_kbit_device_map() if quantization_config is not None else None,
-        quantization_config=quantization_config,
-        use_cache=False
-    )
+    model_kwargs = dict(revision=model_config.model_revision,
+                        device_map=get_kbit_device_map() if quantization_config is not None else None,
+                        quantization_config=quantization_config,
+                        use_cache=False)
 
     # create processor and set padding
 
-    processor = AutoProcessor.from_pretrained(
-        model_config.model_name_or_path, padding_side="right", cache_dir=cache_dir
-    )
+    processor = AutoProcessor.from_pretrained(model_config.model_name_or_path,
+                                              padding_side="right",
+                                              cache_dir=cache_dir)
 
     if differentiable:
         processor.image_processor = Qwen2VLImageProcessor()
@@ -59,9 +55,7 @@ def create_model_and_processor(
     special_token_ids = None
     if model_config.use_special_tokens:
         special_tokens = ["<|Reward|>"]
-        processor.tokenizer.add_special_tokens(
-            {"additional_special_tokens": special_tokens}
-        )
+        processor.tokenizer.add_special_tokens({"additional_special_tokens": special_tokens})
         special_token_ids = processor.tokenizer.convert_tokens_to_ids(special_tokens)
 
     model = Qwen2VLRewardModelBT.from_pretrained(
@@ -70,9 +64,8 @@ def create_model_and_processor(
         reward_token=model_config.reward_token,
         special_token_ids=special_token_ids,
         torch_dtype=torch_dtype,
-        attn_implementation=(
-            "flash_attention_2" if not training_args.disable_flash_attn2 and flash_attn is not None else "sdpa"
-        ),
+        attn_implementation=("flash_attention_2"
+                             if not training_args.disable_flash_attn2 and flash_attn is not None else "sdpa"),
         cache_dir=cache_dir,
         rm_head_type=model_config.rm_head_type,
         rm_head_kwargs=model_config.rm_head_kwargs,
@@ -88,7 +81,7 @@ def create_model_and_processor(
         model.to(torch.float16)
 
     model.rm_head.to(torch.float32)
-    
+
     # create lora and peft model
     if peft_lora_config.lora_enable:
         target_modules = find_target_linear_names(
@@ -143,26 +136,20 @@ def set_requires_grad(parameters, requires_grad):
     for p in parameters:
         p.requires_grad = requires_grad
 
+
 def train(config, local_rank=0, debug=False):
 
     ## ===> Step 1: Parse arguments
-    (data_config, training_args, model_config, peft_lora_config), config_path = (
-        parse_args_with_yaml(
-            (DataConfig, TrainingConfig, ModelConfig, PEFTLoraConfig), config, is_train=True
-        )
-    )
-    training_args.output_dir = os.path.join(
-        training_args.output_dir, config.split("/")[-1].split(".")[0]
-    )
+    (data_config, training_args, model_config, peft_lora_config), config_path = (parse_args_with_yaml(
+        (DataConfig, TrainingConfig, ModelConfig, PEFTLoraConfig), config, is_train=True))
+    training_args.output_dir = os.path.join(training_args.output_dir, config.split("/")[-1].split(".")[0])
     training_args.logging_dir = training_args.output_dir
     # check valid (lora config)
-    assert not (
-        peft_lora_config.lora_enable and model_config.freeze_llm
-    ), "When using LoRA, the LLM should not be frozen. If you want to freeze the LLM, please disable LoRA."
+    assert not (peft_lora_config.lora_enable and model_config.freeze_llm
+                ), "When using LoRA, the LLM should not be frozen. If you want to freeze the LLM, please disable LoRA."
     if not peft_lora_config.lora_enable:
-        assert (
-            not peft_lora_config.vision_lora
-        ), "Error: model_config.lora_enable is not enabled, but model_config.vision_lora is enabled."
+        assert (not peft_lora_config.vision_lora
+                ), "Error: model_config.lora_enable is not enabled, but model_config.vision_lora is enabled."
     else:
         if peft_lora_config.lora_namespan_exclude is None:
             peft_lora_config.lora_namespan_exclude = []
@@ -190,28 +177,26 @@ def train(config, local_rank=0, debug=False):
     else:
         model_to_configure = model
         # set requires_grad for LLM
-        set_requires_grad(
-            model_to_configure.model.parameters(), not model_config.freeze_llm
-        )
+        set_requires_grad(model_to_configure.model.parameters(), not model_config.freeze_llm)
         set_requires_grad(model_to_configure.model.embed_tokens.parameters(), False)
     if not peft_lora_config.vision_lora:
         # set requires_grad for visual encoder and merger
-        set_requires_grad(
-            model_to_configure.visual.parameters(), not model_config.freeze_vision_tower
-        )
-        set_requires_grad(
-            model_to_configure.visual.merger.parameters(), model_config.tune_merger
-        )
-    
-    if model_config.trainable_visual_layers: # This is inverse order to index of model.visual.blocks, set -1 to unfreeze all layers
-        assert model_config.trainable_visual_layers <= len(model_to_configure.visual.blocks), "trainable_visual_layers should be less than or equal to the number of visual blocks"
-        freeze_layer_num = len(model_to_configure.visual.blocks) - model_config.trainable_visual_layers if model_config.trainable_visual_layers > 0 else 0
+        set_requires_grad(model_to_configure.visual.parameters(), not model_config.freeze_vision_tower)
+        set_requires_grad(model_to_configure.visual.merger.parameters(), model_config.tune_merger)
+
+    if model_config.trainable_visual_layers:  # This is inverse order to index of model.visual.blocks, set -1 to unfreeze all layers
+        assert model_config.trainable_visual_layers <= len(
+            model_to_configure.visual.blocks
+        ), "trainable_visual_layers should be less than or equal to the number of visual blocks"
+        freeze_layer_num = len(
+            model_to_configure.visual.blocks
+        ) - model_config.trainable_visual_layers if model_config.trainable_visual_layers > 0 else 0
         for index, layer in enumerate(model_to_configure.visual.blocks):
             if index < freeze_layer_num:
                 set_requires_grad(layer.parameters(), False)
             else:
                 set_requires_grad(layer.parameters(), True)
-    
+
     # set requires_grad for regression head
     set_requires_grad(model_to_configure.rm_head.parameters(), True)
 
@@ -243,26 +228,15 @@ def train(config, local_rank=0, debug=False):
     )
     compute_metrics = partial(compute_multi_attr_accuracy)
 
-    actual_batch_size = (
-        training_args.per_device_train_batch_size
-        * training_args.gradient_accumulation_steps
-        * num_gpu
-    )
-    total_steps = (
-        training_args.num_train_epochs * len(train_dataset) // actual_batch_size
-    )
+    actual_batch_size = (training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps *
+                         num_gpu)
+    total_steps = (training_args.num_train_epochs * len(train_dataset) // actual_batch_size)
     if training_args.save_epochs is not None:
-        training_args.save_steps = round(
-            training_args.save_epochs * len(train_dataset) / actual_batch_size
-        )
+        training_args.save_steps = round(training_args.save_epochs * len(train_dataset) / actual_batch_size)
     if training_args.eval_epochs is not None:
-        training_args.eval_steps = round(
-            training_args.eval_epochs * len(train_dataset) / actual_batch_size
-        )
+        training_args.eval_steps = round(training_args.eval_epochs * len(train_dataset) / actual_batch_size)
     if training_args.logging_epochs is not None:
-        training_args.logging_steps = round(
-            training_args.logging_epochs * len(train_dataset) / actual_batch_size
-        )
+        training_args.logging_steps = round(training_args.logging_epochs * len(train_dataset) / actual_batch_size)
 
     if training_args.local_rank == -1 or training_args.local_rank == 0:
         print(f"===> Using {num_gpu} GPUs.")
@@ -305,9 +279,7 @@ def train(config, local_rank=0, debug=False):
 
     if training_args.local_rank == -1 or training_args.local_rank == 0:
         model_state_dict = model.state_dict()
-        torch.save(
-            model_state_dict, os.path.join(training_args.output_dir, "final_model.pth")
-        )
+        torch.save(model_state_dict, os.path.join(training_args.output_dir, "final_model.pth"))
         model.config.save_pretrained(training_args.output_dir)
 
 

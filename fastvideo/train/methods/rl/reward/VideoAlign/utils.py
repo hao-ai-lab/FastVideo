@@ -9,6 +9,7 @@ from transformers import TrainingArguments
 
 ########## DataClass For Configure ##########
 
+
 @dataclass
 class TrainingConfig(TrainingArguments):
     max_length: Optional[int] = None
@@ -30,6 +31,7 @@ class TrainingConfig(TrainingArguments):
 
     save_full_model: Optional[bool] = False
 
+
 @dataclass
 class PEFTLoraConfig:
     lora_enable: bool = False
@@ -50,6 +52,7 @@ class PEFTLoraConfig:
 
         if isinstance(self.lora_namespan_exclude, list) and len(self.lora_namespan_exclude) == 1:
             self.lora_namespan_exclude = self.lora_namespan_exclude[0]
+
 
 @dataclass
 class ModelConfig:
@@ -84,7 +87,9 @@ class ModelConfig:
         # if isinstance(self.lora_namespan_exclude, list) and len(self.lora_namespan_exclude) == 1:
         #     self.lora_namespan_exclude = self.lora_namespan_exclude[0]
 
+
 ########## Functions for get trainable modules' parameters ##########
+
 
 def maybe_zero_3(param, ignore_status=False, name=None):
     from deepspeed import zero
@@ -98,6 +103,7 @@ def maybe_zero_3(param, ignore_status=False, name=None):
     else:
         param = param.detach().cpu().clone()
     return param
+
 
 # Borrowed from peft.utils.get_peft_model_state_dict
 def get_peft_state_maybe_zero_3(named_params, bias):
@@ -124,6 +130,7 @@ def get_peft_state_maybe_zero_3(named_params, bias):
     to_return = {k: maybe_zero_3(v, ignore_status=True) for k, v in to_return.items()}
     return to_return
 
+
 def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
     to_return = {k: t for k, t in named_params if "lora_" not in k}
     if require_grad_only:
@@ -131,11 +138,12 @@ def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
     to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
     return to_return
 
+
 ########## Load Models From Folder ##########
 
-def _insert_adapter_name_into_state_dict(
-    state_dict: dict[str, torch.Tensor], adapter_name: str, parameter_prefix: str
-) -> dict[str, torch.Tensor]:
+
+def _insert_adapter_name_into_state_dict(state_dict: dict[str, torch.Tensor], adapter_name: str,
+                                         parameter_prefix: str) -> dict[str, torch.Tensor]:
     """Utility function to remap the state_dict keys to fit the PEFT model by inserting the adapter name."""
     peft_model_state_dict = {}
     for key, val in state_dict.items():
@@ -160,9 +168,7 @@ def save_video(tensor, path):
     write_video(path, tensor, 4, video_codec='h264')
 
 
-def load_model_from_checkpoint(
-    model, checkpoint_dir, checkpoint_step
-):
+def load_model_from_checkpoint(model, checkpoint_dir, checkpoint_step):
     checkpoint_paths = glob.glob(os.path.join(checkpoint_dir, "checkpoint-*"))
     checkpoint_paths.sort(key=lambda x: int(x.split("-")[-1]), reverse=True)
 
@@ -177,7 +183,7 @@ def load_model_from_checkpoint(
             print(f"===> Checkpoint step {checkpoint_step} not found, using the latest checkpoint: {checkpoint_path}")
         else:
             print(f"===> Checkpoint step {checkpoint_step} found, using the specified checkpoint: {checkpoint_path}")
-    
+
     checkpoint_step = checkpoint_path.split("checkpoint-")[-1].split("/")[0]
 
     full_ckpt = os.path.join(checkpoint_path, "model.pth")
@@ -190,8 +196,10 @@ def load_model_from_checkpoint(
         lora_state_dict = safetensors.torch.load_file(lora_ckpt)
         non_lora_state_dict = torch.load(non_lora_ckpt, map_location="cpu")
 
-        lora_state_dict = _insert_adapter_name_into_state_dict(lora_state_dict, adapter_name="default", parameter_prefix="lora_")
-        
+        lora_state_dict = _insert_adapter_name_into_state_dict(lora_state_dict,
+                                                               adapter_name="default",
+                                                               parameter_prefix="lora_")
+
         model_state_dict = model.state_dict()
         model_state_dict.update(non_lora_state_dict)
         model_state_dict.update(lora_state_dict)

@@ -5,7 +5,9 @@ import json
 import os
 from tqdm import tqdm
 
+
 class PairwiseOriginalDataset(Dataset):
+
     def __init__(
         self,
         json_list,
@@ -23,9 +25,7 @@ class PairwiseOriginalDataset(Dataset):
 
         if confidence_threshold is not None:
             new_samples = []
-            for sample in tqdm(
-                self.samples, desc="Filtering samples according to confidence threshold"
-            ):
+            for sample in tqdm(self.samples, desc="Filtering samples according to confidence threshold"):
                 if sample.get("confidence", float("inf")) >= confidence_threshold:
                     new_samples.append(sample)
             self.samples = new_samples
@@ -59,9 +59,7 @@ class PairwiseOriginalDataset(Dataset):
         # Process Label
         if self.soft_label:
             choice_dist = sorted(sample["choice_dist"], reverse=True)
-            assert (
-                torch.sum(torch.tensor(choice_dist)) > 0
-            ), "Choice distribution cannot be zero."
+            assert (torch.sum(torch.tensor(choice_dist)) > 0), "Choice distribution cannot be zero."
             label = torch.tensor(choice_dist[0]) / torch.sum(torch.tensor(choice_dist))
         else:
             label = torch.tensor(1).float()

@@ -50,13 +50,14 @@ from transformers.training_args import TrainingArguments
 from trl import RewardTrainer
 from .utils import get_peft_state_non_lora_maybe_zero_3
 
-
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
 else:
     IS_XLA_FSDPV2_POST_2_2 = False
 
+
 class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
+
     def __init__(self, config, output_dim=4, reward_token="last", special_token_ids=None):
         super().__init__(config)
         # pdb.set_trace()
@@ -67,7 +68,7 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         self.special_token_ids = special_token_ids
         if self.special_token_ids is not None:
             self.reward_token = "special"
-        
+
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -88,9 +89,8 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
     ):
         ## modified from the origin class Qwen2VLForConditionalGeneration
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
+        output_hidden_states = (output_hidden_states
+                                if output_hidden_states is not None else self.config.output_hidden_states)
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         # pdb.set_trace()
         if inputs_embeds is None:
@@ -123,11 +123,11 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        
+
         hidden_states = outputs[0]  # [B, L, D]
 
-        logits = self.rm_head(hidden_states)    # [B, L, N]
-        
+        logits = self.rm_head(hidden_states)  # [B, L, N]
+
         if input_ids is not None:
             batch_size = input_ids.shape[0]
         else:
@@ -161,7 +161,7 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
             for special_token_id in self.special_token_ids:
                 special_token_mask = special_token_mask | (input_ids == special_token_id)
             pooled_logits = logits[special_token_mask, ...]
-            pooled_logits = pooled_logits.view(batch_size, 3, -1)   # [B, 3, N] assert 3 attributes
+            pooled_logits = pooled_logits.view(batch_size, 3, -1)  # [B, 3, N] assert 3 attributes
             if self.output_dim == 3:
                 pooled_logits = pooled_logits.diagonal(dim1=1, dim2=2)
             pooled_logits = pooled_logits.view(batch_size, -1)
@@ -169,7 +169,7 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
             # pdb.set_trace()
         else:
             raise ValueError("Invalid reward_token")
-        
+
         return {"logits": pooled_logits}
 
 
@@ -220,10 +220,11 @@ class PartialEmbeddingUpdateCallback(TrainerCallback):
     Callback to update the embedding of special tokens
     Only the special tokens are updated, the rest of the embeddings are kept fixed
     """
+
     def __init__(self, special_token_ids):
         super().__init__()
         self.special_token_ids = special_token_ids
-        self.orig_embeds_params = None 
+        self.orig_embeds_params = None
 
     def on_train_begin(self, args, state, control, **kwargs):
         model = kwargs.get("model")
@@ -234,14 +235,14 @@ class PartialEmbeddingUpdateCallback(TrainerCallback):
         model = kwargs.get("model")
         tokenizer = kwargs.get("tokenizer")
 
-        index_no_updates = torch.ones((len(tokenizer),), dtype=torch.bool)
+        index_no_updates = torch.ones((len(tokenizer), ), dtype=torch.bool)
         index_no_updates[self.special_token_ids] = False
         with torch.no_grad():
             model.get_input_embeddings().weight[index_no_updates] = self.orig_embeds_params[index_no_updates]
-            
 
-                
+
 class VideoVLMRewardTrainer(RewardTrainer):
+
     def __init__(self, loss_type="regular", enable_noise_in_eval=False, *args, **kwargs):
         super(VideoVLMRewardTrainer, self).__init__(*args, **kwargs)
 
@@ -252,7 +253,6 @@ class VideoVLMRewardTrainer(RewardTrainer):
         self.rewards_rejected_accumulated = []
         self.scores_chosen_accumulated = []
         self.scores_rejected_accumulated = []
-
 
     def get_eval_dataloader(self, eval_dataset: Optional[Union[str, Dataset]] = None) -> DataLoader:
         """
@@ -270,20 +270,12 @@ class VideoVLMRewardTrainer(RewardTrainer):
         # If we have persistent workers, don't do a fork bomb especially as eval datasets
         # don't change during training
         dataloader_key = eval_dataset if isinstance(eval_dataset, str) else "eval"
-        if (
-            hasattr(self, "_eval_dataloaders")
-            and dataloader_key in self._eval_dataloaders
-            and self.args.dataloader_persistent_workers
-        ):
+        if (hasattr(self, "_eval_dataloaders") and dataloader_key in self._eval_dataloaders
+                and self.args.dataloader_persistent_workers):
             return self.accelerator.prepare(self._eval_dataloaders[dataloader_key])
 
-        eval_dataset = (
-            self.eval_dataset[eval_dataset]
-            if isinstance(eval_dataset, str)
-            else eval_dataset
-            if eval_dataset is not None
-            else self.eval_dataset
-        )
+        eval_dataset = (self.eval_dataset[eval_dataset] if isinstance(eval_dataset, str) else
+                        eval_dataset if eval_dataset is not None else self.eval_dataset)
         data_collator = lambda features: self.data_collator(features, enable_noise=self.enable_noise_in_eval)
 
         if is_datasets_available() and isinstance(eval_dataset, datasets.Dataset):
@@ -335,65 +327,95 @@ class VideoVLMRewardTrainer(RewardTrainer):
 
             if self.args.vision_lr is not None:
                 lr_mapper["visual"] = self.args.vision_lr
-                visual_parameters = [name for name, _ in opt_model.named_parameters() if "visual" in name and "merger" not in name]
+                visual_parameters = [
+                    name for name, _ in opt_model.named_parameters() if "visual" in name and "merger" not in name
+                ]
             if self.args.merger_lr is not None:
                 lr_mapper["merger"] = self.args.merger_lr
                 merger_parameters = [name for name, _ in opt_model.named_parameters() if "merger" in name]
 
             if len(lr_mapper) > 0:
                 special_lr_parameters = merger_parameters + visual_parameters
-                
+
                 optimizer_grouped_parameters = [
                     {
-                        "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
-                        "weight_decay": self.args.weight_decay,
+                        "params": [
+                            p for n, p in opt_model.named_parameters()
+                            if (n in decay_parameters and n not in special_lr_parameters and p.requires_grad)
+                        ],
+                        "weight_decay":
+                        self.args.weight_decay,
                     },
                     {
-                        "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
-                        "weight_decay": 0.0,
+                        "params": [
+                            p for n, p in opt_model.named_parameters()
+                            if (n not in decay_parameters and n not in special_lr_parameters and p.requires_grad)
+                        ],
+                        "weight_decay":
+                        0.0,
                     },
                 ]
-                
-                if visual_parameters: 
-                    optimizer_grouped_parameters.extend(
-                        [
-                            {
-                                "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n in visual_parameters and p.requires_grad)],
-                                "weight_decay": self.args.weight_decay,
-                                "lr": self.args.vision_lr,
-                            },
-                            {
-                                "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n in visual_parameters and p.requires_grad)],
-                                "weight_decay": 0.0,
-                                "lr": self.args.vision_lr,
-                            },
-                        ]
-                    )
-                
-                if merger_parameters: 
-                    optimizer_grouped_parameters.extend(
-                        [
-                            {
-                                "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n in merger_parameters and p.requires_grad)],
-                                "weight_decay": self.args.weight_decay,
-                                "lr": self.args.merger_lr,
-                            },
-                            {
-                                "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n in merger_parameters and p.requires_grad)],
-                                "weight_decay": 0.0,
-                                "lr": self.args.merger_lr,
-                            },
-                        ]
-                    )
+
+                if visual_parameters:
+                    optimizer_grouped_parameters.extend([
+                        {
+                            "params": [
+                                p for n, p in opt_model.named_parameters()
+                                if (n in decay_parameters and n in visual_parameters and p.requires_grad)
+                            ],
+                            "weight_decay":
+                            self.args.weight_decay,
+                            "lr":
+                            self.args.vision_lr,
+                        },
+                        {
+                            "params": [
+                                p for n, p in opt_model.named_parameters()
+                                if (n not in decay_parameters and n in visual_parameters and p.requires_grad)
+                            ],
+                            "weight_decay":
+                            0.0,
+                            "lr":
+                            self.args.vision_lr,
+                        },
+                    ])
+
+                if merger_parameters:
+                    optimizer_grouped_parameters.extend([
+                        {
+                            "params": [
+                                p for n, p in opt_model.named_parameters()
+                                if (n in decay_parameters and n in merger_parameters and p.requires_grad)
+                            ],
+                            "weight_decay":
+                            self.args.weight_decay,
+                            "lr":
+                            self.args.merger_lr,
+                        },
+                        {
+                            "params": [
+                                p for n, p in opt_model.named_parameters()
+                                if (n not in decay_parameters and n in merger_parameters and p.requires_grad)
+                            ],
+                            "weight_decay":
+                            0.0,
+                            "lr":
+                            self.args.merger_lr,
+                        },
+                    ])
             else:
                 optimizer_grouped_parameters = [
                     {
-                        "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and p.requires_grad)],
-                        "weight_decay": self.args.weight_decay,
+                        "params":
+                        [p for n, p in opt_model.named_parameters() if (n in decay_parameters and p.requires_grad)],
+                        "weight_decay":
+                        self.args.weight_decay,
                     },
                     {
-                        "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and p.requires_grad)],
-                        "weight_decay": 0.0,
+                        "params":
+                        [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and p.requires_grad)],
+                        "weight_decay":
+                        0.0,
                     },
                 ]
 
@@ -401,22 +423,22 @@ class VideoVLMRewardTrainer(RewardTrainer):
                 special_token_embeddings = opt_model.get_input_embeddings().weight
 
                 special_token_embeddings.requires_grad = True
-                
+
                 optimizer_grouped_parameters.extend([
                     {
-                        # "params": [p for n, p in opt_model.get_input_embeddings().named_parameters() if (p.requires_grad)], 
+                        # "params": [p for n, p in opt_model.get_input_embeddings().named_parameters() if (p.requires_grad)],
                         "params": [special_token_embeddings],
                         "lr": self.args.special_token_lr,
                         "weight_decay": 0.0,
                     },
                 ])
-        
+
             optimizer_cls, optimizer_kwargs = self.get_optimizer_cls_and_kwargs(self.args, opt_model)
 
             self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
 
         return self.optimizer
-    
+
     # def training_step(self, model, inputs, num_items_in_batch=None):
     #     pdb.set_trace()
     #     return super(VideoVLMRewardTrainer, self).training_step(model, inputs, num_items_in_batch)
@@ -427,22 +449,15 @@ class VideoVLMRewardTrainer(RewardTrainer):
         inputs,
         return_outputs=False,
     ):
-        rewards_A = model(
-            return_dict=True,
-            **inputs['A']
-        )["logits"]
-        rewards_B = model(
-            return_dict=True,
-            **inputs['B']
-        )["logits"]
+        rewards_A = model(return_dict=True, **inputs['A'])["logits"]
+        rewards_B = model(return_dict=True, **inputs['B'])["logits"]
         # calculate loss, optionally modulate with margin
         # get chosen and rejected rewards from the chosen label
         rewards_chosen, rewards_rejected, scores_chosen, scores_rejected, nontied_mask, valid_mask = _convert_A_B_to_chosen_rejected(
-            rewards_A, rewards_B, inputs["A_scores"], inputs["B_scores"], inputs["chosen_label"]
-        )
+            rewards_A, rewards_B, inputs["A_scores"], inputs["B_scores"], inputs["chosen_label"])
         # pdb.set_trace()
         inputs["margin"] = scores_chosen - scores_rejected
-        
+
         loss_dict = {}
 
         if self.loss_type == "bt":
@@ -466,14 +481,14 @@ class VideoVLMRewardTrainer(RewardTrainer):
             rewards = torch.stack([rewards_A, rewards_B], dim=1)
             scores = torch.stack([inputs["A_scores"], inputs["B_scores"]], dim=1)
             out_mask = scores != 0.0
-            scores = (scores - 3.0)     # rescale
-            # pdb.set_trace() 
+            scores = (scores - 3.0)  # rescale
+            # pdb.set_trace()
             loss = nn.functional.mse_loss(rewards, scores, reduction="none")
         elif self.loss_type == "btt":
             # Bradley-Terry-With-Ties model
             k = 5.0
             log_k = math.log(k)
-            log_k2_sub_1 = math.log(k ** 2 - 1)
+            log_k2_sub_1 = math.log(k**2 - 1)
             bt_loss = -nn.functional.logsigmoid(rewards_chosen - rewards_rejected - log_k)
             same_loss = -nn.functional.logsigmoid(rewards_chosen - rewards_rejected - log_k) \
                         -nn.functional.logsigmoid(rewards_rejected - rewards_chosen - log_k) \
@@ -482,7 +497,7 @@ class VideoVLMRewardTrainer(RewardTrainer):
             out_mask = valid_mask
         else:
             raise NotImplementedError(f"Loss type {self.loss_type} not implemented.")
-        
+
         loss = loss * out_mask
 
         loss = loss.mean()
@@ -502,7 +517,7 @@ class VideoVLMRewardTrainer(RewardTrainer):
         model,
         inputs,
         prediction_loss_only,
-        ignore_keys = None,
+        ignore_keys=None,
     ):
         inputs = self._prepare_inputs(inputs)
         if ignore_keys is None:
@@ -519,9 +534,9 @@ class VideoVLMRewardTrainer(RewardTrainer):
         loss = loss.detach()
         logits = tuple(v for k, v in logits_dict.items() if k not in ignore_keys)
         logits = nested_detach(logits)
-        logits = torch.stack(logits).permute(1, 0, 2)   # [B, 2, N]
+        logits = torch.stack(logits).permute(1, 0, 2)  # [B, 2, N]
 
-        labels = inputs["chosen_label"]   # [B, N], values in {-1, 0, 1}
+        labels = inputs["chosen_label"]  # [B, N], values in {-1, 0, 1}
 
         return loss, logits, labels
 
@@ -536,15 +551,16 @@ class VideoVLMRewardTrainer(RewardTrainer):
             run_dir = self._get_output_dir(trial=trial)
             output_dir = os.path.join(run_dir, checkpoint_folder)
             os.makedirs(output_dir, exist_ok=True)
-            
+
             # TODO: Just Temp
             self.save_model(output_dir, _internal_call=True)
             # pdb.set_trace()
 
             if not self.args.save_full_model:
-                non_lora_weights = get_peft_state_non_lora_maybe_zero_3(self.model.named_parameters(), require_grad_only=True)
+                non_lora_weights = get_peft_state_non_lora_maybe_zero_3(self.model.named_parameters(),
+                                                                        require_grad_only=True)
                 torch.save(non_lora_weights, os.path.join(output_dir, "non_lora_state_dict.pth"))
-            # safetensors.torch.save(non_lora_weights, os.path.join(output_dir, "non_lora_model.safetensors"))                        
+            # safetensors.torch.save(non_lora_weights, os.path.join(output_dir, "non_lora_model.safetensors"))
 
             if not self.args.save_only_model:
                 # Save optimizer and scheduler
@@ -555,7 +571,6 @@ class VideoVLMRewardTrainer(RewardTrainer):
         else:
             super(VideoVLMRewardTrainer, self)._save_checkpoint(model, trial, metrics)
 
-
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
         # If we are executing this function, we are the process zero, so we don't check for that.
         output_dir = output_dir if output_dir is not None else self.args.output_dir
@@ -563,7 +578,7 @@ class VideoVLMRewardTrainer(RewardTrainer):
         logger.info(f"Saving model checkpoint to {output_dir}")
         # pdb.set_trace()
 
-        supported_classes = (PreTrainedModel,) if not is_peft_available() else (PreTrainedModel, PeftModel)
+        supported_classes = (PreTrainedModel, ) if not is_peft_available() else (PreTrainedModel, PeftModel)
         # Save a trained model and configuration using `save_pretrained()`.
         # They can then be reloaded using `from_pretrained()`
         if not isinstance(self.model, supported_classes):
@@ -571,23 +586,23 @@ class VideoVLMRewardTrainer(RewardTrainer):
                 state_dict = self.model.state_dict()
 
             if isinstance(self.accelerator.unwrap_model(self.model), supported_classes):
-                self.accelerator.unwrap_model(self.model).save_pretrained(
-                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
-                )
+                self.accelerator.unwrap_model(self.model).save_pretrained(output_dir,
+                                                                          state_dict=state_dict,
+                                                                          safe_serialization=self.args.save_safetensors)
             else:
                 logger.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
                 if self.args.save_safetensors:
-                    safetensors.torch.save_file(
-                        state_dict, os.path.join(output_dir, SAFE_WEIGHTS_NAME), metadata={"format": "pt"}
-                    )
+                    safetensors.torch.save_file(state_dict,
+                                                os.path.join(output_dir, SAFE_WEIGHTS_NAME),
+                                                metadata={"format": "pt"})
                 else:
                     torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
         else:
             if not self.args.save_full_model:
-                state_dict = {k:v for k, v in state_dict.items() if "wte" not in k}
-                self.model.save_pretrained(
-                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
-                )
+                state_dict = {k: v for k, v in state_dict.items() if "wte" not in k}
+                self.model.save_pretrained(output_dir,
+                                           state_dict=state_dict,
+                                           safe_serialization=self.args.save_safetensors)
             else:
                 torch.save(state_dict, os.path.join(output_dir, 'model.pth'))
 
@@ -598,6 +613,7 @@ class VideoVLMRewardTrainer(RewardTrainer):
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
         # pdb.set_trace()
+
 
 def compute_multi_attr_accuracy(eval_pred, metainfo_idxs=None, eval_dims=None, save_path=None) -> Dict[str, float]:
     predictions, labels = eval_pred
@@ -633,7 +649,7 @@ def compute_multi_attr_accuracy(eval_pred, metainfo_idxs=None, eval_dims=None, s
             rewards_B = predictions[:, 1, idx]
             df[f"reward_A_{eval_dim}"] = rewards_A
             df[f"reward_B_{eval_dim}"] = rewards_B
-        
+
         df.to_csv(save_path, index=False)
         print(f"===> Inference results saved to {save_path}")
 

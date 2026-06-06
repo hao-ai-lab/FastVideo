@@ -1,4 +1,3 @@
-
 import os
 from collections.abc import Mapping
 import torch
@@ -11,22 +10,19 @@ from pathlib import Path
 
 _MODEL_CONFIG_PATH = Path(__file__).parent / f"config/"
 
+
 class HPSv3RewardInferencer():
+
     def __init__(self, config_path=None, checkpoint_path=None, device='cuda', differentiable=False):
         if config_path is None:
-                config_path = os.path.join(_MODEL_CONFIG_PATH, 'HPSv3_7B.yaml')
-                
+            config_path = os.path.join(_MODEL_CONFIG_PATH, 'HPSv3_7B.yaml')
+
         if checkpoint_path is None:
             checkpoint_path = huggingface_hub.hf_hub_download("MizzenAI/HPSv3", 'HPSv3.safetensors', repo_type='model')
 
-        (data_config, training_args, model_config, peft_lora_config), config_path = (
-            parse_args_with_yaml(
-                (DataConfig, TrainingConfig, ModelConfig, PEFTLoraConfig), config_path, is_train=False
-            )
-        )
-        training_args.output_dir = os.path.join(
-            training_args.output_dir, config_path.split("/")[-1].split(".")[0]
-        )
+        (data_config, training_args, model_config, peft_lora_config), config_path = (parse_args_with_yaml(
+            (DataConfig, TrainingConfig, ModelConfig, PEFTLoraConfig), config_path, is_train=False))
+        training_args.output_dir = os.path.join(training_args.output_dir, config_path.split("/")[-1].split(".")[0])
         model, processor, peft_config = create_model_and_processor(
             model_config=model_config,
             peft_lora_config=peft_lora_config,
@@ -41,7 +37,7 @@ class HPSv3RewardInferencer():
             import safetensors.torch
             state_dict = safetensors.torch.load_file(checkpoint_path, device="cpu")
         else:
-            state_dict = torch.load(checkpoint_path , map_location="cpu")
+            state_dict = torch.load(checkpoint_path, map_location="cpu")
 
         if "model" in state_dict:
             state_dict = state_dict["model"]
@@ -61,15 +57,16 @@ class HPSv3RewardInferencer():
         assert padding_side in ['right', 'left']
         if sequences.shape[1] >= max_len:
             return sequences, attention_mask
-        
+
         pad_len = max_len - sequences.shape[1]
         padding = (0, pad_len) if padding_side == 'right' else (pad_len, 0)
 
-        sequences_padded = torch.nn.functional.pad(sequences, padding, 'constant', self.processor.tokenizer.pad_token_id)
+        sequences_padded = torch.nn.functional.pad(sequences, padding, 'constant',
+                                                   self.processor.tokenizer.pad_token_id)
         attention_mask_padded = torch.nn.functional.pad(attention_mask, padding, 'constant', 0)
 
         return sequences_padded, attention_mask_padded
-    
+
     def _prepare_input(self, data):
         """
         Prepare `inputs` before feeding them to the model, converting them to tensors if they are not already and
@@ -83,7 +80,7 @@ class HPSv3RewardInferencer():
             kwargs = {"device": self.device}
             return data.to(**kwargs)
         return data
-    
+
     def _prepare_inputs(self, inputs):
         """
         Prepare `inputs` before feeding them to the model, converting them to tensors if they are not already and
@@ -93,34 +90,31 @@ class HPSv3RewardInferencer():
         if len(inputs) == 0:
             raise ValueError
         return inputs
-    
+
     def prepare_batch(self, image_paths, prompts):
         max_pixels = 256 * 28 * 28
         min_pixels = 256 * 28 * 28
         message_list = []
         for text, image in zip(prompts, image_paths):
-            out_message = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "image": image,
-                            "min_pixels": max_pixels,
-                            "max_pixels": max_pixels,
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                INSTRUCTION.format(text_prompt=text)
-                                + prompt_with_special_token
-                                if self.use_special_tokens
-                                else prompt_without_special_token
-                            ),
-                        },
-                    ],
-                }
-            ]
+            out_message = [{
+                "role":
+                "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "image": image,
+                        "min_pixels": max_pixels,
+                        "max_pixels": max_pixels,
+                    },
+                    {
+                        "type":
+                        "text",
+                        "text":
+                        (INSTRUCTION.format(text_prompt=text) +
+                         prompt_with_special_token if self.use_special_tokens else prompt_without_special_token),
+                    },
+                ],
+            }]
 
             message_list.append(out_message)
 
@@ -139,14 +133,9 @@ class HPSv3RewardInferencer():
     @torch.inference_mode()
     def reward(self, prompts, image_paths):
         batch = self.prepare_batch(image_paths, prompts)
-        rewards = self.model(
-            return_dict=True,
-            **batch
-        )["logits"]
+        rewards = self.model(return_dict=True, **batch)["logits"]
 
         return rewards
-    
-    
 
 
 if __name__ == "__main__":
@@ -156,14 +145,11 @@ if __name__ == "__main__":
     dtype = torch.bfloat16
     inferencer = HPSv3RewardInferencer(config_path, checkpoint_path, device=device)
 
-    image_paths = [
-        "assets/example1.png",
-        "assets/example2.png"
-    ]
+    image_paths = ["assets/example1.png", "assets/example2.png"]
     prompts = [
         "cute chibi anime cartoon fox, smiling wagging tail with a small cartoon heart above sticker",
         "cute chibi anime cartoon fox, smiling wagging tail with a small cartoon heart above sticker"
     ]
     rewards = inferencer.reward(image_paths, prompts)
-    print(rewards[0][0].item()) # miu and sigma. we select miu as the final output
+    print(rewards[0][0].item())  # miu and sigma. we select miu as the final output
     print(rewards[1][0].item())

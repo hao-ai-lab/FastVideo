@@ -67,9 +67,7 @@ from transformers.image_utils import (
 )
 from transformers.utils import TensorType, is_vision_available, logging
 
-
 logger = logging.get_logger(__name__)
-
 
 if is_vision_available():
     from PIL import Image
@@ -115,9 +113,11 @@ def make_batched_videos(videos) -> List[VideoInput]:
     raise ValueError(f"Could not make batched video from {videos}")
 
 
-def smart_resize(
-    height: int, width: int, factor: int = 28, min_pixels: int = 56 * 56, max_pixels: int = 14 * 14 * 4 * 1280
-):
+def smart_resize(height: int,
+                 width: int,
+                 factor: int = 28,
+                 min_pixels: int = 56 * 56,
+                 max_pixels: int = 14 * 14 * 4 * 1280):
     """Rescales the image so that the following conditions are met:
 
     1. Both dimensions (height and width) are divisible by 'factor'.
@@ -131,8 +131,7 @@ def smart_resize(
         raise ValueError(f"height:{height} or width:{width} must be larger than factor:{factor}")
     elif max(height, width) / min(height, width) > 200:
         raise ValueError(
-            f"absolute aspect ratio must be smaller than 200, got {max(height, width) / min(height, width)}"
-        )
+            f"absolute aspect ratio must be smaller than 200, got {max(height, width) / min(height, width)}")
     h_bar = round(height / factor) * factor
     w_bar = round(width / factor) * factor
     if h_bar * w_bar > max_pixels:
@@ -235,15 +234,15 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
         """
         if images.dim() == 3:
             images = images.unsqueeze(0)  # Add batch dimension
-        
+
         batch_size, channels, height, width = images.shape
-        
+
         processed_images = []
         resized_height, resized_width = height, width
-        
+
         for i in range(batch_size):
             image = images[i]  # (C, H, W)
-            
+
             if do_resize:
                 resized_height, resized_width = smart_resize(
                     height,
@@ -253,12 +252,10 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
                     max_pixels=self.max_pixels,
                 )
                 # Use differentiable interpolation
-                image = F.interpolate(
-                    image.unsqueeze(0), 
-                    size=(resized_height, resized_width), 
-                    mode='bilinear', 
-                    align_corners=False
-                ).squeeze(0)
+                image = F.interpolate(image.unsqueeze(0),
+                                      size=(resized_height, resized_width),
+                                      mode='bilinear',
+                                      align_corners=False).squeeze(0)
 
             if do_rescale:
                 image = image * rescale_factor
@@ -276,16 +273,16 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
 
         # Stack all processed images
         patches = torch.stack(processed_images)  # (B, C, H, W)
-        
+
         # Handle temporal dimension
         if patches.shape[0] == 1:
             patches = patches.repeat(self.temporal_patch_size, 1, 1, 1)
-        
+
         # Reshape for patch extraction
         batch_size, channel, resized_height, resized_width = patches.shape
         grid_t = batch_size // self.temporal_patch_size
         grid_h, grid_w = resized_height // self.patch_size, resized_width // self.patch_size
-        
+
         # Differentiable patch extraction and reshaping
         patches = patches.view(
             grid_t,
@@ -299,9 +296,8 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
             self.patch_size,
         )
         patches = patches.permute(0, 3, 6, 4, 7, 2, 1, 5, 8)
-        flatten_patches = patches.reshape(
-            grid_t * grid_h * grid_w, channel * self.temporal_patch_size * self.patch_size * self.patch_size
-        )
+        flatten_patches = patches.reshape(grid_t * grid_h * grid_w,
+                                          channel * self.temporal_patch_size * self.patch_size * self.patch_size)
 
         return flatten_patches, (grid_t, grid_h, grid_w)
 
@@ -365,7 +361,7 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
                 image_mean=image_mean,
                 image_std=image_std,
             )
-        
+
         # Original non-differentiable path for backward compatibility
         images = make_list_of_images(images)
 
@@ -378,8 +374,7 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
         if is_scaled_image(images[0]) and do_rescale:
             logger.warning_once(
                 "It looks like you are trying to rescale already rescaled images. If the input"
-                " images have pixel values between 0 and 1, set `do_rescale=False` to avoid rescaling them again."
-            )
+                " images have pixel values between 0 and 1, set `do_rescale=False` to avoid rescaling them again.")
         if input_data_format is None:
             # We assume that all images have the same channel dimension format.
             input_data_format = infer_channel_dimension_format(images[0])
@@ -396,17 +391,16 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
                     min_pixels=self.min_pixels,
                     max_pixels=self.max_pixels,
                 )
-                image = resize(
-                    image, size=(resized_height, resized_width), resample=resample, input_data_format=input_data_format
-                )
+                image = resize(image,
+                               size=(resized_height, resized_width),
+                               resample=resample,
+                               input_data_format=input_data_format)
 
             if do_rescale:
                 image = self.rescale(image, scale=rescale_factor, input_data_format=input_data_format)
 
             if do_normalize:
-                image = self.normalize(
-                    image=image, mean=image_mean, std=image_std, input_data_format=input_data_format
-                )
+                image = self.normalize(image=image, mean=image_mean, std=image_std, input_data_format=input_data_format)
 
             image = to_channel_dimension_format(image, data_format, input_channel_dim=input_data_format)
             processed_images.append(image)
@@ -433,9 +427,8 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
             self.patch_size,
         )
         patches = patches.transpose(0, 3, 6, 4, 7, 2, 1, 5, 8)
-        flatten_patches = patches.reshape(
-            grid_t * grid_h * grid_w, channel * self.temporal_patch_size * self.patch_size * self.patch_size
-        )
+        flatten_patches = patches.reshape(grid_t * grid_h * grid_w,
+                                          channel * self.temporal_patch_size * self.patch_size * self.patch_size)
 
         return flatten_patches, (grid_t, grid_h, grid_w)
 
@@ -476,11 +469,8 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
             image_mean=image_mean,
             image_std=image_std,
         )
-        
-        return {
-            "pixel_values": patches,
-            "image_grid_thw": torch.tensor(image_grid_thw, device=patches.device)
-        }
+
+        return {"pixel_values": patches, "image_grid_thw": torch.tensor(image_grid_thw, device=patches.device)}
 
     def preprocess(
         self,
@@ -564,10 +554,8 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
             videos = make_batched_videos(videos)
 
         if images is not None and not valid_images(images):
-            raise ValueError(
-                "Invalid image type. Must be of type PIL.Image.Image, numpy.ndarray, "
-                "torch.Tensor, tf.Tensor or jax.ndarray."
-            )
+            raise ValueError("Invalid image type. Must be of type PIL.Image.Image, numpy.ndarray, "
+                             "torch.Tensor, tf.Tensor or jax.ndarray.")
 
         validate_preprocess_arguments(
             rescale_factor=rescale_factor,

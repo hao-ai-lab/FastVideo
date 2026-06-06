@@ -235,10 +235,9 @@ def _flash_attn2_available() -> bool:
         available = hasattr(flash_attn_mod, "flash_attn_func")
     if available:
         return True
-    logger.warning(
-        "Classic FlashAttention-2 is unavailable; using SDPA for the "
-        "VideoAlign reward model. Install flash-attn to enable "
-        "FlashAttention-2.")
+    logger.warning("Classic FlashAttention-2 is unavailable; using SDPA for the "
+                   "VideoAlign reward model. Install flash-attn to enable "
+                   "FlashAttention-2.")
     return False
 
 

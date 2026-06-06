@@ -1,4 +1,3 @@
-
 VIDEOSCORE_QUERY_PROMPT = """
 Suppose you are an expert in judging and evaluating the quality of AI-generated videos,
 please watch the frames of a given video and see the text prompt for generating the video,
@@ -13,7 +12,10 @@ DIMENSION_DESCRIPTIONS = {
     'VQ': ['visual quality', 'the quality of the video in terms of clearness, resolution, brightness, and color'],
     'TA': ['text-to-video alignment', 'the alignment between the text prompt and the video content and motion'],
     'MQ': ['motion quality', 'the quality of the motion in terms of consistency, smoothness, and completeness'],
-    'Overall': ['Overall Performance', 'the overall performance of the video in terms of visual quality, text-to-video alignment, and motion quality'],
+    'Overall': [
+        'Overall Performance',
+        'the overall performance of the video in terms of visual quality, text-to-video alignment, and motion quality'
+    ],
 }
 
 SIMPLE_PROMPT = """
@@ -97,6 +99,7 @@ SIMPLE_PROMPT_NO_PROMPT = """
 Please evaluate the {dimension_name} of a generated video. Consider {dimension_description}.
 """
 
+
 def build_prompt(prompt, dimension, template_type):
     if isinstance(dimension, list) and len(dimension) > 1:
         dimension_name = ", ".join([DIMENSION_DESCRIPTIONS[d][0] for d in dimension])
@@ -115,8 +118,8 @@ def build_prompt(prompt, dimension, template_type):
                                     dimension_description=dimension_description,
                                     text_prompt=prompt)
     elif template_type == "video_score":
-        return VIDEOSCORE_QUERY_PROMPT.format(dimension_name=dimension_name, 
-                                              dimension_description=dimension_description, 
+        return VIDEOSCORE_QUERY_PROMPT.format(dimension_name=dimension_name,
+                                              dimension_description=dimension_description,
                                               text_prompt=prompt)
     elif template_type == "detailed_special":
         return DETAILED_PROMPT_WITH_SPECIAL_TOKEN.format(text_prompt=prompt)

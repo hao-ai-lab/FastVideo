@@ -116,8 +116,7 @@ def _patch_hpsv3_state_dict_loader() -> None:
         return
 
     from fastvideo.train.methods.rl.reward.HPSv3.hpsv3.model.qwen2vl_trainer import (
-        Qwen2VLRewardModelBT,
-    )
+        Qwen2VLRewardModelBT, )
 
     _patch_load_state_dict(Qwen2VLRewardModelBT)
     try:

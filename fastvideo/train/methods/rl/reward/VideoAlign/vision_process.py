@@ -20,7 +20,6 @@ from PIL import Image
 from torchvision import io, transforms
 from torchvision.transforms import InterpolationMode
 
-
 logger = logging.getLogger(__name__)
 
 IMAGE_FACTOR = 28
@@ -52,9 +51,11 @@ def floor_by_factor(number: int, factor: int) -> int:
     return math.floor(number / factor) * factor
 
 
-def smart_resize(
-    height: int, width: int, factor: int = IMAGE_FACTOR, min_pixels: int = MIN_PIXELS, max_pixels: int = MAX_PIXELS
-) -> tuple[int, int]:
+def smart_resize(height: int,
+                 width: int,
+                 factor: int = IMAGE_FACTOR,
+                 min_pixels: int = MIN_PIXELS,
+                 max_pixels: int = MAX_PIXELS) -> tuple[int, int]:
     """
     Rescales the image so that the following conditions are met:
 
@@ -66,8 +67,7 @@ def smart_resize(
     """
     if max(height, width) / min(height, width) > MAX_RATIO:
         raise ValueError(
-            f"absolute aspect ratio must be smaller than {MAX_RATIO}, got {max(height, width) / min(height, width)}"
-        )
+            f"absolute aspect ratio must be smaller than {MAX_RATIO}, got {max(height, width) / min(height, width)}")
     h_bar = max(factor, round_by_factor(height, factor))
     w_bar = max(factor, round_by_factor(width, factor))
     if h_bar * w_bar > max_pixels:
@@ -166,9 +166,7 @@ def smart_nframes(
     return nframes
 
 
-def _read_video_torchvision(
-    ele: dict,
-) -> torch.Tensor:
+def _read_video_torchvision(ele: dict, ) -> torch.Tensor:
     """read video using torchvision.io.read_video
 
     Args:
@@ -212,8 +210,8 @@ def _read_video_torchvision(
         pts = torch.linspace(start_pt, end_pt, num_pts).round().long().tolist()
         idx = []
         for pt in pts:
-            idx.extend(frames_idx[pt - frames_each_pts // 2 : pt + frames_each_pts // 2])
-   
+            idx.extend(frames_idx[pt - frames_each_pts // 2:pt + frames_each_pts // 2])
+
     video = video[idx]
     return video
 
@@ -224,9 +222,7 @@ def is_decord_available() -> bool:
     return importlib.util.find_spec("decord") is not None
 
 
-def _read_video_decord(
-    ele: dict,
-) -> torch.Tensor:
+def _read_video_decord(ele: dict, ) -> torch.Tensor:
     """read video using decord.VideoReader
 
     Args:
@@ -264,7 +260,7 @@ def _read_video_decord(
         pts = torch.linspace(start_pt, end_pt, num_pts).round().long().tolist()
         idx = []
         for pt in pts:
-            idx.extend(frames_idx[pt - frames_each_pts // 2 : pt + frames_each_pts // 2])
+            idx.extend(frames_idx[pt - frames_each_pts // 2:pt + frames_each_pts // 2])
     video = vr.get_batch(idx).asnumpy()
     video = torch.tensor(video).permute(0, 3, 1, 2)  # Convert to TCHW format
     return video
@@ -328,8 +324,10 @@ def fetch_video(ele: dict, image_factor: int = IMAGE_FACTOR) -> torch.Tensor | l
         process_info.pop("type", None)
         process_info.pop("video", None)
         images = [
-            fetch_image({"image": video_element, **process_info}, size_factor=image_factor)
-            for video_element in ele["video"]
+            fetch_image({
+                "image": video_element,
+                **process_info
+            }, size_factor=image_factor) for video_element in ele["video"]
         ]
         nframes = ceil_by_factor(len(images), FRAME_FACTOR)
         if len(images) < nframes:
@@ -345,12 +343,8 @@ def extract_vision_info(conversations: list[dict] | list[list[dict]]) -> list[di
         for message in conversation:
             if isinstance(message["content"], list):
                 for ele in message["content"]:
-                    if (
-                        "image" in ele
-                        or "image_url" in ele
-                        or "video" in ele
-                        or ele["type"] in ("image", "image_url", "video")
-                    ):
+                    if ("image" in ele or "image_url" in ele or "video" in ele
+                            or ele["type"] in ("image", "image_url", "video")):
                         vision_infos.append(ele)
     return vision_infos
 
