@@ -1,0 +1,4 @@
+{"name": "model", "description": "Review PRs that add or modify models, DiTs, VAEs, encoders, pipelines, arch configs", "path": "model/REVIEWER.md", "status": "draft", "trust": "low"}
+{"name": "kernel", "description": "Review PRs that add or modify CUDA/C++/Triton kernels and attention backends", "path": "kernel/REVIEWER.md", "status": "draft", "trust": "low"}
+{"name": "training", "description": "Review PRs that add or modify training methods, distillation, datasets, or distributed training", "path": "training/REVIEWER.md", "status": "draft", "trust": "low"}
+{"name": "general", "description": "Review PRs for inference serving, public API, CI, docs, UI, dependencies; fallback reviewer", "path": "general/REVIEWER.md", "status": "draft", "trust": "low"}
