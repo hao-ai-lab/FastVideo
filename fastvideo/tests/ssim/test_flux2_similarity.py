@@ -36,14 +36,10 @@ REQUIRED_GPUS = 1
 
 device_reference_folder = resolve_inference_device_reference_folder(logger)
 
-FLUX2_DEV_MODEL_ID = "black-forest-labs/FLUX.2-dev"
-FLUX2_KLEIN_4B_MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
-FLUX2_KLEIN_9B_MODEL_ID = "black-forest-labs/FLUX.2-klein-9B"
-
 FLUX2_MODEL_TO_PARAMS: dict[str, dict[str, object]] = {
-    FLUX2_DEV_MODEL_ID: {
+    "black-forest-labs/FLUX.2-dev": {
         "num_gpus": 1,
-        "model_path": FLUX2_DEV_MODEL_ID,
+        "model_path": "black-forest-labs/FLUX.2-dev",
         "height": 1024,
         "width": 1024,
         "num_frames": 1,
@@ -54,9 +50,9 @@ FLUX2_MODEL_TO_PARAMS: dict[str, dict[str, object]] = {
         "tp_size": 1,
         "fps": 1,
     },
-    FLUX2_KLEIN_4B_MODEL_ID: {
+    "black-forest-labs/FLUX.2-klein-4B": {
         "num_gpus": 1,
-        "model_path": FLUX2_KLEIN_4B_MODEL_ID,
+        "model_path": "black-forest-labs/FLUX.2-klein-4B",
         "height": 1024,
         "width": 1024,
         "num_frames": 1,
@@ -67,9 +63,9 @@ FLUX2_MODEL_TO_PARAMS: dict[str, dict[str, object]] = {
         "tp_size": 1,
         "fps": 1,
     },
-    FLUX2_KLEIN_9B_MODEL_ID: {
+    "black-forest-labs/FLUX.2-klein-9B": {
         "num_gpus": 1,
-        "model_path": FLUX2_KLEIN_9B_MODEL_ID,
+        "model_path": "black-forest-labs/FLUX.2-klein-9B",
         "height": 1024,
         "width": 1024,
         "num_frames": 1,
@@ -88,9 +84,9 @@ FLUX2_FULL_QUALITY_MODEL_TO_PARAMS: dict[str, dict[str, object]] = {
 }
 
 TEST_PROMPTS: dict[str, str] = {
-    FLUX2_DEV_MODEL_ID: "a photo of a banana on a wooden table, studio lighting",
-    FLUX2_KLEIN_4B_MODEL_ID: "a brushed steel espresso machine on a marble counter, morning window light",
-    FLUX2_KLEIN_9B_MODEL_ID: "a brushed steel espresso machine on a marble counter, morning window light",
+    "black-forest-labs/FLUX.2-dev": "a photo of a banana on a wooden table, studio lighting",
+    "black-forest-labs/FLUX.2-klein-4B": "a brushed steel espresso machine on a marble counter, morning window light",
+    "black-forest-labs/FLUX.2-klein-9B": "a brushed steel espresso machine on a marble counter, morning window light",
 }
 
 SLICE_COSINE_THRESHOLD = 0.96
