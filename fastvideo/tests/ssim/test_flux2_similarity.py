@@ -125,5 +125,8 @@ def test_flux2_similarity(
             "vae_cpu_offload": True,
             "text_encoder_cpu_offload": True,
             "pin_cpu_memory": False,
+            "override_pipeline_cls_name": (
+                "Flux2KleinPipeline" if "klein" in model_id.lower() else "Flux2Pipeline"
+            ),
         },
     )
