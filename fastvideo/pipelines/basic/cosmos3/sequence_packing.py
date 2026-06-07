@@ -87,13 +87,32 @@ class Cosmos3SoundItem:
 
 
 @dataclass
+class Cosmos3ActionItem:
+    """One action latent for a sample (action-conditioned world model).
+
+    Args:
+        latent: Action latent ``[T, action_dim]`` (per-frame action vectors).
+        condition_frame_indexes: Frame indices kept clean (conditioning actions).
+        domain_id: Embodiment domain id (scalar / ``[1]``) for the
+            domain-aware action projection.
+        fps: Action FPS; only used when ``enable_fps_modulation`` is set.
+    """
+
+    latent: torch.Tensor
+    condition_frame_indexes: list[int] = field(default_factory=list)
+    domain_id: int = 0
+    fps: float | None = None
+
+
+@dataclass
 class Cosmos3SampleInputs:
-    """Per-sample packing inputs (one text prompt + its vision item, +sound)."""
+    """Per-sample packing inputs (text prompt + vision item, +sound, +action)."""
 
     text_ids: list[int]
     vision: Cosmos3VisionItem
     timestep: float
     sound: Cosmos3SoundItem | None = None
+    action: Cosmos3ActionItem | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +158,16 @@ class Cosmos3PackedSequence:
     sound_condition_mask: list[torch.Tensor] = field(default_factory=list)
     fps_sound: torch.Tensor | None = None
 
+    # Action modality (action-conditioned world model); empty/None when no action.
+    action_tokens: list[torch.Tensor] = field(default_factory=list)
+    action_token_shapes: list[tuple[int, ...]] = field(default_factory=list)
+    action_sequence_indexes: torch.Tensor | None = None
+    action_timesteps: torch.Tensor | None = None
+    action_mse_loss_indexes: torch.Tensor | None = None
+    action_noisy_frame_indexes: list[torch.Tensor] = field(default_factory=list)
+    action_condition_mask: list[torch.Tensor] = field(default_factory=list)
+    action_domain_id: list[torch.Tensor] = field(default_factory=list)
+
     def to_dit_kwargs(self, device: torch.device | str | None = None) -> dict[str, Any]:
         """Return the kwargs dict for ``Cosmos3VFMTransformer.forward``.
 
@@ -171,6 +200,13 @@ class Cosmos3PackedSequence:
             sound_mse_loss_indexes=_mv(self.sound_mse_loss_indexes),
             sound_noisy_frame_indexes=[_mv(t) for t in self.sound_noisy_frame_indexes],
             fps_sound=_mv(self.fps_sound),
+            action_tokens=[_mv(t) for t in self.action_tokens],
+            action_token_shapes=list(self.action_token_shapes),
+            action_sequence_indexes=_mv(self.action_sequence_indexes),
+            action_timesteps=_mv(self.action_timesteps),
+            action_mse_loss_indexes=_mv(self.action_mse_loss_indexes),
+            action_noisy_frame_indexes=[_mv(t) for t in self.action_noisy_frame_indexes],
+            action_domain_id=[_mv(t) for t in self.action_domain_id],
         )
 
 
@@ -246,6 +282,15 @@ def pack_cosmos3_video_sequence(
     sound_noisy_frame_indexes: list[torch.Tensor] = []
     sound_condition_mask: list[torch.Tensor] = []
     sound_fps_values: list[float] = []
+
+    action_tokens: list[torch.Tensor] = []
+    action_token_shapes: list[tuple[int, ...]] = []
+    action_sequence_indexes: list[int] = []
+    action_timesteps: list[float] = []
+    action_mse_loss_indexes: list[int] = []
+    action_noisy_frame_indexes: list[torch.Tensor] = []
+    action_condition_mask: list[torch.Tensor] = []
+    action_domain_id: list[torch.Tensor] = []
 
     curr = 0  # running position in the packed sequence
     is_image_batch = True
@@ -335,6 +380,56 @@ def pack_cosmos3_video_sequence(
         curr += num_vision_tokens
         sample_len += num_vision_tokens
 
+        # ---- 2a2. Action split: shares the vision "full" split ----
+        # Mirrors framework ``_pack_action_tokens``: action latent [T, D] -> T
+        # tokens (token shape (T,)), domain-aware, 3D-MRoPE at the vision temporal
+        # offset with ``start_frame_offset=1`` (parallel to vision; tcf=1; does
+        # not advance the offset).
+        action_split_len = 0
+        if sample.action is not None:
+            action_latent = sample.action.latent  # [T, D]
+            action_t = int(action_latent.shape[0])
+            action_split_len = action_t
+
+            action_tokens.append(action_latent)
+            action_token_shapes.append((action_t, ))
+            action_sequence_indexes.extend(range(curr, curr + action_t))
+            action_domain_id.append(torch.tensor([int(sample.action.domain_id)], dtype=torch.long))
+
+            a_cond_set = {idx for idx in sample.action.condition_frame_indexes if 0 <= idx < action_t}
+            a_cond_mask = torch.zeros((action_t, 1), device=action_latent.device, dtype=action_latent.dtype)
+            for fi in a_cond_set:
+                a_cond_mask[fi, 0] = 1.0
+            action_condition_mask.append(a_cond_mask)
+
+            a_noisy = torch.tensor([idx for idx in range(action_t) if idx not in a_cond_set],
+                                   device=action_latent.device,
+                                   dtype=torch.long)
+            action_noisy_frame_indexes.append(a_noisy)
+
+            for fi in range(action_t):
+                if fi in a_cond_set:
+                    continue
+                action_mse_loss_indexes.append(curr + fi)
+                action_timesteps.append(float(sample.timestep))
+
+            action_fps = sample.action.fps if enable_fps_modulation else None
+            action_mrope, _ = compute_mrope_position_ids_vision(
+                grid_t=action_t,
+                grid_h=1,
+                grid_w=1,
+                temporal_offset=vision_start_temporal_offset,
+                fps=action_fps,
+                base_fps=base_fps,
+                temporal_compression_factor=1,  # action is at frame rate
+                base_temporal_compression_factor=temporal_compression_factor,
+                enable_fps_modulation=enable_fps_modulation,
+                start_frame_offset=1,
+            )
+            position_id_blocks.append(action_mrope)
+            curr += action_t
+            sample_len += action_t
+
         # ---- 2b. Sound split (t2vs): shares the vision "full" split ----
         # Mirrors framework ``_pack_sound_tokens``: sound latent [C, T] -> T
         # tokens (token shape (T,1,1)), packed right after vision, with 3D-MRoPE
@@ -401,9 +496,9 @@ def pack_cosmos3_video_sequence(
             eov_len = 1
             sample_len += 1
 
-        # Vision + sound + any trailing eov marker share one "full" split.
+        # Vision + action + sound + any trailing eov marker share one "full" split.
         attn_modes.append("full")
-        split_lens.append(num_vision_tokens + sound_split_len + eov_len)
+        split_lens.append(num_vision_tokens + action_split_len + sound_split_len + eov_len)
         sample_lens.append(sample_len)
 
         if latent_t != 1:
@@ -443,4 +538,12 @@ def pack_cosmos3_video_sequence(
         sound_noisy_frame_indexes=sound_noisy_frame_indexes,
         sound_condition_mask=sound_condition_mask,
         fps_sound=(torch.tensor(sound_fps_values, dtype=torch.float32) if sound_fps_values else None),
+        action_tokens=action_tokens,
+        action_token_shapes=action_token_shapes,
+        action_sequence_indexes=(torch.tensor(action_sequence_indexes, dtype=torch.long) if action_tokens else None),
+        action_timesteps=(torch.tensor(action_timesteps, dtype=timesteps_dtype) if action_tokens else None),
+        action_mse_loss_indexes=(torch.tensor(action_mse_loss_indexes, dtype=torch.long) if action_tokens else None),
+        action_noisy_frame_indexes=action_noisy_frame_indexes,
+        action_condition_mask=action_condition_mask,
+        action_domain_id=action_domain_id,
     )

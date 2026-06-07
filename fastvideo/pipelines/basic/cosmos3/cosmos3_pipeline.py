@@ -48,6 +48,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_unipc_multistep import (
     UniPCMultistepScheduler, )
 from fastvideo.pipelines.basic.cosmos3.sequence_packing import (
+    Cosmos3ActionItem,
     Cosmos3SampleInputs,
     Cosmos3SoundItem,
     Cosmos3VisionItem,
@@ -215,6 +216,37 @@ class Cosmos3SoundSpec:
         return int(math.prod(self.shape))
 
 
+@dataclass
+class Cosmos3ActionSpec:
+    """Geometry + conditioning for one action item in a denoise run.
+
+    Args:
+        shape: ``(T, action_dim)`` of the action latent.
+        condition_frame_indexes: Frame indices kept clean (conditioning actions).
+        domain_id: Embodiment domain id for the domain-aware action projection.
+        fps: Action FPS; used iff fps modulation is on.
+    """
+
+    shape: tuple[int, int]
+    condition_frame_indexes: list[int] = field(default_factory=list)
+    domain_id: int = 0
+    fps: float | None = None
+
+    @property
+    def numel(self) -> int:
+        return int(math.prod(self.shape))
+
+
+def _split_action_latent(flat: torch.Tensor, specs: list[Cosmos3ActionSpec]) -> list[torch.Tensor]:
+    """Split a flat action vector into per-item ``[T, action_dim]`` tensors."""
+    out: list[torch.Tensor] = []
+    offset = 0
+    for spec in specs:
+        out.append(flat[offset:offset + spec.numel].reshape(spec.shape))
+        offset += spec.numel
+    return out
+
+
 def cosmos3_get_cfg_velocity(
     *,
     transformer: Any,
@@ -236,6 +268,8 @@ def cosmos3_get_cfg_velocity(
     normalize_cfg: bool = False,
     sound_specs: list[Cosmos3SoundSpec] | None = None,
     sound_fps_per_item: list[float] | None = None,
+    action_specs: list[Cosmos3ActionSpec] | None = None,
+    action_fps_per_item: list[float] | None = None,
 ) -> torch.Tensor:
     """Sequential-CFG velocity for one denoise step (framework math).
 
@@ -257,11 +291,16 @@ def cosmos3_get_cfg_velocity(
     assert timestep.numel() == 1, "timestep must be a scalar"
     timestep_value = float(timestep.reshape(()).item())
 
-    # Combined flat layout (t2vs): [all vision | all sound], matching the
-    # framework per-sample concat order ([vision_i | sound_i]); single sample here.
+    # Combined flat layout: [all vision | all action | all sound], matching the
+    # framework per-sample concat order ([vision_i | action_i | sound_i]); single
+    # sample here.
     vision_total = sum(spec.numel for spec in specs)
+    action_total = sum(spec.numel for spec in action_specs) if action_specs else 0
     noise_x_vision = _split_flat_latent(flat_latent[:vision_total], specs)
-    noise_x_sound = (_split_flat_latent(flat_latent[vision_total:], sound_specs) if sound_specs else None)
+    noise_x_action = (_split_action_latent(flat_latent[vision_total:vision_total +
+                                                       action_total], action_specs) if action_specs else None)
+    noise_x_sound = (_split_flat_latent(flat_latent[vision_total +
+                                                    action_total:], sound_specs) if sound_specs else None)
     device = next(transformer.parameters()).device
 
     def _run(token_ids: list[int]) -> torch.Tensor:
@@ -274,6 +313,16 @@ def cosmos3_get_cfg_velocity(
                     fps=(sound_fps_per_item[i] if sound_fps_per_item is not None else None),
                 ) for i, ss in enumerate(sound_specs)
             ]
+        action_items: list[Cosmos3ActionItem] = []
+        if action_specs is not None and noise_x_action is not None:
+            action_items = [
+                Cosmos3ActionItem(
+                    latent=noise_x_action[i],
+                    condition_frame_indexes=list(asp.condition_frame_indexes),
+                    domain_id=asp.domain_id,
+                    fps=(action_fps_per_item[i] if action_fps_per_item is not None else None),
+                ) for i, asp in enumerate(action_specs)
+            ]
         samples = [
             Cosmos3SampleInputs(
                 text_ids=list(token_ids),
@@ -283,6 +332,7 @@ def cosmos3_get_cfg_velocity(
                     fps=(fps_per_item[i] if fps_per_item is not None else None),
                 ),
                 sound=(sound_items[i] if i < len(sound_items) else None),
+                action=(action_items[i] if i < len(action_items) else None),
                 timestep=timestep_value,
             ) for i, (latent, spec) in enumerate(zip(noise_x_vision, specs, strict=False))
         ]
@@ -310,23 +360,38 @@ def cosmos3_get_cfg_velocity(
                 items.append(pred * keep if keep.sum() > 0 else torch.zeros_like(pred))
             vision_vel = torch.cat([v.reshape(-1) for v in items]).to(flat_latent.dtype)
 
-        if not sound_specs:
-            return vision_vel
+        parts = [vision_vel]
 
-        # Sound velocity: preds_sound are per-item [C, T], already zero on clean
-        # frames (unpack fills only noisy frames); zero on cond frames defensively.
-        sound_total = sum(spec.numel for spec in sound_specs)
-        sound_vel = torch.zeros(sound_total, device=flat_latent.device, dtype=flat_latent.dtype)
-        preds_s = out.get("preds_sound")
-        if preds_s is not None:
-            s_items: list[torch.Tensor] = []
-            for pred, cond_mask in zip(preds_s, packed.sound_condition_mask, strict=False):
-                pred = pred.squeeze(0) if pred.dim() == 3 else pred  # [C, T]
-                keep = (1.0 - cond_mask).reshape(1, -1).to(dtype=pred.dtype, device=pred.device)  # [1, T]
-                s_items.append(pred * keep)
-            sound_vel = torch.cat([v.reshape(-1) for v in s_items]).to(flat_latent.dtype)
+        if action_specs:
+            # Action velocity: preds_action are per-item [T, D], already zero on
+            # clean frames; zero on cond frames defensively.
+            action_vel = torch.zeros(action_total, device=flat_latent.device, dtype=flat_latent.dtype)
+            preds_a = out.get("preds_action")
+            if preds_a is not None:
+                a_items: list[torch.Tensor] = []
+                for pred, cond_mask in zip(preds_a, packed.action_condition_mask, strict=False):
+                    pred = pred.squeeze(0) if pred.dim() == 3 else pred  # [T, D]
+                    keep = (1.0 - cond_mask).reshape(-1, 1).to(dtype=pred.dtype, device=pred.device)  # [T, 1]
+                    a_items.append(pred * keep)
+                action_vel = torch.cat([v.reshape(-1) for v in a_items]).to(flat_latent.dtype)
+            parts.append(action_vel)
 
-        return torch.cat([vision_vel, sound_vel])
+        if sound_specs:
+            # Sound velocity: preds_sound are per-item [C, T], already zero on clean
+            # frames (unpack fills only noisy frames); zero on cond frames defensively.
+            sound_total = sum(spec.numel for spec in sound_specs)
+            sound_vel = torch.zeros(sound_total, device=flat_latent.device, dtype=flat_latent.dtype)
+            preds_s = out.get("preds_sound")
+            if preds_s is not None:
+                s_items: list[torch.Tensor] = []
+                for pred, cond_mask in zip(preds_s, packed.sound_condition_mask, strict=False):
+                    pred = pred.squeeze(0) if pred.dim() == 3 else pred  # [C, T]
+                    keep = (1.0 - cond_mask).reshape(1, -1).to(dtype=pred.dtype, device=pred.device)  # [1, T]
+                    s_items.append(pred * keep)
+                sound_vel = torch.cat([v.reshape(-1) for v in s_items]).to(flat_latent.dtype)
+            parts.append(sound_vel)
+
+        return vision_vel if len(parts) == 1 else torch.cat(parts)
 
     cond_v = _run(cond_token_ids)
     uncond_v = _run(uncond_token_ids)
@@ -382,6 +447,8 @@ class Cosmos3DenoiseEngine:
         fps_per_item: list[float] | None = None,
         sound_specs: list[Cosmos3SoundSpec] | None = None,
         sound_fps_per_item: list[float] | None = None,
+        action_specs: list[Cosmos3ActionSpec] | None = None,
+        action_fps_per_item: list[float] | None = None,
     ) -> torch.Tensor:
         return cosmos3_get_cfg_velocity(
             transformer=self.transformer,
@@ -402,6 +469,8 @@ class Cosmos3DenoiseEngine:
             fps_per_item=fps_per_item,
             sound_specs=sound_specs,
             sound_fps_per_item=sound_fps_per_item,
+            action_specs=action_specs,
+            action_fps_per_item=action_fps_per_item,
         )
 
     def denoise(
@@ -417,6 +486,8 @@ class Cosmos3DenoiseEngine:
         progress_bar: Any | None = None,
         sound_specs: list[Cosmos3SoundSpec] | None = None,
         sound_fps_per_item: list[float] | None = None,
+        action_specs: list[Cosmos3ActionSpec] | None = None,
+        action_fps_per_item: list[float] | None = None,
     ) -> torch.Tensor:
         """Run the full UniPC denoise loop, returning the final flat latent.
 
@@ -439,6 +510,8 @@ class Cosmos3DenoiseEngine:
                 fps_per_item=fps_per_item,
                 sound_specs=sound_specs,
                 sound_fps_per_item=sound_fps_per_item,
+                action_specs=action_specs,
+                action_fps_per_item=action_fps_per_item,
             )
             stepped = self.scheduler.step(
                 model_output=v_pred,
