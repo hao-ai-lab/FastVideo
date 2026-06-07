@@ -1211,6 +1211,8 @@ def _register_presets() -> None:
     from fastvideo.api.presets import register_preset
     from fastvideo.pipelines.basic.cosmos.presets import (
         ALL_PRESETS as COSMOS_PRESETS, )
+    from fastvideo.pipelines.basic.cosmos3.presets import (
+        ALL_PRESETS as COSMOS3_PRESETS, )
     from fastvideo.pipelines.basic.dreamx_world.presets import (
         ALL_PRESETS as DREAMX_WORLD_PRESETS, )
     from fastvideo.pipelines.basic.gamecraft.presets import (
@@ -1248,6 +1250,7 @@ def _register_presets() -> None:
 
     all_preset_groups = (
         COSMOS_PRESETS,
+        COSMOS3_PRESETS,
         DREAMX_WORLD_PRESETS,
         FLUX2_PRESETS,
         GAMECRAFT_PRESETS,
