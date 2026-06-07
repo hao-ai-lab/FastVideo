@@ -71,13 +71,20 @@ _TCF = 4  # temporal compression factor
 # ---------------------------------------------------------------------------
 # Tiny model builders (framework + FastVideo) with unified_3d_mrope.
 # ---------------------------------------------------------------------------
-def _build_tiny_cosmos3_mrope(seed: int = 42, num_layers: int = 2):
+_SOUND_DIM = 64
+_SOUND_LATENT_FPS = 25
+
+
+def _build_tiny_cosmos3_mrope(seed: int = 42, num_layers: int = 2, sound_gen: bool = False):
     """Tiny framework ``Cosmos3VFMNetwork`` with ``unified_3d_mrope``.
 
     ``rope_theta`` / ``rope_scaling`` (carrying ``mrope_section`` +
     ``mrope_interleaved``) are threaded through the materialized text config;
     ``position_embedding_type="unified_3d_mrope"`` leaves ``latent_pos_embed``
     as ``None`` so positions ride solely on the 3D rotary embedding.
+
+    ``sound_gen=True`` additionally builds the sound MoT heads (``sound2llm`` /
+    ``llm2sound`` / ``sound_modality_embed``) for the t2vs parity test.
     """
     from cosmos_framework.model.vfm.mot.cosmos3_vfm_network import (
         Cosmos3VFMNetwork,
@@ -116,6 +123,12 @@ def _build_tiny_cosmos3_mrope(seed: int = 42, num_layers: int = 2):
         include_visual=False,
     )
     tiny_vlm_cfg = Qwen3VLConfig(text_config=tiny_text_dict)
+    sound_kwargs = dict(
+        sound_gen=True,
+        sound_dim=_SOUND_DIM,
+        temporal_compression_factor_sound=1,
+        sound_latent_fps=_SOUND_LATENT_FPS,
+    ) if sound_gen else {}
     vfm_cfg = Cosmos3VFMNetworkConfig(
         vision_gen=True,
         vlm_config=tiny_vlm_cfg,
@@ -127,6 +140,7 @@ def _build_tiny_cosmos3_mrope(seed: int = 42, num_layers: int = 2):
         max_latent_w=16,
         max_latent_t=8,
         temporal_compression_factor_vision=_TCF,
+        **sound_kwargs,
     )
     torch.manual_seed(seed)
     lm = Qwen3VLTextForCausalLM(config=mot_cfg)
