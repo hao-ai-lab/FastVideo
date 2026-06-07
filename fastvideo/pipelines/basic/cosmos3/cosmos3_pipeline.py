@@ -110,6 +110,60 @@ def cosmos3_tokenize_caption(
 
 
 # ===========================================================================
+# Reasoning (VLM text generation) — und (causal) pathway + lm_head
+# ===========================================================================
+def cosmos3_generate_reasoner_text(
+    transformer: Any,
+    input_ids: list[int],
+    max_new_tokens: int,
+    *,
+    eos_token_id: int | list[int] | None = None,
+) -> list[int]:
+    """Greedy text reasoning via the und (causal) backbone + ``lm_head``.
+
+    Mirrors the framework ``generate_reasoner_text`` (text-only prefill, greedy):
+    only the und-pathway weights (no ``_moe_gen``) + ``embed_tokens`` / ``norm`` /
+    ``lm_head`` participate; the generation pathway and the VFM multimodal
+    embedders are bypassed (no vision/sound/action tokens). Token-for-token
+    identical to the framework reasoner (``test_cosmos3_reasoning_parity``).
+
+    Re-prefills each step (no KV cache) — correctness-first; a KV-cache fast path
+    is a later optimization. Returns the newly generated token ids.
+    """
+    device = next(transformer.parameters()).device
+    ids = [int(x) for x in input_ids]
+    eos: set[int] = set()
+    if eos_token_id is not None:
+        eos = {int(eos_token_id)} if isinstance(eos_token_id, int) else {int(x) for x in eos_token_id}
+
+    new_tokens: list[int] = []
+    for _ in range(int(max_new_tokens)):
+        n = len(ids)
+        pos = torch.arange(n).unsqueeze(0).expand(3, -1).contiguous().to(device)
+        out = transformer(
+            text_ids=torch.tensor(ids, device=device, dtype=torch.long),
+            text_indexes=torch.arange(n, device=device),
+            position_ids=pos,
+            sequence_length=n,
+            split_lens=[n],
+            attn_modes=["causal"],
+            vision_tokens=[],
+            vision_token_shapes=[],
+            vision_sequence_indexes=torch.empty(0, dtype=torch.long, device=device),
+            vision_timesteps=torch.empty(0, device=device),
+            vision_mse_loss_indexes=torch.empty(0, dtype=torch.long, device=device),
+            vision_noisy_frame_indexes=[],
+        )
+        logits = transformer.lm_head(out["last_hidden_state"][n - 1])  # [vocab]
+        nxt = int(logits.argmax().item())
+        ids.append(nxt)
+        new_tokens.append(nxt)
+        if nxt in eos:
+            break
+    return new_tokens
+
+
+# ===========================================================================
 # VAE encode/decode bridge (normalize / denormalize, matching the framework)
 # ===========================================================================
 @dataclass
