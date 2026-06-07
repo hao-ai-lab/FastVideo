@@ -13,7 +13,7 @@
 
 ## Current Phase
 
-- phase: `PR1 (video core) COMPLETE + real-weights E2E generation VERIFIED: DiT / VAE / scheduler / strict-load / sequence-packing / pipeline all framework-parity verified (suite 95 passed, 0 skipped). Real-weights T2V on B200 (1280x704, 29f, 35 steps) produces coherent video matching the prompt. Next: PR2 audio / PR3 action / PR4 reasoning.`
+- phase: `PR1 (video core) COMPLETE + real-weights T2V & I2V VERIFIED: DiT / VAE / scheduler / strict-load / sequence-packing / pipeline / I2V-conditioning all framework-parity verified (suite 98 passed, 0 skipped). Real-weights T2V and I2V on B200 (1280x704, 29f, 35 steps) produce coherent video matching the prompt/conditioning image. I2V work is on stacked branch feat/cosmos3-i2v. Next: PR2 audio / PR3 action / PR4 reasoning.`
 - status: `in_progress`
 - owner: `orchestrator`
 - last_updated: `2026-06-07`
@@ -105,3 +105,12 @@
 - Also wired the remaining integration glue (registry alias `Cosmos3OmniTransformer`->`Cosmos3VFMTransformer`; `text_tokenizer`->TokenizerLoader; scheduler config param-filtering; DiT `materialize_non_persistent_buffers` + compute-dtype casts; packing device-move in `to_dit_kwargs`; empty text-preprocess).
 - Verified: 1280x704, 29 frames, 35 steps on a single B200 -> coherent golden-retriever-in-meadow video matching the prompt (no NaNs; per-frame pixel std ~58; visible temporal motion). Full cosmos3 suite: 95 passed, 0 skipped.
 - NEXT: PR2 audio (`sound_tokenizer` AVAE) / PR3 action / PR4 reasoning. Optional: I2V/T2I real-weights spot-checks; force-push branch (needs explicit OK).
+
+### PR1 (video core) — I2V real-weights — 2026-06-07 (branch feat/cosmos3-i2v)
+- Forked `feat/cosmos3-i2v` off `feat/cosmos3-tier-a-port` (stacked, includes the T2V + scheduler fix).
+- Studied the framework I2V path: `cosmos_framework.inference.vision.load_conditioning_image` (aspect-preserving resize + center crop + uint8 quantize -> `/127.5-1`) + `build_conditioned_video_batch` (frame 0 = image, remaining frames REPEAT the last conditioning frame -> static video), then VAE-encode; `condition_frame_indexes=[0]` (latent). Condition frames kept clean during sampling exactly as FastVideo already does: init noise `cond_mask*x0 + (1-cond_mask)*noise` (`omni_mot_model._prepare_inference_data`) + velocity zeroed `pred*(1-cond_mask)` each step (`_get_velocity`), no re-injection.
+- Bug found + fixed (commit `bd8d604fb`): FastVideo's `_image_to_video_tensor` ZERO-filled the non-condition frames; the temporal Wan VAE (4x) makes latent frame 0 depend on several pixel frames, so zero-fill -> wrong conditioning latent. Rewrote it to repeat-fill + framework resize/crop/quantize.
+- Parity: `test_cosmos3_i2v_conditioning_parity.py` vs framework `load_conditioning_image` + repeat-fill — bit-exact (max abs diff 0.0) across aspect/size/frame cases. Existing `test_cosmos3_denoise_cfg_parity` already covers the I2V cond-mask + velocity math (i2v case).
+- Example: `examples/inference/basic/basic_cosmos3_i2v_new_api.py` (`InputConfig(image_path=...)`, default `assets/images/cyclist.jpg`).
+- Verified on B200 (1280x704, 29f, 35 steps, real weights): output frame 0 reproduces the conditioning cyclist image; later frames show coherent forward motion down the trail following the prompt. Full suite 98 passed, 0 skipped.
+- NEXT: optional T2I real-weights spot-check; then PR2 audio / PR3 action / PR4 reasoning.
