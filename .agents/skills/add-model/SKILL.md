@@ -141,6 +141,54 @@ Arch config rule:
   `transformer/config.json` from the official Python model-config class, not
   from data/eval config classes.
 
+Reference/checkpoint traps to check explicitly (each has silently shipped wrong
+output before):
+
+- **The checkpoint's per-component config can be a lossy generic-format export
+  that does NOT describe the runtime.** A "diffusers-format" `scheduler/`,
+  `vae/`, etc. config may carry fields the framework never uses (and that flip
+  behavior). Verify each component against *how the framework actually
+  instantiates it*, not the JSON. (A Cosmos3 `scheduler_config.json` with
+  `use_karras_sigmas=true` selected diffusion sigmas instead of the framework's
+  flow-matching sigmas → NaN latents → black video, while the DiT was correct.)
+- **Dump `safetensors` keys + shapes for every sub-checkpoint NOW.** This reveals
+  the on-disk naming (often a third convention, distinct from both the framework
+  module tree and your FastVideo classes), whether a sub-checkpoint is partial
+  (e.g. decoder-only), and frequently that it matches an existing native module
+  you can reuse.
+- **Temporal-VAE conditioning is not "only frame 0 matters."** When a condition
+  image/clip feeds a temporal autoencoder, replicate the framework's exact frame
+  fill (e.g. static-repeat of the conditioning frame across the clip), not an
+  assumed zero-fill — the temporal receptive field makes the kept-clean latent
+  frame depend on several pixel frames.
+- **Pipeline knobs may be keyed by an axis you didn't expect** (resolution,
+  aspect, embodiment), not by task. Confirm where a knob's default comes from
+  (e.g. flow_shift was resolution-bucketed, not T2I-vs-video).
+
+Multi-modal / mixture-of-transformers (omni) models:
+
+- The backbone is often a shared transformer with per-modality
+  embed-in/embed-out heads and a packed sequence (e.g. a causal text split + a
+  full-attention generation split shared by vision/audio/action). Once the first
+  modality (usually vision) works, each additional modality is the same *shape*
+  of work — pack tokens, project in + add a modality embedding + scatter timestep
+  embeds, run the shared backbone, project out, unpack — so build the first
+  modality with clean "a modality" seams.
+- The real novelty per modality is the **packing layout + position-id (MRoPE)
+  offsets** and the **combined flat-latent order** for joint denoising (the
+  per-sample concat order must match the framework). Spend the care there.
+- A modality may be **domain-conditioned** (e.g. per-embodiment action via a
+  domain-indexed linear); thread a per-token domain id through pack + project.
+- **Text reasoning usually needs no new model code** — it is the causal pathway
+  + `embed_tokens` / final norm / `lm_head`, all already in the DiT. A text-only
+  forward + `lm_head` should be token-for-token identical to the reference
+  reasoner.
+- **Derived non-persistent buffers** (e.g. RoPE `inv_freq`) are absent from the
+  checkpoint, so under a meta-device FSDP load they land on the `meta` device;
+  provide a `materialize_non_persistent_buffers`-style hook to recompute them on
+  the real device. Also cast at fp32/bf16 boundaries (fp32 noise/VAE latents into
+  a bf16 model) — no-ops in fp32 parity tests, required at inference.
+
 ## Phase 2: Early Parity Scaffolding
 
 Create component parity tests before or alongside implementation. Use
@@ -159,6 +207,20 @@ This phase is early by design:
 - The scaffold must still contain real official loading, deterministic inputs,
   output extraction, and concrete tensor comparisons. No unconditional skips,
   no shape-only tests.
+- **The oracle side MUST be the official framework object** — never a second
+  instance of the unit under test. A test that compares two copies of the wrong
+  thing passes while the real bug ships. (A scheduler "parity" test that used the
+  same diffusers scheduler on both sides hid the black-video bug behind a green
+  suite.) After writing each test, ask: "if the framework were wrong here, would
+  this fail?"
+- **Report both max AND mean abs diff** for every numerical parity test (not just
+  pass/fail) — the trend across components is the signal, and a clean port should
+  read max=mean=0.0 (or fp32-epsilon, called out).
+- **Budget for making the oracle runnable in the test env.** The framework's
+  attention may be CUDA-only (flash/natten) — monkeypatch it to SDPA so parity
+  runs on CPU/float32. If a framework module won't import headless (heavy/private
+  deps), mirror the one constant you need in the test with a cited source rather
+  than importing it.
 
 Use subagents here: dispatch one parity-test subagent per required component,
 including components that may be reused. Their output becomes the red/skip
@@ -192,6 +254,22 @@ Reuse decision:
    FastVideo-native code through the bucket-specific skill.
 4. Reused components still require non-skip component parity against the exact
    official instantiation used by the target pipeline.
+5. **A "matching" native module can still diverge on a config path the original
+   user never exercised.** Re-run parity with the NEW model's exact config — do
+   not assume a reused module is correct because it passed for its first model.
+   (FastVideo's `OobleckVAE` decoder matched bit-exact except for `output_padding
+   = stride % 2`, a no-op for the original model's even strides but required for
+   the new model's odd stride — a 1-sample drift otherwise.) A safe one-line fix
+   that is provably a no-op for existing users is preferred over forking the
+   module.
+6. **Before porting a large sub-model, check two things first:** (a) is it
+   literally a stock library class (transformers/diffusers) that the reference
+   framework merely vendors a copy of? then prefer reusing the library class
+   under the documented model-import exception, proven bit-exact vs the reference;
+   (b) does an existing in-repo native module already implement this architecture
+   under a different name? (Both the audio decoder and the vision encoder were
+   "already there" — one in-repo, one in transformers — saving a from-scratch
+   ViT/codec port.)
 
 Porting subagent dispatch:
 
@@ -373,6 +451,7 @@ Pre-handoff checklist:
 [ ] Prep handoff is complete and committed nowhere with token values.
 [ ] Conversion was run if needed and output loads with real weights.
 [ ] Every required component, reused or newly ported, has a non-skip local parity PASS.
+[ ] Every numerical parity test reports max AND mean abs diff (clean port reads max=mean=0.0, or fp32-epsilon called out).
 [ ] `local_tests_readme` lists every component parity test, command, status, and blocker if any.
 [ ] `port_state_file` has every open question/issue either resolved or listed as an explicit blocker.
 [ ] Any `next_step=ask_user` has a matching `escape_hatch` block and `E###` row.
@@ -380,7 +459,8 @@ Pre-handoff checklist:
 [ ] Pipeline parity has a non-skip local PASS against the official reference.
 [ ] Basic example runs and writes a non-corrupt output.
 [ ] Video SSIM or audio-specific quality regression is added or explicitly deferred.
-[ ] Runtime production code has no diffusers/transformers model-class imports.
+[ ] Runtime production code has no diffusers/transformers model-class imports AND no official-reference-framework imports.
+[ ] Runtime independence verified: production modules import + the model builds with the reference framework blocked (sys.modules raise-on-import), or proven by grep.
 [ ] Production comments are WHY-focused; examples have user-story docstrings.
 [ ] Post-parity hot-path pass is complete.
 ```
@@ -408,6 +488,8 @@ matching `*secret*`.
   registry/example wiring, smoke tests, and pipeline parity-debug.
 - `fastvideo/layers/AGENTS.md` for native layer selection and state-dict surface
   guidance.
+- `tests/local_tests/cosmos3/port_feedback.md` for a worked omni-port (Cosmos3)
+  retrospective: the concrete pitfalls + fixes the Phase notes above distill.
 - `docs/contributing/coding_agents.md` for narrative context.
 - `docs/design/overview.md` for pipeline/config/registry architecture.
 - `fastvideo/pipelines/basic/wan/` for standard T2V/I2V/DMD/Causal variants.
@@ -438,3 +520,4 @@ matching `*secret*`.
 | 2026-04-30 | Extracted handoff schemas into `contracts/` for shared use across skills. |
 | 2026-04-30 | Added pipeline skill contract and Phase 7 component-parity gate. |
 | 2026-04-30 | Added escape-hatch contract for user decisions and `ask_user` handoffs. |
+| 2026-06-07 | Folded Cosmos3 omni-port lessons (`tests/local_tests/cosmos3/port_feedback.md`): lossy checkpoint configs / dump-weights-early / temporal-VAE conditioning / resolution-keyed knobs (Phase 1); oracle-must-be-framework + report max/mean + CPU-runnable oracle (Phase 2); reuse-diverges-on-untested-config + check-for-stock/in-repo-module (Phase 3); multi-modal/MoT modality-bookkeeping + reasoning/buffer/dtype notes (Phase 1); reference-framework production ban + runtime-independence verification (common_rules + checklist). |

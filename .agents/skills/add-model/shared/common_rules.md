@@ -75,14 +75,30 @@ weaken these shared rules.
 
 - No runtime `from diffusers import <model class>` or
   `from transformers import <model class>` in `fastvideo/` production code.
+- **The official reference framework (the upstream repo used as the parity
+  oracle) is a TEST-ONLY dependency.** No `fastvideo/` production module may
+  import it. Production must run with the reference framework *uninstalled* — it
+  exists only to validate the native port, never to run it.
 - Components that own weights or numerical behavior must be FastVideo-native
   unless the user explicitly accepts a documented lazy-wrapper exception.
 - Allowed third-party runtime exceptions are tokenizers and pure data utilities
-  when they match existing project patterns.
-- Tests may import diffusers/transformers as parity references.
+  (e.g. a seeded-randn helper) when they match existing project patterns.
+- When the checkpoint component IS literally a stock library model class and the
+  reference framework itself only vendors a copy of that class (e.g. a stock
+  Qwen-VL vision encoder), reusing the library class — proven bit-exact vs the
+  reference — is usually better than re-porting a large stock model. It is still
+  a model-class import, so it takes the documented lazy-wrapper-exception path
+  (flag it for the user), not the default-native path.
+- Tests may import diffusers / transformers / the reference framework as parity
+  references.
+- **Verify runtime independence before handoff** (see the final-handoff
+  checklist): `grep` production code for reference/diffusers/transformers model
+  imports, AND block those top-level packages in `sys.modules` (raise on import)
+  and confirm every production module still imports and the model still builds.
 - Production comments explain why, not what or provenance. Avoid narrative
   comments like `vendored from`, `matches upstream`, `REVIEW`, or session-history
-  commentary.
+  commentary. (A one-line "mirrors `<ref path>`" pointer on a parity-critical
+  function is acceptable when it documents the numerical contract, not history.)
 
 ## Verification Semantics
 
