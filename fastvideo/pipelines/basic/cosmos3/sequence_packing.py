@@ -111,21 +111,30 @@ class Cosmos3PackedSequence:
     vision_condition_mask: list[torch.Tensor]
     fps_vision: torch.Tensor | None = None
 
-    def to_dit_kwargs(self) -> dict[str, Any]:
-        """Return the kwargs dict for ``Cosmos3VFMTransformer.forward``."""
+    def to_dit_kwargs(self, device: torch.device | str | None = None) -> dict[str, Any]:
+        """Return the kwargs dict for ``Cosmos3VFMTransformer.forward``.
+
+        Packing is device-agnostic (ids/indexes/position-ids are built on CPU).
+        When ``device`` is given, every tensor input is moved to it so the DiT
+        forward runs on a single device (e.g. the model's GPU at inference).
+        """
+
+        def _mv(x: Any) -> Any:
+            return x.to(device) if (device is not None and torch.is_tensor(x)) else x
+
         return dict(
-            text_ids=self.text_ids,
-            text_indexes=self.text_indexes,
-            position_ids=self.position_ids,
+            text_ids=_mv(self.text_ids),
+            text_indexes=_mv(self.text_indexes),
+            position_ids=_mv(self.position_ids),
             sequence_length=int(self.sequence_length),
             split_lens=list(self.split_lens),
             attn_modes=list(self.attn_modes),
-            vision_tokens=list(self.vision_tokens),
+            vision_tokens=[_mv(t) for t in self.vision_tokens],
             vision_token_shapes=list(self.vision_token_shapes),
-            vision_sequence_indexes=self.vision_sequence_indexes,
-            vision_timesteps=self.vision_timesteps,
-            vision_mse_loss_indexes=self.vision_mse_loss_indexes,
-            vision_noisy_frame_indexes=list(self.vision_noisy_frame_indexes),
+            vision_sequence_indexes=_mv(self.vision_sequence_indexes),
+            vision_timesteps=_mv(self.vision_timesteps),
+            vision_mse_loss_indexes=_mv(self.vision_mse_loss_indexes),
+            vision_noisy_frame_indexes=[_mv(t) for t in self.vision_noisy_frame_indexes],
             fps_vision=self.fps_vision,
         )
 
