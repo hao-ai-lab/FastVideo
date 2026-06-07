@@ -187,7 +187,22 @@ class Cosmos3DenoisingStage(PipelineStage):
     # Image preprocessing
     # ------------------------------------------------------------------
     @staticmethod
+    def _resize_and_center_crop(img: torch.Tensor, target_h: int, target_w: int) -> torch.Tensor:
+        """Aspect-ratio-preserving resize + center crop, matching the framework
+        (``cosmos_framework.inference.vision._resize_and_center_crop``)."""
+        import math
+
+        import torchvision.transforms.functional as TF
+        orig_h, orig_w = img.shape[-2], img.shape[-1]
+        scaling_ratio = max(target_w / orig_w, target_h / orig_h)
+        resize_h = int(math.ceil(scaling_ratio * orig_h))
+        resize_w = int(math.ceil(scaling_ratio * orig_w))
+        img = TF.resize(img, [resize_h, resize_w])
+        return TF.center_crop(img, [target_h, target_w])
+
+    @classmethod
     def _image_to_video_tensor(
+        cls,
         image: Any,
         num_frames: int,
         height: int,
@@ -195,36 +210,43 @@ class Cosmos3DenoisingStage(PipelineStage):
         device: torch.device,
         dtype: torch.dtype,
     ) -> torch.Tensor:
-        """Coerce a conditioning image into a ``[1, 3, T, H, W]`` pixel tensor in [-1, 1].
+        """Build the I2V conditioning pixel video ``[1, 3, T, H, W]`` in [-1, 1].
 
-        The first frame holds the (already preprocessed) conditioning image and
-        the remaining frames are zero-filled; only frame 0 is kept clean by the
-        condition mask, so the rest of the clip is denoised from noise.
+        Faithful to the framework (``cosmos_framework.inference.vision``):
+        ``load_conditioning_image`` (aspect-preserving resize + center crop +
+        uint8 quantization, then ``/127.5 - 1``) followed by
+        ``build_conditioned_video_batch``, which fills frame 0 with the image and
+        **repeats the last conditioning frame** for the rest of the clip (a static
+        video), NOT zeros. The whole clip is VAE-encoded by the caller; only the
+        latent condition frame(s) are kept clean by the condition mask, but the
+        VAE is temporal, so the repeated (not zeroed) frames change the condition
+        latent — zero-filling here produces a wrong conditioning latent.
         """
-        import torchvision.transforms.functional as TF
+        import numpy as np
 
-        if isinstance(image, torch.Tensor):
-            img = image.float()
-            # Accept [B,3,T,H,W], [3,T,H,W], [3,H,W], or [B,3,H,W].
-            if img.dim() == 5:
-                img = img[0]
-            if img.dim() == 4 and img.shape[1] == 1:
-                img = img[:, 0]  # [3, H, W]
-            elif img.dim() == 4:
-                img = img[:, 0]  # take first frame -> [3, H, W]
-            # Normalize to [-1, 1] if it looks like [0, 1] or [0, 255].
-            if img.max() > 1.5:
-                img = img / 127.5 - 1.0
-        elif hasattr(image, "convert"):  # PIL.Image
-            import numpy as np
+        # 1. Coerce to a [3, H, W] tensor in the [0, 255] pixel domain.
+        if hasattr(image, "convert"):  # PIL.Image
             arr = np.array(image.convert("RGB"))
-            img = torch.from_numpy(arr).permute(2, 0, 1).float() / 127.5 - 1.0
+            img = torch.from_numpy(arr).permute(2, 0, 1).float()  # [3, H, W]
+        elif isinstance(image, torch.Tensor):
+            img = image.float()
+            if img.dim() == 5:  # [B,3,T,H,W]
+                img = img[0]
+            if img.dim() == 4:  # [3,T,H,W] or [B,3,H,W] -> first frame
+                img = img[:, 0]
+            if img.min() < -0.01:  # [-1, 1] -> [0, 255]
+                img = (img + 1.0) * 127.5
+            elif img.max() <= 1.5:  # [0, 1] -> [0, 255]
+                img = img * 255.0
         else:
             raise TypeError(f"Unsupported conditioning image type: {type(image)}")
 
-        if img.shape[-2:] != (height, width):
-            img = TF.resize(img.unsqueeze(0), [height, width]).squeeze(0)
+        # 2. Framework resize + center crop + uint8 quantization, then -> [-1, 1].
+        img = cls._resize_and_center_crop(img.unsqueeze(0), height, width).squeeze(0)
+        img = img.round().clamp(0, 255) / 127.5 - 1.0  # [3, H, W] in [-1, 1]
 
-        video = torch.zeros((1, 3, num_frames, height, width), device=device, dtype=dtype)
-        video[0, :, 0] = img.to(device=device, dtype=dtype)
-        return video
+        # 3. Static-repeat video (build_conditioned_video_batch: frame 0 = image,
+        #    remaining frames repeat the last conditioning frame).
+        img = img.to(device=device, dtype=dtype)
+        video = img.unsqueeze(0).unsqueeze(2).expand(1, 3, num_frames, height, width)
+        return video.contiguous()
