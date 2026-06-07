@@ -909,6 +909,8 @@ def _register_presets() -> None:
     from fastvideo.api.presets import register_preset
     from fastvideo.pipelines.basic.cosmos.presets import (
         ALL_PRESETS as COSMOS_PRESETS, )
+    from fastvideo.pipelines.basic.cosmos3.presets import (
+        ALL_PRESETS as COSMOS3_PRESETS, )
     from fastvideo.pipelines.basic.gamecraft.presets import (
         ALL_PRESETS as GAMECRAFT_PRESETS, )
     from fastvideo.pipelines.basic.gen3c.presets import (
@@ -940,6 +942,7 @@ def _register_presets() -> None:
 
     all_preset_groups = (
         COSMOS_PRESETS,
+        COSMOS3_PRESETS,
         GAMECRAFT_PRESETS,
         GEN3C_PRESETS,
         HUNYUAN_PRESETS,

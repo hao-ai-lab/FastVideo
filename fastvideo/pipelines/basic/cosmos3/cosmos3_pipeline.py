@@ -1,66 +1,63 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Cosmos3 pipeline (Phase 2f.2 partial).
+"""FastVideo-native Cosmos3 video pipeline (T2V / I2V / T2I).
 
-Upstream reference:
-    ``vllm_omni/diffusion/models/cosmos3/pipeline_cosmos3.py`` from
-    vllm-omni HEAD ``8536f5b1421f78c7df06af6d96fa195c1ceb6384``.
+This replaces the earlier vllm-omni-derived skeleton with a native, stage-based
+:class:`ComposedPipelineBase` pipeline that wires the framework-parity-verified
+Cosmos3 components:
 
-Phase 2f.1 landed the checkpoint-remap + scheduler-shift surface:
+* tokenizer: Qwen2 ``Qwen2TokenizerFast`` + chat template (the only allowed
+  third-party model-adjacent dependency; tokenizers are explicitly permitted),
+* VAE: FastVideo-native ``AutoencoderKLWan`` (Wan2.2) via ``Cosmos3VAEConfig``;
+  encode normalizes ``(mu - mean) * inv_std`` and decode denormalizes + clamps,
+* sequence-packing: :func:`pack_cosmos3_video_sequence` (native, parity-tested),
+* DiT: ``Cosmos3VFMTransformer`` (native, bit-identical to the framework),
+* scheduler: diffusers ``UniPCMultistepScheduler`` (the actual scheduler the
+  checkpoint ships, ``flow_prediction`` + ``use_flow_sigmas``).
 
-* ``_remap_ckpt_key`` — ported verbatim from upstream lines 319-409. This is a
-  pure key-translation function with no FastVideo-specific adaptations; the
-  checkpoint converter at ``scripts/checkpoint_conversion/cosmos3_convert.py``
-  (Phase 5) will reuse it.
-* ``_set_flow_shift`` — ported from upstream lines 498-512 with lazy scheduler
-  construction so the scheduler-default-parity tests can exercise the method on
-  ``__new__``-allocated instances before ``__init__`` is wired.
-* ``_engine_init_flow_shift`` — exposed as a class attribute (default ``1.0``)
-  so ``hasattr(__new__(...), "_engine_init_flow_shift")`` succeeds without
-  running ``__init__``.
+The denoise/CFG glue is a faithful port of the framework's
+``Cosmos3OmniDiffusersPipeline`` math (mirrored in the framework-equivalent
+``diffusers_cosmos3.pipeline``): per UniPC timestep, run a SEQUENTIAL conditional
+then unconditional pass (each repacks the sequence with the prompt / negative
+prompt token ids, forwards the DiT, and zeros the prediction on conditioning
+frames), then combine ``v = uncond + guidance * (cond - uncond)`` and take one
+``scheduler.step(model_output=v, timestep, sample=latent)``. ``timestep_scale``
+is applied to the per-token timesteps *inside* the DiT (its ``forward`` already
+multiplies ``vision_timesteps * timestep_scale`` before the time embedder), so
+the loop passes raw scheduler timesteps to the packer.
 
-Phase 2f.2 adds the runtime call graph (this commit):
+The pure denoise math lives in :class:`Cosmos3DenoiseEngine` and the free
+function :func:`cosmos3_get_cfg_velocity` so it can be unit-/parity-tested
+directly against the framework oracle without constructing the full pipeline.
 
-* ``diffuse`` — sequential 3-mode CFG denoising loop ported from upstream
-  lines 883-1033. The CFG-Parallel branch (cfg_parallel=True) is deferred
-  until FastVideo's classifier-free-guidance-world-size plumbing lands;
-  ``_cfg_parallel_active`` returns False so only the sequential and no-CFG
-  paths execute.
-* ``forward`` — request parsing + T2I/T2V/I2V mode dispatch + flow-shift
-  selection + diffusion driver + decode, ported from upstream lines
-  1037-1206 (single-prompt path; the T2I num_outputs_per_prompt > 1 branch
-  is preserved but uses the unimplemented ``_prepare_latents`` stub).
-* ``_is_t2i_request`` / ``_get_sp_param`` / ``_cfg_parallel_active`` —
-  ported from upstream lines 452-496.
-* Negative-prompt constants — ported from upstream lines 51-61.
-
-Helper methods ``_format_and_tokenize_prompts``, ``_prepare_latents``,
-``_prepare_latents_i2v``, ``_set_scheduler_timesteps``, and
-``_decode_latents`` are defined as ``NotImplementedError`` stubs so the
-pipeline call-graph tests can monkey-patch them without an
-``AttributeError``; their real implementations land in Phase 2c
-(tokenizer) and Phase 2f.3+ (latent prep, scheduler timesteps, VAE decode).
-
-``__init__`` and ``create_pipeline_stages`` remain ``NotImplementedError``
-stubs — full module/stage wiring is left to a future phase.
+No diffusers/transformers *model* classes are imported at runtime here; only the
+Qwen2 tokenizer (loaded by the component loader) and the UniPC scheduler are
+third-party, both explicitly allowed.
 """
-
 from __future__ import annotations
 
-from types import SimpleNamespace
+import math
+from dataclasses import dataclass
 from typing import Any
 
 import torch
-import torch.nn as nn
 from diffusers import UniPCMultistepScheduler
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.pipelines.basic.cosmos3.sequence_packing import (
+    Cosmos3SampleInputs,
+    Cosmos3VisionItem,
+    pack_cosmos3_video_sequence,
+)
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 
 logger = init_logger(__name__)
 
-# Negative-prompt constants ported verbatim from upstream pipeline_cosmos3.py:51-61.
-COSMOS3_DEFAULT_NEGATIVE_PROMPT = ""
+# System prompts, verbatim from the framework (diffusers_cosmos3.pipeline).
+_SYSTEM_PROMPT_IMAGE = "You are a helpful assistant who will generate images from a give prompt."
+_SYSTEM_PROMPT_VIDEO = "You are a helpful assistant who will generate videos from a give prompt."
+
+# Default video negative prompt (framework / Cosmos quality prompt).
 COSMOS3_VIDEO_NEGATIVE_PROMPT = (
     "The video captures a series of frames showing ugly scenes, static with no motion, motion blur, "
     "over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, "
@@ -68,168 +65,413 @@ COSMOS3_VIDEO_NEGATIVE_PROMPT = (
     "jerky movements, low frame rate, artifacting, color banding, unnatural transitions, outdated special effects, "
     "fake elements, unconvincing visuals, poorly edited content, jump cuts, visual noise, and flickering. "
     "Overall, the video is of poor quality.")
-COSMOS3_T2V_NEGATIVE_PROMPT = COSMOS3_VIDEO_NEGATIVE_PROMPT
-COSMOS3_I2V_NEGATIVE_PROMPT = COSMOS3_VIDEO_NEGATIVE_PROMPT
 
 
-class Cosmos3OmniDiffusersPipeline(nn.Module, ComposedPipelineBase):
-    """Cosmos3 T2V/I2V/T2I pipeline (skeleton).
+# ===========================================================================
+# Special-token resolution (Qwen2 chat tokenizer)
+# ===========================================================================
+def cosmos3_special_tokens(tokenizer: Any) -> dict[str, int]:
+    """Resolve the Cosmos3 generation special tokens from a Qwen2 tokenizer.
 
-    Phase 2f.1 lands only the checkpoint-remap + scheduler-shift surface needed
-    by ``test_cosmos3_state_dict_keys.py`` and
-    ``test_cosmos3_scheduler_default_parity.py``. Full wiring (modules,
-    stages, ``diffuse()``, mode dispatch) is deferred to Phase 2f.2.
+    Mirrors the framework's ``llm_special_tokens``:
+    ``start_of_generation=<|vision_start|>``, ``end_of_generation=<|vision_end|>``,
+    ``eos_token_id=tokenizer.eos_token_id``.
+    """
+    return {
+        "start_of_generation": int(tokenizer.convert_tokens_to_ids("<|vision_start|>")),
+        "end_of_generation": int(tokenizer.convert_tokens_to_ids("<|vision_end|>")),
+        "eos_token_id": int(tokenizer.eos_token_id),
+    }
 
-    Inherits from both ``nn.Module`` (matching upstream
-    ``pipeline_cosmos3.py:197-199`` — the conftest fixture
-    ``make_cosmos3_pipeline`` calls ``nn.Module.__init__`` directly) and
-    ``ComposedPipelineBase`` (FastVideo's pipeline convention — sibling
-    ``cosmos2_5_pipeline.py``). Phase 2f.2 can collapse either branch if
-    one proves unnecessary once the full pipeline lands.
 
-    The scheduler-parity tests build instances via
-    ``Cosmos3OmniDiffusersPipeline.__new__(...)`` and rely on:
+def cosmos3_tokenize_caption(
+    tokenizer: Any,
+    caption: str,
+    *,
+    is_video: bool = False,
+    use_system_prompt: bool = False,
+) -> list[int]:
+    """Tokenize a caption with the Qwen2 chat template (framework-faithful).
 
-    * ``hasattr(instance, "scheduler")`` succeeding before ``_set_flow_shift``
-      is called (satisfied by the ``scheduler = None`` class attribute below);
-    * ``hasattr(instance, "_engine_init_flow_shift")`` succeeding (satisfied
-      by the class-attribute default ``1.0``).
+    Optionally prepends an image/video system prompt; always adds the
+    generation prompt and disables ``add_vision_id`` (matching the framework's
+    ``tokenize_caption``).
+    """
+    conversations: list[dict[str, str]] = []
+    if use_system_prompt:
+        conversations.append({
+            "role": "system",
+            "content": _SYSTEM_PROMPT_VIDEO if is_video else _SYSTEM_PROMPT_IMAGE,
+        })
+    conversations.append({"role": "user", "content": caption})
+    token_ids = tokenizer.apply_chat_template(
+        conversations,
+        tokenize=True,
+        add_generation_prompt=True,
+        add_vision_id=False,
+    )
+    return list(token_ids)
+
+
+# ===========================================================================
+# VAE encode/decode bridge (normalize / denormalize, matching the framework)
+# ===========================================================================
+@dataclass
+class _VaeNorm:
+    """Cached ``mean`` / ``inv_std`` for VAE (de)normalization."""
+
+    mean: torch.Tensor  # [z_dim]
+    inv_std: torch.Tensor  # [z_dim]
+
+    @classmethod
+    def from_vae(cls, vae: Any, dtype: torch.dtype) -> _VaeNorm:
+        mean = torch.tensor(list(vae.config.latents_mean), dtype=dtype)
+        std = torch.tensor(list(vae.config.latents_std), dtype=dtype)
+        return cls(mean=mean, inv_std=1.0 / std)
+
+
+def cosmos3_vae_encode(vae: Any, video: torch.Tensor, norm: _VaeNorm) -> torch.Tensor:
+    """Encode ``[B, 3, T, H, W]`` pixels in [-1, 1] to NORMALIZED latents.
+
+    Matches the framework ``DiffusersWan22VAE.encode``: take the posterior mode
+    and apply ``(mu - mean) * inv_std``. FastVideo's ``AutoencoderKLWan.encode``
+    returns a ``DiagonalGaussianDistribution``; we read ``.mode()``.
+    """
+    in_dtype = video.dtype
+    device = video.device
+    mean = norm.mean.to(device=device, dtype=in_dtype).view(1, -1, 1, 1, 1)
+    inv_std = norm.inv_std.to(device=device, dtype=in_dtype).view(1, -1, 1, 1, 1)
+    raw_mu = vae.encode(video).mode()
+    return ((raw_mu - mean) * inv_std).to(in_dtype)
+
+
+def cosmos3_vae_decode(vae: Any, latents: torch.Tensor, norm: _VaeNorm) -> torch.Tensor:
+    """Decode NORMALIZED latents ``[B, z, T, H, W]`` to pixels ``[B, 3, T, H, W]``.
+
+    Inverts the normalization (``z / inv_std + mean``) then calls
+    ``vae.decode`` (which already clamps to [-1, 1]).
+    """
+    in_dtype = latents.dtype
+    device = latents.device
+    mean = norm.mean.to(device=device, dtype=in_dtype).view(1, -1, 1, 1, 1)
+    inv_std = norm.inv_std.to(device=device, dtype=in_dtype).view(1, -1, 1, 1, 1)
+    z_raw = latents / inv_std + mean
+    out = vae.decode(z_raw)
+    if isinstance(out, tuple):
+        out = out[0]
+    if hasattr(out, "sample"):
+        out = out.sample
+    return out.to(in_dtype)
+
+
+# ===========================================================================
+# Per-vision-item packing geometry
+# ===========================================================================
+@dataclass
+class Cosmos3VisionSpec:
+    """Geometry + conditioning for one vision item in a denoise run.
+
+    Args:
+        clean_latent: VAE-encoded conditioning latent ``[C, T, H, W]`` used to
+            keep condition frames clean (I2V / T2I). May be ``None`` for T2V.
+        condition_frame_indexes: Latent-frame indices kept clean.
+        shape: ``(C, T, H, W)`` of the latent for this item.
     """
 
-    # --- Class attributes ---------------------------------------------------
-    #
-    # These exist as class attributes so ``hasattr(__new__(cls), name)`` is
-    # True without ``__init__`` having run. ``__init__`` (Phase 2f.2) will
-    # shadow them with instance attributes derived from the loaded scheduler.
+    shape: tuple[int, int, int, int]
+    condition_frame_indexes: list[int]
+    clean_latent: torch.Tensor | None = None
+
+    @property
+    def numel(self) -> int:
+        return int(math.prod(self.shape))
+
+
+# ===========================================================================
+# Pure denoise/CFG math (parity oracle target)
+# ===========================================================================
+def _split_flat_latent(flat: torch.Tensor, specs: list[Cosmos3VisionSpec]) -> list[torch.Tensor]:
+    """Split a flat latent vector into per-vision-item ``[C, T, H, W]`` tensors."""
+    out: list[torch.Tensor] = []
+    offset = 0
+    for spec in specs:
+        out.append(flat[offset:offset + spec.numel].reshape(spec.shape))
+        offset += spec.numel
+    return out
+
+
+def cosmos3_get_cfg_velocity(
+    *,
+    transformer: Any,
+    flat_latent: torch.Tensor,
+    timestep: torch.Tensor,
+    guidance: float,
+    specs: list[Cosmos3VisionSpec],
+    cond_token_ids: list[int],
+    uncond_token_ids: list[int],
+    special_tokens: dict[str, int],
+    latent_patch_size: int,
+    temporal_modality_margin: int,
+    reset_spatial_ids: bool,
+    enable_fps_modulation: bool,
+    base_fps: float,
+    temporal_compression_factor: int,
+    include_end_of_generation_token: bool = False,
+    fps_per_item: list[float] | None = None,
+    normalize_cfg: bool = False,
+) -> torch.Tensor:
+    """Sequential-CFG velocity for one denoise step (framework math).
+
+    Replicates the framework ``get_cfg_velocity``:
+
+    1. split ``flat_latent`` into per-vision-item ``[C, T, H, W]`` latents,
+    2. run a conditional pass (prompt tokens) and an unconditional pass
+       (negative-prompt tokens); each repacks via
+       :func:`pack_cosmos3_video_sequence`, forwards the DiT to obtain
+       ``preds_vision`` (a list of ``[1, C, T, H, W]`` unpatchified noisy-frame
+       predictions), and zeros the prediction on conditioning frames
+       (``pred * (1 - condition_mask)``),
+    3. combine ``v = uncond + guidance * (cond - uncond)`` (optionally
+       norm-rescaled), returned flattened to match ``flat_latent``.
+
+    ``timestep`` is a scalar tensor (raw scheduler timestep); ``timestep_scale``
+    is applied inside the DiT, so it is passed through unscaled here.
+    """
+    assert timestep.numel() == 1, "timestep must be a scalar"
+    timestep_value = float(timestep.reshape(()).item())
+
+    noise_x_vision = _split_flat_latent(flat_latent, specs)
+
+    def _run(token_ids: list[int]) -> torch.Tensor:
+        samples = [
+            Cosmos3SampleInputs(
+                text_ids=list(token_ids),
+                vision=Cosmos3VisionItem(
+                    latent=latent,
+                    condition_frame_indexes=list(spec.condition_frame_indexes),
+                    fps=(fps_per_item[i] if fps_per_item is not None else None),
+                ),
+                timestep=timestep_value,
+            ) for i, (latent, spec) in enumerate(zip(noise_x_vision, specs, strict=False))
+        ]
+        packed = pack_cosmos3_video_sequence(
+            samples,
+            special_tokens,
+            latent_patch_size=latent_patch_size,
+            include_end_of_generation_token=include_end_of_generation_token,
+            temporal_modality_margin=temporal_modality_margin,
+            reset_spatial_ids=reset_spatial_ids,
+            enable_fps_modulation=enable_fps_modulation,
+            base_fps=base_fps,
+            temporal_compression_factor=temporal_compression_factor,
+        )
+        out = transformer(**packed.to_dit_kwargs())
+        preds = out.get("preds_vision")
+        if preds is None:
+            # Fully-conditioned clip: no noisy frames, zero velocity.
+            return torch.zeros_like(flat_latent)
+        # Zero the prediction on conditioning frames, per item.
+        velocity_items: list[torch.Tensor] = []
+        for pred, cond_mask in zip(preds, packed.vision_condition_mask, strict=False):
+            pred = pred.squeeze(0) if pred.dim() == 5 else pred  # [C, T, H, W]
+            keep = (1.0 - cond_mask).to(dtype=pred.dtype, device=pred.device)  # [T,1,1]
+            if keep.sum() > 0:
+                velocity_items.append(pred * keep)
+            else:
+                velocity_items.append(torch.zeros_like(pred))
+        return torch.cat([v.reshape(-1) for v in velocity_items])
+
+    cond_v = _run(cond_token_ids)
+    uncond_v = _run(uncond_token_ids)
+    v_pred = uncond_v + guidance * (cond_v - uncond_v)
+    if normalize_cfg:
+        scale = (torch.norm(cond_v) / (torch.norm(v_pred) + 1e-8)).clamp(min=0.0, max=1.0)
+        v_pred = v_pred * scale
+    return v_pred
+
+
+class Cosmos3DenoiseEngine:
+    """Stateless denoise driver tying CFG velocity to UniPC stepping.
+
+    Holds the transformer + scheduler + packing constants and runs the full
+    UniPC denoise loop. Kept separate from the pipeline so it can be exercised
+    in isolation (smoke + parity tests) with stub or real components.
+    """
+
+    def __init__(
+        self,
+        *,
+        transformer: Any,
+        scheduler: Any,
+        special_tokens: dict[str, int],
+        latent_patch_size: int,
+        temporal_modality_margin: int,
+        reset_spatial_ids: bool,
+        enable_fps_modulation: bool,
+        base_fps: float,
+        temporal_compression_factor: int,
+        include_end_of_generation_token: bool = False,
+    ) -> None:
+        self.transformer = transformer
+        self.scheduler = scheduler
+        self.special_tokens = special_tokens
+        self.latent_patch_size = latent_patch_size
+        self.temporal_modality_margin = temporal_modality_margin
+        self.reset_spatial_ids = reset_spatial_ids
+        self.enable_fps_modulation = enable_fps_modulation
+        self.base_fps = base_fps
+        self.temporal_compression_factor = temporal_compression_factor
+        self.include_end_of_generation_token = include_end_of_generation_token
+
+    def velocity(
+        self,
+        *,
+        flat_latent: torch.Tensor,
+        timestep: torch.Tensor,
+        guidance: float,
+        specs: list[Cosmos3VisionSpec],
+        cond_token_ids: list[int],
+        uncond_token_ids: list[int],
+        fps_per_item: list[float] | None = None,
+    ) -> torch.Tensor:
+        return cosmos3_get_cfg_velocity(
+            transformer=self.transformer,
+            flat_latent=flat_latent,
+            timestep=timestep,
+            guidance=guidance,
+            specs=specs,
+            cond_token_ids=cond_token_ids,
+            uncond_token_ids=uncond_token_ids,
+            special_tokens=self.special_tokens,
+            latent_patch_size=self.latent_patch_size,
+            temporal_modality_margin=self.temporal_modality_margin,
+            reset_spatial_ids=self.reset_spatial_ids,
+            enable_fps_modulation=self.enable_fps_modulation,
+            base_fps=self.base_fps,
+            temporal_compression_factor=self.temporal_compression_factor,
+            include_end_of_generation_token=self.include_end_of_generation_token,
+            fps_per_item=fps_per_item,
+        )
+
+    def denoise(
+        self,
+        *,
+        flat_latent: torch.Tensor,
+        timesteps: torch.Tensor,
+        guidance: float,
+        specs: list[Cosmos3VisionSpec],
+        cond_token_ids: list[int],
+        uncond_token_ids: list[int],
+        fps_per_item: list[float] | None = None,
+        progress_bar: Any | None = None,
+    ) -> torch.Tensor:
+        """Run the full UniPC denoise loop, returning the final flat latent.
+
+        For each timestep: compute the sequential-CFG velocity, then
+        ``scheduler.step(model_output=v, timestep, sample=latent.unsqueeze(0))``
+        (the framework steps with a leading batch axis), squeezing back to flat.
+        """
+        latent = flat_latent
+        iterator = progress_bar(timesteps) if progress_bar is not None else timesteps
+        for t in iterator:
+            v_pred = self.velocity(
+                flat_latent=latent,
+                timestep=t.reshape(1),
+                guidance=guidance,
+                specs=specs,
+                cond_token_ids=cond_token_ids,
+                uncond_token_ids=uncond_token_ids,
+                fps_per_item=fps_per_item,
+            )
+            stepped = self.scheduler.step(
+                model_output=v_pred,
+                timestep=t,
+                sample=latent.unsqueeze(0),
+                return_dict=False,
+            )[0]
+            latent = stepped.squeeze(0)
+        return latent
+
+
+# ===========================================================================
+# Pipeline (ComposedPipelineBase)
+# ===========================================================================
+class Cosmos3OmniDiffusersPipeline(ComposedPipelineBase):
+    """Cosmos3 video generation pipeline (T2V / I2V / T2I).
+
+    Stage-based ``ComposedPipelineBase`` pipeline. The required modules
+    (``transformer`` / ``vae`` / ``scheduler`` / ``text_tokenizer``) are loaded
+    from the ``nvidia/Cosmos3-Nano`` checkpoint by the component loader. The
+    class name matches the checkpoint ``model_index.json`` ``_class_name`` so
+    the registry resolves it directly.
+
+    The denoise/CFG/VAE math is delegated to module-level helpers
+    (:func:`cosmos3_get_cfg_velocity`, :class:`Cosmos3DenoiseEngine`,
+    :func:`cosmos3_vae_encode` / :func:`cosmos3_vae_decode`) which are
+    framework-parity tested in ``tests/local_tests/cosmos3``.
+    """
+
+    is_video_pipeline = True
+    # ``vision_encoder`` / ``sound_tokenizer`` ship in the checkpoint but the
+    # video path does not need them; they are intentionally omitted here.
+    _required_config_modules = ["text_tokenizer", "vae", "transformer", "scheduler"]
+
+    # Engine-init flow_shift (T2V/I2V); T2I overrides to 3.0 per request.
     _engine_init_flow_shift: float = 1.0
+    # Class-attribute defaults so ``__new__``-based unit tests can read these
+    # before ``initialize_pipeline`` runs.
     scheduler: Any = None
     _base_scheduler_config: Any = None
     _current_flow_shift: float | None = None
 
-    # -- Weight loading -----------------------------------------------------
+    def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
+        """Bind the loaded scheduler + snapshot its config so per-request
+        flow_shift rebuilds are cheap and the engine-init shift is applied."""
+        pipeline_config = fastvideo_args.pipeline_config
+        engine_shift = getattr(pipeline_config, "flow_shift", None)
+        if engine_shift is not None:
+            self._engine_init_flow_shift = float(engine_shift)
+        scheduler = self.get_module("scheduler")
+        if scheduler is not None:
+            self.scheduler = scheduler
+            self._base_scheduler_config = scheduler.config
+            self._current_flow_shift = float(getattr(scheduler.config, "flow_shift", 1.0))
 
-    @staticmethod
-    def _remap_ckpt_key(key: str) -> str | None:
-        """Remap a Diffusers transformer key to the model parameter namespace.
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        """Wire the Cosmos3 stages.
 
-        Checkpoint keys arrive with a synthetic ``transformer.`` prefix from
-        ``weights_sources``. The source checkpoint itself uses the Diffusers
-        transformer namespace: top-level projections plus ``model.*`` for the
-        Qwen3-VL backbone. UND and GEN components share each layer in the
-        source and are split into separate module lists here.
-
-        Returns the remapped name under ``transformer.``, or ``None`` to skip.
-
-        Ported verbatim from upstream ``pipeline_cosmos3.py`` lines 319-409.
+        The whole text->latent->denoise->decode flow is custom (sequential CFG
+        with per-pass repacking), so a single :class:`Cosmos3DenoisingStage`
+        owns it. ``InputValidationStage`` runs first for the standard checks.
         """
-        k = key
-        # Strip the weights_sources prefix
-        if k.startswith("transformer."):
-            k = k[len("transformer."):]
+        from fastvideo.pipelines.stages import InputValidationStage
+        from fastvideo.pipelines.stages.cosmos3_stages import Cosmos3DenoisingStage
 
-        # Top-level generation components.
-        if k.startswith((
-                "vae2llm.",
-                "llm2vae.",
-                "time_embedder.",
-        )):
-            return f"transformer.{k}"
-
-        # Skip lm_head
-        if k.startswith("lm_head."):
-            return None
-
-        # embed_tokens / norm → language_model.*
-        if k.startswith("model.embed_tokens."):
-            return f"transformer.language_model.{k[len('model.'):]}"
-        if k.startswith("model.norm."):
-            return f"transformer.language_model.{k[len('model.'):]}"
-
-        # norm_moe_gen → top level
-        if k.startswith("model.norm_moe_gen."):
-            return f"transformer.{k[len('model.'):]}"
-
-        if not k.startswith("model.layers."):
-            return None
-        k = k[len("model."):]
-
-        if not k.startswith("layers."):
-            return None
-
-        parts = k.split(".", 2)  # ['layers', '{i}', '{rest}']
-        if len(parts) != 3:
-            return None
-        layer_idx = parts[1]
-        rest = parts[2]
-
-        und_lp = f"transformer.language_model.layers.{layer_idx}"
-        gen_lp = f"transformer.gen_layers.{layer_idx}"
-
-        _LAYER_MAP = {
-            # UND attention
-            "self_attn.q_proj.": f"{und_lp}.self_attn.q_proj.",
-            "self_attn.k_proj.": f"{und_lp}.self_attn.k_proj.",
-            "self_attn.v_proj.": f"{und_lp}.self_attn.v_proj.",
-            "self_attn.o_proj.": f"{und_lp}.self_attn.o_proj.",
-            "self_attn.q_norm.": f"{und_lp}.self_attn.q_norm.",
-            "self_attn.k_norm.": f"{und_lp}.self_attn.k_norm.",
-            # GEN attention
-            "self_attn.q_proj_moe_gen.": f"{gen_lp}.cross_attention.q_proj.",
-            "self_attn.k_proj_moe_gen.": f"{gen_lp}.cross_attention.k_proj.",
-            "self_attn.v_proj_moe_gen.": f"{gen_lp}.cross_attention.v_proj.",
-            "self_attn.o_proj_moe_gen.": f"{gen_lp}.cross_attention.o_proj.",
-            "self_attn.q_norm_moe_gen.": f"{gen_lp}.cross_attention.q_norm.",
-            "self_attn.k_norm_moe_gen.": f"{gen_lp}.cross_attention.k_norm.",
-            # Norms
-            "input_layernorm.": f"{und_lp}.input_layernorm.",
-            "post_attention_layernorm.": f"{und_lp}.post_attention_layernorm.",
-            "input_layernorm_moe_gen.": f"{gen_lp}.input_layernorm.",
-            "post_attention_layernorm_moe_gen.": f"{gen_lp}.post_attention_layernorm.",
-            # UND MLP
-            "mlp.gate_proj.": f"{und_lp}.mlp.gate_proj.",
-            "mlp.up_proj.": f"{und_lp}.mlp.up_proj.",
-            "mlp.down_proj.": f"{und_lp}.mlp.down_proj.",
-            # GEN MLP
-            "mlp_moe_gen.gate_proj.": f"{gen_lp}.mlp.gate_proj.",
-            "mlp_moe_gen.up_proj.": f"{gen_lp}.mlp.up_proj.",
-            "mlp_moe_gen.down_proj.": f"{gen_lp}.mlp.down_proj.",
-        }
-
-        for pattern, replacement in _LAYER_MAP.items():
-            if rest.startswith(pattern):
-                suffix = rest[len(pattern):]
-                return replacement + suffix
-
-        return None
+        self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
+        self.add_stage(
+            stage_name="denoising_stage",
+            stage=Cosmos3DenoisingStage(
+                transformer=self.get_module("transformer"),
+                scheduler=self.get_module("scheduler"),
+                vae=self.get_module("vae"),
+                tokenizer=self.get_module("text_tokenizer"),
+                pipeline=self,
+            ),
+        )
 
     # -- Scheduler control --------------------------------------------------
 
     def _set_flow_shift(self, target_shift: float) -> None:
-        """Set the UniPC ``flow_shift`` to a concrete target value.
+        """Set UniPC ``flow_shift`` to ``target_shift``.
 
-        Adapted from upstream ``pipeline_cosmos3.py`` lines 498-512 with one
-        FastVideo-specific addition: when called on an instance built via
-        ``__new__`` (i.e. ``__init__`` has not run, so
-        ``self._base_scheduler_config is None``), this method lazily
-        constructs a default ``UniPCMultistepScheduler`` rather than
-        rebuilding from a saved config. Phase 2f.2's ``__init__`` will
-        replace that lazy path with a checkpoint-loaded scheduler and
-        snapshot its config into ``_base_scheduler_config`` per upstream.
-
-        Tracking ``self._current_flow_shift`` explicitly is required because
-        the previous mode may have rebuilt the scheduler — we cannot rely on
-        ``self.scheduler.config.flow_shift`` reflecting the last requested
-        target if a rebuild was skipped via the equality check.
+        Lazily builds a default UniPC scheduler when called before
+        ``initialize_pipeline`` (e.g. the ``__new__``-based scheduler-parity
+        tests); otherwise rebuilds from the snapshotted base config only when
+        the target differs from the current shift.
         """
         target = float(target_shift)
-
-        # Lazy path: no checkpoint-loaded base config yet (Phase 2f.1 test
-        # entry via __new__). Construct a fresh UniPC scheduler at the
-        # requested flow_shift so test assertions can read
-        # ``self.scheduler.config.flow_shift``. Phase 2f.2's __init__ will
-        # load the real scheduler from the checkpoint and overwrite both
-        # ``self.scheduler`` and ``self._base_scheduler_config``.
-        if self._base_scheduler_config is None:
+        base_config = self._base_scheduler_config
+        if base_config is None:
             self.scheduler = UniPCMultistepScheduler(
                 num_train_timesteps=1000,
                 solver_order=2,
@@ -240,366 +482,23 @@ class Cosmos3OmniDiffusersPipeline(nn.Module, ComposedPipelineBase):
             self._base_scheduler_config = self.scheduler.config
             self._current_flow_shift = target
             return
-
-        # Rebuild only if the target differs from the current shift.
-        if self._current_flow_shift is not None and target == float(self._current_flow_shift):
+        current = self._current_flow_shift
+        if current is not None and target == float(current):
             return
-        self.scheduler = UniPCMultistepScheduler.from_config(self._base_scheduler_config, flow_shift=target)
+        self.scheduler = UniPCMultistepScheduler.from_config(base_config, flow_shift=target)
+        if isinstance(self.modules, dict):
+            self.modules["scheduler"] = self.scheduler
         self._current_flow_shift = target
 
-    # -- Request introspection ----------------------------------------------
+    # -- Tokenization -------------------------------------------------------
 
-    @staticmethod
-    def _cfg_parallel_active() -> bool:
-        """Return True when CFG-Parallel is enabled in the current topology.
-
-        Upstream ``pipeline_cosmos3.py:452-457`` queries
-        ``get_classifier_free_guidance_world_size() > 1``. FastVideo's
-        CFG-Parallel plumbing is not wired in Phase 2f.2, so this always
-        returns False; ``diffuse()`` therefore exercises only the sequential
-        CFG path and the no-CFG path.
-        """
-        return False
-
-    @staticmethod
-    def _get_sp_param(sp: Any, key: str, default: Any = None) -> Any:
-        """Read a runtime control from sampling params.
-
-        Ported verbatim from upstream ``pipeline_cosmos3.py:459-481``.
-
-        Order of precedence:
-            1. ``sp.extra_args[key]`` — preferred path; the OpenAI image/video
-               endpoints surface custom controls there.
-            2. direct attribute on ``sp``.
-            3. ``default``.
-        """
-        extra = getattr(sp, "extra_args", None)
-        if isinstance(extra, dict) and extra.get(key) is not None:
-            return extra[key]
-        val = getattr(sp, key, None)
-        if val is not None:
-            return val
-        return default
-
-    @staticmethod
-    def _is_t2i_request(req: Any) -> bool:
-        """Detect text-to-image mode from request-level prompt modalities.
-
-        Ported verbatim from upstream ``pipeline_cosmos3.py:483-496``.
-        Raises ValueError when a prompt requests both image AND video output
-        simultaneously.
-        """
-        if not req.prompts:
-            return False
-        first_prompt = req.prompts[0]
-        modalities = first_prompt.get("modalities", []) if isinstance(first_prompt, dict) else []
-        if modalities is None:
-            modalities = []
-        if isinstance(modalities, str):
-            modalities = [modalities]
-        if "image" in modalities and "video" in modalities:
-            raise ValueError("Cosmos3 prompt modalities cannot request both image and video output.")
-        return "image" in modalities
-
-    # -- Helper stubs (real implementations land in later phases) -----------
-    #
-    # These exist so the pipeline call-graph tests can monkey-patch them on
-    # the instance without an ``AttributeError``. Each raises
-    # ``NotImplementedError`` if invoked outside a test that replaces it.
-
-    def _format_and_tokenize_prompts(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("_format_and_tokenize_prompts lands in Phase 2c (tokenizer wiring).")
-
-    def _prepare_latents(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("_prepare_latents lands in Phase 2f.3 (latent preparation).")
-
-    def _prepare_latents_i2v(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("_prepare_latents_i2v lands in Phase 2f.3 (I2V latent preparation).")
-
-    def _set_scheduler_timesteps(self, num_inference_steps: int) -> None:
-        raise NotImplementedError("_set_scheduler_timesteps lands in Phase 2f.3 (scheduler timesteps).")
-
-    def _decode_latents(self, latents: torch.Tensor) -> Any:
-        raise NotImplementedError("_decode_latents lands in Phase 2f.3 (VAE decode wiring).")
-
-    # -- Denoising loop -----------------------------------------------------
-
-    def diffuse(
-        self,
-        *,
-        latents: torch.Tensor,
-        timesteps: torch.Tensor,
-        cond_ids: torch.Tensor,
-        cond_mask: torch.Tensor,
-        uncond_ids: torch.Tensor,
-        uncond_mask: torch.Tensor,
-        guidance_scale: float,
-        shared_kwargs: dict[str, Any],
-        velocity_mask: torch.Tensor | None = None,
-        image_latent: torch.Tensor | None = None,
-        condition_latents: torch.Tensor | None = None,
-        guidance_interval: tuple[float, float] | None = None,
-    ) -> torch.Tensor:
-        """Sequential 3-mode CFG denoising loop with optional I2V conditioning.
-
-        Ported from upstream ``pipeline_cosmos3.py:883-1033``. The
-        CFG-Parallel branch (upstream lines 953-980) is deferred until
-        FastVideo's classifier-free-guidance-world-size plumbing lands;
-        ``_cfg_parallel_active`` returns False in Phase 2f.2 so only the
-        sequential CFG branch (upstream lines 982-1019) and the no-CFG
-        branch (upstream lines 1021-1031) execute.
-
-        Cosmos3's UND pathway is text-dependent, so sequential CFG keeps
-        separate K/V caches for the conditional and unconditional text
-        forwards and swaps them in before each branch's transformer call.
-
-        I2V conditioning is applied via ``_step``: ``velocity_mask`` zeros
-        frame-0 noise predictions before the scheduler step, and
-        ``image_latent`` is re-injected into frame 0 after each step
-        (UniPC's predictor-corrector rescales the sample, so zero velocity
-        alone does not preserve frame 0).
-
-        ``guidance_interval`` (T2I) restricts CFG to timesteps inside the
-        closed interval ``[lo, hi]``. Outside the interval the cond/uncond
-        delta is dropped and only the cond branch executes — equivalent to
-        CFG with scale=1.0 but cheaper.
-        """
-        do_cfg = guidance_scale > 1.0
-        cfg_parallel = self._cfg_parallel_active() and do_cfg
-        if cfg_parallel:
-            raise NotImplementedError("Cosmos3OmniDiffusersPipeline.diffuse: CFG-Parallel branch is "
-                                      "deferred; FastVideo cfg-world-size plumbing is not yet wired.")
-
-        self.transformer.reset_cache()
-
-        def _cfg_active_at(t: torch.Tensor) -> bool:
-            if guidance_interval is None:
-                return True
-            t_scalar = float(t.item()) if torch.is_tensor(t) else float(t)
-            lo, hi = guidance_interval
-            return lo <= t_scalar <= hi
-
-        def _step(noise_pred: torch.Tensor, t: torch.Tensor, latents: torch.Tensor) -> torch.Tensor:
-            if isinstance(noise_pred, tuple):
-                raise ValueError("Cosmos3 video-only diffusion received tuple predictions.")
-            if velocity_mask is not None:
-                noise_pred = noise_pred * velocity_mask
-            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-            if condition_latents is not None and velocity_mask is not None:
-                latents = velocity_mask * latents + (1.0 - velocity_mask) * condition_latents
-            elif image_latent is not None:
-                latents[:, :, 0:1, :, :] = image_latent
-            return latents
-
-        if do_cfg:
-            cond_cache: tuple = (None, None)
-            uncond_cache: tuple = (None, None)
-            for t in self.progress_bar(timesteps):
-                timestep = t.unsqueeze(0)
-                cfg_active = _cfg_active_at(t)
-
-                self.transformer.cached_kv, self.transformer.cached_freqs_gen = cond_cache
-                noise_cond = self.transformer(
-                    hidden_states=latents,
-                    timestep=timestep,
-                    text_ids=cond_ids,
-                    text_mask=cond_mask,
-                    **shared_kwargs,
-                )
-                if cond_cache[0] is None:
-                    cond_cache = (self.transformer.cached_kv, self.transformer.cached_freqs_gen)
-
-                if cfg_active:
-                    self.transformer.cached_kv, self.transformer.cached_freqs_gen = uncond_cache
-                    noise_uncond = self.transformer(
-                        hidden_states=latents,
-                        timestep=timestep,
-                        text_ids=uncond_ids,
-                        text_mask=uncond_mask,
-                        **shared_kwargs,
-                    )
-                    if uncond_cache[0] is None:
-                        uncond_cache = (self.transformer.cached_kv, self.transformer.cached_freqs_gen)
-                    noise_pred = noise_uncond + guidance_scale * (noise_cond - noise_uncond)
-                else:
-                    noise_pred = noise_cond
-
-                latents = _step(noise_pred, t, latents)
-        else:
-            for t in self.progress_bar(timesteps):
-                timestep = t.unsqueeze(0)
-                noise_pred = self.transformer(
-                    hidden_states=latents,
-                    timestep=timestep,
-                    text_ids=cond_ids,
-                    text_mask=cond_mask,
-                    **shared_kwargs,
-                )
-                latents = _step(noise_pred, t, latents)
-
-        return latents
-
-    # -- Forward (main generation entry point) ------------------------------
-
-    def forward(self, req: Any) -> SimpleNamespace:
-        """Cosmos3 inference: request parse + mode dispatch + diffuse + decode.
-
-        Ported from upstream ``pipeline_cosmos3.py:1037-1206`` (single-prompt
-        path). FastVideo does not yet have ``OmniDiffusionRequest`` or
-        ``DiffusionOutput`` dataclasses on the production path, so the
-        return value is a duck-typed ``SimpleNamespace`` with an ``output``
-        attribute mirroring upstream ``DiffusionOutput.output``.
-
-        Mode selection (upstream lines 1059-1093):
-          * T2I: ``"image" in modalities`` and no preprocessed image. Defaults
-            to ``num_frames=1``, ``flow_shift=3.0``,
-            ``guidance_interval=(400.0, 1000.0)``, 50 steps, scale=7.0.
-          * I2V: ``preprocessed_image`` present and not T2I. Like T2V but
-            with image conditioning.
-          * T2V: otherwise. Defaults to ``num_frames=189``,
-            ``flow_shift=self._engine_init_flow_shift``, no guidance
-            interval, 35 steps, scale=6.0.
-
-        Calls ``_set_flow_shift`` exactly once per request, after defaults
-        are resolved and before tokenization.
-        """
-        if not req.prompts:
-            raise ValueError("Cosmos3OmniDiffusersPipeline.forward() requires at least one prompt.")
-        if len(req.prompts) > 1:
-            raise ValueError("Cosmos3OmniDiffusersPipeline currently supports a single prompt per request.")
-
-        prompt_data = req.prompts[0]
-        if isinstance(prompt_data, str):
-            prompt = prompt_data
-            negative_prompt = None
-            image_tensor = None
-        else:
-            prompt = prompt_data.get("prompt", "")
-            negative_prompt = prompt_data.get("negative_prompt")
-            additional_info = prompt_data.get("additional_information", {}) or {}
-            image_tensor = additional_info.get("preprocessed_image")
-
-        sp = req.sampling_params
-        is_t2i = self._is_t2i_request(req)
-        is_i2v = image_tensor is not None and not is_t2i
-        if negative_prompt is None:
-            if is_t2i:
-                negative_prompt = COSMOS3_DEFAULT_NEGATIVE_PROMPT
-            elif is_i2v:
-                negative_prompt = COSMOS3_I2V_NEGATIVE_PROMPT
-            else:
-                negative_prompt = COSMOS3_T2V_NEGATIVE_PROMPT
-
-        if is_t2i:
-            height = sp.height or 1024
-            width = sp.width or 1024
-            num_frames = 1
-            num_inference_steps = sp.num_inference_steps or 50
-            guidance_scale = sp.guidance_scale if sp.guidance_scale else 7.0
-            default_flow_shift = 3.0
-            default_guidance_interval: tuple[float, float] | None = (400.0, 1000.0)
-            batch_size = max(1, int(getattr(sp, "num_outputs_per_prompt", None) or 1))
-        else:
-            height = sp.height or 720
-            width = sp.width or 1280
-            num_frames = sp.num_frames or 189
-            num_inference_steps = sp.num_inference_steps or 35
-            guidance_scale = sp.guidance_scale if sp.guidance_scale else 6.0
-            default_flow_shift = self._engine_init_flow_shift
-            default_guidance_interval = None
-            batch_size = 1
-
-        flow_shift_target = float(self._get_sp_param(sp, "flow_shift", default_flow_shift))
-        guidance_interval = self._get_sp_param(sp, "guidance_interval", default_guidance_interval)
-
-        frame_rate = (self._get_sp_param(sp, "resolved_frame_rate") or self._get_sp_param(sp, "frame_rate") or 24.0)
-        max_sequence_length = self._get_sp_param(sp, "max_sequence_length", 512) or 512
-        use_system_prompt = bool(self._get_sp_param(sp, "use_system_prompt", False))
-
-        self._guidance_scale = guidance_scale
-        self._num_timesteps = num_inference_steps
-
-        self._set_flow_shift(flow_shift_target)
-
-        generator = sp.generator
-        if generator is None:
-            seed = sp.seed if sp.seed is not None else 42
-            generator = torch.Generator(device=self.device).manual_seed(seed)
-
-        cond_ids, cond_mask, uncond_ids, uncond_mask = self._format_and_tokenize_prompts(
-            prompt,
-            negative_prompt,
-            num_frames,
-            frame_rate,
-            height,
-            width,
-            max_sequence_length,
-            sp,
-            use_system_prompt,
-            is_t2i=is_t2i,
-        )
-
-        if image_tensor is not None and not is_t2i:
-            latents, velocity_mask, image_latent = self._prepare_latents_i2v(
-                image_tensor,
-                height,
-                width,
-                num_frames,
-                generator,
-            )
-            condition_latents = None
-        else:
-            latents = self._prepare_latents(height, width, num_frames, generator)
-            velocity_mask = None
-            image_latent = None
-            condition_latents = None
-
-        video_shape = (latents.shape[2], latents.shape[3], latents.shape[4])
-        shared_kwargs: dict[str, Any] = dict(video_shape=video_shape, fps=frame_rate)
-        if velocity_mask is not None:
-            shared_kwargs["noisy_frame_mask"] = velocity_mask
-
-        def _run_diffusion(start_latents: torch.Tensor) -> torch.Tensor:
-            self._set_scheduler_timesteps(num_inference_steps)
-            return self.diffuse(
-                latents=start_latents,
-                timesteps=self.scheduler.timesteps,
-                cond_ids=cond_ids,
-                cond_mask=cond_mask,
-                uncond_ids=uncond_ids,
-                uncond_mask=uncond_mask,
-                guidance_scale=guidance_scale,
-                shared_kwargs=shared_kwargs,
-                velocity_mask=velocity_mask,
-                image_latent=image_latent,
-                condition_latents=condition_latents,
-                guidance_interval=guidance_interval,
-            )
-
-        if is_t2i and batch_size > 1:
-            samples = [_run_diffusion(latents)]
-            for _ in range(batch_size - 1):
-                next_latents = self._prepare_latents(height, width, num_frames, generator)
-                samples.append(_run_diffusion(next_latents))
-            latents = torch.cat(samples, dim=0)
-        else:
-            latents = _run_diffusion(latents)
-
-        video = self._decode_latents(latents)
-        return SimpleNamespace(output={"image": video} if is_t2i else {"video": video})
-
-    # -- Construction stubs (full wiring deferred) --------------------------
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        raise NotImplementedError("Cosmos3OmniDiffusersPipeline.__init__ is wired in a later phase. "
-                                  "Use Cosmos3OmniDiffusersPipeline.__new__(cls) for Phase 2f unit "
-                                  "tests that only exercise _remap_ckpt_key, _set_flow_shift, "
-                                  "diffuse, or forward (with monkey-patched helpers).")
-
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        raise NotImplementedError("Cosmos3OmniDiffusersPipeline.create_pipeline_stages is wired in a later phase.")
+    def tokenize_caption(self, caption: str, *, is_video: bool = False, use_system_prompt: bool = False) -> list[int]:
+        return cosmos3_tokenize_caption(self.get_module("text_tokenizer"),
+                                        caption,
+                                        is_video=is_video,
+                                        use_system_prompt=use_system_prompt)
 
 
-# Entry point for pipeline registry (placeholder; full registry wiring lands
-# alongside Phase 2f.2 once create_pipeline_stages and __init__ are real).
+# Entry point for the pipeline registry. The class name matches the checkpoint
+# ``model_index.json`` ``_class_name`` so ``resolve_pipeline_cls`` finds it.
 EntryClass = Cosmos3OmniDiffusersPipeline

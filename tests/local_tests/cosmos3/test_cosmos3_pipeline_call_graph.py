@@ -1,199 +1,198 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Cosmos3 pipeline call-graph parity (Tier A scaffold).
+"""Cosmos3 native-pipeline call-graph contract (Tier A, no real weights).
 
-Reference:
-  * ``vllm_omni/diffusion/models/cosmos3/pipeline_cosmos3.py:883-1033`` —
-    ``Cosmos3OmniDiffusersPipeline.diffuse``: 3-mode CFG denoising loop
-    with UND-cache management.
-  * ``vllm_omni/diffusion/models/cosmos3/pipeline_cosmos3.py:1037-1067`` —
-    ``forward``: parses the request, selects T2I/T2V/I2V mode, dispatches
-    defaults.
-  * Reference test invariants at
-    ``tests/diffusion/models/cosmos3/test_cosmos3_pipeline.py:126-156,196-251``.
+Pins the runtime call graph of the FastVideo-native Cosmos3 pipeline against the
+framework math, using the stub components from ``conftest.py`` (no real weights,
+no ``cosmos_framework``). The native pipeline replaced the vllm-omni-derived
+``diffuse``/``forward(req)``/``reset_cache`` skeleton with a stage-based
+``Cosmos3DenoisingStage`` + ``Cosmos3DenoiseEngine`` doing SEQUENTIAL CFG.
 
-The Tier A scaffold uses the stubs from ``conftest.py`` (StubScheduler,
-StubCosmos3VAE, StubCosmos3Transformer) so the call-graph can be tested
-without a real DiT or VAE. The 4 invariants under test:
+Invariants under test:
 
-  1. ``diffuse(...)`` calls ``transformer.reset_cache()`` exactly once
-     before iterating timesteps;
-  2. With ``do_cfg=True`` and ``guidance_interval=None``, each timestep
-     invokes the transformer twice — once with ``cond_ids`` and once with
-     ``uncond_ids`` — and reuses the cached UND K/V from step 1 onward
-     (asserted via ``StubCosmos3Transformer.calls`` order);
-  3. I2V mode: ``velocity_mask`` zeros frame-0 noise predictions, and
-     ``image_latent`` is re-injected into frame 0 after each scheduler step;
-  4. ``forward`` selects T2I vs T2V mode from ``prompt["modalities"]``
-     and applies the per-mode default ``flow_shift`` / ``num_frames``.
+  1. SEQUENTIAL CFG order — per UniPC step, the transformer is called twice,
+     conditional (prompt tokens) then unconditional (negative-prompt tokens), in
+     that order; over N steps the call order is ``[cond, uncond] * N``.
+  2. CFG combination — the per-step velocity equals
+     ``uncond + guidance * (cond - uncond)`` (verified against the stub's known
+     per-token output) and one UniPC step advances the latent accordingly.
+  3. I2V conditioning — a conditioning image is VAE-encoded and frame 0 is kept
+     clean: its velocity is zeroed (condition mask) so the decoded clip's
+     frame-0 latent equals the clean conditioning latent.
+  4. Mode dispatch — the stage routes T2V (num_frames>1, flow_shift=10.0,
+     ``is_video`` tokenization) vs T2I (num_frames==1, flow_shift=3.0, image
+     tokenization), applying the per-mode ``flow_shift``.
 """
 from __future__ import annotations
 
 import pytest
 import torch
 
+from .conftest import make_fastvideo_args, make_forward_batch
+
 pytestmark = [pytest.mark.local]
 
-
-def _ids(value: int) -> torch.Tensor:
-    return torch.tensor([[value]], dtype=torch.long)
-
-
-def _mask() -> torch.Tensor:
-    return torch.ones(1, 1, dtype=torch.long)
+_LATENT_CHANNEL = 16
+_LATENT_PATCH_SIZE = 2
+_TEMPORAL_FACTOR = 4
+_COND_TOKEN = 2
+_UNCOND_TOKEN = 1
 
 
-def test_diffuse_resets_cache_and_calls_cfg_in_order(make_cosmos3_pipeline) -> None:
-    """Asserts the 3-mode CFG call graph: ``reset_cache`` first, then
-    interleaved ``cond / uncond`` transformer calls with cache reuse.
+def _engine(pipeline, scheduler):
+    from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import Cosmos3DenoiseEngine
 
-    With timesteps ``[900, 100]`` and ``guidance_scale=3.0``, the upstream
-    reference (test_cosmos3_pipeline.py:126-142) asserts the call order is
-    ``[2, 1, 2]`` — i.e. step 0 calls cond (token=2) then uncond (token=1),
-    step 1 reuses the cached UND K/V and only calls cond again (token=2).
-    """
-    pipeline = make_cosmos3_pipeline()
-    latents = torch.zeros(1, 2, 1, 1, 1)
-
-    result = pipeline.diffuse(
-        latents=latents,
-        timesteps=torch.tensor([900, 100]),
-        cond_ids=_ids(2),
-        cond_mask=_mask(),
-        uncond_ids=_ids(1),
-        uncond_mask=_mask(),
-        guidance_scale=3.0,
-        shared_kwargs={"video_shape": (1, 1, 1), "fps": 24.0},
-        guidance_interval=(500.0, 1000.0),
+    return Cosmos3DenoiseEngine(
+        transformer=pipeline.modules["transformer"],
+        scheduler=scheduler,
+        special_tokens={"start_of_generation": 60, "end_of_generation": 61, "eos_token_id": 62},
+        latent_patch_size=_LATENT_PATCH_SIZE,
+        temporal_modality_margin=15_000,
+        reset_spatial_ids=True,
+        enable_fps_modulation=False,
+        base_fps=24.0,
+        temporal_compression_factor=_TEMPORAL_FACTOR,
     )
-    assert pipeline.transformer.reset_calls == 1
-    assert [call["token"] for call in pipeline.transformer.calls] == [2, 1, 2]
-    torch.testing.assert_close(result, torch.full_like(latents, 6.0))
 
 
-def test_diffuse_i2v_velocity_mask_zeros_frame_zero(make_cosmos3_pipeline) -> None:
-    """Asserts I2V velocity-mask + image-latent re-injection contract.
+def test_sequential_cfg_calls_cond_then_uncond_each_step(make_cosmos3_pipeline) -> None:
+    """Each UniPC step calls the transformer cond-then-uncond, in order."""
+    from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import Cosmos3VisionSpec
 
-    Cross-check: pipeline_cosmos3.py:937-951. The velocity_mask zeroes
-    noise predictions on conditioning frames before stepping, and
-    ``image_latent`` is overwritten into frame 0 of the output latents
-    after each scheduler step.
-    """
     pipeline = make_cosmos3_pipeline()
-    result = pipeline.diffuse(
-        latents=torch.zeros(1, 2, 2, 1, 1),
-        timesteps=torch.tensor([7]),
-        cond_ids=_ids(2),
-        cond_mask=_mask(),
-        uncond_ids=_ids(1),
-        uncond_mask=_mask(),
-        guidance_scale=1.0,
-        shared_kwargs={"video_shape": (2, 1, 1), "fps": 24.0},
-        velocity_mask=torch.tensor([[[[[0.0]], [[1.0]]]]]),
-        image_latent=torch.full((1, 2, 1, 1, 1), 7.0),
+    scheduler = pipeline.modules["scheduler"]
+    scheduler.set_timesteps(2, device=torch.device("cpu"))
+    engine = _engine(pipeline, scheduler)
+
+    shape = (_LATENT_CHANNEL, 2, 2, 2)
+    flat = torch.randn(int(torch.tensor(shape).prod()))
+    spec = Cosmos3VisionSpec(shape=shape, condition_frame_indexes=[])
+
+    engine.denoise(
+        flat_latent=flat,
+        timesteps=scheduler.timesteps,
+        guidance=6.0,
+        specs=[spec],
+        cond_token_ids=[_COND_TOKEN, 5, 6],
+        uncond_token_ids=[_UNCOND_TOKEN, 7],
     )
-    torch.testing.assert_close(result[:, :, 0:1], torch.full((1, 2, 1, 1, 1), 7.0))
+    tokens = [c["token"] for c in pipeline.modules["transformer"].calls]
+    # 2 steps -> 4 calls: cond, uncond, cond, uncond.
+    assert tokens == [_COND_TOKEN, _UNCOND_TOKEN, _COND_TOKEN, _UNCOND_TOKEN]
 
 
-@pytest.mark.parametrize(
-    ("modalities", "expected_is_t2i", "expected_default_flow_shift", "expected_default_frames"),
-    [
-        (["image"], True, 3.0, 1),
-        (["video"], False, 1.0, 189),
-    ],
-)
-def test_forward_mode_dispatch_t2i_vs_t2v(
-    make_cosmos3_pipeline,
-    modalities: list[str],
-    expected_is_t2i: bool,
-    expected_default_flow_shift: float,
-    expected_default_frames: int,
-) -> None:
-    """Asserts forward() routes to T2I vs T2V mode based on prompt modalities,
-    and applies per-mode defaults.
+def test_cfg_velocity_combination_formula(make_cosmos3_pipeline) -> None:
+    """The per-step velocity equals ``uncond + g*(cond - uncond)``.
 
-    Cross-check: pipeline_cosmos3.py:1069-1093. T2I defaults:
-    ``num_frames=1``, ``flow_shift=3.0``, ``num_inference_steps=50``,
-    ``guidance_interval=[400, 1000]``. T2V defaults: ``num_frames=189``,
-    ``flow_shift=engine_init`` (1.0 here), ``num_inference_steps=35``,
-    no guidance_interval.
+    The stub returns ``scale(token) * tanh(latent)`` on noisy frames, so the
+    expected velocity is a closed form we can check exactly.
     """
-    pipeline = make_cosmos3_pipeline()
-
-    from types import SimpleNamespace
-
-    captured: dict[str, object] = {"flow_shifts": [], "format_calls": []}
-
-    def fake_format(prompt, negative_prompt, num_frames, frame_rate, height, width, *args, **kwargs):
-        captured["format_calls"].append(
-            {
-                "is_t2i": kwargs.get("is_t2i"),
-                "num_frames": num_frames,
-            }
-        )
-        return _ids(2), _mask(), _ids(1), _mask()
-
-    pipeline._format_and_tokenize_prompts = fake_format
-    pipeline._prepare_latents = lambda *a, **kw: torch.zeros(1, 2, 1, 1, 1)
-    pipeline._set_flow_shift = lambda target: captured["flow_shifts"].append(target)
-    pipeline._set_scheduler_timesteps = lambda steps: setattr(
-        pipeline.scheduler, "timesteps", torch.tensor([7])
+    from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (
+        Cosmos3VisionSpec,
+        cosmos3_get_cfg_velocity,
     )
-    pipeline.diffuse = lambda **kw: kw["latents"]
-    pipeline._decode_latents = lambda latents: latents
 
-    output = pipeline.forward(
-        SimpleNamespace(
-            prompts=[{"prompt": "test", "modalities": modalities}],
-            sampling_params=SimpleNamespace(
-                height=None,
-                width=None,
-                num_frames=None,
-                num_inference_steps=None,
-                guidance_scale=None,
-                generator=None,
-                seed=123,
-                num_outputs_per_prompt=1,
-                frame_rate=None,
-                resolved_frame_rate=None,
-                max_sequence_length=None,
-                extra_args={},
-            ),
-        )
-    )
-    assert captured["format_calls"][-1]["is_t2i"] is expected_is_t2i
-    assert captured["format_calls"][-1]["num_frames"] == expected_default_frames
-    assert captured["flow_shifts"] == [expected_default_flow_shift]
-    expected_output_key = "image" if expected_is_t2i else "video"
-    assert expected_output_key in output.output
-
-
-def test_forward_rejects_both_image_and_video_modalities(make_cosmos3_pipeline) -> None:
-    """Asserts ``_is_t2i_request`` raises ValueError when a prompt
-    requests both image and video modalities simultaneously.
-
-    Cross-check: pipeline_cosmos3.py:490-496.
-    """
     pipeline = make_cosmos3_pipeline()
+    transformer = pipeline.modules["transformer"]
+    shape = (_LATENT_CHANNEL, 2, 2, 2)
+    flat = torch.randn(int(torch.tensor(shape).prod()))
+    guidance = 6.0
 
-    from types import SimpleNamespace
+    v = cosmos3_get_cfg_velocity(
+        transformer=transformer,
+        flat_latent=flat,
+        timestep=torch.tensor([500.0]),
+        guidance=guidance,
+        specs=[Cosmos3VisionSpec(shape=shape, condition_frame_indexes=[])],
+        cond_token_ids=[_COND_TOKEN, 5, 6],
+        uncond_token_ids=[_UNCOND_TOKEN, 7],
+        special_tokens={"start_of_generation": 60, "end_of_generation": 61, "eos_token_id": 62},
+        latent_patch_size=_LATENT_PATCH_SIZE,
+        temporal_modality_margin=15_000,
+        reset_spatial_ids=True,
+        enable_fps_modulation=False,
+        base_fps=24.0,
+        temporal_compression_factor=_TEMPORAL_FACTOR,
+    )
 
-    with pytest.raises(ValueError, match="both image and video"):
-        pipeline.forward(
-            SimpleNamespace(
-                prompts=[{"prompt": "x", "modalities": ["image", "video"]}],
-                sampling_params=SimpleNamespace(
-                    height=None,
-                    width=None,
-                    num_frames=None,
-                    num_inference_steps=None,
-                    guidance_scale=None,
-                    generator=None,
-                    seed=123,
-                    num_outputs_per_prompt=1,
-                    frame_rate=None,
-                    resolved_frame_rate=None,
-                    max_sequence_length=None,
-                    extra_args={},
-                ),
-            )
-        )
+    lat = flat.reshape(shape)
+    scale_cond = 0.01 * (1.0 + (_COND_TOKEN % 7))
+    scale_uncond = 0.01 * (1.0 + (_UNCOND_TOKEN % 7))
+    cond_v = (scale_cond * torch.tanh(lat)).reshape(-1)
+    uncond_v = (scale_uncond * torch.tanh(lat)).reshape(-1)
+    expected = uncond_v + guidance * (cond_v - uncond_v)
+    torch.testing.assert_close(v, expected, atol=1e-6, rtol=1e-5)
+
+
+def test_i2v_keeps_condition_frame_clean(make_cosmos3_pipeline) -> None:
+    """I2V: frame-0 velocity is zeroed so the conditioning frame stays clean."""
+    from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (
+        Cosmos3VisionSpec,
+        cosmos3_get_cfg_velocity,
+    )
+
+    pipeline = make_cosmos3_pipeline()
+    transformer = pipeline.modules["transformer"]
+    shape = (_LATENT_CHANNEL, 3, 2, 2)  # 3 latent frames, frame 0 conditioned
+    flat = torch.randn(int(torch.tensor(shape).prod()))
+
+    v = cosmos3_get_cfg_velocity(
+        transformer=transformer,
+        flat_latent=flat,
+        timestep=torch.tensor([500.0]),
+        guidance=6.0,
+        specs=[Cosmos3VisionSpec(shape=shape, condition_frame_indexes=[0])],
+        cond_token_ids=[_COND_TOKEN, 5, 6],
+        uncond_token_ids=[_UNCOND_TOKEN, 7],
+        special_tokens={"start_of_generation": 60, "end_of_generation": 61, "eos_token_id": 62},
+        latent_patch_size=_LATENT_PATCH_SIZE,
+        temporal_modality_margin=15_000,
+        reset_spatial_ids=True,
+        enable_fps_modulation=False,
+        base_fps=24.0,
+        temporal_compression_factor=_TEMPORAL_FACTOR,
+    )
+    v_grid = v.reshape(shape)  # [C, T, H, W]
+    # Condition frame 0 velocity must be exactly zero; noisy frames non-zero.
+    assert torch.count_nonzero(v_grid[:, 0]) == 0
+    assert torch.count_nonzero(v_grid[:, 1:]) > 0
+
+
+def test_stage_mode_dispatch_t2v(make_cosmos3_pipeline, make_cosmos3_stage) -> None:
+    """T2V (num_frames>1): flow_shift=engine-init (10.0), video tokenization."""
+    pipeline = make_cosmos3_pipeline()
+    stage = make_cosmos3_stage(pipeline)
+    args = make_fastvideo_args()
+    batch = make_forward_batch(num_frames=5, height=16, width=16)
+
+    out = stage.forward(batch, args)
+    assert float(pipeline.scheduler.config.flow_shift) == 10.0
+    assert out.output is not None and out.output.dim() == 5
+    # T2V latent: (5-1)//4 + 1 = 2 frames; 16/8 = 2 latent h/w.
+    assert tuple(out.latents.shape) == (1, _LATENT_CHANNEL, 2, 2, 2)
+
+
+def test_stage_mode_dispatch_t2i(make_cosmos3_pipeline, make_cosmos3_stage) -> None:
+    """T2I (num_frames==1): flow_shift=3.0; single-frame latent."""
+    pipeline = make_cosmos3_pipeline()
+    stage = make_cosmos3_stage(pipeline)
+    args = make_fastvideo_args()
+    batch = make_forward_batch(num_frames=1, height=16, width=16, guidance_scale=4.0)
+
+    out = stage.forward(batch, args)
+    assert float(pipeline.scheduler.config.flow_shift) == 3.0
+    assert tuple(out.latents.shape) == (1, _LATENT_CHANNEL, 1, 2, 2)
+
+
+def test_stage_i2v_encodes_conditioning_image(make_cosmos3_pipeline, make_cosmos3_stage) -> None:
+    """I2V stage: a conditioning image is accepted and decoded to a finite clip."""
+    pipeline = make_cosmos3_pipeline()
+    stage = make_cosmos3_stage(pipeline)
+    args = make_fastvideo_args()
+    image = torch.zeros(3, 16, 16)  # [-1, 1] conditioning frame
+    batch = make_forward_batch(num_frames=5, height=16, width=16, image=image)
+
+    out = stage.forward(batch, args)
+    # I2V uses the same engine-init flow_shift as T2V (10.0).
+    assert float(pipeline.scheduler.config.flow_shift) == 10.0
+    assert out.output is not None and out.output.dim() == 5
+    assert torch.isfinite(out.output).all()
