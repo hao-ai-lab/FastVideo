@@ -13,7 +13,7 @@
 
 ## Current Phase
 
-- phase: `PR1 (video core) COMPLETE + real-weights T2V, I2V & T2I VERIFIED: DiT / VAE / scheduler / strict-load / sequence-packing / pipeline / I2V-conditioning / flow_shift all framework-parity verified (suite 118 passed, 0 skipped). Real-weights T2V+I2V (1280x704) and T2I (960x960) on B200 produce coherent output matching the prompt/conditioning. T2V on feat/cosmos3-tier-a-port; I2V+T2I on stacked feat/cosmos3-i2v. Next: PR2 audio / PR3 action / PR4 reasoning.`
+- phase: `PR1 (video core) + PR2 (audio/t2vs) COMPLETE, real-weights verified. Video core (T2V/I2V/T2I) + audio (AVAE decode / DiT sound pathway / sound packing / t2vs CFG velocity) all framework-parity verified bit-exact (suite 130 passed, 0 skipped). t2vs real-weights on B200 produces coherent video + real stereo 48kHz audio. Branch chain: feat/cosmos3-tier-a-port (T2V) -> feat/cosmos3-i2v (I2V+T2I) -> feat/cosmos3-audio (t2vs). Next: PR3 action / PR4 reasoning.`
 - status: `in_progress`
 - owner: `orchestrator`
 - last_updated: `2026-06-07`
