@@ -107,11 +107,14 @@ class DenoisingStage(PipelineStage):
         # Flux2 matches Diffusers only when the bf16 transformer runs without a
         # surrounding autocast context; autocast changes long-sequence attention
         # numerics enough to break latent parity over four Euler steps.
+        # Prompt-embed casting and scheduler-step placement are config declared;
+        # guidance, timestep, env-var, and autocast Flux2 behavior stay here.
         _is_flux = (getattr(fastvideo_args.pipeline_config.dit_config, "prefix", "") == "Flux")
         if _is_flux and os.getenv("FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION",
                                   "").lower() in {"1", "true", "yes"}:
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
         autocast_enabled = ((target_dtype != torch.float32) and not fastvideo_args.disable_autocast and not _is_flux)
+        scheduler_fp32 = getattr(fastvideo_args.pipeline_config, "scheduler_step_in_fp32", False)
         local_device = get_local_torch_device()
 
         # Get timesteps and calculate warmup steps
@@ -183,18 +186,25 @@ class DenoisingStage(PipelineStage):
 
         # Get latents and embeddings
         latents = batch.latents
-        prompt_embeds = [
-            embed.to(device=local_device, dtype=target_dtype) if torch.is_tensor(embed) else embed
-            for embed in batch.prompt_embeds
-        ]
+        cast_embeds = getattr(fastvideo_args.pipeline_config.dit_config, "cast_prompt_embeds_to_dit_dtype", False)
+        if cast_embeds:
+            prompt_embeds = [
+                embed.to(device=local_device, dtype=target_dtype) if torch.is_tensor(embed) else embed
+                for embed in batch.prompt_embeds
+            ]
+        else:
+            prompt_embeds = list(batch.prompt_embeds)
         assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
-            neg_prompt_embeds = [
-                embed.to(device=local_device, dtype=target_dtype) if torch.is_tensor(embed) else embed
-                for embed in neg_prompt_embeds
-            ]
+            if cast_embeds:
+                neg_prompt_embeds = [
+                    embed.to(device=local_device, dtype=target_dtype) if torch.is_tensor(embed) else embed
+                    for embed in neg_prompt_embeds
+                ]
+            else:
+                neg_prompt_embeds = list(neg_prompt_embeds)
             assert not torch.isnan(neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
@@ -514,10 +524,12 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
-                # Keep the scheduler math out of autocast. Diffusers runs the
-                # Euler update in fp32 before casting back to model dtype; doing
-                # this under autocast introduces BF16 drift over several steps.
-                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+                if scheduler_fp32:
+                    # Diffusers-style: fp32 Euler update outside autocast avoids BF16 drift.
+                    latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+                else:
+                    with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
+                        latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
                 if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
                     latents = latents.squeeze(0)
                     latents = (1. - mask2[0]) * z + mask2[0] * latents

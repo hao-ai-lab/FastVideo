@@ -21,6 +21,7 @@ class Flux2PipelineConfig(PipelineConfig):
 
     # Flux2-specific parameters
     embedded_cfg_scale: float | None = 4.0
+    scheduler_step_in_fp32: bool = True
     flux2_text_encoder_type: str = "mistral3"
     text_encoder_out_layers: tuple[int, ...] = (10, 20, 30)
 
@@ -75,6 +76,7 @@ class Flux2KleinTextEncoderConfig(EncoderConfig):
 class Flux2KleinPipelineConfig(Flux2PipelineConfig):
     """Configuration for Flux2 Klein (distilled, 4-step, no guidance)."""
     embedded_cfg_scale: float | None = None  # Klein distilled: no guidance embedding (matches Diffusers)
+    scheduler_step_in_fp32: bool = True
     flux2_text_encoder_type: str = "qwen3"
     text_encoder_out_layers: tuple[int, ...] = (9, 18, 27)
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (Qwen3TextConfig(), ))

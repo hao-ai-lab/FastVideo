@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copied and adapted from: https://github.com/sglang-ai/sglang
 from dataclasses import dataclass, field
-from typing import Tuple
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 from fastvideo.logger import init_logger
@@ -12,7 +11,9 @@ logger = init_logger(__name__)
 @dataclass
 class Flux2ArchConfig(DiTArchConfig):
     """Architecture configuration for Flux2 transformer model."""
-    
+
+    cast_prompt_embeds_to_dit_dtype: bool = True
+
     # Flux2-specific architecture parameters
     patch_size: int = 1
     in_channels: int = 64
@@ -24,7 +25,7 @@ class Flux2ArchConfig(DiTArchConfig):
     joint_attention_dim: int = 4096  # Dimension for text encoder output
     timestep_guidance_channels: int = 256  # Dimension for timestep embedding
     mlp_ratio: float = 3.0
-    axes_dims_rope: Tuple[int, ...] = (32, 32, 32, 32)  # RoPE dimensions per axis (match diffusers Flux2)
+    axes_dims_rope: tuple[int, ...] = (32, 32, 32, 32)  # RoPE dimensions per axis (match diffusers Flux2)
     rope_theta: int = 2000  # Base frequency for RoPE (match diffusers Flux2)
     eps: float = 1e-6
     guidance_embeds: bool = True  # Whether to use guidance embeddings
@@ -32,13 +33,11 @@ class Flux2ArchConfig(DiTArchConfig):
     ff_context_swiglu_fp32: bool = False
 
     # Parameter name mapping for loading HuggingFace checkpoints
-    param_names_mapping: dict = field(
-        default_factory=lambda: {
-            r"transformer\.(\w*)\.(.*)$": r"\1.\2",
-        }
-    )
+    param_names_mapping: dict = field(default_factory=lambda: {
+        r"transformer\.(\w*)\.(.*)$": r"\1.\2",
+    })
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         self.out_channels = self.out_channels or self.in_channels
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
@@ -72,7 +71,7 @@ class Flux2ArchConfig(DiTArchConfig):
 @dataclass
 class Flux2Config(DiTConfig):
     """Configuration for Flux2 transformer model."""
-    
+
     arch_config: DiTArchConfig = field(default_factory=Flux2ArchConfig)
-    
+
     prefix: str = "Flux"
