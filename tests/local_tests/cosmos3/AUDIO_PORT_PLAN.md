@@ -63,13 +63,15 @@ Goal: text-to-video+sound (**t2vs**) — generate synchronized audio alongside v
   decoder-only wrapper; bit-exact parity vs the framework OobleckDecoder
   (`test_cosmos3_avae_parity`); real 1.9 GB checkpoint strict-loads, decodes
   [1,64,25] -> [1,2,48000] (1 s @ 48 kHz stereo).
-- [ ] **DiT sound pathway (component 2)** — activate the dormant audio heads
-  (`audio_proj_in`/`audio_proj_out`/`audio_modality_embed`) in the native DiT
-  forward; port `pack_sound_latents` + sound token scatter/proj/modality-embed/
-  velocity from the framework MoT. Parity: extend the DiT harness with sound.
-- [ ] **Sound sequence packing (component 3)** — sound modality in
-  `sequence_packing.py` (positions, attn mode, condition mask). Parity vs
-  framework `pack_input_sequence` with sound.
-- [ ] **t2vs pipeline + AV mux (components 4-5)** — placeholder audio, joint
-  vision+sound denoise, AVAE-decode, mux into mp4 / save wav; example;
-  real-weights verification.
+- [x] **DiT sound pathway (component 2) — DONE** (commit `005d6684a`). Activated
+  the dormant audio heads in the forward (`_encode_sound`/`_decode_sound` mirror);
+  `preds_vision` + `preds_sound` bit-exact (max=mean=0.0).
+- [x] **Sound sequence packing (component 3) — DONE** (commit `005d6684a`).
+  `Cosmos3SoundItem` + sound fields; sound shares the vision "full" split with
+  parallel MRoPE. Field-by-field + position_ids exact vs framework.
+- [x] **t2vs pipeline + AV mux (components 4-5) — DONE** (commit `3d8355129`).
+  Joint [vision|sound] denoise, AVAE-decode, stereo 48 kHz AAC mux. t2vs CFG
+  velocity parity max=mean=0.0; real-weights run produces coherent video + real
+  audio (mean -10.2 dB). Example `basic_cosmos3_t2vs_new_api.py`.
+
+**PR2 (audio/t2vs) COMPLETE** — every component bit-exact vs the framework.
