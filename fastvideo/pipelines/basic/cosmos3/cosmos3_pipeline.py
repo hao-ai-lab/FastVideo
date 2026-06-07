@@ -186,8 +186,8 @@ class Cosmos3VisionSpec:
 def _split_flat_latent(flat: torch.Tensor, specs: list[Any]) -> list[torch.Tensor]:
     """Split a flat vector into per-item tensors via each spec's ``numel``/``shape``.
 
-    Shared by vision (``[C, T, H, W]``) and sound (``[C, T]``) specs — every spec
-    exposes ``numel`` and ``shape``.
+    Shared by vision (``[C, T, H, W]``), sound (``[C, T]``), and action
+    (``[T, D]``) specs — every spec exposes ``numel`` and ``shape``.
     """
     out: list[torch.Tensor] = []
     offset = 0
@@ -235,16 +235,6 @@ class Cosmos3ActionSpec:
     @property
     def numel(self) -> int:
         return int(math.prod(self.shape))
-
-
-def _split_action_latent(flat: torch.Tensor, specs: list[Cosmos3ActionSpec]) -> list[torch.Tensor]:
-    """Split a flat action vector into per-item ``[T, action_dim]`` tensors."""
-    out: list[torch.Tensor] = []
-    offset = 0
-    for spec in specs:
-        out.append(flat[offset:offset + spec.numel].reshape(spec.shape))
-        offset += spec.numel
-    return out
 
 
 def cosmos3_get_cfg_velocity(
@@ -297,8 +287,8 @@ def cosmos3_get_cfg_velocity(
     vision_total = sum(spec.numel for spec in specs)
     action_total = sum(spec.numel for spec in action_specs) if action_specs else 0
     noise_x_vision = _split_flat_latent(flat_latent[:vision_total], specs)
-    noise_x_action = (_split_action_latent(flat_latent[vision_total:vision_total +
-                                                       action_total], action_specs) if action_specs else None)
+    noise_x_action = (_split_flat_latent(flat_latent[vision_total:vision_total +
+                                                     action_total], action_specs) if action_specs else None)
     noise_x_sound = (_split_flat_latent(flat_latent[vision_total +
                                                     action_total:], sound_specs) if sound_specs else None)
     device = next(transformer.parameters()).device
