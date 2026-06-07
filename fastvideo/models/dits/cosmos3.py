@@ -46,6 +46,7 @@ import torch.nn.functional as F
 from fastvideo.configs.models.dits.cosmos3 import Cosmos3VideoConfig
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.visual_embedding import timestep_embedding
 from fastvideo.models.dits.base import BaseDiT
 
 EntryClass = ["Cosmos3VFMTransformer"]
@@ -320,19 +321,8 @@ class Cosmos3TimestepEmbedder(nn.Module):
         self.act = nn.SiLU()
         self.linear_2 = ReplicatedLinear(hidden_size, hidden_size, bias=True)
 
-    @staticmethod
-    def timestep_embedding(t: torch.Tensor, dim: int, max_period: int = 10000) -> torch.Tensor:
-        half = dim // 2
-        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
-            device=t.device)
-        args = t[:, None].float() * freqs[None]
-        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-        if dim % 2:
-            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
-        return embedding
-
     def forward(self, t: torch.Tensor) -> torch.Tensor:
-        t_freq = self.timestep_embedding(t, self.frequency_embedding_size)
+        t_freq = timestep_embedding(t, self.frequency_embedding_size)
         # Sinusoidal runs in fp32 (timestep_scale makes inputs tiny); cast to the
         # MLP weight dtype (bf16 at inference; no-op in the fp32 parity tests).
         t_freq = t_freq.to(self.linear_1.weight.dtype)
