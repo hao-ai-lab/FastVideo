@@ -13,7 +13,7 @@
 
 ## Current Phase
 
-- phase: `PR1 (video core) COMPLETE + real-weights T2V & I2V VERIFIED: DiT / VAE / scheduler / strict-load / sequence-packing / pipeline / I2V-conditioning all framework-parity verified (suite 98 passed, 0 skipped). Real-weights T2V and I2V on B200 (1280x704, 29f, 35 steps) produce coherent video matching the prompt/conditioning image. I2V work is on stacked branch feat/cosmos3-i2v. Next: PR2 audio / PR3 action / PR4 reasoning.`
+- phase: `PR1 (video core) COMPLETE + real-weights T2V, I2V & T2I VERIFIED: DiT / VAE / scheduler / strict-load / sequence-packing / pipeline / I2V-conditioning / flow_shift all framework-parity verified (suite 118 passed, 0 skipped). Real-weights T2V+I2V (1280x704) and T2I (960x960) on B200 produce coherent output matching the prompt/conditioning. T2V on feat/cosmos3-tier-a-port; I2V+T2I on stacked feat/cosmos3-i2v. Next: PR2 audio / PR3 action / PR4 reasoning.`
 - status: `in_progress`
 - owner: `orchestrator`
 - last_updated: `2026-06-07`
@@ -114,3 +114,11 @@
 - Example: `examples/inference/basic/basic_cosmos3_i2v_new_api.py` (`InputConfig(image_path=...)`, default `assets/images/cyclist.jpg`).
 - Verified on B200 (1280x704, 29f, 35 steps, real weights): output frame 0 reproduces the conditioning cyclist image; later frames show coherent forward motion down the trail following the prompt. Full suite 98 passed, 0 skipped.
 - NEXT: optional T2I real-weights spot-check; then PR2 audio / PR3 action / PR4 reasoning.
+
+### PR1 (video core) — T2I real-weights + resolution-based flow_shift — 2026-06-07 (branch feat/cosmos3-i2v)
+- Studied framework T2I: tokenization uses `vlm_config.use_system_prompt` which is `false` in the checkpoint (config.json:199) — matches FastVideo's hardcoded `use_system_prompt=False` for all modes (no divergence). Canonical T2I is 960x960 (inputs/omni/t2i.json), single-frame (num_frames=1).
+- Bug found + fixed (commit `604dc2637`): the stage chose `flow_shift` by task (`3.0 if is_t2i else 10.0`), but the framework picks it purely by the named resolution bucket (`OmniSampleArgs._RESOLUTION_SHIFT_DEFAULTS`, 8B backbone: 256->3.0, 480->5.0, 720/768->10.0; model default resolution "720"). Task-based only matched T2V@720 / T2I@256 by luck; canonical T2I@960x960 is the "720" bucket -> 10.0, so `is_t2i->3.0` was wrong. Replaced with `_flow_shift_for_resolution(h,w)` (longest-side bucketing), applied to all tasks.
+- Parity: `test_cosmos3_flow_shift_parity.py` checks the mapping vs framework `{VIDEO,IMAGE}_RES_SIZE_INFO` x `_RESOLUTION_SHIFT_DEFAULTS` (8B rows, 20 cases). Also hardened `_image_to_video_tensor` tensor branch to respect the [-1,1] convention (PIL path stays framework-exact).
+- Example: `examples/inference/basic/basic_cosmos3_t2i_new_api.py` (num_frames=1, 960x960).
+- Verified on B200 (real weights, 35 steps): coherent red-panda image matching the prompt, flow_shift=10.0. Full suite 118 passed, 0 skipped.
+- Video core (T2V/I2V/T2I) is now complete and real-weights verified. NEXT: PR2 audio (sound_tokenizer AVAE + audio output) on a new stacked branch.
