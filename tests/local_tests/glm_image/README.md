@@ -5,8 +5,8 @@ tests compare FastVideo against the official HF `transformers` + `diffusers`
 GLM-Image implementation and are not expected to run in CI unless explicitly
 promoted later.
 
-Port progress, open questions, issues, and handoff notes live in
-`tests/local_tests/glm_image/PORT_STATUS.md`.
+Port progress, open questions, issues, and handoff notes are tracked locally
+alongside these tests (not shipped as part of this PR).
 
 ## Reference Assets
 
@@ -15,11 +15,11 @@ Port progress, open questions, issues, and handoff notes live in
 | Model family | `glm_image` |
 | Workload types | `T2I` (primary), `I2I` (planned follow-up) |
 | Official reference | HF `transformers.models.glm_image` + HF `diffusers.pipelines.glm_image` |
-| Local reference dir | `/home/hal-kaiqin/dreamverse/FastVideo-PR/reference/transformers/src/transformers/models/glm_image/`, `/home/hal-kaiqin/dreamverse/FastVideo-PR/reference/diffusers/src/diffusers/pipelines/glm_image/`, `/home/hal-kaiqin/dreamverse/FastVideo-PR/reference/diffusers/src/diffusers/models/transformers/transformer_glm_image.py` |
+| Local reference dir (relative to repo root) | `reference/transformers/src/transformers/models/glm_image/`, `reference/diffusers/src/diffusers/pipelines/glm_image/`, `reference/diffusers/src/diffusers/models/transformers/transformer_glm_image.py` |
 | Official commit/version | transformers `a65bf6c9d03322c1bf1963ef7c64289c4b3f0757`, diffusers `ff3b86b4755b46a7b5656dfcf84d25bd25ad4740` |
 | HF weights | `zai-org/GLM-Image` |
 | HF revision | default (`main`) |
-| Local weights dir | `/home/hal-kaiqin/dreamverse/FastVideo-PR/official_weights/glm_image` (downloaded) |
+| Local weights dir (relative to repo root) | `official_weights/glm_image` (downloaded) |
 | Source layout | `diffusers` |
 | Needs conversion | `no` (HF repo already in diffusers component layout) |
 
@@ -86,18 +86,17 @@ blocked_on: none
 
 ## Weight Setup
 
-Run from the repo root (`/home/hal-kaiqin/dreamverse/FastVideo-PR`):
+Run from the repo root:
 
 ```bash
 python ".agents/skills/add-model-01-prep/scripts/download_hf_weights.py" \
     "zai-org/GLM-Image" \
-    "/home/hal-kaiqin/dreamverse/FastVideo-PR/official_weights/glm_image"
+    "official_weights/glm_image"
 ```
 
 Weights are ~30 GB (vision_language_encoder 4 shards, transformer 3 shards,
-vae + text_encoder). **Downloaded** to
-`/home/hal-kaiqin/dreamverse/FastVideo-PR/official_weights/glm_image`. Cache via
-`HF_HOME` if `/` is small.
+vae + text_encoder). **Downloaded** to `official_weights/glm_image` (relative to
+repo root). Cache via `HF_HOME` if `/` is small.
 
 ## Prototype And Conversion Artifacts
 
@@ -187,5 +186,6 @@ pytest tests/local_tests/glm_image/test_edit_pipeline_parity.py -v -s
   test, including reused components that own weights or numerical behavior.
 - Pipeline parity may start as a scaffold, but final handoff requires non-skip
   PASS or an explicit blocker accepted through the escape-hatch process.
-- User decisions and pause points are tracked as `E###` rows in
-  `PORT_STATUS.md`; do not rely on chat history for escape-hatch context.
+- User decisions and pause points are tracked as `E###` rows in the local
+  handoff notes (not shipped in this PR); do not rely on chat history for
+  escape-hatch context.
