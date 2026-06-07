@@ -1,37 +1,34 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Shared fixtures for Cosmos3 local parity tests (Phase 2a Tier A).
+"""Shared fixtures for the Cosmos3 native-pipeline local tests.
 
-Ported from the vllm-omni reference suite so FastVideo's Tier A parity
-coverage can land before NVIDIA publishes the real Cosmos3 weights.
-The fixtures here are intentionally self-contained: they do NOT import
-``vllm_omni`` and do NOT import any FastVideo Cosmos3 modules (those
-do not exist yet; they are introduced in Phase 2b).
+These fixtures build the FastVideo-native Cosmos3 pipeline
+(``fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline.Cosmos3OmniDiffusersPipeline``)
+via ``__new__`` and wire it with tiny stub components so the runtime call graph
+(sequential CFG, condition-frame masking, mode dispatch) can be exercised on CPU
+without real weights or ``cosmos_framework``.
 
-Reference:
-- ``tests/diffusion/models/cosmos3/conftest.py`` lines 1-176 from
-  ``vllm-omni`` HEAD ``8536f5b1421f78c7df06af6d96fa195c1ceb6384``.
-
-The stubs reproduce the same name + protocol as the upstream fixtures
-so test code can be ported with minimal renaming once FastVideo's
-Cosmos3 pipeline class lands and a ``make_cosmos3_pipeline`` fixture
-can be re-pointed at the real class.
+The stub transformer implements the native DiT's packed-input contract
+(``{"preds_vision": [[1, C, T, H, W], ...]}``) and records, per call, the first
+``text_ids`` token so tests can assert the cond/uncond pass order.
 """
 from __future__ import annotations
 
-import sys
-import types
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 import torch
+from diffusers import UniPCMultistepScheduler
 from torch import nn
+
+_LATENT_CHANNEL = 16
+_LATENT_PATCH_SIZE = 2
+_SPATIAL_FACTOR = 8
+_TEMPORAL_FACTOR = 4
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register ``local`` marker so ``pytestmark = [pytest.mark.local]``
-    in sibling test files does not trigger ``PytestUnknownMarkWarning``.
-    """
+    """Register the ``local`` marker used by sibling test files."""
     config.addinivalue_line(
         "markers",
         "local: marker for local-only parity/scaffold tests (skipped in CI)",
@@ -39,46 +36,39 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Stub scheduler — mirrors vllm-omni ``StubScheduler``.
+# Stub transformer: records cond/uncond call order; bounded preds_vision.
 # ---------------------------------------------------------------------------
-class StubScheduler:
-    """Minimal UniPC-shaped scheduler stub used by pipeline call-graph tests.
+class StubCosmos3Transformer(nn.Module):
+    """Records each forward's first ``text_ids`` token + returns preds_vision.
 
-    Mirrors ``tests/diffusion/models/cosmos3/conftest.py:16-30`` from
-    the vllm-omni reference: records ``set_timesteps`` and ``step`` calls,
-    advances ``latents`` by ``+noise_pred``, and exposes a ``config``
-    namespace carrying ``num_train_timesteps`` and ``flow_shift``.
+    ``preds_vision`` is keyed by the first text token (so the conditional and
+    unconditional passes return different velocities) and is zero on
+    conditioning frames, matching the real DiT's unpatchify output.
     """
 
-    def __init__(
-        self,
-        timesteps: list[int] | None = None,
-        *,
-        flow_shift: float = 1.0,
-    ) -> None:
-        self.timesteps = torch.tensor(timesteps or [9, 3], dtype=torch.int64)
-        self.config = SimpleNamespace(num_train_timesteps=1000, flow_shift=flow_shift)
-        self.set_timesteps_calls: list[tuple[int, torch.device]] = []
-        self.step_calls: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+    def __init__(self, latent_channel: int = _LATENT_CHANNEL) -> None:
+        super().__init__()
+        self.latent_channel = latent_channel
+        self.embed_tokens = nn.Embedding(64, 8)
+        self.calls: list[dict[str, Any]] = []
 
-    def set_timesteps(self, num_steps: int, device: torch.device) -> None:
-        self.set_timesteps_calls.append((num_steps, device))
-        self.timesteps = torch.arange(num_steps, 0, -1, dtype=torch.int64, device=device)
-
-    def step(
-        self,
-        noise_pred: torch.Tensor,
-        timestep: torch.Tensor,
-        latents: torch.Tensor,
-        **kwargs: Any,
-    ):
-        del kwargs
-        self.step_calls.append((noise_pred.clone(), timestep.clone(), latents.clone()))
-        return (latents + noise_pred,)
+    def forward(self, **kwargs: Any) -> dict[str, Any]:
+        token_ids = kwargs["text_ids"]
+        token = int(token_ids.reshape(-1)[0].item()) if token_ids.numel() else 0
+        self.calls.append({"token": token, "kwargs": dict(kwargs)})
+        scale = 0.01 * (1.0 + (token % 7))
+        preds: list[torch.Tensor] = []
+        for latent, _shape, nfi in zip(kwargs["vision_tokens"], kwargs["vision_token_shapes"],
+                                       kwargs["vision_noisy_frame_indexes"]):
+            lat = latent.squeeze(0) if latent.dim() == 5 else latent  # [C, T, H, W]
+            out = torch.zeros_like(lat)
+            if nfi.numel() > 0:
+                out[:, nfi] = scale * torch.tanh(lat[:, nfi])
+            preds.append(out.unsqueeze(0))
+        return {"preds_vision": preds}
 
 
-class _ModeLatentDist:
-    """Stub for diffusers ``DiagonalGaussianDistribution.mode``."""
+class _StubLatentDist:
 
     def __init__(self, latents: torch.Tensor) -> None:
         self._latents = latents
@@ -88,211 +78,135 @@ class _ModeLatentDist:
 
 
 class StubCosmos3VAE:
-    """VAE stub returning deterministic latents shaped by VAE scale factors.
+    """Deterministic VAE shaped by the Wan scale factors."""
 
-    Mirrors ``tests/diffusion/models/cosmos3/conftest.py:41-70``.
-    """
-
-    dtype = torch.float32
-
-    def __init__(self, z_dim: int = 2, *, temporal: int = 4, spatial: int = 8) -> None:
+    def __init__(self, z_dim: int = _LATENT_CHANNEL) -> None:
         self.config = SimpleNamespace(
             z_dim=z_dim,
-            scale_factor_temporal=temporal,
-            scale_factor_spatial=spatial,
+            scale_factor_temporal=_TEMPORAL_FACTOR,
+            scale_factor_spatial=_SPATIAL_FACTOR,
             latents_mean=[0.0] * z_dim,
             latents_std=[1.0] * z_dim,
         )
 
     def encode(self, video: torch.Tensor):
-        latent_frames = (video.shape[2] - 1) // self.config.scale_factor_temporal + 1
-        latent_height = video.shape[-2] // self.config.scale_factor_spatial
-        latent_width = video.shape[-1] // self.config.scale_factor_spatial
-        latents = torch.ones(
-            video.shape[0],
-            self.config.z_dim,
-            latent_frames,
-            latent_height,
-            latent_width,
-            dtype=video.dtype,
-            device=video.device,
-        )
-        return SimpleNamespace(latent_dist=_ModeLatentDist(latents))
+        b, _c, t, h, w = video.shape
+        lt = (t - 1) // self.config.scale_factor_temporal + 1
+        lh = h // self.config.scale_factor_spatial
+        lw = w // self.config.scale_factor_spatial
+        return _StubLatentDist(torch.ones(b, self.config.z_dim, lt, lh, lw, dtype=video.dtype, device=video.device))
 
-    def decode(self, latents: torch.Tensor, return_dict: bool = False):
-        del return_dict
-        return (latents,)
+    def decode(self, z: torch.Tensor):
+        b, _c, lt, lh, lw = z.shape
+        t = (lt - 1) * self.config.scale_factor_temporal + 1
+        h = lh * self.config.scale_factor_spatial
+        w = lw * self.config.scale_factor_spatial
+        sig = torch.nan_to_num(torch.tanh(z[:, :1, :1, :1, :1])).reshape(b, 1, 1, 1, 1)
+        return torch.clamp(torch.zeros(b, 3, t, h, w, dtype=z.dtype, device=z.device) + sig, -1.0, 1.0)
 
 
-class StubCosmos3Transformer(nn.Module):
-    """Transformer stub that records per-call inputs and emits deterministic
-    output tensors keyed by the first ``text_ids`` token.
+class StubQwen2Tokenizer:
+    """Qwen2-shaped chat tokenizer stub (special tokens + chat template)."""
 
-    Mirrors ``tests/diffusion/models/cosmos3/conftest.py:73-114``.
+    eos_token_id = 62
+    _SPECIAL = {"<|vision_start|>": 60, "<|vision_end|>": 61}
 
-    The stub also exposes ``cached_kv`` / ``cached_freqs_gen`` so pipeline
-    tests can assert that:
-      * ``reset_cache()`` is called before each diffusion loop;
-      * UND/cond and uncond branches each populate their own cache exactly
-        once and reuse it on subsequent timesteps.
-    """
+    def convert_tokens_to_ids(self, token: str) -> int:
+        return self._SPECIAL[token]
 
-    def __init__(self, *, latent_channel_size: int = 2) -> None:
-        super().__init__()
-        self.latent_channel_size = latent_channel_size
-        self.cached_kv: Any | None = None
-        self.cached_freqs_gen: Any | None = None
-        self.calls: list[dict[str, Any]] = []
-        self.reset_calls = 0
-
-    def reset_cache(self) -> None:
-        self.reset_calls += 1
-        self.cached_kv = None
-        self.cached_freqs_gen = None
-
-    def forward(
-        self,
-        *,
-        hidden_states: torch.Tensor,
-        timestep: torch.Tensor,
-        text_ids: torch.Tensor,
-        text_mask: torch.Tensor,
-        **kwargs: Any,
-    ) -> torch.Tensor:
-        token = int(text_ids.reshape(-1)[0].item()) if text_ids.numel() else 0
-        self.calls.append(
-            {
-                "token": token,
-                "timestep": timestep.clone(),
-                "text_mask": text_mask.clone(),
-                "cache_before": self.cached_kv,
-                "kwargs": dict(kwargs),
-            }
-        )
-        if self.cached_kv is None:
-            marker = torch.tensor([token], dtype=torch.float32)
-            self.cached_kv = [(marker, marker + 100)]
-            self.cached_freqs_gen = (marker + 200, marker + 300)
-        return torch.full_like(hidden_states, float(token))
+    def apply_chat_template(self, conversations, *, tokenize=True, add_generation_prompt=True, add_vision_id=False):
+        user = next((c["content"] for c in conversations if c["role"] == "user"), "")
+        n = max(1, min(8, len(user) % 8 + 1))
+        return [10 + (i % 40) for i in range(n)]
 
 
-def passthrough_progress_bar(iterable):
-    return iterable
+def make_scheduler(flow_shift: float = 10.0) -> UniPCMultistepScheduler:
+    return UniPCMultistepScheduler(
+        num_train_timesteps=1000,
+        solver_order=2,
+        prediction_type="flow_prediction",
+        use_flow_sigmas=True,
+        flow_shift=flow_shift,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Tiny config — mirrors test_cosmos3_transformer.py:15-29
-# ---------------------------------------------------------------------------
-def _tiny_cosmos3_config(**overrides: Any) -> dict:
-    """Minimal Cosmos3 transformer config sufficient for shape-only construction.
-
-    Mirrors ``tests/diffusion/models/cosmos3/test_cosmos3_transformer.py:15-29``.
-    """
-    config: dict = {
-        "hidden_size": 8,
-        "num_hidden_layers": 0,
-        "num_attention_heads": 2,
-        "num_key_value_heads": 2,
-        "head_dim": 4,
-        "intermediate_size": 16,
-        "vocab_size": 32,
-        "latent_patch_size": 1,
-        "latent_channel": 2,
-        "rope_scaling": {"mrope_section": [1, 1, 0]},
-    }
-    config.update(overrides)
-    return config
-
-
-# ---------------------------------------------------------------------------
-# Guardrail no-op stub — mirrors conftest.py:121-129
-# ---------------------------------------------------------------------------
-@pytest.fixture(autouse=True)
-def fake_cosmos3_guardrails(monkeypatch: pytest.MonkeyPatch):
-    """Install a no-op replacement for the Cosmos3 guardrails module.
-
-    The vllm-omni reference imports guardrails eagerly; FastVideo's port
-    may either skip guardrails or use a different module path. Either
-    way, an autouse stub avoids accidental network-dependent imports
-    during scaffold-test collection.
-    """
-    module = types.ModuleType("vllm_omni.diffusion.models.cosmos3.guardrails")
-    module.is_guardrails_enabled = lambda od_config, sampling_params=None: False  # type: ignore[attr-defined]
-    module.ensure_initialized = lambda od_config: None  # type: ignore[attr-defined]
-    module.check_text_safety = lambda text: None  # type: ignore[attr-defined]
-    module.check_video_safety = lambda video: video  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, module.__name__, module)
-    return module
-
-
-# ---------------------------------------------------------------------------
-# Pipeline factory — kept as a scaffold; activate in Phase 2b when the
-# FastVideo Cosmos3 pipeline class exists.
+# Pipeline factory — builds the native pipeline via __new__ + stub modules.
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def make_cosmos3_pipeline():
-    """Factory that returns a FastVideo Cosmos3 pipeline pre-wired with stubs.
+    """Return a factory building the native Cosmos3 pipeline wired with stubs."""
 
-    In Phase 2a (Tier A, no real weights), tests that consume this factory
-    should ``pytest.skip`` if the FastVideo Cosmos3 pipeline class does not
-    yet exist. In Phase 2b we replace the placeholder construction with
-    ``object.__new__(<FastVideoCosmos3Pipeline>)`` + ``nn.Module.__init__``
-    and re-point the stubs onto the real attribute names.
+    def _make(**overrides: Any):
+        from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (  # noqa: F401
+            Cosmos3OmniDiffusersPipeline, )
 
-    Mirrors the upstream layout at
-    ``tests/diffusion/models/cosmos3/conftest.py:132-157``.
-    """
-
-    def _make():
-        try:
-            from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (  # type: ignore
-                Cosmos3OmniDiffusersPipeline,
-            )
-        except ImportError:
-            pytest.skip(
-                "FastVideo Cosmos3 pipeline class not yet implemented "
-                "(Phase 2b will provide fastvideo.pipelines.basic.cosmos3)."
-            )
-
-        pipeline = object.__new__(Cosmos3OmniDiffusersPipeline)
-        nn.Module.__init__(pipeline)
-        pipeline.od_config = SimpleNamespace()
-        pipeline.device = torch.device("cpu")
-        pipeline.dtype = torch.float32
-        pipeline.transformer = StubCosmos3Transformer(latent_channel_size=2)
-        pipeline.vae = StubCosmos3VAE(z_dim=2)
-        pipeline.vae_scale_factor_temporal = 4
-        pipeline.vae_scale_factor_spatial = 8
-        pipeline.scheduler = StubScheduler([9, 3], flow_shift=1.0)
-        pipeline._base_scheduler_config = pipeline.scheduler.config
-        pipeline._engine_init_flow_shift = 1.0
-        pipeline._current_flow_shift = 1.0
-        pipeline._guidance_scale = None
-        pipeline._num_timesteps = None
-        pipeline.progress_bar = passthrough_progress_bar
-        return pipeline
+        pipe = Cosmos3OmniDiffusersPipeline.__new__(Cosmos3OmniDiffusersPipeline)
+        scheduler = make_scheduler()
+        pipe.modules = {
+            "transformer": StubCosmos3Transformer(),
+            "vae": StubCosmos3VAE(),
+            "scheduler": scheduler,
+            "text_tokenizer": StubQwen2Tokenizer(),
+        }
+        pipe.scheduler = scheduler
+        pipe._base_scheduler_config = scheduler.config
+        pipe._current_flow_shift = float(scheduler.config.flow_shift)
+        pipe._engine_init_flow_shift = 10.0
+        for key, value in overrides.items():
+            setattr(pipe, key, value)
+        return pipe
 
     return _make
 
 
-def make_sampling_params(**overrides: Any) -> SimpleNamespace:
-    """Build a SamplingParams-like namespace with Cosmos3's expected fields.
+@pytest.fixture
+def make_cosmos3_stage():
+    """Return a factory building a ``Cosmos3DenoisingStage`` bound to a pipeline."""
 
-    Mirrors ``tests/diffusion/models/cosmos3/conftest.py:160-176``.
-    """
-    values = {
-        "height": None,
-        "width": None,
-        "num_frames": None,
-        "num_inference_steps": None,
-        "guidance_scale": None,
-        "generator": None,
-        "seed": 123,
-        "num_outputs_per_prompt": 1,
-        "frame_rate": None,
-        "resolved_frame_rate": None,
-        "max_sequence_length": None,
-        "extra_args": {},
-    }
+    def _make(pipeline):
+        from fastvideo.pipelines.stages.cosmos3_stages import Cosmos3DenoisingStage
+
+        return Cosmos3DenoisingStage(
+            transformer=pipeline.modules["transformer"],
+            scheduler=pipeline.modules["scheduler"],
+            vae=pipeline.modules["vae"],
+            tokenizer=pipeline.modules["text_tokenizer"],
+            pipeline=pipeline,
+        )
+
+    return _make
+
+
+def make_forward_batch(*, num_frames: int, height: int, width: int, image: Any = None, **overrides: Any):
+    """Build a tiny ``ForwardBatch`` for the Cosmos3 stage."""
+    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+
+    values: dict[str, Any] = dict(
+        data_type="video",
+        prompt="a calm ocean at sunrise",
+        negative_prompt="",
+        height=height,
+        width=width,
+        num_frames=num_frames,
+        fps=24,
+        num_inference_steps=2,
+        guidance_scale=6.0,
+        generator=torch.Generator("cpu").manual_seed(0),
+        preprocessed_image=image,
+    )
     values.update(overrides)
-    return SimpleNamespace(**values)
+    return ForwardBatch(**values)
+
+
+def make_fastvideo_args():
+    """Build minimal ``fastvideo_args`` (only ``pipeline_config`` is read)."""
+    from fastvideo.configs.pipelines.cosmos3 import Cosmos3Config
+
+    cfg = Cosmos3Config()
+    arch = cfg.dit_config.arch_config
+    arch.latent_channel = _LATENT_CHANNEL
+    arch.latent_patch_size = _LATENT_PATCH_SIZE
+    arch.temporal_compression_factor = _TEMPORAL_FACTOR
+    arch.enable_fps_modulation = False
+    return SimpleNamespace(pipeline_config=cfg)

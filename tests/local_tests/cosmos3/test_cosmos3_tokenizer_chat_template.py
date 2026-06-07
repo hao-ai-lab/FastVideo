@@ -1,91 +1,83 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Cosmos3 prompt tokenization parity — chat template + special tokens (Tier A).
+"""Cosmos3 prompt tokenization contract — chat template + special tokens.
 
-Reference: ``vllm_omni/diffusion/models/cosmos3/pipeline_cosmos3.py``
-lines 562-606 (``Cosmos3OmniDiffusersPipeline._tokenize_prompt``).
+The native pipeline tokenizes via the module-level helpers
+``cosmos3_special_tokens`` / ``cosmos3_tokenize_caption``
+(``fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline``), which wrap a Qwen2
+chat-template tokenizer:
 
-The Cosmos3 tokenizer is a Qwen2 chat-template tokenizer with two
-appended special tokens:
+  * special tokens: ``start_of_generation=<|vision_start|>``,
+    ``end_of_generation=<|vision_end|>``, ``eos_token_id=tokenizer.eos_token_id``
+    (the framework ``llm_special_tokens``);
+  * ``tokenize_caption`` applies the chat template with
+    ``add_generation_prompt=True`` / ``add_vision_id=False`` and an optional
+    image/video system prompt.
 
-  * ``eos_token_id`` == 151645
-  * ``<|vision_start|>`` == 151652
-
-The reference pipeline:
-  1. Wraps the prompt in a ``role=user`` conversation (optionally with a
-     ``role=system`` prefix carrying ``COSMOS3_SYSTEM_PROMPT``);
-  2. Applies the chat template with ``add_generation_prompt=True``;
-  3. Truncates to ``max_sequence_length``;
-  4. Appends ``eos`` and ``<|vision_start|>``;
-  5. Right-pads with ``pad_token_id`` and produces a matching
-     attention mask of ``[1]*seq_len + [0]*pad_len``.
-
-This Tier A scaffold validates the two special-token IDs and the
-right-pad shape contract. Full byte-for-byte parity against an
-official Cosmos3 tokenizer requires Phase 2b weights.
+These contract checks run against the conftest Qwen2-shaped stub tokenizer (no
+real weights). The byte-for-byte real-token-id check (``eos == 151645``,
+``<|vision_start|> == 151652``) needs the real ``nvidia/Cosmos3-Nano``
+``text_tokenizer`` and is skipped cleanly when it is unavailable.
 """
 from __future__ import annotations
 
 import pytest
 
+from .conftest import StubQwen2Tokenizer
+
 pytestmark = [pytest.mark.local]
 
 
-def test_cosmos3_special_token_ids() -> None:
-    """Asserts the two Cosmos3 special-token IDs the pipeline depends on.
+def test_native_special_tokens_resolution() -> None:
+    """``cosmos3_special_tokens`` resolves the three generation special tokens."""
+    from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import cosmos3_special_tokens
 
-    Specifically ``eos_token_id == 151645`` and
-    ``convert_tokens_to_ids('<|vision_start|>') == 151652``. These IDs
-    are pinned by the Qwen2 base tokenizer and are appended in
-    ``Cosmos3OmniDiffusersPipeline._tokenize_prompt`` at
-    pipeline_cosmos3.py:596-597.
+    special = cosmos3_special_tokens(StubQwen2Tokenizer())
+    assert set(special) == {"start_of_generation", "end_of_generation", "eos_token_id"}
+    assert special["start_of_generation"] == StubQwen2Tokenizer().convert_tokens_to_ids("<|vision_start|>")
+    assert special["end_of_generation"] == StubQwen2Tokenizer().convert_tokens_to_ids("<|vision_end|>")
+    assert special["eos_token_id"] == StubQwen2Tokenizer.eos_token_id
+
+
+def test_native_tokenize_caption_uses_chat_template() -> None:
+    """``cosmos3_tokenize_caption`` returns a non-empty token-id list.
+
+    The video / image system-prompt variants tokenize independently (the chat
+    template prepends a role=system turn when ``use_system_prompt`` is set), and
+    the result is always a plain list of ints.
+    """
+    from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import cosmos3_tokenize_caption
+
+    tok = StubQwen2Tokenizer()
+    ids_video = cosmos3_tokenize_caption(tok, "a robot dances", is_video=True, use_system_prompt=False)
+    ids_image = cosmos3_tokenize_caption(tok, "a robot", is_video=False, use_system_prompt=True)
+    assert isinstance(ids_video, list) and all(isinstance(i, int) for i in ids_video) and ids_video
+    assert isinstance(ids_image, list) and ids_image
+
+
+def test_cosmos3_special_token_ids_real_weights() -> None:
+    """Byte-for-byte Qwen2 special-token ids (needs the real text_tokenizer).
+
+    Asserts ``eos_token_id == 151645`` and
+    ``convert_tokens_to_ids('<|vision_start|>') == 151652`` on the real
+    ``nvidia/Cosmos3-Nano`` Qwen2 tokenizer. Skipped cleanly when the real
+    tokenizer is not loadable in this environment.
     """
     try:
-        from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (  # type: ignore
-            Cosmos3OmniDiffusersPipeline,
-        )
+        from transformers import AutoTokenizer
     except ImportError:
-        pytest.skip("FastVideo Cosmos3 pipeline not yet implemented (Phase 2b)")
+        pytest.skip("transformers not available")
 
-    pipeline = Cosmos3OmniDiffusersPipeline.__new__(Cosmos3OmniDiffusersPipeline)
-    tokenizer = getattr(pipeline, "tokenizer", None)
-    if tokenizer is None:
-        pytest.skip("Cosmos3 tokenizer instance not yet wired on the pipeline")
+    import os
 
+    candidate_paths = [
+        os.path.join(os.environ.get("COSMOS3_WEIGHTS_DIR", ""), "text_tokenizer"),
+        "official_weights/cosmos3/text_tokenizer",
+    ]
+    tok_path = next((p for p in candidate_paths if p and os.path.isdir(p)), None)
+    if tok_path is None:
+        pytest.skip("real nvidia/Cosmos3-Nano text_tokenizer not available "
+                    "(set COSMOS3_WEIGHTS_DIR or provide official_weights/cosmos3)")
+
+    tokenizer = AutoTokenizer.from_pretrained(tok_path)
     assert tokenizer.eos_token_id == 151645
     assert tokenizer.convert_tokens_to_ids("<|vision_start|>") == 151652
-
-
-def test_cosmos3_chat_template_shape_contract() -> None:
-    """Asserts the right-pad shape contract of ``_tokenize_prompt``.
-
-    For ``max_sequence_length = N``, the returned ``input_ids`` and
-    ``attention_mask`` must each be ``[1, N]``, with the first
-    ``seq_len`` mask entries equal to 1 and the remainder equal to 0.
-
-    Once Phase 2b lands, this test should:
-      * call ``_tokenize_prompt`` directly with a small max_seq_length;
-      * assert ``input_ids.shape == (1, max_seq_length)``;
-      * assert ``attention_mask.sum().item() == seq_len`` and that the
-        last two non-pad tokens are ``[eos, vision_start]``.
-    """
-    try:
-        from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (  # type: ignore
-            Cosmos3OmniDiffusersPipeline,
-        )
-    except ImportError:
-        pytest.skip("FastVideo Cosmos3 pipeline not yet implemented (Phase 2b)")
-
-    pipeline = Cosmos3OmniDiffusersPipeline.__new__(Cosmos3OmniDiffusersPipeline)
-    if not hasattr(pipeline, "_tokenize_prompt"):
-        pytest.skip("_tokenize_prompt not yet wired on the FastVideo pipeline")
-
-    input_ids, attention_mask = pipeline._tokenize_prompt(
-        "A robot.", max_sequence_length=32, use_system_prompt=False
-    )
-    assert tuple(input_ids.shape) == (1, 32)
-    assert tuple(attention_mask.shape) == (1, 32)
-    seq_len = int(attention_mask.sum().item())
-    assert attention_mask[0, :seq_len].sum().item() == seq_len
-    assert attention_mask[0, seq_len:].sum().item() == 0
-    assert int(input_ids[0, seq_len - 2].item()) == 151645
-    assert int(input_ids[0, seq_len - 1].item()) == 151652
