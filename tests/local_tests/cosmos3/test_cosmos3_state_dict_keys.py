@@ -1,28 +1,38 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Cosmos3 state-dict-key contract for checkpoint conversion (Tier A scaffold).
+"""Cosmos3 DiT param-name / checkpoint-key-surface contract.
 
-Reference: ``vllm_omni/diffusion/models/cosmos3/pipeline_cosmos3.py:319-409``
-(``Cosmos3OmniDiffusersPipeline._remap_ckpt_key``). The vllm-omni loader's
-remap is the canonical source of truth: it defines which Diffusers
-checkpoint keys become which target module-tree parameter names.
+The FastVideo native Cosmos3 DiT (``fastvideo.models.dits.cosmos3.
+Cosmos3VFMTransformer``) deliberately mirrors the *published diffusers
+checkpoint* transformer key surface so the converter at
+``scripts/checkpoint_conversion/cosmos3_convert.py`` can strict-load with a
+near-identity ``param_names_mapping``.
 
-The FastVideo conversion script at
-``scripts/checkpoint_conversion/cosmos3_convert.py`` (to be authored in
-Phase 5) must produce a state-dict that loads cleanly into the FastVideo
-Cosmos3 DiT module tree. This test pins the target side of that contract:
+This pins the FastVideo side of that contract: a tiny 1-layer DiT must expose
+exactly the published checkpoint's parameter names. The checkpoint key surface
+(validated against ``nvidia/Cosmos3-Nano``; ``{i}`` ranges over the layers):
 
-  * ``embed_tokens``/``norm`` live under ``language_model.``
-  * ``norm_moe_gen`` is a top-level (not per-layer) module
-  * Per-layer keys split into UND (``language_model.layers.{i}``) and
-    GEN (``gen_layers.{i}``) sub-trees:
-      - UND attention: ``self_attn.{q,k,v,o}_proj``, ``self_attn.{q,k}_norm``
-      - GEN cross-attention: ``cross_attention.{q,k,v,o}_proj``,
-        ``cross_attention.{q,k}_norm`` (from the ``*_moe_gen`` source keys)
-      - UND/GEN norms: ``input_layernorm``, ``post_attention_layernorm``
-      - UND/GEN MLPs: ``mlp.{gate,up,down}_proj``
-  * Top-level adapters ``vae2llm``, ``llm2vae``, ``time_embedder`` live
-    under ``transformer.`` (no remapping inside the transformer namespace).
-  * ``lm_head.weight`` is skipped (mapped to ``None``).
+  Top level:
+    embed_tokens.weight, norm.weight, norm_moe_gen.weight, lm_head.weight,
+    proj_in.{weight,bias}, proj_out.{weight,bias},
+    time_embedder.linear_1.{weight,bias}, time_embedder.linear_2.{weight,bias}
+  Dormant heads (present for strict-load):
+    action_proj_in.fc.weight, action_proj_in.bias.weight,
+    action_proj_out.fc.weight, action_proj_out.bias.weight,
+    action_modality_embed,
+    audio_proj_in.{weight,bias}, audio_proj_out.{weight,bias},
+    audio_modality_embed
+  Per layer ``layers.{i}``:
+    self_attn.{to_q,to_k,to_v,to_out,add_q_proj,add_k_proj,add_v_proj,
+               to_add_out,norm_q,norm_k,norm_added_q,norm_added_k}.weight,
+    mlp.{gate_proj,up_proj,down_proj}.weight,
+    mlp_moe_gen.{gate_proj,up_proj,down_proj}.weight,
+    {input_layernorm,input_layernorm_moe_gen,post_attention_layernorm,
+     post_attention_layernorm_moe_gen}.weight
+
+The earlier scaffold pinned the dead vllm-omni layout
+(``language_model.layers`` / ``gen_layers`` / ``cross_attention`` /
+``vae2llm`` / ``llm2vae``); that structure is gone — the native DiT is a single
+dual-pathway ``layers`` ModuleList matching the diffusers checkpoint.
 """
 from __future__ import annotations
 
@@ -31,86 +41,129 @@ import pytest
 pytestmark = [pytest.mark.local]
 
 
-EXPECTED_REMAPS: dict[str, str | None] = {
-    "model.embed_tokens.weight": "transformer.language_model.embed_tokens.weight",
-    "model.norm.weight": "transformer.language_model.norm.weight",
-    "model.norm_moe_gen.weight": "transformer.norm_moe_gen.weight",
-    "model.layers.3.self_attn.q_proj.weight": "transformer.language_model.layers.3.self_attn.q_proj.weight",
-    "model.layers.3.self_attn.q_proj_moe_gen.weight": "transformer.gen_layers.3.cross_attention.q_proj.weight",
-    "model.layers.3.self_attn.k_norm_moe_gen.weight": "transformer.gen_layers.3.cross_attention.k_norm.weight",
-    "model.layers.3.input_layernorm.weight": "transformer.language_model.layers.3.input_layernorm.weight",
-    "model.layers.3.input_layernorm_moe_gen.weight": "transformer.gen_layers.3.input_layernorm.weight",
-    "model.layers.3.mlp.gate_proj.weight": "transformer.language_model.layers.3.mlp.gate_proj.weight",
-    "model.layers.3.mlp_moe_gen.up_proj.weight": "transformer.gen_layers.3.mlp.up_proj.weight",
-    "vae2llm.weight": "transformer.vae2llm.weight",
-    "llm2vae.weight": "transformer.llm2vae.weight",
-    "time_embedder.linear_1.weight": "transformer.time_embedder.linear_1.weight",
-    "lm_head.weight": None,
-}
-
-
-def test_fastvideo_cosmos3_remap_matches_reference() -> None:
-    """Asserts the FastVideo Cosmos3 checkpoint remap table matches the
-    canonical vllm-omni reference at pipeline_cosmos3.py:319-409.
-
-    Once the FastVideo Cosmos3 pipeline (or a standalone remap utility
-    in ``scripts/checkpoint_conversion/cosmos3_convert.py``) exposes a
-    ``_remap_ckpt_key`` callable, this test verifies every key in
-    ``EXPECTED_REMAPS`` maps to the expected target name (or ``None``
-    for skipped keys like ``lm_head.weight``).
-    """
+def _build_tiny_dit():
+    """Construct a tiny 1-layer FastVideo Cosmos3 DiT, or skip if unavailable."""
     try:
-        from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (  # type: ignore
-            Cosmos3OmniDiffusersPipeline,
+        from fastvideo.configs.models.dits.cosmos3 import (
+            Cosmos3ArchConfig,
+            Cosmos3VideoConfig,
         )
-    except ImportError:
-        pytest.skip("FastVideo Cosmos3 pipeline not yet implemented (Phase 2b)")
+        from fastvideo.models.dits.cosmos3 import Cosmos3VFMTransformer
+    except ImportError:  # pragma: no cover - import guard
+        pytest.skip("FastVideo Cosmos3 DiT not importable in this environment")
 
-    remap = getattr(Cosmos3OmniDiffusersPipeline, "_remap_ckpt_key", None)
-    if remap is None:
-        pytest.skip("Cosmos3OmniDiffusersPipeline._remap_ckpt_key not yet defined")
+    import torch
 
-    actual = {key: remap(key) for key in EXPECTED_REMAPS}
-    assert actual == EXPECTED_REMAPS
+    arch = Cosmos3ArchConfig(
+        hidden_size=16,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=2,
+        head_dim=8,
+        intermediate_size=32,
+        vocab_size=64,
+        latent_patch_size=2,
+        latent_channel=16,
+        position_embedding_type="3d_rope",
+        enable_fps_modulation=False,
+        action_gen=True,
+        action_dim=64,
+        max_action_dim=64,
+        num_embodiment_domains=32,
+        sound_gen=True,
+        sound_dim=64,
+    )
+    cfg = Cosmos3VideoConfig(arch_config=arch)
+    return Cosmos3VFMTransformer(cfg, hf_config={}).to(torch.float32)
 
 
 def test_fastvideo_cosmos3_dit_module_tree_param_names() -> None:
-    """Asserts the FastVideo Cosmos3 DiT module tree produces the param
-    names that the checkpoint converter is expected to write.
+    """The native DiT param-name set must equal the published checkpoint surface."""
+    model = _build_tiny_dit()
+    names = {name for name, _ in model.named_parameters()}
 
-    Once ``fastvideo.models.dits.cosmos3.Cosmos3VFMTransformer`` is
-    constructible with a tiny config (see ``conftest._tiny_cosmos3_config``),
-    this test instantiates a 1-layer model and verifies that the
-    parameter-name set contains the expected UND/GEN/adapter prefixes:
-      * ``language_model.layers.0.self_attn.q_proj.weight``
-      * ``gen_layers.0.cross_attention.q_proj.weight``
-      * ``norm_moe_gen.weight``
-      * ``vae2llm.*`` and ``llm2vae.*``
-    """
-    try:
-        from fastvideo.models.dits.cosmos3 import Cosmos3VFMTransformer  # type: ignore
-    except ImportError:
-        pytest.skip("FastVideo Cosmos3 not yet implemented (Phase 2b)")
+    expected_top = {
+        "embed_tokens.weight",
+        "norm.weight",
+        "norm_moe_gen.weight",
+        "lm_head.weight",
+        "proj_in.weight",
+        "proj_in.bias",
+        "proj_out.weight",
+        "proj_out.bias",
+        "time_embedder.linear_1.weight",
+        "time_embedder.linear_1.bias",
+        "time_embedder.linear_2.weight",
+        "time_embedder.linear_2.bias",
+    }
+    expected_dormant = {
+        "action_proj_in.fc.weight",
+        "action_proj_in.bias.weight",
+        "action_proj_out.fc.weight",
+        "action_proj_out.bias.weight",
+        "action_modality_embed",
+        "audio_proj_in.weight",
+        "audio_proj_in.bias",
+        "audio_proj_out.weight",
+        "audio_proj_out.bias",
+        "audio_modality_embed",
+    }
+    layer_suffixes = {
+        "self_attn.to_q.weight",
+        "self_attn.to_k.weight",
+        "self_attn.to_v.weight",
+        "self_attn.to_out.weight",
+        "self_attn.add_q_proj.weight",
+        "self_attn.add_k_proj.weight",
+        "self_attn.add_v_proj.weight",
+        "self_attn.to_add_out.weight",
+        "self_attn.norm_q.weight",
+        "self_attn.norm_k.weight",
+        "self_attn.norm_added_q.weight",
+        "self_attn.norm_added_k.weight",
+        "mlp.gate_proj.weight",
+        "mlp.up_proj.weight",
+        "mlp.down_proj.weight",
+        "mlp_moe_gen.gate_proj.weight",
+        "mlp_moe_gen.up_proj.weight",
+        "mlp_moe_gen.down_proj.weight",
+        "input_layernorm.weight",
+        "input_layernorm_moe_gen.weight",
+        "post_attention_layernorm.weight",
+        "post_attention_layernorm_moe_gen.weight",
+    }
+    expected_layer = {f"layers.0.{s}" for s in layer_suffixes}
+    expected = expected_top | expected_dormant | expected_layer
 
-    from types import SimpleNamespace
-    import torch
+    assert names == expected, (f"Cosmos3 DiT param surface mismatch.\n"
+                               f"  missing: {sorted(expected - names)}\n"
+                               f"  unexpected: {sorted(names - expected)}")
 
-    from .conftest import _tiny_cosmos3_config
 
-    config = _tiny_cosmos3_config(num_hidden_layers=1)
-    model = Cosmos3VFMTransformer(SimpleNamespace(tf_model_config=config, dtype=torch.float32))
-    names = set(name for name, _ in model.named_parameters())
-
-    required_prefixes = [
-        "language_model.layers.0.self_attn.q_proj",
-        "gen_layers.0.cross_attention.q_proj",
-        "norm_moe_gen",
+def test_fastvideo_cosmos3_dit_no_dead_vllm_omni_layout() -> None:
+    """The dead vllm-omni layout (split language_model/gen_layers/cross_attention,
+    vae2llm/llm2vae) must NOT appear in the native DiT param tree."""
+    model = _build_tiny_dit()
+    names = {name for name, _ in model.named_parameters()}
+    dead_fragments = (
+        "language_model.",
+        "gen_layers.",
+        "cross_attention.",
         "vae2llm",
         "llm2vae",
-    ]
-    for prefix in required_prefixes:
-        assert any(name.startswith(prefix) for name in names), (
-            f"Cosmos3 DiT module tree missing expected prefix {prefix!r}; "
-            f"converter at scripts/checkpoint_conversion/cosmos3_convert.py "
-            f"will fail to load weights for this subtree."
-        )
+    )
+    offenders = sorted(n for n in names if any(frag in n for frag in dead_fragments))
+    assert not offenders, f"native DiT still exposes dead vllm-omni param names: {offenders}"
+
+
+def test_fastvideo_cosmos3_dit_per_layer_counts() -> None:
+    """Per-layer block count: 22 weights/layer; full 1-layer model = 44 params.
+
+    (12 attention + 6 dual-MLP + 4 layernorm per layer; + 12 top-level
+    + 10 dormant-head params.)
+    """
+    model = _build_tiny_dit()
+    names = [name for name, _ in model.named_parameters()]
+    per_layer = [n for n in names if n.startswith("layers.0.")]
+    assert len(per_layer) == 22, f"expected 22 per-layer params, got {len(per_layer)}"
+    assert len(names) == 44, f"expected 44 total params for tiny 1-layer DiT, got {len(names)}"
