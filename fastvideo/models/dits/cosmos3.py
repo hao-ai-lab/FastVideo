@@ -808,6 +808,13 @@ class Cosmos3VFMTransformer(BaseDiT):
         sound_mse_loss_indexes: torch.Tensor | None = None,
         sound_noisy_frame_indexes: list[torch.Tensor] | None = None,
         fps_sound: torch.Tensor | None = None,
+        action_tokens: list[torch.Tensor] | None = None,
+        action_token_shapes: list[tuple[int, ...]] | None = None,
+        action_sequence_indexes: torch.Tensor | None = None,
+        action_timesteps: torch.Tensor | None = None,
+        action_mse_loss_indexes: torch.Tensor | None = None,
+        action_noisy_frame_indexes: list[torch.Tensor] | None = None,
+        action_domain_id: list[torch.Tensor] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Video-path forward returning ``{"last_hidden_state", "preds_vision"}``
@@ -863,6 +870,26 @@ class Cosmos3VFMTransformer(BaseDiT):
                                                              sound_token_shapes)
             packed_sequence[sound_sequence_indexes] = packed_sound
 
+        # 2c. Action (DomainAwareLinear): pack [T, D] per sample with a per-token
+        #     domain id -> action_proj_in(domain) + action_modality_embed ->
+        #     timestep scatter -> scatter into the gen split (framework
+        #     ``_encode_action``). Action is domain-conditioned (per embodiment).
+        if action_tokens:
+            packed_action = torch.cat(
+                [a[:shp[0]] for a, shp in zip(action_tokens, action_token_shapes)], dim=0,
+            )  # [total_action_tokens, action_dim]
+            per_token_domain = torch.cat(
+                [d.reshape(1).expand(shp[0]) for d, shp in zip(action_domain_id, action_token_shapes)], dim=0,
+            )  # [total_action_tokens]
+            packed_action = self.action_proj_in(packed_action.to(target_dtype), per_token_domain)
+            packed_action = packed_action + self.action_modality_embed.view(1, -1)
+            if action_mse_loss_indexes is not None and action_mse_loss_indexes.numel() > 0:
+                a_ts = action_timesteps * self.timestep_scale
+                a_embeds = self.time_embedder(a_ts).to(target_dtype)
+                packed_action = self._scatter_timestep_embeds(packed_action, a_embeds, action_noisy_frame_indexes,
+                                                              action_token_shapes)
+            packed_sequence[action_sequence_indexes] = packed_action
+
         # 3. RoPE for the full packed sequence (cos/sin per token); split und/gen
         cos, sin = self.rotary_emb(position_ids, device=device, dtype=target_dtype)  # [N, head_dim]
         und_idx, gen_idx = self._mode_indices(split_lens, attn_modes, device)
@@ -895,8 +922,37 @@ class Cosmos3VFMTransformer(BaseDiT):
             preds_sound, _ = self.audio_proj_out(last_hidden_state[sound_mse_loss_indexes])
             output["preds_sound"] = self._unpack_sound(preds_sound, sound_token_shapes, sound_noisy_frame_indexes)
 
+        # 6c. Action prediction: action_proj_out(per-token domain) on noisy hidden
+        #     states -> unpack to per-sample [T, D] (framework ``_decode_action``).
+        if action_tokens and action_mse_loss_indexes is not None and action_mse_loss_indexes.numel() > 0:
+            noisy_domain = torch.cat(
+                [d.reshape(1).expand(len(nfi)) for d, nfi in zip(action_domain_id, action_noisy_frame_indexes)], dim=0,
+            )
+            preds_action = self.action_proj_out(last_hidden_state[action_mse_loss_indexes], noisy_domain)
+            output["preds_action"] = self._unpack_action(preds_action, action_token_shapes, action_noisy_frame_indexes)
+
         output["last_hidden_state"] = last_hidden_state
         return output
+
+    def _unpack_action(
+        self,
+        packed_preds: torch.Tensor,
+        token_shapes: list[tuple[int, ...]],
+        noisy_frame_indexes: list[torch.Tensor],
+    ) -> list[torch.Tensor]:
+        """Scatter packed noisy action preds back to per-sample ``[T, D]`` (clean
+        frames left zero). Mirrors framework ``unpack_action``."""
+        outputs: list[torch.Tensor] = []
+        start_idx = 0
+        for shape, nfi in zip(token_shapes, noisy_frame_indexes):
+            t = shape[0]
+            out = torch.zeros((t, self.action_dim), device=packed_preds.device, dtype=packed_preds.dtype)
+            t_n = len(nfi)
+            if t_n > 0:
+                out[nfi] = packed_preds[start_idx:start_idx + t_n]
+                start_idx += t_n
+            outputs.append(out)
+        return outputs
 
     def _unpack_sound(
         self,

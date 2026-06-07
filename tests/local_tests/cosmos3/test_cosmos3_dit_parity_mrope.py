@@ -73,9 +73,12 @@ _TCF = 4  # temporal compression factor
 # ---------------------------------------------------------------------------
 _SOUND_DIM = 64
 _SOUND_LATENT_FPS = 25
+_ACTION_DIM = 64
+_NUM_EMBODIMENT_DOMAINS = 32
 
 
-def _build_tiny_cosmos3_mrope(seed: int = 42, num_layers: int = 2, sound_gen: bool = False):
+def _build_tiny_cosmos3_mrope(seed: int = 42, num_layers: int = 2, sound_gen: bool = False,
+                              action_gen: bool = False):
     """Tiny framework ``Cosmos3VFMNetwork`` with ``unified_3d_mrope``.
 
     ``rope_theta`` / ``rope_scaling`` (carrying ``mrope_section`` +
@@ -129,6 +132,11 @@ def _build_tiny_cosmos3_mrope(seed: int = 42, num_layers: int = 2, sound_gen: bo
         temporal_compression_factor_sound=1,
         sound_latent_fps=_SOUND_LATENT_FPS,
     ) if sound_gen else {}
+    action_kwargs = dict(
+        action_gen=True,
+        action_dim=_ACTION_DIM,
+        num_embodiment_domains=_NUM_EMBODIMENT_DOMAINS,
+    ) if action_gen else {}
     vfm_cfg = Cosmos3VFMNetworkConfig(
         vision_gen=True,
         vlm_config=tiny_vlm_cfg,
@@ -141,6 +149,7 @@ def _build_tiny_cosmos3_mrope(seed: int = 42, num_layers: int = 2, sound_gen: bo
         max_latent_t=8,
         temporal_compression_factor_vision=_TCF,
         **sound_kwargs,
+        **action_kwargs,
     )
     torch.manual_seed(seed)
     lm = Qwen3VLTextForCausalLM(config=mot_cfg)
