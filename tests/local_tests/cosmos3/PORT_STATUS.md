@@ -13,7 +13,7 @@
 
 ## Current Phase
 
-- phase: `PR1 (video core): arch config + framework parity-reference harness landed; native DiT module rewrite next`
+- phase: `PR1 (video core): DiT ported + framework parity VERIFIED bit-identical (3d_rope + unified_3d_mrope). Next: conversion + video pipeline`
 - status: `in_progress`
 - owner: `orchestrator`
 - last_updated: `2026-06-06`
@@ -61,7 +61,7 @@
 
 | ID | Phase | Component | Severity | Issue | Evidence | Owner | Status | Resolution |
 |---|---|---|---|---|---|---|---|---|
-| I001 | port | transformer | high | Branch DiT (`Cosmos3VFMTransformer`+`Cosmos3LanguageModel`) built vs vllm-omni #3454; official checkpoint loads `Cosmos3OmniTransformer` (diffusers shim). Class/structure reconciliation required. | `model_index.json`; `diffusers_cosmos3/transformer.py`; branch commit `52bb65f49` | orchestrator | open | |
+| I001 | port | transformer | high | Branch DiT (`Cosmos3VFMTransformer`+`Cosmos3LanguageModel`) built vs vllm-omni #3454; official checkpoint loads `Cosmos3OmniTransformer` (diffusers shim). Class/structure reconciliation required. | `model_index.json`; `diffusers_cosmos3/transformer.py`; branch commit `52bb65f49` | orchestrator | resolved | DiT rewritten to checkpoint layout (single `layers` dual-pathway, BaseDiT-conformant); bit-identical framework parity (3d_rope + unified_3d_mrope), commits 59a4a571c/7c4633295 |
 | I002 | all | tests | medium | Tier-A conftest+tests mirror vllm-omni line-by-line (stubs, `vllm_omni...guardrails`). Must be repointed to `diffusers_cosmos3` / official structures. | `tests/local_tests/cosmos3/conftest.py` | orchestrator | open | |
 
 ## Escape Hatches
