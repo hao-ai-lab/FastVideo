@@ -13,6 +13,7 @@ from multiprocessing import Process, Queue
 
 from dreamverse.config import (
     DEFAULT_MODEL_ID,
+    DREAMVERSE_SP_SIZE,
     MODEL_REGISTRY,
     STARTUP_WARMUP_ENABLED,
     STARTUP_WARMUP_PROMPT,
@@ -33,6 +34,8 @@ from dreamverse.worker_ipc import (
     InitAck,
     JoinAck,
     LeaveAck,
+    LoraAck,
+    LoraStackPayload,
     MediaChunk,
     MediaComplete,
     MediaInit,
@@ -80,6 +83,7 @@ class CommandType(Enum):
     USER_STEP = "user_step"
     USER_LEAVE = "user_leave"
     RELOAD_MODEL = "reload_model"
+    APPLY_LORA = "apply_lora"
 
 
 @dataclass
@@ -282,6 +286,25 @@ def gpu_worker_process(
                         message=str(e),
                     ))
 
+            elif cmd.type == CommandType.APPLY_LORA:
+                try:
+                    assert isinstance(cmd.payload, LoraStackPayload), (f"APPLY_LORA requires LoraStackPayload, "
+                                                                       f"got {type(cmd.payload).__name__}")
+                    trigger, position = worker.apply_lora_stack(cmd.payload.stack)
+                    response_queue.put(
+                        LoraAck(
+                            user_id=cmd.user_id,
+                            style_trigger=trigger,
+                            style_trigger_position=position,
+                        ))
+                except Exception as e:
+                    print(f"[GPU {gpu_id}] Apply LoRA error: {e}")
+                    traceback.print_exc()
+                    response_queue.put(WorkerError(
+                        user_id=cmd.user_id,
+                        message=str(e),
+                    ))
+
             return True  # Continue loop
 
         if first_cmd is not None:
@@ -353,6 +376,25 @@ def gpu_worker_process(
                     response_queue.put(ReloadAck(user_id=cmd.user_id))
                 except Exception as e:
                     print(f"[GPU {gpu_id}] Reload error: {e}")
+                    traceback.print_exc()
+                    response_queue.put(WorkerError(
+                        user_id=cmd.user_id,
+                        message=str(e),
+                    ))
+
+            elif cmd.type == CommandType.APPLY_LORA:
+                try:
+                    assert isinstance(cmd.payload, LoraStackPayload), (f"APPLY_LORA requires LoraStackPayload, "
+                                                                       f"got {type(cmd.payload).__name__}")
+                    trigger, position = worker.apply_lora_stack(cmd.payload.stack)
+                    response_queue.put(
+                        LoraAck(
+                            user_id=cmd.user_id,
+                            style_trigger=trigger,
+                            style_trigger_position=position,
+                        ))
+                except Exception as e:
+                    print(f"[GPU {gpu_id}] Apply LoRA error: {e}")
                     traceback.print_exc()
                     response_queue.put(WorkerError(
                         user_id=cmd.user_id,
@@ -729,6 +771,25 @@ class GPUSlot:
                 raise RuntimeError(f"Unexpected step response for {user_id[:8]}: "
                                    f"{type(response).__name__}")
 
+    async def apply_lora_stack(
+        self,
+        stack: list[tuple[str, float]],
+    ) -> LoraAck:
+        """Re-apply a runtime LoRA stack on this GPU's worker."""
+        self._active = True
+        user_id = "__lora__"
+        payload = LoraStackPayload(stack=stack)
+        response = await self._send_command_tagged(Command(CommandType.APPLY_LORA, payload=payload, user_id=user_id),
+                                                   timeout=120.0)
+        match response:
+            case LoraAck() as ack:
+                return ack
+            case WorkerError(message=msg):
+                raise RuntimeError(f"Apply LoRA failed on GPU {self.gpu_id}: {msg}")
+            case _:
+                raise RuntimeError(f"Unexpected LoRA response on GPU {self.gpu_id}: "
+                                   f"{type(response).__name__}")
+
     async def leave_user(self, user_id: str) -> None:
         """Remove a user from this GPU."""
         try:
@@ -785,8 +846,16 @@ class GPUPool:
     """Manages multiple GPU worker subprocesses."""
 
     def __init__(self, gpu_ids: list[int]):
-        self.gpu_ids = gpu_ids
-        self.slots: dict[int, GPUSlot] = {gpu_id: GPUSlot(gpu_id, str(gpu_id)) for gpu_id in gpu_ids}
+        sp_size = DREAMVERSE_SP_SIZE
+        groups = [gpu_ids[i:i + sp_size] for i in range(0, len(gpu_ids), sp_size)]
+        groups = [g for g in groups if len(g) == sp_size]
+        if not groups:
+            raise RuntimeError(f"Not enough GPUs for DREAMVERSE_SP_SIZE={sp_size}: available={gpu_ids}")
+        if sp_size > 1:
+            print(f"[INFO] Sequence-parallel slots (sp_size={sp_size}): " + ", ".join("{" + ",".join(map(str, g)) + "}"
+                                                                                      for g in groups))
+        self.gpu_ids = [g[0] for g in groups]
+        self.slots: dict[int, GPUSlot] = {g[0]: GPUSlot(g[0], ",".join(str(x) for x in g)) for g in groups}
         self.waiting_list: list[tuple[str, asyncio.Event, WebSocket]] = []
         self.client_gpu_map: dict[str, int] = {}
         self._pool_lock = asyncio.Lock()
@@ -902,6 +971,17 @@ class GPUPool:
                     })
                 except Exception:
                     pass
+
+    async def apply_lora_stack(
+        self,
+        stack: list[tuple[str, float]],
+    ) -> dict[int, str | None]:
+        """Re-apply a runtime LoRA stack across all ready GPU workers."""
+        ready_slots = [slot for slot in self.slots.values() if slot.ready]
+        if not ready_slots:
+            raise RuntimeError("No ready GPU workers to apply LoRA stack.")
+        results = await asyncio.gather(*(slot.apply_lora_stack(stack) for slot in ready_slots))
+        return {slot.gpu_id: ack.style_trigger for slot, ack in zip(ready_slots, results, strict=False)}
 
     async def shutdown(self):
         """Shutdown all GPU workers."""

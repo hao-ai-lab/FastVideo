@@ -2,8 +2,9 @@
 
 In-process evaluation suite for video generations. Includes pixel
 metrics (SSIM, PSNR, LPIPS), Fréchet Video Distance (FVD), optical-flow
-comparisons, the full VBench suite, Physics-IQ, audio metrics, and a
-VLM scorer behind a single registry-driven API.
+comparisons, the full VBench suite, Physics-IQ, audio metrics, an
+absolute VLM scorer (`videoscore2`), and a pairwise VLM judge
+(`judge.third_person_separation`) — all behind a single registry-driven API.
 
 ## Install
 
@@ -197,6 +198,7 @@ fastvideo/
 │       ├── audio/                 # clap_score, audiobox_aesthetics, kl_divergence,
 │       │                          # frechet_distance, wer, desync, imagebind_score
 │       ├── videoscore2/           # VideoScore-2 (Qwen2.5-VL)
+│       ├── judge/                 # pairwise VLM judges (third_person_separation)
 │       ├── physics_iq/            # PhysicsIQ + sub-metrics
 │       └── vbench/                # adapter: sys.path bootstrap + shims
 │           ├── __init__.py
@@ -350,6 +352,40 @@ cached set). Override with `$FASTVIDEO_FVD_REF_FEATURES`, the
 to control read/write behavior. The example script
 `examples/inference/eval/eval_fvd.py` demonstrates the full
 two-directory workflow.
+
+## `judge.third_person_separation` — pairwise VLM judge
+
+A **preference** metric (a judge, not an absolute score), and the suite's first
+remote-API one. For each pair the judge (Gemini) sees the shared first frame and
+two rollouts — a candidate and a reference model under the same control signal —
+and picks the one that better separates the third-person CHARACTER (foreground)
+from the BACKGROUND. The corpus score is the candidate's win-rate, excluding
+ties. Set-vs-set, motion-first; it reads native mp4s, so samples carry path
+strings, not decoded tensors.
+
+```bash
+uv pip install -e .[eval-judge]      # opt-in: needs network + an API key
+export GEMINI_API_KEY=...            # or GOOGLE_API_KEY, or ~/.gemini_token
+```
+
+```python
+from fastvideo.eval import create_evaluator
+
+ev = create_evaluator(metrics=["judge.third_person_separation"], device="cpu")
+result = ev.evaluate(samples=[
+    {"video_path": "cand/000.mp4", "reference_path": "base/000.mp4",
+     "image_path": "frames/000.png", "text_prompt": "W: moves forward", "action": "W"},
+    # ... more pairs ...
+]).corpus["judge.third_person_separation"]
+result.score    # candidate win-rate excl. ties; result.details has the breakdown
+```
+
+Only `video_path`/`reference_path` are required; `image_path`/`text_prompt`/
+`action` are optional. Verdicts are cached under `${FASTVIDEO_EVAL_CACHE}/eval/judge/`.
+The judge separates best when the control yields genuine parallax (e.g.
+translation); rigid whole-frame motion (e.g. pure camera rotation) is harder. To
+sweep several baselines into a table, see
+`examples/inference/eval/eval_third_person_separation.py`.
 
 ## Out of scope (follow-up PRs)
 
