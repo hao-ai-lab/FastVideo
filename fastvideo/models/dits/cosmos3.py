@@ -934,6 +934,44 @@ class Cosmos3VFMTransformer(BaseDiT):
         output["last_hidden_state"] = last_hidden_state
         return output
 
+    def reason_forward(
+        self,
+        inputs_embeds: torch.Tensor,
+        position_ids: torch.Tensor,
+        deepstack_embeds: list[torch.Tensor] | None = None,
+        visual_pos_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Reasoner (causal) backbone forward over one text(+image) sequence.
+
+        All tokens are und (causal); the gen pathway is empty. Mirrors the
+        framework ``reasoner_forward``: run the und layers, optionally injecting
+        per-layer deepstack visual embeds at ``visual_pos_mask`` for the first
+        ``len(deepstack_embeds)`` layers (Qwen3-VL deepstack), then final
+        ``norm``. Returns post-norm hidden states ``[N, hidden]`` (apply
+        ``lm_head`` for logits). Used by image-conditioned reasoning, with the
+        text/vision embeds + ``position_ids`` produced by the multimodal prefill.
+
+        Args:
+            inputs_embeds: ``[N, hidden]`` text embeds with image features
+                already scattered in at the image-token positions.
+            position_ids: ``[3, N]`` (or ``[N]``) mRoPE positions.
+            deepstack_embeds: per-deepstack-layer ``[n_visual, hidden]`` embeds.
+            visual_pos_mask: ``[N]`` bool mask of visual token positions.
+        """
+        device = self.embed_tokens.weight.device
+        target_dtype = inputs_embeds.dtype
+        cos, sin = self.rotary_emb(position_ids, device=device, dtype=target_dtype)  # [N, head_dim]
+        und = inputs_embeds
+        gen = inputs_embeds.new_zeros((0, self.hidden_size))
+        cos_gen = cos.new_zeros((0, cos.shape[-1]))
+        sin_gen = sin.new_zeros((0, sin.shape[-1]))
+        for li, layer in enumerate(self.layers):
+            und, _ = layer(und, gen, cos, sin, cos_gen, sin_gen)
+            if deepstack_embeds is not None and visual_pos_mask is not None and li < len(deepstack_embeds):
+                und = und.clone()
+                und[visual_pos_mask] = und[visual_pos_mask] + deepstack_embeds[li].to(dtype=und.dtype)
+        return self.norm(und)  # [N, hidden]
+
     def _unpack_action(
         self,
         packed_preds: torch.Tensor,
