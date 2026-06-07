@@ -94,6 +94,9 @@ class OobleckDecoderBlock(nn.Module):
             input_dim, output_dim,
             kernel_size=2 * stride, stride=stride,
             padding=math.ceil(stride / 2),
+            # Clean L*stride upsample for both parities; a no-op (0) for even
+            # strides (Stable Audio), needed for odd strides (Cosmos3: 5).
+            output_padding=stride % 2,
         ))
         self.res_unit1 = OobleckResidualUnit(output_dim, dilation=1)
         self.res_unit2 = OobleckResidualUnit(output_dim, dilation=3)
