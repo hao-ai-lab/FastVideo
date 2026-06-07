@@ -158,27 +158,30 @@ def test_i2v_keeps_condition_frame_clean(make_cosmos3_pipeline) -> None:
 
 
 def test_stage_mode_dispatch_t2v(make_cosmos3_pipeline, make_cosmos3_stage) -> None:
-    """T2V (num_frames>1): flow_shift=engine-init (10.0), video tokenization."""
+    """T2V (num_frames>1): resolution-based flow_shift, video tokenization."""
     pipeline = make_cosmos3_pipeline()
     stage = make_cosmos3_stage(pipeline)
     args = make_fastvideo_args()
     batch = make_forward_batch(num_frames=5, height=16, width=16)
 
     out = stage.forward(batch, args)
-    assert float(pipeline.scheduler.config.flow_shift) == 10.0
+    # flow_shift is resolution-based (not task-based): 16x16 -> "256" bucket -> 3.0.
+    # (full resolution->shift parity in test_cosmos3_flow_shift_parity.)
+    assert float(pipeline.scheduler.config.flow_shift) == 3.0
     assert out.output is not None and out.output.dim() == 5
     # T2V latent: (5-1)//4 + 1 = 2 frames; 16/8 = 2 latent h/w.
     assert tuple(out.latents.shape) == (1, _LATENT_CHANNEL, 2, 2, 2)
 
 
 def test_stage_mode_dispatch_t2i(make_cosmos3_pipeline, make_cosmos3_stage) -> None:
-    """T2I (num_frames==1): flow_shift=3.0; single-frame latent."""
+    """T2I (num_frames==1): single-frame latent; resolution-based flow_shift."""
     pipeline = make_cosmos3_pipeline()
     stage = make_cosmos3_stage(pipeline)
     args = make_fastvideo_args()
     batch = make_forward_batch(num_frames=1, height=16, width=16, guidance_scale=4.0)
 
     out = stage.forward(batch, args)
+    # 16x16 -> "256" bucket -> 3.0 (resolution-based, not task-based).
     assert float(pipeline.scheduler.config.flow_shift) == 3.0
     assert tuple(out.latents.shape) == (1, _LATENT_CHANNEL, 1, 2, 2)
 
@@ -192,7 +195,7 @@ def test_stage_i2v_encodes_conditioning_image(make_cosmos3_pipeline, make_cosmos
     batch = make_forward_batch(num_frames=5, height=16, width=16, image=image)
 
     out = stage.forward(batch, args)
-    # I2V uses the same engine-init flow_shift as T2V (10.0).
-    assert float(pipeline.scheduler.config.flow_shift) == 10.0
+    # flow_shift is resolution-based (not task-based): 16x16 -> 3.0.
+    assert float(pipeline.scheduler.config.flow_shift) == 3.0
     assert out.output is not None and out.output.dim() == 5
     assert torch.isfinite(out.output).all()
