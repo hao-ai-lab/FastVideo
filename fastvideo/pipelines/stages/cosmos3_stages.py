@@ -20,6 +20,7 @@ This mirrors the framework ``Cosmos3OmniDiffusersPipeline.__call__``.
 """
 from __future__ import annotations
 
+import os
 import weakref
 from typing import Any
 
@@ -31,6 +32,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (
     Cosmos3DenoiseEngine,
+    Cosmos3SoundSpec,
     Cosmos3VisionSpec,
     _VaeNorm,
     cosmos3_special_tokens,
@@ -186,6 +188,29 @@ class Cosmos3DenoisingStage(PipelineStage):
 
         flat_latent = init_latent.reshape(-1)
         fps_per_item = [fps] if bool(arch.enable_fps_modulation) else None
+
+        # ---- t2vs: jointly generate sound (combined [vision | sound] latent) ----
+        # Mirrors the framework: a placeholder audio sized to the video duration
+        # sets the sound latent length; sound shares the denoise/CFG with vision.
+        with_audio = is_video and os.environ.get("COSMOS3_T2VS", "") not in ("", "0")
+        sound_specs = None
+        sound_fps_per_item = None
+        sound_vae = None
+        sound_shape: tuple[int, int] | None = None
+        if with_audio:
+            sound_vae = self._get_sound_vae(pipe, device, dtype)
+            sound_dim = int(arch.sound_dim)
+            sound_latent_fps = float(arch.sound_latent_fps)
+            # Framework ``create_placeholder_audio`` + ``get_latent_num_samples``.
+            num_audio_samples = int(num_frames / fps * sound_vae.sample_rate)
+            sound_latent_t = max(1, sound_vae.get_latent_num_samples(num_audio_samples))
+            sound_shape = (sound_dim, sound_latent_t)
+            sound_noise = randn_tensor((sound_dim, sound_latent_t), generator=generator, device=device,
+                                       dtype=dtype).float()
+            flat_latent = torch.cat([flat_latent, sound_noise.reshape(-1)])
+            sound_specs = [Cosmos3SoundSpec(shape=sound_shape, condition_frame_indexes=[], fps=sound_latent_fps)]
+            sound_fps_per_item = [sound_latent_fps] if bool(arch.enable_fps_modulation) else None
+
         final_flat = engine.denoise(
             flat_latent=flat_latent,
             timesteps=timesteps,
@@ -195,15 +220,25 @@ class Cosmos3DenoisingStage(PipelineStage):
             uncond_token_ids=uncond_ids,
             fps_per_item=fps_per_item,
             progress_bar=lambda it: tqdm(it, desc="Cosmos3 denoising"),
+            sound_specs=sound_specs,
+            sound_fps_per_item=sound_fps_per_item,
         )
 
-        # ---- Decode: [C, T, H, W] -> pixels [B, 3, T, H, W] in [0, 1] ----
-        result_latent = final_flat.reshape(latent_shape).unsqueeze(0).to(device=device, dtype=dtype)
+        # ---- Decode vision: [C, T, H, W] -> pixels [B, 3, T, H, W] in [0, 1] ----
+        vision_flat = final_flat[:spec.numel]
+        result_latent = vision_flat.reshape(latent_shape).unsqueeze(0).to(device=device, dtype=dtype)
         decoded = cosmos3_vae_decode(self.vae, result_latent, norm)  # [B, 3, T, H, W] in [-1, 1]
         video = ((1.0 + decoded) / 2.0).clamp(0.0, 1.0)
 
         batch.latents = result_latent
         batch.output = video
+
+        # ---- Decode sound: AVAE latent [C, T] -> waveform [C, N] in [-1, 1] ----
+        if with_audio and sound_vae is not None and sound_shape is not None:
+            sound_latent = final_flat[spec.numel:].reshape(sound_shape).unsqueeze(0).to(device=device, dtype=dtype)
+            waveform = sound_vae.decode(sound_latent)  # [1, C_audio, N]
+            batch.extra["audio"] = waveform[0].detach().float().cpu()  # [C_audio, N]
+            batch.extra["audio_sample_rate"] = int(sound_vae.sample_rate)
         return batch
 
     # ------------------------------------------------------------------
@@ -222,6 +257,24 @@ class Cosmos3DenoisingStage(PipelineStage):
         resize_w = int(math.ceil(scaling_ratio * orig_w))
         img = TF.resize(img, [resize_h, resize_w])
         return TF.center_crop(img, [target_h, target_w])
+
+    @staticmethod
+    def _get_sound_vae(pipe: Any, device: torch.device, dtype: torch.dtype) -> Any:
+        """Lazily load + cache the Cosmos3 sound AVAE decoder from the checkpoint.
+
+        The video path does not load ``sound_tokenizer``; t2vs needs only its
+        decoder, so we load it on first use from ``<model_path>/sound_tokenizer``.
+        """
+        cached = getattr(pipe, "_sound_vae", None) if pipe is not None else None
+        if cached is not None:
+            return cached
+        from fastvideo.models.audio.cosmos3_avae import Cosmos3SoundVAE
+        model_path = pipe.model_path
+        sound_dir = os.path.join(model_path, "sound_tokenizer")
+        sound_vae = Cosmos3SoundVAE.from_pretrained(sound_dir, torch_dtype=dtype).to(device)
+        if pipe is not None:
+            pipe._sound_vae = sound_vae
+        return sound_vae
 
     @classmethod
     def _image_to_video_tensor(

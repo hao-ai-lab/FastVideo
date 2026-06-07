@@ -233,3 +233,56 @@ class TestCosmos3SoundParity:
         torch.testing.assert_close(fv_out["preds_vision"][0], fw_out["preds_vision"][0], atol=1e-4, rtol=1e-3)
         torch.testing.assert_close(fv_out["preds_sound"][0], fw_out["preds_sound"][0], atol=1e-4, rtol=1e-3)
         torch.testing.assert_close(fv_on_fw["preds_sound"][0], fw_out["preds_sound"][0], atol=1e-4, rtol=1e-3)
+
+    @pytest.mark.parametrize(("grid_t", "lh", "lw", "snd_t", "n_text", "cond_v", "cond_s"), _CASES)
+    def test_t2vs_cfg_velocity_matches_framework(self, grid_t, lh, lw, snd_t, n_text, cond_v, cond_s):
+        """The combined [vision|sound] sequential-CFG velocity (the t2vs denoise
+        step's pipeline glue) matches a framework-DiT oracle."""
+        from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (
+            Cosmos3SoundSpec,
+            Cosmos3VisionSpec,
+            cosmos3_get_cfg_velocity,
+        )
+
+        vfm, dit = self._build()
+        vision_shape = (_LATENT_CHANNEL, grid_t, lh // _LATENT_PATCH_SIZE, lw // _LATENT_PATCH_SIZE)
+        # _make_inputs builds the vision LATENT [1,C,T,H,W]; here we drive the
+        # combined flat latent directly, so use the un-patchified latent shape.
+        vlat_shape = (_LATENT_CHANNEL, grid_t, lh, lw)
+        sound_shape = (_SOUND_DIM, snd_t)
+        torch.manual_seed(3)
+        cond_ids = torch.randint(0, 60, (n_text,)).tolist()
+        uncond_ids = torch.randint(0, 60, (max(1, n_text - 1),)).tolist()
+        vis_numel = int(torch.tensor(vlat_shape).prod())
+        snd_numel = int(torch.tensor(sound_shape).prod())
+        flat = torch.randn(vis_numel + snd_numel)
+        guidance, ts = 6.0, 500.0
+
+        def _fw_velocity(ids):
+            vision = flat[:vis_numel].reshape(vlat_shape).unsqueeze(0)  # [1,C,T,H,W]
+            sound = flat[vis_numel:].reshape(sound_shape)  # [C,T]
+            ps = _framework_pack_sound(text_ids=ids, vision=vision, sound=sound,
+                                       cond_vision=cond_v, cond_sound=cond_s,
+                                       timestep=ts, is_image_batch=(grid_t == 1))
+            with torch.no_grad():
+                out = vfm(packed_seq=ps)
+            pv = out["preds_vision"][0].squeeze(0)  # [C,T,H,W] (zero on clean)
+            psd = out["preds_sound"][0]  # [C,T] (zero on clean)
+            return torch.cat([pv.reshape(-1), psd.reshape(-1)])
+
+        fw_cond, fw_uncond = _fw_velocity(cond_ids), _fw_velocity(uncond_ids)
+        fw_v = fw_uncond + guidance * (fw_cond - fw_uncond)
+
+        fv_v = cosmos3_get_cfg_velocity(
+            transformer=dit, flat_latent=flat, timestep=torch.tensor([ts]), guidance=guidance,
+            specs=[Cosmos3VisionSpec(shape=vlat_shape, condition_frame_indexes=list(cond_v))],
+            sound_specs=[Cosmos3SoundSpec(shape=sound_shape, condition_frame_indexes=list(cond_s))],
+            cond_token_ids=cond_ids, uncond_token_ids=uncond_ids,
+            special_tokens=_SPECIAL_TOKENS, latent_patch_size=_LATENT_PATCH_SIZE,
+            temporal_modality_margin=_TEMPORAL_MODALITY_MARGIN, reset_spatial_ids=_RESET_SPATIAL_IDS,
+            enable_fps_modulation=False, base_fps=24.0, temporal_compression_factor=_TCF,
+        )
+        assert fv_v.shape == fw_v.shape, f"shape fv={fv_v.shape} fw={fw_v.shape}"
+        mx, mn = _diffs(fv_v, fw_v)
+        print(f"\n[t2vs_cfg_velocity {grid_t}x{lh}x{lw} snd={snd_t}] max={mx:.3e} mean={mn:.3e}")
+        torch.testing.assert_close(fv_v, fw_v, atol=1e-4, rtol=1e-3)
