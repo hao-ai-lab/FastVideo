@@ -2,38 +2,70 @@
 
 ## Overview
 
-Cosmos3 Phase-1 prep tracks a future FastVideo port from the vllm-omni Cosmos3 integration in PR #3454. The current reference supports a single `Cosmos3OmniDiffusersPipeline` for text-to-video (T2V), image-to-video (I2V), and text-to-image (T2I). Follow-up Cosmos3 capabilities mentioned in the PR body, such as sound generation and action-generation modes, are out of scope for the initial FastVideo port.
+This workspace tracks the FastVideo Cosmos3 port. Live port state, component matrix,
+decisions, and blockers live in `PORT_STATUS.md`.
+
+- **Reference (2026-06-06): official NVIDIA `cosmos-framework` diffusers backend** —
+  `Cosmos3OmniDiffusersPipeline` from the `diffusers-cosmos3` shim — loading the
+  now-public `nvidia/Cosmos3-Nano` checkpoint.
+- **Scope: full omni** — T2V / I2V / T2I, audio (sound generation), VLM reasoning,
+  and action-conditioning.
+- The original Tier-A scaffold was written against vllm-omni PR #3454 before official
+  weights were public; it is being repointed to the diffusers reference (see I001/I002
+  in `PORT_STATUS.md`).
 
 ## Reference code
 
-- Reference checkout: `/home/william5lin/cosmos3-reference`
-- Source PR: <https://github.com/vllm-project/vllm-omni/pull/3454>
-- Pinned HEAD: `8536f5b1421f78c7df06af6d96fa195c1ceb6384`
-- Key files:
-  - `vllm_omni/deploy/cosmos3.yaml`
-  - `vllm_omni/diffusion/models/cosmos3/pipeline_cosmos3.py`
-  - `vllm_omni/diffusion/models/cosmos3/transformer_cosmos3.py`
-  - `vllm_omni/diffusion/models/cosmos3/guardrails.py`
-  - `tests/diffusion/models/cosmos3/test_cosmos3_pipeline.py`
-  - `tests/diffusion/models/cosmos3/test_cosmos3_transformer.py`
+Primary (official):
+
+- Local: `cosmos-framework/` (symlink -> `/home/william5lin/FastVideo/cosmos-framework`,
+  commit `003d66d4`); GitHub <https://github.com/NVIDIA/cosmos-framework>
+- diffusers shim `cosmos-framework/packages/diffusers-cosmos3/diffusers_cosmos3/`:
+  - `pipeline.py` — `Cosmos3OmniDiffusersPipeline`
+  - `transformer.py` — `Cosmos3OmniTransformer`
+  - `sequence_packing.py`
+- framework model code: `cosmos_framework/model/vfm/mot/cosmos3_vfm_network.py`,
+  `cosmos_framework/model/vfm/omni_mot_model.py`
+- Installed editable in shared `fv-main`: `diffusers-cosmos3`, `cosmos-framework`
+  (both `--no-deps`).
+
+Original Tier-A reference (superseded, kept for diffing during repoint):
+
+- vllm-omni PR #3454 <https://github.com/vllm-project/vllm-omni/pull/3454>, pinned
+  `8536f5b1`, checkout `/home/william5lin/cosmos3-reference`.
+- The current `conftest.py` + tests still mirror this suite line-by-line.
 
 ## Weight status
 
-PENDING. Do not download weights during Phase 1.
+DOWNLOADED (2026-06-06). `nvidia/Cosmos3-Nano` is now public and diffusers-format
+(the 2026-05-22 `401` is resolved).
 
-- Candidate serving/model id from the PR body: `nvidia/Cosmos3-Nano`
-- Hugging Face API status on 2026-05-22: `401` for `https://huggingface.co/api/models/nvidia/Cosmos3-Nano`; API body reports `Invalid username or password.`
-- Hugging Face author search `author=nvidia&search=Cosmos3`: empty list (`[]`).
-- NGC API URL requested by handoff returned a Next.js 404 HTML page, not model metadata.
+- Local: `official_weights/cosmos3/` (symlink -> main worktree; 33 GiB, 67 files,
+  `model_index.json` present)
+- Source: `nvidia/Cosmos3-Nano`, default revision; `source_layout=diffusers`,
+  `needs_conversion=no`
+- `model_index` class: `Cosmos3OmniDiffusersPipeline` (diffusers 0.37.1)
+- Token: not required (public repo)
 
-## Parity-test placeholder
+Components (from `model_index.json`): `transformer` (`Cosmos3OmniTransformer`),
+`vae` (`AutoencoderKLWan`), `scheduler` (`UniPCMultistepScheduler`),
+`text_tokenizer` (`Qwen2TokenizerFast`), `vision_encoder` (`Qwen3VLVisionModel`),
+`sound_tokenizer` (`Cosmos3AVAEAudioTokenizer`).
 
-Phase 2 should add local parity tests here after the official weights become accessible and FastVideo component prototypes exist. Suggested first targets:
+## Running the Tier-A scaffold
 
-1. Transformer state-dict key/shape inventory versus `Cosmos3VFMTransformer`.
-2. Scheduler/default-parameter parity for T2V, I2V, and T2I request modes.
-3. Prompt metadata-template parity for duration/resolution and image-vs-video modalities.
+```bash
+PYTHONPATH=/home/william5lin/FastVideo_cosmos3_port \
+  python -m pytest tests/local_tests/cosmos3/ -q
+```
+
+NOTE: as of 2026-06-06 these report `15 skipped` because the shared `fv-main` env's
+editable `fastvideo` resolves to the MAIN worktree (a PEP660 finder overrides
+`PYTHONPATH`), so the worktree's cosmos3 modules are not importable. Tracked as E001
+in `PORT_STATUS.md`.
 
 ## SSIM placeholder
 
-No SSIM references seeded yet. Add SSIM coverage only after a FastVideo inference path can load resolved Cosmos3 weights and generate stable T2V/T2I/I2V outputs.
+No SSIM references seeded yet. Add SSIM coverage only after a FastVideo inference path
+can load the Cosmos3 weights and generate stable T2V/I2V/T2I outputs. Audio quality
+uses a separate metric (not SSIM); see `PORT_STATUS.md` Q003.

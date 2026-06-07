@@ -35,6 +35,11 @@ env
 weights/
 logs/
 
+# Cosmos3 local parity assets (symlinked from main worktree)
+/official_weights/
+/converted_weights/
+/cosmos-framework
+
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/
 **/.cache/**
