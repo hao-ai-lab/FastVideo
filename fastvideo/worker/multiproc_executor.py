@@ -232,11 +232,17 @@ class MultiprocExecutor(Executor):
 
         return self._streaming_output_queue.get()
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None = None) -> None:
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None,
+                         strength: float = 1.0,
+                         accumulate: bool = False) -> None:
         responses = self.collective_rpc("set_lora_adapter",
                                         kwargs={
                                             "lora_nickname": lora_nickname,
-                                            "lora_path": lora_path
+                                            "lora_path": lora_path,
+                                            "strength": strength,
+                                            "accumulate": accumulate
                                         })
         for i, response in enumerate(responses):
             if response["status"] != "lora_adapter_set":

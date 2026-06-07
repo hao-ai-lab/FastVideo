@@ -171,3 +171,69 @@ def test_mock_server_cli_updates_latency(monkeypatch):
         assert mock_server.LATENCY_MS == 321
     finally:
         mock_server.LATENCY_MS = old_latency_ms
+
+
+def _lora_client(monkeypatch, captured):
+    server_main = _import_server_main(monkeypatch)
+    monkeypatch.setattr(server_main, "DEVTOOLS_ENABLED", True)
+    monkeypatch.setattr(server_main, "_available_styles_for_active_model", lambda: ["pixar", "transition"])
+    monkeypatch.setattr(
+        server_main,
+        "_resolve_lora_spec",
+        lambda spec: "FastVideo/OmniNFT" if str(spec).strip().lower() == "omninft" else spec,
+    )
+
+    class _FakePool:
+
+        async def apply_lora_stack(self, stack):
+            captured["stack"] = list(stack)
+            return {0: "trigger"}
+
+    server_main.runtime.gpu_pool = _FakePool()
+    return TestClient(server_main.app)
+
+
+def test_apply_lora_stacks_multiple_styles_with_intensities(monkeypatch):
+    captured: dict = {}
+    client = _lora_client(monkeypatch, captured)
+    response = client.post("/lora", json={"strength": 0.8, "styles": {"pixar": 0.45, "transition": 0.5}})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["applied"] is True
+    assert body["styles"] == {"pixar": 0.45, "transition": 0.5}
+    assert captured["stack"] == [("omninft", 0.8), ("pixar", 0.45), ("transition", 0.5)]
+
+
+def test_apply_lora_rejects_unknown_style(monkeypatch):
+    captured: dict = {}
+    client = _lora_client(monkeypatch, captured)
+    response = client.post("/lora", json={"strength": 0.5, "styles": {"watercolor": 0.5}})
+    assert response.status_code == 400
+    assert "stack" not in captured
+
+
+def test_apply_lora_accepts_legacy_single_style(monkeypatch):
+    captured: dict = {}
+    client = _lora_client(monkeypatch, captured)
+    response = client.post("/lora", json={"strength": 0.6, "style": "pixar"})
+    assert response.status_code == 200
+    assert captured["stack"] == [("omninft", 0.6), ("pixar", 1.0)]
+
+
+def test_apply_lora_clamps_and_drops_zero_intensity(monkeypatch):
+    captured: dict = {}
+    client = _lora_client(monkeypatch, captured)
+    response = client.post("/lora", json={"strength": 1.5, "styles": {"pixar": 2.0, "transition": 0.0}})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strength"] == 1.0
+    assert body["styles"] == {"pixar": 1.0}
+    assert captured["stack"] == [("omninft", 1.0), ("pixar", 1.0)]
+
+
+def test_lora_endpoints_hidden_without_devtools(monkeypatch):
+    server_main = _import_server_main(monkeypatch)
+    monkeypatch.setattr(server_main, "DEVTOOLS_ENABLED", False)
+    client = TestClient(server_main.app)
+    assert client.get("/lora/options").status_code == 404
+    assert client.post("/lora", json={"strength": 0.5}).status_code == 404

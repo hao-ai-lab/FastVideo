@@ -89,9 +89,13 @@ class Worker:
         logger.info("Worker %d shutdown complete", self.rank, local_main_process_only=False)
         return {"status": "shutdown_complete"}
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None = None) -> dict[str, Any]:
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None,
+                         strength: float = 1.0,
+                         accumulate: bool = False) -> dict[str, Any]:
         if isinstance(self.pipeline, LoRAPipeline):
-            self.pipeline.set_lora_adapter(lora_nickname, lora_path)
+            self.pipeline.set_lora_adapter(lora_nickname, lora_path, strength=strength, accumulate=accumulate)
             logger.info("Worker %d set LoRA adapter %s with path %s", self.rank, lora_nickname, lora_path)
             return {"status": "lora_adapter_set"}
         return {"status": "failed: pipeline is not a LoRAPipeline"}

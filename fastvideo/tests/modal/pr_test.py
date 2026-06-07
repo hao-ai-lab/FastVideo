@@ -248,7 +248,7 @@ def run_dreamverse_app_tests():
         npm ci &&
         npm run typecheck &&
         npm test &&
-        npx playwright install --with-deps chromium &&
+        npx playwright install --with-deps chromium webkit firefox &&
         bash -c '
             set -e
             BACKEND_PORT="${BACKEND_PORT:-8009}"
@@ -260,7 +260,13 @@ def run_dreamverse_app_tests():
                 sleep 1
             done
             curl -fsS "http://127.0.0.1:$BACKEND_PORT/healthz"
-            BACKEND_HOST=127.0.0.1 BACKEND_PORT="$BACKEND_PORT" CI=1 npm run e2e
+            BACKEND_HOST=127.0.0.1 BACKEND_PORT="$BACKEND_PORT" CI=1 \
+                npm run e2e -- \
+                    --project=chromium \
+                    --project=webkit \
+                    --project=firefox \
+                    --project=mobile-safari \
+                    --project=mobile-chromium
         '
         """,
         build_kernel=False)
