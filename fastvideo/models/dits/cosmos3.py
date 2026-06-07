@@ -801,9 +801,17 @@ class Cosmos3VFMTransformer(BaseDiT):
         vision_mse_loss_indexes: torch.Tensor,
         vision_noisy_frame_indexes: list[torch.Tensor],
         fps_vision: torch.Tensor | None = None,
+        sound_tokens: list[torch.Tensor] | None = None,
+        sound_token_shapes: list[tuple[int, int, int]] | None = None,
+        sound_sequence_indexes: torch.Tensor | None = None,
+        sound_timesteps: torch.Tensor | None = None,
+        sound_mse_loss_indexes: torch.Tensor | None = None,
+        sound_noisy_frame_indexes: list[torch.Tensor] | None = None,
+        fps_sound: torch.Tensor | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Video-path forward returning ``{"last_hidden_state", "preds_vision"}``.
+        """Video-path forward returning ``{"last_hidden_state", "preds_vision"}``
+        (plus ``"preds_sound"`` when sound tokens are provided for t2vs).
 
         Inputs mirror the framework ``PackedSequence`` fields for a single
         text(causal)+vision(full) sample. This is the surface the parity test
@@ -838,6 +846,23 @@ class Cosmos3VFMTransformer(BaseDiT):
 
             packed_sequence[vision_sequence_indexes] = packed_vision
 
+        # 2b. Sound (t2vs): pack [C, T] -> audio_proj_in -> + modality embed ->
+        #     timestep scatter -> scatter into the (full) gen split. Mirrors the
+        #     framework ``_encode_sound``; sound shares the vision "full" split.
+        if sound_tokens:
+            packed_sound = torch.cat(
+                [s[:, :shp[0]].permute(1, 0) for s, shp in zip(sound_tokens, sound_token_shapes)],
+                dim=0,
+            )  # [total_sound_tokens, sound_dim]
+            packed_sound, _ = self.audio_proj_in(packed_sound.to(target_dtype))
+            packed_sound = packed_sound + self.audio_modality_embed
+            if sound_mse_loss_indexes is not None and sound_mse_loss_indexes.numel() > 0:
+                s_ts = sound_timesteps * self.timestep_scale
+                s_embeds = self.time_embedder(s_ts).to(target_dtype)
+                packed_sound = self._scatter_timestep_embeds(packed_sound, s_embeds, sound_noisy_frame_indexes,
+                                                             sound_token_shapes)
+            packed_sequence[sound_sequence_indexes] = packed_sound
+
         # 3. RoPE for the full packed sequence (cos/sin per token); split und/gen
         cos, sin = self.rotary_emb(position_ids, device=device, dtype=target_dtype)  # [N, head_dim]
         und_idx, gen_idx = self._mode_indices(split_lens, attn_modes, device)
@@ -864,8 +889,34 @@ class Cosmos3VFMTransformer(BaseDiT):
             output["preds_vision"] = self._unpatchify_and_unpack(preds, vision_token_shapes,
                                                                  vision_noisy_frame_indexes, original_shapes)
 
+        # 6b. Sound prediction (t2vs): audio_proj_out on noisy sound hidden
+        #     states -> unpack to per-sample [C, T] (framework ``_decode_sound``).
+        if sound_tokens and sound_mse_loss_indexes is not None and sound_mse_loss_indexes.numel() > 0:
+            preds_sound, _ = self.audio_proj_out(last_hidden_state[sound_mse_loss_indexes])
+            output["preds_sound"] = self._unpack_sound(preds_sound, sound_token_shapes, sound_noisy_frame_indexes)
+
         output["last_hidden_state"] = last_hidden_state
         return output
+
+    def _unpack_sound(
+        self,
+        packed_preds: torch.Tensor,
+        token_shapes: list[tuple[int, int, int]],
+        noisy_frame_indexes: list[torch.Tensor],
+    ) -> list[torch.Tensor]:
+        """Scatter packed noisy sound preds back to per-sample ``[C, T]`` (clean
+        frames left zero). Mirrors framework ``unpack_sound_latents``."""
+        outputs: list[torch.Tensor] = []
+        start_idx = 0
+        for shape, nfi in zip(token_shapes, noisy_frame_indexes):
+            t = shape[0]
+            out = torch.zeros((self.sound_dim, t), device=packed_preds.device, dtype=packed_preds.dtype)
+            t_n = len(nfi)
+            if t_n > 0:
+                out[:, nfi] = packed_preds[start_idx:start_idx + t_n].T
+                start_idx += t_n
+            outputs.append(out)
+        return outputs
 
     @staticmethod
     def _mode_indices(split_lens: list[int], attn_modes: list[str],

@@ -70,12 +70,30 @@ class Cosmos3VisionItem:
 
 
 @dataclass
+class Cosmos3SoundItem:
+    """One sound latent for a sample (t2vs).
+
+    Args:
+        latent: AVAE sound latent ``[C, T]`` (channels, temporal frames).
+        condition_frame_indexes: Latent-frame indices that are *conditioned*
+            (clean). ``[]`` for t2vs (all frames generated).
+        fps: Sound latent FPS (``sound_latent_fps``, e.g. 25); only used when
+            ``enable_fps_modulation`` is set.
+    """
+
+    latent: torch.Tensor
+    condition_frame_indexes: list[int] = field(default_factory=list)
+    fps: float | None = None
+
+
+@dataclass
 class Cosmos3SampleInputs:
-    """Per-sample packing inputs (one text prompt + its vision item)."""
+    """Per-sample packing inputs (one text prompt + its vision item, +sound)."""
 
     text_ids: list[int]
     vision: Cosmos3VisionItem
     timestep: float
+    sound: Cosmos3SoundItem | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +129,16 @@ class Cosmos3PackedSequence:
     vision_condition_mask: list[torch.Tensor]
     fps_vision: torch.Tensor | None = None
 
+    # Sound modality (t2vs); empty/None when no sound.
+    sound_tokens: list[torch.Tensor] = field(default_factory=list)
+    sound_token_shapes: list[tuple[int, int, int]] = field(default_factory=list)
+    sound_sequence_indexes: torch.Tensor | None = None
+    sound_timesteps: torch.Tensor | None = None
+    sound_mse_loss_indexes: torch.Tensor | None = None
+    sound_noisy_frame_indexes: list[torch.Tensor] = field(default_factory=list)
+    sound_condition_mask: list[torch.Tensor] = field(default_factory=list)
+    fps_sound: torch.Tensor | None = None
+
     def to_dit_kwargs(self, device: torch.device | str | None = None) -> dict[str, Any]:
         """Return the kwargs dict for ``Cosmos3VFMTransformer.forward``.
 
@@ -136,6 +164,13 @@ class Cosmos3PackedSequence:
             vision_mse_loss_indexes=_mv(self.vision_mse_loss_indexes),
             vision_noisy_frame_indexes=[_mv(t) for t in self.vision_noisy_frame_indexes],
             fps_vision=self.fps_vision,
+            sound_tokens=[_mv(t) for t in self.sound_tokens],
+            sound_token_shapes=list(self.sound_token_shapes),
+            sound_sequence_indexes=_mv(self.sound_sequence_indexes),
+            sound_timesteps=_mv(self.sound_timesteps),
+            sound_mse_loss_indexes=_mv(self.sound_mse_loss_indexes),
+            sound_noisy_frame_indexes=[_mv(t) for t in self.sound_noisy_frame_indexes],
+            fps_sound=_mv(self.fps_sound),
         )
 
 
@@ -203,6 +238,15 @@ def pack_cosmos3_video_sequence(
     vision_condition_mask: list[torch.Tensor] = []
     fps_values: list[float] = []
 
+    sound_tokens: list[torch.Tensor] = []
+    sound_token_shapes: list[tuple[int, int, int]] = []
+    sound_sequence_indexes: list[int] = []
+    sound_timesteps: list[float] = []
+    sound_mse_loss_indexes: list[int] = []
+    sound_noisy_frame_indexes: list[torch.Tensor] = []
+    sound_condition_mask: list[torch.Tensor] = []
+    sound_fps_values: list[float] = []
+
     curr = 0  # running position in the packed sequence
     is_image_batch = True
 
@@ -236,6 +280,8 @@ def pack_cosmos3_video_sequence(
 
         # End of text modality: bump temporal offset before vision.
         temporal_offset += temporal_modality_margin
+        # Sound shares the vision temporal start (parallel temporal positions).
+        vision_start_temporal_offset = temporal_offset
 
         # ---- 2. Vision split (full) ----
         latent = sample.vision.latent
@@ -289,6 +335,57 @@ def pack_cosmos3_video_sequence(
         curr += num_vision_tokens
         sample_len += num_vision_tokens
 
+        # ---- 2b. Sound split (t2vs): shares the vision "full" split ----
+        # Mirrors framework ``_pack_sound_tokens``: sound latent [C, T] -> T
+        # tokens (token shape (T,1,1)), packed right after vision, with 3D-MRoPE
+        # temporal positions starting at the vision temporal offset (parallel to
+        # vision, start_frame_offset=0, tcf=1) and NOT advancing it.
+        sound_split_len = 0
+        if sample.sound is not None:
+            sound_latent = sample.sound.latent
+            sound_latent = sound_latent.squeeze(0) if sound_latent.dim() == 3 else sound_latent  # [C, T]
+            _sc, sound_t = sound_latent.shape
+            sound_split_len = sound_t
+
+            sound_tokens.append(sound_latent)
+            sound_token_shapes.append((sound_t, 1, 1))
+            sound_sequence_indexes.extend(range(curr, curr + sound_t))
+
+            s_cond_set = {idx for idx in sample.sound.condition_frame_indexes if 0 <= idx < sound_t}
+            s_cond_mask = torch.zeros((sound_t, 1), device=sound_latent.device, dtype=sound_latent.dtype)
+            for fi in s_cond_set:
+                s_cond_mask[fi, 0] = 1.0
+            sound_condition_mask.append(s_cond_mask)
+
+            s_noisy = torch.tensor([idx for idx in range(sound_t) if idx not in s_cond_set],
+                                   device=sound_latent.device,
+                                   dtype=torch.long)
+            sound_noisy_frame_indexes.append(s_noisy)
+
+            for fi in range(sound_t):
+                if fi in s_cond_set:
+                    continue
+                sound_mse_loss_indexes.append(curr + fi)  # 1 token per sound frame
+                sound_timesteps.append(float(sample.timestep))
+
+            sound_fps = sample.sound.fps if enable_fps_modulation else None
+            if sound_fps is not None:
+                sound_fps_values.append(float(sound_fps))
+            sound_mrope, _ = compute_mrope_position_ids_vision(
+                grid_t=sound_t,
+                grid_h=1,
+                grid_w=1,
+                temporal_offset=vision_start_temporal_offset,
+                fps=sound_fps,
+                base_fps=base_fps,
+                temporal_compression_factor=1,  # sound latent already at sound_latent_fps
+                enable_fps_modulation=enable_fps_modulation,
+                start_frame_offset=0,
+            )
+            position_id_blocks.append(sound_mrope)
+            curr += sound_t
+            sample_len += sound_t
+
         # ---- 3. Optional end-of-generation marker ----
         eov_len = 0
         if include_end_of_generation_token:
@@ -304,9 +401,9 @@ def pack_cosmos3_video_sequence(
             eov_len = 1
             sample_len += 1
 
-        # The vision split and any trailing eov marker share the "full" split.
+        # Vision + sound + any trailing eov marker share one "full" split.
         attn_modes.append("full")
-        split_lens.append(num_vision_tokens + eov_len)
+        split_lens.append(num_vision_tokens + sound_split_len + eov_len)
         sample_lens.append(sample_len)
 
         if latent_t != 1:
@@ -338,4 +435,12 @@ def pack_cosmos3_video_sequence(
         vision_noisy_frame_indexes=vision_noisy_frame_indexes,
         vision_condition_mask=vision_condition_mask,
         fps_vision=(torch.tensor(fps_values, dtype=torch.float32) if fps_values else None),
+        sound_tokens=sound_tokens,
+        sound_token_shapes=sound_token_shapes,
+        sound_sequence_indexes=(torch.tensor(sound_sequence_indexes, dtype=torch.long) if sound_tokens else None),
+        sound_timesteps=(torch.tensor(sound_timesteps, dtype=timesteps_dtype) if sound_tokens else None),
+        sound_mse_loss_indexes=(torch.tensor(sound_mse_loss_indexes, dtype=torch.long) if sound_tokens else None),
+        sound_noisy_frame_indexes=sound_noisy_frame_indexes,
+        sound_condition_mask=sound_condition_mask,
+        fps_sound=(torch.tensor(sound_fps_values, dtype=torch.float32) if sound_fps_values else None),
     )
