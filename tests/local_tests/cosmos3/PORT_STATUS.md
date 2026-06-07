@@ -13,7 +13,7 @@
 
 ## Current Phase
 
-- phase: `PR1: DiT + VAE + strict-load DONE (framework parity, identity load). Only remaining: video pipeline (#13) — sequence-packing + call path + config/preset/registry + end-to-end parity`
+- phase: `PR1 (video core) COMPLETE: DiT / VAE / scheduler / strict-load / sequence-packing / pipeline all framework-parity verified (suite 83 passed, 0 skipped). Remaining acceptance: real-weights (33 GB, GPU) end-to-end generation vs framework. Then PR2 audio / PR3 action / PR4 reasoning.`
 - status: `in_progress`
 - owner: `orchestrator`
 - last_updated: `2026-06-06`
