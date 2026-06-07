@@ -35,7 +35,10 @@ from typing import Any
 
 import pytest
 import torch
-from diffusers import UniPCMultistepScheduler
+
+from fastvideo.models.schedulers.scheduling_unipc_multistep import (
+    UniPCMultistepScheduler,
+)
 
 pytestmark = [pytest.mark.local]
 

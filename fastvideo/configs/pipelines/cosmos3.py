@@ -12,8 +12,11 @@ Cosmos 2.5:
   the ``text_tokenizer`` checkpoint module by the component loader.
 - VAE is Wan2.2 ``AutoencoderKLWan`` (z_dim=48, scale_factor_spatial=16),
   configured by ``Cosmos3VAEConfig`` (the checkpoint's exact latents_mean/std).
-- Scheduler is diffusers ``UniPCMultistepScheduler`` (flow_prediction,
-  use_flow_sigmas), loaded from the checkpoint.
+- Scheduler is FastVideo-native ``UniPCMultistepScheduler`` configured for
+  pure flow matching (flow_prediction, use_flow_sigmas), equivalent to the
+  framework's ``FlowUniPCMultistepScheduler``. The checkpoint's diffusers-style
+  scheduler config (karras/sigma_min/max) is coerced to the flow setup in
+  ``Cosmos3OmniDiffusersPipeline.initialize_pipeline``.
 - T2I default ``flow_shift`` is 3.0 (set per-request by ``_set_flow_shift``);
   T2V/I2V use the engine-init default of 1.0 baked into this config.
 """
@@ -29,10 +32,6 @@ from fastvideo.configs.models.vaes import Cosmos3VAEConfig  # Wan2.2 Autoencoder
 from fastvideo.configs.pipelines.base import PipelineConfig
 
 
-def _identity_preprocess_text(prompt: str) -> str:
-    return prompt
-
-
 @dataclass
 class Cosmos3Config(PipelineConfig):
     """Configuration for the Cosmos3 video generation pipeline (T2V/I2V/T2I).
@@ -46,11 +45,11 @@ class Cosmos3Config(PipelineConfig):
 
     vae_config: VAEConfig = field(default_factory=Cosmos3VAEConfig)
 
-    # No separate text encoder: Cosmos3LanguageModel lives inside the DiT.
+    # No separate text encoder: the Qwen3-VL-text backbone lives inside the DiT
+    # and the pipeline tokenizes in Cosmos3DenoisingStage, so all three
+    # text-encoder lists are empty (the generic text-encode stage is not used).
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=tuple)
-
-    preprocess_text_funcs: tuple[Callable[[str], str],
-                                 ...] = field(default_factory=lambda: (_identity_preprocess_text, ))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=tuple)
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(default_factory=tuple)
 
     dit_precision: str = "bf16"

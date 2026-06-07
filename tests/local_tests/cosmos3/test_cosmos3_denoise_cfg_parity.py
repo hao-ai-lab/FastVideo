@@ -39,8 +39,6 @@ cosmos_framework = pytest.importorskip(
     reason="cosmos_framework not installed; run in fv-cosmos3 env.",
 )
 
-from diffusers import UniPCMultistepScheduler  # noqa: E402
-
 from .test_cosmos3_dit_parity import _copy_weights  # noqa: E402
 from .test_cosmos3_dit_parity_mrope import (  # noqa: E402
     _LATENT_CHANNEL,
@@ -52,6 +50,10 @@ from .test_cosmos3_dit_parity_mrope import (  # noqa: E402
     _build_tiny_fastvideo_dit_mrope,
 )
 from .test_cosmos3_reference_forward import _apply_sdpa_patches  # noqa: E402
+from .test_cosmos3_scheduler_parity import (  # noqa: E402
+    _fastvideo_scheduler,
+    _framework_scheduler,
+)
 
 pytestmark = [pytest.mark.local]
 
@@ -64,16 +66,9 @@ _SPECIAL_TOKENS = {
     "eos_token_id": 62,
 }
 
-
-def _make_scheduler() -> UniPCMultistepScheduler:
-    """UniPC scheduler matching the Cosmos3 checkpoint flow config."""
-    return UniPCMultistepScheduler(
-        num_train_timesteps=1000,
-        solver_order=2,
-        prediction_type="flow_prediction",
-        use_flow_sigmas=True,
-        flow_shift=10.0,
-    )
+# Cosmos3 video flow_shift; framework scheduler is the parity oracle, FastVideo's
+# vendored UniPC (flow config) is the unit under test.
+_FLOW_SHIFT = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -250,10 +245,8 @@ class TestCosmos3DenoiseCFGParity:
         flat_latent = torch.randn(int(torch.tensor(vision_shape).prod()))
         guidance = 6.0
 
-        fw_sched = _make_scheduler()
-        fv_sched = _make_scheduler()
-        fw_sched.set_timesteps(4, device=torch.device("cpu"))
-        fv_sched.set_timesteps(4, device=torch.device("cpu"))
+        fw_sched = _framework_scheduler(4, _FLOW_SHIFT)
+        fv_sched = _fastvideo_scheduler(4, _FLOW_SHIFT)
         t = fw_sched.timesteps[0]
 
         fw_v = _framework_cfg_velocity(
@@ -304,8 +297,7 @@ class TestCosmos3DenoiseCFGParity:
         num_steps = 3
 
         # Manual framework loop (oracle).
-        fw_sched = _make_scheduler()
-        fw_sched.set_timesteps(num_steps, device=torch.device("cpu"))
+        fw_sched = _framework_scheduler(num_steps, _FLOW_SHIFT)
         fw_latent = flat_latent.clone()
         for t in fw_sched.timesteps:
             v = _framework_cfg_velocity(
@@ -322,8 +314,7 @@ class TestCosmos3DenoiseCFGParity:
                                       return_dict=False)[0].squeeze(0)
 
         # FastVideo engine loop.
-        fv_sched = _make_scheduler()
-        fv_sched.set_timesteps(num_steps, device=torch.device("cpu"))
+        fv_sched = _fastvideo_scheduler(num_steps, _FLOW_SHIFT)
         engine = Cosmos3DenoiseEngine(
             transformer=dit,
             scheduler=fv_sched,

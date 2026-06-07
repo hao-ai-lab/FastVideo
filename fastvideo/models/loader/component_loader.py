@@ -92,6 +92,8 @@ class ComponentLoader(ABC):
             "tokenizer": (TokenizerLoader, "transformers"),
             "tokenizer_2": (TokenizerLoader, "transformers"),
             "tokenizer_3": (TokenizerLoader, "transformers"),
+            # Cosmos3's model_index names its Qwen2 tokenizer "text_tokenizer".
+            "text_tokenizer": (TokenizerLoader, "transformers"),
             "image_processor": (ImageProcessorLoader, "transformers"),
             "feature_extractor": (ImageProcessorLoader, "transformers"),
             "image_encoder": (ImageEncoderLoader, "transformers"),
@@ -1009,7 +1011,19 @@ class SchedulerLoader(ComponentLoader):
 
         scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
-        scheduler = scheduler_cls(**config)
+        # Diffusers checkpoints can carry newer scheduler config keys than the
+        # vendored scheduler accepts (e.g. shift_terminal / sigma_min / sigma_max
+        # from a newer diffusers release). Filter to the class's __init__ params,
+        # mirroring diffusers' ``from_config``, so loading is robust to schema
+        # drift instead of crashing on an unexpected kwarg.
+        import inspect
+        valid_params = set(inspect.signature(scheduler_cls.__init__).parameters)
+        filtered_config = {k: v for k, v in config.items() if k in valid_params}
+        dropped = sorted(set(config) - set(filtered_config))
+        if dropped:
+            logger.warning("Scheduler %s: dropping unsupported config keys %s", class_name, dropped)
+
+        scheduler = scheduler_cls(**filtered_config)
         if fastvideo_args.pipeline_config.flow_shift is not None:
             scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift)
         return scheduler

@@ -35,6 +35,9 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
     "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
+    # Cosmos3-Nano's checkpoint model_index names the DiT "Cosmos3OmniTransformer";
+    # map that HF class name to FastVideo's native Cosmos3VFMTransformer.
+    "Cosmos3OmniTransformer": ("dits", "cosmos3", "Cosmos3VFMTransformer"),
     "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
     "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
     "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),

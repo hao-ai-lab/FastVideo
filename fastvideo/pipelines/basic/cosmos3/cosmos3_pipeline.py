@@ -11,8 +11,10 @@ Cosmos3 components:
   encode normalizes ``(mu - mean) * inv_std`` and decode denormalizes + clamps,
 * sequence-packing: :func:`pack_cosmos3_video_sequence` (native, parity-tested),
 * DiT: ``Cosmos3VFMTransformer`` (native, bit-identical to the framework),
-* scheduler: diffusers ``UniPCMultistepScheduler`` (the actual scheduler the
-  checkpoint ships, ``flow_prediction`` + ``use_flow_sigmas``).
+* scheduler: FastVideo-native ``UniPCMultistepScheduler`` configured for pure
+  flow matching (``flow_prediction`` + ``use_flow_sigmas``), numerically
+  equivalent to the framework's ``FlowUniPCMultistepScheduler`` (parity-tested
+  in ``test_cosmos3_scheduler_parity``).
 
 The denoise/CFG glue is a faithful port of the framework's
 ``Cosmos3OmniDiffusersPipeline`` math (mirrored in the framework-equivalent
@@ -40,10 +42,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
-from diffusers import UniPCMultistepScheduler
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models.schedulers.scheduling_unipc_multistep import (
+    UniPCMultistepScheduler, )
 from fastvideo.pipelines.basic.cosmos3.sequence_packing import (
     Cosmos3SampleInputs,
     Cosmos3VisionItem,
@@ -265,7 +268,8 @@ def cosmos3_get_cfg_velocity(
             base_fps=base_fps,
             temporal_compression_factor=temporal_compression_factor,
         )
-        out = transformer(**packed.to_dit_kwargs())
+        device = next(transformer.parameters()).device
+        out = transformer(**packed.to_dit_kwargs(device=device))
         preds = out.get("preds_vision")
         if preds is None:
             # Fully-conditioned clip: no noisy frames, zero velocity.
@@ -424,6 +428,31 @@ class Cosmos3OmniDiffusersPipeline(ComposedPipelineBase):
     _base_scheduler_config: Any = None
     _current_flow_shift: float | None = None
 
+    @staticmethod
+    def _flow_scheduler_config(config: Any) -> dict[str, Any]:
+        """Coerce a loaded UniPC config to the framework's flow-matching setup.
+
+        The checkpoint ``scheduler_config.json`` carries diffusers-style fields
+        (``use_karras_sigmas=True``, ``sigma_min``/``sigma_max``, beta schedule)
+        that do not describe the framework sampler. The framework uses
+        ``FlowUniPCMultistepScheduler`` (pure flow matching: ``shift`` +
+        ``num_train_timesteps`` only). FastVideo's vendored UniPC checks
+        ``use_karras_sigmas`` *before* ``use_flow_sigmas``, so leaving karras on
+        builds diffusion-style sigmas and the denoise diverges to NaN. Force the
+        flow config here (parity-verified in ``test_cosmos3_scheduler_parity``).
+        """
+        cfg = dict(config)
+        cfg.update(
+            use_karras_sigmas=False,
+            use_exponential_sigmas=False,
+            use_beta_sigmas=False,
+            use_flow_sigmas=True,
+            prediction_type="flow_prediction",
+            predict_x0=True,
+            final_sigmas_type="zero",
+        )
+        return cfg
+
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
         """Bind the loaded scheduler + snapshot its config so per-request
         flow_shift rebuilds are cheap and the engine-init shift is applied."""
@@ -433,9 +462,14 @@ class Cosmos3OmniDiffusersPipeline(ComposedPipelineBase):
             self._engine_init_flow_shift = float(engine_shift)
         scheduler = self.get_module("scheduler")
         if scheduler is not None:
-            self.scheduler = scheduler
-            self._base_scheduler_config = scheduler.config
-            self._current_flow_shift = float(getattr(scheduler.config, "flow_shift", 1.0))
+            # Rebuild from a flow-coerced config so the runtime scheduler matches
+            # the framework sampler (the loaded checkpoint config is diffusers-style).
+            flow_config = self._flow_scheduler_config(scheduler.config)
+            self.scheduler = UniPCMultistepScheduler.from_config(flow_config)
+            if isinstance(self.modules, dict):
+                self.modules["scheduler"] = self.scheduler
+            self._base_scheduler_config = self.scheduler.config
+            self._current_flow_shift = float(getattr(self.scheduler.config, "flow_shift", 1.0))
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Wire the Cosmos3 stages.

@@ -161,10 +161,20 @@ class Cosmos3TextRotaryEmbedding(nn.Module):
     ) -> None:
         super().__init__()
         self.head_dim = head_dim
+        self.rope_theta = float(rope_theta)
         self.mrope_section = list(mrope_section)
-        inv_freq = 1.0 / (rope_theta**(torch.arange(0, head_dim, 2, dtype=torch.int64).float() / head_dim))
-        self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self.register_buffer("inv_freq", self._compute_inv_freq(), persistent=False)
         self.attention_scaling = 1.0  # default RoPE has unit attention scaling
+
+    def _compute_inv_freq(self, device: torch.device | None = None) -> torch.Tensor:
+        exponent = torch.arange(0, self.head_dim, 2, dtype=torch.int64, device=device).float() / self.head_dim
+        return 1.0 / (self.rope_theta**exponent)
+
+    def reset_inv_freq(self, device: torch.device) -> None:
+        """Recompute the non-persistent ``inv_freq`` on ``device`` after a
+        meta-device weight load (it is derived from ``rope_theta`` and is not
+        part of the checkpoint)."""
+        self.register_buffer("inv_freq", self._compute_inv_freq(device), persistent=False)
 
     def _apply_interleaved_mrope(self, freqs: torch.Tensor) -> torch.Tensor:
         """freqs: [3, N, head_dim//2] -> [N, head_dim//2] (interleaved T/H/W)."""
@@ -323,6 +333,9 @@ class Cosmos3TimestepEmbedder(nn.Module):
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:
         t_freq = self.timestep_embedding(t, self.frequency_embedding_size)
+        # Sinusoidal runs in fp32 (timestep_scale makes inputs tiny); cast to the
+        # MLP weight dtype (bf16 at inference; no-op in the fp32 parity tests).
+        t_freq = t_freq.to(self.linear_1.weight.dtype)
         h, _ = self.linear_1(t_freq)
         h = self.act(h)
         out, _ = self.linear_2(h)
@@ -770,6 +783,16 @@ class Cosmos3VFMTransformer(BaseDiT):
         flat = flat.unsqueeze(-1).expand(-1, packed_tokens.shape[1])
         return packed_tokens.scatter_add(0, flat, packed_timestep_embeds)
 
+    def materialize_non_persistent_buffers(self, device: torch.device, dtype: torch.dtype | None = None) -> None:
+        """Recompute non-persistent buffers lost by the meta-device FSDP load.
+
+        Only ``rotary_emb.inv_freq`` is non-persistent (derived from
+        ``rope_theta``, absent from the checkpoint). The FastVideo loader calls
+        this after ``load_model_from_full_model_state_dict``.
+        """
+        del dtype  # inv_freq stays float32 regardless of compute dtype
+        self.rotary_emb.reset_inv_freq(device)
+
     # ------------------------------------------------------------------
     # forward
     # ------------------------------------------------------------------
@@ -809,7 +832,9 @@ class Cosmos3VFMTransformer(BaseDiT):
         original_shapes: list[tuple[int, int, int]] | None = None
         if vision_tokens:
             packed_vision, original_shapes = self._patchify_and_pack(vision_tokens, vision_token_shapes)
-            packed_vision, _ = self.proj_in(packed_vision)
+            # Vision latents arrive in fp32 (noise/VAE); cast to the model's
+            # compute dtype (bf16 at inference; no-op in the fp32 parity tests).
+            packed_vision, _ = self.proj_in(packed_vision.to(target_dtype))
 
             if self.latent_pos_embed is not None:
                 pos_emb = self.latent_pos_embed(vision_token_shapes, fps=fps_vision).to(target_dtype)
