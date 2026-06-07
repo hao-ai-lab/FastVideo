@@ -30,7 +30,6 @@ from tqdm import tqdm
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (
-    COSMOS3_VIDEO_NEGATIVE_PROMPT,
     Cosmos3DenoiseEngine,
     Cosmos3VisionSpec,
     _VaeNorm,
@@ -39,6 +38,8 @@ from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import (
     cosmos3_vae_decode,
     cosmos3_vae_encode,
 )
+from fastvideo.pipelines.basic.cosmos3.presets import (
+    COSMOS3_VIDEO_NEGATIVE_PROMPT, )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 
@@ -141,7 +142,6 @@ class Cosmos3DenoisingStage(PipelineStage):
         spec = Cosmos3VisionSpec(
             shape=latent_shape,
             condition_frame_indexes=condition_frame_indexes,
-            clean_latent=clean_latent,
         )
 
         # ---- Scheduler timesteps ----

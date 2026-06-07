@@ -20,7 +20,7 @@ _DENOISE_STAGE = PresetStageSpec(
 )
 
 # Framework video negative prompt (Cosmos quality prompt).
-_COSMOS3_NEGATIVE_PROMPT = (
+COSMOS3_VIDEO_NEGATIVE_PROMPT = (
     "The video captures a series of frames showing ugly scenes, static with no motion, motion blur, "
     "over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, "
     "underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, "
@@ -42,7 +42,7 @@ COSMOS3_NANO = InferencePreset(
         "fps": 24,
         "guidance_scale": 6.0,
         "num_inference_steps": 35,
-        "negative_prompt": _COSMOS3_NEGATIVE_PROMPT,
+        "negative_prompt": COSMOS3_VIDEO_NEGATIVE_PROMPT,
     },
 )
 
@@ -60,7 +60,7 @@ COSMOS3_NANO_I2V = InferencePreset(
         "fps": 24,
         "guidance_scale": 6.0,
         "num_inference_steps": 35,
-        "negative_prompt": _COSMOS3_NEGATIVE_PROMPT,
+        "negative_prompt": COSMOS3_VIDEO_NEGATIVE_PROMPT,
     },
 )
 

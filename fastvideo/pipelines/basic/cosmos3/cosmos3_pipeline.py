@@ -60,15 +60,6 @@ logger = init_logger(__name__)
 _SYSTEM_PROMPT_IMAGE = "You are a helpful assistant who will generate images from a give prompt."
 _SYSTEM_PROMPT_VIDEO = "You are a helpful assistant who will generate videos from a give prompt."
 
-# Default video negative prompt (framework / Cosmos quality prompt).
-COSMOS3_VIDEO_NEGATIVE_PROMPT = (
-    "The video captures a series of frames showing ugly scenes, static with no motion, motion blur, "
-    "over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, "
-    "underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, "
-    "jerky movements, low frame rate, artifacting, color banding, unnatural transitions, outdated special effects, "
-    "fake elements, unconvincing visuals, poorly edited content, jump cuts, visual noise, and flickering. "
-    "Overall, the video is of poor quality.")
-
 
 # ===========================================================================
 # Special-token resolution (Qwen2 chat tokenizer)
@@ -175,15 +166,12 @@ class Cosmos3VisionSpec:
     """Geometry + conditioning for one vision item in a denoise run.
 
     Args:
-        clean_latent: VAE-encoded conditioning latent ``[C, T, H, W]`` used to
-            keep condition frames clean (I2V / T2I). May be ``None`` for T2V.
         condition_frame_indexes: Latent-frame indices kept clean.
         shape: ``(C, T, H, W)`` of the latent for this item.
     """
 
     shape: tuple[int, int, int, int]
     condition_frame_indexes: list[int]
-    clean_latent: torch.Tensor | None = None
 
     @property
     def numel(self) -> int:
@@ -244,6 +232,7 @@ def cosmos3_get_cfg_velocity(
     timestep_value = float(timestep.reshape(()).item())
 
     noise_x_vision = _split_flat_latent(flat_latent, specs)
+    device = next(transformer.parameters()).device
 
     def _run(token_ids: list[int]) -> torch.Tensor:
         samples = [
@@ -268,7 +257,6 @@ def cosmos3_get_cfg_velocity(
             base_fps=base_fps,
             temporal_compression_factor=temporal_compression_factor,
         )
-        device = next(transformer.parameters()).device
         out = transformer(**packed.to_dit_kwargs(device=device))
         preds = out.get("preds_vision")
         if preds is None:
