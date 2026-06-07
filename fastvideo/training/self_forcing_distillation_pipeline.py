@@ -852,8 +852,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             self.current_trainstep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
 
-            if (step >= self.training_args.ema_start_step) and self.training_args.ema_decay \
-                    and (self.training_args.ema_decay > 0):
+            if step >= self.training_args.ema_start_step:
                 self._build_generator_emas(context=f"lazy @ step {step}")
 
             with torch.autocast("cuda", dtype=torch.bfloat16):

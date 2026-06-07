@@ -920,13 +920,13 @@ class DistillationPipeline(TrainingPipeline):
 
         ema_shard_dir = os.path.join(self.training_args.resume_from_checkpoint, "ema_local_shard")
 
-        if self.generator_ema is None and \
-                os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_rank{self.global_rank}.pt")):
+        if (self.generator_ema is None
+                and os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_rank{self.global_rank}.pt"))):
             self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
             logger.info("Pre-built generator EMA for resume from existing shard")
 
-        if self.transformer_2 is not None and self.generator_ema_2 is None and \
-                os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_2_rank{self.global_rank}.pt")):
+        if (self.transformer_2 is not None and self.generator_ema_2 is None
+                and os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_2_rank{self.global_rank}.pt"))):
             self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=self.training_args.ema_decay)
             logger.info("Pre-built generator EMA_2 for resume from existing shard")
 
@@ -1345,8 +1345,7 @@ class DistillationPipeline(TrainingPipeline):
             self.current_trainstep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
 
-            if (step >= self.training_args.ema_start_step) and self.training_args.ema_decay \
-                    and (self.training_args.ema_decay > 0):
+            if step >= self.training_args.ema_start_step:
                 self._build_generator_emas(context=f"lazy @ step {step}")
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
