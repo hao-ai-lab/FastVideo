@@ -13,7 +13,7 @@
 
 ## Current Phase
 
-- phase: `PR1 (video core): DiT ported + framework parity VERIFIED bit-identical (3d_rope + unified_3d_mrope). Next: conversion + video pipeline`
+- phase: `PR1: DiT + VAE ported, framework parity VERIFIED. Next: conversion (real-weight strict-load) + video pipeline (scheduler UniPC / Qwen2 tokenizer reuse wired there)`
 - status: `in_progress`
 - owner: `orchestrator`
 - last_updated: `2026-06-06`
