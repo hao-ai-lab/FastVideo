@@ -248,13 +248,7 @@ class DistillationPipeline(TrainingPipeline):
         ema_enabled = (self.training_args.ema_decay is not None) and (self.training_args.ema_decay > 0.0)
         if ema_enabled and (self.training_args.ema_start_step <= 0):
             # Only eager-construct from the cold init weights when averaging starts at step 0.
-            self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
-            logger.info("Initialized generator EMA with decay=%s", self.training_args.ema_decay)
-
-            # Initialize EMA for transformer_2 if it exists
-            if self.transformer_2 is not None:
-                self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=self.training_args.ema_decay)
-                logger.info("Initialized generator EMA_2 with decay=%s", self.training_args.ema_decay)
+            self._build_generator_emas(context="eager init, ema_start_step<=0")
         elif ema_enabled:
             # Defer construction to the lazy block in the train loop, which builds the EMA AT
             # ema_start_step from the already-trained weights. Eager-constructing here would anchor
@@ -904,10 +898,44 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.total_loss = training_batch.generator_loss + training_batch.fake_score_loss
         return training_batch
 
+    def _build_generator_emas(self, context: str = "") -> None:
+        # Idempotently construct whichever generator EMA shadows are missing, per-expert and
+        # decoupled. Safe to call repeatedly; no-op once both exist or when EMA is disabled.
+        if (self.training_args.ema_decay is None) or (self.training_args.ema_decay <= 0.0):
+            return
+        suffix = f" [{context}]" if context else ""
+        if self.generator_ema is None:
+            self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
+            logger.info("Built generator EMA (decay=%s)%s", self.training_args.ema_decay, suffix)
+        if self.transformer_2 is not None and self.generator_ema_2 is None:
+            self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=self.training_args.ema_decay)
+            logger.info("Built generator EMA_2 (decay=%s)%s", self.training_args.ema_decay, suffix)
+
+    def _build_deferred_ema_for_resume(self) -> None:
+        # Build a deferred EMA before checkpoint load only when a saved shard exists, so the
+        # shadow reloads instead of being skipped and rebuilt fresh. Gating on shard existence
+        # matters: building when none exists would reintroduce cold-init contamination.
+        if (self.training_args.ema_decay is None) or (self.training_args.ema_decay <= 0.0):
+            return
+
+        ema_shard_dir = os.path.join(self.training_args.resume_from_checkpoint, "ema_local_shard")
+
+        if self.generator_ema is None and \
+                os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_rank{self.global_rank}.pt")):
+            self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
+            logger.info("Pre-built generator EMA for resume from existing shard")
+
+        if self.transformer_2 is not None and self.generator_ema_2 is None and \
+                os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_2_rank{self.global_rank}.pt")):
+            self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=self.training_args.ema_decay)
+            logger.info("Pre-built generator EMA_2 for resume from existing shard")
+
     def _resume_from_checkpoint(self) -> None:
         """Resume training from checkpoint with distillation models."""
 
         logger.info("Loading distillation checkpoint from %s", self.training_args.resume_from_checkpoint)
+
+        self._build_deferred_ema_for_resume()
 
         resumed_step = load_distillation_checkpoint(
             self.transformer,
@@ -1317,15 +1345,9 @@ class DistillationPipeline(TrainingPipeline):
             self.current_trainstep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
 
-            if (step >= self.training_args.ema_start_step) and \
-                    (self.generator_ema is None) and (self.training_args.ema_decay > 0):
-                self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
-                logger.info("Created generator EMA at step %s with decay=%s", step, self.training_args.ema_decay)
-
-                # Create EMA for transformer_2 if it exists
-                if self.transformer_2 is not None and self.generator_ema_2 is None:
-                    self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=self.training_args.ema_decay)
-                    logger.info("Created generator EMA_2 at step %s with decay=%s", step, self.training_args.ema_decay)
+            if (step >= self.training_args.ema_start_step) and self.training_args.ema_decay \
+                    and (self.training_args.ema_decay > 0):
+                self._build_generator_emas(context=f"lazy @ step {step}")
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 training_batch = self.train_one_step(training_batch)

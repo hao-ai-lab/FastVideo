@@ -635,6 +635,26 @@ def load_distillation_checkpoint(
         except Exception as e:
             logger.warning("rank: %s, failed to load generator EMA: %s", rank, str(e))
 
+    # Load EMA_2 from its shard
+    if generator_ema_2 is not None:
+        try:
+            if getattr(generator_ema_2, "mode", None) == "rank0_full":
+                ema_2_path = os.path.join(checkpoint_path, "ema", "generator_ema_2.pt")
+                if rank == 0 and os.path.exists(ema_2_path):
+                    generator_ema_2.load_state_dict(torch.load(ema_2_path, map_location="cpu"))
+                    logger.info("rank: %s, generator EMA_2 (rank0_full) loaded from %s", rank, ema_2_path)
+                elif rank == 0:
+                    logger.info("rank: %s, generator EMA_2 file not found at %s; skipping", rank, ema_2_path)
+            elif getattr(generator_ema_2, "mode", None) == "local_shard":
+                ema_2_path = os.path.join(checkpoint_path, "ema_local_shard", f"generator_ema_2_rank{rank}.pt")
+                if os.path.exists(ema_2_path):
+                    generator_ema_2.load_state_dict(torch.load(ema_2_path, map_location="cpu"))
+                    logger.info("rank: %s, generator EMA_2 shard (local_shard) loaded from %s", rank, ema_2_path)
+                else:
+                    logger.info("rank: %s, generator EMA_2 shard file not found at %s; skipping", rank, ema_2_path)
+        except Exception as e:
+            logger.warning("rank: %s, failed to load generator EMA_2: %s", rank, str(e))
+
     # Load generator_2 distributed checkpoint (MoE support)
     if generator_transformer_2 is not None:
         generator_2_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint", "generator_2")
@@ -665,18 +685,6 @@ def load_distillation_checkpoint(
                         rank,
                         end_time - begin_time,
                         local_main_process_only=False)
-
-            # Load EMA_2 state if available and generator_ema_2 is provided
-            if generator_ema_2 is not None:
-                try:
-                    ema_2_state = generator_2_states.get("ema")
-                    if ema_2_state is not None:
-                        generator_ema_2.load_state_dict(ema_2_state)
-                        logger.info("rank: %s, generator_2 EMA state loaded successfully", rank)
-                    else:
-                        logger.info("rank: %s, no EMA_2 state found in checkpoint", rank)
-                except Exception as e:
-                    logger.warning("rank: %s, failed to load EMA_2 state: %s", rank, str(e))
         else:
             logger.info("rank: %s, generator_2 checkpoint not found, skipping", rank)
 
