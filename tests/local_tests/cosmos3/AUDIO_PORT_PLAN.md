@@ -55,5 +55,21 @@ Goal: text-to-video+sound (**t2vs**) — generate synchronized audio alongside v
 
 ## Status
 - [x] Branch forked, framework audio path studied, plan written.
-- [ ] D1 decision -> start AVAE port + parity harness.
-- [ ] DiT sound pathway, packing, pipeline, AV infra.
+- [x] D1: native port (user-chosen). D2: t2vs first.
+- [x] **AVAE sound decoder (component 1) — DONE** (commit `5f81fb3d5`). Key
+  finding: the checkpoint is decoder-only in AutoencoderOobleck naming with
+  SnakeBeta + weight_g/v == FastVideo's native `OobleckVAE` decoder. Reused it
+  (+ `output_padding=stride%2` for the odd stride 5); `Cosmos3SoundVAE`
+  decoder-only wrapper; bit-exact parity vs the framework OobleckDecoder
+  (`test_cosmos3_avae_parity`); real 1.9 GB checkpoint strict-loads, decodes
+  [1,64,25] -> [1,2,48000] (1 s @ 48 kHz stereo).
+- [ ] **DiT sound pathway (component 2)** — activate the dormant audio heads
+  (`audio_proj_in`/`audio_proj_out`/`audio_modality_embed`) in the native DiT
+  forward; port `pack_sound_latents` + sound token scatter/proj/modality-embed/
+  velocity from the framework MoT. Parity: extend the DiT harness with sound.
+- [ ] **Sound sequence packing (component 3)** — sound modality in
+  `sequence_packing.py` (positions, attn mode, condition mask). Parity vs
+  framework `pack_input_sequence` with sound.
+- [ ] **t2vs pipeline + AV mux (components 4-5)** — placeholder audio, joint
+  vision+sound denoise, AVAE-decode, mux into mp4 / save wav; example;
+  real-weights verification.
