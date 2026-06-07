@@ -13,7 +13,7 @@
 
 ## Current Phase
 
-- phase: `PR1: DiT + VAE ported, framework parity VERIFIED. Next: conversion (real-weight strict-load) + video pipeline (scheduler UniPC / Qwen2 tokenizer reuse wired there)`
+- phase: `PR1: DiT + VAE + strict-load DONE (framework parity, identity load). Only remaining: video pipeline (#13) — sequence-packing + call path + config/preset/registry + end-to-end parity`
 - status: `in_progress`
 - owner: `orchestrator`
 - last_updated: `2026-06-06`
