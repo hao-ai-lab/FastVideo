@@ -121,3 +121,39 @@ class TestCosmos3ReasoningParity:
         fv = cosmos3_generate_reasoner_text(dit, input_ids.tolist(), max_new_tokens=8)
         print(f"\n[greedy_reason seed={seed}] framework={fw} native={fv}")
         assert fv == fw, f"token mismatch: native={fv} framework={fw}"
+
+    def test_deepstack_reasoner_forward_matches_framework(self):
+        """The deepstack reasoner backbone (image-conditioned reasoning's one new
+        native piece) matches the framework ``reasoner_forward`` given identical
+        prefill inputs (inputs_embeds + positions + per-layer deepstack embeds +
+        visual mask)."""
+        from cosmos_framework.model.vfm.mot.unified_mot import ReasonerKVCache
+
+        vfm, dit = self._build()
+        hidden = dit.hidden_size
+        n_layers = dit.num_hidden_layers
+        seq = 10
+        torch.manual_seed(5)
+        inputs_embeds = torch.randn(seq, hidden)
+        position_ids = torch.arange(seq).unsqueeze(0).expand(3, -1).contiguous()  # [3, seq]
+        visual_pos_mask = torch.zeros(seq, dtype=torch.bool)
+        visual_pos_mask[2:6] = True  # 4 "image" tokens
+        k = int(visual_pos_mask.sum())
+        deepstack = [torch.randn(k, hidden) for _ in range(n_layers)]  # one per layer
+
+        model = vfm.language_model.model
+        cache = ReasonerKVCache.empty(num_layers=len(model.layers))
+        with torch.no_grad():
+            hid_fw = model.reasoner_forward(
+                input_ids=None,
+                inputs_embeds=inputs_embeds.unsqueeze(0),
+                position_ids=position_ids.unsqueeze(1),  # [3, B=1, seq]
+                visual_pos_masks=visual_pos_mask.unsqueeze(0),
+                deepstack_visual_embeds=deepstack,
+                cache=cache,
+            )[0]  # [seq, hidden]
+            hid_fv = dit.reason_forward(inputs_embeds, position_ids, deepstack, visual_pos_mask)  # [seq, hidden]
+        assert hid_fw.shape == hid_fv.shape, f"shape fw={hid_fw.shape} fv={hid_fv.shape}"
+        mx, mn = _diffs(hid_fv, hid_fw)
+        print(f"\n[deepstack_reasoner] hidden max abs diff = {mx:.3e} mean abs diff = {mn:.3e}")
+        torch.testing.assert_close(hid_fv, hid_fw, atol=1e-4, rtol=1e-3)
