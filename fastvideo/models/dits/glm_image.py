@@ -597,7 +597,7 @@ class GlmImageAdaLayerNormContinuous(nn.Module):
 class GlmImageTransformer2DModel(BaseDiT):
 
     _fsdp_shard_conditions = GlmImageDiTConfig().arch_config._fsdp_shard_conditions
-    _compile_conditions = GlmImageDiTConfig().arch_config._fsdp_shard_conditions
+    _compile_conditions = GlmImageDiTConfig().arch_config._compile_conditions
     _supported_attention_backends = (
         AttentionBackendEnum.FLASH_ATTN,
         AttentionBackendEnum.TORCH_SDPA,
