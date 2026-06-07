@@ -182,8 +182,12 @@ class Cosmos3VisionSpec:
 # ===========================================================================
 # Pure denoise/CFG math (parity oracle target)
 # ===========================================================================
-def _split_flat_latent(flat: torch.Tensor, specs: list[Cosmos3VisionSpec]) -> list[torch.Tensor]:
-    """Split a flat latent vector into per-vision-item ``[C, T, H, W]`` tensors."""
+def _split_flat_latent(flat: torch.Tensor, specs: list[Any]) -> list[torch.Tensor]:
+    """Split a flat vector into per-item tensors via each spec's ``numel``/``shape``.
+
+    Shared by vision (``[C, T, H, W]``) and sound (``[C, T]``) specs — every spec
+    exposes ``numel`` and ``shape``.
+    """
     out: list[torch.Tensor] = []
     offset = 0
     for spec in specs:
@@ -209,16 +213,6 @@ class Cosmos3SoundSpec:
     @property
     def numel(self) -> int:
         return int(math.prod(self.shape))
-
-
-def _split_sound_latent(flat: torch.Tensor, specs: list[Cosmos3SoundSpec]) -> list[torch.Tensor]:
-    """Split a flat sound vector into per-item ``[C, T]`` tensors."""
-    out: list[torch.Tensor] = []
-    offset = 0
-    for spec in specs:
-        out.append(flat[offset:offset + spec.numel].reshape(spec.shape))
-        offset += spec.numel
-    return out
 
 
 def cosmos3_get_cfg_velocity(
@@ -267,7 +261,7 @@ def cosmos3_get_cfg_velocity(
     # framework per-sample concat order ([vision_i | sound_i]); single sample here.
     vision_total = sum(spec.numel for spec in specs)
     noise_x_vision = _split_flat_latent(flat_latent[:vision_total], specs)
-    noise_x_sound = (_split_sound_latent(flat_latent[vision_total:], sound_specs) if sound_specs else None)
+    noise_x_sound = (_split_flat_latent(flat_latent[vision_total:], sound_specs) if sound_specs else None)
     device = next(transformer.parameters()).device
 
     def _run(token_ids: list[int]) -> torch.Tensor:
