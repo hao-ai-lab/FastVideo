@@ -13,7 +13,7 @@
 
 ## Current Phase
 
-- phase: `PR1 (video core) + PR2 (audio/t2vs) COMPLETE, real-weights verified. Video core (T2V/I2V/T2I) + audio (AVAE decode / DiT sound pathway / sound packing / t2vs CFG velocity) all framework-parity verified bit-exact (suite 130 passed, 0 skipped). t2vs real-weights on B200 produces coherent video + real stereo 48kHz audio. Branch chain: feat/cosmos3-tier-a-port (T2V) -> feat/cosmos3-i2v (I2V+T2I) -> feat/cosmos3-audio (t2vs). Next: PR3 action / PR4 reasoning.`
+- phase: `FULL OMNI SUPPORTED — every modality framework-parity verified bit-exact (suite 150 passed, 0 skipped). PR1 video core (T2V/I2V/T2I) + PR2 audio (t2vs) real-weights verified on B200; PR3 action (domain-aware) + PR4 reasoning (text + vision_encoder + deepstack reasoner) bit-exact. Branch chain: feat/cosmos3-tier-a-port (T2V) -> feat/cosmos3-i2v (I2V+T2I+flow_shift) -> feat/cosmos3-audio (t2vs) -> feat/cosmos3-action -> feat/cosmos3-reasoning. Optional follow-ups: real-weights action2world (needs robot-action data) + image-conditioned-reasoning prefill wiring (vision_encoder + get_rope_index, both proven).`
 - status: `in_progress`
 - owner: `orchestrator`
 - last_updated: `2026-06-07`
@@ -122,3 +122,31 @@
 - Example: `examples/inference/basic/basic_cosmos3_t2i_new_api.py` (num_frames=1, 960x960).
 - Verified on B200 (real weights, 35 steps): coherent red-panda image matching the prompt, flow_shift=10.0. Full suite 118 passed, 0 skipped.
 - Video core (T2V/I2V/T2I) is now complete and real-weights verified. NEXT: PR2 audio (sound_tokenizer AVAE + audio output) on a new stacked branch.
+
+## Full-omni parity summary (every component, max / mean abs diff vs framework)
+
+All run on CPU / float32 (tiny models, framework weights copied in; framework =
+oracle). `tests/local_tests/cosmos3/`, suite: 150 passed, 0 skipped.
+
+| Component / pipeline | Test | max | mean |
+|---|---|---|---|
+| Scheduler (UniPC flow) | test_cosmos3_scheduler_parity | timesteps 0; sigmas ~1e-8; traj <~1e-6 | ~1e-7 |
+| DiT (video, unified_3d_mrope) | test_cosmos3_dit_parity_mrope | 0.0 | 0.0 |
+| Sequence packing (video) | test_cosmos3_packing_parity | 0.0 (exact) | 0.0 |
+| VAE (Wan2.2) | test_cosmos3_vae_parity | 0.0 | 0.0 |
+| Denoise / CFG velocity | test_cosmos3_denoise_cfg_parity | <1e-6 | <1e-7 |
+| flow_shift (resolution) | test_cosmos3_flow_shift_parity | exact | exact |
+| I2V conditioning (static-repeat) | test_cosmos3_i2v_conditioning_parity | 0.0 | 0.0 |
+| AVAE sound decoder | test_cosmos3_avae_parity | 0.0 | 0.0 |
+| DiT sound pathway + packing | test_cosmos3_sound_parity | 0.0 | 0.0 |
+| t2vs CFG velocity | test_cosmos3_sound_parity | 0.0 | 0.0 |
+| DiT action pathway + packing | test_cosmos3_action_parity | 0.0 | 0.0 |
+| action CFG velocity | test_cosmos3_action_parity | 0.0 | 0.0 |
+| Reasoner prefill logits (text) | test_cosmos3_reasoning_parity | 0.0 | 0.0 |
+| Reasoner greedy generation | test_cosmos3_reasoning_parity | token-exact | - |
+| Deepstack reasoner forward | test_cosmos3_reasoning_parity | 0.0 | 0.0 |
+| vision_encoder (Qwen3-VL ViT) | test_cosmos3_vision_encoder_parity | 0.0 | 0.0 |
+
+Real-weights pipelines verified on B200 (`examples/inference/basic/basic_cosmos3*_new_api.py`):
+T2V (1280x704), I2V (cyclist), T2I (960x960 red panda), t2vs (ocean + stereo
+48kHz audio), text reasoning (greedy == framework). All coherent / prompt-matching.
