@@ -235,6 +235,24 @@ class MatrixGame2Model(WanModel):
         ).transpose(1, 2)
         return torch.cat([mask_lat_size, image_latents], dim=1)
 
+    def post_process_validation_frames(
+        self,
+        frames: list[Any],
+        *,
+        action: dict[str, Any] | None = None,
+    ) -> list[Any] | None:
+        if action is None:
+            return None
+        from fastvideo.models.dits.matrixgame2.utils import (
+            overlay_validation_actions_on_frames, )
+
+        return overlay_validation_actions_on_frames(
+            frames,
+            keyboard_cond=action.get("keyboard"),
+            mouse_cond=action.get("mouse"),
+        )
+
+
     def _get_optional_action(
         self,
         raw_batch: dict[str, Any],

@@ -45,6 +45,7 @@ def _make_callback(
     num_frames: int | None = None,
     sampling_timesteps: list[int] | None = None,
     output_dir: str | None = None,
+    overlay_actions: bool = False,
 ) -> ValidationCallback:
     return ValidationCallback(
         pipeline_target=_PIPE_TARGET,
@@ -55,6 +56,7 @@ def _make_callback(
         num_frames=num_frames,
         sampling_timesteps=sampling_timesteps,
         output_dir=output_dir,
+        overlay_actions=overlay_actions,
     )
 
 
@@ -75,6 +77,7 @@ class TestConstructor:
         assert cb.num_frames is None
         assert cb.sampling_timesteps is None
         assert cb.output_dir is None
+        assert cb.overlay_actions is False
         # Lazy fields not yet populated.
         assert cb._pipeline is None
         assert cb._sampling_param is None
@@ -92,12 +95,14 @@ class TestConstructor:
             guidance_scale="4.5",  # type: ignore[arg-type]
             num_frames="77",  # type: ignore[arg-type]
             sampling_timesteps=["1000", "500"],
+            overlay_actions=1,  # type: ignore[arg-type]
         )
         assert cb.every_steps == 50
         assert cb.sampling_steps == [20, 40]
         assert cb.guidance_scale == 4.5
         assert cb.num_frames == 77
         assert cb.sampling_timesteps == [1000, 500]
+        assert cb.overlay_actions is True
 
     def test_pipeline_kwargs_collected(self) -> None:
         cb = ValidationCallback(
@@ -432,3 +437,88 @@ class TestMetricAggregation:
     def test_available_paths_requires_all_paths(self) -> None:
         assert ValidationCallback._available_paths(["a.mp4", "b.mp4"]) == ["a.mp4", "b.mp4"]
         assert ValidationCallback._available_paths(["a.mp4", None]) is None
+
+
+# ---------------------------------------------------------------------------
+# F. action overlay plumbing
+# ---------------------------------------------------------------------------
+
+
+class TestActionOverlay:
+
+    def test_save_validation_videos_supports_overlay_suffix(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cb = _make_callback()
+        cb.global_rank = 3
+        calls: list[tuple[str, int]] = []
+
+        def fake_mimsave(
+            fname: str,
+            video: list[np.ndarray],
+            *,
+            fps: int,
+        ) -> None:
+            calls.append((fname, fps))
+
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.validation.imageio.mimsave",
+            fake_mimsave,
+        )
+
+        filenames = cb._save_validation_videos(
+            [[np.zeros((2, 2, 3), dtype=np.uint8)]],
+            output_dir=str(tmp_path),
+            step=7,
+            num_inference_steps=4,
+            fps=25,
+            suffix="_overlay",
+        )
+
+        assert filenames == [
+            str(tmp_path / "validation_step_7_inference_steps_4_rank_3_video_0_overlay.mp4")
+        ]
+        assert calls == [(filenames[0], 25)]
+
+    def test_post_process_validation_frames_uses_student_hook(self) -> None:
+        cb = _make_callback(overlay_actions=True)
+        frames = [np.zeros((2, 2, 3), dtype=np.uint8)]
+        action = {
+            "keyboard": np.ones((1, 4), dtype=np.float32),
+            "mouse": np.zeros((1, 2), dtype=np.float32),
+        }
+
+        class Student:
+
+            def post_process_validation_frames(
+                self,
+                received_frames: list[np.ndarray],
+                *,
+                action: dict,
+            ) -> list[np.ndarray]:
+                assert received_frames is frames
+                assert action["keyboard"].shape == (1, 4)
+                return [np.full((2, 2, 3), 255, dtype=np.uint8)]
+
+        cb.method = SimpleNamespace(student=Student())
+
+        overlay = cb._post_process_validation_frames(
+            frames,
+            action=action,
+        )
+
+        assert overlay is not None
+        assert int(overlay[0][0, 0, 0]) == 255
+
+    def test_post_process_validation_frames_without_hook_is_noop(self) -> None:
+        cb = _make_callback(overlay_actions=True)
+        cb.method = SimpleNamespace(student=object())
+
+        overlay = cb._post_process_validation_frames(
+            [np.zeros((2, 2, 3), dtype=np.uint8)],
+            action=None,
+        )
+
+        assert overlay is None

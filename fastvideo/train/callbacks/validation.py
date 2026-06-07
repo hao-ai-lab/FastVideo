@@ -49,6 +49,8 @@ logger = init_logger(__name__)
 class _ValidationStepResult:
     videos: list[list[np.ndarray]]
     captions: list[str]
+    overlay_videos: list[list[np.ndarray]] = field(default_factory=list)
+    overlay_captions: list[str] = field(default_factory=list)
     ref_videos: list[str | None] = field(default_factory=list)
     actions: list[dict[str, Any] | None] = field(default_factory=list)
     mouse_pitch_signs: list[int | None] = field(default_factory=list)
@@ -108,6 +110,7 @@ class ValidationCallback(Callback):
         num_frames: int | None = None,
         output_dir: str | None = None,
         sampling_timesteps: list[int] | None = None,
+        overlay_actions: bool = False,
         **pipeline_kwargs: Any,
     ) -> None:
         self.pipeline_target = str(pipeline_target)
@@ -118,6 +121,7 @@ class ValidationCallback(Callback):
         self.num_frames = (int(num_frames) if num_frames is not None else None)
         self.output_dir = (str(output_dir) if output_dir is not None else None)
         self.sampling_timesteps = ([int(s) for s in sampling_timesteps] if sampling_timesteps is not None else None)
+        self.overlay_actions = bool(overlay_actions)
         metrics_config = pipeline_kwargs.pop("metrics", None)
         self.metrics_config = self._parse_metrics_config(metrics_config)
         self.pipeline_kwargs = dict(pipeline_kwargs)
@@ -287,6 +291,14 @@ class ValidationCallback(Callback):
                     num_inference_steps=num_inference_steps,
                     fps=sp.fps,
                 )
+                local_overlay_video_filenames = self._save_validation_videos(
+                    result.overlay_videos,
+                    output_dir=output_dir,
+                    step=step,
+                    num_inference_steps=num_inference_steps,
+                    fps=sp.fps,
+                    suffix="_overlay",
+                )
                 local_metric_stats = self._evaluate_validation_metrics(
                     video_filenames=local_video_filenames,
                     captions=result.captions,
@@ -301,15 +313,21 @@ class ValidationCallback(Callback):
 
                 if self.global_rank == 0:
                     all_video_filenames = list(local_video_filenames)
+                    all_overlay_video_filenames = list(local_overlay_video_filenames)
                     all_captions = list(result.captions)
+                    all_overlay_captions = list(result.overlay_captions)
                     all_metric_stats = local_metric_stats
                     for sp_idx in range(1, num_sp_groups):
                         src = (sp_idx * self.sp_world_size)
                         recv_v = (self.world_group.recv_object(src=src))
                         recv_c = (self.world_group.recv_object(src=src))
+                        recv_ov = (self.world_group.recv_object(src=src))
+                        recv_oc = (self.world_group.recv_object(src=src))
                         recv_m = (self.world_group.recv_object(src=src))
                         all_video_filenames.extend(recv_v)
+                        all_overlay_video_filenames.extend(recv_ov)
                         all_captions.extend(recv_c)
+                        all_overlay_captions.extend(recv_oc)
                         self._merge_metric_stats(
                             all_metric_stats,
                             recv_m,
@@ -319,27 +337,19 @@ class ValidationCallback(Callback):
                         all_metric_stats,
                         step=step,
                     )
-                    video_logs = []
-                    for fname, cap in zip(
-                            all_video_filenames,
-                            all_captions,
-                            strict=True,
-                    ):
-                        art = self.tracker.video(
-                            fname,
-                            caption=cap,
-                        )
-                        if art is not None:
-                            video_logs.append(art)
-                    if video_logs:
-                        logs = {
-                            f"validation_videos_"
-                            f"{num_inference_steps}"
-                            f"_steps": video_logs
-                        }
-                        self.tracker.log_artifacts(
-                            logs,
-                            step,
+                    self._log_validation_video_artifacts(
+                        all_video_filenames,
+                        all_captions,
+                        key=f"validation_videos_{num_inference_steps}_steps",
+                        step=step,
+                    )
+                    if all_overlay_video_filenames:
+                        self._log_validation_video_artifacts(
+                            all_overlay_video_filenames,
+                            all_overlay_captions,
+                            key=(f"validation_videos_{num_inference_steps}"
+                                 f"_steps_overlay"),
+                            step=step,
                         )
                 else:
                     self.world_group.send_object(
@@ -348,6 +358,14 @@ class ValidationCallback(Callback):
                     )
                     self.world_group.send_object(
                         result.captions,
+                        dst=0,
+                    )
+                    self.world_group.send_object(
+                        local_overlay_video_filenames,
+                        dst=0,
+                    )
+                    self.world_group.send_object(
+                        result.overlay_captions,
                         dst=0,
                     )
                     self.world_group.send_object(
@@ -367,6 +385,7 @@ class ValidationCallback(Callback):
         step: int,
         num_inference_steps: int,
         fps: int,
+        suffix: str = "",
     ) -> list[str]:
         filenames: list[str] = []
         for i, video in enumerate(videos):
@@ -375,7 +394,7 @@ class ValidationCallback(Callback):
                 f"validation_step_{step}"
                 f"_inference_steps_{num_inference_steps}"
                 f"_rank_{self.global_rank}"
-                f"_video_{i}.mp4",
+                f"_video_{i}{suffix}.mp4",
             )
             imageio.mimsave(
                 fname,
@@ -384,6 +403,32 @@ class ValidationCallback(Callback):
             )
             filenames.append(fname)
         return filenames
+
+    def _log_validation_video_artifacts(
+        self,
+        video_filenames: list[str],
+        captions: list[str],
+        *,
+        key: str,
+        step: int,
+    ) -> None:
+        video_logs = []
+        for fname, cap in zip(
+                video_filenames,
+                captions,
+                strict=True,
+        ):
+            art = self.tracker.video(
+                fname,
+                caption=cap,
+            )
+            if art is not None:
+                video_logs.append(art)
+        if video_logs:
+            self.tracker.log_artifacts(
+                {key: video_logs},
+                step,
+            )
 
     # ----------------------------------------------------------
     # Metric evaluation
@@ -959,7 +1004,9 @@ class ValidationCallback(Callback):
             inference_args.pipeline_config.dmd_denoising_steps = ([int(s) for s in self.sampling_timesteps])
 
         videos: list[list[np.ndarray]] = []
+        overlay_videos: list[list[np.ndarray]] = []
         captions: list[str] = []
+        overlay_captions: list[str] = []
         ref_videos: list[str | None] = []
         actions: list[dict[str, Any] | None] = []
         mouse_pitch_signs: list[int | None] = []
@@ -975,7 +1022,8 @@ class ValidationCallback(Callback):
             captions.append(batch.prompt)
             ref_video = validation_batch.get("ref_video")
             ref_videos.append(ref_video if isinstance(ref_video, str) else None)
-            actions.append(self._validation_actions(validation_batch))
+            action = self._validation_actions(validation_batch)
+            actions.append(action)
             mouse_pitch_signs.append(self._validation_mouse_pitch_sign(validation_batch))
 
             with torch.no_grad():
@@ -1001,13 +1049,38 @@ class ValidationCallback(Callback):
                 x = (x.transpose(0, 1).transpose(1, 2).squeeze(-1))
                 frames.append((x * 255).numpy().astype(np.uint8))
             videos.append(frames)
+            if self.overlay_actions:
+                overlay_frames = self._post_process_validation_frames(
+                    frames,
+                    action=action,
+                )
+                if overlay_frames is not None:
+                    overlay_videos.append(overlay_frames)
+                    overlay_captions.append(batch.prompt)
 
         return _ValidationStepResult(
             videos=videos,
             captions=captions,
+            overlay_videos=overlay_videos,
+            overlay_captions=overlay_captions,
             ref_videos=ref_videos,
             actions=actions,
             mouse_pitch_signs=mouse_pitch_signs,
+        )
+
+    def _post_process_validation_frames(
+        self,
+        frames: list[np.ndarray],
+        *,
+        action: dict[str, Any] | None,
+    ) -> list[np.ndarray] | None:
+        student = getattr(self.method, "student", None)
+        post_process = getattr(student, "post_process_validation_frames", None)
+        if post_process is None:
+            return None
+        return post_process(
+            frames,
+            action=action,
         )
 
     # ----------------------------------------------------------
