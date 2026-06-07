@@ -63,6 +63,27 @@ class Cosmos3DenoisingStage(PipelineStage):
     def _latent_frames(num_frames: int, temporal_factor: int) -> int:
         return (int(num_frames) - 1) // int(temporal_factor) + 1
 
+    @staticmethod
+    def _flow_shift_for_resolution(height: int, width: int) -> float:
+        """UniPC ``flow_shift`` for a given pixel resolution.
+
+        Mirrors the framework's ``_RESOLUTION_SHIFT_DEFAULTS`` (8B VLM backbone,
+        which Cosmos3-Nano uses): the shift is keyed by the named resolution
+        bucket the (H, W) belongs to, regardless of task (T2V/I2V/T2I):
+
+            "256" -> 3.0,  "480" -> 5.0,  "704"/"720"/"768" -> 10.0
+
+        We invert the framework's ``{IMAGE,VIDEO}_RES_SIZE_INFO`` tables by the
+        longest side: <=320 is the 256 bucket, 640-832 the 480 bucket, and
+        960-1360 the 704/720/768 buckets.
+        """
+        long_side = max(int(height), int(width))
+        if long_side <= 480:
+            return 3.0
+        if long_side <= 896:
+            return 5.0
+        return 10.0
+
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         pipeline_config = fastvideo_args.pipeline_config
         arch = pipeline_config.dit_config.arch_config
@@ -78,10 +99,12 @@ class Cosmos3DenoisingStage(PipelineStage):
         is_t2i = num_frames == 1 and batch.preprocessed_image is None and batch.pil_image is None
         is_i2v = (batch.preprocessed_image is not None or batch.pil_image is not None) and not is_t2i
 
-        # Per-mode flow_shift, set on the owning pipeline (rebuilds scheduler).
+        # Resolution-based flow_shift, set on the owning pipeline (rebuilds the
+        # scheduler). The framework picks the UniPC shift purely from the named
+        # resolution bucket (``_RESOLUTION_SHIFT_DEFAULTS``), NOT from the task,
+        # so T2V/I2V/T2I at the same resolution share a shift.
         pipe = self.pipeline() if self.pipeline is not None else None
-        engine_shift = float(getattr(pipe, "_engine_init_flow_shift", pipeline_config.flow_shift or 1.0))
-        flow_shift = 3.0 if is_t2i else engine_shift
+        flow_shift = self._flow_shift_for_resolution(height, width)
         if pipe is not None and hasattr(pipe, "_set_flow_shift"):
             pipe._set_flow_shift(flow_shift)
             scheduler = pipe.scheduler
@@ -224,29 +247,32 @@ class Cosmos3DenoisingStage(PipelineStage):
         """
         import numpy as np
 
-        # 1. Coerce to a [3, H, W] tensor in the [0, 255] pixel domain.
-        if hasattr(image, "convert"):  # PIL.Image
+        if hasattr(image, "convert"):  # PIL.Image: framework-exact preprocessing.
             arr = np.array(image.convert("RGB"))
-            img = torch.from_numpy(arr).permute(2, 0, 1).float()  # [3, H, W]
-        elif isinstance(image, torch.Tensor):
+            img = torch.from_numpy(arr).permute(2, 0, 1).float()  # [3, H, W] in [0, 255]
+            # Resize + center crop + uint8 quantization, then -> [-1, 1]
+            # (load_conditioning_image / load_conditioning_image_pixels).
+            img = cls._resize_and_center_crop(img.unsqueeze(0), height, width).squeeze(0)
+            img = img.round().clamp(0, 255) / 127.5 - 1.0  # [3, H, W] in [-1, 1]
+        elif isinstance(image, torch.Tensor):  # already-preprocessed conditioning frame.
             img = image.float()
             if img.dim() == 5:  # [B,3,T,H,W]
                 img = img[0]
             if img.dim() == 4:  # [3,T,H,W] or [B,3,H,W] -> first frame
                 img = img[:, 0]
-            if img.min() < -0.01:  # [-1, 1] -> [0, 255]
-                img = (img + 1.0) * 127.5
-            elif img.max() <= 1.5:  # [0, 1] -> [0, 255]
-                img = img * 255.0
+            if img.max() > 1.5:  # [0, 255] -> [-1, 1]; otherwise assume already [-1, 1].
+                img = img / 127.5 - 1.0
+            if img.shape[-2:] != (height, width):
+                img = cls._resize_and_center_crop(img.unsqueeze(0), height, width).squeeze(0)
         else:
             raise TypeError(f"Unsupported conditioning image type: {type(image)}")
 
-        # 2. Framework resize + center crop + uint8 quantization, then -> [-1, 1].
-        img = cls._resize_and_center_crop(img.unsqueeze(0), height, width).squeeze(0)
-        img = img.round().clamp(0, 255) / 127.5 - 1.0  # [3, H, W] in [-1, 1]
-
-        # 3. Static-repeat video (build_conditioned_video_batch: frame 0 = image,
-        #    remaining frames repeat the last conditioning frame).
+        # Static-repeat video (build_conditioned_video_batch: frame 0 = image,
+        # remaining frames repeat the last conditioning frame). The whole clip is
+        # VAE-encoded by the caller; only the latent condition frame(s) are kept
+        # clean by the condition mask, but the VAE is temporal, so the repeated
+        # (not zeroed) frames change the condition latent — zero-filling here
+        # produces a wrong conditioning latent.
         img = img.to(device=device, dtype=dtype)
         video = img.unsqueeze(0).unsqueeze(2).expand(1, 3, num_frames, height, width)
         return video.contiguous()
