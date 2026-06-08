@@ -54,18 +54,15 @@ class Qwen3TextArchConfig(TextEncoderArchConfig):
     text_len: int = 512
     output_hidden_states: bool = True  # Klein needs hidden states from layers 9, 18, 27
 
-    stacked_params_mapping: list[tuple[str, str, str]] = field(
-        default_factory=lambda: [
-            (".qkv_proj", ".q_proj", "q"),
-            (".qkv_proj", ".k_proj", "k"),
-            (".qkv_proj", ".v_proj", "v"),
-            (".gate_up_proj", ".gate_proj", 0),
-            (".gate_up_proj", ".up_proj", 1),
-        ]
-    )
+    stacked_params_mapping: list[tuple[str, str, str | int]] = field(default_factory=lambda: [
+        (".qkv_proj", ".q_proj", "q"),
+        (".qkv_proj", ".k_proj", "k"),
+        (".qkv_proj", ".v_proj", "v"),
+        (".gate_up_proj", ".gate_proj", 0),
+        (".gate_up_proj", ".up_proj", 1),
+    ])
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_norm]
-    )
+        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_norm])
 
     def __post_init__(self) -> None:
         self.tokenizer_kwargs = {

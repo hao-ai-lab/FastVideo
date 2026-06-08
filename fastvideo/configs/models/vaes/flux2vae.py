@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copied and adapted from: https://github.com/sglang-ai/sglang
 from dataclasses import dataclass, field
-from typing import Tuple
 
 from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 
@@ -9,23 +8,23 @@ from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 @dataclass
 class Flux2VAEArchConfig(VAEArchConfig):
     """Architecture configuration for Flux2 VAE model."""
-    
+
     # Flux2 VAE-specific architecture parameters
     in_channels: int = 3
     out_channels: int = 3
-    down_block_types: Tuple[str, ...] = (
+    down_block_types: tuple[str, ...] = (
         "DownEncoderBlock2D",
         "DownEncoderBlock2D",
         "DownEncoderBlock2D",
         "AttnDownEncoderBlock2D",
     )
-    up_block_types: Tuple[str, ...] = (
+    up_block_types: tuple[str, ...] = (
         "AttnUpDecoderBlock2D",
         "UpDecoderBlock2D",
         "UpDecoderBlock2D",
         "UpDecoderBlock2D",
     )
-    block_out_channels: Tuple[int, ...] = (128, 256, 512, 512)
+    block_out_channels: tuple[int, ...] = (128, 256, 512, 512)
     layers_per_block: int = 2
     act_fn: str = "silu"
     latent_channels: int = 16
@@ -37,7 +36,7 @@ class Flux2VAEArchConfig(VAEArchConfig):
     mid_block_add_attention: bool = True
     batch_norm_eps: float = 1e-5
     batch_norm_momentum: float = 0.1
-    patch_size: Tuple[int, int] = (1, 1)
+    patch_size: tuple[int, int] = (1, 1)
 
     # Latent scaling for decode: avoid division-by-zero; match Flux/Flux2 convention (e.g. 0.13025)
     scaling_factor: float = 0.13025
@@ -50,9 +49,9 @@ class Flux2VAEArchConfig(VAEArchConfig):
 @dataclass
 class Flux2VAEConfig(VAEConfig):
     """Configuration for Flux2 VAE model."""
-    
+
     arch_config: Flux2VAEArchConfig = field(default_factory=Flux2VAEArchConfig)
-    
+
     # Flux2 is an image model, so disable temporal tiling
     use_tiling: bool = False
     use_temporal_tiling: bool = False
