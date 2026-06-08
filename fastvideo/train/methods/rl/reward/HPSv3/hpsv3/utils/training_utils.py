@@ -9,9 +9,8 @@ def maybe_zero_3(param, ignore_status=False, name=None):
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 
     if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                print(f"Parameter {name} is not available in ZeRO-3, please check the ZeRO-3 status.")
+        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE and not ignore_status:
+            print(f"Parameter {name} is not available in ZeRO-3, please check the ZeRO-3 status.")
         with zero.GatheredParameters([param]):
             param = param.data.detach().cpu().clone()
     else:
@@ -120,12 +119,14 @@ def load_model_from_checkpoint(model, checkpoint_dir, checkpoint_step):
     return model, checkpoint_step
 
 
-def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=[], verbose=False):
+def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=None, verbose=False):
     """
     Find the target linear modules for LoRA.
     """
     linear_cls = torch.nn.Linear
     embedding_cls = torch.nn.Embedding
+    if lora_namespan_exclude is None:
+        lora_namespan_exclude = []
     lora_module_names = []
 
     for name, module in model.named_modules():
@@ -133,7 +134,7 @@ def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=[
             # print(f"Excluding module: {name}")
             continue
 
-        if isinstance(module, (linear_cls, embedding_cls)):
+        if isinstance(module, linear_cls | embedding_cls):
             lora_module_names.append(name)
 
     if num_lora_modules > 0:

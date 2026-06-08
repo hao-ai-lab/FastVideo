@@ -1,12 +1,6 @@
-import pdb
-from dataclasses import dataclass, field
-from typing import Optional, List, Union
 import numpy as np
-import pandas as pd
 import torch
 from .utils import process_vision_info
-from torch.utils.data import Dataset
-import torchvision.transforms.functional as F
 
 INSTRUCTION = """
 You are tasked with evaluating a generated image based on Visual Quality and Text Alignment and give a overall score to estimate the human preference. Please provide a rating from 0 to 10, with 0 being the worst and 10 being the best. 
@@ -75,7 +69,7 @@ class QWen2VLDataCollator:
         remove unnecessary keys from message(very very necessary)
         """
         message_list = []
-        for text, image in zip(texts, images):
+        for text, image in zip(texts, images, strict=False):
             out_message = [{
                 "role":
                 "user",

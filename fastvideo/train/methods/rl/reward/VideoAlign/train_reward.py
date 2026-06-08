@@ -1,13 +1,12 @@
 import ast
 import json
 import os
-import pdb
 import random
 from dataclasses import asdict
 from functools import partial
 
 import torch
-from datasets import load_dataset, concatenate_datasets
+from datasets import load_dataset
 from peft import LoraConfig, get_peft_model
 from transformers import AutoProcessor, HfArgumentParser
 from trl import get_kbit_device_map, get_quantization_config
@@ -41,12 +40,14 @@ def save_configs_to_json(data_config, training_args, model_config, peft_lora_con
         json.dump(config_dict, f, indent=4)
 
 
-def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=[], verbose=False):
+def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=None, verbose=False):
     """
     Find the target linear modules for LoRA.
     """
     linear_cls = torch.nn.Linear
     embedding_cls = torch.nn.Embedding
+    if lora_namespan_exclude is None:
+        lora_namespan_exclude = []
     lora_module_names = []
 
     for name, module in model.named_modules():
@@ -54,7 +55,7 @@ def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=[
             # print(f"Excluding module: {name}")
             continue
 
-        if isinstance(module, (linear_cls, embedding_cls)):
+        if isinstance(module, linear_cls | embedding_cls):
             lora_module_names.append(name)
 
     if num_lora_modules > 0:
@@ -83,7 +84,7 @@ def create_model_and_processor(
         revision=model_config.model_revision,
         device_map=get_kbit_device_map() if quantization_config is not None else None,
         quantization_config=quantization_config,
-        use_cache=True if training_args.gradient_checkpointing else False,
+        use_cache=bool(training_args.gradient_checkpointing),
     )
     # pdb.set_trace()
 

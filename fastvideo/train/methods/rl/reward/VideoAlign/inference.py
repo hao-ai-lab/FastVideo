@@ -1,9 +1,6 @@
-import ast
 import json
 import os
-import pdb
 from collections.abc import Mapping
-import pandas as pd
 
 import torch
 from .vision_process import process_vision_info
@@ -16,7 +13,7 @@ from .prompt_template import build_prompt
 
 
 def load_configs_from_json(config_path):
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config_dict = json.load(f)
 
     # del config_dict["training_args"]["_n_gpu"]
@@ -24,10 +21,10 @@ def load_configs_from_json(config_path):
     del config_dict["data_config"]["data_dir"]
 
     return config_dict["data_config"], None, config_dict["model_config"], config_dict["peft_lora_config"], \
-           config_dict["inference_config"] if "inference_config" in config_dict else None
+           config_dict.get("inference_config", None)
 
 
-class VideoVLMRewardInference():
+class VideoVLMRewardInference:
 
     def __init__(self, load_from_pretrained, load_from_pretrained_step=-1, device='cuda', dtype=torch.bfloat16):
         config_path = os.path.join(load_from_pretrained, "model_config.json")
@@ -41,8 +38,8 @@ class VideoVLMRewardInference():
             load_from_pretrained_step=load_from_pretrained_step,
             gradient_checkpointing=False,
             disable_flash_attn2=False,
-            bf16=True if dtype == torch.bfloat16 else False,
-            fp16=True if dtype == torch.float16 else False,
+            bf16=dtype == torch.bfloat16,
+            fp16=dtype == torch.float16,
             output_dir="",
         )
 
@@ -99,7 +96,7 @@ class VideoVLMRewardInference():
         """
         if isinstance(data, Mapping):
             return type(data)({k: self._prepare_input(v) for k, v in data.items()})
-        elif isinstance(data, (tuple, list)):
+        elif isinstance(data, tuple | list):
             return type(data)(self._prepare_input(v) for v in data)
         elif isinstance(data, torch.Tensor):
             kwargs = {"device": self.device}
@@ -154,7 +151,7 @@ class VideoVLMRewardInference():
                         },
                     ],
                 },
-            ] for video_path, prompt in zip(video_paths, prompts)]
+            ] for video_path, prompt in zip(video_paths, prompts, strict=False)]
         else:
             chat_data = [[
                 {
@@ -175,7 +172,7 @@ class VideoVLMRewardInference():
                         },
                     ],
                 },
-            ] for video_path, prompt in zip(video_paths, prompts)]
+            ] for video_path, prompt in zip(video_paths, prompts, strict=False)]
         image_inputs, video_inputs = process_vision_info(chat_data)
 
         batch = self.processor(

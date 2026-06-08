@@ -4,7 +4,6 @@ import fire
 from dataclasses import asdict
 from functools import partial
 import torch
-import torch.distributed as dist
 from .model.qwen2vl_trainer import (
     Qwen2VLRewardModelBT,
     VLMRewardTrainer,

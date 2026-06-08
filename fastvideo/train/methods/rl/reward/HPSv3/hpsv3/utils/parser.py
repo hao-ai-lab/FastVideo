@@ -1,7 +1,4 @@
-import sys
-import yaml
-from pathlib import Path
-from typing import Any, Optional, Union, Tuple, List, Literal
+from typing import Any, Literal
 from omegaconf import OmegaConf
 from transformers import HfArgumentParser
 from dataclasses import dataclass, field
@@ -10,43 +7,43 @@ from transformers import TrainingArguments
 
 @dataclass
 class DataConfig:
-    train_json_list: List[str] = field(default_factory=lambda: ["/path/to/dataset/meta_data.json"])
-    val_json_list: List[str] = field(default_factory=lambda: ["/path/to/dataset/meta_data.json"])
-    test_json_list: List[str] = field(default_factory=lambda: ["/path/to/dataset/meta_data.json"])
+    train_json_list: list[str] = field(default_factory=lambda: ["/path/to/dataset/meta_data.json"])
+    val_json_list: list[str] = field(default_factory=lambda: ["/path/to/dataset/meta_data.json"])
+    test_json_list: list[str] = field(default_factory=lambda: ["/path/to/dataset/meta_data.json"])
     soft_label: bool = False
-    confidence_threshold: Optional[float] = None
-    max_pixels: Optional[int] = 256 * 28 * 28  # Default max pixels
-    min_pixels: Optional[int] = 256 * 28 * 28
+    confidence_threshold: float | None = None
+    max_pixels: int | None = 256 * 28 * 28  # Default max pixels
+    min_pixels: int | None = 256 * 28 * 28
     with_instruction: bool = True
-    tied_threshold: Optional[float] = None
+    tied_threshold: float | None = None
 
 
 @dataclass
 class TrainingConfig(TrainingArguments):
-    max_grad_norm: Optional[float] = 1.0
-    dataset_num_proc: Optional[int] = None
-    center_rewards_coefficient: Optional[float] = None
+    max_grad_norm: float | None = 1.0
+    dataset_num_proc: int | None = None
+    center_rewards_coefficient: float | None = None
     disable_flash_attn2: bool = field(default=False)
     disable_dropout: bool = field(default=False)
 
-    vision_lr: Optional[float] = None
-    merger_lr: Optional[float] = None
-    rm_head_lr: Optional[float] = None
-    special_token_lr: Optional[float] = None
+    vision_lr: float | None = None
+    merger_lr: float | None = None
+    rm_head_lr: float | None = None
+    special_token_lr: float | None = None
 
-    conduct_eval: Optional[bool] = True
+    conduct_eval: bool | None = True
     load_from_pretrained: str = None
     load_from_pretrained_step: int = None
-    logging_epochs: Optional[float] = None
-    eval_epochs: Optional[float] = None
-    save_epochs: Optional[float] = None
-    remove_unused_columns: Optional[bool] = False
+    logging_epochs: float | None = None
+    eval_epochs: float | None = None
+    save_epochs: float | None = None
+    remove_unused_columns: bool | None = False
 
-    save_full_model: Optional[bool] = False
+    save_full_model: bool | None = False
 
     # Visualization parameters
-    visualization_steps: Optional[int] = 100
-    max_viz_samples: Optional[int] = 4
+    visualization_steps: int | None = 100
+    max_viz_samples: int | None = 4
 
 
 @dataclass
@@ -56,9 +53,9 @@ class PEFTLoraConfig:
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
-    lora_target_modules: Optional[List[str]] = None
-    lora_namespan_exclude: Optional[List[str]] = None
-    lora_modules_to_save: Optional[List[str]] = None
+    lora_target_modules: list[str] | None = None
+    lora_namespan_exclude: list[str] | None = None
+    lora_modules_to_save: list[str] | None = None
     lora_task_type: str = "CAUSAL_LM"
     use_rslora: bool = False
     num_lora_modules: int = -1
@@ -73,10 +70,10 @@ class PEFTLoraConfig:
 
 @dataclass
 class ModelConfig:
-    model_name_or_path: Optional[str] = None
+    model_name_or_path: str | None = None
     model_revision: str = "main"
     rm_head_type: str = "default"
-    rm_head_kwargs: Optional[dict] = None
+    rm_head_kwargs: dict | None = None
     output_dim: int = 1
 
     use_special_tokens: bool = False
@@ -84,11 +81,11 @@ class ModelConfig:
     freeze_vision_tower: bool = field(default=False)
     freeze_llm: bool = field(default=False)
     tune_merger: bool = field(default=False)
-    trainable_visual_layers: Optional[int] = -1
+    trainable_visual_layers: int | None = -1
 
-    torch_dtype: Optional[Literal["auto", "bfloat16", "float16", "float32"]] = None
+    torch_dtype: Literal["auto", "bfloat16", "float16", "float32"] | None = None
     trust_remote_code: bool = False
-    attn_implementation: Optional[str] = None
+    attn_implementation: str | None = None
     load_in_8bit: bool = False
     load_in_4bit: bool = False
     bnb_4bit_quant_type: Literal["fp4", "nf4"] = "nf4"
@@ -96,7 +93,7 @@ class ModelConfig:
     reward_token: Literal["last", "mean", "special"] = "last"
     loss_type: Literal["bt", "reg", "btt", "margin", "constant_margin", "scaled"] = ("regular")
     loss_hyperparameters: dict = field(default_factory=lambda: {})
-    checkpoint_path: Optional[str] = None
+    checkpoint_path: str | None = None
 
     def __post_init__(self):
         if self.load_in_8bit and self.load_in_4bit:
@@ -113,11 +110,11 @@ class ModelConfig:
 
 
 def parse_args_with_yaml(
-    dataclass_types: Tuple[type, ...],
+    dataclass_types: tuple[type, ...],
     config_path: str = None,
     allow_extra_keys: bool = True,
     is_train: bool = True,
-) -> Tuple[Any, ...]:
+) -> tuple[Any, ...]:
     """
     Parse arguments using HfArgumentParser with OmegaConf for YAML support.
     

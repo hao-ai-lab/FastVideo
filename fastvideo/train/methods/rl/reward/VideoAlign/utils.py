@@ -1,7 +1,8 @@
 import os
 import glob
+import logging
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional
+from typing import Literal
 
 import safetensors
 import torch
@@ -12,24 +13,24 @@ from transformers import TrainingArguments
 
 @dataclass
 class TrainingConfig(TrainingArguments):
-    max_length: Optional[int] = None
-    dataset_num_proc: Optional[int] = None
-    center_rewards_coefficient: Optional[float] = None
+    max_length: int | None = None
+    dataset_num_proc: int | None = None
+    center_rewards_coefficient: float | None = None
     disable_flash_attn2: bool = field(default=False)
 
-    vision_lr: Optional[float] = None
-    merger_lr: Optional[float] = None
-    special_token_lr: Optional[float] = None
+    vision_lr: float | None = None
+    merger_lr: float | None = None
+    special_token_lr: float | None = None
 
-    conduct_eval: Optional[bool] = True
+    conduct_eval: bool | None = True
     load_from_pretrained: str = None
     load_from_pretrained_step: int = None
-    logging_epochs: Optional[float] = None
-    eval_epochs: Optional[float] = None
-    save_epochs: Optional[float] = None
-    remove_unused_columns: Optional[bool] = False
+    logging_epochs: float | None = None
+    eval_epochs: float | None = None
+    save_epochs: float | None = None
+    remove_unused_columns: bool | None = False
 
-    save_full_model: Optional[bool] = False
+    save_full_model: bool | None = False
 
 
 @dataclass
@@ -39,9 +40,9 @@ class PEFTLoraConfig:
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
-    lora_target_modules: Optional[List[str]] = None
-    lora_namespan_exclude: Optional[List[str]] = None
-    lora_modules_to_save: Optional[List[str]] = None
+    lora_target_modules: list[str] | None = None
+    lora_namespan_exclude: list[str] | None = None
+    lora_modules_to_save: list[str] | None = None
     lora_task_type: str = "CAUSAL_LM"
     use_rslora: bool = False
     num_lora_modules: int = -1
@@ -56,7 +57,7 @@ class PEFTLoraConfig:
 
 @dataclass
 class ModelConfig:
-    model_name_or_path: Optional[str] = None
+    model_name_or_path: str | None = None
     model_revision: str = "main"
 
     output_dim: int = 1
@@ -67,9 +68,9 @@ class ModelConfig:
     freeze_llm: bool = field(default=False)
     tune_merger: bool = field(default=False)
 
-    torch_dtype: Optional[Literal["auto", "bfloat16", "float16", "float32"]] = None
+    torch_dtype: Literal["auto", "bfloat16", "float16", "float32"] | None = None
     trust_remote_code: bool = False
-    attn_implementation: Optional[str] = None
+    attn_implementation: str | None = None
     load_in_8bit: bool = False
     load_in_4bit: bool = False
     bnb_4bit_quant_type: Literal["fp4", "nf4"] = "nf4"
@@ -95,9 +96,8 @@ def maybe_zero_3(param, ignore_status=False, name=None):
     from deepspeed import zero
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
+        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE and not ignore_status:
+            logging.warning("%s: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: %s", name, param.ds_status)
         with zero.GatheredParameters([param]):
             param = param.data.detach().cpu().clone()
     else:

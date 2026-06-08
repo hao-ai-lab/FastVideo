@@ -8,10 +8,10 @@ from .utils.parser import ModelConfig, PEFTLoraConfig, TrainingConfig, DataConfi
 from .train import create_model_and_processor
 from pathlib import Path
 
-_MODEL_CONFIG_PATH = Path(__file__).parent / f"config/"
+_MODEL_CONFIG_PATH = Path(__file__).parent / "config/"
 
 
-class HPSv3RewardInferencer():
+class HPSv3RewardInferencer:
 
     def __init__(self, config_path=None, checkpoint_path=None, device='cuda', differentiable=False):
         if config_path is None:
@@ -74,7 +74,7 @@ class HPSv3RewardInferencer():
         """
         if isinstance(data, Mapping):
             return type(data)({k: self._prepare_input(v) for k, v in data.items()})
-        elif isinstance(data, (tuple, list)):
+        elif isinstance(data, tuple | list):
             return type(data)(self._prepare_input(v) for v in data)
         elif isinstance(data, torch.Tensor):
             kwargs = {"device": self.device}
@@ -95,7 +95,7 @@ class HPSv3RewardInferencer():
         max_pixels = 256 * 28 * 28
         min_pixels = 256 * 28 * 28
         message_list = []
-        for text, image in zip(prompts, image_paths):
+        for text, image in zip(prompts, image_paths, strict=False):
             out_message = [{
                 "role":
                 "user",
@@ -103,7 +103,7 @@ class HPSv3RewardInferencer():
                     {
                         "type": "image",
                         "image": image,
-                        "min_pixels": max_pixels,
+                        "min_pixels": min_pixels,
                         "max_pixels": max_pixels,
                     },
                     {

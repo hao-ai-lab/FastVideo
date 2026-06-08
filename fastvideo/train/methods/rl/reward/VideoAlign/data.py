@@ -1,16 +1,9 @@
-import pdb
 from dataclasses import dataclass
-from typing import Optional, List, Union
 
-import pandas as pd
 import torch
 from .prompt_template import build_prompt
 # from qwen_vl_utils import process_vision_info
 from .vision_process import process_vision_info
-from torch.utils.data import Dataset
-import torchvision.transforms.functional as F
-
-from .utils import save_video
 
 
 @dataclass
@@ -23,7 +16,7 @@ class DataConfig:
     fps: float = 2.0
     p_shuffle_frames: float = 0.0
     p_color_jitter: float = 0.0
-    eval_dim: Union[str, List[str]] = "VQ"
+    eval_dim: str | list[str] = "VQ"
     prompt_template_type: str = "none"
     add_noise: bool = False
     sample_type: str = "uniform"
@@ -32,7 +25,7 @@ class DataConfig:
 
 def convert_GSB_csv_to_reward_data(example,
                                    data_dir,
-                                   eval_dims=["VQ"],
+                                   eval_dims=None,
                                    max_pixels=448 * 448,
                                    fps=2.0,
                                    num_frames=None,
@@ -52,6 +45,8 @@ def convert_GSB_csv_to_reward_data(example,
     Returns:
         dict: A dictionary containing the reward data.
     """
+    if eval_dims is None:
+        eval_dims = ["VQ"]
 
     A_data = [{
         "role":
@@ -59,10 +54,10 @@ def convert_GSB_csv_to_reward_data(example,
         "content": [
             {
                 "type": "video",
-                "video": f"file://{data_dir}/{example[f'path_A']}",
+                "video": f"file://{data_dir}/{example['path_A']}",
                 "max_pixels": max_pixels,
                 "fps": fps if num_frames is None else None,
-                "nframes": min(num_frames, example[f"num_frames_A"]) if num_frames is not None else None,
+                "nframes": min(num_frames, example["num_frames_A"]) if num_frames is not None else None,
                 "sample_type": sample_type,
             },
             {
@@ -77,10 +72,10 @@ def convert_GSB_csv_to_reward_data(example,
         "content": [
             {
                 "type": "video",
-                "video": f"file://{data_dir}/{example[f'path_B']}",
+                "video": f"file://{data_dir}/{example['path_B']}",
                 "max_pixels": max_pixels,
                 "fps": fps if num_frames is None else None,
-                "nframes": min(num_frames, example[f"num_frames_B"]) if num_frames is not None else None,
+                "nframes": min(num_frames, example["num_frames_B"]) if num_frames is not None else None,
                 "sample_type": sample_type,
             },
             {
@@ -111,7 +106,7 @@ def convert_GSB_csv_to_reward_data(example,
                     chosen_label = 22
             else:
                 chosen_label = 22
-        except Exception as e:
+        except Exception:
             chosen_label = 22
 
         chosen_labels.append(chosen_label)
@@ -119,7 +114,7 @@ def convert_GSB_csv_to_reward_data(example,
             try:
                 A_score = example[f"MOS_A_{eval_dim}"] if example[f"MOS_A_{eval_dim}"] is not None else 0.0
                 B_score = example[f"MOS_B_{eval_dim}"] if example[f"MOS_B_{eval_dim}"] is not None else 0.0
-            except Exception as e:
+            except Exception:
                 A_score = 0.0
                 B_score = 0.0
             A_scores.append(A_score)
@@ -145,7 +140,7 @@ def convert_GSB_csv_to_reward_data(example,
     }
 
 
-class QWen2VLDataCollator():
+class QWen2VLDataCollator:
 
     def __init__(self, processor, add_noise=False, p_shuffle_frames=0.0, p_color_jitter=0.0):
         self.processor = processor
@@ -161,23 +156,18 @@ class QWen2VLDataCollator():
         """
         remove unnecessary keys from message(very very necessary)
         """
+        message_content = message[0]["content"][0]
         out_message = [{
             "role":
             "user",
             "content": [
                 {
-                    "type":
-                    "video",
-                    "video":
-                    message[0]["content"][0]["video"],
-                    "max_pixels":
-                    message[0]["content"][0]["max_pixels"],
-                    "fps":
-                    message[0]["content"][0]["fps"] if "fps" in message[0]["content"][0] else None,
-                    "nframes":
-                    message[0]["content"][0]["nframes"] if "nframes" in message[0]["content"][0] else None,
-                    "sample_type":
-                    message[0]["content"][0]["sample_type"] if "sample_type" in message[0]["content"][0] else "uniform",
+                    "type": "video",
+                    "video": message_content["video"],
+                    "max_pixels": message_content["max_pixels"],
+                    "fps": message_content.get("fps", None),
+                    "nframes": message_content.get("nframes", None),
+                    "sample_type": message_content.get("sample_type", "uniform"),
                 },
                 {
                     "type": "text",

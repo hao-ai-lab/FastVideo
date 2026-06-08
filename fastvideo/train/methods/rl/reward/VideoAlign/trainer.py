@@ -1,10 +1,6 @@
 import os
-import pdb
-import warnings
-import time
 import math
 # from training.train_utils import get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3
-from typing import List, Optional, Dict, Union, Any
 
 import pandas as pd
 import safetensors
@@ -15,7 +11,6 @@ import datasets
 from torch.utils.data import Dataset, DataLoader
 from peft import PeftModel
 from transformers import Qwen2VLForConditionalGeneration
-from transformers import AutoConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.trainer import TrainerCallback
 from transformers.trainer import (
@@ -25,33 +20,17 @@ from transformers.trainer import (
     WEIGHTS_NAME,
     TRAINING_ARGS_NAME,
     SAFE_WEIGHTS_NAME,
-    TRAINER_STATE_NAME,
     PREFIX_CHECKPOINT_DIR,
     logger,
-    speed_metrics,
-    deepspeed_init,
-    speed_metrics,
-    has_length,
-    EvalPrediction,
-    EvalLoopContainer,
-    PredictionOutput,
     is_torch_xla_available,
-    denumpify_detensorize,
-    PredictionOutput,
-    EvalLoopOutput,
-    DistributedTensorGatherer,
-    SequentialDistributedSampler,
-    nested_concat,
 )
-from transformers.trainer_callback import TrainerControl, TrainerState
 
-from transformers.trainer_pt_utils import nested_detach, find_batch_size
-from transformers.training_args import TrainingArguments
+from transformers.trainer_pt_utils import nested_detach
 from trl import RewardTrainer
 from .utils import get_peft_state_non_lora_maybe_zero_3
 
 if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
+    pass
 else:
     IS_XLA_FSDPV2_POST_2_2 = False
 
@@ -72,20 +51,20 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        pixel_values: Optional[torch.Tensor] = None,
-        pixel_values_videos: Optional[torch.FloatTensor] = None,
-        image_grid_thw: Optional[torch.LongTensor] = None,
-        video_grid_thw: Optional[torch.LongTensor] = None,
-        rope_deltas: Optional[torch.LongTensor] = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: list[torch.FloatTensor] | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        labels: torch.LongTensor | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        pixel_values: torch.Tensor | None = None,
+        pixel_values_videos: torch.FloatTensor | None = None,
+        image_grid_thw: torch.LongTensor | None = None,
+        video_grid_thw: torch.LongTensor | None = None,
+        rope_deltas: torch.LongTensor | None = None,
     ):
         ## modified from the origin class Qwen2VLForConditionalGeneration
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -128,10 +107,7 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
 
         logits = self.rm_head(hidden_states)  # [B, L, N]
 
-        if input_ids is not None:
-            batch_size = input_ids.shape[0]
-        else:
-            batch_size = inputs_embeds.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
 
         ## get sequence length
         if self.config.pad_token_id is None and batch_size != 1:
@@ -244,7 +220,7 @@ class PartialEmbeddingUpdateCallback(TrainerCallback):
 class VideoVLMRewardTrainer(RewardTrainer):
 
     def __init__(self, loss_type="regular", enable_noise_in_eval=False, *args, **kwargs):
-        super(VideoVLMRewardTrainer, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
         self.loss_type = loss_type
         self.enable_noise_in_eval = enable_noise_in_eval
@@ -254,7 +230,7 @@ class VideoVLMRewardTrainer(RewardTrainer):
         self.scores_chosen_accumulated = []
         self.scores_rejected_accumulated = []
 
-    def get_eval_dataloader(self, eval_dataset: Optional[Union[str, Dataset]] = None) -> DataLoader:
+    def get_eval_dataloader(self, eval_dataset: str | Dataset | None = None) -> DataLoader:
         """
         Returns the evaluation [`~torch.utils.data.DataLoader`].
 
@@ -569,9 +545,9 @@ class VideoVLMRewardTrainer(RewardTrainer):
                 self._save_rng_state(output_dir)
 
         else:
-            super(VideoVLMRewardTrainer, self)._save_checkpoint(model, trial, metrics)
+            super()._save_checkpoint(model, trial, metrics)
 
-    def _save(self, output_dir: Optional[str] = None, state_dict=None):
+    def _save(self, output_dir: str | None = None, state_dict=None):
         # If we are executing this function, we are the process zero, so we don't check for that.
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -615,7 +591,7 @@ class VideoVLMRewardTrainer(RewardTrainer):
         # pdb.set_trace()
 
 
-def compute_multi_attr_accuracy(eval_pred, metainfo_idxs=None, eval_dims=None, save_path=None) -> Dict[str, float]:
+def compute_multi_attr_accuracy(eval_pred, metainfo_idxs=None, eval_dims=None, save_path=None) -> dict[str, float]:
     predictions, labels = eval_pred
     metrics = {}
     for idx, eval_dim in enumerate(eval_dims):

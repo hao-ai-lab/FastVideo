@@ -1,17 +1,7 @@
 import os
-import pdb
-import warnings
-import time
 import math
-import json
-from PIL import Image
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from torch.utils.tensorboard import SummaryWriter
-import torchvision.transforms as transforms
 
-from typing import List, Optional, Dict, Union, Any
-import pandas as pd
 import safetensors
 import numpy as np
 import torch
@@ -20,7 +10,6 @@ import datasets
 from torch.utils.data import Dataset, DataLoader
 from peft import PeftModel
 from transformers import Qwen2VLForConditionalGeneration
-from transformers import AutoConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.trainer import TrainerCallback
 from transformers.trainer import (
@@ -30,29 +19,11 @@ from transformers.trainer import (
     WEIGHTS_NAME,
     TRAINING_ARGS_NAME,
     SAFE_WEIGHTS_NAME,
-    TRAINER_STATE_NAME,
     PREFIX_CHECKPOINT_DIR,
     logger,
-    speed_metrics,
-    deepspeed_init,
-    speed_metrics,
-    has_length,
-    EvalPrediction,
-    EvalLoopContainer,
-    PredictionOutput,
-    is_torch_xla_available,
-    denumpify_detensorize,
-    PredictionOutput,
-    EvalLoopOutput,
-    DistributedTensorGatherer,
-    SequentialDistributedSampler,
-    nested_concat,
 )
-from transformers.trainer_pt_utils import IterableDatasetShard
-from transformers.trainer_callback import TrainerControl, TrainerState
 
-from transformers.trainer_pt_utils import nested_detach, find_batch_size
-from transformers.training_args import TrainingArguments
+from transformers.trainer_pt_utils import nested_detach
 from trl import RewardTrainer
 from ..utils.training_utils import get_peft_state_non_lora_maybe_zero_3
 
@@ -93,7 +64,7 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
                         )
                     else:
                         self.rm_head.add_module(
-                            f"output_layer",
+                            "output_layer",
                             nn.Linear(rm_head_kwargs["hidden_size"], output_dim, bias=rm_head_kwargs.get("bias",
                                                                                                          False)),
                         )
@@ -118,20 +89,20 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        pixel_values: Optional[torch.Tensor] = None,
-        pixel_values_videos: Optional[torch.FloatTensor] = None,
-        image_grid_thw: Optional[torch.LongTensor] = None,
-        video_grid_thw: Optional[torch.LongTensor] = None,
-        rope_deltas: Optional[torch.LongTensor] = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: list[torch.FloatTensor] | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        labels: torch.LongTensor | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        pixel_values: torch.Tensor | None = None,
+        pixel_values_videos: torch.FloatTensor | None = None,
+        image_grid_thw: torch.LongTensor | None = None,
+        video_grid_thw: torch.LongTensor | None = None,
+        rope_deltas: torch.LongTensor | None = None,
     ):
         ## modified from the origin class Qwen2VLForConditionalGeneration
         output_attentions = (output_attentions if output_attentions is not None else self.config.output_attentions)
@@ -174,10 +145,7 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         with torch.autocast(device_type='cuda', dtype=torch.float32):
             logits = self.rm_head(hidden_states)  # [B, L, N]
 
-        if input_ids is not None:
-            batch_size = input_ids.shape[0]
-        else:
-            batch_size = inputs_embeds.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
 
         ## get sequence length
         if self.config.pad_token_id is None and batch_size != 1:
@@ -233,8 +201,6 @@ def _convert_A_B_to_chosen_rejected(
         nontied_mask: [B, 1] (preference labels that is not tied)
     """
     chosen_label = torch.ones_like(rewards_A, dtype=torch.int64).to(rewards_A.device)  # [B, 1]
-    chosen_mask = chosen_label == 1
-    rejected_mask = chosen_label != 1
 
     rewards_chosen = rewards_A
     rewards_rejected = rewards_B
@@ -282,22 +248,22 @@ class VLMRewardTrainer(RewardTrainer):
 
     def __init__(self,
                  loss_type="regular",
-                 loss_hyperparameters={},
+                 loss_hyperparameters=None,
                  tied_threshold=None,
                  visualization_steps=500,
                  max_viz_samples=4,
                  *args,
                  **kwargs):
-        super(VLMRewardTrainer, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.loss_type = loss_type
         self.tied_threshold = tied_threshold
         self.rewards_chosen_accumulated = []
         self.rewards_rejected_accumulated = []
-        self.loss_hyperparameters = loss_hyperparameters
+        self.loss_hyperparameters = loss_hyperparameters if loss_hyperparameters is not None else {}
         self.visualization_steps = visualization_steps
         self.max_viz_samples = max_viz_samples
 
-    def get_eval_dataloader(self, eval_dataset: Optional[Union[str, Dataset]] = None) -> DataLoader:
+    def get_eval_dataloader(self, eval_dataset: str | Dataset | None = None) -> DataLoader:
         """
         Returns the evaluation [`~torch.utils.data.DataLoader`].
 
@@ -654,13 +620,13 @@ class VLMRewardTrainer(RewardTrainer):
         try:
             # Get tensorboard writer from trainer
             writer = None
-            if hasattr(self, 'log_metrics'):
+            if hasattr(self, 'log_metrics') and hasattr(self.args,
+                                                        'report_to') and 'tensorboard' in self.args.report_to:
                 # Try to get the writer from the logger
-                if hasattr(self.args, 'report_to') and 'tensorboard' in self.args.report_to:
-                    from torch.utils.tensorboard import SummaryWriter
-                    if not hasattr(self, '_tb_writer'):
-                        self._tb_writer = SummaryWriter(log_dir=self.args.logging_dir)
-                    writer = self._tb_writer
+                from torch.utils.tensorboard import SummaryWriter
+                if not hasattr(self, '_tb_writer'):
+                    self._tb_writer = SummaryWriter(log_dir=self.args.logging_dir)
+                writer = self._tb_writer
 
             if writer is None:
                 return
@@ -777,7 +743,7 @@ class VLMRewardTrainer(RewardTrainer):
         else:
             super(RewardTrainer, self)._save_checkpoint(model, trial, metrics)
 
-    def _save(self, output_dir: Optional[str] = None, state_dict=None):
+    def _save(self, output_dir: str | None = None, state_dict=None):
         # If we are executing this function, we are the process zero, so we don't check for that.
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -827,7 +793,7 @@ class VLMRewardTrainer(RewardTrainer):
         # pdb.set_trace()
 
 
-def compute_multi_attr_accuracy(eval_pred, metainfo_idxs=None) -> Dict[str, float]:
+def compute_multi_attr_accuracy(eval_pred, metainfo_idxs=None) -> dict[str, float]:
     predictions, labels = eval_pred
     metrics = {}
 
@@ -844,8 +810,8 @@ def compute_multi_attr_accuracy(eval_pred, metainfo_idxs=None) -> Dict[str, floa
     accuracy = np.sum(rewards_chosen > rewards_rejected) / total_count
 
     metrics.update({
-        f"Acc": accuracy,
-        f"R_chosen_avg": rewards_chosen_avg,
-        f"R_rejected_avg": rewards_rejected_avg,
+        "Acc": accuracy,
+        "R_chosen_avg": rewards_chosen_avg,
+        "R_rejected_avg": rewards_rejected_avg,
     })
     return metrics

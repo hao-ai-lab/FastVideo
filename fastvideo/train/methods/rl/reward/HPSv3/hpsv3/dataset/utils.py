@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import numpy as np
 ## This file is modified from https://github.com/kq-chen/qwen-vl-utils/blob/main/src/qwen_vl_utils/vision_process.py
 import base64
 import logging
 import math
 import os
 import sys
-import time
 import warnings
 from functools import lru_cache
 from io import BytesIO
@@ -82,14 +80,9 @@ def smart_resize(height: int,
 
 
 def fetch_image(ele: dict[str, str | Image.Image], size_factor: int = IMAGE_FACTOR) -> Image.Image:
-    if "image" in ele:
-        image = ele["image"]
-    else:
-        image = ele["image_url"]
+    image = ele["image"] if "image" in ele else ele["image_url"]
     image_obj = None
-    if isinstance(image, Image.Image):
-        image_obj = image
-    elif isinstance(image, torch.Tensor):
+    if isinstance(image, Image.Image | torch.Tensor):
         image_obj = image
     elif image.startswith("http://") or image.startswith("https://"):
         image_obj = Image.open(requests.get(image, stream=True).raw)
@@ -211,7 +204,7 @@ def smart_nframes(
         nframes = round_by_factor(nframes, FRAME_FACTOR)
     if nframes > total_frames:
         nframes = total_frames
-    if not (FRAME_FACTOR <= nframes and nframes <= total_frames):
+    if not (nframes >= FRAME_FACTOR and nframes <= total_frames):
         raise ValueError(f"nframes should in interval [{FRAME_FACTOR}, {total_frames}], but got {nframes}.")
     return nframes
 
@@ -231,14 +224,16 @@ def _read_video_torchvision(ele: dict, ) -> torch.Tensor:
     video_path = ele["video"]
     if version.parse(torchvision.__version__) < version.parse("0.19.0"):
         if "http://" in video_path or "https://" in video_path:
-            warnings.warn("torchvision < 0.19.0 does not support http/https video path, please upgrade to 0.19.0.")
+            warnings.warn(
+                "torchvision < 0.19.0 does not support http/https video path, please upgrade to 0.19.0.",
+                stacklevel=2,
+            )
         if "file://" in video_path:
             video_path = video_path[7:]
-    st = time.time()
     video, audio, info = io.read_video(
         video_path,
         start_pts=ele.get("video_start", 0.0),
-        end_pts=ele.get("video_end", None),
+        end_pts=ele.get("video_end"),
         pts_unit="sec",
         output_format="TCHW",
     )
@@ -286,7 +281,6 @@ def _read_video_decord(ele: dict, ) -> torch.Tensor:
     """
     import decord
     video_path = ele["video"]
-    st = time.time()
     vr = decord.VideoReader(video_path)
     # TODO: support start_pts and end_pts
     if 'video_start' in ele or 'video_end' in ele:
@@ -369,7 +363,7 @@ def fetch_video(ele: dict, image_factor: int = IMAGE_FACTOR) -> torch.Tensor | l
         ).float()
         return video
     else:
-        assert isinstance(ele["video"], (list, tuple))
+        assert isinstance(ele["video"], list | tuple)
         process_info = ele.copy()
         process_info.pop("type", None)
         process_info.pop("video", None)

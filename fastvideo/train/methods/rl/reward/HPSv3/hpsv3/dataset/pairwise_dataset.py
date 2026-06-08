@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 import random
 import json
 import os
@@ -16,7 +16,7 @@ class PairwiseOriginalDataset(Dataset):
     ):
         self.samples = []
         for json_file in json_list:
-            with open(json_file, "r") as f:
+            with open(json_file) as f:
                 data = json.load(f)
             self.samples.extend(data)
 
