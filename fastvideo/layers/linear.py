@@ -226,8 +226,7 @@ class ReplicatedLinear(LinearBase):
     # to discover which GEMM shapes need quantized kernels. Defaults to
     # False; default forward path is bit-identical to pre-slice behavior.
     enable_shape_tracking = False
-    _unique_shapes: set[tuple[torch.Size, torch.Size]] = set()
-    _shape_to_layer_types: dict[tuple[torch.Size, torch.Size], list[str]] = {}
+    _shape_to_layer_types: dict[tuple[torch.Size, torch.Size], set[str]] = {}
 
     def __init__(
         self,
@@ -314,39 +313,32 @@ class ReplicatedLinear(LinearBase):
     @classmethod
     def reset_shape_tracking(cls) -> None:
         """Clear tracked shapes and layer type mappings."""
-        cls._unique_shapes.clear()
         cls._shape_to_layer_types.clear()
 
     def _track_shape(self, input_shape: torch.Size, output_shape: torch.Size) -> None:
         shape_key = (input_shape, output_shape)
-
-        if shape_key not in self._unique_shapes:
-            self._unique_shapes.add(shape_key)
-            self._shape_to_layer_types[shape_key] = []
-            print(f"Layer: {self.prefix} | input shape: {input_shape} --> "
-                  f"output shape: {output_shape}, Quant Method: "
-                  f"{self.quant_method.__class__.__name__}")
-
-        layer_type = self.__class__.__name__
-        if layer_type not in self._shape_to_layer_types[shape_key]:
-            self._shape_to_layer_types[shape_key].append(layer_type)
+        if shape_key not in self._shape_to_layer_types:
+            self._shape_to_layer_types[shape_key] = set()
+            logger.debug("Layer: %s | input shape: %s --> output shape: %s, Quant Method: %s", self.prefix, input_shape,
+                         output_shape, self.quant_method.__class__.__name__)
+        self._shape_to_layer_types[shape_key].add(self.__class__.__name__)
 
     @classmethod
     def print_shape_summary(cls) -> None:
-        """Print a summary of all unique shapes and their layer types."""
+        """Log a summary of all unique shapes and their layer types."""
         if not cls._shape_to_layer_types:
-            print("No shapes have been processed yet.")
+            logger.info("No shapes have been processed yet.")
             return
 
-        print("\n=== Matrix Multiplication Shape Summary ===")
-        print(f"Total unique shapes: {len(cls._shape_to_layer_types)}")
-        print()
-
+        lines = [
+            "=== Matrix Multiplication Shape Summary ===",
+            f"Total unique shapes: {len(cls._shape_to_layer_types)}",
+        ]
         for i, (shape_key, layer_types) in enumerate(cls._shape_to_layer_types.items(), 1):
             input_shape, output_shape = shape_key
-            print(f"{i}. Input: {input_shape} → Output: {output_shape}")
-            print(f"   Layer types: {', '.join(layer_types)}")
-            print()
+            lines.append(f"{i}. Input: {input_shape} → Output: {output_shape}")
+            lines.append(f"   Layer types: {', '.join(sorted(layer_types))}")
+        logger.info("\n".join(lines))
 
 
 class ColumnParallelLinear(LinearBase):

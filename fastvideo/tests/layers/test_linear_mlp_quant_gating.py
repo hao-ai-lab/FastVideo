@@ -5,22 +5,10 @@ unquantized fallback.
 """
 from __future__ import annotations
 
-from typing import cast
-
 import torch
 
 from fastvideo.layers.linear import ReplicatedLinear, UnquantizedLinearMethod
 from fastvideo.layers.mlp import MLP
-
-ShapeTrackingKey = tuple[object, object]
-
-
-def _tracked_unique_shapes() -> set[ShapeTrackingKey]:
-    return cast(set[ShapeTrackingKey], getattr(ReplicatedLinear, "_unique_shapes"))
-
-
-def _tracked_layer_types_by_shape() -> dict[ShapeTrackingKey, list[str]]:
-    return cast(dict[ShapeTrackingKey, list[str]], getattr(ReplicatedLinear, "_shape_to_layer_types"))
 
 
 def test_replicated_linear_shape_tracking_default_off() -> None:
@@ -30,8 +18,7 @@ def test_replicated_linear_shape_tracking_default_off() -> None:
     linear = ReplicatedLinear(input_size=8, output_size=4)
     linear(torch.randn(2, 8))
 
-    assert len(_tracked_unique_shapes()) == 0
-    assert len(_tracked_layer_types_by_shape()) == 0
+    assert len(ReplicatedLinear._shape_to_layer_types) == 0
 
 
 def test_replicated_linear_shape_tracking_enabled_records_unique_shapes() -> None:
@@ -42,14 +29,12 @@ def test_replicated_linear_shape_tracking_enabled_records_unique_shapes() -> Non
         linear(torch.randn(2, 8))
         linear(torch.randn(3, 8))
 
-        assert len(_tracked_unique_shapes()) == 2
-        assert len(_tracked_layer_types_by_shape()) == 2
-        for layer_types in _tracked_layer_types_by_shape().values():
+        assert len(ReplicatedLinear._shape_to_layer_types) == 2
+        for layer_types in ReplicatedLinear._shape_to_layer_types.values():
             assert "ReplicatedLinear" in layer_types
 
         ReplicatedLinear.reset_shape_tracking()
-        assert len(_tracked_unique_shapes()) == 0
-        assert len(_tracked_layer_types_by_shape()) == 0
+        assert len(ReplicatedLinear._shape_to_layer_types) == 0
     finally:
         ReplicatedLinear.enable_shape_tracking = False
 
