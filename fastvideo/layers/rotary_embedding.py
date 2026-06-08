@@ -445,6 +445,16 @@ def get_nd_rotary_pos_embed(
     return cos, sin
 
 
+_ROTARY_POS_EMBED_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
+
+
+def _hashable(value: Any) -> Any:
+    """Return a hashable view of a scalar or sequence for use in a cache key."""
+    if isinstance(value, list | tuple):
+        return tuple(value)
+    return value
+
+
 def get_rotary_pos_embed(
     rope_sizes,
     hidden_size,
@@ -495,6 +505,25 @@ def get_rotary_pos_embed(
         sp_rank = 0
         sp_world_size = 1
 
+    # Memoize on every output-affecting argument; the table is constant across
+    # denoising steps, so this avoids recomputing the float64 cos/sin tables.
+    cache_key = (
+        _hashable(rope_sizes),
+        tuple(rope_dim_list),
+        rope_theta,
+        _hashable(theta_rescale_factor),
+        _hashable(interpolation_factor),
+        shard_dim,
+        sp_rank,
+        sp_world_size,
+        dtype,
+        start_frame,
+        use_real,
+    )
+    cached = _ROTARY_POS_EMBED_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
         rope_dim_list,
         rope_sizes,
@@ -508,6 +537,8 @@ def get_rotary_pos_embed(
         start_frame=start_frame,
         use_real=use_real,
     )
+    # Cached tensors are shared (read-only); callers copy via .to()/.float().
+    _ROTARY_POS_EMBED_CACHE[cache_key] = (freqs_cos, freqs_sin)
     return freqs_cos, freqs_sin
 
 
