@@ -64,6 +64,14 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             The shift value for the timestep schedule.
         use_dynamic_shifting (`bool`, defaults to False):
             Whether to apply timestep shifting on-the-fly based on the image resolution.
+        use_reference_discrete_timesteps (`bool`, defaults to False):
+            Some reference schedulers (e.g. Z-Image) construct the timestep
+            schedule by linspacing `num_inference_steps + 1` points from
+            `t_max` to `t_min` and dropping the terminal point. Default
+            (`False`) preserves the original `np.linspace(t_max, t_min,
+            num_inference_steps)` (float64) behaviour used by every existing
+            model. Enable this flag only when matching a reference scheduler
+            that expects the +1 + drop-terminal construction.
         base_shift (`float`, defaults to 0.5):
             Value to stabilize image generation. Increasing `base_shift` reduces variation and image is more consistent
             with desired output.
@@ -107,6 +115,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         num_train_timesteps: int = 1000,
         shift: float = 1.0,
         use_dynamic_shifting: bool = False,
+        use_reference_discrete_timesteps: bool = False,
         base_shift: float | None = 0.5,
         max_shift: float | None = 1.15,
         base_image_seq_len: int | None = 256,
@@ -350,7 +359,20 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             if timesteps_array is None:
                 t_max = self._sigma_to_t(self.sigma_max)
                 t_min = self._sigma_to_t(self.sigma_min)
-                timesteps_array = np.linspace(t_max, t_min, num_inference_steps)
+                if self.config.use_reference_discrete_timesteps:
+                    # Some reference schedulers (for example Z-Image) build a
+                    # num_steps+1 linspace and drop the terminal point.
+                    timesteps_array = np.linspace(
+                        t_max,
+                        t_min,
+                        num_inference_steps + 1,
+                        dtype=np.float32,
+                    )[:-1]
+                else:
+                    # Preserve the original numpy default (float64) here —
+                    # casting to float32 silently shifts rounded timestep
+                    # values for every existing model that uses this branch.
+                    timesteps_array = np.linspace(t_max, t_min, num_inference_steps)
             sigmas_array = timesteps_array / self.config.num_train_timesteps
         else:
             sigmas_array = np.array(sigmas).astype(np.float32)
