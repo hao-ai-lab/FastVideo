@@ -10,9 +10,13 @@ With single-pass fused kernels:
   fused_topk_mask:   read scores, find k-th value, write bool mask
 """
 
+import logging
+
 import torch
 import triton
 import triton.language as tl
+
+logger = logging.getLogger(__name__)
 
 
 @triton.jit
@@ -239,11 +243,11 @@ def _fused_topk_mask_kernel(
     # the tie-breaking logic below selects the first topk positions.
     lo = tl.minimum(lo, hi)
 
-    # 32 iterations of fp32 bisection gives precision ~2^-32 ≈ 2.3e-10, which is
-    # far below the minimum gap between distinct bf16 values (~2^-8 ≈ 3.9e-3).
-    # This guarantees threshold converges exactly to a bf16 score value in fp32
-    # representation, so the > / == comparisons below are exact with no risk of
-    # the threshold landing between tied bf16 values.
+    # 32 iterations of fp32 bisection give range-relative resolution (hi-lo)/2^32.
+    # For VSA's softmax-input scores (q_c@k_c/sqrt(d), O(1) magnitude, range < ~10),
+    # this resolves to ~2e-9, well below the bf16 ULP at that magnitude (~8e-3),
+    # so the threshold converges exactly to the k-th bf16 score value and the
+    # > / == comparisons below are exact.
     for _i in range(32):
         mid = (lo + hi) * 0.5
         count_ge = tl.sum(((scores_f32 >= mid) & valid_mask).to(tl.int32), axis=0)
@@ -265,6 +269,13 @@ def _fused_topk_mask_kernel(
     tl.store(mask_base + kv_offsets * stride_m_kv, final_mask, mask=valid_mask)
 
 
+# Triton kernel loads the entire kv row into registers via tl.arange(0, KV_BLOCK_SIZE).
+# Each row spawns multiple same-sized register arrays (scores_f32, valid_mask,
+# above_threshold, at_threshold, cumsum, etc.).  GPU SMs have a fixed register file
+# (e.g. 65536 × 32-bit), so the maximum array length per program is bounded.
+# 4096 (2^12) is an empirical power-of-2 cap that avoids register spilling on
+# mainstream GPUs.  Beyond this the kernel either fails to compile or spills to
+# local memory with severe perf regression, so we fall back to torch.topk.
 MAX_KV_BLOCK_SIZE = 4096
 
 
@@ -297,6 +308,11 @@ def fused_topk_mask(
 
     KV_BLOCK_SIZE = triton.next_power_of_2(kv_blocks)
     if KV_BLOCK_SIZE > MAX_KV_BLOCK_SIZE:
+        logger.debug(
+            "fused_topk_mask: kv_blocks=%d exceeds Triton limit %d, "
+            "falling back to PyTorch topk (slower)",
+            kv_blocks, MAX_KV_BLOCK_SIZE,
+        )
         return _pytorch_topk_mask_fallback(scores, topk)
 
     mask = torch.zeros(B, H, q_blocks, kv_blocks, dtype=torch.bool, device=scores.device)

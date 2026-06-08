@@ -146,6 +146,130 @@ class TestFusedBlockMeanEquivalence:
 
 
 # ---------------------------------------------------------------------------
+# fused_block_mean: backward (gradient) parity
+# ---------------------------------------------------------------------------
+
+
+def _ref_block_mean_with_grad(x, vbs, block_elements):
+    """Eager PyTorch block-mean that supports autograd for gradient reference."""
+    B, H, seq_len, D = x.shape
+    num_blocks = seq_len // block_elements
+    x_blocks = x.view(B, H, num_blocks, block_elements, D)
+    return (x_blocks.float().sum(dim=3) / vbs.view(1, 1, -1, 1).float()).to(x.dtype)
+
+
+class TestFusedBlockMeanBackward:
+
+    def test_gradient_parity(self):
+        """Gradient through fused_block_mean must match the eager view→sum→div path."""
+        _require_cuda()
+        from fastvideo_kernel.triton_kernels.fused_compress_topk import fused_block_mean
+
+        B, H, D = 2, 4, 128
+        num_blocks = 16
+        block_elements = 64
+        seq_len = num_blocks * block_elements
+
+        vbs = torch.randint(16, 65, (num_blocks,), dtype=torch.int32, device="cuda")
+        grad_out = torch.randn(B, H, num_blocks, D, dtype=torch.bfloat16, device="cuda")
+
+        x_fused = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device="cuda")
+        x_ref = x_fused.clone()
+        x_fused.requires_grad_(True)
+        x_ref.requires_grad_(True)
+
+        out_fused = fused_block_mean(x_fused, vbs, block_elements)
+        out_fused.backward(grad_out)
+
+        out_ref = _ref_block_mean_with_grad(x_ref, vbs, block_elements)
+        out_ref.backward(grad_out)
+
+        assert x_fused.grad is not None, "fused path did not produce gradient"
+        assert x_ref.grad is not None, "ref path did not produce gradient"
+        assert x_fused.grad.shape == x_ref.grad.shape
+
+        max_diff = (x_fused.grad - x_ref.grad).abs().max().item()
+        assert torch.allclose(x_fused.grad, x_ref.grad, atol=1e-2, rtol=1e-2), (
+            f"gradient max diff={max_diff}"
+        )
+
+    def test_gradient_parity_variable_block_sizes(self):
+        """Backward parity with non-uniform variable_block_sizes."""
+        _require_cuda()
+        from fastvideo_kernel.triton_kernels.fused_compress_topk import fused_block_mean
+
+        B, H, D = 1, 8, 64
+        num_blocks = 32
+        block_elements = 64
+        seq_len = num_blocks * block_elements
+
+        vbs = torch.randint(1, 65, (num_blocks,), dtype=torch.int32, device="cuda")
+        grad_out = torch.randn(B, H, num_blocks, D, dtype=torch.bfloat16, device="cuda")
+
+        x_fused = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device="cuda")
+        x_ref = x_fused.clone()
+        x_fused.requires_grad_(True)
+        x_ref.requires_grad_(True)
+
+        out_fused = fused_block_mean(x_fused, vbs, block_elements)
+        out_fused.backward(grad_out)
+
+        out_ref = _ref_block_mean_with_grad(x_ref, vbs, block_elements)
+        out_ref.backward(grad_out)
+
+        max_diff = (x_fused.grad - x_ref.grad).abs().max().item()
+        assert torch.allclose(x_fused.grad, x_ref.grad, atol=1e-2, rtol=1e-2), (
+            f"gradient max diff={max_diff}"
+        )
+
+    def test_gradient_through_matmul_chain(self):
+        """End-to-end backward through the compress branch: block_mean → matmul → softmax → matmul."""
+        _require_cuda()
+        from fastvideo_kernel.triton_kernels.fused_compress_topk import fused_block_mean
+
+        B, H, D = 1, 4, 128
+        num_blocks = 16
+        block_elements = 64
+        seq_len = num_blocks * block_elements
+
+        vbs = torch.full((num_blocks,), block_elements, dtype=torch.int32, device="cuda")
+
+        def _forward_compress(x_q, x_k, x_v, use_fused):
+            mean_fn = fused_block_mean if use_fused else (
+                lambda x, v, be: _ref_block_mean_with_grad(x, v, be)
+            )
+            q_c = mean_fn(x_q, vbs, block_elements)
+            k_c = mean_fn(x_k, vbs, block_elements)
+            v_c = mean_fn(x_v, vbs, block_elements)
+            scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (D ** 0.5)
+            attn = torch.softmax(scores, dim=-1)
+            return torch.matmul(attn, v_c)
+
+        base_q = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device="cuda")
+        base_k = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device="cuda")
+        base_v = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device="cuda")
+        grad_out = torch.randn(B, H, num_blocks, D, dtype=torch.bfloat16, device="cuda")
+
+        grads = {}
+        for label, use_fused in [("fused", True), ("ref", False)]:
+            q = base_q.clone().requires_grad_(True)
+            k = base_k.clone().requires_grad_(True)
+            v = base_v.clone().requires_grad_(True)
+            out = _forward_compress(q, k, v, use_fused)
+            out.backward(grad_out)
+            grads[label] = (q.grad, k.grad, v.grad)
+
+        for name, (g_fused, g_ref) in zip(
+            ["dQ", "dK", "dV"],
+            zip(grads["fused"], grads["ref"]),
+        ):
+            max_diff = (g_fused - g_ref).abs().max().item()
+            assert torch.allclose(g_fused, g_ref, atol=1e-2, rtol=1e-2), (
+                f"{name} gradient max diff={max_diff}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # End-to-end: fused video_sparse_attn vs old PyTorch pipeline
 # ---------------------------------------------------------------------------
 
