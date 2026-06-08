@@ -137,13 +137,13 @@ def _patch_hpsv3_runtime_model(model: Any) -> None:
             candidate.__dict__["embed_tokens"] = language_model.embed_tokens
 
 
-def _normalize_device(device) -> str:
+def _normalize_device(device: torch.device | str) -> str:
     if isinstance(device, torch.device):
         return str(device)
     return str(torch.device(device))
 
 
-def _move_hpsv3_inferencer(inferencer: Any, device) -> None:
+def _move_hpsv3_inferencer(inferencer: Any, device: torch.device | str) -> None:
     """Move an HPSv3 inferencer across devices.
 
     HPSv3RewardInferencer does not expose ``.to()``, but it stores its torch
@@ -156,7 +156,7 @@ def _move_hpsv3_inferencer(inferencer: Any, device) -> None:
     inferencer.device = device_str
 
 
-def set_hpsv3_device(device) -> None:
+def set_hpsv3_device(device: torch.device | str) -> None:
     """Move cached HPSv3 inferencer to given device."""
     key = _normalize_device(device)
     if key in _HPSV3_INFERENCERS:
@@ -170,7 +170,7 @@ def set_hpsv3_device(device) -> None:
             return
 
 
-def _get_hpsv3_inferencer(device):
+def _get_hpsv3_inferencer(device: torch.device | str) -> Any:
     """Get or create HPSv3 inferencer for device."""
     key = _normalize_device(device)
     if key not in _HPSV3_INFERENCERS:

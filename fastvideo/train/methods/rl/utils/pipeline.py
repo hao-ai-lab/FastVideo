@@ -129,17 +129,19 @@ def wan_denoising_with_logprob(
     # Window setup.
     use_window = (sde_window_size > 0 and sde_window_range is not None)
     if use_window:
-        if (sde_window_range[1] - sde_window_range[0] < sde_window_size):
+        assert sde_window_range is not None
+        window_range_start, window_range_end = sde_window_range
+        if (window_range_end - window_range_start < sde_window_size):
             msg = (f"sde_window_range span "
-                   f"({sde_window_range[1] - sde_window_range[0]}) "
+                   f"({window_range_end - window_range_start}) "
                    f"must be >= sde_window_size "
                    f"({sde_window_size})")
             raise ValueError(msg)
         if generator is not None:
             gen = (generator[0] if isinstance(generator, list) else generator)
-            max_start = (sde_window_range[1] - sde_window_size)
+            max_start = (window_range_end - sde_window_size)
             start = torch.randint(
-                sde_window_range[0],
+                window_range_start,
                 max_start + 1,
                 (1, ),
                 generator=gen,
@@ -147,15 +149,14 @@ def wan_denoising_with_logprob(
             ).item()
         else:
             start = random.randint(
-                sde_window_range[0],
-                sde_window_range[1] - sde_window_size,
+                window_range_start,
+                window_range_end - sde_window_size,
             )
         end = start + sde_window_size
         sde_window = (start, end)
-        all_latents: list[torch.Tensor] = []
     else:
         sde_window = None
-        all_latents: list[torch.Tensor] = [latents]
+    all_latents: list[torch.Tensor] = [] if sde_window is not None else [latents]
 
     all_log_probs: list[torch.Tensor] = []
     all_kl: list[torch.Tensor] = []
@@ -191,13 +192,14 @@ def wan_denoising_with_logprob(
         _denoise_fwd_time += time.perf_counter() - _fwd_t0
 
         # Determine noise level for this step.
-        if use_window:
-            if i < sde_window[0]:
+        if sde_window is not None:
+            window_start, window_end = sde_window
+            if i < window_start:
                 cur_noise_level = 0.0
-            elif i == sde_window[0]:
+            elif i == window_start:
                 cur_noise_level = noise_level
                 all_latents.append(latents)
-            elif sde_window[0] < i < sde_window[1]:
+            elif window_start < i < window_end:
                 cur_noise_level = noise_level
             else:
                 cur_noise_level = 0.0
@@ -228,8 +230,8 @@ def wan_denoising_with_logprob(
         prev_latents = latents.clone()
 
         # Record.
-        in_window = (use_window and sde_window[0] <= i < sde_window[1])
-        should_record = (not use_window) or in_window
+        in_window = (sde_window is not None and sde_window[0] <= i < sde_window[1])
+        should_record = (sde_window is None) or in_window
 
         if should_record:
             all_latents.append(latents)

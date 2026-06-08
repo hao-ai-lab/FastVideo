@@ -53,7 +53,7 @@ class JsonPromptDataset(Dataset):
         self._metadatas: list[dict] = []
         self._load_all_prompts()
 
-    def _load_all_prompts(self):
+    def _load_all_prompts(self) -> None:
         with open(self.file_path, encoding="utf-8") as f:
             for raw_line in f:
                 line = raw_line.strip()

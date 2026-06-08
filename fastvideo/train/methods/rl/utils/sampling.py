@@ -130,6 +130,7 @@ def sample_epoch(
         ).input_ids.to(device)
 
         # Generator setup.
+        gen: torch.Generator | list[torch.Generator]
         if same_latent:
             gen = create_generator(
                 prompts,

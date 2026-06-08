@@ -94,7 +94,7 @@ class GenRLMethod(TrainingMethod):
         tc = self.training_config
 
         # Optional reference model for KL.
-        self._reference = role_models.get("reference")
+        self._reference: ModelBase | None = role_models.get("reference")
 
         # Parse RL config.
         self._parse_config(mc)
@@ -1052,14 +1052,14 @@ class GenRLMethod(TrainingMethod):
     # Reference model
     # ------------------------------------------------------------------
 
-    def _get_ref_model(self):
+    def _get_ref_model(self) -> ModelBase | None:
         """Get reference model for KL computation."""
         if self._reference is not None:
             return self._reference
         # LoRA case: caller should use disable_adapter.
         return None
 
-    def _get_lora_ref_transformer(self):
+    def _get_lora_ref_transformer(self) -> torch.nn.Module | None:
         """Get LoRA transformer that can disable adapters for sampling KL."""
         transformer = getattr(self.student, "transformer", None)
         if transformer is None:
@@ -1071,7 +1071,7 @@ class GenRLMethod(TrainingMethod):
     def _has_reference_policy(self) -> bool:
         return (self._reference is not None or self._get_lora_ref_transformer() is not None)
 
-    def _get_reference_logprob_context(self):
+    def _get_reference_logprob_context(self) -> tuple[Any | None, Any]:
         """Return model/context for reference log-prob computation."""
         if self._reference is not None:
             return self._reference, contextlib.nullcontext()
