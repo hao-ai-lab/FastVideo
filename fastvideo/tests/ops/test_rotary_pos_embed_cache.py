@@ -6,6 +6,7 @@ import torch
 
 from fastvideo.layers.rotary_embedding import (
     _ROTARY_POS_EMBED_CACHE,
+    _ROTARY_POS_EMBED_CACHE_MAXSIZE,
     get_rotary_pos_embed,
 )
 
@@ -142,7 +143,7 @@ def test_scalar_and_list_factors_are_hashable_and_distinct():
     """List-valued rescale factors are hashable and keyed apart from scalars."""
     _call(theta_rescale_factor=1.0)
     _call(theta_rescale_factor=[1.0, 1.0, 1.0])
-    assert len(_ROTARY_POS_EMBED_CACHE) >= 1
+    assert len(_ROTARY_POS_EMBED_CACHE) == 2
 
 
 def test_caller_device_copy_does_not_corrupt_cache():
@@ -160,3 +161,30 @@ def test_start_frame_offsets_values():
     cos3, _ = _call(start_frame=3)
     assert not torch.equal(cos0, cos3)
     assert len(_ROTARY_POS_EMBED_CACHE) == 2
+
+
+def test_cache_is_bounded_and_evicts_oldest():
+    """The cache caps at the max size and evicts the oldest entry first."""
+    # Tiny grids keep this lightweight; each start_frame is a distinct key.
+    overshoot = _ROTARY_POS_EMBED_CACHE_MAXSIZE + 4
+    for frame in range(overshoot):
+        _call(rope_sizes=(2, 2, 2), start_frame=frame)
+        assert len(_ROTARY_POS_EMBED_CACHE) <= _ROTARY_POS_EMBED_CACHE_MAXSIZE
+    assert len(_ROTARY_POS_EMBED_CACHE) == _ROTARY_POS_EMBED_CACHE_MAXSIZE
+    # The earliest-inserted frames must have been evicted; the latest survive.
+    surviving = {key[-2] for key in _ROTARY_POS_EMBED_CACHE}  # start_frame slot
+    assert overshoot - 1 in surviving
+    assert 0 not in surviving
+
+
+def test_cache_hit_refreshes_recency():
+    """Re-accessing an entry protects it from eviction over an untouched one."""
+    _call(rope_sizes=(2, 2, 2), start_frame=0)  # entry we will keep hot
+    for frame in range(1, _ROTARY_POS_EMBED_CACHE_MAXSIZE):
+        _call(rope_sizes=(2, 2, 2), start_frame=frame)
+    assert len(_ROTARY_POS_EMBED_CACHE) == _ROTARY_POS_EMBED_CACHE_MAXSIZE
+    _call(rope_sizes=(2, 2, 2), start_frame=0)   # hit -> frame 0 becomes most recent
+    _call(rope_sizes=(2, 2, 2), start_frame=99)  # miss -> evicts now-oldest (frame 1)
+    surviving = {key[-2] for key in _ROTARY_POS_EMBED_CACHE}
+    assert 0 in surviving
+    assert 1 not in surviving
