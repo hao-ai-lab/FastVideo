@@ -60,26 +60,19 @@ def load_reward_fn(
         mod = importlib.import_module(module_path)
         fn = getattr(mod, f"{name}_score", None)
         if fn is None:
-            msg = (
-                f"Reward {name}_score not found "
-                f"in {module_path}"
-            )
+            msg = (f"Reward {name}_score not found "
+                   f"in {module_path}")
             raise ValueError(msg)
         return fn(device) if callable(fn) else fn
 
     if name in _BUILTIN_REWARDS:
         fn = _BUILTIN_REWARDS[name]
         sig = inspect.signature(fn)
-        accepts_device = any(
-            p.name in {"device", "dev"}
-            for p in sig.parameters.values()
-        )
+        accepts_device = any(p.name in {"device", "dev"} for p in sig.parameters.values())
         return fn(device) if accepts_device else fn()
 
     def _zero_fn(images, prompts, metadata, only_strict=False):
-        batch = (
-            len(prompts) if prompts is not None else 1
-        )
+        batch = (len(prompts) if prompts is not None else 1)
         zeros = torch.zeros(batch, device=device)
         return {"avg": zeros}, {}
 
@@ -107,9 +100,7 @@ def multi_score(
     reward_fns = {}
     weights = {}
     for name, weight in reward_cfg.items():
-        reward_fns[name] = load_reward_fn(
-            name, device, module_path
-        )
+        reward_fns[name] = load_reward_fn(name, device, module_path)
         weights[name] = weight
 
     def _fn(images, prompts, metadata, only_strict=True):
@@ -117,17 +108,13 @@ def multi_score(
         for name, fn in reward_fns.items():
             out, _meta = fn(images, prompts, metadata)
             if isinstance(out, dict):
-                val = out.get(
-                    "avg", out.get("reward", out)
-                )
+                val = out.get("avg", out.get("reward", out))
             else:
                 val = out
             if return_raw_scores:
                 scores[f"{name}_raw"] = val
             scores[name] = val * weights[name]
-        stacked = torch.stack(
-            [scores[name] for name in reward_cfg], dim=0
-        )
+        stacked = torch.stack([scores[name] for name in reward_cfg], dim=0)
         scores["avg"] = stacked.mean(0)
         return scores, {}
 
@@ -149,12 +136,12 @@ def _device_type(device) -> str:
 def move_reward_models(reward_cfg, device) -> None:
     """Move GPU-backed reward models to device."""
     if _has_reward(
-        reward_cfg,
+            reward_cfg,
         {"hpsv3_general", "hpsv3_percentile"},
     ):
         set_hpsv3_device(device)
     if _has_reward(
-        reward_cfg,
+            reward_cfg,
         {"videoalign_mq", "videoalign_ta", "videoalign_vq"},
     ):
         set_videoalign_device(device)
@@ -164,13 +151,13 @@ def clear_reward_models(reward_cfg) -> None:
     """Drop cached GPU-backed reward models before PPO training."""
     cleared = False
     if _has_reward(
-        reward_cfg,
+            reward_cfg,
         {"hpsv3_general", "hpsv3_percentile"},
     ):
         _HPSV3_INFERENCERS.clear()
         cleared = True
     if _has_reward(
-        reward_cfg,
+            reward_cfg,
         {"videoalign_mq", "videoalign_ta", "videoalign_vq"},
     ):
         _VIDEOALIGN_INFERENCERS.clear()
@@ -192,9 +179,7 @@ def reward_models_on_device(reward_cfg, device):
         if use_cuda:
             torch.cuda.synchronize()
         _t1 = time.perf_counter()
-        logger.info(
-            "[rewards] move_to_device=%.1fs", _t1 - _t0
-        )
+        logger.info("[rewards] move_to_device=%.1fs", _t1 - _t0)
         try:
             yield
         finally:

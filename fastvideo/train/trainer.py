@@ -128,7 +128,7 @@ class Trainer:
             for accum_iter in range(grad_accum):
                 batch = next(data_stream)
                 # TODO: have method.single_train_step return a single dict of outputs directly
-                # TODO: ask single_train_step to do backward and remove explicity method.backward call
+                # TODO: ask single_train_step to do backward and remove explicit method.backward call
                 loss_map, outputs, step_metrics = method.single_train_step(
                     batch,
                     step,

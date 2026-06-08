@@ -14,19 +14,14 @@ import numpy as np
 import torch
 
 from fastvideo.logger import init_logger
-from fastvideo.train.methods.rl.reward.utils import (
-    prepare_images,
-)
+from fastvideo.train.methods.rl.reward.utils import prepare_images
 
 logger = init_logger(__name__)
 
 # Add VideoAlign submodule to path for importing.
-_VIDEOALIGN_ROOT = os.path.join(
-    os.path.dirname(__file__), "VideoAlign"
-)
-if os.path.isdir(_VIDEOALIGN_ROOT):
-    if _VIDEOALIGN_ROOT not in sys.path:
-        sys.path.insert(0, _VIDEOALIGN_ROOT)
+_VIDEOALIGN_ROOT = os.path.join(os.path.dirname(__file__), "VideoAlign")
+if os.path.isdir(_VIDEOALIGN_ROOT) and _VIDEOALIGN_ROOT not in sys.path:
+    sys.path.insert(0, _VIDEOALIGN_ROOT)
 
 # Global cache of VideoAlign inferencers.
 _VIDEOALIGN_INFERENCERS: dict[str, Any] = {}
@@ -48,19 +43,13 @@ def _move_videoalign_inferencer(inferencer: Any, device) -> None:
     inferencer.device = device_str
 
 
-def _remap_qwen2vl_state_dict_keys(
-    state_dict: dict[str, Any],
-) -> dict[str, Any]:
+def _remap_qwen2vl_state_dict_keys(state_dict: dict[str, Any], ) -> dict[str, Any]:
     """Adapt checkpoints saved with older Qwen2-VL key names."""
     remapped = {}
     for key, value in state_dict.items():
         if key.startswith("visual."):
             key = f"model.{key}"
-        elif key.startswith("model.layers."):
-            key = f"model.language_model.{key[len('model.'):]}"
-        elif key.startswith("model.embed_tokens."):
-            key = f"model.language_model.{key[len('model.'):]}"
-        elif key.startswith("model.norm."):
+        elif key.startswith("model.layers.") or key.startswith("model.embed_tokens.") or key.startswith("model.norm."):
             key = f"model.language_model.{key[len('model.'):]}"
 
         key = key.replace(
@@ -119,10 +108,7 @@ def _patch_load_state_dict(cls: Any) -> None:
         state_dict = _remap_qwen2vl_state_dict_keys(state_dict)
         if not assign:
             try:
-                assign = any(
-                    getattr(param, "is_meta", False)
-                    for param in self.parameters()
-                )
+                assign = any(getattr(param, "is_meta", False) for param in self.parameters())
             except Exception:
                 assign = False
         return original_load_state_dict(
@@ -176,12 +162,7 @@ def _select_videoalign_frame_indices(
         ).round().long().tolist()
         idx = []
         for pt in pts:
-            idx.extend(
-                frame_idx[
-                    pt - frames_each_pts // 2:
-                    pt + frames_each_pts // 2
-                ]
-            )
+            idx.extend(frame_idx[pt - frames_each_pts // 2:pt + frames_each_pts // 2])
         return idx
     raise ValueError(f"Unsupported VideoAlign sample_type: {sample_type}")
 
@@ -259,7 +240,7 @@ def _patch_videoalign_video_reader() -> None:
     if _torchvision_read_video_available():
         return
 
-    vision_mod.FORCE_QWENVL_VIDEO_READER = "opencv"
+    vision_mod.__dict__["FORCE_QWENVL_VIDEO_READER"] = "opencv"
     if hasattr(vision_mod.get_video_reader_backend, "cache_clear"):
         vision_mod.get_video_reader_backend.cache_clear()
 
@@ -278,7 +259,7 @@ def _patch_videoalign_modules() -> Any:
 
     if util.find_spec("flash_attn") is None:
         for mod in (train_reward_mod, inference_mod):
-            original_create = mod.create_model_and_processor
+            original_create = mod.__dict__["create_model_and_processor"]
 
             def create_model_and_processor_sdpa(
                 *args,
@@ -290,7 +271,7 @@ def _patch_videoalign_modules() -> Any:
                     training_args.disable_flash_attn2 = True
                 return _original_create(*args, **kwargs)
 
-            mod.create_model_and_processor = create_model_and_processor_sdpa
+            mod.__dict__["create_model_and_processor"] = (create_model_and_processor_sdpa)
 
     _patch_load_state_dict(trainer_mod.Qwen2VLRewardModelBT)
     try:
@@ -308,20 +289,15 @@ def _patch_videoalign_runtime_model(model: Any) -> None:
     """Add aliases expected by VideoAlign's older Qwen2-VL forward."""
     for candidate in _walk_model_graph(model):
         language_model = getattr(candidate, "language_model", None)
-        if (
-            language_model is not None
-            and not hasattr(candidate, "embed_tokens")
-            and hasattr(language_model, "embed_tokens")
-        ):
+        if (language_model is not None and not hasattr(candidate, "embed_tokens")
+                and hasattr(language_model, "embed_tokens")):
             candidate.embed_tokens = language_model.embed_tokens
 
 
 def set_videoalign_device(device) -> None:
     """Move cached VideoAlign inferencers to device."""
     key = _normalize_device_str(device)
-    for old_key, inf in list(
-        _VIDEOALIGN_INFERENCERS.items()
-    ):
+    for old_key, inf in list(_VIDEOALIGN_INFERENCERS.items()):
         if old_key != key and old_key.split(":")[0] != key:
             new_key = inf._key_prefix + ":" + key
             _move_videoalign_inferencer(inf, device)
@@ -357,17 +333,13 @@ def _get_inferencer(
                 "VideoAlign",
             )
             if not os.path.isdir(videoalign_dir):
-                msg = (
-                    "VideoAlign not found. Ensure the "
-                    "VideoAlign submodule is checked out "
-                    "under fastvideo/train/methods/rl/"
-                    "reward/VideoAlign."
-                )
+                msg = ("VideoAlign not found. Ensure the "
+                       "VideoAlign submodule is checked out "
+                       "under fastvideo/train/methods/rl/"
+                       "reward/VideoAlign.")
                 raise ImportError(msg) from exc
-            msg = (
-                "Failed to import VideoAlign runtime dependencies. "
-                f"Original import error: {exc}"
-            )
+            msg = ("Failed to import VideoAlign runtime dependencies. "
+                   f"Original import error: {exc}")
             raise ImportError(msg) from exc
 
         inf = VideoVLMRewardInference(
@@ -380,9 +352,7 @@ def _get_inferencer(
     return _VIDEOALIGN_INFERENCERS[cache_key]
 
 
-def _convert_to_grayscale(
-    frames: np.ndarray,
-) -> np.ndarray:
+def _convert_to_grayscale(frames: np.ndarray, ) -> np.ndarray:
     """Convert FHWC frames to grayscale FHWC."""
     if frames.ndim == 4 and frames.shape[-1] == 3:
         gray = np.mean(frames, axis=-1, keepdims=True)
@@ -428,17 +398,13 @@ def videoalign_mq_score(
             gray_frames = _convert_to_grayscale(frames)
             path = _save_video_to_temp(gray_frames)
             try:
-                results = inf.reward(
-                    [path], [""], use_norm=True
-                )
+                results = inf.reward([path], [""], use_norm=True)
                 mq = float(results[0].get("MQ", 0))
                 batch_scores.append(mq)
             finally:
                 os.remove(path)
 
-        reward = torch.tensor(
-            batch_scores, device=device
-        ).float()
+        reward = torch.tensor(batch_scores, device=device).float()
         return {"avg": reward}, {}
 
     return _score
@@ -467,9 +433,7 @@ def videoalign_vq_score(
             finally:
                 os.remove(path)
 
-        reward = torch.tensor(
-            batch_scores, device=device
-        ).float()
+        reward = torch.tensor(batch_scores, device=device).float()
         return {"avg": reward}, {}
 
     return _score
@@ -490,23 +454,16 @@ def videoalign_ta_score(
             frames = images_np[b]
             if frames.ndim == 3:
                 frames = frames[np.newaxis]
-            prompt = (
-                prompts[b] if prompts and b < len(prompts)
-                else ""
-            )
+            prompt = (prompts[b] if prompts and b < len(prompts) else "")
             path = _save_video_to_temp(frames)
             try:
-                results = inf.reward(
-                    [path], [prompt], use_norm=True
-                )
+                results = inf.reward([path], [prompt], use_norm=True)
                 ta = float(results[0].get("TA", 0))
                 batch_scores.append(ta)
             finally:
                 os.remove(path)
 
-        reward = torch.tensor(
-            batch_scores, device=device
-        ).float()
+        reward = torch.tensor(batch_scores, device=device).float()
         return {"avg": reward}, {}
 
     return _score

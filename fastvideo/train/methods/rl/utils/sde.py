@@ -53,52 +53,32 @@ def sde_step_with_logprob(
     if prev_sample is not None:
         prev_sample = prev_sample.float()
 
-    step_index = [
-        scheduler.index_for_timestep(t) for t in timestep
-    ]
+    step_index = [scheduler.index_for_timestep(t) for t in timestep]
     prev_step_index = [step + 1 for step in step_index]
 
     scheduler.sigmas = scheduler.sigmas.to(sample.device)
     sigma = scheduler.sigmas[step_index].view(-1, 1, 1, 1, 1)
-    sigma_prev = (
-        scheduler.sigmas[prev_step_index].view(-1, 1, 1, 1, 1)
-    )
+    sigma_prev = (scheduler.sigmas[prev_step_index].view(-1, 1, 1, 1, 1))
     sigma_max = scheduler.sigmas[1].item()
     dt = sigma_prev - sigma
 
     if sde_type == "flow_sde":
-        std_dev_t = (
-            torch.sqrt(
-                sigma
-                / (
-                    1
-                    - torch.where(
-                        sigma == 1,
-                        torch.tensor(
-                            sigma_max,
-                            device=sigma.device,
-                            dtype=sigma.dtype,
-                        ),
-                        sigma,
-                    )
-                )
-            )
-            * noise_level
-        )
+        std_dev_t = (torch.sqrt(sigma / (1 - torch.where(
+            sigma == 1,
+            torch.tensor(
+                sigma_max,
+                device=sigma.device,
+                dtype=sigma.dtype,
+            ),
+            sigma,
+        ))) * noise_level)
 
         if diffusion_clip:
-            max_std_dev_t = (
-                diffusion_clip_value / torch.sqrt(-1 * dt)
-            )
+            max_std_dev_t = (diffusion_clip_value / torch.sqrt(-1 * dt))
             std_dev_t = torch.minimum(std_dev_t, max_std_dev_t)
 
-        prev_sample_mean = (
-            sample
-            * (1 + std_dev_t**2 / (2 * sigma) * dt)
-            + model_output
-            * (1 + std_dev_t**2 * (1 - sigma) / (2 * sigma))
-            * dt
-        )
+        prev_sample_mean = (sample * (1 + std_dev_t**2 / (2 * sigma) * dt) + model_output *
+                            (1 + std_dev_t**2 * (1 - sigma) / (2 * sigma)) * dt)
 
         if prev_sample is None:
             variance_noise = randn_tensor(
@@ -107,10 +87,7 @@ def sde_step_with_logprob(
                 device=model_output.device,
                 dtype=model_output.dtype,
             )
-            prev_sample = (
-                prev_sample_mean
-                + std_dev_t * torch.sqrt(-1 * dt) * variance_noise
-            )
+            prev_sample = (prev_sample_mean + std_dev_t * torch.sqrt(-1 * dt) * variance_noise)
 
         if deterministic:
             prev_sample = sample + dt * model_output
@@ -123,28 +100,15 @@ def sde_step_with_logprob(
                 std_scale,
                 min=torch.finfo(std_scale.dtype).tiny,
             )
-            log_prob = (
-                -((prev_sample.detach() - prev_sample_mean) ** 2)
-                / (2 * (std_scale**2))
-                - torch.log(std_scale)
-                - torch.log(
-                    torch.sqrt(2 * torch.as_tensor(math.pi))
-                )
-            )
+            log_prob = (-((prev_sample.detach() - prev_sample_mean)**2) / (2 * (std_scale**2)) - torch.log(std_scale) -
+                        torch.log(torch.sqrt(2 * torch.as_tensor(math.pi))))
 
     elif sde_type == "flow_cps":
-        std_dev_t = sigma_prev * math.sin(
-            noise_level * math.pi / 2
-        )
+        std_dev_t = sigma_prev * math.sin(noise_level * math.pi / 2)
         pred_original_sample = sample - sigma * model_output
-        noise_estimate = (
-            sample + model_output * (1 - sigma)
-        )
-        prev_sample_mean = pred_original_sample * (
-            1 - sigma_prev
-        ) + noise_estimate * torch.sqrt(
-            sigma_prev**2 - std_dev_t**2
-        )
+        noise_estimate = (sample + model_output * (1 - sigma))
+        prev_sample_mean = pred_original_sample * (1 - sigma_prev) + noise_estimate * torch.sqrt(sigma_prev**2 -
+                                                                                                 std_dev_t**2)
 
         if prev_sample is None:
             variance_noise = randn_tensor(
@@ -153,30 +117,19 @@ def sde_step_with_logprob(
                 device=model_output.device,
                 dtype=model_output.dtype,
             )
-            prev_sample = (
-                prev_sample_mean + std_dev_t * variance_noise
-            )
+            prev_sample = (prev_sample_mean + std_dev_t * variance_noise)
 
         if deterministic:
-            prev_sample = (
-                pred_original_sample * (1 - sigma_prev)
-                + noise_estimate * sigma_prev
-            )
+            prev_sample = (pred_original_sample * (1 - sigma_prev) + noise_estimate * sigma_prev)
 
-        log_prob = -(
-            (prev_sample.detach() - prev_sample_mean) ** 2
-        )
+        log_prob = -((prev_sample.detach() - prev_sample_mean)**2)
 
     else:
-        msg = (
-            f"Unknown sde_type: {sde_type}. "
-            "Must be 'flow_sde' or 'flow_cps'."
-        )
+        msg = (f"Unknown sde_type: {sde_type}. "
+               "Must be 'flow_sde' or 'flow_cps'.")
         raise ValueError(msg)
 
-    log_prob = log_prob.mean(
-        dim=tuple(range(1, log_prob.ndim))
-    )
+    log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
 
     if return_sqrt_dt_and_std_dev_t:
         return (

@@ -10,11 +10,9 @@ import torch
 
 from fastvideo.logger import init_logger
 from fastvideo.train.methods.rl.utils.embeddings import (
-    compute_text_embeddings,
-)
+    compute_text_embeddings, )
 from fastvideo.train.methods.rl.utils.pipeline import (
-    wan_denoising_with_logprob,
-)
+    wan_denoising_with_logprob, )
 
 logger = init_logger(__name__)
 
@@ -58,9 +56,7 @@ def eval_once(
 
     # Use EMA context manager if available.
     if ema_callback is not None:
-        ctx = ema_callback.ema_context(
-            model.transformer
-        )
+        ctx = ema_callback.ema_context(model.transformer)
     else:
         from contextlib import nullcontext
 
@@ -68,9 +64,9 @@ def eval_once(
 
     with ctx:
         for batch_idx, (
-            _epoch_tag,
-            prompts,
-            metadata,
+                _epoch_tag,
+                prompts,
+                metadata,
         ) in enumerate(test_dataloader):
             if max_batches is not None and batch_idx >= max_batches:
                 break
@@ -81,9 +77,7 @@ def eval_once(
                 max_sequence_length=512,
                 device=device,
             )
-            neg_prompt_embeds = sample_neg_prompt_embeds[
-                : len(prompts)
-            ]
+            neg_prompt_embeds = sample_neg_prompt_embeds[:len(prompts)]
 
             with torch.no_grad():
                 generator = torch.Generator(device=device)
@@ -98,9 +92,7 @@ def eval_once(
                     model,
                     scheduler,
                     prompt_embeds=prompt_embeds,
-                    negative_prompt_embeds=(
-                        neg_prompt_embeds
-                    ),
+                    negative_prompt_embeds=(neg_prompt_embeds),
                     num_inference_steps=eval_num_steps,
                     guidance_scale=eval_guidance_scale,
                     height=height,
@@ -111,16 +103,12 @@ def eval_once(
                     sde_type="flow_sde",
                 )
 
-            rewards, _ = eval_reward_fn(
-                videos, prompts, metadata
-            )
+            rewards, _ = eval_reward_fn(videos, prompts, metadata)
             for key, val in rewards.items():
                 if key not in all_rewards:
                     all_rewards[key] = []
                 if isinstance(val, torch.Tensor):
-                    all_rewards[key].extend(
-                        val.detach().cpu().tolist()
-                    )
+                    all_rewards[key].extend(val.detach().cpu().tolist())
                 else:
                     all_rewards[key].append(float(val))
 

@@ -83,61 +83,30 @@ def compute_diffusion_nft_loss(
         adv_clip_max=adv_clip_max,
         adv_mode=adv_mode,
     )
-    r = ((shaped_advantages / adv_clip_max) / 2.0 + 0.5).clamp(
-        0.0, 1.0
-    )
+    r = ((shaped_advantages / adv_clip_max) / 2.0 + 0.5).clamp(0.0, 1.0)
 
     old_detached = old_prediction.detach()
-    positive_prediction = (
-        nft_beta * forward_prediction
-        + (1.0 - nft_beta) * old_detached
-    )
-    negative_prediction = (
-        (1.0 + nft_beta) * old_detached
-        - nft_beta * forward_prediction
-    )
+    positive_prediction = (nft_beta * forward_prediction + (1.0 - nft_beta) * old_detached)
+    negative_prediction = ((1.0 + nft_beta) * old_detached - nft_beta * forward_prediction)
 
-    positive_x0 = prediction_to_x0(
-        student, positive_prediction, noisy_latents, timestep
-    )
-    negative_x0 = prediction_to_x0(
-        student, negative_prediction, noisy_latents, timestep
-    )
+    positive_x0 = prediction_to_x0(student, positive_prediction, noisy_latents, timestep)
+    negative_x0 = prediction_to_x0(student, negative_prediction, noisy_latents, timestep)
 
     reduce_dims = tuple(range(1, clean_latents.ndim))
     with torch.no_grad():
-        positive_weight = (
-            (positive_x0.float() - clean_latents.float())
-            .abs()
-            .mean(dim=reduce_dims, keepdim=True)
-            .clamp_min(1e-5)
-        )
-        negative_weight = (
-            (negative_x0.float() - clean_latents.float())
-            .abs()
-            .mean(dim=reduce_dims, keepdim=True)
-            .clamp_min(1e-5)
-        )
+        positive_weight = ((positive_x0.float() - clean_latents.float()).abs().mean(dim=reduce_dims,
+                                                                                    keepdim=True).clamp_min(1e-5))
+        negative_weight = ((negative_x0.float() - clean_latents.float()).abs().mean(dim=reduce_dims,
+                                                                                    keepdim=True).clamp_min(1e-5))
 
-    positive_loss = (
-        (positive_x0 - clean_latents) ** 2 / positive_weight
-    ).mean(dim=reduce_dims)
-    negative_loss = (
-        (negative_x0 - clean_latents) ** 2 / negative_weight
-    ).mean(dim=reduce_dims)
-    unweighted_policy_loss = (
-        r * positive_loss / nft_beta
-        + (1.0 - r) * negative_loss / nft_beta
-    )
+    positive_loss = ((positive_x0 - clean_latents)**2 / positive_weight).mean(dim=reduce_dims)
+    negative_loss = ((negative_x0 - clean_latents)**2 / negative_weight).mean(dim=reduce_dims)
+    unweighted_policy_loss = (r * positive_loss / nft_beta + (1.0 - r) * negative_loss / nft_beta)
     policy_loss = (unweighted_policy_loss * adv_clip_max).mean()
 
-    kl_loss = torch.zeros(
-        (), device=policy_loss.device, dtype=policy_loss.dtype
-    )
+    kl_loss = torch.zeros((), device=policy_loss.device, dtype=policy_loss.dtype)
     if reference_prediction is not None and kl_weight > 0.0:
-        kl_loss = F.mse_loss(
-            forward_prediction.float(), reference_prediction.float()
-        )
+        kl_loss = F.mse_loss(forward_prediction.float(), reference_prediction.float())
 
     total_loss = policy_loss + kl_weight * kl_loss
     losses = {
@@ -146,15 +115,9 @@ def compute_diffusion_nft_loss(
         "kl_loss": kl_loss,
     }
     metrics = {
-        "nft/unweighted_policy_loss": (
-            unweighted_policy_loss.mean().detach()
-        ),
-        "nft/old_deviate": (
-            (forward_prediction - old_detached) ** 2
-        ).mean().detach(),
-        "nft/advantage_abs_mean": (
-            shaped_advantages.abs().mean().detach()
-        ),
+        "nft/unweighted_policy_loss": (unweighted_policy_loss.mean().detach()),
+        "nft/old_deviate": ((forward_prediction - old_detached)**2).mean().detach(),
+        "nft/advantage_abs_mean": (shaped_advantages.abs().mean().detach()),
         "nft/r_mean": r.mean().detach(),
         "nft/timestep_mean": timestep.float().mean().detach(),
     }

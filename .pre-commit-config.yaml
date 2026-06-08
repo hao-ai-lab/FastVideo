@@ -18,6 +18,8 @@ exclude: |
     fastvideo/train\.py|
     fastvideo/utils/.*|
     examples/.*|
+    fastvideo/train/methods/rl/reward/HPSv3/.*|
+    fastvideo/train/methods/rl/reward/VideoAlign/.*|
     .github/workflows/fastvideo-publish.yml|
     .github/workflows/sta-publish.yml|
     .github/workflows/vsa-publish.yml|

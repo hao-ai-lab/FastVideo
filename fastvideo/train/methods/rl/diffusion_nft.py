@@ -24,15 +24,12 @@ from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.methods.rl.objectives.diffusion_nft import (
     AdvMode,
     compute_diffusion_nft_loss,
-    prediction_to_x0,
 )
 from fastvideo.train.methods.rl.reward.diffusion_nft import (
-    build_diffusion_nft_reward_fn,
-)
+    build_diffusion_nft_reward_fn, )
 from fastvideo.train.methods.rl.utils.rewards import move_reward_models
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler,
-)
+    FlowUniPCMultistepScheduler, )
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.config import (
     get_optional_float,
@@ -43,8 +40,7 @@ from fastvideo.train.utils.config import (
     require_positive_int,
 )
 from fastvideo.train.utils.optimizer import (
-    build_optimizer_and_scheduler,
-)
+    build_optimizer_and_scheduler, )
 
 logger = init_logger(__name__)
 
@@ -80,21 +76,15 @@ class DiffusionNFTMethod(TrainingMethod):
         super().__init__(cfg=cfg, role_models=role_models)
 
         if not self.student._trainable:
-            raise ValueError(
-                "DiffusionNFTMethod requires student to be trainable"
-            )
+            raise ValueError("DiffusionNFTMethod requires student to be trainable")
         self.reference = role_models.get("reference")
         if self.reference is not None and self.reference._trainable:
-            raise ValueError(
-                "DiffusionNFTMethod requires reference to be frozen"
-            )
+            raise ValueError("DiffusionNFTMethod requires reference to be frozen")
 
         self._attn_kind: Literal["dense", "vsa"] = self._infer_attn_kind()
         self._media_type = self._parse_media_type()
         self._validate_rollout_setup()
-        self._is_main = not (
-            dist.is_available() and dist.is_initialized()
-        ) or dist.get_rank() == 0
+        self._is_main = not (dist.is_available() and dist.is_initialized()) or dist.get_rank() == 0
 
         self.student.init_preprocessors(self.training_config)
         self._sampling_scheduler = self._build_sampling_scheduler()
@@ -106,19 +96,11 @@ class DiffusionNFTMethod(TrainingMethod):
         )
         if self._sample_num_steps is not None and self._sample_num_steps <= 0:
             raise ValueError("method.sample_num_steps must be > 0")
-        explicit_sample_timesteps = self.method_config.get(
-            "sample_timesteps"
-        )
-        self._sample_timesteps_are_explicit = (
-            explicit_sample_timesteps is not None
-        )
-        self._sample_timesteps = (
-            self._parse_timestep_list("sample_timesteps", default=[])
-            if self._sample_timesteps_are_explicit
-            else self._scheduler_timesteps_for_num_steps(
-                int(self._sample_num_steps or 16)
-            )
-        )
+        explicit_sample_timesteps = self.method_config.get("sample_timesteps")
+        self._sample_timesteps_are_explicit = (explicit_sample_timesteps is not None)
+        self._sample_timesteps = (self._parse_timestep_list("sample_timesteps", default=[])
+                                  if self._sample_timesteps_are_explicit else self._scheduler_timesteps_for_num_steps(
+                                      int(self._sample_num_steps or 16)))
         self._train_timesteps = self._build_train_timestep_list()
         self._sample_guidance_scale = require_non_negative_float(
             self.method_config,
@@ -134,9 +116,7 @@ class DiffusionNFTMethod(TrainingMethod):
         )
         self._num_samples_per_prompt = int(samples_per_prompt)
         if self._num_samples_per_prompt <= 0:
-            raise ValueError(
-                "method.num_samples_per_prompt must be > 0"
-            )
+            raise ValueError("method.num_samples_per_prompt must be > 0")
         self._collection_batch_size = require_positive_int(
             self.method_config,
             "collection_batch_size",
@@ -191,37 +171,25 @@ class DiffusionNFTMethod(TrainingMethod):
             where="method.kl_weight",
         )
         if self._kl_weight > 0.0 and self.reference is None:
-            raise ValueError(
-                "method.kl_weight > 0 requires a frozen reference role"
-            )
+            raise ValueError("method.kl_weight > 0 requires a frozen reference role")
 
         train_batch_size = get_optional_int(
             self.method_config,
             "train_batch_size",
             where="method.train_batch_size",
         )
-        self._train_batch_size = int(
-            train_batch_size
-            or self.training_config.data.train_batch_size
-            or 1
-        )
+        self._train_batch_size = int(train_batch_size or self.training_config.data.train_batch_size or 1)
         if self._train_batch_size <= 0:
             raise ValueError("method.train_batch_size must be > 0")
         if self._train_batch_size > self._num_samples_per_prompt:
-            raise ValueError(
-                "method.train_batch_size must be <= "
-                "method.num_samples_per_prompt"
-            )
+            raise ValueError("method.train_batch_size must be <= "
+                             "method.num_samples_per_prompt")
         log_sample_max_videos = get_optional_int(
             self.method_config,
             "log_sample_max_videos",
             where="method.log_sample_max_videos",
         )
-        self._log_sample_max_videos = (
-            4
-            if log_sample_max_videos is None
-            else max(0, int(log_sample_max_videos))
-        )
+        self._log_sample_max_videos = (4 if log_sample_max_videos is None else max(0, int(log_sample_max_videos)))
 
         self._queue: list[_NFTQueuedBatch] = []
         self._collection_round = 0
@@ -242,9 +210,7 @@ class DiffusionNFTMethod(TrainingMethod):
 
     def on_train_start(self) -> None:
         super().on_train_start()
-        self._reward_model_cfg = self._normalize_reward_model_cfg(
-            self.method_config.get("reward_fn")
-        )
+        self._reward_model_cfg = self._normalize_reward_model_cfg(self.method_config.get("reward_fn"))
         self._reward_fn = build_diffusion_nft_reward_fn(
             self.method_config.get("reward_fn"),
             device=self.student.device,
@@ -267,9 +233,9 @@ class DiffusionNFTMethod(TrainingMethod):
         batch: dict[str, Any],
         iteration: int,
     ) -> tuple[
-        dict[str, torch.Tensor],
-        dict[str, Any],
-        dict[str, LogScalar],
+            dict[str, torch.Tensor],
+            dict[str, Any],
+            dict[str, LogScalar],
     ]:
         del iteration
         step_t0 = time.perf_counter()
@@ -282,22 +248,16 @@ class DiffusionNFTMethod(TrainingMethod):
         self.student.transformer.train()
         self._sync_cuda()
         loss_t0 = time.perf_counter()
-        loss_map, step_metrics = self._compute_nft_loss(
-            queued, training_batch
-        )
+        loss_map, step_metrics = self._compute_nft_loss(queued, training_batch)
         self._sync_cuda()
         loss_t1 = time.perf_counter()
         step_metrics["time/nft_loss_sec"] = loss_t1 - loss_t0
-        step_metrics["time/queue_wait_or_collect_sec"] = (
-            collect_done - step_t0
-        )
+        step_metrics["time/queue_wait_or_collect_sec"] = (collect_done - step_t0)
         step_metrics["queue/remaining_batches"] = float(len(self._queue))
         if self._pending_collection_metrics:
             step_metrics.update(self._pending_collection_metrics)
             self._pending_collection_metrics = {}
-        outputs: dict[str, Any] = {
-            "_fv_backward": (queued.timestep, training_batch.attn_metadata)
-        }
+        outputs: dict[str, Any] = {"_fv_backward": (queued.timestep, training_batch.attn_metadata)}
         if self._is_main and self._latest_sample_videos is not None:
             outputs["sample_videos"] = self._latest_sample_videos
             outputs["sample_prompts"] = self._latest_sample_prompts or []
@@ -343,16 +303,10 @@ class DiffusionNFTMethod(TrainingMethod):
         return {"student": self.student.transformer}
 
     def _init_optimizer(self) -> None:
-        trainable_params = [
-            p
-            for p in self.student.transformer.parameters()
-            if p.requires_grad
-        ]
+        trainable_params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         if not trainable_params:
-            raise ValueError(
-                "DiffusionNFT student transformer has no trainable "
-                "parameters."
-            )
+            raise ValueError("DiffusionNFT student transformer has no trainable "
+                             "parameters.")
         tc = self.training_config
         (
             self._optimizer,
@@ -371,21 +325,15 @@ class DiffusionNFTMethod(TrainingMethod):
             torch.cuda.synchronize(self.student.device)
 
     def _configure_student_negative_conditioning(self) -> None:
-        setter = getattr(
-            self.student, "set_requires_negative_conditioning", None
-        )
+        setter = getattr(self.student, "set_requires_negative_conditioning", None)
         if setter is not None:
             setter(self._sample_guidance_scale != 1.0)
 
     def _parse_media_type(self) -> Literal["image", "video"]:
-        raw = str(
-            self.method_config.get("media_type", "video")
-        ).strip().lower()
+        raw = str(self.method_config.get("media_type", "video")).strip().lower()
         if raw not in {"image", "video"}:
-            raise ValueError(
-                "method.media_type must be one of image or video, got "
-                f"{raw!r}"
-            )
+            raise ValueError("method.media_type must be one of image or video, got "
+                             f"{raw!r}")
         return raw  # type: ignore[return-value]
 
     def _validate_rollout_setup(self) -> None:
@@ -395,29 +343,19 @@ class DiffusionNFTMethod(TrainingMethod):
             "t2v",
         )).strip().lower()
         if data_type != "text_only":
-            raise ValueError(
-                "DiffusionNFTMethod expects "
-                "training.data.preprocessed_data_type='text_only'"
-            )
+            raise ValueError("DiffusionNFTMethod expects "
+                             "training.data.preprocessed_data_type='text_only'")
         num_latent_t = int(self.training_config.data.num_latent_t or 0)
         num_frames = int(self.training_config.data.num_frames or 0)
         if num_latent_t <= 0:
-            raise ValueError(
-                "DiffusionNFTMethod expects training.data.num_latent_t > 0"
-            )
+            raise ValueError("DiffusionNFTMethod expects training.data.num_latent_t > 0")
         if num_frames <= 0:
-            raise ValueError(
-                "DiffusionNFTMethod expects training.data.num_frames > 0"
-            )
-        if self._media_type == "image" and (
-            num_latent_t != 1 or num_frames != 1
-        ):
-            raise ValueError(
-                "method.media_type='image' requires "
-                "training.data.num_latent_t=1 and "
-                "training.data.num_frames=1. Use media_type='video' "
-                "for multi-frame DiffusionNFT."
-            )
+            raise ValueError("DiffusionNFTMethod expects training.data.num_frames > 0")
+        if self._media_type == "image" and (num_latent_t != 1 or num_frames != 1):
+            raise ValueError("method.media_type='image' requires "
+                             "training.data.num_latent_t=1 and "
+                             "training.data.num_frames=1. Use media_type='video' "
+                             "for multi-frame DiffusionNFT.")
 
     def _parse_timestep_list(
         self,
@@ -427,9 +365,7 @@ class DiffusionNFTMethod(TrainingMethod):
     ) -> torch.Tensor:
         raw = self.method_config.get(key, default)
         if not isinstance(raw, list | tuple) or not raw:
-            raise ValueError(
-                f"method.{key} must be a non-empty list"
-            )
+            raise ValueError(f"method.{key} must be a non-empty list")
         return torch.tensor(
             [float(x) for x in raw],
             dtype=torch.float32,
@@ -443,14 +379,11 @@ class DiffusionNFTMethod(TrainingMethod):
             where="method.sample_flow_shift",
         )
         if flow_shift is None:
-            flow_shift = float(
-                getattr(
-                    self.training_config.pipeline_config,
-                    "flow_shift",
-                    3.0,
-                )
-                or 3.0
-            )
+            flow_shift = float(getattr(
+                self.training_config.pipeline_config,
+                "flow_shift",
+                3.0,
+            ) or 3.0)
         return FlowUniPCMultistepScheduler(shift=float(flow_shift))
 
     def _scheduler_timesteps_for_num_steps(
@@ -462,9 +395,7 @@ class DiffusionNFTMethod(TrainingMethod):
         original_sigmas = scheduler.sigmas
         original_step_index = scheduler.step_index
         original_begin_index = scheduler.begin_index
-        original_num_inference_steps = getattr(
-            scheduler, "num_inference_steps", None
-        )
+        original_num_inference_steps = getattr(scheduler, "num_inference_steps", None)
         try:
             scheduler.set_timesteps(
                 int(num_steps),
@@ -480,18 +411,12 @@ class DiffusionNFTMethod(TrainingMethod):
             scheduler._step_index = original_step_index
             scheduler._begin_index = original_begin_index
             if original_num_inference_steps is not None:
-                scheduler.num_inference_steps = (
-                    original_num_inference_steps
-                )
+                scheduler.num_inference_steps = (original_num_inference_steps)
 
     def _build_train_timestep_list(self) -> torch.Tensor:
         explicit = self.method_config.get("train_timesteps")
         if explicit is not None:
-            return self._nearest_training_timesteps(
-                self._parse_timestep_list(
-                    "train_timesteps", default=[]
-                )
-            )
+            return self._nearest_training_timesteps(self._parse_timestep_list("train_timesteps", default=[]))
         fraction = get_optional_float(
             self.method_config,
             "train_timestep_fraction",
@@ -499,9 +424,7 @@ class DiffusionNFTMethod(TrainingMethod):
         )
         fraction = 1.0 if fraction is None else float(fraction)
         if fraction <= 0.0:
-            raise ValueError(
-                "method.train_timestep_fraction must be > 0"
-            )
+            raise ValueError("method.train_timestep_fraction must be > 0")
         count = max(
             1,
             min(
@@ -509,9 +432,7 @@ class DiffusionNFTMethod(TrainingMethod):
                 int(len(self._sample_timesteps) * fraction),
             ),
         )
-        return self._nearest_training_timesteps(
-            self._sample_timesteps[:count]
-        )
+        return self._nearest_training_timesteps(self._sample_timesteps[:count])
 
     def _nearest_training_timesteps(
         self,
@@ -526,10 +447,7 @@ class DiffusionNFTMethod(TrainingMethod):
             dtype=torch.float32,
         )
         indices = torch.argmin(
-            (
-                base_timesteps.unsqueeze(0)
-                - requested.unsqueeze(1)
-            ).abs(),
+            (base_timesteps.unsqueeze(0) - requested.unsqueeze(1)).abs(),
             dim=1,
         )
         return base_timesteps.index_select(0, indices)
@@ -542,33 +460,22 @@ class DiffusionNFTMethod(TrainingMethod):
         result: dict[str, Any] = {}
         for key, value in raw_batch.items():
             if torch.is_tensor(value) and value.shape[:1]:
-                result[key] = value.repeat_interleave(
-                    repeat, dim=0
-                )
+                result[key] = value.repeat_interleave(repeat, dim=0)
             elif key == "info_list" and isinstance(value, list):
-                result[key] = [
-                    dict(item) for item in value for _ in range(repeat)
-                ]
+                result[key] = [dict(item) for item in value for _ in range(repeat)]
             elif key == "caption_text" and isinstance(value, list):
-                result[key] = [
-                    str(item) for item in value for _ in range(repeat)
-                ]
+                result[key] = [str(item) for item in value for _ in range(repeat)]
             else:
                 result[key] = value
 
         info_list = result.get("info_list") or []
         if not isinstance(info_list, list):
             raise ValueError("text-only dataloader must provide info_list")
-        prompts = [
-            str(info.get("prompt") or info.get("caption") or "")
-            for info in info_list
-        ]
+        prompts = [str(info.get("prompt") or info.get("caption") or "") for info in info_list]
         metadata = [dict(info) for info in info_list]
         if any(not prompt for prompt in prompts):
-            raise ValueError(
-                "text-only dataloader rows must include caption/prompt "
-                "metadata"
-            )
+            raise ValueError("text-only dataloader rows must include caption/prompt "
+                             "metadata")
         return result, prompts, metadata
 
     @torch.no_grad()
@@ -579,13 +486,9 @@ class DiffusionNFTMethod(TrainingMethod):
         round_t0 = time.perf_counter()
 
         t0 = time.perf_counter()
-        repeated_batch, prompts, metadata = self._repeat_raw_batch(
-            raw_batch
-        )
+        repeated_batch, prompts, metadata = self._repeat_raw_batch(raw_batch)
         self._sync_cuda()
-        timings["time/collection_prepare_batch_sec"] = (
-            time.perf_counter() - t0
-        )
+        timings["time/collection_prepare_batch_sec"] = (time.perf_counter() - t0)
 
         sample_batches: list[TrainingBatch] = []
         clean_chunks: list[torch.Tensor] = []
@@ -597,14 +500,10 @@ class DiffusionNFTMethod(TrainingMethod):
         timings["time/collection_decode_sec"] = 0.0
         timings["time/collection_reward_sec"] = 0.0
         captured_samples = False
-        collection_batch_size = min(
-            self._collection_batch_size, len(prompts)
-        )
+        collection_batch_size = min(self._collection_batch_size, len(prompts))
         for start in range(0, len(prompts), collection_batch_size):
             end = min(start + collection_batch_size, len(prompts))
-            chunk_batch = self._slice_raw_batch(
-                repeated_batch, start, end
-            )
+            chunk_batch = self._slice_raw_batch(repeated_batch, start, end)
             sample_batch = self.student.prepare_batch(
                 chunk_batch,
                 generator=self.cuda_generator,
@@ -615,26 +514,18 @@ class DiffusionNFTMethod(TrainingMethod):
             t0 = time.perf_counter()
             clean = self._sample_clean_latents(sample_batch)
             self._sync_cuda()
-            timings["time/collection_sample_sec"] += (
-                time.perf_counter() - t0
-            )
+            timings["time/collection_sample_sec"] += (time.perf_counter() - t0)
             clean_chunks.append(clean)
             clean_latent_stds.append(clean.detach().float().std())
 
             t0 = time.perf_counter()
             media = self._decode_media(clean)
             self._sync_cuda()
-            timings["time/collection_decode_sec"] += (
-                time.perf_counter() - t0
-            )
+            timings["time/collection_decode_sec"] += (time.perf_counter() - t0)
             media_float = media.detach().float()
             media_means.append(media_float.mean())
             media_stds.append(media_float.std())
-            if (
-                self._is_main
-                and self._log_sample_max_videos > 0
-                and not captured_samples
-            ):
+            if (self._is_main and self._log_sample_max_videos > 0 and not captured_samples):
                 self._capture_sample_media(
                     media,
                     prompts[start:end],
@@ -653,13 +544,9 @@ class DiffusionNFTMethod(TrainingMethod):
                     metadata[start:end],
                 )
                 self._sync_cuda()
-                timings["time/collection_reward_sec"] += (
-                    time.perf_counter() - t0
-                )
+                timings["time/collection_reward_sec"] += (time.perf_counter() - t0)
                 for key, value in chunk_rewards.items():
-                    reward_chunks.setdefault(key, []).append(
-                        value.detach().to(device=self.student.device)
-                    )
+                    reward_chunks.setdefault(key, []).append(value.detach().to(device=self.student.device))
             finally:
                 move_reward_models(self._reward_model_cfg, "cpu")
                 if torch.cuda.is_available():
@@ -667,19 +554,12 @@ class DiffusionNFTMethod(TrainingMethod):
 
         sample_batch = self._concat_sample_batches(sample_batches)
         clean_latents = torch.cat(clean_chunks, dim=0)
-        reward_details = {
-            key: torch.cat(values, dim=0)
-            for key, values in reward_chunks.items()
-        }
+        reward_details = {key: torch.cat(values, dim=0) for key, values in reward_chunks.items()}
 
         t0 = time.perf_counter()
-        advantages, reward_metrics = self._compute_advantages(
-            prompts, reward_details
-        )
+        advantages, reward_metrics = self._compute_advantages(prompts, reward_details)
         self._sync_cuda()
-        timings["time/collection_advantages_sec"] = (
-            time.perf_counter() - t0
-        )
+        timings["time/collection_advantages_sec"] = (time.perf_counter() - t0)
 
         t0 = time.perf_counter()
         self._queue = self._build_training_queue(
@@ -688,21 +568,15 @@ class DiffusionNFTMethod(TrainingMethod):
             advantages,
         )
         self._sync_cuda()
-        timings["time/collection_queue_build_sec"] = (
-            time.perf_counter() - t0
-        )
-        timings["time/collection_total_sec"] = (
-            time.perf_counter() - round_t0
-        )
+        timings["time/collection_queue_build_sec"] = (time.perf_counter() - t0)
+        timings["time/collection_total_sec"] = (time.perf_counter() - round_t0)
         self._pending_collection_metrics = {
             "collection/round": float(self._collection_round),
             "collection/queued_batches": float(len(self._queue)),
             "collection/sample_batches": float(len(sample_batches)),
             "sample/media_mean": self._mean_metric(media_means),
             "sample/media_std": self._mean_metric(media_stds),
-            "sample/clean_latent_std": self._mean_metric(
-                clean_latent_stds
-            ),
+            "sample/clean_latent_std": self._mean_metric(clean_latent_stds),
             **reward_metrics,
             **timings,
         }
@@ -740,13 +614,9 @@ class DiffusionNFTMethod(TrainingMethod):
         if samples.ndim == 4:
             samples = samples.unsqueeze(2)
         if samples.ndim != 5:
-            raise ValueError(
-                "DiffusionNFT sample logging expected media with shape "
-                f"(B,C,H,W) or (B,C,F,H,W), got {tuple(samples.shape)}"
-            )
-        self._latest_sample_videos = (
-            (samples * 255.0).round().to(torch.uint8).cpu()
-        )
+            raise ValueError("DiffusionNFT sample logging expected media with shape "
+                             f"(B,C,H,W) or (B,C,F,H,W), got {tuple(samples.shape)}")
+        self._latest_sample_videos = ((samples * 255.0).round().to(torch.uint8).cpu())
         self._latest_sample_prompts = [str(p) for p in prompts[:n]]
 
     def _slice_raw_batch(
@@ -757,39 +627,26 @@ class DiffusionNFTMethod(TrainingMethod):
     ) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in raw_batch.items():
-            if torch.is_tensor(value) and value.shape[:1]:
-                result[key] = value[start:end]
-            elif isinstance(value, list) and len(value) >= end:
+            if torch.is_tensor(value) and value.shape[:1] or isinstance(value, list) and len(value) >= end:
                 result[key] = value[start:end]
             else:
                 result[key] = value
         return result
 
-    def _concat_sample_batches(
-        self, batches: list[TrainingBatch]
-    ) -> TrainingBatch:
+    def _concat_sample_batches(self, batches: list[TrainingBatch]) -> TrainingBatch:
         if not batches:
             raise RuntimeError("No sample batches were collected")
         raw_shape = batches[0].raw_latent_shape
         embeds = [batch.encoder_hidden_states for batch in batches]
         masks = [batch.encoder_attention_mask for batch in batches]
-        if raw_shape is None or any(
-            batch.raw_latent_shape is None
-            or batch.raw_latent_shape[1:] != raw_shape[1:]
-            for batch in batches
-        ):
+        if raw_shape is None or any(batch.raw_latent_shape is None or batch.raw_latent_shape[1:] != raw_shape[1:]
+                                    for batch in batches):
             raise RuntimeError("Collected sample batches changed latent shape")
-        if any(embed is None for embed in embeds) or any(
-            mask is None for mask in masks
-        ):
+        if any(embed is None for embed in embeds) or any(mask is None for mask in masks):
             raise RuntimeError("Collected sample batch missing text embeds")
         batch = TrainingBatch()
-        batch.encoder_hidden_states = torch.cat(
-            [embed for embed in embeds if embed is not None], dim=0
-        )
-        batch.encoder_attention_mask = torch.cat(
-            [mask for mask in masks if mask is not None], dim=0
-        )
+        batch.encoder_hidden_states = torch.cat([embed for embed in embeds if embed is not None], dim=0)
+        batch.encoder_attention_mask = torch.cat([mask for mask in masks if mask is not None], dim=0)
         batch.raw_latent_shape = (
             batch.encoder_hidden_states.shape[0],
             *raw_shape[1:],
@@ -797,16 +654,12 @@ class DiffusionNFTMethod(TrainingMethod):
         return batch
 
     @torch.no_grad()
-    def _sample_clean_latents(
-        self, batch: TrainingBatch
-    ) -> torch.Tensor:
+    def _sample_clean_latents(self, batch: TrainingBatch) -> torch.Tensor:
         if batch.latents is None:
             raise RuntimeError("prepare_batch() did not create latents")
         raw_latent_shape = batch.raw_latent_shape
         if raw_latent_shape is None:
-            raise RuntimeError(
-                "prepare_batch() did not set raw_latent_shape"
-            )
+            raise RuntimeError("prepare_batch() did not set raw_latent_shape")
 
         model_dtype = batch.latents.dtype
         latents = torch.randn(
@@ -821,17 +674,13 @@ class DiffusionNFTMethod(TrainingMethod):
         original_sigmas = scheduler.sigmas
         original_step_index = scheduler.step_index
         original_begin_index = scheduler.begin_index
-        original_num_inference_steps = getattr(
-            scheduler, "num_inference_steps", None
-        )
+        original_num_inference_steps = getattr(scheduler, "num_inference_steps", None)
 
         try:
             if self._sample_timesteps_are_explicit:
-                raise ValueError(
-                    "method.sample_timesteps is not supported with "
-                    "Wan UniPC sampling. Use method.sample_num_steps "
-                    "instead."
-                )
+                raise ValueError("method.sample_timesteps is not supported with "
+                                 "Wan UniPC sampling. Use method.sample_num_steps "
+                                 "instead.")
             scheduler.set_timesteps(
                 int(self._sample_num_steps or len(self._sample_timesteps)),
                 device=latents.device,
@@ -841,9 +690,7 @@ class DiffusionNFTMethod(TrainingMethod):
 
             self.student.transformer.eval()
             for step_index, timestep in enumerate(timesteps):
-                timestep_batch = timestep.expand(latents.shape[0]).to(
-                    device=latents.device
-                )
+                timestep_batch = timestep.expand(latents.shape[0]).to(device=latents.device)
                 batch.timesteps = timestep_batch
                 batch.raw_latent_shape = raw_latent_shape
                 pred = self._guided_predict_noise_for_sampling(
@@ -866,9 +713,7 @@ class DiffusionNFTMethod(TrainingMethod):
             scheduler._step_index = original_step_index
             scheduler._begin_index = original_begin_index
             if original_num_inference_steps is not None:
-                scheduler.num_inference_steps = (
-                    original_num_inference_steps
-                )
+                scheduler.num_inference_steps = (original_num_inference_steps)
 
     @torch.no_grad()
     def _guided_predict_noise_for_sampling(
@@ -898,11 +743,11 @@ class DiffusionNFTMethod(TrainingMethod):
 
         def predict(text_dict: dict[str, torch.Tensor]) -> torch.Tensor:
             with (
-                torch.autocast(device_type, dtype=dtype),
-                set_forward_context(
-                    current_timestep=step_index,
-                    attn_metadata=None,
-                ),
+                    torch.autocast(device_type, dtype=dtype),
+                    set_forward_context(
+                        current_timestep=step_index,
+                        attn_metadata=None,
+                    ),
             ):
                 out = self.student.transformer(
                     hidden_states.to(dtype),
@@ -916,10 +761,8 @@ class DiffusionNFTMethod(TrainingMethod):
 
         uncond = getattr(batch, "unconditional_dict", None)
         if uncond is None:
-            raise RuntimeError(
-                "Missing unconditional_dict; negative conditioning "
-                "may have failed"
-            )
+            raise RuntimeError("Missing unconditional_dict; negative conditioning "
+                               "may have failed")
         cond_pred = predict(cond)
         uncond_pred = predict(uncond)
         return uncond_pred + guidance_scale * (cond_pred - uncond_pred)
@@ -959,18 +802,14 @@ class DiffusionNFTMethod(TrainingMethod):
         return uncond + guidance_scale * (cond - uncond)
 
     @torch.no_grad()
-    def _decode_media(
-        self, clean_latents: torch.Tensor
-    ) -> torch.Tensor:
+    def _decode_media(self, clean_latents: torch.Tensor) -> torch.Tensor:
         """Decode clean latents to image or video reward inputs.
 
         Returns:
             ``media_type=image``: ``(B, C, H, W)`` first-frame tensor.
             ``media_type=video``: ``(B, C, F, H, W)`` video tensor.
         """
-        latents = clean_latents.permute(0, 2, 1, 3, 4).to(
-            self.student.device
-        )
+        latents = clean_latents.permute(0, 2, 1, 3, 4).to(self.student.device)
         decoded = self.student.decode_latents(latents)
         if self._media_type == "image":
             return decoded[:, :, 0].contiguous()
@@ -989,32 +828,17 @@ class DiffusionNFTMethod(TrainingMethod):
         if dist.is_available() and dist.is_initialized():
             world_size = dist.get_world_size()
             rank = dist.get_rank()
-            gathered_prompts: list[list[str] | None] = [
-                None for _ in range(world_size)
-            ]
+            gathered_prompts: list[list[str] | None] = [None for _ in range(world_size)]
             dist.all_gather_object(gathered_prompts, prompts)
-            gathered_rewards: list[list[float] | None] = [
-                None for _ in range(world_size)
-            ]
+            gathered_rewards: list[list[float] | None] = [None for _ in range(world_size)]
             dist.all_gather_object(
                 gathered_rewards,
                 local_rewards.detach().cpu().tolist(),
             )
-            all_prompts = [
-                prompt
-                for rank_prompts in gathered_prompts
-                for prompt in (rank_prompts or [])
-            ]
-            rank_lengths = [
-                len(rank_prompts or [])
-                for rank_prompts in gathered_prompts
-            ]
+            all_prompts = [prompt for rank_prompts in gathered_prompts for prompt in (rank_prompts or [])]
+            rank_lengths = [len(rank_prompts or []) for rank_prompts in gathered_prompts]
             rewards = torch.tensor(
-                [
-                    score
-                    for rank_rewards in gathered_rewards
-                    for score in (rank_rewards or [])
-                ],
+                [score for rank_rewards in gathered_rewards for score in (rank_rewards or [])],
                 device=local_rewards.device,
                 dtype=torch.float32,
             )
@@ -1024,31 +848,17 @@ class DiffusionNFTMethod(TrainingMethod):
         global_std = rewards.std(unbiased=False).clamp_min(1e-4)
         for prompt in np.unique(prompt_array):
             indices_np = np.nonzero(prompt_array == prompt)[0]
-            indices = torch.as_tensor(
-                indices_np, device=rewards.device, dtype=torch.long
-            )
+            indices = torch.as_tensor(indices_np, device=rewards.device, dtype=torch.long)
             prompt_rewards = rewards.index_select(0, indices)
             mean = prompt_rewards.mean()
-            std = (
-                global_std
-                if self._global_std
-                else prompt_rewards.std(unbiased=False).clamp_min(1e-4)
-            )
-            prompt_stds.append(
-                float(
-                    prompt_rewards.std(unbiased=False).detach().cpu()
-                )
-            )
-            advantages.index_copy_(
-                0, indices, (prompt_rewards - mean) / std
-            )
+            std = (global_std if self._global_std else prompt_rewards.std(unbiased=False).clamp_min(1e-4))
+            prompt_stds.append(float(prompt_rewards.std(unbiased=False).detach().cpu()))
+            advantages.index_copy_(0, indices, (prompt_rewards - mean) / std)
 
         start = sum(rank_lengths[:rank])
         end = start + rank_lengths[rank]
         local_advantages = advantages[start:end].to(local_rewards.device)
-        return local_advantages, self._reward_metrics(
-            reward_details, prompt_stds
-        )
+        return local_advantages, self._reward_metrics(reward_details, prompt_stds)
 
     def _reward_metrics(
         self,
@@ -1057,41 +867,30 @@ class DiffusionNFTMethod(TrainingMethod):
     ) -> dict[str, LogScalar]:
         metrics: dict[str, LogScalar] = {}
         for key, value in reward_details.items():
-            mean, std = self._distributed_mean_std(
-                value.detach().float()
-            )
+            mean, std = self._distributed_mean_std(value.detach().float())
             metrics[f"reward/{key}"] = mean
             metrics[f"reward/{key}_std"] = std
 
         prompt_stds_np = np.asarray(prompt_stds, dtype=np.float64)
         if prompt_stds_np.size:
-            metrics["reward/zero_std_ratio"] = float(
-                np.count_nonzero(prompt_stds_np == 0.0)
-                / prompt_stds_np.size
-            )
-            metrics["reward/prompt_std_mean"] = float(
-                prompt_stds_np.mean()
-            )
+            metrics["reward/zero_std_ratio"] = float(np.count_nonzero(prompt_stds_np == 0.0) / prompt_stds_np.size)
+            metrics["reward/prompt_std_mean"] = float(prompt_stds_np.mean())
         else:
             metrics["reward/zero_std_ratio"] = 0.0
             metrics["reward/prompt_std_mean"] = 0.0
         return metrics
 
-    def _distributed_mean_std(
-        self, value: torch.Tensor
-    ) -> tuple[float, float]:
+    def _distributed_mean_std(self, value: torch.Tensor) -> tuple[float, float]:
         value = value.float()
-        local = torch.stack(
-            [
-                value.sum(),
-                (value * value).sum(),
-                torch.tensor(
-                    float(value.numel()),
-                    device=value.device,
-                    dtype=value.dtype,
-                ),
-            ]
-        )
+        local = torch.stack([
+            value.sum(),
+            (value * value).sum(),
+            torch.tensor(
+                float(value.numel()),
+                device=value.device,
+                dtype=value.dtype,
+            ),
+        ])
         if dist.is_available() and dist.is_initialized():
             dist.all_reduce(local, op=dist.ReduceOp.SUM)
         count = local[2].clamp_min(1.0)
@@ -1109,24 +908,15 @@ class DiffusionNFTMethod(TrainingMethod):
         clean_latents: torch.Tensor,
         advantages: torch.Tensor,
     ) -> list[_NFTQueuedBatch]:
-        if (
-            sample_batch.encoder_hidden_states is None
-            or sample_batch.encoder_attention_mask is None
-        ):
-            raise RuntimeError(
-                "sample_batch is missing text conditioning"
-            )
+        if (sample_batch.encoder_hidden_states is None or sample_batch.encoder_attention_mask is None):
+            raise RuntimeError("sample_batch is missing text conditioning")
         raw_shape = sample_batch.raw_latent_shape
         if raw_shape is None:
-            raise RuntimeError(
-                "sample_batch is missing raw_latent_shape"
-            )
+            raise RuntimeError("sample_batch is missing raw_latent_shape")
 
         queue: list[_NFTQueuedBatch] = []
         total = clean_latents.shape[0]
-        train_timesteps = self._train_timesteps.to(
-            device=clean_latents.device
-        )
+        train_timesteps = self._train_timesteps.to(device=clean_latents.device)
         for _inner_epoch in range(self._inner_epochs):
             perm = torch.randperm(
                 total,
@@ -1141,16 +931,8 @@ class DiffusionNFTMethod(TrainingMethod):
             for start in range(0, total, self._train_batch_size):
                 idx = perm[start:start + self._train_batch_size]
                 clean = clean_latents.index_select(0, idx).detach()
-                embeds = (
-                    sample_batch.encoder_hidden_states.index_select(
-                        0, idx
-                    ).detach()
-                )
-                mask = (
-                    sample_batch.encoder_attention_mask.index_select(
-                        0, idx
-                    ).detach()
-                )
+                embeds = (sample_batch.encoder_hidden_states.index_select(0, idx).detach())
+                mask = (sample_batch.encoder_attention_mask.index_select(0, idx).detach())
                 clean = clean.to(dtype=embeds.dtype)
                 adv = advantages.index_select(0, idx).detach()
                 for timestep_idx in timestep_perm:
@@ -1186,13 +968,10 @@ class DiffusionNFTMethod(TrainingMethod):
                             encoder_hidden_states=embeds,
                             encoder_attention_mask=mask,
                             raw_latent_shape=raw_shape,
-                        )
-                    )
+                        ))
         return queue
 
-    def _make_training_batch(
-        self, queued: _NFTQueuedBatch
-    ) -> TrainingBatch:
+    def _make_training_batch(self, queued: _NFTQueuedBatch) -> TrainingBatch:
         return self._make_training_batch_from_tensors(
             queued.encoder_hidden_states,
             queued.encoder_attention_mask,

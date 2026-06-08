@@ -7,9 +7,7 @@ import numpy as np
 import torch
 
 
-def prepare_images(
-    images: torch.Tensor | np.ndarray,
-) -> np.ndarray:
+def prepare_images(images: torch.Tensor | np.ndarray, ) -> np.ndarray:
     """Convert tensor images to uint8 numpy (NHWC or NFHWC).
 
     Accepts:
@@ -42,7 +40,5 @@ def prepare_images(
             images = images.transpose(0, 2, 3, 4, 1)
 
     if images.dtype == np.float32 or images.dtype == np.float64:
-        images = np.clip(images * 255, 0, 255).astype(
-            np.uint8
-        )
+        images = np.clip(images * 255, 0, 255).astype(np.uint8)
     return images

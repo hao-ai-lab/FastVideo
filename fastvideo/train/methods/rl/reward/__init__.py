@@ -6,16 +6,14 @@ from fastvideo.train.methods.rl.reward.hpsv3 import (
     hpsv3_percentile_score,
 )
 from fastvideo.train.methods.rl.reward.ocr import (
-    video_ocr_score,
-)
+    video_ocr_score, )
 from fastvideo.train.methods.rl.reward.videoalign import (
     videoalign_mq_score,
     videoalign_ta_score,
     videoalign_vq_score,
 )
 from fastvideo.train.methods.rl.reward.diffusion_nft import (
-    build_diffusion_nft_reward_fn,
-)
+    build_diffusion_nft_reward_fn, )
 
 __all__ = [
     "build_diffusion_nft_reward_fn",

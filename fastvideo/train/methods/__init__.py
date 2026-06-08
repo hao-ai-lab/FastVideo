@@ -8,5 +8,4 @@ __all__ = [
     "FineTuneMethod",
     "SelfForcingMethod",
     "DiffusionForcingSFTMethod",
-    "GenRLMethod",
 ]

@@ -14,8 +14,7 @@ import torch
 
 from fastvideo.logger import init_logger
 from fastvideo.train.methods.rl.reward.utils import (
-    prepare_images,
-)
+    prepare_images, )
 
 logger = init_logger(__name__)
 
@@ -51,11 +50,7 @@ def _remap_hpsv3_state_dict(state_dict: dict[str, Any]) -> dict[str, Any]:
     for key, value in state_dict.items():
         if key.startswith("visual."):
             key = f"model.{key}"
-        elif key.startswith("model.layers."):
-            key = f"model.language_model.{key[len('model.'):]}"
-        elif key.startswith("model.embed_tokens."):
-            key = f"model.language_model.{key[len('model.'):]}"
-        elif key.startswith("model.norm."):
+        elif key.startswith("model.layers.") or key.startswith("model.embed_tokens.") or key.startswith("model.norm."):
             key = f"model.language_model.{key[len('model.'):]}"
 
         key = key.replace(
@@ -145,11 +140,8 @@ def _patch_hpsv3_runtime_model(model: Any) -> None:
     """Add aliases expected by HPSv3's older Qwen2-VL forward."""
     for candidate in _walk_model_graph(model):
         language_model = getattr(candidate, "language_model", None)
-        if (
-            language_model is not None
-            and not hasattr(candidate, "embed_tokens")
-            and hasattr(language_model, "embed_tokens")
-        ):
+        if (language_model is not None and not hasattr(candidate, "embed_tokens")
+                and hasattr(language_model, "embed_tokens")):
             candidate.embed_tokens = language_model.embed_tokens
 
 
@@ -186,7 +178,7 @@ def set_hpsv3_device(device) -> None:
             return
 
 
-def _get_hpsv3_inferencer(device):
+def _get_hpsv3_inferencer(device) -> Any:
     """Get or create HPSv3 inferencer for device."""
     key = _normalize_device(device)
     if key not in _HPSV3_INFERENCERS:
@@ -195,11 +187,9 @@ def _get_hpsv3_inferencer(device):
             from hpsv3 import HPSv3RewardInferencer
             _patch_hpsv3_state_dict_loader()
         except ImportError as exc:
-            msg = (
-                "Failed to import HPSv3. Ensure the HPSv3 submodule is "
-                "checked out under fastvideo/train/methods/rl/reward/HPSv3 "
-                "and that its transformers dependencies are compatible."
-            )
+            msg = ("Failed to import HPSv3. Ensure the HPSv3 submodule is "
+                   "checked out under fastvideo/train/methods/rl/reward/HPSv3 "
+                   "and that its transformers dependencies are compatible.")
             raise ImportError(msg) from exc
         inf = HPSv3RewardInferencer(device=device)
         _patch_hpsv3_runtime_model(inf.model)
@@ -221,9 +211,9 @@ def _extract_reward_scalar(result) -> float:
     """Extract a float from HPSv3 result."""
     if isinstance(result, torch.Tensor):
         return float(result.item())
-    if isinstance(result, (float, int)):
+    if isinstance(result, float | int):
         return float(result)
-    if isinstance(result, (list, np.ndarray)):
+    if isinstance(result, list | np.ndarray):
         return float(np.mean(result))
     return float(result)
 
@@ -247,19 +237,13 @@ def hpsv3_general_score(device):
             for frame in frames:
                 path = _save_frame_to_temp(frame)
                 try:
-                    rewards = inf.reward(
-                        ["A high-quality image"], [path]
-                    )
-                    frame_scores.append(
-                        _extract_reward_scalar(rewards[0][0])
-                    )
+                    rewards = inf.reward(["A high-quality image"], [path])
+                    frame_scores.append(_extract_reward_scalar(rewards[0][0]))
                 finally:
                     os.remove(path)
             batch_scores.append(np.mean(frame_scores))
 
-        reward = torch.tensor(
-            batch_scores, device=device
-        ).float()
+        reward = torch.tensor(batch_scores, device=device).float()
         return {"avg": reward}, {}
 
     return _score
@@ -278,36 +262,24 @@ def hpsv3_percentile_score(device):
             frames = images_np[b]
             if frames.ndim == 3:
                 frames = frames[np.newaxis]
-            prompt = (
-                prompts[b]
-                if prompts and b < len(prompts)
-                else "A high-quality image"
-            )
+            prompt = (prompts[b] if prompts and b < len(prompts) else "A high-quality image")
             frame_scores = []
             for frame in frames:
                 path = _save_frame_to_temp(frame)
                 try:
-                    rewards = inf.reward(
-                        [prompt], [path]
-                    )
-                    frame_scores.append(
-                        _extract_reward_scalar(rewards[0][0])
-                    )
+                    rewards = inf.reward([prompt], [path])
+                    frame_scores.append(_extract_reward_scalar(rewards[0][0]))
                 finally:
                     os.remove(path)
             # Top 30% percentile.
             if frame_scores:
                 k = max(1, int(len(frame_scores) * 0.3))
-                top_k = sorted(
-                    frame_scores, reverse=True
-                )[:k]
+                top_k = sorted(frame_scores, reverse=True)[:k]
                 batch_scores.append(np.mean(top_k))
             else:
                 batch_scores.append(0.0)
 
-        reward = torch.tensor(
-            batch_scores, device=device
-        ).float()
+        reward = torch.tensor(batch_scores, device=device).float()
         return {"avg": reward}, {}
 
     return _score

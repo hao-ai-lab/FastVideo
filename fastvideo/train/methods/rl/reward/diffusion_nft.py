@@ -28,10 +28,8 @@ def _to_uint8_nhwc(images: torch.Tensor) -> np.ndarray:
     if images.ndim == 5:
         # (N, C, F, H, W) -> (N, F, H, W, C)
         return np.transpose(images, (0, 2, 3, 4, 1))
-    raise ValueError(
-        "Expected image/video tensor with 4 or 5 dims, got "
-        f"shape={images.shape}"
-    )
+    raise ValueError("Expected image/video tensor with 4 or 5 dims, got "
+                     f"shape={images.shape}")
 
 
 def _jpeg_incompressibility(images: torch.Tensor) -> torch.Tensor:
@@ -42,14 +40,10 @@ def _jpeg_incompressibility(images: torch.Tensor) -> torch.Tensor:
         frame_sizes: list[float] = []
         for frame in frames:
             buffer = BytesIO()
-            Image.fromarray(frame).save(
-                buffer, format="JPEG", quality=95
-            )
+            Image.fromarray(frame).save(buffer, format="JPEG", quality=95)
             frame_sizes.append(buffer.tell() / 1000.0)
         sizes.append(float(np.mean(frame_sizes)))
-    return torch.tensor(
-        sizes, device=images.device, dtype=torch.float32
-    )
+    return torch.tensor(sizes, device=images.device, dtype=torch.float32)
 
 
 def _mean_luminance(images: torch.Tensor) -> torch.Tensor:
@@ -66,7 +60,10 @@ def _build_genrl_reward_fn(
 
     score_fn = multi_score(
         device,
-        {str(k): float(v) for k, v in reward_config.items()},
+        {
+            str(k): float(v)
+            for k, v in reward_config.items()
+        },
         return_raw_scores=True,
     )
 
@@ -76,12 +73,7 @@ def _build_genrl_reward_fn(
         metadata: list[dict[str, Any]],
     ) -> dict[str, torch.Tensor]:
         scores, _ = score_fn(images, prompts, metadata, True)
-        return {
-            key: torch.as_tensor(
-                value, device=device, dtype=torch.float32
-            )
-            for key, value in scores.items()
-        }
+        return {key: torch.as_tensor(value, device=device, dtype=torch.float32) for key, value in scores.items()}
 
     return _fn
 
@@ -117,15 +109,9 @@ def _frames_for_image_reward(
     # DiffusionNFT rewards are image rewards, so score every frame and
     # average back to one scalar per video.
     batch, channels, frames, height, width = media.shape
-    flat = media.permute(0, 2, 1, 3, 4).reshape(
-        batch * frames, channels, height, width
-    )
-    flat_prompts = [
-        prompt for prompt in prompts for _ in range(frames)
-    ]
-    flat_metadata = [
-        dict(item) for item in metadata for _ in range(frames)
-    ]
+    flat = media.permute(0, 2, 1, 3, 4).reshape(batch * frames, channels, height, width)
+    flat_prompts = [prompt for prompt in prompts for _ in range(frames)]
+    flat_metadata = [dict(item) for item in metadata for _ in range(frames)]
     return flat, flat_prompts, flat_metadata, frames
 
 
@@ -137,15 +123,11 @@ def _average_frame_scores(
 ) -> dict[str, torch.Tensor]:
     averaged: dict[str, torch.Tensor] = {}
     for key, value in scores.items():
-        tensor = torch.as_tensor(
-            value, device=device, dtype=torch.float32
-        )
+        tensor = torch.as_tensor(value, device=device, dtype=torch.float32)
         if frames is not None:
             if tensor.numel() % frames != 0:
-                raise RuntimeError(
-                    f"Reward {key!r} returned {tensor.numel()} scores, "
-                    f"which is not divisible by num_frames={frames}."
-                )
+                raise RuntimeError(f"Reward {key!r} returned {tensor.numel()} scores, "
+                                   f"which is not divisible by num_frames={frames}.")
             tensor = tensor.reshape(-1, frames).mean(dim=1)
         averaged[key] = tensor
     return averaged
@@ -161,34 +143,26 @@ def _external_diffusion_nft_reward(
     try:
         from flow_grpo import rewards as flow_rewards
     except ImportError as exc:
-        raise ImportError(
-            f"Reward {reward_name!r} requires DiffusionNFT's "
-            "Flow-GRPO reward package. Keep the local DiffusionNFT "
-            "checkout at the repo root or use a built-in reward such "
-            "as 'jpeg_incompressibility'."
-        ) from exc
+        raise ImportError(f"Reward {reward_name!r} requires DiffusionNFT's "
+                          "Flow-GRPO reward package. Keep the local DiffusionNFT "
+                          "checkout at the repo root or use a built-in reward such "
+                          "as 'jpeg_incompressibility'.") from exc
 
-    score_fn = flow_rewards.multi_score(
-        device, {reward_name: float(weight)}
-    )
+    score_fn = flow_rewards.multi_score(device, {reward_name: float(weight)})
 
     def _fn(
         images: torch.Tensor,
         prompts: list[str],
         metadata: list[dict[str, Any]],
     ) -> dict[str, torch.Tensor]:
-        reward_images, reward_prompts, reward_metadata, frames = (
-            _frames_for_image_reward(images, prompts, metadata)
-        )
+        reward_images, reward_prompts, reward_metadata, frames = (_frames_for_image_reward(images, prompts, metadata))
         score_details, _ = score_fn(
             reward_images,
             reward_prompts,
             reward_metadata,
             only_strict=True,
         )
-        return _average_frame_scores(
-            score_details, device=device, frames=frames
-        )
+        return _average_frame_scores(score_details, device=device, frames=frames)
 
     return _fn
 
@@ -208,9 +182,7 @@ def build_diffusion_nft_reward_fn(
     GenRL reward package; other unknown names delegate to the local
     DiffusionNFT/Flow-GRPO image reward package.
     """
-    raw_rewards: Any = reward_config or {
-        "jpeg_incompressibility": 1.0
-    }
+    raw_rewards: Any = reward_config or {"jpeg_incompressibility": 1.0}
     if isinstance(raw_rewards, dict) and "backend" in raw_rewards:
         backend = str(raw_rewards["backend"]).strip().lower()
     if isinstance(raw_rewards, dict) and "rewards" in raw_rewards:
@@ -227,20 +199,16 @@ def build_diffusion_nft_reward_fn(
         "videoalign_vq",
     }
     if backend not in {"auto", "diffusion_nft", "genrl"}:
-        raise ValueError(
-            "method.reward_backend must be one of auto, diffusion_nft, "
-            f"or genrl, got {backend!r}"
-        )
-    if backend == "genrl" or (
-        backend == "auto"
-        and any(str(name) in genrl_reward_names for name in raw_rewards)
-    ):
+        raise ValueError("method.reward_backend must be one of auto, diffusion_nft, "
+                         f"or genrl, got {backend!r}")
+    if backend == "genrl" or (backend == "auto" and any(str(name) in genrl_reward_names for name in raw_rewards)):
         return _build_genrl_reward_fn(raw_rewards, device=device)
 
     reward_fns: list[tuple[str, float, RewardFn]] = []
     for name, weight_raw in raw_rewards.items():
         reward_name = str(name).strip().lower()
         weight = float(weight_raw)
+        reward_fn: RewardFn
 
         if reward_name == "jpeg_incompressibility":
 
@@ -250,11 +218,7 @@ def build_diffusion_nft_reward_fn(
                 metadata: list[dict[str, Any]],
             ) -> dict[str, torch.Tensor]:
                 del prompts, metadata
-                return {
-                    "jpeg_incompressibility": (
-                        _jpeg_incompressibility(images)
-                    )
-                }
+                return {"jpeg_incompressibility": (_jpeg_incompressibility(images))}
 
         elif reward_name == "jpeg_compressibility":
 
@@ -264,11 +228,7 @@ def build_diffusion_nft_reward_fn(
                 metadata: list[dict[str, Any]],
             ) -> dict[str, torch.Tensor]:
                 del prompts, metadata
-                return {
-                    "jpeg_compressibility": (
-                        -_jpeg_incompressibility(images) / 500.0
-                    )
-                }
+                return {"jpeg_compressibility": (-_jpeg_incompressibility(images) / 500.0)}
 
         elif reward_name == "mean_luminance":
 
@@ -305,13 +265,8 @@ def build_diffusion_nft_reward_fn(
             else:
                 base_score = scores[next(iter(scores))]
             for key, value in scores.items():
-                details[key] = value.to(
-                    device=device, dtype=torch.float32
-                )
-            weighted = (
-                base_score.to(device=device, dtype=torch.float32)
-                * weight
-            )
+                details[key] = value.to(device=device, dtype=torch.float32)
+            weighted = (base_score.to(device=device, dtype=torch.float32) * weight)
             total = weighted if total is None else total + weighted
         if total is None:
             raise RuntimeError("No rewards were computed")

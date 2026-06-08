@@ -12,12 +12,8 @@ from typing import Any
 import torch
 
 from fastvideo.logger import init_logger
-from fastvideo.train.methods.rl.utils.embeddings import (
-    compute_text_embeddings,
-)
-from fastvideo.train.methods.rl.utils.pipeline import (
-    wan_denoising_with_logprob,
-)
+from fastvideo.train.methods.rl.utils.embeddings import compute_text_embeddings
+from fastvideo.train.methods.rl.utils.pipeline import wan_denoising_with_logprob
 
 logger = init_logger(__name__)
 
@@ -82,9 +78,9 @@ def sample_epoch(
     tracker: Any | None = None,
     async_reward_scoring: bool = True,
 ) -> tuple[
-    list[dict[str, Any]],
-    list[torch.Tensor],
-    list[list[str]],
+        list[dict[str, Any]],
+        list[torch.Tensor],
+        list[list[str]],
 ]:
     """Run one sampling epoch: generate videos and compute rewards.
 
@@ -103,16 +99,12 @@ def sample_epoch(
     all_prompts: list[list[str]] = []
 
     for i in range(num_batches_per_epoch):
-        current_epoch_tag = (
-            epoch * num_batches_per_epoch + i
-        )
+        current_epoch_tag = (epoch * num_batches_per_epoch + i)
         train_sampler.set_epoch(current_epoch_tag)
 
         # Drain until epoch tag matches.
         while True:
-            epoch_tag, prompts, prompt_metadata = next(
-                train_iter
-            )
+            epoch_tag, prompts, prompt_metadata = next(train_iter)
             if epoch_tag == current_epoch_tag:
                 break
 
@@ -136,6 +128,7 @@ def sample_epoch(
         ).input_ids.to(device)
 
         # Generator setup.
+        gen: torch.Generator | list[torch.Generator]
         if same_latent:
             gen = create_generator(
                 prompts,
@@ -144,9 +137,7 @@ def sample_epoch(
             )
         else:
             gen = torch.Generator(device=device)
-            gen.manual_seed(
-                seed + epoch * SEED_EPOCH_STRIDE + i
-            )
+            gen.manual_seed(seed + epoch * SEED_EPOCH_STRIDE + i)
 
         torch.cuda.synchronize()
         _t_embed_done = time.perf_counter()
@@ -162,9 +153,7 @@ def sample_epoch(
                 model,
                 scheduler,
                 prompt_embeds=prompt_embeds,
-                negative_prompt_embeds=(
-                    sample_neg_prompt_embeds
-                ),
+                negative_prompt_embeds=(sample_neg_prompt_embeds),
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
                 height=height,
@@ -190,11 +179,7 @@ def sample_epoch(
         kls = torch.stack(kls_list, dim=1)
         kl = kls.detach()
 
-        timesteps = (
-            torch.stack(timesteps_list)
-            .unsqueeze(0)
-            .repeat(sample_batch_size, 1)
-        )
+        timesteps = (torch.stack(timesteps_list).unsqueeze(0).repeat(sample_batch_size, 1))
 
         videos_cpu = videos.detach().cpu()
 
@@ -227,21 +212,17 @@ def sample_epoch(
             _t_denoise_done - _t_batch_start,
         )
 
-        samples.append(
-            {
-                "prompt_ids": prompt_ids,
-                "prompt_embeds": prompt_embeds,
-                "negative_prompt_embeds": (
-                    sample_neg_prompt_embeds
-                ),
-                "timesteps": timesteps,
-                "latents": latents[:, :-1],
-                "next_latents": latents[:, 1:],
-                "log_probs": log_probs,
-                "kl": kl,
-                "rewards": rewards,
-            }
-        )
+        samples.append({
+            "prompt_ids": prompt_ids,
+            "prompt_embeds": prompt_embeds,
+            "negative_prompt_embeds": (sample_neg_prompt_embeds),
+            "timesteps": timesteps,
+            "latents": latents[:, :-1],
+            "next_latents": latents[:, 1:],
+            "log_probs": log_probs,
+            "kl": kl,
+            "rewards": rewards,
+        })
 
     # Wait for all rewards.
     torch.cuda.synchronize()
@@ -252,13 +233,8 @@ def sample_epoch(
         else:
             videos_cpu, prompts, prompt_metadata = sample["rewards"]
             torch.cuda.empty_cache()
-            rewards, _ = reward_fn(
-                videos_cpu, prompts, prompt_metadata, True
-            )
-        sample["rewards"] = {
-            key: torch.as_tensor(value, device=device).float()
-            for key, value in rewards.items()
-        }
+            rewards, _ = reward_fn(videos_cpu, prompts, prompt_metadata, True)
+        sample["rewards"] = {key: torch.as_tensor(value, device=device).float() for key, value in rewards.items()}
     _t_reward_done = time.perf_counter()
     logger.info(
         "[sample_epoch] reward_wait=%.1fs",

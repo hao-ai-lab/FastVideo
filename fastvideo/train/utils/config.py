@@ -308,15 +308,11 @@ def _build_training_config(
             if init_from is not None:
                 model_path = str(init_from)
 
-    preprocessed_data_type = str(
-        da.get("preprocessed_data_type", "t2v") or "t2v"
-    ).strip().lower()
+    preprocessed_data_type = str(da.get("preprocessed_data_type", "t2v") or "t2v").strip().lower()
     if preprocessed_data_type not in {"t2v", "text_only"}:
-        raise ValueError(
-            "training.data.preprocessed_data_type must be one of "
-            "{'t2v', 'text_only'}, got "
-            f"{preprocessed_data_type!r}"
-        )
+        raise ValueError("training.data.preprocessed_data_type must be one of "
+                         "{'t2v', 'text_only'}, got "
+                         f"{preprocessed_data_type!r}")
 
     return TrainingConfig(
         distributed=DistributedConfig(

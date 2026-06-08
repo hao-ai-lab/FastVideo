@@ -87,5 +87,4 @@ preprocess_output_text/
 .claude/
 .codex/
 openspec/
-
-logs
+modal_train_*.py
