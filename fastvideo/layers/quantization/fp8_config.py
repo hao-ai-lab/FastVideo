@@ -118,7 +118,7 @@ class FP8QuantizeMethod(QuantizeMethodBase):
         bias: torch.Tensor | None = None,
         pre_quantized: tuple[torch.Tensor, torch.Tensor, Any] | None = None,
     ) -> torch.Tensor:
-        out_dim = layer.weight.shape[0]
+        out_dim = layer._fp8_weight.shape[0]
         original_shape = x.shape
 
         if not _supports_fp8_compute():
@@ -159,12 +159,9 @@ class FP8QuantizeMethod(QuantizeMethodBase):
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """bf16 fallback for pre-sm89 GPUs."""
-        out_dim = layer.weight.shape[0]
+        out_dim = layer._fp8_weight.shape[0]
         original_shape = x.shape
-        w_fp8 = getattr(layer, "_fp8_weight", None)
-        if w_fp8 is None:
-            out = F.linear(x, layer.weight, bias)
-            return out.view(*original_shape[:-1], out_dim)
+        w_fp8 = layer._fp8_weight
         w_scale = layer._fp8_weight_scale.to(x.dtype)
         weight = w_fp8.to(x.dtype) * w_scale.unsqueeze(1)
         out = F.linear(x, weight, bias)
@@ -209,27 +206,35 @@ class FP8Config(QuantizationConfig):
 
 def convert_model_to_fp8(model: torch.nn.Module) -> None:
     """Quantize all FP8-tagged linear layers in-place after weights are loaded."""
+    import gc
     from torch.distributed.tensor import DTensor  # type: ignore
 
-    for mod in model.modules():
-        qm = getattr(mod, "quant_method", None)
-        if not isinstance(qm, FP8QuantizeMethod):
-            continue
-        weight = getattr(mod, "weight", None)
-        if weight is None:
-            continue
-        weight_local = weight.to_local() if isinstance(weight, DTensor) else weight  # type: ignore[arg-type]
-        w = weight_local.float()
-        if getattr(qm, "granularity", "tensor") == "channel":
-            w_absmax = w.abs().amax(dim=1).nan_to_num()
-            w_scale = (w_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE)
-            w_fp8 = (w / w_scale.unsqueeze(1)).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
-        else:
-            w_absmax = w.abs().amax().nan_to_num()
-            w_scale = (w_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE).view(1)
-            w_fp8 = (w / w_scale).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
-        mod.register_buffer("_fp8_weight", w_fp8.contiguous(), persistent=False)
-        mod.register_buffer("_fp8_weight_scale", w_scale.to(torch.float32), persistent=False)
+    with torch.no_grad():
+        for mod in model.modules():
+            qm = getattr(mod, "quant_method", None)
+            if not isinstance(qm, FP8QuantizeMethod):
+                continue
+            weight = getattr(mod, "weight", None)
+            if weight is None:
+                continue
+            weight_local = weight.to_local() if isinstance(weight, DTensor) else weight  # type: ignore[arg-type]
+            if getattr(qm, "granularity", "tensor") == "channel":
+                w_absmax = weight_local.detach().abs().amax(dim=1).nan_to_num().float()
+                w_scale = (w_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE)
+                w_fp8 = (weight_local / w_scale.to(weight_local.dtype).unsqueeze(1)).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
+            else:
+                w_absmax = weight_local.detach().abs().amax().nan_to_num().to(torch.float32)
+                w_scale = (w_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE).view(1)
+                w_fp8 = (weight_local / w_scale.to(weight_local.dtype)).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
+            mod.register_buffer("_fp8_weight", w_fp8.contiguous(), persistent=False)
+            mod.register_buffer("_fp8_weight_scale", w_scale.to(torch.float32), persistent=False)
+            removed_weight = mod._parameters.pop("weight", None)
+            if removed_weight is not None:
+                removed_weight.grad = None
+            del removed_weight, weight, weight_local, w_absmax, w_scale, w_fp8
+
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 __all__ = [
