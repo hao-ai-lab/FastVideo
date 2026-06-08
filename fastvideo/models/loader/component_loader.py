@@ -573,7 +573,21 @@ class TokenizerLoader(ComponentLoader):
                 # If parsing fails, fall through to AutoTokenizer below.
                 pass
 
-        if os.path.exists(os.path.join(resolved_model_path, "processor_config.json")):
+        # Only Flux2 full's Mistral3 (require_processor=True) must load via
+        # AutoProcessor. Gate the processor_config.json shortcut on that flag so
+        # existing encoders (e.g. HunyuanVideo 1.5 / Qwen2.5-VL) stay on the
+        # historical AutoTokenizer path below even if their tokenizer dir happens
+        # to ship a processor_config.json.
+        require_processor = False
+        if hasattr(fastvideo_args.pipeline_config, "text_encoder_configs"):
+            try:
+                require_processor = any(
+                    getattr(getattr(cfg, "arch_config", None), "require_processor", False)
+                    for cfg in fastvideo_args.pipeline_config.text_encoder_configs)
+            except Exception:
+                require_processor = False
+
+        if require_processor and os.path.exists(os.path.join(resolved_model_path, "processor_config.json")):
             processor = AutoProcessor.from_pretrained(
                 resolved_model_path,
                 local_files_only=os.path.isdir(resolved_model_path),

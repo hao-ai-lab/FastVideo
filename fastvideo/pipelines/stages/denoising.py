@@ -148,7 +148,7 @@ class DenoisingStage(PipelineStage):
         image_embeds = batch.image_embeds
         if len(image_embeds) > 0:
             assert not torch.isnan(image_embeds[0]).any(), "image_embeds contains nan"
-            image_embeds = [image_embed.to(device=local_device, dtype=target_dtype) for image_embed in image_embeds]
+            image_embeds = [image_embed.to(target_dtype) for image_embed in image_embeds]
 
         image_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
@@ -212,7 +212,7 @@ class DenoisingStage(PipelineStage):
                 for embed in batch.prompt_embeds
             ]
         else:
-            prompt_embeds = list(batch.prompt_embeds)
+            prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
@@ -223,7 +223,7 @@ class DenoisingStage(PipelineStage):
                     for embed in neg_prompt_embeds
                 ]
             else:
-                neg_prompt_embeds = list(neg_prompt_embeds)
+                neg_prompt_embeds = batch.negative_prompt_embeds
             assert not torch.isnan(neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert

@@ -152,9 +152,11 @@ class DecodingStage(PipelineStage):
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
-            # Image VAEs (e.g. Flux2) expect 4D (B, C, H, W); squeeze T when 5D with T=1
+            # Flux2's image VAE expects 4D (B, C, H, W); squeeze the singleton T
+            # only for Flux2 packed latents. Gated on `_is_flux2_packed` so video
+            # VAEs that legitimately decode 5D latents with T=1 are untouched.
             squeezed_for_vae = False
-            if latents.ndim == 5 and latents.shape[2] == 1:
+            if latents.ndim == 5 and latents.shape[2] == 1 and self._is_flux2_packed(latents):
                 latents = latents.squeeze(2)
                 squeezed_for_vae = True
             # Flux2 packed: BN denorm + unpatchify for VAE decode.
@@ -163,6 +165,8 @@ class DecodingStage(PipelineStage):
             if latents.ndim == 4 and self._is_flux2_packed(latents):
                 latents = self._flux2_bn_denorm_and_unpatchify(latents)
             image = self.vae.decode(latents)
+            # Unwrap diffusers-style DecoderOutput / tuple (Flux2 VAE returns a
+            # DecoderOutput). No-op for existing VAEs that return a plain tensor.
             if hasattr(image, "sample"):
                 image = image.sample
             elif isinstance(image, tuple | list):

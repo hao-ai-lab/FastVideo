@@ -242,15 +242,11 @@ class TextEncodingStage(PipelineStage):
             if encoder_config.is_chat_model:
                 already_chat_formatted = bool(processed_texts) and isinstance(processed_texts[0], list)
                 if already_chat_formatted:
-                    text_inputs = tokenizer.apply_chat_template(
-                        processed_texts,
-                        tokenize=True,
-                        return_dict=True,
-                        return_tensors="pt",
-                        padding=tok_kwargs.get("padding"),
-                        truncation=tok_kwargs.get("truncation", True),
-                        max_length=tok_kwargs.get("max_length"),
-                    ).to(target_device)
+                    # Existing chat models (e.g. HunyuanVideo 1.5 / Qwen2.5-VL)
+                    # pre-format prompts into message lists upstream and rely on
+                    # the inner tokenizer + full tokenizer_kwargs (which include
+                    # add_generation_prompt). Preserve that original path exactly.
+                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(target_device)
                 else:
                     # Two-step approach matching Diffusers: format with chat
                     # template first, then tokenize the resulting strings.

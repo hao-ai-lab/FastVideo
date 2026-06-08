@@ -17,6 +17,8 @@ class Mistral3TextArchConfig(TextEncoderArchConfig):
     num_hidden_layers: int = 40
     text_len: int = 512
     output_hidden_states: bool = True
+    # Mistral3 (full Flux2) ships a multimodal processor; load via AutoProcessor.
+    require_processor: bool = True
 
     def __post_init__(self) -> None:
         self.tokenizer_kwargs = {
