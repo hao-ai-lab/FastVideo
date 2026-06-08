@@ -7,12 +7,19 @@ User story:
     write a single PNG so I can compare the output against the reference."
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig,
+    GenerationRequest,
+    GeneratorConfig,
+    OffloadConfig,
+    OutputConfig,
+    PipelineSelection,
+    SamplingConfig,
+)
 
 
 DEFAULT_PROMPT = "a brushed steel espresso machine on a marble counter, morning window light"
@@ -49,29 +56,40 @@ def main() -> None:
     if args.backend:
         os.environ["FASTVIDEO_ATTENTION_BACKEND"] = args.backend
 
-    generator = VideoGenerator.from_pretrained(
-        args.model_path,
-        num_gpus=args.num_gpus,
-        workload_type="t2i",
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
+    generator_config = GeneratorConfig(
+        model_path=args.model_path,
+        engine=EngineConfig(
+            num_gpus=args.num_gpus,
+            use_fsdp_inference=False,
+            offload=OffloadConfig(
+                dit=False,
+                vae=True,
+                text_encoder=True,
+                pin_cpu_memory=False,
+            ),
+        ),
+        pipeline=PipelineSelection(workload_type="t2i"),
     )
+
+    generator = VideoGenerator.from_config(generator_config)
     try:
-        generator.generate_video(
+        request = GenerationRequest(
             prompt=args.prompt,
-            output_path=args.output_path,
-            save_video=True,
-            height=args.height,
-            width=args.width,
-            num_frames=1,
-            fps=1,
-            num_inference_steps=args.steps,
-            guidance_scale=1.0,
-            seed=args.seed,
+            sampling=SamplingConfig(
+                height=args.height,
+                width=args.width,
+                num_frames=1,
+                fps=1,
+                num_inference_steps=args.steps,
+                guidance_scale=1.0,
+                seed=args.seed,
+            ),
+            output=OutputConfig(
+                output_path=args.output_path,
+                save_video=True,
+            ),
         )
+        generator.generate(request)
     finally:
         generator.shutdown()
 

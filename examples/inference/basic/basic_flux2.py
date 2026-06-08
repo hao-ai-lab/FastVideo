@@ -10,7 +10,17 @@ import os
 from pathlib import Path
 
 from fastvideo import VideoGenerator
-from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api import (
+    ComponentConfig,
+    EngineConfig,
+    GenerationRequest,
+    GeneratorConfig,
+    OffloadConfig,
+    OutputConfig,
+    ParallelismConfig,
+    PipelineSelection,
+    SamplingConfig,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,39 +71,51 @@ def main() -> None:
         1 if args.num_gpus > 1 else args.num_gpus
     )
 
-    generator = VideoGenerator.from_pretrained(
-        args.model_path,
-        num_gpus=args.num_gpus,
-        tp_size=tp_size,
-        sp_size=sp_size,
-        workload_type="t2i",
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        override_pipeline_cls_name="Flux2Pipeline",
+    generator_config = GeneratorConfig(
+        model_path=args.model_path,
+        engine=EngineConfig(
+            num_gpus=args.num_gpus,
+            parallelism=ParallelismConfig(tp_size=tp_size, sp_size=sp_size),
+            use_fsdp_inference=False,
+            offload=OffloadConfig(
+                dit=False,
+                vae=True,
+                text_encoder=True,
+                pin_cpu_memory=False,
+            ),
+        ),
+        pipeline=PipelineSelection(
+            workload_type="t2i",
+            components=ComponentConfig(override_pipeline_cls_name="Flux2Pipeline"),
+        ),
     )
-    try:
-        sampling = SamplingParam.from_pretrained(args.model_path)
-        sampling.prompt = args.prompt
-        sampling.height = args.height
-        sampling.width = args.width
-        sampling.num_frames = 1
-        sampling.fps = 1
-        sampling.num_inference_steps = args.steps
-        sampling.guidance_scale = args.guidance_scale
-        sampling.max_sequence_length = args.max_sequence_length
-        sampling.seed = args.seed
-        sampling.output_path = str(output)
-        sampling.save_video = True
-        sampling.return_frames = False
 
-        generator.generate_video(
-            args.prompt,
-            sampling_param=sampling,
-            output_path=str(output),
+    generator = VideoGenerator.from_config(generator_config)
+    try:
+        sampling = SamplingConfig(
+            height=args.height,
+            width=args.width,
+            num_frames=1,
+            fps=1,
+            num_inference_steps=args.steps,
+            guidance_scale=args.guidance_scale,
+            seed=args.seed,
         )
+        extensions = {}
+        if args.max_sequence_length is not None:
+            extensions["max_sequence_length"] = args.max_sequence_length
+
+        request = GenerationRequest(
+            prompt=args.prompt,
+            sampling=sampling,
+            output=OutputConfig(
+                output_path=str(output),
+                save_video=True,
+                return_frames=False,
+            ),
+            extensions=extensions,
+        )
+        generator.generate(request)
     finally:
         generator.shutdown()
 
