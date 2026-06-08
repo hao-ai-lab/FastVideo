@@ -446,6 +446,11 @@ def get_nd_rotary_pos_embed(
 
 
 _ROTARY_POS_EMBED_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
+# Bound the table cache so long-running servers / causal models (which vary
+# start_frame per frame) cannot grow it without limit; entries are large float64
+# tensors. Least-recently-used eviction keeps the active resolution(s) hot while
+# capping memory.
+_ROTARY_POS_EMBED_CACHE_MAXSIZE = 16
 
 
 def _hashable(value: Any) -> Any:
@@ -522,6 +527,9 @@ def get_rotary_pos_embed(
     )
     cached = _ROTARY_POS_EMBED_CACHE.get(cache_key)
     if cached is not None:
+        # Move to most-recently-used position so the active table is not evicted
+        # when several resolutions / buckets share the process (LRU recency).
+        _ROTARY_POS_EMBED_CACHE[cache_key] = _ROTARY_POS_EMBED_CACHE.pop(cache_key)
         return cached
 
     freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
@@ -538,6 +546,9 @@ def get_rotary_pos_embed(
         use_real=use_real,
     )
     # Cached tensors are shared (read-only); callers copy via .to()/.float().
+    # Reached only on a miss, so evict the least-recently-used entry at capacity.
+    if len(_ROTARY_POS_EMBED_CACHE) >= _ROTARY_POS_EMBED_CACHE_MAXSIZE:
+        _ROTARY_POS_EMBED_CACHE.pop(next(iter(_ROTARY_POS_EMBED_CACHE)))
     _ROTARY_POS_EMBED_CACHE[cache_key] = (freqs_cos, freqs_sin)
     return freqs_cos, freqs_sin
 
