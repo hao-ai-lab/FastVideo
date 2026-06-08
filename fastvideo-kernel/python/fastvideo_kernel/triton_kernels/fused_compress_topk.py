@@ -239,10 +239,14 @@ def _fused_topk_mask_kernel(
     # the tie-breaking logic below selects the first topk positions.
     lo = tl.minimum(lo, hi)
 
+    # 32 iterations of fp32 bisection gives precision ~2^-32 ≈ 2.3e-10, which is
+    # far below the minimum gap between distinct bf16 values (~2^-8 ≈ 3.9e-3).
+    # This guarantees threshold converges exactly to a bf16 score value in fp32
+    # representation, so the > / == comparisons below are exact with no risk of
+    # the threshold landing between tied bf16 values.
     for _i in range(32):
         mid = (lo + hi) * 0.5
         count_ge = tl.sum(((scores_f32 >= mid) & valid_mask).to(tl.int32), axis=0)
-        # If count >= topk, threshold is at or above mid
         lo = tl.where(count_ge >= topk, mid, lo)
         hi = tl.where(count_ge >= topk, hi, mid)
 
