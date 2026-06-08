@@ -15,21 +15,23 @@ from fastvideo.pipelines.stages.denoising import (Cosmos25AutoDenoisingStage, Co
                                                   CosmosDenoisingStage, DenoisingStage, DmdDenoisingStage)
 from fastvideo.pipelines.stages.sr_denoising import SRDenoisingStage
 from fastvideo.pipelines.stages.encoding import EncodingStage
-from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage, MatrixGameImageEncodingStage,
-                                                       RefImageEncodingStage, ImageVAEEncodingStage,
-                                                       VideoVAEEncodingStage, Hy15ImageEncodingStage,
-                                                       HYWorldImageEncodingStage)
+from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage, MatrixGame2ImageEncodingStage,
+                                                       MatrixGame2ImageVAEEncodingStage,
+                                                       MatrixGame3ImageVAEEncodingStage, RefImageEncodingStage,
+                                                       ImageVAEEncodingStage, VideoVAEEncodingStage,
+                                                       Hy15ImageEncodingStage, HYWorldImageEncodingStage)
 from fastvideo.pipelines.stages.gamecraft_image_encoding import (GameCraftImageVAEEncodingStage)
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (Cosmos25LatentPreparationStage, CosmosLatentPreparationStage,
                                                            Cosmos25AutoLatentPreparationStage,
                                                            Cosmos25T2WLatentPreparationStage,
                                                            Cosmos25V2WLatentPreparationStage, LatentPreparationStage)
-from fastvideo.pipelines.stages.ltx2_audio_decoding import LTX2AudioDecodingStage
-from fastvideo.pipelines.stages.ltx2_denoising import LTX2DenoisingStage
-from fastvideo.pipelines.stages.ltx2_latent_preparation import (LTX2LatentPreparationStage)
-from fastvideo.pipelines.stages.ltx2_text_encoding import LTX2TextEncodingStage
-from fastvideo.pipelines.stages.matrixgame_denoising import (MatrixGameCausalDenoisingStage)
+from fastvideo.pipelines.basic.ltx2.stages import (  # noqa: F401
+    LTX2AudioDecodingStage, LTX2DenoisingStage, LTX2LatentPreparationStage, LTX2RefineInitStage, LTX2RefineLoRAStage,
+    LTX2TextEncodingStage, LTX2UpsampleStage, STAGE_2_DISTILLED_SIGMA_VALUES,
+)
+from fastvideo.pipelines.stages.matrixgame2_denoising import MatrixGame2CausalDenoisingStage
+from fastvideo.pipelines.stages.matrixgame3_denoising import MatrixGame3DenoisingStage
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
 from fastvideo.pipelines.stages.gen3c_stages import (Gen3CCFGPolicyStage, Gen3CConditioningStage, Gen3CDenoisingStage,
@@ -60,7 +62,8 @@ __all__ = [
     "DmdDenoisingStage",
     "CausalDMDDenosingStage",
     "CausalDenoisingStage",
-    "MatrixGameCausalDenoisingStage",
+    "MatrixGame2CausalDenoisingStage",
+    "MatrixGame3DenoisingStage",
     "HYWorldDenoisingStage",
     "GameCraftDenoisingStage",
     "Gen3CCFGPolicyStage",
@@ -78,7 +81,9 @@ __all__ = [
     "EncodingStage",
     "DecodingStage",
     "ImageEncodingStage",
-    "MatrixGameImageEncodingStage",
+    "MatrixGame2ImageEncodingStage",
+    "MatrixGame2ImageVAEEncodingStage",
+    "MatrixGame3ImageVAEEncodingStage",
     "Hy15ImageEncodingStage",
     "HYWorldImageEncodingStage",
     "RefImageEncodingStage",

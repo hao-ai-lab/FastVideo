@@ -4,12 +4,12 @@ These are end-to-end example scripts for distilling Wan2.1 T2V 1.3B model using 
 ### 0. Make sure you have installed VSA
 
 ```bash
-pip install vsa
+uv pip install vsa
 ```
 
 ### 1. Download dataset:
 ```bash
-bash examples/distill/Wan-Syn-480P/download_dataset.sh
+bash examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P/download_dataset.sh
 ```
 
 ### 2. Configure and run distillation:

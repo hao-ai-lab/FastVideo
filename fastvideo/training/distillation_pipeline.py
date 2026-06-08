@@ -245,7 +245,9 @@ class DistillationPipeline(TrainingPipeline):
 
         self.generator_ema: EMA_FSDP | None = None
         self.generator_ema_2: EMA_FSDP | None = None
-        if (self.training_args.ema_decay is not None) and (self.training_args.ema_decay > 0.0):
+        ema_enabled = (self.training_args.ema_decay is not None) and (self.training_args.ema_decay > 0.0)
+        if ema_enabled and (self.training_args.ema_start_step <= 0):
+            # Only eager-construct from the cold init weights when averaging starts at step 0.
             self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
             logger.info("Initialized generator EMA with decay=%s", self.training_args.ema_decay)
 
@@ -253,6 +255,12 @@ class DistillationPipeline(TrainingPipeline):
             if self.transformer_2 is not None:
                 self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=self.training_args.ema_decay)
                 logger.info("Initialized generator EMA_2 with decay=%s", self.training_args.ema_decay)
+        elif ema_enabled:
+            # Defer construction to the lazy block in the train loop, which builds the EMA AT
+            # ema_start_step from the already-trained weights. Eager-constructing here would anchor
+            # the shadow to the cold init and leave it base-contaminated (blurry) on short runs.
+            logger.info("Generator EMA deferred: built lazily at ema_start_step=%s from trained weights",
+                        self.training_args.ema_start_step)
         else:
             logger.info("Generator EMA disabled (ema_decay <= 0.0)")
 
@@ -326,22 +334,6 @@ class DistillationPipeline(TrainingPipeline):
                 return model
         return model
 
-    def get_ema_model_copy(self) -> torch.nn.Module | None:
-        """Get a copy of the model with EMA weights applied."""
-        if self.generator_ema is not None:
-            ema_model = copy.deepcopy(self.transformer)
-            self.generator_ema.copy_to_unwrapped(ema_model)
-            return ema_model
-        return None
-
-    def get_ema_2_model_copy(self) -> torch.nn.Module | None:
-        """Get a copy of the transformer_2 model with EMA weights applied."""
-        if self.generator_ema_2 is not None and self.transformer_2 is not None:
-            ema_2_model = copy.deepcopy(self.transformer_2)
-            self.generator_ema_2.copy_to_unwrapped(ema_2_model)
-            return ema_2_model
-        return None
-
     def is_ema_ready(self, current_step: int | None = None):
         """Check if EMA is ready for use (after ema_start_step)."""
         if current_step is None:
@@ -361,68 +353,61 @@ class DistillationPipeline(TrainingPipeline):
         try:
             # Save main transformer EMA
             if self.generator_ema is not None:
-                ema_model = self.get_ema_model_copy()
-                if ema_model is None:
-                    logger.warning("Failed to create EMA model copy")
-                else:
-                    ema_save_dir = os.path.join(output_dir, f"ema_checkpoint-{step}")
-                    os.makedirs(ema_save_dir, exist_ok=True)
+                ema_save_dir = os.path.join(output_dir, f"ema_checkpoint-{step}")
+                os.makedirs(ema_save_dir, exist_ok=True)
 
-                    # save as diffusers format
-                    from safetensors.torch import save_file
+                # save as diffusers format
+                from safetensors.torch import save_file
 
-                    from fastvideo.training.training_utils import (custom_to_hf_state_dict,
-                                                                   gather_state_dict_on_cpu_rank0)
-                    cpu_state = gather_state_dict_on_cpu_rank0(ema_model, device=None)
+                from fastvideo.training.training_utils import (custom_to_hf_state_dict, gather_state_dict_on_cpu_rank0)
+                # Swap EMA weights into the live FSDP module in place (no deepcopy) and gather the
+                # full state dict within the context; weights are restored on exit.
+                with self.generator_ema.apply_to_model(self.transformer):
+                    cpu_state = gather_state_dict_on_cpu_rank0(self.transformer, device=None)
 
-                    if self.global_rank == 0:
-                        weight_path = os.path.join(ema_save_dir, "diffusion_pytorch_model.safetensors")
-                        diffusers_state_dict = custom_to_hf_state_dict(cpu_state, ema_model.reverse_param_names_mapping)
-                        save_file(diffusers_state_dict, weight_path)
+                if self.global_rank == 0:
+                    weight_path = os.path.join(ema_save_dir, "diffusion_pytorch_model.safetensors")
+                    diffusers_state_dict = custom_to_hf_state_dict(cpu_state,
+                                                                   self.transformer.reverse_param_names_mapping)
+                    save_file(diffusers_state_dict, weight_path)
 
-                        config_dict = ema_model.hf_config
-                        if "dtype" in config_dict:
-                            del config_dict["dtype"]
-                        config_path = os.path.join(ema_save_dir, "config.json")
-                        with open(config_path, "w") as f:
-                            json.dump(config_dict, f, indent=4)
+                    # deepcopy so deleting "dtype" doesn't mutate the live model's hf_config
+                    config_dict = copy.deepcopy(self.transformer.hf_config)
+                    if "dtype" in config_dict:
+                        del config_dict["dtype"]
+                    config_path = os.path.join(ema_save_dir, "config.json")
+                    with open(config_path, "w") as f:
+                        json.dump(config_dict, f, indent=4)
 
-                        logger.info("EMA weights saved to %s", weight_path)
-
-                    del ema_model
+                    logger.info("EMA weights saved to %s", weight_path)
 
             # Save transformer_2 EMA
-            if self.generator_ema_2 is not None:
-                ema_2_model = self.get_ema_2_model_copy()
-                if ema_2_model is None:
-                    logger.warning("Failed to create EMA_2 model copy")
-                else:
-                    ema_2_save_dir = os.path.join(output_dir, f"ema_2_checkpoint-{step}")
-                    os.makedirs(ema_2_save_dir, exist_ok=True)
+            if self.generator_ema_2 is not None and self.transformer_2 is not None:
+                ema_2_save_dir = os.path.join(output_dir, f"ema_2_checkpoint-{step}")
+                os.makedirs(ema_2_save_dir, exist_ok=True)
 
-                    # save as diffusers format
-                    from safetensors.torch import save_file
+                # save as diffusers format
+                from safetensors.torch import save_file
 
-                    from fastvideo.training.training_utils import (custom_to_hf_state_dict,
-                                                                   gather_state_dict_on_cpu_rank0)
-                    cpu_state_2 = gather_state_dict_on_cpu_rank0(ema_2_model, device=None)
+                from fastvideo.training.training_utils import (custom_to_hf_state_dict, gather_state_dict_on_cpu_rank0)
+                with self.generator_ema_2.apply_to_model(self.transformer_2):
+                    cpu_state_2 = gather_state_dict_on_cpu_rank0(self.transformer_2, device=None)
 
-                    if self.global_rank == 0:
-                        weight_path_2 = os.path.join(ema_2_save_dir, "diffusion_pytorch_model.safetensors")
-                        diffusers_state_dict_2 = custom_to_hf_state_dict(cpu_state_2,
-                                                                         ema_2_model.reverse_param_names_mapping)
-                        save_file(diffusers_state_dict_2, weight_path_2)
+                if self.global_rank == 0:
+                    weight_path_2 = os.path.join(ema_2_save_dir, "diffusion_pytorch_model.safetensors")
+                    diffusers_state_dict_2 = custom_to_hf_state_dict(cpu_state_2,
+                                                                     self.transformer_2.reverse_param_names_mapping)
+                    save_file(diffusers_state_dict_2, weight_path_2)
 
-                        config_dict_2 = ema_2_model.hf_config
-                        if "dtype" in config_dict_2:
-                            del config_dict_2["dtype"]
-                        config_path_2 = os.path.join(ema_2_save_dir, "config.json")
-                        with open(config_path_2, "w") as f:
-                            json.dump(config_dict_2, f, indent=4)
+                    # deepcopy so deleting "dtype" doesn't mutate the live model's hf_config
+                    config_dict_2 = copy.deepcopy(self.transformer_2.hf_config)
+                    if "dtype" in config_dict_2:
+                        del config_dict_2["dtype"]
+                    config_path_2 = os.path.join(ema_2_save_dir, "config.json")
+                    with open(config_path_2, "w") as f:
+                        json.dump(config_dict_2, f, indent=4)
 
-                        logger.info("EMA_2 weights saved to %s", weight_path_2)
-
-                    del ema_2_model
+                    logger.info("EMA_2 weights saved to %s", weight_path_2)
 
         except Exception as e:
             logger.error("Failed to save EMA weights: %s", str(e))
@@ -666,6 +651,10 @@ class DistillationPipeline(TrainingPipeline):
                                                               scheduler=self.noise_scheduler).unflatten(
                                                                   0, real_score_pred_noise_uncond.shape[:2])
 
+            # CFG on the real-score teacher. Uses the DMD2 parameterization
+            # x_cond + w * (x_cond - x_uncond), which is offset by 1 from the
+            # Ho & Salimans form x_uncond + w * (x_cond - x_uncond):
+            # w=0 -> cond, w=-1 -> uncond, w_standard = w + 1.
             real_score_pred_video = pred_real_video_cond + (pred_real_video_cond -
                                                             pred_real_video_uncond) * self.real_score_guidance_scale
 
@@ -738,8 +727,11 @@ class DistillationPipeline(TrainingPipeline):
                 max_grad_norm,
                 foreach=None,
             )
-            assert grad_norm is not float('nan') or grad_norm is not float('inf')
-            grad_norm = grad_norm.item() if grad_norm is not None else 0.0
+            if grad_norm is not None:
+                assert torch.isfinite(grad_norm), (f"grad_norm is not finite: {grad_norm}")
+                grad_norm = grad_norm.item()
+            else:
+                grad_norm = 0.0
         else:
             grad_norm = 0.0
         training_batch.grad_norm = grad_norm

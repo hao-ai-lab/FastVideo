@@ -1,0 +1,17 @@
+# Minimum config to instantiate WanCausalModel for the loading + forward
+# smoke test. Same checkpoint as Wan; transformer class is overridden to
+# CausalWanTransformer3DModel by WanCausalModel itself.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanCausalModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.dfsft.DiffusionForcingSFTMethod
+
+training:
+  dit_precision: bf16
+
+pipeline: {}

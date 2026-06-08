@@ -1,0 +1,47 @@
+# Minimum config to run a single training step of
+# DiffusionForcingSFTMethod on WanCausalModel for the per-method
+# smoke test.  Uses the real Wan 2.1 1.3B checkpoint (loaded as a
+# CausalWanTransformer3DModel by WanCausalModel) with tiny synthetic
+# latents.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanCausalModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.dfsft.DiffusionForcingSFTMethod
+  chunk_size: 3
+
+training:
+  dit_precision: bf16
+
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+
+  data:
+    seed: 42
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    # Multiple of chunk_size=3 so the diffusion-forcing chunker has
+    # whole chunks to work with.
+    num_latent_t: 6
+    num_height: 64
+    num_width: 64
+    num_frames: 21
+
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1
+    gradient_accumulation_steps: 1
+
+pipeline: {}

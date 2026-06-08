@@ -214,6 +214,12 @@ class TextEncodingStage(PipelineStage):
             for prompt_str in texts:
                 processed_text = preprocess_func(prompt_str)
                 if processed_text is not None:
+                    # Guard against empty strings that produce 0 tokens with
+                    # Qwen2-style tokenizers. Scoped via treat_empty_as_dot so
+                    # models that legitimately use "" (e.g. negative_prompt="")
+                    # are not affected.
+                    if not processed_text.strip() and getattr(encoder_config, "treat_empty_as_dot", False):
+                        processed_text = "."
                     processed_texts.append(processed_text)
                 else:
                     # Assuming batch_size = 1, special case for hunyuanvideo1.5 where there is no glyph text
@@ -224,10 +230,14 @@ class TextEncodingStage(PipelineStage):
                     attn_masks_list.append(attention_mask)
                     return self.return_embeds(embeds_list, attn_masks_list, return_type, return_attention_mask, indices)
 
+            # If tokenizer is a multimodal processor (e.g. Qwen2_5_VLProcessor),
+            # use its inner tokenizer for text-only encoding.
+            tok = getattr(tokenizer, "tokenizer", tokenizer)
+
             if encoder_config.is_chat_model:
-                text_inputs = tokenizer.apply_chat_template(processed_texts, **tok_kwargs).to(target_device)
+                text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(target_device)
             else:
-                text_inputs = tokenizer(processed_texts, **tok_kwargs).to(target_device)
+                text_inputs = tok(processed_texts, **tok_kwargs).to(target_device)
 
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]

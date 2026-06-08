@@ -12,7 +12,7 @@ automates the boilerplate of setting environment variables, picking the right
 entrypoint, and applying defaults from the closest example script.
 
 ## Prerequisites
-- The repo is cloned and `fastvideo` is installed (`uv pip install -e .[dev]`).
+- The repo is cloned and `fastvideo` is installed (`uv pip install -e ".[dev]"`).
 - Dataset is preprocessed (see `docs/training/data_preprocess.md`).
 - `WANDB_API_KEY` is set in the environment (or `WANDB_MODE=offline` for local).
 - GPU resources are available (multi-GPU requires NCCL).
@@ -38,7 +38,7 @@ entrypoint, and applying defaults from the closest example script.
 | `finetune` (Wan T2V) | `fastvideo/training/wan_training_pipeline.py` |
 | `finetune` (Wan I2V) | `fastvideo/training/wan_i2v_training_pipeline.py` |
 | `finetune` (LTX-2) | `fastvideo/training/ltx2_training_pipeline.py` |
-| `finetune` (MatrixGame) | `fastvideo/training/matrixgame_training_pipeline.py` |
+| `finetune` (Matrix-Game 2.0) | `fastvideo/training/matrixgame2_training_pipeline.py` |
 | `distill-dmd` | `fastvideo/training/wan_distillation_pipeline.py` |
 | `self-forcing` | `fastvideo/training/wan_self_forcing_distillation_pipeline.py` |
 

@@ -11,7 +11,7 @@ except ImportError:
 
     def _unsupported(*args, **kwargs):
         raise ImportError(
-            "flash-attn is not installed. Please install it, e.g., `pip install flash-attn`."
+            "flash-attn is not installed. Please install it, e.g., `uv pip install flash-attn`."
         )
 
     _flash_attn_varlen_forward = _unsupported

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastvideo"
-version = "0.1.7"
+version = "0.2.0"
 description = "FastVideo"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,40 +15,40 @@ classifiers = [
 
 dependencies = [
     # Core Libraries
-    "scipy==1.14.1",
-    "six==1.16.0",
-    "h5py==3.12.1",
+    "scipy>=1.14.1",
+    "six>=1.16.0",
+    "h5py>=3.12.1",
     "requests>=2.32.2",
 
     # Machine Learning & Transformers
-    "transformers==4.57.3",
+    "transformers>=4.57.3",
     "tokenizers>=0.20.1",
-    "sentencepiece==0.2.0",
-    "timm==1.0.11",
+    "sentencepiece>=0.2.0",
+    "timm>=1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.33.1",
-    "torch>=2.10.0",
+    "torch==2.11.0",
     "torchvision",
 
     # Acceleration & Optimization
     "accelerate==1.0.1",
 
     # Computer Vision & Image Processing
-    "opencv-python==4.10.0.84",
+    "opencv-python>=4.10.0.84",
     "pillow>=10.3.0",
-    "imageio==2.36.0",
-    "imageio-ffmpeg==0.5.1",
+    "imageio>=2.36.0",
+    "imageio-ffmpeg>=0.5.1",
     "einops",
 
     # Experiment Tracking & Logging
     "wandb>=0.21.0",
     "loguru",
-    "test-tube==0.7.5",
+    "test-tube>=0.7.5",
 
     # Miscellaneous Utilities
     "tqdm",
     "pytest",
-    "PyYAML==6.0.1",
+    "PyYAML>=6.0.1",
     "protobuf>=5.28.3",
     "gradio==5.32.0",
     "moviepy>=2.0.0",
@@ -71,7 +71,7 @@ dependencies = [
     # Training Dependencies
     "torchdata",
     "pyarrow",
-    "datasets==4.0.0",
+    "datasets>=4.0.0",
     "av",
 
     # Preprocessing Dependencies
@@ -84,7 +84,7 @@ prerelease = "allow"
 
 [project.optional-dependencies]
 
-# flash-attn: pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation
+# flash-attn: uv pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation
 
 
 lint = [
@@ -93,7 +93,7 @@ lint = [
 
 test = [
     "av",
-    "pytorch-msssim==1.0.0",
+    "pytorch-msssim>=1.0.0",
     "pytest",
 ]
 

@@ -1,0 +1,153 @@
+# Dreamverse streaming demo — fastvideo serve --config target.
+#
+# This config is for testing Dreamverse-like streaming through the lower-level
+# `fastvideo serve --config` entrypoint. Use `dreamverse-server` for the full
+# Dreamverse web app.
+#
+# Mirrors ../FastVideo-internal/ui/ltx2-streaming/server/config.py
+# defaults so the public typed surface produces the same runtime
+# behavior as the internal UI's GPU pool. Sources of each setting are
+# annotated inline; deviations are explicit.
+#
+# Boot:    uv run fastvideo serve --config serve_configs/streaming_demo.yaml
+# Override at the CLI:
+#          uv run fastvideo serve --config <yaml> \
+#              --server.port 8010 \
+#              --streaming.warmup.enabled false
+#
+# Required environment (sourced from ~/.env when launched via the
+# launch-demo skill):
+#   * CEREBRAS_API_KEY        (prompt enhancement, default provider)
+#   * CEREBRAS_IFM_API_KEY    (only required if you set
+#                              streaming.prompt.provider to cerebras_ifm
+#                              via dotted override; the public typed
+#                              schema currently only accepts cerebras /
+#                              groq, so cerebras_ifm flows via env on
+#                              dreamverse-server, not fastvideo serve)
+#   * GROQ_API_KEY            (only if you switch provider to groq)
+#   * OPENAI_API_KEY          (downstream rewrites in some prompt
+#                              system prompts)
+#
+# Hosts without flashinfer / NVFP4: comment out the
+# `engine.quantization` block below — the loader falls back to bf16
+# automatically when no quant_config is set.
+
+generator:
+  # internal: MODEL_REGISTRY["fast-ltx2"] (config.py:14-19)
+  model_path: FastVideo/LTX2-Distilled-Diffusers
+
+  engine:
+    # internal: NUM_GPUS=1 hardcoded in gpu_pool.py worker boot
+    num_gpus: 1
+
+    # internal: gpu_pool.py:251-258 — all offload flags False so the
+    # full DiT, text encoder, and VAE stay resident on GPU.
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: false
+      vae: false
+      pin_cpu_memory: true
+
+    # internal: gpu_pool.py:251-258 + the just-uncommented "mode" line
+    # — torch.compile on for transformer + text encoder, inductor
+    # backend, fullgraph for graph-break debugging, max-autotune-
+    # no-cudagraphs for the kernel sweep, dynamic off (static shapes).
+    compile:
+      enabled: true
+      text_encoder_enabled: true
+      backend: inductor
+      fullgraph: true
+      mode: max-autotune-no-cudagraphs
+      dynamic: false
+
+    # internal: pipeline_config.dit_config.quant_config = FP4Config()
+    # set in gpu_pool.py:280 (via the legacy in-place mutation). The
+    # public typed surface resolves "NVFP4" to NVFP4Config() and pins
+    # it on dit_config in FastVideoArgs.__post_init__. Comment this
+    # block out on hosts without flashinfer / NVFP4 hardware.
+    quantization:
+      transformer_quant: NVFP4
+
+  pipeline:
+    workload_type: t2v
+    # internal: pipeline_config.vae_tiling left default (False).
+    vae_tiling: false
+
+    components:
+      # Same as model_path; LTX-2 reads its tokenizer / scheduler
+      # config from the same root.
+      config_root: FastVideo/LTX2-Distilled-Diffusers
+
+    # internal: gpu_pool.py:259-265 ltx2_refine_* kwargs.
+    # The distilled stage-2 refine runs in 2 inference steps with
+    # gs=1.0 and add_noise=True (no LoRA — empty path).
+    preset_overrides:
+      refine:
+        enabled: true
+        num_inference_steps: 2
+        guidance_scale: 1.0
+        add_noise: true
+
+server:
+  # internal: main.py defaults (host 0.0.0.0, port 8009).
+  host: 0.0.0.0
+  port: 8009
+  # internal: outputs/ relative to server dir.
+  output_dir: outputs/
+
+# default_request is the operator-pinned baseline merged into every
+# /v1/stream session_init. Internal/ui hardcodes these in gpu_pool.py
+# (NUM_FRAMES, FRAME_HEIGHT, FRAME_WIDTH, NUM_INFERENCE_STEPS,
+# TARGET_FPS); we put them on default_request.sampling so explicit
+# client overrides still win.
+default_request:
+  sampling:
+    num_frames: 121          # internal: config.py:36 NUM_FRAMES
+    height: 1088             # internal: config.py:37 FRAME_HEIGHT
+    width: 1920              # internal: config.py:38 FRAME_WIDTH
+    num_inference_steps: 5   # internal: config.py:39 NUM_INFERENCE_STEPS
+    fps: 24                  # internal: gpu_pool.py:85 TARGET_FPS
+
+streaming:
+  # internal: config.py:33 SESSION_TIMEOUT_SECONDS = 300
+  session_timeout_seconds: 300
+  # internal: config.py:282-284 GENERATION_SEGMENT_CAP default 6
+  generation_segment_cap: 6
+  # internal: config.py:46 STREAM_MODE default "av_fmp4"
+  stream_mode: av_fmp4
+
+  # internal: config.py:288-300 STARTUP_WARMUP_*
+  warmup:
+    enabled: true
+    prompt: "A cinematic drone shot over coastal cliffs at sunrise, golden light, gentle ocean waves, ultra detailed"
+    timeout_seconds: 2400
+
+  # internal: gpu_pool.py session-controller defaults — 9 conditioning
+  # frames, 0 end-offset, audio re-encode on (matches Dreamverse
+  # session_controller and FastVideo-internal video_generation paths).
+  pool:
+    num_workers: 1            # one worker per GPU; gpu_pool spawns based on CUDA_VISIBLE_DEVICES
+    enable_audio_reencode: true
+    conditioning_num_frames: 9
+    conditioning_end_offset: 0
+
+  # internal: PROMPT_PROVIDER = "cerebras_ifm" hardcoded in config.py:143.
+  # The public typed Literal is currently {"cerebras", "groq"} only —
+  # cerebras_ifm requires the legacy env-driven path on dreamverse-server.
+  # For the typed fastvideo serve path we default to "cerebras" with the
+  # same model id; switch to groq via dotted override if cerebras is down.
+  prompt:
+    enabled: true
+    provider: cerebras
+    model: gpt-oss-120b              # internal: config.py:189 PROMPT_MODEL
+    timeout_ms: 20000                # internal: config.py:216 PROMPT_TIMEOUT_MS
+    # system_prompt_dir intentionally unset; the public PromptEnhancer
+    # falls back to its packaged defaults when None. Set to an absolute
+    # directory if you want to pin operator-edited prompts.
+
+  # internal: PROMPT_SAFETY_ENABLED default False (config.py:115).
+  # Enable + provide classifier_path on hosts with the fasttext extra
+  # installed (uv sync --extra safety in Dreamverse).
+  safety:
+    enabled: false

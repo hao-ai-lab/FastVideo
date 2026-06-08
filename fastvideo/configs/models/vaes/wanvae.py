@@ -76,5 +76,7 @@ class WanVAEConfig(VAEConfig):
     use_temporal_tiling: bool = False
     use_parallel_tiling: bool = False
 
+    use_light_vae: bool = False
+
     def __post_init__(self):
         self.blend_num_frames = (self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames) * 2

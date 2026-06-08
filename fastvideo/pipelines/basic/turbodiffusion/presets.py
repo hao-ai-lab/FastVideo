@@ -26,7 +26,7 @@ TURBO_T2V_1_3B = InferencePreset(
         "fps": 16,
         "guidance_scale": 1.0,
         "num_inference_steps": 4,
-        "negative_prompt": None,
+        "negative_prompt": "",
     },
 )
 
@@ -44,7 +44,7 @@ TURBO_T2V_14B = InferencePreset(
         "fps": 16,
         "guidance_scale": 1.0,
         "num_inference_steps": 4,
-        "negative_prompt": None,
+        "negative_prompt": "",
     },
 )
 
@@ -62,7 +62,7 @@ TURBO_I2V_A14B = InferencePreset(
         "fps": 16,
         "guidance_scale": 1.0,
         "num_inference_steps": 4,
-        "negative_prompt": None,
+        "negative_prompt": "",
     },
 )
 
