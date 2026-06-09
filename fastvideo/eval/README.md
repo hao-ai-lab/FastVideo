@@ -151,7 +151,7 @@ callbacks:
 
       # `synthetic_optical_flow` also needs actions in the validation
       # manifest (`action_path`) plus a repo-local calibration file.
-      calibration_path: assets/eval/matrixgame2_synthetic_flow_calibration.json
+      calibration_path: assets/eval/worldmodel_synthetic_flow_calibration.json
 ```
 
 Metric summaries are written under
