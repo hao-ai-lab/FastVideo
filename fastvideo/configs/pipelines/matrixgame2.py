@@ -23,3 +23,4 @@ class MatrixGame2I2V480PConfig(WanI2V480PConfig):
     warp_denoising_step: bool = True
     context_noise: int = 0
     num_frames_per_block: int = 3
+    keyboard_value_scale: float = 1.0  # to enhance action condition for world models

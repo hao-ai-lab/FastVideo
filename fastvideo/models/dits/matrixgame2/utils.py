@@ -261,6 +261,14 @@ def overlay_validation_actions_on_frames(
     return processed_frames
 
 
+def scale_keyboard_condition(
+    keyboard_condition: torch.Tensor,
+    scale: float,
+) -> torch.Tensor:
+    if float(scale) == 1.0:
+        return keyboard_condition
+    return keyboard_condition * float(scale)
+
 
 def expand_action_to_frames(action: dict, num_frames: int) -> tuple[torch.Tensor, torch.Tensor]:
     result = {}

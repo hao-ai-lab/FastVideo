@@ -13,6 +13,7 @@ from fastvideo.distributed import (
     get_sp_group,
     get_world_group,
 )
+from fastvideo.models.dits.matrixgame2.utils import scale_keyboard_condition
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.training_utils import normalize_dit_input
 
@@ -84,12 +85,14 @@ class MatrixGame2Model(WanModel):
             raw_batch,
             key="keyboard_cond",
             expected_frames=self._expected_action_frames(tc.data.num_latent_t),
+            expected_dim=self._expected_action_dim("keyboard"),
             dtype=dtype,
         )
         mouse_cond = self._get_optional_action(
             raw_batch,
             key="mouse_cond",
             expected_frames=self._expected_action_frames(tc.data.num_latent_t),
+            expected_dim=self._expected_action_dim("mouse"),
             dtype=dtype,
         )
 
@@ -172,22 +175,63 @@ class MatrixGame2Model(WanModel):
             raise ValueError("text_dict cannot be None for Matrix-Game 2.0")
         hidden_states = noise_input.permute(0, 2, 1, 3, 4)
         if hidden_states.shape[1] == 16:
-            cond_latents = text_dict.get("image_latents")
+            # Streaming long tuning scores a window at a time; use the
+            # window-specific first-image latent when the method provides it.
+            cond_latents = self._get_score_window_image_latents(
+                text_dict,
+                batch_info=text_dict.get("_batch_info"),
+                num_latents=hidden_states.shape[2],
+            )
             if cond_latents is None:
                 raise RuntimeError("Matrix-Game 2.0 requires image_latents in conditional_dict "
                                    "when noise_input has 16 channels")
-            num_t = hidden_states.shape[2]
-            cond_latents = cond_latents[:, :, :num_t]
             hidden_states = torch.cat([hidden_states, cond_latents], dim=1)
+        # For streaming long tuning, align actions to the same score window as
+        # the latent/image condition; otherwise this falls back to the prefix.
+        keyboard_cond, mouse_cond = self._get_score_window_actions(
+            text_dict,
+            batch_info=text_dict.get("_batch_info"),
+            num_latents=hidden_states.shape[2],
+        )
         return {
             "hidden_states": hidden_states,
             "encoder_hidden_states": None,
             "timestep": timestep.to(device=self.device, dtype=torch.bfloat16),
             "encoder_hidden_states_image": text_dict["encoder_hidden_states_image"],
-            "keyboard_cond": text_dict["keyboard_cond"],
-            "mouse_cond": text_dict["mouse_cond"],
+            "keyboard_cond": keyboard_cond,
+            "mouse_cond": mouse_cond,
             "return_dict": False,
         }
+
+    def predict_noise(
+        self,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        # Streaming long tuning re-anchors each score window on its first
+        # image/latent, so pass window metadata through existing dict plumbing.
+        info = getattr(batch, "matrixgame_streaming_chunk_info", None)
+        for text_dict in (batch.conditional_dict, batch.unconditional_dict):
+            if isinstance(text_dict, dict):
+                text_dict["_batch_info"] = info
+        try:
+            return super().predict_noise(
+                noisy_latents,
+                timestep,
+                batch,
+                conditional=conditional,
+                cfg_uncond=cfg_uncond,
+                attn_kind=attn_kind,
+            )
+        finally:
+            for text_dict in (batch.conditional_dict, batch.unconditional_dict):
+                if isinstance(text_dict, dict):
+                    text_dict.pop("_batch_info", None)
 
     def _build_matrixgame_cond_concat(
         self,
@@ -235,6 +279,98 @@ class MatrixGame2Model(WanModel):
         ).transpose(1, 2)
         return torch.cat([mask_lat_size, image_latents], dim=1)
 
+    def _get_score_window_image_latents(
+        self,
+        text_dict: dict[str, Any],
+        *,
+        batch_info: dict[str, Any] | None,
+        num_latents: int,
+    ) -> torch.Tensor | None:
+        # Prefer a window-specific first-image latent when long tuning has
+        # recomputed one; otherwise keep the original MG first-frame condition.
+        if batch_info is not None:
+            condition_latents = batch_info.get("condition_image_latents")
+            if condition_latents is not None:
+                if condition_latents.shape[2] != num_latents:
+                    raise ValueError("condition_image_latents temporal length must match "
+                                     "noise_input: "
+                                     f"{condition_latents.shape[2]} vs {num_latents}")
+                return condition_latents
+
+        image_latents = text_dict.get("image_latents")
+        if image_latents is None:
+            return None
+        return image_latents[:, :, :num_latents]
+
+    def _get_score_window_actions(
+        self,
+        text_dict: dict[str, Any],
+        *,
+        batch_info: dict[str, Any] | None,
+        num_latents: int,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        frame_start = 0
+        if batch_info is not None:
+            frame_start = int(batch_info.get("frame_start", 0) or 0)
+        frame_end = frame_start + int(num_latents)
+        action_frame_start = frame_start * self._temporal_compression_ratio()
+        action_frame_end = ((frame_end - 1) * self._temporal_compression_ratio()) + 1
+
+        def _slice_action(action: torch.Tensor | None) -> torch.Tensor | None:
+            if action is None:
+                return None
+            if action.shape[1] < action_frame_end:
+                raise ValueError("Matrix-Game 2.0 score action tensor is shorter than "
+                                 "the requested streaming window: "
+                                 f"got={action.shape[1]}, required>={action_frame_end}")
+            return action[:, action_frame_start:action_frame_end]
+
+        return (
+            _slice_action(text_dict.get("keyboard_cond")),
+            _slice_action(text_dict.get("mouse_cond")),
+        )
+
+    def _get_optional_action(
+        self,
+        raw_batch: dict[str, Any],
+        *,
+        key: str,
+        expected_frames: int,
+        expected_dim: int,
+        dtype: torch.dtype,
+    ) -> torch.Tensor | None:
+        value = raw_batch.get(key)
+        if value is None or value.numel() == 0:
+            return None
+        # Actions must follow the same first-image window as the latent
+        # condition; allow only padded zero channels during format alignment.
+        value = self._align_action_feature_dim(
+            value,
+            name=key,
+            expected_dim=expected_dim,
+        )
+        if value.shape[1] < expected_frames:
+            raise ValueError(f"{key} has {value.shape[1]} frames but requires at least {expected_frames}")
+        return value[:, :expected_frames].to(device=self.device, dtype=dtype)
+
+    def prepare_validation_action_condition(
+        self,
+        action: torch.Tensor,
+        *,
+        name: str,
+    ) -> torch.Tensor:
+        channel = name.removesuffix("_cond")
+        action = self._align_action_feature_dim(
+            action,
+            name=name,
+            expected_dim=self._expected_action_dim(channel),
+        )
+        if name == "keyboard_cond":
+            pipeline_config = getattr(self.training_config, "pipeline_config", None)
+            keyboard_value_scale = getattr(pipeline_config, "keyboard_value_scale", 1.0)
+            action = scale_keyboard_condition(action, float(keyboard_value_scale))
+        return action
+
     def post_process_validation_frames(
         self,
         frames: list[Any],
@@ -252,21 +388,29 @@ class MatrixGame2Model(WanModel):
             mouse_cond=action.get("mouse"),
         )
 
+    def _expected_action_dim(self, channel: str) -> int:
+        action_config = getattr(self.transformer, "action_config", {}) or {}
+        return int(action_config.get(f"{channel}_dim_in", 0) or 0)
 
-    def _get_optional_action(
+    def _align_action_feature_dim(
         self,
-        raw_batch: dict[str, Any],
+        action: torch.Tensor,
         *,
-        key: str,
-        expected_frames: int,
-        dtype: torch.dtype,
-    ) -> torch.Tensor | None:
-        value = raw_batch.get(key)
-        if value is None or value.numel() == 0:
-            return None
-        if value.shape[1] < expected_frames:
-            raise ValueError(f"{key} has {value.shape[1]} frames but requires at least {expected_frames}")
-        return value[:, :expected_frames].to(device=self.device, dtype=dtype)
+        name: str,
+        expected_dim: int,
+    ) -> torch.Tensor:
+        if expected_dim <= 0:
+            return action
+        actual_dim = int(action.shape[-1])
+        if actual_dim == expected_dim:
+            return action
+        if actual_dim > expected_dim:
+            extra = action[..., expected_dim:]
+            if bool(torch.count_nonzero(extra).item() == 0):
+                return action[..., :expected_dim]
+            raise ValueError(f"{name} feature dim mismatch: got={actual_dim}, "
+                             f"expected={expected_dim}, and trailing channels are not all zero.")
+        raise ValueError(f"{name} feature dim mismatch: got={actual_dim}, expected={expected_dim}")
 
     def _expected_action_frames(self, num_latent_t: int) -> int:
         return (num_latent_t - 1) * self._temporal_compression_ratio() + 1

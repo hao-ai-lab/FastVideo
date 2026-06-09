@@ -111,6 +111,7 @@ def parse_multi_phased_distill_schedule(
         parts = [part.strip() for part in raw.split(",") if part.strip()]
         for idx, part in enumerate(parts):
             fields = [field.strip() for field in part.split(":")]
+            end_step: int | None
             if len(fields) == 2:
                 start_step = previous_end
                 end_step = _as_int(
@@ -315,7 +316,6 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             default_streaming_max_length=default_max,
         )
         self._streaming_state: _StreamingState | None = None
-        self._streaming_debug_log = bool(mcfg.get("streaming_debug_log", False))
         self._streaming_anchor_inject_k = int(
             get_optional_int(
                 mcfg,
@@ -324,6 +324,29 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             ) or 1)
         if self._streaming_anchor_inject_k < 1:
             raise ValueError("method.streaming_anchor_inject_k must be >= 1")
+        reencode_anchor_raw = mcfg.get("streaming_reencode_overlap_anchor", True)
+        if reencode_anchor_raw is None:
+            reencode_anchor_raw = True
+        self._streaming_reencode_overlap_anchor = _as_bool(
+            reencode_anchor_raw,
+            where="method.streaming_reencode_overlap_anchor",
+        )
+        require_full_blocks_raw = mcfg.get("streaming_require_full_blocks", False)
+        if require_full_blocks_raw is None:
+            require_full_blocks_raw = False
+        self._streaming_require_full_blocks = _as_bool(
+            require_full_blocks_raw,
+            where="method.streaming_require_full_blocks",
+        )
+        real_score_cfg_raw = mcfg.get("real_score_cfg", True)
+        if real_score_cfg_raw is None:
+            real_score_cfg_raw = True
+        self._real_score_cfg = _as_bool(
+            real_score_cfg_raw,
+            where="method.real_score_cfg",
+        )
+        self._score_min_timestep = self._score_timestep_from_ratio("min_timestep_ratio")
+        self._score_max_timestep = self._score_timestep_from_ratio("max_timestep_ratio")
 
         max_stage_latents = max(s.num_latent_t for s in self._distill_stages)
         if max_stage_latents > default_num_latent_t:
@@ -358,6 +381,10 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             dict[str, Any],
             dict[str, LogScalar],
     ]:
+        batch = self._with_padded_first_frame_latent(
+            batch,
+            target_latent_frames=int(self.training_config.data.num_latent_t),
+        )
         training_batch = self.student.prepare_batch(
             batch,
             generator=self.cuda_generator,
@@ -409,6 +436,13 @@ class StreamingLongTuningMethod(SelfForcingMethod):
                 "generator_pred_video": pred_x0.detach(),
                 "streaming_chunk_mask": chunk_mask.detach(),
             }
+            self.student.backward(
+                generator_loss,
+                student_ctx,
+                grad_accum_rounds=self._gradient_accumulation_steps(),
+            )
+            generator_loss = generator_loss.detach()
+            student_ctx = None
 
         fake_score_loss, critic_ctx, critic_outputs = (self._critic_flow_matching_loss_for_x0(
             pred_x0.detach(),
@@ -426,7 +460,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         outputs: dict[str, Any] = dict(generator_outputs)
         outputs.update(critic_outputs)
         outputs["_fv_backward"] = {
-            "update_student": update_student,
+            "update_student": False,
             "student_ctx": student_ctx,
             "critic_ctx": critic_ctx,
         }
@@ -480,6 +514,13 @@ class StreamingLongTuningMethod(SelfForcingMethod):
                 training_batch,
                 chunk_mask=chunk_mask,
             )
+            self.student.backward(
+                generator_loss,
+                student_ctx,
+                grad_accum_rounds=self._gradient_accumulation_steps(),
+            )
+            generator_loss = generator_loss.detach()
+            student_ctx = None
 
         with torch.no_grad():
             generator_pred_x0 = self._student_rollout(
@@ -496,7 +537,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         total_loss = generator_loss + fake_score_loss
         outputs: dict[str, Any] = dict(critic_outputs)
         outputs["_fv_backward"] = {
-            "update_student": update_student,
+            "update_student": False,
             "student_ctx": student_ctx,
             "critic_ctx": critic_ctx,
         }
@@ -530,6 +571,10 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             metrics,
         )
 
+    def _gradient_accumulation_steps(self) -> int:
+        loop_config = getattr(self.training_config, "loop", None)
+        return max(1, int(getattr(loop_config, "gradient_accumulation_steps", 1) or 1))
+
     def _student_rollout_streaming(
         self,
         batch: Any,
@@ -548,6 +593,10 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         if (state is None or state.stage != stage or not self._can_generate_more(state)):
             if state is not None:
                 self.student.clear_caches(cache_tag=state.cache_tag)
+            raw_batch = self._with_padded_first_frame_latent(
+                raw_batch,
+                target_latent_frames=int(self.training_config.data.num_latent_t),
+            )
             training_batch = self.student.prepare_batch(
                 raw_batch,
                 generator=self.cuda_generator,
@@ -568,6 +617,37 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             )
             self._streaming_state = state
         return state
+
+    def _with_padded_first_frame_latent(
+        self,
+        raw_batch: dict[str, Any],
+        *,
+        target_latent_frames: int,
+    ) -> dict[str, Any]:
+        first_frame_latent = raw_batch.get("first_frame_latent")
+        if first_frame_latent is None:
+            return raw_batch
+        if first_frame_latent.ndim != 5:
+            raise ValueError("first_frame_latent must have shape [B, C, T, H, W], "
+                             f"got {tuple(first_frame_latent.shape)}")
+        target_latent_frames = int(target_latent_frames)
+        if first_frame_latent.shape[2] >= target_latent_frames:
+            return raw_batch
+
+        # Long tuning passes first-frame-only MatrixGame I2V condition as a full-length latent tensor.
+        pad_frames = target_latent_frames - int(first_frame_latent.shape[2])
+        pad = torch.zeros(
+            first_frame_latent.shape[0],
+            first_frame_latent.shape[1],
+            pad_frames,
+            first_frame_latent.shape[3],
+            first_frame_latent.shape[4],
+            device=first_frame_latent.device,
+            dtype=first_frame_latent.dtype,
+        )
+        batch = dict(raw_batch)
+        batch["first_frame_latent"] = torch.cat([first_frame_latent, pad], dim=2)
+        return batch
 
     def _can_generate_more(self, state: _StreamingState) -> bool:
         max_length = self._stage_max_length(state.stage)
@@ -615,9 +695,18 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         if current + new_frames > max_length:
             raise RuntimeError("Streaming chunk would exceed max length")
 
+        rollout_block_size = int(self._chunk_size)
+        if rollout_block_size <= 0:
+            raise ValueError("method.chunk_size must be positive")
+        if self._streaming_require_full_blocks and new_frames % rollout_block_size != 0:
+            raise ValueError("Streaming new-frame count must be divisible by "
+                             "method.chunk_size: "
+                             f"new_frames={new_frames}, "
+                             f"chunk_size={rollout_block_size}")
+
         denoising_steps = self._get_denoising_step_list(device)
         num_steps = int(denoising_steps.numel())
-        noisy_block = torch.randn(
+        noise_full = torch.randn(
             (
                 batch_size,
                 new_frames,
@@ -629,24 +718,107 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             dtype=dtype,
             generator=self.cuda_generator,
         )
-        exit_idx = self._sample_exit_indices(
-            num_blocks=1,
+
+        block_lengths: list[int] = []
+        remaining_block_frames = int(new_frames)
+        while remaining_block_frames > 0:
+            current_block = min(rollout_block_size, remaining_block_frames)
+            block_lengths.append(current_block)
+            remaining_block_frames -= current_block
+
+        exit_indices = self._sample_exit_indices(
+            num_blocks=len(block_lengths),
             num_steps=num_steps,
             device=device,
-        )[0]
+        )
+        block0_exit_idx = int(exit_indices[0])
+        denoised_from, denoised_to = self._get_self_forcing_timestep_bounds(
+            denoising_steps,
+            block0_exit_idx,
+        )
 
-        pred_x0_chunk: torch.Tensor | None = None
-        for step_idx, current_timestep in enumerate(denoising_steps):
-            timestep_block = current_timestep * torch.ones(
-                (batch_size, new_frames),
-                device=device,
-                dtype=torch.float32,
-            )
-            exit_flag = step_idx == int(exit_idx)
-            enable_grad = bool(with_grad) and torch.is_grad_enabled()
+        denoised_blocks: list[torch.Tensor] = []
+        local_start = 0
+        for block_idx, block_frames in enumerate(block_lengths):
+            block_start = current + local_start
+            noisy_block = noise_full[:, local_start:local_start + block_frames]
+            exit_idx = int(exit_indices[block_idx])
+            pred_x0_block: torch.Tensor | None = None
 
-            if not exit_flag:
-                with torch.no_grad():
+            for step_idx, current_timestep in enumerate(denoising_steps):
+                timestep_block = current_timestep * torch.ones(
+                    (batch_size, block_frames),
+                    device=device,
+                    dtype=torch.float32,
+                )
+                exit_flag = step_idx == exit_idx
+                enable_grad = (bool(with_grad) and bool(self._enable_gradient_in_rollout) and torch.is_grad_enabled())
+
+                if not exit_flag:
+                    with torch.no_grad():
+                        pred_noise = self.student.predict_noise_streaming(
+                            noisy_block,
+                            timestep_block,
+                            batch,
+                            conditional=True,
+                            cache_tag=state.cache_tag,
+                            store_kv=False,
+                            cur_start_frame=block_start,
+                            cfg_uncond=self._cfg_uncond,
+                            attn_kind="vsa",
+                        )
+                        if pred_noise is None:
+                            raise RuntimeError("predict_noise_streaming returned None")
+                        pred_x0_block = pred_noise_to_pred_video(
+                            pred_noise=pred_noise.flatten(0, 1),
+                            noise_input_latent=noisy_block.flatten(0, 1),
+                            timestep=timestep_block,
+                            scheduler=self._sf_scheduler,
+                        ).unflatten(0, pred_noise.shape[:2])
+
+                    if step_idx + 1 >= num_steps:
+                        break
+                    next_timestep = denoising_steps[step_idx + 1]
+                    if self._student_sample_type == "sde":
+                        noisy_block = self._sf_add_noise(
+                            pred_x0_block,
+                            torch.randn(
+                                pred_x0_block.shape,
+                                device=device,
+                                dtype=pred_x0_block.dtype,
+                                generator=self.cuda_generator,
+                            ),
+                            next_timestep * torch.ones(
+                                (batch_size, block_frames),
+                                device=device,
+                                dtype=torch.float32,
+                            ),
+                        )
+                    else:
+                        next_timestep_block = next_timestep * torch.ones(
+                            (batch_size, block_frames),
+                            device=device,
+                            dtype=torch.float32,
+                        )
+                        sigma_cur = self._timestep_to_sigma(timestep_block).view(
+                            batch_size,
+                            block_frames,
+                            1,
+                            1,
+                            1,
+                        )
+                        sigma_next = self._timestep_to_sigma(next_timestep_block).view(
+                            batch_size,
+                            block_frames,
+                            1,
+                            1,
+                            1,
+                        )
+                        eps = (noisy_block - (1 - sigma_cur) * pred_x0_block) / sigma_cur.clamp_min(1e-8)
+                        noisy_block = (1 - sigma_next) * pred_x0_block + sigma_next * eps
+                    continue
+
+                with torch.set_grad_enabled(enable_grad):
                     pred_noise = self.student.predict_noise_streaming(
                         noisy_block,
                         timestep_block,
@@ -654,90 +826,74 @@ class StreamingLongTuningMethod(SelfForcingMethod):
                         conditional=True,
                         cache_tag=state.cache_tag,
                         store_kv=False,
-                        cur_start_frame=current,
+                        cur_start_frame=block_start,
                         cfg_uncond=self._cfg_uncond,
                         attn_kind="vsa",
                     )
                     if pred_noise is None:
                         raise RuntimeError("predict_noise_streaming returned None")
-                    pred_x0_chunk = pred_noise_to_pred_video(
+                    pred_x0_block = pred_noise_to_pred_video(
                         pred_noise=pred_noise.flatten(0, 1),
                         noise_input_latent=noisy_block.flatten(0, 1),
                         timestep=timestep_block,
                         scheduler=self._sf_scheduler,
                     ).unflatten(0, pred_noise.shape[:2])
+                break
 
-                if step_idx + 1 >= num_steps:
-                    break
-                next_timestep = denoising_steps[step_idx + 1]
-                noisy_block = self._sf_add_noise(
-                    pred_x0_chunk,
+            if pred_x0_block is None:
+                raise RuntimeError("Streaming rollout produced no block")
+            denoised_blocks.append(pred_x0_block)
+
+            with torch.no_grad():
+                context_timestep = torch.ones(
+                    (batch_size, block_frames),
+                    device=device,
+                    dtype=torch.float32,
+                ) * float(self._context_noise)
+                context_latents = self._sf_add_noise(
+                    pred_x0_block.detach(),
                     torch.randn(
-                        pred_x0_chunk.shape,
+                        pred_x0_block.shape,
                         device=device,
-                        dtype=pred_x0_chunk.dtype,
+                        dtype=pred_x0_block.dtype,
                         generator=self.cuda_generator,
                     ),
-                    next_timestep * torch.ones(
-                        (batch_size, new_frames),
-                        device=device,
-                        dtype=torch.float32,
-                    ),
+                    context_timestep,
                 )
-                continue
 
-            with torch.set_grad_enabled(enable_grad):
-                pred_noise = self.student.predict_noise_streaming(
-                    noisy_block,
-                    timestep_block,
+                _ = self.student.predict_noise_streaming(
+                    context_latents,
+                    context_timestep,
                     batch,
                     conditional=True,
                     cache_tag=state.cache_tag,
-                    store_kv=False,
-                    cur_start_frame=current,
+                    store_kv=True,
+                    cur_start_frame=block_start,
                     cfg_uncond=self._cfg_uncond,
                     attn_kind="vsa",
                 )
-                if pred_noise is None:
-                    raise RuntimeError("predict_noise_streaming returned None")
-                pred_x0_chunk = pred_noise_to_pred_video(
-                    pred_noise=pred_noise.flatten(0, 1),
-                    noise_input_latent=noisy_block.flatten(0, 1),
-                    timestep=timestep_block,
-                    scheduler=self._sf_scheduler,
-                ).unflatten(0, pred_noise.shape[:2])
-            break
 
-        if pred_x0_chunk is None:
+            local_start += block_frames
+
+        if not denoised_blocks:
             raise RuntimeError("Streaming rollout produced no chunk")
-
-        with torch.no_grad():
-            context_timestep = torch.zeros(
-                (batch_size, new_frames),
-                device=device,
-                dtype=torch.float32,
-            )
-            _ = self.student.predict_noise_streaming(
-                pred_x0_chunk.detach(),
-                context_timestep,
-                batch,
-                conditional=True,
-                cache_tag=state.cache_tag,
-                store_kv=True,
-                cur_start_frame=current,
-                cfg_uncond=self._cfg_uncond,
-                attn_kind="vsa",
-            )
+        pred_x0_chunk = torch.cat(denoised_blocks, dim=1)
+        batch.denoised_timestep_from = denoised_from
+        batch.denoised_timestep_to = denoised_to
 
         if overlap > 0 and state.previous_latents is not None:
-            anchor_source = torch.cat(
-                [state.previous_latents.detach(), pred_x0_chunk],
-                dim=1,
-            )
-            full_chunk = self._process_first_frame_anchor(
-                anchor_source,
-                target_latents=chunk_size,
-            )
+            overlap_latents = state.previous_latents[:, -overlap:].detach()
+            if self._streaming_reencode_overlap_anchor:
+                anchor_source = torch.cat(
+                    [state.previous_latents.detach(), pred_x0_chunk],
+                    dim=1,
+                )
+                full_chunk = self._process_first_frame_anchor(
+                    anchor_source,
+                    target_latents=chunk_size,
+                )
+            else:
+                full_chunk = torch.cat([overlap_latents, pred_x0_chunk], dim=1)
             chunk_mask = torch.zeros(
                 (batch_size, chunk_size, 1, 1, 1),
                 device=device,
@@ -753,6 +909,9 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             )
 
         state.current_length = current + new_frames
+        temporal_compression_ratio = int(self.training_config.pipeline_config.vae_config.arch_config.
+                                         temporal_compression_ratio  # type: ignore[union-attr]
+                                         )
         chunk_info = _StreamingChunkInfo(
             chunk_start=current - overlap,
             chunk_end=current + new_frames - 1,
@@ -763,25 +922,60 @@ class StreamingLongTuningMethod(SelfForcingMethod):
             current_length=state.current_length,
             max_length=max_length,
         )
-        history = (full_chunk.detach() if state.previous_latents is None else torch.cat(
-            [
-                state.previous_latents.detach(),
-                pred_x0_chunk.detach(),
-            ],
-            dim=1,
-        ))
-        state.previous_latents = history[:, -chunk_size:]
+        score_frame_start = max(0, current - overlap)
+        batch.matrixgame_streaming_chunk_info = {
+            "frame_start": score_frame_start,
+            "frame_end": score_frame_start + int(full_chunk.shape[1]),
+            "new_frame_start": int(overlap),
+            "new_frames": int(new_frames),
+            "gradient_mask": chunk_mask,
+            "condition_image_latents": None,
+            "condition_image_embeds": None,
+            "generator_chunk_start": int(current),
+            "generator_chunk_end": int(current + new_frames),
+            "generator_action_frame_end": int((current + new_frames - 1) * temporal_compression_ratio + 1),
+            "window_label": f"window_{score_frame_start}_{score_frame_start + int(full_chunk.shape[1])}",
+        }
+        state.previous_latents = full_chunk.detach()[:, -chunk_size:]
 
-        if self._streaming_debug_log and (not dist.is_initialized() or dist.get_rank() == 0):
+        if not dist.is_initialized() or dist.get_rank() == 0:
             print(
                 "[StreamingLong] "
                 f"stage={state.stage.name} start={current} "
                 f"new={new_frames} overlap={overlap} "
+                f"blocks={block_lengths} "
                 f"current_length={state.current_length}/{max_length}",
                 flush=True,
             )
 
         return full_chunk, chunk_mask, chunk_info
+
+    def _get_self_forcing_timestep_bounds(
+        self,
+        step_list: torch.Tensor,
+        exit_idx: int,
+    ) -> tuple[int | None, int | None]:
+        scheduler_timesteps = self._sf_scheduler.timesteps.to(
+            device=step_list.device,
+            dtype=torch.float32,
+        )
+        exit_idx = min(int(exit_idx), int(step_list.numel()) - 1)
+        denoising_timestep = step_list[exit_idx].to(dtype=scheduler_timesteps.dtype)
+        denoised_timestep_from = int(self.student.num_train_timesteps) - int(
+            torch.argmin(
+                (scheduler_timesteps - denoising_timestep).abs(),
+                dim=0,
+            ).item())
+        if exit_idx == int(step_list.numel()) - 1:
+            return denoised_timestep_from, 0
+
+        next_denoising_timestep = step_list[exit_idx + 1].to(dtype=scheduler_timesteps.dtype)
+        denoised_timestep_to = int(self.student.num_train_timesteps) - int(
+            torch.argmin(
+                (scheduler_timesteps - next_denoising_timestep).abs(),
+                dim=0,
+            ).item())
+        return denoised_timestep_from, denoised_timestep_to
 
     def _process_first_frame_anchor(
         self,
@@ -845,8 +1039,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
     ) -> torch.Tensor:
         latents = frames.permute(0, 2, 1, 3, 4).float()
         cfg = getattr(vae, "config", None)
-        if (cfg is not None and hasattr(cfg, "latents_mean")
-                and hasattr(cfg, "latents_std")):
+        if (cfg is not None and hasattr(cfg, "latents_mean") and hasattr(cfg, "latents_std")):
             latents_mean = torch.tensor(
                 cfg.latents_mean,
                 device=latents.device,
@@ -882,8 +1075,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         vae: Any,
     ) -> torch.Tensor:
         cfg = getattr(vae, "config", None)
-        if (cfg is not None and hasattr(cfg, "latents_mean")
-                and hasattr(cfg, "latents_std")):
+        if (cfg is not None and hasattr(cfg, "latents_mean") and hasattr(cfg, "latents_std")):
             latents_mean = torch.tensor(
                 cfg.latents_mean,
                 device=latents.device,
@@ -928,8 +1120,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         else:
             latent_dist = getattr(encoded, "latent_dist", None)
             if latent_dist is not None:
-                raw_latent = (latent_dist.mode() if hasattr(latent_dist, "mode") else
-                              latent_dist.mean)
+                raw_latent = (latent_dist.mode() if hasattr(latent_dist, "mode") else latent_dist.mean)
             else:
                 mean = getattr(encoded, "mean", None)
                 if not isinstance(mean, torch.Tensor):
@@ -949,16 +1140,14 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         if encoder is None:
             raise RuntimeError("Streaming first-frame anchor requires a VAE "
                                "loaded with encoder weights")
-        if (getattr(target, "use_feature_cache", False)
-                and not hasattr(target, "_enc_feat_map")):
+        if (getattr(target, "use_feature_cache", False) and not hasattr(target, "_enc_feat_map")):
             config = getattr(target, "config", None)
             if config is not None:
                 config.load_encoder = True
             clear_cache = getattr(target, "clear_cache", None)
             if callable(clear_cache):
                 clear_cache()
-        if (getattr(target, "use_feature_cache", False)
-                and not hasattr(target, "_enc_feat_map")):
+        if (getattr(target, "use_feature_cache", False) and not hasattr(target, "_enc_feat_map")):
             raise RuntimeError("Streaming first-frame anchor requires VAE "
                                "encoder feature-cache buffers")
 
@@ -987,15 +1176,13 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         update_student: bool,
         chunk_info: _StreamingChunkInfo,
     ) -> None:
-        if not self._streaming_debug_log:
-            return
         if dist.is_initialized() and dist.get_rank() != 0:
             return
 
         generator_state = "on" if update_student else "off"
         train_target = "generator+critic" if update_student else "critic"
         print(
-            "[LongLiveTrain] "
+            "[StreamingLong] "
             f"step={iteration} stage={stage.name} "
             f"chunk_latents={chunk_info.chunk_start}-{chunk_info.chunk_end} "
             f"train_latents={chunk_info.train_start}-{chunk_info.train_end} "
@@ -1122,15 +1309,11 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         chunk_mask: torch.Tensor | None,
     ) -> tuple[torch.Tensor, Any, dict[str, Any]]:
         device = generator_pred_x0.device
-        fake_score_timestep = torch.randint(
-            0,
-            int(self.student.num_train_timesteps),
-            [1],
+        batch_size = int(generator_pred_x0.shape[0])
+        fake_score_timestep = self._sample_score_timestep(
+            batch_size,
             device=device,
-            dtype=torch.long,
-            generator=self.cuda_generator,
         )
-        fake_score_timestep = self.student.shift_and_clamp_timestep(fake_score_timestep)
 
         noise = torch.randn(
             generator_pred_x0.shape,
@@ -1180,17 +1363,13 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         if guidance_scale is None:
             guidance_scale = 1.0
         device = generator_pred_x0.device
+        batch_size = int(generator_pred_x0.shape[0])
 
         with torch.no_grad():
-            timestep = torch.randint(
-                0,
-                int(self.student.num_train_timesteps),
-                [1],
+            timestep = self._sample_score_timestep(
+                batch_size,
                 device=device,
-                dtype=torch.long,
-                generator=self.cuda_generator,
             )
-            timestep = self.student.shift_and_clamp_timestep(timestep)
             noise = torch.randn(
                 generator_pred_x0.shape,
                 device=device,
@@ -1215,21 +1394,61 @@ class StreamingLongTuningMethod(SelfForcingMethod):
                 conditional=True,
                 attn_kind="dense",
             )
-            real_uncond_x0 = self._predict_x0_with_scheduler(
-                self.teacher,
-                noisy_latents,
-                timestep,
-                batch,
-                conditional=False,
-                attn_kind="dense",
-            )
-            real_cfg_x0 = (real_uncond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale)
-            denom = torch.abs(generator_pred_x0 - real_cfg_x0).mean()
+            if self._real_score_cfg:
+                real_uncond_x0 = self._predict_x0_with_scheduler(
+                    self.teacher,
+                    noisy_latents,
+                    timestep,
+                    batch,
+                    conditional=False,
+                    attn_kind="dense",
+                )
+                real_cfg_x0 = real_uncond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
+            else:
+                real_cfg_x0 = real_cond_x0
+            denom = torch.abs(generator_pred_x0.float() - real_cfg_x0.float(), ).mean(dim=[1, 2, 3, 4],
+                                                                                      keepdim=True).clamp_min(1e-6)
             grad = (faker_x0 - real_cfg_x0) / denom
             grad = torch.nan_to_num(grad)
 
         loss = 0.5 * (generator_pred_x0.float() - (generator_pred_x0.float() - grad.float()).detach())**2
         return self._masked_mean(loss, chunk_mask)
+
+    def _score_timestep_from_ratio(self, key: str) -> int | None:
+        ratio = get_optional_float(
+            self.method_config,
+            key,
+            where=f"method.{key}",
+        )
+        if ratio is None:
+            return None
+        if not 0.0 <= ratio <= 1.0:
+            raise ValueError(f"method.{key} must be in [0, 1], got {ratio}")
+        return int(round(float(ratio) * int(self.student.num_train_timesteps)))
+
+    def _sample_score_timestep(
+        self,
+        batch_size: int,
+        *,
+        device: torch.device,
+    ) -> torch.Tensor:
+        timestep = torch.randint(
+            0,
+            int(self.student.num_train_timesteps),
+            [batch_size],
+            device=device,
+            dtype=torch.long,
+            generator=self.cuda_generator,
+        )
+        timestep = self.student.shift_and_clamp_timestep(timestep)
+        min_timestep = self._score_min_timestep
+        max_timestep = self._score_max_timestep
+        if min_timestep is not None or max_timestep is not None:
+            timestep = timestep.clamp(
+                min=0 if min_timestep is None else int(min_timestep),
+                max=(int(self.student.num_train_timesteps) if max_timestep is None else int(max_timestep)),
+            )
+        return timestep
 
     def _masked_mean(
         self,

@@ -65,6 +65,12 @@ class _ValidationMetricStats:
 
 
 @dataclass(slots=True)
+class _SavedValidationVideos:
+    filenames: list[str] = field(default_factory=list)
+    indices: list[int] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class _ValidationMetricsConfig:
     enabled: bool = False
     names: list[str] = field(default_factory=list)
@@ -284,14 +290,14 @@ class ValidationCallback(Callback):
                     output_dir,
                     exist_ok=True,
                 )
-                local_video_filenames = self._save_validation_videos(
+                local_videos = self._save_validation_videos(
                     result.videos,
                     output_dir=output_dir,
                     step=step,
                     num_inference_steps=num_inference_steps,
                     fps=sp.fps,
                 )
-                local_overlay_video_filenames = self._save_validation_videos(
+                local_overlay_videos = self._save_validation_videos(
                     result.overlay_videos,
                     output_dir=output_dir,
                     step=step,
@@ -299,12 +305,34 @@ class ValidationCallback(Callback):
                     fps=sp.fps,
                     suffix="_overlay",
                 )
+                local_video_filenames = local_videos.filenames
+                local_overlay_video_filenames = local_overlay_videos.filenames
+                local_captions = self._select_by_indices(
+                    result.captions,
+                    local_videos.indices,
+                )
+                local_overlay_captions = self._select_by_indices(
+                    result.overlay_captions,
+                    local_overlay_videos.indices,
+                )
+                local_ref_videos = self._select_by_indices(
+                    result.ref_videos,
+                    local_videos.indices,
+                )
+                local_actions = self._select_by_indices(
+                    result.actions,
+                    local_videos.indices,
+                )
+                local_mouse_pitch_signs = self._select_by_indices(
+                    result.mouse_pitch_signs,
+                    local_videos.indices,
+                )
                 local_metric_stats = self._evaluate_validation_metrics(
                     video_filenames=local_video_filenames,
-                    captions=result.captions,
-                    ref_videos=result.ref_videos,
-                    actions=result.actions,
-                    mouse_pitch_signs=result.mouse_pitch_signs,
+                    captions=local_captions,
+                    ref_videos=local_ref_videos,
+                    actions=local_actions,
+                    mouse_pitch_signs=local_mouse_pitch_signs,
                     fps=sp.fps,
                     output_dir=output_dir,
                     step=step,
@@ -314,8 +342,8 @@ class ValidationCallback(Callback):
                 if self.global_rank == 0:
                     all_video_filenames = list(local_video_filenames)
                     all_overlay_video_filenames = list(local_overlay_video_filenames)
-                    all_captions = list(result.captions)
-                    all_overlay_captions = list(result.overlay_captions)
+                    all_captions = list(local_captions)
+                    all_overlay_captions = list(local_overlay_captions)
                     all_metric_stats = local_metric_stats
                     for sp_idx in range(1, num_sp_groups):
                         src = (sp_idx * self.sp_world_size)
@@ -357,7 +385,7 @@ class ValidationCallback(Callback):
                         dst=0,
                     )
                     self.world_group.send_object(
-                        result.captions,
+                        local_captions,
                         dst=0,
                     )
                     self.world_group.send_object(
@@ -365,7 +393,7 @@ class ValidationCallback(Callback):
                         dst=0,
                     )
                     self.world_group.send_object(
-                        result.overlay_captions,
+                        local_overlay_captions,
                         dst=0,
                     )
                     self.world_group.send_object(
@@ -386,8 +414,8 @@ class ValidationCallback(Callback):
         num_inference_steps: int,
         fps: int,
         suffix: str = "",
-    ) -> list[str]:
-        filenames: list[str] = []
+    ) -> _SavedValidationVideos:
+        saved = _SavedValidationVideos()
         for i, video in enumerate(videos):
             fname = os.path.join(
                 output_dir,
@@ -396,13 +424,34 @@ class ValidationCallback(Callback):
                 f"_rank_{self.global_rank}"
                 f"_video_{i}{suffix}.mp4",
             )
-            imageio.mimsave(
-                fname,
-                video,
-                fps=fps,
-            )
-            filenames.append(fname)
-        return filenames
+            # Validation video encoding can fail due transient ffmpeg or
+            # filesystem errors; skip the artifact so training can continue.
+            try:
+                imageio.mimsave(
+                    fname,
+                    video,
+                    fps=fps,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Failed to save validation video %s on rank %s; skipping artifact: %s",
+                    fname,
+                    self.global_rank,
+                    exc,
+                )
+                with contextlib.suppress(OSError):
+                    os.remove(fname)
+                continue
+            saved.filenames.append(fname)
+            saved.indices.append(i)
+        return saved
+
+    @staticmethod
+    def _select_by_indices(
+        values: list[Any],
+        indices: list[int],
+    ) -> list[Any]:
+        return [values[i] for i in indices if i < len(values)]
 
     def _log_validation_video_artifacts(
         self,
@@ -950,17 +999,10 @@ class ValidationCallback(Callback):
                 array,
                 dtype=torch.bfloat16,
             )
-            if name == "keyboard_cond":
-                student = getattr(self.method, "student", None)
-                align = getattr(student, "_align_action_feature_dim", None)
-                expected_dim_fn = getattr(student, "_expected_action_dim", None)
-                if align is not None:
-                    expected_dim = int(expected_dim_fn("keyboard")) if expected_dim_fn is not None else 0
-                    tensor = align(
-                        tensor,
-                        name=name,
-                        expected_dim=expected_dim,
-                    )
+            student = getattr(self.method, "student", None)
+            prepare_action = getattr(student, "prepare_validation_action_condition", None)
+            if prepare_action is not None:
+                tensor = prepare_action(tensor, name=name)
             tensor = tensor.unsqueeze(0)
             setattr(
                 batch,

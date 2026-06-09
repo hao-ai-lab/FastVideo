@@ -91,6 +91,27 @@ def _padding_q_k_v(tensor: torch.Tensor, padded_length: int) -> torch.Tensor:
     )
 
 
+def _retain_kv_with_sink(
+    k: torch.Tensor,
+    v: torch.Tensor,
+    target_len: int,
+    sink_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if k.shape[1] <= target_len or sink_size <= 0:
+        return k[:, -target_len:], v[:, -target_len:]
+
+    sink_len = min(int(sink_size), target_len, k.shape[1])
+    tail_len = target_len - sink_len
+    sink_k = k[:, :sink_len]
+    sink_v = v[:, :sink_len]
+    if tail_len <= 0:
+        return sink_k, sink_v
+
+    tail_k = k[:, sink_len:][:, -tail_len:]
+    tail_v = v[:, sink_len:][:, -tail_len:]
+    return torch.cat([sink_k, tail_k], dim=1), torch.cat([sink_v, tail_v], dim=1)
+
+
 def _update_kv_cache_and_attend(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -100,6 +121,7 @@ def _update_kv_cache_and_attend(
     start_frame: int,
     num_frame_per_block: int,
     local_attn_size: int,
+    sink_size: int,
     *,
     use_k_for_num_tokens: bool = False,
     store_first_only: bool = False,
@@ -133,7 +155,6 @@ def _update_kv_cache_and_attend(
         k.shape[1] if use_k_for_num_tokens else q.shape[1]
     ) == num_frame_per_block
 
-    sink_size = 0
     max_attention_size = local_attn_size
     sink_tokens = sink_size * 1
     kv_cache_size = kv_cache["k"].shape[1]
@@ -206,16 +227,22 @@ def _update_kv_cache_and_attend(
 
     # Store new k, v in cache
     if store_first_only:
-        kv_cache["k"][:, local_start_index:local_end_index] = k[:1]
-        kv_cache["v"][:, local_start_index:local_end_index] = v[:1]
+        kv_cache["k"][:, local_start_index:local_end_index] = k[
+            : kv_cache["k"].shape[0]
+        ]
+        kv_cache["v"][:, local_start_index:local_end_index] = v[
+            : kv_cache["v"].shape[0]
+        ]
     else:
         kv_cache["k"][:, local_start_index:local_end_index] = k
         kv_cache["v"][:, local_start_index:local_end_index] = v
 
-    # Retrieve from cache and perform attention
-    cache_start = max(0, local_end_index - max_attention_size)
-    cached_k = kv_cache["k"][:, cache_start:local_end_index]
-    cached_v = kv_cache["v"][:, cache_start:local_end_index]
+    cached_k, cached_v = _retain_kv_with_sink(
+        kv_cache["k"][:, :local_end_index],
+        kv_cache["v"][:, :local_end_index],
+        min(local_end_index, max_attention_size),
+        sink_tokens,
+    )
 
     if repeat_factor is not None:
         cached_k = cached_k.repeat(repeat_factor, 1, 1, 1)
@@ -261,6 +288,7 @@ class ActionModule(nn.Module):
         enable_mouse=True,
         enable_keyboard=True,
         local_attn_size=6,
+        sink_size=0,
         blocks: list | None = None,
     ):
         super().__init__()
@@ -274,6 +302,7 @@ class ActionModule(nn.Module):
         )
         blocks = blocks if blocks is not None else []
         self.local_attn_size = local_attn_size
+        self.sink_size = sink_size
         self.enable_mouse = enable_mouse
         self.enable_keyboard = enable_keyboard
 
@@ -565,6 +594,7 @@ class ActionModule(nn.Module):
                     start_frame,
                     num_frame_per_block,
                     self.local_attn_size,
+                    self.sink_size,
                     use_k_for_num_tokens=False,
                 )
         else:
@@ -689,6 +719,7 @@ class ActionModule(nn.Module):
                         start_frame,
                         num_frame_per_block,
                         self.local_attn_size,
+                        self.sink_size,
                         use_k_for_num_tokens=True,
                         store_first_only=True,
                         repeat_factor=S,
@@ -719,6 +750,7 @@ class ActionModule(nn.Module):
                         start_frame,
                         num_frame_per_block,
                         self.local_attn_size,
+                        self.sink_size,
                         use_k_for_num_tokens=True,
                     )
             else:
