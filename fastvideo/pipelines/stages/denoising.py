@@ -233,9 +233,8 @@ class DenoisingStage(PipelineStage):
         if is_lucy_edit:
             patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
             assert patch_size[0] == 1, "Lucy Edit timestep expansion assumes temporal patch size 1"
-            lucy_timestep_seq_len = (
-                latents.shape[2] * (latents.shape[3] // patch_size[1]) * (latents.shape[4] // patch_size[2])
-            )
+            lucy_timestep_seq_len = (latents.shape[2] * (latents.shape[3] // patch_size[1]) *
+                                     (latents.shape[4] // patch_size[2]))
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
