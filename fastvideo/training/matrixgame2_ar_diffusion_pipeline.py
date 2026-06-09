@@ -405,7 +405,6 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
         sampling_param.num_frames = num_frames
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
-            latents=None,
             generator=torch.Generator(device="cpu").manual_seed(self.seed),
             n_tokens=n_tokens,
             eta=0.0,
