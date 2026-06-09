@@ -510,8 +510,10 @@ def _register_configs() -> None:
             "FastVideo/Matrix-Game-2.0-Base-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
-            "mignonjia/mg_zelda",
-            "mignonjia/mg_zelda_longlive",
+            # Zelda World Model
+            "mignonjia/mg_longtuning_distilled_zelda", # distilled using self forcing with streaming long tuning
+            "mignonjia/mg_sf_distilled_zelda", # distilled using self forcing
+            "mignonjia/mg_causal_zelda", 
             "mignonjia/mg_bidirectional_zelda",
         ],
         model_detectors=[
@@ -519,9 +521,6 @@ def _register_configs() -> None:
                 "matrix-game-2",
                 "matrixgame2",
                 "matrix-game-2.0",
-                "mg_zelda",
-                "mg_bidirectional_zelda",
-                "mg-bidirectional-zelda",
             )),
         ],
         model_family="matrixgame",
