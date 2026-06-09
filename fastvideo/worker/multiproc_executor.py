@@ -138,7 +138,9 @@ class MultiprocExecutor(Executor):
         result_batch = ForwardBatch(data_type=forward_batch.data_type,
                                     output=output,
                                     logging_info=logging_info,
-                                    extra=extra)
+                                    extra=extra,
+                                    trajectory_latents=responses[0].get("trajectory_latents"),
+                                    trajectory_timesteps=responses[0].get("trajectory_timesteps"))
 
         return result_batch
 
@@ -699,6 +701,8 @@ class WorkerMultiprocProc:
                             "output_batch": result,
                             "logging_info": logging_info,
                             "extra": extra,
+                            "trajectory_latents": output_batch.trajectory_latents,
+                            "trajectory_timesteps": output_batch.trajectory_timesteps,
                         })
                     else:
                         result = self.worker.execute_method(method, *args, **kwargs)

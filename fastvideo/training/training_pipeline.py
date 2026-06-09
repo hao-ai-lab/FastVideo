@@ -690,7 +690,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         sampling_param.num_frames = num_frames
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
-            latents=None,
             generator=self.validation_random_generator,
             n_tokens=n_tokens,
             eta=0.0,
