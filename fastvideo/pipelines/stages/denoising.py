@@ -4,6 +4,7 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
+import os
 import weakref
 from collections.abc import Iterable
 from typing import Any
@@ -103,7 +104,37 @@ class DenoisingStage(PipelineStage):
         # TODO(will): make the precision configurable for inference
         # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        # Flux2-only denoising compensations.
+        #
+        # `_is_flux` gates four behaviors that exist because Flux2's transformer
+        # forward() does things internally that the generic pipeline must undo or
+        # match. These are architectural facts about the Flux2 transformer, not
+        # tunable precision policies (the precision policies #5/#6 — prompt-embed
+        # casting and scheduler-step placement — were already moved to config:
+        # DiTArchConfig.cast_prompt_embeds_to_dit_dtype and
+        # PipelineConfig.scheduler_step_in_fp32).
+        #
+        # The four behaviors gated below:
+        #   1. env-var bf16-reduced-precision matmul disable (4-step Klein drift)
+        #   2. autocast disabled (Flux2 long-sequence attention breaks parity under autocast)
+        #   3. guidance: skip the external x1000 (Flux2 multiplies guidance by 1000 internally)
+        #   4. timestep: divide by 1000 with cast-before-divide (Flux2 multiplies timestep by 1000 internally)
+        #
+        # Contract: `prefix == "Flux"` is set ONLY by Flux2 (fastvideo/configs/
+        # models/dits/flux_2.py). No other model uses that prefix, so this exact
+        # match cannot false-positive. A future Flux variant that needs the same
+        # compensations must either set prefix == "Flux" too, OR (preferred) these
+        # gates should graduate to arch-config declarations like the precision
+        # policies above.
+        _is_flux = (getattr(fastvideo_args.pipeline_config.dit_config, "prefix", "") == "Flux")
+        if _is_flux and os.getenv("FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION",
+                                  "").lower() in {"1", "true", "yes"}:
+            # Gate 1: tighten bf16 matmul accumulation for the 4-step Klein model (opt-in via env var).
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+        # Gate 2: Flux2 runs its bf16 transformer WITHOUT autocast — autocast perturbs long-sequence attention enough to break 4-step latent parity.
+        autocast_enabled = ((target_dtype != torch.float32) and not fastvideo_args.disable_autocast and not _is_flux)
+        scheduler_fp32 = getattr(fastvideo_args.pipeline_config, "scheduler_step_in_fp32", False)
+        local_device = get_local_torch_device()
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
@@ -159,13 +190,40 @@ class DenoisingStage(PipelineStage):
             },
         )
 
+        for key in ("flux2_txt_ids", "flux2_img_ids"):
+            value = batch.extra.get(key)
+            if torch.is_tensor(value):
+                batch.extra[key] = value.to(device=local_device)
+
+        flux2_id_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "txt_ids": batch.extra.get("flux2_txt_ids"),
+                "img_ids": batch.extra.get("flux2_img_ids"),
+            },
+        )
+
         # Get latents and embeddings
         latents = batch.latents
-        prompt_embeds = batch.prompt_embeds
+        cast_embeds = getattr(fastvideo_args.pipeline_config.dit_config, "cast_prompt_embeds_to_dit_dtype", False)
+        if cast_embeds:
+            prompt_embeds = [
+                embed.to(device=local_device, dtype=target_dtype) if torch.is_tensor(embed) else embed
+                for embed in batch.prompt_embeds
+            ]
+        else:
+            prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
+            if cast_embeds:
+                neg_prompt_embeds = [
+                    embed.to(device=local_device, dtype=target_dtype) if torch.is_tensor(embed) else embed
+                    for embed in neg_prompt_embeds
+                ]
+            else:
+                neg_prompt_embeds = batch.negative_prompt_embeds
             assert not torch.isnan(neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
@@ -216,13 +274,17 @@ class DenoisingStage(PipelineStage):
         # Hoisted out of the per-step loop: depends only on inputs that
         # are constant across denoising steps.
         use_meanflow = getattr(self.transformer.config, "use_meanflow", False)
+        # Gate 3: Flux2's transformer multiplies guidance by 1000 internally, so we
+        # skip the external *1000 pre-scaling for Flux models.
         embedded_cfg_scale = fastvideo_args.pipeline_config.embedded_cfg_scale
+        if _is_flux and embedded_cfg_scale is not None:
+            embedded_cfg_scale = batch.guidance_scale
         if embedded_cfg_scale is not None:
             guidance_expand = (torch.tensor(
                 [embedded_cfg_scale] * latents.shape[0],
                 dtype=torch.float32,
                 device=get_local_torch_device(),
-            ).to(target_dtype) * 1000.0)
+            ).to(target_dtype) * (1.0 if _is_flux else 1000.0))
         else:
             guidance_expand = None
         # V2V padding: zero-filled tensor concatenated with each step's
@@ -324,7 +386,19 @@ class DenoisingStage(PipelineStage):
                     t_expand = timestep.repeat(latent_model_input.shape[0], 1)
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
-                t_expand = t_expand.to(get_local_torch_device())
+                # Gate 4: Flux2 transformer multiplies timestep by 1000 internally, so
+                # the pipeline must pass timestep/1000 (matching Diffusers).
+                # Diffusers casts to the latent dtype before the division; doing
+                # the division in fp32 first changes BF16 rounding for the final
+                # Klein timestep and breaks latent parity.
+                if _is_flux:
+                    t_expand = t_expand.to(
+                        device=get_local_torch_device(),
+                        dtype=latent_model_input.dtype,
+                    )
+                    t_expand = t_expand / 1000.0
+                else:
+                    t_expand = t_expand.to(get_local_torch_device())
 
                 if use_meanflow:
                     if i == len(timesteps) - 1:
@@ -403,6 +477,7 @@ class DenoisingStage(PipelineStage):
                             **action_kwargs,
                             **camera_kwargs,
                             **timesteps_r_kwarg,
+                            **flux2_id_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -444,6 +519,7 @@ class DenoisingStage(PipelineStage):
                                     **action_kwargs,
                                     **camera_kwargs,
                                     **timesteps_r_kwarg,
+                                    **flux2_id_kwargs,
                                 )
                             _cfg_gate_fresh_uncond += 1
 
@@ -467,12 +543,16 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
-                    # Compute the previous noisy sample
+                if scheduler_fp32:
+                    # Diffusers-style: fp32 Euler update outside autocast avoids BF16 drift.
                     latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
-                    if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
-                        latents = latents.squeeze(0)
-                        latents = (1. - mask2[0]) * z + mask2[0] * latents
-                        # latents = latents.unsqueeze(0)
+                else:
+                    with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
+                        latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+                if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+                    latents = latents.squeeze(0)
+                    latents = (1. - mask2[0]) * z + mask2[0] * latents
+                    # latents = latents.unsqueeze(0)
 
                 # save trajectory latents if needed
                 if batch.return_trajectory_latents:
