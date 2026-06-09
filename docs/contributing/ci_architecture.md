@@ -103,6 +103,7 @@ failing test's output.
 | [Performance Tests](performance_benchmarks.md) | `performance` | 30 min |
 | API Server Tests | `api_server` | 30 min |
 | Train Framework Tests | `train_framework` | 30 min |
+| Eval Metrics Tests | `eval` | 90 min |
 
 If a Full Suite test fails, check the Buildkite build log for the failing step's output.
 Fix the regression, push, and comment `/merge` again to re-trigger.
@@ -281,6 +282,7 @@ Triggers a specific Buildkite test or suite on the current PR branch.
 | `/test performance` | Performance benchmarks | `performance` |
 | `/test api` | API server integration tests | `api_server` |
 | `/test train-framework` | `fastvideo.train` GPU model loading + per-method tests | `train_framework` |
+| `/test eval` | Eval metric regression vs upstream reference scores | `eval` |
 | `/test full` | Entire Full Suite | all (with `TEST_SCOPE=full`) |
 | `/test fastcheck` | Entire Fastcheck suite | fastcheck (with `TEST_SCOPE=fastcheck`) |
 | `/test pre-commit` | Pre-commit checks on PR code | — (runs `ci-precommit.yml` via `workflow_call`) |
