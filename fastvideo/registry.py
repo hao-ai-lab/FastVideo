@@ -44,6 +44,7 @@ from fastvideo.configs.pipelines.turbodiffusion import (
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
     FastWan2_2_TI2V_5B_Config,
+    LucyEditDevConfig,
     SelfForcingWan2_2_T2V480PConfig,
     SelfForcingWanT2V480PConfig,
     WANV2VConfig,
@@ -780,6 +781,18 @@ def _register_configs() -> None:
         ],
         model_family="wan",
         default_preset="fast_wan_2_2_ti2v_5b",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LucyEditDevConfig,
+        workload_types=(),
+        hf_model_paths=[
+            "decart-ai/Lucy-Edit-Dev",
+            "decart-ai/Lucy-Edit-1.1-Dev",
+        ],
+        model_detectors=[lambda path: "lucy-edit" in path.lower()],
+        model_family="wan",
+        default_preset="lucy_edit_dev",
     )
     register_configs(
         sampling_param_cls=None,
