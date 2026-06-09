@@ -1,15 +1,38 @@
 # World-Model: Matrix-Game 2.0 I2V
 
-Three training scenarios for the Matrix-Game 2.0 I2V world model on the
-new YAML-driven trainer (`fastvideo/train/entrypoint/train.py`).
+Training scenarios for the Matrix-Game 2.0 I2V world model on Minecraft and
+Zelda data, using the new YAML-driven trainer
+(`fastvideo/train/entrypoint/train.py`).
 
 | Config | Method | Student | Notes |
 |---|---|---|---|
 | `finetune_i2v.yaml` | `FineTuneMethod` | `MatrixGame2Model` (bidirectional) | Multi-step SFT from `mg_bidirectional_Solaris`. |
 | `dfsft_causal_i2v.yaml` | `DiffusionForcingSFTMethod` | `MatrixGame2CausalModel` | Diffusion-Forcing SFT with chunkwise timesteps. |
-| `self_forcing_causal_i2v_MG2.yaml` | `SelfForcingMethod` | `MatrixGame2CausalModel` | Matrix-Game 2.0 DMD/Self-Forcing distillation; teacher = bidirectional, critic = bidirectional. |
+| `self_forcing_causal_i2v.yaml` | `SelfForcingMethod` | `MatrixGame2CausalModel` | Matrix-Game 2.0 DMD/Self-Forcing distillation; teacher = bidirectional, critic = bidirectional. |
 | `self_forcing_causal_i2v_zelda.yaml` | `SelfForcingMethod` | `MatrixGame2CausalModel` | Zelda world model DMD/Self-Forcing distillation; teacher = bidirectional, critic = bidirectional. |
-| `streaming_long_tuning_causal_i2v.yaml` | `StreamingLongTuningMethod` | `MatrixGame2CausalModel` | Multi-stage self-forcing, then LongLive-style streaming long tuning. |
+| `streaming_long_tuning_causal_i2v.yaml` | `StreamingLongTuningMethod` | `MatrixGame2CausalModel` | LongLive-style streaming long tuning from the 1k-step Zelda self-forcing checkpoint. |
+
+Zelda world-model distillation is a two-run workflow: first run
+`self_forcing_causal_i2v_zelda.yaml` to train or load the 1k-step self-forcing
+checkpoint (`mignonjia/mg_sf_distilled_zelda_1k_steps`), then run
+`streaming_long_tuning_causal_i2v.yaml` for the 3k-step streaming long-tuning
+stage. The long-tuning YAML starts from that 1k-step checkpoint; it does not run
+the short self-forcing stage inside the same config.
+
+## Zelda Training Data
+
+The Zelda training configs use `data/zeldam2-clean` as a suggested local path.
+Download the dataset from Hugging Face before running those configs:
+
+```bash
+python scripts/huggingface/download_hf.py \
+    --repo_id mignonjia/zeldam2-clean \
+    --local_dir data/zeldam2-clean \
+    --repo_type dataset
+```
+
+You can store the dataset elsewhere; update `training.data.data_path` in the
+YAML to point at that location.
 
 ## Zelda Validation Data
 

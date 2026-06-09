@@ -47,7 +47,7 @@ training:
     hsdp_shard_dim: 8
 
   data:
-    data_path: /mnt/weka/home/hao.zhang/mhuo/wm-lab/zeldam2-v2-hf/zeldam2-clean
+    data_path: data/zeldam2-clean
     dataloader_num_workers: 4
     train_batch_size: 1
     training_cfg_rate: 0.0

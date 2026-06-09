@@ -468,7 +468,7 @@ class TestActionOverlay:
             fake_mimsave,
         )
 
-        filenames = cb._save_validation_videos(
+        saved = cb._save_validation_videos(
             [[np.zeros((2, 2, 3), dtype=np.uint8)]],
             output_dir=str(tmp_path),
             step=7,
@@ -477,10 +477,53 @@ class TestActionOverlay:
             suffix="_overlay",
         )
 
-        assert filenames == [
+        assert saved.filenames == [
             str(tmp_path / "validation_step_7_inference_steps_4_rank_3_video_0_overlay.mp4")
         ]
-        assert calls == [(filenames[0], 25)]
+        assert saved.indices == [0]
+        assert calls == [(saved.filenames[0], 25)]
+
+    def test_save_validation_videos_skips_failed_artifact(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cb = _make_callback()
+        cb.global_rank = 0
+        calls: list[str] = []
+
+        def fake_mimsave(
+            fname: str,
+            video: list[np.ndarray],
+            *,
+            fps: int,
+        ) -> None:
+            del video, fps
+            calls.append(fname)
+            if len(calls) == 1:
+                raise OSError("ffmpeg failed")
+
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.validation.imageio.mimsave",
+            fake_mimsave,
+        )
+
+        saved = cb._save_validation_videos(
+            [
+                [np.zeros((2, 2, 3), dtype=np.uint8)],
+                [np.ones((2, 2, 3), dtype=np.uint8)],
+            ],
+            output_dir=str(tmp_path),
+            step=8,
+            num_inference_steps=5,
+            fps=24,
+        )
+
+        assert saved.indices == [1]
+        assert saved.filenames == [
+            str(tmp_path / "validation_step_8_inference_steps_5_rank_0_video_1.mp4")
+        ]
+        assert len(calls) == 2
 
     def test_post_process_validation_frames_uses_student_hook(self) -> None:
         cb = _make_callback(overlay_actions=True)

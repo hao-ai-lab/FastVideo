@@ -323,6 +323,37 @@ Self-Forcing inherits all DMD2 parameters, plus:
 | `enable_gradient_in_rollout` | `true` | Enable backprop through rollout |
 | `start_gradient_frame` | `0` | Frame index where gradients begin |
 
+### Streaming Long Tuning
+
+`StreamingLongTuningMethod` extends Self-Forcing for LongLive-style rollouts. It
+keeps a streaming state, generates overlapping chunks, and trains only the new
+frames while preserving context from earlier chunks.
+
+For the MatrixGame2/Zelda world-model example, self-forcing and long tuning are
+separate runs: first train or load the 1k-step self-forcing checkpoint using `self_forcing_causal_i2v_zelda.yaml`, then run
+`streaming_long_tuning_causal_i2v.yaml` from that checkpoint for the 3k-step
+streaming long-tuning stage.
+
+```yaml
+method:
+  _target_: fastvideo.train.methods.distribution_matching.streaming_long_tuning.StreamingLongTuningMethod
+  streaming_chunk_size: 9
+  streaming_max_length: 39
+  streaming_fixed_overlap_latents: 3
+  streaming_reencode_overlap_anchor: true
+  streaming_anchor_inject_k: 1
+  streaming_require_full_blocks: true
+  multi_phased_distill_schedule:
+    - stage: streaming_long
+      start_step: 0
+      end_step: 3000
+      num_latent_t: 39
+      streaming_training: true
+```
+
+See `examples/train/scenario/worldmodel/streaming_long_tuning_causal_i2v.yaml`
+for a complete MatrixGame2/Zelda configuration.
+
 ---
 
 ## Callbacks

@@ -1297,7 +1297,7 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         batch.attn_metadata = None
         batch.attn_metadata_vsa = None
         build_metadata(batch)
-        batch.attn_metadata_vsa = copy.deepcopy(batch.attn_metadata)
+        batch.attn_metadata_vsa = copy.copy(batch.attn_metadata)
         if batch.attn_metadata is not None:
             batch.attn_metadata.VSA_sparsity = 0.0
 
