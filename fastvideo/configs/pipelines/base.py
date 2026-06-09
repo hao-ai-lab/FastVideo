@@ -69,8 +69,9 @@ class PipelineConfig:
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
 
-    # Wan2.2 TI2V parameters
+    # Wan2.2 task modifiers
     ti2v_task: bool = False
+    lucy_edit_task: bool = False
     boundary_ratio: float | None = None
 
     # Compilation
