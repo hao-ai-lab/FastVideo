@@ -117,6 +117,7 @@ class ValidationCallback(Callback):
         output_dir: str | None = None,
         sampling_timesteps: list[int] | None = None,
         overlay_actions: bool = False,
+        keyboard_value_scale: float = 1.0,
         **pipeline_kwargs: Any,
     ) -> None:
         self.pipeline_target = str(pipeline_target)
@@ -128,6 +129,8 @@ class ValidationCallback(Callback):
         self.output_dir = (str(output_dir) if output_dir is not None else None)
         self.sampling_timesteps = ([int(s) for s in sampling_timesteps] if sampling_timesteps is not None else None)
         self.overlay_actions = bool(overlay_actions)
+        # Validation-only action amplification for world model; training keeps raw action values.
+        self.keyboard_value_scale = float(keyboard_value_scale)
         metrics_config = pipeline_kwargs.pop("metrics", None)
         self.metrics_config = self._parse_metrics_config(metrics_config)
         self.pipeline_kwargs = dict(pipeline_kwargs)
@@ -1001,7 +1004,11 @@ class ValidationCallback(Callback):
             student = getattr(self.method, "student", None)
             prepare_action = getattr(student, "prepare_validation_action_condition", None)
             if prepare_action is not None:
-                tensor = prepare_action(tensor, name=name)
+                tensor = prepare_action(
+                    tensor,
+                    name=name,
+                    keyboard_value_scale=self.keyboard_value_scale,
+                )
             tensor = tensor.unsqueeze(0)
             setattr(
                 batch,

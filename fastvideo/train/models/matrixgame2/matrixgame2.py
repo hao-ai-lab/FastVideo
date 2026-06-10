@@ -358,6 +358,7 @@ class MatrixGame2Model(WanModel):
         action: torch.Tensor,
         *,
         name: str,
+        keyboard_value_scale: float = 1.0,
     ) -> torch.Tensor:
         channel = name.removesuffix("_cond")
         action = self._align_action_feature_dim(
@@ -366,8 +367,6 @@ class MatrixGame2Model(WanModel):
             expected_dim=self._expected_action_dim(channel),
         )
         if name == "keyboard_cond":
-            pipeline_config = getattr(self.training_config, "pipeline_config", None)
-            keyboard_value_scale = getattr(pipeline_config, "keyboard_value_scale", 1.0)
             action = scale_keyboard_condition(action, float(keyboard_value_scale))
         return action
 
