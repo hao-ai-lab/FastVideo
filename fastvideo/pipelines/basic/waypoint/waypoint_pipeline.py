@@ -321,8 +321,7 @@ class WaypointPipeline(ComposedPipelineBase):
             nf = batch.num_frames
             nf = (max(nf) if nf else 1) if isinstance(nf, list) else int(nf)
             n_buttons = getattr(fastvideo_args.pipeline_config, "n_buttons", 256)
-            # Zero only the missing tensor so a caller that supplies just one of
-            # keyboard_cond / mouse_cond does not have the provided one discarded.
+            # Zero only the missing tensor, so supplying just one isn't discarded.
             if keyboard is None:
                 logger.warning("Waypoint forward: missing keyboard_cond; using zeros for "
                                "%d frames", nf)
@@ -353,7 +352,6 @@ class WaypointPipeline(ComposedPipelineBase):
         if not self.post_init_called:
             self.post_init()
 
-        # Encode prompt using WaypointTextEncodingStage (reuse stages)
         text_encoder = self.get_module("text_encoder", None)
         tokenizer = self.get_module("tokenizer", None)
         prompt_emb = None
@@ -438,7 +436,6 @@ class WaypointPipeline(ComposedPipelineBase):
         device = next(transformer.parameters()).device
         dtype = self._waypoint_compute_dtype(transformer)
 
-        # Normalize action tensor shapes to [B, T, ...]
         if keyboard_action.dim() == 2:
             keyboard_action = keyboard_action.unsqueeze(0)
         if mouse_action.dim() == 2:
@@ -448,7 +445,6 @@ class WaypointPipeline(ComposedPipelineBase):
         assert mouse_action.dim() == 3, \
             "mouse_action must be [B,T,2] or [T,2]"
 
-        # Ensure same time length
         t = min(keyboard_action.shape[1], mouse_action.shape[1])
         keyboard_action = keyboard_action[:, :t].to(device=device, dtype=dtype)
         mouse_action = mouse_action[:, :t].to(device=device, dtype=dtype)
@@ -459,7 +455,6 @@ class WaypointPipeline(ComposedPipelineBase):
         mouse = mouse_action
         scroll = scroll_action
 
-        # Scheduler sigma schedule
         sigmas = torch.tensor(
             pipeline_config.scheduler_sigmas,
             device=device,
@@ -477,9 +472,8 @@ class WaypointPipeline(ComposedPipelineBase):
                 latent_w,
             )
 
-        # Prompt tensors are constant across the rollout; move them to the
-        # transformer device/dtype once (needed under CPU offload) instead of
-        # re-copying every frame.
+        # Prompt tensors are constant across the rollout; move to the transformer
+        # device/dtype once (needed under CPU offload) rather than per frame.
         prompt_emb = ctx.prompt_emb.to(device=device, dtype=dtype) if ctx.prompt_emb is not None else None
         prompt_pad_mask = ctx.prompt_pad_mask.to(device=device) if ctx.prompt_pad_mask is not None else None
 
@@ -503,11 +497,9 @@ class WaypointPipeline(ComposedPipelineBase):
                 device=device,
                 dtype=torch.long,
             )
-            # Index controls by the local step within THIS call's action tensor,
-            # not the global frame_index: with image seeding (frame_index starts
-            # at 1) or a second streaming_step (frame_index already large), the
-            # global index would drop/repeat actions. Equivalent to frame_index
-            # on the single-shot-from-0 path.
+            # Index controls by the local step within this call's action tensor,
+            # not the global frame_index (which, after image seeding or on a later
+            # streaming_step, would drop or repeat actions).
             ctrl_step = (min(local_i, mouse.shape[1] - 1) if mouse.shape[1] > 0 else 0)
 
             # StaticKVCache semantics: cache is read-only during denoise.
@@ -548,7 +540,6 @@ class WaypointPipeline(ComposedPipelineBase):
                         kv_cache=ctx.kv_cache,
                     )
 
-                # Accumulate in acc_dtype (fp32 default / bf16 if matching official)
                 x_acc = x_acc + (sigma_next - sigma_curr).to(acc_dtype) * v_pred.to(acc_dtype)
                 x = x_acc.to(dtype)
 
@@ -608,12 +599,11 @@ class WaypointPipeline(ComposedPipelineBase):
                 decoded = vae.decode(latent_in)
 
                 frame = (decoded.sample if hasattr(decoded, "sample") else decoded)
-                # Normalize to [B, C, H, W]
+                # Normalize to [B, C, H, W].
                 if frame.dim() == 3:
                     frame = frame.unsqueeze(0)
                 if frame.shape[-1] == 3:
                     frame = frame.permute(0, 3, 1, 2)
-                # Verify VAE output is full-res (e.g. 384x256), not latent res (32x32)
                 if ctx.frame_index == 0:
                     out_h, out_w = frame.shape[-2], frame.shape[-1]
                     if (out_h, out_w) == expected_spatial:
@@ -650,8 +640,7 @@ class WaypointPipeline(ComposedPipelineBase):
             ctx.frame_index += 1
 
         if generated_frames:
-            # Stack to [B, C, T, H, W]
-            ctx.batch.output = torch.stack(generated_frames, dim=2)
+            ctx.batch.output = torch.stack(generated_frames, dim=2)  # [B, C, T, H, W]
 
         return ctx.batch
 

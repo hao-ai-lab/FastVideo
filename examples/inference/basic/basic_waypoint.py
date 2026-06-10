@@ -24,7 +24,6 @@ def main():
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
-        max_kv_cache_frames=256,
     )
 
     keyboard_cond = torch.zeros((num_frames, 256))

@@ -37,13 +37,12 @@ from fastvideo.configs.models.dits.waypoint_transformer import (
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
-# Default config instance used for class-level attributes
 _DEFAULT_WAYPOINT_CONFIG = WaypointConfig()
 _DEFAULT_WAYPOINT_ARCH = _DEFAULT_WAYPOINT_CONFIG.arch_config
 
 if _FLEX_ATTN_AVAILABLE:
-    # Match the official Waypoint numerics: its compiled flex_attention runs
-    # the fp32 matmuls in tf32 (PyTorch's default "high" precision).
+    # Match official numerics: its compiled flex_attention runs the fp32 matmuls
+    # in tf32 (PyTorch's default "high" precision).
     torch.backends.cuda.matmul.allow_tf32 = True
     _flex_attention = torch.compile(
         flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
@@ -265,6 +264,10 @@ class OrthoRoPE(nn.Module):
         self.head_dim = head_dim
         # HF: spatial D/8 each (pixel_frequencies(D/8) -> D/16, repeat 2), temporal D/4
         assert head_dim // 8 + head_dim // 8 + head_dim // 4 == head_dim // 2
+        # This single RoPE is shared across all layers and applied to both q and
+        # k, so memoize the angles on the pos_ids dict identity (fresh per
+        # model.forward) to avoid recomputing them 2*n_layers times.
+        self._angle_cache: tuple[dict, torch.Tensor, torch.Tensor] | None = None
 
     def get_angles(
         self,
@@ -278,20 +281,17 @@ class OrthoRoPE(nn.Module):
         head_dim = self.head_dim
         max_freq = min(H, W) * 0.8
 
-        # HF: spatial_freqs = pixel_frequencies(head_dim//8, max_freq)  # [D/16]
         spatial_freqs = _pixel_frequencies(head_dim // 8, max_freq, device)
-        # HF: pos_x = linspace(-1+1/W, 1-1/W, W); we have integer x_pos in [0, W-1]
+        # Map integer x/y_pos in [0, W-1]/[0, H-1] to HF's pos = linspace(-1+1/W, 1-1/W, W).
         w1 = max(W - 1, 1)
         h1 = max(H - 1, 1)
         norm_x = (-1.0 + 1.0 / W) + (2.0 - 2.0 / W) * x_pos.float() / w1
         norm_y = (-1.0 + 1.0 / H) + (2.0 - 2.0 / H) * y_pos.float() / h1
-        # freqs_x: [B,L,D/16] then repeat_interleave(2) -> [B,L,D/8]
         angle_x = norm_x.unsqueeze(-1) * spatial_freqs.unsqueeze(0).unsqueeze(0)
         angle_x = angle_x.repeat_interleave(2, dim=-1)
         angle_y = norm_y.unsqueeze(-1) * spatial_freqs.unsqueeze(0).unsqueeze(0)
         angle_y = angle_y.repeat_interleave(2, dim=-1)
 
-        # HF: temporal_freqs = lang_frequencies(head_dim//4)  # [D/8]
         temporal_freqs = _lang_frequencies(head_dim // 4, device)
         angle_t = t_pos.float().unsqueeze(-1) * temporal_freqs.unsqueeze(0).unsqueeze(0)
         angle_t = angle_t.repeat_interleave(2, dim=-1)
@@ -314,19 +314,21 @@ class OrthoRoPE(nn.Module):
             y1 = x1 * cos + x0 * sin
             return cat((y0, y1), dim=-1)
         """
-        cos, sin = self.get_angles(
-            pos_ids["t_pos"],
-            pos_ids["y_pos"],
-            pos_ids["x_pos"],
-        )
-        # cos/sin: [B, L, head_dim/2] — one value per consecutive pair.
-        # Add head-dim broadcast: [B, L, 1, head_dim/2]
+        cache = self._angle_cache
+        if cache is not None and cache[0] is pos_ids:
+            cos, sin = cache[1], cache[2]
+        else:
+            cos, sin = self.get_angles(
+                pos_ids["t_pos"],
+                pos_ids["y_pos"],
+                pos_ids["x_pos"],
+            )
+            self._angle_cache = (pos_ids, cos, sin)
         cos = cos.unsqueeze(2)
         sin = sin.unsqueeze(2)
 
-        # unfold ALL of head_dim into consecutive pairs
         x_float = x.float()
-        x0, x1 = x_float.unfold(-1, 2, 2).unbind(-1)  # each [..., head_dim/2]
+        x0, x1 = x_float.unfold(-1, 2, 2).unbind(-1)
 
         y0 = x0 * cos - x1 * sin
         y1 = x1 * cos + x0 * sin
@@ -342,7 +344,7 @@ class MLPFusion(nn.Module):
 
     def __init__(self, d_model: int):
         super().__init__()
-        # Input is concatenation of x and cond, each d_model
+        # Input is the concatenation of x and cond (each d_model).
         self.mlp = _waypoint_mlp(2 * d_model, d_model, d_model)
     
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
@@ -357,13 +359,9 @@ class MLPFusion(nn.Module):
         N = cond.shape[1]
         tokens_per_frame = L // N
 
-        # Split fc_in weights for efficient computation (fc_in = first layer)
+        # Split fc_in weights so x and cond are fused without concatenating them.
         Wx, Wc = self.mlp.fc_in.weight.chunk(2, dim=1)
-
-        # Reshape x to [B, N, tokens_per_frame, D]
         x_reshaped = x.view(B, N, tokens_per_frame, D)
-
-        # Compute: fc_in_x(x) + fc_in_c(cond).unsqueeze(2)
         h = F.linear(x_reshaped, Wx) + F.linear(cond, Wc).unsqueeze(2)
         h = F.silu(h)
         y = F.linear(h, self.mlp.fc_out.weight)
@@ -474,7 +472,6 @@ class GatedSelfAttention(nn.Module):
         # With cache, use SDPA directly (DistributedAttention has no cache support).
         if kv_cache is None:
             if _FLEX_ATTN_AVAILABLE and _flex_attention is not None:
-                # Bidirectional spatial attention via flex_attention (like WanVideo)
                 padded_length = math.ceil(L / 128) * 128 - L
                 total_len = L + padded_length
                 block_mask = create_block_mask(
@@ -510,7 +507,6 @@ class GatedSelfAttention(nn.Module):
                     enable_gqa=(self.n_kv_heads != self.n_heads),
                 )[:, :, :L].transpose(1, 2)
             else:
-                # Fallback: DistributedAttention (sequence parallelism)
                 if self.n_kv_heads != self.n_heads:
                     rep = self.n_heads // self.n_kv_heads
                     k = k.repeat_interleave(rep, dim=2)
@@ -520,9 +516,9 @@ class GatedSelfAttention(nn.Module):
                 )
         elif kv_cache is not None:
             frame_t = int(pos_ids["t_pos"][0, 0].item())
-            k_t = k.transpose(1, 2)  # [B, n_kv_heads, L, head_dim]
+            k_t = k.transpose(1, 2)
             v_t = v.transpose(1, 2)
-            q_t = q.transpose(1, 2)  # [B, n_heads, L, head_dim]
+            q_t = q.transpose(1, 2)
             key, val, key_mask = self._upsert_kv_cache(
                 kv_cache, k_t, v_t, frame_t, update_cache
             )
@@ -560,8 +556,7 @@ class GatedSelfAttention(nn.Module):
                 )
             attn_out = attn_out.transpose(1, 2)  # [B, L, n_heads, head_dim]
 
-        # Official: gate attn output BEFORE out_proj
-        # attn_out is [B, L, n_heads, head_dim] here (already transposed)
+        # Official gates the attn output BEFORE out_proj.
         if self.gated_attn:
             gates, _ = self.gate_proj(x[..., : self.n_heads])
             gates = torch.sigmoid(gates)  # [B, L, n_heads]
@@ -612,11 +607,12 @@ class GatedSelfAttention(nn.Module):
 
         frozen_ref = kv_cache.get("frozen_ref")
         is_frozen = update_cache is False or (frozen_ref is not None and frozen_ref[0])
-        if not is_frozen:
-            dst = ring_idx if write_step else current_idx
-            cache_k.index_copy_(2, dst, k)
-            cache_v.index_copy_(2, dst, v)
-            written[dst] = True
+        # Persist into the ring bucket only on a write step; on a non-write step
+        # the destination is the tail (already written just above), so it's a no-op.
+        if not is_frozen and write_step:
+            cache_k.index_copy_(2, ring_idx, k)
+            cache_v.index_copy_(2, ring_idx, v)
+            written[ring_idx] = True
 
         return cache_k, cache_v, key_mask
 
@@ -634,19 +630,15 @@ class CrossAttention(nn.Module):
         self.d_model = d_model
         self.context_dim = context_dim
         self.head_dim = head_dim
-        # Calculate n_heads from context_dim and head_dim
         assert context_dim % head_dim == 0, f"context_dim {context_dim} must be divisible by head_dim {head_dim}"
         self.n_heads = context_dim // head_dim
 
-        # Q: project from d_model to context_dim
         self.q_proj = ReplicatedLinear(d_model, context_dim, bias=False)
-        # K, V: project from context_dim to context_dim
         self.k_proj = ReplicatedLinear(context_dim, context_dim, bias=False)
         self.v_proj = ReplicatedLinear(context_dim, context_dim, bias=False)
-        # Out: project from context_dim back to d_model
         self.out_proj = ReplicatedLinear(context_dim, d_model, bias=False)
 
-        # Use LocalAttention for cross-attention (local operation, no SP needed)
+        # LocalAttention: cross-attention is a local op, no sequence parallelism.
         self.attn = LocalAttention(
             num_heads=self.n_heads,
             head_size=self.head_dim,
@@ -717,23 +709,19 @@ class WaypointBlock(nn.Module):
             rope=rope,
         )
 
-        # Feed-forward MLP
         self.mlp = _waypoint_mlp(d_model, d_model * mlp_ratio, d_model)
-        
-        # Conditioning head (6 modulation vectors)
+        # CondHead emits 6 modulation vectors (scale/bias/gate × 2).
         self.cond_head = CondHead(d_model, noise_conditioning)
         
-        # Optional cross-attention for prompts (every prompt_conditioning_period layers)
+        # Prompt cross-attention / control fusion run only every Nth layer.
         do_prompt_cond = (
             prompt_conditioning is not None
             and layer_idx % prompt_conditioning_period == 0
         )
         self.prompt_cross_attn = (
-            CrossAttention(d_model, prompt_embedding_dim)  # Uses head_dim=64 internally
+            CrossAttention(d_model, prompt_embedding_dim)
             if do_prompt_cond else None
         )
-        
-        # Optional MLPFusion for controls (every ctrl_conditioning_period layers)
         do_ctrl_cond = layer_idx % ctrl_conditioning_period == 0
         self.ctrl_mlpfusion = MLPFusion(d_model) if do_ctrl_cond else None
     
@@ -767,22 +755,19 @@ class WaypointBlock(nn.Module):
             x, pos_ids=pos_emb, kv_cache=kv_cache, update_cache=update_cache
         )
         x = ada_gate(x, g0) + residual
-        
-        # Cross-attention for prompts
+
         if self.prompt_cross_attn is not None and prompt_emb is not None:
             x = self.prompt_cross_attn(
                 rms_norm(x),
                 context=rms_norm(prompt_emb),
                 context_pad_mask=prompt_pad_mask,
             ) + x
-        
-        # MLPFusion for controls
+
         if self.ctrl_mlpfusion is not None and ctrl_emb is not None:
             x = self.ctrl_mlpfusion(rms_norm(x), rms_norm(ctrl_emb)) + x
-        
-        # MLP with AdaLN
+
         x = ada_gate(self.mlp(ada_rmsnorm(x, s1, b1)), g1) + x
-        
+
         return x
 
 
@@ -881,30 +866,24 @@ class WaypointWorldModel(BaseDiT):
         self.hidden_size = config.d_model
         self.num_attention_heads = config.n_heads
         self.num_channels_latents = config.channels
-        
-        # Timestep/noise conditioning
+
         self.denoise_step_emb = NoiseConditioner(config.d_model)
-        
-        # Controller input embedding
         self.ctrl_emb = ControllerInputEmbedding(
             config.n_buttons, config.d_model, config.mlp_ratio
         )
-        
-        # CFG modules
+
         if config.ctrl_conditioning is not None:
             self.ctrl_cfg = CFG(config.d_model, config.ctrl_cond_dropout)
         else:
             self.ctrl_cfg = None
-            
+
         if config.prompt_conditioning is not None:
             self.prompt_cfg = CFG(config.prompt_embedding_dim, config.prompt_cond_dropout)
         else:
             self.prompt_cfg = None
-        
-        # Main transformer
+
         self.transformer = WaypointTransformer(config)
-        
-        # Patch embedding and output
+
         self.patch = tuple(config.patch)
         ph, pw = self.patch
         
@@ -971,34 +950,30 @@ class WaypointWorldModel(BaseDiT):
                 "Pipeline must use latent_h,w so that (H//ph)*(W//pw)==tokens_per_frame."
             )
 
-        # Noise conditioning
         cond = self.denoise_step_emb(sigma)  # [B, N, d_model]
-        
-        # Control embedding
+
         if button is not None:
             ctrl_emb = self.ctrl_emb(mouse, button, scroll)  # [B, N, d_model]
             if self.ctrl_cfg is not None:
                 ctrl_emb = self.ctrl_cfg(ctrl_emb)
         else:
             ctrl_emb = None
-        
-        # Prompt CFG
+
         if prompt_emb is not None and self.prompt_cfg is not None:
             prompt_emb = self.prompt_cfg(prompt_emb)
-        
+
         # Patchify: [B, N, C, H, W] -> [B, N*Hp*Wp, d_model]
         x = x.reshape(B * N, C, H, W)
-        x = self.patchify(x)  # [B*N, d_model, Hp, Wp]
+        x = self.patchify(x)
         x = x.view(B, N, self.config.d_model, Hp, Wp)
         x = x.permute(0, 1, 3, 4, 2).reshape(B, N * Hp * Wp, self.config.d_model)
 
-        # Position IDs for RoPE: t_pos, y_pos, x_pos each [B, L]
-        # Official uses grid indices 0..width-1 and 0..height-1 (NOT multiplied
-        # by patch size). The OrthoRoPE normalises to [-1,1] internally.
+        # RoPE position ids use raw grid indices 0..Wp-1 / 0..Hp-1 (NOT scaled by
+        # patch size); OrthoRoPE normalises to [-1, 1] internally.
         L = N * Hp * Wp
         idx = torch.arange(Hp * Wp, device=x.device, dtype=torch.long)
-        y_xy = idx // Wp       # 0..Hp-1  (matches official idx.div(width))
-        x_xy = idx % Wp        # 0..Wp-1  (matches official idx.remainder(width))
+        y_xy = idx // Wp
+        x_xy = idx % Wp
         y_pos = (
             y_xy.unsqueeze(0).unsqueeze(0).expand(B, N, -1).reshape(B, L)
         )
@@ -1016,9 +991,7 @@ class WaypointWorldModel(BaseDiT):
         )
 
         x = F.silu(self.out_norm(x, cond))
-        x, _ = self.unpatchify(x)  # [B, N*Hp*Wp, C*ph*pw]
-        
-        # Reshape back to image
+        x, _ = self.unpatchify(x)
         x = x.view(B, N, Hp, Wp, C, ph, pw)
         x = x.permute(0, 1, 4, 2, 5, 3, 6).reshape(B, N, C, H, W)
         

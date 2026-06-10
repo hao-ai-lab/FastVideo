@@ -120,7 +120,6 @@ def test_waypoint_similarity(prompt, ATTENTION_BACKEND, model_id):
         vae_cpu_offload=False,
         text_encoder_cpu_offload=False,
         pin_cpu_memory=True,
-        max_kv_cache_frames=num_frames + 64,
     )
 
     keyboard_cond = torch.zeros((num_frames, 256), dtype=torch.float32)
