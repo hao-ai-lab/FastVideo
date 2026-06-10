@@ -21,6 +21,22 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 logger = init_logger(__name__)
 
 
+def calculate_dynamic_shift_mu(
+    image_seq_len: int,
+    base_seq_len: int = 256,
+    max_seq_len: int = 4096,
+    base_shift: float = 0.5,
+    max_shift: float = 1.15,
+) -> float:
+    """Resolution-dependent flow-match mu.
+
+    Shared by SD3.5 and Ovis-Image timestep preparation.
+    """
+    m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
+    b = base_shift - m * base_seq_len
+    return float(image_seq_len) * m + b
+
+
 class TimestepPreparationStage(PipelineStage):
     """
     Stage for preparing timesteps for the diffusion process.
@@ -141,18 +157,6 @@ class SD35TimestepPreparationStage(TimestepPreparationStage):
     resolution-dependent `mu` value and passes it to `set_timesteps()`.
     """
 
-    @staticmethod
-    def _calculate_mu(
-        image_seq_len: int,
-        base_seq_len: int = 256,
-        max_seq_len: int = 4096,
-        base_shift: float = 0.5,
-        max_shift: float = 1.15,
-    ) -> float:
-        m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
-        b = base_shift - m * base_seq_len
-        return float(image_seq_len) * m + b
-
     def forward(
         self,
         batch: ForwardBatch,
@@ -190,7 +194,7 @@ class SD35TimestepPreparationStage(TimestepPreparationStage):
                 self.scheduler.set_timesteps(
                     batch.num_inference_steps,
                     device=device,
-                    mu=self._calculate_mu(
+                    mu=calculate_dynamic_shift_mu(
                         image_seq_len=image_seq_len,
                         base_seq_len=base_seq_len,
                         max_seq_len=max_seq_len,
@@ -213,18 +217,6 @@ class OvisImageTimestepPreparationStage(TimestepPreparationStage):
     at 1024² and change every denoised sample.
     """
 
-    @staticmethod
-    def _calculate_shift(
-        image_seq_len: int,
-        base_seq_len: int = 256,
-        max_seq_len: int = 4096,
-        base_shift: float = 0.5,
-        max_shift: float = 1.15,
-    ) -> float:
-        m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
-        b = base_shift - m * base_seq_len
-        return image_seq_len * m + b
-
     def forward(
         self,
         batch: ForwardBatch,
@@ -239,7 +231,7 @@ class OvisImageTimestepPreparationStage(TimestepPreparationStage):
         image_seq_len = (batch.height // 16) * (batch.width // 16)
 
         cfg = getattr(self.scheduler, "config", None)
-        mu = self._calculate_shift(
+        mu = calculate_dynamic_shift_mu(
             image_seq_len,
             int(getattr(cfg, "base_image_seq_len", 256)),
             int(getattr(cfg, "max_image_seq_len", 4096)),

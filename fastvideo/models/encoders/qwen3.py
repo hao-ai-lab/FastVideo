@@ -174,13 +174,6 @@ class OvisQwen3Attention(nn.Module):
         self.q_norm = RMSNorm(self.head_dim, eps=arch.rms_norm_eps)
         self.k_norm = RMSNorm(self.head_dim, eps=arch.rms_norm_eps)
 
-        # Sliding window (layer-dependent in Qwen3)
-        layer_types = arch.layer_types or []
-        layer_type = (layer_types[layer_idx]
-                      if layer_idx < len(layer_types) else "full_attention")
-        self.sliding_window = (arch.sliding_window
-                               if layer_type == "sliding_attention" else None)
-
     @staticmethod
     def _repeat_kv(hidden: torch.Tensor, n_rep: int) -> torch.Tensor:
         if n_rep == 1:

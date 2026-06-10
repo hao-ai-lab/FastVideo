@@ -26,16 +26,12 @@ class OvisImageTransformer2DModelArchConfig(DiTArchConfig):
 
     joint_attention_dim: int = 2048
     axes_dims_rope: list[int] = field(default_factory=lambda: [16, 56, 56])
+    mlp_ratio: float = 4.0
 
     num_channels_latents: int = 16  # in_channels=64 is this packed 16*4
 
     _fsdp_shard_conditions: list = field(default_factory=lambda: [_is_double_block, _is_single_block])
     _compile_conditions: list = field(default_factory=lambda: [_is_double_block, _is_single_block])
-
-    # Native attr names match HF, so all mappings are identity.
-    param_names_mapping: dict = field(default_factory=dict)
-    reverse_param_names_mapping: dict = field(default_factory=dict)
-    lora_param_names_mapping: dict = field(default_factory=dict)
 
 
 @dataclass

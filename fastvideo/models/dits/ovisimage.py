@@ -163,14 +163,14 @@ class OvisAdaLayerNormContinuous(nn.Module):
 
 
 
-class OvisGEGLUFeedForward(nn.Module):
+class OvisSwiGLUFeedForward(nn.Module):
     """Feed-forward for double-stream blocks. The ModuleList indices mirror
     Diffusers `ff.net` (0=proj, 1=dropout, 2=down) so weights load by name."""
 
     def __init__(self, hidden_size: int, ff_dim: int):
         super().__init__()
         self.net = nn.ModuleList([
-            _GEGLUGateUp(hidden_size, ff_dim),
+            _SwiGLUGateUp(hidden_size, ff_dim),
             nn.Identity(),
             nn.Linear(ff_dim, hidden_size, bias=True),
         ])
@@ -179,7 +179,7 @@ class OvisGEGLUFeedForward(nn.Module):
         return self.net[2](self.net[0](x))
 
 
-class _GEGLUGateUp(nn.Module):
+class _SwiGLUGateUp(nn.Module):
     """SwiGLU gate+up projection: proj -> [hidden, gate], return hidden*silu(gate)."""
 
     def __init__(self, in_features: int, out_features: int):
@@ -314,12 +314,12 @@ class OvisImageDoubleStreamBlock(nn.Module):
         super().__init__()
         self.norm1 = OvisAdaLayerNormZero(hidden_size)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.ff = OvisGEGLUFeedForward(hidden_size, ff_dim)
+        self.ff = OvisSwiGLUFeedForward(hidden_size, ff_dim)
 
         self.norm1_context = OvisAdaLayerNormZero(hidden_size)
         self.norm2_context = nn.LayerNorm(hidden_size, elementwise_affine=False,
                                           eps=1e-6)
-        self.ff_context = OvisGEGLUFeedForward(hidden_size, ff_dim)
+        self.ff_context = OvisSwiGLUFeedForward(hidden_size, ff_dim)
 
         self.attn = _OvisDoubleAttn(hidden_size, num_heads, head_dim,
                                     supported_attention_backends,
@@ -458,7 +458,7 @@ class OvisImageTransformer2DModel(BaseDiT):
         self.out_channels = out_channels
         self.in_channels = in_channels
 
-        ff_dim = hidden_size * 4
+        ff_dim = int(hidden_size * arch.mlp_ratio)
 
         self.x_embedder = nn.Linear(in_channels, hidden_size, bias=True)
         # Text encoder output is RMSNorm'd before projection (matches Diffusers).
@@ -485,7 +485,7 @@ class OvisImageTransformer2DModel(BaseDiT):
                 hidden_size=hidden_size,
                 num_heads=num_heads,
                 head_dim=head_dim,
-                mlp_ratio=4.0,
+                mlp_ratio=arch.mlp_ratio,
                 supported_attention_backends=self._supported_attention_backends,
                 prefix=f"single_transformer_blocks.{i}",
             ) for i in range(num_single_layers)
@@ -540,12 +540,8 @@ class OvisImageTransformer2DModel(BaseDiT):
         t_emb = _timestep_embedding(timestep, self._freq_dim).to(img.dtype)
         temb = self.timestep_embedder(t_emb)
 
-        img_ids = kwargs.get("img_ids")
-        txt_ids = kwargs.get("txt_ids")
-        if img_ids is None:
-            img_ids = _prepare_img_ids(H // 2, W // 2, hidden_states.device)
-        if txt_ids is None:
-            txt_ids = _prepare_txt_ids(txt_seq, hidden_states.device)
+        img_ids = _prepare_img_ids(H // 2, W // 2, hidden_states.device)
+        txt_ids = _prepare_txt_ids(txt_seq, hidden_states.device)
 
         # Joint RoPE, txt-first then img (matches Diffusers ordering).
         joint_ids = torch.cat([txt_ids, img_ids], dim=0)
@@ -575,3 +571,6 @@ class OvisImageTransformer2DModel(BaseDiT):
             output = output.unsqueeze(2)
 
         return output
+
+
+EntryClass = OvisImageTransformer2DModel

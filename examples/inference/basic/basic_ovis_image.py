@@ -21,6 +21,7 @@ def main():
     # Using local path to the downloaded model
     generator = VideoGenerator.from_pretrained(
         "AIDC-AI/Ovis-Image-7B",
+        workload_type="t2i",
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=False,

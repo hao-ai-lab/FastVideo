@@ -36,8 +36,9 @@ device_reference_folder = resolve_device_reference_folder(
 MODEL_ID = "AIDC-AI__Ovis-Image-7B"
 
 TEST_PROMPTS = [
-    'A vibrant poster with the text "FAST VIDEO" written in bold red letters '
-    "on a clean white background. Professional design, high contrast, 4k quality.",
+    "A vibrant travel poster with the bold word EXPLORE in large clean sans-serif "
+    "letters above a sunny mountain landscape, professional layout, high contrast, "
+    "sharp typography, 4k quality",
 ]
 
 OVIS_PARAMS = {

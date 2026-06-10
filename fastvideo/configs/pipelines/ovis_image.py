@@ -34,7 +34,7 @@ def qwen3_postprocess_text(outputs: BaseEncoderOutput, mask: torch.Tensor) -> tu
 class OvisImageT2IConfig(PipelineConfig):
     """Ovis-Image-7B T2I config (Qwen3 / Ovis2.5-2B text encoder)."""
 
-    embedded_cfg_scale: float = 5.0
+    embedded_cfg_scale: float | None = None
     flow_shift: float = 3.0
 
     dit_config: DiTConfig = field(default_factory=OvisImageTransformer2DModelConfig)
