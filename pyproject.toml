@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastvideo"
-version = "0.1.7"
+version = "0.2.0"
 description = "FastVideo"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,18 +15,18 @@ classifiers = [
 
 dependencies = [
     # Core Libraries
-    "scipy==1.14.1",
-    "six==1.16.0",
-    "h5py==3.12.1",
+    "scipy>=1.14.1",
+    "six>=1.16.0",
+    "h5py>=3.12.1",
     "requests>=2.32.2",
 
     # Machine Learning & Transformers
-    "transformers==4.57.3",
+    "transformers>=4.57.3",
     "tokenizers>=0.20.1",
-    "sentencepiece==0.2.0",
-    "timm==1.0.11",
+    "sentencepiece>=0.2.0",
+    "timm>=1.0.11",
     "peft>=0.15.0",
-    "diffusers>=0.33.1",
+    "diffusers>=0.38.0",
     "torch==2.11.0",
     "torchvision",
     "torchaudio",
@@ -35,21 +35,21 @@ dependencies = [
     "accelerate==1.0.1",
 
     # Computer Vision & Image Processing
-    "opencv-python==4.10.0.84",
+    "opencv-python>=4.10.0.84",
     "pillow>=10.3.0",
-    "imageio==2.36.0",
-    "imageio-ffmpeg==0.5.1",
+    "imageio>=2.36.0",
+    "imageio-ffmpeg>=0.5.1",
     "einops",
 
     # Experiment Tracking & Logging
     "wandb>=0.21.0",
     "loguru",
-    "test-tube==0.7.5",
+    "test-tube>=0.7.5",
     
     # Miscellaneous Utilities
     "tqdm",
     "pytest",
-    "PyYAML==6.0.1",
+    "PyYAML>=6.0.1",
     "protobuf>=5.28.3",
     "gradio==5.32.0",
     "moviepy>=2.0.0",
@@ -73,17 +73,17 @@ dependencies = [
     # Training Dependencies
     "torchdata",
     "pyarrow",
-    "datasets==4.0.0",
+    "datasets>=4.0.0",
     "av",
 
     # Preprocessing Dependencies
     "torchcodec",
     "ray>=2.49.1",
-    "ftfy==6.3.1",
+    "ftfy>=6.3.1",
 
     # Job Runner
-    "fastapi==0.129.0",
-    "uvicorn==0.41.0"
+    "fastapi>=0.129.0",
+    "uvicorn>=0.41.0"
 ]
 
 [tool.uv]
@@ -106,6 +106,7 @@ torchaudio = [
   { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
 imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
+flash-attn-cute = { git = "https://github.com/XOR-op/flash-attention.git", branch = "fa4-compile", subdirectory = "flash_attn/cute" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -130,7 +131,7 @@ lint = [
 
 test = [
     "av",
-    "pytorch-msssim==1.0.0",
+    "pytorch-msssim>=1.0.0",
     "pytest",
     "pandas",
     "plotly",
@@ -142,10 +143,13 @@ test = [
 # separately as documented in the README. decord has no aarch64 wheels
 # (upstream effectively unmaintained); it's split into its own extra so
 # the main eval extras install on ARM systems too. eval/io/video.py has
-# a PyAV fallback that covers the video-decode path without decord.
+# a PyAV fallback that covers the video-decode path without decord. The
+# judge.* metrics (eval-judge) call a remote API and need a key, so they
+# are opt-in and intentionally kept out of the default [eval] set.
 eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
 eval-physics-iq = []
 eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "pytorchvideo"]
+eval-judge = ["google-genai"]
 eval = [
     "lpips", "ptlflow", "qwen-vl-utils",
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
@@ -170,9 +174,12 @@ streaming = [
 ]
 
 dreamverse = [
-    "uvicorn[standard]==0.41.0",
+    "uvicorn[standard]>=0.41.0",
     "cerebras-cloud-sdk",
-    "flash-attn-cute @ git+https://github.com/XOR-op/flash-attention.git@fa4-compile#subdirectory=flash_attn/cute",
+    # PyPI forbids direct URL deps in published metadata; pin the fork via
+    # [tool.uv.sources] above (same pattern as imagebind) so the wheel stays
+    # publishable while uv workspace installs still get the fork.
+    "flash-attn-cute",
     "flashinfer-python",
     "openai>=1.40",
 ]
