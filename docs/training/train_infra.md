@@ -161,6 +161,18 @@ training:
     decay_interval_steps: 0
 ```
 
+`training.data.data_path` can also mix multiple preprocessed datasets by using a mapping from dataset path to repeat count:
+
+```yaml
+training:
+  data:
+    data_path:
+      data/zeldam2-clean: 1
+      data/multi3d_games: 2
+```
+
+The repeat count duplicates that dataset's parquet file list before shuffling/sampling, so the example above trains with roughly twice as much `multi3d_games` exposure as `zeldam2-clean`. Paths are just suggested locations; use any local path that contains a FastVideo preprocessed parquet dataset.
+
 ### `callbacks` — Pluggable hooks
 
 Callbacks run at specific points in the training loop (before/after optimizer

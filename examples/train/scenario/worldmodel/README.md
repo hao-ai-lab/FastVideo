@@ -34,6 +34,24 @@ python scripts/huggingface/download_hf.py \
 You can store the dataset elsewhere; update `training.data.data_path` in the
 YAML to point at that location.
 
+## Multi3D Training Data
+
+`finetune_i2v.yaml` also mixes in multi-game data from `data/multi3d_games`.
+On the internal cluster, create the suggested local path with:
+
+```bash
+ln -s /mnt/weka/home/hao.zhang/alex/wm-lab/datas/datasets/multi3d_games \
+    data/multi3d_games
+```
+
+You can store this dataset elsewhere; update the matching
+`training.data.data_path` key in the YAML.
+
+To mix datasets in a training YAML, set `training.data.data_path` to a
+path-to-repeat-count mapping. For example, `finetune_i2v.yaml` uses
+`data/zeldam2-clean: 1` and `data/multi3d_games: 2`, which repeats the
+multi-game parquet list twice before training samples are shuffled.
+
 ## Zelda Validation Data
 
 The Zelda validation configs expect a small public validation bundle under

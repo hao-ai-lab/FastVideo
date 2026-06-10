@@ -22,7 +22,7 @@ class DistributedConfig:
 
 @dataclass(slots=True)
 class DataConfig:
-    data_path: str = ""
+    data_path: str | list[str] | dict[str, int] = ""
     train_batch_size: int = 1
     dataloader_num_workers: int = 0
     training_cfg_rate: float = 0.0
