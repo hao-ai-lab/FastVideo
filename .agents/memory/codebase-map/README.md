@@ -117,6 +117,30 @@ FastVideo-WorldModel/
 | `TOKENIZERS_PARALLELISM` | Set `false` to avoid fork warnings |
 | `HF_HOME` | HuggingFace cache directory |
 
+## RL Reward Runtime Vendoring
+
+Commit `78b6995e` (`WIP: vendor HPSv3 and VideoAlign reward runtimes`) added
+vendored runtime code under `fastvideo/train/methods/rl/reward/HPSv3` and
+`fastvideo/train/methods/rl/reward/VideoAlign`, replacing broken gitlinks with
+normal tracked files.
+
+The provenance and porting rules live in the vendor package markers:
+`fastvideo/train/methods/rl/reward/HPSv3/__init__.py`,
+`fastvideo/train/methods/rl/reward/HPSv3/hpsv3/__init__.py`, and
+`fastvideo/train/methods/rl/reward/VideoAlign/__init__.py`.
+
+The FastVideo wrapper scripts `hpsv3.py` and `videoalign.py` depend on these
+vendored packages through explicit package imports. The copied runtime files
+are ported faithfully from upstream, with only import-path changes needed for
+package importability; this means some third-party code is unrelated to
+FastVideo internals but remains faithful to the source.
+
+Known follow-ups from commit `78b6995e`: the vendored code was not expected to
+pass pre-commit at that commit. VideoAlign also assumed checkpoint artifacts
+already existed under its checkpoints path or the configured
+`VIDEOALIGN_CHECKPOINT_PATH`; later work resolved the default checkpoint path by
+downloading the `KlingTeam/VideoReward` Hugging Face snapshot.
+
 ## Build & Test Commands
 
 ```bash

@@ -1,0 +1,60 @@
+# Model Configuration
+rm_head_type: "ranknet"
+lora_enable: False
+vision_lora: False
+freeze_vision_tower: False
+freeze_llm: False
+tune_merger: True                     
+model_name_or_path: "Qwen/Qwen2-VL-7B-Instruct"
+num_lora_modules: -1
+lora_r: 512
+lora_alpha: 1024
+lora_namespan_exclude: ['lm_head', 'rm_head', 'embed_tokens']
+
+# Data Configuration
+confidence_threshold: 0.95
+tied_threshold: null
+max_pixels: 200704 # 256 * 28 * 28
+min_pixels: 200704
+with_instruction: true
+
+train_json_list:
+  - example_train.json
+test_json_list:
+  - ["Valid Set 1", ["example_set_1_part1.json", "example_set_1_part2.json"]]
+  - ['Valid Set 2',["example_set_2_part1.json"]]
+
+soft_label: False
+output_dir: output_models
+use_special_tokens: true
+reward_token: "special"
+output_dim: 2
+loss_type: "uncertainty"
+
+# Training Configuration
+disable_flash_attn2: False
+per_device_train_batch_size: 2
+per_device_eval_batch_size: 8
+gradient_accumulation_steps: 4
+num_train_epochs: 10
+learning_rate: 2.0e-6
+special_token_lr: 2.0e-6
+warmup_ratio: 0.05
+lr_scheduler_type: "constant_with_warmup"
+gradient_checkpointing: True
+gradient_checkpointing_kwargs: {"use_reentrant": False}
+
+# Evaluation and Logging
+eval_strategy: "steps"
+logging_epochs: 0.01
+eval_epochs: 0.1
+save_epochs: 0.1
+report_to: tensorboard
+
+# System Configuration
+bf16: True
+torch_dtype: "bfloat16"
+deepspeed: hpsv3/config/ds_config/zero2.json
+save_only_model: True
+save_full_model: True
+dataloader_num_workers: 8

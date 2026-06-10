@@ -216,6 +216,15 @@ disallow_untyped_calls = true
 check_untyped_defs = true
 follow_imports = "silent"
 
+[[tool.mypy.overrides]]
+module = [
+    "fastvideo.train.methods.rl.reward.HPSv3.*",
+    "fastvideo.train.methods.rl.reward.VideoAlign.*",
+    "*.fastvideo.train.methods.rl.reward.HPSv3.*",
+    "*.fastvideo.train.methods.rl.reward.VideoAlign.*",
+]
+ignore_errors = true
+
 [tool.codespell]
 # ``*/_vendored/*`` matches upstream-provenance files vendored under any
 # ``_vendored/`` subdir (project-wide convention; mirrors the
