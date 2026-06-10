@@ -243,7 +243,9 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
         image_grid_thw = inputs["image_grid_thw"]
         num_condition_images = image_grid_thw.shape[0] - 1
         source_grids = image_grid_thw[:num_condition_images]
-        embed = torch.cat(self.vision_language_encoder.get_image_features(inputs["pixel_values"], source_grids), dim=0)
+        image_features = self.vision_language_encoder.get_image_features(inputs["pixel_values"], source_grids)
+        image_feature_parts = getattr(image_features, "pooler_output", image_features)
+        embed = torch.cat(image_feature_parts, dim=0)
         src_ids_d32 = self.vision_language_encoder.get_image_tokens(embed, source_grids)
         split_sizes = source_grids.prod(dim=-1).tolist()
         upsampled = [
