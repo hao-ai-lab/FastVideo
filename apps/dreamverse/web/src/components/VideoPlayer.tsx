@@ -161,6 +161,7 @@ export default function VideoPlayer({
 							}}
 							size="icon"
 							variant="outline"
+							aria-label={canShare ? "Share video" : "Download video"}
 							className="absolute top-3 left-3 z-10 cursor-pointer bg-slate-800/50 text-white/90 shadow-md backdrop-blur-sm transition-all border-white/30 hover:bg-slate-800/85 hover:border-white/50 hover:text-white hover:scale-105"
 						>
 							{canShare ? <Share className="size-5" /> : <Download className="size-5" />}

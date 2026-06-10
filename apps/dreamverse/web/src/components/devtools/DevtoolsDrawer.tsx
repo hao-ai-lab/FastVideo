@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import LoraControls from '@/components/devtools/LoraControls';
 
 interface DevtoolsDrawerProps {
   editableMode?: boolean;
@@ -126,6 +127,8 @@ export default function DevtoolsDrawer({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
+        <LoraControls />
+
         {/* Prompt window memory */}
         <details className="group overflow-hidden rounded-2xl border border-border bg-card shadow-sm" open>
           <summary className="flex cursor-pointer list-none items-start justify-between gap-4 px-5 py-4">

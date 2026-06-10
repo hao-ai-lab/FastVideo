@@ -50,6 +50,14 @@ const nextConfig: NextConfig = {
         source: '/curated-presets/:path*',
         destination: `${backendUrl}/curated-presets/:path*`,
       },
+      {
+        source: '/lora',
+        destination: `${backendUrl}/lora`,
+      },
+      {
+        source: '/lora/:path*',
+        destination: `${backendUrl}/lora/:path*`,
+      },
     ];
   } }),
   webpack: (config) => {

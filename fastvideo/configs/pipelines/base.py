@@ -35,6 +35,11 @@ class PipelineConfig:
     flow_shift: float | None = None
     flow_shift_sr: float | None = None
     disable_autocast: bool = False
+    # When True, the scheduler's Euler update runs in fp32 outside the autocast
+    # block (Diffusers-style; avoids BF16 drift over multiple steps). Flux2 sets
+    # this True for reference parity; other models keep the legacy in-autocast
+    # behavior to preserve existing SSIM references.
+    scheduler_step_in_fp32: bool = False
     is_causal: bool = False
 
     # Model configuration
@@ -64,8 +69,9 @@ class PipelineConfig:
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
 
-    # Wan2.2 TI2V parameters
+    # Wan2.2 task modifiers
     ti2v_task: bool = False
+    lucy_edit_task: bool = False
     boundary_ratio: float | None = None
 
     # Compilation
