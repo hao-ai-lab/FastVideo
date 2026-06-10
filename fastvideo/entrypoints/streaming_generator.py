@@ -88,8 +88,10 @@ class StreamingVideoGenerator(VideoGenerator):
                  fastvideo_args: FastVideoArgs,
                  executor_class: type[Executor],
                  log_stats: bool,
-                 use_queue_mode: bool = True):
-        super().__init__(fastvideo_args, executor_class, log_stats)
+                 use_queue_mode: bool = True,
+                 *,
+                 log_queue=None):
+        super().__init__(fastvideo_args, executor_class, log_stats, log_queue=log_queue)
         self.accumulated_frames: list[np.ndarray] = []
         self.sampling_param: SamplingParam | None = None
         self.batch: ForwardBatch | None = None
@@ -99,12 +101,13 @@ class StreamingVideoGenerator(VideoGenerator):
         self.block_idx: int = 0
 
     @classmethod
-    def from_fastvideo_args(cls, fastvideo_args: FastVideoArgs) -> "StreamingVideoGenerator":
+    def from_fastvideo_args(cls, fastvideo_args: FastVideoArgs, *, log_queue=None) -> "StreamingVideoGenerator":
         executor_class = Executor.get_class(fastvideo_args)
         return cls(
             fastvideo_args=fastvideo_args,
             executor_class=executor_class,
             log_stats=False,
+            log_queue=log_queue,
         )
 
     def reset(

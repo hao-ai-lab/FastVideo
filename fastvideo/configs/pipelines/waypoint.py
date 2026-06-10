@@ -82,6 +82,13 @@ class WaypointT2VConfig(PipelineConfig):
     # Use >= num_steps to avoid eviction; 64 is default, 128 avoids eviction for 120-frame runs.
     max_kv_cache_frames: int = 128
 
+    # Faithful-to-official denoise: the official does no latent renormalization
+    # and accumulates the rectified-flow ODE in bf16. The original port added a
+    # smooth std-normalization + fp32 accumulation to stabilize the (then-buggy)
+    # flat KV cache; with the correct per-layer cache they hurt fidelity.
+    disable_latent_norm: bool = True
+    bf16_denoise: bool = True
+
     def __post_init__(self):
         # Waypoint doesn't use standard VAE loading
         pass

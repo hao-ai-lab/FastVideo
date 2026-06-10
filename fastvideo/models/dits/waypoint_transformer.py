@@ -8,16 +8,9 @@ This is a port of the Overworld Waypoint-1-Small model to FastVideo's
 architecture, maintaining weight compatibility with the official checkpoint.
 
 Reference: https://huggingface.co/Overworld/Waypoint-1-Small
-
-Correctness: Denoising follows the official rectified-flow update
-x = x + (sigma_next - sigma_curr) * v (see Overworld denoise.py).
-For parity with diffusers/WorldEngine, consider adding a cache pass
-(single forward with sigma=0 after denoising) to update KV cache when
-generating multiple frames autoregressively.
 """
 
 import math
-import os
 from typing import Optional
 
 import torch
@@ -38,7 +31,6 @@ except ImportError:
 from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
-from fastvideo.logger import init_logger
 from fastvideo.configs.models.dits.waypoint_transformer import (
     WaypointConfig,
 )
@@ -49,10 +41,10 @@ from fastvideo.platforms import AttentionBackendEnum
 _DEFAULT_WAYPOINT_CONFIG = WaypointConfig()
 _DEFAULT_WAYPOINT_ARCH = _DEFAULT_WAYPOINT_CONFIG.arch_config
 
-logger = init_logger(__name__)
-_WAYPOINT_DEBUG = os.environ.get("WAYPOINT_DEBUG", "0") in ("1", "true", "yes")
-
 if _FLEX_ATTN_AVAILABLE:
+    # Match the official Waypoint numerics: its compiled flex_attention runs
+    # the fp32 matmuls in tf32 (PyTorch's default "high" precision).
+    torch.backends.cuda.matmul.allow_tf32 = True
     _flex_attention = torch.compile(
         flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
     )
@@ -71,8 +63,8 @@ else:
 # =============================================================================
 
 
-def rms_norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
+def rms_norm(x: torch.Tensor, eps: float | None = None) -> torch.Tensor:
+    return F.rms_norm(x, (x.size(-1), ), eps=eps)
 
 
 class AdaLN(nn.Module):
@@ -103,14 +95,14 @@ class AdaLN(nn.Module):
         ab = ab.view(B, N, 1,
                      2 * D).expand(-1, -1, L // N, -1).reshape(B, L, 2 * D)
         scale, shift = ab.chunk(2, dim=-1)
-        return rms_norm(x, self.eps) * (1 + scale) + shift
+        return rms_norm(x) * (1 + scale) + shift
 
 
 def ada_rmsnorm(
     x: torch.Tensor,
     scale: torch.Tensor,
     bias: torch.Tensor,
-    eps: float = 1e-6,
+    eps: float | None = None,
 ) -> torch.Tensor:
     """Adaptive RMS normalization; scale/bias [B, N, D] broadcast to [B, L, D]."""
     B, L, D = x.shape
@@ -527,32 +519,46 @@ class GatedSelfAttention(nn.Module):
                     q, k, v, freqs_cis=None, attention_mask=None
                 )
         elif kv_cache is not None:
-            cache_end = kv_cache["end"]
-            if isinstance(cache_end, torch.Tensor):
-                cache_end = int(cache_end.item())
-            cache_k = kv_cache["k"]  # [B, n_kv_heads, cache_size, head_dim]
-            cache_v = kv_cache["v"]
-            if cache_end > 0:
-                cached_k = cache_k[:, :, :cache_end, :]  # [B, n_kv_heads, end, head_dim]
-                cached_v = cache_v[:, :, :cache_end, :]
-                k_t = torch.cat([cached_k, k.transpose(1, 2)], dim=2)
-                v_t = torch.cat([cached_v, v.transpose(1, 2)], dim=2)
-            else:
-                k_t = k.transpose(1, 2)  # [B, n_kv_heads, L, head_dim]
-                v_t = v.transpose(1, 2)
+            frame_t = int(pos_ids["t_pos"][0, 0].item())
+            k_t = k.transpose(1, 2)  # [B, n_kv_heads, L, head_dim]
+            v_t = v.transpose(1, 2)
             q_t = q.transpose(1, 2)  # [B, n_heads, L, head_dim]
-            # No mask: spatial tokens are bidirectional; they can all see cache + current
-            attn_out = F.scaled_dot_product_attention(
-                q_t, k_t, v_t,
-                attn_mask=None,
-                dropout_p=0.0,
-                is_causal=False,
-                scale=self.scale,
-                enable_gqa=(self.n_kv_heads != self.n_heads),
+            key, val, key_mask = self._upsert_kv_cache(
+                kv_cache, k_t, v_t, frame_t, update_cache
             )
+            if _FLEX_ATTN_AVAILABLE and _flex_attention is not None:
+                # Match official: compiled flex_attention over the ring cache,
+                # keyed by the per-slot validity mask (True = attend).
+                written = key_mask.reshape(-1)  # [capacity] bool
+
+                def mask_mod(b, h, q_idx, kv_idx):
+                    return written[kv_idx]
+
+                block_mask = create_block_mask(
+                    mask_mod,
+                    B=None,
+                    H=None,
+                    Q_LEN=q_t.shape[-2],
+                    KV_LEN=written.shape[0],
+                    device=q_t.device,
+                    _compile=False,
+                )
+                attn_out = _flex_attention(
+                    q_t, key, val,
+                    block_mask=block_mask,
+                    scale=self.scale,
+                    enable_gqa=(self.n_kv_heads != self.n_heads),
+                )
+            else:
+                attn_out = F.scaled_dot_product_attention(
+                    q_t, key, val,
+                    attn_mask=key_mask,
+                    dropout_p=0.0,
+                    is_causal=False,
+                    scale=self.scale,
+                    enable_gqa=(self.n_kv_heads != self.n_heads),
+                )
             attn_out = attn_out.transpose(1, 2)  # [B, L, n_heads, head_dim]
-            if update_cache:
-                self._write_kv_cache(kv_cache, k, v, L)
 
         # Official: gate attn output BEFORE out_proj
         # attn_out is [B, L, n_heads, head_dim] here (already transposed)
@@ -565,46 +571,54 @@ class GatedSelfAttention(nn.Module):
         out, _ = self.out_proj(attn_out)
         return out
 
-    def _write_kv_cache(
+    def _upsert_kv_cache(
         self,
         kv_cache: dict,
         k: torch.Tensor,
         v: torch.Tensor,
-        L: int,
-    ) -> None:
-        """Write current frame K/V into the layer cache (ring buffer).
-        StaticKVCache semantics: no-op when cache is frozen (read-only during denoise).
+        frame_t: int,
+        update_cache: bool,
+    ):
+        """Per-layer ring KV cache matching official LayerKVCache.upsert.
+
+        Ring of ``num_buckets`` slots (each tpf wide) over ``[0, L)`` plus a tail
+        ``[L, L+tpf)`` that always holds the current frame. The current frame's
+        queries attend over the whole capacity, masked to written slots minus the
+        about-to-be-overwritten bucket on a write step. When not frozen and on a
+        write step, the current frame is persisted into its ring bucket.
         """
-        frozen_ref = kv_cache.get("frozen_ref")
-        if frozen_ref is not None and frozen_ref[0]:
-            return
-        cache_k = kv_cache["k"]
+        cache_k = kv_cache["k"]  # [B, n_kv_heads, capacity, head_dim]
         cache_v = kv_cache["v"]
-        cache_size = cache_k.shape[2]
-        end = kv_cache["end"]
-        k_t = k.transpose(1, 2)  # [B, n_kv_heads, L, head_dim]
-        v_t = v.transpose(1, 2)
-        if end + L <= cache_size:
-            cache_k[:, :, end : end + L, :] = k_t
-            cache_v[:, :, end : end + L, :] = v_t
-            kv_cache["end"] = end + L
-        else:
-            num_keep = cache_size - L
-            if _WAYPOINT_DEBUG:
-                logger.info(
-                    "DEBUG [kv_cache] EVICTION: end=%d L=%d cache_size=%d "
-                    "num_keep=%d (rolling)",
-                    end, L, cache_size, num_keep,
-                )
-            cache_k[:, :, :num_keep, :].copy_(
-                cache_k[:, :, end - num_keep : end, :]
-            )
-            cache_v[:, :, :num_keep, :].copy_(
-                cache_v[:, :, end - num_keep : end, :]
-            )
-            cache_k[:, :, num_keep:, :] = k_t
-            cache_v[:, :, num_keep:, :] = v_t
-            kv_cache["end"] = cache_size
+        written = kv_cache["written"]  # [capacity] bool
+        L = kv_cache["L"]
+        tpf = kv_cache["tpf"]
+        pinned_dilation = kv_cache["pinned_dilation"]
+        num_buckets = kv_cache["num_buckets"]
+        current_idx = kv_cache["current_idx"]  # [tpf] long, == arange(tpf)+L
+
+        bucket = (frame_t + pinned_dilation - 1) // pinned_dilation
+        slot = bucket % num_buckets
+        base = slot * tpf
+        ring_idx = kv_cache["frame_offsets"] + base  # [tpf] long in [0, L)
+        write_step = (frame_t % pinned_dilation) == 0
+
+        cache_k.index_copy_(2, current_idx, k)
+        cache_v.index_copy_(2, current_idx, v)
+
+        mask_written = written.clone()
+        if write_step:
+            mask_written[ring_idx] = False
+        key_mask = mask_written.view(1, 1, 1, -1)
+
+        frozen_ref = kv_cache.get("frozen_ref")
+        is_frozen = update_cache is False or (frozen_ref is not None and frozen_ref[0])
+        if not is_frozen:
+            dst = ring_idx if write_step else current_idx
+            cache_k.index_copy_(2, dst, k)
+            cache_v.index_copy_(2, dst, v)
+            written[dst] = True
+
+        return cache_k, cache_v, key_mask
 
 
 class CrossAttention(nn.Module):
@@ -840,10 +854,6 @@ class WaypointTransformer(nn.Module):
 # =============================================================================
 # Main WorldModel
 # =============================================================================
-
-def is_blocks(name: str) -> bool:
-    """FSDP shard condition for transformer blocks."""
-    return ".blocks." in name
 
 
 class WaypointWorldModel(BaseDiT):

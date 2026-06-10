@@ -3,15 +3,9 @@
 
 This pipeline supports streaming generation of video frames conditioned on
 text prompts and real-time controller inputs (mouse, keyboard, scroll).
-
-Debug: set WAYPOINT_DEBUG=1 to enable extensive tensor logging for blur diagnosis.
 """
 
-import atexit
-import json
-import os
 from dataclasses import dataclass, field
-from typing import Any
 
 import torch
 
@@ -24,95 +18,6 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch
 
 logger = init_logger(__name__)
-
-# Set WAYPOINT_DEBUG=1 for extensive tensor logging (blur diagnosis)
-_WAYPOINT_DEBUG = os.environ.get("WAYPOINT_DEBUG", "0") in ("1", "true", "yes")
-_WAYPOINT_DEBUG_FILE = os.environ.get("WAYPOINT_DEBUG_FILE", "")
-_DEBUG_COLLECTOR: list[dict[str, Any]] = []
-
-
-def _stats_dict(
-    t: torch.Tensor | None,
-    *,
-    include_sample: bool = False,
-) -> dict:
-    """Tensor stats as dict for JSON serialization."""
-    if t is None:
-        return {}
-    f = t.float().detach()
-    s = float(f.std()) if f.numel() > 1 else 0.0
-    out = {
-        "shape": list(t.shape),
-        "mean": float(f.mean()),
-        "std": s,
-        "min": float(f.min()),
-        "max": float(f.max()),
-        "has_nan": bool(torch.isnan(f).any()),
-        "has_inf": bool(torch.isinf(f).any()),
-    }
-    if include_sample and f.numel() > 0:
-        flat = f.flatten()
-        n = min(5, flat.numel())
-        out["sample"] = flat[:n].tolist()
-    return out
-
-
-def _stats_rgb(t: torch.Tensor | None) -> list[dict]:
-    """Per-channel stats for RGB tensor (H,W,C), (C,H,W), or (B,C,H,W)."""
-    if t is None or t.numel() == 0:
-        return []
-    f = t.float().detach()
-    if f.dim() >= 3 and f.shape[-1] == 3:
-        slices = [f[..., c] for c in range(3)]
-    elif f.dim() == 3 and f.shape[0] == 3:
-        slices = [f[c] for c in range(3)]
-    elif f.dim() == 4 and f.shape[1] == 3:
-        slices = [f[:, c] for c in range(3)]
-    else:
-        return []
-    return [{
-        "ch": c,
-        "mean": float(s.mean()),
-        "std": float(s.std()) if s.numel() > 1 else 0.0,
-        "min": float(s.min()),
-        "max": float(s.max()),
-    } for c, s in enumerate(slices)]
-
-
-def _collect_debug(tag: str, frame: int | None = None, **kwargs: Any) -> None:
-    """Append debug entry when WAYPOINT_DEBUG_FILE is set."""
-    if not _WAYPOINT_DEBUG_FILE:
-        return
-    entry = {"tag": tag, **kwargs}
-    if frame is not None:
-        entry["frame"] = frame
-    _DEBUG_COLLECTOR.append(entry)
-
-
-def _write_debug_file() -> None:
-    """Write collected debug stats to file (called at exit)."""
-    if not _WAYPOINT_DEBUG_FILE or not _DEBUG_COLLECTOR:
-        return
-    try:
-        data = {"source": "fastvideo", "entries": _DEBUG_COLLECTOR}
-        with open(_WAYPOINT_DEBUG_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-        logger.info("Debug stats saved to %s", _WAYPOINT_DEBUG_FILE)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to write debug file: %s", e)
-
-
-if _WAYPOINT_DEBUG_FILE:
-    atexit.register(_write_debug_file)
-
-
-def _tensor_stats(t: torch.Tensor, name: str = "t") -> str:
-    """Format tensor stats for debug logging."""
-    if t is None:
-        return f"{name}=None"
-    f = t.float()
-    return (f"{name} shape={tuple(t.shape)} mean={f.mean().item():.6f} std={f.std().item():.6f} "
-            f"min={f.min().item():.6f} max={f.max().item():.6f}")
 
 
 @dataclass
@@ -159,10 +64,12 @@ class StreamingContext:
     batch: ForwardBatch
     fastvideo_args: FastVideoArgs
     frame_index: int = 0
-    kv_cache: list | None = None  # Per-layer list of {"k", "v", "end"}
+    kv_cache: list | None = None  # Per-layer ring caches (see _create_waypoint_kv_cache)
     prompt_emb: torch.Tensor | None = None
     prompt_pad_mask: torch.Tensor | None = None
     ref_latent_std: float | None = None
+    disable_latent_norm: bool = False
+    bf16_denoise: bool = False
 
 
 class WaypointPipeline(ComposedPipelineBase):
@@ -188,7 +95,6 @@ class WaypointPipeline(ComposedPipelineBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._streaming_ctx: StreamingContext | None = None
-        self._vae_cache = None
         # Bulk DiT dtype (bf16/fp16) after load; denoise_step_emb may be fp32 alone.
         self._waypoint_dit_dtype: torch.dtype | None = None
 
@@ -235,8 +141,118 @@ class WaypointPipeline(ComposedPipelineBase):
             return self._waypoint_dit_dtype
         return next(transformer.parameters()).dtype
 
+    def _cache_pass(
+        self,
+        transformer: torch.nn.Module,
+        x: torch.Tensor,
+        frame_ts: torch.Tensor,
+        prompt_emb: torch.Tensor | None,
+        prompt_pad_mask: torch.Tensor | None,
+        mouse: torch.Tensor,
+        button: torch.Tensor,
+        scroll: torch.Tensor,
+        kv_cache: list | None,
+    ) -> None:
+        """Run sigma=0 forward to persist a frame in the KV cache.
+
+        Mirrors official StaticKVCache cache pass: unfreeze, write K/V, refreeze.
+        """
+        if kv_cache is None:
+            return
+        kv_cache[0]["frozen_ref"][0] = False
+        sigma_zero = x.new_zeros((x.shape[0], 1))
+        with set_forward_context(
+                current_timestep=0,
+                attn_metadata=SDPAMetadata(current_timestep=0, attn_mask=None),
+                forward_batch=None,
+        ):
+            transformer(
+                x=x,
+                sigma=sigma_zero,
+                frame_timestamp=frame_ts,
+                prompt_emb=prompt_emb,
+                prompt_pad_mask=prompt_pad_mask,
+                mouse=mouse,
+                button=button,
+                scroll=scroll,
+                kv_cache=kv_cache,
+                update_cache=True,
+            )
+        kv_cache[0]["frozen_ref"][0] = True
+
+    @torch.no_grad()
+    def _seed_image_frame(
+        self,
+        image,
+        ctx: "StreamingContext",
+        fastvideo_args: FastVideoArgs,
+    ) -> None:
+        """Encode an init image and seed it as frame 0 in the KV cache.
+
+        Matches official WorldEnginePrepareLatentsStep: VAE-encode the image to a
+        [1,1,C,h,w] latent, run a sigma=0 cache pass at frame_timestamp=0 with zero
+        control, then advance frame_index to 1 so denoising starts at the next frame.
+        """
+        vae = self.get_module("vae", None)
+        transformer = self.get_module("transformer")
+        if vae is None or ctx.kv_cache is None:
+            return
+        device = next(transformer.parameters()).device
+        dtype = self._waypoint_compute_dtype(transformer)
+
+        img = self._to_uint8_hwc(image)
+        latent = vae.encode(img)  # [1, C, h, w]
+        if latent.dim() == 4:
+            latent = latent.unsqueeze(1)  # [1, 1, C, h, w]
+        latent = latent.to(device=device, dtype=dtype)
+
+        frame_ts = torch.zeros(1, 1, device=device, dtype=torch.long)
+        prompt_emb = ctx.prompt_emb.to(device=device, dtype=dtype) if ctx.prompt_emb is not None else None
+        prompt_pad_mask = ctx.prompt_pad_mask.to(device=device) if ctx.prompt_pad_mask is not None else None
+        mouse = torch.zeros(1, 1, 2, device=device, dtype=dtype)
+        button = torch.zeros(1, 1, 256, device=device, dtype=dtype)
+        scroll = torch.zeros(1, 1, 1, device=device, dtype=dtype)
+
+        self._cache_pass(transformer, latent, frame_ts, prompt_emb, prompt_pad_mask, mouse, button, scroll,
+                         ctx.kv_cache)
+        ctx.frame_index = 1
+        logger.info("Waypoint seeded init image as frame 0 (kv_cache warm)")
+
+    @staticmethod
+    def _to_uint8_hwc(image) -> torch.Tensor:
+        """Convert PIL/tensor (any of [H,W,3], [C,H,W], batched) to uint8 [H,W,3]."""
+        import PIL.Image
+        if isinstance(image, PIL.Image.Image):
+            import numpy as np
+            arr = np.asarray(image.convert("RGB"))
+            return torch.from_numpy(arr).to(torch.uint8)
+        t = image
+        if not isinstance(t, torch.Tensor):
+            t = torch.as_tensor(t)
+        t = t.detach().cpu()
+        while t.dim() > 3:
+            t = t[0]
+        if t.dim() == 3 and t.shape[0] in (1, 3) and t.shape[-1] not in (1, 3):
+            t = t.permute(1, 2, 0)
+        if t.shape[-1] == 1:
+            t = t.repeat(1, 1, 3)
+        t = t[..., :3]
+        if t.dtype != torch.uint8:
+            t = t.float()
+            if t.max() <= 1.5:
+                t = t * 255.0
+            t = t.round().clamp(0, 255).to(torch.uint8)
+        return t.contiguous()
+
     def _create_waypoint_kv_cache(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> list | None:
-        """Create per-layer KV cache for autoregressive cross-frame attention."""
+        """Create per-layer ring KV cache matching official StaticKVCache.
+
+        Local layers use a ``local_window`` ring; global layers (every
+        ``global_attn_period`` from ``global_attn_offset``) use a wider
+        ``global_window`` ring with ``global_pinned_dilation``. Each layer ring
+        holds ``L`` history tokens plus a ``tokens_per_frame`` tail for the
+        current frame.
+        """
         transformer = self.get_module("transformer", None)
         if transformer is None:
             return None
@@ -246,40 +262,37 @@ class WaypointPipeline(ComposedPipelineBase):
         n_layers = getattr(arch, "n_layers", getattr(arch, "num_layers", 22))
         n_kv_heads = getattr(arch, "n_kv_heads", 20)
         head_dim = getattr(arch, "attention_head_dim", arch.d_model // arch.n_heads)
-        tokens_per_frame = getattr(arch, "tokens_per_frame", 256)
-        # Use at least num_frames so long videos don't evict; override from batch if present
-        cfg_max = getattr(pipeline_config, "max_kv_cache_frames", 64)
-        batch_frames = batch.num_frames
-        if isinstance(batch_frames, list):
-            batch_frames = max(batch_frames) if batch_frames else 0
-        max_frames = max(cfg_max, batch_frames or 0) or cfg_max
-        cache_size = max_frames * tokens_per_frame
+        tpf = getattr(arch, "tokens_per_frame", 256)
+        local_window = getattr(arch, "local_window", 16)
+        global_window = getattr(arch, "global_window", 128)
+        period = getattr(arch, "global_attn_period", 4)
+        offset = getattr(arch, "global_attn_offset", 0) % period
+        global_pinned_dilation = getattr(arch, "global_pinned_dilation", 8)
         device = next(transformer.parameters()).device
         dtype = self._waypoint_compute_dtype(transformer)
         B = 1
-        # Shared frozen flag: StaticKVCache semantics (read-only during denoise,
-        # write only in cache pass). All layers share the same list ref.
         frozen_ref = [True]
         kv_cache = []
-        for _ in range(n_layers):
+        for layer_idx in range(n_layers):
+            is_global = (layer_idx - offset) % period == 0
+            window = global_window if is_global else local_window
+            pinned_dilation = global_pinned_dilation if is_global else 1
+            L = window * tpf
+            capacity = L + tpf
+            num_buckets = (L // tpf) // pinned_dilation
+            written = torch.zeros(capacity, dtype=torch.bool, device=device)
+            written[L:] = True
+            frame_offsets = torch.arange(tpf, dtype=torch.long, device=device)
             kv_cache.append({
-                "k": torch.zeros(
-                    B,
-                    n_kv_heads,
-                    cache_size,
-                    head_dim,
-                    device=device,
-                    dtype=dtype,
-                ),
-                "v": torch.zeros(
-                    B,
-                    n_kv_heads,
-                    cache_size,
-                    head_dim,
-                    device=device,
-                    dtype=dtype,
-                ),
-                "end": 0,
+                "k": torch.zeros(B, n_kv_heads, capacity, head_dim, device=device, dtype=dtype),
+                "v": torch.zeros(B, n_kv_heads, capacity, head_dim, device=device, dtype=dtype),
+                "L": L,
+                "tpf": tpf,
+                "pinned_dilation": pinned_dilation,
+                "num_buckets": num_buckets,
+                "written": written,
+                "frame_offsets": frame_offsets,
+                "current_idx": frame_offsets + L,
                 "frozen_ref": frozen_ref,
             })
         return kv_cache
@@ -307,13 +320,17 @@ class WaypointPipeline(ComposedPipelineBase):
             dtype = self._waypoint_compute_dtype(transformer)
             nf = batch.num_frames
             nf = (max(nf) if nf else 1) if isinstance(nf, list) else int(nf)
-            logger.warning(
-                "Waypoint forward: missing keyboard_cond/mouse_cond; "
-                "using zeros for %d frames",
-                nf,
-            )
-            keyboard = torch.zeros(1, nf, 256, device=device, dtype=dtype)
-            mouse = torch.zeros(1, nf, 2, device=device, dtype=dtype)
+            n_buttons = getattr(fastvideo_args.pipeline_config, "n_buttons", 256)
+            # Zero only the missing tensor so a caller that supplies just one of
+            # keyboard_cond / mouse_cond does not have the provided one discarded.
+            if keyboard is None:
+                logger.warning("Waypoint forward: missing keyboard_cond; using zeros for "
+                               "%d frames", nf)
+                keyboard = torch.zeros(1, nf, n_buttons, device=device, dtype=dtype)
+            if mouse is None:
+                logger.warning("Waypoint forward: missing mouse_cond; using zeros for "
+                               "%d frames", nf)
+                mouse = torch.zeros(1, nf, 2, device=device, dtype=dtype)
 
         try:
             self.streaming_reset(batch, fastvideo_args)
@@ -352,57 +369,40 @@ class WaypointPipeline(ComposedPipelineBase):
         # semantics: frozen during denoise, unfrozen only for sigma=0 cache pass).
         kv_cache = self._create_waypoint_kv_cache(batch, fastvideo_args)
 
-        self._streaming_ctx = StreamingContext(
+        pipeline_config = fastvideo_args.pipeline_config
+        ctx = StreamingContext(
             batch=batch,
             fastvideo_args=fastvideo_args,
             frame_index=0,
             kv_cache=kv_cache,
             prompt_emb=prompt_emb,
             prompt_pad_mask=prompt_pad_mask,
+            disable_latent_norm=getattr(pipeline_config, "disable_latent_norm", False),
+            bf16_denoise=getattr(pipeline_config, "bf16_denoise", False),
         )
+        self._streaming_ctx = ctx
 
-        self._vae_cache = None
+        # Init-image conditioning: encode the image and seed it as frame 0 so the
+        # rollout is conditioned on the given first frame (matches official).
+        image = (getattr(batch, "image", None) or getattr(batch, "pil_image", None))
+        if image is None:
+            image_path = getattr(batch, "image_path", None)
+            if image_path:
+                import PIL.Image
+                if str(image_path).startswith(("http://", "https://")):
+                    import io
+                    import urllib.request
+                    with urllib.request.urlopen(image_path) as resp:
+                        image = PIL.Image.open(io.BytesIO(resp.read())).convert("RGB")
+                else:
+                    image = PIL.Image.open(image_path).convert("RGB")
+        if image is not None:
+            self._seed_image_frame(image, ctx, fastvideo_args)
+
         logger.info(
             "Waypoint streaming reset complete (KV cache: %s)",
             "enabled (StaticKVCache semantics)" if kv_cache else "disabled",
         )
-        if _WAYPOINT_DEBUG and kv_cache:
-            cache_size = kv_cache[0]["k"].shape[2] if kv_cache else 0
-            tokens_per_frame = getattr(
-                getattr(
-                    getattr(fastvideo_args.pipeline_config, "dit_config", None),
-                    "arch_config",
-                    None,
-                ),
-                "tokens_per_frame",
-                256,
-            )
-            logger.info(
-                "DEBUG [kv_cache] created: layers=%d cache_size=%d "
-                "max_frames~=%d",
-                len(kv_cache),
-                cache_size,
-                cache_size // tokens_per_frame if tokens_per_frame else 0,
-            )
-        if _WAYPOINT_DEBUG and prompt_emb is not None:
-            logger.info(
-                "DEBUG [text] %s",
-                _tensor_stats(prompt_emb, "prompt_emb"),
-            )
-        if _WAYPOINT_DEBUG and prompt_pad_mask is not None:
-            n_pad = prompt_pad_mask.sum().item()
-            n_valid = prompt_pad_mask.numel() - n_pad
-            logger.info(
-                "DEBUG [text] prompt_pad_mask: shape=%s pad_count=%d valid_count=%d",
-                tuple(prompt_pad_mask.shape),
-                int(n_pad),
-                int(n_valid),
-            )
-        if _WAYPOINT_DEBUG_FILE and prompt_emb is not None:
-            _collect_debug(
-                "prompt_emb",
-                prompt_emb=_stats_dict(prompt_emb, include_sample=True),
-            )
 
     @torch.no_grad()
     def streaming_step(
@@ -468,12 +468,6 @@ class WaypointPipeline(ComposedPipelineBase):
 
         generated_frames: list[torch.Tensor] = []
 
-        # Multi-frame debug: log first N frames (WAYPOINT_DEBUG=1 increases coverage)
-        DEBUG_MULTIFRAME_MAX = 10 if _WAYPOINT_DEBUG else 5
-        DEBUG_LAST_N = 10 if _WAYPOINT_DEBUG else 5
-        DEBUG_STEPS_FRAME0 = _WAYPOINT_DEBUG  # Log all denoising steps for frame 0
-        _log_last_frames = DEBUG_LAST_N > 0 and t > DEBUG_LAST_N
-
         # HF Waypoint expects latents [B, 1, 16, 32, 32] (32x32 -> 16x16 tokens/frame)
         if latent_h != 32 or latent_w != 32:
             logger.warning(
@@ -483,7 +477,13 @@ class WaypointPipeline(ComposedPipelineBase):
                 latent_w,
             )
 
-        for _ in range(t):
+        # Prompt tensors are constant across the rollout; move them to the
+        # transformer device/dtype once (needed under CPU offload) instead of
+        # re-copying every frame.
+        prompt_emb = ctx.prompt_emb.to(device=device, dtype=dtype) if ctx.prompt_emb is not None else None
+        prompt_pad_mask = ctx.prompt_pad_mask.to(device=device) if ctx.prompt_pad_mask is not None else None
+
+        for local_i in range(t):
             # Noise: [B, 1, C, H, W] with H,W = latent grid (height*ph, width*pw)
             # Use explicit generator per frame (official: seed + frame_idx) for repro.
             latent_shape = (
@@ -496,18 +496,6 @@ class WaypointPipeline(ComposedPipelineBase):
             seed = getattr(ctx.batch, "seed", None) or getattr(ctx.fastvideo_args, "seed", None) or 0
             g = torch.Generator(device=device).manual_seed(int(seed) + ctx.frame_index)
             x = torch.randn(latent_shape, device=device, dtype=dtype, generator=g)
-            if _WAYPOINT_DEBUG and ctx.frame_index == 0:
-                logger.info(
-                    "DEBUG [noise] frame=%d %s",
-                    ctx.frame_index,
-                    _tensor_stats(x, "x_init"),
-                )
-            if _WAYPOINT_DEBUG_FILE and ctx.frame_index < 20:
-                _collect_debug(
-                    "x_init",
-                    frame=ctx.frame_index,
-                    x_init=_stats_dict(x, include_sample=True),
-                )
 
             frame_ts = torch.full(
                 (keyboard_action.shape[0], 1),
@@ -515,61 +503,22 @@ class WaypointPipeline(ComposedPipelineBase):
                 device=device,
                 dtype=torch.long,
             )
-            ctrl_step = (min(ctx.frame_index, mouse.shape[1] - 1) if mouse.shape[1] > 0 else 0)
-
-            _is_last_window = (_log_last_frames and ctx.frame_index >= t - DEBUG_LAST_N)
-            if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
-                m_slice = mouse[:, ctrl_step:ctrl_step + 1]
-                b_slice = button[:, ctrl_step:ctrl_step + 1]
-                logger.info(
-                    "DEBUG frame %d: ctrl_step=%d frame_ts=%s "
-                    "mouse mean=%.4f button sum=%.2f (cond slice)",
-                    ctx.frame_index,
-                    ctrl_step,
-                    frame_ts[0, 0].item(),
-                    m_slice.float().mean().item(),
-                    b_slice.float().sum().item(),
-                )
-                if _WAYPOINT_DEBUG:
-                    pressed = (b_slice[0, 0] > 0.5).nonzero(as_tuple=True)[0]
-                    logger.info(
-                        "DEBUG [ctrl] frame=%d mouse=%s button_indices=%s scroll=%s",
-                        ctx.frame_index,
-                        m_slice[0, 0].tolist(),
-                        pressed.tolist() if pressed.numel() else [],
-                        scroll[0, ctrl_step, 0].item(),
-                    )
-            elif _is_last_window:
-                logger.info(
-                    "DEBUG (last) frame %d/%d: ctrl_step=%d frame_ts=%s",
-                    ctx.frame_index,
-                    t,
-                    ctrl_step,
-                    frame_ts[0, 0].item(),
-                )
+            # Index controls by the local step within THIS call's action tensor,
+            # not the global frame_index: with image seeding (frame_index starts
+            # at 1) or a second streaming_step (frame_index already large), the
+            # global index would drop/repeat actions. Equivalent to frame_index
+            # on the single-shot-from-0 path.
+            ctrl_step = (min(local_i, mouse.shape[1] - 1) if mouse.shape[1] > 0 else 0)
 
             # StaticKVCache semantics: cache is read-only during denoise.
             if ctx.kv_cache is not None:
                 ctx.kv_cache[0]["frozen_ref"][0] = True
 
-            # Denoise through sigma schedule
-            if ctx.frame_index == 0:
-                logger.info(
-                    "DEBUG sigmas=%s  x_init: mean=%.4f std=%.4f",
-                    [round(s.item(), 4) for s in sigmas],
-                    x.float().mean().item(),
-                    x.float().std().item(),
-                )
-            if _WAYPOINT_DEBUG and ctx.frame_index == 0:
-                logger.info(
-                    "DEBUG [scheduler] sigmas=%s steps=%d",
-                    [f"{s.item():.6f}" for s in sigmas],
-                    len(sigmas) - 1,
-                )
-            # Accumulate the rectified-flow ODE in fp32 to avoid bf16
-            # rounding errors that compound across 240+ autoregressive
-            # frames (manifests as latent drift → darker video).
-            x_fp32 = x.float()
+            # Rectified-flow ODE accumulation. Official accumulates in bf16; the
+            # fp32 path (default) reduces drift across long autoregressive rollouts.
+            # Toggle with pipeline_config.bf16_denoise to match official exactly.
+            acc_dtype = dtype if ctx.bf16_denoise else torch.float32
+            x_acc = x.to(acc_dtype)
             for i in range(len(sigmas) - 1):
                 sigma_curr = sigmas[i]
                 sigma_next = sigmas[i + 1]
@@ -581,16 +530,7 @@ class WaypointPipeline(ComposedPipelineBase):
                 )
 
                 attn_metadata = SDPAMetadata(current_timestep=i, attn_mask=None)
-                if DEBUG_STEPS_FRAME0 and ctx.frame_index == 0:
-                    logger.info(
-                        "DEBUG [denoise] step=%d x_before: %s",
-                        i,
-                        _tensor_stats(x, "x"),
-                    )
 
-                # Ensure prompt tensors are on same device as transformer (needed with CPU offload)
-                prompt_emb = ctx.prompt_emb.to(device=device, dtype=dtype) if ctx.prompt_emb is not None else None
-                prompt_pad_mask = ctx.prompt_pad_mask.to(device=device) if ctx.prompt_pad_mask is not None else None
                 with set_forward_context(
                         current_timestep=i,
                         attn_metadata=attn_metadata,
@@ -608,159 +548,44 @@ class WaypointPipeline(ComposedPipelineBase):
                         kv_cache=ctx.kv_cache,
                     )
 
-                if ctx.frame_index == 0 and _WAYPOINT_DEBUG_FILE:
-                    _collect_debug(
-                        "denoise_step",
-                        frame=0,
-                        step=i,
-                        sigma_curr=float(sigma_curr),
-                        sigma_next=float(sigma_next),
-                        v_pred=_stats_dict(v_pred, include_sample=True),
-                        x_before=_stats_dict(x.clone(), include_sample=True),
-                    )
-                if ctx.frame_index == 0:
-                    xf = x_fp32
-                    vf = v_pred.float()
-                    dsig = (sigma_next - sigma_curr).item()
-                    logger.info(
-                        "DEBUG step %d: sigma=%.4f->%.4f  "
-                        "v_pred mean=%.4f std=%.4f min=%.4f max=%.4f  "
-                        "x mean=%.4f std=%.4f  dsig=%.4f",
-                        i,
-                        sigma_curr.item(),
-                        sigma_next.item(),
-                        vf.mean().item(),
-                        vf.std().item(),
-                        vf.min().item(),
-                        vf.max().item(),
-                        xf.mean().item(),
-                        xf.std().item(),
-                        dsig,
-                    )
+                # Accumulate in acc_dtype (fp32 default / bf16 if matching official)
+                x_acc = x_acc + (sigma_next - sigma_curr).to(acc_dtype) * v_pred.to(acc_dtype)
+                x = x_acc.to(dtype)
 
-                # fp32 accumulation: update in float32 then cast back
-                x_fp32 = x_fp32 + (sigma_next - sigma_curr).float() * v_pred.float()
-                x = x_fp32.to(dtype)
-                if ctx.frame_index == 0 and _WAYPOINT_DEBUG_FILE:
-                    _collect_debug(
-                        "denoise_step_after",
-                        frame=0,
-                        step=i,
-                        x_after=_stats_dict(x, include_sample=True),
-                    )
-                if DEBUG_STEPS_FRAME0 and ctx.frame_index == 0:
-                    logger.info(
-                        "DEBUG [denoise] step=%d x_after: %s",
-                        i,
-                        _tensor_stats(x, "x"),
-                    )
-
-            if _WAYPOINT_DEBUG_FILE and ctx.frame_index < 120:
-                _collect_debug(
-                    "denoised",
-                    frame=ctx.frame_index,
-                    denoised=_stats_dict(x, include_sample=(ctx.frame_index < 5)),
-                )
-            if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
+            # Smooth latent normalization (non-official stabilization hack): the
+            # autoregressive loop causes latent std to grow over hundreds of frames
+            # (~0.5 → ~1.5). Smoothly pull every frame's scale toward frame-0's std
+            # (strength=0.8). The official pipeline does NOT do this; it flattens
+            # output (std ~16 vs ~52). Disable with pipeline_config.disable_latent_norm.
+            if not ctx.disable_latent_norm:
                 xf = x.float()
-                logger.info(
-                    "DEBUG frame %d denoised x: mean=%.4f std=%.4f min=%.4f max=%.4f",
-                    ctx.frame_index,
-                    xf.mean().item(),
-                    xf.std().item(),
-                    xf.min().item(),
-                    xf.max().item(),
-                )
-                if _WAYPOINT_DEBUG:
-                    has_nan = torch.isnan(xf).any().item()
-                    has_inf = torch.isinf(xf).any().item()
-                    if has_nan or has_inf:
-                        logger.warning(
-                            "DEBUG [denoised] frame=%d HAS_NAN=%s HAS_INF=%s",
-                            ctx.frame_index,
-                            has_nan,
-                            has_inf,
-                        )
-            elif _is_last_window:
-                xf = x.float()
-                logger.info(
-                    "DEBUG (last) frame %d denoised x: mean=%.4f std=%.4f "
-                    "min=%.4f max=%.4f",
-                    ctx.frame_index,
-                    xf.mean().item(),
-                    xf.std().item(),
-                    xf.min().item(),
-                    xf.max().item(),
-                )
-
-            # Smooth latent normalization: the autoregressive loop causes
-            # latent std to grow over hundreds of frames (~0.5 → ~1.5).
-            # Instead of a hard on/off threshold (which causes twitching),
-            # smoothly interpolate every frame's scale toward the reference
-            # std from frame 0.  strength=0.8 means 80% pull toward ref.
-            xf = x.float()
-            cur_std = max(xf.std().item(), 1e-6)
-            if ctx.ref_latent_std is None:
-                ctx.ref_latent_std = cur_std
-            else:
-                target_std = ctx.ref_latent_std
-                strength = 0.8
-                blended_std = (strength * target_std + (1.0 - strength) * cur_std)
-                scale = blended_std / cur_std
-                if abs(scale - 1.0) > 1e-4:
-                    x = (xf * scale).to(dtype)
-                if (ctx.frame_index < DEBUG_MULTIFRAME_MAX or _is_last_window):
-                    logger.info(
-                        "DEBUG frame %d smooth norm: std %.4f -> "
-                        "%.4f (scale=%.4f)",
-                        ctx.frame_index,
-                        cur_std,
-                        blended_std,
-                        scale,
-                    )
+                cur_std = max(xf.std().item(), 1e-6)
+                if ctx.ref_latent_std is None:
+                    ctx.ref_latent_std = cur_std
+                else:
+                    target_std = ctx.ref_latent_std
+                    strength = 0.8
+                    blended_std = (strength * target_std + (1.0 - strength) * cur_std)
+                    scale = blended_std / cur_std
+                    if abs(scale - 1.0) > 1e-4:
+                        x = (xf * scale).to(dtype)
 
             # Cache pass: run forward with sigma=0 to update KV cache for next frame.
-            # StaticKVCache semantics: unfreeze for this pass only, then re-freeze.
-            if ctx.kv_cache is not None:
-                ctx.kv_cache[0]["frozen_ref"][0] = False
-                sigma_zero = torch.zeros(x.shape[0], 1, device=device, dtype=dtype)
-                with set_forward_context(
-                        current_timestep=0,
-                        attn_metadata=SDPAMetadata(current_timestep=0, attn_mask=None),
-                        forward_batch=None,
-                ):
-                    transformer(
-                        x=x,
-                        sigma=sigma_zero,
-                        frame_timestamp=frame_ts,
-                        prompt_emb=prompt_emb,
-                        prompt_pad_mask=prompt_pad_mask,
-                        mouse=mouse[:, ctrl_step:ctrl_step + 1],
-                        button=button[:, ctrl_step:ctrl_step + 1],
-                        scroll=scroll[:, ctrl_step:ctrl_step + 1],
-                        kv_cache=ctx.kv_cache,
-                        update_cache=True,
-                    )
-                ctx.kv_cache[0]["frozen_ref"][0] = True
-                if ctx.frame_index < DEBUG_MULTIFRAME_MAX or _is_last_window:
-                    logger.info(
-                        "DEBUG %sframe %d: KV cache updated (sigma=0 pass done)",
-                        "(last) " if _is_last_window else "",
-                        ctx.frame_index,
-                    )
-                if _WAYPOINT_DEBUG and ctx.kv_cache and ctx.frame_index < 3:
-                    ends = [c["end"] for c in ctx.kv_cache[:3]]
-                    logger.info(
-                        "DEBUG [kv_cache] frame=%d layer_ends[:3]=%s",
-                        ctx.frame_index,
-                        ends,
-                    )
+            self._cache_pass(
+                transformer,
+                x,
+                frame_ts,
+                prompt_emb,
+                prompt_pad_mask,
+                mouse[:, ctrl_step:ctrl_step + 1],
+                button[:, ctrl_step:ctrl_step + 1],
+                scroll[:, ctrl_step:ctrl_step + 1],
+                ctx.kv_cache,
+            )
 
-            # Decode latent to frame (WorldEngineVAE / OWL VAE).
-            # CRITICAL: Do NOT resize/interpolate latents before decode. The VAE is a
-            # spatial upscaler: it expects the transformer's native grid (e.g. 32x32
-            # for Waypoint-1-Small, or 48x32 for full Waypoint) and outputs full-res
-            # pixels (e.g. 384x256). Resizing latents would force low-res blurry output.
+            # Decode latent to frame. The VAE is a spatial upscaler expecting the
+            # transformer's native grid (e.g. 32x32); do not resize latents before
+            # decode or output is low-res.
             if vae is not None:
                 latent_in = x[:, 0]  # [B, C, H, W] from DiT
                 expected_spatial = (latent_h, latent_w)
@@ -780,113 +605,7 @@ class WaypointPipeline(ComposedPipelineBase):
                     if isinstance(shift, torch.Tensor):
                         shift = shift.to(latent_in.device, latent_in.dtype)
                     latent_in = latent_in + shift
-                if ctx.frame_index == 0:
-                    logger.info(
-                        "DEBUG VAE class: %s  type(vae)=%s",
-                        type(vae).__name__,
-                        type(vae).__mro__,
-                    )
-                if _WAYPOINT_DEBUG and ctx.frame_index == 0:
-                    logger.info(
-                        "DEBUG [VAE] scaling_factor=%s shift=%s latent_in_dtype=%s",
-                        scaling_factor,
-                        getattr(vae_config, "shift_factor", None),
-                        latent_in.dtype,
-                    )
-                if _WAYPOINT_DEBUG_FILE and ctx.frame_index == 0:
-                    shift_val = getattr(vae_config, "shift_factor", None)
-                    shift_s = None
-                    if shift_val is not None and isinstance(shift_val, torch.Tensor):
-                        shift_s = float(shift_val.item()) if shift_val.numel() == 1 else None
-                    elif shift_val is not None:
-                        shift_s = float(shift_val)
-                    _collect_debug(
-                        "vae_config",
-                        scaling_factor=(float(scaling_factor) if scaling_factor is not None else 1.0),
-                        shift_factor=shift_s,
-                    )
-                if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
-                    lf = latent_in.float()
-                    logger.info(
-                        "DEBUG frame %d VAE input: mean=%.4f std=%.4f min=%.4f max=%.4f",
-                        ctx.frame_index,
-                        lf.mean().item(),
-                        lf.std().item(),
-                        lf.min().item(),
-                        lf.max().item(),
-                    )
-                elif _is_last_window:
-                    lf = latent_in.float()
-                    logger.info(
-                        "DEBUG (last) frame %d VAE input: mean=%.4f std=%.4f "
-                        "min=%.4f max=%.4f",
-                        ctx.frame_index,
-                        lf.mean().item(),
-                        lf.std().item(),
-                        lf.min().item(),
-                        lf.max().item(),
-                    )
                 decoded = vae.decode(latent_in)
-                if ctx.frame_index == 0:
-                    logger.info(
-                        "DEBUG VAE raw output: type=%s "
-                        "has_sample=%s",
-                        type(decoded).__name__,
-                        hasattr(decoded, "sample"),
-                    )
-                _d = decoded.sample if hasattr(decoded, "sample") else decoded
-                if _WAYPOINT_DEBUG and isinstance(_d, torch.Tensor):
-                    _df = _d.float()
-                    if torch.isnan(_df).any() or torch.isinf(_df).any():
-                        logger.warning(
-                            "DEBUG [VAE] frame=%d decoded HAS_NAN=%s HAS_INF=%s",
-                            ctx.frame_index,
-                            torch.isnan(_df).any().item(),
-                            torch.isinf(_df).any().item(),
-                        )
-                if _WAYPOINT_DEBUG_FILE and isinstance(_d, torch.Tensor) and ctx.frame_index < 30:
-                    vae_stats = _stats_dict(_d, include_sample=True)
-                    rgb = _stats_rgb(_d)
-                    _collect_debug(
-                        "vae_out",
-                        frame=ctx.frame_index,
-                        vae_out=vae_stats,
-                        **({
-                            "vae_out_rgb": rgb
-                        } if rgb else {}),
-                    )
-                if isinstance(_d, torch.Tensor) and ctx.frame_index < DEBUG_MULTIFRAME_MAX:
-                    _df = _d.float()
-                    logger.info(
-                        "DEBUG frame %d decoded: mean=%.2f std=%.2f min=%.1f max=%.1f",
-                        ctx.frame_index,
-                        _df.mean().item(),
-                        _df.std().item(),
-                        _df.min().item(),
-                        _df.max().item(),
-                    )
-                    if _d.dim() >= 3 and _d.shape[-1] == 3:
-                        for c in range(3):
-                            ch = _df[..., c]
-                            logger.info(
-                                "DEBUG frame %d ch%d (RGB): mean=%.2f min=%.1f max=%.1f",
-                                ctx.frame_index,
-                                c,
-                                ch.mean().item(),
-                                ch.min().item(),
-                                ch.max().item(),
-                            )
-                elif isinstance(_d, torch.Tensor) and _is_last_window:
-                    _df = _d.float()
-                    logger.info(
-                        "DEBUG (last) frame %d decoded: mean=%.2f std=%.2f "
-                        "min=%.1f max=%.1f",
-                        ctx.frame_index,
-                        _df.mean().item(),
-                        _df.std().item(),
-                        _df.min().item(),
-                        _df.max().item(),
-                    )
 
                 frame = (decoded.sample if hasattr(decoded, "sample") else decoded)
                 # Normalize to [B, C, H, W]
@@ -926,24 +645,6 @@ class WaypointPipeline(ComposedPipelineBase):
                         frame = (frame + 1.0) * 0.5
                     frame = frame.clamp(0.0, 1.0)
 
-                if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
-                    logger.info(
-                        "DEBUG frame %d final: mean=%.4f min=%.4f max=%.4f "
-                        "(drift to 1.0 = white, high mean = washout)",
-                        ctx.frame_index,
-                        frame.mean().item(),
-                        frame.min().item(),
-                        frame.max().item(),
-                    )
-                elif _is_last_window:
-                    logger.info(
-                        "DEBUG (last) frame %d final: mean=%.4f min=%.4f max=%.4f "
-                        "(blur/washout check)",
-                        ctx.frame_index,
-                        frame.mean().item(),
-                        frame.min().item(),
-                        frame.max().item(),
-                    )
                 generated_frames.append(frame)
 
             ctx.frame_index += 1
@@ -957,7 +658,6 @@ class WaypointPipeline(ComposedPipelineBase):
     def streaming_clear(self) -> None:
         """Clear streaming state."""
         self._streaming_ctx = None
-        self._vae_cache = None
         logger.info("Waypoint streaming cleared")
 
 

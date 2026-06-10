@@ -2,9 +2,16 @@
 """
 SSIM regression test for Waypoint-1-Small.
 
-Uses StreamingVideoGenerator (reset/step/finalize). Reference videos must be
-generated first: run this test, then `bash update_reference_videos.sh` from
-this directory (adjust REFERENCE_DIR to your device, e.g. A40_reference_videos).
+Drives ``VideoGenerator`` and compares against a device-specific reference,
+using the shared ``reference_utils`` helpers (same as the Matrix-Game tests) so
+the reference path matches the tiered layout the HF download CLI populates
+(``reference_videos/<tier>/<GPU>_reference_videos/...``), with a flat-legacy
+fallback. To create/update references: run this test once (it generates the
+video and fails because the reference is missing), then
+`python reference_videos_cli.py copy-local --quality-tier default
+--device-folder <GPU>_reference_videos` from this directory to promote the
+freshly generated video, then re-run to compare. Canonical CI references are
+generated on L40S.
 """
 # Avoid PyTorch 2.10 + Triton "duplicate template name" on some CI/RunPod images.
 # Must be set before torch/fastvideo are imported.
@@ -16,8 +23,14 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 import torch
 import pytest
 
-from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
+from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
+from fastvideo.tests.ssim.reference_utils import (
+    build_generated_output_dir,
+    build_reference_folder_path,
+    get_cuda_device_name,
+    resolve_device_reference_folder,
+)
 from fastvideo.tests.utils import (
     compute_video_ssim_torchvision,
     write_ssim_results,
@@ -25,25 +38,36 @@ from fastvideo.tests.utils import (
 
 logger = init_logger(__name__)
 
-device_name = torch.cuda.get_device_name()
-device_reference_folder_suffix = "_reference_videos"
-
-if "A40" in device_name:
-    device_reference_folder = "A40" + device_reference_folder_suffix
-elif "L40S" in device_name:
-    device_reference_folder = "L40S" + device_reference_folder_suffix
-else:
-    logger.warning(f"Unsupported device for ssim tests: {device_name}")
+# Resolve the device-specific reference folder via the shared helper so this
+# test reads the same tiered layout the HF download CLI populates
+# (reference_videos/<tier>/<GPU>_reference_videos/...), with a flat-legacy
+# fallback. Canonical CI references are generated on L40S/A40.
+_device_name = get_cuda_device_name()
+device_reference_folder = resolve_device_reference_folder(
+    (
+        ("A40", "A40"),
+        ("L40S", "L40S"),
+        ("H200", "H200"),
+    ),
+    device_name=_device_name,
+    # Keep "any device works": fall back to a folder derived from the GPU name
+    # (e.g. "NVIDIA RTX 4090" -> "RTX_4090_reference_videos").
+    unknown_device_prefix=_device_name.replace("NVIDIA ", "").strip().replace(
+        " ", "_"),
+    logger=logger,
+)
 
 # Owl-Control keycode: W=forward
 KEY_FORWARD = 17
 
+# WorldEngineVAE always decodes to 360x640, so frame count (num_steps) is the
+# main cost lever; keep it small for a fast regression pass.
 WAYPOINT_PARAMS = {
     "num_gpus": 1,
     "model_path": "FastVideo/Waypoint-1-Small-Diffusers",
     "height": 368,
     "width": 640,
-    "num_steps": 60,
+    "num_steps": 16,
     "frames_per_step": 1,
     "num_inference_steps": 4,
     "seed": 1024,
@@ -64,26 +88,31 @@ TEST_PROMPTS = [
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
 def test_waypoint_similarity(prompt, ATTENTION_BACKEND, model_id):
     """
-    Test that runs Waypoint inference via StreamingVideoGenerator and compares
-    the output to reference videos using SSIM.
+    Run Waypoint inference via VideoGenerator and compare the output to the
+    device's reference video using SSIM.
     """
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    base_output_dir = os.path.join(script_dir, "generated_videos", model_id)
-    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
-    output_video_name = "video.mp4"
-    output_path = os.path.join(output_dir, output_video_name)
-
+    output_dir = build_generated_output_dir(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     os.makedirs(output_dir, exist_ok=True)
 
     BASE_PARAMS = MODEL_TO_PARAMS[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
-    total_frames = BASE_PARAMS["num_steps"] * BASE_PARAMS["frames_per_step"]
-    num_frames_cap = max(32, total_frames + 8)
+    num_frames = BASE_PARAMS["num_steps"] * BASE_PARAMS["frames_per_step"]
 
-    generator = StreamingVideoGenerator.from_pretrained(
+    if BASE_PARAMS["seed"] is not None:
+        torch.manual_seed(BASE_PARAMS["seed"])
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(BASE_PARAMS["seed"])
+
+    generator = VideoGenerator.from_pretrained(
         BASE_PARAMS["model_path"],
         num_gpus=BASE_PARAMS["num_gpus"],
         use_fsdp_inference=False,
@@ -91,46 +120,42 @@ def test_waypoint_similarity(prompt, ATTENTION_BACKEND, model_id):
         vae_cpu_offload=False,
         text_encoder_cpu_offload=False,
         pin_cpu_memory=True,
+        max_kv_cache_frames=num_frames + 64,
     )
 
-    reset_kw = dict(
+    keyboard_cond = torch.zeros((num_frames, 256), dtype=torch.float32)
+    keyboard_cond[:, KEY_FORWARD] = 1.0
+    mouse_cond = torch.zeros((num_frames, 2), dtype=torch.float32)
+
+    generator.generate_video(
         prompt=prompt,
-        num_frames=num_frames_cap,
+        keyboard_cond=keyboard_cond.unsqueeze(0),
+        mouse_cond=mouse_cond.unsqueeze(0),
+        num_frames=num_frames,
         height=BASE_PARAMS["height"],
         width=BASE_PARAMS["width"],
         num_inference_steps=num_inference_steps,
-        output_path=output_path,
-        save_video=True,
-        video_quality=BASE_PARAMS["video_quality"],
+        fps=BASE_PARAMS.get("fps", 60),
         seed=BASE_PARAMS["seed"],
-    )
-    generator.reset(**reset_kw)
-
-    if BASE_PARAMS["seed"] is not None:
-        torch.manual_seed(BASE_PARAMS["seed"])
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(BASE_PARAMS["seed"])
-
-    keyboard_cond = torch.zeros(
-        (1, BASE_PARAMS["frames_per_step"], 256), dtype=torch.float32
-    )
-    keyboard_cond[:, :, KEY_FORWARD] = 1.0
-    mouse_cond = torch.zeros(
-        (1, BASE_PARAMS["frames_per_step"], 2), dtype=torch.float32
+        output_path=output_dir,
+        save_video=True,
     )
 
-    for _ in range(BASE_PARAMS["num_steps"]):
-        generator.step(keyboard_cond=keyboard_cond, mouse_cond=mouse_cond)
-
-    saved_path = generator.finalize()
-    generator.shutdown()
+    # generate_video writes "<prompt>.mp4" under output_dir; take the newest mp4.
+    import glob
+    mp4s = sorted(glob.glob(os.path.join(output_dir, "*.mp4")),
+                  key=os.path.getmtime)
+    saved_path = mp4s[-1] if mp4s else None
 
     assert saved_path and os.path.exists(saved_path), (
         f"Output video was not generated at {output_path}"
     )
 
-    reference_folder = os.path.join(
-        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    reference_folder = build_reference_folder_path(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
     )
 
     if not os.path.exists(reference_folder):
@@ -138,7 +163,7 @@ def test_waypoint_similarity(prompt, ATTENTION_BACKEND, model_id):
         raise FileNotFoundError(
             f"Reference video folder does not exist: {reference_folder}. "
             "Run this test to generate a video, then "
-            "bash update_reference_videos.sh from this directory."
+            "`python reference_videos_cli.py copy-local` from this directory."
         )
 
     reference_video_name = None
@@ -183,9 +208,9 @@ def test_waypoint_similarity(prompt, ATTENTION_BACKEND, model_id):
     if not success:
         logger.error("Failed to write SSIM results to file")
 
-    # Waypoint may have run-to-run variance (cuDNN, etc.). Use a relaxed
-    # threshold until determinism is verified. Other models use 0.93–0.98.
-    min_acceptable_ssim = 0.35
+    # Determinism verified locally with TORCH_COMPILE_DISABLE + fixed seed
+    # (same-device regen vs reference gives SSIM=1.0), so use a tight threshold.
+    min_acceptable_ssim = 0.95
     assert mean_ssim >= min_acceptable_ssim, (
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
         f"for {model_id} with backend: {ATTENTION_BACKEND}"
