@@ -613,18 +613,10 @@ def load_distillation_checkpoint(
                 end_time - begin_time,
                 local_main_process_only=False)
 
-    # Load EMA separately if saved in rank0_full mode
+    # Load EMA separately
     if generator_ema is not None:
         try:
-            if getattr(generator_ema, "mode", None) == "rank0_full":
-                ema_path = os.path.join(checkpoint_path, "ema", "generator_ema.pt")
-                if rank == 0 and os.path.exists(ema_path):
-                    ema_state = torch.load(ema_path, map_location="cpu")
-                    generator_ema.load_state_dict(ema_state)
-                    logger.info("rank: %s, generator EMA (rank0_full) loaded from %s", rank, ema_path)
-                elif rank == 0:
-                    logger.info("rank: %s, generator EMA file not found at %s; skipping", rank, ema_path)
-            elif getattr(generator_ema, "mode", None) == "local_shard":
+            if getattr(generator_ema, "mode", None) == "local_shard":
                 ema_path = os.path.join(checkpoint_path, "ema_local_shard", f"generator_ema_rank{rank}.pt")
                 if os.path.exists(ema_path):
                     ema_state = torch.load(ema_path, map_location="cpu")
@@ -632,8 +624,27 @@ def load_distillation_checkpoint(
                     logger.info("rank: %s, generator EMA shard (local_shard) loaded from %s", rank, ema_path)
                 else:
                     logger.info("rank: %s, generator EMA shard file not found at %s; skipping", rank, ema_path)
+            else:
+                logger.info("rank: %s, generator EMA mode %s not supported for resume; skipping", rank,
+                            getattr(generator_ema, "mode", None))
         except Exception as e:
             logger.warning("rank: %s, failed to load generator EMA: %s", rank, str(e))
+
+    # Load EMA_2 from its shard (symmetric with generator_ema above)
+    if generator_ema_2 is not None:
+        try:
+            if getattr(generator_ema_2, "mode", None) == "local_shard":
+                ema_2_path = os.path.join(checkpoint_path, "ema_local_shard", f"generator_ema_2_rank{rank}.pt")
+                if os.path.exists(ema_2_path):
+                    generator_ema_2.load_state_dict(torch.load(ema_2_path, map_location="cpu"))
+                    logger.info("rank: %s, generator EMA_2 shard (local_shard) loaded from %s", rank, ema_2_path)
+                else:
+                    logger.info("rank: %s, generator EMA_2 shard file not found at %s; skipping", rank, ema_2_path)
+            else:
+                logger.info("rank: %s, generator EMA_2 mode %s not supported for resume; skipping", rank,
+                            getattr(generator_ema_2, "mode", None))
+        except Exception as e:
+            logger.warning("rank: %s, failed to load generator EMA_2: %s", rank, str(e))
 
     # Load generator_2 distributed checkpoint (MoE support)
     if generator_transformer_2 is not None:
@@ -665,18 +676,6 @@ def load_distillation_checkpoint(
                         rank,
                         end_time - begin_time,
                         local_main_process_only=False)
-
-            # Load EMA_2 state if available and generator_ema_2 is provided
-            if generator_ema_2 is not None:
-                try:
-                    ema_2_state = generator_2_states.get("ema")
-                    if ema_2_state is not None:
-                        generator_ema_2.load_state_dict(ema_2_state)
-                        logger.info("rank: %s, generator_2 EMA state loaded successfully", rank)
-                    else:
-                        logger.info("rank: %s, no EMA_2 state found in checkpoint", rank)
-                except Exception as e:
-                    logger.warning("rank: %s, failed to load EMA_2 state: %s", rank, str(e))
         else:
             logger.info("rank: %s, generator_2 checkpoint not found, skipping", rank)
 

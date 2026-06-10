@@ -108,6 +108,7 @@ surfaces:
       vae_sp: generator.pipeline.preset_overrides.vae_sp
       dmd_denoising_steps: generator.pipeline.preset_overrides.dmd_denoising_steps
       ti2v_task: generator.pipeline.preset_overrides.ti2v_task
+      lucy_edit_task: generator.pipeline.preset_overrides.lucy_edit_task
       boundary_ratio: generator.pipeline.preset_overrides.boundary_ratio
     compatibility_only:
       model_path: "Redundant with generator.model_path."
@@ -125,9 +126,18 @@ surfaces:
       text_encoder_configs: "Legacy internal component config object."
       preprocess_text_funcs: "Internal text preprocessing hooks."
       postprocess_text_funcs: "Internal text postprocessing hooks."
+      scheduler_step_in_fp32: "Runtime scheduler precision toggle; not part of the public typed inference API."
 
   pipeline_config_extensions:
     preset_owned:
+      flux2_text_encoder_type:
+        sources:
+          - fastvideo.configs.pipelines.flux_2.Flux2PipelineConfig
+          - fastvideo.configs.pipelines.flux_2.Flux2KleinPipelineConfig
+      text_encoder_out_layers:
+        sources:
+          - fastvideo.configs.pipelines.flux_2.Flux2PipelineConfig
+          - fastvideo.configs.pipelines.flux_2.Flux2KleinPipelineConfig
       conditioning_strategy:
         sources:
           - fastvideo.configs.pipelines.cosmos.CosmosConfig
@@ -491,6 +501,8 @@ surfaces:
       inpaint_mask: request.extensions.stable_audio.inpaint_mask
     internal_only:
       data_type: "Derived from the request shape and not a public input."
+      latents: "Pre-generated diffusion latents supplied by parity/debug harnesses; not a public input."
+      max_sequence_length: "Model-specific text-encoder sequence cap; not part of the public typed inference API."
 
   sampling_param_extensions: {}
 

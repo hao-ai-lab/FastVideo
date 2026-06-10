@@ -30,7 +30,12 @@ from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
+from fastvideo.configs.pipelines.flux_2 import (
+    Flux2KleinPipelineConfig,
+    Flux2PipelineConfig,
+)
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
+from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -39,6 +44,7 @@ from fastvideo.configs.pipelines.turbodiffusion import (
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
     FastWan2_2_TI2V_5B_Config,
+    LucyEditDevConfig,
     SelfForcingWan2_2_T2V480PConfig,
     SelfForcingWanT2V480PConfig,
     WANV2VConfig,
@@ -54,6 +60,7 @@ from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
+from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
@@ -230,6 +237,9 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "FastVideo/LTX2-Distilled-Diffusers",
+            # LTX-2.3 distilled aliases share the distilled pipeline/preset.
+            "FastVideo/LTX2.3-Distilled-Diffusers",
+            "FastVideo/LTX-2.3-Distilled-Diffusers",
         ],
         model_detectors=[
             lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
@@ -237,7 +247,30 @@ def _register_configs() -> None:
         model_family="ltx2",
         default_preset="ltx2_distilled",
     )
-    # LTX-2 (base)
+    # LTX-2.3 (base) — registered before the LTX-2.0 base entry so its more
+    # specific 2.3 detector wins. Uses the same pipeline config; the new
+    # arch flags are read from the checkpoint config.json.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LTX2T2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "Lightricks/LTX-2.3",
+            "FastVideo/LTX2.3-base",
+            "FastVideo/LTX2.3-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: (any(token in path.lower() for token in (
+                "lightricks/ltx-2.3",
+                "ltx2.3-base",
+                "ltx2.3-diffusers",
+                "ltx-2.3-diffusers",
+            )) and "distilled" not in path.lower()),
+        ],
+        model_family="ltx2",
+        default_preset="ltx2_3_base",
+    )
+    # LTX-2 (base) — excludes 2.3 so the dedicated 2.3 entry above wins.
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=LTX2T2VConfig,
@@ -248,7 +281,8 @@ def _register_configs() -> None:
             "FastVideo/LTX2-Diffusers",
         ],
         model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" not in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" not in path.lower() and
+            "2.3" not in path.lower(),
         ],
         model_family="ltx2",
         default_preset="ltx2_base",
@@ -293,6 +327,45 @@ def _register_configs() -> None:
         ],
         model_family="stable_audio",
         default_preset="stable_audio_open_small",
+    )
+
+    def _is_flux2_klein(path: str) -> bool:
+        path_lower = path.lower()
+        return "flux.2-klein" in path_lower or "flux2-klein" in path_lower or "flux2klein" in path_lower
+
+    def _is_flux2_full(path: str) -> bool:
+        path_lower = path.lower()
+        is_flux2 = "flux.2" in path_lower or "flux2" in path_lower or "flux_2" in path_lower or "flux-2" in path_lower
+        return is_flux2 and "klein" not in path_lower
+
+    # Flux2 Klein (distilled, 4-step, no guidance)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Flux2KleinPipelineConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=[
+            "black-forest-labs/FLUX.2-klein-4B",
+            "black-forest-labs/FLUX.2-klein-9B",
+        ],
+        model_detectors=[
+            _is_flux2_klein,
+        ],
+        model_family="flux2",
+        default_preset="flux2_klein_4b",
+    )
+    # Flux2 (full, Mistral3 text encoder, embedded guidance)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Flux2PipelineConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=[
+            "black-forest-labs/FLUX.2-dev",
+        ],
+        model_detectors=[
+            _is_flux2_full,
+        ],
+        model_family="flux2",
+        default_preset="flux2_dev",
     )
 
     # Hunyuan 1.5 (specific)
@@ -483,10 +556,32 @@ def _register_configs() -> None:
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
         ],
         model_detectors=[
-            lambda path: "matrix-game" in path.lower() or "matrixgame" in path.lower(),
+            lambda path: any(token in path.lower() for token in (
+                "matrix-game-2",
+                "matrixgame2",
+                "matrix-game-2.0",
+            )),
         ],
         model_family="matrixgame",
         default_preset="matrixgame2_i2v",
+    )
+    # MatrixGame 3.0 (I2V)
+    register_configs(
+        sampling_param_cls=MatrixGame3SamplingParam,
+        pipeline_config_cls=MatrixGame3I2V720PConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "matrix-game-3",
+                "matrixgame3",
+                "matrix-game-3.0",
+            )),
+        ],
+        model_family="matrixgame",
+        default_preset="matrixgame3_i2v",
     )
 
     # GEN3C (must register before generic Cosmos detector)
@@ -689,6 +784,18 @@ def _register_configs() -> None:
     )
     register_configs(
         sampling_param_cls=None,
+        pipeline_config_cls=LucyEditDevConfig,
+        workload_types=(),
+        hf_model_paths=[
+            "decart-ai/Lucy-Edit-Dev",
+            "decart-ai/Lucy-Edit-1.1-Dev",
+        ],
+        model_detectors=[lambda path: "lucy-edit" in path.lower()],
+        model_family="wan",
+        default_preset="lucy_edit_dev",
+    )
+    register_configs(
+        sampling_param_cls=None,
         pipeline_config_cls=Wan2_2_T2V_A14B_Config,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
@@ -789,15 +896,19 @@ def get_model_info(
     if workload_type is None:
         workload_type = WorkloadType.T2V
 
-    if os.path.exists(model_path):
-        config = verify_model_config_and_directory(model_path)
-    else:
-        config = maybe_download_model_index(model_path)
+    config_info = _get_config_info(model_path, raise_on_missing=True)
+    assert config_info is not None, "config_info must be resolved"
 
-    pipeline_name = config.get("_class_name")
     if override_pipeline_cls_name:
-        logger.info("Overriding pipeline class name from %s to %s", pipeline_name, override_pipeline_cls_name)
         pipeline_name = override_pipeline_cls_name
+        logger.info("Using override pipeline class name %s", pipeline_name)
+    else:
+        if os.path.exists(model_path):
+            config = verify_model_config_and_directory(model_path)
+        else:
+            config = maybe_download_model_index(model_path)
+
+        pipeline_name = config.get("_class_name")
 
     if pipeline_name is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
@@ -805,9 +916,6 @@ def get_model_info(
 
     pipeline_registry = get_pipeline_registry(pipeline_type)
     pipeline_cls = pipeline_registry.resolve_pipeline_cls(pipeline_name, pipeline_type, workload_type)
-
-    config_info = _get_config_info(model_path, raise_on_missing=True)
-    assert config_info is not None, "config_info must be resolved"
 
     sampling_param_cls = config_info.sampling_param_cls or SamplingParam
 
@@ -859,6 +967,8 @@ def _register_presets() -> None:
         ALL_PRESETS as LTX2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame2.presets import (
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
+    from fastvideo.pipelines.basic.matrixgame3.presets import (
+        ALL_PRESETS as MATRIXGAME3_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -867,9 +977,12 @@ def _register_presets() -> None:
         ALL_PRESETS as TURBODIFFUSION_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
         ALL_PRESETS as WAN_PRESETS, )
+    from fastvideo.pipelines.basic.flux_2.presets import (
+        ALL_PRESETS as FLUX2_PRESETS, )
 
     all_preset_groups = (
         COSMOS_PRESETS,
+        FLUX2_PRESETS,
         GAMECRAFT_PRESETS,
         GEN3C_PRESETS,
         HUNYUAN_PRESETS,
@@ -879,6 +992,7 @@ def _register_presets() -> None:
         LONGCAT_PRESETS,
         LTX2_PRESETS,
         MATRIXGAME2_PRESETS,
+        MATRIXGAME3_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,

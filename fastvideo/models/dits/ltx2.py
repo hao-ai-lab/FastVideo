@@ -36,6 +36,65 @@ from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
 
+# QuACK provides a fast NVFP4 RMSNorm used only for the LTX-2.3 refine stage.
+# Import defensively: upstream installs without QuACK must still work, simply
+# falling back to ``torch.nn.functional.rms_norm`` (the non-refine path).
+try:
+    from quack import rmsnorm as _quack_rmsnorm
+except Exception:  # pragma: no cover - optional dependency
+    _quack_rmsnorm = None
+
+
+def _is_ltx2_refine_stage() -> bool:
+    """Return True when running LTX-2 stage-2 refinement denoising.
+
+    Only the refine stage uses the QuACK fast path; everything else (and any
+    install lacking QuACK) uses the standard Torch RMSNorm, which reproduces
+    LTX-2.0 numerics exactly.
+    """
+    if _quack_rmsnorm is None:
+        return False
+    try:
+        forward_ctx = get_forward_context()
+    except AssertionError:
+        return False
+    forward_batch = forward_ctx.forward_batch
+    if forward_batch is None:
+        return False
+    return forward_batch.extra.get("ltx2_fp4_stage_profile") == "refine"
+
+
+def _rms_norm_dispatch(
+    x: torch.Tensor,
+    eps: float,
+    weight: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Use QuACK RMSNorm only for LTX-2 refine stage, else Torch RMSNorm."""
+    if _is_ltx2_refine_stage():
+        return _quack_rmsnorm(x, weight=weight, eps=eps)
+    return torch.nn.functional.rms_norm(
+        x, (x.shape[-1], ), weight=weight, eps=eps)
+
+
+class StageAwareRMSNorm(nn.RMSNorm):
+    """Use torch.nn.RMSNorm for base stage and QuACK for refine stage.
+
+    When QuACK is unavailable or outside the refine stage this behaves
+    identically to ``torch.nn.RMSNorm`` (LTX-2.0 q_norm/k_norm behavior).
+    """
+
+    def __init__(self, hidden_size: int, eps: float = 1e-6) -> None:
+        super().__init__(hidden_size, eps=eps)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if _is_ltx2_refine_stage():
+            return _quack_rmsnorm(
+                x,
+                weight=self.weight,
+                eps=self.eps,
+            )
+        return super().forward(x)
+
 
 def _supports_prequantized_input(linear: ReplicatedLinear) -> bool:
     """Whether ``linear``'s quant method is willing to accept a
@@ -192,6 +251,18 @@ class AdaLayerNormSingle(torch.nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         embedded_timestep = self.emb(timestep, hidden_dtype=hidden_dtype)
         return self.linear(self.silu(embedded_timestep)), embedded_timestep
+
+
+# Number of AdaLN scale/shift/gate rows. LTX-2.0 emits 6 (shift/scale/gate for
+# self-attn and FFN). LTX-2.3 with cross_attention_adaln emits 3 extra rows for
+# the text cross-attention shift/scale/gate.
+ADALN_NUM_BASE_PARAMS = 6
+ADALN_NUM_CROSS_ATTN_PARAMS = 3
+
+
+def adaln_embedding_coefficient(cross_attention_adaln: bool) -> int:
+    return ADALN_NUM_BASE_PARAMS + (ADALN_NUM_CROSS_ATTN_PARAMS
+                                    if cross_attention_adaln else 0)
 
 
 class PixArtAlphaTextProjection(torch.nn.Module):
@@ -832,6 +903,8 @@ class TransformerArgs:
     cross_scale_shift_timestep: torch.Tensor | None
     cross_gate_timestep: torch.Tensor | None
     enabled: bool
+    # LTX-2.3 cross-attention AdaLN prompt timestep embedding (None for 2.0).
+    prompt_timestep: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -843,6 +916,8 @@ class Modality:
     positions: torch.Tensor
     context: torch.Tensor
     context_mask: torch.Tensor | None = None
+    # LTX-2.3 cross-attention AdaLN sigma timestep (None for 2.0).
+    sigma: torch.Tensor | None = None
 
 
 class TransformerArgsPreprocessor:
@@ -860,6 +935,7 @@ class TransformerArgsPreprocessor:
         double_precision_rope: bool,
         positional_embedding_theta: float,
         rope_type: LTXRopeType,
+        prompt_adaln: AdaLayerNormSingle | None = None,
     ) -> None:
         self.patchify_proj = patchify_proj
         self.adaln = adaln
@@ -872,12 +948,19 @@ class TransformerArgsPreprocessor:
         self.double_precision_rope = double_precision_rope
         self.positional_embedding_theta = positional_embedding_theta
         self.rope_type = rope_type
+        # LTX-2.3 cross-attention AdaLN prompt timestep embedder (None for 2.0).
+        self.prompt_adaln = prompt_adaln
 
     def _prepare_timestep(
-        self, timestep: torch.Tensor, batch_size: int, hidden_dtype: torch.dtype
+        self,
+        timestep: torch.Tensor,
+        batch_size: int,
+        hidden_dtype: torch.dtype,
+        adaln: AdaLayerNormSingle | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        adaln = self.adaln if adaln is None else adaln
         timestep = timestep * self.timestep_scale_multiplier
-        timestep, embedded_timestep = self.adaln(timestep.flatten(), hidden_dtype=hidden_dtype)
+        timestep, embedded_timestep = adaln(timestep.flatten(), hidden_dtype=hidden_dtype)
         timestep = timestep.view(batch_size, -1, timestep.shape[-1])
         embedded_timestep = embedded_timestep.view(batch_size, -1, embedded_timestep.shape[-1])
         return timestep, embedded_timestep
@@ -895,8 +978,11 @@ class TransformerArgsPreprocessor:
             context = context.to(x.dtype)
         if attention_mask is not None and attention_mask.device != x.device:
             attention_mask = attention_mask.to(x.device)
-        context = self.caption_projection(context)
-        context = context.view(batch_size, -1, x.shape[-1])
+        # When ``caption_proj_before_connector`` is set the caption projection
+        # lives in the text encoder, so it is None here and we skip it.
+        if self.caption_projection is not None:
+            context = self.caption_projection(context)
+            context = context.view(batch_size, -1, x.shape[-1])
         return context, attention_mask
 
     def _prepare_attention_mask(self, attention_mask: torch.Tensor | None, x_dtype: torch.dtype) -> torch.Tensor | None:
@@ -939,7 +1025,16 @@ class TransformerArgsPreprocessor:
         if not latent.is_contiguous():
             latent = latent.contiguous()
         x = self.patchify_proj(latent)
-        timestep, embedded_timestep = self._prepare_timestep(modality.timesteps, x.shape[0], modality.latent.dtype)
+        timestep, embedded_timestep = self._prepare_timestep(
+            modality.timesteps, x.shape[0], modality.latent.dtype, self.adaln)
+        prompt_timestep = None
+        if self.prompt_adaln is not None and modality.sigma is not None:
+            prompt_timestep, _ = self._prepare_timestep(
+                modality.sigma,
+                x.shape[0],
+                modality.latent.dtype,
+                self.prompt_adaln,
+            )
         context, attention_mask = self._prepare_context(modality.context, x, modality.context_mask)
         attention_mask = self._prepare_attention_mask(attention_mask, modality.latent.dtype)
         pe = self._prepare_positional_embeddings(
@@ -961,6 +1056,7 @@ class TransformerArgsPreprocessor:
             cross_scale_shift_timestep=None,
             cross_gate_timestep=None,
             enabled=modality.enabled,
+            prompt_timestep=prompt_timestep,
         )
 
 
@@ -985,6 +1081,7 @@ class MultiModalTransformerArgsPreprocessor:
         positional_embedding_theta: float,
         rope_type: LTXRopeType,
         av_ca_timestep_scale_multiplier: int,
+        prompt_adaln: AdaLayerNormSingle | None = None,
     ) -> None:
         self.simple_preprocessor = TransformerArgsPreprocessor(
             patchify_proj=patchify_proj,
@@ -998,6 +1095,7 @@ class MultiModalTransformerArgsPreprocessor:
             double_precision_rope=double_precision_rope,
             positional_embedding_theta=positional_embedding_theta,
             rope_type=rope_type,
+            prompt_adaln=prompt_adaln,
         )
         self.cross_scale_shift_adaln = cross_scale_shift_adaln
         self.cross_gate_adaln = cross_gate_adaln
@@ -1062,6 +1160,9 @@ class TransformerConfig:
     heads: int
     d_head: int
     context_dim: int
+    # LTX-2.3 gated extensions (default OFF == LTX-2.0 behavior).
+    apply_gated_attention: bool = False
+    cross_attention_adaln: bool = False
 
 
 class LTXDistributedAttention(DistributedAttention):
@@ -1091,7 +1192,6 @@ class LTXDistributedAttention(DistributedAttention):
         )
         self.rope_type = rope_type
 
-    @torch.compiler.disable
     def forward(
         self,
         q: torch.Tensor,
@@ -1324,6 +1424,7 @@ class LTXSelfAttention(nn.Module):
         norm_eps: float,
         rope_type: LTXRopeType,
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
+        apply_gated_attention: bool = False,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ) -> None:
@@ -1335,8 +1436,10 @@ class LTXSelfAttention(nn.Module):
         self.dim_head = dim_head
         self.rope_type = rope_type
 
-        self.q_norm = torch.nn.RMSNorm(inner_dim, eps=norm_eps)
-        self.k_norm = torch.nn.RMSNorm(inner_dim, eps=norm_eps)
+        # StageAwareRMSNorm is identical to torch.nn.RMSNorm outside the
+        # LTX-2.3 refine stage, so default-off behavior matches LTX-2.0.
+        self.q_norm = StageAwareRMSNorm(inner_dim, eps=norm_eps)
+        self.k_norm = StageAwareRMSNorm(inner_dim, eps=norm_eps)
         self.to_q = ReplicatedLinear(
             query_dim,
             inner_dim,
@@ -1358,6 +1461,18 @@ class LTXSelfAttention(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.to_v",
         )
+        # LTX-2.3 gated attention. DISTINCT from the VSA-QAT to_gate_compress
+        # gate below: this gate multiplies the *self-attention output* by
+        # 2*sigmoid(to_gate_logits(x)). None (default) == LTX-2.0 behavior.
+        self.to_gate_logits: ReplicatedLinear | None = None
+        if apply_gated_attention:
+            self.to_gate_logits = ReplicatedLinear(
+                query_dim,
+                heads,
+                bias=True,
+                quant_config=quant_config,
+                prefix=f"{prefix}.to_gate_logits",
+            )
         self.to_out = nn.ModuleList([
             ReplicatedLinear(
                 inner_dim,
@@ -1422,6 +1537,8 @@ class LTXSelfAttention(nn.Module):
         q = _linear_project_with_optional_prequant(self.to_q, x, q_pre_quantized)
         k = _linear_project_with_optional_prequant(self.to_k, context, kv_pre_quantized)
         v = _linear_project_with_optional_prequant(self.to_v, context, kv_pre_quantized)
+        gate_logits = (self.to_gate_logits(x)[0]
+                       if self.to_gate_logits is not None else None)
         gate_compress = (self.to_gate_compress(context)[0]
                          if self.to_gate_compress is not None else None)
 
@@ -1471,6 +1588,12 @@ class LTXSelfAttention(nn.Module):
                             gate_compress=gate_compress,
                             ltx_freqs_cis=pe,
                             ltx_k_freqs_cis=k_pe)
+        # LTX-2.3 gated attention: scale the attention output per-head by
+        # 2*sigmoid(gate_logits). No-op for LTX-2.0 (gate_logits is None).
+        if gate_logits is not None:
+            out = out.view(b, q_len, self.heads, self.dim_head)
+            gates = 2.0 * torch.sigmoid(gate_logits).to(out.dtype)
+            out = out * gates.unsqueeze(-1)
         out = out.reshape(b, q_len, -1)
         out = self.to_out[0](out)[0]
         return self.to_out[1](out)
@@ -1488,6 +1611,7 @@ class LTXDistributedSelfAttention(nn.Module):
         norm_eps: float,
         rope_type: LTXRopeType,
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
+        apply_gated_attention: bool = False,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ) -> None:
@@ -1499,8 +1623,10 @@ class LTXDistributedSelfAttention(nn.Module):
         self.dim_head = dim_head
         self.rope_type = rope_type
 
-        self.q_norm = torch.nn.RMSNorm(inner_dim, eps=norm_eps)
-        self.k_norm = torch.nn.RMSNorm(inner_dim, eps=norm_eps)
+        # StageAwareRMSNorm == torch.nn.RMSNorm outside the LTX-2.3 refine
+        # stage, preserving LTX-2.0 numerics by default.
+        self.q_norm = StageAwareRMSNorm(inner_dim, eps=norm_eps)
+        self.k_norm = StageAwareRMSNorm(inner_dim, eps=norm_eps)
         self.to_q = ReplicatedLinear(
             query_dim,
             inner_dim,
@@ -1522,6 +1648,16 @@ class LTXDistributedSelfAttention(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.to_v",
         )
+        # LTX-2.3 gated attention (distinct from VSA-QAT to_gate_compress).
+        self.to_gate_logits: ReplicatedLinear | None = None
+        if apply_gated_attention:
+            self.to_gate_logits = ReplicatedLinear(
+                query_dim,
+                heads,
+                bias=True,
+                quant_config=quant_config,
+                prefix=f"{prefix}.to_gate_logits",
+            )
         self.to_out = nn.ModuleList([
             ReplicatedLinear(
                 inner_dim,
@@ -1586,6 +1722,8 @@ class LTXDistributedSelfAttention(nn.Module):
         q = _linear_project_with_optional_prequant(self.to_q, x, q_pre_quantized)
         k = _linear_project_with_optional_prequant(self.to_k, context, kv_pre_quantized)
         v = _linear_project_with_optional_prequant(self.to_v, context, kv_pre_quantized)
+        gate_logits = (self.to_gate_logits(x)[0]
+                       if self.to_gate_logits is not None else None)
         gate_compress = (self.to_gate_compress(context)[0]
                          if self.to_gate_compress is not None else None)
 
@@ -1616,6 +1754,11 @@ class LTXDistributedSelfAttention(nn.Module):
             ltx_freqs_cis=pe,
         )
 
+        # LTX-2.3 gated attention (no-op for LTX-2.0).
+        if gate_logits is not None:
+            out = out.view(b, q_len, self.heads, self.dim_head)
+            gates = 2.0 * torch.sigmoid(gate_logits).to(out.dtype)
+            out = out * gates.unsqueeze(-1)
         out = out.reshape(b, q_len, -1)
         out = self.to_out[0](out)[0]
         return self.to_out[1](out)
@@ -1632,12 +1775,17 @@ class BasicAVTransformerBlock(torch.nn.Module):
         rope_type: LTXRopeType = LTXRopeType.INTERLEAVED,
         norm_eps: float = 1e-6,
         use_distributed_attention: bool = False,
+        cross_attention_adaln: bool = False,
+        stg_block_idx: int = 29,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
         super().__init__()
         self.idx = idx
         self.use_distributed_attention = use_distributed_attention
+        # LTX-2.3 cross-attention AdaLN + per-sample STG (defaults reproduce 2.0).
+        self.cross_attention_adaln = cross_attention_adaln
+        self.stg_block_idx = stg_block_idx
 
         # Choose attention class based on SP mode
         # Self-attention and audio-video cross-attention use DistributedAttention when SP > 1
@@ -1664,6 +1812,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=video_self_attn_backends,
+                apply_gated_attention=video.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.attn1",
             )
@@ -1676,6 +1825,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=dense_attn_backends,
+                apply_gated_attention=video.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.attn2",
             )
@@ -1685,7 +1835,11 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}",
             )
-            self.scale_shift_table = torch.nn.Parameter(torch.empty(6, video.dim))
+            # 6 rows for LTX-2.0; 9 rows when cross_attention_adaln adds the
+            # text cross-attention shift/scale/gate.
+            video_sst_size = adaln_embedding_coefficient(cross_attention_adaln)
+            self.scale_shift_table = torch.nn.Parameter(
+                torch.empty(video_sst_size, video.dim))
 
         if audio is not None:
             # Audio self-attention - use distributed when SP > 1
@@ -1697,6 +1851,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=dense_attn_backends,
+                apply_gated_attention=audio.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio_attn1",
             )
@@ -1709,6 +1864,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=dense_attn_backends,
+                apply_gated_attention=audio.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio_attn2",
             )
@@ -1718,7 +1874,9 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio",
             )
-            self.audio_scale_shift_table = torch.nn.Parameter(torch.empty(6, audio.dim))
+            audio_sst_size = adaln_embedding_coefficient(cross_attention_adaln)
+            self.audio_scale_shift_table = torch.nn.Parameter(
+                torch.empty(audio_sst_size, audio.dim))
 
         if audio is not None and video is not None:
             # Audio-to-video cross-attention
@@ -1731,6 +1889,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=dense_attn_backends,
+                apply_gated_attention=video.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio_to_video_attn",
             )
@@ -1744,11 +1903,21 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=dense_attn_backends,
+                apply_gated_attention=audio.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.video_to_audio_attn",
             )
             self.scale_shift_table_a2v_ca_audio = torch.nn.Parameter(torch.empty(5, audio.dim))
             self.scale_shift_table_a2v_ca_video = torch.nn.Parameter(torch.empty(5, video.dim))
+
+        # LTX-2.3 cross-attention AdaLN prompt scale/shift tables (only created
+        # when cross_attention_adaln is enabled, so absent for LTX-2.0).
+        if self.cross_attention_adaln and video is not None:
+            self.prompt_scale_shift_table = torch.nn.Parameter(
+                torch.empty(2, video.dim))
+        if self.cross_attention_adaln and audio is not None:
+            self.audio_prompt_scale_shift_table = torch.nn.Parameter(
+                torch.empty(2, audio.dim))
 
         self.norm_eps = norm_eps
 
@@ -1802,6 +1971,44 @@ class BasicAVTransformerBlock(torch.nn.Module):
 
         return (*scale_shift_chunks, *gate_ada_values)
 
+    def _apply_text_cross_attention(
+        self,
+        x: torch.Tensor,
+        context: torch.Tensor,
+        attn: Callable,
+        scale_shift_table: torch.Tensor,
+        prompt_scale_shift_table: torch.Tensor | None,
+        timestep: torch.Tensor,
+        prompt_timestep: torch.Tensor | None,
+        context_mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Text cross-attention with optional LTX-2.3 cross-attention AdaLN.
+
+        When ``cross_attention_adaln`` is False this is exactly the LTX-2.0
+        path: ``attn(rms_norm(x), context=context, mask=context_mask)``.
+        """
+        if self.cross_attention_adaln:
+            # The 3 extra AdaLN rows (6..9) carry text cross-attn shift/scale/gate.
+            shift_q, scale_q, gate = self.get_ada_values(
+                scale_shift_table, x.shape[0], timestep, slice(6, 9))
+            return apply_cross_attention_adaln(
+                x=x,
+                context=context,
+                attn=attn,
+                q_shift=shift_q,
+                q_scale=scale_q,
+                q_gate=gate,
+                prompt_scale_shift_table=prompt_scale_shift_table,
+                prompt_timestep=prompt_timestep,
+                context_mask=context_mask,
+                norm_eps=self.norm_eps,
+            )
+        return attn(
+            _rms_norm_dispatch(x, eps=self.norm_eps),
+            context=context,
+            mask=context_mask,
+        )
+
     def forward(
         self,
         video: TransformerArgs | None,
@@ -1809,8 +2016,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
         video_original_seq_len: int | None = None,
         audio_original_seq_len: int | None = None,
         skip_cross_modal_attn: bool = False,
-        skip_video_self_attn: bool = False,
-        skip_audio_self_attn: bool = False,
+        skip_video_self_attn: bool | torch.Tensor = False,
+        skip_audio_self_attn: bool | torch.Tensor = False,
     ) -> tuple[TransformerArgs | None, TransformerArgs | None]:
         """Forward pass for transformer block.
 
@@ -1834,51 +2041,97 @@ class BasicAVTransformerBlock(torch.nn.Module):
         run_a2v = run_vx and run_ax
         run_v2a = run_ax and run_vx
 
+        def _build_attn_keep_mask(
+            values: torch.Tensor,
+            skip_flag: bool | torch.Tensor,
+        ) -> torch.Tensor:
+            """STG keep-mask for self-attention.
+
+            Returns a per-sample multiplier (1 keep, 0 perturb) broadcastable
+            over ``values``. Only the configured ``stg_block_idx`` is perturbed.
+            Supports both the LTX-2.0 bool flag and an LTX-2.3 per-sample
+            tensor ``[B]`` (1/True == perturb). When skip_flag is False/0 the
+            multiplier is all ones, reproducing the un-skipped LTX-2.0 path.
+            """
+            bsz = values.shape[0]
+            keep = torch.ones((bsz, ), device=values.device, dtype=values.dtype)
+            if self.idx == self.stg_block_idx:
+                if torch.is_tensor(skip_flag):
+                    if skip_flag.ndim == 0:
+                        perturb = skip_flag.reshape(1).expand(bsz)
+                    else:
+                        if skip_flag.shape[0] != bsz:
+                            raise ValueError(
+                                "Per-sample STG mask batch size mismatch: "
+                                f"got {skip_flag.shape[0]}, expected {bsz}")
+                        perturb = skip_flag.reshape(bsz)
+                    keep = 1.0 - perturb.to(device=values.device,
+                                            dtype=values.dtype)
+                elif bool(skip_flag):
+                    keep.zero_()
+            return keep.view(bsz, *([1] * (values.ndim - 1)))
+
         if run_vx:
             vshift_msa, vscale_msa, vgate_msa = self.get_ada_values(
                 self.scale_shift_table, vx.shape[0], video.timesteps, slice(0, 3)
             )
-            if not skip_video_self_attn:
-                norm_vx = torch.nn.functional.rms_norm(vx, (vx.shape[-1],), eps=self.norm_eps) * (1 + vscale_msa) + vshift_msa
-                if self.use_distributed_attention:
-                    vx = vx + self.attn1(
-                        norm_vx,
-                        pe=video.positional_embeddings,
-                        original_seq_len=video_original_seq_len,
-                    ) * vgate_msa
-                else:
-                    vx = vx + self.attn1(norm_vx, pe=video.positional_embeddings) * vgate_msa
-            # Text cross-attention: no SP mask needed (text is replicated, uses local attention)
-            vx = vx + self.attn2(
-                torch.nn.functional.rms_norm(vx, (vx.shape[-1],), eps=self.norm_eps),
+            norm_vx = _rms_norm_dispatch(vx, eps=self.norm_eps) * (
+                1 + vscale_msa) + vshift_msa
+            video_self_attn_mask = _build_attn_keep_mask(vx, skip_video_self_attn)
+            if self.use_distributed_attention:
+                vx_attn1_out = self.attn1(
+                    norm_vx,
+                    pe=video.positional_embeddings,
+                    original_seq_len=video_original_seq_len,
+                )
+            else:
+                vx_attn1_out = self.attn1(norm_vx, pe=video.positional_embeddings)
+            vx = vx + vx_attn1_out * vgate_msa * video_self_attn_mask
+            # Text cross-attention: no SP mask needed (text is replicated).
+            vx = vx + self._apply_text_cross_attention(
+                x=vx,
                 context=video.context,
-                mask=video.context_mask,
+                attn=self.attn2,
+                scale_shift_table=self.scale_shift_table,
+                prompt_scale_shift_table=getattr(
+                    self, "prompt_scale_shift_table", None),
+                timestep=video.timesteps,
+                prompt_timestep=video.prompt_timestep,
+                context_mask=video.context_mask,
             )
 
         if run_ax:
             ashift_msa, ascale_msa, agate_msa = self.get_ada_values(
                 self.audio_scale_shift_table, ax.shape[0], audio.timesteps, slice(0, 3)
             )
-            if not skip_audio_self_attn:
-                norm_ax = torch.nn.functional.rms_norm(ax, (ax.shape[-1],), eps=self.norm_eps) * (1 + ascale_msa) + ashift_msa
-                if self.use_distributed_attention:
-                    ax = ax + self.audio_attn1(
-                        norm_ax,
-                        pe=audio.positional_embeddings,
-                        original_seq_len=audio_original_seq_len,
-                    ) * agate_msa
-                else:
-                    ax = ax + self.audio_attn1(norm_ax, pe=audio.positional_embeddings) * agate_msa
-            # Text cross-attention: no SP mask needed (text is replicated, uses local attention)
-            ax = ax + self.audio_attn2(
-                torch.nn.functional.rms_norm(ax, (ax.shape[-1],), eps=self.norm_eps),
+            norm_ax = _rms_norm_dispatch(ax, eps=self.norm_eps) * (
+                1 + ascale_msa) + ashift_msa
+            audio_self_attn_mask = _build_attn_keep_mask(ax, skip_audio_self_attn)
+            if self.use_distributed_attention:
+                ax_attn1_out = self.audio_attn1(
+                    norm_ax,
+                    pe=audio.positional_embeddings,
+                    original_seq_len=audio_original_seq_len,
+                )
+            else:
+                ax_attn1_out = self.audio_attn1(norm_ax, pe=audio.positional_embeddings)
+            ax = ax + ax_attn1_out * agate_msa * audio_self_attn_mask
+            # Text cross-attention: no SP mask needed (text is replicated).
+            ax = ax + self._apply_text_cross_attention(
+                x=ax,
                 context=audio.context,
-                mask=audio.context_mask,
+                attn=self.audio_attn2,
+                scale_shift_table=self.audio_scale_shift_table,
+                prompt_scale_shift_table=getattr(
+                    self, "audio_prompt_scale_shift_table", None),
+                timestep=audio.timesteps,
+                prompt_timestep=audio.prompt_timestep,
+                context_mask=audio.context_mask,
             )
 
         if (run_a2v or run_v2a) and not skip_cross_modal_attn:
-            vx_norm3 = torch.nn.functional.rms_norm(vx, (vx.shape[-1],), eps=self.norm_eps)
-            ax_norm3 = torch.nn.functional.rms_norm(ax, (ax.shape[-1],), eps=self.norm_eps)
+            vx_norm3 = _rms_norm_dispatch(vx, eps=self.norm_eps)
+            ax_norm3 = _rms_norm_dispatch(ax, eps=self.norm_eps)
 
             (
                 scale_ca_audio_hidden_states_a2v,
@@ -1996,17 +2249,22 @@ class BasicAVTransformerBlock(torch.nn.Module):
                     )
 
         if run_vx:
+            # slice(3, 6) selects the FFN shift/scale/gate. Identical to
+            # slice(3, None) for the 6-row LTX-2.0 table, but correct for the
+            # 9-row cross_attention_adaln table (rows 6..9 are the cross-attn).
             vshift_mlp, vscale_mlp, vgate_mlp = self.get_ada_values(
-                self.scale_shift_table, vx.shape[0], video.timesteps, slice(3, None)
+                self.scale_shift_table, vx.shape[0], video.timesteps, slice(3, 6)
             )
-            vx_scaled = torch.nn.functional.rms_norm(vx, (vx.shape[-1],), eps=self.norm_eps) * (1 + vscale_mlp) + vshift_mlp
+            vx_scaled = _rms_norm_dispatch(vx, eps=self.norm_eps) * (
+                1 + vscale_mlp) + vshift_mlp
             vx = vx + self.ff(vx_scaled) * vgate_mlp
 
         if run_ax:
             ashift_mlp, ascale_mlp, agate_mlp = self.get_ada_values(
-                self.audio_scale_shift_table, ax.shape[0], audio.timesteps, slice(3, None)
+                self.audio_scale_shift_table, ax.shape[0], audio.timesteps, slice(3, 6)
             )
-            ax_scaled = torch.nn.functional.rms_norm(ax, (ax.shape[-1],), eps=self.norm_eps) * (1 + ascale_mlp) + ashift_mlp
+            ax_scaled = _rms_norm_dispatch(ax, eps=self.norm_eps) * (
+                1 + ascale_mlp) + ashift_mlp
             ax = ax + self.audio_ff(ax_scaled) * agate_mlp
 
         if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
@@ -2025,6 +2283,39 @@ class BasicAVTransformerBlock(torch.nn.Module):
             replace(video, x=vx) if video is not None else None,
             replace(audio, x=ax) if audio is not None else None,
         )
+
+
+def apply_cross_attention_adaln(
+    x: torch.Tensor,
+    context: torch.Tensor,
+    attn: Callable,
+    q_shift: torch.Tensor,
+    q_scale: torch.Tensor,
+    q_gate: torch.Tensor,
+    prompt_scale_shift_table: torch.Tensor | None,
+    prompt_timestep: torch.Tensor | None,
+    context_mask: torch.Tensor | None = None,
+    norm_eps: float = 1e-6,
+) -> torch.Tensor:
+    """LTX-2.3 cross-attention AdaLN: modulate query (x) and key/value
+    (context) by AdaLN scale/shift and gate the output.
+
+    Only reached when ``cross_attention_adaln`` is enabled, so it never
+    affects the LTX-2.0 path.
+    """
+    if prompt_scale_shift_table is None or prompt_timestep is None:
+        raise ValueError(
+            "cross_attention_adaln requires prompt scale/shift tables and prompt_timestep."
+        )
+    batch_size = x.shape[0]
+    shift_kv, scale_kv = (
+        prompt_scale_shift_table[None, None].to(device=x.device, dtype=x.dtype)
+        + prompt_timestep.reshape(batch_size, prompt_timestep.shape[1], 2, -1)
+    ).unbind(dim=2)
+    attn_input = _rms_norm_dispatch(x, eps=norm_eps) * (1 + q_scale) + q_shift
+    encoder_hidden_states = context * (1 + scale_kv) + shift_kv
+    return attn(attn_input, context=encoder_hidden_states,
+                mask=context_mask) * q_gate
 
 
 class LTXModelType(Enum):
@@ -2068,12 +2359,21 @@ class LTXModel(torch.nn.Module):
         av_ca_timestep_scale_multiplier: int = 1,
         rope_type: LTXRopeType = LTXRopeType.INTERLEAVED,
         double_precision_rope: bool = False,
+        cross_attention_adaln: bool = False,
+        caption_proj_before_connector: bool = False,
+        apply_gated_attention: bool = False,
+        stg_block_idx: int = 29,
         use_distributed_attention: bool = False,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
         super().__init__()
         self._enable_gradient_checkpointing = False
+        # LTX-2.3 gated extensions (all default OFF == LTX-2.0 behavior).
+        self.cross_attention_adaln = cross_attention_adaln
+        self.caption_proj_before_connector = caption_proj_before_connector
+        self.apply_gated_attention = apply_gated_attention
+        self.stg_block_idx = stg_block_idx
         self.use_middle_indices_grid = use_middle_indices_grid
         self.rope_type = rope_type
         self.double_precision_rope = double_precision_rope
@@ -2093,6 +2393,7 @@ class LTXModel(torch.nn.Module):
                 out_channels=out_channels,
                 caption_channels=caption_channels,
                 norm_eps=norm_eps,
+                create_caption_projection=not caption_proj_before_connector,
             )
 
         if model_type.is_audio_enabled():
@@ -2106,6 +2407,7 @@ class LTXModel(torch.nn.Module):
                 out_channels=audio_out_channels,
                 caption_channels=caption_channels,
                 norm_eps=norm_eps,
+                create_caption_projection=not caption_proj_before_connector,
             )
 
         if model_type.is_video_enabled() and model_type.is_audio_enabled():
@@ -2133,13 +2435,26 @@ class LTXModel(torch.nn.Module):
         out_channels: int,
         caption_channels: int,
         norm_eps: float,
+        create_caption_projection: bool = True,
     ) -> None:
         self.patchify_proj = torch.nn.Linear(in_channels, self.inner_dim, bias=True)
-        self.adaln_single = AdaLayerNormSingle(self.inner_dim)
-        self.caption_projection = PixArtAlphaTextProjection(
-            in_features=caption_channels,
-            hidden_size=self.inner_dim,
+        self.adaln_single = AdaLayerNormSingle(
+            self.inner_dim,
+            embedding_coefficient=adaln_embedding_coefficient(
+                self.cross_attention_adaln),
         )
+        # When caption_proj_before_connector is set the caption projection
+        # lives in the text encoder, so it is omitted here (LTX-2.3 layout).
+        if create_caption_projection:
+            self.caption_projection = PixArtAlphaTextProjection(
+                in_features=caption_channels,
+                hidden_size=self.inner_dim,
+            )
+        if self.cross_attention_adaln:
+            self.prompt_adaln_single = AdaLayerNormSingle(
+                self.inner_dim,
+                embedding_coefficient=2,
+            )
         self.scale_shift_table = torch.nn.Parameter(torch.empty(2, self.inner_dim))
         self.norm_out = torch.nn.LayerNorm(self.inner_dim, elementwise_affine=False, eps=norm_eps)
         self.proj_out = torch.nn.Linear(self.inner_dim, out_channels)
@@ -2150,13 +2465,24 @@ class LTXModel(torch.nn.Module):
         out_channels: int,
         caption_channels: int,
         norm_eps: float,
+        create_caption_projection: bool = True,
     ) -> None:
         self.audio_patchify_proj = torch.nn.Linear(in_channels, self.audio_inner_dim, bias=True)
-        self.audio_adaln_single = AdaLayerNormSingle(self.audio_inner_dim)
-        self.audio_caption_projection = PixArtAlphaTextProjection(
-            in_features=caption_channels,
-            hidden_size=self.audio_inner_dim,
+        self.audio_adaln_single = AdaLayerNormSingle(
+            self.audio_inner_dim,
+            embedding_coefficient=adaln_embedding_coefficient(
+                self.cross_attention_adaln),
         )
+        if create_caption_projection:
+            self.audio_caption_projection = PixArtAlphaTextProjection(
+                in_features=caption_channels,
+                hidden_size=self.audio_inner_dim,
+            )
+        if self.cross_attention_adaln:
+            self.audio_prompt_adaln_single = AdaLayerNormSingle(
+                self.audio_inner_dim,
+                embedding_coefficient=2,
+            )
         self.audio_scale_shift_table = torch.nn.Parameter(torch.empty(2, self.audio_inner_dim))
         self.audio_norm_out = torch.nn.LayerNorm(self.audio_inner_dim, elementwise_affine=False, eps=norm_eps)
         self.audio_proj_out = torch.nn.Linear(self.audio_inner_dim, out_channels)
@@ -2184,7 +2510,7 @@ class LTXModel(torch.nn.Module):
             self.video_args_preprocessor = MultiModalTransformerArgsPreprocessor(
                 patchify_proj=self.patchify_proj,
                 adaln=self.adaln_single,
-                caption_projection=self.caption_projection,
+                caption_projection=getattr(self, "caption_projection", None),
                 cross_scale_shift_adaln=self.av_ca_video_scale_shift_adaln_single,
                 cross_gate_adaln=self.av_ca_a2v_gate_adaln_single,
                 inner_dim=self.inner_dim,
@@ -2198,11 +2524,12 @@ class LTXModel(torch.nn.Module):
                 positional_embedding_theta=self.positional_embedding_theta,
                 rope_type=self.rope_type,
                 av_ca_timestep_scale_multiplier=self.av_ca_timestep_scale_multiplier,
+                prompt_adaln=getattr(self, "prompt_adaln_single", None),
             )
             self.audio_args_preprocessor = MultiModalTransformerArgsPreprocessor(
                 patchify_proj=self.audio_patchify_proj,
                 adaln=self.audio_adaln_single,
-                caption_projection=self.audio_caption_projection,
+                caption_projection=getattr(self, "audio_caption_projection", None),
                 cross_scale_shift_adaln=self.av_ca_audio_scale_shift_adaln_single,
                 cross_gate_adaln=self.av_ca_v2a_gate_adaln_single,
                 inner_dim=self.audio_inner_dim,
@@ -2216,12 +2543,13 @@ class LTXModel(torch.nn.Module):
                 positional_embedding_theta=self.positional_embedding_theta,
                 rope_type=self.rope_type,
                 av_ca_timestep_scale_multiplier=self.av_ca_timestep_scale_multiplier,
+                prompt_adaln=getattr(self, "audio_prompt_adaln_single", None),
             )
         elif self.model_type.is_video_enabled():
             self.video_args_preprocessor = TransformerArgsPreprocessor(
                 patchify_proj=self.patchify_proj,
                 adaln=self.adaln_single,
-                caption_projection=self.caption_projection,
+                caption_projection=getattr(self, "caption_projection", None),
                 inner_dim=self.inner_dim,
                 max_pos=self.positional_embedding_max_pos,
                 num_attention_heads=self.num_attention_heads,
@@ -2230,12 +2558,13 @@ class LTXModel(torch.nn.Module):
                 double_precision_rope=self.double_precision_rope,
                 positional_embedding_theta=self.positional_embedding_theta,
                 rope_type=self.rope_type,
+                prompt_adaln=getattr(self, "prompt_adaln_single", None),
             )
         elif self.model_type.is_audio_enabled():
             self.audio_args_preprocessor = TransformerArgsPreprocessor(
                 patchify_proj=self.audio_patchify_proj,
                 adaln=self.audio_adaln_single,
-                caption_projection=self.audio_caption_projection,
+                caption_projection=getattr(self, "audio_caption_projection", None),
                 inner_dim=self.audio_inner_dim,
                 max_pos=self.audio_positional_embedding_max_pos,
                 num_attention_heads=self.audio_num_attention_heads,
@@ -2244,6 +2573,7 @@ class LTXModel(torch.nn.Module):
                 double_precision_rope=self.double_precision_rope,
                 positional_embedding_theta=self.positional_embedding_theta,
                 rope_type=self.rope_type,
+                prompt_adaln=getattr(self, "audio_prompt_adaln_single", None),
             )
 
     def _init_transformer_blocks(
@@ -2264,6 +2594,8 @@ class LTXModel(torch.nn.Module):
                 heads=self.num_attention_heads,
                 d_head=attention_head_dim,
                 context_dim=cross_attention_dim,
+                apply_gated_attention=self.apply_gated_attention,
+                cross_attention_adaln=self.cross_attention_adaln,
             )
             if self.model_type.is_video_enabled()
             else None
@@ -2274,6 +2606,8 @@ class LTXModel(torch.nn.Module):
                 heads=self.audio_num_attention_heads,
                 d_head=audio_attention_head_dim,
                 context_dim=audio_cross_attention_dim,
+                apply_gated_attention=self.apply_gated_attention,
+                cross_attention_adaln=self.cross_attention_adaln,
             )
             if self.model_type.is_audio_enabled()
             else None
@@ -2288,6 +2622,8 @@ class LTXModel(torch.nn.Module):
                     rope_type=self.rope_type,
                     norm_eps=norm_eps,
                     use_distributed_attention=use_distributed_attention,
+                    cross_attention_adaln=self.cross_attention_adaln,
+                    stg_block_idx=self.stg_block_idx,
                     quant_config=quant_config,
                     prefix=prefix,
                 )
@@ -2476,6 +2812,10 @@ class LTX2Transformer3DModel(BaseDiT):
             audio_cross_attention_dim=arch.audio_cross_attention_dim,
             audio_positional_embedding_max_pos=arch.audio_positional_embedding_max_pos,
             av_ca_timestep_scale_multiplier=arch.av_ca_timestep_scale_multiplier,
+            cross_attention_adaln=arch.cross_attention_adaln,
+            caption_proj_before_connector=arch.caption_proj_before_connector,
+            apply_gated_attention=arch.apply_gated_attention,
+            stg_block_idx=arch.stg_block_idx,
             use_distributed_attention=use_distributed_attention,
             quant_config=config.quant_config,
             prefix=config.prefix,
@@ -2561,9 +2901,12 @@ class LTX2Transformer3DModel(BaseDiT):
         audio_encoder_hidden_states: torch.Tensor | None = None,
         audio_timestep: torch.Tensor | None = None,
         audio_encoder_attention_mask: torch.Tensor | None = None,
+        video_sigma: torch.Tensor | None = None,
+        audio_sigma: torch.Tensor | None = None,
         skip_cross_modal_attn: bool = False,
         skip_video_self_attn_blocks: list[int] | None = None,
         skip_audio_self_attn_blocks: list[int] | None = None,
+        video_position_offset_sec: float = 0.0,
         **kwargs,
     ) -> torch.Tensor:
         if isinstance(encoder_hidden_states, list):
@@ -2587,6 +2930,12 @@ class LTX2Transformer3DModel(BaseDiT):
         # Patchify video latents
         video_shape = VideoLatentShape.from_torch_shape(hidden_states.shape)
         latents = self.patchifier.patchify(hidden_states)
+        # LTX-2.3 cross-attention AdaLN consumes a per-sample sigma timestep.
+        # When the denoising stage does not supply one (LTX-2.0, or any caller
+        # that omits it) derive it from the video timestep. The downstream
+        # ``prompt_adaln`` is None for LTX-2.0 so this value is ignored there.
+        if video_sigma is None:
+            video_sigma = timestep[:, 0] if timestep.ndim > 1 else timestep
 
         # Shard video latents and timestep across SP ranks
         video_original_seq_len = latents.shape[1]
@@ -2610,7 +2959,10 @@ class LTX2Transformer3DModel(BaseDiT):
             DEFAULT_LTX2_SCALE_FACTORS,
             fps=fps,
             causal_fix=True,
-        ).to(hidden_states.dtype)
+        )
+        if video_position_offset_sec:
+            positions[:, 0, ...] = positions[:, 0, ...] + float(video_position_offset_sec)
+        positions = positions.to(hidden_states.dtype)
 
         # Pad positions to match padded sequence length for SP cross-attention
         if sp_world_size > 1 and video_padded_seq_len > video_original_seq_len:
@@ -2625,6 +2977,7 @@ class LTX2Transformer3DModel(BaseDiT):
             positions=positions,
             context=encoder_hidden_states,
             context_mask=encoder_attention_mask,
+            sigma=video_sigma,
         )
         if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
             video_head = latents.flatten()[:8].float().tolist()
@@ -2648,6 +3001,11 @@ class LTX2Transformer3DModel(BaseDiT):
         if audio_hidden_states is not None and audio_encoder_hidden_states is not None and audio_timestep is not None:
             audio_shape = AudioLatentShape.from_torch_shape(audio_hidden_states.shape)
             audio_latents = self.audio_patchifier.patchify(audio_hidden_states)
+            if audio_sigma is None:
+                audio_sigma = (
+                    audio_timestep[:, 0]
+                    if audio_timestep.ndim > 1 else audio_timestep
+                )
 
             # Shard audio latents and timestep across SP ranks
             audio_original_seq_len = audio_latents.shape[1]
@@ -2670,6 +3028,7 @@ class LTX2Transformer3DModel(BaseDiT):
                 positions=audio_positions,
                 context=audio_encoder_hidden_states,
                 context_mask=audio_encoder_attention_mask,
+                sigma=audio_sigma,
             )
             if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
                 audio_head = audio_latents.flatten()[:8].float().tolist()

@@ -138,7 +138,9 @@ class MultiprocExecutor(Executor):
         result_batch = ForwardBatch(data_type=forward_batch.data_type,
                                     output=output,
                                     logging_info=logging_info,
-                                    extra=extra)
+                                    extra=extra,
+                                    trajectory_latents=responses[0].get("trajectory_latents"),
+                                    trajectory_timesteps=responses[0].get("trajectory_timesteps"))
 
         return result_batch
 
@@ -232,11 +234,17 @@ class MultiprocExecutor(Executor):
 
         return self._streaming_output_queue.get()
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None = None) -> None:
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None,
+                         strength: float = 1.0,
+                         accumulate: bool = False) -> None:
         responses = self.collective_rpc("set_lora_adapter",
                                         kwargs={
                                             "lora_nickname": lora_nickname,
-                                            "lora_path": lora_path
+                                            "lora_path": lora_path,
+                                            "strength": strength,
+                                            "accumulate": accumulate
                                         })
         for i, response in enumerate(responses):
             if response["status"] != "lora_adapter_set":
@@ -693,6 +701,8 @@ class WorkerMultiprocProc:
                             "output_batch": result,
                             "logging_info": logging_info,
                             "extra": extra,
+                            "trajectory_latents": output_batch.trajectory_latents,
+                            "trajectory_timesteps": output_batch.trajectory_timesteps,
                         })
                     else:
                         result = self.worker.execute_method(method, *args, **kwargs)

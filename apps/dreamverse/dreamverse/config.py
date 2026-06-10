@@ -57,18 +57,24 @@ MODEL_REGISTRY = {
         "name": "FastLTX2",
         "model_path": "FastVideo/LTX2-Distilled-Diffusers",
         "config_model_path": "FastVideo/LTX2-Distilled-Diffusers",
+        "lora_repo": "FastVideo/LTX2-OmniNFT-LoRA",
     },
     "fast-ltx23": {
         "name": "FastLTX23",
         "model_path": "FastVideo/LTX-2.3-Distilled-Diffusers",
         "config_model_path": "FastVideo/LTX-2.3-Distilled-Diffusers",
+        "lora_repo": "FastVideo/LTX-2.3-OmniNFT-LoRA",
     },
 }
 
 DEFAULT_MODEL_ID = "fast-ltx2"
 
+ACTIVE_MODEL_ID = (os.getenv("DREAMVERSE_MODEL_ID", "").strip() or DEFAULT_MODEL_ID)
+if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
+    ACTIVE_MODEL_ID = DEFAULT_MODEL_ID
+
 # Active model configuration
-MODEL_CONFIG = MODEL_REGISTRY[DEFAULT_MODEL_ID]
+MODEL_CONFIG = MODEL_REGISTRY[ACTIVE_MODEL_ID]
 
 # Generation limits
 SESSION_TIMEOUT_SECONDS = 300
@@ -164,6 +170,76 @@ def _optional_env(*names: str) -> str | None:
 
 DEVTOOLS_ENABLED = _env_bool("FASTVIDEO_ENABLE_DEVTOOLS", False)
 PROMPT_SAFETY_ENABLED = _env_bool("FASTVIDEO_ENABLE_PROMPT_SAFETY", False)
+DREAMVERSE_MAX_AUTOTUNE = _env_bool("DREAMVERSE_MAX_AUTOTUNE", True)
+DREAMVERSE_SP_SIZE = max(1, _env_int("DREAMVERSE_SP_SIZE", 1))
+
+DREAMVERSE_MODEL_PATH = (os.getenv("DREAMVERSE_MODEL_PATH", "").strip() or None)
+if DREAMVERSE_MODEL_PATH:
+    MODEL_CONFIG = {
+        **MODEL_CONFIG,
+        "model_path": DREAMVERSE_MODEL_PATH,
+        "config_model_path": DREAMVERSE_MODEL_PATH,
+    }
+
+AVAILABLE_LORAS = {
+    "pixar": {
+        "repo": "vrgamedevgirl84/LTX_2.3_Pixar_Toon_Style_LoRa",
+        "trigger": "P1x4r",
+        "model": "fast-ltx23",
+        "position": "prepend",
+        "label": "Pixar Toon",
+    },
+    "transition": {
+        "repo": "valiantcat/LTX-2.3-Transition-LORA",
+        "trigger": "zhuanchang",
+        "model": "fast-ltx23",
+        "position": "append",
+        "label": "Transition",
+    },
+}
+
+
+def _active_model_key() -> str:
+    return ACTIVE_MODEL_ID
+
+
+def _available_styles_for_active_model() -> list[str]:
+    active = _active_model_key()
+    return [k for k, v in AVAILABLE_LORAS.items() if v.get("model") == active]
+
+
+def _resolve_lora_spec(spec: str) -> str | None:
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    if spec.lower() == "omninft":
+        return MODEL_CONFIG.get("lora_repo")
+    if spec.lower() in AVAILABLE_LORAS:
+        return AVAILABLE_LORAS[spec.lower()]["repo"]
+    return spec
+
+
+def _parse_lora_stack(raw: str) -> list[tuple[str, float]]:
+    out: list[tuple[str, float]] = []
+    for item in (raw or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        spec, _, stren = item.partition("@")
+        resolved = _resolve_lora_spec(spec)
+        if resolved:
+            try:
+                strength = float(stren) if stren.strip() else 1.0
+            except ValueError:
+                strength = 1.0
+            out.append((resolved, strength))
+    return out
+
+
+DREAMVERSE_LORA_PATH = _resolve_lora_spec(os.getenv("DREAMVERSE_LORA_PATH", ""))
+DREAMVERSE_LORA_NICKNAME = (os.getenv("DREAMVERSE_LORA_NICKNAME", "omninft").strip() or "omninft")
+DREAMVERSE_LORA_STRENGTH = _env_float("DREAMVERSE_LORA_STRENGTH", 1.0)
+DREAMVERSE_LORA_STACK = _parse_lora_stack(os.getenv("DREAMVERSE_LORA_STACK", ""))
 
 
 def _resolve_devtools_paths(

@@ -219,6 +219,15 @@ class ReplicatedLinear(LinearBase):
                         (e.g. model.layers.0.qkv_proj)
     """
 
+    # Opt-in instrumentation: when ``enable_shape_tracking`` is set to True,
+    # ``forward`` records every unique ``(input_shape, output_shape)`` pair
+    # observed across all ``ReplicatedLinear`` instances, along with the
+    # subclass name that produced it. Used by upcoming QAT-aware backends
+    # to discover which GEMM shapes need quantized kernels. Defaults to
+    # False; default forward path is bit-identical to pre-slice behavior.
+    enable_shape_tracking = False
+    _shape_to_layer_types: dict[tuple[torch.Size, torch.Size], set[str]] = {}
+
     def __init__(
         self,
         input_size: int,
@@ -285,6 +294,8 @@ class ReplicatedLinear(LinearBase):
         bias = self.bias if not self.skip_bias_add else None
         assert self.quant_method is not None
         output = self.quant_method.apply(self, x, bias)
+        if self.enable_shape_tracking:
+            self._track_shape(x.shape, output.shape)
         output_bias = self.bias if self.skip_bias_add else None
         return output, output_bias
 
@@ -293,6 +304,41 @@ class ReplicatedLinear(LinearBase):
         s += f", output_features={self.output_size}"
         s += f", bias={self.bias is not None}"
         return s
+
+    @classmethod
+    def get_shape_mapping(cls) -> dict:
+        """Get the mapping from (input_shape, output_shape) to layer types."""
+        return cls._shape_to_layer_types.copy()
+
+    @classmethod
+    def reset_shape_tracking(cls) -> None:
+        """Clear tracked shapes and layer type mappings."""
+        cls._shape_to_layer_types.clear()
+
+    def _track_shape(self, input_shape: torch.Size, output_shape: torch.Size) -> None:
+        shape_key = (input_shape, output_shape)
+        if shape_key not in self._shape_to_layer_types:
+            self._shape_to_layer_types[shape_key] = set()
+            logger.debug("Layer: %s | input shape: %s --> output shape: %s, Quant Method: %s", self.prefix, input_shape,
+                         output_shape, self.quant_method.__class__.__name__)
+        self._shape_to_layer_types[shape_key].add(self.__class__.__name__)
+
+    @classmethod
+    def print_shape_summary(cls) -> None:
+        """Log a summary of all unique shapes and their layer types."""
+        if not cls._shape_to_layer_types:
+            logger.info("No shapes have been processed yet.")
+            return
+
+        lines = [
+            "=== Matrix Multiplication Shape Summary ===",
+            f"Total unique shapes: {len(cls._shape_to_layer_types)}",
+        ]
+        for i, (shape_key, layer_types) in enumerate(cls._shape_to_layer_types.items(), 1):
+            input_shape, output_shape = shape_key
+            lines.append(f"{i}. Input: {input_shape} → Output: {output_shape}")
+            lines.append(f"   Layer types: {', '.join(sorted(layer_types))}")
+        logger.info("\n".join(lines))
 
 
 class ColumnParallelLinear(LinearBase):

@@ -11,9 +11,22 @@ uses 2048.
 
 This metric follows the set-vs-set protocol (``is_set_metric=True``):
 
-  - :meth:`accumulate` is called once per video to buffer features.
-  - :meth:`finalize`   is called once after all videos to compute FVD.
-  - :meth:`reset`      clears buffers between evaluation runs.
+  - :meth:`accumulate` is called once per video to buffer features. Routes
+    on ``sample["role"]`` — ``"reference"`` → real buffer, anything else →
+    generated buffer.  This is the same convention
+    :class:`audio.frechet_distance.FrechetAudioDistanceMetric` uses.
+  - :meth:`finalize` is called once after all videos to compute FVD.
+  - :meth:`reset`    clears both buffers between evaluation runs.
+
+To score two corpora, build a samples list with
+:func:`fastvideo.eval.io.inputs.samples_from` and hand it to
+:meth:`Evaluator.evaluate` — the path-friendly form is::
+
+    from fastvideo.eval import create_evaluator, samples_from
+    ev = create_evaluator(metrics=["common.fvd"], device="cuda:0")
+    result = ev.evaluate(samples=samples_from(
+        video="gen/", reference="ref/",
+    )).corpus["common.fvd"]
 
 Extractors
 ----------
@@ -31,13 +44,18 @@ scores from the literature; use ``i3d`` for paper comparisons.
 Reference features
 ------------------
 
-On the first call to :meth:`accumulate` that includes ``sample["reference"]``,
-features are extracted from those reference videos and saved to *cache_path*.
-Every subsequent run loads that cache automatically — no need to pass
-``sample["reference"]`` again.
+Two ways to supply reference features:
 
-Each extractor caches to a separate file (``real_features_{extractor}.pt``)
-because feature dimensions differ — mixing them silently would yield garbage.
+1. **Stream**: pass ``reference=`` to :func:`samples_from`.  Equal
+   cardinality emits paired samples (``sample["video"]`` +
+   ``sample["reference"]``); unequal cardinality role-tags the unmatched
+   references.  ``accumulate`` routes both shapes correctly.  If
+   ``cache_mode="read_write"`` (default) and no cache exists, the
+   extracted features are persisted to *cache_path* on :meth:`finalize`.
+2. **Cache hit**: a prior run wrote ``cache_path``; :meth:`setup` loads it
+   automatically and streamed references are unnecessary.
+
+Streamed references always win over the cache when both are present.
 
 Cache resolution order (first match wins):
   1. ``cache_path=`` constructor kwarg, if set.
@@ -141,20 +159,23 @@ class FVDMetric(BaseMetric):
         Feature backbone name. One of ``"i3d"`` (default), ``"clip"``,
         ``"videomae"``. See module docstring for guidance.
     cache_path : str, optional
-        Where extracted reference features are cached. Built from
-        ``sample["reference"]`` on the first run, reused automatically on
-        every subsequent run.  Resolution order: constructor kwarg →
-        ``$FASTVIDEO_FVD_REF_FEATURES`` env-var →
+        Where extracted reference features are cached. Resolution order:
+        constructor kwarg → ``$FASTVIDEO_FVD_REF_FEATURES`` env-var →
         ``${FASTVIDEO_EVAL_CACHE}/fvd/real_features_{extractor}.pt``
         (default, resolved at :meth:`setup` time so the env-var can be set
         after import).
+    cache_mode : str
+        ``"read_write"`` (default) — read at setup, write at finalize on
+        cache miss. ``"read"`` — read at setup, never write.  ``"off"`` —
+        ignore the cache entirely.  Auto-write happens only when the cache
+        was missing AND reference features streamed in this run.
     chunk_size : int
         Videos per forward pass. Reduce if GPU runs OOM.
     """
 
     name = "common.fvd"
     is_set_metric = True
-    requires_reference = False  # uses cached real features, not per-sample ref
+    requires_reference = False  # reference is supplied via role="reference" samples or cache
     higher_is_better = False  # lower FVD = better
     needs_gpu = True
     dependencies = ["huggingface_hub", "scipy", "transformers"]
@@ -163,22 +184,29 @@ class FVDMetric(BaseMetric):
         self,
         extractor: str = "i3d",
         cache_path: str | None = None,
+        cache_mode: str = "read_write",
         chunk_size: int = 32,
     ) -> None:
         super().__init__()
         if extractor not in available_extractors():
             raise ValueError(f"Unknown FVD extractor '{extractor}'. "
                              f"Available: {available_extractors()}")
+        if cache_mode not in {"off", "read", "read_write"}:
+            raise ValueError(f"cache_mode must be one of 'off', 'read', 'read_write'; got {cache_mode!r}")
         self._extractor_name = extractor
         self._cache_path_arg = cache_path
+        self._cache_mode = cache_mode
         self._chunk = chunk_size
         self._extractor: _BaseExtractor | None = None
 
         # Accumulated feature buffers — cleared by reset()
-        self._gen_features: list[np.ndarray] = []
-        self._real_features: np.ndarray | None = None
+        self._gen_buf: list[np.ndarray] = []
+        self._real_buf: list[np.ndarray] = []
+        # Cache loaded at setup() time; survives reset() (the cached corpus
+        # is part of the metric's configured state, not its run state).
+        self._cached_real: np.ndarray | None = None
 
-    def to(self, device):
+    def to(self, device: str | torch.device) -> FVDMetric:
         super().to(device)
         if self._extractor is not None:
             self._extractor.to(self.device)
@@ -197,79 +225,94 @@ class FVDMetric(BaseMetric):
         else:
             self.cache_path = _default_cache_path(self._extractor_name)
         self._extractor = load_extractor(self._extractor_name, self.device)
-        self._real_features = self._load_cache()
+        if self._cache_mode != "off":
+            self._cached_real = self._load_cache()
 
     # ------------------------------------------------------------------
     # Set-vs-set protocol
     # ------------------------------------------------------------------
 
     def reset(self) -> None:
-        """Clear generated feature buffer. Called before each evaluation run."""
-        self._gen_features = []
+        """Clear generated and streamed-reference buffers. Cache survives."""
+        self._gen_buf = []
+        self._real_buf = []
 
     def accumulate(self, sample: dict) -> None:
-        """Extract features from one generated video and buffer them.
+        """Extract features from one video and route by ``sample["role"]``.
 
-        If ``sample["reference"]`` is provided and no cache exists yet,
-        reference features are extracted and saved to *cache_path*.
+        Routing rules:
+
+        * ``role="reference"`` → real buffer; the reference key is ignored.
+        * Otherwise → generated buffer.  If ``sample["reference"]`` is
+          also present, its features also go into the real buffer — this
+          lets a paired samples list (the shape per-sample metrics like
+          LPIPS need) feed FVD in the same pass without a second decode.
+
+        Accepts either a raw tensor or a populated :class:`Video` instance
+        under either key.
         """
         if self._extractor is None:
             self.setup()
         assert self._extractor is not None  # for type narrowing
 
-        video = sample["video"]  # (T, C, H, W) from evaluator
+        if sample.get("role") == "reference":
+            self._real_buf.append(self._extract(sample["video"]))
+            return
+
+        self._gen_buf.append(self._extract(sample["video"]))
+        if "reference" in sample:
+            self._real_buf.append(self._extract(sample["reference"]))
+
+    def _extract(self, video: torch.Tensor) -> np.ndarray:
+        """Batchify (4-D → 5-D) and run the chunked extractor forward.
+
+        Pre-condition: ``video`` is already a tensor — :class:`EvalWorker`
+        unwraps :class:`Video` instances before any metric sees the sample.
+        """
         if video.dim() == 4:
-            video = video.unsqueeze(0)  # → (1, T, C, H, W)
-
-        self._gen_features.append(_extract_chunked(self._extractor, video, self._chunk))
-
-        # Build real feature cache on first encounter
-        if self._real_features is None:
-            self._real_features = self._load_cache()
-
-        if self._real_features is None:
-            ref = sample.get("reference")
-            if ref is not None:
-                if ref.dim() == 4:
-                    ref = ref.unsqueeze(0)
-                self._real_features = _extract_chunked(self._extractor, ref, self._chunk)
-                self._save_cache(self._real_features)
-        elif sample.get("reference") is not None:
-            # Reference features already exist (from cache or an earlier
-            # accumulate call). Silently dropping ``sample["reference"]``
-            # would be a foot-gun for callers expecting per-sample-reference
-            # semantics — warn so the mismatch surfaces.
-            warnings.warn(
-                "common.fvd: sample['reference'] ignored because reference features "
-                "are already loaded (from cache or a prior accumulate call). Pass the "
-                "entire reference set on a single accumulate() call, or pre-build the "
-                f"cache at {self.cache_path}.",
-                stacklevel=2,
-            )
+            video = video.unsqueeze(0)  # (T, C, H, W) → (1, T, C, H, W)
+        assert self._extractor is not None
+        return _extract_chunked(self._extractor, video, self._chunk)
 
     def finalize(self) -> MetricResult:
-        """Compute FVD from all accumulated generated features vs. real features."""
-        if not self._gen_features:
+        """Compute FVD from buffered generated features vs. reference features.
+
+        Reference source priority: streamed (``_real_buf``) > disk cache
+        (``_cached_real``).  On a fresh cache + streamed refs, write the
+        accumulated real features back to disk if ``cache_mode="read_write"``.
+        """
+        if not self._gen_buf:
             return MetricResult(
                 name=self.name,
                 score=None,
                 details={"skipped": "No generated videos accumulated before finalize()."},
             )
+        all_gen = np.concatenate(self._gen_buf, axis=0)
 
-        if self._real_features is None:
+        if self._real_buf:
+            all_real = np.concatenate(self._real_buf, axis=0)
+            ref_source = "streamed"
+            # Persist to cache only when we built real features fresh and
+            # the cache slot was empty — never silently overwrite an
+            # existing cache.
+            if self._cache_mode == "read_write" and self._cached_real is None:
+                self._save_cache(all_real)
+        elif self._cached_real is not None:
+            all_real = self._cached_real
+            ref_source = "cached"
+        else:
             return MetricResult(
                 name=self.name,
                 score=None,
                 details={
-                    "skipped": ("No reference features available. Pass sample['reference'] "
-                                "in at least one accumulate() call to build the cache at: "
-                                f"{self.cache_path}")
+                    "skipped": ("No reference features available. Pass role='reference' samples "
+                                "(or a paired samples list with 'reference' key) to "
+                                f"Evaluator.evaluate(), or pre-build the cache at: {self.cache_path}")
                 },
             )
 
-        all_gen = np.concatenate(self._gen_features, axis=0)
         n_gen = len(all_gen)
-        n_real = len(self._real_features)
+        n_real = len(all_real)
 
         if n_gen < _MIN_VIDEOS_WARN or n_real < _MIN_VIDEOS_WARN:
             warnings.warn(
@@ -280,7 +323,7 @@ class FVDMetric(BaseMetric):
             )
 
         mu_gen, sigma_gen = _gaussian_params(all_gen)
-        mu_real, sigma_real = _gaussian_params(self._real_features)
+        mu_real, sigma_real = _gaussian_params(all_real)
         fvd = _frechet_distance(mu_gen, sigma_gen, mu_real, sigma_real)
 
         return MetricResult(
@@ -290,18 +333,24 @@ class FVDMetric(BaseMetric):
                 "extractor": self._extractor_name,
                 "n_generated": n_gen,
                 "n_reference": n_real,
+                "ref_source": ref_source,
             },
         )
 
     def merge_from(self, other: BaseMetric) -> None:
-        """Fold another worker's accumulated features into this one (multi-GPU)."""
+        """Fold another worker's accumulated features into this one (multi-GPU).
+
+        Both gen and ref buffers concatenate.  The disk cache is the same
+        across workers, so we only adopt *other*'s ``_cached_real`` if our
+        own slot is empty (defensive — should always already match).
+        """
         assert isinstance(other, FVDMetric)
         assert other._extractor_name == self._extractor_name, (
             f"merge_from extractor mismatch: {other._extractor_name!r} vs {self._extractor_name!r}")
-        self._gen_features.extend(other._gen_features)
-        # Real features are identical across workers (same cache); keep ours.
-        if self._real_features is None and other._real_features is not None:
-            self._real_features = other._real_features
+        self._gen_buf.extend(other._gen_buf)
+        self._real_buf.extend(other._real_buf)
+        if self._cached_real is None and other._cached_real is not None:
+            self._cached_real = other._cached_real
 
     # ------------------------------------------------------------------
     # Cache helpers
