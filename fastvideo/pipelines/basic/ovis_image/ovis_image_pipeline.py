@@ -5,6 +5,7 @@ import torch
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, DenoisingStage, InputValidationStage,
@@ -24,6 +25,10 @@ class OvisImageDecodingStage(DecodingStage):
     and restored after, and `decode()` returns a diffusers `DecoderOutput` whose
     `.sample` must be unwrapped.
     """
+
+    # Restate the inherited attr type so mypy can resolve `self.vae` in this
+    # overridden `decode` (a bare reassignment otherwise trips [has-type]).
+    vae: ParallelTiledVAE
 
     @torch.no_grad()
     def decode(self, latents: torch.Tensor, fastvideo_args: FastVideoArgs) -> torch.Tensor:
