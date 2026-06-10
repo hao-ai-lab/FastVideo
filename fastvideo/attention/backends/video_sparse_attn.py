@@ -150,14 +150,11 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     # in postprocess_output().  Avoids materializing the intermediate
     # ``[B, len(non_pad_index), H, D]`` tensor on every layer.
     untile_combined_index: torch.LongTensor
-    # Per-step shared padded buffer used by tile().  Lazily populated on
-    # the first layer's call and reused by every subsequent VSA layer in
-    # the same denoising step.  Scoping to metadata (not class/instance)
-    # makes the reuse thread-safe across concurrent requests and keeps
-    # the "pad positions are zero" invariant trivially true (the buffer
-    # is freshly zeroed alongside ``non_pad_index`` so the index set
-    # cannot drift between calls).
+    # Per-step shared padded buffer used by tile().  Inference can reuse this
+    # across VSA layers, but training disables it so activation checkpointing
+    # can release the large tiled QKVG scratch tensor after each attention call.
     tile_buf: torch.Tensor | None = None
+    cache_tile_buf: bool = True
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -175,6 +172,7 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
         patch_size: tuple[int, int, int],
         VSA_sparsity: float,
         device: torch.device,
+        cache_tile_buf: bool = True,
         **kwargs: dict[str, Any],
     ) -> VideoSparseAttentionMetadata:
         patch_size = patch_size
@@ -201,7 +199,8 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             reverse_tile_partition_indices=reverse_tile_partition_indices,
             variable_block_sizes=variable_block_sizes,
             non_pad_index=non_pad_index,
-            untile_combined_index=untile_combined_index)
+            untile_combined_index=untile_combined_index,
+            cache_tile_buf=cache_tile_buf)
 
 
 class VideoSparseAttentionImpl(AttentionImpl):
@@ -236,6 +235,11 @@ class VideoSparseAttentionImpl(AttentionImpl):
         h_padded_size = num_tiles[1] * VSA_TILE_SIZE[1]
         w_padded_size = num_tiles[2] * VSA_TILE_SIZE[2]
         target_shape = (x.shape[0], t_padded_size * h_padded_size * w_padded_size, x.shape[-2], x.shape[-1])
+
+        if not attn_metadata.cache_tile_buf:
+            buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
+            buf[:, attn_metadata.non_pad_index] = x[:, attn_metadata.tile_partition_indices]
+            return buf
 
         # Reuse the per-step buffer stashed on metadata (lazily allocated
         # on the first VSA layer's call within a denoising step).  Pad

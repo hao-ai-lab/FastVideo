@@ -28,7 +28,7 @@ dependencies = [
     "sentencepiece>=0.2.0",
     "timm>=1.0.11",
     "peft>=0.15.0",
-    "diffusers>=0.33.1",
+    "diffusers>=0.38.0",
     "torch==2.11.0",
     "torchvision",
     "torchaudio",

@@ -14,6 +14,11 @@ class DiTArchConfig(ArchConfig):
     param_names_mapping: dict = field(default_factory=dict)
     reverse_param_names_mapping: dict = field(default_factory=dict)
     lora_param_names_mapping: dict = field(default_factory=dict)
+    # When True, the denoising stage casts text/prompt embeddings to the DiT's
+    # working dtype before the diffusion loop. Flux2 requires this (BFL casts ctx
+    # to bf16 before denoising); models with fp32 text encoders (Wan, Hunyuan15,
+    # SD3.5) leave it False to preserve full-precision embeddings.
+    cast_prompt_embeds_to_dit_dtype: bool = False
     _supported_attention_backends: tuple[AttentionBackendEnum,
                                          ...] = (AttentionBackendEnum.SAGE_ATTN, AttentionBackendEnum.FLASH_ATTN,
                                                  AttentionBackendEnum.TORCH_SDPA,

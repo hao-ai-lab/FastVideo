@@ -52,6 +52,7 @@ def apply_rotary_emb(
     freqs_cis: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
     use_real: bool = True,
     use_real_unbind_dim: int = -1,
+    sequence_dim: int = 2,
 ) -> torch.Tensor:
     """
     Apply rotary embeddings to input tensors using the given frequency tensor. This function applies rotary embeddings
@@ -60,17 +61,23 @@ def apply_rotary_emb(
     tensors contain rotary embeddings and are returned as real tensors.
     Args:
         x (`torch.Tensor`):
-            Query or key tensor to apply rotary embeddings. [B, H, S, D] xk (torch.Tensor): Key tensor to apply
+            Query or key tensor to apply rotary embeddings. [B, H, S, D] if sequence_dim=2 else [B, S, H, D].
         freqs_cis (`Tuple[torch.Tensor]`): Precomputed frequency tensor for complex exponentials. ([S, D], [S, D],)
+        sequence_dim: 1 = sequence at dim 1 (cos [1,S,1,D], x [B,S,H,D]); 2 = sequence at dim 2 (cos [1,1,S,D], x [B,H,S,D]).
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
     """
     if use_real:
         cos, sin = freqs_cis  # [S, D]
-        # Match Diffusers broadcasting (sequence_dim=2 case)
-        cos = cos[None, None, :, :]
-        sin = sin[None, None, :, :]
         cos, sin = cos.to(x.device), sin.to(x.device)
+        if sequence_dim == 2:
+            cos = cos[None, None, :, :]
+            sin = sin[None, None, :, :]
+        elif sequence_dim == 1:
+            cos = cos[None, :, None, :]
+            sin = sin[None, :, None, :]
+        else:
+            raise ValueError(f"sequence_dim must be 1 or 2, got {sequence_dim}")
 
         if use_real_unbind_dim == -1:
             # Used for flux, cogvideox, hunyuan-dit
