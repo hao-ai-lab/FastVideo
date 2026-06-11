@@ -95,6 +95,19 @@ DEFAULT_VALIDATION_VBENCH_METRICS = [
     "vbench.dynamic_degree",
 ]
 
+SYNTHETIC_OPTICAL_FLOW_METRIC = "optical_flow.synthetic_optical_flow"
+SYNTHETIC_OPTICAL_FLOW_LOG_KEYS = (
+    "mf_epe_mean",
+    "mf_angle_err_mean",
+    "mf_cosine_mean",
+    "mf_mag_ratio_mean",
+    "pixel_epe_mean_mean",
+    "px_angle_rmse_mean",
+    "fl_all_mean",
+    "foe_dist_mean",
+    "flow_kl_2d_mean",
+)
+
 
 class ValidationCallback(Callback):
     """Generic validation callback driven entirely by YAML
@@ -603,6 +616,20 @@ class ValidationCallback(Callback):
         metric_results: dict[str, Any],
     ) -> None:
         for metric_name, metric_result in metric_results.items():
+            details = getattr(metric_result, "details", {}) or {}
+            if metric_name == SYNTHETIC_OPTICAL_FLOW_METRIC:
+                if not isinstance(details, dict):
+                    continue
+                for detail_name in SYNTHETIC_OPTICAL_FLOW_LOG_KEYS:
+                    key = f"{metric_name}.{detail_name}"
+                    ValidationCallback._accumulate_scalar(
+                        stats,
+                        row,
+                        key,
+                        details.get(detail_name),
+                    )
+                continue
+
             score = getattr(metric_result, "score", None)
             ValidationCallback._accumulate_scalar(
                 stats,
@@ -610,7 +637,6 @@ class ValidationCallback(Callback):
                 metric_name,
                 score,
             )
-            details = getattr(metric_result, "details", {}) or {}
             if not isinstance(details, dict):
                 continue
             for detail_name, value in details.items():

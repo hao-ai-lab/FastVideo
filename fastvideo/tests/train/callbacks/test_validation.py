@@ -24,6 +24,8 @@ from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.callbacks.ema import EMACallback
 from fastvideo.train.callbacks.validation import (
     DEFAULT_VALIDATION_VBENCH_METRICS,
+    SYNTHETIC_OPTICAL_FLOW_LOG_KEYS,
+    SYNTHETIC_OPTICAL_FLOW_METRIC,
     ValidationCallback,
     _ValidationMetricStats,
 )
@@ -306,18 +308,29 @@ class TestMetricAggregation:
                     score=0.5,
                     details={"ignored": [1, 2, 3]},
                 ),
-                "optical_flow.synthetic_optical_flow": SimpleNamespace(
-                    name="optical_flow.synthetic_optical_flow",
+                SYNTHETIC_OPTICAL_FLOW_METRIC: SimpleNamespace(
+                    name=SYNTHETIC_OPTICAL_FLOW_METRIC,
                     score=1.5,
-                    details={"pixel_epe_mean_mean": 2.5},
+                    details={
+                        **{key: float(i) for i, key in enumerate(SYNTHETIC_OPTICAL_FLOW_LOG_KEYS)},
+                        "pixel_epe_mean_std": 99.0,
+                        "pixel_epe_mean_max": 100.0,
+                        "pixel_epe_mean_auc": 101.0,
+                    },
                 ),
             },
         )
 
         assert stats.sums["vbench.aesthetic_quality"] == 0.5
         assert stats.counts["vbench.aesthetic_quality"] == 1.0
-        assert stats.sums["optical_flow.synthetic_optical_flow"] == 1.5
-        assert stats.sums["optical_flow.synthetic_optical_flow.pixel_epe_mean_mean"] == 2.5
+        for i, key in enumerate(SYNTHETIC_OPTICAL_FLOW_LOG_KEYS):
+            metric_key = f"{SYNTHETIC_OPTICAL_FLOW_METRIC}.{key}"
+            assert stats.sums[metric_key] == float(i)
+            assert stats.counts[metric_key] == 1.0
+        assert SYNTHETIC_OPTICAL_FLOW_METRIC not in stats.sums
+        assert f"{SYNTHETIC_OPTICAL_FLOW_METRIC}.pixel_epe_mean_std" not in stats.sums
+        assert f"{SYNTHETIC_OPTICAL_FLOW_METRIC}.pixel_epe_mean_max" not in stats.sums
+        assert f"{SYNTHETIC_OPTICAL_FLOW_METRIC}.pixel_epe_mean_auc" not in stats.sums
         assert "vbench.aesthetic_quality.ignored" not in stats.sums
         assert row["vbench.aesthetic_quality"] == 0.5
 
