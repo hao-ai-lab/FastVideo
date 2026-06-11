@@ -2,7 +2,13 @@
 
 The generation block is the same as
 ``examples/inference/basic/basic_ltx2.py`` — same prompt, same model,
-same shape, same num_frames. After ``shutdown()`` the script loads the
+same shape, same num_frames. This script can also be used as a template for other text-to-video
+models, such as Wan. To evaluate another model, replace the
+``VideoGenerator.from_pretrained(...)`` model name and adjust the
+generation parameters such as ``num_frames``, ``height``, ``width``,
+and ``fps`` to match that model's output.
+
+After ``shutdown()`` the script loads the
 mp4 back, builds a single :class:`fastvideo.eval.Evaluator`, and runs
 the prompt-aware VBench subset that's meaningful for an arbitrary
 text→video sample.
