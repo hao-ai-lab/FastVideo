@@ -147,6 +147,7 @@ class Trainer:
             desc="Steps",
             disable=self.local_rank > 0,
         )
+        # Allow method-specific optimization flow (e.g. DiffusionNFT).
         method_manages_optimization = bool(method.manages_optimization())
         for step in progress:
             t0 = time.perf_counter()

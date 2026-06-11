@@ -203,7 +203,8 @@ class TrainingMethod(torch.nn.Module, ABC):
         Most methods return loss tensors and let :class:`Trainer` handle
         gradient accumulation, callbacks, optimizer stepping, and scheduler
         stepping. RL-style methods such as DiffusionNFT need to preserve their
-        own sample-then-inner-train loop, so they can opt into a managed step.
+        own sample-then-inner-train loop, so they can provide a specific
+        ``managed_train_step``.
         """
         return False
 

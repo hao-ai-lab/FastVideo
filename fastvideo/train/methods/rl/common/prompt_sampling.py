@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Prompt sampling helpers for online RL methods."""
+"""Prompt-row sampling helpers for online RL methods.
+
+This module chooses and repeats dataset prompt rows across ranks for RL training
+batches. Here, "sampling" means selection, not generator sampling.
+"""
 
 from __future__ import annotations
 

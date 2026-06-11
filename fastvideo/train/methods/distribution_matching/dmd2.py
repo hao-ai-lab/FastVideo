@@ -208,6 +208,13 @@ class DMD2Method(TrainingMethod):
         return targets
 
     def _parse_rollout_mode(self, ) -> Literal["simulate", "data_latent"]:
+        """Parse how DMD2 obtains the latent point used for rollout.
+
+        ``simulate`` starts from fresh noise and lets the student create an
+        artificial latent trajectory, so it can run with text-only data.
+        ``data_latent`` starts from preprocessed VAE latents and perturbs them
+        at a sampled denoising timestep.
+        """
         raw = self.method_config.get("rollout_mode", None)
         if raw is None:
             raise ValueError("method_config.rollout_mode must be set "

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Build a text-only Parquet dataset from a one-prompt-per-line file. The script
+# shards prompts across GPU_NUM single-GPU torchrun workers, runs
+# v1_preprocess.py with --preprocess_task text_only, and writes prompt
+# embeddings/captions under OUTPUT_DIR for DMD2/DiffusionNFT text-only runs.
+
 INPUT_FILE="${1:-train.txt}"
 OUTPUT_DIR="${OUTPUT_DIR:-data/train_text_only_dmd_preprocessed}"
 MODEL_PATH="${MODEL_PATH:-Wan-AI/Wan2.1-T2V-1.3B-Diffusers}"
