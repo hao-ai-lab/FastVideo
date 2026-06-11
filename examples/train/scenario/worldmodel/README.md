@@ -49,26 +49,29 @@ You can store this dataset elsewhere; update the matching
 
 To mix datasets in a training YAML, set `training.data.data_path` to a
 path-to-repeat-count mapping. For example, `finetune_i2v.yaml` uses
-`data/zeldam2-clean: 1` and `data/multi3d_games: 2`, which repeats the
-multi-game parquet list twice before training samples are shuffled.
+`data/zeldam2-clean: 1` and `data/multi3d_games: 10`, which repeats the
+multi-game parquet list ten times before training samples are shuffled.
 
-## Zelda Validation Data
+## World Model Validation Data
 
-The Zelda validation configs expect a small public validation bundle under
-`data/zelda_validation_data`.
+The world-model validation configs expect a small public validation bundle under
+`data/worldmodel_validation_data`.
 
-Download it from Hugging Face before running either Zelda scenario:
+Download it from Hugging Face before running the Zelda or mixed finetune
+scenarios:
 
 ```bash
 python scripts/huggingface/download_hf.py \
-    --repo_id mignonjia/zelda_validation_data \
-    --local_dir data/zelda_validation_data \
+    --repo_id mignonjia/worldmodel_validation_data \
+    --local_dir data/worldmodel_validation_data \
     --repo_type dataset
 ```
 
-The bundle contains `validation_zelda.json`, `images/`, and `actions/`. The
-Zelda configs point `callbacks.validation.dataset_file` at
-`data/zelda_validation_data/validation_zelda.json`.
+The bundle contains `validation_zelda.json`, `validation_mc_ood.json`,
+`images/`, and `actions/`. The Zelda distillation configs point
+`callbacks.validation.dataset_file` at
+`data/worldmodel_validation_data/validation_zelda.json`; the mixed finetune
+config points at `data/worldmodel_validation_data/validation_mc_ood.json`.
 
 ## Usage
 

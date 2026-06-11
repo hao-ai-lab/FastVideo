@@ -112,7 +112,7 @@ callbacks:
     max_grad_norm: 1.0
   validation:
     pipeline_target: fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline.MatrixGame2CausalDMDPipeline
-    dataset_file: data/zelda_validation_data/validation_zelda.json
+    dataset_file: data/worldmodel_validation_data/validation_zelda.json
     every_steps: 100
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]
