@@ -292,6 +292,32 @@ def run_train_framework_tests():
               secrets=[
                   modal.Secret.from_dict(
                       {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
+              ],
+              volumes={"/root/data": model_vol})
+def run_eval_tests():
+    # Eval metric regression: drives the high-level fastvideo.eval API on a
+    # fixed asset and asserts each score matches the upstream reference number
+    # checked into fastvideo/tests/eval/reference_scores/. Pulls several scorer
+    # checkpoints (VideoScore2 VLM, VBench nets, audio models) on first run;
+    # they cache on the hf-model-weights volume thereafter.
+    #
+    # Installs [eval-full] (eval + vbench + audio extras) on top of [test]:
+    # the dev image only ships [dev], and without the extras skip_missing_deps
+    # in conftest would silently drop nearly every metric and the lane would
+    # pass vacuously. detectron2-backed vbench metrics remain skipped by
+    # design (not pip-installable; see fastvideo/eval/README.md).
+    run_test_command(
+        'uv pip install -e ".[test,eval-full]" && '
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/eval -vs",
+        build_kernel=True)
+
+
+@app.function(gpu="L40S:1",
+              image=image,
+              timeout=3600,
+              secrets=[
+                  modal.Secret.from_dict(
+                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
               ])
 def run_lora_extraction_tests():
     run_test(

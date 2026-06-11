@@ -1,0 +1,12 @@
+{
+  "metric": "audio.desync",
+  "score": 0.0,
+  "details": {
+    "front_desync_s": 0.0,
+    "back_desync_s": 0.0,
+    "num_segments_used": 14,
+    "upstream": "hkchengrex/av-benchmark (Synchformer)",
+    "checkpoint": "synchformer_state_dict.pth (MMAudio v0.1 release)",
+    "asset_video": "fastvideo/tests/eval/asset/ltx2.mp4"
+  }
+}
