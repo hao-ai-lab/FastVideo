@@ -48,6 +48,10 @@ def build_eval_kwargs(row: dict, video_path: Path, *, fps: float = 24.0) -> dict
     Forwards ``prompt`` as scalar ``text_prompt`` and ``auxiliary_info``
     as scalar dict when present on the row, matching the one-sample-per-call
     contract used by ``Evaluator.evaluate(**sample)``.
+
+    The returned ``video`` tensor has shape ``(T, C, H, W)`` in ``[0, 1]``.
+    The eval pool still auto-squeezes legacy ``(1, T, C, H, W)`` callers
+    for backward compatibility.
     """
     from fastvideo.eval.io.video import load_video
 
