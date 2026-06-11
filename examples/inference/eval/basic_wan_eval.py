@@ -104,7 +104,7 @@ def main() -> None:
         fps=FPS,
     )
 
-    print(f"[eval] running ({sample['video'].shape[1]} frames @ {FPS:g} fps)...")
+    print(f"[eval] running ({sample['video'].shape[0]} frames @ {FPS:g} fps)...")
     results = evaluator.evaluate(**sample)
 
     _print_results(results)
