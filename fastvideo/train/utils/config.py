@@ -394,6 +394,7 @@ def _build_training_config(
         ),
         tracker=TrackerConfig(
             trackers=list(tr.get("trackers", []) or []),
+            entity=str(tr.get("entity", "") or ""),
             project_name=str(tr.get("project_name", "fastvideo") or "fastvideo"),
             run_name=str(tr.get("run_name", "") or ""),
         ),

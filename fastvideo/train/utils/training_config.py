@@ -62,6 +62,7 @@ class CheckpointConfig:
 @dataclass(slots=True)
 class TrackerConfig:
     trackers: list[str] = field(default_factory=list)
+    entity: str = ""
     project_name: str = "fastvideo"
     run_name: str = ""
 
