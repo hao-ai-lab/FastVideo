@@ -6,7 +6,7 @@ models:
     _target_: fastvideo.train.models.matrixgame2.matrixgame2_causal.MatrixGame2CausalModel
     init_from: mignonjia/mg_sf_distilled_zelda_1k_steps 
     trainable: true
-    # transformer_override_safetensor: /mnt/weka/home/hao.zhang/mhuo/FastVideo/outputs/matrixgame_dmd/checkpoints/mg_zelda_sf_m2/checkpoint-1000_weight_only/ema/generator_ema.safetensors
+    # transformer_override_safetensor: outputs/matrixgame_dmd/checkpoints/mg_zelda_sf_m2/checkpoint-1000_weight_only/ema/generator_ema.safetensors
   teacher:
     _target_: fastvideo.train.models.matrixgame2.matrixgame2.MatrixGame2Model
     init_from: mignonjia/mg_bidirectional_zelda

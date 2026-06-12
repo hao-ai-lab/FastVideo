@@ -1,23 +1,32 @@
 # World-Model: Matrix-Game 2.0 I2V
 
-Training scenarios for the Matrix-Game 2.0 I2V world model on Minecraft and
-Zelda data, using the new YAML-driven trainer
+Training scenarios for the Matrix-Game 2.0 I2V world model on Solaris (Minecraft)
+data and Zelda data, using the new YAML-driven trainer
 (`fastvideo/train/entrypoint/train.py`).
+
+## Solaris Configs
 
 | Config | Method | Student | Notes |
 |---|---|---|---|
-| `finetune_i2v.yaml` | `FineTuneMethod` | `MatrixGame2Model` (bidirectional) | Multi-step SFT from `mg_bidirectional_Solaris`. |
-| `dfsft_causal_i2v.yaml` | `DiffusionForcingSFTMethod` | `MatrixGame2CausalModel` | Diffusion-Forcing SFT with chunkwise timesteps. |
-| `self_forcing_causal_i2v.yaml` | `SelfForcingMethod` | `MatrixGame2CausalModel` | Matrix-Game 2.0 DMD/Self-Forcing distillation; teacher = bidirectional, critic = bidirectional. |
-| `self_forcing_causal_i2v_zelda.yaml` | `SelfForcingMethod` | `MatrixGame2CausalModel` | Zelda world model DMD/Self-Forcing distillation; teacher = bidirectional, critic = bidirectional. |
-| `streaming_long_tuning_causal_i2v.yaml` | `StreamingLongTuningMethod` | `MatrixGame2CausalModel` | LongLive-style streaming long tuning from the 1k-step Zelda self-forcing checkpoint. |
+| `solaris/finetune_i2v.yaml` | `FineTuneMethod` | `MatrixGame2Model` (bidirectional) | Multi-step SFT from `mg_bidirectional_Solaris`. |
+| `solaris/dfsft_causal_i2v.yaml` | `DiffusionForcingSFTMethod` | `MatrixGame2CausalModel` | Diffusion-Forcing SFT with chunkwise timesteps. |
+| `solaris/self_forcing_causal_i2v.yaml` | `SelfForcingMethod` | `MatrixGame2CausalModel` | Matrix-Game 2.0 DMD/Self-Forcing distillation; teacher = bidirectional, critic = bidirectional. |
+
+## Zelda Configs
+
+| Config | Method | Student | Notes |
+|---|---|---|---|
+| `zelda/finetune_i2v.yaml` | `FineTuneMethod` | `MatrixGame2Model` (bidirectional) | Zelda bidirectional I2V finetuning from `FastVideo/Matrix-Game-2.0-Base-Diffusers`. Uses 33-frame clips and Zelda validation with action overlays. |
+| `zelda/dfsft_causal_i2v.yaml` | `DiffusionForcingSFTMethod` | `MatrixGame2CausalModel` | Zelda causal Diffusion-Forcing SFT from `FastVideo/Matrix-Game-2.0-Base-Diffusers`. Uses the same Zelda data, resolution, optimizer, checkpoint, and validation defaults as the Zelda finetune config. |
+| `zelda/self_forcing_causal_i2v.yaml` | `SelfForcingMethod` | `MatrixGame2CausalModel` | Zelda DMD/Self-Forcing distillation; teacher = bidirectional, critic = bidirectional. |
+| `zelda/streaming_long_tuning_causal_i2v.yaml` | `StreamingLongTuningMethod` | `MatrixGame2CausalModel` | LongLive-style streaming long tuning from the 1k-step Zelda self-forcing checkpoint. |
 
 Zelda world-model distillation is a two-run workflow: first run
-`self_forcing_causal_i2v_zelda.yaml` to train or load the 1k-step self-forcing
-checkpoint (`mignonjia/mg_sf_distilled_zelda_1k_steps`), then run
-`streaming_long_tuning_causal_i2v.yaml` for the 3k-step streaming long-tuning
-stage. The long-tuning YAML starts from that 1k-step checkpoint; it does not run
-the short self-forcing stage inside the same config.
+`zelda/self_forcing_causal_i2v.yaml` to train or load the 1k-step
+self-forcing checkpoint (`mignonjia/mg_sf_distilled_zelda_1k_steps`), then run
+`zelda/streaming_long_tuning_causal_i2v.yaml` for the 3k-step streaming
+long-tuning stage. The long-tuning YAML starts from that 1k-step checkpoint; it
+does not run the short self-forcing stage inside the same config.
 
 ## Zelda Training Data
 
@@ -36,21 +45,17 @@ YAML to point at that location.
 
 ## Multi3D Training Data
 
-`finetune_i2v.yaml` also mixes in multi-game data from `data/multi3d_games`.
-On the internal cluster, create the suggested local path with:
-
-```bash
-ln -s /mnt/weka/home/hao.zhang/alex/wm-lab/datas/datasets/multi3d_games \
-    data/multi3d_games
-```
-
-You can store this dataset elsewhere; update the matching
-`training.data.data_path` key in the YAML.
+`zelda/finetune_i2v.yaml` includes an optional, commented-out Multi3D entry.
+Enable it only when you want to mix Zelda with multi-game data from
+`data/multi3d_games`. You can store this dataset anywhere; before enabling it,
+update the matching commented `training.data.data_path` key in the YAML to the
+correct location.
 
 To mix datasets in a training YAML, set `training.data.data_path` to a
-path-to-repeat-count mapping. For example, `finetune_i2v.yaml` uses
-`data/zeldam2-clean: 1` and `data/multi3d_games: 10`, which repeats the
-multi-game parquet list ten times before training samples are shuffled.
+path-to-repeat-count mapping. For example, `zelda/finetune_i2v.yaml` can use
+`data/zeldam2-clean: 1` and `# data/multi3d_games: 10`; uncommenting the
+Multi3D entry repeats the multi-game parquet list ten times before training
+samples are shuffled.
 
 ## World Model Validation Data
 
@@ -68,36 +73,49 @@ python scripts/huggingface/download_hf.py \
 ```
 
 The bundle contains `validation_zelda.json`, `validation_mc_ood.json`,
-`images/`, and `actions/`. The Zelda distillation configs point
+`images/`, and `actions/`. The Zelda configs point
 `callbacks.validation.dataset_file` at
-`data/worldmodel_validation_data/validation_zelda.json`; the mixed finetune
-config points at `data/worldmodel_validation_data/validation_mc_ood.json`.
+`data/worldmodel_validation_data/validation_zelda.json`; mixed or OOD finetune
+configs can point at `data/worldmodel_validation_data/validation_mc_ood.json`.
 
 ## Usage
 
+### Solaris
+
 ```bash
 bash examples/train/run.sh \
-    examples/train/scenario/worldmodel/finetune_i2v.yaml
+    examples/train/scenario/worldmodel/solaris/finetune_i2v.yaml
 
 bash examples/train/run.sh \
-    examples/train/scenario/worldmodel/dfsft_causal_i2v.yaml
+    examples/train/scenario/worldmodel/solaris/dfsft_causal_i2v.yaml
 
 bash examples/train/run.sh \
-    examples/train/scenario/worldmodel/self_forcing_causal_i2v.yaml
+    examples/train/scenario/worldmodel/solaris/self_forcing_causal_i2v.yaml
+```
 
-# Zelda world model distillation
+### Zelda
+
+```bash
+# Finetuning / DFSFT
 bash examples/train/run.sh \
-    examples/train/scenario/worldmodel/self_forcing_causal_i2v_zelda.yaml
+    examples/train/scenario/worldmodel/zelda/finetune_i2v.yaml
 
 bash examples/train/run.sh \
-    examples/train/scenario/worldmodel/streaming_long_tuning_causal_i2v.yaml
+    examples/train/scenario/worldmodel/zelda/dfsft_causal_i2v.yaml
+
+# Distillation / long tuning
+bash examples/train/run.sh \
+    examples/train/scenario/worldmodel/zelda/self_forcing_causal_i2v.yaml
+
+bash examples/train/run.sh \
+    examples/train/scenario/worldmodel/zelda/streaming_long_tuning_causal_i2v.yaml
 ```
 
 Override any field on the command line:
 
 ```bash
 bash examples/train/run.sh \
-    examples/train/scenario/worldmodel/dfsft_causal_i2v.yaml \
+    examples/train/scenario/worldmodel/solaris/dfsft_causal_i2v.yaml \
     --training.distributed.num_gpus 8 \
     --training.optimizer.learning_rate 1e-5
 ```
