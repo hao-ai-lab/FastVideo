@@ -689,13 +689,21 @@ struct CollectiveMainloopFwd {
         //     cute::gemm(tiled_mma_pv, make_zip_tensor(tOrP(_, _, block_id), tOrSFP(_, _, block_id)), make_zip_tensor(tOrVt(_, _, block_id), tOrSFVt(_, _, block_id)), tOrO);
         // };
         auto add_delta_s = [&](auto& acc) {
-            auto tSsDS_stage = recast<float4>(sDS(_, _, smem_pipe_read_k.index()));
+            // The MMA atom composites 4 sub-MMA m16n8k64 covering N=0-7, 8-15, 16-23, 24-31.
+            // Each float4 register group spans two sub-MMAs, so N positions are scattered
+            // (e.g., {2t, 2t+1, 8+2t, 9+2t}), not consecutive.
+            float const* ds_ptr = reinterpret_cast<float const*>(
+                &sDS(_0{}, _0{}, smem_pipe_read_k.index()));
             auto acc_float4 = recast<float4>(acc);
-            int quad_id = (threadIdx.x % 4) * 2;
+            int tid = threadIdx.x % 4;
             for (int i = 0; i < 4; i++) {
-                auto num = quad_id + i * 8;
-                float4 delta_s_0 = tSsDS_stage(make_coord(_0{}, _0{}), make_coord(num, _0{}));
-                float4 delta_s_1 = tSsDS_stage(make_coord(_0{}, _0{}), make_coord(num + 1, _0{}));
+                int base_n = i * 32 + tid * 2;
+                float4 delta_s_0 = make_float4(
+                    ds_ptr[base_n], ds_ptr[base_n + 1],
+                    ds_ptr[base_n + 8], ds_ptr[base_n + 9]);
+                float4 delta_s_1 = make_float4(
+                    ds_ptr[base_n + 16], ds_ptr[base_n + 17],
+                    ds_ptr[base_n + 24], ds_ptr[base_n + 25]);
                 acc_float4(make_coord(make_coord(_0{}, _0{}), _0{}), _0{}, i) = delta_s_0;
                 acc_float4(make_coord(make_coord(_0{}, _0{}), _1{}), _0{}, i) = delta_s_0;
                 acc_float4(make_coord(make_coord(_0{}, _1{}), _0{}), _0{}, i) = delta_s_1;
@@ -838,10 +846,12 @@ struct CollectiveMainloopFwd {
             Tensor tScS = thread_mma_qk.partition_C(cS);
             #pragma unroll
             for (int i = 0; i < size(tSrS); ++i) {
-                if (int(get<1>(tScS(i))) >= col_limit_causal(int(get<0>(tScS(i))), n_block - 1)) {
+                if (int(get<1>(tScS(i))) >= col_limit_causal(int(get<0>(tScS(i))), n_block)) {
                     tSrS(i) = -INFINITY;
                 }
             }
+
+
             softmax_fused.template online_softmax_with_quant</*Is_first=*/false>(tSrS, AbsMaxP, mainloop_params.softmax_scale_log2);
             Tensor tOrO = make_fragment_like(tOrO_store);
             consumer_wait(pipeline_v, smem_pipe_read_v);
@@ -879,6 +889,8 @@ struct CollectiveMainloopFwd {
                     ++smem_pipe_read_k;
                 }
             }
+
+
             softmax_fused.template online_softmax_with_quant</*Is_first=*/false>(tSrS, AbsMaxP, mainloop_params.softmax_scale_log2);
             Tensor tOrO = make_fragment_like(tOrO_store);
             consumer_wait(pipeline_v, smem_pipe_read_v);
@@ -886,7 +898,7 @@ struct CollectiveMainloopFwd {
             quantize(_0{}, tSrS_converion_view);
             CUTLASS_PRAGMA_UNROLL
             for (int v_block = 0; v_block < size<2>(tOrP); ++v_block) {
-                cute::gemm(tiled_mma_pv, make_zip_tensor(tOrP(_, _, v_block), tOrSFP(_, _, v_block)), 
+                cute::gemm(tiled_mma_pv, make_zip_tensor(tOrP(_, _, v_block), tOrSFP(_, _, v_block)),
                                     make_zip_tensor(tOrVt(_, _, v_block), tOrSFVt(_, _, v_block)), tOrO);
                 if (v_block < size<2>(tOrP) - 1) {
                     copy_v_block(v_block + 1);
