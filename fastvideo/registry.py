@@ -41,6 +41,7 @@ from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionT2V_14B_Config,
     TurboDiffusionT2V_1_3B_Config,
 )
+from fastvideo.configs.pipelines.waypoint import WaypointT2VConfig
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
     FastWan2_2_TI2V_5B_Config,
@@ -61,6 +62,7 @@ from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
+from fastvideo.api.waypoint import WaypointSamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
@@ -683,6 +685,19 @@ def _register_configs() -> None:
         ],
         model_family="turbodiffusion",
         default_preset="turbo_i2v_a14b",
+    )
+
+    # Waypoint
+    register_configs(
+        sampling_param_cls=WaypointSamplingParam,
+        pipeline_config_cls=WaypointT2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/Waypoint-1-Small-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: "waypoint" in path.lower() or "worldengine" in path.lower(),
+        ],
     )
 
     # Wan — defaults provided by presets (no sampling_param_cls needed)
