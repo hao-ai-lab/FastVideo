@@ -234,7 +234,6 @@ class DenoisingStage(PipelineStage):
 
         boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps if boundary_ratio is not None else None
         latent_model_input = latents.to(target_dtype)
-        assert latent_model_input.shape[0] == 1, "only support batch size 1"
 
         if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
             # TI2V directly replaces the first frame of the latent with
