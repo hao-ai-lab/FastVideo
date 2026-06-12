@@ -82,7 +82,6 @@ class WanVideoArchConfig(DiTArchConfig):
     sink_size: int = 0  # Size of the attention sink, we keep the first `sink_size` frames unchanged when rolling the KV cache
     num_frames_per_block: int = 3
     sliding_window_num_frames: int = 21
-    # "absolute" (shipped) | "relativistic" (drift-free long rollout; see _relative_rope.py)
     rope_cache_policy: str = "absolute"
 
     def __post_init__(self):

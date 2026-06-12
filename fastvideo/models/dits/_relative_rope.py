@@ -17,5 +17,8 @@ def relativistic_window_offsets(
     Returns ``(window_len, query_lo, query_hi)``: the cached window occupies
     ``table[0:window_len]`` and the query the tail ``table[query_lo:query_hi]``.
     """
+    assert num_new_tokens <= max_attention_size, (
+        f"num_new_tokens ({num_new_tokens}) exceeds the attention window "
+        f"({max_attention_size}); needs num_frames_per_block <= local_attn_size")
     window_len = min(local_end_index, max_attention_size)
     return window_len, window_len - num_new_tokens, window_len
