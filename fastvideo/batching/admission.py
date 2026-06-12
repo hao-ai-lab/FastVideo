@@ -59,7 +59,7 @@ class BatchingRule:
     source: str = "user"
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any], *, source: str) -> "BatchingRule":
+    def from_dict(cls, data: dict[str, Any], *, source: str) -> BatchingRule:
         if not isinstance(data, dict):
             raise ValueError(f"batching config rule from {source} must be an object, got {type(data).__name__}")
         _validate_rule_keys(data, source=source)
@@ -117,6 +117,7 @@ class BatchingRule:
 
 
 class BatchAdmissionController:
+
     def __init__(self, fastvideo_args: FastVideoArgs, *, gpu_id: int = 0):
         self._mode = fastvideo_args.batching_mode
         self._user_max_batch_size = max(1, int(fastvideo_args.batching_max_size))
@@ -193,8 +194,7 @@ class BatchAdmissionController:
 
     def _matching_rules(self, request: Any) -> list[BatchingRule]:
         return [
-            rule for rule in self._rules
-            if rule.matches(
+            rule for rule in self._rules if rule.matches(
                 model_path=self._model_path,
                 resolution=resolution_key(request),
                 device_memory_gb=self._device_memory_gb,
@@ -247,9 +247,8 @@ def _config_entries(payload: Any) -> list[dict[str, Any]]:
                 entry.setdefault("resolution", resolution)
             entries.append(entry)
         return entries
-    raise ValueError(
-        "batching config must be a {'schema_version': 1, 'rules': [...]} object, "
-        "a list of rules, or a mapping keyed by model|resolution")
+    raise ValueError("batching config must be a {'schema_version': 1, 'rules': [...]} object, "
+                     "a list of rules, or a mapping keyed by model|resolution")
 
 
 def _validate_rule_keys(data: dict[str, Any], *, source: str) -> None:
