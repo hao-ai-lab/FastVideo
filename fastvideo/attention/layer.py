@@ -56,7 +56,6 @@ class DistributedAttention(nn.Module):
         self.backend = backend_name_to_enum(attn_backend.get_name())
         self.dtype = dtype
 
-    @torch.compiler.disable
     def forward(
         self,
         q: torch.Tensor,
@@ -107,7 +106,10 @@ class DistributedAttention(nn.Module):
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            qkv[:batch_size * 2] = _apply_rotary_emb(qkv[:batch_size * 2], cos, sin, is_neox_style=False)
+            # Apply RoPE to Q and K only (V untouched). Functional form (no
+            # in-place slice assignment) so torch.compile can trace it.
+            qk_rope = _apply_rotary_emb(qkv[:batch_size * 2], cos, sin, is_neox_style=False)
+            qkv = torch.cat([qk_rope, qkv[batch_size * 2:]], dim=0)
         # Apply backend-specific preprocess_qkv
         qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
@@ -146,7 +148,6 @@ class DistributedAttention_VSA(DistributedAttention):
     """Distributed attention layer with VSA support.
     """
 
-    @torch.compiler.disable
     def forward(
         self,
         q: torch.Tensor,
@@ -199,7 +200,10 @@ class DistributedAttention_VSA(DistributedAttention):
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            qkvg[:batch_size * 2] = _apply_rotary_emb(qkvg[:batch_size * 2], cos, sin, is_neox_style=False)
+            # Functional RoPE (no in-place slice assignment) so torch.compile
+            # can trace through this method.
+            qk_rope = _apply_rotary_emb(qkvg[:batch_size * 2], cos, sin, is_neox_style=False)
+            qkvg = torch.cat([qk_rope, qkvg[batch_size * 2:]], dim=0)
 
         qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
