@@ -130,3 +130,6 @@ apps/dreamverse/web/.env.production.local
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
+
+# Local model weights (e.g. models/Ovis-Image-7B)
+models/

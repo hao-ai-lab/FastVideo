@@ -11,9 +11,10 @@ from fastvideo.configs.models.dits.stable_audio import StableAudioConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
 from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
+from fastvideo.configs.models.dits.ovisimage import OvisImageTransformer2DModelConfig
 
 __all__ = [
     "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig", "WanVideoConfig", "CosmosVideoConfig",
     "Cosmos25VideoConfig", "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig",
-    "MagiHumanVideoConfig", "StableAudioConfig", "Flux2Config"
+    "MagiHumanVideoConfig", "StableAudioConfig", "Flux2Config", "OvisImageTransformer2DModelConfig"
 ]

@@ -58,6 +58,7 @@ from fastvideo.configs.pipelines.wan import (
 )
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
+from fastvideo.configs.pipelines.ovis_image import OvisImageT2IConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
@@ -849,6 +850,21 @@ def _register_configs() -> None:
         default_preset="sf_wan_2_2_i2v_a14b",
     )
 
+    # Ovis-Image
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=OvisImageT2IConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=[
+            "AIDC-AI/Ovis-Image-7B",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in ("ovis-image", "ovis_image")),
+        ],
+        model_family="ovis_image",
+        default_preset="ovis_image_7b",
+    )
+
     # SD3.5
     register_configs(
         sampling_param_cls=None,
@@ -969,6 +985,8 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame3.presets import (
         ALL_PRESETS as MATRIXGAME3_PRESETS, )
+    from fastvideo.pipelines.basic.ovis_image.presets import (
+        ALL_PRESETS as OVIS_IMAGE_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -993,6 +1011,7 @@ def _register_presets() -> None:
         LTX2_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
+        OVIS_IMAGE_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,
