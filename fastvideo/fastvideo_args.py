@@ -132,6 +132,28 @@ class FastVideoArgs:
     vae_cpu_offload: bool = True
     pin_cpu_memory: bool = True
 
+    # Step caching via cache-dit (https://github.com/vipshop/cache-dit).
+    # LOSSY: skips DiT blocks on steps whose features barely change, so the
+    # output is NOT bit-identical (SSIM<1.0). Opt-in, default OFF, Wan DiT
+    # only for now. When on, the first ``cachedit_fn_compute_blocks`` blocks
+    # always run and produce an L1 "stable" residual; if its relative change
+    # from the previous step is below ``cachedit_residual_threshold`` the
+    # middle blocks are skipped and a cached residual reused; the last
+    # ``cachedit_bn_compute_blocks`` blocks always run to refine. No caching
+    # during the first ``cachedit_max_warmup_steps`` steps. ``cachedit_
+    # taylorseer`` swaps the constant-residual reuse for a Taylor-expansion
+    # extrapolation of the residual (higher fidelity at the same skip rate).
+    # Requires ``pip install cache-dit`` and is incompatible with DiT
+    # offloading (see DenoisingStage — caching skips blocks, offload assumes
+    # every block runs each step).
+    use_cachedit: bool = False
+    cachedit_fn_compute_blocks: int = 8
+    cachedit_bn_compute_blocks: int = 0
+    cachedit_residual_threshold: float = 0.08
+    cachedit_max_warmup_steps: int = 8
+    cachedit_taylorseer: bool = False
+    cachedit_taylorseer_order: int = 1
+
     # Compilation
     # ``enable_torch_compile`` covers the DiT path (transformer,
     # transformer_2, and the LTX-2 stage-2 transformer_refine).
@@ -589,6 +611,47 @@ class FastVideoArgs:
             "--disable-autocast",
             action=StoreBoolean,
             help="Disable autocast for denoising loop and vae decoding in pipeline sampling",
+        )
+
+        # cache-dit step caching (lossy; Wan DiT). Requires `pip install
+        # cache-dit` and is incompatible with DiT offloading.
+        parser.add_argument(
+            "--use-cachedit",
+            action=StoreBoolean,
+            help="Enable cache-dit step caching for the Wan DiT (lossy; skips DiT blocks on steps whose features "
+            "barely change). Requires `pip install cache-dit`; incompatible with DiT offloading.",
+        )
+        parser.add_argument(
+            "--cachedit-fn-compute-blocks",
+            type=int,
+            help="cache-dit: number of leading DiT blocks always computed (default 8).",
+        )
+        parser.add_argument(
+            "--cachedit-bn-compute-blocks",
+            type=int,
+            help="cache-dit: number of trailing DiT blocks always computed to refine (default 0).",
+        )
+        parser.add_argument(
+            "--cachedit-residual-threshold",
+            type=float,
+            help="cache-dit: relative L1 residual-diff threshold below which middle blocks are skipped (default 0.08; "
+            "higher = faster, lower quality).",
+        )
+        parser.add_argument(
+            "--cachedit-max-warmup-steps",
+            type=int,
+            help="cache-dit: number of initial steps that always compute every block (default 8).",
+        )
+        parser.add_argument(
+            "--cachedit-taylorseer",
+            action=StoreBoolean,
+            help="cache-dit: use a TaylorSeer calibrator (extrapolates the cached residual instead of holding it "
+            "constant — higher fidelity at the same skip rate).",
+        )
+        parser.add_argument(
+            "--cachedit-taylorseer-order",
+            type=int,
+            help="cache-dit: TaylorSeer expansion order / number of derivatives (default 1; 2 = quadratic).",
         )
 
         # VSA parameters

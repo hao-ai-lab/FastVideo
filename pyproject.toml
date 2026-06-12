@@ -137,6 +137,11 @@ test = [
     "plotly",
 ]
 
+# Optional step-caching backend. Enables FastVideoArgs.use_cachedit (lossy
+# DBCache / TaylorSeer acceleration for the Wan DiT). Not a runtime dep —
+# only imported when use_cachedit is set. Install: uv pip install "fastvideo[cache]"
+cache = ["cache-dit"]
+
 # Eval extras. See fastvideo/eval/README.md for which install path
 # covers which metrics. detectron2 (vbench color/object_class/etc.) is
 # CUDA-version-pinned and not cleanly pip-installable — install it
