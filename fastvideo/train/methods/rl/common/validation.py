@@ -13,7 +13,7 @@ import torch
 @dataclass(slots=True)
 class RLValidationConfig:
     every_steps: int = 0
-    num_steps: int = 40 # Reference DiffusionNFT sampling num steps for best visual quality
+    num_steps: int = 40  # Reference DiffusionNFT sampling num steps for best visual quality
     num_prompts: int = 16
     batch_size: int = 16
     log_samples: bool = True
