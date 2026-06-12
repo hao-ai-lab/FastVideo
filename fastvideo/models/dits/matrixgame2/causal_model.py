@@ -36,6 +36,7 @@ from fastvideo.layers.visual_embedding import (
     ModulateProjection,
 )
 from fastvideo.logger import init_logger
+from fastvideo.models.dits._relative_rope import relativistic_window_offsets
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.wanvideo import (
     WanT2VCrossAttention,
@@ -147,6 +148,7 @@ class CausalMatrixGame2SelfAttention(nn.Module):
         sink_size: int = 0,
         qk_norm: bool = True,
         eps: float = 1e-6,
+        rope_cache_policy: str = "absolute",
     ) -> None:
         assert dim % num_heads == 0
         super().__init__()
@@ -157,6 +159,7 @@ class CausalMatrixGame2SelfAttention(nn.Module):
         self.sink_size = sink_size
         self.qk_norm = qk_norm
         self.eps = eps
+        self.rope_cache_policy = rope_cache_policy
         self._freqs_cache = None
 
         self.attn = LocalAttention(
@@ -206,12 +209,15 @@ class CausalMatrixGame2SelfAttention(nn.Module):
 
         freqs = self._freqs_cache
 
-        roped_query = causal_rope_apply(
-            q, grid_sizes, freqs, start_frame=start_frame
-        ).type_as(v)
-        roped_key = causal_rope_apply(
-            k, grid_sizes, freqs, start_frame=start_frame
-        ).type_as(v)
+        # relativistic defers roping until the cache window is known (and caches raw k)
+        relativistic = self.rope_cache_policy == "relativistic" and kv_cache is not None
+        if not relativistic:
+            roped_query = causal_rope_apply(
+                q, grid_sizes, freqs, start_frame=start_frame
+            ).type_as(v)
+            roped_key = causal_rope_apply(
+                k, grid_sizes, freqs, start_frame=start_frame
+            ).type_as(v)
 
         if kv_cache is None:
             padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
@@ -268,7 +274,7 @@ class CausalMatrixGame2SelfAttention(nn.Module):
                     "grid_sizes not provided, using q.shape[1] as frame_seqlen"
                 )
 
-            current_end = current_start + roped_query.shape[1]
+            current_end = current_start + q.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
 
             # Compute max_attention_size dynamically based on actual frame_seqlen
@@ -286,7 +292,8 @@ class CausalMatrixGame2SelfAttention(nn.Module):
                 kv_cache["v"] = kv_cache["v"].detach()
 
             kv_cache_size = kv_cache["k"].shape[1]
-            num_new_tokens = roped_query.shape[1]
+            num_new_tokens = q.shape[1]
+            stored_key = k if relativistic else roped_key  # raw vs roped in cache
             global_end_index = (
                 int(kv_cache["global_end_index"].item())
                 if isinstance(kv_cache["global_end_index"], torch.Tensor)
@@ -328,19 +335,30 @@ class CausalMatrixGame2SelfAttention(nn.Module):
                     + current_end - global_end_index - num_evicted_tokens
                 )
                 local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+                kv_cache["k"][:, local_start_index:local_end_index] = stored_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
                 local_end_index = (
                     local_end_index_prev + current_end - global_end_index
                 )
                 local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+                kv_cache["k"][:, local_start_index:local_end_index] = stored_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
 
             kv_start = max(0, local_end_index - max_attention_size)
             k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
             v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
+
+            if relativistic:
+                window_len, query_lo, _ = relativistic_window_offsets(
+                    local_end_index, num_new_tokens, max_attention_size)
+                h, w = int(grid_sizes[1]), int(grid_sizes[2])
+                window_grid = (window_len // frame_seqlen, h, w)
+                roped_query = causal_rope_apply(
+                    q, grid_sizes, freqs,
+                    start_frame=query_lo // frame_seqlen).type_as(v)
+                k_for_attn = causal_rope_apply(
+                    k_for_attn, window_grid, freqs, start_frame=0).type_as(v)
 
             x = torch.nn.functional.scaled_dot_product_attention(
                 roped_query.transpose(1, 2),
@@ -377,6 +395,7 @@ class CausalMatrixGame2TransformerBlock(nn.Module):
         prefix: str = "",
         action_config: dict | None = None,
         block_idx: int = 0,
+        rope_cache_policy: str = "absolute",
     ):
         super().__init__()
         action_config = action_config or {}
@@ -394,6 +413,7 @@ class CausalMatrixGame2TransformerBlock(nn.Module):
             sink_size=sink_size,
             qk_norm=qk_norm,
             eps=eps,
+            rope_cache_policy=rope_cache_policy,
         )
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
@@ -642,6 +662,12 @@ class CausalMatrixGame2WanModel(BaseDiT):
             if arch_cfg
             else getattr(config, "sink_size", 0)
         )
+        self.rope_cache_policy = (
+            getattr(arch_cfg, "rope_cache_policy",
+                    getattr(config, "rope_cache_policy", "absolute"))
+            if arch_cfg
+            else getattr(config, "rope_cache_policy", "absolute")
+        )
 
         # 1. Patch & position embedding
         self.patch_embedding = PatchEmbed(
@@ -683,6 +709,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
                     prefix=f"{getattr(config, 'prefix', 'Wan')}.blocks.{i}",
                     action_config=self.action_config,
                     block_idx=i,
+                    rope_cache_policy=self.rope_cache_policy,
                 )
                 for i in range(config.num_layers)
             ]
