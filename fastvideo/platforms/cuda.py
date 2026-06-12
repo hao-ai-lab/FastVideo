@@ -140,6 +140,13 @@ class CudaPlatformBase(Platform):
             except ImportError as e:
                 logger.info(e)
                 logger.info("Sage Attention 3 backend is not installed. Fall back to Flash Attention.")
+        elif selected_backend == AttentionBackendEnum.ATTN_QAT_INFER:
+            from fastvideo.attention.backends.attn_qat_infer import (  # noqa: F401
+                AttnQatInferBackend, is_attn_qat_infer_available)
+            if is_attn_qat_infer_available():
+                logger.info("Using Attn-QAT inference (modified SageAttention3 FP4) backend.")
+                return "fastvideo.attention.backends.attn_qat_infer.AttnQatInferBackend"
+            logger.info("Attn-QAT inference kernel is not built. Fall back to Flash Attention.")
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from fastvideo_kernel import video_sparse_attn  # noqa: F401
