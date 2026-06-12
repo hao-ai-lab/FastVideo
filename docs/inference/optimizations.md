@@ -24,6 +24,7 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
+- Attn-QAT inference (modified SageAttention3 FP4, sm_120/RTX 5090): `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
@@ -121,6 +122,42 @@ gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
 - `use_fsdp_inference=True` is incompatible with the FP4 path (FSDP shards invalidate tensor pointers)
 - Per-call cosine similarity vs BF16: ~0.99 (slight quantization error accumulates over denoising steps)
 - Only supports `headdim >= 128`
+
+### NVFP4 + Attn-QAT (modified SageAttention3, Blackwell sm_120)
+
+**`ATTN_QAT_INFER`** with **`transformer_quant="NVFP4"`**
+
+Runs the DiT fully in 4-bit: NVFP4 linear layers (activations quantized on the
+fly) plus the modified SageAttention3 FP4 attention backend. This is the
+inference half of the Quantization-Aware Distillation (QAD) recipe and the path
+used for the RTX 5090 release.
+
+The `attn_qat_infer` kernel hard-gates on **sm_120 (consumer Blackwell / RTX
+5090)**; on other GPUs the backend logs a notice and falls back to Flash
+Attention. See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040).
+
+Enable both halves — attention via the env var, linear via `transformer_quant`:
+
+```python
+import os
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
+
+from fastvideo import VideoGenerator
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    num_gpus=1,
+    transformer_quant="NVFP4",   # or "nvfp4_qat" to match a QAT-distilled checkpoint
+    use_fsdp_inference=False,     # FSDP shards invalidate the FP4 tensor pointers
+)
+gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
+```
+
+Or run the example script:
+
+```bash
+python examples/inference/optimizations/nvfp4_qat_wan2_1_1_3b.py
+python examples/inference/optimizations/nvfp4_qat_wan2_1_1_3b.py --bf16  # baseline
+```
 
 ### Sliding Tile Attention (Archived)
 
