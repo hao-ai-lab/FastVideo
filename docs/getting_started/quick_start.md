@@ -1,27 +1,34 @@
 # 🚀 Quick Start
 
-Get up and running with FastVideo in minutes!
+Already installed FastVideo? Generate your first video below. If not, see the [Installation Guide](installation.md) first.
 
-## Installation
+## ⚡ Generate Your Command
 
-First, install FastVideo:
+Select your task and hardware to get a ready-to-run command:
 
-```bash
-# If you previously used Conda, use uv instead for a faster, more stable setup
-uv venv --python 3.12 --seed
-source .venv/bin/activate
+<div class="quick-start-guide-wrap">
+  <iframe
+    class="quick-start-guide-frame"
+    src="/config-generator/"
+    title="FastVideo Guided Config Generator"
+  ></iframe>
+</div>
 
-# Install FastVideo
-uv pip install fastvideo
-```
+<script>
+window.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "quick-start-guide-height") {
+    const frame = document.querySelector(".quick-start-guide-frame");
+    if (frame) frame.style.height = e.data.height + "px";
+  }
+});
+</script>
 
-Also optionally install flash-attn:
+!!! tip "Need more control?"
+    Use the [Advanced Tuning Guide](advanced_tuning_guide.md) to tune all parameters — resolution, attention backend, memory offloading, and more.
 
-```bash
-uv pip install flash-attn --no-build-isolation -v
-```
+## Python API
 
-## Basic Usage
+Prefer Python over the CLI? Here are equivalent examples:
 
 ### Text-to-Video Generation
 
@@ -76,6 +83,7 @@ if __name__ == '__main__':
 
 ## Next Steps
 
+- [Advanced Tuning Guide](advanced_tuning_guide.md) - Fine-grained parameter tuning
 - [Installation Guide](installation.md) - Detailed installation instructions
 - [Configuration](../inference/configuration.md) - Learn about configuration options
 - [Examples](../inference/examples/examples_inference_index.md) - Explore more
