@@ -114,13 +114,25 @@ class ScaleResidual(nn.Module):
 # FSDP's MixedPrecisionPolicy
 class FP32LayerNorm(nn.LayerNorm):
 
+    def _fp32_cached(self, attr: str, t: torch.Tensor | None) -> torch.Tensor | None:
+        """Return a cached fp32 view of ``t``, recomputed if its storage or version changed."""
+        if t is None or t.dtype == torch.float32:
+            return t
+        cache = self.__dict__.get(attr)
+        key = (t.data_ptr(), t._version)
+        if cache is not None and cache[1:] == key:
+            return cache[0]
+        fp32 = t.float()
+        self.__dict__[attr] = (fp32, *key)
+        return fp32
+
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         origin_dtype = inputs.dtype
         return F.layer_norm(
             inputs.float(),
             self.normalized_shape,
-            self.weight.float() if self.weight is not None else None,
-            self.bias.float() if self.bias is not None else None,
+            self._fp32_cached("_w_fp32_cache", self.weight),
+            self._fp32_cached("_b_fp32_cache", self.bias),
             self.eps,
         ).to(origin_dtype)
 
