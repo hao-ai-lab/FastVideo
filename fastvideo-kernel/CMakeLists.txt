@@ -50,6 +50,21 @@ include_directories(
 set(FASTVIDEO_KERNEL_BUILD_TK "AUTO" CACHE STRING "Build ThunderKittens kernels: AUTO/ON/OFF")
 set_property(CACHE FASTVIDEO_KERNEL_BUILD_TK PROPERTY STRINGS AUTO ON OFF)
 
+set(_FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER_DEFAULT "AUTO")
+if(DEFINED FASTVIDEO_KERNEL_BUILD_MODIFIED_SAGE3 AND NOT DEFINED CACHE{FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER})
+    set(_FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER_DEFAULT "${FASTVIDEO_KERNEL_BUILD_MODIFIED_SAGE3}")
+endif()
+
+set(FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER "${_FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER_DEFAULT}" CACHE STRING
+    "Build attn_qat_infer Blackwell inference kernels: AUTO/ON/OFF")
+set_property(CACHE FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER PROPERTY STRINGS AUTO ON OFF)
+
+if(DEFINED FASTVIDEO_KERNEL_BUILD_MODIFIED_SAGE3)
+    message(DEPRECATION
+        "FASTVIDEO_KERNEL_BUILD_MODIFIED_SAGE3 is deprecated. "
+        "Use FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER instead.")
+endif()
+
 # Prefer environment variable (used by CI) if CMake var is not explicitly set.
 if(NOT DEFINED TORCH_CUDA_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_ARCH_LIST})
     set(TORCH_CUDA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
@@ -57,6 +72,7 @@ endif()
 
 message(STATUS "TORCH_CUDA_ARCH_LIST (cmake/env): ${TORCH_CUDA_ARCH_LIST}")
 message(STATUS "FASTVIDEO_KERNEL_BUILD_TK: ${FASTVIDEO_KERNEL_BUILD_TK}")
+message(STATUS "FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER: ${FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER}")
 
 set(ENABLE_TK_KERNELS OFF)
 if(FASTVIDEO_KERNEL_BUILD_TK STREQUAL "ON")
@@ -89,6 +105,54 @@ if(ENABLE_TK_KERNELS)
     message(STATUS "ThunderKittens kernels: ENABLED")
 else()
     message(STATUS "ThunderKittens kernels: DISABLED (will use Triton fallbacks at runtime)")
+endif()
+
+set(ENABLE_ATTN_QAT_INFER OFF)
+if(GPU_BACKEND STREQUAL "ROCM")
+    message(STATUS "attn_qat_infer kernels: DISABLED (ROCm build)")
+else()
+    set(_WANTS_ATTN_QAT_INFER OFF)
+    if(FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER STREQUAL "ON")
+        set(_WANTS_ATTN_QAT_INFER ON)
+    elseif(FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER STREQUAL "AUTO")
+        if(TORCH_CUDA_ARCH_LIST)
+            string(REGEX MATCH
+                "(^|[; ,])((12\\.0a)|(120a)|(sm_120a))([; ,]|$)"
+                _HAS_120A "${TORCH_CUDA_ARCH_LIST}")
+            if(_HAS_120A)
+                set(_WANTS_ATTN_QAT_INFER ON)
+            endif()
+        else()
+            execute_process(
+                COMMAND "${Python_EXECUTABLE}" -c
+                "import torch; print('1' if (torch.cuda.is_available() and torch.version.cuda and torch.cuda.get_device_capability()[0] >= 12) else '0')"
+                OUTPUT_VARIABLE _LOCAL_HAS_BLACKWELL
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+            )
+            if(_LOCAL_HAS_BLACKWELL STREQUAL "1")
+                set(_WANTS_ATTN_QAT_INFER ON)
+            endif()
+        endif()
+    endif()
+
+    if(_WANTS_ATTN_QAT_INFER)
+        if(CUDAToolkit_VERSION VERSION_LESS 12.8)
+            message(WARNING
+                "attn_qat_infer kernels require CUDA Toolkit 12.8+. "
+                "Skipping because CUDAToolkit_VERSION=${CUDAToolkit_VERSION}.")
+        else()
+            set(ENABLE_ATTN_QAT_INFER ON)
+        endif()
+    endif()
+
+    if(ENABLE_ATTN_QAT_INFER)
+        message(STATUS "attn_qat_infer kernels: ENABLED")
+    else()
+        message(STATUS
+            "attn_qat_infer kernels: DISABLED "
+            "(requires CUDA 12.8+ and Blackwell sm_120a)")
+    endif()
 endif()
 
 # Always try to build the extension if CUDA is available, but conditionally add sources/flags
@@ -181,5 +245,76 @@ if(BUILD_CXX_KERNELS)
 
     # We install it to fastvideo_kernel/_C so we can load it to register the ops
     install(TARGETS fastvideo_kernel_ops LIBRARY DESTINATION fastvideo_kernel/_C)
+endif()
+
+if(ENABLE_ATTN_QAT_INFER)
+    set(ATTN_QAT_INFER_DIR ${CMAKE_SOURCE_DIR}/attn_qat_infer)
+    set(ATTN_QAT_INFER_INCLUDE_DIRS
+        ${ATTN_QAT_INFER_DIR}
+        ${CMAKE_SOURCE_DIR}/include/cutlass/include
+        ${CMAKE_SOURCE_DIR}/include/cutlass/tools/util/include
+        ${TORCH_INCLUDE_DIRS}
+    )
+    set(ATTN_QAT_INFER_CUDA_FLAGS
+        "-O3"
+        "-std=c++17"
+        "-U__CUDA_NO_HALF_OPERATORS__"
+        "-U__CUDA_NO_HALF_CONVERSIONS__"
+        "-U__CUDA_NO_BFLOAT16_OPERATORS__"
+        "-U__CUDA_NO_BFLOAT16_CONVERSIONS__"
+        "-U__CUDA_NO_BFLOAT162_OPERATORS__"
+        "-U__CUDA_NO_BFLOAT162_CONVERSIONS__"
+        "--expt-relaxed-constexpr"
+        "--expt-extended-lambda"
+        "--use_fast_math"
+        "--ptxas-options=--verbose,--warn-on-local-memory-usage"
+        "-lineinfo"
+        "-DCUTLASS_DEBUG_TRACE_LEVEL=0"
+        "-DNDEBUG"
+        "-DQBLKSIZE=128"
+        "-DKBLKSIZE=128"
+        "-DCTA256"
+        "-DDQINRMEM"
+    )
+
+    Python_add_library(fp4attn_cuda MODULE WITH_SOABI
+        attn_qat_infer/blackwell/api.cu
+    )
+    target_include_directories(fp4attn_cuda PRIVATE ${ATTN_QAT_INFER_INCLUDE_DIRS})
+    target_compile_definitions(fp4attn_cuda PRIVATE TORCH_EXTENSION_NAME=fp4attn_cuda)
+    target_compile_options(fp4attn_cuda PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-O3 -std=c++17>
+        $<$<COMPILE_LANGUAGE:CUDA>:${ATTN_QAT_INFER_CUDA_FLAGS}>
+    )
+    set_target_properties(fp4attn_cuda PROPERTIES
+        CUDA_ARCHITECTURES "120a"
+        CXX_STANDARD 17
+        CUDA_STANDARD 17
+    )
+    target_link_libraries(fp4attn_cuda PRIVATE ${TORCH_LIBRARIES} CUDA::cudart CUDA::cuda_driver)
+
+    Python_add_library(fp4quant_cuda MODULE WITH_SOABI
+        attn_qat_infer/quantization/fp4_quantization_4d.cu
+    )
+    target_include_directories(fp4quant_cuda PRIVATE ${ATTN_QAT_INFER_INCLUDE_DIRS})
+    target_compile_definitions(fp4quant_cuda PRIVATE TORCH_EXTENSION_NAME=fp4quant_cuda)
+    target_compile_options(fp4quant_cuda PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-O3 -std=c++17>
+        $<$<COMPILE_LANGUAGE:CUDA>:${ATTN_QAT_INFER_CUDA_FLAGS}>
+    )
+    set_target_properties(fp4quant_cuda PROPERTIES
+        CUDA_ARCHITECTURES "120a"
+        CXX_STANDARD 17
+        CUDA_STANDARD 17
+    )
+    target_link_libraries(fp4quant_cuda PRIVATE ${TORCH_LIBRARIES} CUDA::cudart CUDA::cuda_driver)
+
+    if(TORCH_PYTHON_LIBRARY_PATH)
+        target_link_libraries(fp4attn_cuda PRIVATE "${TORCH_PYTHON_LIBRARY_PATH}")
+        target_link_libraries(fp4quant_cuda PRIVATE "${TORCH_PYTHON_LIBRARY_PATH}")
+    endif()
+
+    install(TARGETS fp4attn_cuda LIBRARY DESTINATION .)
+    install(TARGETS fp4quant_cuda LIBRARY DESTINATION .)
 endif()
 
