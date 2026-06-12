@@ -931,6 +931,12 @@ class TrainingArgs(FastVideoArgs):
     # VSA training decay parameters
     VSA_decay_rate: float = 0.01  # decay rate -> 0.02
     VSA_decay_interval_steps: int = 1  # decay interval steps -> 50
+    # Reuse the per-step padded VSA tile buffer across attention layers during
+    # training. Defaults to False: under full activation checkpointing the
+    # cached buffer survives into the backward recompute and inflates peak
+    # memory (see #1423). Enable on memory-rich setups to keep the per-step
+    # buffer-reuse speedup.
+    VSA_cache_tile_buf: bool = False
 
     # LoRA training parameters
     lora_rank: int | None = None
@@ -1171,6 +1177,13 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             default=TrainingArgs.VSA_decay_interval_steps,
             help="VSA decay interval steps")
+        parser.add_argument("--VSA-cache-tile-buf",
+                            action=StoreBoolean,
+                            default=TrainingArgs.VSA_cache_tile_buf,
+                            help="Reuse the per-step padded VSA tile buffer across attention "
+                            "layers during training. Off by default to avoid the activation-"
+                            "checkpointing OOM (#1423); enable on memory-rich setups for the "
+                            "per-step buffer-reuse speedup.")
         parser.add_argument("--lora-training", action=StoreBoolean, help="Whether to use LoRA training")
         parser.add_argument("--lora-rank", type=int, help="LoRA rank")
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")

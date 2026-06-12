@@ -360,7 +360,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 patch_size=patch_size,
                 VSA_sparsity=current_vsa_sparsity,
                 device=get_local_torch_device(),
-                cache_tile_buf=False)
+                cache_tile_buf=self.training_args.VSA_cache_tile_buf)
         elif envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
             if not vmoba_available:
                 raise ImportError("FASTVIDEO_ATTENTION_BACKEND is set to VMOBA_ATTN, "
