@@ -1,6 +1,6 @@
 # Multimodal Generation Batching Port Report
 
-Date: 2026-05-30  
+Date: 2026-05-30
 Branch: `multimodal-gen-batching`
 
 ## Summary
@@ -101,6 +101,14 @@ Focused tests and hooks:
 | Text padding fix | `ap-IJIJjdLogSGkzeN4sCP46E` | entrypoint and text encoding tests plus pre-commit | `28 passed`, pre-commit passed |
 | Single-text-encode fix | `ap-DIIEE6Wy0I728fqsc63C6s` | entrypoint and text encoding tests plus pre-commit | `29 passed`, pre-commit passed |
 | Final changed-file suite | `ap-1mFqrE5eCwPkEKnffQcQou` | batching, generator, text encoding, OpenAI API, compat, and input-validation tests plus pre-commit | `119 passed`, pre-commit passed |
+
+Post-report validation:
+
+| Check | Modal app | Command summary | Result |
+| --- | --- | --- | --- |
+| Wan T2V SSIM on H100 | `ap-KaJr2loSTefvmj8ijYwWOK` | `FASTVIDEO_SSIM_MODEL_ID=Wan2.1-T2V-1.3B-Diffusers pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs` on `H100:2` | Generated both videos, but failed before SSIM comparison because `H100_reference_videos` are missing for both `FLASH_ATTN` and `TORCH_SDPA` |
+| Wan T2V SSIM on L40S | `ap-iWP6PA1IyZbXHDKtIE1LQH` | same targeted Wan T2V SSIM command on `L40S:2`, `--install-extra none` | `2 passed`, `6 warnings`; mean SSIM `0.9786614696` for `FLASH_ATTN`, `0.9743387236` for `TORCH_SDPA` |
+| Full pre-commit attempt | `ap-r20n8jCBwqQnh8I5Us1yTN` | `pre-commit run --all-files` on `L40S:1` | Failed because yapf/ruff rewrote a large set of pre-existing repository files; not taken as PR-local evidence |
 
 ## Parity
 
