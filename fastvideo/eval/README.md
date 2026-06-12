@@ -125,6 +125,44 @@ to run a subset of the Evaluator's registered metrics on this batch
 (useful for scoring different corpora with different metric subsets in
 successive calls without burning model loads).
 
+### Training-time validation metrics
+
+The modular trainer can score validation videos during training through
+`callbacks.validation.metrics`. Each distributed rank that writes local
+validation videos also runs its local metrics on `cuda:<local_rank>`;
+rank 0 only merges scalar summaries and logs artifacts.
+
+```yaml
+callbacks:
+  validation:
+    pipeline_target: fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline.MatrixGame2CausalDMDPipeline
+    dataset_file: examples/distill/MatrixGame2.0/validation.json
+    sampling_steps: [4]
+    metrics:
+      enabled: true
+      names:
+        - vbench.imaging_quality
+        - vbench.aesthetic_quality
+        - optical_flow.synthetic_optical_flow
+        - common.fvd
+      skip_missing_deps: true
+      strict: false
+      unload_after_validation: true
+
+      # `synthetic_optical_flow` also needs actions in the validation
+      # manifest (`action_path`) plus a repo-local calibration file.
+      calibration_path: assets/eval/worldmodel_synthetic_flow_calibration.json
+```
+
+Metric summaries are written under
+`<output_dir>/eval/step_<step>/inference_steps_<n>_rank_<rank>.json` and
+scalar means are logged with the `metrics/validation/...` prefix.
+Install `fastvideo[eval]` for optical-flow dependencies such as
+`ptlflow`; VBench metrics use the pinned submodule under
+`fastvideo/third_party/eval/vbench`. FVD uses `ref_video` entries from
+the validation manifest when present, or the standard
+`FASTVIDEO_FVD_REF_FEATURES` / eval-cache reference feature path.
+
 ### CLI
 
 ```bash
@@ -353,5 +391,3 @@ sweep several baselines into a table, see
 
 - **MIND** metrics. Depend on a separate `vipe` upstream submodule.
 - **VBench-2.0**. Sibling vbench2 package; needs its own port.
-- **Training-time eval callback** (`EvalCallback`) and the
-  `RolloutEvaluator` helper.

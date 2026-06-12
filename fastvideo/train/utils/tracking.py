@@ -39,6 +39,7 @@ def build_tracker(
         tracker_log_dir = os.path.join(tracker_log_dir, "tracker")
 
     tracker_config_dict = config if trackers else None
+    tracker_entity = tracker_config.entity or None
     tracker_run_name = tracker_config.run_name or None
     project = (tracker_config.project_name or "fastvideo")
 
@@ -47,5 +48,6 @@ def build_tracker(
         experiment_name=project,
         config=tracker_config_dict,
         log_dir=tracker_log_dir,
+        entity=tracker_entity,
         run_name=tracker_run_name,
     )

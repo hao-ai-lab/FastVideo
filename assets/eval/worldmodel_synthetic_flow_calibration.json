@@ -1,0 +1,22 @@
+{
+  "alpha_yaw": 0.08734091699186919,
+  "alpha_pitch": 0.08169667696275307,
+  "alpha_turn": 5.724587470723463e-17,
+  "beta_fwd": 0.02842768078408099,
+  "beta_strafe": 0.022531015077067108,
+  "focal_length": 457.0,
+  "frame_shape": [
+    352,
+    640
+  ],
+  "calibrated_from": [
+    "1_wasd_only",
+    "camera",
+    "camera4hold_alpha1",
+    "fully_random",
+    "wasdonly_alpha1",
+    "wasd4holdrandview_simple_1key1mouse1"
+  ],
+  "residual_rms": 15.890399609478676,
+  "n_equations": 4125232
+}

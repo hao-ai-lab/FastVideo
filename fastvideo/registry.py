@@ -554,6 +554,12 @@ def _register_configs() -> None:
             "FastVideo/Matrix-Game-2.0-Base-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
+            # Zelda World Model
+            "mignonjia/mg_longtuning_distilled_zelda", # distilled using streaming long tuning which init from mg_sf_distilled_zelda_1k_steps
+            "mignonjia/mg_sf_distilled_zelda_1k_steps", # distilled using self forcing for 1k steps
+            "mignonjia/mg_sf_distilled_zelda", # distilled using self forcing for 3k steps
+            "mignonjia/mg_causal_zelda", 
+            "mignonjia/mg_bidirectional_zelda",
         ],
         model_detectors=[
             lambda path: any(token in path.lower() for token in (
