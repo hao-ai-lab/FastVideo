@@ -140,6 +140,14 @@ class CudaPlatformBase(Platform):
             except ImportError as e:
                 logger.info(e)
                 logger.info("Sage Attention 3 backend is not installed. Fall back to Flash Attention.")
+        elif selected_backend == AttentionBackendEnum.ATTN_QAT_TRAIN:
+            from fastvideo.attention.backends.attn_qat_train import (  # noqa: F401
+                AttnQatTrainBackend, is_attn_qat_train_available)
+            if is_attn_qat_train_available():
+                logger.info("Using Attn-QAT training (fake-quantized attention) backend.")
+                return "fastvideo.attention.backends.attn_qat_train.AttnQatTrainBackend"
+            logger.warning("Attn-QAT training kernel is not built; falling back to Flash Attention "
+                           "(NO fake-quant in the attention path).")
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from fastvideo_kernel import video_sparse_attn  # noqa: F401
