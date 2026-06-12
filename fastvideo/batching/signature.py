@@ -144,8 +144,7 @@ def _freeze_signature_value(value: Any) -> Any:
         return value.value
     if isinstance(value, dict):
         return tuple(
-            (str(key), _freeze_signature_value(item))
-            for key, item in sorted(value.items(), key=lambda kv: str(kv[0])))
+            (str(key), _freeze_signature_value(item)) for key, item in sorted(value.items(), key=lambda kv: str(kv[0])))
     if isinstance(value, list | tuple):
         return tuple(_freeze_signature_value(item) for item in value)
     return repr(value)
