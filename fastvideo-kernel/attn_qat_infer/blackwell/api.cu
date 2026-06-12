@@ -222,8 +222,8 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
     ) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    bool is_sm120 = dprops->major == 12 && dprops->minor == 0;
-    TORCH_CHECK(is_sm120, "only supports Blackwell GPUs or newer.");
+    bool is_blackwell_or_newer = dprops->major >= 12;
+    TORCH_CHECK(is_blackwell_or_newer, "only supports Blackwell GPUs or newer.");
 
     auto q_dtype = q.dtype();
     auto sfq_dtype = sfq.dtype();
@@ -312,9 +312,10 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
                      is_bf16,
                      single_level_p_quant
                     );
-    // TODO: 132 sm count?
-    auto tile_count_semaphore = is_causal ? torch::full({1}, 132, opts.dtype(torch::kInt32)) : torch::empty({1}, opts.dtype(torch::kInt32));
-    params.tile_count_semaphore = tile_count_semaphore.data_ptr<int>();
+    // StaticPersistentTileScheduler does not use tile_count_semaphore; avoid a
+    // stack-local tensor whose data pointer would dangle after mha_fwd returns
+    // while the async kernel may still be running.
+    params.tile_count_semaphore = nullptr;
 
     if (seqlen_k > 0) {
         auto stream = at::cuda::getCurrentCUDAStream().stream();

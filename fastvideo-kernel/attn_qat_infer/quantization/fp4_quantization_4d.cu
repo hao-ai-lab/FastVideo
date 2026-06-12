@@ -225,7 +225,11 @@
      e2m1Vals[i] = fp32_vec_to_e2m1(fp2Vals + i * 4);
    }
  
-   // save, do not check range
+   // Skip out-of-range tokens: never write past the sequence when num_tokens
+   // is not a multiple of BLOCK_SIZE (out-of-bounds write fix).
+   if (token_id >= num_tokens) return;
+
+   // save
    if constexpr (CVT_FP4_ELTS_PER_THREAD == 8) {
      reinterpret_cast<uint32_t*>(output + 
                                  batch_id * stride_bz_output +
@@ -355,6 +359,12 @@
      e2m1Vals[i] = fp32_vec_to_e2m1(fp2Vals + i * 4);
    }
  
+   // Skip out-of-range tokens: never write past the sequence when num_tokens
+   // is not a multiple of BLOCK_SIZE (out-of-bounds write fix).
+   const int write_token_id = token_block_id * BLOCK_SIZE +
+       (threadIdx.x % NUM_THREADS_PER_SEQ) * CVT_FP4_ELTS_PER_THREAD;
+   if (write_token_id >= num_tokens) return;
+
    // save
    if constexpr (CVT_FP4_ELTS_PER_THREAD == 8) {
      reinterpret_cast<uint32_t*>(output + 
