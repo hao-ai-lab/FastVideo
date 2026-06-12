@@ -105,6 +105,15 @@ class MediaComplete:
     chunks: int
 
 
+@dataclass(frozen=True)
+class MediaError:
+    """Post-generation fMP4 failure routed through the segment media path."""
+    user_id: str
+    segment_idx: int
+    stream_id: str
+    message: str
+
+
 # ---- System events (no user_id) --------------------------------------------
 
 
@@ -129,6 +138,7 @@ WorkerEvent = (StepComplete
                | MediaInit
                | MediaChunk
                | MediaComplete
+               | MediaError
                | InitAck
                | ShutdownAck)
 

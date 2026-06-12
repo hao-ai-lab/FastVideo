@@ -5,6 +5,7 @@ import asyncio
 import multiprocessing as mp
 import os
 import subprocess
+import threading
 import time
 import traceback
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ from dreamverse.worker_ipc import (
     LoraStackPayload,
     MediaChunk,
     MediaComplete,
+    MediaError,
     MediaInit,
     ReloadAck,
     ReloadModelPayload,
@@ -49,6 +51,8 @@ from dreamverse.worker_ipc import (
     WorkerError,
     WorkerEvent,
 )
+
+ACTIVE_STREAM_JOIN_TIMEOUT_SECONDS = 15.0
 
 
 def _parse_requested_gpu_limit() -> int | None:
@@ -167,10 +171,98 @@ def gpu_worker_process(
     from dreamverse.video_generation import VideoGenerationWorker
 
     worker = VideoGenerationWorker(gpu_id)
+    # One active fMP4 stream per worker keeps binary media chunks ordered by segment.
+    active_stream_thread: threading.Thread | None = None
+    active_stream_segment_idx: int | None = None
 
     def event_loop(first_cmd: Command = None):
         """Blocking event loop for LTX2; dispatches user commands."""
         print(f"[GPU {gpu_id}] Entering event loop")
+
+        def wait_for_active_stream() -> None:
+            """Join the active fMP4 segment stream before leave, shutdown, or the next stream."""
+            nonlocal active_stream_thread
+            nonlocal active_stream_segment_idx
+            if active_stream_thread is None:
+                return
+            if active_stream_thread.is_alive():
+                print(f"[GPU {gpu_id}] Waiting for AV stream "
+                      f"segment {active_stream_segment_idx} before continuing")
+            active_stream_thread.join(timeout=ACTIVE_STREAM_JOIN_TIMEOUT_SECONDS)
+            if active_stream_thread.is_alive():
+                raise RuntimeError(f"Timed out waiting for AV stream segment "
+                                   f"{active_stream_segment_idx} after "
+                                   f"{ACTIVE_STREAM_JOIN_TIMEOUT_SECONDS:.0f}s")
+            active_stream_thread = None
+            active_stream_segment_idx = None
+
+        def start_stream_thread(
+            *,
+            step_result,
+            user_id: str,
+            segment_idx: int,
+            stream_id: str,
+            head_trim_frames: int,
+            head_trim_audio_frames: int,
+        ) -> None:
+            """Start fMP4 encoding for one segment and publish media events to the controller."""
+            nonlocal active_stream_thread
+            nonlocal active_stream_segment_idx
+            wait_for_active_stream()
+            stream_timings = dict(step_result.timings)
+
+            def _publish(event: StreamEvent) -> None:
+                response_queue.put(_stream_event_to_worker_event(event, user_id, segment_idx))
+
+            def _run_stream() -> None:
+                try:
+                    av_ok, av_error = stream_fmp4(
+                        frames=step_result.frames,
+                        audio=step_result.audio,
+                        audio_sample_rate=step_result.audio_sample_rate,
+                        stream_id=stream_id,
+                        timings=stream_timings,
+                        head_trim_frames=head_trim_frames,
+                        head_trim_audio_frames=head_trim_audio_frames,
+                        shared_buffer=None,
+                        shared_buffer_bytes=0,
+                        publish=_publish,
+                        log_prefix=f"[GPU {gpu_id}]",
+                    )
+                    if not av_ok:
+                        response_queue.put(
+                            MediaError(
+                                user_id=user_id,
+                                segment_idx=segment_idx,
+                                stream_id=stream_id,
+                                message=av_error or "worker av_fmp4 stream failed",
+                            ))
+                        return
+                    print(f"[GPU {gpu_id}] AV streamed segment {segment_idx}: "
+                          f"encode_total={stream_timings.get('av_encode_stream_ms', 0):.0f}ms "
+                          f"wav_write={stream_timings.get('av_wav_write_ms', 0):.1f}ms "
+                          f"spawn={stream_timings.get('av_ffmpeg_spawn_ms', 0):.1f}ms "
+                          f"first_chunk={stream_timings.get('av_first_chunk_ms', 0):.0f}ms "
+                          f"chunk_interval_med={stream_timings.get('av_chunk_interval_ms_median', 0):.1f}ms "
+                          f"chunk_interval_p95={stream_timings.get('av_chunk_interval_ms_p95', 0):.1f}ms "
+                          f"publish_med={stream_timings.get('av_chunk_publish_ms_median', 0):.2f}ms "
+                          f"read_med={stream_timings.get('av_chunk_read_ms_median', 0):.1f}ms")
+                except Exception as exc:
+                    response_queue.put(
+                        MediaError(
+                            user_id=user_id,
+                            segment_idx=segment_idx,
+                            stream_id=stream_id,
+                            message=str(exc),
+                        ))
+
+            active_stream_thread = threading.Thread(
+                target=_run_stream,
+                name=f"dreamverse-av-stream-gpu{gpu_id}-seg{segment_idx}",
+                daemon=False,
+            )
+            active_stream_segment_idx = segment_idx
+            active_stream_thread.start()
 
         def handle_command(cmd: Command):
             if cmd.type == CommandType.USER_JOIN:
@@ -204,40 +296,21 @@ def gpu_worker_process(
                           f"audio_shape={audio_shape}, "
                           f"audio_sample_rate={step_result.audio_sample_rate}")
                     stream_id = generate_stream_id(segment_idx)
-
-                    def _publish(event: StreamEvent) -> None:
-                        response_queue.put(_stream_event_to_worker_event(event, cmd.user_id, segment_idx))
-
-                    av_ok, av_error = stream_fmp4(
-                        frames=step_result.frames,
-                        audio=step_result.audio,
-                        audio_sample_rate=step_result.audio_sample_rate,
+                    start_stream_thread(
+                        step_result=step_result,
+                        user_id=cmd.user_id,
+                        segment_idx=segment_idx,
                         stream_id=stream_id,
-                        timings=step_result.timings,
                         head_trim_frames=head_trim_frames,
                         head_trim_audio_frames=head_trim_audio_frames,
-                        shared_buffer=shared_stream_buffer,
-                        shared_buffer_bytes=shared_stream_buffer_bytes,
-                        publish=_publish,
-                        log_prefix=f"[GPU {gpu_id}]",
                     )
-                    if not av_ok:
-                        raise RuntimeError(av_error or "worker av_fmp4 stream failed")
-                    print(f"[GPU {gpu_id}] AV streamed segment {segment_idx}: "
-                          f"encode_total={step_result.timings.get('av_encode_stream_ms', 0):.0f}ms "
-                          f"wav_write={step_result.timings.get('av_wav_write_ms', 0):.1f}ms "
-                          f"spawn={step_result.timings.get('av_ffmpeg_spawn_ms', 0):.1f}ms "
-                          f"first_chunk={step_result.timings.get('av_first_chunk_ms', 0):.0f}ms "
-                          f"chunk_interval_med={step_result.timings.get('av_chunk_interval_ms_median', 0):.1f}ms "
-                          f"chunk_interval_p95={step_result.timings.get('av_chunk_interval_ms_p95', 0):.1f}ms "
-                          f"publish_med={step_result.timings.get('av_chunk_publish_ms_median', 0):.2f}ms "
-                          f"read_med={step_result.timings.get('av_chunk_read_ms_median', 0):.1f}ms")
-                    step_result.timings["ipc_put_start_ns"] = time.time_ns()
+                    step_timings = dict(step_result.timings)
+                    step_timings["ipc_put_start_ns"] = time.time_ns()
                     response_queue.put(
                         StepComplete(
                             user_id=cmd.user_id,
                             segment_idx=segment_idx,
-                            timings=step_result.timings,
+                            timings=step_timings,
                         ))
                 except Exception as e:
                     print(f"[GPU {gpu_id}] Step error: {e}")
@@ -249,8 +322,17 @@ def gpu_worker_process(
 
             elif cmd.type == CommandType.USER_LEAVE:
                 print(f"[GPU {gpu_id}] User {cmd.user_id[:8]} left")
-                worker.clear_conditioning()
-                response_queue.put(LeaveAck(user_id=cmd.user_id))
+                try:
+                    wait_for_active_stream()
+                    worker.clear_conditioning()
+                    response_queue.put(LeaveAck(user_id=cmd.user_id))
+                except Exception as e:
+                    print(f"[GPU {gpu_id}] Leave error: {e}")
+                    response_queue.put(WorkerError(
+                        user_id=cmd.user_id,
+                        message=str(e),
+                    ))
+                    return False
 
             elif cmd.type == CommandType.SHUTDOWN:
                 return False  # Signal to exit
@@ -309,6 +391,7 @@ def gpu_worker_process(
 
         if first_cmd is not None:
             if first_cmd.type == CommandType.SHUTDOWN:
+                wait_for_active_stream()
                 worker.shutdown()
                 response_queue.put(ShutdownAck())
                 return
@@ -323,6 +406,7 @@ def gpu_worker_process(
 
             if cmd.type == CommandType.SHUTDOWN:
                 print(f"[GPU {gpu_id}] Event loop shutting down")
+                wait_for_active_stream()
                 worker.shutdown()
                 response_queue.put(ShutdownAck())
                 return
@@ -642,7 +726,7 @@ class GPUSlot:
                     continue
 
                 # AV streaming events → route to the user's stream queue.
-                if isinstance(event, (MediaInit, MediaChunk, MediaComplete)):
+                if isinstance(event, (MediaInit, MediaChunk, MediaComplete, MediaError)):
                     stream_queue = self._stream_queues.get(event.user_id)
                     if stream_queue is not None:
                         await stream_queue.put(event)
