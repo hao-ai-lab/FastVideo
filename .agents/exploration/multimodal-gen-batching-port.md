@@ -505,6 +505,16 @@ Current local implementation state:
   `ap-1mFqrE5eCwPkEKnffQcQou` from commit
   `2304837ed1bc0e1cd733d61f864d6cb1e7682b26`:
   `119 passed, 14 warnings`, and pre-commit passed.
+- Post-report Wan T2V SSIM validation:
+  - H100 attempt `ap-KaJr2loSTefvmj8ijYwWOK` generated videos but failed
+    before comparison because H100 reference folders are missing.
+  - L40S run `ap-iWP6PA1IyZbXHDKtIE1LQH` passed:
+    `2 passed, 6 warnings`; mean SSIM `0.9786614696` for `FLASH_ATTN`
+    and `0.9743387236` for `TORCH_SDPA`.
+- `pre-commit run --all-files` was attempted on Modal app
+  `ap-r20n8jCBwqQnh8I5Us1yTN`, but failed because yapf/ruff rewrote a
+  large set of pre-existing repository files. This was not committed because
+  it would introduce unrelated formatting churn.
 - No code changes remain after the final validation report/state update.
 
 Important constraints:
