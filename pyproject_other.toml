@@ -21,7 +21,9 @@ dependencies = [
     "requests>=2.32.2",
 
     # Machine Learning & Transformers
-    "transformers>=4.57.3",
+    # GLM-Image's AR encoder (GlmImageForConditionalGeneration) first ships in
+    # transformers 5.0.0; floor bumped from >=4.57.3 to >=5.0.0 (stable, not rc).
+    "transformers>=5.0.0",
     "tokenizers>=0.20.1",
     "sentencepiece>=0.2.0",
     "timm>=1.0.11",
