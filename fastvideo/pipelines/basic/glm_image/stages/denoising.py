@@ -29,7 +29,7 @@ class GlmImageDenoisingStage(DenoisingStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         device = get_local_torch_device()
         dtype = torch.bfloat16
-        guidance_scale = getattr(batch, "guidance_scale", 1.5)
+        guidance_scale = batch.guidance_scale
         do_cfg = guidance_scale > 1.0
 
         latents = getattr(batch, "latent", getattr(batch, "latents", None))
