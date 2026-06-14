@@ -122,8 +122,15 @@ except ImportError:
     _FA4_FP4_AVAILABLE = False
 
 
-def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor, ) -> tuple[torch.Tensor, torch.Tensor]:
+@torch.library.custom_op("fastvideo::_nvfp4_quantize_for_fa4", mutates_args=())
+def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Quantize a (batch, seqlen, nheads, headdim) BF16 tensor to FP4.
+
+    Registered as a ``torch.library.custom_op`` so torch.compile/dynamo treats
+    it as an opaque leaf and never traces into flashinfer ``nvfp4_quantize``
+    (whose ``@functools.cache``d module getter takes a ``_thread.allocate_lock``
+    and JIT-builds via ``subprocess`` on first call — neither is dynamo-traceable).
+    The paired ``register_fake`` below supplies output shapes/strides for tracing.
 
     Returns:
         fp4_tensor: torch.float4_e2m1fn_x2, shape (batch, seqlen_padded, nheads, headdim//2)
@@ -168,6 +175,27 @@ def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor, ) -> tuple[torch.Tensor, to
     sf_canonical = sf_decomposed.permute(0, 2, 1, 3, 4, 5, 6).contiguous()
     sf_mma = sf_canonical.permute(4, 5, 2, 6, 3, 1, 0)
 
+    return fp4_tensor, sf_mma
+
+
+@_nvfp4_quantize_for_fa4.register_fake
+def _nvfp4_quantize_for_fa4_fake(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    # Shapes/strides must mirror the real impl above so the compiled graph
+    # threads the right metadata into flash_attn_fp4_func. No flashinfer call —
+    # pure meta-tensor allocation.
+    batch, seqlen, nheads, headdim = tensor_4d.shape
+    tile_m, sf_vec_size = 128, 16
+    seqlen_padded = (seqlen + tile_m - 1) // tile_m * tile_m
+    fp4_tensor = torch.empty((batch, seqlen_padded, nheads, headdim // 2),
+                             dtype=torch.float4_e2m1fn_x2, device=tensor_4d.device)
+    atom_m0, atom_m1, atom_k = 32, 4, 4
+    rest_m = seqlen_padded // tile_m
+    rest_k = (headdim // sf_vec_size) // atom_k
+    # Build contiguous then apply the same final permute so sf_mma's strides
+    # (notably stride[3]==1, required by FA4) match the real tensor.
+    sf_canonical = torch.empty((batch, nheads, rest_m, rest_k, atom_m0, atom_m1, atom_k),
+                               dtype=torch.uint8, device=tensor_4d.device)
+    sf_mma = sf_canonical.permute(4, 5, 2, 6, 3, 1, 0)
     return fp4_tensor, sf_mma
 
 
@@ -255,6 +283,20 @@ class FlashAttentionImpl(AttentionImpl):
             assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
             assert _FA4_FP4_AVAILABLE, ("NVFP4 FA4 requires flash-attention-fp4 (flash_attn.cute). "
                                         "Install via instructions in docs/inference/optimizations.md")
+            # Pre-build the flashinfer FP4 quant module eagerly (here, in the
+            # worker process, before torch.compile). The Q/K quant in
+            # `_nvfp4_quantize_for_fa4` calls flashinfer `nvfp4_quantize`, whose
+            # first invocation JIT-builds the sm10x module via `subprocess`
+            # (nvcc --version). If that first call lands inside a compiled
+            # region, dynamo tries to trace the subprocess and crashes. The
+            # builder is `@functools.cache`d, so warming it once here makes the
+            # later compiled call a pure cache hit.
+            try:
+                from flashinfer.quantization.fp4_quantization import (
+                    get_fp4_quantization_module)
+                get_fp4_quantization_module(f"{cap[0]}{cap[1]}")
+            except Exception as exc:  # pragma: no cover - best-effort warmup
+                logger.warning("FP4 quant module pre-build failed: %s", exc)
             logger.info("NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk only)")
 
     def forward(
