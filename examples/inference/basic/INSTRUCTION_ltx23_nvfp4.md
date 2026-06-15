@@ -155,6 +155,10 @@ All knobs are env vars:
 | `LTX23_HEIGHT`/`_WIDTH` | 1280/832 | resolution (H×W) |
 | `LTX23_NUM_FRAMES`    | 121     | 121≈5 s, 481≈20 s @24fps |
 | `LTX23_STEPS`         | 8       | denoise steps (refine fixed at 3) |
+| `LTX23_VAE_TILING`    | 0       | tile the VAE decode — set 1 for long/high-res (avoids the 32-bit decode overflow; see §11) |
+| `LTX23_DECODE`        | 1       | set 0 → `output_type="latent"`: skip VAE decode + video save to measure DiT (denoise/refine) timing cleanly on long runs |
+| `LTX23_WARMUP`        | 2 / 1   | warmup runs (default 2 if compile else 1) |
+| `LTX23_MEASURED`      | 3       | measured runs to average |
 | `LTX23_MODEL_PATH`    | hub id  | local snapshot dir (optional) |
 
 Common env block for every run:
@@ -220,10 +224,55 @@ that the cudagraph result is the *closest* match to its own non-cudagraph output
 (PSNR 17.95 dB — higher than any cross-config pair). The per-frame difference is
 ordinary diffusion sensitivity to kernel/numeric changes, not corruption.
 
-## 10. Known limitations / TODO
+## 10. Long-token / longer-video scaling (241 / 481 frames)
 
-- **Long / high-res video**: 20 s (481 frames) and ≥1920×1088 currently hit a VAE
-  decode `input tensor must fit into 32-bit index math` — enable VAE tiling
-  (`ltx2_vae_tiling=True`) to run those; not yet benchmarked with cudagraphs.
+DiT token length is `N = T_lat × H_lat × W_lat` with VAE compression 32×
+spatial / 8× temporal and DiT patch 1: `T_lat = (frames−1)/8 + 1`,
+`H_lat = H/32`, `W_lat = W/32`. At 832×1280 each extra latent frame adds
+40×26 = 1040 tokens, so **frame count is the clean linear axis** for long-context
+tests — use `frames = 8k+1` (121 / 241 / 481), else `(frames−1)//8` truncates.
+
+Measured on GB300 (t2v, 832×1280, 8+3, nvfp4+FA4-FP4+CUDA graphs vs bf16+FA4+CG),
+seconds:
+
+| frames (~dur) | N (refine) | nvfp4  denoise / refine / **e2e** | bf16  denoise / refine / e2e |
+|---------------|-----------:|-----------------------------------|------------------------------|
+| 121 (~5 s)    | 16,640     | 0.859 / 1.193 / **3.00**          | 1.082 / 1.725 / 3.77         |
+| 241 (~10 s)   | 32,240     | 1.549 / 2.956 / **6.15**          | 2.051 / 4.073 / 7.85         |
+| 481 (~20 s)   | 63,440     | 3.261 / 8.259 / **11.9***         | —                            |
+
+*481-frame e2e is **DiT-only** (`LTX23_DECODE=0`): the full-res tiled VAE decode
+is CPU-bound and dominates wall-time without saying anything about DiT scaling,
+so it is excluded. The 121/241 e2e include decode + video save.
+
+Finding: the low-res **denoise** stays ~linear in frames (launch-bound), but the
+full-res **refine** goes super-linear — attention (N²) is ~29 % of refine at
+121 f, ~44 % at 241 f, ~61 % at 481 f. nvfp4's ~20 % e2e win over bf16 holds
+across all lengths.
+
+```bash
+# 241-frame full e2e (decode still fits 32-bit untiled at 241 f)
+LTX23_COMPILE=1 LTX23_NVFP4=1 LTX23_FA4=1 \
+  LTX23_COMPILE_MODE=reduce-overhead LTX23_NO_CGTREES=1 LTX23_COMPILE_TE=0 \
+  LTX23_NUM_FRAMES=241 python $SCRIPT                             # nvfp4 ~6.15 s
+
+# 481-frame DiT-only (skip the slow tiled decode, measure denoise/refine)
+LTX23_COMPILE=1 LTX23_NVFP4=1 LTX23_FA4=1 \
+  LTX23_COMPILE_MODE=reduce-overhead LTX23_NO_CGTREES=1 LTX23_COMPILE_TE=0 \
+  LTX23_NUM_FRAMES=481 LTX23_DECODE=0 python $SCRIPT              # DiT ~11.9 s
+
+# 481-frame WITH decode (needs tiling; decode is slow/CPU-bound)
+LTX23_COMPILE=1 LTX23_NVFP4=1 LTX23_FA4=1 \
+  LTX23_COMPILE_MODE=reduce-overhead LTX23_NO_CGTREES=1 LTX23_COMPILE_TE=0 \
+  LTX23_NUM_FRAMES=481 LTX23_VAE_TILING=1 python $SCRIPT
+```
+
+## 11. Known limitations / TODO
+
+- **Long / high-res VAE decode**: past ~241 frames at 832×1280 (and ≥1920×1088),
+  untiled decode overflows `input tensor must fit into 32-bit index math`. It runs
+  with `LTX23_VAE_TILING=1`, but the tiled decode is **CPU-bound and very slow**
+  (the per-tile trapezoidal-blend stitch dominates) — not yet optimized. Use
+  `LTX23_DECODE=0` to benchmark DiT timing without it.
 - cudagraphs is DiT-only here; text-encoder/VAE graph capture needs
   `cudagraph_mark_step_begin()` plumbing to be safe.

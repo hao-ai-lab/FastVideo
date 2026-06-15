@@ -151,11 +151,17 @@ def main() -> None:
         dit_cpu_offload=False,
         text_encoder_cpu_offload=False,
         vae_cpu_offload=False,
-        ltx2_vae_tiling=False,
+        # Long / high-res runs (e.g. 968 frames) overflow VAE decode's 32-bit
+        # index math; enable tiling via LTX23_VAE_TILING=1 to run them.
+        ltx2_vae_tiling=_env_flag("LTX23_VAE_TILING", "0"),
     )
     if FA4:
         # Enables FlashAttention-4 + FP4 Q/K quant (sets FASTVIDEO_NVFP4_FA4=1).
         gen_kwargs["nvfp4_fa4"] = True
+    # output_type="latent" bypasses the VAE decode in DecodingStage (generator-
+    # level fastvideo arg, not a per-request sampling param).
+    if not _env_flag("LTX23_DECODE", "1"):
+        gen_kwargs["output_type"] = "latent"
     if COMPILE:
         dit_mode = os.getenv("LTX23_COMPILE_MODE", "default")
         torch_compile_kwargs = {
@@ -187,6 +193,11 @@ def main() -> None:
     generator = VideoGenerator.from_pretrained(model_root, **gen_kwargs)
 
     # Pure t2v: no ltx2_images / ltx2_image_crf.
+    # LTX23_DECODE=0 -> output_type="latent": bypass the VAE decode (+ video
+    # save) so denoise/refine DiT timing is measured cleanly. Needed for long /
+    # high-res runs where tiled VAE decode dominates wall-time and would
+    # otherwise pay ~1h per run while telling us nothing about DiT scaling.
+    decode = _env_flag("LTX23_DECODE", "1")
     common_kwargs = dict(
         prompt=PROMPT,
         negative_prompt="",
@@ -194,12 +205,13 @@ def main() -> None:
         height=HEIGHT, width=WIDTH,
         num_frames=NUM_FRAMES, fps=24,
         num_inference_steps=STEPS,
-        save_video=True,
+        save_video=decode,
     )
 
     # Compile needs 2 warmups (cold compile + settle); eager needs 1.
-    warmup_runs = 2 if COMPILE else 1
-    measured_runs = 3
+    # Overridable for long runs where 5 full generations is too costly.
+    warmup_runs = int(os.getenv("LTX23_WARMUP", "2" if COMPILE else "1"))
+    measured_runs = int(os.getenv("LTX23_MEASURED", "3"))
     warmup_secs: list[float] = []
     measured_secs: list[float] = []
     stage_times: dict[str, list[float]] = {}
