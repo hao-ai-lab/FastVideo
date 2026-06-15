@@ -57,9 +57,46 @@ The raw videos are full-HD MixKit clips (≈1080p/30fps); preprocessing resizes 
 [`docs/training/data_preprocess.md`](../../../../../docs/training/data_preprocess.md)
 for the full parameter reference.
 
-## Next
+## Train (QAT finetune)
 
-With the data in place, run the QAD finetune / DMD-distillation scripts in this
-directory (added alongside the recipe). The 4-bit attention path is selected via
-`FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN` and the NVFP4 linear layers via
-`transformer_quant="nvfp4_qat"` — see the QAD recipe docs.
+With the data in place, run the quantization-aware finetune. The 4-bit attention
+path is **config-driven** — selected purely by an env var, no monkey-patching:
+
+```bash
+bash examples/training/finetune/wan_t2v_1.3B/mixkit/finetune_qat.sh
+# or point at your own parquet dir / GPU count:
+NUM_GPUS=4 bash .../mixkit/finetune_qat.sh data/HD-Mixkit-Finetune-Wan/combined_parquet_dataset/
+```
+
+`FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN` routes attention through the
+fake-quantized Triton kernel (straight-through estimator), so the DiT learns to
+absorb FP4 attention error. This kernel is Triton, so it runs on both `sm_100`
+(B200/GB200) and `sm_120` (RTX 5090).
+
+> The next stage of the full QAD recipe is a quantization-aware DMD distillation
+> down to 3 steps; that pipeline is tracked separately.
+
+## Inference (NVFP4 4-bit linear)
+
+For Wan-2.1, enable the FP4 linear layers with the **`nvfp4_qat`** quantization
+config (it matches Wan's `to_q/k/v/out` + `ffn` layers; the plain `NVFP4` config
+is LTX2-specific and will not quantize Wan):
+
+```python
+from fastvideo import VideoGenerator
+from fastvideo.layers.quantization import get_quantization_config
+
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", num_gpus=1,
+    transformer_quant=get_quantization_config("nvfp4_qat")(),  # a config instance, not the string
+    use_fsdp_inference=False,
+)
+gen.generate(request={"prompt": "...", "output": {"save_video": True}})
+```
+
+The loader converts the tagged linear weights to FP4 at load time
+(`_maybe_convert_model_to_nvfp4`). Combine with
+`FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER` on an RTX 5090 (`sm_120`) for the
+full 4-bit path; on other GPUs the attention falls back to Flash while the FP4
+linear layers still run. `flashinfer` (and a host C++ compiler for its FP4
+kernel JIT) are required.
