@@ -109,12 +109,21 @@ explicitly out of scope.
 
 The single most important architectural claim: **multi-engine DAG composition (vllm-omni / sglang-omni style) is
 necessary but not sufficient.** It handles separable omni models (thinker → talker → vocoder, distinct weights per
-stage). It cannot express Cosmos3-class MoT models, where the AR text reasoner and the multimodal diffusion denoiser
-are **the same resident weights** driven by two different loop types within one request. FastVideo's differentiation
-is a runtime where *one model instance* can serve interleaved AR steps and denoise steps — and that requirement, not
-serving features, is what dictates the stage/loop abstraction below. Stated with open eyes: **no surveyed system
-implements runtime-owned diffusion iteration at scheduler granularity — loop inversion is this design's principal
-novelty, with zero production precedent** (diffusers' loop blocks own their own iteration; §6.2.3). The risk is
+stage). vllm-omni's `bagel_single_stage`/`lance` prove one resident instance *can* run both loops on shared
+weights in one request — AR `generate_text` and diffusion `generate_image` over co-resident `*_moe_gen` experts
+(`bagel_transformer.py:718,726`; `pipeline_bagel.py:677,808`). What a DAG of **separate** engines cannot do is
+share the weights; what vllm-omni does **not** do is make those interleaved loops runtime-visible — it buries them
+in one opaque request-scheduled `DIFFUSION` stage (`RequestScheduler`, `max_num_running_reqs=1`,
+`diffusion_engine.py:166-169`), so the scheduler never sees the AR+denoise interleaving. FastVideo's
+differentiation is therefore not *expressing* MoT (vllm-omni already does) but making the loops first-class:
+a runtime where *one model instance* serves interleaved AR steps and denoise steps that are runtime-visible,
+step-scheduled, and batchable — and that requirement, not serving features, is what dictates the stage/loop
+abstraction below. Stated with open eyes: **no surveyed system makes runtime-owned diffusion iteration the
+always-on default at scheduler granularity — there is only narrow, opt-in precedent: vllm-omni's
+`SupportsStepExecution` (`prepare_encode`/`denoise_step`/`step_scheduler`/`post_decode`,
+`diffusion/models/interface.py:44-67`) is runtime-owned diffusion iteration at step granularity, but
+Qwen-Image-only and off in every deploy; this design generalizes it to an always-on universal contract**
+(diffusers' loop blocks, by contrast, own their own iteration; §6.2.3). The risk is
 retired by Phase-1 bit-identical parity gates and a measured falsifier (§10), not by borrowed validation. The
 contract is also kept deliberately small: families may ship custom step bodies — the runtime owns *iteration*,
 never the factoring of step internals.
@@ -287,7 +296,7 @@ What we take and what we reject, per system. (Full notes from the code review ar
 |---|---|---|---|
 | **sglang `multimodal_gen`** (`~/sglang/python/sglang/multimodal_gen/`) — FastVideo's serving-hardened descendant | HTTP/OpenAI server (images/videos/meshes), rank-0 `Scheduler` event loop + `GPUWorker`s over ZMQ, `Req` (= ForwardBatch + SamplingParams delegation), **N:M:K role disaggregation** (`disaggregation/orchestrator.py`: encoder/denoiser/decoder pools, capacity-aware dispatch, request state machine, tensor-transfer with P2P/RDMA), warmup requests, RL weight updates | Server/API shape; scheduler-process topology; **role affinity on stages** + disagg state machine; warmup; `Req` w/ sampling-param delegation | Request-level scheduling only (one request per step, no batching/interleave); diffusion-only — no KV cache, no AR loop, no token scheduling; stage/batch abstractions inherited our P1–P3 problems |
 | **sglang `srt`** (`~/sglang/python/sglang/srt/`) | LLM serving: continuous batching (`Req`/`ScheduleBatch`, EXTEND/DECODE), radix prefix cache, paged KV (`ReqToTokenPool` + allocators), CUDA-graph decode, overlap scheduling, PD disaggregation with bootstrap/transfer queues | **Concepts**: paged KV pool + allocator design, scheduler event loop w/ overlap, chunked prefill, PD-disagg queue pattern, multimodal-embedding cache keyed by content hash | Wholesale embedding: srt is token-centric; its scheduler, radix tree and attention backends assume LLM decode. We borrow designs, not the stack |
-| **vllm-omni** (`~/vllm-omni/`) | Multi-stage omni serving: frozen declarative `PipelineConfig`/`StagePipelineConfig` (stage_id, `execution_type ∈ {LLM_AR, LLM_GENERATION, DIFFUSION}`, `input_sources` DAG, `final_output_type`), YAML deploy (devices/TP/memory/connectors per stage), per-stage engines in own processes (stock vLLM core for AR; `DiffusionEngine` for DiT, inline-or-remote), `OmniConnectorBase` put/get + `chunk_ready` signals (SHM/RDMA), global orchestrator + per-stage schedulers, `async_chunk` streaming | **Declarative pipeline spec separate from deploy YAML**; connector interface with readiness signals; inline-vs-remote stage execution; per-stage independent schedulers; streaming-input (resumable) requests | **No cross-stage KV/weight sharing** → cannot express MoT hybrids (their BAGEL-lineage "Lance" is just one monolithic stage); diffusion stages don't batch; linear-chain streaming only |
+| **vllm-omni** (`~/vllm-omni/`, HEAD #4168) | Multi-stage omni serving: frozen declarative `PipelineConfig`/`StagePipelineConfig` (stage_id, `execution_type ∈ {LLM_AR, LLM_GENERATION, DIFFUSION}`, `input_sources` DAG, `final_output_type`), YAML deploy (devices/TP/memory/connectors per stage), per-stage engines in own processes (stock vLLM core for AR; `DiffusionEngine` for DiT, inline-or-remote), `OmniConnectorBase` put/get + `chunk_ready` readiness signals (SHM + RDMA via Mooncake/Mori/Yuanrong — *not* NIXL/NCCL), readiness-set parking + bounded-window-K + preemption for flow control (**no credit-based flow control anywhere**), global orchestrator + per-stage schedulers, `async_chunk` streaming | **Declarative pipeline spec separate from deploy YAML** (the frozen `PipelineConfig` + editable `deploy/<model>.yaml` `DeployConfig` fused by `merge_pipeline_deploy` — adopted here verified, §6.1); connector interface with readiness signals; inline-vs-remote stage execution; per-stage independent schedulers; streaming-input (resumable) requests; **`SupportsStepExecution` as loop-inversion prior art** (opt-in, Qwen-Image-only — we generalize it, §6.2.2); its **3 separate cache subsystems** (`OmniTensorPrefixCache`, `OmniKVTransferManager`, diffusion/cache TeaCache/MagCache/cache-dit) confirm our per-class-pools thesis (§6.3.2) | vllm-omni **does** express shared-weight MoT (`bagel_single_stage`/`lance`: co-resident `*_moe_gen` experts, one resident instance running AR `generate_text` + diffusion `generate_image` in one request) — but only as **one opaque `DIFFUSION` stage the scheduler never sees inside** (`RequestScheduler`, `max_num_running_reqs=1`), so the AR+denoise interleaving is invisible to scheduling/batching; cross-stage KV is a TP-rank/CFG-branch-aware **copy** (`OmniKVTransferManager`), not a shared live cache; **separate-stage** weight sharing is absent (correctly); diffusion batching exists but is opt-in, homogeneous-`SamplingParamsKey`-gated, Qwen-Image-only, and off in every deploy; streaming is linear-chain in practice (routing hardwired `src+1`, `orchestrator.py:1122`) though the schema permits a DAG |
 | **sglang-omni** (`~/sglang-omni/`) | Extension over stock sglang: `StageConfig` DAG (factory, gpu, tp_size, process colocation, `next/route_fn/wait_for/merge_fn/stream_to`), per-stage schedulers (`OmniScheduler` wrapping sglang by composition, `SimpleScheduler`, `DllmScheduler` for the LLaDA2-Uni diffusion-LLM thinker — Ming-Omni's DiT talker runs on a different scheduler — plus streaming variants), **Relay** transport (NIXL/SHM/NCCL/Mooncake, credit-based flow control), hidden-state capture thinker→talker, segmenter-based streaming | Relay abstraction + credit flow control; fan-in `merge_fn` / fan-out / `stream_to` edge semantics; scheduler-composition pattern; hidden-state capture as a declared stage output | Same gap: stages own disjoint weights/caches; hybrid AR+diffusion only as AR stage → DiT stage; per-model bootstrap duplication |
 | **vLLM-Omni RFC #4084 — "Composable Parallel Strategies"** ([issue](https://github.com/vllm-project/vllm-omni/issues/4084), open, 2026-06) | Proposal: every parallelism scheme (TP/DP/SP/CP/EP/PP/CFG/VAE-PP/stage replicas) becomes a declarative `StrategySpec` — `mesh_axis` (name+degree), L1 routing/aggregation pattern, optional L2 per-layer hooks and L3 kernel factories — stacked into a mesh tree with generic collective-group construction; thin adapter translates onto omni's existing runtime (`l1_owner` marks who routes each axis, preventing double-routing) | **Stacked-axis spec as single source of truth** + generic group construction; the **L1/L2/L3 intervention vocabulary** (we reuse it for both parallelism and the extension system); **pre-flight topology validation**; **CPU-testable composition** via a fake process backend; explicit per-axis ownership; fail-loud on unsupported combos instead of silent fallback | Adapter/translation indirection is their constraint (retrofitting vLLM), not ours — we implement the spec natively in `fastvideo/distributed/`; parallelism-only scope (no loops, caches, or hybrid-model answers); the schemes hardest for us (CP variants, affinity routing) are exactly the parts deferred to follow-up RFCs — design proven, implementation not |
 | **verl-omni** (`~/verl-omni/`) | RL post-training for diffusion/omni models (verl lineage): Ray single-controller, vLLM-Omni rollout servers + FSDP2/VeOmni trainers, DanceGRPO/FlowGRPO/DiffusionNFT/Diffusion-DPO recipes (Qwen-Image, SD3.5, Wan2.2), async multi-reward serving, "rollout correction" | Reward-loop architecture (weighted multi-reward, HTTP scorers, async overlap with rollout); SDE-with-logprob scheduler formulation (`FlowMatchSDEDiscreteScheduler`); component-granular sleep levels; group-relative advantage utils; bypass-vs-decoupled log-prob modes | Pays the full two-runtime tax (§8.4): Wan2.2 re-implemented inside vLLM-Omni for rollout *and* in diffusers/FSDP2 for training, stitched by `rollout_correction.py` (IS + rejection masks) — the machinery a single-runtime design exists to delete |
@@ -451,7 +460,7 @@ requirement: families whose step bodies braid across slot boundaries keep custom
 
 | Policy | Replaces | Examples |
 |---|---|---|
-| `CFGPolicy` | chunked cond/uncond logic, adaptive-gate delta reuse, LongCat batched-CFG, per-modality scales, Cosmos interval gating, embedded-guidance (Flux ×1000) | `ClassicCFG`, `BatchedCFG`, `AdaptiveGateCFG`, `PerModalityCFG`, `EmbeddedGuidance`, `CFGParallel` |
+| `CFGPolicy` | chunked cond/uncond logic, adaptive-gate delta reuse, LongCat batched-CFG, per-modality scales, Cosmos interval gating, embedded-guidance (Flux ×1000) | `ClassicCFG`, `BatchedCFG`, `AdaptiveGateCFG`, `PerModalityCFG`, `EmbeddedGuidance` (cfg-parallel is a parallelism *axis*, not a policy — see below) |
 | `ExpertRouting` | Wan2.2 `boundary_ratio` transformer switch | `BoundaryTimestepRouting(transformer, transformer_2)` |
 | `AttnMetadataProvider` | VSA / V-MoBA / STA builder `isinstance` chain in the loop | registered per backend; built in `init`, refreshed per step only if needed |
 | `PrecisionPolicy` | `prefix == "Flux"` autocast hacks, `scheduler_step_in_fp32`, cast flags | declared in model config |
@@ -484,6 +493,25 @@ consumes the *sampler's* EDM coefficients inside each CFG branch with an x0-spac
 (`denoising.py:845-933`), and LTX2's guidance passes alter the network via forward kwargs
 (`ltx2_denoising.py:503-605`) — braids no slot factoring owns cleanly.
 
+**CFG-as-policy is proven by precedent, not speculative.** vllm-omni's `CFGParallelMixin` already unifies
+sequential-2-forward, batched, *and* cfg-parallel under one pair — `predict_noise_maybe_with_cfg` +
+`combine_cfg_noise` (`vllm_omni/diffusion/.../cfg_parallel.py:76-212`) — so one shared denoise-step body plus a
+swappable `CFGPolicy` expressing classic (2-forward), batched (1-forward stack+chunk), adaptive-gate (cached-delta
+reuse with model-id invalidation), per-modality, and embedded-guidance (single-branch) is an existence proof, not
+a hope. The right reading of vllm-omni's "three CFG mechanisms" is **one unified in-loop pair + one parallelism
+axis + one orchestrator layer**, not three independent CFG systems. We make that boundary explicit in **three
+layers**: **(1)** `CFGPolicy` is *in-loop* — it owns the branch vocabulary, the combine formula, and per-request
+mutable state (the adaptive-gate cached delta is the canonical state case); **batched-vs-2-forward is a dispatch
+detail *inside* one policy, not a separate mechanism** — which is why there is no standalone `BatchedCFG` axis to
+collide with parallelism. **(2)** cfg-parallel is a *parallelism axis* — it shards `policy.predict`'s branches
+across ranks and runs the **same rank-invariant combine** on every rank, and **composes under any policy**; a
+request never owns both a batched-CFG policy variant *and* a `cfg` parallel group (declaring both is rejected,
+§6.3.4). **(3)** companions are an *orchestrator pattern* — a request is split into companion sub-requests
+*upstream* of diffusion, and the loop receives already-computed conditioning unchanged. Two caveats the slots must
+respect: the combine runs in the **step body's numeric space** (Cosmos combines in **x0-space** post-EDM, not
+noise-space — `denoising.py:845-933`); and **embedded-guidance/Flux is a degenerate single-branch identity-combine
+policy** (guidance rides inside the forward kwarg), *not* "no CFG".
+
 Which is why the scheduler's contract is deliberately smaller than the policy system: **a family may ship a
 custom `step` body** — a hand-written function using samplers, CFG math, and conditioning utilities as a library
 (the Cosmos3 port's denoise-engine pattern, legitimized). A custom step is still a `LoopStage`: scheduled,
@@ -497,10 +525,12 @@ External validation, stated at its true scope: diffusers' **Modular Pipelines** 
 *policy* pillar — **Guiders** (CFG, PAG, APG, SkipLayer…, each with start/stop step scheduling) are exactly
 pluggable CFG policies, and `CFGPolicy` stays adapter-compatible with their `BaseGuidance` interface so model
 ports and guidance research transfer in both directions (§6.6). It does **not** validate loop inversion: their
-loop blocks own their own iteration, invisible to any runtime (see §5). The honest position: **no surveyed system
-— vLLM, sglang, multimodal_gen, diffusers — implements runtime-owned diffusion iteration at scheduler
-granularity. Loop inversion is this design's principal novelty, with zero production precedent**, and the Phase-1
-bit-identical parity gates are what carry that risk (risk 3).
+loop blocks own their own iteration, invisible to any runtime (see §5). The honest position: **there is only
+narrow, opt-in precedent — vllm-omni's `SupportsStepExecution` (`prepare_encode`/`denoise_step`/`step_scheduler`/
+`post_decode`, `diffusion/models/interface.py:44-67`) is runtime-owned diffusion iteration at step granularity,
+but Qwen-Image-only and off in every deploy; no surveyed system makes it the always-on default. This design
+generalizes that contract to a universal, always-on one** (diffusers' loop blocks, by contrast, own their own
+iteration), and the Phase-1 bit-identical parity gates are what carry that risk (risk 3).
 
 #### 6.2.4 PipelineSpec: declarative graphs
 
@@ -795,12 +825,19 @@ runners can implement it.
 - **Role pools** (opt-in): encode / denoise / decode pools with capacity dispatch — port of `multimodal_gen`'s
   disaggregation, now expressible per graph node rather than per hardcoded role.
 - **Per-node placement** (opt-in): deploy YAML pins nodes to devices/pools (vision encoder on its own GPU; vocoder
-  on CPU); cross-pool edges select a `Connector` (SHM → NCCL/NIXL with credit-based flow control and `chunk_ready`
-  readiness signals — vllm-omni + sglang-omni's proven designs). For KV/cache-bearing edges specifically, the
+  on CPU); cross-pool edges select a `Connector` (transport: SHM/Mooncake/Mori/Yuanrong today, with NIXL as a
+  target — *not* "vllm-omni's NIXL/NCCL", which it does not use). The `chunk_ready` readiness signal is adopted
+  from vllm-omni's `OmniConnectorBase`; **credit-based flow control is sglang-omni's Relay design, not
+  vllm-omni's** (vllm-omni uses readiness-set *parking*, no credits) — so credit-flow here is a FastVideo
+  addition *over* vllm-omni's readiness model, composed with sglang-omni's proven design. For KV/cache-bearing
+  edges specifically, the
   connector speaks a protocol shaped like vLLM's `KVConnectorBase_V1` (scheduler-side query/alloc/finish roles +
   worker-side async `start_load`/`wait_for_layer`/`save` with layer-pipelined loading and `invalid_block_ids`
   fault reporting) — the same interface NIXL/LMCache/Mooncake already implement, which is also what makes Dynamo
-  ask A4 (§6.3.6) an extension of an existing contract rather than a new one.
+  ask A4 (§6.3.6) an extension of an existing contract rather than a new one. **Adopt vllm-omni's TP-rank-aware +
+  CFG-branch-aware KV payload slicing** (`OmniKVTransferManager` `build_rank_aware_send_keys`/`recv_keys`): a
+  shared-weight MoT split across parallel groups must slice KV by rank *and* by CFG branch on the wire, not ship a
+  monolithic blob.
 - **External-engine node** (opt-in, later): an `ARDecodeLoop`-shaped adapter that delegates a *separable* AR stage
   (a 235B thinker) to a colocated sglang/vLLM instance over the connector interface. Useful for separable omni
   models; never required for MoT models (which must stay native).
@@ -809,8 +846,8 @@ runners can implement it.
   membership computed generically (the RFC's mesh-tree construction) instead of hand-wired per combination in
   `fastvideo/distributed/parallel_state.py`. We adopt three properties outright: **(1) pre-flight validation** —
   rank counts, group membership, and *ownership conflicts* are build errors; each axis records who realizes it
-  (e.g. CFG can be owned by a `BatchedCFG` step policy *or* a `cfg` parallel group — declaring both is rejected,
-  the RFC's `l1_owner` / no-double-routing rule applied to our policy-vs-group split); **(2) fail-loud** on
+  (e.g. CFG branches can be realized by a batching `CFGPolicy` (1-forward stack+chunk) *or* a `cfg` parallel group —
+  declaring both is rejected, the RFC's `l1_owner` / no-double-routing rule applied to our policy-vs-axis split); **(2) fail-loud** on
   unsupported combinations rather than silent fallback; **(3) CPU-testability** — engine scheduler, graph dispatch,
   and placement planning run against a fake worker pool so topology logic is unit-tested without GPUs (FastVideo CI
   is GPU-starved; this is how the composition layer stays tested). The RFC's L1/L2/L3 intervention vocabulary —
@@ -1217,8 +1254,18 @@ and the accompanying skill (`.agents/skills/rlhf-training-abstractions/SKILL.md`
 only consumable units are family-bound pipeline classes, so every new post-training method must choose between a
 wrong dependency and a private loop. The `add-rl-method` skill now mandates the vendored sampler for future RL
 methods — which contains the duplication *within* `train/methods/rl/` but cements it outside the substrate, where
-no inference optimization, CFG policy, or scheduler improvement will ever reach it. A `DenoiseLoop` over substrate
-step bodies is the third option this design exists to provide.
+no inference optimization, CFG policy, or scheduler improvement will ever reach it.
+
+Concretely the "fourth copy" is already **two** vendored RL/distill loops, not one: `DiffusionSampler`
+(`rl/common/sampling.py:92-99` docstring, `:128-147` hand-rolled `for`-loop, `conditional=True`, `attn_kind=dense`)
+*and* DMD2's `_student_rollout` (`dmd2.py:430-550`, `attn_kind=vsa`) — a second, independently vendored loop. What
+each of these vendored loops **forgoes** by living outside the substrate is itemizable: (1) cross-group /
+cross-request batching; (2) content-hash embedding/feature-cache reuse; (3) step scheduling and interleaving;
+(4) cost-aware admission; (5) component-granular sleep/wake (it holds student + old + reference resident
+simultaneously); (6) cache-dit / interceptor skip acceleration (forced dense, full 25-step ODE); (7) distilled
+few-step sampler selection (a 4-step card collapses 25→4). A `DenoiseLoop` over substrate
+step bodies is the third option this design exists to provide — and, per §8.4, it is the moat: rollout forward
+*is* serve forward + capture, so every serving optimization is automatically a rollout optimization.
 
 ### 8.2 The decision: shared substrate, layered dependencies
 
@@ -1283,13 +1330,27 @@ every inference capability FastVideo ships is really a **(recipe, runtime) pair*
 
 Two structural consequences:
 
-1. **The training loop embeds the inference loop.** Distillation runs deployment-grade rollouts *inside* training:
-   DMD needs student rollouts; self-forcing is literally "train against your own KV-cached causal rollout" — the
-   runtime feature must exist before the model class does; QAT's fake-quant forward must match the deployed quant
-   kernels. There is no valid sequencing of "build the inference engine first, training later" — each is a
-   dependency of the other, which is exactly why the substrate (§8.2) has to come first, and why the denoise loop
-   keeps getting copied (§8.1): every post-training method needs an inference loop inside it, and absent a shared
-   one, each grows its own.
+1. **The training loop embeds the inference loop — and that collocation is the central, durable moat.** Distillation
+   runs deployment-grade rollouts *inside* training: DMD needs student rollouts; self-forcing is literally "train
+   against your own KV-cached causal rollout" — the runtime feature must exist before the model class does; QAT's
+   fake-quant forward must match the deployed quant kernels. There is no valid sequencing of "build the inference
+   engine first, training later" — each is a dependency of the other, which is exactly why the substrate (§8.2) has
+   to come first, and why the denoise loop keeps getting copied (§8.1): every post-training method needs an
+   inference loop inside it, and absent a shared one, each grows its own. The payoff of collocating
+   inference + post-training/RL on one substrate: **rollout forward is serve forward + capture** — same loop, same
+   caches, same batcher, same numerics — so every serving optimization is automatically a rollout optimization and
+   there is exactly **one numerics surface** (no rollout-vs-train kernel gap to patch, §8.4).
+
+   **RL rollout is a strictly *better* cross-request batching case than open-world serving** — the killer point. A
+   GRPO/NFT group is K identical-config samples of one prompt: `num_video_per_prompt:24`,
+   `sample_train_batch_size:6`, `num_batches_per_epoch:48`, `num_steps:25`, single-frame 448×832, 4 GPUs
+   (`diffusion_nft_pick_clip.yaml:33-37,52-55,72-91`; `distributed_k_repeat_indices` with `repeats_per_prompt=24`,
+   `diffusion_nft.py:331-338`). Same shape, same schedule, same CFG branch, K=24-wide → **zero bucketing needed**
+   (serving must bucket heterogeneous resolutions/steps/CFG). The K samples also share *one* prompt embedding, so a
+   content-hash feature cache encodes the text **once** and reuses it across all 24 — a **24× text-encode
+   reduction** the vendored loop cannot express (it carries the embedding per-sample, `diffusion_nft.py:308-309`).
+   Per GPU per outer epoch = 6 prompts × 48 batches = 288 prompt-slots, each a 24-wide homogeneous denoise batch:
+   near-ideal co-batchable work the vendored Python loop runs **one sample at a time**.
 
 2. **Train/serve skew generalizes the RL mismatch.** Any sampling-in-the-loop post-training optimizes the student
    *under the rollout implementation used during training*. Serve it under different kernels/sampler/caching and
@@ -1329,6 +1390,23 @@ wound:
 The punchline for FastVideo: verl-omni's Wan2.2 rollout adapter is a **re-implementation of code this repo already
 owns** — external RL frameworks must rebuild our models inside other engines to RL-train them, then correct the
 numerics. Doing RL natively means the model exists once and the corrections become a fallback, not a foundation.
+
+**The moat made concrete.** Under this design, rollout = the *same* shared `DenoiseLoop` + a `CFGPolicy` (for NFT:
+conditional-only / identity — `predict_noise` already carries `conditional:bool` + `cfg_uncond` as the policy knob,
+`train/models/base.py:142-152`) + an `OutputSpec(capture=behavior)` + the step scheduler + the caches — so rollout
+forward *is* serve forward + capture. Every serving optimization is automatically a rollout optimization, and there
+is one numerics surface, no rollout-vs-train kernel gap to patch. The alternative is the **two-runtime tax** the
+table above enumerates: verl-omni re-implements Wan inside vLLM-Omni and stitches it with `rollout_correction.py`'s
+IS / rejection masks; miles' TIS/MIS, bitwise log-probs, R3 routing replay, and unified-FP8 are *all* mismatch
+patches. FastVideo's own landed NFT confirms it from the other side — a vendored bare-model loop with zero
+serving-grade optimizations (§8.1). Collocation at FastVideo's 1–30B FSDP2 scale **deletes the second runtime, the
+correction layer, and the 3rd/4th denoise-loop copies** — and it makes the `(recipe, runtime)` flywheel (§8.3,
+§9.5) honest, because preferences are then collected under the very serving profile that ships. This collocation of
+inference + post-training (including RL) on one substrate is the central, durable moat. Three caveats the design
+already names keep this from being hand-waving: old-policy weights are a `WeightSyncPlan` **role** (rollout samples
+from `self.old`, decay-blended `diffusion_nft.py:858-862`); the dense-attn pin is a Precision/Attn **policy** on the
+card; and likelihood-free NFT is the **C2 behavioral rung** (no log-probs to match — `old_deviate` / ref-MSE in
+prediction space, `diffusion_nft.py:777-778`).
 
 **What stays regardless** (intrinsic to RL, not artifacts of the split): trajectory buffers and rollout
 management, group-relative advantage computation, multi-reward serving with async overlap, staleness control,
@@ -1843,9 +1921,11 @@ FastVideo a model/stage library.
 ### 11.2 Multi-engine DAG composition only (vllm-omni / sglang-omni model)
 
 - **Pros:** fastest route to separable omni (thinker/talker/vocoder); engine reuse; process isolation.
-- **Cons:** cannot express single-weights hybrids (Cosmos3 MoT, BAGEL lineage) — both reference systems concede
-  this by falling back to monolithic single stages; weight duplication for shared backbones; connector latency on
-  the token path; per-stage KV islands.
+- **Cons:** expresses single-weights hybrids (Cosmos3 MoT, BAGEL lineage) only as **one opaque monolithic stage**
+  — vllm-omni's `bagel`/`lance` *are* real shared-weight MoT, but request-scheduled (`max_num_running_reqs=1`),
+  batch-incapable, with the AR+denoise interleaving invisible to the scheduler — so the runtime can't
+  schedule/batch/preempt the loops inside; cross-stage KV is a copy, not a shared live cache; weight duplication
+  for backbones split across *separate* stages; connector latency on the token path.
 - **Decision:** adopt the *composition concepts* (declarative spec, connectors, per-stage schedulers, async_chunk
   streaming) **inside** one runtime, and offer external-engine nodes as an opt-in — rather than making cross-engine
   composition the foundation.
@@ -2000,9 +2080,11 @@ internals at runtime. We could allow plugins the same freedom.
    with breakable CUDA graphs as the optimization tier (experimental upstream — the eager path is the correctness
    guarantee, §6.3.3); Phase-2 gate includes a ≤2% batch-of-1 latency budget, itself gated on the Phase-1
    loop-inversion overhead measurement.
-3. **Loop inversion is unprecedented at scheduler granularity — not just the hybrid slice.** No surveyed system
-   implements runtime-owned diffusion iteration (vLLM/sglang own AR token loops; diffusers' loop blocks own their
-   own iteration — §6.2.3); the hybrid AR+denoise multiplexing is the deepest end of a bet that is novel from its
+3. **Always-on loop inversion has only narrow precedent — not the hybrid slice.** The one prior art is
+   vllm-omni's `SupportsStepExecution` (runtime-owned diffusion iteration at step granularity, but opt-in,
+   Qwen-Image-only, off in every deploy — §6.2.2); no surveyed system makes it the always-on default (vLLM/sglang
+   own AR token loops; diffusers' loop blocks own their own iteration — §6.2.3), and the hybrid AR+denoise
+   multiplexing on shared weights is the deepest end of a bet that is novel from its
    first step. *Mitigations:* the Phase-1 parity gates are the load-bearing control (old loop vs new loop,
    bit-identical, per family — this is where the novelty risk is actually retired); the Phase-1 overhead
    measurement gates the latency story; the Cosmos3 port's 150-test bit-exact suite is the hybrid-slice prototype
