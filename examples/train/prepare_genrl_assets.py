@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -12,7 +14,7 @@ from pathlib import Path
 MIN_TRAIN_PROMPTS = 4
 GENRL_REPO = "https://github.com/ModelTC/GenRL.git"
 GENRL_PROMPT_FILES = ("train.json", "test.json")
-VIDEOREWARD_REPO = "KlingTeam/VideoReward"
+VIDEOREWARD_REPO = "KwaiVGI/VideoReward"
 
 
 def _run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -156,6 +158,78 @@ def has_video_reward_checkpoint(root: Path) -> bool:
     return False
 
 
+def check_reward_runtime(device: str = "auto") -> None:
+    """Run the same lightweight reward-model preflight used by Modal."""
+    import numpy as np
+    import torch
+
+    selected_device = device
+    if selected_device == "auto":
+        selected_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+    print("=== GenRL reward preflight ===", flush=True)
+    import peft
+    import transformers
+    import torchvision
+
+    print(
+        "Versions: "
+        f"torch={torch.__version__} "
+        f"torchvision={torchvision.__version__} "
+        f"transformers={transformers.__version__} "
+        f"peft={peft.__version__}",
+        flush=True,
+    )
+
+    from fastvideo.train.methods.rl.reward.hpsv3 import (
+        _HPSV3_INFERENCERS,
+        hpsv3_general_score,
+        hpsv3_percentile_score,
+        set_hpsv3_device,
+    )
+
+    torch_device = torch.device(selected_device)
+    dummy_video = np.zeros((1, 1, 224, 224, 3), dtype=np.uint8)
+    for name, factory in (
+        ("HPSv3-general", hpsv3_general_score),
+        ("HPSv3-percentile", hpsv3_percentile_score),
+    ):
+        reward = factory(torch_device)
+        scores, _ = reward(dummy_video, ["preflight prompt"], {})
+        value = float(scores["avg"].detach().cpu()[0])
+        print(f"{name} preflight score: {value:.4f}", flush=True)
+
+    set_hpsv3_device("cpu")
+    _HPSV3_INFERENCERS.clear()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    from fastvideo.train.methods.rl.reward.videoalign import (
+        _VIDEOALIGN_INFERENCERS,
+        set_videoalign_device,
+        videoalign_mq_score,
+        videoalign_ta_score,
+    )
+
+    dummy_video = np.zeros((1, 8, 224, 224, 3), dtype=np.uint8)
+    for name, factory in (
+        ("VideoAlign-MQ", videoalign_mq_score),
+        ("VideoAlign-TA", videoalign_ta_score),
+    ):
+        reward = factory(torch_device)
+        scores, _ = reward(dummy_video, ["preflight prompt"], {})
+        value = float(scores["avg"].detach().cpu()[0])
+        print(f"{name} preflight score: {value:.4f}", flush=True)
+
+    set_videoalign_device("cpu")
+    _VIDEOALIGN_INFERENCERS.clear()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print("=== GenRL reward preflight OK ===", flush=True)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Prepare assets for GenRL HPSv3 + VideoAlign training."
@@ -178,6 +252,16 @@ def parse_args() -> argparse.Namespace:
         default=Path(".cache/VideoReward"),
         help=f"Directory containing or receiving {VIDEOREWARD_REPO}.",
     )
+    parser.add_argument(
+        "--check-rewards",
+        action="store_true",
+        help="After preparing assets, load HPSv3 and VideoAlign on a dummy video.",
+    )
+    parser.add_argument(
+        "--reward-device",
+        default="auto",
+        help="Device for --check-rewards: auto, cpu, cuda, or cuda:<index>.",
+    )
     return parser.parse_args()
 
 
@@ -185,9 +269,12 @@ def main() -> None:
     args = parse_args()
     prompt_dir = prepare_genrl_prompts(args.prompt_dir, args.genrl_cache_dir)
     videoalign_dir = prepare_video_reward(args.videoalign_dir)
+    os.environ.setdefault("VIDEOALIGN_CHECKPOINT_PATH", str(videoalign_dir))
     print("GenRL assets ready.")
     print(f"PROMPT_DATASET_PATH={prompt_dir}")
     print(f"VIDEOALIGN_CHECKPOINT_PATH={videoalign_dir}")
+    if args.check_rewards:
+        check_reward_runtime(args.reward_device)
 
 
 if __name__ == "__main__":

@@ -69,6 +69,15 @@ uv pip install -r examples/train/requirements-genrl.txt
 python examples/train/prepare_genrl_assets.py
 ```
 
+Before launching a long run, verify that both reward models load and can score
+a dummy video:
+
+```bash
+VIDEOALIGN_CHECKPOINT_PATH=.cache/VideoReward \
+FORCE_QWENVL_VIDEO_READER=opencv \
+python examples/train/prepare_genrl_assets.py --check-rewards
+```
+
 The helper writes:
 
 ```bash

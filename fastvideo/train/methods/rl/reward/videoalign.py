@@ -333,7 +333,7 @@ def _resolve_videoalign_checkpoint_path(checkpoint_path: str | None) -> str:
     if env_checkpoint_path:
         return os.path.abspath(env_checkpoint_path)
     return snapshot_download(
-        repo_id="KlingTeam/VideoReward",
+        repo_id="KwaiVGI/VideoReward",
         repo_type="model",
         allow_patterns=(
             "model_config.json",
