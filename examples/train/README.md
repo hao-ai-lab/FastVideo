@@ -95,7 +95,7 @@ VIDEOALIGN_CHECKPOINT_PATH=.cache/VideoReward \
 FORCE_QWENVL_VIDEO_READER=opencv \
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
 bash examples/train/run.sh \
-    examples/train/configs/genrl_wan2.1_t2v_1.3B_hpsv3_videoalign.yaml \
+    examples/train/configs/rl/wan/genrl_hpsv3_videoalign.yaml \
     --training.checkpoint.output_dir outputs/genrl_longcat
 ```
 

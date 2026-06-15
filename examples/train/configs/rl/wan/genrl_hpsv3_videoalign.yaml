@@ -19,7 +19,7 @@
 #   VIDEOALIGN_CHECKPOINT_PATH=.cache/VideoReward \
 #   FORCE_QWENVL_VIDEO_READER=opencv \
 #   bash examples/train/run.sh \
-#     examples/train/configs/genrl_wan2.1_t2v_1.3B_hpsv3_videoalign.yaml \
+#     examples/train/configs/rl/wan/genrl_hpsv3_videoalign.yaml \
 #     --training.checkpoint.output_dir /path/to/outputs/genrl_hpsv3_videoalign
 
 models:
