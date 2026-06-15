@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
 MIN_TRAIN_PROMPTS = 4
 GENRL_REPO = "https://github.com/ModelTC/GenRL.git"
-VIDEOREWARD_REPO = "KwaiVGI/VideoReward"
+GENRL_PROMPT_FILES = ("train.json", "test.json")
+VIDEOREWARD_REPO = "KlingTeam/VideoReward"
 
 
 def _run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -21,29 +23,54 @@ def _is_nonempty_dir(path: Path) -> bool:
     return path.is_dir() and any(path.iterdir())
 
 
-def prepare_genrl_prompts(genrl_dir: Path) -> Path:
-    if not genrl_dir.exists():
-        _run(["git", "clone", GENRL_REPO, str(genrl_dir)])
-    elif not (genrl_dir / ".git").exists() and not _is_nonempty_dir(
-        genrl_dir
-    ):
-        genrl_dir.rmdir()
-        _run(["git", "clone", GENRL_REPO, str(genrl_dir)])
-
-    if (genrl_dir / ".git").exists():
-        _run(["git", "lfs", "install"], cwd=genrl_dir)
+def _ensure_genrl_sparse_checkout(genrl_cache_dir: Path) -> Path:
+    """Fetch only the GenRL prompt JSONL files into an ignored cache checkout."""
+    if not genrl_cache_dir.exists():
         _run(
             [
                 "git",
-                "lfs",
-                "pull",
-                "-I",
-                "datasets/filtered_prompts/*",
-            ],
-            cwd=genrl_dir,
+                "clone",
+                "--depth",
+                "1",
+                "--filter=blob:none",
+                "--sparse",
+                GENRL_REPO,
+                str(genrl_cache_dir),
+            ]
         )
+    elif not (genrl_cache_dir / ".git").exists():
+        if _is_nonempty_dir(genrl_cache_dir):
+            raise RuntimeError(
+                f"{genrl_cache_dir} exists but is not a git checkout. "
+                "Pass --genrl-cache-dir to use a different cache directory."
+            )
+        genrl_cache_dir.rmdir()
+        return _ensure_genrl_sparse_checkout(genrl_cache_dir)
 
-    prompt_dir = genrl_dir / "datasets" / "filtered_prompts"
+    _run(
+        ["git", "sparse-checkout", "set", "datasets/filtered_prompts"],
+        cwd=genrl_cache_dir,
+    )
+    _run(["git", "lfs", "install"], cwd=genrl_cache_dir)
+    _run(
+        [
+            "git",
+            "lfs",
+            "pull",
+            "-I",
+            "datasets/filtered_prompts/*",
+        ],
+        cwd=genrl_cache_dir,
+    )
+    return genrl_cache_dir / "datasets" / "filtered_prompts"
+
+
+def prepare_genrl_prompts(prompt_dir: Path, genrl_cache_dir: Path) -> Path:
+    source_prompt_dir = _ensure_genrl_sparse_checkout(genrl_cache_dir)
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    for filename in GENRL_PROMPT_FILES:
+        shutil.copy2(source_prompt_dir / filename, prompt_dir / filename)
+
     validate_prompt_file(
         prompt_dir / "train.json",
         min_prompts=MIN_TRAIN_PROMPTS,
@@ -55,7 +82,8 @@ def prepare_genrl_prompts(genrl_dir: Path) -> Path:
 def validate_prompt_file(path: Path, min_prompts: int) -> None:
     if not path.exists():
         raise FileNotFoundError(
-            f"Missing {path}. Expected GenRL filtered_prompts JSONL files."
+            f"Missing {path}. Expected GenRL filtered_prompts JSONL files. "
+            "Run `python examples/train/prepare_genrl_assets.py`."
         )
 
     prompt_count = 0
@@ -73,7 +101,10 @@ def validate_prompt_file(path: Path, min_prompts: int) -> None:
                     f"{path} is a Git LFS pointer, not real prompt JSON. "
                     "Install git-lfs and rerun this script."
                 )
-            item = json.loads(line)
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Invalid JSON in {path} at line {line_no}: {exc}") from exc
             if item.get("prompt"):
                 prompt_count += 1
 
@@ -92,7 +123,7 @@ def prepare_video_reward(videoalign_dir: Path) -> Path:
         from huggingface_hub import snapshot_download
     except ImportError as exc:
         raise ImportError(
-            "huggingface_hub is required to download KwaiVGI/VideoReward. "
+            f"huggingface_hub is required to download {VIDEOREWARD_REPO}. "
             "Install FastVideo dependencies, then rerun this script."
         ) from exc
 
@@ -130,23 +161,29 @@ def parse_args() -> argparse.Namespace:
         description="Prepare assets for GenRL HPSv3 + VideoAlign training."
     )
     parser.add_argument(
-        "--genrl-dir",
+        "--prompt-dir",
         type=Path,
-        default=Path("GenRL"),
-        help="Directory containing or receiving the ModelTC/GenRL checkout.",
+        default=Path(".cache/genrl_filtered_prompts"),
+        help="Directory that will contain train.json and test.json.",
+    )
+    parser.add_argument(
+        "--genrl-cache-dir",
+        type=Path,
+        default=Path(".cache/GenRL"),
+        help="Ignored sparse checkout cache used to fetch only GenRL filtered prompts.",
     )
     parser.add_argument(
         "--videoalign-dir",
         type=Path,
         default=Path(".cache/VideoReward"),
-        help="Directory containing or receiving KwaiVGI/VideoReward.",
+        help=f"Directory containing or receiving {VIDEOREWARD_REPO}.",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    prompt_dir = prepare_genrl_prompts(args.genrl_dir)
+    prompt_dir = prepare_genrl_prompts(args.prompt_dir, args.genrl_cache_dir)
     videoalign_dir = prepare_video_reward(args.videoalign_dir)
     print("GenRL assets ready.")
     print(f"PROMPT_DATASET_PATH={prompt_dir}")

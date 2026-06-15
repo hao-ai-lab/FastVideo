@@ -57,7 +57,7 @@ class JsonPromptDataset(Dataset):
         if not os.path.exists(self.file_path):
             raise FileNotFoundError("GenRL prompt file not found: "
                                     f"{self.file_path}. Expected train.json/test.json "
-                                    "from GenRL/datasets/filtered_prompts.")
+                                    "from examples/train/prepare_genrl_assets.py.")
 
         saw_content = False
         with open(self.file_path, encoding="utf-8") as f:
@@ -67,9 +67,7 @@ class JsonPromptDataset(Dataset):
                     continue
                 if not saw_content and line.startswith("version https://git-lfs.github.com"):
                     raise RuntimeError(f"{self.file_path} is a Git LFS pointer, not the "
-                                       "real prompt JSON. Run `git lfs pull -I "
-                                       "'datasets/filtered_prompts/*'` in the GenRL "
-                                       "checkout or rerun "
+                                       "real prompt JSON. Rerun "
                                        "`python examples/train/prepare_genrl_assets.py`.")
                 saw_content = True
                 try:

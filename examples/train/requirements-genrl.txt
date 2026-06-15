@@ -1,0 +1,15 @@
+# Dependency pins used for the reproduced GenRL HPSv3 + VideoAlign run.
+#
+# Install after the editable FastVideo install so these reward-stack versions
+# match the Modal environment used for the reference run.
+datasets==3.6.0
+fire>=0.7.0
+matplotlib==3.10.3
+numpy==1.26.4
+peft==0.10.0
+prettytable==3.8.0
+qwen-vl-utils==0.0.11
+safetensors==0.5.3
+scipy==1.15.2
+timm==1.0.15
+trl==0.8.6

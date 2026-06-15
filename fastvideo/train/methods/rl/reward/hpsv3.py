@@ -180,9 +180,10 @@ def _get_hpsv3_inferencer(device: torch.device | str) -> Any:
 
             _patch_hpsv3_state_dict_loader()
         except ImportError as exc:
-            msg = ("Failed to import HPSv3. Ensure the HPSv3 submodule is "
-                   "checked out under fastvideo/train/methods/rl/reward/HPSv3 "
-                   "and that its transformers dependencies are compatible.")
+            msg = ("Failed to import the vendored HPSv3 reward runtime under "
+                   "fastvideo/train/methods/rl/reward/HPSv3. Install "
+                   "FastVideo with the GenRL extra and verify the vendored "
+                   "runtime files are present.")
             raise ImportError(msg) from exc
         inf = HPSv3RewardInferencer(device=device)
         _patch_hpsv3_runtime_model(inf.model)

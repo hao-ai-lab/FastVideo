@@ -11,7 +11,7 @@
 # - Use NUM_GPUS=4 so the distributed rollout/grouping shape matches.
 # - Prepare the exact GenRL prompt JSONL files and VideoReward checkpoint:
 #   python examples/train/prepare_genrl_assets.py
-# - Set VIDEOALIGN_CHECKPOINT_PATH to the prepared KwaiVGI/VideoReward snapshot.
+# - Set VIDEOALIGN_CHECKPOINT_PATH to the prepared KlingTeam/VideoReward snapshot.
 # - Set FORCE_QWENVL_VIDEO_READER=opencv if torchvision video IO is missing.
 #
 # Usage:
@@ -55,7 +55,7 @@ method:
   reward_on_gpu: true
 
   # ---- Data ----
-  prompt_dataset_path: GenRL/datasets/filtered_prompts
+  prompt_dataset_path: .cache/genrl_filtered_prompts
   prompt_fn: filtered_prompts
 
   # ---- Sampling ----
