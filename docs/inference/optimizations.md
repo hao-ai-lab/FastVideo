@@ -125,7 +125,7 @@ gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
 
 ### NVFP4 + Attn-QAT (modified SageAttention3, Blackwell sm_120)
 
-**`ATTN_QAT_INFER`** with **`transformer_quant="NVFP4"`**
+**`ATTN_QAT_INFER`** with **`transformer_quant=nvfp4_qat`**
 
 Runs the DiT fully in 4-bit: NVFP4 linear layers (activations quantized on the
 fly) plus the modified SageAttention3 FP4 attention backend. This is the
@@ -143,10 +143,13 @@ import os
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
 
 from fastvideo import VideoGenerator
+from fastvideo.layers.quantization import get_quantization_config
 gen = VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     num_gpus=1,
-    transformer_quant="NVFP4",   # or "nvfp4_qat" to match a QAT-distilled checkpoint
+    # Wan-2.1 uses the nvfp4_qat config (NVFP4 is LTX2-specific). Pass an
+    # instance — the bare string is not resolved on the from_pretrained path.
+    transformer_quant=get_quantization_config("nvfp4_qat")(),
     use_fsdp_inference=False,     # FSDP shards invalidate the FP4 tensor pointers
 )
 gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
