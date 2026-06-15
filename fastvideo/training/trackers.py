@@ -285,9 +285,46 @@ class SequentialTracker(BaseTracker):
         return None
 
 
+class SwanlabTracker(BaseTracker):
+    """Tracker implementation for SwanLab."""
+
+    def __init__(
+        self,
+        experiment_name: str,
+        log_dir: str,
+        *,
+        config: dict[str, Any] | None = None,
+        run_name: str | None = None,
+    ) -> None:
+        super().__init__()
+
+        import swanlab
+
+        pathlib.Path(log_dir).mkdir(parents=True, exist_ok=True)
+
+        self._swanlab = swanlab
+        self._run = swanlab.init(
+            project=experiment_name,
+            experiment_name=run_name,
+            config=(_sanitize_wandb_config(config) if config is not None else None),
+            logdir=log_dir,
+        )
+        logger.info("Initialized SwanLab tracker")
+
+    def log(self, metrics: dict[str, Any], step: int) -> None:
+        metrics = {**self._timed_metrics, **metrics}
+        if metrics:
+            self._swanlab.log(metrics, step=step)
+        self._timed_metrics = {}
+
+    def finish(self) -> None:
+        self._swanlab.finish()
+
+
 class Trackers(str, Enum):
     NONE = "none"
     WANDB = "wandb"
+    SWANLAB = "swanlab"
 
 
 SUPPORTED_TRACKERS = {tracker.value for tracker in Trackers}
@@ -319,6 +356,14 @@ def initialize_trackers(
         elif tracker_name == Trackers.WANDB.value:
             tracker_instances.append(
                 WandbTracker(
+                    experiment_name,
+                    os.path.abspath(log_dir),
+                    config=config,
+                    run_name=run_name,
+                ))
+        elif tracker_name == Trackers.SWANLAB.value:
+            tracker_instances.append(
+                SwanlabTracker(
                     experiment_name,
                     os.path.abspath(log_dir),
                     config=config,
