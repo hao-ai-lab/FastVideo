@@ -2,11 +2,13 @@
 #
 # Install after the editable FastVideo install so these reward-stack versions
 # match the Modal environment used for the reference run.
+accelerate>=1.1.0
 datasets==3.6.0
 fire>=0.7.0
 matplotlib==3.10.3
 numpy==1.26.4
-peft==0.10.0
+# FastVideo's current diffusers version requires peft>=0.17.0 at import time.
+peft>=0.17.0
 prettytable==3.8.0
 qwen-vl-utils==0.0.11
 safetensors==0.5.3

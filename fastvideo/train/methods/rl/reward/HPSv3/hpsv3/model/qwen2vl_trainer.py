@@ -38,18 +38,26 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         special_token_ids=None,
         rm_head_type="default",
         rm_head_kwargs=None,
+        use_cache=None,
     ):
+        if use_cache is not None:
+            config.use_cache = use_cache
         super().__init__(config)
         # pdb.set_trace()
         self.output_dim = output_dim
+        hidden_size = getattr(config, "hidden_size", None)
+        if hidden_size is None and hasattr(config, "text_config"):
+            hidden_size = getattr(config.text_config, "hidden_size", None)
+        if hidden_size is None:
+            raise AttributeError("Qwen2VL config is missing hidden_size and text_config.hidden_size.")
         if rm_head_type == "default":
-            self.rm_head = nn.Linear(config.hidden_size, output_dim, bias=False)
+            self.rm_head = nn.Linear(hidden_size, output_dim, bias=False)
         elif rm_head_type == "ranknet":
             if rm_head_kwargs is not None:
                 for layer in range(rm_head_kwargs.get("num_layers", 3)):
                     if layer == 0:
                         self.rm_head = nn.Sequential(
-                            nn.Linear(config.hidden_size, rm_head_kwargs["hidden_size"]),
+                            nn.Linear(hidden_size, rm_head_kwargs["hidden_size"]),
                             nn.ReLU(),
                             nn.Dropout(rm_head_kwargs.get("dropout", 0.1)),
                         )
@@ -71,7 +79,7 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
 
             else:
                 self.rm_head = nn.Sequential(
-                    nn.Linear(config.hidden_size, 1024),
+                    nn.Linear(hidden_size, 1024),
                     nn.ReLU(),
                     nn.Dropout(0.05),
                     nn.Linear(1024, 16),
@@ -103,14 +111,34 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         image_grid_thw: torch.LongTensor | None = None,
         video_grid_thw: torch.LongTensor | None = None,
         rope_deltas: torch.LongTensor | None = None,
+        cache_position: torch.LongTensor | None = None,
+        **kwargs,
     ):
         ## modified from the origin class Qwen2VLForConditionalGeneration
         output_attentions = (output_attentions if output_attentions is not None else self.config.output_attentions)
         output_hidden_states = (output_hidden_states
                                 if output_hidden_states is not None else self.config.output_hidden_states)
         return_dict = (return_dict if return_dict is not None else self.config.use_return_dict)
-        # pdb.set_trace()
-        if inputs_embeds is None:
+        if hasattr(self.model, "language_model"):
+            outputs = self.model(
+                input_ids=input_ids,
+                pixel_values=pixel_values,
+                pixel_values_videos=pixel_values_videos,
+                image_grid_thw=image_grid_thw,
+                video_grid_thw=video_grid_thw,
+                position_ids=position_ids,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                cache_position=cache_position,
+                **kwargs,
+            )
+            hidden_states = outputs[0]
+        elif inputs_embeds is None:
             inputs_embeds = self.model.embed_tokens(input_ids)
             if pixel_values is not None:
                 pixel_values = pixel_values.type(self.visual.get_dtype())
@@ -129,19 +157,32 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
             if attention_mask is not None:
                 attention_mask = attention_mask.to(inputs_embeds.device)
 
-        outputs = self.model(
-            input_ids=None,
-            position_ids=position_ids,
-            attention_mask=attention_mask,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
+            outputs = self.model(
+                input_ids=None,
+                position_ids=position_ids,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
+            hidden_states = outputs[0]
+        else:
+            outputs = self.model(
+                input_ids=None,
+                position_ids=position_ids,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
+            hidden_states = outputs[0]
 
-        hidden_states = outputs[0]  # [B, L, D]
         with torch.autocast(device_type='cuda', dtype=torch.float32):
             logits = self.rm_head(hidden_states)  # [B, L, N]
 
