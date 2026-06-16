@@ -135,13 +135,14 @@ def blockscaled_fp4_attn(qlist: Tuple,
                          is_causal: bool = False, 
                          per_block_mean: bool = True,
                          is_bf16: bool = True,
-                         single_level_p_quant: bool = False
+                         single_level_p_quant: bool = False,
+                         sm_scale: float | None = None
                         ):
-    softmax_scale = (qlist[0].shape[-1] * 2) ** (-0.5)
+    softmax_scale = sm_scale if sm_scale is not None else (qlist[0].shape[-1] * 2) ** (-0.5)
     return fp4attn_cuda.fwd(qlist[0], klist[0], vlist[0], qlist[1], klist[1], vlist[1], delta_s, KL, None, softmax_scale, is_causal, per_block_mean, is_bf16, single_level_p_quant)
 
 
-def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, single_level_p_quant = True, **kwargs):
+def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, single_level_p_quant = True, sm_scale: float | None = None, **kwargs):
     """
     SageAttention3 Blackwell kernel for FP4 attention.
     
@@ -156,6 +157,8 @@ def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_m
                               (standard per-block FP4 quantization like V, no s_P1).
                               If False (default), use two-level quantization:
                               s_P1 = rowmax(P̃)/(448×6), then s_P2, P̂_2 = φ(P̃/s_P1).
+        sm_scale: Softmax scale to pass through to the CUDA kernel. If None,
+                  defaults to the kernel's 1/sqrt(D) scale.
         **kwargs: Additional arguments (ignored)
     
     Returns:
@@ -180,6 +183,7 @@ def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_m
     is_causal,
     per_block_mean,
     is_bf16,
-    single_level_p_quant
+    single_level_p_quant,
+    sm_scale
     )[0][:, :, :QL, :].contiguous()
     return o_fp4
