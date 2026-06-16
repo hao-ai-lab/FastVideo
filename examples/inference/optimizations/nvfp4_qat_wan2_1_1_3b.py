@@ -47,7 +47,7 @@ def main():
     from fastvideo import VideoGenerator
     from fastvideo.layers.quantization import get_quantization_config
 
-    mode = "bf16" if args.bf16 else f"nvfp4_qat_{args.quant_method}"
+    mode = "bf16" if args.bf16 else args.quant_method
     if args.compile:
         mode += "_compile"
     print(f"Mode: {mode.upper()}")
