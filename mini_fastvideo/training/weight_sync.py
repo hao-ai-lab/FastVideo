@@ -45,8 +45,10 @@ class WeightSyncPlan:
             dst_dit.blend_from(src_dit, self.decay)     # decay·dst + (1-decay)·src
         else:
             dst_dit.copy_from(src_dit)                  # hard copy (student push / reference init)
-        # 4) bump version + 5) invalidate caches/graphs + 6) publish (set_weights_version does 4-6)
+        # 4) bump version + 5) invalidate the TRANSFORMER's caches/graphs + 6) publish.
+        # Scoped to the transformer (the synced weights) so frozen text/vision encoders keep
+        # their feature caches (design_v3 §7.1).
         version = f"w{next(_ver)}"
         if dst_instance is not None:
-            dst_instance.set_weights_version(version)
+            dst_instance.set_weights_version(version, components=["transformer"])
         return version

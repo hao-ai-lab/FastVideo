@@ -79,6 +79,14 @@ class FeatureCache(_Pool):
             _v, nb, _k = self._store.pop(h)
             self.used_bytes -= nb
 
+    def invalidate_components(self, components: set[str]) -> None:
+        """Drop only entries produced by the changed components (design_v3 §7.1 partition-not-flush):
+        a transformer-only weight sync must NOT evict text-encoder embeddings."""
+        drop = [h for h, (_v, _nb, k) in self._store.items() if k.component_id in components]
+        for h in drop:
+            _v, nb, _k = self._store.pop(h)
+            self.used_bytes -= nb
+
 
 class ResidualCache(_Pool):
     """cache-dit residual store, scoped per ``LoopState`` AND per CFG branch (§5.1, §11).
@@ -97,8 +105,10 @@ class ResidualCache(_Pool):
 
     def get(self, namespace: str, branch: str, name: str) -> Any | None:
         v = self._store.get((namespace, branch, name))
-        (self.__dict__.__setitem__("hits", self.hits + 1) if v is not None
-         else self.__dict__.__setitem__("misses", self.misses + 1))
+        if v is not None:
+            self.hits += 1
+        else:
+            self.misses += 1
         return v
 
     def clear_namespace(self, namespace: str) -> None:

@@ -45,6 +45,12 @@ def compare_outputs(serial: dict[str, Output], interleaved: dict[str, Output]) -
             continue
         for name in sorted(so.artifacts):
             a, b = _artifact_payload(so.artifacts[name]), _artifact_payload(io.artifacts[name])
+            if a is None and b is None:
+                # both empty is NOT parity — a deferred/aborted request must not pass the gate vacuously
+                divs.append(Divergence(f"{rid}:{name}", ConsistencyLevel.C1, float("inf"), float("inf"),
+                                       "both serial and interleaved produced EMPTY output for a declared "
+                                       "artifact (deferred/aborted?) — suspicious, not parity"))
+                continue
             if not bit_identical(a, b):
                 divs.append(Divergence(f"{rid}:{name}", ConsistencyLevel.C1, float("nan"), float("nan"),
                                        "serial vs interleaved output not bit-identical "

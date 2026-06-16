@@ -41,7 +41,8 @@ class RuntimeLoopContext:
         override = None
         if self.interceptors.active and self.state is not None:
             override = self.interceptors.before(plan, self.state)
-            if override is not None:
+            # only count a skip the step body will actually honor (must carry a forward result)
+            if override is not None and "noise_pred" in override:
                 self.metrics["skipped_steps"] = self.metrics.get("skipped_steps", 0) + 1
 
         t0 = perf_counter()
