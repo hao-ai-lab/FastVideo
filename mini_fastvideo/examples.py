@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from .models import build_default_engine
+from .models import build_default_engine, build_omni_engine
 from .models.wan21 import build_wan21_card
 from .parity import assert_interleave_parity
-from .request import DiffusionParams, OutputSpec, TaskType, make_request
+from .request import DiffusionParams, OutputSpec, SamplingParams, TaskType, make_request
 from .training import build_diffusion_nft
 
 
@@ -60,9 +60,26 @@ def example_d_rl_rollout() -> None:
           f"(K samples encode the prompt once — the 24× reduction)")
 
 
+def example_g_omni_mot() -> None:
+    print("\n(g) Omni / MoT (§16): ONE resident instance runs AR + diffusion loops on shared weights")
+    eng = build_omni_engine()
+    o = eng.run(make_request(TaskType.T2V, "cosmos3-vfm", "a phoenix",
+                             sampling=SamplingParams(max_tokens=6, seed=1),
+                             diffusion=DiffusionParams(num_steps=4, seed=1)))
+    print(f"    Cosmos3 (reason→joint denoise): text={o.artifacts['text'].text} "
+          f"video={o.artifacts['video'].frames.shape}")
+    o2 = eng.run(make_request(TaskType.T2I, "bagel-mot", "a teapot",
+                              sampling=SamplingParams(max_tokens=6, seed=2),
+                              diffusion=DiffusionParams(num_steps=4, seed=2)))
+    print(f"    BAGEL (generate_text→generate_image): text={o2.artifacts['text'].text} "
+          f"image={o2.artifacts['image'].tensor.shape}")
+    print(f"    scheduler priced BOTH WorkUnit kinds (runtime-visible, not one opaque stage): "
+          f"{dict(eng.admission.metrics.by_kind)}")
+
+
 def main() -> None:
     print("=" * 78)
-    print("mini-fastvideo — worked examples (design_v3 §15). One runtime, many loops.")
+    print("mini-fastvideo — worked examples (design_v3 §15-16). One runtime, many loops.")
     print("=" * 78)
     eng = build_default_engine()
     print(f"registered (recipe, runtime) cards: {list(eng._registry)}")
@@ -71,6 +88,7 @@ def main() -> None:
     example_c_causal_streaming(eng)
     example_c2_interleave_gate(eng)
     example_d_rl_rollout()
+    example_g_omni_mot()
     print("\n" + "=" * 78)
     print("All examples ran on CPU with numpy toy components. The architecture (cards, driven")
     print("loops, scheduler, caches, parity, training-on-shared-loops) is real; the neural")

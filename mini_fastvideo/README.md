@@ -17,9 +17,7 @@ point of the (recipe, runtime) separation.
 |---|---|
 | **Inference** | Wan2.1-1.3B (T2V, bidirectional diffusion) · LTX2.3 (two-stage distilled: 8-step base → upsample → 3-step refine) · Wan-causal (chunked/streaming rollout, the self-forcing student) |
 | **Training** (all on Wan2.1-1.3B) | finetuning (flow-match) · DMD2 distillation · DiffusionNFT (likelihood-free RL) · self-forcing (causal, on Wan-causal) |
-
-Phase 2 (designed-for, not yet built): a Cosmos3 omni card and a canonical vllm-omni-style MoT model.
-The spine is already omni-ready — see *Omni readiness* below.
+| **Omni / MoT** (phase 2) | Cosmos3 (reasoner `ar_decode` → joint `diffusion_denoise`) · BAGEL/lance (`generate_text` → `generate_image`) — each ONE resident MoT instance running both loop types on shared weights |
 
 ## The one invariant (design_v3 §1)
 
@@ -93,15 +91,28 @@ Each `ComponentSpec` records the real `load_id` (e.g.
    scheduler (LTX) inside the loop's step body.
 The loops, policies, scheduler, caches, parity gates, and training methods are unchanged.
 
-## Omni readiness (phase 2)
+## Omni / MoT (phase 2 — implemented)
 
-The spine already carries the minimal concessions so Cosmos3 / vllm-omni MoT is additive, not a
-refactor: `LoopKind`/`WorkUnitKind` include `ar_decode`/`ar_token`/`chunk_step`; `ModelInstance` runs
-multiple loops against shared components; `LoopSpec.shared_weight_components` + `extension_schema`;
-`LoopState.extension` for packed factored sequences; `paged_kv` cache class; the interleave gate
-generalizes to any loop. Adding an omni card means: a `Cosmos3PackedSequence` state extension, an
-`ar_decode` loop bound to the same `transformer` as the `diffusion_denoise` loop, and a program
-`ar_decode(reasoner) → pack → diffusion_denoise(joint) → decoders`.
+The omni-ready spine paid off: adding omni was **additive, not a refactor**. Two omni cards now ship,
+each as ONE resident MoT instance whose `transformer` binds *both* an `ar_decode` loop and a
+`diffusion_denoise` loop (`shared_weight_components=["transformer"]` on both) — the §16 claim no
+DAG-of-engines can express, made native:
+
+- **`models/cosmos3/`** — `tokenize → reason (ar_decode) → pack → diffusion_denoise → vae_decode`.
+  The reasoner upsamples the prompt on the und pathway; its tokens condition the joint denoise on the
+  same weights. `sound_vae` is declared `optional_for` non-t2vs (the lazy-component P8 fix).
+- **`models/bagel/`** — the canonical vllm-omni model: `generate_text (ar_decode) → generate_image
+  (diffusion_denoise)`. Unlike vllm-omni's opaque `DIFFUSION` stage, **both loops are runtime-visible**:
+  the scheduler prices `ar_token` *and* `diffusion_step` WorkUnits (verified in `test_omni.py`).
+
+The diffusion loop is literally `WanDenoiseLoop` (the same step body the engine serves for Wan), bound
+to the MoT module — one loop definition, reused. The interleave gate generalizes across loop types
+(`test_omni.py::test_omni_interleave_parity_holds_across_loop_types`). Run it:
+`python3 -c "from mini_fastvideo.models import build_omni_engine; ..."` or see `mini_fastvideo/examples.py`.
+
+Still future work (declared on the spine, not yet built): the packed factored-sequence
+(`[text|vision|action|sound]`) `LoopState.extension`, joint multi-modality denoise with per-modality
+CFG, and world-model `chunk_rollout` for action-conditioned omni.
 
 ## Deliberately out of scope (per design_v3 non-goals)
 
