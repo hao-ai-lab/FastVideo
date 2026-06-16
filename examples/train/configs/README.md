@@ -7,6 +7,7 @@ configs/
 ├── fine_tuning/          # Standard finetuning and DFSFT
 ├── distribution_matching/  # DMD2 and Self-Forcing
 ├── knowledge_distillation/ # KD from teacher to student
+├── rl/                   # RL methods such as DiffusionNFT and GenRL
 └── example.yaml          # Annotated reference config with all fields
 ```
 

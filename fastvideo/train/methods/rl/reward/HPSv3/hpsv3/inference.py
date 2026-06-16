@@ -1,27 +1,55 @@
 import os
 from collections.abc import Mapping
-import torch
-import huggingface_hub
-from .dataset.utils import process_vision_info
-from .dataset.data_collator_qwen import prompt_with_special_token, prompt_without_special_token, INSTRUCTION
-from .utils.parser import ModelConfig, PEFTLoraConfig, TrainingConfig, DataConfig, parse_args_with_yaml
-from .train import create_model_and_processor
 from pathlib import Path
+
+import huggingface_hub
+import torch
+
+from .dataset.data_collator_qwen import (
+    INSTRUCTION,
+    prompt_with_special_token,
+    prompt_without_special_token,
+)
+from .dataset.utils import process_vision_info
+from .train import create_model_and_processor
+from .utils.parser import (
+    DataConfig,
+    ModelConfig,
+    PEFTLoraConfig,
+    TrainingConfig,
+    parse_args_with_yaml,
+)
 
 _MODEL_CONFIG_PATH = Path(__file__).parent / "config/"
 
 
 class HPSv3RewardInferencer:
-
-    def __init__(self, config_path=None, checkpoint_path=None, device='cuda', differentiable=False):
+    def __init__(
+        self,
+        config_path=None,
+        checkpoint_path=None,
+        device="cuda",
+        differentiable=False,
+    ):
         if config_path is None:
-            config_path = os.path.join(_MODEL_CONFIG_PATH, 'HPSv3_7B.yaml')
+            config_path = os.path.join(_MODEL_CONFIG_PATH, "HPSv3_7B.yaml")
 
         if checkpoint_path is None:
-            checkpoint_path = huggingface_hub.hf_hub_download("MizzenAI/HPSv3", 'HPSv3.safetensors', repo_type='model')
+            checkpoint_path = huggingface_hub.hf_hub_download("MizzenAI/HPSv3", "HPSv3.safetensors", repo_type="model")
 
-        (data_config, training_args, model_config, peft_lora_config), config_path = (parse_args_with_yaml(
-            (DataConfig, TrainingConfig, ModelConfig, PEFTLoraConfig), config_path, is_train=False))
+        (
+            (
+                data_config,
+                training_args,
+                model_config,
+                peft_lora_config,
+            ),
+            config_path,
+        ) = parse_args_with_yaml(
+            (DataConfig, TrainingConfig, ModelConfig, PEFTLoraConfig),
+            config_path,
+            is_train=False,
+        )
         training_args.output_dir = os.path.join(training_args.output_dir, config_path.split("/")[-1].split(".")[0])
         model, processor, peft_config = create_model_and_processor(
             model_config=model_config,
@@ -33,15 +61,36 @@ class HPSv3RewardInferencer:
         self.device = device
         self.use_special_tokens = model_config.use_special_tokens
 
-        if checkpoint_path.endswith('.safetensors'):
+        if checkpoint_path.endswith(".safetensors"):
             import safetensors.torch
+
             state_dict = safetensors.torch.load_file(checkpoint_path, device="cpu")
         else:
             state_dict = torch.load(checkpoint_path, map_location="cpu")
 
         if "model" in state_dict:
             state_dict = state_dict["model"]
+        before_rm_head = {
+            key: value.detach().cpu().clone()
+            for key, value in model.state_dict().items()
+            if "rm_head" in key
+        }
         model.load_state_dict(state_dict, strict=True)
+        after_rm_head = {
+            key: value.detach().cpu()
+            for key, value in model.state_dict().items()
+            if "rm_head" in key
+        }
+        unchanged = (
+            before_rm_head
+            and set(before_rm_head) == set(after_rm_head)
+            and all(torch.equal(before_rm_head[key], after_rm_head[key]) for key in before_rm_head)
+        )
+        if unchanged:
+            raise RuntimeError(
+                f"HPSv3 checkpoint {checkpoint_path} did not overwrite rm_head "
+                "weights. Refusing to score rewards with a randomly initialized head."
+            )
         model.eval()
 
         self.model = model
@@ -50,20 +99,21 @@ class HPSv3RewardInferencer:
         self.model.to(self.device)
         self.data_config = data_config
 
-    def _pad_sequence(self, sequences, attention_mask, max_len, padding_side='right'):
+    def _pad_sequence(self, sequences, attention_mask, max_len, padding_side="right"):
         """
         Pad the sequences to the maximum length.
         """
-        assert padding_side in ['right', 'left']
+        assert padding_side in ["right", "left"]
         if sequences.shape[1] >= max_len:
             return sequences, attention_mask
 
         pad_len = max_len - sequences.shape[1]
-        padding = (0, pad_len) if padding_side == 'right' else (pad_len, 0)
+        padding = (0, pad_len) if padding_side == "right" else (pad_len, 0)
 
-        sequences_padded = torch.nn.functional.pad(sequences, padding, 'constant',
-                                                   self.processor.tokenizer.pad_token_id)
-        attention_mask_padded = torch.nn.functional.pad(attention_mask, padding, 'constant', 0)
+        sequences_padded = torch.nn.functional.pad(
+            sequences, padding, "constant", self.processor.tokenizer.pad_token_id
+        )
+        attention_mask_padded = torch.nn.functional.pad(attention_mask, padding, "constant", 0)
 
         return sequences_padded, attention_mask_padded
 
@@ -74,9 +124,9 @@ class HPSv3RewardInferencer:
         """
         if isinstance(data, Mapping):
             return type(data)({k: self._prepare_input(v) for k, v in data.items()})
-        elif isinstance(data, tuple | list):
+        if isinstance(data, (tuple, list)):
             return type(data)(self._prepare_input(v) for v in data)
-        elif isinstance(data, torch.Tensor):
+        if isinstance(data, torch.Tensor):
             kwargs = {"device": self.device}
             return data.to(**kwargs)
         return data
@@ -95,26 +145,28 @@ class HPSv3RewardInferencer:
         max_pixels = 256 * 28 * 28
         min_pixels = 256 * 28 * 28
         message_list = []
-        for text, image in zip(prompts, image_paths, strict=False):
-            out_message = [{
-                "role":
-                "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "image": image,
-                        "min_pixels": min_pixels,
-                        "max_pixels": max_pixels,
-                    },
-                    {
-                        "type":
-                        "text",
-                        "text":
-                        (INSTRUCTION.format(text_prompt=text) +
-                         prompt_with_special_token if self.use_special_tokens else prompt_without_special_token),
-                    },
-                ],
-            }]
+        for text, image in zip(prompts, image_paths):
+            out_message = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": image,
+                            "min_pixels": max_pixels,
+                            "max_pixels": max_pixels,
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                INSTRUCTION.format(text_prompt=text) + prompt_with_special_token
+                                if self.use_special_tokens
+                                else prompt_without_special_token
+                            ),
+                        },
+                    ],
+                }
+            ]
 
             message_list.append(out_message)
 
@@ -139,16 +191,16 @@ class HPSv3RewardInferencer:
 
 
 if __name__ == "__main__":
-    config_path = 'config/inference/HPSv3_7B.yaml'
-    checkpoint_path = 'checkpoints/HPSv3_7B.pth'
-    device = 'cuda'
+    config_path = "config/inference/HPSv3_7B.yaml"
+    checkpoint_path = "checkpoints/HPSv3_7B.pth"
+    device = "cuda"
     dtype = torch.bfloat16
     inferencer = HPSv3RewardInferencer(config_path, checkpoint_path, device=device)
 
     image_paths = ["assets/example1.png", "assets/example2.png"]
     prompts = [
         "cute chibi anime cartoon fox, smiling wagging tail with a small cartoon heart above sticker",
-        "cute chibi anime cartoon fox, smiling wagging tail with a small cartoon heart above sticker"
+        "cute chibi anime cartoon fox, smiling wagging tail with a small cartoon heart above sticker",
     ]
     rewards = inferencer.reward(image_paths, prompts)
     print(rewards[0][0].item())  # miu and sigma. we select miu as the final output

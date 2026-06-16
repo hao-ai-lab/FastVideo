@@ -1,8 +1,9 @@
-from typing import Any, Literal
-from omegaconf import OmegaConf
-from transformers import HfArgumentParser
+import contextlib
 from dataclasses import dataclass, field
-from transformers import TrainingArguments
+from typing import Any, Literal
+
+from omegaconf import OmegaConf
+from transformers import HfArgumentParser, TrainingArguments
 
 
 @dataclass
@@ -61,10 +62,10 @@ class PEFTLoraConfig:
     num_lora_modules: int = -1
 
     def __post_init__(self):
-        if (isinstance(self.lora_target_modules, list) and len(self.lora_target_modules) == 1):
+        if isinstance(self.lora_target_modules, list) and len(self.lora_target_modules) == 1:
             self.lora_target_modules = self.lora_target_modules[0]
 
-        if (isinstance(self.lora_namespan_exclude, list) and len(self.lora_namespan_exclude) == 1):
+        if isinstance(self.lora_namespan_exclude, list) and len(self.lora_namespan_exclude) == 1:
             self.lora_namespan_exclude = self.lora_namespan_exclude[0]
 
 
@@ -91,8 +92,8 @@ class ModelConfig:
     bnb_4bit_quant_type: Literal["fp4", "nf4"] = "nf4"
     use_bnb_nested_quant: bool = False
     reward_token: Literal["last", "mean", "special"] = "last"
-    loss_type: Literal["bt", "reg", "btt", "margin", "constant_margin", "scaled"] = ("regular")
-    loss_hyperparameters: dict = field(default_factory=lambda: {})
+    loss_type: Literal["bt", "reg", "btt", "margin", "constant_margin", "scaled"] = "regular"
+    loss_hyperparameters: dict = field(default_factory=dict)
     checkpoint_path: str | None = None
 
     def __post_init__(self):
@@ -117,12 +118,12 @@ def parse_args_with_yaml(
 ) -> tuple[Any, ...]:
     """
     Parse arguments using HfArgumentParser with OmegaConf for YAML support.
-    
+
     Args:
         dataclass_types: Tuple of dataclass types for HfArgumentParser
         args: Optional arguments (if None, will read from sys.argv)
         allow_extra_keys: Whether to allow extra keys in config
-    
+
     Returns:
         Tuple of parsed dataclass instances
     """
@@ -130,13 +131,40 @@ def parse_args_with_yaml(
     # Load YAML config and merge with command line overrides
     args = OmegaConf.to_container(OmegaConf.load(config_path))
     if not is_train:
-        args.pop('deepspeed', None)
+        args.pop("deepspeed", None)
+
+    @contextlib.contextmanager
+    def _disable_accelerate_state_reset(enabled: bool):
+        if not enabled:
+            yield
+            return
+        try:
+            from accelerate.state import AcceleratorState, PartialState
+        except Exception:
+            # If accelerate is unavailable, just continue.
+            yield
+            return
+        orig_acc_reset = AcceleratorState._reset_state
+        orig_partial_reset = PartialState._reset_state
+
+        def _no_reset_state(*_args, **_kwargs):
+            return None
+
+        AcceleratorState._reset_state = staticmethod(_no_reset_state)
+        PartialState._reset_state = staticmethod(_no_reset_state)
+        try:
+            yield
+        finally:
+            AcceleratorState._reset_state = orig_acc_reset
+            PartialState._reset_state = orig_partial_reset
 
     # Parse with HfArgumentParser
     parser = HfArgumentParser(dataclass_types)
-    return parser.parse_dict(args, allow_extra_keys=allow_extra_keys), config_path
+    with _disable_accelerate_state_reset(enabled=not is_train):
+        return parser.parse_dict(args, allow_extra_keys=allow_extra_keys), config_path
 
 
 if __name__ == "__main__":
     data_config, training_args, model_config, peft_lora_config = parse_args_with_yaml(
-        (DataConfig, TrainingConfig, ModelConfig, PEFTLoraConfig))
+        (DataConfig, TrainingConfig, ModelConfig, PEFTLoraConfig)
+    )

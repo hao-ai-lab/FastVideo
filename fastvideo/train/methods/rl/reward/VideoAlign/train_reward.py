@@ -6,15 +6,19 @@ from dataclasses import asdict
 from functools import partial
 
 import torch
-from datasets import load_dataset
+from .data import DataConfig, QWen2VLDataCollator, convert_GSB_csv_to_reward_data
 from peft import LoraConfig, get_peft_model
+from .trainer import (
+    PartialEmbeddingUpdateCallback,
+    Qwen2VLRewardModelBT,
+    VideoVLMRewardTrainer,
+    compute_multi_attr_accuracy,
+)
 from transformers import AutoProcessor, HfArgumentParser
 from trl import get_kbit_device_map, get_quantization_config
+from .utils import ModelConfig, PEFTLoraConfig, TrainingConfig, load_model_from_checkpoint
 
-from .trainer import Qwen2VLRewardModelBT, VideoVLMRewardTrainer, compute_multi_attr_accuracy, PartialEmbeddingUpdateCallback
-from .data import DataConfig, QWen2VLDataCollator, convert_GSB_csv_to_reward_data
-from .utils import ModelConfig, PEFTLoraConfig, TrainingConfig
-from .utils import load_model_from_checkpoint
+from datasets import load_dataset
 
 
 def save_configs_to_json(data_config, training_args, model_config, peft_lora_config):
@@ -40,14 +44,12 @@ def save_configs_to_json(data_config, training_args, model_config, peft_lora_con
         json.dump(config_dict, f, indent=4)
 
 
-def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=None, verbose=False):
+def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=[], verbose=False):
     """
     Find the target linear modules for LoRA.
     """
     linear_cls = torch.nn.Linear
     embedding_cls = torch.nn.Embedding
-    if lora_namespan_exclude is None:
-        lora_namespan_exclude = []
     lora_module_names = []
 
     for name, module in model.named_modules():
@@ -55,7 +57,7 @@ def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=N
             # print(f"Excluding module: {name}")
             continue
 
-        if isinstance(module, linear_cls | embedding_cls):
+        if isinstance(module, (linear_cls, embedding_cls)):
             lora_module_names.append(name)
 
     if num_lora_modules > 0:
@@ -77,21 +79,24 @@ def create_model_and_processor(
     cache_dir=None,
 ):
     # create model
-    torch_dtype = (model_config.torch_dtype if model_config.torch_dtype in ["auto", None] else getattr(
-        torch, model_config.torch_dtype))
+    torch_dtype = (
+        model_config.torch_dtype
+        if model_config.torch_dtype in ["auto", None]
+        else getattr(torch, model_config.torch_dtype)
+    )
     quantization_config = get_quantization_config(model_config)
     model_kwargs = dict(
         revision=model_config.model_revision,
         device_map=get_kbit_device_map() if quantization_config is not None else None,
         quantization_config=quantization_config,
-        use_cache=bool(training_args.gradient_checkpointing),
+        use_cache=True if training_args.gradient_checkpointing else False,
     )
     # pdb.set_trace()
 
     # create processor and set padding
-    processor = AutoProcessor.from_pretrained(model_config.model_name_or_path,
-                                              padding_side="right",
-                                              cache_dir=cache_dir)
+    processor = AutoProcessor.from_pretrained(
+        model_config.model_name_or_path, padding_side="right", cache_dir=cache_dir
+    )
 
     special_token_ids = None
     if model_config.use_special_tokens:
@@ -105,9 +110,10 @@ def create_model_and_processor(
         reward_token=model_config.reward_token,
         special_token_ids=special_token_ids,
         torch_dtype=torch_dtype,
-        attn_implementation="flash_attention_2" if not training_args.disable_flash_attn2 else "sdpa",
+        attn_implementation=("flash_attention_2" if not training_args.disable_flash_attn2 else "sdpa"),
         cache_dir=cache_dir,
-        **model_kwargs)
+        **model_kwargs,
+    )
     if model_config.use_special_tokens:
         model.resize_token_embeddings(len(processor.tokenizer))
 
@@ -118,9 +124,11 @@ def create_model_and_processor(
 
     # create lora and peft model
     if peft_lora_config.lora_enable:
-        target_modules = find_target_linear_names(model,
-                                                  num_lora_modules=peft_lora_config.num_lora_modules,
-                                                  lora_namespan_exclude=peft_lora_config.lora_namespan_exclude)
+        target_modules = find_target_linear_names(
+            model,
+            num_lora_modules=peft_lora_config.num_lora_modules,
+            lora_namespan_exclude=peft_lora_config.lora_namespan_exclude,
+        )
         peft_config = LoraConfig(
             target_modules=target_modules,
             r=peft_lora_config.lora_r,
@@ -144,13 +152,13 @@ def create_model_and_processor(
 def create_dataset(data_config, meta_file=None):
     if meta_file is None:
         meta_file = data_config.meta_data
-    dataset = load_dataset('csv', data_files=meta_file)
+    dataset = load_dataset("csv", data_files=meta_file)
 
     def add_idx(example, idx):
-        example['metainfo_idx'] = idx
+        example["metainfo_idx"] = idx
         return example
 
-    dataset['train'] = dataset['train'].map(lambda example, idx: add_idx(example, idx), with_indices=True)
+    dataset["train"] = dataset["train"].map(lambda example, idx: add_idx(example, idx), with_indices=True)
 
     if not data_config.use_tied_data:
         filter_func = lambda example: any(example[f"{dim}"] != "same" for dim in data_config.eval_dim)
@@ -167,8 +175,12 @@ def create_dataset(data_config, meta_file=None):
         data_config.prompt_template_type,
         sample_type=data_config.sample_type,
     )
-    dataset = dataset.map(convert_func, remove_columns=dataset['train'].column_names, load_from_cache_file=False)
-    dataset = dataset['train']
+    dataset = dataset.map(
+        convert_func,
+        remove_columns=dataset["train"].column_names,
+        load_from_cache_file=False,
+    )
+    dataset = dataset["train"]
     # pdb.set_trace()
     return dataset
 
@@ -176,15 +188,22 @@ def create_dataset(data_config, meta_file=None):
 def train():
     ## ===> Step 1: Parse arguments
     parser = HfArgumentParser((DataConfig, TrainingConfig, ModelConfig, PEFTLoraConfig))
-    data_config, training_args, model_config, peft_lora_config = parser.parse_args_into_dataclasses()
+    (
+        data_config,
+        training_args,
+        model_config,
+        peft_lora_config,
+    ) = parser.parse_args_into_dataclasses()
     # pdb.set_trace()
 
     # check valid (lora config)
-    assert not (peft_lora_config.lora_enable and model_config.freeze_llm
-                ), 'When using LoRA, the LLM should not be frozen. If you want to freeze the LLM, please disable LoRA.'
+    assert not (peft_lora_config.lora_enable and model_config.freeze_llm), (
+        "When using LoRA, the LLM should not be frozen. If you want to freeze the LLM, please disable LoRA."
+    )
     if not peft_lora_config.lora_enable:
-        assert not peft_lora_config.vision_lora, \
+        assert not peft_lora_config.vision_lora, (
             "Error: model_config.lora_enable is not enabled, but model_config.vision_lora is enabled."
+        )
     else:
         if peft_lora_config.lora_namespan_exclude is not None:
             peft_lora_config.lora_namespan_exclude = ast.literal_eval(peft_lora_config.lora_namespan_exclude)
@@ -204,8 +223,11 @@ def train():
 
     ## load model
     if training_args.load_from_pretrained is not None:
-        model, checkpoint_step = load_model_from_checkpoint(model, training_args.load_from_pretrained,
-                                                            training_args.load_from_pretrained_step)
+        model, checkpoint_step = load_model_from_checkpoint(
+            model,
+            training_args.load_from_pretrained,
+            training_args.load_from_pretrained_step,
+        )
     model.train()
 
     if peft_lora_config.lora_enable:
@@ -239,8 +261,8 @@ def train():
             # valid_dataset = valid_dataset.select(indices)
         else:
             dataset = train_dataset.train_test_split(test_size=0.02)
-            train_dataset = dataset['train']
-            valid_dataset = dataset['test']
+            train_dataset = dataset["train"]
+            valid_dataset = dataset["test"]
     else:
         valid_dataset = None
 
@@ -305,7 +327,7 @@ def train():
 
     if training_args.local_rank == -1 or training_args.local_rank == 0:
         model_state_dict = model.state_dict()
-        torch.save(model_state_dict, os.path.join(training_args.output_dir, 'final_model.pth'))
+        torch.save(model_state_dict, os.path.join(training_args.output_dir, "final_model.pth"))
         model.config.save_pretrained(training_args.output_dir)
 
 

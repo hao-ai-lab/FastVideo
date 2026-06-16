@@ -329,8 +329,11 @@ def _resolve_videoalign_checkpoint_path(checkpoint_path: str | None) -> str:
     """Return a local VideoAlign checkpoint directory."""
     if checkpoint_path is not None:
         return os.path.abspath(checkpoint_path)
+    env_checkpoint_path = os.environ.get("VIDEOALIGN_CHECKPOINT_PATH")
+    if env_checkpoint_path:
+        return os.path.abspath(env_checkpoint_path)
     return snapshot_download(
-        repo_id="KlingTeam/VideoReward",
+        repo_id="KwaiVGI/VideoReward",
         repo_type="model",
         allow_patterns=(
             "model_config.json",
@@ -353,10 +356,10 @@ def _get_inferencer(
             inference_mod = _patch_videoalign_modules()
             VideoVLMRewardInference = inference_mod.VideoVLMRewardInference
         except ImportError as exc:
-            msg = ("VideoAlign not found. Ensure the "
-                   "VideoAlign submodule is checked out "
-                   "under fastvideo/train/methods/rl/"
-                   "reward/VideoAlign")
+            msg = ("Failed to import the vendored VideoAlign reward runtime "
+                   "under fastvideo/train/methods/rl/reward/VideoAlign. "
+                   "Install FastVideo with the GenRL extra and verify the "
+                   "vendored runtime files are present.")
             raise ImportError(msg) from exc
 
         inf = VideoVLMRewardInference(

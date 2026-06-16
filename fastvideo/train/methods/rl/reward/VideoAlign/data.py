@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import torch
 from .prompt_template import build_prompt
+
 # from qwen_vl_utils import process_vision_info
 from .vision_process import process_vision_info
 
@@ -23,14 +24,16 @@ class DataConfig:
     use_tied_data: bool = True
 
 
-def convert_GSB_csv_to_reward_data(example,
-                                   data_dir,
-                                   eval_dims=None,
-                                   max_pixels=448 * 448,
-                                   fps=2.0,
-                                   num_frames=None,
-                                   prompt_template_type="none",
-                                   sample_type="uniform"):
+def convert_GSB_csv_to_reward_data(
+    example,
+    data_dir,
+    eval_dims=["VQ"],
+    max_pixels=448 * 448,
+    fps=2.0,
+    num_frames=None,
+    prompt_template_type="none",
+    sample_type="uniform",
+):
     """
     Convert Good/Same/Bad csv data to reward data.
 
@@ -45,45 +48,45 @@ def convert_GSB_csv_to_reward_data(example,
     Returns:
         dict: A dictionary containing the reward data.
     """
-    if eval_dims is None:
-        eval_dims = ["VQ"]
 
-    A_data = [{
-        "role":
-        "user",
-        "content": [
-            {
-                "type": "video",
-                "video": f"file://{data_dir}/{example['path_A']}",
-                "max_pixels": max_pixels,
-                "fps": fps if num_frames is None else None,
-                "nframes": min(num_frames, example["num_frames_A"]) if num_frames is not None else None,
-                "sample_type": sample_type,
-            },
-            {
-                "type": "text",
-                "text": build_prompt(example["prompt"], eval_dims, prompt_template_type)
-            },
-        ],
-    }]
-    B_data = [{
-        "role":
-        "user",
-        "content": [
-            {
-                "type": "video",
-                "video": f"file://{data_dir}/{example['path_B']}",
-                "max_pixels": max_pixels,
-                "fps": fps if num_frames is None else None,
-                "nframes": min(num_frames, example["num_frames_B"]) if num_frames is not None else None,
-                "sample_type": sample_type,
-            },
-            {
-                "type": "text",
-                "text": build_prompt(example["prompt"], eval_dims, prompt_template_type)
-            },
-        ],
-    }]
+    A_data = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "video",
+                    "video": f"file://{data_dir}/{example['path_A']}",
+                    "max_pixels": max_pixels,
+                    "fps": fps if num_frames is None else None,
+                    "nframes": (min(num_frames, example["num_frames_A"]) if num_frames is not None else None),
+                    "sample_type": sample_type,
+                },
+                {
+                    "type": "text",
+                    "text": build_prompt(example["prompt"], eval_dims, prompt_template_type),
+                },
+            ],
+        }
+    ]
+    B_data = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "video",
+                    "video": f"file://{data_dir}/{example['path_B']}",
+                    "max_pixels": max_pixels,
+                    "fps": fps if num_frames is None else None,
+                    "nframes": (min(num_frames, example["num_frames_B"]) if num_frames is not None else None),
+                    "sample_type": sample_type,
+                },
+                {
+                    "type": "text",
+                    "text": build_prompt(example["prompt"], eval_dims, prompt_template_type),
+                },
+            ],
+        }
+    ]
 
     chosen_labels = []
     A_scores = []
@@ -127,8 +130,8 @@ def convert_GSB_csv_to_reward_data(example,
     A_scores = torch.tensor(A_scores, dtype=torch.float)
     B_scores = torch.tensor(B_scores, dtype=torch.float)
     metainfo_idx = None
-    if 'metainfo_idx' in example:
-        metainfo_idx = example['metainfo_idx']
+    if "metainfo_idx" in example:
+        metainfo_idx = example["metainfo_idx"]
 
     return {
         "A_data": A_data,
@@ -141,7 +144,6 @@ def convert_GSB_csv_to_reward_data(example,
 
 
 class QWen2VLDataCollator:
-
     def __init__(self, processor, add_noise=False, p_shuffle_frames=0.0, p_color_jitter=0.0):
         self.processor = processor
         self.add_noise = add_noise
@@ -156,25 +158,28 @@ class QWen2VLDataCollator:
         """
         remove unnecessary keys from message(very very necessary)
         """
-        message_content = message[0]["content"][0]
-        out_message = [{
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "video",
-                    "video": message_content["video"],
-                    "max_pixels": message_content["max_pixels"],
-                    "fps": message_content.get("fps", None),
-                    "nframes": message_content.get("nframes", None),
-                    "sample_type": message_content.get("sample_type", "uniform"),
-                },
-                {
-                    "type": "text",
-                    "text": message[0]["content"][1]["text"]
-                },
-            ],
-        }]
+        out_message = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": message[0]["content"][0]["video"],
+                        "max_pixels": message[0]["content"][0]["max_pixels"],
+                        "fps": (message[0]["content"][0]["fps"] if "fps" in message[0]["content"][0] else None),
+                        "nframes": (
+                            message[0]["content"][0]["nframes"] if "nframes" in message[0]["content"][0] else None
+                        ),
+                        "sample_type": (
+                            message[0]["content"][0]["sample_type"]
+                            if "sample_type" in message[0]["content"][0]
+                            else "uniform"
+                        ),
+                    },
+                    {"type": "text", "text": message[0]["content"][1]["text"]},
+                ],
+            }
+        ]
 
         if out_message[0]["content"][0]["fps"] is None:
             out_message[0]["content"][0].pop("fps")
@@ -183,20 +188,21 @@ class QWen2VLDataCollator:
 
         return out_message
 
-    def _pad_sequence(self, sequences, attention_mask, max_len, padding_side='right'):
+    def _pad_sequence(self, sequences, attention_mask, max_len, padding_side="right"):
         """
         Pad the sequences to the maximum length.
         """
-        assert padding_side in ['right', 'left']
+        assert padding_side in ["right", "left"]
         if sequences.shape[1] >= max_len:
             return sequences, attention_mask
 
         pad_len = max_len - sequences.shape[1]
-        padding = (0, pad_len) if padding_side == 'right' else (pad_len, 0)
+        padding = (0, pad_len) if padding_side == "right" else (pad_len, 0)
 
-        sequences_padded = torch.nn.functional.pad(sequences, padding, 'constant',
-                                                   self.processor.tokenizer.pad_token_id)
-        attention_mask_padded = torch.nn.functional.pad(attention_mask, padding, 'constant', 0)
+        sequences_padded = torch.nn.functional.pad(
+            sequences, padding, "constant", self.processor.tokenizer.pad_token_id
+        )
+        attention_mask_padded = torch.nn.functional.pad(attention_mask, padding, "constant", 0)
 
         return sequences_padded, attention_mask_padded
 
@@ -245,12 +251,12 @@ class QWen2VLDataCollator:
 
         # pdb.set_trace()
         max_len = max(batch_A["input_ids"].shape[1], batch_B["input_ids"].shape[1])
-        batch_A["input_ids"], batch_A["attention_mask"] = self._pad_sequence(batch_A["input_ids"],
-                                                                             batch_A["attention_mask"], max_len,
-                                                                             "right")
-        batch_B["input_ids"], batch_B["attention_mask"] = self._pad_sequence(batch_B["input_ids"],
-                                                                             batch_B["attention_mask"], max_len,
-                                                                             "right")
+        batch_A["input_ids"], batch_A["attention_mask"] = self._pad_sequence(
+            batch_A["input_ids"], batch_A["attention_mask"], max_len, "right"
+        )
+        batch_B["input_ids"], batch_B["attention_mask"] = self._pad_sequence(
+            batch_B["input_ids"], batch_B["attention_mask"], max_len, "right"
+        )
         # print(f"Batch A: {batch_A['input_ids'].shape}, Batch B: {batch_B['input_ids'].shape}")
 
         chosen_label = torch.stack([torch.tensor(feature["chosen_label"]) for feature in features])

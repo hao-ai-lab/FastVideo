@@ -54,11 +54,22 @@ class JsonPromptDataset(Dataset):
         self._load_all_prompts()
 
     def _load_all_prompts(self) -> None:
+        if not os.path.exists(self.file_path):
+            raise FileNotFoundError("GenRL prompt file not found: "
+                                    f"{self.file_path}. Expected train.json/test.json "
+                                    "from examples/train/prepare_genrl_assets.py.")
+
+        saw_content = False
         with open(self.file_path, encoding="utf-8") as f:
-            for raw_line in f:
+            for line_no, raw_line in enumerate(f, start=1):
                 line = raw_line.strip()
                 if not line:
                     continue
+                if not saw_content and line.startswith("version https://git-lfs.github.com"):
+                    raise RuntimeError(f"{self.file_path} is a Git LFS pointer, not the "
+                                       "real prompt JSON. Rerun "
+                                       "`python examples/train/prepare_genrl_assets.py`.")
+                saw_content = True
                 try:
                     item = json.loads(line)
                     prompt = item.get("prompt", "")
@@ -68,9 +79,15 @@ class JsonPromptDataset(Dataset):
                         self._metadatas.append(metadata)
                 except json.JSONDecodeError as e:
                     logger.warning(
-                        "Skipping invalid JSON line: %s",
+                        "Skipping invalid JSON line %d in %s: %s",
+                        line_no,
+                        self.file_path,
                         e,
                     )
+        if not self._prompts:
+            raise ValueError("No usable prompts found in "
+                             f"{self.file_path}. Expected JSONL rows with a "
+                             "`prompt` field.")
 
     def __len__(self) -> int:
         return len(self._prompts)

@@ -9,12 +9,21 @@ The text prompt used for generation is "{text_prompt}".
 """
 
 DIMENSION_DESCRIPTIONS = {
-    'VQ': ['visual quality', 'the quality of the video in terms of clearness, resolution, brightness, and color'],
-    'TA': ['text-to-video alignment', 'the alignment between the text prompt and the video content and motion'],
-    'MQ': ['motion quality', 'the quality of the motion in terms of consistency, smoothness, and completeness'],
-    'Overall': [
-        'Overall Performance',
-        'the overall performance of the video in terms of visual quality, text-to-video alignment, and motion quality'
+    "VQ": [
+        "visual quality",
+        "the quality of the video in terms of clearness, resolution, brightness, and color",
+    ],
+    "TA": [
+        "text-to-video alignment",
+        "the alignment between the text prompt and the video content and motion",
+    ],
+    "MQ": [
+        "motion quality",
+        "the quality of the motion in terms of consistency, smoothness, and completeness",
+    ],
+    "Overall": [
+        "Overall Performance",
+        "the overall performance of the video in terms of visual quality, text-to-video alignment, and motion quality",
     ],
 }
 
@@ -103,7 +112,7 @@ Please evaluate the {dimension_name} of a generated video. Consider {dimension_d
 def build_prompt(prompt, dimension, template_type):
     if isinstance(dimension, list) and len(dimension) > 1:
         dimension_name = ", ".join([DIMENSION_DESCRIPTIONS[d][0] for d in dimension])
-        dimension_name = f'overall performance({dimension_name})'
+        dimension_name = f"overall performance({dimension_name})"
         dimension_description = "the overall performance of the video"
     else:
         if isinstance(dimension, list):
@@ -113,17 +122,20 @@ def build_prompt(prompt, dimension, template_type):
 
     if template_type == "none":
         return prompt
-    elif template_type == "simple":
-        return SIMPLE_PROMPT.format(dimension_name=dimension_name,
-                                    dimension_description=dimension_description,
-                                    text_prompt=prompt)
-    elif template_type == "video_score":
-        return VIDEOSCORE_QUERY_PROMPT.format(dimension_name=dimension_name,
-                                              dimension_description=dimension_description,
-                                              text_prompt=prompt)
-    elif template_type == "detailed_special":
+    if template_type == "simple":
+        return SIMPLE_PROMPT.format(
+            dimension_name=dimension_name,
+            dimension_description=dimension_description,
+            text_prompt=prompt,
+        )
+    if template_type == "video_score":
+        return VIDEOSCORE_QUERY_PROMPT.format(
+            dimension_name=dimension_name,
+            dimension_description=dimension_description,
+            text_prompt=prompt,
+        )
+    if template_type == "detailed_special":
         return DETAILED_PROMPT_WITH_SPECIAL_TOKEN.format(text_prompt=prompt)
-    elif template_type == "detailed":
+    if template_type == "detailed":
         return DETAILED_PROMPT.format(text_prompt=prompt)
-    else:
-        raise ValueError("Invalid template type")
+    raise ValueError("Invalid template type")
