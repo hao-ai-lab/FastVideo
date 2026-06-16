@@ -1,10 +1,10 @@
-"""Shared lightweight type aliases for mini-fastvideo.
+"""Shared lightweight type aliases for v2.
 
 The core (card/loop/runtime/cache/parity/program/request/training) is numpy-only
 and CPU-testable. Tensors are therefore typed structurally as ``TensorLike``:
 on the CPU test path they are ``numpy.ndarray``; on a GPU box the same code runs
 with ``torch.Tensor``. The core never imports torch — only model-component
-*adapters* do, lazily (see ``mini_fastvideo/card/components.py``).
+*adapters* do, lazily (see ``v2/card/components.py``).
 """
 from __future__ import annotations
 

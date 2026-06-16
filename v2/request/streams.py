@@ -6,7 +6,7 @@ logs, finals." Event taxonomy: ``request.*``, ``session.*``, ``artifact.*``,
 stream, byte-range/buffer-ref, codec/container, timestamp range, and
 preview-vs-final — invalid combinations are unrepresentable.
 
-For mini-fastvideo the Stream is a simple synchronous ordered channel (the core is
+For v2 the Stream is a simple synchronous ordered channel (the core is
 numpy/sync and CPU-testable); a GPU/server deployment swaps in an async channel
 without changing the event types.
 """

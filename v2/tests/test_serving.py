@@ -10,21 +10,21 @@ import asyncio
 
 import numpy as np
 
-from mini_fastvideo._enums import WorkUnitKind
-from mini_fastvideo.card import CostModel
-from mini_fastvideo.deploy import (
+from v2._enums import WorkUnitKind
+from v2.card import CostModel
+from v2.deploy import (
     DynamoWorkerAdapter,
     FakeDynamoRuntime,
     LocalFleet,
     NoWorkerAvailable,
     build_deployment_card,
 )
-from mini_fastvideo.extend import InterceptorChain, ObserverBus
-from mini_fastvideo.models import build_default_engine, build_omni_engine, build_wan21_card, build_wan_t2v_program
-from mini_fastvideo.request import DiffusionParams, OutputSpec, SamplingParams, TaskType, make_request
-from mini_fastvideo.runtime import AsyncEngine, DisaggregatedRunner, Engine, PoolSet, wan_t2v_disaggregated
-from mini_fastvideo.serving import OmniOpenAIServer
-from mini_fastvideo.transport import (
+from v2.extend import InterceptorChain, ObserverBus
+from v2.models import build_default_engine, build_omni_engine, build_wan21_card, build_wan_t2v_program
+from v2.request import DiffusionParams, OutputSpec, SamplingParams, TaskType, make_request
+from v2.runtime import AsyncEngine, DisaggregatedRunner, Engine, PoolSet, wan_t2v_disaggregated
+from v2.serving import OmniOpenAIServer
+from v2.transport import (
     InProcConnector,
     InProcKVConnector,
     ShmFakeConnector,
@@ -137,7 +137,7 @@ def _req(seed=1):
 
 
 def test_fleet_least_loaded_routes_around_busy_worker():
-    from mini_fastvideo.runtime import RequestState
+    from v2.runtime import RequestState
     A, B, cardA, cardB = _two_workers()
     fleet = LocalFleet("least_loaded")
     fleet.register("A", A, cardA); fleet.register("B", B, cardB)
