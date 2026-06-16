@@ -73,8 +73,25 @@ fake-quantized Triton kernel (straight-through estimator), so the DiT learns to
 absorb FP4 attention error. This kernel is Triton, so it runs on both `sm_100`
 (B200/GB200) and `sm_120` (RTX 5090).
 
-> The next stage of the full QAD recipe is a quantization-aware DMD distillation
-> down to 3 steps; that pipeline is tracked separately.
+## Train stage 2 (QAT DMD distillation to 3 steps)
+
+Distill the QAT-finetuned generator down to **3 sampling steps**. Only the
+generator is quantized (Attn-QAT); the teacher (`real_score`) and critic
+(`fake_score`) stay full precision. This is enforced in the loader
+(`component_loader.py`, via the `_loading_teacher_critic_model` flag), so the
+same global `ATTN_QAT_TRAIN` env reaches **only** the generator — no per-model
+flags or monkey-patching.
+
+```bash
+# generator init = the stage-1 finetune checkpoint
+bash examples/training/finetune/wan_t2v_1.3B/mixkit/distill_dmd_qat.sh \
+    data/HD-Mixkit-Finetune-Wan/combined_parquet_dataset/ \
+    checkpoints/wan_t2v_qat_finetune/checkpoint-2000/transformer/diffusion_pytorch_model.safetensors
+```
+
+DMD runs a double loop (critic every step, generator every
+`generator_update_interval`), and validation samples the distilled student at
+3 steps — the final 4-bit-attention model.
 
 ## Inference (NVFP4 4-bit linear)
 
