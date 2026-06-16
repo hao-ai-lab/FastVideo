@@ -1,11 +1,8 @@
 """Vendored HPSv3 runtime package.
 
 Source: https://github.com/MizzenAI/HPSv3
-Commit: bd0c5fcb5f587617b0169c07222ab78d01e2f3c2
+Commit: a2eb2ef2c7b5d91a566347a5825cf6d872122149
 Purpose: Runtime reward inference integration for FastVideo GenRL.
-
-This is temporary minimal vendoring for PR integration. It is expected to be
-cleaned up and normalized later.
 
 Porting rules:
 - Include only files required by the runtime import closure used by FastVideo.

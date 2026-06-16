@@ -1,7 +1,7 @@
 """Vendored runtime subset of VideoAlign.
 
 Source: https://github.com/KlingAIResearch/VideoAlign
-Commit: 219ab9db64c045e5181a2202d11f686439351292
+Commit: aba26b658fec7d9fd30c295187b548ea673c8769
 Purpose: Runtime reward inference integration for FastVideo GenRL.
 
 This is temporary minimal vendoring for PR integration. It is expected to be

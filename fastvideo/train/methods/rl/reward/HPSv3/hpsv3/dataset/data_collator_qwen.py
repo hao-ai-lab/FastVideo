@@ -41,7 +41,6 @@ Please provide the overall ratings of this image:
 
 
 class QWen2VLDataCollator:
-
     def __init__(
         self,
         processor,
@@ -69,25 +68,28 @@ class QWen2VLDataCollator:
         remove unnecessary keys from message(very very necessary)
         """
         message_list = []
-        for text, image in zip(texts, images, strict=False):
-            out_message = [{
-                "role":
-                "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "image": image,
-                        "min_pixels": min_pixels,
-                        "max_pixels": max_pixels,
-                    },
-                    {
-                        "type":
-                        "text",
-                        "text": (INSTRUCTION.format(text_prompt=text) +
-                                 prompt_with_special_token if use_special_tokens else prompt_without_special_token),
-                    },
-                ],
-            }]
+        for text, image in zip(texts, images):
+            out_message = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": image,
+                            "min_pixels": min_pixels,
+                            "max_pixels": max_pixels,
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                INSTRUCTION.format(text_prompt=text) + prompt_with_special_token
+                                if use_special_tokens
+                                else prompt_without_special_token
+                            ),
+                        },
+                    ],
+                }
+            ]
 
             message_list.append(out_message)
 
@@ -104,8 +106,9 @@ class QWen2VLDataCollator:
         pad_len = max_len - sequences.shape[1]
         padding = (0, pad_len) if padding_side == "right" else (pad_len, 0)
 
-        sequences_padded = torch.nn.functional.pad(sequences, padding, "constant",
-                                                   self.processor.tokenizer.pad_token_id)
+        sequences_padded = torch.nn.functional.pad(
+            sequences, padding, "constant", self.processor.tokenizer.pad_token_id
+        )
         attention_mask_padded = torch.nn.functional.pad(attention_mask, padding, "constant", 0)
 
         return sequences_padded, attention_mask_padded
@@ -164,12 +167,12 @@ class QWen2VLDataCollator:
 
         # pdb.set_trace()
         max_len = max(batch_1["input_ids"].shape[1], batch_2["input_ids"].shape[1])
-        batch_1["input_ids"], batch_1["attention_mask"] = self._pad_sequence(batch_1["input_ids"],
-                                                                             batch_1["attention_mask"], max_len,
-                                                                             "right")
-        batch_2["input_ids"], batch_2["attention_mask"] = self._pad_sequence(batch_2["input_ids"],
-                                                                             batch_2["attention_mask"], max_len,
-                                                                             "right")
+        batch_1["input_ids"], batch_1["attention_mask"] = self._pad_sequence(
+            batch_1["input_ids"], batch_1["attention_mask"], max_len, "right"
+        )
+        batch_2["input_ids"], batch_2["attention_mask"] = self._pad_sequence(
+            batch_2["input_ids"], batch_2["attention_mask"], max_len, "right"
+        )
 
         batch = {
             "batch_1": batch_1,

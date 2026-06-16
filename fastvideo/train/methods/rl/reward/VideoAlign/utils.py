@@ -1,6 +1,5 @@
-import os
 import glob
-import logging
+import os
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -95,9 +94,11 @@ class ModelConfig:
 def maybe_zero_3(param, ignore_status=False, name=None):
     from deepspeed import zero
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+
     if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE and not ignore_status:
-            logging.warning("%s: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: %s", name, param.ds_status)
+        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
+            if not ignore_status:
+                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
         with zero.GatheredParameters([param]):
             param = param.data.detach().cpu().clone()
     else:
@@ -142,8 +143,9 @@ def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
 ########## Load Models From Folder ##########
 
 
-def _insert_adapter_name_into_state_dict(state_dict: dict[str, torch.Tensor], adapter_name: str,
-                                         parameter_prefix: str) -> dict[str, torch.Tensor]:
+def _insert_adapter_name_into_state_dict(
+    state_dict: dict[str, torch.Tensor], adapter_name: str, parameter_prefix: str
+) -> dict[str, torch.Tensor]:
     """Utility function to remap the state_dict keys to fit the PEFT model by inserting the adapter name."""
     peft_model_state_dict = {}
     for key, val in state_dict.items():
@@ -162,15 +164,26 @@ def _insert_adapter_name_into_state_dict(state_dict: dict[str, torch.Tensor], ad
 
 def save_video(tensor, path):
     from torchvision.io import write_video
+
     tensor = tensor * 255.0
     tensor = tensor.permute(0, 2, 3, 1)
     tensor = tensor.clamp(0, 255).byte()
-    write_video(path, tensor, 4, video_codec='h264')
+    write_video(path, tensor, 4, video_codec="h264")
 
 
 def load_model_from_checkpoint(model, checkpoint_dir, checkpoint_step):
     checkpoint_paths = glob.glob(os.path.join(checkpoint_dir, "checkpoint-*"))
     checkpoint_paths.sort(key=lambda x: int(x.split("-")[-1]), reverse=True)
+    if not checkpoint_paths:
+        raise FileNotFoundError(
+            f"No VideoAlign checkpoint-* directories found under {checkpoint_dir}."
+        )
+
+    before_rm_head = {
+        key: value.detach().cpu().clone()
+        for key, value in model.state_dict().items()
+        if "rm_head" in key
+    }
 
     if checkpoint_step is None or checkpoint_step == -1:
         # get the latest checkpoint
@@ -193,16 +206,42 @@ def load_model_from_checkpoint(model, checkpoint_dir, checkpoint_step):
         model_state_dict = torch.load(full_ckpt, map_location="cpu")
         model.load_state_dict(model_state_dict)
     else:
+        if not os.path.exists(lora_ckpt) or not os.path.exists(non_lora_ckpt):
+            raise FileNotFoundError(
+                "VideoAlign checkpoint must contain either model.pth or both "
+                f"adapter_model.safetensors and non_lora_state_dict.pth. Got {checkpoint_path}."
+            )
         lora_state_dict = safetensors.torch.load_file(lora_ckpt)
         non_lora_state_dict = torch.load(non_lora_ckpt, map_location="cpu")
+        if not any("rm_head" in key for key in non_lora_state_dict):
+            raise RuntimeError(
+                f"{non_lora_ckpt} does not contain rm_head weights. Refusing "
+                "to use a randomly initialized VideoAlign reward head."
+            )
 
-        lora_state_dict = _insert_adapter_name_into_state_dict(lora_state_dict,
-                                                               adapter_name="default",
-                                                               parameter_prefix="lora_")
+        lora_state_dict = _insert_adapter_name_into_state_dict(
+            lora_state_dict, adapter_name="default", parameter_prefix="lora_"
+        )
 
         model_state_dict = model.state_dict()
         model_state_dict.update(non_lora_state_dict)
         model_state_dict.update(lora_state_dict)
         model.load_state_dict(model_state_dict)
+
+    after_rm_head = {
+        key: value.detach().cpu()
+        for key, value in model.state_dict().items()
+        if "rm_head" in key
+    }
+    unchanged = (
+        before_rm_head
+        and set(before_rm_head) == set(after_rm_head)
+        and all(torch.equal(before_rm_head[key], after_rm_head[key]) for key in before_rm_head)
+    )
+    if unchanged:
+        raise RuntimeError(
+            f"VideoAlign checkpoint {checkpoint_path} did not overwrite rm_head "
+            "weights. Refusing to score rewards with a randomly initialized head."
+        )
 
     return model, checkpoint_step
