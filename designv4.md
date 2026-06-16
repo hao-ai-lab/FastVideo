@@ -5,7 +5,7 @@
 > together with **what was actually built and tested** in the `v2/` package, and with the one workload
 > that most stressed the design — **UniRL/PromptRL-style joint LM + generator reinforcement learning**
 > (arXiv 2510.17937; PromptRL, arXiv 2602.01382). v4 is not aspirational. Every structural claim below
-> is backed by code in `v2/` and a passing test (91 tests, 14 files, two independent runners — `pytest`
+> is backed by code in `v2/` and a passing test (97 tests, 15 files, two independent runners — `pytest`
 > and a zero-dependency `v2/run_tests.py`). The neural forwards are toy numpy stand-ins (no GPU/torch in
 > this environment, §12); the **control flow, contracts, scheduling, caching, parity gates, and training
 > math are real**, which is the whole point of the (recipe, runtime) separation: swap the component
@@ -89,12 +89,17 @@ The Card/Loop/Program split is not specialized to one sharing pattern. The **sam
 | Single diffusion | `transformer` | `diffusion_denoise` | — | `wan21` |
 | **MoT omni** | **one** `transformer` | `ar_decode` **+** `diffusion_denoise` | both loops → **same** component | `cosmos3`, `bagel` |
 | **Joint LM+gen RL** | `llm` **+** `transformer` (separate) | `ar_decode`→`llm`, `diffusion_denoise`→`transformer` | **disjoint** experts, one request | `unified` |
+| **Cascade omni-speech** | `thinker` **+** `talker` **+** `vocoder` (separate) | `ar_decode`→`ar_decode`→`audio_decode` | **disjoint**, **chained** (talker reads thinker hidden state; vocoder reads talker tokens) | `qwen_omni` |
 
-MoT (one module, two loops) and UniRL (two experts, two loops) are *topological opposites*, yet both are
-ordinary `shared_weight_components` bindings on `LoopSpec`s — **no new primitive**. The third idea: *the
-weight-sharing graph is data on the card, not structure in the runtime.* This is what lets the same engine
-serve a 1.3B single-DiT, a 30B MoT, and a Qwen+FLUX joint-RL recipe without three runtimes. ✅ Proven by
-`v2/tests/test_unified_rl.py::test_two_separate_experts_not_a_shared_mot`.
+These four are the *full* spread of weight-sharing topologies — one module, one shared module across two
+loops, two disjoint experts trained jointly, three disjoint experts chained — and every one of them is just
+`shared_weight_components` bindings on `LoopSpec`s plus hand-off nodes in a `Program`: **no new primitive**.
+MoT (shared) and UniRL (disjoint, jointly trained) are topological *opposites*; Qwen-Omni adds a third axis,
+*depth* (a three-stage cascade with cross-stage conditioning). The signature idea: *the weight-sharing graph
+is data on the card, not structure in the runtime.* This is what lets one engine serve a 1.3B single-DiT, a
+30B MoT, a Qwen+FLUX joint-RL recipe, and a thinker→talker→vocoder speech model without four runtimes.
+✅ Proven by `test_unified_rl.py::test_two_separate_experts_not_a_shared_mot` and
+`test_thinker_talker.py::test_three_disjoint_experts_three_loop_types`.
 
 ## 3. Planes and dependency order
 
@@ -306,6 +311,29 @@ new card + a new method, not a new engine* — which is exactly the claim §2.3 
 it. The refinements the test forced (the component-scoped weight sync; the explicit likelihood-based C2
 rung; `guidance_scale=1` at RL time to keep the PPO recompute faithful) are improvements, not patches.
 
+### 9.5 Second stress test — Qwen-Omni thinker→talker→vocoder (the cascade topology)
+
+A second canonical vllm-omni model was ported to confirm the §2.3 claim from a different direction:
+vllm-omni's `qwen2_5_omni` pipeline — a **thinker** (multimodal LLM → text), a **talker** (AR → speech
+codec tokens, conditioned on the thinker's hidden state), and a **code2wav vocoder** (codec tokens →
+waveform). vllm-omni expresses it as three opaque stages with `custom_process_input_func` hand-offs the
+scheduler never sees inside; v2 expresses it as **three driven loops** (`v2/models/qwen_omni/`) — every
+thinker token, talker token, and vocoder chunk a runtime-visible WorkUnit.
+
+What it added beyond UniRL: a **three-expert, three-loop-type cascade** (`ar_decode → ar_decode →
+audio_decode`) with **chained cross-stage conditioning** (talker reads the thinker's tokens *and* hidden
+state — the "full payload" path; vocoder reads the talker's speech tokens) and **streaming codec→waveform**
+via `AUDIO_CHUNK` WorkUnits. The loop kinds were *already* in the enum — `LoopKind.AR_DECODE`'s docstring
+literally names "thinker/talker", and `LoopKind.AUDIO_DECODE` + `WorkUnitKind.AUDIO_CHUNK` were defined for
+exactly the vocoder — so the port added a `ToyTalker`/`ToyVocoder`, a `VocoderLoop` (filling the anticipated
+`AUDIO_DECODE` slot), a card, a program, and one tiny generalization (`ARDecodeLoop` gained a configurable
+`prompt_slot` so two chained AR loops don't collide on the prefill slot). The contract, scheduler, caches,
+and parity gate were untouched again. ✅ `v2/tests/test_thinker_talker.py` (6 tests, incl. the three-loop
+interleave parity gate and the cascade-conditioning checks); full suite **97 passed**, zero regressions.
+
+The two stress tests together span the topology space — *shared* (MoT), *disjoint-joint* (UniRL),
+*disjoint-cascade* (Qwen-Omni) — and the design absorbed all three as **cards + methods, never engines**.
+
 ## 10. Serving & fleet — our own stack, Dynamo optional
 
 Per the explicit instruction "*don't completely rely on Dynamo; we still need our own version*," v2 ships a
@@ -349,12 +377,13 @@ v2/
   request/     requests, params (DiffusionParams + sde_rollout), tasks (TaskType), streams, artifacts
   models/      backend (toy components) + common (cached_text_encode)
                wan21/ ltx2/ wan_causal/         # phase 1: T2V, distilled, self-forcing student
-               omni/ cosmos3/ bagel/            # phase 2: MoT (one module, two loops)
+               omni/ cosmos3/ bagel/            # phase 2: MoT (one module, two loops); omni/ = ARDecodeLoop + VocoderLoop
                unified/                         # §9: two experts, two loops, joint RL
+               qwen_omni/                       # §9.5: thinker→talker→vocoder, three experts/three loops
   training/    rollout, behavior, rewards, weight_sync, methods/{finetune,dmd2,diffusion_nft,self_forcing,unified_rl}
   serving/     AsyncEngine, pools, DisaggregatedRunner, connectors, OpenAI server
   deploy/      DeploymentCard, LocalFleet, DynamoWorkerAdapter
-  tests/       14 files, 91 tests          run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
+  tests/       15 files, 97 tests          run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
 ```
 
 **Enforced boundaries:** `card/` imports no product/runtime; `runtime/` executes `card/` loops but defines
@@ -385,6 +414,7 @@ multi-expert RL force a redesign?"* — answered: it generalizes, no redesign (�
 | Source | Take | Constrain / reject |
 |---|---|---|
 | **UniRL-Zero / PromptRL** (arXiv 2510.17937, 2602.01382) | Joint LM-refiner + flow-generator RL under one reward; FlowGRPO SDE-prefix/ODE-tail with per-step log-probs; group-relative advantage → token-PG **and** PPO; partial-refinement contrast; prompt-only vs joint ablation; two LRs | Expresses the two experts and the joint update as a **card + method**, not a bespoke trainer; the SDE rollout sampler is a *library* entry gated behind `sde_rollout`, never the serve path; the PPO ratio rests on the **likelihood-based C2** parity gate, not on hope |
+| **vllm-omni `qwen2_5_omni`** (thinker-talker-vocoder) | The canonical 3-stage omni-speech cascade: thinker (MM-LLM→text) → talker (AR→speech codec tokens, conditioned on thinker hidden state) → code2wav vocoder (tokens→waveform), streaming | Three opaque request-scheduled stages with `custom_process_input_func` hand-offs become **three driven loops** (ar_decode×2 + audio_decode), every token/chunk a step-visible WorkUnit; the cross-stage hand-offs are explicit `Program` nodes, not stage-boundary callbacks; the vocoder fills the pre-declared `LoopKind.AUDIO_DECODE` slot |
 
 ---
 
@@ -392,11 +422,12 @@ multi-expert RL force a redesign?"* — answered: it generalizes, no redesign (�
 
 v3 argued that the atomic unit is the (recipe, runtime) pair and that a model-native, loop-driven runtime is
 what the post-training era requires. v4 is the same argument, now *built and measured* in `v2/`: the
-contracts hold under serving, under MoT omni, and — the hard case — under **joint LM + generator
-reinforcement learning**, where one reward simultaneously updates two separate experts driven by two
-different loop types in one request. That workload, which UniRL/PromptRL identify as central to the future
-of content creation, fit inside the design as *a new card and a new method* with no new runtime primitive.
-The design's bet is therefore not that it is elegant — it is that **the weight-sharing topology and the
-training recipe are data on a card, so a new frontier recipe is a card, not a rewrite.** The remaining work
-is the GPU port, where, by construction, the loops, scheduler, caches, parity, and training plane do not
-change — only the component factories do.
+contracts hold under serving, under MoT omni, under a thinker→talker→vocoder **cascade**, and — the hard
+case — under **joint LM + generator reinforcement learning**, where one reward simultaneously updates two
+separate experts driven by two different loop types in one request. Those workloads — UniRL/PromptRL's
+joint RL (central to the future of content creation) and vllm-omni's omni-speech cascade — both fit inside
+the design as *a new card and a new method/loop*, with no new runtime primitive. The design's bet is
+therefore not that it is elegant — it is that **the weight-sharing topology and the training recipe are
+data on a card, so a new frontier recipe is a card, not a rewrite.** The remaining work is the GPU port,
+where, by construction, the loops, scheduler, caches, parity, and training plane do not change — only the
+component factories do.
