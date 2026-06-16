@@ -1,4 +1,4 @@
-"""mini-fastvideo — a scoped, CPU-testable realization of the design_v3 model-native runtime.
+"""v2 — a scoped, CPU-testable realization of the design_v3 model-native runtime.
 
 > A model card is a (recipe, runtime) pair with a parity obligation.
 > The model owns loop semantics; the runtime owns loop lifecycle.
@@ -12,7 +12,7 @@ omni-ready (multi-loop ModelInstance, ar_decode/chunk_rollout loop kinds) for th
 Cosmos3 + vllm-omni omni ports.
 
 The core is numpy-only and CPU-testable; heavy Wan/LTX neural forwards become lazy torch
-adapters (see ``mini_fastvideo/models/*/components.py``) that are off the test path.
+adapters (see ``v2/models/*/components.py``) that are off the test path.
 """
 from __future__ import annotations
 

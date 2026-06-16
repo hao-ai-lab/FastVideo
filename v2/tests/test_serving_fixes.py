@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import asyncio
 
-from mini_fastvideo.card import CostModel
-from mini_fastvideo.deploy import build_deployment_card
-from mini_fastvideo.models import build_default_engine, build_wan21_card, build_wan_t2v_program
-from mini_fastvideo.request import Cancelled, DiffusionParams, OutputSpec, TaskType, make_request
-from mini_fastvideo.runtime import AsyncEngine, PoolSet, wan_t2v_disaggregated
-from mini_fastvideo.transport import InProcConnector
+from v2.card import CostModel
+from v2.deploy import build_deployment_card
+from v2.models import build_default_engine, build_wan21_card, build_wan_t2v_program
+from v2.request import Cancelled, DiffusionParams, OutputSpec, TaskType, make_request
+from v2.runtime import AsyncEngine, PoolSet, wan_t2v_disaggregated
+from v2.transport import InProcConnector
 
 
 def _disagg_engine():
@@ -101,8 +101,8 @@ def test_offline_runner_honors_cancellation():
 
 
 def test_http_rejects_oversized_and_malformed_requests():
-    from mini_fastvideo.runtime import AsyncEngine as AE
-    from mini_fastvideo.serving import OmniOpenAIServer
+    from v2.runtime import AsyncEngine as AE
+    from v2.serving import OmniOpenAIServer
 
     async def status_of(host, port, raw: bytes) -> int:
         r, w = await asyncio.open_connection(host, port)

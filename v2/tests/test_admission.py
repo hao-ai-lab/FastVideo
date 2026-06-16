@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from mini_fastvideo.memory import MemoryManager, OutOfMemory
-from mini_fastvideo.models import build_default_engine
-from mini_fastvideo.models.wan21.loop import latent_shape
-from mini_fastvideo.parity import compare_outputs
-from mini_fastvideo.request import DiffusionParams, TaskType, make_request
-from mini_fastvideo.runtime import AdmissionController, Engine
+from v2.memory import MemoryManager, OutOfMemory
+from v2.models import build_default_engine
+from v2.models.wan21.loop import latent_shape
+from v2.parity import compare_outputs
+from v2.request import DiffusionParams, TaskType, make_request
+from v2.runtime import AdmissionController, Engine
 
 
 def test_memory_manager_reserve_release_and_oom():
