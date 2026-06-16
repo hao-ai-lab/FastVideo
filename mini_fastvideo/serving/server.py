@@ -61,12 +61,22 @@ def _ser_artifacts(out: Output) -> dict:
 
 
 class OmniOpenAIServer:
-    def __init__(self, engine: Any, *, engine_id: str = "mini-fastvideo"):
+    def __init__(self, engine: Any, *, engine_id: str = "mini-fastvideo", max_jobs: int = 512):
         self.engine = engine                       # an AsyncEngine
         self.engine_id = engine_id
         self.jobs: dict[str, dict] = {}            # video job store
         self.http = HttpServer(self.dispatch)
         self.served = 0
+        self.max_jobs = max_jobs
+        self._tasks: set = set()                   # tracked video-job tasks (no fire-and-forget leak)
+
+    def _evict_jobs(self) -> None:
+        terminal = ("completed", "failed")
+        for jid in list(self.jobs):
+            if len(self.jobs) <= self.max_jobs:
+                break
+            if self.jobs[jid].get("status") in terminal:
+                self.jobs.pop(jid, None)
 
     # --- routing ------------------------------------------------------------ #
     async def dispatch(self, req: Request) -> Response:
@@ -122,7 +132,10 @@ class OmniOpenAIServer:
         vg = VideoGenerationRequest.from_json(req.json())
         job_id = f"video-{next(_job_ctr)}"
         self.jobs[job_id] = {"id": job_id, "status": "queued", "model": vg.model}
-        asyncio.create_task(self._run_video_job(job_id, vg))
+        t = asyncio.create_task(self._run_video_job(job_id, vg))
+        self._tasks.add(t)
+        t.add_done_callback(self._tasks.discard)   # tracked, not fire-and-forget
+        self._evict_jobs()
         return Response.json({"id": job_id, "status": "queued", "model": vg.model}, status=202)
 
     async def _run_video_job(self, job_id: str, vg: VideoGenerationRequest) -> None:
@@ -187,4 +200,11 @@ class OmniOpenAIServer:
         return await self.http.start(host, port)
 
     async def close(self) -> None:
+        for t in list(self._tasks):                # cancel + drain in-flight video jobs on shutdown
+            t.cancel()
+        for t in list(self._tasks):
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
         await self.http.close()
