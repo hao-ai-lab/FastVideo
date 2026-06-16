@@ -36,6 +36,10 @@ class WeightSyncPlan:
     layout_adapters: dict[str, Any] = field(default_factory=dict)
     transport: str = "in_proc"                 # in_proc | shm | nccl | rdma
     decay: float = 0.0                         # for EMA / OLD_POLICY blend
+    # which component(s) this plan syncs — versioned + cache-invalidated in isolation (design_v3 §7.1).
+    # Joint RL (UniRL) ships ONE plan per trainable expert: ``("transformer",)`` and ``("llm",)`` —
+    # so the LM weight sync does NOT flush the frozen text-encoder's feature cache, and vice-versa.
+    components: tuple[str, ...] = ("transformer",)
 
     def apply(self, src_dit: Any, dst_dit: Any, dst_instance: Any = None) -> str:
         """Execute the lifecycle. Returns the new weights_version published on dst_instance."""
@@ -45,10 +49,10 @@ class WeightSyncPlan:
             dst_dit.blend_from(src_dit, self.decay)     # decay·dst + (1-decay)·src
         else:
             dst_dit.copy_from(src_dit)                  # hard copy (student push / reference init)
-        # 4) bump version + 5) invalidate the TRANSFORMER's caches/graphs + 6) publish.
-        # Scoped to the transformer (the synced weights) so frozen text/vision encoders keep
-        # their feature caches (design_v3 §7.1).
+        # 4) bump version + 5) invalidate ONLY this plan's component caches/graphs + 6) publish.
+        # Scoped to ``self.components`` so frozen text/vision encoders keep their feature caches,
+        # and the two experts of a joint-RL update version independently (design_v3 §7.1, §10).
         version = f"w{next(_ver)}"
         if dst_instance is not None:
-            dst_instance.set_weights_version(version, components=["transformer"])
+            dst_instance.set_weights_version(version, components=list(self.components))
         return version
