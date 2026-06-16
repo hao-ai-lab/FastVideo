@@ -3,7 +3,14 @@ from __future__ import annotations
 
 from .context import RuntimeLoopContext
 from .engine import Engine, ProgramRunner
-from .scheduler import AdmissionController, BatchScheduler, SchedulerMetrics, WorkUnit
+from .scheduler import (
+    AdmissionController,
+    AdmissionInfeasible,
+    BatchScheduler,
+    SchedulerMetrics,
+    StepTicket,
+    WorkUnit,
+)
 
 __all__ = ["Engine", "ProgramRunner", "RuntimeLoopContext", "AdmissionController",
-           "BatchScheduler", "SchedulerMetrics", "WorkUnit"]
+           "AdmissionInfeasible", "BatchScheduler", "SchedulerMetrics", "StepTicket", "WorkUnit"]

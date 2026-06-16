@@ -27,6 +27,9 @@ class ModelInstance:
         self.caches = cache_manager
         self.weights_version = weights_version
         self.adapter_versions: dict[str, str] = {}
+        # per-component weight versions (§7.1): a component's version changes only when IT is synced,
+        # so a transformer-only RL sync never invalidates the frozen text-encoder's feature cache.
+        self.component_versions: dict[str, str] = {cid: weights_version for cid in card.components}
         self._components: dict[str, Any] = {}
         self._loops: dict[str, Any] = {}
         self._asleep: set[str] = set()
@@ -69,10 +72,20 @@ class ModelInstance:
             self._asleep.discard(cid)
 
     # --- weight sync (design_v3 §10): bump version + invalidate caches -------- #
-    def set_weights_version(self, version: str) -> None:
+    def version_of(self, component_id: str) -> str:
+        """The component's own weights version (defaults to the instance version)."""
+        return self.component_versions.get(component_id, self.weights_version)
+
+    def set_weights_version(self, version: str, components: list[str] | None = None) -> None:
+        """Publish a new weights version. If ``components`` is given, only those components' versions
+        bump and only their caches are invalidated (design_v3 §7.1 partition-not-flush) — so a
+        transformer-only RL weight sync leaves the frozen text-encoder's feature cache intact."""
         self.weights_version = version
-        if self.caches is not None and hasattr(self.caches, "invalidate_weights"):
-            self.caches.invalidate_weights(version)
+        changed = components if components is not None else list(self.card.components.keys())
+        for c in changed:
+            self.component_versions[c] = version
+        if self.caches is not None and hasattr(self.caches, "invalidate_components"):
+            self.caches.invalidate_components(set(changed))
 
     def __repr__(self) -> str:
         return (f"ModelInstance(card={self.card.model_id!r}, weights={self.weights_version!r}, "

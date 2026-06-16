@@ -90,7 +90,7 @@ class ChunkRolloutLoop:
         emits = []
         if i == self.steps_per_chunk - 1:                       # last step of this chunk → streamable
             emits.append(StreamChunk(stream_id=st.request_id, modality="video",
-                                     seq=st.scratch["chunk_idx"], preview=False))
+                                     seq=st.scratch["chunk_idx"], data=x, preview=False))
         res = ResourceRequest(
             compute_seconds=self.cost.predict(int(np.prod(x.shape)), float(len(branches))),
             resident_bytes=int(x.nbytes), peak_activation_bytes=int(x.nbytes * len(branches)))

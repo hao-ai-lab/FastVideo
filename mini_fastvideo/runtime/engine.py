@@ -30,7 +30,13 @@ from ..request.artifacts import (
 from ..request.cancel import CancelKind, CancelScope
 from ..request.streams import Stream
 from .context import RuntimeLoopContext
-from .scheduler import AdmissionController, SchedulerMetrics
+from .scheduler import (
+    AdmissionController,
+    AdmissionInfeasible,
+    BatchScheduler,
+    SchedulerMetrics,
+    WorkUnit,
+)
 
 
 def _to_artifact(name: str, value: Any, producer: str = "") -> Any:
@@ -108,6 +114,10 @@ class ProgramRunner:
                         return False
                     need = plan0.resources.resident_bytes
                     if need > 0:
+                        if not self.engine.admission.feasible_resident(need):
+                            raise AdmissionInfeasible(
+                                f"{node.loop_id}: resident {need}B exceeds pool capacity "
+                                f"{self.engine.admission.memory.total_bytes}B")
                         res = self.engine.admission.reserve_resident(node.loop_id, need)
                         if res is None:
                             self.engine.metrics.deferred += 1
@@ -120,13 +130,16 @@ class ProgramRunner:
                 if plan is None:
                     self._finish_loop(node)
                     return False
+                if not self.engine.admission.feasible_step(plan):
+                    raise AdmissionInfeasible(
+                        f"{node.loop_id}: step needs peak {plan.resources.peak_activation_bytes}B / "
+                        f"{plan.resources.compute_seconds:.4g}s — exceeds pool/budget capacity")
                 step_res = self.engine.admission.admit_step(plan)
                 if step_res is None:
-                    return False              # deferred this tick
+                    return False              # deferred this tick (will retry; refundable)
                 self.loop_runner.step()
                 self.engine.admission.release(step_res)
-                self.engine.metrics.batched_units += 1
-                self.engine.metrics.by_kind[plan.kind.value] += 1
+                self.engine.metrics.stepped_units += 1
                 if self.loop_runner.done:
                     self._finish_loop(node)
                 return False                  # yielded one loop step → return for interleaving
@@ -138,21 +151,30 @@ class ProgramRunner:
             self.slots[node.output_slot] = self.loop_runner.result.outputs
             self._merge_metrics(self.loop_runner.result.metrics)
         if self._resident_res not in (None, True):
-            self.engine.admission.release(self._resident_res)
+            self.engine.admission.memory.release(self._resident_res)   # resident is a plain Reservation
         self._resident_res = None
         self.loop_runner = None
         self.node_idx += 1
 
+    @property
+    def _progress(self) -> tuple:
+        """A token that changes iff the runner advanced (node, loop step, or resident reservation)."""
+        sidx = self.loop_runner.state.step_idx if self.loop_runner is not None else -1
+        return (self.node_idx, sidx, self._resident_res is not None)
+
     def run_to_completion(self) -> None:
-        guard = 0
-        limit = 10_000_000
+        stuck = 0
         while not self.done:
-            before = (self.node_idx, self.loop_runner.state.step_idx if self.loop_runner else -1)
+            p0 = self._progress
             self.tick()
-            guard += 1
-            after = (self.node_idx, self.loop_runner.state.step_idx if self.loop_runner else -1)
-            if guard > limit:
-                raise RuntimeError(f"program {self.program.program_id} did not terminate")
+            if not self.done and self._progress == p0:
+                stuck += 1
+                if stuck > 3:                       # fail fast, not a 10M busy-spin
+                    raise AdmissionInfeasible(
+                        f"program {self.program.program_id} made no progress for several ticks "
+                        "(unsatisfiable reservation or deadlock)")
+            else:
+                stuck = 0
 
     def output(self) -> Output:
         artifacts: dict[str, Any] = {}
@@ -201,13 +223,22 @@ class Engine:
 
     def run_interleaved(self, requests: list[Any]) -> dict[str, Output]:
         runners = [self._make_runner(req) for req in requests]
-        guard = 0
-        limit = 10_000_000
         while not all(r.done for r in runners):
+            # accounting: how many ready WorkPlans would co-batch this round (BatchScheduler, §6.3)
+            units = [WorkUnit(r.request.request_id, r.loop_runner.peek())
+                     for r in runners if not r.done and r.loop_runner is not None
+                     and r.loop_runner.peek() is not None]
+            if units:
+                self.metrics.batches += len(BatchScheduler.group(units))
+            progressed = False
             for r in runners:
                 if not r.done:
+                    p0 = r._progress
                     r.tick()
-            guard += 1
-            if guard > limit:
-                raise RuntimeError("interleaved scheduling did not terminate (admission deadlock?)")
+                    if r.done or r._progress != p0:
+                        progressed = True
+            if not progressed:                      # nobody could be admitted → real deadlock, fail fast
+                raise AdmissionInfeasible(
+                    "interleaved scheduling deadlocked: no request could be admitted this round "
+                    "(jointly infeasible — would require step-boundary preemption, §6.4)")
         return {r.request.request_id: r.output() for r in runners}
