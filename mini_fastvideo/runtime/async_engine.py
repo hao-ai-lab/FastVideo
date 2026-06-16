@@ -23,6 +23,14 @@ from .engine import Engine
 _SENTINEL = object()
 
 
+def _safe_put(q: "asyncio.Queue", item: Any) -> None:
+    """Non-blocking put on an unbounded queue — safe to call from finally/cancellation paths."""
+    try:
+        q.put_nowait(item)
+    except Exception:
+        pass
+
+
 class RequestState:
     WAITING = "waiting"
     RUNNING = "running"
@@ -32,14 +40,32 @@ class RequestState:
 
 
 class AsyncEngine:
-    def __init__(self, engine: Engine | None = None, *, max_stall_ticks: int = 200_000):
+    def __init__(self, engine: Engine | None = None, *, max_stall_ticks: int = 200_000,
+                 max_history: int = 512):
         self.engine = engine if engine is not None else Engine()
         self._disagg: dict[str, tuple] = {}                 # model_id -> (PoolSet, Program)
         self._events: dict[str, asyncio.Queue] = {}
         self._states: dict[str, str] = {}
         self._results: dict[str, Output] = {}
         self._runners: dict[str, Any] = {}
+        self._order: list[str] = []                         # submission order, for bounded eviction
         self.max_stall_ticks = max_stall_ticks
+        self.max_history = max_history
+
+    def _evict(self) -> None:
+        """Bound retained per-request state to the most recent ``max_history`` terminal requests."""
+        terminal = (RequestState.COMPLETED, RequestState.CANCELLED, RequestState.FAILED)
+        i = 0
+        while len(self._order) > self.max_history and i < len(self._order):
+            rid = self._order[i]
+            if self._states.get(rid) in terminal:
+                self._order.pop(i)
+                self._events.pop(rid, None)
+                self._states.pop(rid, None)
+                self._results.pop(rid, None)
+                self._runners.pop(rid, None)
+            else:
+                i += 1
 
     # --- registration ------------------------------------------------------- #
     def register(self, model_id: str, instance: Any, program: Any) -> None:
@@ -87,13 +113,14 @@ class AsyncEngine:
     async def _run(self, request: Any) -> None:
         rid = request.request_id
         evq = self._events[rid]
-        runner = self._make_runner(request)
-        self._runners[rid] = runner
-        self._states[rid] = RequestState.RUNNING
-        await evq.put(OmniEvent("request.start", rid, payload={"task": request.task.value}))
+        runner = None
         stream_cursor = 0
         stall = 0
         try:
+            runner = self._make_runner(request)
+            self._runners[rid] = runner
+            self._states[rid] = RequestState.RUNNING
+            await evq.put(OmniEvent("request.start", rid, payload={"task": request.task.value}))
             while not runner.done:
                 runner.cancel_scope.check()                  # common-path cancellation (step boundary)
                 p0 = runner._progress
@@ -119,24 +146,41 @@ class AsyncEngine:
             await evq.put(OmniEvent("request.complete", rid, payload={"metrics": dict(out.metrics)}))
         except Cancelled:
             self._states[rid] = RequestState.CANCELLED
-            partial = runner.output() if hasattr(runner, "output") else None
-            if partial is not None:
-                partial.error = "cancelled"
-                self._results[rid] = partial
-            await evq.put(OmniEvent("request.cancelled", rid))
+            if runner is not None and hasattr(runner, "output"):
+                try:
+                    partial = runner.output()
+                    partial.error = "cancelled"
+                    self._results[rid] = partial
+                except Exception:
+                    pass
+            _safe_put(evq, OmniEvent("request.cancelled", rid))
+        except asyncio.CancelledError:                       # driver task cancelled (e.g. client gone)
+            self._states[rid] = RequestState.CANCELLED
+            raise
         except Exception as e:  # noqa: BLE001 — request-fatal isolation: one request's error
             self._states[rid] = RequestState.FAILED
             self._results[rid] = Output(request_id=rid, error=str(e))
-            await evq.put(OmniEvent("request.failed", rid, payload={"error": str(e)}))
+            _safe_put(evq, OmniEvent("request.failed", rid, payload={"error": str(e)}))
         finally:
-            await evq.put(_SENTINEL)
+            # release any pool this request occupied — a cancel/error mid-loop must NOT leak capacity
+            if runner is not None and hasattr(runner, "close"):
+                try:
+                    runner.close()
+                except Exception:
+                    pass
+            _safe_put(evq, _SENTINEL)
+            self._evict()
 
     async def submit(self, request: Any) -> AsyncIterator[OmniEvent]:
         """Submit a request and stream its events live (request.start → media.chunk* → artifact.ready*
-        → request.complete | request.cancelled | request.failed)."""
+        → request.complete | request.cancelled | request.failed). Cancels the driver if the consumer
+        abandons the stream (e.g. client disconnect), so no orphaned compute keeps running."""
         rid = request.request_id
+        if rid in self._events and self._states.get(rid) in (RequestState.WAITING, RequestState.RUNNING):
+            raise ValueError(f"request_id {rid!r} is already in flight")
         self._events[rid] = asyncio.Queue()
         self._states[rid] = RequestState.WAITING
+        self._order.append(rid)
         task = asyncio.create_task(self._run(request))
         evq = self._events[rid]
         try:
@@ -146,7 +190,12 @@ class AsyncEngine:
                     break
                 yield ev
         finally:
-            await task
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):     # noqa: BLE001
+                pass
 
     async def generate(self, request: Any) -> Output:
         """Non-streaming: drive to completion, return the Output (the offline path over the queue)."""

@@ -71,17 +71,19 @@ class DisaggregatedRunner:
             if holder_id and holder_id != pool.pool_id and r in self.slots:
                 src = self.pools.by_id[holder_id]
                 got = src.connector.acquire_credit()                  # credit-based flow control
-                manifest = TransferManifest(keys=(r,), producer_id=holder_id, consumer_id=pool.pool_id,
-                                            src_location=src.connector.name, dst_location=pool.connector.name,
-                                            nbytes=payload_nbytes(self.slots.get(r)))
-                src.connector.put(r, self.slots.get(r), manifest)     # producer publishes (chunk_ready)
-                if src.connector.chunk_ready(r):                       # readiness signal
-                    self.slots[r] = src.connector.take(r)              # consumer fetches
-                if got:
-                    src.connector.release_credit()
-                self.slot_pool[r] = pool.pool_id
-                self.transfers += 1
-                self.metrics["transfers"] = self.metrics.get("transfers", 0) + 1
+                try:
+                    manifest = TransferManifest(keys=(r,), producer_id=holder_id, consumer_id=pool.pool_id,
+                                                src_location=src.connector.name, dst_location=pool.connector.name,
+                                                nbytes=payload_nbytes(self.slots.get(r)))
+                    src.connector.put(r, self.slots.get(r), manifest)  # producer publishes (chunk_ready)
+                    if src.connector.chunk_ready(r):                   # readiness signal
+                        self.slots[r] = src.connector.take(r)          # consumer fetches
+                        self.slot_pool[r] = pool.pool_id               # re-home ONLY on a successful fetch
+                        self.transfers += 1
+                        self.metrics["transfers"] = self.metrics.get("transfers", 0) + 1
+                finally:
+                    if got:                                            # never leak a credit on an error path
+                        src.connector.release_credit()
 
     def _commit_node_writes(self, node, pool) -> None:
         for w in node.writes:
@@ -90,6 +92,7 @@ class DisaggregatedRunner:
     def tick(self) -> bool:
         if self.done:
             return True
+        self.cancel_scope.check()                  # common-path cancellation (online + offline, all nodes)
         nodes = self.program.active_nodes(self.request)
         while True:
             if self.node_idx >= len(nodes):
@@ -155,6 +158,11 @@ class DisaggregatedRunner:
                                        f"(state={self.state}); a pool cannot admit it")
             else:
                 stuck = 0
+
+    def close(self) -> None:
+        """Release any pool this request is occupying (idempotent). Called on terminal exit so a
+        cancel/error mid-loop never leaks pool capacity (the §6.4 failure-isolation guarantee)."""
+        self._leave_current()
 
     def output(self) -> Output:
         artifacts = {name: _to_artifact(name, self.slots.get(slot), producer=slot)

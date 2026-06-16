@@ -84,6 +84,7 @@ class ProgramRunner:
     def tick(self) -> bool:
         if self.done:
             return True
+        self.cancel_scope.check()          # common-path cancellation (offline + all-component programs)
         nodes = self.program.nodes
         while True:
             if self.node_idx >= len(nodes):

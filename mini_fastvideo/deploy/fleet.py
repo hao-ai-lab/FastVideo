@@ -53,11 +53,12 @@ class Worker:
 
 
 class LocalFleet:
-    def __init__(self, policy: str = "least_loaded"):
+    def __init__(self, policy: str = "least_loaded", *, max_affinity: int = 100_000):
         assert policy in ("least_loaded", "cost", "affinity")
         self.policy = policy
+        self.max_affinity = max_affinity
         self.workers: dict[str, Worker] = {}
-        self._affinity: dict[str, str] = {}      # affinity key -> worker_id (sticky)
+        self._affinity: dict[str, str] = {}      # affinity key -> worker_id (sticky), FIFO-bounded
 
     # --- discovery / health (what Dynamo's registry + planner would do) ------ #
     def register(self, worker_id: str, engine: Any, card: DeploymentCard) -> Worker:
@@ -89,6 +90,8 @@ class LocalFleet:
             if wid in self.workers and self.workers[wid] in cands:
                 return self.workers[wid]
             chosen = min(cands, key=lambda w: w.load)         # cold key → least-loaded, then pin
+            if len(self._affinity) >= self.max_affinity:       # FIFO-bound the sticky map
+                self._affinity.pop(next(iter(self._affinity)), None)
             self._affinity[key] = chosen.worker_id
             return chosen
         if self.policy == "cost":
