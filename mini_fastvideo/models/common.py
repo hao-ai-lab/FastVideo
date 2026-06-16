@@ -1,0 +1,32 @@
+"""Shared component-node helpers (text encode with feature cache, etc.).
+
+The content-hash feature cache (design_v3 §7.2) is the reuse mechanism behind the §10 claim that
+a K-sample RL group encodes its shared prompt once instead of K times.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from ..cache.keys import CacheKey, content_hash
+
+
+def cached_text_encode(instance: Any, text: str) -> Any:
+    enc = instance.component("text_encoder")
+    cache = instance.caches
+    if cache is not None and cache.has("feature"):
+        key = CacheKey(model_id=instance.card.model_id, component_id="text_encoder",
+                       weights_version=instance.weights_version,
+                       input_hashes=(("text", content_hash(text)),))
+        hit = cache.pool("feature").get(key)
+        if hit is not None:
+            return hit
+        emb = enc.encode(text)
+        cache.pool("feature").put(key, emb)
+        return emb
+    return enc.encode(text)
+
+
+def text_encode_node_fn(instance, slots, request, ctx) -> None:
+    """ComponentNode fn: prompt + negative prompt → cached text embeddings in slots."""
+    slots["text_embeds"] = cached_text_encode(instance, request.prompt())
+    slots["neg_text_embeds"] = cached_text_encode(instance, request.diffusion.negative_prompt)
