@@ -689,7 +689,20 @@ class GenRLMethod(TrainingMethod):
                 samples[key] = samples[key][row_idx, perms]
 
             # Batch into micro-batches.
+            if total_batch_size % self._num_batches_per_epoch != 0:
+                raise ValueError(
+                    "GenRL PPO batch size must be divisible by "
+                    "num_batches_per_epoch after advantage filtering. Got "
+                    f"total_batch_size={total_batch_size}, "
+                    f"num_batches_per_epoch={self._num_batches_per_epoch}."
+                )
             micro = (total_batch_size // self._num_batches_per_epoch)
+            if micro <= 0:
+                raise ValueError(
+                    "GenRL PPO microbatch size must be positive. Got "
+                    f"total_batch_size={total_batch_size}, "
+                    f"num_batches_per_epoch={self._num_batches_per_epoch}."
+                )
             batched = {k: v.reshape(-1, micro, *v.shape[1:]) for k, v in samples.items()}
             batched_list = [dict(zip(batched, x, strict=False)) for x in zip(*batched.values(), strict=False)]
 

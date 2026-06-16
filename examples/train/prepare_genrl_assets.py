@@ -147,6 +147,11 @@ def has_video_reward_checkpoint(root: Path) -> bool:
     model_config = root / "model_config.json"
     if not model_config.exists():
         return False
+    if (root / "model.pth").exists():
+        return True
+    if ((root / "adapter_model.safetensors").exists()
+            and (root / "non_lora_state_dict.pth").exists()):
+        return True
     for checkpoint in root.glob("checkpoint-*"):
         if (checkpoint / "model.pth").exists():
             return True
