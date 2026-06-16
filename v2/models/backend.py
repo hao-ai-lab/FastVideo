@@ -221,6 +221,47 @@ class ToyPromptRefiner:
         self.logits = decay * self.logits + (1.0 - decay) * other.logits
 
 
+class ToyTalker(ToyMoTDiT):
+    """Toy Talker — Qwen-Omni stage 1 (AR over a speech-codec vocab, conditioned on the Thinker).
+
+    A *separate expert* from the thinker (not weight-shared): its next-token depends on its OWN
+    weights (a seed salt) AND the prefilled thinker payload (tokens + hidden state). So the cascade
+    is real — change the thinker and the talker's tokens change; change the talker's weights and they
+    change too. The vllm-omni Talker is likewise a distinct model conditioned on Thinker hidden states.
+    """
+
+    def __init__(self, channels: int = LATENT_CHANNELS, seed: int = 0):
+        super().__init__(channels=channels, seed=seed)
+        self.salt = (seed % 97) + 1
+
+    def ar_forward(self, tokens) -> int:
+        ctx = sum(int(t) for t in tokens)
+        return int((ctx * 7 + 13 + self.salt) % self.VOCAB)     # weight-dependent (salt) + context
+
+
+class ToyVocoder:
+    """Toy streaming code2wav vocoder — Qwen-Omni stage 2 (BigVGAN/Code2Wav role).
+
+    Speech codec tokens → audio waveform, synthesized in chunks. Deterministic given the tokens so
+    the ``audio_decode`` loop is interleave-safe. Each token contributes a short, timbre-stamped
+    waveform segment — enough to exercise chunked synthesis, streaming emits, and the AudioArtifact.
+    """
+
+    def __init__(self, samples_per_token: int = 16, vocab: int = 256, seed: int = 7):
+        self.spt = int(samples_per_token)
+        rng = np.random.default_rng(seed)
+        self.bank = (rng.standard_normal(vocab) * 0.3).astype("float32")   # per-token timbre offset
+
+    def synthesize(self, token_chunk) -> np.ndarray:
+        """One chunk of codec tokens → a waveform segment in [-1, 1], length spt·len(chunk)."""
+        segs = []
+        for t in token_chunk:
+            t = int(t) % self.bank.size
+            phase = np.linspace(0.0, np.pi * (1 + (t % 8)), self.spt, dtype="float32")
+            segs.append(np.tanh(self.bank[t] + np.sin(phase)).astype("float32"))
+        return np.concatenate(segs) if segs else np.zeros(0, dtype="float32")
+
+
 class ToyVAE:
     """Tiny deterministic VAE. encode: video→latent (mean-pool + channel proj); decode: latent→video."""
 

@@ -10,6 +10,7 @@ from typing import Any
 from .bagel import build_bagel_card, build_bagel_program
 from .cosmos3 import build_cosmos3_card, build_cosmos3_program
 from .ltx2 import build_ltx2_card, build_ltx2_program
+from .qwen_omni import build_qwen_omni_card, build_qwen_omni_program
 from .unified import build_unified_card, build_unified_program
 from .wan21 import build_wan21_card, build_wan_t2v_program
 from .wan_causal import build_wan_causal_card, build_wan_causal_program
@@ -20,6 +21,7 @@ __all__ = [
     "build_wan_causal_card", "build_wan_causal_program",
     "build_cosmos3_card", "build_cosmos3_program",
     "build_bagel_card", "build_bagel_program",
+    "build_qwen_omni_card", "build_qwen_omni_program",
     "build_unified_card", "build_unified_program",
     "build_default_engine", "build_omni_engine", "build_unified_engine",
 ]
@@ -30,10 +32,12 @@ _BUILDERS = [
     (build_wan_causal_card, build_wan_causal_program),
 ]
 
-# Phase-2 omni cards (MoT, one resident instance running AR + diffusion loops on shared weights)
+# Phase-2 omni cards: MoT shared-weight (Cosmos3/BAGEL) + the cascaded thinker→talker→vocoder
+# (Qwen-Omni, three disjoint experts / three loop types in one request).
 _OMNI_BUILDERS = [
     (build_cosmos3_card, build_cosmos3_program),
     (build_bagel_card, build_bagel_program),
+    (build_qwen_omni_card, build_qwen_omni_program),
 ]
 
 
