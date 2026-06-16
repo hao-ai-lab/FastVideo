@@ -70,6 +70,7 @@ class Capability(str, Enum):
     TEXT_TO_IMAGE = "text_to_image"
     TEXT_TO_VIDEO_SOUND = "text_to_video_sound"
     AUDIO_TO_VIDEO = "audio_to_video"
+    TEXT_TO_SPEECH = "text_to_speech"      # thinker→talker→vocoder (Qwen-Omni): reason + speak
     REASONING_TEXT = "reasoning_text"
     ACTION_CONDITIONING = "action_conditioning"
     STREAMING_VIDEO_CONTINUATION = "streaming_video_continuation"

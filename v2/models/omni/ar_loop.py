@@ -22,17 +22,19 @@ from ...request.streams import StreamChunk
 
 
 class ARDecodeLoop:
-    def __init__(self, *, loop_id, transformer_id="transformer", cost, max_tokens=8):
+    def __init__(self, *, loop_id, transformer_id="transformer", cost, max_tokens=8,
+                 prompt_slot="prompt_tokens"):
         self.loop_id = loop_id
         self.transformer_id = transformer_id
         self.cost = cost
         self.max_tokens = max_tokens
+        self.prompt_slot = prompt_slot          # which slot holds the prefill (chained AR loops differ)
 
     def init(self, req, model, ctx) -> LoopState:
         seed = req.sampling.seed if req.sampling.seed is not None else 0
         st = LoopState(loop_id=self.loop_id, instance_id=model.card.model_id,
                        request_id=req.request_id, profile=ctx.profile, seed=seed)
-        prompt_tokens = ctx.slots.get("prompt_tokens") or [1]
+        prompt_tokens = ctx.slots.get(self.prompt_slot) or [1]
         st.scratch["tokens"] = list(prompt_tokens)          # prefill (folded into init for the toy)
         st.scratch["generated"] = []
         st.scratch["max_tokens"] = min(req.sampling.max_tokens, self.max_tokens)
