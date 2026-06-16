@@ -112,7 +112,7 @@ class BaseTracker:
         self._timed_metrics = {}
 
     def log_artifacts(self, artifacts: dict[str, Any], step: int) -> None:
-        """Log artifacts such as videos or images.
+        """Log tracker artifacts such as sampled media.
 
         By default this is treated the same as :meth:`log`.
         """

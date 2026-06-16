@@ -131,6 +131,8 @@ class ValidationCallback(Callback):
         sampling_timesteps: list[int] | None = None,
         overlay_actions: bool = False,
         keyboard_value_scale: float = 1.0,
+        offload_training_state: bool = False,
+        unload_pipeline_after_validation: bool = False,
         **pipeline_kwargs: Any,
     ) -> None:
         self.pipeline_target = str(pipeline_target)
@@ -146,6 +148,8 @@ class ValidationCallback(Callback):
         self.keyboard_value_scale = float(keyboard_value_scale)
         metrics_config = pipeline_kwargs.pop("metrics", None)
         self.metrics_config = self._parse_metrics_config(metrics_config)
+        self.offload_training_state = self._coerce_bool(offload_training_state)
+        self.unload_pipeline_after_validation = self._coerce_bool(unload_pipeline_after_validation)
         self.pipeline_kwargs = dict(pipeline_kwargs)
 
         # Set after on_train_start.
@@ -201,6 +205,10 @@ class ValidationCallback(Callback):
             prefetch_factor=int(config.get("prefetch_factor", 2)),
             log_prefix=str(config.get("log_prefix", "metrics/validation")),
         )
+    def _coerce_bool(value: Any) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
 
     # ----------------------------------------------------------
     # Callback hooks
@@ -254,16 +262,183 @@ class ValidationCallback(Callback):
     ) -> None:
 
         transformer = method.student.transformer
-        # Look for an EMA callback to temporarily swap
-        # EMA weights during validation.
-        ema_cb = self._find_ema_callback()
-        ctx = ema_cb.ema_context(transformer) if ema_cb is not None else contextlib.nullcontext(transformer)
-        with ctx as t:
-            self._run_validation_inner(
+        try:
+            with self._validation_memory_context(
+                    method,
+                    validation_transformer=transformer,
+            ):
+                # Look for an EMA callback to temporarily swap
+                # EMA weights during validation.
+                ema_cb = self._find_ema_callback()
+                ctx = ema_cb.ema_context(transformer) if ema_cb is not None else contextlib.nullcontext(transformer)
+                with ctx as t:
+                    self._run_validation_inner(
+                        method,
+                        step,
+                        t,
+                    )
+        finally:
+            if self.unload_pipeline_after_validation:
+                self._clear_pipeline_cache()
+
+    @contextlib.contextmanager
+    def _validation_memory_context(
+        self,
+        method: TrainingMethod,
+        *,
+        validation_transformer: torch.nn.Module,
+    ):
+        if not self.offload_training_state:
+            yield
+            return
+
+        optimizer_tensor_records: list[tuple[Any, Any, torch.device]] = []
+        module_records: list[tuple[str, torch.nn.Module, torch.device]] = []
+        try:
+            self._offload_optimizer_states_to_cpu(
                 method,
-                step,
-                t,
+                optimizer_tensor_records,
             )
+            self._offload_inactive_role_modules_to_cpu(
+                method,
+                validation_transformer=validation_transformer,
+                module_records=module_records,
+            )
+            self._empty_cuda_cache()
+            yield
+        finally:
+            self._restore_inactive_role_modules(module_records)
+            self._restore_optimizer_states(optimizer_tensor_records)
+            self._empty_cuda_cache()
+
+    def _offload_optimizer_states_to_cpu(
+        self,
+        method: TrainingMethod,
+        records: list[tuple[Any, Any, torch.device]],
+    ) -> None:
+        optimizers = getattr(method, "_optimizer_dict", {})
+        if not optimizers:
+            return
+        moved = 0
+        for optimizer in optimizers.values():
+            state = getattr(optimizer, "state", None)
+            if not isinstance(state, dict):
+                continue
+            for param_state in state.values():
+                moved += self._offload_tensor_container_to_cpu(
+                    param_state,
+                    records,
+                )
+        if moved:
+            logger.info(
+                "Offloaded %d optimizer state tensors to CPU for validation.",
+                moved,
+            )
+
+    def _offload_tensor_container_to_cpu(
+        self,
+        obj: Any,
+        records: list[tuple[Any, Any, torch.device]],
+    ) -> int:
+        moved = 0
+        if isinstance(obj, dict):
+            for key, value in list(obj.items()):
+                if torch.is_tensor(value) and value.device.type == "cuda":
+                    records.append((obj, key, value.device))
+                    obj[key] = value.detach().cpu()
+                    moved += 1
+                else:
+                    moved += self._offload_tensor_container_to_cpu(value, records)
+            return moved
+        if isinstance(obj, list):
+            for idx, value in enumerate(list(obj)):
+                if torch.is_tensor(value) and value.device.type == "cuda":
+                    records.append((obj, idx, value.device))
+                    obj[idx] = value.detach().cpu()
+                    moved += 1
+                else:
+                    moved += self._offload_tensor_container_to_cpu(value, records)
+        return moved
+
+    def _restore_optimizer_states(
+        self,
+        records: list[tuple[Any, Any, torch.device]],
+    ) -> None:
+        for container, key, device in reversed(records):
+            value = container[key]
+            if torch.is_tensor(value):
+                container[key] = value.to(device=device)
+        if records:
+            logger.info(
+                "Restored %d optimizer state tensors after validation.",
+                len(records),
+            )
+
+    def _offload_inactive_role_modules_to_cpu(
+        self,
+        method: TrainingMethod,
+        *,
+        validation_transformer: torch.nn.Module,
+        module_records: list[tuple[str, torch.nn.Module, torch.device]],
+    ) -> None:
+        role_models = getattr(method, "_role_models", {})
+        if not isinstance(role_models, dict):
+            return
+
+        for role, model in role_models.items():
+            module = getattr(model, "transformer", None)
+            if not isinstance(module, torch.nn.Module):
+                continue
+            if module is validation_transformer:
+                continue
+            device = self._first_cuda_tensor_device(module)
+            if device is None:
+                continue
+            try:
+                module.to("cpu")
+            except Exception as exc:
+                logger.warning(
+                    "Could not offload role %r transformer to CPU before validation: %s",
+                    role,
+                    exc,
+                )
+                continue
+            module_records.append((str(role), module, device))
+            logger.info(
+                "Offloaded role %r transformer from %s to CPU for validation.",
+                role,
+                device,
+            )
+
+    def _restore_inactive_role_modules(
+        self,
+        module_records: list[tuple[str, torch.nn.Module, torch.device]],
+    ) -> None:
+        for role, module, device in reversed(module_records):
+            module.to(device)
+            logger.info(
+                "Restored role %r transformer to %s after validation.",
+                role,
+                device,
+            )
+
+    @staticmethod
+    def _first_cuda_tensor_device(module: torch.nn.Module) -> torch.device | None:
+        for tensor in list(module.parameters(recurse=True)) + list(module.buffers(recurse=True)):
+            device = getattr(tensor, "device", None)
+            if isinstance(device, torch.device) and device.type == "cuda":
+                return device
+        return None
+
+    def _clear_pipeline_cache(self) -> None:
+        self._pipeline = None
+        self._pipeline_key = None
+        self._empty_cuda_cache()
+
+    @staticmethod
+    def _empty_cuda_cache() -> None:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _find_ema_callback(self) -> Any | None:
         """Find the EMA callback in the callback dict."""
@@ -911,6 +1086,7 @@ class ValidationCallback(Callback):
         }
         if flow_shift is not None:
             kwargs["flow_shift"] = float(flow_shift)
+        kwargs.update(self.pipeline_kwargs)
 
         self._pipeline = PipelineCls.from_pretrained(
             self._pipeline_model_path(),

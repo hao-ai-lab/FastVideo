@@ -80,6 +80,8 @@ class TestConstructor:
         assert cb.sampling_timesteps is None
         assert cb.output_dir is None
         assert cb.overlay_actions is False
+        assert cb.offload_training_state is False
+        assert cb.unload_pipeline_after_validation is False
         # Lazy fields not yet populated.
         assert cb._pipeline is None
         assert cb._sampling_param is None
@@ -98,6 +100,8 @@ class TestConstructor:
             num_frames="77",  # type: ignore[arg-type]
             sampling_timesteps=["1000", "500"],
             overlay_actions=1,  # type: ignore[arg-type]
+            offload_training_state="1",  # type: ignore[arg-type]
+            unload_pipeline_after_validation="false",  # type: ignore[arg-type]
         )
         assert cb.every_steps == 50
         assert cb.sampling_steps == [20, 40]
@@ -105,6 +109,8 @@ class TestConstructor:
         assert cb.num_frames == 77
         assert cb.sampling_timesteps == [1000, 500]
         assert cb.overlay_actions is True
+        assert cb.offload_training_state is True
+        assert cb.unload_pipeline_after_validation is False
 
     def test_pipeline_kwargs_collected(self) -> None:
         cb = ValidationCallback(
