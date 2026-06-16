@@ -205,6 +205,8 @@ class ValidationCallback(Callback):
             prefetch_factor=int(config.get("prefetch_factor", 2)),
             log_prefix=str(config.get("log_prefix", "metrics/validation")),
         )
+
+    @staticmethod
     def _coerce_bool(value: Any) -> bool:
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on"}
