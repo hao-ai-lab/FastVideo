@@ -35,7 +35,10 @@ Training records behavior on the same loops it serves.
 |---|---|---|---|
 | `card/` | §4 | `ModelCard` = (components, loops, **recipe**, **parity**) as one versioned, validatable object; `ModelInstance` (one resident card; many loops bind shared components by reference) | `tests/test_contracts.py` |
 | `loop/` | §5 | the driven-loop contract `init/next/advance/finalize`; typed `WorkPlan`/`StepResult`/`LoopState`; the single `LoopRunner` driver; policies (CFG/flow-shift/precision/expert/conditioning); the flow-match sampler | `test_policies.py`, `test_inference.py` |
-| `runtime/` | §6 | `Engine` (serial + step-interleaved execution), layered scheduler (`AdmissionController`, `BatchScheduler`), the `RuntimeLoopContext` (the inversion point), cost currency | `test_admission.py`, `test_interleave_gate.py` |
+| `runtime/` | §6 | `Engine` (serial + step-interleaved), `AsyncEngine` (queue, lifecycle, live streaming, cancellation), `DisaggregatedRunner` + role `Pool`s, layered scheduler (`AdmissionController`, `BatchScheduler`), `RuntimeLoopContext`, cost currency | `test_admission.py`, `test_interleave_gate.py`, `test_serving.py` |
+| `transport/` | §7.3 | pluggable `Connector`s (in-proc / SHM-fake) with `chunk_ready` readiness + credit flow-control; `KVConnector` shape; `TransferManifest` | `test_serving.py` |
+| `deploy/` | §14 | `DeploymentCard`; **our own `LocalFleet`** (cost/affinity/least-loaded routing, health/drain); `DynamoWorkerAdapter` (frontable, not relied upon) | `test_serving.py` |
+| `serving/` | §6.3.5, §12 | our own OpenAI server (stdlib asyncio): `/v1/chat` (SSE), `/v1/images`, `/v1/videos` (async job+poll) + `/sync`, `/health`, `/metrics` | `test_serving.py` |
 | `cache/` | §7 | typed `CacheKey` (partitioned by adapter+weights), per-class pools (`feature`/`residual`/`slab_kv`/`paged_kv`) behind one manager | `test_cache.py` |
 | `memory/` | §7.3 | tagged pools, reservation-before-admission, component-granular sleep/wake | `test_admission.py` |
 | `parallel/` | §8 | `ParallelPlan` (named axes), fake `DeviceMesh` builder, pre-flight validation (cfgp≤2, **pp_patch invalid for causal**, ownership conflicts) | `test_contracts.py` |
@@ -114,8 +117,46 @@ Still future work (declared on the spine, not yet built): the packed factored-se
 (`[text|vision|action|sound]`) `LoopState.extension`, joint multi-modality denoise with per-modality
 CFG, and world-model `chunk_rollout` for action-conditioned omni.
 
+## Serving & fleet (our own version — Dynamo is an option, not a dependency)
+
+The serving layer is built, not deferred to Dynamo:
+
+- **`AsyncEngine`** (`runtime/async_engine.py`) — a real request queue, lifecycle state machine
+  (waiting → running → completed/cancelled/failed), live `AsyncIterator[OmniEvent]` streaming, and
+  step-level concurrency over the same scheduler. Cancellation is common-path (trips the CancelScope,
+  raises at the next step boundary, delivers partial artifacts).
+- **Role / stage pools + disaggregation** (`runtime/pools.py`, `runtime/disaggregated.py`) — a request
+  runs across encoder → denoiser → decoder pools with capacity-aware dispatch; cross-pool edges move
+  through connectors. Disaggregated output is **bit-identical to inline** (test). `wan_t2v_disaggregated()`
+  is the canonical N:M:K split (denoiser capacity 1 = jumbo batch-of-1).
+- **`transport/`** — pluggable connectors (in-proc zero-copy, SHM-fake copy) with `chunk_ready`
+  readiness (vllm-omni) **and** credit-based flow control (sglang-omni Relay), plus a `KVConnector` shape.
+- **Our own fleet** (`deploy/fleet.py` `LocalFleet`) — discovery, health/drain, and routing by
+  least-loaded / cost-model / sticky-affinity over multiple engine workers. This is the design.md §6.3.6
+  *fallback* made first-class, so we are never *reliant* on Dynamo.
+- **Dynamo adapter** (`deploy/dynamo.py`) — exports the same `DeploymentCard` + cost model so NVIDIA
+  Dynamo *can* front us (registration / health / drain / cost / cache-events). One object, two consumers;
+  `FakeDynamoRuntime` proves the contract end-to-end without importing Dynamo.
+- **OpenAI server** (`serving/`) — a framework-free stdlib-asyncio HTTP server (the vllm-omni pattern,
+  our own version): `/v1/chat/completions` (SSE), `/v1/images/generations`, `/v1/videos` (async job +
+  poll) + `/v1/videos/sync`, `/v1/models`, `/health`, `/metrics`. Endpoints are a thin shim over the
+  **step-scheduled** engine — the substance vllm-omni's request-scheduled opaque DIFFUSION stage lacks.
+
+```python
+import asyncio
+from mini_fastvideo.models import build_default_engine, build_omni_engine
+from mini_fastvideo.runtime import AsyncEngine
+from mini_fastvideo.serving import OmniOpenAIServer
+async def serve():
+    eng = build_default_engine(); build_omni_engine(eng)
+    host, port = await OmniOpenAIServer(AsyncEngine(eng)).serve(port=8000)
+asyncio.run(serve())   # then POST /v1/videos, GET /v1/videos/{id}, POST /v1/chat (stream:true)
+```
+
 ## Deliberately out of scope (per design_v3 non-goals)
 
-Fleet/Dynamo orchestration, the ComfyUI workflow compiler, WebRTC realtime transport, full LLM-grade
-AR serving (radix trees, speculative decoding), and real distributed parallelism (the mesh builder is
-a CPU fake). These are named in design_v3 as the fleet's job or as later phases.
+The ComfyUI workflow compiler, WebRTC realtime transport, full LLM-grade AR serving (radix prefix
+trees, speculative decoding), and real *distributed* parallelism (the mesh builder is a CPU fake; pools
+are single-node — multi-node is *multiple* pools fronted by the fleet, §8/§14). A *live* Dynamo
+integration is also out (we ship the adapter + contract, not a running Dynamo) — by design it's an
+option, and our LocalFleet covers the fleet role without it.
