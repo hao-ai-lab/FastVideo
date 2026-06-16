@@ -4,19 +4,19 @@ interleave-safe; a module-global version provably is NOT — which is *why* §11
 """
 from __future__ import annotations
 
-from mini_fastvideo._enums import WorkUnitKind
-from mini_fastvideo.card import CostModel
-from mini_fastvideo.extend import (
+from v2._enums import WorkUnitKind
+from v2.card import CostModel
+from v2.extend import (
     InterceptorChain,
     InterceptorConflict,
     NaNWatch,
     Profiler,
     ResidualSkipInterceptor,
 )
-from mini_fastvideo.models import build_default_engine
-from mini_fastvideo.parity import assert_interleave_parity
-from mini_fastvideo.request import DiffusionParams, TaskType, make_request
-from mini_fastvideo.runtime import Engine
+from v2.models import build_default_engine
+from v2.parity import assert_interleave_parity
+from v2.request import DiffusionParams, TaskType, make_request
+from v2.runtime import Engine
 
 
 def _req(prompt, seed):

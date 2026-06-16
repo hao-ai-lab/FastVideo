@@ -1,6 +1,6 @@
 """Worked examples (design_v3 §15), runnable as a demo:
 
-    python3 -m mini_fastvideo.examples
+    python3 -m v2.examples
 
 Each prints what it demonstrates. This doubles as living documentation of the API.
 """
@@ -136,7 +136,7 @@ def example_h_serving_and_fleet() -> None:
 
 def main() -> None:
     print("=" * 78)
-    print("mini-fastvideo — worked examples (design_v3 §6,§13-16). One runtime, many loops.")
+    print("v2 — worked examples (design_v3 §6,§13-16). One runtime, many loops.")
     print("=" * 78)
     eng = build_default_engine()
     print(f"registered (recipe, runtime) cards: {list(eng._registry)}")

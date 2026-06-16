@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from mini_fastvideo.cache import CacheKey, CacheManager, CachePolicy
-from mini_fastvideo.cache.classes import FeatureCache, Slab, SlabKVCache
-from mini_fastvideo.models.wan_causal import build_wan_causal_card
+from v2.cache import CacheKey, CacheManager, CachePolicy
+from v2.cache.classes import FeatureCache, Slab, SlabKVCache
+from v2.models.wan_causal import build_wan_causal_card
 
 
 def test_feature_cache_reuse_and_adapter_partition():
@@ -55,6 +55,6 @@ def test_cache_manager_materializes_only_declared_classes():
     cm = CacheManager.from_card(build_wan_causal_card())
     assert cm.has("feature") and cm.has("slab_kv")
     # a pure bidirectional card declares no KV class
-    from mini_fastvideo.models.wan21 import build_wan21_card
+    from v2.models.wan21 import build_wan21_card
     cm2 = CacheManager.from_card(build_wan21_card())
     assert cm2.has("feature") and not cm2.has("slab_kv")    # KV is the minority case

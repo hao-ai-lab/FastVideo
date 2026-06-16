@@ -6,9 +6,9 @@ this gate is not.
 """
 from __future__ import annotations
 
-from mini_fastvideo.models import build_default_engine
-from mini_fastvideo.parity import assert_interleave_parity
-from mini_fastvideo.request import DiffusionParams, TaskType, make_request
+from v2.models import build_default_engine
+from v2.parity import assert_interleave_parity
+from v2.request import DiffusionParams, TaskType, make_request
 
 
 def _req(mid, prompt, seed, steps=4):

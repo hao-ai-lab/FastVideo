@@ -61,7 +61,7 @@ def _ser_artifacts(out: Output) -> dict:
 
 
 class OmniOpenAIServer:
-    def __init__(self, engine: Any, *, engine_id: str = "mini-fastvideo", max_jobs: int = 512):
+    def __init__(self, engine: Any, *, engine_id: str = "v2", max_jobs: int = 512):
         self.engine = engine                       # an AsyncEngine
         self.engine_id = engine_id
         self.jobs: dict[str, dict] = {}            # video job store

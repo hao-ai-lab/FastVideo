@@ -9,17 +9,17 @@ from __future__ import annotations
 
 import numpy as np
 
-from mini_fastvideo._enums import WorkUnitKind
-from mini_fastvideo.cache import CacheManager
-from mini_fastvideo.card import load_card
-from mini_fastvideo.loop.contracts import ResourceRequest, ShapeSignature, WorkPlan
-from mini_fastvideo.memory import MemoryManager
-from mini_fastvideo.models import build_default_engine
-from mini_fastvideo.models.common import cached_text_encode
-from mini_fastvideo.models.wan21 import build_wan21_card
-from mini_fastvideo.parity import compare_outputs
-from mini_fastvideo.request import DiffusionParams, Output, TaskType, VideoArtifact, make_request
-from mini_fastvideo.runtime import AdmissionController, AdmissionInfeasible, Engine
+from v2._enums import WorkUnitKind
+from v2.cache import CacheManager
+from v2.card import load_card
+from v2.loop.contracts import ResourceRequest, ShapeSignature, WorkPlan
+from v2.memory import MemoryManager
+from v2.models import build_default_engine
+from v2.models.common import cached_text_encode
+from v2.models.wan21 import build_wan21_card
+from v2.parity import compare_outputs
+from v2.request import DiffusionParams, Output, TaskType, VideoArtifact, make_request
+from v2.runtime import AdmissionController, AdmissionInfeasible, Engine
 
 
 def test_infeasible_reservation_fails_fast_not_busy_spin():

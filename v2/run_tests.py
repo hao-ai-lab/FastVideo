@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Zero-dependency test runner for mini-fastvideo.
+"""Zero-dependency test runner for v2.
 
-The mini-fastvideo core is numpy-only and CPU-testable. This runner discovers
-``test_*`` functions in ``mini_fastvideo/tests/test_*.py`` and runs them without
+The v2 core is numpy-only and CPU-testable. This runner discovers
+``test_*`` functions in ``v2/tests/test_*.py`` and runs them without
 needing pytest installed (it is fully pytest-compatible, so ``pytest`` works too).
 
 Usage:
-    python3 mini_fastvideo/run_tests.py            # run all
-    python3 mini_fastvideo/run_tests.py interleave # run files matching a substring
+    python3 v2/run_tests.py            # run all
+    python3 v2/run_tests.py interleave # run files matching a substring
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TESTS_DIR = HERE / "tests"
-REPO_ROOT = HERE.parent  # so `import mini_fastvideo` works
+REPO_ROOT = HERE.parent  # so `import v2` works
 
 
 def _load(path: Path):

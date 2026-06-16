@@ -3,18 +3,18 @@ from __future__ import annotations
 
 import numpy as np
 
-from mini_fastvideo._enums import ConsistencyLevel, LoopKind, WorkUnitKind
-from mini_fastvideo.card import (
+from v2._enums import ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CardValidationError,
     CostModel,
     LoopSpec,
     ModelCard,
     RecipeSpec,
 )
-from mini_fastvideo.cache.keys import CacheKey, content_hash
-from mini_fastvideo.models.wan21 import build_wan21_card
-from mini_fastvideo.models.wan_causal import build_wan_causal_card
-from mini_fastvideo.parallel import ParallelPlan, ParallelValidationError, validate_plan
+from v2.cache.keys import CacheKey, content_hash
+from v2.models.wan21 import build_wan21_card
+from v2.models.wan_causal import build_wan_causal_card
+from v2.parallel import ParallelPlan, ParallelValidationError, validate_plan
 
 
 def test_wan_card_validates():

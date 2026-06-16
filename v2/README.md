@@ -1,4 +1,4 @@
-# mini-fastvideo
+# v2
 
 A scoped, **CPU-testable** realization of the `design_v3.md` model-native runtime — the architecture
 where *omni is native, train and serve are the same loops by construction, and correctness is a typed
@@ -76,9 +76,9 @@ engine never imports `training`. `card/` imports no runtime.
 
 ```bash
 cd /Users/willlin/src/FastVideo-mini
-python3 -m pytest mini_fastvideo/tests/ -q      # 49 tests
-python3 mini_fastvideo/run_tests.py             # same suite, ZERO deps (no pytest needed)
-python3 -m mini_fastvideo.examples              # the design_v3 §15 worked examples
+python3 -m pytest v2/tests/ -q      # 49 tests
+python3 v2/run_tests.py             # same suite, ZERO deps (no pytest needed)
+python3 -m v2.examples              # the design_v3 §15 worked examples
 ```
 
 Requires only Python 3.10+ and numpy.
@@ -111,7 +111,7 @@ DAG-of-engines can express, made native:
 The diffusion loop is literally `WanDenoiseLoop` (the same step body the engine serves for Wan), bound
 to the MoT module — one loop definition, reused. The interleave gate generalizes across loop types
 (`test_omni.py::test_omni_interleave_parity_holds_across_loop_types`). Run it:
-`python3 -c "from mini_fastvideo.models import build_omni_engine; ..."` or see `mini_fastvideo/examples.py`.
+`python3 -c "from v2.models import build_omni_engine; ..."` or see `v2/examples.py`.
 
 Still future work (declared on the spine, not yet built): the packed factored-sequence
 (`[text|vision|action|sound]`) `LoopState.extension`, joint multi-modality denoise with per-modality
@@ -144,9 +144,9 @@ The serving layer is built, not deferred to Dynamo:
 
 ```python
 import asyncio
-from mini_fastvideo.models import build_default_engine, build_omni_engine
-from mini_fastvideo.runtime import AsyncEngine
-from mini_fastvideo.serving import OmniOpenAIServer
+from v2.models import build_default_engine, build_omni_engine
+from v2.runtime import AsyncEngine
+from v2.serving import OmniOpenAIServer
 async def serve():
     eng = build_default_engine(); build_omni_engine(eng)
     host, port = await OmniOpenAIServer(AsyncEngine(eng)).serve(port=8000)

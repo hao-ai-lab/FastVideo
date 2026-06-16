@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from mini_fastvideo._enums import ConsistencyLevel
-from mini_fastvideo.models.wan21 import build_wan21_card
-from mini_fastvideo.models.wan_causal import build_wan_causal_card
-from mini_fastvideo.training import (
+from v2._enums import ConsistencyLevel
+from v2.models.wan21 import build_wan21_card
+from v2.models.wan_causal import build_wan_causal_card
+from v2.training import (
     WeightRole,
     build_diffusion_nft,
     build_dmd2,

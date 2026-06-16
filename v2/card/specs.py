@@ -143,7 +143,7 @@ class ComponentSpec:
     resident_for: list[str] = field(default_factory=list)  # loop_ids that keep this resident mid-request
     optional_for: set[str] = field(default_factory=set)    # tasks that don't need it
     required_for: set[str] = field(default_factory=set)    # tasks that require it
-    # mini-fastvideo wiring: a factory producing the live component (toy numpy or torch adapter)
+    # v2 wiring: a factory producing the live component (toy numpy or torch adapter)
     factory: Callable[..., Any] | None = None
 
 
@@ -170,7 +170,7 @@ class LoopSpec:
     # omni-ready (omni-readiness report §4a):
     shared_weight_components: list[str] = field(default_factory=list)
     allows_interleaving: bool = True
-    # mini-fastvideo: the Loop implementation factory (built at bind time)
+    # v2: the Loop implementation factory (built at bind time)
     loop_factory: Callable[..., Any] | None = None
 
 

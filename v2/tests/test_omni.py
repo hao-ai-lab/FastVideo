@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from mini_fastvideo._enums import WorkUnitKind
-from mini_fastvideo.models import build_omni_engine
-from mini_fastvideo.models.cosmos3 import build_cosmos3_card
-from mini_fastvideo.parity import assert_interleave_parity
-from mini_fastvideo.request import DiffusionParams, SamplingParams, TaskType, make_request
+from v2._enums import WorkUnitKind
+from v2.models import build_omni_engine
+from v2.models.cosmos3 import build_cosmos3_card
+from v2.parity import assert_interleave_parity
+from v2.request import DiffusionParams, SamplingParams, TaskType, make_request
 
 
 def _eng():
