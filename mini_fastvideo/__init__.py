@@ -44,14 +44,14 @@ from .request import (
     TaskType,
     make_request,
 )
-from .runtime import Engine
+from .runtime import AsyncEngine, Engine
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "ModelCard", "ComponentSpec", "LoopSpec", "RecipeSpec", "ParitySpec", "CostModel",
     "CapabilityMatrix", "ModelInstance", "load_card",
-    "Engine", "Program", "ProgramKind", "ComponentNode", "ModelLoopNode", "when_task", "when_opt",
+    "Engine", "AsyncEngine", "Program", "ProgramKind", "ComponentNode", "ModelLoopNode", "when_task", "when_opt",
     "Request", "Session", "Output", "make_request", "TaskType", "SamplingParams", "DiffusionParams",
     "LoopKind", "WorkUnitKind", "ConsistencyLevel", "ExecutionProfile", "Capability",
     "__version__",

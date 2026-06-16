@@ -77,9 +77,66 @@ def example_g_omni_mot() -> None:
           f"{dict(eng.admission.metrics.by_kind)}")
 
 
+async def _serving_demo() -> None:
+    import asyncio
+
+    from .deploy import DynamoWorkerAdapter, FakeDynamoRuntime, LocalFleet, build_deployment_card
+    from .models.wan21 import build_wan21_card, build_wan_t2v_program
+    from .runtime import AsyncEngine, PoolSet, wan_t2v_disaggregated
+    from .serving import OmniOpenAIServer
+
+    eng = build_default_engine()
+    build_omni_engine(eng)
+    ae = AsyncEngine(eng)
+
+    # disaggregated pools: encoder → denoiser → decoder
+    card = build_wan21_card()
+    pools = PoolSet(wan_t2v_disaggregated(), card)
+    pools.warmup()
+    ae.register_disaggregated("wan-disagg", pools, build_wan_t2v_program())
+    out = await ae.generate(make_request(TaskType.T2V, "wan-disagg", "a wave",
+                                         diffusion=DiffusionParams(num_steps=4, seed=1)))
+    print(f"    disaggregated T2V (enc→den→dec): video={out.artifacts['video'].frames.shape} "
+          f"cross-pool transfers={out.metrics['transfers']:.0f}")
+
+    # our own OpenAI server over a real socket
+    server = OmniOpenAIServer(ae, engine_id="worker-0")
+    host, port = await server.serve(port=0)
+
+    async def http(method, path, body=b""):
+        r, w = await asyncio.open_connection(host, port)
+        w.write(f"{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body)
+        await w.drain()
+        data = await r.read(); w.close()
+        return data.decode("utf-8", "replace")
+
+    health = await http("GET", "/health")
+    sse = await http("POST", "/v1/chat/completions",
+                     b'{"model":"cosmos3-vfm","messages":[{"role":"user","content":"a comet"}],"stream":true}')
+    n_chunks = sse.count("data: ")
+    print(f"    OpenAI server: /health ok={'healthy' in health}; chat SSE streamed {n_chunks} chunks (omni reason→denoise)")
+    await server.close()
+
+    # our own fleet router + Dynamo adapter (frontable, not relied upon) — same DeploymentCard
+    dcard = build_deployment_card("worker-0", [card])
+    fleet = LocalFleet("least_loaded")
+    fleet.register("worker-0", ae, dcard)
+    routed = fleet.route(make_request(TaskType.T2V, "wan2.1-1.3b", "x", diffusion=DiffusionParams(num_steps=2)))
+    dyn = FakeDynamoRuntime()
+    dyn.register_worker(DynamoWorkerAdapter(ae, dcard))
+    print(f"    LocalFleet routes to '{routed.worker_id}'; Dynamo adapter registered "
+          f"({len(dyn.registry)} worker) — both consume the SAME DeploymentCard")
+
+
+def example_h_serving_and_fleet() -> None:
+    import asyncio
+    print("\n(h) Serving + fleet (OUR OWN — Dynamo-optional): async engine, role pools, OpenAI server")
+    asyncio.run(_serving_demo())
+
+
 def main() -> None:
     print("=" * 78)
-    print("mini-fastvideo — worked examples (design_v3 §15-16). One runtime, many loops.")
+    print("mini-fastvideo — worked examples (design_v3 §6,§13-16). One runtime, many loops.")
     print("=" * 78)
     eng = build_default_engine()
     print(f"registered (recipe, runtime) cards: {list(eng._registry)}")
@@ -89,6 +146,7 @@ def main() -> None:
     example_c2_interleave_gate(eng)
     example_d_rl_rollout()
     example_g_omni_mot()
+    example_h_serving_and_fleet()
     print("\n" + "=" * 78)
     print("All examples ran on CPU with numpy toy components. The architecture (cards, driven")
     print("loops, scheduler, caches, parity, training-on-shared-loops) is real; the neural")
