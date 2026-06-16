@@ -28,9 +28,8 @@ logger = logging.getLogger(__name__)
 
 class NVFP4QATTrainQuantizeMethod(QuantizeMethodBase):
 
-    def create_weights(self, layer: torch.nn.Module, input_size_per_partition: int,
-                       output_partition_sizes: list[int], input_size: int, output_size: int,
-                       params_dtype: torch.dtype, **extra_weight_attrs):
+    def create_weights(self, layer: torch.nn.Module, input_size_per_partition: int, output_partition_sizes: list[int],
+                       input_size: int, output_size: int, params_dtype: torch.dtype, **extra_weight_attrs):
         # Trainable master weight, fake-quantized to FP4 on each forward.
         weight = Parameter(torch.empty(
             sum(output_partition_sizes),
@@ -42,8 +41,7 @@ class NVFP4QATTrainQuantizeMethod(QuantizeMethodBase):
         layer.register_parameter("weight", weight)
         set_weight_attrs(weight, extra_weight_attrs)
 
-    def apply(self, layer: torch.nn.Module, x: torch.Tensor,
-              bias: torch.Tensor | None = None) -> torch.Tensor:
+    def apply(self, layer: torch.nn.Module, x: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:
         # FP4 forward + full-precision backward (STE).
         from fastvideo.layers.fp4linear import _LinearFWD4BWD16Fn
         return _LinearFWD4BWD16Fn.apply(x, layer.weight, bias, "cutlass", 16, True)

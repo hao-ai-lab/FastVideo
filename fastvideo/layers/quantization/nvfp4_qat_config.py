@@ -81,15 +81,10 @@ class NVFP4QATQuantizeMethod(QuantizeMethodBase):
         # (the previous behavior) adds a sync point, costs a kernel launch,
         # and produces a data-dependent value that prevents CUDA-graph
         # capture under ``torch.compile(mode='reduce-overhead')``.
-        self.x_global_sf = torch.tensor(1.0,
-                                        device="cuda",
-                                        dtype=torch.float32)
+        self.x_global_sf = torch.tensor(1.0, device="cuda", dtype=torch.float32)
 
-    def create_weights(self, layer: torch.nn.Module,
-                       input_size_per_partition: int,
-                       output_partition_sizes: list[int], input_size: int,
-                       output_size: int, params_dtype: torch.dtype,
-                       **extra_weight_attrs) -> None:
+    def create_weights(self, layer: torch.nn.Module, input_size_per_partition: int, output_partition_sizes: list[int],
+                       input_size: int, output_size: int, params_dtype: torch.dtype, **extra_weight_attrs) -> None:
         weight = Parameter(torch.empty(
             sum(output_partition_sizes),
             input_size_per_partition,
@@ -100,15 +95,13 @@ class NVFP4QATQuantizeMethod(QuantizeMethodBase):
         layer.register_parameter("weight", weight)
         set_weight_attrs(weight, extra_weight_attrs)
 
-    def apply(self, layer: torch.nn.Module, x: torch.Tensor,
-              bias: torch.Tensor | None = None) -> torch.Tensor:
+    def apply(self, layer: torch.nn.Module, x: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:
         # ``_fp4_weight`` carries the (out, in/2) packed fp4 weight, so its
         # row count is the output dim even after the dense weight is popped.
         out_dim = layer._fp4_weight.shape[0]
         original_shape = x.shape
 
-        assert x.dtype in (torch.bfloat16, torch.float16), (
-            f"only allow bf16/fp16 inputs to fp4 linear, got {x.dtype}")
+        assert x.dtype in (torch.bfloat16, torch.float16), (f"only allow bf16/fp16 inputs to fp4 linear, got {x.dtype}")
         x = x.view(-1, x.shape[-1])
         x_global_sf = self.x_global_sf
         x_fp4, x_scale = _nvfp4_quantize(
@@ -149,11 +142,9 @@ class NVFP4QATConfig(QuantizationConfig):
             projections (:data:`DEFAULT_FP4_LAYERS`).
     """
 
-    def __init__(self,
-                 target_layers: tuple[str, ...] | None = None) -> None:
+    def __init__(self, target_layers: tuple[str, ...] | None = None) -> None:
         super().__init__()
-        self.target_layers = (tuple(target_layers)
-                              if target_layers else DEFAULT_FP4_LAYERS)
+        self.target_layers = (tuple(target_layers) if target_layers else DEFAULT_FP4_LAYERS)
 
     def get_name(self) -> str:
         return "nvfp4_qat"
@@ -170,7 +161,7 @@ class NVFP4QATConfig(QuantizationConfig):
         return []
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "NVFP4QATConfig":
+    def from_config(cls, config: dict[str, Any]) -> NVFP4QATConfig:
         target_layers = config.get("target_layers")
         if target_layers is not None:
             target_layers = tuple(target_layers)
@@ -178,8 +169,7 @@ class NVFP4QATConfig(QuantizationConfig):
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
-        if isinstance(layer, LinearBase) and any(
-                name in prefix for name in self.target_layers):
+        if isinstance(layer, LinearBase) and any(name in prefix for name in self.target_layers):
             return NVFP4QATQuantizeMethod()
         return None
 
@@ -208,8 +198,7 @@ def convert_model_to_fp4(model: torch.nn.Module) -> None:
             weight_local = weight.to_local() if isinstance(weight, DTensor) else weight  # type: ignore[arg-type]
 
             # Only the reduced scalar needs fp32; avoid a full fp32 copy.
-            weight_absmax = (weight_local.detach().abs().nan_to_num().amax().to(
-                dtype=torch.float32))
+            weight_absmax = (weight_local.detach().abs().nan_to_num().amax().to(dtype=torch.float32))
             weight_global_sf = (448 * 6) / weight_absmax
             fp4_w, fp4_s = _nvfp4_quantize(
                 weight_local,
