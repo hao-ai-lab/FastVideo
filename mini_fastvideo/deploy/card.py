@@ -8,6 +8,7 @@ This is the contract our OWN fleet (``deploy/fleet.py``) consumes AND the Dynamo
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,7 +60,9 @@ def build_deployment_card(engine_id: str, model_cards: list, *, max_concurrent: 
         if cost_model is None:
             for lp in c.loops.values():
                 if lp.step_cost_model is not None:
-                    cost_model = lp.step_cost_model
+                    # own copy so online calibration of one card's cost doesn't alias another replica's
+                    cost_model = dataclasses.replace(lp.step_cost_model,
+                                                     coefficients=dict(lp.step_cost_model.coefficients))
                     break
     return DeploymentCard(
         engine_id=engine_id, model_cards=ids, capabilities=frozenset(caps),
