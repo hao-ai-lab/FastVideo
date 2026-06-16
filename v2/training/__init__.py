@@ -12,10 +12,12 @@ from .methods import (
     FineTuneMethod,
     SelfForcingMethod,
     TrainingMethod,
+    UnifiedRLMethod,
     build_diffusion_nft,
     build_dmd2,
     build_finetune,
     build_self_forcing,
+    build_unified_rl,
 )
 from .rewards import MultiRewardScorer, build_multi_reward_scorer
 from .rollout import RolloutContext, Trajectory, TrajectoryBuffer, rollout_loop
@@ -23,7 +25,8 @@ from .weight_sync import WeightRole, WeightSyncPlan
 
 __all__ = [
     "TrainingMethod", "FineTuneMethod", "DMD2Method", "DiffusionNFTMethod", "SelfForcingMethod",
-    "build_finetune", "build_dmd2", "build_diffusion_nft", "build_self_forcing",
+    "UnifiedRLMethod",
+    "build_finetune", "build_dmd2", "build_diffusion_nft", "build_self_forcing", "build_unified_rl",
     "BehaviorRecord", "TrajectoryStatus", "Trajectory", "TrajectoryBuffer", "RolloutContext",
     "rollout_loop", "WeightSyncPlan", "WeightRole", "MultiRewardScorer", "build_multi_reward_scorer",
 ]
