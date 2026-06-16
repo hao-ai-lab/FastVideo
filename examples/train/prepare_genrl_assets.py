@@ -89,24 +89,27 @@ def validate_prompt_file(path: Path, min_prompts: int) -> None:
         )
 
     prompt_count = 0
+    saw_content = False
     with path.open(encoding="utf-8") as f:
         for line_no, raw_line in enumerate(f, start=1):
             line = raw_line.strip()
             if not line:
                 continue
-            if (
-                prompt_count == 0
-                and line_no == 1
-                and line.startswith("version https://git-lfs.github.com")
-            ):
+            if not saw_content and line.startswith("version https://git-lfs.github.com"):
                 raise RuntimeError(
                     f"{path} is a Git LFS pointer, not real prompt JSON. "
                     "Install git-lfs and rerun this script."
                 )
+            saw_content = True
             try:
                 item = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise RuntimeError(f"Invalid JSON in {path} at line {line_no}: {exc}") from exc
+            if not isinstance(item, dict):
+                raise RuntimeError(
+                    f"Expected JSON object in {path} at line {line_no}; "
+                    f"got {type(item).__name__}."
+                )
             if item.get("prompt"):
                 prompt_count += 1
 

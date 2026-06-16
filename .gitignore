@@ -128,4 +128,5 @@ apps/dreamverse/web/.env.production.local
 .codex/
 .sisyphus/
 openspec/
+modal_train_genrl.py
 fastvideo/tests/ssim/reference_videos/**
