@@ -37,6 +37,10 @@ class DiffusionParams:
     num_frames: int = 81
     fps: int = 16
     seed: int | None = None
+    # FlowGRPO-style RL rollout: use the SDE sampler (with per-step log-prob capture) instead of the
+    # deterministic ODE serve sampler (PromptRL/UniRL §6). Default False ⇒ the serve path is unchanged.
+    sde_rollout: bool = False
+    sde_noise_scale: float = 0.7
 
 
 class CaptureMode(str, Enum):

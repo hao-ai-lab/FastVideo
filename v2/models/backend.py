@@ -145,6 +145,82 @@ class ToyMoTDiT(ToyDiT):
         return (rng.standard_normal((4, 8)) * 0.1).astype("float32")
 
 
+class ToyPromptRefiner:
+    """Toy LM prompt-refiner — UniRL/PromptRL's Qwen role (a *separate expert*, not MoT-shared).
+
+    A categorical policy over a small set of refinement "actions" (stand-in for the LM emitting a
+    refined prompt). Sampling an action picks an embedding offset that shifts the diffusion
+    conditioning; the realized reward then drives the policy by REINFORCE. This is the *second
+    trainable expert* in the unified-RL stress test: one reward → a token-policy-gradient update
+    here AND a FlowGRPO update on the DiT, under one advantage (design_v3 §10; PromptRL §6).
+
+    Real gradient: loss = −A·logπ(a); ∇_logits = −A·(onehot(a) − softmax). So the toy LM actually
+    learns to prefer the reward-favored action — the LM-side analogue of ToyDiT.mse_grad_step.
+    """
+
+    def __init__(self, n_actions: int = 8, dim: int = TEXT_DIM, seq: int = TEXT_SEQ, seed: int = 0):
+        self.n = int(n_actions)
+        self.dim, self.seq = int(dim), int(seq)
+        self.logits = np.zeros(self.n, dtype="float64")                  # the trainable policy params
+        rng = np.random.default_rng(seed)
+        # each action ⇒ a fixed conditioning offset (the "content" of that refined prompt)
+        self._emb = (rng.standard_normal((self.n, self.seq, self.dim)) * 0.1).astype("float32")
+
+    def _probs(self) -> np.ndarray:
+        z = self.logits - self.logits.max()
+        e = np.exp(z)
+        return e / e.sum()
+
+    def sample_refinement(self, rng) -> tuple[int, float]:
+        """Sample an action (exploration) and return (action, logπ(action))."""
+        p = self._probs()
+        a = int(rng.choice(self.n, p=p))
+        return a, float(np.log(p[a] + 1e-12))
+
+    def argmax_refinement(self) -> tuple[int, float]:
+        a = int(np.argmax(self.logits))
+        return a, float(np.log(self._probs()[a] + 1e-12))
+
+    def action_logprob(self, action: int) -> float:
+        return float(np.log(self._probs()[int(action)] + 1e-12))
+
+    def ar_forward(self, tokens) -> int:
+        """und-pathway hook so the declared ``ar_decode`` loop is runnable (greedy ⇒ interleave-safe)."""
+        return int(np.argmax(self.logits))
+
+    def refined_embed(self, base_embed, action: int) -> np.ndarray:
+        """Apply the chosen refinement to the base text embedding → the diffusion conditioning."""
+        base = np.zeros((self.seq, self.dim), dtype="float32") if base_embed is None \
+            else np.asarray(base_embed, dtype="float32")
+        return (base + self._emb[int(action)]).astype("float32")
+
+    def pg_step(self, action: int, advantage: float, lr: float) -> float:
+        """REINFORCE on the categorical policy. Returns grad_norm (the per-method regression signal)."""
+        p = self._probs()
+        onehot = np.zeros(self.n, dtype="float64")
+        onehot[int(action)] = 1.0
+        grad = -float(advantage) * (onehot - p)                          # ∇_logits (−A·logπ(a))
+        self.logits = self.logits - float(lr) * grad                     # descent on −A·logπ ⇒ ascent on A·logπ
+        return float(np.linalg.norm(grad))
+
+    def kl_to(self, other: "ToyPromptRefiner") -> float:
+        """KL(π_self ‖ π_other) over the categorical — the LM-PG reference-KL penalty term."""
+        p, q = self._probs(), other._probs()
+        return float(np.sum(p * (np.log(p + 1e-12) - np.log(q + 1e-12))))
+
+    def clone(self) -> "ToyPromptRefiner":
+        c = ToyPromptRefiner.__new__(ToyPromptRefiner)
+        c.n, c.dim, c.seq = self.n, self.dim, self.seq
+        c.logits, c._emb = self.logits.copy(), self._emb.copy()
+        return c
+
+    def copy_from(self, other: "ToyPromptRefiner") -> None:
+        self.logits = other.logits.copy()
+
+    def blend_from(self, other: "ToyPromptRefiner", decay: float) -> None:
+        self.logits = decay * self.logits + (1.0 - decay) * other.logits
+
+
 class ToyVAE:
     """Tiny deterministic VAE. encode: video→latent (mean-pool + channel proj); decode: latent→video."""
 

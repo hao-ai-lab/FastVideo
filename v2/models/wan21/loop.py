@@ -21,7 +21,7 @@ from ...loop.contracts import (
     StepResult,
     WorkPlan,
 )
-from ...loop.sampler import flow_match_euler_step
+from ...loop.sampler import flow_match_euler_step, flow_sde_step_with_logprob
 from ...request.streams import StreamChunk
 from ..backend import LATENT_CHANNELS
 
@@ -59,6 +59,9 @@ class WanDenoiseLoop:
         st.cond["negative_prompt_embeds"] = ctx.slots.get("neg_text_embeds")
         st.scratch["guidance_scale"] = float(req.diffusion.guidance_scale)
         st.scratch["stream_video"] = bool(req.outputs.stream.get("video"))
+        # FlowGRPO RL rollout: switch the sampler to SDE-with-logprob (else deterministic ODE serve).
+        st.scratch["sde"] = bool(getattr(req.diffusion, "sde_rollout", False))
+        st.scratch["sde_noise_scale"] = float(getattr(req.diffusion, "sde_noise_scale", 0.7))
         st.plugin_state["cfg"] = {}
         return st
 
@@ -75,6 +78,7 @@ class WanDenoiseLoop:
         pe, ne = st.cond["prompt_embeds"], st.cond["negative_prompt_embeds"]
         scale = st.scratch["guidance_scale"]
         cfg, precision = self.cfg, self.precision
+        sde, noise_scale, rng = st.scratch.get("sde", False), st.scratch.get("sde_noise_scale", 0.7), st.rng
 
         def run(model, override=None):
             if override is not None and "noise_pred" in override:
@@ -83,7 +87,15 @@ class WanDenoiseLoop:
                 dit = model.component(expert_id)
                 preds = {b: dit(x, pe if b == "cond" else ne, sigma_t) for b in branches}
                 velocity = cfg.combine(preds, scale, sctx, cfg_state)
-            x_next = flow_match_euler_step(precision.cast(x), precision.cast(velocity), sigma_t, sigma_next)
+            velocity = precision.cast(velocity)
+            if sde:                                              # FlowGRPO rollout: stochastic + log-prob
+                noise = rng.standard_normal(x.shape)
+                x_next, logp, _m, _s = flow_sde_step_with_logprob(
+                    precision.cast(x), velocity, sigma_t, sigma_next, noise=noise, noise_scale=noise_scale)
+                return StepResult(output={"noise_pred": np.asarray(velocity, dtype="float32"),
+                                          "latents": x_next.astype("float32"),
+                                          "sde_logprob": logp, "prev": np.asarray(x, dtype="float32")})
+            x_next = flow_match_euler_step(precision.cast(x), velocity, sigma_t, sigma_next)
             return StepResult(output={"noise_pred": np.asarray(velocity, dtype="float32"),
                                       "latents": x_next.astype("float32")})
 
@@ -106,11 +118,16 @@ class WanDenoiseLoop:
     def advance(self, st: LoopState, result: StepResult) -> LoopState:
         st.latents["video"] = result.output["latents"]
         if st.profile == ExecutionProfile.ROLLOUT:
-            st.trajectory.append({
-                "step": st.step_idx, "sigma": st.sigmas[st.step_idx],
-                "velocity": np.asarray(result.output["noise_pred"]).copy(),
-                "latents": np.asarray(st.latents["video"]).copy(),
-            })
+            i = st.step_idx
+            rec = {"step": i, "sigma": st.sigmas[i],
+                   "velocity": np.asarray(result.output["noise_pred"]).copy(),
+                   "latents": np.asarray(st.latents["video"]).copy()}
+            if "sde_logprob" in result.output:                   # FlowGRPO: capture the PPO log-prob slice
+                rec.update(sde_logprob=result.output["sde_logprob"],
+                           prev=np.asarray(result.output["prev"]).copy(),
+                           sample=np.asarray(result.output["latents"]).copy(),
+                           sigma_t=st.sigmas[i], sigma_next=st.sigmas[i + 1])
+            st.trajectory.append(rec)
         st.step_idx += 1
         return st
 
