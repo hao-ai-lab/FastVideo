@@ -2,13 +2,12 @@
 
 Mini-fastvideo implements the load-bearing layers:
   * ``AdmissionController`` — the reservation gate (§6.2): do not admit a WorkUnit unless its
-    compute budget AND memory (resident + worst-case peak) can be reserved. Two requests that
-    fit individually but jointly OOM are rejected at admission, not at step 37.
-  * ``BatchScheduler`` — groups compatible WorkPlans by ``shape_sig.batch_key`` (§6.3): image
-    diffusion and AR decode batch across requests; jumbo video stays batch-of-1.
-  * cost currency — predicted GPU-time (§6.1), accumulated for fairness/metrics.
-
-PlacementScheduler/TransferScheduler are single-node trivial here (one pool, in-proc edges).
+    compute budget AND memory (resident + worst-case peak) can be reserved. Reservations are
+    *refundable* (compute is a concurrency gate, not a lifetime cap), and infeasible reservations
+    (need > pool capacity) fail fast with ``AdmissionInfeasible`` instead of spinning.
+  * ``BatchScheduler`` — groups compatible WorkPlans by ``shape_sig.batch_key`` (§6.3). NOTE: in this
+    single-process mini, grouping drives *accounting* (how many units would co-batch); kernels still
+    execute per-plan. Real cross-request batched execution is a GPU-path concern (documented, not faked).
 """
 from __future__ import annotations
 
@@ -20,6 +19,10 @@ from ..loop.contracts import WorkPlan
 from ..memory.allocator import MemoryManager, Reservation
 
 
+class AdmissionInfeasible(RuntimeError):
+    """A reservation can never be satisfied (need > pool capacity) — fail fast, don't spin."""
+
+
 @dataclass
 class WorkUnit:
     """The smallest schedulable action (design_v3 §6.1)."""
@@ -29,23 +32,38 @@ class WorkUnit:
 
 
 @dataclass
+class StepTicket:
+    """Returned by ``admit_step``; carries what ``release`` must refund (memory + compute)."""
+    memory_res: Reservation | None
+    compute_seconds: float
+
+
+@dataclass
 class SchedulerMetrics:
     admitted: int = 0
     deferred: int = 0
     batches: int = 0
-    batched_units: int = 0
+    stepped_units: int = 0
     gpu_seconds: float = 0.0
     by_kind: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
 
 class AdmissionController:
-    """Reservation before admission (design_v3 §6.2). Compute budget + memory both gate."""
+    """Reservation before admission (design_v3 §6.2). Compute budget + memory both gate; both refund."""
 
     def __init__(self, memory: MemoryManager | None = None, compute_budget_seconds: float = float("inf")):
         self.memory = memory or MemoryManager()
         self.compute_budget = compute_budget_seconds
         self.compute_spent = 0.0
         self.metrics = SchedulerMetrics()
+
+    def feasible_resident(self, nbytes: int) -> bool:
+        return nbytes <= self.memory.total_bytes
+
+    def feasible_step(self, plan: WorkPlan) -> bool:
+        """Could this step EVER be admitted on an empty pool? If not, the caller fails fast."""
+        return (plan.resources.peak_activation_bytes <= self.memory.total_bytes
+                and plan.resources.compute_seconds <= self.compute_budget)
 
     def reserve_resident(self, tag: str, nbytes: int) -> Reservation | None:
         if nbytes <= 0:
@@ -54,11 +72,8 @@ class AdmissionController:
             return None
         return self.memory.reserve(tag, nbytes)
 
-    def admit_step(self, plan: WorkPlan) -> Reservation | None | bool:
-        """Reserve a step's peak activation + check the compute budget.
-
-        Returns a Reservation (peak reserved), True (no peak to reserve but admitted),
-        or None (deferred — budget/memory unavailable)."""
+    def admit_step(self, plan: WorkPlan) -> StepTicket | None:
+        """Reserve a step's peak activation + check the compute budget. None ⇒ deferred."""
         c = plan.resources.compute_seconds
         if self.compute_spent + c > self.compute_budget:
             self.metrics.deferred += 1
@@ -74,11 +89,14 @@ class AdmissionController:
         self.metrics.admitted += 1
         self.metrics.gpu_seconds += c
         self.metrics.by_kind[plan.kind.value] += 1
-        return res if res is not None else True
+        return StepTicket(res, c)
 
-    def release(self, res: Reservation | None | bool) -> None:
-        if isinstance(res, Reservation):
-            self.memory.release(res)
+    def release(self, ticket: StepTicket | None) -> None:
+        if ticket is None:
+            return
+        if ticket.memory_res is not None:
+            self.memory.release(ticket.memory_res)
+        self.compute_spent = max(0.0, self.compute_spent - ticket.compute_seconds)   # refund
 
 
 class BatchScheduler:

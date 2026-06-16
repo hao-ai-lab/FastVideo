@@ -44,6 +44,13 @@ class CacheManager:
             if hasattr(pool, "invalidate_weights"):
                 pool.invalidate_weights(version)
 
+    def invalidate_components(self, components) -> None:
+        """Component-scoped invalidation (design_v3 §7.1): only drop caches for changed components."""
+        comps = set(components)
+        for pool in self._pools.values():
+            if hasattr(pool, "invalidate_components"):
+                pool.invalidate_components(comps)
+
     def clear_namespace(self, namespace: str) -> None:
         """Release a finished request's per-request caches (residual/slab)."""
         for pool in self._pools.values():

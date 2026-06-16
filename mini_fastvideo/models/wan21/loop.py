@@ -94,7 +94,8 @@ class WanDenoiseLoop:
             peak_activation_bytes=int(x.nbytes))          # one step's transient working buffer
         emits = []
         if st.scratch.get("stream_video"):
-            emits.append(StreamChunk(stream_id=st.request_id, modality="video", seq=i, preview=True))
+            emits.append(StreamChunk(stream_id=st.request_id, modality="video", seq=i,
+                                     data=x, preview=True))   # carry the latent as a preview payload
         return WorkPlan(
             loop_id=self.loop_id, instance_id=st.instance_id, kind=WorkUnitKind.DIFFUSION_STEP,
             shape_sig=ShapeSignature(WorkUnitKind.DIFFUSION_STEP, dims=tuple(x.shape),

@@ -108,6 +108,43 @@ class ToyDiT:
         return loss, grad_norm
 
 
+class ToyTokenizer:
+    """Deterministic byte-ish tokenizer for the omni AR pathway (phase 2)."""
+    EOS = 0
+    VOCAB = 256
+
+    def encode(self, text: str) -> list[int]:
+        toks = [(ord(c) % (self.VOCAB - 1)) + 1 for c in (text or "")[:16]]
+        return toks or [1]
+
+    def decode(self, tokens) -> str:
+        return "".join(chr(32 + (int(t) % 90)) for t in tokens)
+
+
+class ToyMoTDiT(ToyDiT):
+    """Mixture-of-Transformers stand-in: ONE resident module that runs BOTH an AR (understanding)
+    pathway and a diffusion (generation) pathway on shared weights (design_v3 §4.2, §16).
+
+    ``ar_forward`` is the und pathway (next-token); ``__call__`` (inherited) is the gen pathway
+    (velocity). Binding both the ar_decode and diffusion_denoise loops to one instance of this
+    component is the MoT requirement no DAG-of-engines can express.
+    """
+    VOCAB = 256
+    EOS = 0
+
+    def ar_forward(self, tokens) -> int:
+        # deterministic next-token from the context (greedy ⇒ trivially interleave-safe)
+        ctx = sum(int(t) for t in tokens)
+        nxt = (ctx * 7 + 13) % self.VOCAB
+        return int(nxt)
+
+    def reasoner_embed(self, tokens) -> np.ndarray:
+        """Pack the und-pathway tokens into a conditioning embed the gen pathway consumes
+        (the Cosmos3 'prompt upsampling before diffusion in the same request')."""
+        rng = np.random.default_rng((sum(int(t) for t in tokens) + 1) % (1 << 31))
+        return (rng.standard_normal((4, 8)) * 0.1).astype("float32")
+
+
 class ToyVAE:
     """Tiny deterministic VAE. encode: video→latent (mean-pool + channel proj); decode: latent→video."""
 
