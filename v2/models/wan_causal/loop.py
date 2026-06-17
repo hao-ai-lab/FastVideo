@@ -24,7 +24,7 @@ from ...loop.contracts import (
     StepResult,
     WorkPlan,
 )
-from ...loop.sampler import flow_match_euler_step
+from ...platform import FLOW_MATCH_STEP
 from ...request.streams import StreamChunk
 from ..backend import LATENT_CHANNELS
 
@@ -80,13 +80,14 @@ class ChunkRolloutLoop:
         cfg, precision = self.cfg, self.precision
 
         def run(model, override=None):
+            fm = model.platform.kernels.get(FLOW_MATCH_STEP)    # solver dispatched per (device, arch)
             if override is not None and "noise_pred" in override:
                 velocity = np.asarray(override["noise_pred"], dtype="float32")
             else:
                 dit = model.component("transformer")
                 preds = {b: dit(x, pe if b == "cond" else ne, sigma_t, context=context) for b in branches}
                 velocity = cfg.combine(preds, scale, sctx, cfg_state)
-            x_next = flow_match_euler_step(precision.cast(x), precision.cast(velocity), sigma_t, sigma_next)
+            x_next = fm(precision.cast(x), precision.cast(velocity), sigma_t, sigma_next)
             return StepResult(output={"noise_pred": np.asarray(velocity, dtype="float32"),
                                       "latents": x_next.astype("float32")})
 

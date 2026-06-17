@@ -19,6 +19,7 @@ from v2.loop.driver import LoopRunner
 from v2.models.backend import ToyDiT, ToyTextEncoder, ToyVAE
 from v2.models.common import text_encode_node_fn
 from v2.models.wan21 import build_wan21_card
+from v2.models.wan_causal import build_wan_causal_card
 from v2.parity import bit_identical               # the typed C1 instrument (ladder.py)
 from v2.platform import (
     FLOW_MATCH_STEP,
@@ -27,7 +28,7 @@ from v2.platform import (
     component_matrix,
     kernel_matrix,
 )
-from v2.platform.backends.accel import AccelDiT
+from v2.platform.backends.accel import AccelComponent, AccelDiT
 from v2.request import DiffusionParams, TaskType, make_request
 from v2.request.streams import Stream
 from v2.runtime import Engine
@@ -41,8 +42,8 @@ def _instance(platform):
     return load_card(card, cache_manager=CacheManager.from_card(card), platform=platform)
 
 
-def _drive_denoise(inst, prompt="a fox", seed=1, *, steps=8, sde=False):
-    """Drive the wan21 denoise loop step-by-step on ``inst``'s platform; return the final latent."""
+def _drive_denoise(inst, prompt="a fox", seed=1, *, steps=8, sde=False, loop_id="diffusion_denoise"):
+    """Drive a loop step-by-step on ``inst``'s platform; return the final latent."""
     req = make_request(TaskType.T2V, inst.card.model_id, prompt,
                        diffusion=DiffusionParams(num_steps=steps, seed=seed, sde_rollout=sde))
     slots: dict = {}
@@ -51,7 +52,7 @@ def _drive_denoise(inst, prompt="a fox", seed=1, *, steps=8, sde=False):
     ctx = RuntimeLoopContext(inst, observers=_HUB.observers, interceptors=_HUB.interceptors,
                              slots=slots, stream=Stream(req.request_id), cancel_scope=None,
                              profile=profile, metrics={}, request_id=req.request_id)
-    runner = LoopRunner(inst.loop("diffusion_denoise"), ctx, req, inst)
+    runner = LoopRunner(inst.loop(loop_id), ctx, req, inst)
     while not runner.done:
         runner.step()
     return np.asarray(runner.result.outputs["latents"])
@@ -134,9 +135,10 @@ def test_accel_component_override_and_device_fallback():
     inst = _instance(Platform.accel("sm90"))
     dit = inst.component("transformer")               # registered for accel → AccelDiT wrapper
     assert isinstance(dit, AccelDiT) and dit.device == "accel"
-    # text_encoder / vae are NOT registered for accel → fall back over accel→cpu to the factory toy
+    vae = inst.component("vae")                        # vae is ALSO overridden on accel (kind-generic)
+    assert isinstance(vae, AccelComponent) and vae.device == "accel"
+    # text_encoder is NOT registered for accel → falls back over accel→cpu to the numpy factory toy
     assert isinstance(inst.component("text_encoder"), ToyTextEncoder)
-    assert isinstance(inst.component("vae"), ToyVAE)
 
 
 def test_cuda_component_falls_back_to_factory_when_unavailable():
@@ -168,6 +170,17 @@ def test_accel_sde_dispatch_path_equivalent():
 def test_accel_denoise_still_produces_valid_output():
     out = _drive_denoise(_instance(Platform.accel("sm90")), seed=3, steps=4)
     assert out.shape[0] == 4 and np.all(np.isfinite(out))
+
+
+def test_parity_oracle_accel_equals_cpu_second_loop():
+    """A SECOND loop family (wan-causal chunk rollout) also routes its solver through the kernel
+    table — so the seam is finished across loops, not just wan21 denoise. accel ≡ cpu, bit-identical."""
+    def drive(platform):
+        card = build_wan_causal_card()
+        inst = load_card(card, cache_manager=CacheManager.from_card(card), platform=platform)
+        loop_id = next(iter(inst.card.loops))          # the chunk-rollout loop
+        return _drive_denoise(inst, seed=5, loop_id=loop_id)
+    assert bit_identical(drive(Platform.cpu()), drive(Platform.accel("sm90")))
 
 
 # --------------------------------------------------------------------------- #

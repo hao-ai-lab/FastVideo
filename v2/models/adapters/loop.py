@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 from ...loop.contracts import Done
-from ...loop.sampler import flow_match_euler_step
+from ...platform import FLOW_MATCH_STEP
 from ..wan21.loop import WanDenoiseLoop
 
 
@@ -39,7 +39,8 @@ class AdapterDenoiseLoop(WanDenoiseLoop):
             for aid in adapters:                                    # apply each active adapter's delta
                 v = v + model.component(aid).delta(x, control)
             res.output["noise_pred"] = v
-            res.output["latents"] = flow_match_euler_step(prec.cast(x), v, sigma_t, sigma_next).astype("float32")
+            fm = model.platform.kernels.get(FLOW_MATCH_STEP)    # solver dispatched per (device, arch)
+            res.output["latents"] = fm(prec.cast(x), v, sigma_t, sigma_next).astype("float32")
             return res
 
         plan.run = run

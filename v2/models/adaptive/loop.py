@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 
 from ...loop.contracts import Done, StepResult
-from ...loop.sampler import flow_match_euler_step
+from ...platform import FLOW_MATCH_STEP
 from ..wan21.loop import WanDenoiseLoop
 
 
@@ -46,7 +46,7 @@ class CacheDiTDenoiseLoop(WanDenoiseLoop):
         v = np.asarray(last_v, dtype="float32")
 
         def run(model, override=None):
-            x_next = flow_match_euler_step(prec.cast(x), v, sigma_t, sigma_next)
+            x_next = model.platform.kernels.get(FLOW_MATCH_STEP)(prec.cast(x), v, sigma_t, sigma_next)
             return StepResult(output={"noise_pred": v, "latents": x_next.astype("float32"), "skipped": True})
 
         plan.run = run

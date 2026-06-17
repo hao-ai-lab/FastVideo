@@ -21,16 +21,20 @@ import numpy as np
 from ..._enums import ConsistencyLevel, ExecutionProfile
 from ...loop.sampler import flow_sde_ml_velocity, flow_sde_step_with_logprob
 from ...models.common import cached_text_encode
+from ...platform import FLOW_SDE_STEP
 from ...request import DiffusionParams, TaskType, make_request
 from ..rollout import rollout_loop
 from ..weight_sync import WeightRole, WeightSyncPlan
 from .base import TrainingMethod, new_instance
 
 
-def _flowgrpo_ppo_step(dit, ref_dit, behavior, emb, advantage, *, lr, ppo_clip, beta, noise_scale):
+def _flowgrpo_ppo_step(dit, ref_dit, behavior, emb, advantage, *, lr, ppo_clip, beta, noise_scale,
+                       sde_step=None):
     """One FlowGRPO PPO pass over an SDE trajectory: per-step ratio + KL, then move the policy toward
     the max-likelihood velocity of each realized sample (advantage-weighted). Returns
-    (ppo_loss, kl, ratio, grad_norm). Shared by both stages."""
+    (ppo_loss, kl, ratio, grad_norm). Shared by both stages. ``sde_step`` is the platform-resolved SDE
+    kernel (pins the recompute to the rollout's kernel, C2); defaults to the numpy reference."""
+    sde_step = sde_step or flow_sde_step_with_logprob
     ppo_losses, kls, ratios, gnorms = [], [], [], []
     for rec in behavior or []:
         if "sde_logprob" not in rec:
@@ -38,10 +42,10 @@ def _flowgrpo_ppo_step(dit, ref_dit, behavior, emb, advantage, *, lr, ppo_clip, 
         prev, sample = rec["prev"], rec["sample"]
         st, sn = float(rec["sigma_t"]), float(rec["sigma_next"])
         v_cur = dit(prev, emb, st)
-        _, logp_cur, mean_cur, eff_std = flow_sde_step_with_logprob(
+        _, logp_cur, mean_cur, eff_std = sde_step(
             prev, v_cur, st, sn, prev_sample=sample, noise_scale=noise_scale)
         v_ref = ref_dit(prev, emb, st)
-        _, _, mean_ref, _ = flow_sde_step_with_logprob(
+        _, _, mean_ref, _ = sde_step(
             prev, v_ref, st, sn, prev_sample=sample, noise_scale=noise_scale)
         ratio = float(np.exp(np.clip(logp_cur - float(rec["sde_logprob"]), -10.0, 10.0)))
         clipped = float(np.clip(ratio, 1.0 - ppo_clip, 1.0 + ppo_clip))
@@ -141,11 +145,13 @@ class WorkflowRLMethod(TrainingMethod):
                 pt, _kt, rt, gt = _flowgrpo_ppo_step(
                     self.t2i.component("transformer"), self.t2i_ref.component("transformer"),
                     res_t.behavior, emb_t, a, lr=self.t2i_lr, ppo_clip=self.ppo_clip,
-                    beta=self.beta, noise_scale=self.sde_noise_scale)
+                    beta=self.beta, noise_scale=self.sde_noise_scale,
+                    sde_step=self.t2i.platform.kernels.get(FLOW_SDE_STEP))
                 pi_, _ki, ri, gi = _flowgrpo_ppo_step(
                     self.i2v.component("transformer"), self.i2v_ref.component("transformer"),
                     res_i.behavior, emb_i, a, lr=self.i2v_lr, ppo_clip=self.ppo_clip,
-                    beta=self.beta, noise_scale=self.sde_noise_scale)
+                    beta=self.beta, noise_scale=self.sde_noise_scale,
+                    sde_step=self.i2v.platform.kernels.get(FLOW_SDE_STEP))
                 t2i_loss.append(pt); i2v_loss.append(pi_)
                 t2i_gn.append(gt); i2v_gn.append(gi)
                 ratios.extend([rt, ri])

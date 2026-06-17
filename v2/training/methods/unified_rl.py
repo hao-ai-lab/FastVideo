@@ -32,8 +32,8 @@ import numpy as np
 
 from ..._enums import ConsistencyLevel, ExecutionProfile
 from ...loop.sampler import flow_sde_ml_velocity as _ml_velocity
-from ...loop.sampler import flow_sde_step_with_logprob
 from ...models.common import cached_text_encode
+from ...platform import FLOW_SDE_STEP
 from ...request import DiffusionParams, TaskType, make_request
 from ..rollout import rollout_loop
 from ..weight_sync import WeightRole, WeightSyncPlan
@@ -112,6 +112,9 @@ class UnifiedRLMethod(TrainingMethod):
         """FlowGRPO PPO over one rollout's SDE trajectory: per-step ratio + KL, then a toy DiT step.
         Returns (mean_ppo_loss, mean_kl, mean_ratio, grad_norm)."""
         ref_dit = self.reference.component("transformer")
+        # Pin the log-prob recompute to the SAME SDE kernel the rollout used (C2 kernel-pinning):
+        # on a GPU box the rollout's logp and this ratio must come from one kernel or the PPO ratio biases.
+        sde_step = self.student.platform.kernels.get(FLOW_SDE_STEP)
         ppo_losses, kls, ratios, gnorms = [], [], [], []
         for rec in behavior or []:
             if "sde_logprob" not in rec:
@@ -119,10 +122,10 @@ class UnifiedRLMethod(TrainingMethod):
             prev, sample = rec["prev"], rec["sample"]
             st, sn = float(rec["sigma_t"]), float(rec["sigma_next"])
             v_cur = self.dit(prev, emb, st)
-            _, logp_cur, mean_cur, eff_std = flow_sde_step_with_logprob(
+            _, logp_cur, mean_cur, eff_std = sde_step(
                 prev, v_cur, st, sn, prev_sample=sample, noise_scale=self.sde_noise_scale)
             v_ref = ref_dit(prev, emb, st)
-            _, _, mean_ref, _ = flow_sde_step_with_logprob(
+            _, _, mean_ref, _ = sde_step(
                 prev, v_ref, st, sn, prev_sample=sample, noise_scale=self.sde_noise_scale)
             ratio = float(np.exp(np.clip(logp_cur - float(rec["sde_logprob"]), -10.0, 10.0)))
             clipped = float(np.clip(ratio, 1.0 - self.ppo_clip, 1.0 + self.ppo_clip))
