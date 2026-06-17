@@ -28,7 +28,7 @@ from ...loop.contracts import (
     StepResult,
     WorkPlan,
 )
-from ...loop.sampler import flow_match_euler_step
+from ...platform import FLOW_MATCH_STEP
 from ..backend import LATENT_CHANNELS
 
 BASE_SIGMAS = [1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0]
@@ -99,6 +99,7 @@ class LTX2DenoiseLoop:
         au = st.latents.get("audio")
 
         def run(model, override=None):
+            fm = model.platform.kernels.get(FLOW_MATCH_STEP)    # solver dispatched per (device, arch)
             if override is not None and "noise_pred" in override:
                 velocity = np.asarray(override["noise_pred"], dtype="float32")
             else:
@@ -110,14 +111,14 @@ class LTX2DenoiseLoop:
                 velocity = (pos
                             + (v_guidance - 1.0) * (pos - neg)
                             + stg_scale * (pos - ptb))
-            x_next = flow_match_euler_step(x, np.asarray(velocity, dtype="float32"), sigma_t, sigma_next)
+            x_next = fm(x, np.asarray(velocity, dtype="float32"), sigma_t, sigma_next)
             out = {"noise_pred": np.asarray(velocity, dtype="float32"), "latents": x_next.astype("float32")}
             if want_audio and au is not None:                   # joint audio denoise, conditioned on video
                 dit = model.component("transformer")
                 a_pos = dit(au, pe, sigma_t, context=x)         # context=x ⇒ audio synced to the video
                 a_neg = dit(au, ne, sigma_t, context=x)
                 a_vel = a_pos + (a_guidance - 1.0) * (a_pos - a_neg)   # audio's OWN guidance scale
-                out["audio_latents"] = flow_match_euler_step(au, a_vel, sigma_t, sigma_next).astype("float32")
+                out["audio_latents"] = fm(au, a_vel, sigma_t, sigma_next).astype("float32")
             return StepResult(output=out)
 
         res = ResourceRequest(

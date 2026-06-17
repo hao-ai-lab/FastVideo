@@ -17,14 +17,15 @@ scheduler, caches, parity, training, and workflow code are unchanged.
 
 Honest scope of what is *wired* today (the substrate supports more than it demonstrates): a pure-
 python `accel` stand-in backend proves the dispatch is genuinely device-generic (cross-device
-resolution + arch fallback + the parity oracle, bit-identical to numpy) without a GPU. The wan21
-denoise loop routes its solver ops (`flow_match_step`/`flow_sde_step`) through the kernel table, and
-the `dit` component has a backend override; the other model loops still call the numpy samplers
-directly and only the `dit` kind is overridden — each is a one-line change to adopt. The full
-torch/CUDA path and a cudagraph capture-safety (`workspace_bytes`) contract are declared/​deferred,
-not implemented.
+resolution + arch fallback + the parity oracle, bit-identical to numpy) without a GPU. All diffusion
+loops (wan21, ltx2, wan-causal, adapters, adaptive) and the FlowGRPO RL log-prob recompute route
+their solver ops (`flow_match_step`/`flow_sde_step`) through the kernel table — the recompute is
+pinned to the rollout's kernel for C2 correctness. The `dit` and `vae` components have `accel`
+overrides (`text_encoder` demonstrates the device→cpu fallback). Not yet routed: the AR/vocoder op
+families (omni/qwen-omni) have no KERNELS entries, the full torch/CUDA path is declared-unavailable,
+and a cudagraph capture-safety (`workspace_bytes`) contract is deferred.
 
-**183 tests, 30 files**, run two ways (`pytest` and a zero-dependency runner). Python 3.10+ and numpy only.
+**184 tests, 30 files**, run two ways (`pytest` and a zero-dependency runner). Python 3.10+ and numpy only.
 
 ## Scope
 
@@ -100,7 +101,7 @@ Stress tests (the design held — see **designv4 §9**):
 
 ```bash
 cd /Users/willlin/src/FastVideo-mini
-python3 -m pytest v2/tests/ -q      # 127 tests
+python3 -m pytest v2/tests/ -q      # 184 tests
 python3 v2/run_tests.py             # same suite, ZERO deps (no pytest needed)
 python3 -m v2.examples              # the worked examples
 ```
@@ -115,9 +116,9 @@ Each `ComponentSpec` records the real `load_id` (e.g.
    `vae.decode`; `text_encoder.encode`), and the device kernels for the solver/primitive ops. They
    flip to `available=True` when torch+CUDA are present, and `Platform.detect()` resolves them; the
    numpy `ComponentSpec.factory` stays as the CPU terminal fallback rung;
-3. for the loops that don't yet route through the kernel table, swap the direct numpy
-   flow-match/SDE sampler calls for `model.platform.kernels.get(...)` (the wan21 loop shows the
-   pattern — a one-line change per call site).
+3. the diffusion loops + RL recompute already dispatch their solver ops via
+   `model.platform.kernels.get(...)`, so the registered `cuda` kernels are picked up automatically;
+   only the not-yet-routed op families (AR sampling, vocoder synth) need the same one-line swap.
 The loops, policies, scheduler, caches, parity gates, training methods, and workflows are unchanged.
 
 ## Serving & fleet (our own version — Dynamo is an option, not a dependency)

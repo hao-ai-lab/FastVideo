@@ -58,6 +58,31 @@ def _build_accel_dit(spec: Any, instance: Any, platform: Any) -> AccelDiT:
 register_component("dit", _build_accel_dit, device="accel", source="accel(stand-in):AccelDiT")
 
 
+class AccelComponent:
+    """Generic device-tagged wrapper for non-callable component kinds (vae, audio_vae, …). Delegates
+    the full call surface (``decode``/``encode``/…) to the inner toy, so accel ≡ cpu numerically."""
+
+    def __init__(self, inner: Any):
+        self._inner = inner
+        self.device = "accel"
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
+
+
+def _build_accel_component(spec: Any, instance: Any, platform: Any) -> AccelComponent:
+    if getattr(spec, "factory", None) is None:
+        raise RuntimeError(f"accel: no factory to wrap for kind={spec.kind!r}")
+    return AccelComponent(spec.factory(instance))
+
+
+# Override more than one component kind on accel (proving the seam is kind-generic, not dit-special).
+# text_encoder is deliberately left UNregistered so the device→cpu fallback path stays demonstrated.
+for _kind in ("vae", "audio_vae"):
+    register_component(_kind, _build_accel_component, device="accel",
+                       source="accel(stand-in):AccelComponent")
+
+
 # --------------------------------------------------------------------------- #
 # Kernels: independent accel implementations that match the numpy reference.   #
 # --------------------------------------------------------------------------- #

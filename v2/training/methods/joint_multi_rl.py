@@ -28,8 +28,8 @@ import numpy as np
 
 from ..._enums import ConsistencyLevel, ExecutionProfile
 from ...loop.sampler import flow_sde_ml_velocity as _ml_velocity
-from ...loop.sampler import flow_sde_step_with_logprob
 from ...models.common import cached_text_encode
+from ...platform import FLOW_SDE_STEP
 from ...request import DiffusionParams, TaskType, make_request
 from ..rollout import rollout_loop
 from ..weight_sync import WeightRole, WeightSyncPlan
@@ -116,6 +116,8 @@ class JointMultiExpertRL(TrainingMethod):
 
     def _dit_ppo(self, behavior, emb, advantage):
         ref_dit = self.reference.component(self.generator_id)
+        # Pin the log-prob recompute to the SAME SDE kernel the rollout used (C2 kernel-pinning).
+        sde_step = self.student.platform.kernels.get(FLOW_SDE_STEP)
         ppo_losses, kls, ratios, gnorms = [], [], [], []
         for rec in behavior or []:
             if "sde_logprob" not in rec:
@@ -123,10 +125,10 @@ class JointMultiExpertRL(TrainingMethod):
             prev, sample = rec["prev"], rec["sample"]
             st, sn = float(rec["sigma_t"]), float(rec["sigma_next"])
             v_cur = self.dit(prev, emb, st)
-            _, logp_cur, mean_cur, eff_std = flow_sde_step_with_logprob(
+            _, logp_cur, mean_cur, eff_std = sde_step(
                 prev, v_cur, st, sn, prev_sample=sample, noise_scale=self.sde_noise_scale)
             v_ref = ref_dit(prev, emb, st)
-            _, _, mean_ref, _ = flow_sde_step_with_logprob(
+            _, _, mean_ref, _ = sde_step(
                 prev, v_ref, st, sn, prev_sample=sample, noise_scale=self.sde_noise_scale)
             ratio = float(np.exp(np.clip(logp_cur - float(rec["sde_logprob"]), -10.0, 10.0)))
             clipped = float(np.clip(ratio, 1.0 - self.ppo_clip, 1.0 + self.ppo_clip))
