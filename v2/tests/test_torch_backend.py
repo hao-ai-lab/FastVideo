@@ -9,6 +9,7 @@ the box — so they're worth pinning here.
 """
 from __future__ import annotations
 
+import importlib.util
 import sys
 
 import pytest
@@ -64,6 +65,10 @@ def test_cuda_cells_unavailable_on_this_box():
 # --------------------------------------------------------------------------- #
 # The load-bearing guard: importing the backends never imports torch          #
 # --------------------------------------------------------------------------- #
+@pytest.mark.skipif(
+    importlib.util.find_spec("torch") is not None,
+    reason="torch installed (GPU box): the cuda-availability probe imports torch by design to call "
+           "torch.cuda.is_available(); this no-torch-import invariant is only verifiable without torch.")
 def test_loading_backends_does_not_import_torch():
     ensure_backends_loaded()
     component_matrix(); kernel_matrix()
