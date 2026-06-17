@@ -13,6 +13,7 @@ from .specs import (
     when_opt,
     when_task,
 )
+from .workflow import Workflow, WorkflowStage
 
 __all__ = ["Program", "ProgramKind", "ProgramNode", "ComponentNode", "ModelLoopNode",
-           "Edge", "EdgeKind", "always", "when_task", "when_opt"]
+           "Edge", "EdgeKind", "always", "when_task", "when_opt", "Workflow", "WorkflowStage"]
