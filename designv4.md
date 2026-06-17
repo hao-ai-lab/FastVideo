@@ -5,7 +5,7 @@
 > together with **what was actually built and tested** in the `v2/` package, and with the one workload
 > that most stressed the design — **UniRL/PromptRL-style joint LM + generator reinforcement learning**
 > (arXiv 2510.17937; PromptRL, arXiv 2602.01382). v4 is not aspirational. Every structural claim below
-> is backed by code in `v2/` and a passing test (109 tests, 17 files, two independent runners — `pytest`
+> is backed by code in `v2/` and a passing test (114 tests, 17 files, two independent runners — `pytest`
 > and a zero-dependency `v2/run_tests.py`). The neural forwards are toy numpy stand-ins (no GPU/torch in
 > this environment, §12); the **control flow, contracts, scheduling, caching, parity gates, and training
 > math are real**, which is the whole point of the (recipe, runtime) separation: swap the component
@@ -370,8 +370,33 @@ threaded stage→stage. The `image_video` package ships two distinct cards (`flu
 `ImagePart`; stage 2's program folds the image into the I2V conditioning (a program node — `WanDenoiseLoop`
 itself is unchanged) and denoises a video. Crucially, crossing instances is a *Workflow boundary*, not a
 program loop step, so **each model keeps its own interleave-parity guarantee** (proven per-stage). Cost on
-the per-step scheduling path: zero. ✅ `v2/tests/test_t2i_i2v_workflow.py` (7 tests: the video provably
-depends on the generated image; two distinct instances; each stage standalone + parity-gated).
+the per-step scheduling path: zero. ✅ `v2/tests/test_t2i_i2v_workflow.py` (12 tests: the video provably
+depends on the generated image; two distinct instances; each stage standalone + parity-gated; plus the
+naming/registration tests below).
+
+**Naming & registering custom pipelines** (asked directly). A workflow is a *first-class servable*, named
+and registered with the **same discipline as a card** — two levels, mirroring how cards work:
+
+  * **Name = `workflow_id`, in the same namespace as `model_id`.** A workflow is addressed exactly like a
+    model: `engine.run(request)` with `request.model_id == "image_video.t2i_i2v"` routes to the workflow;
+    `engine.serves(name)` reports it; the OpenAI `/models` list includes it. Convention: a **dotted,
+    namespaced** id — `<package>.<pipeline>` (`image_video.t2i_i2v`) — so it never collides with a card id
+    (kebab, e.g. `flux-t2i`); `register_workflow` rejects a collision outright.
+  * **Declared dependencies, validated.** A `Workflow.requires` is the list of cards it composes (derived
+    from its stages — `["flux-t2i", "wan-i2v"]`), and `register_workflow` calls `workflow.validate(engine)`
+    to fail fast if any required card is absent (design.md P7: declared, never inferred).
+  * **Two-level registry, exactly like cards.** A *declarative catalog* — `_WORKFLOWS` in
+    `models/__init__.py` (the cross-model analog of `_BUILDERS`/`_OMNI_BUILDERS`, and of vllm-omni's
+    `pipeline_registry`) — maps `workflow_id → (builder, required-card-builders)`; **adding a custom
+    pipeline is one line there.** `register_workflows(engine, only=[...])` brings up the cards and the
+    workflow together. A live engine then holds validated `Workflow`s in `engine._workflows`, just as it
+    holds instances in `_registry`. A standalone `WorkflowRegistry` class is available for out-of-tree/ad
+    hoc catalogs (the `register_pipeline`-style escape hatch).
+
+So "more custom ones" is: write the stage builders, add one `_WORKFLOWS` entry with a namespaced id, done —
+it is then addressable, discoverable, and dependency-checked like any model. (Async/streaming dispatch of a
+workflow servable through `AsyncEngine.submit` is the one piece not yet wired — the offline `engine.run`
+path and `serves()`/listing are; it is the same routing hook, noted as the remaining step.)
 
 ### 9.7 N-way joint RL — arbitrary experts (asked: possible, or a rewrite?)
 
@@ -464,7 +489,7 @@ v2/
                methods/{finetune,dmd2,diffusion_nft,self_forcing,unified_rl,joint_multi_rl}
   serving/     AsyncEngine, pools, DisaggregatedRunner, connectors, OpenAI server
   deploy/      DeploymentCard, LocalFleet, DynamoWorkerAdapter
-  tests/       17 files, 109 tests         run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
+  tests/       17 files, 114 tests         run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
 ```
 
 **Enforced boundaries:** `card/` imports no product/runtime; `runtime/` executes `card/` loops but defines

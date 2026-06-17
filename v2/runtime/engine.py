@@ -194,9 +194,22 @@ class Engine:
     admission: AdmissionController = field(default_factory=AdmissionController)
     metrics: SchedulerMetrics = field(default_factory=SchedulerMetrics)
     _registry: dict[str, tuple[Any, Program]] = field(default_factory=dict)
+    _workflows: dict[str, Any] = field(default_factory=dict)   # workflow_id -> validated Workflow
 
     def register(self, model_id: str, instance: Any, program: Program) -> None:
         self._registry[model_id] = (instance, program)
+
+    def register_workflow(self, workflow: Any) -> Any:
+        """Register a cross-model Workflow as a servable, addressable by ``workflow.workflow_id`` in
+        the SAME namespace as model ids. Validates its required cards are already registered."""
+        workflow.validate(self)
+        if workflow.workflow_id in self._registry:
+            raise ValueError(f"workflow id {workflow.workflow_id!r} collides with a registered model")
+        self._workflows[workflow.workflow_id] = workflow
+        return workflow
+
+    def serves(self, name: str) -> bool:
+        return name in self._registry or name in self._workflows
 
     def _resolve(self, request: Any) -> tuple[Any, Program]:
         if request.model_id not in self._registry:
@@ -209,6 +222,10 @@ class Engine:
 
     # --- offline single-request (the VideoGenerator path) -------------------- #
     def run(self, request: Any) -> Output:
+        if request.model_id in self._workflows:                # a workflow servable → orchestrate stages
+            wf = self._workflows[request.model_id]
+            seed = request.diffusion.seed if request.diffusion.seed is not None else 0
+            return wf.run(self, prompt=request.prompt(), seed=seed, request=request)
         r = self._make_runner(request)
         r.run_to_completion()
         return r.output()
