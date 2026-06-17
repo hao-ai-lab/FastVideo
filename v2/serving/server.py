@@ -113,7 +113,8 @@ class OmniOpenAIServer:
                 "gpu_seconds": round(adm.gpu_seconds, 6), "by_kind": dict(adm.by_kind)}
 
     def _models(self) -> dict:
-        ids = list(self.engine.engine._registry) + list(self.engine._disagg)
+        ids = (list(self.engine.engine._registry) + list(self.engine._disagg)
+               + list(self.engine.engine._workflows))           # workflows are servables too
         return {"object": "list", "data": [{"id": m, "object": "model"} for m in ids]}
 
     # --- images ------------------------------------------------------------- #

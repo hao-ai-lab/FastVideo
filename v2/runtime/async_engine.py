@@ -74,6 +74,9 @@ class AsyncEngine:
     def register_disaggregated(self, model_id: str, pools: Any, program: Any) -> None:
         self._disagg[model_id] = (pools, program)
 
+    def register_workflow(self, workflow: Any) -> Any:
+        return self.engine.register_workflow(workflow)
+
     def is_disaggregated(self, model_id: str) -> bool:
         return model_id in self._disagg
 
@@ -107,7 +110,8 @@ class AsyncEngine:
         return sum(1 for s in self._states.values() if s == RequestState.WAITING)
 
     def serves(self, model_id: str) -> bool:
-        return model_id in self.engine._registry or model_id in self._disagg
+        return (model_id in self.engine._registry or model_id in self._disagg
+                or model_id in self.engine._workflows)
 
     # --- the driver: one asyncio task per request --------------------------- #
     async def _run(self, request: Any) -> None:
