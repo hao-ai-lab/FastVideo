@@ -80,18 +80,21 @@ class WanDenoiseLoop:
         cfg, precision = self.cfg, self.precision
         sde, noise_scale, rng = st.scratch.get("sde", False), st.scratch.get("sde_noise_scale", 0.7), st.rng
 
+        def _velocity(model, x_, sigma_t_, pe_, ne_, scale_):
+            # The conditioned forward + CFG combine. Solver/forward dispatch through the platform's
+            # kernel table (numpy on CPU, the device kernel on a GPU/accel backend — design_v3 §17).
+            dit = model.component(expert_id)
+            preds = {b: dit(x_, pe_ if b == "cond" else ne_, sigma_t_) for b in branches}
+            return precision.cast(cfg.combine(preds, scale_, sctx, cfg_state))
+
         def run(model, override=None):
-            # Solver primitives are dispatched through the platform's kernel table: on CPU these
-            # resolve to the numpy reference; on a GPU/accel backend they resolve to that device's
-            # kernel — same loop, same StepResult shape (design_v3 §17).
+            # The EAGER thunk: handles the override (cached-prediction) path and the stochastic SDE
+            # rollout path — both eager-break under capture. Allocates freely.
             kernels = model.platform.kernels
             if override is not None and "noise_pred" in override:
-                velocity = np.asarray(override["noise_pred"], dtype="float32")
+                velocity = precision.cast(np.asarray(override["noise_pred"], dtype="float32"))
             else:
-                dit = model.component(expert_id)
-                preds = {b: dit(x, pe if b == "cond" else ne, sigma_t) for b in branches}
-                velocity = cfg.combine(preds, scale, sctx, cfg_state)
-            velocity = precision.cast(velocity)
+                velocity = _velocity(model, x, sigma_t, pe, ne, scale)
             if sde:                                              # FlowGRPO rollout: stochastic + log-prob
                 noise = rng.standard_normal(x.shape)
                 x_next, logp, _m, _s = kernels.get(FLOW_SDE_STEP)(
@@ -102,6 +105,17 @@ class WanDenoiseLoop:
             x_next = kernels.get(FLOW_MATCH_STEP)(precision.cast(x), velocity, sigma_t, sigma_next)
             return StepResult(output={"noise_pred": np.asarray(velocity, dtype="float32"),
                                       "latents": x_next.astype("float32")})
+
+        def graph_fn(model, ws):
+            # The CAPTURABLE op-structure: reads EVERY per-step input from the static workspace (never
+            # from closure over per-step data) and writes into the static output buffer — so the same
+            # captured graph replays correctly with rebound buffer contents (design_v3 §6.2).
+            st_t, st_n = float(ws["sigma_t"]), float(ws["sigma_next"])
+            velocity = _velocity(model, ws["x"], st_t, ws["pe"], ws["ne"], float(ws["scale"]))
+            x_next = model.platform.kernels.get(FLOW_MATCH_STEP)(precision.cast(ws["x"]), velocity, st_t, st_n)
+            np.copyto(ws["out"], x_next.astype("float32"))       # write the static output buffer
+            return StepResult(output={"noise_pred": np.asarray(velocity, dtype="float32"),
+                                      "latents": np.array(ws["out"], copy=True)})
 
         cond_bytes = sum(int(np.asarray(e).nbytes) for e in (pe, ne) if e is not None)
         res = ResourceRequest(
@@ -127,7 +141,11 @@ class WanDenoiseLoop:
             # is sound for branch-set/expert-determined policies (ClassicCFG); a policy whose op
             # structure forks on other state (PerModalityCFG modality) would need a graph_key hook.
             capturable=not sde,
-            graph_key=(tuple(sorted(branches)), expert_id, precision.scheduler_step_in_fp32))
+            graph_key=(tuple(sorted(branches)), expert_id, precision.scheduler_step_in_fp32),
+            # the static-buffer capture form: graph_fn reads all per-step inputs from the workspace
+            graph_fn=graph_fn,
+            graph_inputs={"x": x, "sigma_t": sigma_t, "sigma_next": sigma_next,
+                          "pe": pe, "ne": ne, "scale": scale})
 
     def advance(self, st: LoopState, result: StepResult) -> LoopState:
         st.latents["video"] = result.output["latents"]

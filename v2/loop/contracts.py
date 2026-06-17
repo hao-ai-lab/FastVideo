@@ -121,6 +121,15 @@ class WorkPlan:
     # the captured graph's *shape of computation*. Part of the capture key so a step with a different
     # branch set / expert never replays an incompatible graph. Empty ⇒ structure fixed by shape alone.
     graph_key: tuple = ()
+    # The static-buffer capture form (design_v3 §6.2). A capturable step exposes its deterministic op
+    # structure as ``graph_fn(model, workspace) -> StepResult`` reading EVERY per-step-varying input
+    # (latent, sigmas, conditioning) from ``workspace`` — never from closure — plus ``graph_inputs``,
+    # the dict of those current values. The runtime allocates address-stable buffers once per key and
+    # rebinds ``graph_inputs`` into them in place each step (modeling CUDA static I/O buffers). Loops
+    # that don't provide both stay on the eager path (the runtime eager-breaks them). ``run`` remains
+    # the eager thunk (override / stochastic paths, and the no-capture baseline).
+    graph_fn: Any = None
+    graph_inputs: dict[str, Any] | None = None
 
 
 @dataclass

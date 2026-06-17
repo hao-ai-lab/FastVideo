@@ -24,17 +24,27 @@ correctness-critical and bug-prone regardless of device:
     AUTOMATIC: the resident-weight version is *in* the key, so a synced component's old graphs simply
     become unreachable and the next step recaptures.
 
-The capturer NEVER executes a *stored* thunk — it always runs the *current* step's thunk (so it
-cannot smear per-request state across interleaved requests). The ``CapturedGraph`` is the keyed
-record used to account capture-vs-replay and to detect a same-key/different-workspace clash.
+**Static buffers (the capture-safety discipline).** A captured graph references FIXED memory
+addresses — replay copies the current step's inputs *into* those buffers in place, then relaunches;
+only the contents change, never the op-structure or the addresses. So a capturable step must expose
+its computation as ``graph_fn(model, workspace)`` that reads EVERY per-step-varying input (latent,
+sigmas, conditioning) from the workspace — never from closure — and must not allocate fresh I/O each
+call. ``StaticWorkspace`` models those buffers: ``alloc`` reserves them once per key; ``bind`` copies
+the current step's values in via ``np.copyto``, which RAISES on a shape/dtype mismatch — so an
+ill-fitting input cannot silently replay an incompatible graph (a real key-soundness backstop, not
+the weak ``peak_activation_bytes`` proxy). Because all per-step/per-request inputs flow through the
+workspace, the SAME captured buffers are correctly reused across interleaved requests; the capturer
+re-invokes the *current* step's ``graph_fn`` (CPU can't bake op-structure into a replayable object),
+which is sound because the key guarantees every step under it is structurally identical.
 
-Honest scope — what this mini does NOT yet model (these bite a real GPU, not the CPU tests):
-  * **Static-buffer refactor (not done).** The wan21 step body still allocates per call
-    (``np.asarray``/``.astype``/host RNG). On real CUDA a capturable region must bind its I/O and
-    scratch to reused static buffers first; ``workspace_bytes`` here is a *declared number*, not a
-    buffer binding. So the workspace check below is a shape-change proxy (it compares the step's
-    ``peak_activation_bytes``), NOT the kernel-level capture-safety backstop a real integration needs
-    — the registered per-kernel ``workspace_bytes`` is declared in the matrix but not yet consulted.
+The per-key workspace is SHARED across requests (it lives on the instance). That is correct under
+this engine's synchronous, one-step-at-a-time execution: ``dispatch`` rebinds then runs ``graph_fn``
+atomically within a single step, and returns a copy of the output buffer, so an interleaved request's
+next step overwrites the buffers only after the prior step fully consumed them. (The batch-of-N
+interleave-parity gate exercises two same-key requests sharing this workspace and stays bit-identical.)
+A truly concurrent / multi-stream executor would instead need a per-stream workspace pool.
+
+Honest scope — what this mini still does NOT model (bites a real GPU, not the CPU tests):
   * **Capture cost is not budgeted.** ``WorkUnitKind.GRAPH_CAPTURE`` and
     ``ResourceRequest.graph_capture_size`` are declared placeholders; admission does not yet account
     the one-time capture (warmup) cost.
@@ -46,11 +56,47 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+import numpy as np
+
+
+class StaticWorkspace:
+    """Address-stable buffers for a captured region (models CUDA static I/O buffers). Allocated once
+    per capture key; ``bind`` updates contents IN PLACE (``np.copyto``), raising on a shape mismatch
+    so an ill-fitting input can't replay an incompatible graph."""
+
+    def __init__(self, buffers: dict[str, Any]):
+        self._b = buffers
+
+    @staticmethod
+    def _mk(v: Any):
+        return None if v is None else np.array(v)      # scalars become 0-d arrays; arrays are copied
+
+    @classmethod
+    def alloc(cls, inputs: dict[str, Any]) -> "StaticWorkspace":
+        b = {k: cls._mk(v) for k, v in inputs.items()}
+        x = inputs.get("x")
+        if x is not None:
+            b["out"] = np.array(x)                      # static output buffer, latent-shaped
+        return cls(b)
+
+    def bind(self, inputs: dict[str, Any]) -> None:
+        for k, v in inputs.items():
+            cur = self._b.get(k)
+            if cur is None:
+                if v is not None:
+                    raise ValueError(f"workspace[{k!r}] was None at capture but has a value on replay")
+                continue
+            np.copyto(cur, v)                           # in place; raises if shapes/dtypes don't fit
+
+    def __getitem__(self, k: str):
+        return self._b[k]
+
 
 @dataclass
 class CapturedGraph:
     """A keyed record standing in for a captured ``torch.cuda.CUDAGraph`` + its static buffers."""
     key: tuple
+    workspace: Any                  # StaticWorkspace (the reused fixed buffers), or None
     workspace_bytes: int
     replays: int = 0
 
@@ -78,37 +124,41 @@ class GraphCapturer:
 
     def dispatch(self, plan: Any, instance: Any, override: Any,
                  eager: Callable[[Any], Any]) -> Any:
-        """Run one step under the capture lifecycle. ``eager(override)`` executes the step thunk and
-        returns its StepResult|dict. Returns that result unchanged on every path (capture, replay,
-        eager-break) — replay re-runs the current thunk, so the result is always correct for *this*
-        step; the cache only governs accounting + structural-compatibility checks."""
+        """Run one step under the capture lifecycle. ``eager(override)`` runs the eager step thunk
+        (override / stochastic / no-capture paths). A capturable step runs its ``graph_fn`` against
+        the keyed ``StaticWorkspace``; replay rebinds the current inputs into the SAME buffers and
+        re-invokes the current ``graph_fn`` (sound because the key fixes the op-structure)."""
         if not self.enabled:
             return eager(override)
-        # Eager-break: a model-declared non-capturable step (host RNG / data-dependent) or a step an
-        # interceptor overrode this iteration never enters the graph cache.
-        if not getattr(plan, "capturable", True) or override is not None:
+        # Eager-break: a model-declared non-capturable step (host RNG / data-dependent), an
+        # interceptor override this iteration, or a step with no static graph form never enters the
+        # graph cache.
+        has_static = plan.graph_fn is not None and plan.graph_inputs is not None
+        if not getattr(plan, "capturable", True) or override is not None or not has_static:
             self.stats["eager_breaks"] += 1
             return eager(override)
 
         key = self.key(plan, instance)
-        ws = int(plan.resources.peak_activation_bytes)
+        ws_bytes = int(plan.resources.peak_activation_bytes)
         g = self._graphs.get(key)
         if g is None:
-            # MISS → capture (cheap warmup): record the keyed graph, then run the step once.
-            self._graphs[key] = CapturedGraph(key=key, workspace_bytes=ws)
+            # MISS → capture (cheap warmup): allocate the static buffers, bind inputs, run once.
+            ws = StaticWorkspace.alloc(plan.graph_inputs)
+            self._graphs[key] = CapturedGraph(key=key, workspace=ws, workspace_bytes=ws_bytes)
             self.stats["captures"] += 1
-            return eager(None)
+            return plan.graph_fn(instance, ws)
 
-        # HIT → replay. Safety net: everything under one key must need the same static workspace; a
-        # mismatch means the key is insufficient (it would replay an incompatible graph on a GPU).
-        if g.workspace_bytes != ws:
+        # HIT → replay. peak-workspace proxy guard (declared static workspace must match)...
+        if g.workspace_bytes != ws_bytes:
             raise RuntimeError(
                 f"cudagraph key collision: key {key} captured a {g.workspace_bytes}-byte workspace "
-                f"but this step needs {ws} — the capture key is insufficient and would corrupt a "
-                f"real graph. This is a keying bug, not a runtime condition.")
+                f"but this step needs {ws_bytes} — the capture key is insufficient and would corrupt "
+                f"a real graph. This is a keying bug, not a runtime condition.")
+        # ...and the real backstop: rebinding into the fixed buffers raises if shapes don't fit.
+        g.workspace.bind(plan.graph_inputs)
         g.replays += 1
         self.stats["replays"] += 1
-        return eager(None)
+        return plan.graph_fn(instance, g.workspace)
 
     def invalidate(self, component_ids: Any = None) -> int:
         """Evict captured graphs whose resident weights just changed (RL weight sync), mirroring
