@@ -41,6 +41,9 @@ class DiffusionParams:
     # deterministic ODE serve sampler (PromptRL/UniRL §6). Default False ⇒ the serve path is unchanged.
     sde_rollout: bool = False
     sde_noise_scale: float = 0.7
+    # Active adapters for this request (LoRA / ControlNet ids on the base) — the adapter plane (§9.19).
+    # Empty ⇒ the base model, unmodified. Part of the cache key (adapter_versions) so adapted ≠ base.
+    adapters: tuple[str, ...] = ()
 
 
 class CaptureMode(str, Enum):
