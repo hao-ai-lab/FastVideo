@@ -55,7 +55,10 @@ class ChunkRolloutLoop:
                        sigmas=[float(s) for s in sig], timesteps=[float(s) * 1000.0 for s in sig])
         st.cond["prompt_embeds"] = ctx.slots.get("text_embeds")
         st.cond["negative_prompt_embeds"] = ctx.slots.get("neg_text_embeds")
-        st.scratch.update(chunk_idx=0, step_in_chunk=0, slabs=[], chunks_out=[],
+        # world-model continuation: seed the chunk context from prior chunks (an interactive session's
+        # persistent world state; design_v3 §16). Default [] ⇒ a fresh rollout (unchanged one-shot path).
+        prior = [np.asarray(c, dtype="float32") for c in (ctx.slots.get("world_context") or [])]
+        st.scratch.update(chunk_idx=0, step_in_chunk=0, slabs=prior, chunks_out=[],
                           guidance_scale=float(req.diffusion.guidance_scale),
                           caches=getattr(model, "caches", None))
         st.latents["chunk"] = (rng.standard_normal(self._chunk_shape(req)) * float(sig[0])).astype("float32")
@@ -122,6 +125,6 @@ class ChunkRolloutLoop:
 
     def finalize(self, st: LoopState) -> LoopResult:
         video = np.concatenate(st.scratch["chunks_out"], axis=1) if st.scratch["chunks_out"] else None
-        return LoopResult(outputs={"latents": video},
+        return LoopResult(outputs={"latents": video, "chunks": list(st.scratch["chunks_out"])},
                           metrics={"chunks": float(st.scratch["chunk_idx"])},
                           behavior=st.trajectory or None)
