@@ -1,21 +1,26 @@
-"""``cuda`` — the real torch/GPU backend, *declared but unavailable* on this box (design_v3 §17).
+"""``cuda`` — the real torch/GPU backend (design_v3 §17; README "Running the real models").
 
-This environment has no torch and no GPU, so these cells cannot run here. But they are registered
-anyway, gated by an ``available`` predicate (a ``find_spec`` check that never imports torch), so the
-backend matrix is **enumerable without a GPU and without importing torch**: ``kernel_matrix()`` /
-``component_matrix()`` list these rows with ``available=False``. (Registration is via the fixed
-backend import list, not setuptools entry points — see the scope caveat in ``registry.py``; full
-entry-point discovery is the real-package mechanism, not wired in this mini.)
+On a CPU box this module is still safe to import: it imports ONLY stdlib at top, gates every cell on
+``available=_cuda_available`` (a ``find_spec`` check that never imports torch), and registers thin
+**lazy trampolines** whose bodies ``import`` the torch implementations only when actually called. So
+``ensure_backends_loaded()`` runs on every box without importing torch, the matrix stays dumpable
+(``kernel_matrix()`` / ``component_matrix()`` list these rows ``available=False`` here), and
+``resolve_first`` skips them — the CPU mini stays green.
 
-On a real box (torch + CUDA present) ``available`` flips to ``True`` and ``Platform.detect()``
-returns a ``cuda`` platform that resolves these instead of the numpy/accel rungs. The bodies below
-are deliberately not implemented — they exist to anchor the matrix and to fail loudly if ever
-resolved on a box that lacks the toolchain.
+On a real box (torch + CUDA present) ``available`` flips True, ``Platform.detect()`` returns a
+``cuda`` platform, and these resolve instead of the numpy/accel rungs:
+  * components → the torch adapters in ``torch_adapters.py`` (wrap the real ``fastvideo.models.*``
+    module named by the card's ``load_id``; weights from ``ComponentSpec.checkpoint``);
+  * the solver ops → plain torch elementwise in ``torch_kernels.py``. (There is NO fused flow-match /
+    SDE *solver* kernel in fastvideo-kernel — it ships only primitives — so the honest ``source`` is
+    "torch elementwise", at arch ``generic`` with no static scratch.)
+
+WRITTEN-NOT-RUN: the torch code is grounded in the verbatim real APIs but cannot be executed here;
+see ``GPU_BRINGUP.md`` for the checklist and the on-box ``# BRINGUP`` confirm points.
 """
 from __future__ import annotations
 
 import importlib.util
-from typing import Any
 
 from ..registry import FLOW_MATCH_STEP, FLOW_SDE_STEP, register_component, register_kernel
 
@@ -34,22 +39,44 @@ def _cuda_available() -> bool:
         return False
 
 
-def _unavailable(what: str):
-    def _fn(*_a, **_k):
-        raise RuntimeError(
-            f"{what} requires a GPU box with torch + the fastvideo-kernel toolchain; "
-            f"this cell is declared for matrix enumeration only")
-    return _fn
+# --- lazy trampolines: import torch only when actually called (on a GPU box) ------------------- #
+def _build_dit(spec, instance, platform):
+    from .torch_adapters import build_torch_dit
+    return build_torch_dit(spec, instance, platform)
 
 
-# Component: the real DiT torch adapter (loads `spec.load_id`, places weights on the device).
-register_component("dit", _unavailable("torch DiT adapter"), device="cuda",
-                   available=_cuda_available, source="fastvideo.models.dits (torch adapter)")
+def _build_vae(spec, instance, platform):
+    from .torch_adapters import build_torch_vae
+    return build_torch_vae(spec, instance, platform)
 
-# Kernels: the real fused solver primitives from fastvideo-kernel, at the Hopper rung.
-register_kernel(FLOW_MATCH_STEP, _unavailable("cuda flow_match kernel"), device="cuda", arch="sm90",
-                available=_cuda_available, source="fastvideo-kernel:flow_match (cuda)",
-                workspace_bytes=1 << 16)
-register_kernel(FLOW_SDE_STEP, _unavailable("cuda flow_sde kernel"), device="cuda", arch="sm90",
-                available=_cuda_available, source="fastvideo-kernel:flow_sde (cuda)",
-                workspace_bytes=1 << 17)
+
+def _build_text_encoder(spec, instance, platform):
+    from .torch_adapters import build_torch_text_encoder
+    return build_torch_text_encoder(spec, instance, platform)
+
+
+def _flow_match_cuda(*args, **kwargs):
+    from .torch_kernels import flow_match_step
+    return flow_match_step(*args, **kwargs)
+
+
+def _flow_sde_cuda(*args, **kwargs):
+    from .torch_kernels import flow_sde_step
+    return flow_sde_step(*args, **kwargs)
+
+
+# --- components: the real torch adapters (wrap load_id; weights from spec.checkpoint) ----------- #
+_ADAPTERS = "v2.platform.backends.torch_adapters"
+register_component("dit", _build_dit, device="cuda", available=_cuda_available,
+                   source=f"{_ADAPTERS}:TorchWanDiT")
+register_component("vae", _build_vae, device="cuda", available=_cuda_available,
+                   source=f"{_ADAPTERS}:TorchWanVAE")
+register_component("text_encoder", _build_text_encoder, device="cuda", available=_cuda_available,
+                   source=f"{_ADAPTERS}:TorchT5Encoder")
+
+# --- solver ops: plain torch elementwise (no fused solver kernel exists in fastvideo-kernel) ---- #
+# arch="generic" (elementwise, arch-agnostic), workspace_bytes=0 (no static scratch).
+register_kernel(FLOW_MATCH_STEP, _flow_match_cuda, device="cuda", arch="generic",
+                available=_cuda_available, source="torch elementwise (no fused solver kernel)")
+register_kernel(FLOW_SDE_STEP, _flow_sde_cuda, device="cuda", arch="generic",
+                available=_cuda_available, source="torch elementwise (no fused solver kernel)")

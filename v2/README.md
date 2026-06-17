@@ -26,13 +26,21 @@ overrides (`text_encoder` demonstrates the device→cpu fallback). wan21's denoi
 key (device/arch/shape/resident-weights/branch-set+expert), eager-break for data-dependent steps
 (SDE / interceptor override), version-eviction on weight sync, and the **static-buffer** discipline
 (the capturable step reads every per-step input from an address-stable `StaticWorkspace`; rebinding
-in place raises on a shape mismatch — a real key-soundness check) — is wired and tested. Not yet
-done (deferred, and bites only a real GPU): admission budgeting of capture cost (`GRAPH_CAPTURE`),
-a per-stream workspace pool for a concurrent executor, the AR/vocoder op families (omni/qwen-omni),
-and the full torch/CUDA path. Replay here re-runs the step's `graph_fn` against the captured static
-buffers — it models the capture lifecycle + buffer discipline, not the GPU speedup.
+in place raises on a shape mismatch — a real key-soundness check) — is wired and tested. The real
+**torch/CUDA backend** is now *written* (`platform/backends/torch_{cuda,adapters,kernels}.py`): torch
+adapters that wrap the real `fastvideo.models.*` (resolved from each card's `load_id`, weights from
+`ComponentSpec.checkpoint`) behind the mini's duck-typed surface, plus plain-torch solver ops (there
+is **no** fused solver kernel in fastvideo-kernel — only primitives). It is **written-not-run**: this
+box has no GPU/torch, so it's grounded in the verbatim real APIs but unverified — gated
+`available=False` (CPU stays green; importing it never imports torch), with every on-box confirm point
+marked `# BRINGUP`. See [`platform/backends/GPU_BRINGUP.md`](platform/backends/GPU_BRINGUP.md). Not yet
+done (deferred, bites only a real GPU): admission budgeting of capture cost (`GRAPH_CAPTURE`), a
+per-stream workspace pool for a concurrent executor, the AR/vocoder op families (omni/qwen-omni), the
+GPU training surface (`mse_grad_step`), and a torch-native loop surface (the perf follow-up). Replay
+here re-runs the step's `graph_fn` against the captured static buffers — it models the capture
+lifecycle + buffer discipline, not the GPU speedup.
 
-**197 tests, 31 files**, run two ways (`pytest` and a zero-dependency runner). Python 3.10+ and numpy only.
+**204 tests, 32 files**, run two ways (`pytest` and a zero-dependency runner). Python 3.10+ and numpy only.
 
 ## Scope
 
@@ -108,24 +116,24 @@ Stress tests (the design held — see **designv4 §9**):
 
 ```bash
 cd /Users/willlin/src/FastVideo-mini
-python3 -m pytest v2/tests/ -q      # 197 tests
+python3 -m pytest v2/tests/ -q      # 204 tests
 python3 v2/run_tests.py             # same suite, ZERO deps (no pytest needed)
 python3 -m v2.examples              # the worked examples
 ```
 
 ## Running the real models (GPU)
 
-Each `ComponentSpec` records the real `load_id` (e.g.
-`fastvideo.models.dits.wanvideo:WanTransformer3DModel`). To run real Wan/LTX/etc.:
+The `cuda` backend is **written** (`platform/backends/torch_{cuda,adapters,kernels}.py`) but
+**not yet run** — this box has no GPU. To bring it up on a GPU box, follow
+[`platform/backends/GPU_BRINGUP.md`](platform/backends/GPU_BRINGUP.md) (the ordered checklist + the
+`# BRINGUP` confirm points). In short:
 1. install torch + the parent `fastvideo` package + weights;
-2. implement the `cuda` (or other-device) cells in `platform/backends/` — a component builder that
-   loads the real module and exposes the same call surface the loops use (a velocity forward;
-   `vae.decode`; `text_encoder.encode`), and the device kernels for the solver/primitive ops. They
-   flip to `available=True` when torch+CUDA are present, and `Platform.detect()` resolves them; the
-   numpy `ComponentSpec.factory` stays as the CPU terminal fallback rung;
-3. the diffusion loops + RL recompute already dispatch their solver ops via
-   `model.platform.kernels.get(...)`, so the registered `cuda` kernels are picked up automatically;
-   only the not-yet-routed op families (AR sampling, vocoder synth) need the same one-line swap.
+2. set `ComponentSpec.checkpoint` (the weights source) on each component — the one piece the cards
+   don't carry yet (risk A);
+3. `Platform.detect()` returns a `cuda` platform; the torch adapters (wrapping the real
+   `fastvideo.models.*` named by each `load_id`) and the plain-torch solver ops flip to
+   `available=True` and resolve automatically. The numpy `ComponentSpec.factory` stays as the CPU
+   terminal fallback rung; the AR/vocoder op families still need the same one-line kernel-table swap.
 The loops, policies, scheduler, caches, parity gates, training methods, and workflows are unchanged.
 
 ## Serving & fleet (our own version — Dynamo is an option, not a dependency)
