@@ -311,7 +311,7 @@ log-prob**, and lands **two component updates** from **one reward**.
   **byte-for-byte frozen** in prompt-only mode.
 - **The two experts version independently** (distinct weight versions; `text_encoder` stays at `v0`).
 - **The two-loop serve program passes the interleave parity gate** unchanged.
-- ✅ All in `v2/tests/test_unified_rl.py` (9 tests); full suite **91 passed**, zero regressions.
+- ✅ All in `v2/tests/test_unified_rl.py` (9 tests); zero regressions in the full suite.
 
 ### 9.4 The verdict: the design *held*
 
@@ -343,7 +343,7 @@ exactly the vocoder — so the port added a `ToyTalker`/`ToyVocoder`, a `Vocoder
 `AUDIO_DECODE` slot), a card, a program, and one tiny generalization (`ARDecodeLoop` gained a configurable
 `prompt_slot` so two chained AR loops don't collide on the prefill slot). The contract, scheduler, caches,
 and parity gate were untouched again. ✅ `v2/tests/test_thinker_talker.py` (6 tests, incl. the three-loop
-interleave parity gate and the cascade-conditioning checks); full suite **97 passed**, zero regressions.
+interleave parity gate and the cascade-conditioning checks); zero regressions in the full suite.
 
 The two stress tests together span the topology space — *shared* (MoT), *disjoint-joint* (UniRL),
 *disjoint-cascade* (Qwen-Omni) — and the design absorbed all three as **cards + methods, never engines**.
