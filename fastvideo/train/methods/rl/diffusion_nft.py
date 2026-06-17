@@ -27,7 +27,11 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.models.base import ModelBase
-from fastvideo.train.methods.rl.rewards import build_multi_reward_scorer
+from fastvideo.train.methods.rl.rewards import (
+    GENRL_REWARD_NAMES,
+    build_multi_reward_scorer,
+    normalize_reward_weights,
+)
 from fastvideo.train.methods.rl.common import (
     DiffusionSampler,
     RLValidationConfig,
@@ -164,14 +168,18 @@ class DiffusionNFTMethod(TrainingMethod):
                              "{all, positive_only, negative_only, one_only, binary}")
 
         reward_fn = self.method_config.get("reward_fn", None)
-        if not isinstance(reward_fn, dict) or not reward_fn:
-            raise ValueError("method.reward_fn must be a non-empty mapping, "
-                             "for example {pickscore: 1.0, clipscore: 1.0}")
-        self._reward_fn_config = {str(k): float(v) for k, v in reward_fn.items()}
-        unsupported = sorted(set(self._reward_fn_config) - {"pickscore", "clipscore"})
-        if unsupported:
-            raise ValueError(f"Unsupported DiffusionNFT reward(s): {unsupported}. "
-                             "Only pickscore and clipscore are currently ported.")
+        self._reward_fn_config, reward_backend = normalize_reward_weights(reward_fn)
+        self._reward_backend = str(
+            self.method_config.get(
+                "reward_backend",
+                reward_backend or "auto",
+            ) or "auto").strip().lower()
+        if self._reward_backend not in {"auto", "diffusion_nft", "genrl"}:
+            raise ValueError("method.reward_backend must be one of auto, diffusion_nft, "
+                             f"or genrl, got {self._reward_backend!r}")
+        if self._reward_backend == "genrl" and not any(name in GENRL_REWARD_NAMES for name in self._reward_fn_config):
+            raise ValueError("method.reward_backend='genrl' requires at least one GenRL reward "
+                             f"from {sorted(GENRL_REWARD_NAMES)}")
 
         self._reward_scorer: Any | None = None
         self._init_optimizer_and_scheduler()
@@ -255,6 +263,7 @@ class DiffusionNFTMethod(TrainingMethod):
         self._reward_scorer = build_multi_reward_scorer(
             self._reward_fn_config,
             device=self.student.device,
+            backend=self._reward_backend,
         )
 
     def _init_optimizer_and_scheduler(self) -> None:
