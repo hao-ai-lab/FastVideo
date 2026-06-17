@@ -29,7 +29,8 @@ from ..backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
 from .loop import WanDenoiseLoop
 
 
-def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shift: float = 3.0) -> ModelCard:
+def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shift: float = 3.0,
+                     checkpoint_root: str | None = None) -> ModelCard:
     seed = _seed_from(model_id)
     cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg = cfg_policy or ClassicCFG()
@@ -82,4 +83,27 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shi
                          ParallelPlan(axes={"sp": 2, "cfgp": 2}, mesh_order=["cfgp", "sp"])],
             default_plan=ParallelPlan.single()),
     )
-    return card.validate()
+    card.validate()
+    if checkpoint_root:
+        stamp_wan21_checkpoints(card, checkpoint_root)
+    return card
+
+
+# Wan2.1 diffusers checkpoint layout: each component's weights live in a subfolder of the model root.
+_WAN21_SUBFOLDERS = {"transformer": "transformer", "vae": "vae", "text_encoder": "text_encoder"}
+
+
+def stamp_wan21_checkpoints(card: ModelCard, model_root: str) -> ModelCard:
+    """GPU deploy-time: point each component's ``ComponentSpec.checkpoint`` at its weights subfolder
+    under ``model_root`` (a local diffusers dir, or an HF id resolved via ``snapshot_download``). The
+    toy cards leave ``checkpoint`` empty; the real torch adapters require it (BRINGUP risk A). The
+    adapter derives the pipeline-config model root from ``dirname(checkpoint)`` and loads the sibling
+    ``tokenizer/`` directory too. Mutates and returns the card."""
+    import os
+    if not os.path.isdir(model_root):
+        from huggingface_hub import snapshot_download
+        model_root = snapshot_download(model_root)
+    for component_id, subfolder in _WAN21_SUBFOLDERS.items():
+        if component_id in card.components:
+            card.components[component_id].checkpoint = os.path.join(model_root, subfolder)
+    return card

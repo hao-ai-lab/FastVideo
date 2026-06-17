@@ -26,9 +26,21 @@ from ...request.streams import StreamChunk
 from ..backend import LATENT_CHANNELS
 
 
-def latent_shape(req) -> tuple[int, int, int, int]:
-    """Map request geometry to a small (deterministic) latent for the CPU toy backend."""
+# Real Wan2.1 VAE (AutoencoderKLWan) compression: z_dim=16, 4x temporal, 8x spatial.
+WAN_LATENT_CHANNELS = 16
+WAN_TEMPORAL_RATIO = 4
+WAN_SPATIAL_RATIO = 8
+
+
+def latent_shape(req, model=None) -> tuple[int, int, int, int]:
+    """Latent geometry for the denoise loop. On the real (GPU) backend the DiT/VAE require the true Wan
+    geometry (16 channels; (num_frames-1)//4+1 temporal, height/8, width/8); the CPU toy uses a tiny
+    deterministic stand-in. ``model is None`` (e.g. cost-estimation in tests) keeps the toy shape."""
     d = req.diffusion
+    if model is not None and getattr(getattr(model, "platform", None), "device", "cpu") == "cuda":
+        t = (max(1, d.num_frames) - 1) // WAN_TEMPORAL_RATIO + 1
+        return (WAN_LATENT_CHANNELS, max(1, t),
+                max(1, d.height // WAN_SPATIAL_RATIO), max(1, d.width // WAN_SPATIAL_RATIO))
     t = max(1, d.num_frames // 40)
     h = max(2, d.height // 120)
     w = max(2, d.width // 120)
@@ -49,7 +61,7 @@ class WanDenoiseLoop:
         rng = np.random.default_rng(seed)
         sig = self.flow_shift.build_schedule(req.diffusion.num_steps, req.diffusion.height,
                                              req.diffusion.width, sigmas=req.diffusion.sigmas or None)
-        shape = latent_shape(req)
+        shape = latent_shape(req, model)
         x = (rng.standard_normal(shape) * float(sig[0])).astype("float32")
         st = LoopState(loop_id=self.loop_id, instance_id=model.card.model_id,
                        request_id=req.request_id, profile=ctx.profile, rng=rng, seed=seed,
