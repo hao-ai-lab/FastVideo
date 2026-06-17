@@ -31,6 +31,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..._enums import ConsistencyLevel, ExecutionProfile
+from ...loop.sampler import flow_sde_ml_velocity as _ml_velocity
 from ...loop.sampler import flow_sde_step_with_logprob
 from ...models.common import cached_text_encode
 from ...request import DiffusionParams, TaskType, make_request
@@ -130,10 +131,9 @@ class UnifiedRLMethod(TrainingMethod):
             ppo_losses.append(ppo)
             kls.append(kl)
             ratios.append(ratio)
-            # toy generator update: nudge toward the rollout velocity scaled by advantage sign
-            v_target = np.asarray(rec["velocity"], dtype="float32")
-            lr_eff = self.dit_lr * float(np.clip(advantage, -1.0, 1.0))
-            _, gn = self.dit.mse_grad_step(prev, emb, st, v_target, lr_eff)
+            v_target = _ml_velocity(prev, sample, st, sn, noise_scale=self.sde_noise_scale)  # PG direction
+            _, gn = self.dit.mse_grad_step(prev, emb, st, v_target,
+                                           self.dit_lr * float(np.clip(advantage, -1.0, 1.0)))
             gnorms.append(gn)
         m = lambda xs: float(np.mean(xs)) if xs else 0.0                   # noqa: E731
         return m(ppo_losses), m(kls), m(ratios), m(gnorms)

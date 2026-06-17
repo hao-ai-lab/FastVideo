@@ -10,12 +10,14 @@ from .methods import (
     DiffusionNFTMethod,
     DMD2Method,
     FineTuneMethod,
+    JointMultiExpertRL,
     SelfForcingMethod,
     TrainingMethod,
     UnifiedRLMethod,
     build_diffusion_nft,
     build_dmd2,
     build_finetune,
+    build_joint_multi_rl,
     build_self_forcing,
     build_unified_rl,
 )
@@ -25,8 +27,9 @@ from .weight_sync import WeightRole, WeightSyncPlan
 
 __all__ = [
     "TrainingMethod", "FineTuneMethod", "DMD2Method", "DiffusionNFTMethod", "SelfForcingMethod",
-    "UnifiedRLMethod",
+    "UnifiedRLMethod", "JointMultiExpertRL",
     "build_finetune", "build_dmd2", "build_diffusion_nft", "build_self_forcing", "build_unified_rl",
+    "build_joint_multi_rl",
     "BehaviorRecord", "TrajectoryStatus", "Trajectory", "TrajectoryBuffer", "RolloutContext",
     "rollout_loop", "WeightSyncPlan", "WeightRole", "MultiRewardScorer", "build_multi_reward_scorer",
 ]

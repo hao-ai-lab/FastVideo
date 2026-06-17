@@ -9,6 +9,13 @@ from typing import Any
 
 from .bagel import build_bagel_card, build_bagel_program
 from .cosmos3 import build_cosmos3_card, build_cosmos3_program
+from .image_video import (
+    build_flux_t2i_card,
+    build_flux_t2i_program,
+    build_t2i_then_i2v_workflow,
+    build_wan_i2v_card,
+    build_wan_i2v_program,
+)
 from .ltx2 import build_ltx2_card, build_ltx2_program
 from .qwen_omni import build_qwen_omni_card, build_qwen_omni_program
 from .unified import build_unified_card, build_unified_program
@@ -23,7 +30,9 @@ __all__ = [
     "build_bagel_card", "build_bagel_program",
     "build_qwen_omni_card", "build_qwen_omni_program",
     "build_unified_card", "build_unified_program",
-    "build_default_engine", "build_omni_engine", "build_unified_engine",
+    "build_flux_t2i_card", "build_flux_t2i_program", "build_wan_i2v_card", "build_wan_i2v_program",
+    "build_t2i_then_i2v_workflow",
+    "build_default_engine", "build_omni_engine", "build_unified_engine", "build_image_video_engine",
 ]
 
 _BUILDERS = [
@@ -65,6 +74,21 @@ def build_omni_engine(engine: Any = None) -> Any:
     from ..runtime import Engine
     eng = engine if engine is not None else Engine()
     for build_card, build_program in _OMNI_BUILDERS:
+        card = build_card()
+        inst = load_card(card, cache_manager=CacheManager.from_card(card))
+        eng.register(card.model_id, inst, build_program())
+    return eng
+
+
+def build_image_video_engine(engine: Any = None) -> Any:
+    """Register the T2I (``flux-t2i``) and I2V (``wan-i2v``) cards on one engine — two *separate*
+    models chained by ``build_t2i_then_i2v_workflow`` (design_v3 §13 cross-model composition)."""
+    from ..cache import CacheManager
+    from ..card import load_card
+    from ..runtime import Engine
+    eng = engine if engine is not None else Engine()
+    for build_card, build_program in [(build_flux_t2i_card, build_flux_t2i_program),
+                                      (build_wan_i2v_card, build_wan_i2v_program)]:
         card = build_card()
         inst = load_card(card, cache_manager=CacheManager.from_card(card))
         eng.register(card.model_id, inst, build_program())

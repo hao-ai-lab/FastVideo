@@ -66,3 +66,21 @@ def flow_sde_step_with_logprob(x_t, velocity, sigma_t: float, sigma_next: float,
     log_prob = float(np.mean(-((prev_sample - mean) ** 2) / (2.0 * var)
                              - np.log(eff_std) - 0.5 * np.log(2.0 * np.pi)))
     return prev_sample.astype("float32"), log_prob, mean.astype("float32"), float(eff_std)
+
+
+def flow_sde_ml_velocity(x_t, sample, sigma_t: float, sigma_next: float, *, noise_scale: float = 0.7):
+    """The velocity whose deterministic SDE mean lands exactly on ``sample`` (the max-likelihood
+    velocity for a realized FlowGRPO sample). Moving the policy toward it, advantage-weighted, is the
+    policy-gradient direction — and is nonzero even at ratio==1, so it is the *correct* FlowGRPO update
+    surrogate (nudging toward the velocity the model already produced would be a no-op). PromptRL §6.
+    """
+    x_t = np.asarray(x_t, dtype=np.float64)
+    sample = np.asarray(sample, dtype=np.float64)
+    s = min(float(sigma_t), 0.9999)
+    dt = float(sigma_next) - float(sigma_t)
+    std = float(np.sqrt(s / (1.0 - s)) * noise_scale)
+    denom = 2.0 * max(s, 1e-6)
+    a = 1.0 + std ** 2 / denom * dt
+    b = (1.0 + std ** 2 * (1.0 - s) / denom) * dt
+    b = b if abs(b) > 1e-8 else (1e-8 if b >= 0.0 else -1e-8)
+    return ((sample - x_t * a) / b).astype("float32")
