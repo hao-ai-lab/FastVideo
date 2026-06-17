@@ -95,7 +95,7 @@ def build_t2i_then_i2v_workflow(t2i_id: str = "flux-t2i", i2v_id: str = "wan-i2v
                             diffusion=DiffusionParams(num_steps=4, num_frames=81,   # → multi-frame video
                                                       seed=state.get("seed", 0)))
 
-    return Workflow("t2i_then_i2v", [
+    return Workflow("image_video.t2i_i2v", [          # namespaced id: <package>.<pipeline> (a servable)
         WorkflowStage(t2i_id, t2i_stage, label="t2i"),
         WorkflowStage(i2v_id, i2v_stage, label="i2v"),
     ])

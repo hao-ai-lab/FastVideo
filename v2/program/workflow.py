@@ -34,10 +34,43 @@ class WorkflowStage:
     label: str = ""
 
 
+def _engine_serves(engine: Any, model_id: str) -> bool:
+    if hasattr(engine, "serves"):
+        return engine.serves(model_id)                     # AsyncEngine
+    return model_id in getattr(engine, "_registry", {})    # Engine
+
+
 @dataclass
 class Workflow:
+    """A named, registrable cross-model pipeline. ``workflow_id`` is its servable name — it lives in
+    the SAME namespace as a card's ``model_id`` (so the engine, server, and fleet route to it the same
+    way), and by convention is dotted/namespaced to avoid colliding with a card id (e.g.
+    ``"image_video.t2i_i2v"``). ``requires`` is the set of cards it composes — declared, validated,
+    never inferred (design.md P7)."""
     workflow_id: str
     stages: list[WorkflowStage] = field(default_factory=list)
+
+    @property
+    def requires(self) -> list[str]:
+        """The model_ids this workflow composes (deduped, in first-use order). The engine must serve
+        all of them before the workflow can run."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for s in self.stages:
+            if s.model_id not in seen:
+                seen.add(s.model_id)
+                out.append(s.model_id)
+        return out
+
+    def validate(self, engine: Any) -> "Workflow":
+        """Fail-fast: every required card must already be registered on ``engine`` (no silent skips)."""
+        if not self.stages:
+            raise ValueError(f"workflow {self.workflow_id!r} has no stages")
+        missing = [m for m in self.requires if not _engine_serves(engine, m)]
+        if missing:
+            raise ValueError(f"workflow {self.workflow_id!r} requires unregistered models {missing} "
+                             f"(register those cards before the workflow)")
+        return self
 
     def run(self, engine: Any, **initial: Any) -> Any:
         """Execute the stages in order on ``engine``; return the final stage's Output.
@@ -48,7 +81,7 @@ class Workflow:
             raise ValueError(f"workflow {self.workflow_id!r} has no stages")
         state: dict[str, Any] = dict(initial)
         out = None
-        for i, stage in enumerate(self.stages):
+        for stage in self.stages:
             label = stage.label or stage.model_id
             req = stage.make_request(state)
             if req.model_id != stage.model_id:
@@ -59,3 +92,29 @@ class Workflow:
             for name, art in out.artifacts.items():
                 state[f"{label}:{name}"] = art
         return out
+
+
+class WorkflowRegistry:
+    """Declarative ``workflow_id → builder`` catalog — the cross-model analog of the card builders in
+    ``models/__init__.py`` (cf. vllm-omni's ``pipeline_registry``). Adding a custom pipeline is one
+    ``register`` call; the builder is a zero/kw-arg factory returning a ``Workflow``."""
+
+    def __init__(self) -> None:
+        self._builders: dict[str, Any] = {}
+
+    def register(self, workflow_id: str, builder: Any) -> Any:
+        if workflow_id in self._builders:
+            raise ValueError(f"workflow {workflow_id!r} already registered")
+        self._builders[workflow_id] = builder
+        return builder
+
+    def build(self, workflow_id: str, **kw: Any) -> Workflow:
+        if workflow_id not in self._builders:
+            raise KeyError(f"no workflow {workflow_id!r} (have {list(self._builders)})")
+        return self._builders[workflow_id](**kw)
+
+    def names(self) -> list[str]:
+        return list(self._builders)
+
+    def __contains__(self, workflow_id: str) -> bool:
+        return workflow_id in self._builders

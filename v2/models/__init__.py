@@ -31,7 +31,7 @@ __all__ = [
     "build_qwen_omni_card", "build_qwen_omni_program",
     "build_unified_card", "build_unified_program",
     "build_flux_t2i_card", "build_flux_t2i_program", "build_wan_i2v_card", "build_wan_i2v_program",
-    "build_t2i_then_i2v_workflow",
+    "build_t2i_then_i2v_workflow", "register_workflows",
     "build_default_engine", "build_omni_engine", "build_unified_engine", "build_image_video_engine",
 ]
 
@@ -80,19 +80,40 @@ def build_omni_engine(engine: Any = None) -> Any:
     return eng
 
 
-def build_image_video_engine(engine: Any = None) -> Any:
-    """Register the T2I (``flux-t2i``) and I2V (``wan-i2v``) cards on one engine — two *separate*
-    models chained by ``build_t2i_then_i2v_workflow`` (design_v3 §13 cross-model composition)."""
+# Declarative catalog of cross-model workflows: workflow_id -> (builder, required model cards).
+# Adding a custom pipeline is one line here (the cross-model analog of _BUILDERS / _OMNI_BUILDERS;
+# cf. vllm-omni's pipeline_registry). ``register_workflows`` registers each whose cards are present.
+_WORKFLOWS: dict[str, tuple] = {
+    "image_video.t2i_i2v": (build_t2i_then_i2v_workflow,
+                            [(build_flux_t2i_card, build_flux_t2i_program),
+                             (build_wan_i2v_card, build_wan_i2v_program)]),
+}
+
+
+def register_workflows(engine: Any, *, only: list[str] | None = None) -> Any:
+    """Register catalog workflows (and the cards they require) onto ``engine``. ``only`` selects a
+    subset by workflow_id; default registers all whose cards aren't yet present."""
     from ..cache import CacheManager
     from ..card import load_card
+    names = only if only is not None else list(_WORKFLOWS)
+    for wf_id in names:
+        build_workflow, card_builders = _WORKFLOWS[wf_id]
+        for build_card, build_program in card_builders:
+            card = build_card()
+            if not engine.serves(card.model_id):
+                inst = load_card(card, cache_manager=CacheManager.from_card(card))
+                engine.register(card.model_id, inst, build_program())
+        engine.register_workflow(build_workflow())
+    return engine
+
+
+def build_image_video_engine(engine: Any = None) -> Any:
+    """Register the T2I (``flux-t2i``) and I2V (``wan-i2v``) cards plus the ``image_video.t2i_i2v``
+    workflow on one engine — two *separate* models chained by a cross-model workflow, addressable by
+    its workflow_id like any servable (design_v3 §13)."""
     from ..runtime import Engine
     eng = engine if engine is not None else Engine()
-    for build_card, build_program in [(build_flux_t2i_card, build_flux_t2i_program),
-                                      (build_wan_i2v_card, build_wan_i2v_program)]:
-        card = build_card()
-        inst = load_card(card, cache_manager=CacheManager.from_card(card))
-        eng.register(card.model_id, inst, build_program())
-    return eng
+    return register_workflows(eng, only=["image_video.t2i_i2v"])
 
 
 def build_unified_engine(engine: Any = None) -> Any:
