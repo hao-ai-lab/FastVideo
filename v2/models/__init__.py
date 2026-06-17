@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from .adaptive import build_adaptive_card
+from .adapters import build_adapter_card, build_adapter_program
 from .bagel import build_bagel_card, build_bagel_program
 from .cosmos3 import build_cosmos3_card, build_cosmos3_program
 from .image_video import (
@@ -40,6 +41,7 @@ __all__ = [
     "build_flux_t2i_card", "build_flux_t2i_program", "build_wan_i2v_card", "build_wan_i2v_program",
     "build_t2i_then_i2v_workflow", "build_t2i_i2v_extend_workflow", "register_workflows",
     "build_tiled_card", "build_tiled_program", "build_adaptive_card",
+    "build_adapter_card", "build_adapter_program",
     "build_default_engine", "build_omni_engine", "build_unified_engine", "build_image_video_engine",
     "build_tiled_engine",
 ]
