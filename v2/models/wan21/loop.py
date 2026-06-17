@@ -21,7 +21,7 @@ from ...loop.contracts import (
     StepResult,
     WorkPlan,
 )
-from ...loop.sampler import flow_match_euler_step, flow_sde_step_with_logprob
+from ...platform import FLOW_MATCH_STEP, FLOW_SDE_STEP
 from ...request.streams import StreamChunk
 from ..backend import LATENT_CHANNELS
 
@@ -81,6 +81,10 @@ class WanDenoiseLoop:
         sde, noise_scale, rng = st.scratch.get("sde", False), st.scratch.get("sde_noise_scale", 0.7), st.rng
 
         def run(model, override=None):
+            # Solver primitives are dispatched through the platform's kernel table: on CPU these
+            # resolve to the numpy reference; on a GPU/accel backend they resolve to that device's
+            # kernel — same loop, same StepResult shape (design_v3 §17).
+            kernels = model.platform.kernels
             if override is not None and "noise_pred" in override:
                 velocity = np.asarray(override["noise_pred"], dtype="float32")
             else:
@@ -90,12 +94,12 @@ class WanDenoiseLoop:
             velocity = precision.cast(velocity)
             if sde:                                              # FlowGRPO rollout: stochastic + log-prob
                 noise = rng.standard_normal(x.shape)
-                x_next, logp, _m, _s = flow_sde_step_with_logprob(
+                x_next, logp, _m, _s = kernels.get(FLOW_SDE_STEP)(
                     precision.cast(x), velocity, sigma_t, sigma_next, noise=noise, noise_scale=noise_scale)
                 return StepResult(output={"noise_pred": np.asarray(velocity, dtype="float32"),
                                           "latents": x_next.astype("float32"),
                                           "sde_logprob": logp, "prev": np.asarray(x, dtype="float32")})
-            x_next = flow_match_euler_step(precision.cast(x), velocity, sigma_t, sigma_next)
+            x_next = kernels.get(FLOW_MATCH_STEP)(precision.cast(x), velocity, sigma_t, sigma_next)
             return StepResult(output={"noise_pred": np.asarray(velocity, dtype="float32"),
                                       "latents": x_next.astype("float32")})
 

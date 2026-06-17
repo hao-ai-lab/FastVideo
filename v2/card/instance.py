@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..platform import Platform
 from .specs import ModelCard
 
 
@@ -21,11 +22,16 @@ class ModelInstance:
     passed to ``Loop.init`` (the loop reads components through it)."""
 
     def __init__(self, card: ModelCard, parallel_plan: Any = None,
-                 cache_manager: Any = None, weights_version: str = "v0"):
+                 cache_manager: Any = None, weights_version: str = "v0",
+                 platform: Any = None):
         self.card = card
         self.parallel_plan = parallel_plan
         self.caches = cache_manager
         self.weights_version = weights_version
+        # The detected (device, arch). Resolves component/kernel implementations through the two
+        # backend registries; defaults to CPU/numpy. Swapping this to a GPU platform is the whole
+        # "change only the backend, not the loops/policies/training" story (design_v3 §17).
+        self.platform = platform if platform is not None else Platform.cpu()
         self.adapter_versions: dict[str, str] = {}
         # per-component weight versions (§7.1): a component's version changes only when IT is synced,
         # so a transformer-only RL sync never invalidates the frozen text-encoder's feature cache.
@@ -42,9 +48,9 @@ class ModelInstance:
             spec = self.card.components.get(component_id)
             if spec is None:
                 raise KeyError(f"component {component_id!r} not declared on card {self.card.model_id!r}")
-            if spec.factory is None:
-                raise RuntimeError(f"component {component_id!r} has no factory (cannot instantiate)")
-            self._components[component_id] = spec.factory(self)
+            # The single materialization seam: the platform resolves (kind, device, variant) through
+            # the COMPONENTS registry, falling back to spec.factory as the cpu/numpy terminal rung.
+            self._components[component_id] = self.platform.build_component(spec, self)
         return self._components[component_id]
 
     def has_component(self, component_id: str) -> bool:
@@ -93,8 +99,14 @@ class ModelInstance:
 
 
 def load_card(card: ModelCard, parallel_plan: Any = None, cache_manager: Any = None,
-              *, validate: bool = True) -> ModelInstance:
-    """The card-as-factory entrypoint (design_v3 §4.1: card is a runtime factory)."""
+              *, validate: bool = True, platform: Any = None) -> ModelInstance:
+    """The card-as-factory entrypoint (design_v3 §4.1: card is a runtime factory).
+
+    ``platform`` selects the backend (device, arch); when omitted it is detected (CPU/numpy here,
+    CUDA on a torch+GPU box). The same card loads on any backend — only the resolved component/kernel
+    implementations differ.
+    """
     if validate:
         card.validate()
-    return ModelInstance(card, parallel_plan=parallel_plan, cache_manager=cache_manager)
+    return ModelInstance(card, parallel_plan=parallel_plan, cache_manager=cache_manager,
+                         platform=platform if platform is not None else Platform.detect())

@@ -7,12 +7,24 @@ elaborates).
 
 It is "mini" in two senses: (1) it supports a deliberate subset of models/methods, and (2) the heavy
 neural forwards are small numpy stand-ins so the whole thing runs and is tested on a laptop with no
-GPU and no torch. **The architecture is real; the kernels are toys.** On a GPU box you swap
-`ComponentSpec.factory` for the torch adapters (which wrap the real `fastvideo.models.*` modules) and
-nothing else in the runtime, scheduler, caches, parity, training, or workflow code changes — that is
-the whole point of the (recipe, runtime) separation.
+GPU and no torch. **The architecture is real; the kernels are toys.** Backends are selected through
+the `platform/` dispatch substrate: two tuple-keyed registries — `COMPONENTS(kind, device, variant)`
+and `KERNELS(op, device, arch, variant)` — that a detected `Platform` resolves, with the numpy
+reference as the terminal fallback rung and parity oracle (`§17`). On a GPU box you register the
+torch component/kernel backends (the `cuda` cells are declared in `platform/backends/torch_cuda.py`,
+`available=False` until torch+CUDA are present) and `Platform.detect()` resolves them — the loops,
+scheduler, caches, parity, training, and workflow code are unchanged.
 
-**127 tests, 20 files**, run two ways (`pytest` and a zero-dependency runner). Python 3.10+ and numpy only.
+Honest scope of what is *wired* today (the substrate supports more than it demonstrates): a pure-
+python `accel` stand-in backend proves the dispatch is genuinely device-generic (cross-device
+resolution + arch fallback + the parity oracle, bit-identical to numpy) without a GPU. The wan21
+denoise loop routes its solver ops (`flow_match_step`/`flow_sde_step`) through the kernel table, and
+the `dit` component has a backend override; the other model loops still call the numpy samplers
+directly and only the `dit` kind is overridden — each is a one-line change to adopt. The full
+torch/CUDA path and a cudagraph capture-safety (`workspace_bytes`) contract are declared/​deferred,
+not implemented.
+
+**183 tests, 30 files**, run two ways (`pytest` and a zero-dependency runner). Python 3.10+ and numpy only.
 
 ## Scope
 
@@ -98,9 +110,14 @@ python3 -m v2.examples              # the worked examples
 Each `ComponentSpec` records the real `load_id` (e.g.
 `fastvideo.models.dits.wanvideo:WanTransformer3DModel`). To run real Wan/LTX/etc.:
 1. install torch + the parent `fastvideo` package + weights;
-2. replace each `ComponentSpec.factory` with a lazy adapter that loads the real module and exposes the
-   same call surface the loops use (a velocity forward; `vae.decode`; `text_encoder.encode`);
-3. swap the numpy flow-match/SDE samplers for the real schedulers inside the loop's step body.
+2. implement the `cuda` (or other-device) cells in `platform/backends/` — a component builder that
+   loads the real module and exposes the same call surface the loops use (a velocity forward;
+   `vae.decode`; `text_encoder.encode`), and the device kernels for the solver/primitive ops. They
+   flip to `available=True` when torch+CUDA are present, and `Platform.detect()` resolves them; the
+   numpy `ComponentSpec.factory` stays as the CPU terminal fallback rung;
+3. for the loops that don't yet route through the kernel table, swap the direct numpy
+   flow-match/SDE sampler calls for `model.platform.kernels.get(...)` (the wan21 loop shows the
+   pattern — a one-line change per call site).
 The loops, policies, scheduler, caches, parity gates, training methods, and workflows are unchanged.
 
 ## Serving & fleet (our own version — Dynamo is an option, not a dependency)
