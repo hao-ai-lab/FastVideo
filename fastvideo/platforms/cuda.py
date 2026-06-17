@@ -153,8 +153,10 @@ class CudaPlatformBase(Platform):
             if is_attn_qat_train_available():
                 logger.info("Using Attn-QAT training (fake-quantized attention) backend.")
                 return "fastvideo.attention.backends.attn_qat_train.AttnQatTrainBackend"
-            logger.warning("Attn-QAT training kernel is not built; falling back to Flash Attention "
-                           "(NO fake-quant in the attention path).")
+            raise ImportError(
+                "ATTN_QAT_TRAIN selected but fastvideo_kernel.triton_kernels.attn_qat_train is not built. "
+                "Silent fallback would produce a non-QAT training run; refusing to proceed. "
+                "Install the training kernel or pick a different FASTVIDEO_ATTENTION_BACKEND.")
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from fastvideo_kernel import video_sparse_attn  # noqa: F401
