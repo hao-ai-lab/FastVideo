@@ -24,12 +24,15 @@ pinned to the rollout's kernel for C2 correctness. The `dit` and `vae` component
 overrides (`text_encoder` demonstrates the device→cpu fallback). wan21's denoise also runs under
 **piecewise CUDA-graph capture/replay** at the step boundary (Path A): the capture *lifecycle* —
 key (device/arch/shape/resident-weights/branch-set+expert), eager-break for data-dependent steps
-(SDE / interceptor override), and version-eviction on weight sync — is wired and tested. Not yet
-done (deferred, and bites only a real GPU): the static-buffer refactor of the step body, admission
-budgeting of capture cost (`GRAPH_CAPTURE`), the AR/vocoder op families (omni/qwen-omni) and the
-full torch/CUDA path. Replay here re-runs the step thunk — it models the lifecycle, not the speedup.
+(SDE / interceptor override), version-eviction on weight sync, and the **static-buffer** discipline
+(the capturable step reads every per-step input from an address-stable `StaticWorkspace`; rebinding
+in place raises on a shape mismatch — a real key-soundness check) — is wired and tested. Not yet
+done (deferred, and bites only a real GPU): admission budgeting of capture cost (`GRAPH_CAPTURE`),
+a per-stream workspace pool for a concurrent executor, the AR/vocoder op families (omni/qwen-omni),
+and the full torch/CUDA path. Replay here re-runs the step's `graph_fn` against the captured static
+buffers — it models the capture lifecycle + buffer discipline, not the GPU speedup.
 
-**195 tests, 31 files**, run two ways (`pytest` and a zero-dependency runner). Python 3.10+ and numpy only.
+**197 tests, 31 files**, run two ways (`pytest` and a zero-dependency runner). Python 3.10+ and numpy only.
 
 ## Scope
 
@@ -105,7 +108,7 @@ Stress tests (the design held — see **designv4 §9**):
 
 ```bash
 cd /Users/willlin/src/FastVideo-mini
-python3 -m pytest v2/tests/ -q      # 195 tests
+python3 -m pytest v2/tests/ -q      # 197 tests
 python3 v2/run_tests.py             # same suite, ZERO deps (no pytest needed)
 python3 -m v2.examples              # the worked examples
 ```

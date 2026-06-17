@@ -126,13 +126,15 @@ class _Res:
 
 
 class _Plan:
-    def __init__(self, ws=64, gk=(), cap=True, bk=("step",)):
+    def __init__(self, ws=64, gk=(), cap=True, bk=("step",), gin=None, gfn=None):
         self.loop_id = "L"
         self.shape_sig = _Sig(bk)
         self.resources = _Res(ws)
         self.graph_key = gk
         self.capturable = cap
         self.run = None
+        self.graph_inputs = gin if gin is not None else {"x": np.zeros((2, 2), dtype="float32")}
+        self.graph_fn = gfn if gfn is not None else (lambda model, w: {"ok": True})
 
 
 class _Plat:
@@ -164,23 +166,39 @@ def test_override_and_noncapturable_eager_break():
     assert cap.stats["eager_breaks"] == 2 and cap.stats["captures"] == 0
 
 
+def test_no_static_graph_form_eager_breaks():
+    cap, inst = GraphCapturer(), _Inst()
+    p = _Plan(); p.graph_fn = None                             # a plan with no static capture form
+    cap.dispatch(p, inst, None, lambda ov: {"r": 1})
+    assert cap.stats["eager_breaks"] == 1 and cap.stats["captures"] == 0
+
+
 def test_invalidate_drops_only_matching_component_graphs():
     from v2.runtime.cudagraph import CapturedGraph
     cap = GraphCapturer()
     # two graphs whose keys carry different resident components (key[4] = resident ((cid, ver), ...))
     k_dit = ("accel", "sm90", "L", ("a",), (("transformer", "v0"),), ())
     k_txt = ("accel", "sm90", "L", ("a",), (("text_encoder", "v0"),), ())
-    cap._graphs[k_dit] = CapturedGraph(k_dit, 1)
-    cap._graphs[k_txt] = CapturedGraph(k_txt, 1)
+    cap._graphs[k_dit] = CapturedGraph(k_dit, None, 1)
+    cap._graphs[k_txt] = CapturedGraph(k_txt, None, 1)
     dropped = cap.invalidate({"transformer"})
     assert dropped == 1 and cap.captured == 1 and k_txt in cap._graphs   # only the dit graph evicted
 
 
-def test_workspace_collision_raises():
-    """Same key, different static workspace ⇒ the key is insufficient and would corrupt a real
-    graph. The capturer refuses (the safety net), rather than silently replaying."""
+def test_workspace_bytes_collision_raises():
+    """Same key, different declared static-workspace size ⇒ the key is insufficient. Refuse."""
     cap, inst = GraphCapturer(), _Inst()
     eager = lambda ov: {"ok": True}
     cap.dispatch(_Plan(ws=100), inst, None, eager)             # capture: key→100B workspace
     with pytest.raises(RuntimeError, match="key collision"):
         cap.dispatch(_Plan(ws=200), inst, None, eager)         # same key, 200B ⇒ refuse
+
+
+def test_static_buffer_shape_mismatch_raises():
+    """The real backstop: rebinding an input whose shape doesn't fit the captured static buffer
+    raises (np.copyto) — catching a key that let incompatible shapes share a graph."""
+    cap, inst = GraphCapturer(), _Inst()
+    eager = lambda ov: {}
+    cap.dispatch(_Plan(gin={"x": np.zeros((2, 2), dtype="float32")}), inst, None, eager)  # 2x2 buffer
+    with pytest.raises(ValueError):                            # 4x4 won't fit the captured 2x2 buffer
+        cap.dispatch(_Plan(gin={"x": np.zeros((4, 4), dtype="float32")}), inst, None, eager)
