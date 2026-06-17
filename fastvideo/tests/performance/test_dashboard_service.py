@@ -3,8 +3,8 @@ from fastvideo.performance_dashboard.service import build_latest_summary, build_
 from fastvideo.tests.performance import hf_store
 
 
-def _record(ts, commit, latency, throughput, success=True):
-    return {
+def _record(ts, commit, latency, throughput, success=True, **metadata):
+    record = {
         "model_id": "wan-t2v-1.3b-2gpu",
         "gpu_type": "NVIDIA L40S",
         "timestamp": ts,
@@ -17,6 +17,8 @@ def _record(ts, commit, latency, throughput, success=True):
         "vae_decode_time_s": 3.0,
         "success": success,
     }
+    record.update(metadata)
+    return record
 
 
 def test_build_latest_summary_uses_previous_successful_records_for_baseline():
@@ -64,6 +66,34 @@ def test_filter_records_and_trends_preserve_metric_points():
     assert trends[0]["points"][1]["metrics"]["latency"] == 12.0
 
 
+def test_trends_include_source_metadata_with_legacy_defaults():
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            run_source="pr",
+            baseline_eligible=False,
+            pr_number="123",
+            branch="feature/dashboard",
+            build_url="https://buildkite.example/build",
+        ),
+        _record("2026-01-02T00:00:00+00:00", "b" * 40, 12.0, 8.0),
+    ]
+
+    filtered = filter_records(records, run_source="pr")
+    trends = build_trends(records)
+
+    assert len(filtered) == 1
+    assert trends[0]["points"][0]["run_source"] == "pr"
+    assert trends[0]["points"][0]["pr_number"] == "123"
+    assert trends[0]["points"][0]["branch"] == "feature/dashboard"
+    assert trends[0]["points"][0]["build_url"] == "https://buildkite.example/build"
+    assert trends[0]["points"][1]["run_source"] == "unknown"
+    assert trends[0]["points"][1]["baseline_eligible"] is False
+
+
 def test_hf_token_resolution_accepts_standard_env_names(monkeypatch):
     for env_var in hf_store.HF_TOKEN_ENV_VARS:
         monkeypatch.delenv(env_var, raising=False)
@@ -71,3 +101,21 @@ def test_hf_token_resolution_accepts_standard_env_names(monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "hf_local")
 
     assert hf_store.resolve_hf_token() == "hf_local"
+
+
+def test_load_records_can_filter_baseline_eligible_records(tmp_path):
+    model_dir = tmp_path / "wan"
+    model_dir.mkdir()
+    (model_dir / "pr.json").write_text(
+        '{"timestamp": "2026-01-01T00:00:00+00:00", "success": true, "baseline_eligible": false}',
+        encoding="utf-8",
+    )
+    (model_dir / "main.json").write_text(
+        '{"timestamp": "2026-01-02T00:00:00+00:00", "success": true, "baseline_eligible": true}',
+        encoding="utf-8",
+    )
+
+    records = hf_store.load_records(str(tmp_path), successful_only=True, baseline_eligible_only=True)
+
+    assert len(records) == 1
+    assert records[0]["baseline_eligible"] is True

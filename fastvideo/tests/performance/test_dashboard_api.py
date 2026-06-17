@@ -36,8 +36,8 @@ class FakeStore(PerformanceDataStore):
         return records
 
 
-def _record(model_id, gpu_type, ts, commit, latency, throughput, success=True):
-    return {
+def _record(model_id, gpu_type, ts, commit, latency, throughput, success=True, **metadata):
+    record = {
         "model_id": model_id,
         "gpu_type": gpu_type,
         "timestamp": ts,
@@ -50,6 +50,8 @@ def _record(model_id, gpu_type, ts, commit, latency, throughput, success=True):
         "vae_decode_time_s": 3.0,
         "success": success,
     }
+    record.update(metadata)
+    return record
 
 
 def test_summary_endpoint_returns_latest_group_status():
@@ -85,6 +87,44 @@ def test_summary_status_is_independent_of_days_window():
     assert narrow["filters"]["days"] is None
     assert narrow["filters"]["trend_window_days"] == 1
     assert len(trends["groups"][0]["points"]) == 1
+
+
+def test_dashboard_endpoints_filter_and_return_run_source_metadata():
+    app = create_app(FakeStore([
+        _record(
+            "wan",
+            "NVIDIA L40S",
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            run_source="pr",
+            pr_number="123",
+            branch="feature/perf",
+            baseline_eligible=False,
+        ),
+        _record(
+            "wan",
+            "NVIDIA L40S",
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            11.0,
+            9.0,
+            run_source="scheduled_main",
+            baseline_eligible=True,
+        ),
+    ]))
+    client = TestClient(app)
+
+    summary = client.get("/api/performance/summary", params={"run_source": "pr"}).json()
+    trends = client.get("/api/performance/trends", params={"run_source": "pr"}).json()
+
+    assert summary["count"] == 1
+    assert summary["rows"][0]["run_source"] == "pr"
+    assert summary["rows"][0]["pr_number"] == "123"
+    assert summary["filters"]["run_source"] == "pr"
+    assert trends["count"] == 1
+    assert trends["groups"][0]["points"][0]["run_source"] == "pr"
 
 
 def test_records_and_trends_endpoints_filter_by_model_and_gpu():

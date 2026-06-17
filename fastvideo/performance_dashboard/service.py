@@ -18,6 +18,16 @@ from fastvideo.tests.performance.hf_store import safe_float
 from .metrics import METRICS
 
 Record = dict[str, Any]
+METADATA_KEYS = (
+    "run_source",
+    "baseline_eligible",
+    "branch",
+    "pr_number",
+    "test_scope",
+    "build_url",
+    "build_id",
+    "job_id",
+)
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -45,6 +55,7 @@ def filter_records(
     *,
     model_id: str | None = None,
     gpu_type: str | None = None,
+    run_source: str | None = None,
     success: bool | None = None,
 ) -> list[Record]:
     filtered = records
@@ -52,9 +63,29 @@ def filter_records(
         filtered = [record for record in filtered if record.get("model_id") == model_id]
     if gpu_type:
         filtered = [record for record in filtered if record.get("gpu_type") == gpu_type]
+    if run_source:
+        filtered = [record for record in filtered if record_run_source(record) == run_source]
     if success is not None:
         filtered = [record for record in filtered if bool(record.get("success", True)) == success]
     return sorted(filtered, key=record_sort_key)
+
+
+def record_run_source(record: Record) -> str:
+    value = str(record.get("run_source") or "unknown")
+    return value if value in {"pr", "local", "scheduled_main", "unknown"} else "unknown"
+
+
+def record_metadata(record: Record) -> Record:
+    return {
+        "run_source": record_run_source(record),
+        "baseline_eligible": bool(record.get("baseline_eligible", False)),
+        "branch": record.get("branch") or "",
+        "pr_number": record.get("pr_number") or "",
+        "test_scope": record.get("test_scope") or "",
+        "build_url": record.get("build_url") or "",
+        "build_id": record.get("build_id") or "",
+        "job_id": record.get("job_id") or "",
+    }
 
 
 def group_by_model_gpu(records: list[Record]) -> dict[tuple[str, str], list[Record]]:
@@ -123,6 +154,7 @@ def build_latest_summary(records: list[Record],
             latest.get("timestamp"),
             "commit_sha":
             latest.get("commit_sha"),
+            **record_metadata(latest),
             "success":
             success,
             "baseline_n":
@@ -150,6 +182,7 @@ def build_trends(records: list[Record]) -> list[Record]:
             point = {
                 "timestamp": record.get("timestamp"),
                 "commit_sha": record.get("commit_sha"),
+                **record_metadata(record),
                 "success": bool(record.get("success", True)),
                 "metrics": {
                     metric.key: safe_float(record.get(metric.key))
