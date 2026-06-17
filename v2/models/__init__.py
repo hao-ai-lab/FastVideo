@@ -21,6 +21,7 @@ from .image_video import (
 from .ltx2 import build_ltx2_av_program, build_ltx2_card, build_ltx2_program
 from .qwen_omni import build_qwen_omni_card, build_qwen_omni_program
 from .reward import build_reward_card
+from .speculative import build_speculative_card, build_speculative_program
 from .tiled import build_tiled_card, build_tiled_program
 from .unified import build_unified_card, build_unified_program
 from .wan21 import build_wan21_card, build_wan_t2v_program
@@ -34,6 +35,7 @@ __all__ = [
     "build_bagel_card", "build_bagel_program",
     "build_qwen_omni_card", "build_qwen_omni_program",
     "build_reward_card",
+    "build_speculative_card", "build_speculative_program",
     "build_unified_card", "build_unified_program",
     "build_flux_t2i_card", "build_flux_t2i_program", "build_wan_i2v_card", "build_wan_i2v_program",
     "build_t2i_then_i2v_workflow", "build_t2i_i2v_extend_workflow", "register_workflows",

@@ -262,6 +262,48 @@ class ToyVocoder:
         return np.concatenate(segs) if segs else np.zeros(0, dtype="float32")
 
 
+def _spec_target_next(tokens) -> int:
+    """The target AR model's greedy next-token. Length-dependent so the sequence stays varied (no
+    trivial absorbing fixed point) — the substrate for a meaningful speculative-decoding accept rate."""
+    s = sum(int(t) for t in tokens)
+    n = len(tokens)
+    return int((s * 31 + 7 * n + 13) % 256)
+
+
+class ToyTargetModel:
+    """Toy speculative-decoding TARGET (the large, ground-truth AR model)."""
+    VOCAB = 256
+    EOS = 0
+
+    def __init__(self, seed: int = 0):
+        self.seed = seed
+
+    def ar_forward(self, tokens) -> int:
+        return _spec_target_next(tokens)
+
+
+class ToyDraftModel:
+    """Toy speculative-decoding DRAFT model — a cheap approximation of the target.
+
+    It replicates the target on a context-and-position-varying subset (~``agree`` fraction → those tokens
+    are accepted) and diverges otherwise (→ a rejection + a target correction). The accept rate varies
+    *within* a decode, so different rounds accept different lengths (a ragged loop). The demonstration is
+    exact regardless of draft quality: speculative decoding accepts only tokens the target would have
+    produced, so the output equals the target's own greedy decode (design_v3 §2.2)."""
+    VOCAB = 256
+    EOS = 0
+
+    def __init__(self, agree: float = 0.7, seed: int = 0):
+        self.agree = float(agree)
+
+    def ar_forward(self, tokens) -> int:
+        target = _spec_target_next(tokens)
+        s, n = sum(int(t) for t in tokens), len(tokens)
+        if ((s * 13 + n * 7) % 10) < int(round(self.agree * 10)):   # agree on a varying subset
+            return int(target)
+        return int((target + 1) % self.VOCAB)                       # a cheap wrong guess (rejected)
+
+
 class ToyRewardModel:
     """Toy learned reward model — a served scorer/verifier (PickScore / CLIP / a VLM judge stand-in).
 

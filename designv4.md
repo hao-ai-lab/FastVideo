@@ -5,7 +5,7 @@
 > together with **what was actually built and tested** in the `v2/` package, and with the one workload
 > that most stressed the design — **UniRL/PromptRL-style joint LM + generator reinforcement learning**
 > (arXiv 2510.17937; PromptRL, arXiv 2602.01382). v4 is not aspirational. Every structural claim below
-> is backed by code in `v2/` and a passing test (148 tests, 25 files, two independent runners — `pytest`
+> is backed by code in `v2/` and a passing test (153 tests, 26 files, two independent runners — `pytest`
 > and a zero-dependency `v2/run_tests.py`). The neural forwards are toy numpy stand-ins (no GPU/torch in
 > this environment, §12); the **control flow, contracts, scheduling, caching, parity gates, and training
 > math are real**, which is the whole point of the (recipe, runtime) separation: swap the component
@@ -538,10 +538,23 @@ turning *any* RL method into RLHF/RLAIF with **no method change** — the K roll
 `REWARD_BATCH` units. ✅ `v2/tests/test_served_reward.py` (4: REWARD_BATCH loop, drop-in interface,
 determinism, DiffusionNFT driven by the served reward).
 
-These five (§9.11–§9.15) cover the remaining stress tests from the audit: a product-grade joint-A/V model,
-the cleanest proof of model-owned control flow, recursive composition depth, the RL flywheel's hot-swap
-correctness, and the reward plane composing with serving — each a new card / loop / method / controller,
-**no new runtime primitive**.
+### 9.16 Speculative (draft-verify) decoding
+
+The AR-side analog of §9.12: a cheap **draft** model proposes K tokens, the **target** verifies them in
+one batched step, and `SpeculativeARLoop` accepts the longest matching prefix plus one target correction
+— a *variable* accepted-length per round (a ragged loop the model owns). Two claims hold: **exactness** —
+the emitted sequence equals the target's *own* greedy decode for *any* draft quality (every accepted token
+is one the target would have produced; the correction is the target's token), so the speedup is free; and
+**the speedup scales with the accept rate** — a better draft accepts more per round ⇒ fewer `verify_rounds`
+(the expensive model's latency steps) for the same output (tested: draft-agree 0.3→1×, 0.7→3×, 1.0→4×=K).
+Two components (`draft` + `target`) co-scheduled on one resident instance, every round an `AR_TOKEN`
+WorkUnit. ✅ `v2/tests/test_speculative.py` (5: exactness across draft qualities, speedup scaling,
+co-scheduling, interleave parity).
+
+These six (§9.11–§9.16) close out the audit's remaining stress tests: a product-grade joint-A/V model, the
+cleanest proof of model-owned control flow, recursive composition depth, the RL flywheel's hot-swap
+correctness, the reward plane composing with serving, and an exact AR speedup — each a new card / loop /
+method / controller, **no new runtime primitive**.
 
 ## 10. Serving & fleet — our own stack, Dynamo optional
 
@@ -600,7 +613,7 @@ v2/
                methods/{finetune,dmd2,diffusion_nft,self_forcing,unified_rl,joint_multi_rl,workflow_rl}
   serving/     AsyncEngine, pools, DisaggregatedRunner, connectors, OpenAI server
   deploy/      DeploymentCard, LocalFleet, DynamoWorkerAdapter
-  tests/       25 files, 148 tests         run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
+  tests/       26 files, 153 tests         run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
 ```
 
 **Enforced boundaries:** `card/` imports no product/runtime; `runtime/` executes `card/` loops but defines
