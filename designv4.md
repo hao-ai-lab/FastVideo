@@ -5,7 +5,7 @@
 > together with **what was actually built and tested** in the `v2/` package, and with the one workload
 > that most stressed the design — **UniRL/PromptRL-style joint LM + generator reinforcement learning**
 > (arXiv 2510.17937; PromptRL, arXiv 2602.01382). v4 is not aspirational. Every structural claim below
-> is backed by code in `v2/` and a passing test (127 tests, 20 files, two independent runners — `pytest`
+> is backed by code in `v2/` and a passing test (148 tests, 25 files, two independent runners — `pytest`
 > and a zero-dependency `v2/run_tests.py`). The neural forwards are toy numpy stand-ins (no GPU/torch in
 > this environment, §12); the **control flow, contracts, scheduling, caching, parity gates, and training
 > math are real**, which is the whole point of the (recipe, runtime) separation: swap the component
@@ -480,6 +480,69 @@ special-casing. The *economic* half — whether it pays on a real GPU duty-cycle
 in-loop call — remains a measurement for the port (the falsifier's experiment is unchanged). ✅
 `v2/tests/test_tiled_scheduling.py` (4).
 
+### 9.11 LTX-2 joint audio+video denoise (T2VS, per-modality guidance)
+
+LTX-2 declared an `audio_vae` (`required_for={"t2vs"}`) but never used it — now it does. A single
+two-stage denoise carries a **synchronized audio latent** alongside the video (the audio latent is
+conditioned on the video latent, so they stay in sync), applies **per-modality CFG** (`guidance_per_modality`
+— video and audio get separate guidance scales), threads both latents through base→refine, and decodes via
+the video VAE *and* the audio VAE → `video` + `audio` artifacts. The audio path is gated on the request
+asking for audio, so the default **T2V path is byte-for-byte unchanged** (the existing LTX-2 tests are
+untouched). What it lights up: the `guidance_per_modality` policy (scalar→per-modality, no loop branching),
+the `sound_vae`/`t2vs` capability, and multi-artifact fan-out from one synchronized loop — true joint A/V,
+not a post-hoc audio bolt-on. ✅ `v2/tests/test_ltx2_av.py` (5: video+audio, audio↔video sync, independent
+per-modality guidance, interleave parity, T2V-unchanged).
+
+### 9.12 Content-adaptive control flow — cache-dit skip + early-exit
+
+The signature payoff of loop inversion (§2.2): because the model owns control flow, the
+`CacheDiTDenoiseLoop`'s `next()` can **reuse the cached velocity** when consecutive predictions barely
+change (cache-dit / TeaCache — skip the DiT forward, a 1.5–2× inference win) and **early-exit** when the
+latent converges — a *variable, content-dependent step count*, impossible in a `for t in timesteps`
+runtime. It is an isolated `WanDenoiseLoop` subclass (threshold 0 ⇒ identical to the base, so nothing
+else is touched). Skips stay close to the full run (rel video diff < 0.05 at ~40% steps skipped), and —
+the load-bearing part — the **interleave parity gate still holds across requests with different step
+counts** (ragged loops don't smear). ✅ `v2/tests/test_adaptive_compute.py` (4).
+
+### 9.13 Nested workflows (recursive composition)
+
+A `workflow_id` is a servable in the same namespace as a model, so a `WorkflowStage` can invoke a
+*workflow* exactly as it invokes a model — `engine.run` routes it either way. A workflow whose first stage
+IS the T2I→I2V workflow (then extends its video) runs end-to-end; `requires` lists the inner workflow and
+validation recurses. Cycles are prevented at **registration** (a self-referencing workflow `requires`
+itself, which isn't served yet), with a **run-time cycle guard** (`engine._wf_running`) as defense-in-depth.
+So "composition is data" scales to arbitrary depth, not just two flat stages. ✅
+`v2/tests/test_nested_workflow.py` (5).
+
+### 9.14 Live weight-sync under in-flight serving (the RL flywheel's hardest correctness)
+
+Collocated RL serves rollouts and receives weight updates on the same instance. The hazard: swapping
+weights *while a denoise loop is mid-flight* makes that request a half-and-half of two policies — its
+captured log-probs describe a rollout that never happened, and training silently corrupts. The
+`WeightSyncController` makes the lifecycle explicit — **freeze admission → drain in-flight → transfer
+(per-component) → bump version + invalidate that component's caches → resume** — and the tests prove it:
+a mid-flight swap *does* corrupt (shown, as the thing to avoid); draining first leaves the in-flight
+request **bit-identical to the no-sync baseline** (it finished on its start weights) while a post-sync
+request reflects the new weights; and the sync bumps only the transformer's version, so the **frozen
+text-encoder's feature cache survives** (a shared prompt still reuses across the sync). This is the moat's
+hardest correctness surface — the reason verl-omni/miles chose the two-runtime tax — proven at the
+drain-semantics level. ✅ `v2/tests/test_weight_sync_live.py` (3).
+
+### 9.15 Reward-model-as-a-served-card (REWARD_BATCH)
+
+In real RL the reward is a *model* (PickScore/CLIP/a VLM judge), not a heuristic. A reward model is now
+just another card — a `scorer` component + a `score` loop emitting **`REWARD_BATCH`** work units (the kind
+had zero coverage) — so a learned reward is loaded, priced, scheduled, and place-able on its own pool. A
+`ServedRewardScorer` drop-in-replaces the numpy scorer (`method.scorer = ServedRewardScorer(reward_inst)`),
+turning *any* RL method into RLHF/RLAIF with **no method change** — the K rollout samples score as batched
+`REWARD_BATCH` units. ✅ `v2/tests/test_served_reward.py` (4: REWARD_BATCH loop, drop-in interface,
+determinism, DiffusionNFT driven by the served reward).
+
+These five (§9.11–§9.15) cover the remaining stress tests from the audit: a product-grade joint-A/V model,
+the cleanest proof of model-owned control flow, recursive composition depth, the RL flywheel's hot-swap
+correctness, and the reward plane composing with serving — each a new card / loop / method / controller,
+**no new runtime primitive**.
+
 ## 10. Serving & fleet — our own stack, Dynamo optional
 
 Per the explicit instruction "*don't completely rely on Dynamo; we still need our own version*," v2 ships a
@@ -530,11 +593,14 @@ v2/
                image_video/                     # §9.6: flux-t2i + wan-i2v, cross-model T2I→I2V workflow
                multi_expert/                    # §9.7: N refiners + generator, N-way joint RL
                tiled/                           # §9.10: VAETileLoop, VAE_TILE units co-scheduled w/ denoise
-  training/    rollout, behavior, rewards, weight_sync,
+               ltx2/ (audio_vae)                # §9.11: joint A/V denoise (T2VS, per-modality guidance)
+               adaptive/                        # §9.12: CacheDiTDenoiseLoop (cache-dit skip + early-exit)
+               reward/                          # §9.15: reward-model card, REWARD_BATCH work units
+  training/    rollout, behavior, rewards (+ServedRewardScorer), weight_sync (+WeightSyncController),
                methods/{finetune,dmd2,diffusion_nft,self_forcing,unified_rl,joint_multi_rl,workflow_rl}
   serving/     AsyncEngine, pools, DisaggregatedRunner, connectors, OpenAI server
   deploy/      DeploymentCard, LocalFleet, DynamoWorkerAdapter
-  tests/       20 files, 127 tests         run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
+  tests/       25 files, 148 tests         run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
 ```
 
 **Enforced boundaries:** `card/` imports no product/runtime; `runtime/` executes `card/` loops but defines
@@ -544,17 +610,21 @@ folder — it is how the (recipe, runtime) pair is kept honest.
 
 ## 13. Falsifiers, open questions, reference-synthesis delta
 
-The v3 falsifiers stand, but two have been **half-resolved** by the stress tests: (a) *"the general WorkUnit
-scheduler may be over-general for non-step kinds"* — its **mechanism** half is now validated (`VAE_TILE`
-units interleave bit-identically with denoise steps through one budget, §9.10); its **economic** half (does
+The v3 falsifiers stand, but several have been **half-resolved** by the stress tests: (a) *"the general
+WorkUnit scheduler may be over-general for non-step kinds"* — its **mechanism** half is validated (`VAE_TILE`
+and `REWARD_BATCH` units interleave/schedule through one budget, §9.10/§9.15); its **economic** half (does
 it *pay* on a real duty-cycle vs an in-loop call) is unchanged, deferred to the port. (b) The **realtime**
-plane is no longer un-exercised — sessions, persistent KV, and step-boundary cancellation work (§9.8) —
-though the <100ms latency target itself is still a GPU-only measurement. Still open: step-level scheduling
-must beat request-level on a real duty-cycle trace; cost-model admission is a modeling bet; the clean-slate
-premise is out of scope by request; quality/C4 is unmeasured. The stress tests **retired one open question** —
-*"does the Card/Loop/Program split generalize beyond serving and MoT, or will joint multi-expert RL / cross-
-model pipelines / interactive sessions force a redesign?"* — answered across §9.4–§9.10: it generalizes, no
-redesign. New questions they **opened**:
+plane is no longer un-exercised — sessions, persistent KV, step-boundary cancellation (§9.8) — though the
+<100ms latency target is still a GPU-only measurement. (c) The **moat's hot-swap correctness** — weight-sync
+*under in-flight serving* — is demonstrated at the drain-semantics level (§9.14: in-flight requests finish on
+their start weights, per-component versioning, frozen-encoder cache survives); what remains GPU-only is
+boundary-stop at *step* granularity (vs request-drain) and the throughput of doing it under real load. Still
+open: step-level scheduling must beat request-level on a real duty-cycle trace; cost-model admission is a
+modeling bet; the clean-slate premise is out of scope by request; quality/C4 is unmeasured. The stress tests
+**retired the central open question** — *"does the Card/Loop/Program split generalize beyond serving and MoT,
+or will joint multi-expert RL / cross-model pipelines / interactive sessions / joint A/V / content-adaptive
+compute / hot weight-sync force a redesign?"* — answered across §9.4–§9.15: it generalizes, no redesign. New
+questions they **opened**:
 
 - **Throughput of two-loop rollouts.** A joint rollout interleaves an `ar_decode` and a `diffusion_denoise`
   loop per sample; the homogeneous-group batching win (K identical diffusion samples) is intact, but the LM
@@ -582,11 +652,15 @@ contracts hold under serving, under MoT omni (where BAGEL and Cosmos3 both land)
 thinker→talker→vocoder **cascade**, under **cross-model T2I→I2V** chaining, under **joint LM + generator RL**,
 under **N-way joint RL** over arbitrary experts, under **interactive world-model sessions** (persistent
 state, cancellation, streaming), under **end-to-end RL across a workflow** (a final reward training an
-earlier model), and under **heterogeneous WorkUnit co-scheduling** (VAE tiles interleaved with denoise
-steps). Every one of those fit inside the design as *a new card, method, loop, Workflow, or session driver*,
-with **no new runtime primitive** — and the only real bug the stress tests surfaced (a no-op generator
-gradient) was a fix in the sampler *library*, not the runtime. The design's bet is therefore not that it is
-elegant — it is that **the weight-sharing topology, the composition graph, the training recipe, and the
-session lifecycle are all data over cards, loops, and workflows, so a new frontier capability is a card or a
-driver, not a rewrite.** The remaining work is the GPU port, where, by construction, the loops, scheduler,
-caches, parity, and training plane do not change — only the component factories do.
+earlier model), under **heterogeneous WorkUnit co-scheduling** (VAE tiles interleaved with denoise steps),
+under **joint audio+video** (LTX-2 T2VS with per-modality guidance), under **content-adaptive compute**
+(cache-dit skip + early-exit), under **nested workflows** (recursive composition), under **hot weight-sync
+while serving** (the RL flywheel's drain-correct lifecycle), and under a **served reward model**
+(REWARD_BATCH). Every one of those fit inside the design as *a new card, method, loop, Workflow, session
+driver, or controller*, with **no new runtime primitive** — and the only real bug any stress test surfaced
+(a no-op generator gradient) was a fix in the sampler *library*, not the runtime. The design's bet is
+therefore not that it is elegant — it is that **the weight-sharing topology, the composition graph, the
+training recipe, the reward, and the session/sync lifecycle are all data over cards, loops, workflows, and
+controllers, so a new frontier capability is a card or a driver, not a rewrite.** The remaining work is the
+GPU port, where, by construction, the loops, scheduler, caches, parity, and training plane do not change —
+only the component factories do.

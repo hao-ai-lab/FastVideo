@@ -52,3 +52,26 @@ class MultiRewardScorer:
 
 def build_multi_reward_scorer(config: dict[str, float]) -> MultiRewardScorer:
     return MultiRewardScorer(config)
+
+
+class ServedRewardScorer:
+    """A reward scorer backed by a SERVED reward-model card (design_v3 §10).
+
+    Drop-in for ``MultiRewardScorer`` (same ``score(media, prompts) -> {"avg": ...}`` interface), but
+    instead of a numpy heuristic it runs a reward MODEL through its ``score`` loop — so the K rollout
+    samples are scored as ``REWARD_BATCH`` work units (admitted, priced, interleavable). Set it as an RL
+    method's ``.scorer`` to turn any method into RLHF/RLAIF with a learned reward, no method change."""
+
+    def __init__(self, reward_instance, *, loop_id: str = "score"):
+        self.inst = reward_instance
+        self.loop_id = loop_id
+
+    def score(self, media: list, prompts: list | None = None) -> dict[str, np.ndarray]:
+        from .._enums import ExecutionProfile
+        from ..request import TaskType, make_request
+        from .rollout import rollout_loop
+        req = make_request(TaskType.REASON, self.inst.card.model_id, "")     # task is cosmetic here
+        res = rollout_loop(self.inst, self.loop_id, req, slots={"media": list(media)},
+                           profile=ExecutionProfile.SERVE)
+        rewards = np.asarray(res.outputs["rewards"], dtype="float64")
+        return {"served": rewards, "avg": rewards}

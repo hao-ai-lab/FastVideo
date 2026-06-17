@@ -25,7 +25,6 @@ from ...loop.contracts import (
     LoopState,
     ResourceRequest,
     ShapeSignature,
-    StepContext,
     StepResult,
     WorkPlan,
 )
@@ -47,7 +46,7 @@ def ltx_base_latent_shape(req) -> tuple[int, int, int, int]:
 
 class LTX2DenoiseLoop:
     def __init__(self, *, loop_id, stage, sigmas, cfg_scale, stg_scale, cost,
-                 input_slot=None, seed_offset=0):
+                 input_slot=None, seed_offset=0, audio_input_slot=None):
         self.loop_id = loop_id
         self.stage = stage                 # "base" | "refine"
         self.sigmas = list(sigmas)
@@ -55,6 +54,7 @@ class LTX2DenoiseLoop:
         self.stg_scale = stg_scale
         self.cost = cost
         self.input_slot = input_slot       # None => fresh noise (base); slot name => read latents (refine)
+        self.audio_input_slot = audio_input_slot   # joint A/V: where to read the threaded audio latent
         self.seed_offset = seed_offset
 
     def init(self, req, model, ctx) -> LoopState:
@@ -71,6 +71,20 @@ class LTX2DenoiseLoop:
                        timesteps=[float(s) * 1000.0 for s in sig])
         st.cond["prompt_embeds"] = ctx.slots.get("text_embeds")
         st.cond["negative_prompt_embeds"] = ctx.slots.get("neg_text_embeds")
+        # joint A/V (T2VS): denoise an audio latent alongside the video, with per-modality guidance.
+        # Gated on the request asking for audio ⇒ the T2V path below is byte-for-byte unchanged.
+        want_audio = "audio" in getattr(req.outputs, "modalities", frozenset())
+        gpm = req.diffusion.guidance_per_modality or {}
+        st.scratch["want_audio"] = want_audio
+        st.scratch["v_guidance"] = float(gpm.get("video", self.cfg_scale))   # == cfg_scale for T2V
+        st.scratch["a_guidance"] = float(gpm.get("audio", self.cfg_scale))
+        if want_audio:
+            if self.audio_input_slot is None:
+                a_len = max(2, req.diffusion.num_frames // 20)
+                au = (rng.standard_normal((LATENT_CHANNELS, a_len, 1, 1)) * float(sig[0])).astype("float32")
+            else:
+                au = np.asarray(ctx.slots[self.audio_input_slot], dtype="float32")
+            st.latents["audio"] = au
         return st
 
     def next(self, st: LoopState):
@@ -80,7 +94,9 @@ class LTX2DenoiseLoop:
         sigma_t, sigma_next = st.sigmas[i], st.sigmas[i + 1]
         x = st.latents["video"]
         pe, ne = st.cond["prompt_embeds"], st.cond["negative_prompt_embeds"]
-        cfg_scale, stg_scale = self.cfg_scale, self.stg_scale
+        v_guidance, stg_scale = st.scratch["v_guidance"], self.stg_scale   # per-modality video CFG
+        want_audio, a_guidance = st.scratch.get("want_audio", False), st.scratch.get("a_guidance", 0.0)
+        au = st.latents.get("audio")
 
         def run(model, override=None):
             if override is not None and "noise_pred" in override:
@@ -92,11 +108,17 @@ class LTX2DenoiseLoop:
                 # STG-perturbed pass (here: drop text conditioning) — the multi-pass braid
                 ptb = dit(x, np.zeros_like(pe) if pe is not None else None, sigma_t)
                 velocity = (pos
-                            + (cfg_scale - 1.0) * (pos - neg)
+                            + (v_guidance - 1.0) * (pos - neg)
                             + stg_scale * (pos - ptb))
             x_next = flow_match_euler_step(x, np.asarray(velocity, dtype="float32"), sigma_t, sigma_next)
-            return StepResult(output={"noise_pred": np.asarray(velocity, dtype="float32"),
-                                      "latents": x_next.astype("float32")})
+            out = {"noise_pred": np.asarray(velocity, dtype="float32"), "latents": x_next.astype("float32")}
+            if want_audio and au is not None:                   # joint audio denoise, conditioned on video
+                dit = model.component("transformer")
+                a_pos = dit(au, pe, sigma_t, context=x)         # context=x ⇒ audio synced to the video
+                a_neg = dit(au, ne, sigma_t, context=x)
+                a_vel = a_pos + (a_guidance - 1.0) * (a_pos - a_neg)   # audio's OWN guidance scale
+                out["audio_latents"] = flow_match_euler_step(au, a_vel, sigma_t, sigma_next).astype("float32")
+            return StepResult(output=out)
 
         res = ResourceRequest(
             compute_seconds=self.cost.predict(int(np.prod(x.shape)), 3.0),  # 3 passes
@@ -110,6 +132,8 @@ class LTX2DenoiseLoop:
 
     def advance(self, st: LoopState, result: StepResult) -> LoopState:
         st.latents["video"] = result.output["latents"]
+        if "audio_latents" in result.output:
+            st.latents["audio"] = result.output["audio_latents"]
         if st.profile == ExecutionProfile.ROLLOUT:
             st.trajectory.append({"step": st.step_idx, "stage": self.stage,
                                   "latents": np.asarray(st.latents["video"]).copy()})
@@ -117,6 +141,8 @@ class LTX2DenoiseLoop:
         return st
 
     def finalize(self, st: LoopState) -> LoopResult:
-        return LoopResult(outputs={"latents": st.latents["video"]},
-                          metrics={f"{self.stage}_steps": float(st.step_idx)},
+        outs = {"latents": st.latents["video"]}
+        if st.scratch.get("want_audio") and "audio" in st.latents:
+            outs["audio_latents"] = st.latents["audio"]         # threaded to the next stage / decoded
+        return LoopResult(outputs=outs, metrics={f"{self.stage}_steps": float(st.step_idx)},
                           behavior=st.trajectory or None)

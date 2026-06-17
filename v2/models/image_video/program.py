@@ -99,3 +99,25 @@ def build_t2i_then_i2v_workflow(t2i_id: str = "flux-t2i", i2v_id: str = "wan-i2v
         WorkflowStage(t2i_id, t2i_stage, label="t2i"),
         WorkflowStage(i2v_id, i2v_stage, label="i2v"),
     ])
+
+
+def build_t2i_i2v_extend_workflow(inner_id: str = "image_video.t2i_i2v", i2v_id: str = "wan-i2v") -> Workflow:
+    """A NESTED workflow (design_v3 §13; §9.13): its first stage is *another workflow* (the T2I→I2V
+    pipeline), whose video is then extended by an I2V pass. Proves composition is recursive — a
+    workflow id is a servable, so a stage can invoke a workflow exactly as it invokes a model."""
+    def shot1(state):                                 # stage 1 IS a workflow (engine.run routes it)
+        return make_request(TaskType.T2V, inner_id, state["prompt"],
+                            diffusion=DiffusionParams(num_steps=4, num_frames=1, seed=state.get("seed", 0)))
+
+    def shot2(state):
+        video = np.asarray(state["shot1:video"].frames)        # the inner workflow's output
+        first_frame = video[:, :1]                             # extend from its first frame
+        return make_request(TaskType.I2V, i2v_id, state["prompt"],
+                            inputs=(TextPart(state["prompt"]), ImagePart(pixels=first_frame)),
+                            diffusion=DiffusionParams(num_steps=4, num_frames=81,
+                                                      seed=state.get("seed", 0) + 1))
+
+    return Workflow("image_video.t2i_i2v_extend", [
+        WorkflowStage(inner_id, shot1, label="shot1"),         # ← a workflow stage
+        WorkflowStage(i2v_id, shot2, label="shot2"),
+    ])
