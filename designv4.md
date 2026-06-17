@@ -5,7 +5,7 @@
 > together with **what was actually built and tested** in the `v2/` package, and with the one workload
 > that most stressed the design — **UniRL/PromptRL-style joint LM + generator reinforcement learning**
 > (arXiv 2510.17937; PromptRL, arXiv 2602.01382). v4 is not aspirational. Every structural claim below
-> is backed by code in `v2/` and a passing test (114 tests, 17 files, two independent runners — `pytest`
+> is backed by code in `v2/` and a passing test (127 tests, 20 files, two independent runners — `pytest`
 > and a zero-dependency `v2/run_tests.py`). The neural forwards are toy numpy stand-ins (no GPU/torch in
 > this environment, §12); the **control flow, contracts, scheduling, caching, parity gates, and training
 > math are real**, which is the whole point of the (recipe, runtime) separation: swap the component
@@ -437,6 +437,49 @@ shared-credit variance, N-scaling, prompt-only freeze, independent versioning).
 > C2 ratio==1 identity still holds (it is measured *before* the update). A real bug, found by the stress
 > test, fixed in the sampler library — not the runtime.
 
+### 9.8 Interactive world-model session (the realtime/Session plane)
+
+The Session/realtime plane (§16) was the most-asserted, least-tested part of the design — *zero* coverage.
+`WorldModelSession` (`v2/runtime/session.py`) drives the causal `chunk_rollout` loop as a long-lived
+interactive session: each `.act(action)` resumes the world from **persistent cross-request state** carried
+on the `Session` (its `kv_handle`), streams frames as chunks complete, and honors **step-boundary
+cancellation** — using the exact runtime primitives the engine uses (`RuntimeLoopContext` + `LoopRunner`).
+What it exercised that one-shot generation never does: (a) a loop that *continues* across requests (the
+world is stateful — same action + different history → different frames; ✅ tested); (b) **transactional
+cancellation** — a cancelled act raises `Cancelled` at a step boundary and leaves the world state
+unchanged, so the session is resumable; (c) **no cross-session smearing** — interleaving a second session's
+acts between this one's is bit-identical to running them apart (the §9.3 guarantee, now for sessions). The
+only code added was a continuation seam in the chunk loop (`init` seeds context from a `world_context` slot;
+default empty ⇒ the unchanged one-shot path) and the session driver. ✅ `v2/tests/test_world_session.py` (5).
+
+### 9.9 End-to-end RL over a cross-model workflow
+
+Combines §9.6 (cross-model workflow) and §9.7 (joint RL) into the sharpest test of the training-plane
+boundary: train **both** stages of the T2I→I2V workflow from **one final-video reward**. `WorkflowRLMethod`
+(`v2/training/methods/workflow_rl.py`) rolls out the *whole workflow* with SDE capture in **both** instances
+(T2I diffusion → decode image → condition + I2V diffusion → decode video → score), then applies FlowGRPO PPO
+to each stage's transformer under the *same* final-video group advantage, with two `WeightSyncPlan`s on two
+*different* instances. The load-bearing result: **the earlier model (T2I) is trained by a reward computed on
+the final video** — end-to-end credit across a model boundary — and it is *caused* by that reward, proven by
+a control: a constant reward ⇒ zero advantage ⇒ neither generator moves (✅ tested). So "rollout == serve +
+capture" holds for a *workflow*, not just a card; the training plane spans model instances with no new
+primitive (it drives the same shared loops, threading the artifact exactly as the serve-time Workflow does).
+✅ `v2/tests/test_workflow_rl.py` (4: two-instance SDE rollout, both-stages-train, the causal control,
+independent versioning).
+
+### 9.10 Heterogeneous WorkUnit co-scheduling (the §17 falsifier, mechanism half)
+
+§17's named falsifier: *"the general WorkUnit scheduler may be over-general"* — is scheduling VAE tiles
+through the same admission machinery as denoise steps worth it? The `VAE_TILE` kind had zero coverage.
+`VAETileLoop` + the `wan-tiled` card (`v2/models/tiled/`) make tiled VAE decode a loop of `VAE_TILE` work
+units, and the tests show: tiling is **exact** (tiled == one-shot decode, a C0 parity); the units are real
+(one per latent row); and — the point — a `VAE_TILE` pipeline and a `DIFFUSION_STEP` pipeline **interleave
+bit-identically** (the §9.3 gate holds over *heterogeneous* kinds) and **co-run in one interleaved batch**.
+This validates the *mechanism* the falsifier questions: non-step kinds flow through the one budget without
+special-casing. The *economic* half — whether it pays on a real GPU duty-cycle, vs collapsing tiles to an
+in-loop call — remains a measurement for the port (the falsifier's experiment is unchanged). ✅
+`v2/tests/test_tiled_scheduling.py` (4).
+
 ## 10. Serving & fleet — our own stack, Dynamo optional
 
 Per the explicit instruction "*don't completely rely on Dynamo; we still need our own version*," v2 ships a
@@ -478,6 +521,7 @@ v2/
   parity/      interleave_gate, consistency ladder, compare_outputs
   extend/      observers, interceptors
   request/     requests, params (DiffusionParams + sde_rollout), tasks (TaskType), streams, artifacts
+  runtime/     engine, scheduler, admission; session.py = WorldModelSession (§9.8 interactive plane)
   models/      backend (toy components) + common (cached_text_encode)
                wan21/ ltx2/ wan_causal/         # phase 1: T2V, distilled, self-forcing student
                omni/ cosmos3/ bagel/            # phase 2: MoT (one module, two loops); omni/ = ARDecodeLoop + VocoderLoop
@@ -485,11 +529,12 @@ v2/
                qwen_omni/                       # §9.5: thinker→talker→vocoder, three experts/three loops
                image_video/                     # §9.6: flux-t2i + wan-i2v, cross-model T2I→I2V workflow
                multi_expert/                    # §9.7: N refiners + generator, N-way joint RL
+               tiled/                           # §9.10: VAETileLoop, VAE_TILE units co-scheduled w/ denoise
   training/    rollout, behavior, rewards, weight_sync,
-               methods/{finetune,dmd2,diffusion_nft,self_forcing,unified_rl,joint_multi_rl}
+               methods/{finetune,dmd2,diffusion_nft,self_forcing,unified_rl,joint_multi_rl,workflow_rl}
   serving/     AsyncEngine, pools, DisaggregatedRunner, connectors, OpenAI server
   deploy/      DeploymentCard, LocalFleet, DynamoWorkerAdapter
-  tests/       17 files, 114 tests         run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
+  tests/       20 files, 127 tests         run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
 ```
 
 **Enforced boundaries:** `card/` imports no product/runtime; `runtime/` executes `card/` loops but defines
@@ -499,12 +544,17 @@ folder — it is how the (recipe, runtime) pair is kept honest.
 
 ## 13. Falsifiers, open questions, reference-synthesis delta
 
-The v3 falsifiers stand (step-level scheduling must beat request-level on a real duty-cycle trace; the
-general WorkUnit scheduler may be over-general for non-step kinds; cost-model admission is a modeling bet;
-the clean-slate premise is out of scope by request; quality/C4 is unmeasured). The stress test **retired one
-open question** — *"does the Card/Loop/Program split generalize beyond serving and MoT, or will joint
-multi-expert RL force a redesign?"* — answered: it generalizes, no redesign (§9.4). Two new questions it
-**opened**:
+The v3 falsifiers stand, but two have been **half-resolved** by the stress tests: (a) *"the general WorkUnit
+scheduler may be over-general for non-step kinds"* — its **mechanism** half is now validated (`VAE_TILE`
+units interleave bit-identically with denoise steps through one budget, §9.10); its **economic** half (does
+it *pay* on a real duty-cycle vs an in-loop call) is unchanged, deferred to the port. (b) The **realtime**
+plane is no longer un-exercised — sessions, persistent KV, and step-boundary cancellation work (§9.8) —
+though the <100ms latency target itself is still a GPU-only measurement. Still open: step-level scheduling
+must beat request-level on a real duty-cycle trace; cost-model admission is a modeling bet; the clean-slate
+premise is out of scope by request; quality/C4 is unmeasured. The stress tests **retired one open question** —
+*"does the Card/Loop/Program split generalize beyond serving and MoT, or will joint multi-expert RL / cross-
+model pipelines / interactive sessions force a redesign?"* — answered across §9.4–§9.10: it generalizes, no
+redesign. New questions they **opened**:
 
 - **Throughput of two-loop rollouts.** A joint rollout interleaves an `ar_decode` and a `diffusion_denoise`
   loop per sample; the homogeneous-group batching win (K identical diffusion samples) is intact, but the LM
@@ -530,11 +580,13 @@ v3 argued that the atomic unit is the (recipe, runtime) pair and that a model-na
 what the post-training era requires. v4 is the same argument, now *built and measured* in `v2/`: the
 contracts hold under serving, under MoT omni (where BAGEL and Cosmos3 both land), under a
 thinker→talker→vocoder **cascade**, under **cross-model T2I→I2V** chaining, under **joint LM + generator RL**,
-and under **N-way joint RL** over an arbitrary set of experts. Each of those — including the two the user
-pushed hardest on, "more than two experts" and "image-then-video" — fit inside the design as *a new card, a
-new method, or a Workflow*, with **no new runtime primitive**. The one real bug the stress tests surfaced (a
-no-op generator gradient) was a fix in the sampler *library*, not the runtime. The design's bet is therefore
-not that it is elegant — it is that **the weight-sharing topology, the composition graph, and the training
-recipe are all data on cards and workflows, so a new frontier recipe is a card, not a rewrite.** The
-remaining work is the GPU port, where, by construction, the loops, scheduler, caches, parity, and training
-plane do not change — only the component factories do.
+under **N-way joint RL** over arbitrary experts, under **interactive world-model sessions** (persistent
+state, cancellation, streaming), under **end-to-end RL across a workflow** (a final reward training an
+earlier model), and under **heterogeneous WorkUnit co-scheduling** (VAE tiles interleaved with denoise
+steps). Every one of those fit inside the design as *a new card, method, loop, Workflow, or session driver*,
+with **no new runtime primitive** — and the only real bug the stress tests surfaced (a no-op generator
+gradient) was a fix in the sampler *library*, not the runtime. The design's bet is therefore not that it is
+elegant — it is that **the weight-sharing topology, the composition graph, the training recipe, and the
+session lifecycle are all data over cards, loops, and workflows, so a new frontier capability is a card or a
+driver, not a rewrite.** The remaining work is the GPU port, where, by construction, the loops, scheduler,
+caches, parity, and training plane do not change — only the component factories do.

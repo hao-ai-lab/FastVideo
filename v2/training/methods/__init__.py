@@ -8,6 +8,7 @@ from .finetune import FineTuneMethod, build_finetune
 from .joint_multi_rl import JointMultiExpertRL, build_joint_multi_rl
 from .self_forcing import SelfForcingMethod, build_self_forcing
 from .unified_rl import UnifiedRLMethod, build_unified_rl
+from .workflow_rl import WorkflowRLMethod, build_workflow_rl
 
 __all__ = [
     "TrainingMethod", "new_instance", "predict_x0",
@@ -17,4 +18,5 @@ __all__ = [
     "SelfForcingMethod", "build_self_forcing",
     "UnifiedRLMethod", "build_unified_rl",
     "JointMultiExpertRL", "build_joint_multi_rl",
+    "WorkflowRLMethod", "build_workflow_rl",
 ]
