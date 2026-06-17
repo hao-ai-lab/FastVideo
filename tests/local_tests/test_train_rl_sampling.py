@@ -174,6 +174,28 @@ def test_diffusion_nft_config_uses_rl_sampler_not_dmd_pipeline():
     assert cfg.method["validation"]["log_samples"] is True
 
 
+def test_diffusion_nft_video_config_uses_genrl_rewards_in_clean_layout():
+    config_path = "examples/train/configs/rl/wan/diffusion_nft_videoalign.yaml"
+
+    cfg = load_run_config(config_path)
+    raw_text = open(config_path, encoding="utf-8").read()
+
+    assert cfg.method["_target_"] == "fastvideo.train.methods.rl.diffusion_nft.DiffusionNFTMethod"
+    assert cfg.method["reward_backend"] == "genrl"
+    assert cfg.method["reward_fn"]["rewards"] == {
+        "videoalign_vq": 1.0,
+        "videoalign_mq": 1.0,
+        "videoalign_ta": 1.0,
+    }
+    assert cfg.method["sampling"]["scheduler"] == "flow_match_euler"
+    assert cfg.method["sampling"]["trajectory"] == "ode"
+    assert cfg.training.data.num_latent_t == 20
+    assert cfg.training.data.num_frames == 77
+    assert "rl/reward/" not in raw_text
+    assert "WanDMDPipeline" not in raw_text
+    assert "solver" not in cfg.method["sampling"]
+
+
 def test_validation_shard_indices_are_stable_and_padded():
     rank0 = validation_shard_indices(5, rank=0, world_size=2)
     rank1 = validation_shard_indices(5, rank=1, world_size=2)

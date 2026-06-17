@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 
+import numpy as np
 import torch
 
 RewardScorer = Callable[[torch.Tensor, Sequence[str]], torch.Tensor]
@@ -25,6 +26,32 @@ def select_first_frame(media: torch.Tensor) -> torch.Tensor:
         return media
     raise ValueError("media must have shape [B, C, H, W] or [B, C, T, H, W], "
                      f"got {tuple(media.shape)}")
+
+
+def media_to_uint8_array(media: torch.Tensor | np.ndarray) -> np.ndarray:
+    """Convert image/video media to uint8 NHWC or NFHWC arrays."""
+    if isinstance(media, torch.Tensor):
+        media = media.detach().float().clamp(0, 1).cpu().numpy()
+    media = np.asarray(media)
+    if media.ndim == 4:
+        if media.shape[-1] in (1, 3):
+            pass
+        elif media.shape[1] in (1, 3):
+            media = media.transpose(0, 2, 3, 1)
+    elif media.ndim == 5:
+        if media.shape[-1] in (1, 3):
+            pass
+        elif media.shape[2] in (1, 3):
+            media = media.transpose(0, 1, 3, 4, 2)
+        elif media.shape[1] in (1, 3):
+            media = media.transpose(0, 2, 3, 4, 1)
+    else:
+        raise ValueError("media must have shape [B, C, H, W], [B, H, W, C], "
+                         "[B, C, T, H, W], [B, T, C, H, W], or "
+                         f"[B, T, H, W, C], got {tuple(media.shape)}")
+    if media.dtype in (np.float16, np.float32, np.float64):
+        media = np.clip(media * 255.0, 0, 255).round().astype(np.uint8)
+    return media
 
 
 class MultiRewardScorer:
