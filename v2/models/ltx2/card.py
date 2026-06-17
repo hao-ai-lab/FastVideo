@@ -24,7 +24,7 @@ from ...card import (
     RecipeSpec,
 )
 from ...parallel import ParallelPlan
-from ..backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
+from ..backend import ToyAudioVAE, ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
 from .loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop
 
 
@@ -39,7 +39,8 @@ def build_ltx2_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
     def refine_factory():
         return LTX2DenoiseLoop(loop_id="ltx2_refine", stage="refine", sigmas=REFINE_SIGMAS,
                                cfg_scale=1.0, stg_scale=0.0, cost=cost,
-                               input_slot="ltx_upsampled", seed_offset=1000)
+                               input_slot="ltx_upsampled", seed_offset=1000,
+                               audio_input_slot="ltx_audio")   # read threaded audio in T2VS (else unused)
 
     components = {
         "text_encoder": ComponentSpec(component_id="text_encoder", kind="text_encoder",
@@ -52,9 +53,10 @@ def build_ltx2_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
                                      load_id="fastvideo.models.dits.ltx2:LTX2Transformer3DModel",
                                      factory=lambda inst: ToyDiT(seed=seed),
                                      resident_for=["ltx2_base", "ltx2_refine"], required_for={"t2v"}),
-        # audio_vae/vocoder are optional_for T2V (declared, not implemented in the mini)
+        # audio branch: lazy for T2V (not loaded), required for T2VS (joint audio+video, §9.11)
         "audio_vae": ComponentSpec(component_id="audio_vae", kind="audio_vae",
                                    load_id="fastvideo.models.audio.ltx2_audio_vae:AudioVAE",
+                                   factory=lambda inst: ToyAudioVAE(),
                                    optional_for={"t2v"}, required_for={"t2vs"}),
     }
     loops = {
@@ -70,7 +72,8 @@ def build_ltx2_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
     card = ModelCard(
         model_id=model_id, family="ltx2",
         components=components, loops=loops,
-        capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.VAE_DECODE),
+        capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.TEXT_TO_VIDEO_SOUND,
+                                         Capability.VAE_DECODE),
         recipe=RecipeSpec(method="distilled", parents=["ltx2.3-base"], assumes_loop="ltx2_base",
                           assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),

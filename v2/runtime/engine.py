@@ -195,6 +195,7 @@ class Engine:
     metrics: SchedulerMetrics = field(default_factory=SchedulerMetrics)
     _registry: dict[str, tuple[Any, Program]] = field(default_factory=dict)
     _workflows: dict[str, Any] = field(default_factory=dict)   # workflow_id -> validated Workflow
+    _wf_running: set = field(default_factory=set)              # workflow ids in-flight (nested cycle guard)
 
     def register(self, model_id: str, instance: Any, program: Program) -> None:
         self._registry[model_id] = (instance, program)
@@ -224,8 +225,15 @@ class Engine:
     def run(self, request: Any) -> Output:
         if request.model_id in self._workflows:                # a workflow servable → orchestrate stages
             wf = self._workflows[request.model_id]
+            if request.model_id in self._wf_running:           # nested workflows: cycle guard (§9.13)
+                raise ValueError(f"workflow cycle: {request.model_id!r} is already running "
+                                 f"(a workflow cannot transitively invoke itself)")
             seed = request.diffusion.seed if request.diffusion.seed is not None else 0
-            return wf.run(self, prompt=request.prompt(), seed=seed, request=request)
+            self._wf_running.add(request.model_id)
+            try:
+                return wf.run(self, prompt=request.prompt(), seed=seed, request=request)
+            finally:
+                self._wf_running.discard(request.model_id)
         r = self._make_runner(request)
         r.run_to_completion()
         return r.output()

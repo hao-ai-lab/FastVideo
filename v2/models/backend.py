@@ -262,6 +262,46 @@ class ToyVocoder:
         return np.concatenate(segs) if segs else np.zeros(0, dtype="float32")
 
 
+class ToyRewardModel:
+    """Toy learned reward model — a served scorer/verifier (PickScore / CLIP / a VLM judge stand-in).
+
+    Maps a media latent → a scalar reward in [-1, 1] via a fixed projection over per-channel features.
+    The point isn't the math: it's that the reward is computed by a *model* (served, scheduled as
+    ``REWARD_BATCH`` work units, place-able on its own pool), not a numpy heuristic bolted onto the
+    method — the reward plane composing with the serving plane (design_v3 §10)."""
+
+    def __init__(self, dim: int = LATENT_CHANNELS, seed: int = 5):
+        rng = np.random.default_rng(seed)
+        self.w = (rng.standard_normal(dim) * 0.5).astype("float32")
+
+    def score(self, media) -> float:
+        a = np.asarray(media, dtype="float64")
+        feat = a.reshape(a.shape[0], -1).mean(axis=1) if a.ndim > 1 else np.atleast_1d(a)
+        n = self.w.size
+        feat = feat[:n] if feat.size >= n else np.pad(feat, (0, n - feat.size))
+        return float(np.tanh(float(np.dot(self.w, feat))))
+
+
+class ToyAudioVAE:
+    """Toy audio VAE — mel-like audio latent → mono waveform (the LTX-2 / Cosmos3 audio branch).
+
+    Decodes a small ``[C, A, 1, 1]`` audio latent (denoised jointly with the video latent) into a 1-D
+    waveform: channel-collapse via a fixed projection, then upsample along time. Deterministic, so the
+    joint A/V denoise loop stays interleave-safe. The video VAE and this share nothing — two decoders,
+    one synchronized latent pair (design_v3 §15b joint A/V)."""
+
+    def __init__(self, samples_per_frame: int = 16, seed: int = 2):
+        self.spf = int(samples_per_frame)
+        rng = np.random.default_rng(seed)
+        self.proj = (rng.standard_normal(LATENT_CHANNELS) * 0.3).astype("float32")
+
+    def decode(self, audio_latent: np.ndarray) -> np.ndarray:
+        a = np.asarray(audio_latent, dtype="float32")
+        flat = a.reshape(a.shape[0], -1)                       # [C, A·...]
+        mono = np.tensordot(self.proj, flat, axes=([0], [0]))  # [A·...]
+        return np.tanh(np.repeat(mono, self.spf)).astype("float32")     # [A·spf] mono waveform
+
+
 class ToyVAE:
     """Tiny deterministic VAE. encode: video→latent (mean-pool + channel proj); decode: latent→video."""
 
