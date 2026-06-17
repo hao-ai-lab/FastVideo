@@ -27,7 +27,7 @@ class PerformanceDataStore:
 
     def __init__(self, tracking_root: str | None = None) -> None:
         self.tracking_root = tracking_root or os.environ.get("PERFORMANCE_TRACKING_ROOT", DEFAULT_TRACKING_ROOT)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.last_sync_at: str | None = None
         self.last_sync_error: str | None = None
 
@@ -49,7 +49,6 @@ class PerformanceDataStore:
                     "last_sync_error": None,
                 }
             except Exception as exc:
-                self.last_sync_at = datetime.now(timezone.utc).isoformat()
                 self.last_sync_error = str(exc)
                 return {
                     "ok": False,
