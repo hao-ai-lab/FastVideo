@@ -115,9 +115,19 @@ class WanDenoiseLoop:
         return WorkPlan(
             loop_id=self.loop_id, instance_id=st.instance_id, kind=WorkUnitKind.DIFFUSION_STEP,
             shape_sig=ShapeSignature(WorkUnitKind.DIFFUSION_STEP, dims=tuple(x.shape),
+                                     dtype=precision.compute_dtype,    # compute dtype is part of the key
                                      extra=(("cfg", type(cfg).__name__),)),
             resources=res, payload={"branch": "combined", "step": i}, run=run,
-            label=f"wan.denoise.{i}", emits=emits)
+            label=f"wan.denoise.{i}", emits=emits,
+            # CUDA-graph capture (Path A): the deterministic ODE step is capturable; the stochastic
+            # SDE rollout step has host RNG / a data-dependent branch, so it must eager-break. The
+            # op-structure key carries the CFG branch set, active expert, and the scheduler-precision
+            # flag so a step with a different branch set / expert / solver precision never replays an
+            # incompatible captured graph. (Compute dtype rides in shape_sig.dtype above.) NOTE: this
+            # is sound for branch-set/expert-determined policies (ClassicCFG); a policy whose op
+            # structure forks on other state (PerModalityCFG modality) would need a graph_key hook.
+            capturable=not sde,
+            graph_key=(tuple(sorted(branches)), expert_id, precision.scheduler_step_in_fp32))
 
     def advance(self, st: LoopState, result: StepResult) -> LoopState:
         st.latents["video"] = result.output["latents"]

@@ -112,6 +112,15 @@ class WorkPlan:
     # the cheap solver step with it.
     run: Any = None
     label: str = ""
+    # --- piecewise CUDA-graph capture (design_v3 §6.2; Path A) ----------------------------------- #
+    # ``capturable``: the model's static declaration that this step is safe to capture/replay — i.e.
+    # no host RNG / data-dependent control flow inside the captured region. A stochastic step (the
+    # FlowGRPO SDE rollout) sets this False, forcing the runtime to eager-break it.
+    capturable: bool = True
+    # ``graph_key``: extra op-structure discriminators (active CFG branch set, expert id) that change
+    # the captured graph's *shape of computation*. Part of the capture key so a step with a different
+    # branch set / expert never replays an incompatible graph. Empty ⇒ structure fixed by shape alone.
+    graph_key: tuple = ()
 
 
 @dataclass

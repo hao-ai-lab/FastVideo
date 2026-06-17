@@ -45,8 +45,11 @@ class RuntimeLoopContext:
             if override is not None and "noise_pred" in override:
                 self.metrics["skipped_steps"] = self.metrics.get("skipped_steps", 0) + 1
 
+        def _eager(ov):
+            return plan.run(self.instance, ov) if plan.run is not None else {}
+
         t0 = perf_counter()
-        out = plan.run(self.instance, override) if plan.run is not None else {}
+        out = self._run_step(plan, override, _eager)
         dt = perf_counter() - t0
         if isinstance(out, StepResult):
             result = out
@@ -62,6 +65,21 @@ class RuntimeLoopContext:
         self.metrics["steps"] = self.metrics.get("steps", 0) + 1
         self.metrics["gpu_seconds"] = self.metrics.get("gpu_seconds", 0.0) + result.actual_seconds
         return result
+
+    def _run_step(self, plan: WorkPlan, override, eager):
+        """Execute the step body, under piecewise CUDA-graph capture/replay when the loop declares
+        graph_capture="breakable_cudagraph" (design_v3 §6.2; Path A). Otherwise plain eager — the
+        unchanged path. Replay still runs the current thunk (CPU models the lifecycle, not the
+        speedup); see runtime/cudagraph.py."""
+        if plan.run is None:
+            return {}
+        loop = self.instance.card.loops.get(plan.loop_id) if self.instance.card else None
+        if getattr(loop, "graph_capture", "eager") != "breakable_cudagraph":
+            return eager(override)
+        if self.instance.graphs is None:
+            from .cudagraph import GraphCapturer
+            self.instance.graphs = GraphCapturer()
+        return self.instance.graphs.dispatch(plan, self.instance, override, eager)
 
     def emit(self, chunk: StreamChunk) -> None:
         self.stream.emit(OmniEvent(type="media.chunk", request_id=self.request_id,

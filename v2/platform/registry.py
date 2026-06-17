@@ -107,6 +107,7 @@ class TupleRegistry:
             row = dict(zip(self.key_fields, key))
             row["available"] = reg.is_available()
             row["source"] = reg.source
+            row.update(reg.meta)              # surface declared metadata (e.g. workspace_bytes)
             rows.append(row)
         return rows
 
@@ -123,6 +124,13 @@ def register_component(kind: str, fn: Callable[..., Any], *, device: str, varian
 
 
 def register_kernel(op: str, fn: Callable[..., Any], *, device: str, arch: str, variant: str = "default",
-                    available: Callable[[], bool] | None = None, source: str = "") -> None:
-    """Register a stateless kernel. ``fn(*args, **kwargs)`` — same signature as its numpy reference."""
-    KERNELS.put((op, device, arch, variant), fn, available=available, source=source)
+                    available: Callable[[], bool] | None = None, source: str = "",
+                    workspace_bytes: int = 0) -> None:
+    """Register a stateless kernel. ``fn(*args, **kwargs)`` — same signature as its numpy reference.
+
+    ``workspace_bytes`` is the kernel's static scratch requirement — the capture-safety contract
+    (design_v3 §6.2): a kernel used inside a captured CUDA graph must draw its workspace from the
+    pool-provided static buffer, not malloc per call, or replay corrupts. Declared here so the
+    requirement is enumerable in the matrix; the numpy reference needs none (0)."""
+    KERNELS.put((op, device, arch, variant), fn, available=available, source=source,
+                meta={"workspace_bytes": int(workspace_bytes)})
