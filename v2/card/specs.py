@@ -145,6 +145,9 @@ class ComponentSpec:
     required_for: set[str] = field(default_factory=set)    # tasks that require it
     # v2 wiring: a factory producing the live component (toy numpy or torch adapter)
     factory: Callable[..., Any] | None = None
+    # GPU backend: weights source (HF id or local path) for the real torch adapter resolved from
+    # ``load_id``. Empty for the CPU toy (its factory needs no weights); a GPU deployment fills it in.
+    checkpoint: str = ""
 
 
 @dataclass
