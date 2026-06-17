@@ -32,6 +32,10 @@ class ModelInstance:
         # backend registries; defaults to CPU/numpy. Swapping this to a GPU platform is the whole
         # "change only the backend, not the loops/policies/training" story (design_v3 §17).
         self.platform = platform if platform is not None else Platform.cpu()
+        # Piecewise CUDA-graph cache for loops declaring graph_capture="breakable_cudagraph". Lazily
+        # created by the runtime (kept as a plain attr so card/ stays free of any runtime import —
+        # design_v3 §18 boundary); a captured graph is tied to this instance's resident weights.
+        self.graphs: Any = None
         self.adapter_versions: dict[str, str] = {}
         # per-component weight versions (§7.1): a component's version changes only when IT is synced,
         # so a transformer-only RL sync never invalidates the frozen text-encoder's feature cache.
@@ -92,6 +96,10 @@ class ModelInstance:
             self.component_versions[c] = version
         if self.caches is not None and hasattr(self.caches, "invalidate_components"):
             self.caches.invalidate_components(set(changed))
+        # Evict captured CUDA graphs for the synced components too (else they leak on a real box;
+        # version-in-key already makes them unreachable). Duck-typed → card/ imports no runtime.
+        if self.graphs is not None and hasattr(self.graphs, "invalidate"):
+            self.graphs.invalidate(set(changed))
 
     def __repr__(self) -> str:
         return (f"ModelInstance(card={self.card.model_id!r}, weights={self.weights_version!r}, "

@@ -48,6 +48,8 @@ register_component("dit", _unavailable("torch DiT adapter"), device="cuda",
 
 # Kernels: the real fused solver primitives from fastvideo-kernel, at the Hopper rung.
 register_kernel(FLOW_MATCH_STEP, _unavailable("cuda flow_match kernel"), device="cuda", arch="sm90",
-                available=_cuda_available, source="fastvideo-kernel:flow_match (cuda)")
+                available=_cuda_available, source="fastvideo-kernel:flow_match (cuda)",
+                workspace_bytes=1 << 16)
 register_kernel(FLOW_SDE_STEP, _unavailable("cuda flow_sde kernel"), device="cuda", arch="sm90",
-                available=_cuda_available, source="fastvideo-kernel:flow_sde (cuda)")
+                available=_cuda_available, source="fastvideo-kernel:flow_sde (cuda)",
+                workspace_bytes=1 << 17)

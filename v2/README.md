@@ -21,11 +21,15 @@ resolution + arch fallback + the parity oracle, bit-identical to numpy) without 
 loops (wan21, ltx2, wan-causal, adapters, adaptive) and the FlowGRPO RL log-prob recompute route
 their solver ops (`flow_match_step`/`flow_sde_step`) through the kernel table — the recompute is
 pinned to the rollout's kernel for C2 correctness. The `dit` and `vae` components have `accel`
-overrides (`text_encoder` demonstrates the device→cpu fallback). Not yet routed: the AR/vocoder op
-families (omni/qwen-omni) have no KERNELS entries, the full torch/CUDA path is declared-unavailable,
-and a cudagraph capture-safety (`workspace_bytes`) contract is deferred.
+overrides (`text_encoder` demonstrates the device→cpu fallback). wan21's denoise also runs under
+**piecewise CUDA-graph capture/replay** at the step boundary (Path A): the capture *lifecycle* —
+key (device/arch/shape/resident-weights/branch-set+expert), eager-break for data-dependent steps
+(SDE / interceptor override), and version-eviction on weight sync — is wired and tested. Not yet
+done (deferred, and bites only a real GPU): the static-buffer refactor of the step body, admission
+budgeting of capture cost (`GRAPH_CAPTURE`), the AR/vocoder op families (omni/qwen-omni) and the
+full torch/CUDA path. Replay here re-runs the step thunk — it models the lifecycle, not the speedup.
 
-**184 tests, 30 files**, run two ways (`pytest` and a zero-dependency runner). Python 3.10+ and numpy only.
+**195 tests, 31 files**, run two ways (`pytest` and a zero-dependency runner). Python 3.10+ and numpy only.
 
 ## Scope
 
@@ -101,7 +105,7 @@ Stress tests (the design held — see **designv4 §9**):
 
 ```bash
 cd /Users/willlin/src/FastVideo-mini
-python3 -m pytest v2/tests/ -q      # 184 tests
+python3 -m pytest v2/tests/ -q      # 195 tests
 python3 v2/run_tests.py             # same suite, ZERO deps (no pytest needed)
 python3 -m v2.examples              # the worked examples
 ```
