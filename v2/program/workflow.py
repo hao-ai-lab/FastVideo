@@ -94,6 +94,72 @@ class Workflow:
         return out
 
 
+def _payload(artifact: Any) -> Any:
+    for attr in ("frames", "samples", "latent", "tensor", "text"):
+        v = getattr(artifact, attr, None)
+        if v is not None:
+            return v
+    return None
+
+
+class ParallelWorkflow(Workflow):
+    """Fan-out: run every stage on the SAME initial input (conceptually in parallel — the engine can
+    interleave their steps), then merge their artifacts into one Output, namespaced by stage label.
+    The non-linear shape a linear chain can't express: one prompt → N models → a merged result (e.g.
+    variants, or video+audio+upscale in parallel). Design_v3 §13."""
+
+    def run(self, engine: Any, **initial: Any) -> Any:
+        if not self.stages:
+            raise ValueError(f"workflow {self.workflow_id!r} has no stages")
+        from ..request.artifacts import Output
+        merged: dict[str, Any] = {}
+        metrics: dict[str, float] = {}
+        rid = self.workflow_id
+        for stage in self.stages:
+            label = stage.label or stage.model_id
+            req = stage.make_request(dict(initial))          # each branch sees the ORIGINAL input
+            if req.model_id != stage.model_id:
+                raise ValueError(f"{self.workflow_id!r} stage {label!r}: model mismatch")
+            out = engine.run(req)
+            rid = out.request_id
+            for name, art in out.artifacts.items():
+                merged[f"{label}:{name}"] = art              # namespaced — branches don't collide
+            for k, v in out.metrics.items():
+                metrics[f"{label}:{k}"] = v
+        return Output(request_id=rid, artifacts=merged, metrics=metrics)
+
+
+class BestOfNWorkflow(Workflow):
+    """Inference-time scaling / rejection sampling: generate N candidates (varying seed), score each with
+    a reward scorer, return the best. A feedback loop across models — generator + reward (e.g. the served
+    REWARD_BATCH card, §9.15) — the other non-linear shape. Design_v3 §10/§13."""
+
+    def __init__(self, workflow_id, generator_stage, *, scorer, n: int = 4, score_key: str = "latents"):
+        super().__init__(workflow_id, [generator_stage])
+        self.scorer = scorer                                 # any .score(media, prompts) -> {"avg": ...}
+        self.n = int(n)
+        self.score_key = score_key
+
+    def run(self, engine: Any, **initial: Any) -> Any:
+        import numpy as np
+        stage = self.stages[0]
+        base_seed = int(initial.get("seed", 0))
+        cands = []
+        for i in range(self.n):
+            req = stage.make_request({**initial, "seed": base_seed * 100 + i})
+            if req.model_id != stage.model_id:
+                raise ValueError(f"{self.workflow_id!r}: model mismatch")
+            cands.append(engine.run(req))
+        media = [_payload(c.artifacts[self.score_key]) for c in cands]
+        scores = np.asarray(self.scorer.score(media, [initial.get("prompt", "")] * len(cands))["avg"])
+        best = int(np.argmax(scores))
+        out = cands[best]
+        out.metrics["best_of_n"] = float(self.n)
+        out.metrics["best_index"] = float(best)
+        out.metrics["best_score"] = float(scores[best])
+        return out
+
+
 class WorkflowRegistry:
     """Declarative ``workflow_id → builder`` catalog — the cross-model analog of the card builders in
     ``models/__init__.py`` (cf. vllm-omni's ``pipeline_registry``). Adding a custom pipeline is one

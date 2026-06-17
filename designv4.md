@@ -5,7 +5,7 @@
 > together with **what was actually built and tested** in the `v2/` package, and with the one workload
 > that most stressed the design — **UniRL/PromptRL-style joint LM + generator reinforcement learning**
 > (arXiv 2510.17937; PromptRL, arXiv 2602.01382). v4 is not aspirational. Every structural claim below
-> is backed by code in `v2/` and a passing test (153 tests, 26 files, two independent runners — `pytest`
+> is backed by code in `v2/` and a passing test (167 tests, 29 files, two independent runners — `pytest`
 > and a zero-dependency `v2/run_tests.py`). The neural forwards are toy numpy stand-ins (no GPU/torch in
 > this environment, §12); the **control flow, contracts, scheduling, caching, parity gates, and training
 > math are real**, which is the whole point of the (recipe, runtime) separation: swap the component
@@ -556,6 +556,44 @@ cleanest proof of model-owned control flow, recursive composition depth, the RL 
 correctness, the reward plane composing with serving, and an exact AR speedup — each a new card / loop /
 method / controller, **no new runtime primitive**.
 
+### 9.17 Non-linear workflow shapes — fan-out + best-of-N feedback
+
+Every workflow so far was a *linear chain*. Two non-linear shapes complete the composition vocabulary:
+**`ParallelWorkflow`** (fan-out) runs N stages on the *same* input and merges their artifacts namespaced
+by branch — one prompt → N models in parallel (variants, or video+audio+upscale) → a merged result, the
+engine free to interleave the branches' steps. **`BestOfNWorkflow`** (feedback) generates N candidates,
+scores each with a reward scorer, and returns the best — inference-time scaling / rejection sampling,
+composing a generator with the served REWARD_BATCH card (§9.15) in a loop. Both reuse the `Workflow`
+requires/validate machinery (fan-out requires all branch models; best-of-N requires the generator).
+✅ `v2/tests/test_workflow_shapes.py` (4: fan-out merge, best-of-N returns the argmax candidate,
+determinism, requires).
+
+### 9.18 The (recipe, runtime) flywheel — RL → distill → faster card
+
+design_v3 §16's central product claim, made concrete and *measured*: `run_flywheel` (1) RL-improves the
+base (DiffusionNFT), then (2) distills **from the RL'd model** — a DMD2 student whose **teacher is the
+RL'd policy** — into a faster few-step card, (3) recording the provenance chain `base → rl → distilled`
+in `RecipeSpec.parents`. Both stages drive the same denoise loop the engine serves, so the flywheel is
+real, not aspirational — and the distilled student is **measurably closer to the RL'd teacher than the
+base is** (the distillation worked), the distilled card is a valid few-step servable, and the recipe
+chain is an auditable typed fact ("this fast model came from that RL run"). ✅ `v2/tests/test_flywheel.py`
+(4: chaining, distilled-approaches-teacher, provenance chain, the distilled card serves few-step).
+
+### 9.19 The adapter plane — per-request LoRA / ControlNet over one base
+
+The `CacheKey.adapter_versions` field existed (and was cache-tested), but the *serving* capability did
+not. Now many adapters are declared over ONE resident base; a request selects which to apply
+(`DiffusionParams.adapters`), and `AdapterDenoiseLoop` applies each active adapter's velocity delta. What
+it proves: per-request selection changes the output (base ≠ LoRA-A ≠ LoRA-B), **multi-LoRA composes**, a
+**ControlNet** conditions on a control image (different control → different video), mixed-adapter requests
+**interleave without smearing** (the active set lives in the request/`LoopState`, never global),
+**hot-swap** changes generation, and the cache key **partitions by the adapter stack** (adapted ≠ base,
+version A ≠ B — the §7.1 guarantee). One base, N lightweight swappable adapters — the production-ubiquitous
+pattern, as a card + an isolated loop. ✅ `v2/tests/test_adapters.py` (6).
+
+These three (§9.17–§9.19) add the non-linear workflow shapes, the headline RL→distill flywheel, and the
+adapter-serving plane — again each a new workflow / method+helper / card+loop, **no new runtime primitive**.
+
 ## 10. Serving & fleet — our own stack, Dynamo optional
 
 Per the explicit instruction "*don't completely rely on Dynamo; we still need our own version*," v2 ships a
@@ -609,11 +647,15 @@ v2/
                ltx2/ (audio_vae)                # §9.11: joint A/V denoise (T2VS, per-modality guidance)
                adaptive/                        # §9.12: CacheDiTDenoiseLoop (cache-dit skip + early-exit)
                reward/                          # §9.15: reward-model card, REWARD_BATCH work units
+               speculative/                     # §9.16: draft + target AR, speculative decoding
+               adapters/                        # §9.19: one base + LoRA/ControlNet, per-request (AdapterDenoiseLoop)
+  program/     Program (one model) + Workflow / ParallelWorkflow / BestOfNWorkflow (cross-model, §9.6/§9.17)
   training/    rollout, behavior, rewards (+ServedRewardScorer), weight_sync (+WeightSyncController),
+               flywheel (RL→distill, §9.18),
                methods/{finetune,dmd2,diffusion_nft,self_forcing,unified_rl,joint_multi_rl,workflow_rl}
   serving/     AsyncEngine, pools, DisaggregatedRunner, connectors, OpenAI server
   deploy/      DeploymentCard, LocalFleet, DynamoWorkerAdapter
-  tests/       26 files, 153 tests         run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
+  tests/       29 files, 167 tests         run via `pytest v2/tests/` OR `python3 v2/run_tests.py`
 ```
 
 **Enforced boundaries:** `card/` imports no product/runtime; `runtime/` executes `card/` loops but defines
@@ -668,9 +710,12 @@ state, cancellation, streaming), under **end-to-end RL across a workflow** (a fi
 earlier model), under **heterogeneous WorkUnit co-scheduling** (VAE tiles interleaved with denoise steps),
 under **joint audio+video** (LTX-2 T2VS with per-modality guidance), under **content-adaptive compute**
 (cache-dit skip + early-exit), under **nested workflows** (recursive composition), under **hot weight-sync
-while serving** (the RL flywheel's drain-correct lifecycle), and under a **served reward model**
-(REWARD_BATCH). Every one of those fit inside the design as *a new card, method, loop, Workflow, session
-driver, or controller*, with **no new runtime primitive** — and the only real bug any stress test surfaced
+while serving** (the RL flywheel's drain-correct lifecycle), under a **served reward model**
+(REWARD_BATCH), under **speculative decoding** (exact, lower-latency AR), under **non-linear workflows**
+(fan-out + best-of-N feedback), under the **RL→distill flywheel** (a faster card with provenance), and
+under the **adapter plane** (per-request LoRA/ControlNet over one base). Every one of those fit inside the
+design as *a new card, method, loop, Workflow, session driver, or controller*, with **no new runtime
+primitive** — and the only real bug any stress test surfaced
 (a no-op generator gradient) was a fix in the sampler *library*, not the runtime. The design's bet is
 therefore not that it is elegant — it is that **the weight-sharing topology, the composition graph, the
 training recipe, the reward, and the session/sync lifecycle are all data over cards, loops, workflows, and

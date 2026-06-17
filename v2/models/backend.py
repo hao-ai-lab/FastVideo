@@ -262,6 +262,54 @@ class ToyVocoder:
         return np.concatenate(segs) if segs else np.zeros(0, dtype="float32")
 
 
+class ToyLoRA:
+    """Toy LoRA adapter — a low-rank velocity delta on a base DiT, selected and applied per request.
+
+    Many of these are served over ONE resident base (the adapter is tiny: a rank-r channel delta);
+    a request picks which to apply. Swappable/versioned independently (the cache key's
+    ``adapter_versions``). Stand-in for a real LoRA / DoRA / IP-Adapter (design_v3 §9.19)."""
+    kind = "lora"
+
+    def __init__(self, adapter_id: str, channels: int = LATENT_CHANNELS, scale: float = 0.6,
+                 rank: int = 2, seed: int = 0):
+        self.adapter_id = adapter_id
+        self.scale = float(scale)
+        rng = np.random.default_rng(seed)
+        self.a = (rng.standard_normal((channels, rank)) * 0.4).astype("float32")
+        self.b = (rng.standard_normal((rank, channels)) * 0.4).astype("float32")
+
+    def delta(self, latent, control=None) -> np.ndarray:
+        w = self.a @ self.b                                   # [C, C] low-rank weight delta
+        d = np.tensordot(w, np.asarray(latent, dtype="float32"), axes=([1], [0]))   # [C, ...]
+        return (self.scale * np.tanh(d)).astype("float32")
+
+    def update(self, seed: int) -> None:                      # hot-swap: replace the adapter's weights
+        rng = np.random.default_rng(seed)
+        self.a = (rng.standard_normal(self.a.shape) * 0.4).astype("float32")
+
+
+class ToyControlNet:
+    """Toy ControlNet adapter — conditions the velocity on a control signal (pose/depth/edge stand-in).
+    Different control ⇒ different generation; selected per request like a LoRA (design_v3 §9.19)."""
+    kind = "controlnet"
+
+    def __init__(self, adapter_id: str, channels: int = LATENT_CHANNELS, scale: float = 0.8, seed: int = 1):
+        self.adapter_id = adapter_id
+        self.scale = float(scale)
+        rng = np.random.default_rng(seed)
+        self.proj = (rng.standard_normal(channels) * 0.3).astype("float32")
+
+    def delta(self, latent, control=None) -> np.ndarray:
+        latent = np.asarray(latent, dtype="float32")
+        c = float(np.mean(control)) if control is not None else 0.0   # the control image's signal
+        shape = (latent.shape[0],) + (1,) * (latent.ndim - 1)
+        return (self.scale * c * self.proj.reshape(shape)).astype("float32")
+
+    def update(self, seed: int) -> None:
+        rng = np.random.default_rng(seed)
+        self.proj = (rng.standard_normal(self.proj.shape) * 0.3).astype("float32")
+
+
 def _spec_target_next(tokens) -> int:
     """The target AR model's greedy next-token. Length-dependent so the sequence stays varied (no
     trivial absorbing fixed point) — the substrate for a meaningful speculative-decoding accept rate."""
