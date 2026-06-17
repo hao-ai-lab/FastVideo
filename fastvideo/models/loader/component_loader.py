@@ -942,6 +942,20 @@ class TransformerLoader(ComponentLoader):
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
 
+        # Generator-only QAT for DMD distillation: the teacher (real_score) and
+        # critic (fake_score) transformers load with this flag set and must stay
+        # full precision. Drop the nvfp4_qat quant from their copied config, and
+        # mask the global ATTN_QAT_TRAIN env so their attention falls back to dense
+        # (the backend is read globally at build time). The generator loads without
+        # the flag and keeps both.
+        _qat_generator_only = hasattr(fastvideo_args, "_loading_teacher_critic_model")
+        _qat_prev_attn_env = None
+        if _qat_generator_only:
+            dit_config.quant_config = None
+            from fastvideo.attention.selector import _cached_get_attn_backend
+            _qat_prev_attn_env = os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
+            _cached_get_attn_backend.cache_clear()
+
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files
@@ -1027,6 +1041,12 @@ class TransformerLoader(ComponentLoader):
             enable_torch_compile=fastvideo_args.enable_torch_compile,
             torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
         )
+
+        if _qat_generator_only:
+            from fastvideo.attention.selector import _cached_get_attn_backend
+            if _qat_prev_attn_env is not None:
+                os.environ["FASTVIDEO_ATTENTION_BACKEND"] = _qat_prev_attn_env
+            _cached_get_attn_backend.cache_clear()
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
