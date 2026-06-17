@@ -16,8 +16,6 @@ numpy<->torch at its boundary. A torch-native end-to-end surface is the perf fol
 """
 from __future__ import annotations
 
-import importlib
-
 import numpy as np
 import torch
 
@@ -27,10 +25,22 @@ import torch
 NUM_TRAIN_TIMESTEPS = 1000
 
 
-def _resolve(load_id: str):
-    """``"pkg.mod:Class"`` → the class object (the card's ``load_id``)."""
-    module_path, _, cls_name = load_id.partition(":")
-    return getattr(importlib.import_module(module_path), cls_name)
+def _fastvideo_args(spec):
+    # BRINGUP risk A: the real loaders take a FastVideoArgs (model config / precision / parallelism),
+    # not just a path. Confirm the exact constructor + required fields on the box.
+    from fastvideo.fastvideo_args import FastVideoArgs
+    return FastVideoArgs(model_path=spec.checkpoint)
+
+
+def _load_via_fastvideo(loader_attr: str, spec):
+    """Construct a real component via the FastVideo loaders (models/loader/component_loader.py) — the
+    REAL entry point. ``WanTransformer3DModel`` / ``AutoencoderKLWan`` have NO ``from_pretrained``; the
+    loader reads the checkpoint config, resolves the right class (so e.g. UMT5 vs T5 is chosen from the
+    config, not hardcoded), instantiates with that config, and loads weights (incl. FSDP). The card's
+    ``load_id`` is therefore a hint, not the instantiation path."""
+    from fastvideo.models.loader import component_loader as _cl
+    loader = getattr(_cl, loader_attr)()
+    return loader.load(spec.checkpoint, _fastvideo_args(spec))
 
 
 def _torch_dtype(name: str):
@@ -117,28 +127,44 @@ class TorchWanDiT:
 # VAE — AutoencoderKLWan (fastvideo/models/vaes/wanvae.py)                     #
 # --------------------------------------------------------------------------- #
 class TorchWanVAE:
-    """vae.decode(latent[C,T,H,W]) -> video; vae.encode(video) -> latent (numpy in/out)."""
+    """vae.decode(latent[C,T,H,W]) -> video; vae.encode(video) -> latent (numpy in/out).
+
+    The DiT operates in NORMALIZED latent space, so encode applies ``(z - mean) * inv_std`` and decode
+    inverts it. FastVideo stores ``latents_std`` as its RECIPROCAL — the encode transform is
+    ``(z - latents_mean) * latents_std`` with ``latents_std = 1/std`` (training_utils.py:801-806).
+    Skipping this yields washed-out / saturated video, not an error (BRINGUP risk D).
+    """
 
     def __init__(self, module, *, device, dtype):
         self.module = module.to(device=device, dtype=dtype).eval()
         self.device, self.dtype = device, dtype
 
-    @torch.no_grad()
-    def decode(self, latent):
-        z = _to_torch(latent, device=self.device, dtype=self.dtype).unsqueeze(0)
-        # BRINGUP risk D: if the DiT works in normalized latent space, undo latents_mean/std/shift
-        # (wanvae.py:1111) before decode. decode -> video [B,3,T,H,W] in [-1,1] (wanvae.py:1262).
-        video = self.module.decode(z)
-        return _to_numpy(video.squeeze(0))
+    def _mean_invstd(self, like):
+        mean = torch.tensor(self.module.latents_mean, device=like.device,
+                            dtype=torch.float32).view(1, -1, 1, 1, 1)
+        inv_std = (1.0 / torch.tensor(self.module.latents_std, device=like.device,
+                                      dtype=torch.float32)).view(1, -1, 1, 1, 1)
+        return mean, inv_std
 
     @torch.no_grad()
     def encode(self, video):
         x = _to_torch(video, device=self.device, dtype=self.dtype).unsqueeze(0)
-        dist = self.module.encode(x)
-        # BRINGUP risk D: encode returns a DiagonalGaussianDistribution (wanvae.py:1196), NOT a tensor.
+        dist = self.module.encode(x)                  # DiagonalGaussianDistribution (wanvae.py:1178)
         z = dist.mode() if hasattr(dist, "mode") else (dist.sample() if hasattr(dist, "sample") else dist)
-        # ... and apply latents_mean/std normalization to match the DiT's training latent scale.
+        mean, inv_std = self._mean_invstd(z)
+        z = (z.float() - mean) * inv_std              # → the normalized latent the DiT expects
         return _to_numpy(z.squeeze(0))
+
+    @torch.no_grad()
+    def decode(self, latent):
+        z = _to_torch(latent, device=self.device, dtype=self.dtype).unsqueeze(0).float()
+        mean, inv_std = self._mean_invstd(z)
+        z = z / inv_std + mean                        # invert the encode-side normalization
+        shift = getattr(self.module, "shift_factor", None)   # BRINGUP risk D: confirm placement/sign
+        if shift is not None:
+            z = z + (shift.to(z) if torch.is_tensor(shift) else shift)
+        video = self.module.decode(z.to(self.dtype))  # → video [B,3,T,H,W] in [-1,1] (wanvae.py:1240)
+        return _to_numpy(video.squeeze(0))
 
 
 # --------------------------------------------------------------------------- #
@@ -154,13 +180,17 @@ class TorchT5Encoder:
 
     @torch.no_grad()
     def encode(self, text):
-        toks = self.tokenizer(text or "", return_tensors="pt", padding="max_length",
-                              max_length=self.max_length, truncation=True)
+        # BRINGUP risk E: the exact tokenizer kwargs come from the model config (text_len/max_length,
+        # special tokens). Don't force padding="max_length" — that is not in the real kwargs.
+        toks = self.tokenizer(text or "", return_tensors="pt", max_length=self.max_length, truncation=True)
         ids = toks.input_ids.to(self.device)
         mask = toks.attention_mask.to(self.device)
-        # BRINGUP risk E: Wan2.1 t2v uses UMT5EncoderModel (card load_id says T5EncoderModel), and the
-        # real forward must run inside FastVideo's set_forward_context(...) (text_encoding.py:273).
-        out = self.module(input_ids=ids, attention_mask=mask)
+        # REQUIRED: the FastVideo T5/UMT5 attention reads global state via get_forward_context(), so the
+        # forward must run inside set_forward_context(...) (forward_context.py:54; text_encoding.py:273).
+        # A bare call reads stale/None context and fails or mis-encodes.
+        from fastvideo.forward_context import set_forward_context
+        with set_forward_context(current_timestep=0, attn_metadata=None):
+            out = self.module(input_ids=ids, attention_mask=mask)
         hidden = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
         return _to_numpy(hidden.squeeze(0))
 
@@ -175,28 +205,22 @@ def _device_dtype(spec, instance, platform):
 
 
 def build_torch_dit(spec, instance, platform):
-    cls = _resolve(spec.load_id)
-    ckpt = _require_checkpoint(spec)
+    _require_checkpoint(spec)
     device, dtype = _device_dtype(spec, instance, platform)
-    # BRINGUP risk A: the exact construction path. FastVideo models load via from_pretrained or a
-    # TransformerLoader().load(ckpt, fastvideo_args); confirm which on the box.
-    module = cls.from_pretrained(ckpt)
+    module = _load_via_fastvideo("TransformerLoader", spec)     # NOT from_pretrained (it has none)
     return TorchWanDiT(module, device=device, dtype=dtype)
 
 
 def build_torch_vae(spec, instance, platform):
-    cls = _resolve(spec.load_id)
-    ckpt = _require_checkpoint(spec)
+    _require_checkpoint(spec)
     device, dtype = _device_dtype(spec, instance, platform)
-    module = cls.from_pretrained(ckpt)                          # BRINGUP risk A
+    module = _load_via_fastvideo("VAELoader", spec)
     return TorchWanVAE(module, device=device, dtype=dtype)
 
 
 def build_torch_text_encoder(spec, instance, platform):
-    cls = _resolve(spec.load_id)
-    ckpt = _require_checkpoint(spec)
+    _require_checkpoint(spec)
     device, dtype = _device_dtype(spec, instance, platform)
-    from transformers import AutoTokenizer                      # BRINGUP risk E: confirm tokenizer class
-    tokenizer = AutoTokenizer.from_pretrained(ckpt)
-    module = cls.from_pretrained(ckpt)                          # BRINGUP risk A/E
+    module = _load_via_fastvideo("TextEncoderLoader", spec)     # resolves UMT5 vs T5 from the config
+    tokenizer = _load_via_fastvideo("TokenizerLoader", spec)
     return TorchT5Encoder(module, tokenizer, device=device, dtype=dtype)
