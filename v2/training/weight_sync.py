@@ -56,3 +56,40 @@ class WeightSyncPlan:
         if dst_instance is not None:
             dst_instance.set_weights_version(version, components=list(self.components))
         return version
+
+
+class WeightSyncController:
+    """The §10 hot weight-sync lifecycle over a *live, serving* resident instance, made explicit and
+    testable — the RL flywheel's hardest correctness surface (rollout while serving, swap weights, stay
+    correct):
+
+        freeze() admission → (drain in-flight loops to a boundary) → sync() transfer+publish → resume.
+
+    The load-bearing invariant: an in-flight request finishes on the weights it **started** with — the
+    sync waits for it to drain, so its trajectory is never a half-and-half of two policies, and its
+    captured behavior is stamped with that version (for correct off-policy correction). ``freeze`` gates
+    admission so no NEW request starts the synced loop mid-swap; the caller drains the in-flight set,
+    then ``sync`` transfers per-component (bump version + invalidate that component's caches only) and
+    resumes. This is the engine-side counterpart to a training ``WeightSyncPlan`` — same lifecycle.
+    """
+
+    def __init__(self, instance: Any):
+        self.instance = instance
+        self.frozen = False
+        self.synced = 0
+
+    def freeze(self) -> None:
+        self.frozen = True
+
+    def can_admit(self) -> bool:
+        return not self.frozen          # admission gate: no new starts of the synced loop while frozen
+
+    def sync(self, src_dit: Any, *, component_id: str = "transformer",
+             role: WeightRole = WeightRole.STUDENT) -> str:
+        """Transfer new weights into the resident component, bump its version, invalidate ONLY its
+        caches, and resume admission. Call AFTER in-flight loops on this instance have drained."""
+        version = WeightSyncPlan(role=role, components=(component_id,)).apply(
+            src_dit, self.instance.component(component_id), self.instance)
+        self.frozen = False
+        self.synced += 1
+        return version

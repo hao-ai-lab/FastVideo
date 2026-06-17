@@ -23,9 +23,9 @@ from .methods import (
     build_unified_rl,
     build_workflow_rl,
 )
-from .rewards import MultiRewardScorer, build_multi_reward_scorer
+from .rewards import MultiRewardScorer, ServedRewardScorer, build_multi_reward_scorer
 from .rollout import RolloutContext, Trajectory, TrajectoryBuffer, rollout_loop
-from .weight_sync import WeightRole, WeightSyncPlan
+from .weight_sync import WeightRole, WeightSyncController, WeightSyncPlan
 
 __all__ = [
     "TrainingMethod", "FineTuneMethod", "DMD2Method", "DiffusionNFTMethod", "SelfForcingMethod",
@@ -33,5 +33,6 @@ __all__ = [
     "build_finetune", "build_dmd2", "build_diffusion_nft", "build_self_forcing", "build_unified_rl",
     "build_joint_multi_rl", "build_workflow_rl",
     "BehaviorRecord", "TrajectoryStatus", "Trajectory", "TrajectoryBuffer", "RolloutContext",
-    "rollout_loop", "WeightSyncPlan", "WeightRole", "MultiRewardScorer", "build_multi_reward_scorer",
+    "rollout_loop", "WeightSyncPlan", "WeightSyncController", "WeightRole",
+    "MultiRewardScorer", "ServedRewardScorer", "build_multi_reward_scorer",
 ]

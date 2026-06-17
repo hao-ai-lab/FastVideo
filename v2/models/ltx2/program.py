@@ -41,3 +41,36 @@ def build_ltx2_program() -> Program:
         ],
         output_artifacts={"video": "video", "latents": "ltx_refine_out"},
     ).validate()
+
+
+# --- joint audio+video (T2VS) program (design_v3 §15b; §9.11) ---------------------- #
+def _upsample_av(instance, slots, request, ctx) -> None:
+    _upsample(instance, slots, request, ctx)                       # video latent upsample (reuse)
+    base = slots.get("ltx_base_out", {})
+    slots["ltx_audio"] = base.get("audio_latents") if isinstance(base, dict) else None  # thread audio
+
+
+def _audio_decode(instance, slots, request, ctx) -> None:
+    ro = slots.get("ltx_refine_out", {})
+    au = ro.get("audio_latents") if isinstance(ro, dict) else None
+    slots["audio"] = instance.component("audio_vae").decode(au) if au is not None else None
+
+
+def build_ltx2_av_program() -> Program:
+    """T2VS: the two-stage denoise carries a synchronized audio latent through both stages; the video
+    VAE and the audio VAE decode the two modalities → video + audio artifacts (per-modality guidance)."""
+    return Program(
+        program_id="ltx2.t2vs.2stage", kind=ProgramKind.INLINE,
+        nodes=[
+            ComponentNode("text_encode", fn=_text_encode, writes=("text_embeds", "neg_text_embeds")),
+            ModelLoopNode("base", loop_id="ltx2_base", output_slot="ltx_base_out",
+                          reads=("text_embeds",), writes=("ltx_base_out",)),
+            ComponentNode("upsample", fn=_upsample_av, reads=("ltx_base_out",),
+                          writes=("ltx_upsampled", "ltx_audio")),
+            ModelLoopNode("refine", loop_id="ltx2_refine", output_slot="ltx_refine_out",
+                          reads=("ltx_upsampled", "ltx_audio"), writes=("ltx_refine_out",)),
+            ComponentNode("vae_decode", fn=_vae_decode, reads=("ltx_refine_out",), writes=("video",)),
+            ComponentNode("audio_decode", fn=_audio_decode, reads=("ltx_refine_out",), writes=("audio",)),
+        ],
+        output_artifacts={"video": "video", "audio": "audio", "latents": "ltx_refine_out"},
+    ).validate()
