@@ -18,6 +18,7 @@ from .image_video import (
 )
 from .ltx2 import build_ltx2_card, build_ltx2_program
 from .qwen_omni import build_qwen_omni_card, build_qwen_omni_program
+from .tiled import build_tiled_card, build_tiled_program
 from .unified import build_unified_card, build_unified_program
 from .wan21 import build_wan21_card, build_wan_t2v_program
 from .wan_causal import build_wan_causal_card, build_wan_causal_program
@@ -32,7 +33,9 @@ __all__ = [
     "build_unified_card", "build_unified_program",
     "build_flux_t2i_card", "build_flux_t2i_program", "build_wan_i2v_card", "build_wan_i2v_program",
     "build_t2i_then_i2v_workflow", "register_workflows",
+    "build_tiled_card", "build_tiled_program",
     "build_default_engine", "build_omni_engine", "build_unified_engine", "build_image_video_engine",
+    "build_tiled_engine",
 ]
 
 _BUILDERS = [
@@ -114,6 +117,22 @@ def build_image_video_engine(engine: Any = None) -> Any:
     from ..runtime import Engine
     eng = engine if engine is not None else Engine()
     return register_workflows(eng, only=["image_video.t2i_i2v"])
+
+
+def build_tiled_engine(engine: Any = None) -> Any:
+    """Register the tiled-decode card (``wan-tiled``, whose VAE decode emits ``VAE_TILE`` work units)
+    alongside plain Wan2.1 — so an interleaved batch mixes ``VAE_TILE`` and ``DIFFUSION_STEP`` units
+    through one admission/scheduler budget (the §17 heterogeneous-co-scheduling probe)."""
+    from ..cache import CacheManager
+    from ..card import load_card
+    from ..runtime import Engine
+    eng = engine if engine is not None else Engine()
+    for build_card, build_program in [(build_tiled_card, build_tiled_program),
+                                      (build_wan21_card, build_wan_t2v_program)]:
+        card = build_card()
+        inst = load_card(card, cache_manager=CacheManager.from_card(card))
+        eng.register(card.model_id, inst, build_program())
+    return eng
 
 
 def build_unified_engine(engine: Any = None) -> Any:
