@@ -49,6 +49,10 @@ def _get_attn_qat_train_attention() -> Callable[..., torch.Tensor] | None:
     return _attn_qat_train_attention
 
 
+def is_attn_qat_train_available() -> bool:
+    return _get_attn_qat_train_attention() is not None
+
+
 def attn_qat_train(q_BLHD: torch.Tensor,
                    k_BLHD: torch.Tensor,
                    v_BLHD: torch.Tensor,
