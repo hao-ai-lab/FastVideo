@@ -148,6 +148,11 @@ class ComponentSpec:
     # GPU backend: weights source (HF id or local path) for the real torch adapter resolved from
     # ``load_id``. Empty for the CPU toy (its factory needs no weights); a GPU deployment fills it in.
     checkpoint: str = ""
+    # GPU backend: optional explicit torch-adapter class "module:Class" (a TorchComponent subclass
+    # constructed as cls(module, device=, dtype=)). Lets a NEW architecture declare its own adapter on
+    # the card instead of editing the shared backend dispatch — so a port is a self-contained recipe
+    # package. Empty -> the backend's built-in per-kind dispatch (Wan/LTX2) by module class name.
+    adapter: str = ""
 
 
 @dataclass

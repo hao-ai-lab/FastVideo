@@ -436,9 +436,25 @@ class LTX2AudioVAE(TorchComponent):
 # --------------------------------------------------------------------------- #
 # build_component — one dispatch (replaces the six build_torch_* + trampolines) #
 # --------------------------------------------------------------------------- #
+def _explicit_adapter(spec, module, device, dtype, *extra):
+    """Build the card's explicitly-declared adapter (``ComponentSpec.adapter='module:Class'``) if set —
+    the seam that lets a NEW architecture's recipe carry its own TorchComponent subclass without editing
+    the dispatch here (so a port is a self-contained recipe package). Constructed as
+    ``cls(module, *extra, device=device, dtype=dtype)``. Returns None when unset (-> built-in dispatch)."""
+    ref = getattr(spec, "adapter", "") or ""
+    if not ref:
+        return None
+    import importlib
+    mod, _, cls = ref.partition(":")
+    return getattr(importlib.import_module(mod), cls)(module, *extra, device=device, dtype=dtype)
+
+
 def _make_dit(spec, instance, platform, args):
     module = load_component("TransformerLoader", spec.checkpoint, args)
     device, dtype = _device(platform), _native_dtype(module)
+    explicit = _explicit_adapter(spec, module, device, dtype)
+    if explicit is not None:
+        return explicit
     if "LTX2" in type(module).__name__:
         return LTX2DiT(module, device=device, dtype=dtype)
     # Wan2.2 MoE: >1 DiT expert -> CPU-offload all but the active one (swapped at the boundary).
@@ -454,6 +470,9 @@ def _make_dit(spec, instance, platform, args):
 def _make_vae(spec, instance, platform, args):
     module = load_component("VAELoader", spec.checkpoint, args)
     device, dtype = _device(platform), _native_dtype(module)
+    explicit = _explicit_adapter(spec, module, device, dtype)
+    if explicit is not None:
+        return explicit
     cls = LTX2VAE if "LTX2" in type(module).__name__ else WanVAE
     return cls(module, device=device, dtype=dtype)
 
@@ -462,6 +481,9 @@ def _make_text_encoder(spec, instance, platform, args):
     module = load_component("TextEncoderLoader", spec.checkpoint, args)
     tokenizer = load_component("TokenizerLoader", os.path.join(_model_root(spec), "tokenizer"), args)
     device, dtype = _device(platform), _native_dtype(module)
+    explicit = _explicit_adapter(spec, module, device, dtype, tokenizer)   # adapter cls(module, tokenizer, ...)
+    if explicit is not None:
+        return explicit
     cls = Gemma if "Gemma" in type(module).__name__ else T5Encoder
     return cls(module, tokenizer, device=device, dtype=dtype)
 
