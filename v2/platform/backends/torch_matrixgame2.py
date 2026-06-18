@@ -65,7 +65,67 @@ class MatrixGame2CausalDiT(TorchComponent):
     adapter is a single ``_forward_inference`` call with the cache/i2v/action plumbing. It is NOT the toy
     ``dit(latent, text_embed, sigma)`` shape — the loop calls ``MatrixGame2CausalDiT.call`` explicitly with
     the causal kwargs (the toy backend exercises the SAME loop via its degenerate path; see the recipe
-    loop). All arch-specifics are built INTERNALLY here so the loop stays backend-agnostic."""
+    loop). All arch-specifics are built INTERNALLY here so the loop stays backend-agnostic.
+
+    KV-CACHE OWNERSHIP: ``forward`` dispatches to ``_forward_inference`` ONLY when ``kv_cache is not None``;
+    otherwise it falls into the train forward (which expects a non-empty text-embed list and uses the
+    GPU-only ``flex_attention`` compile path). So the adapter ALLOCATES proper pre-sized cache dicts
+    (k/v/global_end_index/local_end_index for the sliding-window self-attn; k/v/is_init for the cross-attn)
+    sized from the loaded arch + ``frame_seq_len`` — faithful to ``MatrixGame2CausalDenoisingStage._initialize_*``
+    — and mutates them in place across blocks/DMD steps. The loop calls ``reset_caches()`` once per request
+    (in its ``init``) so a fresh generate starts from empty caches; the adapter then lazily (re)allocates on
+    the first ``call`` of the request when the latent spatial shape is known. The loop's own placeholder
+    cache lists are IGNORED on GPU (they exist only so the CPU toy threading stays structurally identical)."""
+
+    # Per-request sliding-window KV / cross-attn caches; lazily (re)allocated in ``_ensure_caches``.
+    _kv_cache: list[dict] | None = None
+    _crossattn_cache: list[dict] | None = None
+    _kv_cache_mouse: list[dict] | None = None
+    _kv_cache_keyboard: list[dict] | None = None
+    _cache_frame_seq_len: int | None = None
+
+    def reset_caches(self) -> None:
+        """Drop the per-request sliding-window KV / cross-attn caches so the next generate starts clean.
+        Called by the loop's ``init`` (once per request). Lazy (re)allocation happens on the first ``call``."""
+        self._kv_cache = None
+        self._crossattn_cache = None
+        self._kv_cache_mouse = None
+        self._kv_cache_keyboard = None
+        self._cache_frame_seq_len = None
+
+    def _ensure_caches(self, batch_size: int, frame_seq_len: int) -> None:
+        """Allocate (or re-allocate on a shape change) the cache dict lists, faithful to the fastvideo stage's
+        ``_initialize_kv_cache`` / ``_initialize_crossattn_cache`` / ``_initialize_action_kv_cache``."""
+        if self._kv_cache is not None and self._cache_frame_seq_len == frame_seq_len:
+            return
+        m = self.module
+        num_blocks = len(m.blocks)
+        num_heads = m.num_attention_heads
+        head_dim = getattr(m, "attention_head_dim", m.hidden_size // num_heads)
+        local_attn_size = getattr(m, "local_attn_size", -1)
+        sliding = getattr(getattr(getattr(m, "config", None), "arch_config", None), "sliding_window_num_frames", 15)
+        kv_size = local_attn_size * frame_seq_len if local_attn_size != -1 else frame_seq_len * sliding
+        dev, dt = self.device, self.dtype
+
+        def _kv_entry() -> dict:
+            return {
+                "k": torch.zeros([batch_size, kv_size, num_heads, head_dim], dtype=dt, device=dev),
+                "v": torch.zeros([batch_size, kv_size, num_heads, head_dim], dtype=dt, device=dev),
+                "global_end_index": torch.tensor([0], dtype=torch.long, device=dev),
+                "local_end_index": torch.tensor([0], dtype=torch.long, device=dev),
+            }
+
+        self._kv_cache = [_kv_entry() for _ in range(num_blocks)]
+        self._crossattn_cache = [{
+            "k": torch.zeros([batch_size, 257, num_heads, head_dim], dtype=dt, device=dev),
+            "v": torch.zeros([batch_size, 257, num_heads, head_dim], dtype=dt, device=dev),
+            "is_init": False,
+        } for _ in range(num_blocks)]
+        # Action caches: only needed when mouse/keyboard conditioning is active (BRINGUP -> None on the
+        # degenerate world-rollout). The block skips the action_model entirely when both conds are None.
+        self._kv_cache_mouse = None
+        self._kv_cache_keyboard = None
+        self._cache_frame_seq_len = frame_seq_len
 
     @torch.no_grad()
     def call(self,
@@ -86,36 +146,50 @@ class MatrixGame2CausalDiT(TorchComponent):
              prompt_embeds: Any = None) -> np.ndarray:
         # hidden_states [B, C, T, h, w]; the DiT concats image_latent internally off the forward_batch.
         hs = self._t(latent)  # [1, C, T, h, w]
-        b, _c, t, _h, _w = hs.shape
+        b, _c, t, h_lat, w_lat = hs.shape
+        # frame_seq_len = (h*w) / (patch_h*patch_w). Wan patch is [1,2,2] -> /4 (the model's current_start is
+        # start_frame*frame_seq_len; the loop already computes current_start with the same arithmetic).
+        p_t, p_h, p_w = self.module.patch_size
+        frame_seq_len = (h_lat // p_h) * (w_lat // p_w)
+        # Allocate (once per request, reset via reset_caches) the sliding-window self-attn + cross-attn caches
+        # so forward dispatches to _forward_inference (kv_cache is not None) and uses the SDPA cache path.
+        self._ensure_caches(batch_size=b, frame_seq_len=frame_seq_len)
         # Per-frame integer timestep [B, num_frames] (long); keep 2-D — never collapse to a scalar.
         ts_np = np.asarray(timestep).reshape(-1)
         timestep_t = torch.as_tensor(ts_np, device=self.device, dtype=torch.long).reshape(1, -1).expand(b, t)
         # CLIP image embeds [257, 1280] are the SOLE cross-attn context; the model wants a list.
         img_ctx = self._t(image_embed) if image_embed is not None else None
         image_kwargs = {"encoder_hidden_states_image": [img_ctx] if img_ctx is not None else []}
-        # Text is ignored but the forward wants a non-empty placeholder list (condition_embedder drops it).
-        pe = self._t(prompt_embeds) if prompt_embeds is not None else None
-        ehs: list[Any] = [pe] if pe is not None else []
+        # Text is ignored (Matrix-Game 2.0 has no text encoder); the condition_embedder drops it and the
+        # inference forward only touches encoder_hidden_states when it is NOT None -> pass None (an empty
+        # placeholder list would index-error at ``encoder_hidden_states[0]``).
+        ehs = None
         # Action conditioning (interactive surface) — None on the degenerate world-rollout path (BRINGUP).
         action_kwargs: dict[str, Any] = {"num_frame_per_block": int(num_frame_per_block)}
         if mouse_cond is not None:
             action_kwargs["mouse_cond"] = self._t(mouse_cond)
         if keyboard_cond is not None:
             action_kwargs["keyboard_cond"] = self._t(keyboard_cond)
-        if kv_cache_mouse is not None:
-            action_kwargs["kv_cache_mouse"] = kv_cache_mouse
-        if kv_cache_keyboard is not None:
-            action_kwargs["kv_cache_keyboard"] = kv_cache_keyboard
+        if self._kv_cache_mouse is not None:
+            action_kwargs["kv_cache_mouse"] = self._kv_cache_mouse
+        if self._kv_cache_keyboard is not None:
+            action_kwargs["kv_cache_keyboard"] = self._kv_cache_keyboard
         # i2v cond_concat: the DiT reads image_latent off the forward_batch -> channel-concat dim=1.
         cond_lat = self._t(image_latent) if image_latent is not None else None
+        # The causal blocks run several norms in fp32 (FP32LayerNorm + the fp32 ScaleResidualLayerNorm),
+        # producing fp32 activations fed back into bf16 linears; fastvideo's stage wraps the whole forward in
+        # ``torch.autocast(bf16)`` so those linears cast their inputs. Mirror that here (skip when the module
+        # itself is fp32). Faithful to ``MatrixGame2CausalDenoisingStage._process_single_block``.
         from v2.forward_context import set_forward_context
-        with set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=_CondBatch(cond_lat)):
+        autocast_enabled = self.dtype != torch.float32
+        with torch.autocast(device_type="cuda", dtype=self.dtype, enabled=autocast_enabled), \
+                set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=_CondBatch(cond_lat)):
             eps = self.module(
                 hs,
                 ehs,
                 timestep_t,
-                kv_cache=kv_cache,
-                crossattn_cache=crossattn_cache,
+                kv_cache=self._kv_cache,
+                crossattn_cache=self._crossattn_cache,
                 current_start=int(current_start),
                 start_frame=int(start_frame),
                 **image_kwargs,

@@ -19,27 +19,57 @@ import numpy as np
 
 from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
 
+# Wan2.1 VAE compression (z=16, 8x spatial, 4x temporal). The DiT's i2v cond_concat is 20ch:
+# 4 mask channels + 16 VAE-latent channels (faithful to MatrixGame2ImageVAEEncodingStage).
+_MG2_LATENT_CHANNELS = 16
+_MG2_MASK_CHANNELS = 4
+_MG2_SPATIAL_RATIO = 8
+_MG2_TEMPORAL_RATIO = 4
+
+
+def _first_frame_pixels(request) -> np.ndarray:
+    """Return the first-frame conditioning image as ``[3, H, W]`` float32 in [-1, 1]. Matrix-Game 2.0 is an
+    i2v world model: a first frame is MANDATORY (it is the only spatial conditioning + drives the cond_concat
+    that makes the DiT's 36 in-channels). When the request carries no image (degenerate world-rollout / a
+    plain text smoke request), synthesize a neutral mid-gray frame at the requested resolution -- the world
+    model then extends from a blank first frame. Faithful to fastvideo's ``create_default_image`` fallback
+    in ``MatrixGame2ImageEncodingStage`` (which uses a default image when ``batch.pil_image is None``)."""
+    img = request.image()
+    h = int(request.diffusion.height)
+    w = int(request.diffusion.width)
+    if img is not None and getattr(img, "pixels", None) is not None:
+        px = np.asarray(img.pixels, dtype="float32")
+        if px.ndim == 3 and px.shape[0] not in (1, 3) and px.shape[-1] in (1, 3):
+            px = np.transpose(px, (2, 0, 1))  # HWC -> CHW
+        if px.max() > 1.5:  # uint8-ish [0,255] -> [-1, 1]
+            px = px / 127.5 - 1.0
+        return px.astype("float32")
+    return np.zeros((3, h, w), dtype="float32")  # neutral (mid-gray in [-1,1]) blank first frame
+
 
 def _image_encode(instance, slots, request, ctx) -> None:
-    """CLIP-encode the first-frame conditioning image -> 257x1280 cross-attn context (sole conditioning)."""
-    img = request.image()
-    slots["i2v_img_embeds"] = (instance.component("image_encoder").encode_image(img.pixels)
-                               if img is not None and getattr(img, "pixels", None) is not None else None)
+    """CLIP-encode the first-frame conditioning image -> 257x1280 cross-attn context (the SOLE conditioning;
+    Matrix-Game 2.0 has no text encoder, so this cross-attn context must always be present)."""
+    px = _first_frame_pixels(request)
+    slots["i2v_img_embeds"] = instance.component("image_encoder").encode_image(px)
 
 
 def _cond_encode(instance, slots, request, ctx) -> None:
     """First-frame VAE conditioning, mirroring ``MatrixGame2ImageVAEEncodingStage``: encode the conditioning
-    image as frame 0 (rest zeros) -> the RAW cond_latent (NO mask channel). The DiT channel-concats it onto
-    the noise latent (dim=1). Same VAE normalization as the noise latents (the WanVAE adapter handles it)."""
-    img = request.image()
-    if img is None or getattr(img, "pixels", None) is None:
-        slots["i2v_cond"] = None
-        return
-    px = np.asarray(img.pixels, dtype="float32")  # [3, H, W] in [-1, 1]
+    image as frame 0 (rest zeros) -> the normalized 16ch ``img_cond`` latent (the WanVAE adapter applies the
+    (z-mean)/std normalization + deterministic ``mode()``), then PREPEND the 4-channel first-frame mask to
+    form the 20-channel ``cond_concat`` (``cat([mask[:4], img_cond], dim=1)``). The DiT channel-concats this
+    onto the 16ch noise latent internally (dim=1) -> 36 in-channels (the checkpoint's ``in_channels=36``)."""
+    px = _first_frame_pixels(request)  # [3, H, W] in [-1, 1]
     nf = int(request.diffusion.num_frames)
     cond_video = np.zeros((px.shape[0], nf) + px.shape[1:], dtype="float32")
     cond_video[:, 0] = px  # frame 0 = conditioning image, rest zeros
-    slots["i2v_cond"] = np.asarray(instance.component("vae").encode(cond_video), dtype="float32")  # raw [C,T,h,w]
+    img_cond = np.asarray(instance.component("vae").encode(cond_video), dtype="float32")  # [16, t, h, w]
+    # First-frame latent mask: ones on latent-frame 0, zeros elsewhere; keep the first 4 channels.
+    mask = np.zeros_like(img_cond)
+    mask[:, 0] = 1.0
+    cond_concat = np.concatenate([mask[:_MG2_MASK_CHANNELS], img_cond], axis=0)  # [20, t, h, w]
+    slots["i2v_cond"] = cond_concat.astype("float32")
 
 
 def _action_prepare(instance, slots, request, ctx) -> None:

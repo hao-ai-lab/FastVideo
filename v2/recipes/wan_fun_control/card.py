@@ -55,6 +55,45 @@ _FUN_CONTROL_NEG = ("Bright tones, overexposed, static, blurred details, subtitl
                     " messy background, three legs, many people in the background, walking backwards")
 
 
+def _ensure_fastvideo_control_detector() -> None:
+    """BRINGUP: fastvideo's registry resolves the V2V/Control PipelineConfig (``WANV2VConfig`` — DiT/VAE/T5
+    precisions + configs the loaders need) by model_path. The id ``IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers``
+    IS registered (``WANV2VConfig``), but ONLY as an exact HF-id / short-name map. At GPU load time the
+    torch backend hands the loader the *local snapshot dir* (``.../snapshots/<hash>``) — whose short name is
+    the opaque hash — and (unlike the sibling Wan2.1-Fun-InP, whose ``WanImageToVideoPipeline`` class name
+    hits a registered detector) the Control entry has NO detector for its ``WanVideoToVideoPipeline`` class
+    name, so the snapshot-dir path fails to resolve (``ValueError: No match found for pipeline ...``).
+
+    fastvideo source is off-limits for this port (HARD RULE), so we add the missing detector here, at
+    recipe-import time, via fastvideo's PUBLIC registry state — attaching it to the *existing* Control
+    ``model_id`` (no duplicate ConfigInfo, no HF-path remap warning). The detector matches the
+    ``WanVideoToVideoPipeline`` class name (from ``model_index.json``) and the ``wan2.1-fun-1.3b-control``
+    path substring, so the snapshot-dir path now resolves to ``WANV2VConfig``. Idempotent. NOTE: the clean
+    upstream fix is a ``model_detectors=[...]`` arg on the Control ``register_configs`` call in
+    ``fastvideo/registry.py`` — reported in the bring-up notes."""
+    try:
+        from fastvideo import registry as _reg
+    except Exception:
+        return
+    hf_id = "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers"
+    model_id = _reg._MODEL_HF_PATH_TO_NAME.get(hf_id)
+    if model_id is None:  # not registered (older fastvideo) -> nothing to do
+        return
+
+    def _is_wan_fun_control(path: str) -> bool:
+        p = (path or "").lower()
+        return "wanvideotovideopipeline" in p or "wan2.1-fun-1.3b-control" in p
+
+    # Already attached? (idempotent across re-imports / repeated card builds.)
+    if any(mid == model_id and getattr(det, "_wan_fun_control", False) for mid, det in _reg._MODEL_NAME_DETECTORS):
+        return
+    _is_wan_fun_control._wan_fun_control = True  # type: ignore[attr-defined]
+    _reg._MODEL_NAME_DETECTORS.append((model_id, _is_wan_fun_control))
+
+
+_ensure_fastvideo_control_detector()
+
+
 def build_wan_fun_control_card(model_id: str = "wan2.1-fun-1.3b-control",
                                *,
                                flow_shift: float = 3.0,

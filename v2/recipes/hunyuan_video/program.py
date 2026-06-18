@@ -19,10 +19,29 @@ from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
 from v2.recipes.common import cached_text_encode
 
 
+def _ensure_text_encoder_2_stamped(instance: Any) -> None:
+    """The shared ``stamp_wan21_checkpoints`` (called by the entrypoint after ``build_card``) only knows
+    Wan's subfolder superset, which does NOT include ``text_encoder_2`` (HunyuanVideo's CLIP secondary
+    encoder). Stamp it here — right before the component is materialized — from the already-stamped
+    ``transformer`` checkpoint's parent (the model root). Idempotent / no-op once set; this keeps the fix
+    inside the recipe (no edit to the shared stamp). Build-time stamping via ``build_*_card(checkpoint_root)``
+    already covers the local-path path; this covers the registry+entrypoint path."""
+    import os
+    te2 = instance.card.components.get("text_encoder_2")
+    if te2 is None or te2.checkpoint:
+        return
+    tr = instance.card.components.get("transformer")
+    if tr is None or not tr.checkpoint:
+        return
+    root = os.path.dirname(os.path.normpath(tr.checkpoint))
+    te2.checkpoint = os.path.join(root, "text_encoder_2")
+
+
 def _encode_pooled(instance: Any, text: str) -> Any:
     """CLIP secondary encode (pooled global vector). Reuses the content-hash feature cache discipline of
     ``cached_text_encode`` but on the ``text_encoder_2`` component (a distinct cache partition by
     component_id). Falls back to the plain encode when the instance has no feature cache."""
+    _ensure_text_encoder_2_stamped(instance)
     enc = instance.component("text_encoder_2")
     cache = instance.caches
     if cache is not None and cache.has("feature"):

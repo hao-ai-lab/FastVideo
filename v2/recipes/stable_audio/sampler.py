@@ -43,7 +43,7 @@ def vdenoiser_x0(x: np.ndarray, sigma: float, net: Callable[[np.ndarray, float],
 
     EDM-v preconditioning (sigma_data=1):
       ``c_skip = 1/(sigma^2+1)``, ``c_out = -sigma/sqrt(sigma^2+1)``, ``c_in = 1/sqrt(sigma^2+1)``,
-      ``c_noise = atan(sigma)`` (k-diffusion's ``VDenoiser.sigma_to_t``), and
+      ``c_noise = atan(sigma)/(pi/2)`` (k-diffusion's ``VDenoiser.sigma_to_t``), and
       ``x0 = c_skip·x + c_out·F(c_in·x, c_noise)``.
     ``net(scaled_x, c_noise)`` is the raw v-prediction (the torch adapter / CPU toy); this function owns
     the preconditioning so the adapter stays the bare network.
@@ -53,7 +53,7 @@ def vdenoiser_x0(x: np.ndarray, sigma: float, net: Callable[[np.ndarray, float],
     c_skip = 1.0 / s2p1
     c_out = -s / np.sqrt(s2p1)
     c_in = 1.0 / np.sqrt(s2p1)
-    c_noise = float(np.arctan(s))  # VDenoiser sigma_to_t
+    c_noise = float(np.arctan(s) / (np.pi / 2.0))  # k-diffusion VDenoiser sigma_to_t = atan(sigma)/(pi/2)
     x = np.asarray(x, dtype="float32")
     v = np.asarray(net((x * c_in).astype("float32"), c_noise), dtype="float32")
     return (c_skip * x + c_out * v).astype("float32")

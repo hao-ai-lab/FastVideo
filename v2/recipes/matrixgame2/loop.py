@@ -152,6 +152,14 @@ class MatrixGame2CausalDMDLoop:
         st.scratch["kv_cache_mouse"] = []
         st.scratch["kv_cache_keyboard"] = []
         st.plugin_state["cfg"] = {}
+        # On GPU the MatrixGame2CausalDiT adapter OWNS the sliding-window KV / cross-attn caches (their
+        # shapes come from the loaded arch); reset them once per request so a fresh generate starts clean.
+        try:
+            dit = model.component("transformer")
+            if hasattr(dit, "reset_caches"):
+                dit.reset_caches()
+        except Exception:
+            pass  # CPU toy has no caches to reset
         return st
 
     # --------------------------------------------------------------------- #

@@ -94,9 +94,22 @@ class HunyuanVideo15DiT(TorchComponent):
         hs = self._t(latent)  # [1, C(32), T, H, W]
         if cond is not None:  # i2v: concat first-frame cond latent (33ch) -> 65ch
             hs = torch.cat([hs, self._t(cond)], dim=1)
-        # ``text_embed`` is a (qwen_hidden, byt5_hidden) tuple from the loop. Both are already numpy
-        # [seq, dim]; the byt5 element may be a zero-length [0, 1472] (no glyph text).
-        qwen_e, byt5_e = text_embed if isinstance(text_embed, tuple | list) else (text_embed, None)
+        else:
+            # t2v: the DiT's PatchEmbed always expects in_channels=65. The real pipeline reaches 65 by
+            # concatenating the V2V triple [latents(32), video_latent(1ch zeros), v2v_zero_pad(32ch zeros)]
+            # (denoising.py:387 with Hy15ImageEncodingStage setting a 1ch zero video_latent for t2v). We
+            # reproduce that here so the t2v forward sees 65 channels (BRINGUP fix: 32->65 channel pad).
+            pad = torch.zeros(hs.shape[0], 33, *hs.shape[2:], device=self.device, dtype=self.dtype)
+            hs = torch.cat([hs, pad], dim=1)
+        # ``text_embed`` carries the conditioning the program packed: either the bare Qwen embedding
+        # [qseq, 3584] (the common t2v / no-glyph case) OR a 2-element pair (Qwen, ByT5) when the prompt
+        # has quoted glyph text. The program packs the pair as a numpy OBJECT array (length 2) so the
+        # shared loop's np.asarray/np.array bookkeeping doesn't choke on inhomogeneous shapes; a plain
+        # tuple/list is also accepted (defensive). Anything else is the bare Qwen array -> byt5_e=None,
+        # and the empty [1, 0, 1472] ByT5 default below reproduces the real pipeline's no-glyph behaviour.
+        _is_pair = (isinstance(text_embed, tuple | list) or
+                    (isinstance(text_embed, np.ndarray) and text_embed.dtype == object and text_embed.shape == (2, )))
+        qwen_e, byt5_e = (text_embed[0], text_embed[1]) if _is_pair else (text_embed, None)
         qwen_t = self._t(qwen_e)  # [1, qseq, 3584]
         if byt5_e is None:
             byt5_t = torch.zeros(1, 0, HUNYUAN15_BYT5_DIM, device=self.device, dtype=self.dtype)

@@ -106,20 +106,22 @@ def build_kandinsky5_card(model_id: str = "kandinsky-5.0-t2v-lite-5s",
                       factory=lambda inst: ToyTextEncoder(),
                       required_for={"t2v"}),
         "vae":
-        ComponentSpec(component_id="vae",
-                      kind="vae",
-                      load_id="fastvideo.models.vaes.hunyuanvae:AutoencoderKLHunyuanVideo",
-                      adapter=_KANDINSKY5_VAE,
-                      factory=lambda inst: ToyVAE(channels=KANDINSKY5_LATENT_CHANNELS),
-                      required_for={"t2v"}),
+        ComponentSpec(
+            component_id="vae",
+            kind="vae",
+            load_id="fastvideo.models.vaes.hunyuanvae:AutoencoderKLHunyuanVideo",
+            adapter=_KANDINSKY5_VAE,
+            factory=lambda inst: ToyVAE(),  # toy stand-in: the toy LATENT_CHANNELS, not the
+            required_for={"t2v"}),  # real z=16 (the CPU latent_shape uses the toy count)
         "transformer":
-        ComponentSpec(component_id="transformer",
-                      kind="dit",
-                      load_id="fastvideo.models.dits.kandinsky5:Kandinsky5Transformer3DModel",
-                      adapter=_KANDINSKY5_DIT,
-                      factory=lambda inst: ToyDiT(channels=KANDINSKY5_LATENT_CHANNELS, seed=seed),
-                      resident_for=["diffusion_denoise"],
-                      required_for={"t2v"}),
+        ComponentSpec(
+            component_id="transformer",
+            kind="dit",
+            load_id="fastvideo.models.dits.kandinsky5:Kandinsky5Transformer3DModel",
+            adapter=_KANDINSKY5_DIT,
+            factory=lambda inst: ToyDiT(seed=seed),  # toy stand-in uses the toy LATENT_CHANNELS
+            resident_for=["diffusion_denoise"],
+            required_for={"t2v"}),
     }
     loops = {
         "diffusion_denoise":

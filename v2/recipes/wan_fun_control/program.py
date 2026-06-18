@@ -58,23 +58,32 @@ def _control_video_encode(instance: Any, slots: dict, request: Any, ctx: Any) ->
 
     Mirrors ``VideoVAEEncodingStage`` (VAE-encode the control video) + the V2V concat in ``DenoisingStage``
     (``cat([latent, video_latent, zero_pad])``). We pre-build the ``[video_latent | zero_pad]`` (32ch) half
-    so the loop/adapter only has to ``cat([noise(16ch), this(32ch)])``. ``None`` (no control video) ->
-    pure T2V degrade."""
+    so the loop/adapter only has to ``cat([noise(16ch), this(32ch)])`` → the 48ch Fun-Control DiT input.
+
+    BRINGUP: the Fun-Control DiT's ``patch_embedding`` is a Conv3d with ``in_channels=48`` — it ALWAYS
+    requires the 48ch input (no pure-16ch T2V path). The real pipeline reflects this: when no control
+    video is supplied, ``RefImageEncodingStage`` still sets ``video_latent = zeros`` and
+    ``VideoVAEEncodingStage`` VAE-encodes it (an asserted, non-optional stage). So we NEVER emit
+    ``i2v_cond=None``; with no control video we VAE-encode a ZERO control video (faithful to the real
+    zeros-``video_latent`` path) and concat the zero pad — the 48ch input is always well-formed."""
+    nf = int(request.diffusion.num_frames)
     part = _control_video_part(request)
     if part is None or getattr(part, "frames", None) is None:
-        slots["i2v_cond"] = None
-        return
-    nf = int(request.diffusion.num_frames)
-    frames = np.asarray(part.frames, dtype="float32")  # [T, H, W, 3] or [3, T, H, W]
-    if frames.ndim == 4 and frames.shape[-1] == 3:  # [T, H, W, 3] -> [3, T, H, W]
-        frames = np.transpose(frames, (3, 0, 1, 2))
-    # Match the requested frame count: truncate, or zero-pad the tail (``_prepare_control_video_tensor``).
-    t = frames.shape[1]
-    if t > nf:
-        frames = frames[:, :nf]
-    elif t < nf:
-        pad = np.zeros((frames.shape[0], nf - t) + frames.shape[2:], dtype="float32")
-        frames = np.concatenate([frames, pad], axis=1)
+        # No control video: encode a zero control video (the real pipeline's zeros-``video_latent`` path).
+        # Pixel-space zeros -> VAE -> the model's "empty control" latent; concat with the zero pad → 32ch.
+        h, w = int(request.diffusion.height), int(request.diffusion.width)
+        frames = np.zeros((3, nf, h, w), dtype="float32")
+    else:
+        frames = np.asarray(part.frames, dtype="float32")  # [T, H, W, 3] or [3, T, H, W]
+        if frames.ndim == 4 and frames.shape[-1] == 3:  # [T, H, W, 3] -> [3, T, H, W]
+            frames = np.transpose(frames, (3, 0, 1, 2))
+        # Match the requested frame count: truncate, or zero-pad the tail (``_prepare_control_video_tensor``).
+        t = frames.shape[1]
+        if t > nf:
+            frames = frames[:, :nf]
+        elif t < nf:
+            pad = np.zeros((frames.shape[0], nf - t) + frames.shape[2:], dtype="float32")
+            frames = np.concatenate([frames, pad], axis=1)
     control_latent = np.asarray(instance.component("vae").encode(frames), dtype="float32")  # [16, T, h, w]
     zero_pad = np.zeros_like(control_latent)  # the V2V zero pad (fixed shape, never written)
     # [control_latent(16) | zero_pad(16)] -> WanDiT concats this AFTER the 16ch noise -> 48ch Fun-Control input.
