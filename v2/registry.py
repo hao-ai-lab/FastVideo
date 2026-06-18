@@ -82,15 +82,36 @@ _BUCKET_C: tuple[tuple, ...] = (
      "build_matrixgame2_card", "build_matrixgame2_program", "CausalMatrixGame2WanModel"),
     (("FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers", ), "matrixgame3", "build_matrixgame3_card",
      "build_matrixgame3_program", "MatrixGame3WanModel"),
+    # Residual Wan-family variants — reuse the Wan/Causal ARCH (NO new torch adapter; a new in-package
+    # sampler/loop/conditioning). transformer_cls="" -> explicit-HF-id-ONLY: the generic Wan/Causal arch
+    # fallback already serves unregistered Wan checkpoints, and only the exact id distinguishes these
+    # capability variants (rCM/DMD few-step, v2v, control, causal-MoE) from a base Wan of the same class.
+    (("loayrashid/TurboWan2.1-T2V-1.3B-Diffusers", ), "turbowan", "build_turbowan_card", "build_turbowan_program", ""
+     ),  # rCM 4-step
+    (("loayrashid/TurboWan2.2-I2V-A14B-Diffusers", ), "turbowan", "build_turbowan_i2v_a14b_card",
+     "build_turbowan_i2v_program", ""),  # rCM MoE i2v
+    (("decart-ai/Lucy-Edit-Dev", "decart-ai/Lucy-Edit-1.1-Dev"), "lucy_edit", "build_lucy_edit_card",
+     "build_lucy_edit_program", ""),  # v2v editor
+    (("IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers", ), "wan_fun_control", "build_wan_fun_control_card",
+     "build_wan_fun_control_program", ""),  # control input
+    (("FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers", ), "sfwan22", "build_sfwan22_i2v_a14b_card",
+     "build_sfwan22_i2v_program", ""),  # causal MoE i2v
+    (("rand0nmr/SFWan2.2-T2V-A14B-Diffusers", ), "sfwan22", "build_sfwan22_t2v_a14b_card", "build_sfwan22_t2v_program",
+     ""),  # causal MoE t2v
+    (("FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers", "FastVideo/FastWan2.2-TI2V-5B-Diffusers"), "fastwan",
+     "build_fastwan_card", "build_fastwan_program", ""),  # DMD 3-step (FullAttn loadable; VSA BRINGUP)
+    (("FastVideo/FastWan2.1-T2V-1.3B-Diffusers", "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers"), "fastwan",
+     "build_fastwan_t2v_1_3b_card", "build_fastwan_program", ""),  # DMD (VSA + non-strict load BRINGUP)
 )
 
 
-def _lazy(package: str, fn: str) -> Callable[[], Any]:
-    """A ``() -> card_or_program`` builder that imports the recipe package only when first called."""
+def _lazy(package: str, fn: str, *args: Any, **kwargs: Any) -> Callable[[], Any]:
+    """A ``() -> card_or_program`` builder that imports the recipe package only when first called.
+    ``args``/``kwargs`` are forwarded to the builder (e.g. a per-id resolution/model_id override)."""
 
     def _build() -> Any:
         import importlib
-        return getattr(importlib.import_module(f"v2.recipes.{package}"), fn)()
+        return getattr(importlib.import_module(f"v2.recipes.{package}"), fn)(*args, **kwargs)
 
     return _build
 
@@ -146,7 +167,11 @@ def _entries() -> list[ModelEntry]:
         # Cosmos-Predict2-2B-Video2World — EDM-Karras denoiser (new CosmosDenoiseLoop + CosmosDiT adapter),
         # reusing the Wan VAE adapter + T5. Registered for t2v (video2world conditioning threads later).
         ModelEntry(("nvidia/Cosmos-Predict2-2B-Video2World", ), build_cosmos2_card, build_cosmos2_program),
-    ] + _bucket_c_entries()  # the 14 self-contained bucket-C recipe packages (one row each in _BUCKET_C)
+        # TurboWan2.1-T2V-14B: same rCM card as the 1.3B but the 720p resolution default (args override).
+        ModelEntry(("loayrashid/TurboWan2.1-T2V-14B-Diffusers", ),
+                   _lazy("turbowan", "build_turbowan_card", "turbowan2.1-t2v-14b", height=720, width=1280),
+                   _lazy("turbowan", "build_turbowan_program")),
+    ] + _bucket_c_entries()  # the bucket-C + Wan-variant self-contained recipe packages (rows in _BUCKET_C)
 
 
 def _short(p: str) -> str:
