@@ -204,6 +204,7 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b", *, checkpoint_root:
 # (``transformer_2``), and LTX-2 (``spatial_upsampler``) alike.
 _WAN21_SUBFOLDERS = {"transformer": "transformer", "transformer_2": "transformer_2",
                      "vae": "vae", "text_encoder": "text_encoder",
+                     "image_encoder": "image_encoder",                 # Wan i2v CLIP vision
                      "spatial_upsampler": "spatial_upsampler",
                      "audio_vae": "audio_vae", "vocoder": "vocoder"}   # LTX-2.3 T2VS audio branch
 
