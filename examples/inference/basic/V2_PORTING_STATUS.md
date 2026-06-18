@@ -1,96 +1,78 @@
 # v2 porting status — fastvideo models → the v2 (recipe, runtime) substrate
 
-Goal: drive each `examples/inference/basic/` model through the **v2 `VideoGenerator`** (typed
-`fastvideo.api` configs + the real torch backend) and generate video, with a matching `v2_*` example.
+Goal: every model in fastvideo's registry resolves through the **v2 `VideoGenerator`** / `Engine`
+(typed `fastvideo.api` configs + the real torch backend) to a recipe that can construct and run it.
 
-**Active scope (per request): the Wan family + LTX-2 only.** The Cosmos/Hunyuan/SD3.5/LongCat/Flux2/
-audio/interactive families below are kept as an upstream reference map but are out of the current scope.
+**Scope: ALL fastvideo models (achieved).** v2 now resolves **63/64** of fastvideo's registered HF ids
+by exact id (PRIMARY), plus the architecture fallback for local/unregistered checkpoints. The single
+remaining id — `FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers` — is **environment-blocked**: its VSA
+(Sparse-Linear Attention) kernels require `nvcc` (not built in this bring-up). It arch-resolves to the
+base Wan card but needs the VSA kernel build to run faithfully.
 
-Dispatch is **architecture-driven** (`v2/video_generator.py`): `from_config` reads the checkpoint's
-pipeline / transformer / VAE class names (+ `z_dim`, `transformer_2`) and picks the v2 card — mirroring
-fastvideo's `get_pipeline_config_cls_from_name`, with no hardcoded repo-id table.
+Dispatch is **architecture-driven** (`v2/registry.py`): exact HF id → short-name → architecture
+inference from the checkpoint (pipeline / transformer / VAE class names + `z_dim`, `transformer_2`,
+`spatial_upsampler`). Adding a model is one `_BUCKET_C` row (HF ids → builders + transformer class).
 
-The v2 mini implements a small set of loops/samplers (**flow-match Euler**, causal **chunk_rollout**,
-**FlowGRPO SDE**) and adapters (Wan DiT/VAE/UMT5, causal Wan, LTX-2 DiT/VAE/Gemma/**spatial upsampler**).
-A model ports **cleanly** only when its architecture *and* sampler match what v2 implements; otherwise it
-needs new per-model work (a card, an adapter for the DiT/VAE/encoder forward, and/or a new sampler), and
-some are blocked by the environment (gated weights, local-only weights, non-video modality, no VSA).
+## The porting mechanism — self-contained recipe packages
+Every net-new arch is a **self-contained recipe package** (`v2/recipes/<arch>/` = `card.py` `loop.py`
+`program.py` [+ `sampler.py`] + an optional `v2/platform/backends/torch_<arch>.py` adapter). The card
+declares its torch adapter via **`ComponentSpec.adapter="module:Class"`** (the `_explicit_adapter` seam in
+`torch_backend.py`) instead of editing the shared `_make_dit`/`_make_vae`/`_make_text_encoder` dispatch —
+so a port adds **only new files**, never touching shared code, and parallel ports never conflict. New
+samplers/loops live in-package. Registration is one row in `v2/registry.py:_BUCKET_C`.
 
-The v2 bring-up runs **single-GPU, resident, on the `TORCH_SDPA` backend** (no fastvideo-kernel / VSA /
-FP4), so distilled models that depend on VSA/SLA/FP4 kernels or non-flow-match samplers won't match.
-(Wan2.2-A14B MoE is the exception to "resident": its two 14B experts are CPU-offloaded and swapped onto
-the GPU one at a time at the boundary-timestep transition, so it fits a single 80GB GPU.)
-
-**Environment status:** the box was rescheduled from an aarch64 host to an x86_64 host mid-session
-(`ipp1a1…` → `ipp2-0493`). The aarch64 `.venv` couldn't execute on x86, so the venv was **rebuilt for
-x86** (torch 2.11.0+cu128 x86 + numpy 2.5.0rc1 x86 + fastvideo[dev]) and re-validated: the v2 CPU suite
-is green and wan21 + LTX-2 base both generate real video on the x86 stack. (If the box flips arch again,
-rebuild the venv for the current arch — system python `/usr/bin/python3.12`, reinstall the matching
-`uv`, `uv pip install -e ".[dev]"` with `fastvideo-kernel` commented out.)
-
-## Working today (verified, real video) — committed on `v2`
-| Official example(s) | Model | v2 card | v2 example |
-|---|---|---|---|
-| `basic.py`, `basic_mps.py`*, `basic_ray.py`* | `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` | wan21 | `v2_basic.py`, `v2_basic_new_api.py` |
-| `basic_self_forcing_causal.py` | `wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers` | wan_causal | `v2_basic_self_forcing_causal.py`, `v2_basic_new_api.py` |
-| `basic_ltx2_distilled.py`, `basic_ltx2_distilled_fast_profile.py` | `FastVideo/LTX2-Distilled-Diffusers` | ltx2 — real `LTX2LatentUpsampler` between base/refine (un_normalize→learned 2× upsample→normalize) | `v2_basic_new_api.py` |
-| `basic_wan2_2_ti2v.py` (T2V branch) | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | wan2.2-ti2v | `v2_basic_wan2_2_ti2v.py` |
-| `basic_wan2_2.py` | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` (MoE) | wan2.2-a14b + **CPU expert offload** (one 14B expert resident at a time, swapped at the boundary → 60GB peak) | `v2_basic_wan2_2.py` |
-| `basic_ltx2.py` | `Davids048/LTX2-Base-Diffusers` | ltx2 base (single-stage, request-driven many-step) | `v2_basic_ltx2.py` |
-| `basic_ltx2_3_distilled.py` | `FastVideo/LTX-2.3-Distilled-Diffusers` (18.99B) | ltx2.3-distilled card — single-stage **joint T2VS** (video **+** audio): SEPARATE video/audio text connectors + gated attention, joint DiT forward (video↔audio cross-attention), then video VAE + AudioDecoder→Vocoder | `v2_basic_ltx2_3_distilled.py` |
-
-All seven rows GPU-verified to generate real video on the rebuilt x86 stack. LTX-2.3 is the only **A/V**
-model: GPU-verified T2VS produces video (3,33,256,384) **and** stereo audio (2×61920 @ 24 kHz, nonzero,
-std 0.059) in one joint pass — the dual-connector / joint-cross-attention path is exercised end-to-end.
-\* `basic_mps.py` (Apple MPS) and `basic_ray.py` (ray executor) are device/executor variants of the same
-Wan2.1 model — covered by wan21; those runtime modes are out of scope.
-
-## Needs per-model work (architecture/sampler matches partially)
-| Official example(s) | Model | What v2 needs |
+## Working today (GPU-verified, real video/audio) — committed on `v2`
+| Official example(s) | Model | v2 card |
 |---|---|---|
-| `basic_dmd.py`, `basic_dmd_new_api.py` | FastWan2.1-T2V-1.3B (WanDMDPipeline) | **Blocked (env):** loading needs a *non-strict* load to skip the VSA-only `to_gate_compress` (root cause: the checkpoint key mis-maps under the generic Wan path, and `TransformerLoader` is strict except Cosmos2.5 — `component_loader.py:1005`). Even loaded, the DMD model is trained for VSA, which is **not built here (no nvcc)**, so SDPA output would be degraded. Needs the fastvideo-kernel VSA build + a non-strict WanDMD load. |
-| `basic_turbodiffusion*.py` | TurboWan2.1/2.2 (RCM) | **New sampler:** Reparameterized Consistency Model (`fastvideo/models/schedulers/scheduling_rcm.py:RCMScheduler`) — v2 has only flow-match/chunk/SDE loops; needs a new RCM consistency loop. |
-| `basic_wan2_2_i2v.py`, `basic_wan2_2_Fun.py` | Wan2.2-I2V / Fun | **I2V mechanism (identified, `pipelines/stages/image_encoding.py`):** SigLIP `image_encoder`+`image_processor` → `image_embeds` (the DiT's `encoder_hidden_states_image`, already accepted) **and** VAE-encode the first frame, concat `[noisy_latent, image_latent, mask]` (first-frame mask=1) → an i2v DiT (larger in_channels). v2 needs: image_encoder/image_processor components+adapters, a VAE-encode-image node, the concat-mask conditioning in the wan loop, the i2v DiT in_channels, `image_path` handling (reuse A14B offload). Fun adds a control input. |
-| `basic_lucy_edit.py` | `decart-ai/Lucy-Edit-Dev` (Wan v2v) | **V2V mechanism (identified):** `WanVideoToVideoPipeline` + `VideoVAEEncodingStage` — VAE-encode the input video to a conditioning latent. v2 needs input-video loading + a VAE-encode-video node + the v2v conditioning (no image_encoder). |
-| `basic_ltx2_3_distilled_i2v*.py` | LTX-2.3-Distilled I2V | Image conditioning on the ltx2 single-stage program (encode the input image + condition the denoise). |
+| `basic.py`, `basic_mps.py`, `basic_ray.py` | `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` | wan21 |
+| `basic_self_forcing_causal.py` | `wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers` | wan_causal |
+| `basic_ltx2_distilled.py` | `FastVideo/LTX2-Distilled-Diffusers` (2-stage + spatial upsampler) | ltx2 |
+| `basic_wan2_2_ti2v.py` | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | wan2.2-ti2v |
+| `basic_wan2_2.py` | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` (MoE + CPU expert offload) | wan2.2-a14b |
+| `basic_ltx2.py` | `Davids048/LTX2-Base-Diffusers` | ltx2 base |
+| `basic_ltx2_3_distilled.py` | `FastVideo/LTX-2.3-Distilled-Diffusers` (joint T2VS, video+audio) | ltx2.3-distilled |
 
-## Backlog — goal: port ALL fastvideo models (63 total: 8 ported · 21 reuse-arch · 34 new-arch)
-Ported (12): the 7 above + **Wan2.1-T2V-14B** + **Wan2.2-I2V-A14B** (MoE i2v, structural) + the
-**Wan2.1 i2v cluster** — Wan2.1-Fun-1.3B-InP
-(GPU-verified: CLIP encoder + first-frame [mask|cond] -> 36ch DiT) and Wan2.1-I2V-14B-480P/720P (reuse the
-same i2v card; 14B weights GPU-pending). i2v required a real sub-system: the image-encoder adapter, the
-loop's i2v conditioning hooks, and the Wan adapter's 36ch concat (all landed + T2V-unregressed).
+Plus the **Wan2.1 i2v cluster** (Fun-1.3B-InP GPU-verified; I2V-14B-480P/720P + Wan2.2-I2V-A14B MoE reuse
+the i2v card) — CLIP image-encoder + first-frame `[mask|cond]` → 36ch DiT.
 
-⚠️ Not as trivial as the bucket split implies: the `FastVideo/*` distilled checkpoints (FastWan DMD, VSA,
-Turbo) carry **gated-attention params** (`to_gate_compress`) the generic `WanTransformer3DModel` loader
-can't map (`select_by_architecture` already rejects `WanDMDPipeline` for this) — they need a param-mapping
-fix (as LTX-2.3 did) on top of the few-step schedule, so they're really bucket-C-effort. GPU-verify each
-port before claiming support.
+## Newly ported — CPU-verified end-to-end; GPU load/run is BRINGUP
+Each resolves through the registry AND runs end-to-end on the CPU toy backend via the public `Engine`
+path (the `v2/tests/test_bucket_c_ports.py` regression guard), emitting the correct modality artifact.
+GPU bring-up pending per-model (cosmos2/flux2/sd35 weights are HF-gated; the FastVideo/* orgs are public).
 
-**Bucket B (21 left) — reuse a v2 architecture** (`WanTransformer3DModel` / `CausalWanTransformer3DModel` /
-`LTX2Transformer3DModel`): a `ModelEntry` in `v2/registry.py` + a recipe (parameterize the wan21/wan_causal/
-ltx2 builders) + `SamplingDefaults`, NO new adapter. Includes other Wan T2V sizes; i2v variants (need an
-image-encoder component + i2v program); FastWan/Turbo (DMD/RCM schedules → a loop variant); Wan2.2-I2V-A14B;
-SF-Wan2.2; LTX-2 base/2.3 repo aliases (already arch-fallback-resolvable, so they work without an entry).
+**15 net-new architectures** (each a new `TorchComponent` adapter + recipe):
+- **cosmos2** (Cosmos-Predict2-2B-Video2World) — EDM-Karras denoiser; new `CosmosDenoiseLoop` +
+  `build_karras_sigmas` (the reference port). **cosmos25** (Cosmos-Predict2.5 2B/14B) — flow-match,
+  per-frame plain-sigma timestep, Reason1/Qwen2.5-VL encoder. **gen3c** (GEN3C) — EDM + 82ch pose-buffer.
+- **hunyuan_video** (+FastHunyuan) — reuses WanDenoiseLoop, dual LLaMA+CLIP encoders, Hunyuan VAE.
+  **hunyuan_video15** (480p/720p). **hunyuangamecraft**, **hyworld** — interactive (camera/action).
+- **longcat** (T2V/I2V/VC). **kandinsky5** (5.0 T2V Lite).
+- **sd35** (MMDiT, image, triple-encoder). **flux2** (dev/klein, MMDiT image). **stable_audio** (audio).
+- **lingbotworld** (camera/Plucker), **matrixgame2**, **matrixgame3** — interactive world models.
 
-**Bucket C (34 models, ~13 new architectures) — need a new `TorchComponent` adapter + recipe per arch:**
-`basic_cosmos2_5_*` (Cosmos-Predict2.5), `basic_gen3c.py` (GEN3C — **local `converted_weights/` only**),
-`basic_hy15*.py` / `basic_gamecraft.py` / `basic_hyworld.py` (Hunyuan family),
-`basic_longcat_*.py` (LongCat + LoRA), `basic_lingbotworld_base_cam.py`,
-`basic_sd35_t2i.py` (SD3.5 image), `basic_flux2*.py` (**gated** black-forest-labs).
+**5 Wan-family variants** (reuse the Wan/Causal arch, new in-package sampler/loop/conditioning):
+- **turbowan** — rCM few-step (faithful RCMScheduler port), 1.3B/14B T2V + I2V-A14B MoE.
+- **lucy_edit** — v2v editor (video-VAE-encode node → 96ch DiT input). **wan_fun_control** — control input.
+- **sfwan22** — Self-Forcing Wan2.2-A14B causal + MoE (i2v + t2v). **fastwan** — DMD 3-step (TI2V-5B-FullAttn
+  loadable; VSA-trained variants + non-strict `to_gate_compress` load are BRINGUP).
 
-## Different modality / interactive (out of the t2v VideoGenerator surface)
-`basic_stable_audio*.py` (audio), `basic_matrixgame2*.py` / `basic_matrixgame3.py`
-(interactive mouse/keyboard-conditioned world models).
+BRINGUP scope per port (documented in each package): GPU load/run; for interactive/world-model archs the
+action/camera/memory conditioning needs a request-API extension (the t2v/degenerate path is what
+CPU-verifies); video2world/i2v frame-replace conditioning is threaded but inert without conditioning inputs.
 
-## How to add a model to the v2 VideoGenerator
-1. Add a v2 recipe under `v2/recipes/<family>/` (card/loop/program) whose `load_id`s name the real models;
-   set per-model `SamplingDefaults` on the card (`v2/card/specs.py`) — see `wan21`/`ltx2` for the pattern.
-2. Register it in the shared `v2/registry.py` (every entrypoint resolves through it): add a `ModelEntry`
-   mapping its HF id(s) → builders (the PRIMARY path — the only way to split same-arch capability variants,
-   e.g. T2V vs the i2v "InP"), and/or a branch in `select_by_architecture` for the arch-inference FALLBACK.
-3. **Bucket B (reuse an existing arch):** nothing more — the redesigned `torch_backend.py` already builds
-   Wan/LTX components. **Bucket C (new arch):** add a `TorchComponent` subclass + a `_MAKERS`/class-detect
-   branch in `torch_backend.py`, vendor the new model code as marked re-export stubs under `v2/models/...`
-   (see `v2-vendoring-approach`), and register any new component kind in `torch_cuda.py`.
-4. Add `examples/inference/basic/v2_<name>.py` mirroring the official example; generate to confirm.
+## Environment
+v2 bring-up runs **single-GPU, resident, on the `TORCH_SDPA` backend** (no fastvideo-kernel / VSA / FP4).
+The box has been rescheduled across hosts/arches/python versions mid-session; rebuild the venv for the
+current arch when that happens: `uv venv --python 3.12 .venv`; comment out `fastvideo-kernel` in
+`pyproject.toml`; `uv pip install -e ".[dev]"`. Source `/home/scratch.willlin_ent/.bringup_env`
+(`HF_HOME=./.cache` on scratch, `FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA`). v2 CPU mini: 240 passed, 2 skipped.
+
+## How to add a model to the v2 substrate
+1. `v2/recipes/<arch>/` — card (declare adapters via `ComponentSpec.adapter`; per-model `SamplingDefaults`),
+   loop (reuse `WanDenoiseLoop`/`chunk_rollout` or a new in-package loop+sampler), program.
+2. `v2/platform/backends/torch_<arch>.py` — a `TorchComponent` subclass (only the forward semantics) if the
+   arch is genuinely new; reuse `WanDiT`/`LTX2DiT`/`WanVAE`/`T5Encoder` via `load_id` when it isn't.
+3. One row in `v2/registry.py:_BUCKET_C` (HF ids → builders; `transformer_cls` for the arch fallback, or
+   `""` for explicit-id-only capability variants of an existing arch).
+4. CPU-verify: it resolves + runs on the toy backend (auto-covered by `test_bucket_c_ports.py`). Then GPU
+   bring-up (`stamp_*_checkpoints` → real weights) per BRINGUP notes.
