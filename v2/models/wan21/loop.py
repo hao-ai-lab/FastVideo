@@ -32,15 +32,18 @@ WAN_TEMPORAL_RATIO = 4
 WAN_SPATIAL_RATIO = 8
 
 
-def latent_shape(req, model=None) -> tuple[int, int, int, int]:
+def latent_shape(req, model=None, *, channels=WAN_LATENT_CHANNELS,
+                 spatial_ratio=WAN_SPATIAL_RATIO,
+                 temporal_ratio=WAN_TEMPORAL_RATIO) -> tuple[int, int, int, int]:
     """Latent geometry for the denoise loop. On the real (GPU) backend the DiT/VAE require the true Wan
-    geometry (16 channels; (num_frames-1)//4+1 temporal, height/8, width/8); the CPU toy uses a tiny
-    deterministic stand-in. ``model is None`` (e.g. cost-estimation in tests) keeps the toy shape."""
+    geometry; the CPU toy uses a tiny deterministic stand-in. ``model is None`` (e.g. cost-estimation in
+    tests) keeps the toy shape. Defaults are Wan2.1 (16 channels, 4x temporal, 8x spatial); Wan2.2-TI2V
+    passes channels=48, spatial_ratio=16 (its higher-compression z_dim=48 VAE)."""
     d = req.diffusion
     if model is not None and getattr(getattr(model, "platform", None), "device", "cpu") == "cuda":
-        t = (max(1, d.num_frames) - 1) // WAN_TEMPORAL_RATIO + 1
-        return (WAN_LATENT_CHANNELS, max(1, t),
-                max(1, d.height // WAN_SPATIAL_RATIO), max(1, d.width // WAN_SPATIAL_RATIO))
+        t = (max(1, d.num_frames) - 1) // temporal_ratio + 1
+        return (channels, max(1, t),
+                max(1, d.height // spatial_ratio), max(1, d.width // spatial_ratio))
     t = max(1, d.num_frames // 40)
     h = max(2, d.height // 120)
     w = max(2, d.width // 120)
@@ -48,20 +51,26 @@ def latent_shape(req, model=None) -> tuple[int, int, int, int]:
 
 
 class WanDenoiseLoop:
-    def __init__(self, *, loop_id, cfg, flow_shift, precision, expert, cost):
+    def __init__(self, *, loop_id, cfg, flow_shift, precision, expert, cost,
+                 latent_channels=WAN_LATENT_CHANNELS, spatial_ratio=WAN_SPATIAL_RATIO,
+                 temporal_ratio=WAN_TEMPORAL_RATIO):
         self.loop_id = loop_id
         self.cfg = cfg
         self.flow_shift = flow_shift
         self.precision = precision
         self.expert = expert
         self.cost = cost
+        self.latent_channels = latent_channels
+        self.spatial_ratio = spatial_ratio
+        self.temporal_ratio = temporal_ratio
 
     def init(self, req, model, ctx) -> LoopState:
         seed = req.diffusion.seed if req.diffusion.seed is not None else 0
         rng = np.random.default_rng(seed)
         sig = self.flow_shift.build_schedule(req.diffusion.num_steps, req.diffusion.height,
                                              req.diffusion.width, sigmas=req.diffusion.sigmas or None)
-        shape = latent_shape(req, model)
+        shape = latent_shape(req, model, channels=self.latent_channels,
+                             spatial_ratio=self.spatial_ratio, temporal_ratio=self.temporal_ratio)
         x = (rng.standard_normal(shape) * float(sig[0])).astype("float32")
         st = LoopState(loop_id=self.loop_id, instance_id=model.card.model_id,
                        request_id=req.request_id, profile=ctx.profile, rng=rng, seed=seed,

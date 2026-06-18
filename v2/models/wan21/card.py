@@ -30,7 +30,8 @@ from .loop import WanDenoiseLoop
 
 
 def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shift: float = 3.0,
-                     checkpoint_root: str | None = None) -> ModelCard:
+                     checkpoint_root: str | None = None, latent_channels: int = 16,
+                     spatial_ratio: int = 8, temporal_ratio: int = 4) -> ModelCard:
     seed = _seed_from(model_id)
     cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg = cfg_policy or ClassicCFG()
@@ -40,7 +41,9 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shi
 
     def loop_factory():
         return WanDenoiseLoop(loop_id="diffusion_denoise", cfg=cfg, flow_shift=flow,
-                              precision=precision, expert=expert, cost=cost)
+                              precision=precision, expert=expert, cost=cost,
+                              latent_channels=latent_channels, spatial_ratio=spatial_ratio,
+                              temporal_ratio=temporal_ratio)
 
     components = {
         "text_encoder": ComponentSpec(
@@ -87,6 +90,17 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shi
     if checkpoint_root:
         stamp_wan21_checkpoints(card, checkpoint_root)
     return card
+
+
+def build_wan22_ti2v_card(model_id: str = "wan2.2-ti2v-5b", *,
+                          checkpoint_root: str | None = None) -> ModelCard:
+    """Wan2.2-TI2V-5B card. Same component classes as Wan2.1 (WanTransformer3DModel / AutoencoderKLWan /
+    UMT5), so the torch adapters are reused as-is — the deltas are the higher-compression VAE geometry
+    (z_dim=48, 16x spatial, 4x temporal) and the 480p flow shift 5.0. The DiT forward accepts a scalar
+    timestep (its 1D path), so no per-frame ``expand_timesteps`` is needed for pure t2v. Uses the same
+    ``transformer/vae/text_encoder`` subfolder layout, so ``stamp_wan21_checkpoints`` applies."""
+    return build_wan21_card(model_id=model_id, flow_shift=5.0, checkpoint_root=checkpoint_root,
+                            latent_channels=48, spatial_ratio=16, temporal_ratio=4)
 
 
 # Wan2.1 diffusers checkpoint layout: each component's weights live in a subfolder of the model root.
