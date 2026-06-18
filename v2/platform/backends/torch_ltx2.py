@@ -166,6 +166,9 @@ class TorchLTX2AudioVAE:
         self.module = module.to(device=device, dtype=dtype).eval()      # AudioDecoder
         self.vocoder = vocoder                                          # TorchLTX2Vocoder | None
         self.device, self.dtype = device, dtype
+        # Final waveform rate = the Vocoder's output_sample_rate (24000 for LTX-2; AudioDecoder's own
+        # sample_rate is the internal mel rate). Surfaced so a saver writes the wav at the right rate.
+        self.sample_rate = int(getattr(getattr(vocoder, "module", None), "output_sample_rate", 24000))
 
     @torch.no_grad()
     def decode(self, audio_latent):

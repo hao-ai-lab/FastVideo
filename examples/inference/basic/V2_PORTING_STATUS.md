@@ -37,11 +37,13 @@ rebuild the venv for the current arch — system python `/usr/bin/python3.12`, r
 | `basic_wan2_2_ti2v.py` (T2V branch) | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | wan2.2-ti2v | `v2_basic_wan2_2_ti2v.py` |
 | `basic_wan2_2.py` | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` (MoE) | wan2.2-a14b + **CPU expert offload** (one 14B expert resident at a time, swapped at the boundary → 60GB peak) | `v2_basic_wan2_2.py` |
 | `basic_ltx2.py` | `Davids048/LTX2-Base-Diffusers` | ltx2 base (single-stage, request-driven many-step) | `v2_basic_ltx2.py` |
-| `basic_ltx2_3_distilled.py` | `FastVideo/LTX-2.3-Distilled-Diffusers` (18.99B) | ltx2 base card (single-stage; few-step) | `v2_basic_ltx2_3_distilled.py` |
+| `basic_ltx2_3_distilled.py` | `FastVideo/LTX-2.3-Distilled-Diffusers` (18.99B) | ltx2.3-distilled card — single-stage **joint T2VS** (video **+** audio): SEPARATE video/audio text connectors + gated attention, joint DiT forward (video↔audio cross-attention), then video VAE + AudioDecoder→Vocoder | `v2_basic_ltx2_3_distilled.py` |
 
-All seven rows GPU-verified to generate real video (LTX-2 base / 2.3 show inter-frame motion 4.5 / 6.6
-on the rebuilt x86 stack). \* `basic_mps.py` (Apple MPS) and `basic_ray.py` (ray executor) are
-device/executor variants of the same Wan2.1 model — covered by wan21; those runtime modes are out of scope.
+All seven rows GPU-verified to generate real video on the rebuilt x86 stack. LTX-2.3 is the only **A/V**
+model: GPU-verified T2VS produces video (3,33,256,384) **and** stereo audio (2×61920 @ 24 kHz, nonzero,
+std 0.059) in one joint pass — the dual-connector / joint-cross-attention path is exercised end-to-end.
+\* `basic_mps.py` (Apple MPS) and `basic_ray.py` (ray executor) are device/executor variants of the same
+Wan2.1 model — covered by wan21; those runtime modes are out of scope.
 
 ## Needs per-model work (architecture/sampler matches partially)
 | Official example(s) | Model | What v2 needs |

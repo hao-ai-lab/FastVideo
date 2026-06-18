@@ -27,9 +27,11 @@ from typing import Any
 class VideoGenerator:
     """Typed t2v entrypoint over a single resident v2 ``ModelInstance`` (mirrors fastvideo's)."""
 
-    def __init__(self, engine: Any, model_id: str) -> None:
+    def __init__(self, engine: Any, model_id: str, *, instance: Any = None, supports_av: bool = False) -> None:
         self._engine = engine
         self._model_id = model_id
+        self._inst = instance              # the resident ModelInstance (to read e.g. the audio sample rate)
+        self._supports_av = supports_av    # model emits joint video+sound (LTX-2.3 T2VS) -> auto-request audio
 
     # --------------------------------------------------------------------- #
     @classmethod
@@ -84,25 +86,34 @@ class VideoGenerator:
         from .models.wan21 import stamp_wan21_checkpoints   # transformer/vae/text_encoder subfolder layout
         stamp_wan21_checkpoints(card, root)
 
+        from ._enums import Capability
         from .card import load_card
         from .cache import CacheManager
         from .runtime import Engine
         inst = load_card(card, cache_manager=CacheManager.from_card(card))   # platform auto-detect -> cuda
         eng = Engine()
         eng.register(card.model_id, inst, program)
-        return cls(eng, card.model_id)
+        # A model that advertises TEXT_TO_VIDEO_SOUND (LTX-2.3) generates joint video+audio; the
+        # entrypoint then issues a T2VS request by default so a plain generate() yields both modalities.
+        supports_av = card.capabilities.has(Capability.TEXT_TO_VIDEO_SOUND)
+        return cls(eng, card.model_id, instance=inst, supports_av=supports_av)
 
     def shutdown(self) -> None:
         """API parity with ``fastvideo.VideoGenerator.shutdown()``. The v2 bring-up holds a single
         resident instance that is freed at process exit; there is nothing to tear down explicitly."""
 
     # --------------------------------------------------------------------- #
-    def generate(self, request: Any) -> Any:
+    def generate(self, request: Any, *, want_audio: bool | None = None) -> Any:
         """``request``: ``fastvideo.api.GenerationRequest``. Returns a ``GenerationResult`` (or a list
-        for multi-prompt) with ``.video_path`` (saved mp4) and optionally ``.frames``."""
-        from .request import DiffusionParams, TaskType, make_request
+        for multi-prompt) with ``.video_path`` (saved mp4) and optionally ``.frames``.
+
+        ``want_audio``: ``None`` (default) auto-enables sound for an A/V model (LTX-2.3 → T2VS, both
+        video+audio in one joint pass); ``True``/``False`` force it on/off. For a video-only model the
+        auto resolves to video-only (T2V), unchanged."""
+        from .request import DiffusionParams, OutputSpec, TaskType, make_request
         s = request.sampling
         prompts = request.prompt if isinstance(request.prompt, list) else [request.prompt]
+        audio = self._supports_av if want_audio is None else bool(want_audio)
         results = []
         for idx, prompt in enumerate(prompts):
             diff = DiffusionParams(
@@ -110,7 +121,11 @@ class VideoGenerator:
                 height=s.height, width=s.width, guidance_scale=s.guidance_scale,
                 negative_prompt=request.negative_prompt or "",
                 sigmas=tuple(s.sigmas) if getattr(s, "sigmas", None) else None)
-            req = make_request(TaskType.T2V, self._model_id, prompt, diffusion=diff)
+            if audio:   # joint text->video+sound: ask for both modalities so the audio branch runs
+                req = make_request(TaskType.T2VS, self._model_id, prompt, diffusion=diff,
+                                   outputs=OutputSpec(modalities=frozenset({"video", "audio"})))
+            else:
+                req = make_request(TaskType.T2V, self._model_id, prompt, diffusion=diff)
             out = self._engine.run(req)
             results.append(self._result(out, request.output, s.fps, idx))
         return results[0] if len(results) == 1 else results
@@ -121,8 +136,10 @@ class VideoGenerator:
         ``GenerationRequest`` from loose kwargs (+ an optional ``SamplingParam`` override) and calls
         ``generate()``. kwargs: num_inference_steps / seed / num_frames / height / width /
         guidance_scale / fps / sigmas / negative_prompt / output_path / output_video_name /
-        save_video / return_frames."""
+        save_video / return_frames / audio (None=auto for an A/V model, True/False to force; the audio
+        is saved as a sibling ``.wav`` next to the mp4)."""
         from fastvideo.api import GenerationRequest, OutputConfig, SamplingConfig
+        audio = kwargs.pop("audio", None)      # None -> auto (by model capability), True/False -> force
         sp = sampling_param
 
         def pick(key: str, default: Any) -> Any:
@@ -148,7 +165,7 @@ class VideoGenerator:
             return_frames=bool(kwargs.get("return_frames", False)))
         req = GenerationRequest(prompt=prompt, negative_prompt=pick("negative_prompt", None),
                                sampling=sampling, output=output)
-        return self.generate(req)
+        return self.generate(req, want_audio=audio)
 
     # --------------------------------------------------------------------- #
     def _result(self, out: Any, output: Any, fps: int, idx: int) -> Any:
@@ -158,13 +175,49 @@ class VideoGenerator:
         # -> [T,H,W,C] uint8 (the on-disk / return convention)
         vid = ((np.clip(frames, -1.0, 1.0) + 1.0) / 2.0 * 255.0).astype("uint8")
         vid = vid.transpose(1, 2, 3, 0) if vid.ndim == 4 else vid
+        save = bool(getattr(output, "save_video", True))
+        out_dir = getattr(output, "output_path", "outputs/")
+        stem = (output.output_video_name or f"v2_{self._model_id}_{idx}")
+        stem = stem[:-4] if stem.endswith(".mp4") else stem
         video_path = None
-        if getattr(output, "save_video", True):
-            os.makedirs(output.output_path, exist_ok=True)
-            name = output.output_video_name or f"v2_{self._model_id}_{idx}"
-            name = name if name.endswith(".mp4") else f"{name}.mp4"
-            video_path = os.path.join(output.output_path, name)
+        if save:
+            os.makedirs(out_dir, exist_ok=True)
+            video_path = os.path.join(out_dir, f"{stem}.mp4")
             import imageio.v2 as imageio
             imageio.mimsave(video_path, list(vid), fps=int(fps), format="mp4")
-        return GenerationResult(frames=(vid if getattr(output, "return_frames", True) else None),
-                                video_path=video_path)
+        # Audio (T2VS): the AudioArtifact carries the raw stereo waveform; save a sibling .wav at the
+        # vocoder's real rate (read from the built audio_vae adapter — the artifact's default rate is a
+        # placeholder). A plain T2V request produces no audio artifact, so this is skipped.
+        audio = audio_sr = audio_path = None
+        art = out.artifacts.get("audio") if hasattr(out.artifacts, "get") else None
+        wav = getattr(art, "samples", None) if art is not None else None
+        if wav is not None:
+            audio = np.asarray(wav, dtype="float32")
+            audio_sr = self._audio_sample_rate(default=int(getattr(art, "sample_rate", 24000) or 24000))
+            if save:
+                audio_path = os.path.join(out_dir, f"{stem}.wav")
+                self._write_wav(audio_path, audio, audio_sr)
+        res = GenerationResult(frames=(vid if getattr(output, "return_frames", True) else None),
+                               video_path=video_path, audio=audio, audio_sample_rate=audio_sr)
+        if audio_path:
+            res.extra["audio_path"] = audio_path
+        return res
+
+    def _audio_sample_rate(self, default: int = 24000) -> int:
+        """Read the true output rate off the built audio_vae adapter (LTX-2 vocoder = 24000); fall back
+        to ``default`` if the model has no audio component or the adapter doesn't expose it."""
+        try:
+            return int(getattr(self._inst.component("audio_vae"), "sample_rate", default))
+        except Exception:
+            return int(default)
+
+    @staticmethod
+    def _write_wav(path: str, wav: Any, sample_rate: int) -> None:
+        """Write ``wav`` ([samples] or [channels, samples] / [samples, channels], float in [-1,1]) to a
+        WAV at ``sample_rate`` (scipy: IEEE-float WAV, no extra deps beyond the installed stack)."""
+        import numpy as np
+        from scipy.io import wavfile
+        a = np.asarray(wav, dtype="float32")
+        if a.ndim == 2 and a.shape[0] in (1, 2) and a.shape[0] < a.shape[1]:
+            a = a.T                       # [channels, samples] -> [samples, channels] (scipy convention)
+        wavfile.write(path, int(sample_rate), np.clip(a, -1.0, 1.0))
