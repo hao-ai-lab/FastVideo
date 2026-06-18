@@ -197,6 +197,7 @@ def load_records(
     *,
     days: int | None = None,
     successful_only: bool = False,
+    baseline_eligible_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Return raw JSON dicts from *local_dir*.
 
@@ -206,6 +207,8 @@ def load_records(
             many days. Records with a missing/unparsable timestamp are kept.
         successful_only: When True, only records with ``success=True`` are
             returned. Useful when building a regression baseline.
+        baseline_eligible_only: When True, only records explicitly marked with
+            ``baseline_eligible=True`` are returned.
 
     Returns:
         List of raw dicts sorted by ``timestamp`` ascending (records that could
@@ -225,6 +228,9 @@ def load_records(
             continue
 
         if successful_only and not data.get("success", True):
+            continue
+
+        if baseline_eligible_only and data.get("baseline_eligible") is not True:
             continue
 
         if cutoff is not None:
@@ -251,6 +257,7 @@ def load_records_for_model(
     *,
     last_n: int | None = None,
     successful_only: bool = True,
+    baseline_eligible_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Return records for a specific *model_id*, optionally filtered by GPU.
 
@@ -261,6 +268,7 @@ def load_records_for_model(
         last_n: When set, return only the most recent *n* records (after all
             other filters). Useful for sliding-window baseline calculations.
         successful_only: Passed through to :func:`load_records`.
+        baseline_eligible_only: Passed through to :func:`load_records`.
 
     Returns:
         List of matching dicts sorted by timestamp ascending.
@@ -269,7 +277,11 @@ def load_records_for_model(
     if not os.path.isdir(model_dir):
         return []
 
-    records = load_records(model_dir, successful_only=successful_only)
+    records = load_records(
+        model_dir,
+        successful_only=successful_only,
+        baseline_eligible_only=baseline_eligible_only,
+    )
 
     if gpu_type is not None:
         records = [r for r in records if r.get("gpu_type") == gpu_type]
