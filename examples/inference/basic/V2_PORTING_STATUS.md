@@ -54,8 +54,16 @@ Wan2.1 model — covered by wan21; those runtime modes are out of scope.
 | `basic_lucy_edit.py` | `decart-ai/Lucy-Edit-Dev` (Wan v2v) | **V2V mechanism (identified):** `WanVideoToVideoPipeline` + `VideoVAEEncodingStage` — VAE-encode the input video to a conditioning latent. v2 needs input-video loading + a VAE-encode-video node + the v2v conditioning (no image_encoder). |
 | `basic_ltx2_3_distilled_i2v*.py` | LTX-2.3-Distilled I2V | Image conditioning on the ltx2 single-stage program (encode the input image + condition the denoise). |
 
-## Out of current scope — new families (kept as an upstream reference map only)
-Each would need a new card + adapters (DiT/VAE/encoder forwards) + maybe a sampler:
+## Backlog — goal: port ALL fastvideo models (63 total: 8 ported · 21 reuse-arch · 34 new-arch)
+Ported (8): the 7 above + **Wan2.1-T2V-14B** (bucket B — reuses the Wan recipe/adapter; 720p defaults).
+
+**Bucket B (21 left) — reuse a v2 architecture** (`WanTransformer3DModel` / `CausalWanTransformer3DModel` /
+`LTX2Transformer3DModel`): a `ModelEntry` in `v2/registry.py` + a recipe (parameterize the wan21/wan_causal/
+ltx2 builders) + `SamplingDefaults`, NO new adapter. Includes other Wan T2V sizes; i2v variants (need an
+image-encoder component + i2v program); FastWan/Turbo (DMD/RCM schedules → a loop variant); Wan2.2-I2V-A14B;
+SF-Wan2.2; LTX-2 base/2.3 repo aliases (already arch-fallback-resolvable, so they work without an entry).
+
+**Bucket C (34 models, ~13 new architectures) — need a new `TorchComponent` adapter + recipe per arch:**
 `basic_cosmos2_5_*` (Cosmos-Predict2.5), `basic_gen3c.py` (GEN3C — **local `converted_weights/` only**),
 `basic_hy15*.py` / `basic_gamecraft.py` / `basic_hyworld.py` (Hunyuan family),
 `basic_longcat_*.py` (LongCat + LoRA), `basic_lingbotworld_base_cam.py`,
@@ -66,11 +74,13 @@ Each would need a new card + adapters (DiT/VAE/encoder forwards) + maybe a sampl
 (interactive mouse/keyboard-conditioned world models).
 
 ## How to add a model to the v2 VideoGenerator
-1. Ensure a v2 card exists (`v2/models/<family>/`) whose `load_id`s resolve to real `fastvideo.models.*`.
-2. Register it in the shared `v2/registry.py` (used by every entrypoint — VideoGenerator, CLI, server):
-   add a `ModelEntry` mapping its HF id(s) → builders (the explicit PRIMARY path — the only way to split
-   same-architecture capability variants, e.g. T2V vs the i2v "InP"), and/or a branch in
-   `select_by_architecture` for the arch-inference FALLBACK (local paths / unregistered repos).
-3. If a DiT/VAE/encoder/upsampler forward differs, add an adapter + class-detection in `torch_adapters.py`
-   and register the component kind in `torch_cuda.py`.
+1. Add a v2 recipe under `v2/recipes/<family>/` (card/loop/program) whose `load_id`s name the real models;
+   set per-model `SamplingDefaults` on the card (`v2/card/specs.py`) — see `wan21`/`ltx2` for the pattern.
+2. Register it in the shared `v2/registry.py` (every entrypoint resolves through it): add a `ModelEntry`
+   mapping its HF id(s) → builders (the PRIMARY path — the only way to split same-arch capability variants,
+   e.g. T2V vs the i2v "InP"), and/or a branch in `select_by_architecture` for the arch-inference FALLBACK.
+3. **Bucket B (reuse an existing arch):** nothing more — the redesigned `torch_backend.py` already builds
+   Wan/LTX components. **Bucket C (new arch):** add a `TorchComponent` subclass + a `_MAKERS`/class-detect
+   branch in `torch_backend.py`, vendor the new model code as marked re-export stubs under `v2/models/...`
+   (see `v2-vendoring-approach`), and register any new component kind in `torch_cuda.py`.
 4. Add `examples/inference/basic/v2_<name>.py` mirroring the official example; generate to confirm.

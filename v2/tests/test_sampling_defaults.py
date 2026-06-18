@@ -3,9 +3,24 @@ from types import SimpleNamespace
 
 from v2.card import SamplingDefaults
 from v2.recipes.ltx2 import build_ltx2_3_card, build_ltx2_base_card, build_ltx2_card
-from v2.recipes.wan21 import build_wan21_card, build_wan22_a14b_card, build_wan22_ti2v_card
+from v2.recipes.wan21 import (
+    build_wan21_card,
+    build_wan22_a14b_card,
+    build_wan22_ti2v_card,
+    build_wan_t2v_14b_card,
+)
 from v2.recipes.wan_causal import build_wan_causal_card
+from v2.registry import resolve
 from v2.video_generator import _resolve_default
+
+
+def test_wan_t2v_14b_defaults_and_registry():
+    # Bucket-B port: reuses the Wan recipe/adapter, only defaults differ (720p, flow_shift 5.0).
+    sd = build_wan_t2v_14b_card().sampling_defaults
+    assert (sd.num_steps, sd.guidance_scale, sd.height, sd.width, sd.fps) == (50, 5.0, 720, 1280, 16)
+    # the HF id resolves to the 14B card via the shared registry (not the 1.3B fallback defaults)
+    build_card, _ = resolve("Wan-AI/Wan2.1-T2V-14B-Diffusers")
+    assert build_card().sampling_defaults.height == 720
 
 
 def test_wan21_defaults():
