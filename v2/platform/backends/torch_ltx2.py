@@ -28,7 +28,10 @@ class TorchLTX2DiT:
         self._VideoLatentShape = VideoLatentShape
 
     @torch.no_grad()
-    def __call__(self, latent, text_embed, sigma, context=None):
+    def __call__(self, latent, text_embed, sigma, audio_latent=None, audio_text=None, context=None):
+        """Video-only (audio_latent=None) -> velocity[C,T,H,W]; joint A/V (audio_latent given) -> a tuple
+        (video_velocity, audio_velocity). LTX-2.3 cross-attends video<->audio in one forward, so the
+        audio latent + audio text must be passed together (not a separate call)."""
         hs = _to_torch(latent, device=self.device, dtype=self.dtype).unsqueeze(0)   # [1,C,T,H,W]
         ehs = _to_torch(text_embed, device=self.device, dtype=self.dtype)
         if ehs is not None:
@@ -39,13 +42,30 @@ class TorchLTX2DiT:
         # per-token timestep = template * sigma (sigma direct, 0..1); per-sample video_sigma.
         timestep = torch.full((1, token_count, 1), s, device=self.device, dtype=torch.float32)
         video_sigma = torch.tensor([s], device=self.device, dtype=torch.float32)
+        av_kwargs: dict = {}
+        au = None
+        if audio_latent is not None:                     # joint A/V: audio latent [1,8,T,16] + audio text
+            from fastvideo.models.audio.ltx2_audio_vae import AudioLatentShape
+            au = _to_torch(audio_latent, device=self.device, dtype=self.dtype).unsqueeze(0)
+            aeh = _to_torch(audio_text, device=self.device, dtype=self.dtype)
+            if aeh is not None:
+                aeh = aeh.unsqueeze(0)
+            atok = self.module.audio_patchifier.get_token_count(AudioLatentShape.from_torch_shape(tuple(au.shape)))
+            av_kwargs = dict(
+                audio_hidden_states=au, audio_encoder_hidden_states=aeh,
+                audio_timestep=torch.full((1, atok, 1), s, device=self.device, dtype=torch.float32),
+                audio_sigma=torch.tensor([s], device=self.device, dtype=torch.float32))
         from fastvideo.forward_context import set_forward_context
         with set_forward_context(current_timestep=s, attn_metadata=None):
-            denoised = self.module(hidden_states=hs, encoder_hidden_states=ehs, timestep=timestep,
-                                   video_sigma=video_sigma, encoder_attention_mask=None)
-        if isinstance(denoised, tuple):
-            denoised = denoised[0]                       # t2v: video_out only (audio path unused)
-        # LTX-2 DiT predicts x0; the v2 loop integrates velocity. velocity = (x_t - x0)/sigma.
+            out = self.module(hidden_states=hs, encoder_hidden_states=ehs, timestep=timestep,
+                              video_sigma=video_sigma, encoder_attention_mask=None, **av_kwargs)
+        # LTX-2 DiT predicts x0; the v2 loop integrates velocity = (x_t - x0)/sigma.
+        if au is not None:
+            denoised_v, denoised_a = out
+            vel_v = (hs.float() - denoised_v.float()) / max(s, 1e-6)
+            vel_a = (au.float() - denoised_a.float()) / max(s, 1e-6)
+            return _to_numpy(vel_v.squeeze(0)), _to_numpy(vel_a.squeeze(0))
+        denoised = out[0] if isinstance(out, tuple) else out
         velocity = (hs.float() - denoised.float()) / max(s, 1e-6)
         return _to_numpy(velocity.squeeze(0))
 
@@ -107,6 +127,56 @@ class TorchGemma:
             out = self.module(input_ids=ids, attention_mask=mask)
         hidden = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
         return _to_numpy(hidden.squeeze(0))
+
+    @torch.no_grad()
+    def encode_av(self, text):
+        """LTX-2.3's connector emits SEPARATE video + audio text projections; returns (video_text,
+        audio_text) numpy arrays (video = last_hidden_state, audio = hidden_states[0]). For LTX-2.0 the
+        two are the same shared projection, so both are returned equal."""
+        toks = self.tokenizer(text or "", return_tensors="pt", max_length=self.max_length,
+                              truncation=True, padding="max_length")
+        ids = toks.input_ids.to(self.device)
+        mask = toks.attention_mask.to(self.device)
+        from fastvideo.forward_context import set_forward_context
+        with set_forward_context(current_timestep=0, attn_metadata=None):
+            out = self.module(input_ids=ids, attention_mask=mask)
+        video = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
+        hs = getattr(out, "hidden_states", None)
+        audio = hs[0] if hs else video
+        return _to_numpy(video.squeeze(0)), _to_numpy(audio.squeeze(0))
+
+
+class TorchLTX2Vocoder:
+    """Thin wrapper over the LTX-2 ``Vocoder`` module (mel-spectrogram -> waveform @24kHz). Built as its
+    own component so ``TorchLTX2AudioVAE`` can chain AudioDecoder -> Vocoder."""
+
+    def __init__(self, module, *, device, dtype):
+        self.module = module.to(device=device, dtype=dtype).eval()
+        self.device, self.dtype = device, dtype
+
+
+class TorchLTX2AudioVAE:
+    """audio_vae.decode(audio_latent[C,T,F]) -> waveform (numpy). Runs the LTX-2 ``AudioDecoder``
+    (latent -> mel spectrogram) then the ``Vocoder`` (mel -> waveform @24kHz)."""
+
+    def __init__(self, module, vocoder, *, device, dtype):
+        self.module = module.to(device=device, dtype=dtype).eval()      # AudioDecoder
+        self.vocoder = vocoder                                          # TorchLTX2Vocoder | None
+        self.device, self.dtype = device, dtype
+
+    @torch.no_grad()
+    def decode(self, audio_latent):
+        z = _to_torch(audio_latent, device=self.device, dtype=self.dtype).unsqueeze(0)   # [1,8,T,16]
+        mel = self.module(z)
+        if hasattr(mel, "sample"):
+            mel = mel.sample
+        if self.vocoder is not None:
+            wav = self.vocoder.module(mel)
+            if hasattr(wav, "sample"):
+                wav = wav.sample
+        else:
+            wav = mel
+        return _to_numpy(wav.squeeze(0))
 
 
 class TorchLTX2Upsampler:
