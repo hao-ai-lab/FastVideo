@@ -41,7 +41,11 @@ class ChunkRolloutLoop:
         self.precision = precision
         self.cost = cost
 
-    def _chunk_shape(self, req) -> tuple[int, int, int, int]:
+    def _chunk_shape(self, req, model=None) -> tuple[int, int, int, int]:
+        # Real Wan geometry on the cuda backend (16 latent channels; chunk_size latent frames; 8x
+        # spatial VAE compression); the CPU toy keeps a tiny stand-in.
+        if model is not None and getattr(getattr(model, "platform", None), "device", "cpu") == "cuda":
+            return (16, self.chunk_size, max(1, req.diffusion.height // 8), max(1, req.diffusion.width // 8))
         h = max(2, req.diffusion.height // 120)
         w = max(2, req.diffusion.width // 120)
         return (LATENT_CHANNELS, self.chunk_size, h, w)
@@ -61,7 +65,7 @@ class ChunkRolloutLoop:
         st.scratch.update(chunk_idx=0, step_in_chunk=0, slabs=prior, chunks_out=[],
                           guidance_scale=float(req.diffusion.guidance_scale),
                           caches=getattr(model, "caches", None))
-        st.latents["chunk"] = (rng.standard_normal(self._chunk_shape(req)) * float(sig[0])).astype("float32")
+        st.latents["chunk"] = (rng.standard_normal(self._chunk_shape(req, model)) * float(sig[0])).astype("float32")
         st.plugin_state["cfg"] = {}
         return st
 

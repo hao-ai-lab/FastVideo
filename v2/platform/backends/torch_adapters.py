@@ -120,6 +120,11 @@ class TorchWanDiT:
     def __init__(self, module, *, device, dtype):
         self.module = module.to(device=device, dtype=dtype).eval()
         self.device, self.dtype = device, dtype
+        # CausalWanTransformer3DModel (self-forcing student) conditions across chunks via an internal
+        # kv_cache, NOT a forward arg — so the chunk_rollout loop's latent `context` is ignored here;
+        # with no kv_cache passed it dispatches to its full-attention _forward_train. (Faithful
+        # kv_cache streaming is a follow-up; this runs the real causal weights per chunk.)
+        self.causal = "Causal" in type(module).__name__
 
     @torch.no_grad()
     def __call__(self, latent, text_embed, sigma, context=None):
@@ -127,9 +132,14 @@ class TorchWanDiT:
         ehs = _to_torch(text_embed, device=self.device, dtype=self.dtype)
         if ehs is not None:
             ehs = ehs.unsqueeze(0)
-        # BRINGUP risk B (confirmed on box): timestep = sigma * 1000, the FlowUniPC continuous timestep.
-        timestep = torch.tensor([float(sigma) * NUM_TRAIN_TIMESTEPS], device=self.device)
-        img = _to_torch(context, device=self.device, dtype=self.dtype)
+        # BRINGUP risk B (confirmed): timestep = sigma * 1000. Standard Wan takes a scalar; the causal
+        # model needs a per-latent-frame timestep [B, num_frames] (uniform here — the chunk_rollout loop
+        # denoises a whole chunk at one sigma, not the staggered per-frame causal schedule).
+        ts = float(sigma) * NUM_TRAIN_TIMESTEPS
+        timestep = (torch.full((1, hs.shape[2]), ts, device=self.device) if self.causal
+                    else torch.tensor([ts], device=self.device))
+        # ``context`` is an i2v image embedding for standard Wan; the causal model takes none (see __init__).
+        img = None if self.causal else _to_torch(context, device=self.device, dtype=self.dtype)
         if img is not None:
             img = img.unsqueeze(0)
         # The FastVideo attention layer reads attn_metadata via get_forward_context(), so the DiT forward
