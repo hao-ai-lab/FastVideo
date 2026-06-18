@@ -33,6 +33,72 @@ class ModelEntry:
     build_program: Callable[[], Any]
 
 
+# Bucket-C ports — each is a self-contained recipe package (card-declared torch adapter via
+# ``ComponentSpec.adapter`` + a new/forked loop, no shared-backend edit). ONE table drives BOTH the
+# explicit HF-id registry (PRIMARY) and the ``select_by_architecture`` fallback, so adding a port is one
+# row. Rows: (hf_ids, package, card_builder, program_builder, transformer_cls). ``transformer_cls`` is the
+# diffusers/EntryClass name for the fallback ("" = explicit-id-only; confirm against the real checkpoint's
+# transformer/config.json _class_name). Builders are resolved lazily (``import v2.registry`` stays cheap /
+# torch-free; the recipe packages are CPU-clean but importing 14 of them eagerly on every resolve is waste).
+_BUCKET_C: tuple[tuple, ...] = (
+    (("KyleShao/Cosmos-Predict2.5-2B-Diffusers", "nvidia/Cosmos-Predict2.5-14B"), "cosmos25", "build_cosmos25_card",
+     "build_cosmos25_program", "Cosmos25Transformer3DModel"),
+    (("hunyuanvideo-community/HunyuanVideo", ), "hunyuan_video", "build_hunyuan_video_card",
+     "build_hunyuan_video_program", "HunyuanVideoTransformer3DModel"),
+    (("FastVideo/FastHunyuan-diffusers", ), "hunyuan_video", "build_fast_hunyuan_video_card",
+     "build_hunyuan_video_program", ""),
+    (("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+      "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled"), "hunyuan_video15",
+     "build_hunyuan_video15_card", "build_hunyuan_video15_program", "HunyuanVideo15Transformer3DModel"),
+    (("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v",
+      "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_i2v_distilled",
+      "weizhou03/HunyuanVideo-1.5-Diffusers-1080p", "weizhou03/HunyuanVideo-1.5-Diffusers-1080p-2SR"),
+     "hunyuan_video15", "build_hunyuan_video15_720p_card", "build_hunyuan_video15_program", ""),
+    (("FastVideo/LongCat-Video-T2V-Diffusers", "FastVideo/LongCat-Video-I2V-Diffusers",
+      "FastVideo/LongCat-Video-VC-Diffusers"), "longcat", "build_longcat_card", "build_longcat_program",
+     "LongCatTransformer3DModel"),
+    (("stabilityai/stable-diffusion-3.5-medium", ), "sd35", "build_sd35_card", "build_sd35_program",
+     "SD3Transformer2DModel"),
+    (("FastVideo/GEN3C-Cosmos-7B-Diffusers", ), "gen3c", "build_gen3c_card", "build_gen3c_program",
+     "Gen3CTransformer3DModel"),
+    (("kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers", ), "kandinsky5", "build_kandinsky5_card",
+     "build_kandinsky5_program", "Kandinsky5Transformer3DModel"),
+    (("black-forest-labs/FLUX.2-dev", ), "flux2", "build_flux2_card", "build_flux2_program", "Flux2Transformer2DModel"),
+    (("black-forest-labs/FLUX.2-klein-4B", "black-forest-labs/FLUX.2-klein-9B"), "flux2", "build_flux2_klein_card",
+     "build_flux2_program", ""),
+    (("FastVideo/stable-audio-open-1.0-Diffusers", ), "stable_audio", "build_stable_audio_card",
+     "build_stable_audio_program", "StableAudioDiT"),
+    (("FastVideo/stable-audio-open-small-Diffusers", ), "stable_audio", "build_stable_audio_small_card",
+     "build_stable_audio_program", ""),
+    (("FastVideo/HunyuanGameCraft-Diffusers", ), "hunyuangamecraft", "build_hunyuangamecraft_card",
+     "build_hunyuangamecraft_program", "HunyuanGameCraftTransformer3DModel"),
+    (("FastVideo/HY-WorldPlay-Bidirectional-Diffusers", ), "hyworld", "build_hyworld_card", "build_hyworld_program",
+     "HYWorldTransformer3DModel"),
+    (("FastVideo/LingBot-World-Base-Cam-Diffusers", ), "lingbotworld", "build_lingbotworld_card",
+     "build_lingbotworld_program", "LingBotWorldTransformer3DModel"),
+    (("FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers", "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
+      "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers", "FastVideo/Matrix-Game-2.0-Base-Diffusers",
+      "FastVideo/Matrix-Game-2.0-GTA-Diffusers", "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers"), "matrixgame2",
+     "build_matrixgame2_card", "build_matrixgame2_program", "CausalMatrixGame2WanModel"),
+    (("FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers", ), "matrixgame3", "build_matrixgame3_card",
+     "build_matrixgame3_program", "MatrixGame3WanModel"),
+)
+
+
+def _lazy(package: str, fn: str) -> Callable[[], Any]:
+    """A ``() -> card_or_program`` builder that imports the recipe package only when first called."""
+
+    def _build() -> Any:
+        import importlib
+        return getattr(importlib.import_module(f"v2.recipes.{package}"), fn)()
+
+    return _build
+
+
+def _bucket_c_entries() -> list[ModelEntry]:
+    return [ModelEntry(hf_ids, _lazy(pkg, cb), _lazy(pkg, pb)) for (hf_ids, pkg, cb, pb, _cls) in _BUCKET_C]
+
+
 def _entries() -> list[ModelEntry]:
     """The explicit registry (PRIMARY). Builders imported lazily to avoid import cycles with the model
     packages and keep importing this module cheap."""
@@ -54,7 +120,7 @@ def _entries() -> list[ModelEntry]:
     )
     from v2.recipes.wan21.i2v import build_wan21_i2v_card, build_wan21_i2v_program, build_wan22_i2v_a14b_card
     from v2.recipes.cosmos2 import build_cosmos2_card, build_cosmos2_program
-    return [
+    return [  # noqa: RUF005 — explicit list, extended with the bucket-C ports below via _bucket_c_entries()
         ModelEntry(("Wan-AI/Wan2.1-T2V-1.3B-Diffusers", ), build_wan21_card, build_wan_t2v_program),
         ModelEntry(("Wan-AI/Wan2.1-T2V-14B-Diffusers", ), build_wan_t2v_14b_card, build_wan_t2v_program),
         # Wan2.1 i2v cluster: CLIP image encoder + first-frame VAE conditioning ([mask|cond] -> 36ch DiT).
@@ -80,7 +146,7 @@ def _entries() -> list[ModelEntry]:
         # Cosmos-Predict2-2B-Video2World — EDM-Karras denoiser (new CosmosDenoiseLoop + CosmosDiT adapter),
         # reusing the Wan VAE adapter + T5. Registered for t2v (video2world conditioning threads later).
         ModelEntry(("nvidia/Cosmos-Predict2-2B-Video2World", ), build_cosmos2_card, build_cosmos2_program),
-    ]
+    ] + _bucket_c_entries()  # the 14 self-contained bucket-C recipe packages (one row each in _BUCKET_C)
 
 
 def _short(p: str) -> str:
@@ -118,6 +184,11 @@ def select_by_architecture(sig: dict):
     """FALLBACK: map an architecture signature -> (build_card, build_program) by class names, so a local
     path / renamed repo / new distilled variant of a known arch still resolves with no registry entry."""
     tr, pipe = sig.get("transformer_cls"), sig.get("pipeline")
+    for (_hf, pkg, cb, pb, cls) in _BUCKET_C:  # the 14 bucket-C ports, keyed by transformer cls
+        if cls and tr == cls:
+            import importlib
+            mod = importlib.import_module(f"v2.recipes.{pkg}")
+            return getattr(mod, cb), getattr(mod, pb)
     if tr == "CosmosTransformer3DModel":
         from v2.recipes.cosmos2 import build_cosmos2_card, build_cosmos2_program
         return build_cosmos2_card, build_cosmos2_program
