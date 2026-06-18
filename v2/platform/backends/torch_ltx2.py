@@ -139,7 +139,10 @@ class TorchGemma:
         mask = toks.attention_mask.to(self.device)
         from fastvideo.forward_context import set_forward_context
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            out = self.module(input_ids=ids, attention_mask=mask)
+            # output_hidden_states=True populates hidden_states=(audio_encoding,) — the SEPARATE audio
+            # connector projection (gemma.py:703); without it hidden_states is None and we'd wrongly
+            # fall back to the video embedding (different dim -> cross-attn shape mismatch).
+            out = self.module(input_ids=ids, attention_mask=mask, output_hidden_states=True)
         video = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
         hs = getattr(out, "hidden_states", None)
         audio = hs[0] if hs else video

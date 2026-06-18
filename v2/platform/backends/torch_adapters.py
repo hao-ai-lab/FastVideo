@@ -363,3 +363,22 @@ def build_torch_upsampler(spec, instance, platform):
     stats_owner = getattr(vae_module, "decoder", None) or getattr(vae_module, "encoder", None) or vae_module
     from .torch_ltx2 import TorchLTX2Upsampler
     return TorchLTX2Upsampler(module, stats_owner, device=device, dtype=dtype)
+
+
+def build_torch_audio_vae(spec, instance, platform):
+    ckpt = _require_checkpoint(spec)
+    _ensure_fastvideo_runtime()
+    module = _load_component("AudioDecoderLoader", ckpt, _fastvideo_args(spec))   # LTX2AudioDecoder
+    device, dtype = _device(platform), _native_dtype(module)
+    voc = instance.component("vocoder")   # build/fetch the vocoder; TorchLTX2AudioVAE chains decoder->vocoder
+    from .torch_ltx2 import TorchLTX2AudioVAE
+    return TorchLTX2AudioVAE(module, voc, device=device, dtype=dtype)
+
+
+def build_torch_vocoder(spec, instance, platform):
+    ckpt = _require_checkpoint(spec)
+    _ensure_fastvideo_runtime()
+    module = _load_component("VocoderLoader", ckpt, _fastvideo_args(spec))        # LTX2Vocoder
+    device, dtype = _device(platform), _native_dtype(module)
+    from .torch_ltx2 import TorchLTX2Vocoder
+    return TorchLTX2Vocoder(module, device=device, dtype=dtype)

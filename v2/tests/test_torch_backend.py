@@ -42,7 +42,8 @@ def _make_cuda_available(monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_cuda_has_all_components_and_two_solver_ops():
     comps = sorted(r["kind"] for r in component_matrix() if r["device"] == "cuda")
-    assert comps == ["dit", "text_encoder", "upsampler", "vae"]   # + upsampler: LTX-2 spatial upsampler
+    # + upsampler (LTX-2 spatial), audio_vae + vocoder (LTX-2.3 T2VS audio branch)
+    assert comps == ["audio_vae", "dit", "text_encoder", "upsampler", "vae", "vocoder"]
     ops = sorted(r["op"] for r in kernel_matrix() if r["device"] == "cuda")
     assert ops == ["flow_match_step", "flow_sde_step"]
 
