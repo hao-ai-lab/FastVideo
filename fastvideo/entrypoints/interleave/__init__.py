@@ -24,6 +24,10 @@ from fastvideo.entrypoints.interleave.schema import (
     PlannerInput,
 )
 from fastvideo.entrypoints.interleave.server import build_app
+from fastvideo.entrypoints.interleave.trace import (
+    save_trace,
+    trace_to_dict,
+)
 
 __all__ = [
     "AcceptAllCritic",
@@ -43,4 +47,6 @@ __all__ = [
     "PlannerProvider",
     "SinglePromptPlanner",
     "build_app",
+    "save_trace",
+    "trace_to_dict",
 ]

@@ -23,6 +23,10 @@ from fastvideo.entrypoints.interleave.schema import (
     PlannedInterleaveStep,
 )
 from fastvideo.entrypoints.interleave.server import build_app
+from fastvideo.entrypoints.interleave.trace import (
+    save_trace,
+    trace_to_dict,
+)
 
 
 def test_interleave_edit_request_accepts_singular_step_field() -> None:
@@ -190,3 +194,44 @@ def test_interleave_orchestrator_retries_with_refined_prompt() -> None:
     assert len(trace.attempts) == 2
     assert trace.final_image is not None
     assert trace.final_image.prompt == "refined prompt"
+
+
+def test_trace_serialization_omits_images_by_default(tmp_path: Path) -> None:
+    generated = GeneratedImage(
+        prompt="final",
+        image_base64="large-payload",
+        file_path="/tmp/final.png",
+        inference_time_s=0.5,
+    )
+    trace = InterleaveOrchestrator(
+        planner=FakeSingleStepPlanner(),
+        generator=FakeSingleStepGenerator(generated),
+    ).run("final")
+
+    payload = trace_to_dict(trace)
+
+    assert payload["success"] is True
+    assert payload["final_image"]["file_path"] == "/tmp/final.png"
+    assert "image_base64" not in payload["final_image"]
+    assert "image_base64" not in payload["attempts"][0]["generated"]
+
+    trace_path = tmp_path / "trace.json"
+    save_trace(trace, trace_path)
+    assert "large-payload" not in trace_path.read_text(encoding="utf-8")
+
+    payload_with_images = trace_to_dict(trace, include_images=True)
+    assert payload_with_images["final_image"]["image_base64"] == "large-payload"
+
+
+class FakeSingleStepPlanner:
+    def plan(self, request):
+        return [PlannedInterleaveStep(prompt=request.instruction)]
+
+
+class FakeSingleStepGenerator:
+    def __init__(self, generated: GeneratedImage) -> None:
+        self.generated = generated
+
+    def generate(self, request, *, request_id=None):
+        del request, request_id
+        return self.generated

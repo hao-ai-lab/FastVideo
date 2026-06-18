@@ -105,7 +105,8 @@ Testing plan:
 - [x] Implement first minimal app/service layer.
 - [x] Add unit tests with fakes.
 - [x] Run Modal-backed validation.
-- [ ] Commit first coherent checkpoint.
+- [x] Commit first coherent checkpoint.
+- [x] Add trace serialization and a native single-prompt example runner.
 
 ## Findings
 
@@ -235,6 +236,32 @@ Validation completed:
   - Result: `4 passed, 14 warnings in 22.54s`.
   - Pre-commit result: `yapf`, `ruff`, `codespell`, `mypy`, filename check all
     passed. PyMarkdown/actionlint skipped with no files to check.
+
+Commits so far:
+
+- `7e70f859` — `[misc] track InterleaveThinker integration plan`
+- `eb33639c` — `[feat] add InterleaveThinker compatibility service`
+
+Next slice:
+
+- Added `fastvideo/entrypoints/interleave/trace.py` with JSON-safe
+  serialization for `InterleaveTrace`, excluding base64 image payloads by
+  default.
+- Added `examples/interleave/interleave_single_prompt.py` that uses
+  `VideoGenerator`, `FastVideoImageGeneratorBackend`, `SinglePromptPlanner`,
+  and `AcceptAllCritic` to generate a one-step interleave trace.
+- Added focused tests for trace serialization in
+  `tests/local_tests/test_interleave_entrypoint.py`.
+
+Validation note for the next Modal run:
+
+- Commit the trace/example slice locally.
+- Create a temporary validation worktree from upstream `main`.
+- Apply `git diff --binary main..interleavethinker-fastvideo` into that
+  temporary worktree so all branch changes are uncommitted relative to `main`.
+- Run Modal from the temporary validation worktree with `--apply-local-patch`.
+  This avoids the launcher's limitation that it only captures local diffs from
+  the current `HEAD`, not local-only commits.
 
 ## Proposed Standardization
 
