@@ -50,12 +50,19 @@ def _maybe_convert_model_to_nvfp4(model: nn.Module) -> None:
     from fastvideo.layers.quantization.nvfp4_config import (
         NVFP4QuantizeMethod, convert_model_to_nvfp4,
     )
+    from fastvideo.layers.quantization.nvfp4_qat_config import (
+        NVFP4QATQuantizeMethod, convert_model_to_fp4,
+    )
 
     for mod in model.modules():
-        if isinstance(getattr(mod, "quant_method", None),
-                      NVFP4QuantizeMethod):
+        qm = getattr(mod, "quant_method", None)
+        if isinstance(qm, NVFP4QuantizeMethod):
             logger.info("Converting loaded model weights for NVFP4 linear layers")
             convert_model_to_nvfp4(model)
+            return
+        if isinstance(qm, NVFP4QATQuantizeMethod):
+            logger.info("Converting loaded model weights for NVFP4-QAT linear layers")
+            convert_model_to_fp4(model)
             return
 
 
@@ -332,6 +339,7 @@ def load_model_from_full_model_state_dict(
         NotImplementedError: If got FSDP with more than 1D.
     """
     meta_sd = model.state_dict()
+    named_parameters = dict(model.named_parameters())
     sharded_sd = {}
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
         full_sd_iterator, param_names_mapping)  # type: ignore
@@ -363,8 +371,25 @@ def load_model_from_full_model_state_dict(
             )
         if not hasattr(meta_sharded_param, "device_mesh"):
             full_tensor = full_tensor.to(device=device, dtype=param_dtype)
-            # In cases where parts of the model aren't sharded, some parameters will be plain tensors
-            sharded_tensor = full_tensor
+            target_param = named_parameters.get(target_param_name)
+            weight_loader = getattr(target_param, "weight_loader", None)
+            # Gated on a shape mismatch: only fused/stacked params with a custom
+            # weight_loader (e.g. Qwen3's merged QKV/gate-up) take this path.
+            # Existing models whose unsharded params match the checkpoint shape
+            # fall through to the original `sharded_tensor = full_tensor` below.
+            if target_param is not None and callable(weight_loader) and tuple(target_param.shape) != tuple(
+                    full_tensor.shape):
+                loaded_param = nn.Parameter(torch.empty(tuple(target_param.shape),
+                                                        device=device,
+                                                        dtype=param_dtype),
+                                            requires_grad=False)
+                for attr_name, attr_value in vars(target_param).items():
+                    setattr(loaded_param, attr_name, attr_value)
+                weight_loader(loaded_param, full_tensor)
+                sharded_tensor = loaded_param.data
+            else:
+                # In cases where parts of the model aren't sharded, some parameters will be plain tensors.
+                sharded_tensor = full_tensor
         else:
             full_tensor = full_tensor.to(device=device, dtype=param_dtype)
             sharded_tensor = distribute_tensor(

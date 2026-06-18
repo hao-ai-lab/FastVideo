@@ -517,6 +517,7 @@ class VideoGenerator:
             if _ek in kwargs:
                 extra_overrides[_ek] = kwargs.pop(_ek)
 
+        prompt_embeds = kwargs.pop("prompt_embeds", None)
         sampling_param.update(kwargs)
         kwargs["_extra_overrides"] = extra_overrides
 
@@ -567,6 +568,8 @@ class VideoGenerator:
             raise ValueError("Either prompt or prompt_txt must be provided")
         output_path = self._prepare_output_path(sampling_param.output_path, prompt)
         kwargs["output_path"] = output_path
+        if prompt_embeds is not None:
+            kwargs["prompt_embeds"] = prompt_embeds
         return self._generate_single_video(
             prompt=prompt,
             sampling_param=sampling_param,
@@ -669,6 +672,7 @@ class VideoGenerator:
         prompt = prompt.strip()
         sampling_param = deepcopy(sampling_param)
         output_path = kwargs["output_path"]
+        prompt_embeds = kwargs.get("prompt_embeds")
         sampling_param.prompt = prompt
         # Process negative prompt
         if sampling_param.negative_prompt is not None:
@@ -715,6 +719,9 @@ class VideoGenerator:
             n_tokens=n_tokens,
             VSA_sparsity=fastvideo_args.VSA_sparsity,
         )
+        # Allow precomputed prompt_embeds (e.g. from diffusers) to skip text encoding
+        if prompt_embeds is not None:
+            batch.prompt_embeds = (list(prompt_embeds) if isinstance(prompt_embeds, list | tuple) else [prompt_embeds])
 
         extra_overrides = kwargs.pop("_extra_overrides", {})
         for _ek, _ev in extra_overrides.items():
@@ -1245,8 +1252,12 @@ class VideoGenerator:
             logger.warning("Audio mux failed: %s", e)
             return False
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None = None) -> None:
-        self.executor.set_lora_adapter(lora_nickname, lora_path)
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None,
+                         strength: float = 1.0,
+                         accumulate: bool = False) -> None:
+        self.executor.set_lora_adapter(lora_nickname, lora_path, strength=strength, accumulate=accumulate)
 
     def unmerge_lora_weights(self) -> None:
         """
