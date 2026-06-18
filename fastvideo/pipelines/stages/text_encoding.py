@@ -221,9 +221,11 @@ class TextEncodingStage(PipelineStage):
                     # Guard against empty strings that produce 0 tokens with
                     # Qwen2-style tokenizers. Scoped via treat_empty_as_dot so
                     # models that legitimately use "" (e.g. negative_prompt="")
-                    # are not affected.
-                    if isinstance(processed_text, str) and not processed_text.strip() and getattr(
-                            encoder_config, "treat_empty_as_dot", False):
+                    # are not affected. Chat-model preprocessors return a
+                    # message list/dict (not str), which has no .strip() and
+                    # never needs this guard, so restrict it to plain strings.
+                    if (isinstance(processed_text, str) and not processed_text.strip()
+                            and getattr(encoder_config, "treat_empty_as_dot", False)):
                         processed_text = "."
                     processed_texts.append(processed_text)
                 else:

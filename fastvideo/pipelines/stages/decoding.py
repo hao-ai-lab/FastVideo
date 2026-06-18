@@ -72,8 +72,11 @@ class DecodingStage(PipelineStage):
 
         cfg = getattr(self.vae, "config", None)
 
-        # Matrix-Game 2.0-style: z = z * std + mean
-        if (cfg is not None and hasattr(cfg, "latents_mean") and hasattr(cfg, "latents_std")):
+        # Matrix-Game 2.0-style: z = z * std + mean. The fields exist (as None)
+        # on diffusers AutoencoderKL configs that instead use scaling/shift, so
+        # require non-None values here rather than mere attribute presence.
+        if (cfg is not None and getattr(cfg, "latents_mean", None) is not None
+                and getattr(cfg, "latents_std", None) is not None):
             latents_mean = torch.tensor(cfg.latents_mean, device=latents.device,
                                         dtype=latents.dtype).view(1, -1, 1, 1, 1)
             latents_std = torch.tensor(cfg.latents_std, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
