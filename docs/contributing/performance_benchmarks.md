@@ -41,6 +41,13 @@ when you want local Markdown/normalized-result artifacts from the comparator.
 `fastvideo/tests/performance/results/`; remove stale result files if you only
 want to compare the latest local run.
 
+## Local live dashboard
+
+For an app-style local dashboard backed by the same HF performance-tracking
+records, see `performance_dashboard/README.md`. The dashboard provides a
+FastAPI API plus a React UI and can be exposed with `ngrok` after building the
+frontend.
+
 ## Architecture
 
 ```

@@ -24,7 +24,7 @@ from huggingface_hub import HfApi, snapshot_download
 # ---------------------------------------------------------------------------
 
 HF_REPO_ID: str = os.environ.get("HF_REPO_ID", "FastVideo/performance-tracking")
-HF_TOKEN: str | None = os.environ.get("HF_API_KEY")
+HF_TOKEN_ENV_VARS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
 SYNC_MARKER = ".hf_sync_complete"
 SYNC_REUSE_TTL_SECONDS = int(os.environ.get("PERFORMANCE_TRACKING_SYNC_REUSE_TTL_SECONDS", "3600"))
 
@@ -46,6 +46,15 @@ def safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def resolve_hf_token() -> str | None:
+    """Return the first configured Hugging Face token env var."""
+    for env_var in HF_TOKEN_ENV_VARS:
+        token = os.environ.get(env_var)
+        if token:
+            return token
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +129,7 @@ def sync_from_hf(
             repo_id=HF_REPO_ID,
             repo_type="dataset",
             local_dir=local_dir,
-            token=HF_TOKEN,
+            token=resolve_hf_token(),
             allow_patterns="*.json",
         )
         os.makedirs(local_dir, exist_ok=True)
@@ -150,8 +159,9 @@ def upload_record(
     that must not silently lose records — otherwise the rolling baseline can
     stop advancing without any signal in the build log.
     """
-    if not HF_TOKEN:
-        msg = "hf_store: HF_API_KEY not set"
+    token = resolve_hf_token()
+    if not token:
+        msg = f"hf_store: none of {', '.join(HF_TOKEN_ENV_VARS)} set"
         if strict:
             raise RuntimeError(f"{msg}; cannot upload.")
         print(f"{msg}, skipping upload.")
@@ -161,7 +171,7 @@ def upload_record(
     path_in_repo = f"{sanitize(model_id)}/{os.path.basename(local_path)}"
     commit_sha = (record.get("commit_sha") or "unknown")[:7]
 
-    api = HfApi(token=HF_TOKEN)
+    api = HfApi(token=token)
     try:
         api.upload_file(
             path_or_fileobj=local_path,
