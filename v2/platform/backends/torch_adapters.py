@@ -117,17 +117,43 @@ class TorchWanDiT:
                 encoder_hidden_states_image=None, guidance=None) -> velocity[B,C,T,H,W]  (bare tensor)
     """
 
-    def __init__(self, module, *, device, dtype):
-        self.module = module.to(device=device, dtype=dtype).eval()
+    def __init__(self, module, *, device, dtype, offload_group=None, component_id="transformer"):
         self.device, self.dtype = device, dtype
+        # Wan2.2 MoE (A14B): two 14B experts don't both fit one 80GB GPU. When ``offload_group`` is set,
+        # keep this expert on CPU and bring only the *active* one onto the GPU on demand (evicting the
+        # other) — the boundary-timestep routing uses each expert in a contiguous phase, so it's a single
+        # swap, not per-step thrash. Single-expert Wan stays GPU-resident (offload_group=None).
+        self.offload_group = offload_group
+        self.component_id = component_id
+        if offload_group is None:
+            self.module = module.to(device=device, dtype=dtype).eval()
+            self._on_gpu = True
+        else:
+            self.module = module.to(device="cpu", dtype=dtype).eval()   # offload to CPU until first call
+            self._on_gpu = False
+            offload_group[component_id] = self
         # CausalWanTransformer3DModel (self-forcing student) conditions across chunks via an internal
         # kv_cache, NOT a forward arg — so the chunk_rollout loop's latent `context` is ignored here;
         # with no kv_cache passed it dispatches to its full-attention _forward_train. (Faithful
         # kv_cache streaming is a follow-up; this runs the real causal weights per chunk.)
         self.causal = "Causal" in type(module).__name__
 
+    def _ensure_resident(self) -> None:
+        """MoE offload: make this expert the sole GPU-resident DiT (evict the previously-active one to
+        CPU first, so peak GPU never holds both). No-op for the single-expert resident case."""
+        if self.offload_group is None or self._on_gpu:
+            return
+        for other in self.offload_group.values():
+            if other is not self and other._on_gpu:
+                other.module.to("cpu")
+                other._on_gpu = False
+        torch.cuda.empty_cache()
+        self.module.to(self.device)
+        self._on_gpu = True
+
     @torch.no_grad()
     def __call__(self, latent, text_embed, sigma, context=None):
+        self._ensure_resident()
         hs = _to_torch(latent, device=self.device, dtype=self.dtype).unsqueeze(0)      # add batch dim
         ehs = _to_torch(text_embed, device=self.device, dtype=self.dtype)
         if ehs is not None:
@@ -166,7 +192,8 @@ class TorchWanDiT:
         import copy
         c = TorchWanDiT.__new__(TorchWanDiT)
         c.module = copy.deepcopy(self.module)
-        c.device, c.dtype = self.device, self.dtype
+        c.device, c.dtype, c.causal = self.device, self.dtype, self.causal
+        c.offload_group, c.component_id, c._on_gpu = None, self.component_id, True   # standalone resident copy
         return c
 
     def mse_grad_step(self, *a, **k):
@@ -283,7 +310,16 @@ def build_torch_dit(spec, instance, platform):
     if "LTX2" in type(module).__name__:                          # LTX2Transformer3DModel
         from .torch_ltx2 import TorchLTX2DiT
         return TorchLTX2DiT(module, device=device, dtype=dtype)
-    return TorchWanDiT(module, device=device, dtype=dtype)       # WanTransformer3DModel / Causal*
+    # Wan2.2 MoE (A14B): >1 DiT expert -> CPU-offload all but the active one (swapped at the boundary)
+    # so the two 14B experts fit one 80GB GPU. A single-expert Wan stays GPU-resident (grp=None).
+    n_experts = sum(1 for c in instance.card.components.values() if getattr(c, "kind", None) == "dit")
+    grp = None
+    if n_experts > 1:
+        grp = getattr(instance, "_dit_offload_group", None)
+        if grp is None:
+            grp = instance._dit_offload_group = {}
+    return TorchWanDiT(module, device=device, dtype=dtype, offload_group=grp,   # WanTransformer3DModel / Causal*
+                       component_id=spec.component_id)
 
 
 def build_torch_vae(spec, instance, platform):
