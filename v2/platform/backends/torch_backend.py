@@ -197,9 +197,11 @@ class WanDiT(TorchComponent):
         self._on_gpu = True
 
     @torch.no_grad()
-    def __call__(self, latent, text_embed, sigma, context=None):
+    def __call__(self, latent, text_embed, sigma, context=None, *, cond=None):
         self._ensure_resident()
         hs = self._t(latent)
+        if cond is not None:        # i2v: concat [noise (16ch) ; mask+cond_latent (20ch)] -> 36ch DiT input
+            hs = torch.cat([hs, self._t(cond)], dim=1)
         ehs = self._t(text_embed)
         # timestep = sigma*1000 (BRINGUP risk B). Causal model needs per-latent-frame [B, num_frames].
         ts = float(sigma) * NUM_TRAIN_TIMESTEPS

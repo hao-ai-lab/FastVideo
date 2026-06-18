@@ -80,6 +80,11 @@ class WanDenoiseLoop:
         st.cond["negative_prompt_embeds"] = ctx.slots.get("neg_text_embeds")
         st.scratch["guidance_scale"] = float(req.diffusion.guidance_scale)
         st.scratch["stream_video"] = bool(req.outputs.stream.get("video"))
+        # I2V (optional): the program writes the CLIP image embeds + the [mask|cond] latent into slots;
+        # the WanDiT adapter concats the cond (16->36ch) and passes the embeds as encoder_hidden_states_image.
+        # Absent for T2V -> None -> the dit call + capture are unchanged.
+        st.scratch["i2v_cond"] = ctx.slots.get("i2v_cond")
+        st.scratch["i2v_img_embeds"] = ctx.slots.get("i2v_img_embeds")
         # FlowGRPO RL rollout: switch the sampler to SDE-with-logprob (else deterministic ODE serve).
         st.scratch["sde"] = bool(getattr(req.diffusion, "sde_rollout", False))
         st.scratch["sde_noise_scale"] = float(getattr(req.diffusion, "sde_noise_scale", 0.7))
@@ -101,11 +106,16 @@ class WanDenoiseLoop:
         cfg, precision = self.cfg, self.precision
         sde, noise_scale, rng = st.scratch.get("sde", False), st.scratch.get("sde_noise_scale", 0.7), st.rng
 
+        i2v_ctx, i2v_cond = st.scratch.get("i2v_img_embeds"), st.scratch.get("i2v_cond")
+
         def _velocity(model, x_, sigma_t_, pe_, ne_, scale_):
             # The conditioned forward + CFG combine. Solver/forward dispatch through the platform's
             # kernel table (numpy on CPU, the device kernel on a GPU/accel backend — design_v3 §17).
+            # i2v_ctx/i2v_cond are None for T2V (the plain forward); for i2v the adapter concats the
+            # conditioning latent and passes the CLIP embeds as encoder_hidden_states_image.
             dit = model.component(expert_id)
-            preds = {b: dit(x_, pe_ if b == "cond" else ne_, sigma_t_) for b in branches}
+            preds = {b: dit(x_, pe_ if b == "cond" else ne_, sigma_t_, context=i2v_ctx, cond=i2v_cond)
+                     for b in branches}
             return precision.cast(cfg.combine(preds, scale_, sctx, cfg_state))
 
         def run(model, override=None):
@@ -161,7 +171,7 @@ class WanDenoiseLoop:
             # incompatible captured graph. (Compute dtype rides in shape_sig.dtype above.) NOTE: this
             # is sound for branch-set/expert-determined policies (ClassicCFG); a policy whose op
             # structure forks on other state (PerModalityCFG modality) would need a graph_key hook.
-            capturable=not sde,
+            capturable=not sde and i2v_cond is None,   # i2v threads non-workspace conditioning -> eager
             graph_key=(tuple(sorted(branches)), expert_id, precision.scheduler_step_in_fp32),
             # the static-buffer capture form: graph_fn reads all per-step inputs from the workspace
             graph_fn=graph_fn,
