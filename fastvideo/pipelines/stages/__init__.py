@@ -33,6 +33,8 @@ from fastvideo.pipelines.basic.ltx2.stages import (  # noqa: F401
 from fastvideo.pipelines.stages.matrixgame2_denoising import MatrixGame2CausalDenoisingStage
 from fastvideo.pipelines.stages.matrixgame3_denoising import MatrixGame3DenoisingStage
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
+from fastvideo.pipelines.stages.kandinsky5 import (Kandinsky5DecodingStage, Kandinsky5DenoisingStage,
+                                                   Kandinsky5LatentPreparationStage)
 from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
 from fastvideo.pipelines.stages.gen3c_stages import (Gen3CCFGPolicyStage, Gen3CConditioningStage, Gen3CDenoisingStage,
                                                      Gen3CLatentPreparationStage)
@@ -65,6 +67,9 @@ __all__ = [
     "MatrixGame2CausalDenoisingStage",
     "MatrixGame3DenoisingStage",
     "HYWorldDenoisingStage",
+    "Kandinsky5DecodingStage",
+    "Kandinsky5DenoisingStage",
+    "Kandinsky5LatentPreparationStage",
     "GameCraftDenoisingStage",
     "Gen3CCFGPolicyStage",
     "Gen3CConditioningStage",
