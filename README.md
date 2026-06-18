@@ -61,7 +61,7 @@ uv pip install fastvideo
 
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.
 
-> **On an NVIDIA DGX Spark (GB10 / ARM64 + CUDA 13)?** The one-liner above needs adapting — the CUDA kernel has no prebuilt ARM wheel and must be compiled. Follow the [DGX Spark install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/spark/).
+> **On an NVIDIA DGX Spark (GB10 / ARM64 + CUDA 13)?** There's no prebuilt ARM wheel for the CUDA kernel, so it's an editable from-source install (`uv pip install -e .`, which compiles the kernel for you) rather than `uv pip install fastvideo`. Follow the [DGX Spark install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/spark/).
 
 ### Install with an AI coding agent
 
