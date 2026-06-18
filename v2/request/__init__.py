@@ -1,7 +1,7 @@
 """Request plane — typed runtime objects crossing the product boundary (design_v3 §12)."""
 from __future__ import annotations
 
-from .artifacts import (
+from v2.request.artifacts import (
     Artifact,
     AudioArtifact,
     LatentArtifact,
@@ -10,8 +10,8 @@ from .artifacts import (
     TextArtifact,
     VideoArtifact,
 )
-from .cancel import CancelKind, Cancelled, CancelScope
-from .modalpart import (
+from v2.request.cancel import CancelKind, Cancelled, CancelScope
+from v2.request.modalpart import (
     ActionPart,
     AudioPart,
     ImagePart,
@@ -21,10 +21,10 @@ from .modalpart import (
     TextPart,
     VideoPart,
 )
-from .params import CaptureMode, DiffusionParams, OutputSpec, SamplingParams
-from .requests import Request, Session, make_request, new_request_id
-from .streams import OmniEvent, Stream, StreamChunk
-from .tasks import TaskType
+from v2.request.params import CaptureMode, DiffusionParams, OutputSpec, SamplingParams
+from v2.request.requests import Request, Session, make_request, new_request_id
+from v2.request.streams import OmniEvent, Stream, StreamChunk
+from v2.request.tasks import TaskType
 
 __all__ = [
     "TaskType", "Modality", "ModalPart", "TextPart", "ImagePart", "VideoPart",

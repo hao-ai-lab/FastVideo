@@ -1,8 +1,8 @@
 """Wan-causal streaming program: text_encode → chunk_rollout → vae_decode (design_v3 §4, §15e)."""
 from __future__ import annotations
 
-from ...program import ComponentNode, ModelLoopNode, Program, ProgramKind
-from ..common import text_encode_node_fn as _text_encode
+from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.models.common import text_encode_node_fn as _text_encode
 
 
 def _vae_decode(instance, slots, request, ctx) -> None:

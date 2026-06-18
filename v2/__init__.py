@@ -16,14 +16,14 @@ adapters (see ``v2/models/*/components.py``) that are off the test path.
 """
 from __future__ import annotations
 
-from ._enums import (
+from v2._enums import (
     Capability,
     ConsistencyLevel,
     ExecutionProfile,
     LoopKind,
     WorkUnitKind,
 )
-from .card import (
+from v2.card import (
     CapabilityMatrix,
     ComponentSpec,
     CostModel,
@@ -34,8 +34,8 @@ from .card import (
     RecipeSpec,
     load_card,
 )
-from .program import ComponentNode, ModelLoopNode, Program, ProgramKind, when_opt, when_task
-from .request import (
+from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind, when_opt, when_task
+from v2.request import (
     DiffusionParams,
     Output,
     Request,
@@ -44,7 +44,7 @@ from .request import (
     TaskType,
     make_request,
 )
-from .runtime import AsyncEngine, Engine
+from v2.runtime import AsyncEngine, Engine
 
 __version__ = "0.2.0"
 
@@ -63,6 +63,6 @@ def __getattr__(name: str):
     # Lazy: the GPU entrypoint imports torch / fastvideo, so resolve it only on access — plain
     # ``import v2`` (and the CPU-only mini) stay torch-free.
     if name == "VideoGenerator":
-        from .video_generator import VideoGenerator
+        from v2.video_generator import VideoGenerator
         return VideoGenerator
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

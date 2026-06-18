@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from ...program import ComponentNode, ModelLoopNode, Program, ProgramKind
-from ..omni import emit_text_node, tokenize_node
+from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.models.omni import emit_text_node, tokenize_node
 
 
 def thinker_to_talker_node(instance, slots, request, ctx) -> None:

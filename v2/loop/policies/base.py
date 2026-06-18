@@ -15,8 +15,8 @@ from typing import Any
 
 import numpy as np
 
-from ..contracts import StepContext
-from ..sampler import build_flow_sigmas
+from v2.loop.contracts import StepContext
+from v2.loop.sampler import build_flow_sigmas
 
 
 # --------------------------------------------------------------------------- #

@@ -1,9 +1,9 @@
 """Cache plane — correct by key, per-class pools (design_v3 §7)."""
 from __future__ import annotations
 
-from .classes import FeatureCache, PagedKVCache, ResidualCache, Slab, SlabKVCache, make_pool
-from .keys import CacheKey, CachePolicy, content_hash
-from .manager import CacheManager
+from v2.cache.classes import FeatureCache, PagedKVCache, ResidualCache, Slab, SlabKVCache, make_pool
+from v2.cache.keys import CacheKey, CachePolicy, content_hash
+from v2.cache.manager import CacheManager
 
 __all__ = ["CacheKey", "CachePolicy", "content_hash", "CacheManager",
            "FeatureCache", "ResidualCache", "SlabKVCache", "PagedKVCache", "Slab", "make_pool"]

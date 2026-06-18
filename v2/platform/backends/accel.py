@@ -25,8 +25,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...models.backend import ToyDiT
-from ..registry import FLOW_MATCH_STEP, FLOW_SDE_STEP, register_component, register_kernel
+from v2.models.backend import ToyDiT
+from v2.platform.registry import FLOW_MATCH_STEP, FLOW_SDE_STEP, register_component, register_kernel
 
 
 # --------------------------------------------------------------------------- #
@@ -100,7 +100,7 @@ register_kernel(FLOW_MATCH_STEP, _accel_flow_match_step,
 # reuses the numpy reference, so the accel SDE path is the same function as cpu (the SDE parity test
 # therefore checks dispatch-path equivalence, not an independent impl; the ODE op above is the real
 # independent oracle). A device that DID specialize SDE would be checked the same way the ODE op is.
-from ...loop.sampler import flow_sde_step_with_logprob  # noqa: E402
+from v2.loop.sampler import flow_sde_step_with_logprob  # noqa: E402
 
 register_kernel(FLOW_SDE_STEP, flow_sde_step_with_logprob,
                 device="accel", arch="sm90", source="accel(stand-in):sde_logprob")

@@ -8,8 +8,8 @@ one (or a few) batched units — the homogeneous-batch win the scheduler likes.
 """
 from __future__ import annotations
 
-from ..._enums import WorkUnitKind
-from ...loop.contracts import (
+from v2._enums import WorkUnitKind
+from v2.loop.contracts import (
     Done,
     LoopResult,
     LoopState,

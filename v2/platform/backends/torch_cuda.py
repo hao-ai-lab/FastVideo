@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import importlib.util
 
-from ..registry import FLOW_MATCH_STEP, FLOW_SDE_STEP, register_component, register_kernel
+from v2.platform.registry import FLOW_MATCH_STEP, FLOW_SDE_STEP, register_component, register_kernel
 
 
 def _torch_present() -> bool:
@@ -41,42 +41,42 @@ def _cuda_available() -> bool:
 
 # --- lazy trampolines: import torch only when actually called (on a GPU box) ------------------- #
 def _build_dit(spec, instance, platform):
-    from .torch_adapters import build_torch_dit
+    from v2.platform.backends.torch_adapters import build_torch_dit
     return build_torch_dit(spec, instance, platform)
 
 
 def _build_vae(spec, instance, platform):
-    from .torch_adapters import build_torch_vae
+    from v2.platform.backends.torch_adapters import build_torch_vae
     return build_torch_vae(spec, instance, platform)
 
 
 def _build_text_encoder(spec, instance, platform):
-    from .torch_adapters import build_torch_text_encoder
+    from v2.platform.backends.torch_adapters import build_torch_text_encoder
     return build_torch_text_encoder(spec, instance, platform)
 
 
 def _build_upsampler(spec, instance, platform):
-    from .torch_adapters import build_torch_upsampler
+    from v2.platform.backends.torch_adapters import build_torch_upsampler
     return build_torch_upsampler(spec, instance, platform)
 
 
 def _build_audio_vae(spec, instance, platform):
-    from .torch_adapters import build_torch_audio_vae
+    from v2.platform.backends.torch_adapters import build_torch_audio_vae
     return build_torch_audio_vae(spec, instance, platform)
 
 
 def _build_vocoder(spec, instance, platform):
-    from .torch_adapters import build_torch_vocoder
+    from v2.platform.backends.torch_adapters import build_torch_vocoder
     return build_torch_vocoder(spec, instance, platform)
 
 
 def _flow_match_cuda(*args, **kwargs):
-    from .torch_kernels import flow_match_step
+    from v2.platform.backends.torch_kernels import flow_match_step
     return flow_match_step(*args, **kwargs)
 
 
 def _flow_sde_cuda(*args, **kwargs):
-    from .torch_kernels import flow_sde_step
+    from v2.platform.backends.torch_kernels import flow_sde_step
     return flow_sde_step(*args, **kwargs)
 
 

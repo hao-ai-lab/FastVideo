@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from ...program import ComponentNode, ModelLoopNode, Program, ProgramKind, Workflow, WorkflowStage
-from ...request import DiffusionParams, TaskType, make_request
-from ...request.modalpart import ImagePart, TextPart
-from ..common import text_encode_node_fn as _text_encode
+from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind, Workflow, WorkflowStage
+from v2.request import DiffusionParams, TaskType, make_request
+from v2.request.modalpart import ImagePart, TextPart
+from v2.models.common import text_encode_node_fn as _text_encode
 
 
 # --- stage 1: text → image -------------------------------------------------------- #

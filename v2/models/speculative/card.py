@@ -1,8 +1,8 @@
 """Speculative-decoding card — a draft + target AR pair on one instance (design_v3 §2.2, §9.16)."""
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -14,9 +14,9 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...parallel import ParallelPlan
-from ..backend import ToyDraftModel, ToyTargetModel, ToyTokenizer, _seed_from
-from .loop import SpeculativeARLoop
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyDraftModel, ToyTargetModel, ToyTokenizer, _seed_from
+from v2.models.speculative.loop import SpeculativeARLoop
 
 
 def build_speculative_card(model_id: str = "spec-decode", *, spec_len: int = 4,

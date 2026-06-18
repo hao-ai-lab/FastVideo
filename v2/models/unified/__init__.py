@@ -3,7 +3,7 @@ both trainable under one RL reward. The stress test that the Card/Loop/Program s
 joint multi-expert RL (design_v3 §4, §10)."""
 from __future__ import annotations
 
-from .card import N_REFINE_ACTIONS, build_unified_card
-from .program import apply_refinement_node, build_unified_program
+from v2.models.unified.card import N_REFINE_ACTIONS, build_unified_card
+from v2.models.unified.program import apply_refinement_node, build_unified_program
 
 __all__ = ["build_unified_card", "build_unified_program", "apply_refinement_node", "N_REFINE_ACTIONS"]

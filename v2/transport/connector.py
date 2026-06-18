@@ -14,7 +14,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Protocol, runtime_checkable
 
-from .manifest import TransferManifest, payload_nbytes
+from v2.transport.manifest import TransferManifest, payload_nbytes
 
 
 class CreditWindow:

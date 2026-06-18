@@ -1,8 +1,8 @@
 """Loop plane — driven loops + policies (design_v3 §5)."""
 from __future__ import annotations
 
-from .._enums import LoopKind, WorkUnitKind
-from .contracts import (
+from v2._enums import LoopKind, WorkUnitKind
+from v2.loop.contracts import (
     CacheOp,
     CachePlan,
     Done,
@@ -17,8 +17,8 @@ from .contracts import (
     StepResult,
     WorkPlan,
 )
-from .driver import LoopRunner
-from .sampler import add_noise, build_flow_sigmas, flow_match_euler_step, x0_from_velocity
+from v2.loop.driver import LoopRunner
+from v2.loop.sampler import add_noise, build_flow_sigmas, flow_match_euler_step, x0_from_velocity
 
 __all__ = [
     "Loop", "LoopContext", "LoopState", "LoopResult", "WorkPlan", "Done", "StepResult",

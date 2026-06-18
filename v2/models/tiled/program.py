@@ -6,8 +6,8 @@ units. (Contrast the plain Wan program, where decode is a single in-tick node.)
 """
 from __future__ import annotations
 
-from ...program import ComponentNode, ModelLoopNode, Program, ProgramKind
-from ..common import text_encode_node_fn as _text_encode
+from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.models.common import text_encode_node_fn as _text_encode
 
 
 def build_tiled_program() -> Program:

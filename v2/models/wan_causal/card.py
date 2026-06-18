@@ -7,8 +7,8 @@ this card by the validator (stale KV breaks causality).
 """
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -20,10 +20,10 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...loop.policies import ClassicCFG, FlowShiftPolicy, PrecisionPolicy
-from ...parallel import ParallelPlan
-from ..backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
-from .loop import ChunkRolloutLoop
+from v2.loop.policies import ClassicCFG, FlowShiftPolicy, PrecisionPolicy
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
+from v2.models.wan_causal.loop import ChunkRolloutLoop
 
 
 def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b", *,

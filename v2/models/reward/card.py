@@ -7,8 +7,8 @@ run on its own role-pool (reward disaggregation).
 """
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CapabilityMatrix,
     ComponentSpec,
     CostModel,
@@ -19,9 +19,9 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...parallel import ParallelPlan
-from ..backend import ToyRewardModel, _seed_from
-from .loop import RewardLoop
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyRewardModel, _seed_from
+from v2.models.reward.loop import RewardLoop
 
 
 def build_reward_card(model_id: str = "pickscore-reward", *, batch: int = 4) -> ModelCard:

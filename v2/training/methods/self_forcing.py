@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..._enums import ConsistencyLevel
-from ...request import DiffusionParams, TaskType, make_request
-from .base import new_instance
-from .dmd2 import DMD2Method
+from v2._enums import ConsistencyLevel
+from v2.request import DiffusionParams, TaskType, make_request
+from v2.training.methods.base import new_instance
+from v2.training.methods.dmd2 import DMD2Method
 
 
 class SelfForcingMethod(DMD2Method):

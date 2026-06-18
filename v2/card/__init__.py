@@ -1,9 +1,9 @@
 """Model Plane — the center (design_v3 §4). The (recipe, runtime) pair as a typed card."""
 from __future__ import annotations
 
-from .._enums import Capability, ConsistencyLevel, ExecutionProfile, LoopKind, WorkUnitKind
-from .instance import ModelInstance, load_card
-from .specs import (
+from v2._enums import Capability, ConsistencyLevel, ExecutionProfile, LoopKind, WorkUnitKind
+from v2.card.instance import ModelInstance, load_card
+from v2.card.specs import (
     CacheContract,
     CapabilityMatrix,
     CardValidationError,

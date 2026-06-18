@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..._enums import ConsistencyLevel
-from ...models.backend import LATENT_CHANNELS
-from ...models.common import cached_text_encode
-from .base import TrainingMethod, new_instance
+from v2._enums import ConsistencyLevel
+from v2.models.backend import LATENT_CHANNELS
+from v2.models.common import cached_text_encode
+from v2.training.methods.base import TrainingMethod, new_instance
 
 
 class FineTuneMethod(TrainingMethod):

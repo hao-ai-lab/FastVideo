@@ -1,9 +1,9 @@
 """LTX2.3 — two-stage distilled video diffusion (base → upsample → refine)."""
 from __future__ import annotations
 
-from .card import build_ltx2_3_card, build_ltx2_base_card, build_ltx2_card
-from .loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop, LTX23DenoiseLoop
-from .program import (
+from v2.models.ltx2.card import build_ltx2_3_card, build_ltx2_base_card, build_ltx2_card
+from v2.models.ltx2.loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop, LTX23DenoiseLoop
+from v2.models.ltx2.program import (
     build_ltx2_3_program,
     build_ltx2_av_program,
     build_ltx2_base_program,

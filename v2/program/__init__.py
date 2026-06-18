@@ -1,7 +1,7 @@
 """Program plane — compose a card's loops into a task (design_v3 §13)."""
 from __future__ import annotations
 
-from .specs import (
+from v2.program.specs import (
     ComponentNode,
     Edge,
     EdgeKind,
@@ -13,7 +13,7 @@ from .specs import (
     when_opt,
     when_task,
 )
-from .workflow import (
+from v2.program.workflow import (
     BestOfNWorkflow,
     ParallelWorkflow,
     Workflow,

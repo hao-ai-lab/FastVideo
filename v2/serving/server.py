@@ -18,9 +18,9 @@ from typing import Any
 
 import numpy as np
 
-from ..request.artifacts import Output
-from ..request.streams import StreamChunk
-from .http import HttpServer, Request, Response
+from v2.request.artifacts import Output
+from v2.request.streams import StreamChunk
+from v2.serving.http import HttpServer, Request, Response
 
 
 def _json_default(o: Any) -> Any:
@@ -32,7 +32,7 @@ def _json_default(o: Any) -> Any:
     if isinstance(o, np.ndarray):
         return {"shape": list(o.shape), "dtype": str(o.dtype)}
     return str(o)
-from .protocol import ChatCompletionRequest, ImageGenerationRequest, VideoGenerationRequest
+from v2.serving.protocol import ChatCompletionRequest, ImageGenerationRequest, VideoGenerationRequest
 
 _job_ctr = itertools.count(1)
 _chat_ctr = itertools.count(1)

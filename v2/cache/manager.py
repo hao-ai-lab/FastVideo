@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .classes import _Pool, make_pool
-from .keys import CachePolicy
+from v2.cache.classes import _Pool, make_pool
+from v2.cache.keys import CachePolicy
 
 
 class CacheManager:

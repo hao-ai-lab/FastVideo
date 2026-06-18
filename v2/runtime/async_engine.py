@@ -14,11 +14,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any, AsyncIterator
 
-from ..request.artifacts import Output
-from ..request.cancel import Cancelled
-from ..request.streams import OmniEvent
-from .disaggregated import DisaggregatedRunner
-from .engine import Engine
+from v2.request.artifacts import Output
+from v2.request.cancel import Cancelled
+from v2.request.streams import OmniEvent
+from v2.runtime.disaggregated import DisaggregatedRunner
+from v2.runtime.engine import Engine
 
 _SENTINEL = object()
 

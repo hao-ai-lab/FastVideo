@@ -8,8 +8,8 @@ and severs the shared state).
 """
 from __future__ import annotations
 
-from ...program import ComponentNode, ModelLoopNode, Program, ProgramKind
-from ..omni import emit_text_node, pack_cond_from_tokens, tokenize_node, vae_decode_node
+from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.models.omni import emit_text_node, pack_cond_from_tokens, tokenize_node, vae_decode_node
 
 
 def build_cosmos3_program() -> Program:

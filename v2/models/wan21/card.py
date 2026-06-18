@@ -9,8 +9,8 @@ Mirrors the real Wan2.1-1.3B wiring discovered in the repo:
 """
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -23,16 +23,16 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...loop.policies import (
+from v2.loop.policies import (
     BoundaryTimestepRouting,
     ClassicCFG,
     FlowShiftPolicy,
     NoRouting,
     PrecisionPolicy,
 )
-from ...parallel import ParallelPlan
-from ..backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
-from .loop import WanDenoiseLoop
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
+from v2.models.wan21.loop import WanDenoiseLoop
 
 
 def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shift: float = 3.0,

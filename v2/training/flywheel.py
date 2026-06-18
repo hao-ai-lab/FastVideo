@@ -18,7 +18,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-from .methods import build_diffusion_nft, build_dmd2
+from v2.training.methods import build_diffusion_nft, build_dmd2
 
 
 def derive_card(base_card: Any, model_id: str, *, method: str, parents: list[str]) -> Any:

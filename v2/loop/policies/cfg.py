@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from ..contracts import StepContext
+from v2.loop.contracts import StepContext
 
 
 class CFGPolicy(ABC):

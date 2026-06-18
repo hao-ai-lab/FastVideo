@@ -35,7 +35,7 @@ class ModelEntry:
 def _entries() -> list[ModelEntry]:
     """The explicit registry (PRIMARY). Builders imported lazily to avoid import cycles with the model
     packages and keep importing this module cheap."""
-    from .models.ltx2 import (
+    from v2.models.ltx2 import (
         build_ltx2_3_card,
         build_ltx2_3_program,
         build_ltx2_base_card,
@@ -43,8 +43,8 @@ def _entries() -> list[ModelEntry]:
         build_ltx2_card,
         build_ltx2_program,
     )
-    from .models.wan_causal import build_wan_causal_card, build_wan_causal_program
-    from .models.wan21 import (
+    from v2.models.wan_causal import build_wan_causal_card, build_wan_causal_program
+    from v2.models.wan21 import (
         build_wan21_card,
         build_wan22_a14b_card,
         build_wan22_ti2v_card,
@@ -99,7 +99,7 @@ def select_by_architecture(sig: dict):
     path / renamed repo / new distilled variant of a known arch still resolves with no registry entry."""
     tr, pipe = sig.get("transformer_cls"), sig.get("pipeline")
     if tr == "LTX2Transformer3DModel":
-        from .models.ltx2 import (
+        from v2.models.ltx2 import (
             build_ltx2_base_card,
             build_ltx2_base_program,
             build_ltx2_card,
@@ -109,10 +109,10 @@ def select_by_architecture(sig: dict):
             return build_ltx2_card, build_ltx2_program          # two-stage (base -> upsample -> refine)
         return build_ltx2_base_card, build_ltx2_base_program    # single-stage
     if tr == "CausalWanTransformer3DModel":
-        from .models.wan_causal import build_wan_causal_card, build_wan_causal_program
+        from v2.models.wan_causal import build_wan_causal_card, build_wan_causal_program
         return build_wan_causal_card, build_wan_causal_program
     if tr == "WanTransformer3DModel":
-        from .models.wan21 import (
+        from v2.models.wan21 import (
             build_wan21_card,
             build_wan22_a14b_card,
             build_wan22_ti2v_card,

@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..platform import Platform
-from .specs import ModelCard
+from v2.platform import Platform
+from v2.card.specs import ModelCard
 
 
 class ModelInstance:

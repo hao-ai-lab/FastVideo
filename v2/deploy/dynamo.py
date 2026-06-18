@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..request.artifacts import Output
-from .card import DeploymentCard
+from v2.request.artifacts import Output
+from v2.deploy.card import DeploymentCard
 
 
 class DynamoWorkerAdapter:

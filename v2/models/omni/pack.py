@@ -7,7 +7,7 @@ module, so this is weight-sharing, not a hand-off between two engines.
 """
 from __future__ import annotations
 
-from ..backend import ToyTokenizer
+from v2.models.backend import ToyTokenizer
 
 
 def tokenize_node(instance, slots, request, ctx) -> None:

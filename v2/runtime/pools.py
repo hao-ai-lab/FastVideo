@@ -11,9 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..cache import CacheManager
-from ..card import load_card
-from ..transport import Connector, make_connector
+from v2.cache import CacheManager
+from v2.card import load_card
+from v2.transport import Connector, make_connector
 
 
 @dataclass

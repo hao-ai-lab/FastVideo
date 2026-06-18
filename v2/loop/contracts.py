@@ -26,9 +26,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from .._enums import ExecutionProfile, WorkUnitKind
-from .._types import TensorLike
-from ..request.streams import StreamChunk
+from v2._enums import ExecutionProfile, WorkUnitKind
+from v2._types import TensorLike
+from v2.request.streams import StreamChunk
 
 
 # --------------------------------------------------------------------------- #

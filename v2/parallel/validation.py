@@ -7,8 +7,8 @@ All checks are CPU-testable on a fake mesh (design.md §6.3.4: CPU-testability).
 """
 from __future__ import annotations
 
-from .._enums import LoopKind
-from .plan import AXIS_NAMES, ParallelPlan
+from v2._enums import LoopKind
+from v2.parallel.plan import AXIS_NAMES, ParallelPlan
 
 
 class ParallelValidationError(ValueError):

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .contracts import Done, LoopContext, LoopResult, LoopState, WorkPlan
+from v2.loop.contracts import Done, LoopContext, LoopResult, LoopState, WorkPlan
 
 
 class LoopRunner:

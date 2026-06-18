@@ -5,9 +5,9 @@ engine never imports ``training``. The rollout forward IS the serve forward plus
 """
 from __future__ import annotations
 
-from .behavior import BehaviorRecord, TrajectoryStatus
-from .flywheel import derive_card, run_flywheel
-from .methods import (
+from v2.training.behavior import BehaviorRecord, TrajectoryStatus
+from v2.training.flywheel import derive_card, run_flywheel
+from v2.training.methods import (
     DiffusionNFTMethod,
     DMD2Method,
     FineTuneMethod,
@@ -24,9 +24,9 @@ from .methods import (
     build_unified_rl,
     build_workflow_rl,
 )
-from .rewards import MultiRewardScorer, ServedRewardScorer, build_multi_reward_scorer
-from .rollout import RolloutContext, Trajectory, TrajectoryBuffer, rollout_loop
-from .weight_sync import WeightRole, WeightSyncController, WeightSyncPlan
+from v2.training.rewards import MultiRewardScorer, ServedRewardScorer, build_multi_reward_scorer
+from v2.training.rollout import RolloutContext, Trajectory, TrajectoryBuffer, rollout_loop
+from v2.training.weight_sync import WeightRole, WeightSyncController, WeightSyncPlan
 
 __all__ = [
     "TrainingMethod", "FineTuneMethod", "DMD2Method", "DiffusionNFTMethod", "SelfForcingMethod",

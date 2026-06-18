@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from ...loop.contracts import Done
-from ...platform import FLOW_MATCH_STEP
-from ..wan21.loop import WanDenoiseLoop
+from v2.loop.contracts import Done
+from v2.platform import FLOW_MATCH_STEP
+from v2.models.wan21.loop import WanDenoiseLoop
 
 
 class AdapterDenoiseLoop(WanDenoiseLoop):

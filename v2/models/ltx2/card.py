@@ -14,8 +14,8 @@ Real wiring: DiT ``ltx2:LTX2Transformer3DModel``, causal VAE ``ltx2vae``, Gemma 
 """
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -27,9 +27,9 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...parallel import ParallelPlan
-from ..backend import ToyAudioVAE, ToyDiT, ToyTextEncoder, ToyUpsampler, ToyVAE, ToyVocoder, _seed_from
-from .loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop, LTX23DenoiseLoop
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyAudioVAE, ToyDiT, ToyTextEncoder, ToyUpsampler, ToyVAE, ToyVocoder, _seed_from
+from v2.models.ltx2.loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop, LTX23DenoiseLoop
 
 
 def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:

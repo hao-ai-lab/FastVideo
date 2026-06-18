@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .base import InterceptorChain, Observer
+from v2.extend.base import InterceptorChain, Observer
 
 
 class PluginRegistry:

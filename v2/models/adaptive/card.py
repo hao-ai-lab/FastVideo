@@ -3,8 +3,8 @@
 ``diffusion_denoise``); only the loop differs."""
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -16,10 +16,10 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
-from ...parallel import ParallelPlan
-from ..backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
-from .loop import CacheDiTDenoiseLoop
+from v2.loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
+from v2.models.adaptive.loop import CacheDiTDenoiseLoop
 
 
 def build_adaptive_card(model_id: str = "wan-adaptive", *, cache_threshold: float = 0.02,

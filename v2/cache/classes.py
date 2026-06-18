@@ -18,7 +18,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
-from .keys import CacheKey, CachePolicy
+from v2.cache.keys import CacheKey, CachePolicy
 
 
 def _nbytes(value: Any) -> int:

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..request.artifacts import (
+from v2.request.artifacts import (
     AudioArtifact,
     LatentArtifact,
     Output,
@@ -20,7 +20,7 @@ from ..request.artifacts import (
     TextArtifact,
     VideoArtifact,
 )
-from .ladder import ConsistencyLevel, Divergence, bit_identical
+from v2.parity.ladder import ConsistencyLevel, Divergence, bit_identical
 
 
 def _artifact_payload(art: Any) -> Any:

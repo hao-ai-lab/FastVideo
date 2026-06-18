@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from itertools import product
 
-from .plan import ParallelPlan
-from .validation import validate_plan
+from v2.parallel.plan import ParallelPlan
+from v2.parallel.validation import validate_plan
 
 
 class FakeDeviceMesh:

@@ -15,8 +15,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..loop.contracts import WorkPlan
-from ..memory.allocator import MemoryManager, Reservation
+from v2.loop.contracts import WorkPlan
+from v2.memory.allocator import MemoryManager, Reservation
 
 
 class AdmissionInfeasible(RuntimeError):

@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from .._enums import ConsistencyLevel  # re-exported for the package
+from v2._enums import ConsistencyLevel  # re-exported for the package
 
 
 @dataclass
