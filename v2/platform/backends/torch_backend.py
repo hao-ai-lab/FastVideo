@@ -367,6 +367,25 @@ class Gemma(TorchComponent):
         return _to_numpy(video.squeeze(0)), _to_numpy(audio.squeeze(0))
 
 
+class CLIPImageEncoder(TorchComponent):
+    """CLIP-vision image encoder for Wan i2v: ``encode_image(image) -> image_embeds`` (the DiT's
+    ``encoder_hidden_states_image``). Mirrors fastvideo's ImageEncodingStage — the HF image processor
+    preprocesses, the encoder returns ``last_hidden_state``. BRINGUP: written-not-run; GPU-verify the
+    processor/encoder subfolders + dtype against a real i2v checkpoint (see GPU_BRINGUP.md)."""
+
+    def __init__(self, module, processor, *, device, dtype):
+        super().__init__(module, device=device, dtype=dtype)
+        self.processor = processor
+
+    @torch.no_grad()
+    def encode_image(self, image):
+        inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+        with self._ctx():
+            out = self.module(**inputs)
+        embeds = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
+        return _to_numpy(embeds.squeeze(0))
+
+
 # --------------------------------------------------------------------------- #
 # Upsampler + audio (LTX-2)                                                     #
 # --------------------------------------------------------------------------- #
@@ -445,6 +464,13 @@ def _make_text_encoder(spec, instance, platform, args):
     return cls(module, tokenizer, device=device, dtype=dtype)
 
 
+def _make_image_encoder(spec, instance, platform, args):
+    module = load_component("ImageEncoderLoader", spec.checkpoint, args)   # CLIP vision
+    # the HF image processor is a sibling subfolder (BRINGUP: confirm path on a real i2v checkpoint)
+    processor = load_component("ImageProcessorLoader", os.path.join(_model_root(spec), "image_processor"), args)
+    return CLIPImageEncoder(module, processor, device=_device(platform), dtype=_native_dtype(module))
+
+
 def _make_upsampler(spec, instance, platform, args):
     module = load_component("UpsamplerLoader", spec.checkpoint, args)   # LTX2LatentUpsampler
     vae = instance.component("vae")
@@ -468,7 +494,8 @@ def _make_vocoder(spec, instance, platform, args):
 
 _MAKERS = {
     "dit": _make_dit, "vae": _make_vae, "text_encoder": _make_text_encoder,
-    "upsampler": _make_upsampler, "audio_vae": _make_audio_vae, "vocoder": _make_vocoder,
+    "image_encoder": _make_image_encoder, "upsampler": _make_upsampler,
+    "audio_vae": _make_audio_vae, "vocoder": _make_vocoder,
 }
 
 
