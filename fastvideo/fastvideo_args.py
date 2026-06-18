@@ -1024,10 +1024,12 @@ class TrainingArgs(FastVideoArgs):
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         parser.add_argument("--data-path", type=str, required=True, help="Path to parquet files")
-        parser.add_argument("--transformer-quant", type=str, default=None,
+        parser.add_argument("--transformer-quant",
+                            type=str,
+                            default=None,
                             help="Quantization config name for the DiT (e.g. nvfp4_qat_train for "
-                                 "QAT-finetune FP4 linear with a straight-through estimator). "
-                                 "Resolved to a QuantizationConfig and pinned on dit_config.quant_config.")
+                            "QAT-finetune FP4 linear with a straight-through estimator). "
+                            "Resolved to a QuantizationConfig and pinned on dit_config.quant_config.")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,
