@@ -26,9 +26,11 @@ from v2.card import (
     ParitySpec,
     PrecisionContract,
     RecipeSpec,
+    SamplingDefaults,
 )
 from v2.parallel import ParallelPlan
 from v2.platform.backends.toy import ToyAudioVAE, ToyDiT, ToyTextEncoder, ToyUpsampler, ToyVAE, ToyVocoder, _seed_from
+from v2.recipes._prompts import LTX2_NEG
 from v2.recipes.ltx2.loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop, LTX23DenoiseLoop
 
 
@@ -86,6 +88,9 @@ def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
                                          Capability.VAE_DECODE),
         recipe=RecipeSpec(method="distilled", parents=["ltx2.3-base"], assumes_loop="ltx2_base",
                           assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
+        sampling_defaults=SamplingDefaults(  # two-stage distilled: 8-step base (+ 2-step refine in loop)
+            num_steps=8, guidance_scale=1.0, height=1024, width=1536, num_frames=121, fps=24,
+            negative_prompt=""),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
         caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24,
                                          reuse_across_requests=True)},
@@ -134,6 +139,9 @@ def build_ltx2_base_card(model_id: str = "ltx2-single-stage") -> ModelCard:
         capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.VAE_DECODE),
         recipe=RecipeSpec(method="base", assumes_loop="ltx2_single",
                           assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
+        sampling_defaults=SamplingDefaults(
+            num_steps=40, guidance_scale=3.0, height=512, width=768, num_frames=121, fps=24,
+            negative_prompt=LTX2_NEG),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
         caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24,
                                          reuse_across_requests=True)},
@@ -191,6 +199,9 @@ def build_ltx2_3_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
                                          Capability.VAE_DECODE),
         recipe=RecipeSpec(method="distilled", parents=["ltx2.3-base"], assumes_loop="ltx2_3",
                           assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
+        sampling_defaults=SamplingDefaults(  # joint A/V: per-modality cfg video 3 / audio 7
+            num_steps=30, guidance_scale=3.0, height=512, width=768, num_frames=121, fps=24,
+            negative_prompt=LTX2_NEG, guidance_per_modality={"video": 3.0, "audio": 7.0}),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
         caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24,
                                          reuse_across_requests=True)},

@@ -24,14 +24,33 @@ from typing import Any
 # ``v2/registry.py`` so every entrypoint (this VideoGenerator, a CLI, the server) resolves identically.
 
 
+def _resolve_default(key: str, generic: Any, kwargs: dict, sp: Any, sd: Any,
+                     card_attr: str | None = None) -> Any:
+    """Resolve one sampling param with precedence kwargs > SamplingParam override > card
+    ``SamplingDefaults`` > generic fallback. ``card_attr`` aliases the card field name when it differs
+    from the request key (e.g. ``num_inference_steps`` -> ``SamplingDefaults.num_steps``). Pure +
+    torch-free so it's unit-testable without a GPU."""
+    if key in kwargs and kwargs[key] is not None:
+        return kwargs[key]
+    if sp is not None and getattr(sp, key, None) is not None:
+        return getattr(sp, key)
+    if sd is not None:
+        cv = getattr(sd, card_attr or key, None)
+        if cv is not None:
+            return cv
+    return generic
+
+
 class VideoGenerator:
     """Typed t2v entrypoint over a single resident v2 ``ModelInstance`` (mirrors fastvideo's)."""
 
-    def __init__(self, engine: Any, model_id: str, *, instance: Any = None, supports_av: bool = False) -> None:
+    def __init__(self, engine: Any, model_id: str, *, instance: Any = None, supports_av: bool = False,
+                 card: Any = None) -> None:
         self._engine = engine
         self._model_id = model_id
         self._inst = instance              # the resident ModelInstance (to read e.g. the audio sample rate)
         self._supports_av = supports_av    # model emits joint video+sound (LTX-2.3 T2VS) -> auto-request audio
+        self._card = card                  # the v2 ModelCard (for per-model sampling_defaults)
 
     # --------------------------------------------------------------------- #
     @classmethod
@@ -96,7 +115,7 @@ class VideoGenerator:
         # A model that advertises TEXT_TO_VIDEO_SOUND (LTX-2.3) generates joint video+audio; the
         # entrypoint then issues a T2VS request by default so a plain generate() yields both modalities.
         supports_av = card.capabilities.has(Capability.TEXT_TO_VIDEO_SOUND)
-        return cls(eng, card.model_id, instance=inst, supports_av=supports_av)
+        return cls(eng, card.model_id, instance=inst, supports_av=supports_av, card=card)
 
     def shutdown(self) -> None:
         """API parity with ``fastvideo.VideoGenerator.shutdown()``. The v2 bring-up holds a single
@@ -141,16 +160,15 @@ class VideoGenerator:
         from fastvideo.api import GenerationRequest, OutputConfig, SamplingConfig
         audio = kwargs.pop("audio", None)      # None -> auto (by model capability), True/False -> force
         sp = sampling_param
+        # Per-model defaults (LTX-2 wants 8/30 steps + its own res, Wan2.2-TI2V 704x1280@24fps, etc.) come
+        # from the resolved card; precedence is kwargs > SamplingParam > card defaults > generic fallback.
+        sd = getattr(self._card, "sampling_defaults", None) if self._card is not None else None
 
-        def pick(key: str, default: Any) -> Any:
-            if key in kwargs and kwargs[key] is not None:
-                return kwargs[key]
-            if sp is not None and getattr(sp, key, None) is not None:
-                return getattr(sp, key)
-            return default
+        def pick(key: str, default: Any, card_attr: str | None = None) -> Any:
+            return _resolve_default(key, default, kwargs, sp, sd, card_attr)
 
         sampling = SamplingConfig(
-            num_inference_steps=int(pick("num_inference_steps", 30)),
+            num_inference_steps=int(pick("num_inference_steps", 30, "num_steps")),
             seed=int(pick("seed", 1024)),
             num_frames=int(pick("num_frames", 25)),
             height=int(pick("height", 480)),
