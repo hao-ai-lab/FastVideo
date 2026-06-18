@@ -99,12 +99,12 @@ Testing plan:
 - [x] Created branch `interleavethinker-fastvideo` from committed `main`.
 - [x] Read root `AGENTS.md`, `fastvideo/AGENTS.md`, onboarding, codebase map,
   skills index, workflows list, lessons list, and exploration template.
-- [ ] Inspect `fastvideo/entrypoints/cli`, `VideoGenerator`, schema, serve, and
+- [x] Inspect `fastvideo/entrypoints/cli`, `VideoGenerator`, schema, serve, and
   streaming prompt provider patterns.
-- [ ] Decide exact CLI/service shape based on existing FastVideo conventions.
-- [ ] Implement first minimal app/service layer.
-- [ ] Add unit tests with fakes.
-- [ ] Run Modal-backed validation.
+- [x] Decide exact CLI/service shape based on existing FastVideo conventions.
+- [x] Implement first minimal app/service layer.
+- [x] Add unit tests with fakes.
+- [x] Run Modal-backed validation.
 - [ ] Commit first coherent checkpoint.
 
 ## Findings
@@ -117,6 +117,35 @@ Testing plan:
   under `fastvideo/train`.
 - Existing prompt orchestration under `fastvideo/entrypoints/streaming/prompt`
   provides a good provider/fallback style to mirror for planner/critic clients.
+- Existing OpenAI image routes expose `/v1/images` and `/v1/images/edits`,
+  but InterleaveThinker reward code posts JSON to `/edit` and expects
+  `{"success": true, "edited_image": "<base64 png>"}`. Add a compatibility
+  app instead of changing the OpenAI-compatible API surface.
+- Use `ServeConfig` for the new compatibility server rather than inventing a
+  new top-level config. `fastvideo interleave-serve --config <serve.yaml>`
+  can reuse `generator`, `server`, and `default_request`.
+- The first code slice will include:
+  - `fastvideo/entrypoints/interleave/schema.py` for Pydantic request/response
+    models and dataclasses shared by the orchestrator.
+  - `fastvideo/entrypoints/interleave/generator.py` for `VideoGenerator` request
+    translation plus base64 image IO.
+  - `fastvideo/entrypoints/interleave/orchestrator.py` for planner/critic loop
+    protocols and a minimal retry/refine implementation.
+  - `fastvideo/entrypoints/interleave/server.py` for `/health`, `/edit`, and
+    `/generate` alias endpoints.
+  - `fastvideo/entrypoints/cli/interleave_serve.py` and CLI registration.
+  - example config/docs under `examples/interleave/`.
+  - pure tests under `tests/local_tests/` using fakes.
+- Implemented the package and CLI registration:
+  - `fastvideo/entrypoints/interleave/__init__.py`
+  - `fastvideo/entrypoints/interleave/schema.py`
+  - `fastvideo/entrypoints/interleave/generator.py`
+  - `fastvideo/entrypoints/interleave/orchestrator.py`
+  - `fastvideo/entrypoints/interleave/server.py`
+  - `fastvideo/entrypoints/cli/interleave_serve.py`
+  - `fastvideo/entrypoints/cli/main.py`
+  - `examples/interleave/README.md`
+  - `examples/interleave/flux2_klein_interleave_serve.yaml`
 
 ## Mistakes / Dead Ends
 
@@ -127,6 +156,13 @@ Testing plan:
 - A first relative-path `apply_patch` attempt was rejected because it would have
   targeted the original checkout. All manual edits must use absolute paths under
   `/tmp/fastvideo-interleavethinker`.
+- First Modal validation attempt failed before tests. Cause: `--apply-local-patch`
+  included `.agents/exploration/interleavethinker-fastvideo-integration.md` as a
+  tracked modification relative to the local-only checkpoint commit
+  `7e70f859`, but the Modal job checked out upstream `main`
+  `633d39356804e63478d242611e992dc8e1af3caa`, where that file does not exist.
+  Fix: rerun Modal with `--patch-paths` limited to code, examples, and tests,
+  excluding `.agents`.
 
 ## Current Handoff Notes
 
@@ -142,15 +178,63 @@ git log --oneline -5
 
 Before editing code, continue reading:
 
-- `fastvideo/entrypoints/cli/main.py`
-- `fastvideo/entrypoints/cli/serve.py`
-- `fastvideo/entrypoints/openai/image_api.py`
-- `fastvideo/entrypoints/openai/video_api.py`
-- `fastvideo/entrypoints/streaming/prompt/enhancer.py`
-- `fastvideo/entrypoints/video_generator.py`
-- `fastvideo/api/schema.py`
+- Already inspected:
+  - `fastvideo/entrypoints/cli/main.py`
+  - `fastvideo/entrypoints/cli/serve.py`
+  - `fastvideo/entrypoints/cli/generate.py`
+  - `fastvideo/entrypoints/cli/inference_config.py`
+  - `fastvideo/entrypoints/openai/image_api.py`
+  - `fastvideo/entrypoints/openai/video_api.py`
+  - `fastvideo/entrypoints/openai/api_server.py`
+  - `fastvideo/entrypoints/openai/protocol.py`
+  - `fastvideo/entrypoints/streaming/prompt/enhancer.py`
+  - `fastvideo/entrypoints/streaming/server.py`
+  - `fastvideo/entrypoints/video_generator.py`
+  - `fastvideo/api/schema.py`
+  - `fastvideo/api/compat.py`
 
 Do not use or modify the dirty `/home/toolbox/FastVideo` checkout.
+
+Next immediate steps:
+
+1. Add pure tests:
+   - request schema accepts `num_inference_step` and `num_inference_steps`.
+   - backend builds a `GenerationRequest` with one image frame and optional
+     decoded input image.
+   - server returns InterleaveThinker-compatible JSON with a fake backend.
+   - orchestrator retries with critic-provided `refine_prompt`.
+2. Run formatting/pre-commit on changed files if possible.
+3. Run focused tests on Modal using
+   `fastvideo/tests/modal/launch_l40s_job.py` from this worktree, not from the
+   original checkout.
+   - Important: pass `--git-repo https://github.com/hao-ai-lab/FastVideo.git`
+     and `--git-commit 633d39356804e63478d242611e992dc8e1af3caa`.
+   - Important: pass `--patch-paths` excluding `.agents/...` until the next
+     local commit is pushed anywhere reachable by Modal.
+4. Commit the first code checkpoint after tests or at least after static import
+   checks.
+
+Validation completed:
+
+- First Modal attempt:
+  - Command: `pytest tests/local_tests/test_interleave_entrypoint.py -q &&
+    pre-commit run --files ...`
+  - Failed before tests because `.agents` handoff diff could not apply to
+    upstream `main`.
+- Second Modal attempt:
+  - Command: `pytest tests/local_tests/test_interleave_entrypoint.py -q &&
+    pre-commit run --files fastvideo/entrypoints/cli/main.py
+    fastvideo/entrypoints/cli/interleave_serve.py
+    fastvideo/entrypoints/interleave/__init__.py
+    fastvideo/entrypoints/interleave/schema.py
+    fastvideo/entrypoints/interleave/generator.py
+    fastvideo/entrypoints/interleave/orchestrator.py
+    fastvideo/entrypoints/interleave/server.py`
+  - Modal app URL shown by CLI:
+    `https://modal.com/apps/hao-ai-lab/main/ap-kB8zs3gMtKj66loYptASBw`
+  - Result: `4 passed, 14 warnings in 22.54s`.
+  - Pre-commit result: `yapf`, `ruff`, `codespell`, `mypy`, filename check all
+    passed. PyMarkdown/actionlint skipped with no files to check.
 
 ## Proposed Standardization
 

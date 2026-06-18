@@ -2,6 +2,8 @@
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/entrypoints/cli/main.py
 from fastvideo.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.entrypoints.cli.generate import cmd_init as generate_cmd_init
+from fastvideo.entrypoints.cli.interleave_serve import (
+    cmd_init as interleave_serve_cmd_init, )
 from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.entrypoints.cli.router_serve import (
     cmd_init as router_serve_cmd_init, )
@@ -15,6 +17,7 @@ def cmd_init() -> list[CLISubcommand]:
     commands = []
     commands.extend(generate_cmd_init())
     commands.extend(serve_cmd_init())
+    commands.extend(interleave_serve_cmd_init())
     commands.extend(router_serve_cmd_init())
     commands.extend(bench_cmd_init())
     commands.extend(eval_cmd_init())
@@ -33,7 +36,7 @@ def main() -> None:
         cmds[cmd.name] = cmd
 
     args, unknown = parser.parse_known_args()
-    if unknown and args.subparser not in {"generate", "serve"}:
+    if unknown and args.subparser not in {"generate", "serve", "interleave-serve"}:
         parser.error(f"unrecognized arguments: {' '.join(unknown)}")
     args._unknown = unknown
     if args.subparser in cmds:
