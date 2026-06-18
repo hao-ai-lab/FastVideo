@@ -65,8 +65,10 @@ Each would need a new card + adapters (DiT/VAE/encoder forwards) + maybe a sampl
 
 ## How to add a model to the v2 VideoGenerator
 1. Ensure a v2 card exists (`v2/models/<family>/`) whose `load_id`s resolve to real `fastvideo.models.*`.
-2. Dispatch is automatic: add a branch in `v2/video_generator.py:_select_builders` keyed on the new
-   architecture (transformer/pipeline/VAE class names) — no HF-id table to edit.
+2. Register it in the shared `v2/registry.py` (used by every entrypoint — VideoGenerator, CLI, server):
+   add a `ModelEntry` mapping its HF id(s) → builders (the explicit PRIMARY path — the only way to split
+   same-architecture capability variants, e.g. T2V vs the i2v "InP"), and/or a branch in
+   `select_by_architecture` for the arch-inference FALLBACK (local paths / unregistered repos).
 3. If a DiT/VAE/encoder/upsampler forward differs, add an adapter + class-detection in `torch_adapters.py`
    and register the component kind in `torch_cuda.py`.
 4. Add `examples/inference/basic/v2_<name>.py` mirroring the official example; generate to confirm.
