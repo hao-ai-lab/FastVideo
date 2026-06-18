@@ -28,7 +28,7 @@ def test_fan_out_runs_branches_and_merges():
     eng = build_default_engine()
     wf = ParallelWorkflow("variants.fanout", [
         WorkflowStage("wan2.1-1.3b", _t2v("wan2.1-1.3b"), label="wan"),
-        WorkflowStage("ltx2.3-distilled", _t2v("ltx2.3-distilled"), label="ltx"),
+        WorkflowStage("ltx2-2stage-distilled", _t2v("ltx2-2stage-distilled"), label="ltx"),
     ])
     out = wf.run(eng, prompt="a comet over the sea", seed=1)
     # both branches' artifacts present, namespaced by label
@@ -38,7 +38,7 @@ def test_fan_out_runs_branches_and_merges():
     assert wan_v.ndim == 4 and ltx_v.ndim == 4
     # two different models on the same prompt → different videos (genuine fan-out, not duplication)
     assert wan_v.shape != ltx_v.shape or not np.array_equal(wan_v, ltx_v)
-    assert wf.requires == ["wan2.1-1.3b", "ltx2.3-distilled"]
+    assert wf.requires == ["wan2.1-1.3b", "ltx2-2stage-distilled"]
 
 
 def _best_of_n(n=4):

@@ -55,16 +55,16 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shi
         "text_encoder": ComponentSpec(
             component_id="text_encoder", kind="text_encoder",
             load_id="fastvideo.models.encoders.t5:T5EncoderModel",
-            factory=lambda inst: ToyTextEncoder(), required_for={"t2v", "i2v", "ti2v"}),
+            factory=lambda inst: ToyTextEncoder(), required_for={"t2v"}),
         "vae": ComponentSpec(
             component_id="vae", kind="vae",
             load_id="fastvideo.models.vaes.wanvae:AutoencoderKLWan",
-            factory=lambda inst: ToyVAE(), required_for={"t2v", "i2v"}),
+            factory=lambda inst: ToyVAE(), required_for={"t2v"}),
         "transformer": ComponentSpec(
             component_id="transformer", kind="dit",
             load_id="fastvideo.models.dits.wanvideo:WanTransformer3DModel",
             factory=lambda inst: ToyDiT(seed=seed),
-            resident_for=["diffusion_denoise"], required_for={"t2v", "i2v", "ti2v"}),
+            resident_for=["diffusion_denoise"], required_for={"t2v"}),
     }
     loops = {
         "diffusion_denoise": LoopSpec(
@@ -77,7 +77,7 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shi
         model_id=model_id, family="wan",
         components=components, loops=loops,
         capabilities=CapabilityMatrix.of(
-            Capability.TEXT_TO_VIDEO, Capability.IMAGE_TO_VIDEO,
+            Capability.TEXT_TO_VIDEO,   # base Wan2.1 is T2V-only; i2v is the separate InP variant
             Capability.VAE_DECODE, Capability.POLICY_ROLLOUT),
         recipe=RecipeSpec(method="base", assumes_loop="diffusion_denoise",
                           assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
