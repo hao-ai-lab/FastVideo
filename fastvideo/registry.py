@@ -24,6 +24,7 @@ from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyu
                                                    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
                                                    Hunyuan15SR1080PConfig)
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
+from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5T2VConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
@@ -367,7 +368,7 @@ def _register_configs() -> None:
     # Kandinsky5 Lite T2V
     register_configs(
         sampling_param_cls=None,
-        pipeline_config_cls=PipelineConfig,
+        pipeline_config_cls=Kandinsky5T2VConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
@@ -376,6 +377,7 @@ def _register_configs() -> None:
             lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5")),
         ],
         model_family="kandinsky5",
+        default_preset="kandinsky5_t2v_lite_5s",
     )
 
     # LongCat (T2V, I2V, VC use same config; workload varies by path)
@@ -776,6 +778,8 @@ def _register_presets() -> None:
         ALL_PRESETS as HUNYUAN15_PRESETS, )
     from fastvideo.pipelines.basic.hyworld.presets import (
         ALL_PRESETS as HYWORLD_PRESETS, )
+    from fastvideo.pipelines.basic.kandinsky5.presets import (
+        ALL_PRESETS as KANDINSKY5_PRESETS, )
     from fastvideo.pipelines.basic.lingbotworld.presets import (
         ALL_PRESETS as LINGBOTWORLD_PRESETS, )
     from fastvideo.pipelines.basic.longcat.presets import (
@@ -798,6 +802,7 @@ def _register_presets() -> None:
         HUNYUAN_PRESETS,
         HUNYUAN15_PRESETS,
         HYWORLD_PRESETS,
+        KANDINSKY5_PRESETS,
         LINGBOTWORLD_PRESETS,
         LONGCAT_PRESETS,
         LTX2_PRESETS,

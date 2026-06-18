@@ -31,6 +31,8 @@ from fastvideo.pipelines.stages.ltx2_latent_preparation import (LTX2LatentPrepar
 from fastvideo.pipelines.stages.ltx2_text_encoding import LTX2TextEncodingStage
 from fastvideo.pipelines.stages.matrixgame_denoising import (MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
+from fastvideo.pipelines.stages.kandinsky5 import (Kandinsky5DecodingStage, Kandinsky5DenoisingStage,
+                                                   Kandinsky5LatentPreparationStage)
 from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
 from fastvideo.pipelines.stages.gen3c_stages import (Gen3CCFGPolicyStage, Gen3CConditioningStage, Gen3CDenoisingStage,
                                                      Gen3CLatentPreparationStage)
@@ -62,6 +64,9 @@ __all__ = [
     "CausalDenoisingStage",
     "MatrixGameCausalDenoisingStage",
     "HYWorldDenoisingStage",
+    "Kandinsky5DecodingStage",
+    "Kandinsky5DenoisingStage",
+    "Kandinsky5LatentPreparationStage",
     "GameCraftDenoisingStage",
     "Gen3CCFGPolicyStage",
     "Gen3CConditioningStage",
