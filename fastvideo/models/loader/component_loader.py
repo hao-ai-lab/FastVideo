@@ -320,6 +320,19 @@ class TextEncoderLoader(ComponentLoader):
                 f"text encoder index {idx} out of range for text_encoder_configs (len={len(encoder_configs)}), model_path={model_path}"
             )
         encoder_config = encoder_configs[idx]
+        if (
+            model_config.get("architectures") == ["CLIPModel"]
+            and isinstance(model_config.get("text_config"), dict)
+        ):
+            valid_arch_fields = {
+                f.name for f in dataclasses.fields(encoder_config.arch_config)
+            }
+            model_config = {
+                key: value
+                for key, value in deepcopy(model_config["text_config"]).items()
+                if key in valid_arch_fields
+            }
+            model_config["architectures"] = ["CLIPTextModel"]
         encoder_config.update_model_arch(model_config)
         if idx < 0 or idx >= len(encoder_precisions):
             raise IndexError(
@@ -404,7 +417,9 @@ class TextEncoderLoader(ComponentLoader):
             else:
                 loaded_weights: set[str] = model.load_weights(
                     self._get_all_weights(
-                        model, model_path, to_cpu=use_cpu_offload
+                        model,
+                        model_path,
+                        to_cpu=fastvideo_args.text_encoder_cpu_offload,
                     )
                 )  # type: ignore
 
