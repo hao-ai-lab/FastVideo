@@ -42,7 +42,7 @@ class ToyTextEncoder:
 
     def encode_av(self, text: str):
         """LTX-2.3's connector emits SEPARATE video + audio text projections; toy returns two distinct
-        embeddings (the real TorchGemma.encode_av returns last_hidden_state + hidden_states[0])."""
+        embeddings (the real Gemma.encode_av returns last_hidden_state + hidden_states[0])."""
         return self.encode(text), self.encode((text or "") + "\x00audio")
 
 
@@ -435,7 +435,7 @@ class ToyVAE:
 class ToyUpsampler:
     """Toy latent upsampler — CPU stand-in for the learned LTX-2 spatial upsampler. Nearest-neighbor 2x
     spatial repeat on a ``[C,T,H,W]`` latent. The real ``LTX2LatentUpsampler`` learns this super-res; the
-    GPU backend swaps in that module (torch_ltx2.TorchLTX2Upsampler) via the ``upsampler`` component kind,
+    GPU backend swaps in that module (torch_backend.LTX2Upsampler) via the ``upsampler`` component kind,
     so the program calls ``component('spatial_upsampler').upsample(...)`` on both backends (no device branch)."""
 
     def __init__(self, scale: int = 2):

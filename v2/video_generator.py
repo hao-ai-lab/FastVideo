@@ -59,7 +59,7 @@ class VideoGenerator:
         (``num_gpus`` / ``use_fsdp_inference`` / ``*_cpu_offload`` / ``pin_cpu_memory`` / ``VSA_sparsity``
         / ...). The v2 bring-up runs single-GPU, resident, on SDPA, so these are accepted for parity but
         not all applied."""
-        from fastvideo.api import EngineConfig, GeneratorConfig, OffloadConfig
+        from v2.api import EngineConfig, GeneratorConfig, OffloadConfig
         engine = EngineConfig(
             num_gpus=int(kwargs.get("num_gpus", 1)),
             use_fsdp_inference=bool(kwargs.get("use_fsdp_inference", False)),
@@ -157,7 +157,7 @@ class VideoGenerator:
         guidance_scale / fps / sigmas / negative_prompt / output_path / output_video_name /
         save_video / return_frames / audio (None=auto for an A/V model, True/False to force; the audio
         is saved as a sibling ``.wav`` next to the mp4)."""
-        from fastvideo.api import GenerationRequest, OutputConfig, SamplingConfig
+        from v2.api import GenerationRequest, OutputConfig, SamplingConfig
         audio = kwargs.pop("audio", None)      # None -> auto (by model capability), True/False -> force
         sp = sampling_param
         # Per-model defaults (LTX-2 wants 8/30 steps + its own res, Wan2.2-TI2V 704x1280@24fps, etc.) come
@@ -188,7 +188,7 @@ class VideoGenerator:
     # --------------------------------------------------------------------- #
     def _result(self, out: Any, output: Any, fps: int, idx: int) -> Any:
         import numpy as np
-        from fastvideo.api import GenerationResult
+        from v2.api import GenerationResult
         frames = np.asarray(out.artifacts["video"].frames, dtype="float32")   # [C,T,H,W] in [-1,1]
         # -> [T,H,W,C] uint8 (the on-disk / return convention)
         vid = ((np.clip(frames, -1.0, 1.0) + 1.0) / 2.0 * 255.0).astype("uint8")
