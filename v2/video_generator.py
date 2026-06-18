@@ -24,8 +24,7 @@ from typing import Any
 # ``v2/registry.py`` so every entrypoint (this VideoGenerator, a CLI, the server) resolves identically.
 
 
-def _resolve_default(key: str, generic: Any, kwargs: dict, sp: Any, sd: Any,
-                     card_attr: str | None = None) -> Any:
+def _resolve_default(key: str, generic: Any, kwargs: dict, sp: Any, sd: Any, card_attr: str | None = None) -> Any:
     """Resolve one sampling param with precedence kwargs > SamplingParam override > card
     ``SamplingDefaults`` > generic fallback. ``card_attr`` aliases the card field name when it differs
     from the request key (e.g. ``num_inference_steps`` -> ``SamplingDefaults.num_steps``). Pure +
@@ -44,34 +43,37 @@ def _resolve_default(key: str, generic: Any, kwargs: dict, sp: Any, sd: Any,
 class VideoGenerator:
     """Typed t2v entrypoint over a single resident v2 ``ModelInstance`` (mirrors fastvideo's)."""
 
-    def __init__(self, engine: Any, model_id: str, *, instance: Any = None, supports_av: bool = False,
+    def __init__(self,
+                 engine: Any,
+                 model_id: str,
+                 *,
+                 instance: Any = None,
+                 supports_av: bool = False,
                  card: Any = None) -> None:
         self._engine = engine
         self._model_id = model_id
-        self._inst = instance              # the resident ModelInstance (to read e.g. the audio sample rate)
-        self._supports_av = supports_av    # model emits joint video+sound (LTX-2.3 T2VS) -> auto-request audio
-        self._card = card                  # the v2 ModelCard (for per-model sampling_defaults)
+        self._inst = instance  # the resident ModelInstance (to read e.g. the audio sample rate)
+        self._supports_av = supports_av  # model emits joint video+sound (LTX-2.3 T2VS) -> auto-request audio
+        self._card = card  # the v2 ModelCard (for per-model sampling_defaults)
 
     # --------------------------------------------------------------------- #
     @classmethod
-    def from_pretrained(cls, model_path: str, **kwargs: Any) -> "VideoGenerator":
+    def from_pretrained(cls, model_path: str, **kwargs: Any) -> VideoGenerator:
         """Convenience constructor (mirrors fastvideo's): accepts the legacy ``from_pretrained`` kwargs
         (``num_gpus`` / ``use_fsdp_inference`` / ``*_cpu_offload`` / ``pin_cpu_memory`` / ``VSA_sparsity``
         / ...). The v2 bring-up runs single-GPU, resident, on SDPA, so these are accepted for parity but
         not all applied."""
         from v2.api import EngineConfig, GeneratorConfig, OffloadConfig
-        engine = EngineConfig(
-            num_gpus=int(kwargs.get("num_gpus", 1)),
-            use_fsdp_inference=bool(kwargs.get("use_fsdp_inference", False)),
-            offload=OffloadConfig(
-                text_encoder=bool(kwargs.get("text_encoder_cpu_offload", False)),
-                dit=bool(kwargs.get("dit_cpu_offload", False)),
-                vae=bool(kwargs.get("vae_cpu_offload", False)),
-                pin_cpu_memory=bool(kwargs.get("pin_cpu_memory", False))))
+        engine = EngineConfig(num_gpus=int(kwargs.get("num_gpus", 1)),
+                              use_fsdp_inference=bool(kwargs.get("use_fsdp_inference", False)),
+                              offload=OffloadConfig(text_encoder=bool(kwargs.get("text_encoder_cpu_offload", False)),
+                                                    dit=bool(kwargs.get("dit_cpu_offload", False)),
+                                                    vae=bool(kwargs.get("vae_cpu_offload", False)),
+                                                    pin_cpu_memory=bool(kwargs.get("pin_cpu_memory", False))))
         return cls.from_config(GeneratorConfig(model_path=model_path, engine=engine))
 
     @classmethod
-    def from_config(cls, config: Any) -> "VideoGenerator":
+    def from_config(cls, config: Any) -> VideoGenerator:
         """``config``: ``fastvideo.api.GeneratorConfig``. Resolves the v2 card from ``model_path``,
         stamps the (downloaded) checkpoint onto it, and registers it on a fresh v2 ``Engine`` whose
         ``Platform.detect()`` returns cuda on a GPU box."""
@@ -99,17 +101,17 @@ class VideoGenerator:
             cfg_root = model_path if local else snapshot_download(
                 model_path, revision=rev, allow_patterns=["*.json", "**/*.json"])
             build_card, build_program = resolve(model_path, cfg_root)
-        root = model_path if local else snapshot_download(model_path, revision=rev)   # full weights (cached)
+        root = model_path if local else snapshot_download(model_path, revision=rev)  # full weights (cached)
         card, program = build_card(), build_program()
 
-        from v2.recipes.wan21 import stamp_wan21_checkpoints   # transformer/vae/text_encoder subfolder layout
+        from v2.recipes.wan21 import stamp_wan21_checkpoints  # transformer/vae/text_encoder subfolder layout
         stamp_wan21_checkpoints(card, root)
 
         from v2._enums import Capability
         from v2.card import load_card
         from v2.cache import CacheManager
         from v2.runtime import Engine
-        inst = load_card(card, cache_manager=CacheManager.from_card(card))   # platform auto-detect -> cuda
+        inst = load_card(card, cache_manager=CacheManager.from_card(card))  # platform auto-detect -> cuda
         eng = Engine()
         eng.register(card.model_id, inst, program)
         # A model that advertises TEXT_TO_VIDEO_SOUND (LTX-2.3) generates joint video+audio; the
@@ -135,13 +137,19 @@ class VideoGenerator:
         audio = self._supports_av if want_audio is None else bool(want_audio)
         results = []
         for idx, prompt in enumerate(prompts):
-            diff = DiffusionParams(
-                num_steps=s.num_inference_steps, seed=s.seed, num_frames=s.num_frames,
-                height=s.height, width=s.width, guidance_scale=s.guidance_scale,
-                negative_prompt=request.negative_prompt or "",
-                sigmas=tuple(s.sigmas) if getattr(s, "sigmas", None) else None)
-            if audio:   # joint text->video+sound: ask for both modalities so the audio branch runs
-                req = make_request(TaskType.T2VS, self._model_id, prompt, diffusion=diff,
+            diff = DiffusionParams(num_steps=s.num_inference_steps,
+                                   seed=s.seed,
+                                   num_frames=s.num_frames,
+                                   height=s.height,
+                                   width=s.width,
+                                   guidance_scale=s.guidance_scale,
+                                   negative_prompt=request.negative_prompt or "",
+                                   sigmas=tuple(s.sigmas) if getattr(s, "sigmas", None) else None)
+            if audio:  # joint text->video+sound: ask for both modalities so the audio branch runs
+                req = make_request(TaskType.T2VS,
+                                   self._model_id,
+                                   prompt,
+                                   diffusion=diff,
                                    outputs=OutputSpec(modalities=frozenset({"video", "audio"})))
             else:
                 req = make_request(TaskType.T2V, self._model_id, prompt, diffusion=diff)
@@ -158,7 +166,7 @@ class VideoGenerator:
         save_video / return_frames / audio (None=auto for an A/V model, True/False to force; the audio
         is saved as a sibling ``.wav`` next to the mp4)."""
         from v2.api import GenerationRequest, OutputConfig, SamplingConfig
-        audio = kwargs.pop("audio", None)      # None -> auto (by model capability), True/False -> force
+        audio = kwargs.pop("audio", None)  # None -> auto (by model capability), True/False -> force
         sp = sampling_param
         # Per-model defaults (LTX-2 wants 8/30 steps + its own res, Wan2.2-TI2V 704x1280@24fps, etc.) come
         # from the resolved card; precedence is kwargs > SamplingParam > card defaults > generic fallback.
@@ -167,43 +175,65 @@ class VideoGenerator:
         def pick(key: str, default: Any, card_attr: str | None = None) -> Any:
             return _resolve_default(key, default, kwargs, sp, sd, card_attr)
 
-        sampling = SamplingConfig(
-            num_inference_steps=int(pick("num_inference_steps", 30, "num_steps")),
-            seed=int(pick("seed", 1024)),
-            num_frames=int(pick("num_frames", 25)),
-            height=int(pick("height", 480)),
-            width=int(pick("width", 832)),
-            guidance_scale=float(pick("guidance_scale", 5.0)),
-            fps=int(pick("fps", 16)),
-            sigmas=pick("sigmas", None))
-        output = OutputConfig(
-            output_path=kwargs.get("output_path", "outputs/"),
-            output_video_name=kwargs.get("output_video_name"),
-            save_video=bool(kwargs.get("save_video", True)),
-            return_frames=bool(kwargs.get("return_frames", False)))
-        req = GenerationRequest(prompt=prompt, negative_prompt=pick("negative_prompt", None),
-                               sampling=sampling, output=output)
+        sampling = SamplingConfig(num_inference_steps=int(pick("num_inference_steps", 30, "num_steps")),
+                                  seed=int(pick("seed", 1024)),
+                                  num_frames=int(pick("num_frames", 25)),
+                                  height=int(pick("height", 480)),
+                                  width=int(pick("width", 832)),
+                                  guidance_scale=float(pick("guidance_scale", 5.0)),
+                                  fps=int(pick("fps", 16)),
+                                  sigmas=pick("sigmas", None))
+        output = OutputConfig(output_path=kwargs.get("output_path", "outputs/"),
+                              output_video_name=kwargs.get("output_video_name"),
+                              save_video=bool(kwargs.get("save_video", True)),
+                              return_frames=bool(kwargs.get("return_frames", False)))
+        req = GenerationRequest(prompt=prompt,
+                                negative_prompt=pick("negative_prompt", None),
+                                sampling=sampling,
+                                output=output)
         return self.generate(req, want_audio=audio)
 
     # --------------------------------------------------------------------- #
     def _result(self, out: Any, output: Any, fps: int, idx: int) -> Any:
         import numpy as np
         from v2.api import GenerationResult
-        frames = np.asarray(out.artifacts["video"].frames, dtype="float32")   # [C,T,H,W] in [-1,1]
-        # -> [T,H,W,C] uint8 (the on-disk / return convention)
-        vid = ((np.clip(frames, -1.0, 1.0) + 1.0) / 2.0 * 255.0).astype("uint8")
-        vid = vid.transpose(1, 2, 3, 0) if vid.ndim == 4 else vid
+        arts = out.artifacts
         save = bool(getattr(output, "save_video", True))
         out_dir = getattr(output, "output_path", "outputs/")
         stem = (output.output_video_name or f"v2_{self._model_id}_{idx}")
-        stem = stem[:-4] if stem.endswith(".mp4") else stem
-        video_path = None
-        if save:
-            os.makedirs(out_dir, exist_ok=True)
-            video_path = os.path.join(out_dir, f"{stem}.mp4")
-            import imageio.v2 as imageio
-            imageio.mimsave(video_path, list(vid), fps=int(fps), format="mp4")
-        # Audio (T2VS): the AudioArtifact carries the raw stereo waveform; save a sibling .wav at the
+        for _ext in (".mp4", ".png", ".wav"):
+            stem = stem[:-len(_ext)] if stem.endswith(_ext) else stem
+
+        def _to_uint8(a: Any) -> Any:  # [-1,1] float -> [0,255] uint8
+            return ((np.clip(np.asarray(a, dtype="float32"), -1.0, 1.0) + 1.0) / 2.0 * 255.0).astype("uint8")
+
+        # Modality-aware: a model emits exactly one of video / image / (and/or) audio. T2V/I2V/T2VS carry
+        # a "video" artifact; T2I (SD3.5 / FLUX.2) an "image" TensorArtifact; audio (Stable Audio) only
+        # the AudioArtifact. Guard each so an audio/image-only result does not KeyError on "video".
+        vid = video_path = image_path = None
+        if "video" in arts:
+            vid = _to_uint8(arts["video"].frames)  # [C,T,H,W] -> [T,H,W,C]
+            vid = vid.transpose(1, 2, 3, 0) if vid.ndim == 4 else vid
+            if save:
+                os.makedirs(out_dir, exist_ok=True)
+                video_path = os.path.join(out_dir, f"{stem}.mp4")
+                import imageio.v2 as imageio
+                imageio.mimsave(video_path, list(vid), fps=int(fps), format="mp4")
+        elif "image" in arts:  # single decoded image (T2I)
+            art = arts["image"]
+            img = _to_uint8(getattr(art, "tensor", getattr(art, "frames", art)))
+            img = np.squeeze(img)
+            if img.ndim == 4:
+                img = img[0]
+            if img.ndim == 3 and img.shape[0] in (1, 3, 4) and img.shape[-1] not in (1, 3, 4):
+                img = img.transpose(1, 2, 0)  # [C,H,W] -> [H,W,C]
+            vid = img
+            if save:
+                os.makedirs(out_dir, exist_ok=True)
+                image_path = os.path.join(out_dir, f"{stem}.png")
+                import imageio.v2 as imageio
+                imageio.imwrite(image_path, img)
+        # Audio (T2VS / Stable Audio): the AudioArtifact carries the raw stereo waveform; save a sibling .wav at the
         # vocoder's real rate (read from the built audio_vae adapter — the artifact's default rate is a
         # placeholder). A plain T2V request produces no audio artifact, so this is skipped.
         audio = audio_sr = audio_path = None
@@ -216,9 +246,13 @@ class VideoGenerator:
                 audio_path = os.path.join(out_dir, f"{stem}.wav")
                 self._write_wav(audio_path, audio, audio_sr)
         res = GenerationResult(frames=(vid if getattr(output, "return_frames", True) else None),
-                               video_path=video_path, audio=audio, audio_sample_rate=audio_sr)
+                               video_path=video_path,
+                               audio=audio,
+                               audio_sample_rate=audio_sr)
         if audio_path:
             res.extra["audio_path"] = audio_path
+        if image_path:
+            res.extra["image_path"] = image_path
         return res
 
     def _audio_sample_rate(self, default: int = 24000) -> int:
@@ -237,5 +271,5 @@ class VideoGenerator:
         from scipy.io import wavfile
         a = np.asarray(wav, dtype="float32")
         if a.ndim == 2 and a.shape[0] in (1, 2) and a.shape[0] < a.shape[1]:
-            a = a.T                       # [channels, samples] -> [samples, channels] (scipy convention)
+            a = a.T  # [channels, samples] -> [samples, channels] (scipy convention)
         wavfile.write(path, int(sample_rate), np.clip(a, -1.0, 1.0))
