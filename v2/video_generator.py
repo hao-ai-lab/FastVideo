@@ -68,9 +68,20 @@ class VideoGenerator:
     # --------------------------------------------------------------------- #
     @classmethod
     def from_pretrained(cls, model_path: str, **kwargs: Any) -> "VideoGenerator":
-        """Convenience: build from an HF id (+ optional GeneratorConfig kwargs)."""
-        from fastvideo.api import GeneratorConfig
-        return cls.from_config(GeneratorConfig(model_path=model_path, **kwargs))
+        """Convenience constructor (mirrors fastvideo's): accepts the legacy ``from_pretrained`` kwargs
+        (``num_gpus`` / ``use_fsdp_inference`` / ``*_cpu_offload`` / ``pin_cpu_memory`` / ``VSA_sparsity``
+        / ...). The v2 bring-up runs single-GPU, resident, on SDPA, so these are accepted for parity but
+        not all applied."""
+        from fastvideo.api import EngineConfig, GeneratorConfig, OffloadConfig
+        engine = EngineConfig(
+            num_gpus=int(kwargs.get("num_gpus", 1)),
+            use_fsdp_inference=bool(kwargs.get("use_fsdp_inference", False)),
+            offload=OffloadConfig(
+                text_encoder=bool(kwargs.get("text_encoder_cpu_offload", False)),
+                dit=bool(kwargs.get("dit_cpu_offload", False)),
+                vae=bool(kwargs.get("vae_cpu_offload", False)),
+                pin_cpu_memory=bool(kwargs.get("pin_cpu_memory", False))))
+        return cls.from_config(GeneratorConfig(model_path=model_path, engine=engine))
 
     @classmethod
     def from_config(cls, config: Any) -> "VideoGenerator":
@@ -120,6 +131,41 @@ class VideoGenerator:
             out = self._engine.run(req)
             results.append(self._result(out, request.output, s.fps, idx))
         return results[0] if len(results) == 1 else results
+
+    # --------------------------------------------------------------------- #
+    def generate_video(self, prompt: Any = None, sampling_param: Any = None, **kwargs: Any) -> Any:
+        """Convenience API mirroring ``fastvideo.VideoGenerator.generate_video``. Builds a
+        ``GenerationRequest`` from loose kwargs (+ an optional ``SamplingParam`` override) and calls
+        ``generate()``. kwargs: num_inference_steps / seed / num_frames / height / width /
+        guidance_scale / fps / sigmas / negative_prompt / output_path / output_video_name /
+        save_video / return_frames."""
+        from fastvideo.api import GenerationRequest, OutputConfig, SamplingConfig
+        sp = sampling_param
+
+        def pick(key: str, default: Any) -> Any:
+            if key in kwargs and kwargs[key] is not None:
+                return kwargs[key]
+            if sp is not None and getattr(sp, key, None) is not None:
+                return getattr(sp, key)
+            return default
+
+        sampling = SamplingConfig(
+            num_inference_steps=int(pick("num_inference_steps", 30)),
+            seed=int(pick("seed", 1024)),
+            num_frames=int(pick("num_frames", 25)),
+            height=int(pick("height", 480)),
+            width=int(pick("width", 832)),
+            guidance_scale=float(pick("guidance_scale", 5.0)),
+            fps=int(pick("fps", 16)),
+            sigmas=pick("sigmas", None))
+        output = OutputConfig(
+            output_path=kwargs.get("output_path", "outputs/"),
+            output_video_name=kwargs.get("output_video_name"),
+            save_video=bool(kwargs.get("save_video", True)),
+            return_frames=bool(kwargs.get("return_frames", False)))
+        req = GenerationRequest(prompt=prompt, negative_prompt=pick("negative_prompt", None),
+                               sampling=sampling, output=output)
+        return self.generate(req)
 
     # --------------------------------------------------------------------- #
     def _result(self, out: Any, output: Any, fps: int, idx: int) -> Any:
