@@ -294,3 +294,189 @@ skill for adding agentic app layers over FastVideo generators:
 - compatibility API service wrappers,
 - fake-provider unit tests,
 - Modal smoke-test pattern.
+
+## Training Loop Extension
+
+Status: in progress as of the user request to "Add a training loop" for
+InterleaveThinker's RL integration.
+
+User constraints still active:
+
+- Continue using `/tmp/fastvideo-interleavethinker`.
+- Do not edit `/home/toolbox/FastVideo`; that checkout is dirty and belongs to
+  another agent.
+- Commit useful checkpoints and push each commit immediately after committing.
+- Run tests on Modal through `fastvideo/tests/modal/launch_l40s_job.py`; the
+  local machine is not suitable for the relevant test environment.
+- Keep this handoff file current before interruptions or context compaction.
+
+Skills / guidance applied for this slice:
+
+- `.agents/skills/rlhf-training-abstractions/SKILL.md`
+- `.agents/skills/add-rl-method/SKILL.md`
+- `.agents/skills/add-reward-model/SKILL.md`
+- `fastvideo/train/AGENTS.md`
+- `fastvideo/tests/AGENTS.md`
+
+Upstream InterleaveThinker RL facts gathered from
+`/tmp/InterleaveThinker-src`:
+
+- RL launch script:
+  `train/EasyR1/local_scripts/run_interleave_thinker_rl.sh`.
+- It runs EasyR1/verl GRPO with
+  `python3 -m verl.trainer.main`.
+- The actor checkpoint is `${ROOT}/ckpt/critic_sft`, not a diffusion model.
+- `critic_sft` is produced by LLaMA-Factory SFT from
+  `Qwen/Qwen3-VL-8B-Instruct`.
+- The SFT config freezes the visual tower and multimodal projector and trains
+  the language side of a Qwen3-VL critic.
+- The RL script overrides EasyR1's default model path with
+  `worker.actor.model.model_path="${MODEL_PATH}"`.
+- The EasyR1 config uses `algorithm.adv_estimator: grpo`,
+  `worker.rollout.n: 8`, `worker.rollout.temperature: 1.0`,
+  `worker.rollout.top_p: 1.0`, `algorithm.use_kl_loss: true`, and
+  `algorithm.kl_coef: 1.0e-2`.
+- The reward function is
+  `train/EasyR1/verl/reward_function/interleave_thinker_reward.py:compute_score`.
+- The reward posts JSON to a FastVideo-compatible `/edit` API using
+  `EDIT_MODEL_NAME="klein"`, `num_inference_step=4`,
+  `guidance_scale=1.0`, `width=1024`, `height=1024`, and
+  `enhance_prompt=false`.
+- Reward components:
+  - XML/JSON format reward: response must include `<think>...</think>` and an
+    `<answer>...</answer>` JSON object with `previous_step_success` and
+    `refine_prompt`.
+  - Judge accuracy reward: predicted `previous_step_success` must match the
+    ground-truth previous-step success flag.
+  - Image edit improvement: generate an edited image from `refine_prompt` and
+    score semantic / quality improvement with Gemini; upstream combines these
+    with `overall = 0.5 * format + 0.5 * (0.2 * accuracy + 0.6 * semantic +
+    0.2 * quality)`.
+
+Implementation plan for the FastVideo training loop:
+
+1. Add reusable InterleaveThinker reward utilities under
+   `fastvideo/train/methods/rl/rewards/interleave_thinker.py`.
+   - Keep parser/format/accuracy/edit aggregation independent from the method.
+   - Allow fake scorer injection in tests.
+   - Do not include Gemini credentials or network calls in the reusable core.
+2. Add a managed RL method under
+   `fastvideo/train/methods/rl/interleave_thinker.py`.
+   - Subclass `TrainingMethod`.
+   - Return `manages_optimization() == True`.
+   - Implement `managed_train_step(data_stream, iteration)` as a genuine
+     outer loop: consume prompts, ask the actor role-model adapter for grouped
+     responses, score rewards, compute GRPO-style group-normalized advantages,
+     and call the actor adapter's update hook.
+   - Keep Qwen3-VL / tokenizer / logprob details behind model hooks instead of
+     embedding them in the method. FastVideo currently has no native Qwen3-VL
+     actor wrapper, so this slice creates the method contract and tests it with
+     fakes rather than vendoring EasyR1.
+3. Add a public skeleton config under `examples/train/configs/rl/` showing the
+   method target and knobs. It should be parseable but clearly rely on a future
+   actor `ModelBase` wrapper.
+4. Add focused tests under `tests/local_tests/`:
+   - reward parser and score aggregation,
+   - managed loop calls actor generation/update and computes grouped
+     advantages,
+   - config parsing for the new method target,
+   - sanity that existing non-RL methods still default to trainer-managed
+     optimization if touched by the tests.
+5. Validate via Modal:
+   - `pytest tests/local_tests/test_interleave_thinker_reward.py
+     tests/local_tests/test_interleave_thinker_method.py
+     tests/local_tests/test_train_rl_sampling.py -q`
+   - `pre-commit run --files <changed FastVideo files>` with the repository's
+     configured hooks.
+
+Design boundary for reviewers:
+
+- This is intentionally not a full native Qwen3-VL/EasyR1 port. Adding a
+  first-class Qwen3-VL actor model belongs in `fastvideo/train/models/` and can
+  reuse this method once available.
+- This does provide a FastVideo-native RL method and reward surface, so the
+  InterleaveThinker RL loop can be integrated like other training methods:
+  YAML target, trainer lifecycle, method-managed step, metrics, callbacks, and
+  checkpoint visibility through role models.
+
+Current training-loop edits:
+
+- [x] Add `fastvideo/train/methods/rl/rewards/interleave_thinker.py`.
+- [x] Export the new reward utilities.
+- [x] Add `fastvideo/train/methods/rl/interleave_thinker.py`.
+- [x] Export `InterleaveThinkerRLMethod`.
+- [x] Add `fastvideo/train/models/interleave_thinker/` adapter shell so the
+  example YAML has an importable FastVideo model target.
+- [x] Add config example:
+  `examples/train/configs/rl/interleave_thinker/critic_grpo.yaml`.
+- [x] Add local tests:
+  - `tests/local_tests/test_interleave_thinker_reward.py`
+  - `tests/local_tests/test_interleave_thinker_method.py`
+- [x] Run Modal validation.
+- [ ] Commit and push.
+
+Implementation details added:
+
+- `InterleaveThinkerRewardScorer` parses `<think>` / `<answer>` responses,
+  accepts JSON or Python-literal answer dicts, computes format reward, judge
+  accuracy reward, and normalized semantic/quality edit rewards.
+- Reward scoring accepts optional injected `edit_scorer` or per-rollout
+  `edit_score(s)` metadata. It does not load Gemini or call edit APIs.
+- `InterleaveThinkerRLMethod` subclasses `TrainingMethod`, returns
+  `manages_optimization() == True`, and implements a real
+  `managed_train_step`:
+  1. collect rollouts from `student.generate_interleave_responses(...)` or
+     offline `response/responses` batch fields,
+  2. score InterleaveThinker rewards,
+  3. compute GRPO-style group-normalized advantages by `group_key`,
+  4. call `student.train_interleave_rollouts(...)` with rollouts, rewards,
+     advantages, optional FastVideo optimizer/scheduler, grad accumulation, and
+     max grad norm.
+- `InterleaveThinkerCriticModel` is deliberately an adapter shell. It documents
+  the required hooks and raises until a native Qwen/VLM backend is implemented.
+- `git diff --check` passed locally before Modal validation.
+- First Modal validation attempt for this slice reached the remote L40S
+  container:
+  - Modal app URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-tIqT7DuddSWzb3O9Un1w66`
+  - Tests passed: `22 passed, 14 warnings in 20.75s`.
+  - Pre-commit failed only on Ruff `SIM108` in
+    `fastvideo/train/methods/rl/interleave_thinker.py`.
+  - Fixed by replacing a small `if`/`else` response selection with the ternary
+    Ruff requested.
+- Second Modal validation attempt passed:
+  - Modal app URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-2Z2sH2UfhMoPmKolG0KY6t`
+  - Command:
+    `pytest tests/local_tests/test_interleave_thinker_reward.py
+    tests/local_tests/test_interleave_thinker_method.py
+    tests/local_tests/test_train_rl_sampling.py -q && pre-commit run --files
+    fastvideo/train/methods/rl/__init__.py
+    fastvideo/train/methods/rl/interleave_thinker.py
+    fastvideo/train/methods/rl/rewards/__init__.py
+    fastvideo/train/methods/rl/rewards/interleave_thinker.py
+    fastvideo/train/models/interleave_thinker/__init__.py
+    fastvideo/train/models/interleave_thinker/critic.py`
+  - Result: `22 passed, 14 warnings in 19.80s`.
+  - Pre-commit result: `yapf`, `ruff`, `codespell`, `mypy`, filename check,
+    and suggestion hooks passed. PyMarkdown/actionlint skipped with no files to
+    check.
+
+Pending validation command:
+
+```bash
+python fastvideo/tests/modal/launch_l40s_job.py run-l40s-1 \
+  --git-repo https://github.com/hao-ai-lab/FastVideo.git \
+  --git-commit 633d39356804e63478d242611e992dc8e1af3caa \
+  --apply-local-patch \
+  --patch-paths fastvideo/train/methods/rl/__init__.py \
+    fastvideo/train/methods/rl/interleave_thinker.py \
+    fastvideo/train/methods/rl/rewards/__init__.py \
+    fastvideo/train/methods/rl/rewards/interleave_thinker.py \
+    fastvideo/train/models/interleave_thinker/__init__.py \
+    fastvideo/train/models/interleave_thinker/critic.py \
+    examples/train/configs/rl/interleave_thinker/critic_grpo.yaml \
+    tests/local_tests/test_interleave_thinker_reward.py \
+    tests/local_tests/test_interleave_thinker_method.py \
+  --cmd 'pytest tests/local_tests/test_interleave_thinker_reward.py tests/local_tests/test_interleave_thinker_method.py tests/local_tests/test_train_rl_sampling.py -q && pre-commit run --files fastvideo/train/methods/rl/__init__.py fastvideo/train/methods/rl/interleave_thinker.py fastvideo/train/methods/rl/rewards/__init__.py fastvideo/train/methods/rl/rewards/interleave_thinker.py fastvideo/train/models/interleave_thinker/__init__.py fastvideo/train/models/interleave_thinker/critic.py'
+```

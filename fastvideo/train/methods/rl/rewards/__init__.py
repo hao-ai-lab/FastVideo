@@ -5,6 +5,19 @@ from fastvideo.train.methods.rl.rewards.frame_rewards import (
     ClipScoreScorer,
     PickScoreScorer,
 )
+from fastvideo.train.methods.rl.rewards.interleave_thinker import (
+    EditScoreProvider,
+    InterleaveThinkerAnswer,
+    InterleaveThinkerEditRequest,
+    InterleaveThinkerEditScore,
+    InterleaveThinkerRewardResult,
+    InterleaveThinkerRewardScorer,
+    extract_interleave_answer,
+    interleave_format_reward,
+    interleave_judge_accuracy_reward,
+    normalize_interleave_response,
+    score_interleave_thinker_rewards,
+)
 from fastvideo.train.methods.rl.rewards.media import (
     MultiRewardScorer,
     RewardScorer,
@@ -29,9 +42,20 @@ def build_multi_reward_scorer(
 
 __all__ = [
     "ClipScoreScorer",
+    "EditScoreProvider",
+    "InterleaveThinkerAnswer",
+    "InterleaveThinkerEditRequest",
+    "InterleaveThinkerEditScore",
+    "InterleaveThinkerRewardResult",
+    "InterleaveThinkerRewardScorer",
     "MultiRewardScorer",
     "PickScoreScorer",
     "RewardScorer",
     "build_multi_reward_scorer",
+    "extract_interleave_answer",
+    "interleave_format_reward",
+    "interleave_judge_accuracy_reward",
+    "normalize_interleave_response",
+    "score_interleave_thinker_rewards",
     "select_first_frame",
 ]

@@ -1,0 +1,67 @@
+# InterleaveThinker critic RL bridge.
+#
+# Upstream InterleaveThinker trains a Qwen3-VL critic checkpoint with EasyR1
+# GRPO. This config expresses the same outer loop through FastVideo's modular
+# trainer. The default model target is an adapter shell; replace or extend it
+# with a concrete Qwen/VLM backend that implements:
+#
+#   generate_interleave_responses(...)
+#   train_interleave_rollouts(...)
+
+models:
+  student:
+    _target_: fastvideo.train.models.interleave_thinker.InterleaveThinkerCriticModel
+    init_from: ckpt/critic_sft
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.rl.interleave_thinker.InterleaveThinkerRLMethod
+  num_generations: 8
+  num_batches_per_step: 1
+  temperature: 1.0
+  top_p: 1.0
+  max_new_tokens: 2048
+  format_weight: 0.5
+  judge_accuracy_weight: 0.2
+  semantic_weight: 0.6
+  quality_weight: 0.2
+  fallback_edit_reward: 0.5
+  advantage_eps: 0.0001
+  advantage_clip: 5.0
+  max_grad_norm: 1.0
+  terminal_progress: true
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 4
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: data/InterleaveThinker/Train-Data/critic_rl.jsonl
+    preprocessed_data_type: text_only
+    train_batch_size: 16
+    dataloader_num_workers: 0
+    seed: 42
+
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/interleave_thinker_critic_grpo
+    training_state_checkpointing_steps: 50
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: EasyR1-qwen3-vl
+    run_name: interleave_thinker_critic_grpo_fastvideo
