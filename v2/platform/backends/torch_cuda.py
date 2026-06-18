@@ -51,7 +51,8 @@ def _flow_sde_cuda(*args, **kwargs):
 _B = "v2.platform.backends.torch_backend"
 _KIND_SOURCE = {
     "dit": "WanDiT/LTX2DiT", "vae": "WanVAE/LTX2VAE", "text_encoder": "T5Encoder/Gemma",
-    "upsampler": "LTX2Upsampler", "audio_vae": "LTX2AudioVAE", "vocoder": "LTX2Vocoder",
+    "image_encoder": "CLIPImageEncoder", "upsampler": "LTX2Upsampler",
+    "audio_vae": "LTX2AudioVAE", "vocoder": "LTX2Vocoder",
 }
 for _kind, _cls in _KIND_SOURCE.items():
     register_component(_kind, _build_component, device="cuda", available=_cuda_available,
