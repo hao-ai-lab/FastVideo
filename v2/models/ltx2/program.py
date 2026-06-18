@@ -67,6 +67,38 @@ def build_ltx2_base_program() -> Program:
     ).validate()
 
 
+# --- single-stage LTX-2.3 joint A/V (T2VS) ----------------------------------------- #
+def _text_encode_av(instance, slots, request, ctx) -> None:
+    """LTX-2.3 connector emits SEPARATE video + audio text projections (one Gemma call)."""
+    video_text, audio_text = instance.component("text_encoder").encode_av(request.prompt())
+    slots["text_embeds"] = video_text
+    slots["audio_text_embeds"] = audio_text
+
+
+def _audio_decode_single(instance, slots, request, ctx) -> None:
+    out = slots.get("ltx_out", {})
+    au = out.get("audio_latents") if isinstance(out, dict) else None
+    slots["audio"] = instance.component("audio_vae").decode(au) if au is not None else None
+
+
+def build_ltx2_3_program() -> Program:
+    """LTX-2.3 single-stage T2VS: text_encode (separate video+audio connectors) → JOINT A/V denoise
+    (one DiT forward per step cross-attends video<->audio) → video decode + audio decode
+    (AudioDecoder→Vocoder). A plain T2V request leaves the audio latent unproduced, so audio_decode
+    writes None and the audio components stay unbuilt."""
+    return Program(
+        program_id="ltx2.3.t2vs", kind=ProgramKind.INLINE,
+        nodes=[
+            ComponentNode("text_encode", fn=_text_encode_av, writes=("text_embeds", "audio_text_embeds")),
+            ModelLoopNode("denoise", loop_id="ltx2_3", output_slot="ltx_out",
+                          reads=("text_embeds", "audio_text_embeds"), writes=("ltx_out",)),
+            ComponentNode("vae_decode", fn=_vae_decode_single, reads=("ltx_out",), writes=("video",)),
+            ComponentNode("audio_decode", fn=_audio_decode_single, reads=("ltx_out",), writes=("audio",)),
+        ],
+        output_artifacts={"video": "video", "audio": "audio", "latents": "ltx_out"},
+    ).validate()
+
+
 # --- joint audio+video (T2VS) program (design_v3 §15b; §9.11) ---------------------- #
 def _upsample_av(instance, slots, request, ctx) -> None:
     _upsample(instance, slots, request, ctx)                       # video latent upsample (reuse)

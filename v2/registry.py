@@ -36,6 +36,8 @@ def _entries() -> list[ModelEntry]:
     """The explicit registry (PRIMARY). Builders imported lazily to avoid import cycles with the model
     packages and keep importing this module cheap."""
     from .models.ltx2 import (
+        build_ltx2_3_card,
+        build_ltx2_3_program,
         build_ltx2_base_card,
         build_ltx2_base_program,
         build_ltx2_card,
@@ -55,10 +57,10 @@ def _entries() -> list[ModelEntry]:
         ModelEntry(("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",), build_wan_causal_card, build_wan_causal_program),
         # LTX-2 two-stage distilled (ships a spatial_upsampler: base -> upsample -> refine):
         ModelEntry(("FastVideo/LTX2-Distilled-Diffusers",), build_ltx2_card, build_ltx2_program),
-        # LTX-2 single-stage (no upsampler) — the non-distilled base (many-step) AND the 2.3-distilled
-        # (few-step), which is also single-stage; pass a small num_inference_steps for the distilled one:
-        ModelEntry(("Davids048/LTX2-Base-Diffusers", "FastVideo/LTX-2.3-Distilled-Diffusers"),
-                   build_ltx2_base_card, build_ltx2_base_program),
+        # LTX-2 single-stage, non-distilled base (request-driven many-step, video-only):
+        ModelEntry(("Davids048/LTX2-Base-Diffusers",), build_ltx2_base_card, build_ltx2_base_program),
+        # LTX-2.3 distilled — single-stage, JOINT text->video+audio (separate connectors + gated attn):
+        ModelEntry(("FastVideo/LTX-2.3-Distilled-Diffusers",), build_ltx2_3_card, build_ltx2_3_program),
     ]
 
 

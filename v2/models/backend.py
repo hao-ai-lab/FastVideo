@@ -40,6 +40,11 @@ class ToyTextEncoder:
         rng = np.random.default_rng(_seed_from("txt:" + (text or "<empty>")))
         return (rng.standard_normal((self.seq, self.dim)) * 0.1).astype("float32")
 
+    def encode_av(self, text: str):
+        """LTX-2.3's connector emits SEPARATE video + audio text projections; toy returns two distinct
+        embeddings (the real TorchGemma.encode_av returns last_hidden_state + hidden_states[0])."""
+        return self.encode(text), self.encode((text or "") + "\x00audio")
+
 
 class ToyDiT:
     """A tiny deterministic velocity predictor (stands in for the 1.3B DiT).
@@ -67,9 +72,18 @@ class ToyDiT:
         return mixed
 
     def __call__(self, latent: np.ndarray, text_embed: np.ndarray | None, sigma: float,
-                 context: np.ndarray | None = None) -> np.ndarray:
+                 context: np.ndarray | None = None, *,
+                 audio_latent: np.ndarray | None = None, audio_text: np.ndarray | None = None):
         latent = np.asarray(latent, dtype=np.float32)
-        return np.tanh(self._pre_tanh(latent, text_embed, sigma, context)).astype("float32")
+        video = np.tanh(self._pre_tanh(latent, text_embed, sigma, context)).astype("float32")
+        if audio_latent is None:
+            return video
+        # toy joint A/V (LTX-2.3): a simple element-wise audio velocity (the real DiT cross-attends
+        # video<->audio in one forward and returns (video_vel, audio_vel)).
+        au = np.asarray(audio_latent, dtype=np.float32)
+        a_cond = float(np.mean(audio_text)) if audio_text is not None else 0.0
+        audio = np.tanh(0.9 * au + 0.1 * float(sigma) + 0.3 * a_cond).astype("float32")
+        return video, audio
 
     # --- minimal trainable surface (so training methods do real optimizer steps) --------- #
     def clone(self) -> "ToyDiT":
@@ -388,7 +402,10 @@ class ToyAudioVAE:
     def decode(self, audio_latent: np.ndarray) -> np.ndarray:
         a = np.asarray(audio_latent, dtype="float32")
         flat = a.reshape(a.shape[0], -1)                       # [C, A·...]
-        mono = np.tensordot(self.proj, flat, axes=([0], [0]))  # [A·...]
+        # project over the actual channel count (LTX-2.3 audio latent is 8ch; the 2-stage toy is
+        # LATENT_CHANNELS) — np.resize is identity when they already match, so existing T2VS is unchanged.
+        proj = np.resize(self.proj, a.shape[0]).astype("float32")
+        mono = np.tensordot(proj, flat, axes=([0], [0]))       # [A·...]
         return np.tanh(np.repeat(mono, self.spf)).astype("float32")     # [A·spf] mono waveform
 
 

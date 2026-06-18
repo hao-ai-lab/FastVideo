@@ -28,8 +28,8 @@ from ...card import (
     RecipeSpec,
 )
 from ...parallel import ParallelPlan
-from ..backend import ToyAudioVAE, ToyDiT, ToyTextEncoder, ToyUpsampler, ToyVAE, _seed_from
-from .loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop
+from ..backend import ToyAudioVAE, ToyDiT, ToyTextEncoder, ToyUpsampler, ToyVAE, ToyVocoder, _seed_from
+from .loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop, LTX23DenoiseLoop
 
 
 def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
@@ -133,6 +133,63 @@ def build_ltx2_base_card(model_id: str = "ltx2-single-stage") -> ModelCard:
         components=components, loops=loops,
         capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.VAE_DECODE),
         recipe=RecipeSpec(method="base", assumes_loop="ltx2_single",
+                          assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
+        parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
+        caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24,
+                                         reuse_across_requests=True)},
+        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()],
+                                        default_plan=ParallelPlan.single()),
+    )
+    return card.validate()
+
+
+def build_ltx2_3_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
+    """LTX-2.3 single-stage JOINT text->video+audio (T2VS). Distinct from the single-stage *base*: the
+    2.3 text encoder's connector emits SEPARATE video/audio projections and the DiT carries
+    gated-attention params (both auto-built by the loaders from config.json), and ONE DiT forward
+    cross-attends video<->audio (``LTX23DenoiseLoop``). Distilled few-step schedule (BASE_SIGMAS).
+    Adds ``audio_vae`` (AudioDecoder) + ``vocoder`` for the audio branch; a plain T2V request runs
+    video-only (audio components stay unbuilt)."""
+    seed = _seed_from(model_id)
+    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1.5e-4, per_unit_seconds=1.2e-7)
+
+    def loop_factory():
+        return LTX23DenoiseLoop(loop_id="ltx2_3", sigmas=BASE_SIGMAS, cfg_scale=1.0, stg_scale=0.0, cost=cost)
+
+    components = {
+        "text_encoder": ComponentSpec(component_id="text_encoder", kind="text_encoder",
+                                      load_id="transformers:AutoModel",  # LTX2GemmaTextEncoderModel
+                                      factory=lambda inst: ToyTextEncoder(), required_for={"t2v", "t2vs"}),
+        "vae": ComponentSpec(component_id="vae", kind="vae",
+                             load_id="fastvideo.models.vaes.ltx2vae:VideoDecoder",
+                             factory=lambda inst: ToyVAE(), required_for={"t2v", "t2vs"}),
+        "transformer": ComponentSpec(component_id="transformer", kind="dit",
+                                     load_id="fastvideo.models.dits.ltx2:LTX2Transformer3DModel",
+                                     factory=lambda inst: ToyDiT(seed=seed),
+                                     resident_for=["ltx2_3"], required_for={"t2v", "t2vs"}),
+        # audio branch (T2VS only): AudioDecoder (latent->mel) + Vocoder (mel->waveform). Not built for t2v.
+        "audio_vae": ComponentSpec(component_id="audio_vae", kind="audio_vae",
+                                   load_id="fastvideo.models.audio.ltx2_audio_vae:AudioDecoder",
+                                   factory=lambda inst: ToyAudioVAE(),
+                                   required_for={"t2vs"}, optional_for={"t2v"}),
+        "vocoder": ComponentSpec(component_id="vocoder", kind="vocoder",
+                                 load_id="fastvideo.models.audio.ltx2_audio_vae:Vocoder",
+                                 factory=lambda inst: ToyVocoder(),
+                                 required_for={"t2vs"}, optional_for={"t2v"}),
+    }
+    loops = {
+        "ltx2_3": LoopSpec(loop_id="ltx2_3", kind=LoopKind.DIFFUSION_DENOISE,
+                           work_unit_kind=WorkUnitKind.DIFFUSION_STEP, step_cost_model=cost,
+                           shared_weight_components=["transformer"], cache_policy=["feature"],
+                           loop_factory=loop_factory),
+    }
+    card = ModelCard(
+        model_id=model_id, family="ltx2",
+        components=components, loops=loops,
+        capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.TEXT_TO_VIDEO_SOUND,
+                                         Capability.VAE_DECODE),
+        recipe=RecipeSpec(method="distilled", parents=["ltx2.3-base"], assumes_loop="ltx2_3",
                           assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
         caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24,
