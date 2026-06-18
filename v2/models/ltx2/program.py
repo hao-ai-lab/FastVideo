@@ -47,6 +47,26 @@ def build_ltx2_program() -> Program:
     ).validate()
 
 
+# --- single-stage LTX-2 base model (no distill, no upsampler) ---------------------- #
+def _vae_decode_single(instance, slots, request, ctx) -> None:
+    slots["video"] = instance.component("vae").decode(slots["ltx_out"]["latents"])
+
+
+def build_ltx2_base_program() -> Program:
+    """Single-stage LTX-2 base: text_encode → denoise (request-driven many-step, full-res) → vae_decode.
+    No upsample/refine (those are the distilled two-stage program above)."""
+    return Program(
+        program_id="ltx2.t2v.base", kind=ProgramKind.INLINE,
+        nodes=[
+            ComponentNode("text_encode", fn=_text_encode, writes=("text_embeds", "neg_text_embeds")),
+            ModelLoopNode("denoise", loop_id="ltx2_single", output_slot="ltx_out",
+                          reads=("text_embeds",), writes=("ltx_out",)),
+            ComponentNode("vae_decode", fn=_vae_decode_single, reads=("ltx_out",), writes=("video",)),
+        ],
+        output_artifacts={"video": "video", "latents": "ltx_out"},
+    ).validate()
+
+
 # --- joint audio+video (T2VS) program (design_v3 §15b; §9.11) ---------------------- #
 def _upsample_av(instance, slots, request, ctx) -> None:
     _upsample(instance, slots, request, ctx)                       # video latent upsample (reuse)

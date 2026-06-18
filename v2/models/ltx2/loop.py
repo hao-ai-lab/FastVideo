@@ -42,25 +42,36 @@ LTX2_SPATIAL_RATIO = 32
 LTX2_TEMPORAL_RATIO = 8
 
 
-def ltx_base_latent_shape(req, model=None) -> tuple[int, int, int, int]:
+def ltx_base_latent_shape(req, model=None, *, full_res: bool = False) -> tuple[int, int, int, int]:
+    """Latent geometry for an LTX-2 denoise loop. The *distilled* base STAGE runs half-res (stage-2
+    upsamples 2x) → spatial//64; the single-stage LTX-2 *base model* runs full-res → spatial//32
+    (``full_res=True``). 128 channels, 8x temporal."""
     d = req.diffusion
+    div = LTX2_SPATIAL_RATIO if full_res else (LTX2_SPATIAL_RATIO * 2)
     if model is not None and getattr(getattr(model, "platform", None), "device", "cpu") == "cuda":
         t = (max(1, d.num_frames) - 1) // LTX2_TEMPORAL_RATIO + 1
-        h = max(1, d.height // (LTX2_SPATIAL_RATIO * 2))      # half-res base; stage-2 upsamples 2x
-        w = max(1, d.width // (LTX2_SPATIAL_RATIO * 2))
-        return (LTX2_LATENT_CHANNELS, t, h, w)
+        return (LTX2_LATENT_CHANNELS, t, max(1, d.height // div), max(1, d.width // div))
     t = max(1, d.num_frames // 40)
-    # refine halves requested resolution for stage-1; stage-2 upsamples 2× (design §15)
-    h = max(2, d.height // 240)
-    w = max(2, d.width // 240)
-    return (LATENT_CHANNELS, t, h, w)
+    toy_div = 120 if full_res else 240
+    return (LATENT_CHANNELS, t, max(2, d.height // toy_div), max(2, d.width // toy_div))
+
+
+def base_flow_sigmas(num_steps: int, shift: float = 1.0) -> list[float]:
+    """Many-step rectified-flow sigma schedule (1→0) for the non-distilled LTX-2 *base* model, with an
+    optional resolution shift. (The distilled stages use the fixed few-step BASE_SIGMAS/REFINE_SIGMAS.)"""
+    n = max(1, int(num_steps))
+    s = np.linspace(1.0, 0.0, n + 1)
+    if shift != 1.0:
+        s = shift * s / (1.0 + (shift - 1.0) * s)
+    return [float(x) for x in s]
 
 
 class LTX2DenoiseLoop:
     def __init__(self, *, loop_id, stage, sigmas, cfg_scale, stg_scale, cost,
-                 input_slot=None, seed_offset=0, audio_input_slot=None):
+                 input_slot=None, seed_offset=0, audio_input_slot=None,
+                 full_res=False, request_steps=False, shift=1.0):
         self.loop_id = loop_id
-        self.stage = stage                 # "base" | "refine"
+        self.stage = stage                 # "base" | "refine" | "single" (base model)
         self.sigmas = list(sigmas)
         self.cfg_scale = cfg_scale
         self.stg_scale = stg_scale
@@ -68,13 +79,19 @@ class LTX2DenoiseLoop:
         self.input_slot = input_slot       # None => fresh noise (base); slot name => read latents (refine)
         self.audio_input_slot = audio_input_slot   # joint A/V: where to read the threaded audio latent
         self.seed_offset = seed_offset
+        # Single-stage LTX-2 base model: full-res latent + a request-driven many-step schedule (distilled
+        # stages keep full_res=False + the fixed few-step self.sigmas).
+        self.full_res = full_res
+        self.request_steps = request_steps
+        self.shift = shift
 
     def init(self, req, model, ctx) -> LoopState:
         seed = (req.diffusion.seed if req.diffusion.seed is not None else 0) + self.seed_offset
         rng = np.random.default_rng(seed)
-        sig = self.sigmas
+        sig = base_flow_sigmas(req.diffusion.num_steps, self.shift) if self.request_steps else self.sigmas
         if self.input_slot is None:
-            x = (rng.standard_normal(ltx_base_latent_shape(req, model)) * float(sig[0])).astype("float32")
+            x = (rng.standard_normal(ltx_base_latent_shape(req, model, full_res=self.full_res))
+                 * float(sig[0])).astype("float32")
         else:
             x = np.asarray(ctx.slots[self.input_slot], dtype="float32")
         st = LoopState(loop_id=self.loop_id, instance_id=model.card.model_id,

@@ -41,6 +41,7 @@ def _read_arch_signature(root: str) -> dict:
         "pipeline": mi.get("_class_name"),
         "boundary_ratio": mi.get("boundary_ratio"),
         "has_transformer_2": os.path.isdir(os.path.join(root, "transformer_2")),
+        "has_spatial_upsampler": os.path.isdir(os.path.join(root, "spatial_upsampler")) or "spatial_upsampler" in mi,
         "transformer_cls": tcfg.get("_class_name"),
         "in_channels": tcfg.get("in_channels"),
         "vae_z_dim": vcfg.get("z_dim", vcfg.get("latent_channels")),
@@ -54,8 +55,15 @@ def _select_builders(sig: dict):
     hardcoded HF-id table. New families are added here by class, next to the card that handles them."""
     tr, pipe = sig.get("transformer_cls"), sig.get("pipeline")
     if tr == "LTX2Transformer3DModel":
-        from .models.ltx2 import build_ltx2_card, build_ltx2_program
-        return build_ltx2_card, build_ltx2_program
+        from .models.ltx2 import (
+            build_ltx2_base_card,
+            build_ltx2_base_program,
+            build_ltx2_card,
+            build_ltx2_program,
+        )
+        if sig.get("has_spatial_upsampler"):
+            return build_ltx2_card, build_ltx2_program          # distilled two-stage (base→upsample→refine)
+        return build_ltx2_base_card, build_ltx2_base_program    # single-stage base model
     if tr == "CausalWanTransformer3DModel":
         from .models.wan_causal import build_wan_causal_card, build_wan_causal_program
         return build_wan_causal_card, build_wan_causal_program
@@ -145,6 +153,10 @@ class VideoGenerator:
         eng = Engine()
         eng.register(card.model_id, inst, program)
         return cls(eng, card.model_id)
+
+    def shutdown(self) -> None:
+        """API parity with ``fastvideo.VideoGenerator.shutdown()``. The v2 bring-up holds a single
+        resident instance that is freed at process exit; there is nothing to tear down explicitly."""
 
     # --------------------------------------------------------------------- #
     def generate(self, request: Any) -> Any:

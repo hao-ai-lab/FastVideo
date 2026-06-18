@@ -90,3 +90,49 @@ def build_ltx2_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
                                         default_plan=ParallelPlan.single()),
     )
     return card.validate()
+
+
+def build_ltx2_base_card(model_id: str = "ltx2.base") -> ModelCard:
+    """Single-stage LTX-2 *base* model (`Davids048/LTX2-Base-Diffusers`): one many-step flow-match loop
+    at FULL latent res — no distilled base/refine split, no spatial upsampler. Reuses the LTX-2 torch
+    adapters (DiT/VAE/Gemma); the sigma schedule is request-driven (`num_inference_steps`)."""
+    seed = _seed_from(model_id)
+    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1.5e-4, per_unit_seconds=1.2e-7)
+
+    def single_factory():
+        return LTX2DenoiseLoop(loop_id="ltx2_single", stage="single", sigmas=[1.0, 0.0],
+                               cfg_scale=3.0, stg_scale=0.0, cost=cost, input_slot=None,
+                               seed_offset=0, full_res=True, request_steps=True, shift=1.0)
+
+    components = {
+        "text_encoder": ComponentSpec(component_id="text_encoder", kind="text_encoder",
+                                      load_id="transformers:AutoModel",  # Gemma
+                                      factory=lambda inst: ToyTextEncoder(), required_for={"t2v"}),
+        "vae": ComponentSpec(component_id="vae", kind="vae",
+                             load_id="fastvideo.models.vaes.ltx2vae:VideoDecoder",
+                             factory=lambda inst: ToyVAE(), required_for={"t2v"}),
+        "transformer": ComponentSpec(component_id="transformer", kind="dit",
+                                     load_id="fastvideo.models.dits.ltx2:LTX2Transformer3DModel",
+                                     factory=lambda inst: ToyDiT(seed=seed),
+                                     resident_for=["ltx2_single"], required_for={"t2v"}),
+    }
+    loops = {
+        "ltx2_single": LoopSpec(loop_id="ltx2_single", kind=LoopKind.DIFFUSION_DENOISE,
+                                work_unit_kind=WorkUnitKind.DIFFUSION_STEP, step_cost_model=cost,
+                                shared_weight_components=["transformer"], cache_policy=["feature"],
+                                loop_factory=single_factory),
+    }
+    card = ModelCard(
+        model_id=model_id, family="ltx2",
+        components=components, loops=loops,
+        capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.VAE_DECODE),
+        recipe=RecipeSpec(method="base", assumes_loop="ltx2_single",
+                          assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
+        parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
+        caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24,
+                                         reuse_across_requests=True)},
+        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()],
+                                        default_plan=ParallelPlan.single()),
+    )
+    return card.validate()
