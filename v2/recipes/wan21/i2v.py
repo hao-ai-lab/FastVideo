@@ -28,11 +28,11 @@ from v2.card import (
     RecipeSpec,
     SamplingDefaults,
 )
-from v2.loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
+from v2.loop.policies import BoundaryTimestepRouting, ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
 from v2.parallel import ParallelPlan
 from v2.platform.backends.toy import ToyDiT, ToyImageEncoder, ToyTextEncoder, ToyVAE, _seed_from
 from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
-from v2.recipes._prompts import WAN_NEG_EN
+from v2.recipes._prompts import WAN_NEG_CN, WAN_NEG_EN
 from v2.recipes.common import text_encode_node_fn as _text_encode
 from v2.recipes.wan21.card import stamp_wan21_checkpoints
 from v2.recipes.wan21.loop import WanDenoiseLoop
@@ -86,6 +86,61 @@ def build_wan21_i2v_card(model_id: str = "wan2.1-i2v-1.3b", *, flow_shift: float
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
         sampling_defaults=SamplingDefaults(num_steps=40, guidance_scale=5.0, height=height, width=width,
                                            num_frames=num_frames, fps=16, negative_prompt=WAN_NEG_EN),
+    )
+    card.validate()
+    if checkpoint_root:
+        stamp_wan21_checkpoints(card, checkpoint_root)
+    return card
+
+
+def build_wan22_i2v_a14b_card(model_id: str = "wan2.2-i2v-a14b", *, boundary: float = 0.9,
+                              checkpoint_root: str | None = None) -> ModelCard:
+    """Wan2.2-I2V-A14B — MoE (two WanTransformer3DModel experts + boundary routing) + i2v conditioning
+    (CLIP + first-frame [mask|cond]). Reuses the Wan adapter (cond concat + MoE CPU offload), the shared
+    WanDenoiseLoop (i2v hooks + the boundary expert), and the i2v program. Structural (GPU-pending: 2x14B)."""
+    seed = _seed_from(model_id)
+    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
+    cfg, flow = ClassicCFG(), FlowShiftPolicy(shift=5.0)
+    precision = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True)
+    expert = BoundaryTimestepRouting(high_noise="transformer", low_noise="transformer_2", boundary=boundary)
+
+    def loop_factory():
+        return WanDenoiseLoop(loop_id="i2v_denoise", cfg=cfg, flow_shift=flow, precision=precision,
+                              expert=expert, cost=cost)
+
+    def _dit(cid):
+        return ComponentSpec(cid, kind="dit", load_id="fastvideo.models.dits.wanvideo:WanTransformer3DModel",
+                             factory=lambda inst: ToyDiT(seed=seed), resident_for=["i2v_denoise"],
+                             required_for={"i2v"})
+
+    components = {
+        "text_encoder": ComponentSpec("text_encoder", kind="text_encoder",
+                                      load_id="fastvideo.models.encoders.t5:T5EncoderModel",
+                                      factory=lambda inst: ToyTextEncoder(), required_for={"i2v"}),
+        "image_encoder": ComponentSpec("image_encoder", kind="image_encoder",
+                                       load_id="fastvideo.models.encoders.clip:CLIPVisionModel",
+                                       factory=lambda inst: ToyImageEncoder(), required_for={"i2v"}),
+        "vae": ComponentSpec("vae", kind="vae", load_id="fastvideo.models.vaes.wanvae:AutoencoderKLWan",
+                             factory=lambda inst: ToyVAE(), required_for={"i2v"}),
+        "transformer": _dit("transformer"), "transformer_2": _dit("transformer_2"),
+    }
+    loops = {
+        "i2v_denoise": LoopSpec("i2v_denoise", kind=LoopKind.DIFFUSION_DENOISE,
+                                work_unit_kind=WorkUnitKind.DIFFUSION_STEP, step_cost_model=cost,
+                                shared_weight_components=["transformer", "transformer_2"],
+                                cache_policy=["feature"], loop_factory=loop_factory),
+    }
+    card = ModelCard(
+        model_id=model_id, family="wan", components=components, loops=loops,
+        capabilities=CapabilityMatrix.of(Capability.IMAGE_TO_VIDEO, Capability.VAE_DECODE),
+        recipe=RecipeSpec(method="base", assumes_loop="i2v_denoise", assumes_precision="float32",
+                          consistency_required=ConsistencyLevel.C1),
+        parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
+        caches={"feature": CacheContract("feature", max_bytes=1 << 24, reuse_across_requests=True)},
+        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
+        sampling_defaults=SamplingDefaults(num_steps=40, guidance_scale=3.5, height=480, width=832,
+                                           num_frames=81, fps=16, negative_prompt=WAN_NEG_CN),
     )
     card.validate()
     if checkpoint_root:
