@@ -79,8 +79,16 @@ class Kandinsky5DiT(TorchComponent):
 
     @torch.no_grad()
     def __call__(self, latent, text_embed, sigma, context=None, *, cond=None):
-        hs = self._t(latent)  # [1, C, T, H, W] (channels-first from the loop)
+        hs = self._t(latent)  # [1, C, T, H, W] (channels-first from the loop, C=in_visual_dim)
         hs = hs.permute(0, 2, 3, 4, 1).contiguous()  # -> [1, T, H, W, C] (the forward's geometry)
+        # visual_cond path (Lite-5s: arch.visual_cond=True): the visual_embeddings.in_layer expects a
+        # last-dim of 2*in_visual_dim + 1 (latent + zeros visual-cond + a 1-ch zeros mask). For T2V the
+        # diffusers pipeline (prepare_latents) concats torch.zeros_like(latent) + a zeros mask. We rebuild
+        # it fresh each forward (always zeros) so the loop/VAE only carry the in_visual_dim diffusion latent.
+        if bool(getattr(self.module, "visual_cond", False)):
+            zeros_cond = torch.zeros_like(hs)
+            zeros_mask = torch.zeros((*hs.shape[:-1], 1), device=hs.device, dtype=hs.dtype)
+            hs = torch.cat([hs, zeros_cond, zeros_mask], dim=-1).contiguous()  # [1, T, H, W, 2C+1]
         ehs = self._t(text_embed)  # [1, seq, 3584]
         if context is None:
             raise ValueError("Kandinsky5DiT requires the CLIP pooled vector (passed as `context`); "

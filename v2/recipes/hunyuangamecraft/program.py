@@ -37,6 +37,25 @@ GAMECRAFT_TEMPORAL_RATIO = 4
 GAMECRAFT_SPATIAL_RATIO = 8
 
 
+def _stamp_text_encoder_2(instance: Any) -> None:
+    """The shared ``from_config`` stamps the card via ``stamp_wan21_checkpoints``, whose subfolder map
+    knows only ``transformer/vae/text_encoder`` — NOT GameCraft's second text encoder. So ``text_encoder_2``
+    arrives at GPU build time with an empty ``checkpoint`` and ``_require_checkpoint`` fails. Derive the
+    model root from the already-stamped ``text_encoder`` (LLaMA) checkpoint and point ``text_encoder_2`` at
+    the sibling ``text_encoder_2/`` subfolder, here in the recipe's own node (no edit to the shared stamp).
+    No-op once stamped or on the CPU toy (empty LLaMA checkpoint -> the toy factory needs no weights)."""
+    import os
+    comps = instance.card.components
+    spec2 = comps.get("text_encoder_2")
+    if spec2 is None or spec2.checkpoint:
+        return
+    llama_ckpt = getattr(comps.get("text_encoder"), "checkpoint", "") or ""
+    if not llama_ckpt:
+        return  # CPU toy / unstamped card: leave it for the toy factory
+    root = os.path.dirname(os.path.normpath(llama_ckpt))
+    spec2.checkpoint = os.path.join(root, "text_encoder_2")
+
+
 def _text_encode_dual(instance: Any, slots: dict, request: Any, ctx: Any) -> None:
     """LLaMA (text_states) + CLIP (text_states_2) for prompt + negative prompt. The shared
     ``cached_text_encode`` keys on component_id, so the LLaMA and CLIP embeds never collide in the cache."""
@@ -46,6 +65,7 @@ def _text_encode_dual(instance: Any, slots: dict, request: Any, ctx: Any) -> Non
     slots["text_embeds"] = cached_text_encode(instance, prompt)
     slots["neg_text_embeds"] = cached_text_encode(instance, neg)
     # CLIP pooled -> dedicated slots (text_states_2), threaded through the adapter's context= per branch.
+    _stamp_text_encoder_2(instance)  # stamp the CLIP checkpoint the Wan stamp skipped (GPU only)
     clip = instance.component("text_encoder_2")
     slots["clip_text_embeds"] = clip.encode(prompt)
     slots["clip_neg_text_embeds"] = clip.encode(neg)

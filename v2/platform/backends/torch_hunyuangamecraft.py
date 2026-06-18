@@ -29,14 +29,33 @@ the BRINGUP notes in ``loop.py``/``program.py``.
 """
 from __future__ import annotations
 
+import os
+from typing import Any
+
 import torch
 
-from v2.platform.backends.torch_backend import T5Encoder, TorchComponent, _to_numpy
+from v2.platform.backends.torch_backend import TorchComponent, _to_numpy
 
 # Flow-match timestep convention (same as Wan): the loop hands the raw sigma (1->0); the GameCraft DiT
 # (like diffusers/FastVideo) embeds ``timestep = sigma * num_train_timesteps``. BRINGUP risk B.
 NUM_TRAIN_TIMESTEPS = 1000
 GAMECRAFT_SCALING_FACTOR = 0.476986  # GameCraftVAE.config.scaling_factor (scalar, NOT per-channel stats)
+
+# GameCraft reuses HunyuanVideo's dual-text path verbatim (same LLaVA-LLaMA-3 + CLIP encoders + the same
+# DiT txt/vector_in split). The LLaMA prompt template + crop are recipe DATA copied from
+# ``fastvideo/configs/pipelines/hunyuan.py`` (``llama_preprocess_text`` / ``llama_postprocess_text``).
+PROMPT_TEMPLATE_ENCODE_VIDEO = (
+    "<|start_header_id|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "
+    "1. The main content and theme of the video."
+    "2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects."
+    "3. Actions, events, behaviors temporal relationships, physical movement changes of the objects."
+    "4. background environment, light, style and atmosphere."
+    "5. camera angles, movements, and transitions used in the video:<|eot_id|>"
+    "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>")
+LLAMA_CROP_START = 95  # the template's fixed system-prompt token count (crop_start)
+LLAMA_HIDDEN_STATE_SKIP_LAYER = 2  # use hidden_states[-(skip+1)] -> skip the last 2 LLaMA layers
+LLAMA_TEXT_LEN = 256  # LlamaArchConfig.text_len (the tokenizer max_length before the template)
+CLIP_TEXT_LEN = 77  # CLIPTextConfig.text_len
 
 
 class GameCraftDiT(TorchComponent):
@@ -75,8 +94,9 @@ class GameCraftDiT(TorchComponent):
             ehs.append(self._t(context))
         # --- camera_states (CameraNet Plücker): None for the t2v/degenerate path (BRINGUP) ----------- #
         camera = self._t(cond.get("camera_states")) if cond.get("camera_states") is not None else None
-        # timestep = sigma*1000, shape [B] (the stage does ``t.repeat(B)``). BRINGUP risk B.
-        ts = torch.tensor([float(sigma) * NUM_TRAIN_TIMESTEPS], device=self.device, dtype=self.dtype).expand(b)
+        # timestep = sigma*1000, shape [B] (the stage does ``t.repeat(B)``). Keep it FLOAT32 (the scalar the
+        # time_in TimestepEmbedder consumes) — a bf16 timestep would lose precision in the sinusoidal embed.
+        ts = torch.tensor([float(sigma) * NUM_TRAIN_TIMESTEPS] * b, device=self.device)
         with self._ctx():
             velocity = self.module(
                 model_input,
@@ -117,16 +137,52 @@ class GameCraftVAE(TorchComponent):
         return self._n(video)  # video [B,3,T,H,W] in [-1,1]
 
 
+def _resolve_clip_tokenizer(passed_tokenizer: Any) -> Any:
+    """The shared ``_make_text_encoder`` hands BOTH encoders the ``<root>/tokenizer`` subfolder (the LLaMA
+    tokenizer). GameCraft's CLIP tokenizer lives in ``<root>/tokenizer_2``, so resolve it from the model
+    root (the parent of the passed tokenizer's ``name_or_path``). Falls back to the passed tokenizer if the
+    sibling dir is absent (e.g. a single-tokenizer checkpoint), keeping the path robust on CPU/toy.
+
+    Build the fast tokenizer straight from ``tokenizer.json`` via ``PreTrainedTokenizerFast``: in this env
+    (transformers 5.x + tokenizers 0.23) BOTH ``AutoTokenizer`` and ``CLIPTokenizerFast.from_pretrained``
+    route through the SLOW ``CLIPTokenizer.__init__``, which builds a ``processors.RobertaProcessing(cls=...)``
+    the installed ``tokenizers`` rejects (``unexpected keyword argument 'cls'``). Loading the prebuilt
+    ``tokenizer.json`` directly bypasses that broken slow-path converter and yields the correct CLIP vocab
+    (49408) + EOS (49407) so ``CLIPTextModel`` pools at the right token."""
+    name_or_path = getattr(passed_tokenizer, "name_or_path", "") or ""
+    if not name_or_path:
+        return passed_tokenizer
+    root = os.path.dirname(os.path.normpath(name_or_path))
+    tok2 = os.path.join(root, "tokenizer_2")
+    if not os.path.isdir(tok2):
+        return passed_tokenizer
+    tj = os.path.join(tok2, "tokenizer.json")
+    if os.path.isfile(tj):
+        from transformers import PreTrainedTokenizerFast
+        # CLIP pads with the EOS token (``<|endoftext|>``, id 49407); the CLIPTextModel pools at the FIRST
+        # EOS, so pad==eos is harmless (the real EOS precedes the pad run).
+        return PreTrainedTokenizerFast(tokenizer_file=tj,
+                                       bos_token="<|startoftext|>",
+                                       eos_token="<|endoftext|>",
+                                       unk_token="<|endoftext|>",
+                                       pad_token="<|endoftext|>")
+    # No prebuilt tokenizer.json -> try the normal loaders (may work on a different lib version).
+    from transformers import AutoTokenizer
+    return AutoTokenizer.from_pretrained(tok2, use_fast=True)
+
+
 class GameCraftClipEncoder(TorchComponent):
     """CLIP ViT-L/14 text encoder -> POOLED embedding (768d), the DiT's ``text_states_2``.
 
-    BRINGUP: written-not-run. The program writes this into the ``clip_text_embeds`` slot; the loop threads
-    it through the ``context=`` slot per CFG branch. Returns the pooled output (``[768]`` or ``[1,768]``),
-    matching ``batch.clip_embedding_pos``/``clip_embedding_neg`` in the fastvideo stage."""
+    The program writes this into the ``clip_text_embeds`` slot; the loop threads it through the ``context=``
+    slot per CFG branch. Returns the pooled output (``[768]``), matching ``batch.clip_embedding_pos`` /
+    ``clip_embedding_neg`` in the fastvideo stage (``clip_postprocess_text`` -> ``pooler_output``). Mirrors
+    the GPU-verified ``HunyuanVideoCLIPEncoder``; resolves the ``tokenizer_2`` subfolder itself (the shared
+    text-encoder maker passes the LLaMA ``tokenizer`` to both encoders)."""
 
-    def __init__(self, module, tokenizer, *, device, dtype, max_length: int = 77):
+    def __init__(self, module, tokenizer, *, device, dtype, max_length: int = CLIP_TEXT_LEN):
         super().__init__(module, device=device, dtype=dtype)
-        self.tokenizer = tokenizer
+        self.tokenizer = _resolve_clip_tokenizer(tokenizer)
         self.max_length = max_length
 
     @torch.no_grad()
@@ -147,26 +203,39 @@ class GameCraftClipEncoder(TorchComponent):
         return _to_numpy(pooled.squeeze(0))
 
 
-class GameCraftLlamaEncoder(T5Encoder):
+class GameCraftLlamaEncoder(TorchComponent):
     """LLaVA-LLaMA-3-8B text encoder -> hidden states (4096d), the DiT's ``text_states``.
 
-    BRINGUP: written-not-run. GameCraft consumes an intermediate hidden-state layer via the Hunyuan
-    ``llama_postprocess`` (``output_hidden_states=True``) plus the LLaVA prompt template — those
-    preprocess/postprocess functions are not yet ported to v2 (blocker 4). This subclass currently reuses
-    the (U)MT5 ``encode`` contract (real-token rows, no fixed zero-pad surprises) as a structural
-    placeholder; the real LLaVA template + hidden-layer pick must be wired during GPU bring-up."""
+    Faithful to ``fastvideo/configs/pipelines/hunyuan.py`` (GameCraft reuses HunyuanVideo's text path):
+    wrap the prompt in ``PROMPT_TEMPLATE_ENCODE_VIDEO``, run with ``output_hidden_states=True``, take the
+    intermediate hidden state ``hidden_states[-(skip+1)]`` (skip the last 2 layers), and crop the first 95
+    template tokens (``crop_start``). Returns the per-token sequence ``[L, 4096]`` (``encoder_hidden_states[0]``).
+    Mirrors the GPU-verified ``HunyuanVideoLlamaEncoder``. The module is loaded with
+    ``output_hidden_states=True`` (``HunyuanGameCraftPipelineConfig.__post_init__`` sets it)."""
+
+    def __init__(self, module, tokenizer, *, device, dtype, max_length: int = LLAMA_TEXT_LEN):
+        super().__init__(module, device=device, dtype=dtype)
+        self.tokenizer = tokenizer
+        self.max_length = max_length
 
     @torch.no_grad()
     def encode(self, text):
-        toks = self.tokenizer(text or "", return_tensors="pt", max_length=self.max_length, truncation=True)
+        prompt = PROMPT_TEMPLATE_ENCODE_VIDEO.format(text or "")
+        toks = self.tokenizer(prompt,
+                              return_tensors="pt",
+                              max_length=self.max_length + LLAMA_CROP_START,
+                              truncation=True)
         ids = toks.input_ids.to(self.device)
         mask = toks.attention_mask.to(self.device)
         with self._ctx():
-            # BRINGUP: real GameCraft passes output_hidden_states=True and picks an intermediate layer via
-            # llama_postprocess; here we take last_hidden_state as the structural stand-in.
-            out = self.module(input_ids=ids, attention_mask=mask)
-        hidden = (out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]).squeeze(0)
-        return _to_numpy(torch.nan_to_num(hidden, nan=0.0))
+            out = self.module(input_ids=ids, attention_mask=mask, output_hidden_states=True)
+        hidden_states = getattr(out, "hidden_states", None)
+        if hidden_states is None:
+            raise RuntimeError("GameCraftLlamaEncoder: module returned no hidden_states; load LLaMA with "
+                               "output_hidden_states=True (HunyuanGameCraftPipelineConfig.__post_init__ sets it).")
+        hidden = hidden_states[-(LLAMA_HIDDEN_STATE_SKIP_LAYER + 1)]  # skip the last 2 layers
+        hidden = hidden[:, LLAMA_CROP_START:]  # drop the template's 95 system tokens
+        return _to_numpy(torch.nan_to_num(hidden.squeeze(0), nan=0.0))
 
 
 # Re-export the scalar scaling constant for the loop/program to keep the value single-sourced.

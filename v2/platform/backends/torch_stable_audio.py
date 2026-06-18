@@ -122,11 +122,13 @@ class StableAudioConditioner(TorchComponent):
     ``pack_conditioning``. The DiT consumes a single-batch payload; CFG (null/zero negative cross-attn) is
     built in the loop.
 
-    BRINGUP: the shared text-encoder maker calls ``TextEncoderLoader`` (a generic T5), not the SA
-    ``ConditionerLoader`` that builds ``StableAudioMultiConditioner`` — so on a GPU box this adapter must
-    instead be handed a real ``StableAudioMultiConditioner`` module (e.g. via a recipe-local loader
-    override / a ``conditioner`` component kind). The ``tokenizer`` extra the text-encoder maker passes is
-    accepted and ignored (the conditioner owns its own T5 tokenizer)."""
+    GPU load path: the shared text-encoder maker calls ``TextEncoderLoader`` (a generic T5) and CRASHES on
+    SA (the SA pipeline config has an EMPTY ``text_encoder_configs`` tuple), and the SA conditioner weights
+    live in a SEPARATE ``conditioner/`` subfolder. So the card declares this component with a dedicated
+    ``conditioner`` kind (unregistered in ``_MAKERS`` -> the platform falls through to
+    ``ComponentSpec.factory``), and ``make_stable_audio_conditioner`` below loads the real
+    ``StableAudioMultiConditioner`` via the SA ``ConditionerLoader`` and wraps it here. The ``tokenizer``
+    arg (passed None by the factory) is accepted and ignored — the conditioner owns its own T5 tokenizer."""
 
     def __init__(self, module, tokenizer=None, *, device, dtype):
         super().__init__(module, device=device, dtype=dtype)
@@ -147,3 +149,48 @@ class StableAudioConditioner(TorchComponent):
             cond = self.module(cond_meta, self.device)
             cross, _mask, glob = self.module.get_conditioning_inputs(cond)
         return pack_conditioning(_to_numpy(cross.squeeze(0)), _to_numpy(glob.squeeze(0)))
+
+
+# --------------------------------------------------------------------------- #
+# Conditioner factory — the GPU load path for the SA multi-conditioner.        #
+# --------------------------------------------------------------------------- #
+# The card declares the conditioner component with ``kind="conditioner"`` (NOT
+# ``text_encoder``): the shared ``_MAKERS`` dispatch has no ``conditioner`` kind, so the
+# platform falls through to ``ComponentSpec.factory(instance)`` — THIS function. That is the
+# only seam that keeps the port self-contained (no edit to torch_backend.py's makers): the
+# generic ``TextEncoderLoader`` cannot build a ``StableAudioMultiConditioner`` (the SA pipeline
+# config has an EMPTY ``text_encoder_configs`` tuple — it raises "index 0 out of range"), and
+# the SA weights live in a SEPARATE ``conditioner/`` subfolder (the ``text_encoder/`` subfolder
+# the stamp points at holds a plain T5 the conditioner does not consume). So this factory loads
+# the real ``StableAudioMultiConditioner`` via the dedicated ``ConditionerLoader`` against the
+# sibling ``conditioner/`` subfolder, then wraps it in the ``StableAudioConditioner`` adapter.
+def make_stable_audio_conditioner(instance):
+    """``ComponentSpec.factory`` for the SA conditioner. CPU -> the toy text encoder (so the loop
+    still runs without weights); cuda -> the real ``StableAudioMultiConditioner`` loaded from the
+    ``conditioner/`` subfolder and wrapped in ``StableAudioConditioner``."""
+    platform = getattr(instance, "platform", None)
+    device = getattr(platform, "device", "cpu")
+    spec = instance.card.components["text_encoder"]
+    if device != "cuda":
+        from v2.platform.backends.toy import ToyTextEncoder
+        return ToyTextEncoder()
+    import os
+
+    from v2.platform.backends.torch_backend import (
+        _device,
+        _ensure_fastvideo_runtime,
+        _fastvideo_args,
+        _native_dtype,
+        load_component,
+    )
+
+    _ensure_fastvideo_runtime()
+    # spec.checkpoint is stamped to ``<root>/text_encoder`` (the plain T5); the SA conditioner
+    # weights are the sibling ``<root>/conditioner`` subfolder. FastVideoArgs derives the repo root
+    # (and thus the SA pipeline config) from dirname(spec.checkpoint) == <root>.
+    model_root = os.path.dirname(os.path.normpath(spec.checkpoint))
+    conditioner_path = os.path.join(model_root, "conditioner")
+    args = _fastvideo_args(spec)
+    module = load_component("ConditionerLoader", conditioner_path, args)
+    return StableAudioConditioner(  # type: ignore[no-untyped-call]
+        module, None, device=_device(platform), dtype=_native_dtype(module))

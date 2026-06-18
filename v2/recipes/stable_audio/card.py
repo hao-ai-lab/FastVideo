@@ -45,7 +45,7 @@ from v2.card import (
 )
 from v2.loop.policies import ClassicCFG, NoRouting, PrecisionPolicy
 from v2.parallel import ParallelPlan
-from v2.platform.backends.toy import ToyTextEncoder, _seed_from
+from v2.platform.backends.toy import _seed_from
 from v2.recipes.stable_audio.loop import StableAudioDenoiseLoop
 from v2.recipes.wan21.card import stamp_wan21_checkpoints
 
@@ -58,6 +58,14 @@ SA_IO_CHANNELS = 64
 _SA_DIT = "v2.platform.backends.torch_stable_audio:StableAudioDiT"
 _SA_VAE = "v2.platform.backends.torch_stable_audio:OobleckVAE"
 _SA_CONDITIONER = "v2.platform.backends.torch_stable_audio:StableAudioConditioner"
+
+
+def _SA_CONDITIONER_FACTORY(instance):
+    """Lazy ``ComponentSpec.factory`` for the conditioner — keeps the card torch-free at import
+    (the torch backend module is only imported on the GPU box, when the factory is actually called).
+    CPU -> ToyTextEncoder; cuda -> the real ``StableAudioMultiConditioner`` adapter."""
+    from v2.platform.backends.torch_stable_audio import make_stable_audio_conditioner
+    return make_stable_audio_conditioner(instance)
 
 
 def build_stable_audio_card(model_id: str = "stable-audio-open-1.0",
@@ -87,14 +95,19 @@ def build_stable_audio_card(model_id: str = "stable-audio-open-1.0",
                                       sample_size=sample_size)
 
     components = {
-        # The SA multi-conditioner, declared under the ``text_encoder`` kind (kind reuse). On CPU this is
-        # the ToyTextEncoder; on GPU the StableAudioConditioner adapter (BRINGUP: needs the SA loader).
+        # The SA multi-conditioner. Declared under a DEDICATED ``conditioner`` kind (NOT ``text_encoder``):
+        # the shared ``_MAKERS`` dispatch has no ``conditioner`` kind, so on GPU the platform falls through
+        # to ``ComponentSpec.factory(instance)`` -> ``make_stable_audio_conditioner`` (which loads the real
+        # ``StableAudioMultiConditioner`` via the SA ``ConditionerLoader`` from the ``conditioner/``
+        # subfolder + wraps it in ``StableAudioConditioner``). This is the self-contained-port seam: routing
+        # via ``text_encoder`` kind crashes in ``TextEncoderLoader`` because the SA pipeline config has an
+        # EMPTY ``text_encoder_configs`` tuple. On CPU the same factory returns the ToyTextEncoder.
         "text_encoder":
         ComponentSpec(component_id="text_encoder",
-                      kind="text_encoder",
+                      kind="conditioner",
                       load_id="fastvideo.models.encoders.stable_audio_conditioner:StableAudioMultiConditioner",
                       adapter=_SA_CONDITIONER,
-                      factory=lambda inst: ToyTextEncoder(),
+                      factory=_SA_CONDITIONER_FACTORY,
                       required_for={"t2a"}),
         "vae":
         ComponentSpec(component_id="vae",

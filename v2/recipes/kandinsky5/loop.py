@@ -46,8 +46,11 @@ from v2.platform import FLOW_MATCH_STEP
 from v2.platform.backends.toy import LATENT_CHANNELS
 from v2.request.streams import StreamChunk
 
-# AutoencoderKLHunyuanVideo compression for Kandinsky-5: z=4 latent channels, 8× spatial, 4× temporal.
-KANDINSKY5_LATENT_CHANNELS = 4
+# AutoencoderKLHunyuanVideo compression for Kandinsky-5: z=16 latent channels, 8× spatial, 4× temporal.
+# BRINGUP: the real Lite-5s checkpoint config is in_visual_dim/out_visual_dim/latent_channels = 16 (NOT 4 —
+# 4 was a stale guess). The DiT's visual_cond=True path concats an extra cond+mask to 33 last-dim INSIDE the
+# adapter; the loop/VAE latent stays the 16-channel diffusion latent.
+KANDINSKY5_LATENT_CHANNELS = 16
 KANDINSKY5_TEMPORAL_RATIO = 4
 KANDINSKY5_SPATIAL_RATIO = 8
 

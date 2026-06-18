@@ -37,6 +37,21 @@ SIGLIP_DIM = 1152
 # HY-WorldPlay latent geometry (AutoencoderKLHYWorld): z=32 + 1 mask channel for the cond latent.
 HYWORLD_LATENT_CHANNELS = 32
 HYWORLD_VAE_SCALING_FACTOR = 1.03682
+# ByT5 glyph stream embed dim (DiT ``txt_in_2`` = HunyuanVideo15ByT5TextProjection(1472, ...)). The zero
+# glyph fallback MUST match this (NOT the Qwen dim), or ``txt_in_2.norm`` LayerNorm(1472) shape-mismatches.
+HYWORLD_BYT5_DIM = 1472
+# Faithful Qwen2.5-VL mllm conditioning (fastvideo configs/pipelines/hunyuan15.py). The video chat
+# template prepends 108 system-prompt tokens; the postprocess crops them and takes hidden_states[-3]. An
+# EMPTY prompt (negative_prompt="") becomes the user content " " inside the template, so the token
+# sequence is NEVER zero-length (the plain tokenizer would emit 0 tokens -> the SDPA reshape crashes).
+HYWORLD_PROMPT_TEMPLATE_TOKEN_LENGTH = 108
+HYWORLD_PROMPT_TEMPLATE_ENCODE_VIDEO = (
+    "You are a helpful assistant. Describe the video by detailing the following aspects: "
+    "        1. The main content and theme of the video. "
+    "        2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects. "
+    "        3. Actions, events, behaviors temporal relationships, physical movement changes of the objects. "
+    "        4. background environment, light, style and atmosphere. "
+    "        5. camera angles, movements, and transitions used in the video.")
 
 
 class HYWorldDiT(TorchComponent):
@@ -73,8 +88,13 @@ class HYWorldDiT(TorchComponent):
 
         # 3-stream conditioning: encoder_hidden_states must be a LIST [qwen, byt5]; image a LIST [siglip].
         qwen = self._t(text_embed)  # [1, seq, dim]
+        # The glyph (byt5) embed dim is the DiT ``txt_in_2`` input width (1472), NOT the Qwen dim (3584).
+        # Read it off the loaded module when available so the zero fallback matches LayerNorm(1472) exactly.
+        byt5_dim = int(getattr(getattr(self.module, "txt_in_2", None), "norm",
+                               None).normalized_shape[0]) if getattr(self.module, "txt_in_2", None) is not None \
+            else HYWORLD_BYT5_DIM
         byt5 = self._t(ctx.get("byt5_embeds")) if ctx.get("byt5_embeds") is not None else \
-            torch.zeros(1, 1, qwen.shape[-1], device=self.device, dtype=self.dtype)
+            torch.zeros(1, 1, byt5_dim, device=self.device, dtype=self.dtype)
         img = self._t(ctx.get("i2v_img_embeds")) if ctx.get("i2v_img_embeds") is not None else \
             self._zero_image_embeds()
         # Per-pos/neg attention masks (BRINGUP: the stage swaps prompt_attention_mask <-> negative). The
@@ -101,7 +121,13 @@ class HYWorldDiT(TorchComponent):
             Ks = torch.eye(3, device=self.device, dtype=self.dtype).expand(1, t, 3, 3).contiguous()
             action = torch.zeros(t, device=self.device, dtype=self.dtype)
 
-        with self._ctx():
+        # Faithful to HYWorldDenoisingStage: the whole DiT forward runs under CUDA autocast(bf16). The
+        # txt_in refiner mean-pools the bf16 text embed against an fp32 mask -> an fp32 intermediate that
+        # feeds bf16-weight linears (c_embedder); without autocast that mixes Float/BFloat16 and crashes.
+        autocast_dtype = self.dtype if self.dtype in (torch.float16, torch.bfloat16) else torch.bfloat16
+        on_cuda = "cuda" in str(self.device)
+        autocast_on = on_cuda and (self.dtype != torch.float32)
+        with self._ctx(), torch.autocast(device_type="cuda", dtype=autocast_dtype, enabled=autocast_on):
             velocity = self.module(
                 hs,
                 [qwen, byt5],
@@ -144,21 +170,46 @@ class HYWorldQwenEncoder(TorchComponent):
     template tokens. Returns the cropped real-token embedding (numpy). Encoder weights are fp32 here; on
     the box mirror the fastvideo TextEncodingStage marshalling exactly."""
 
-    def __init__(self, module, tokenizer, *, device, dtype, max_length: int = 256, crop_start: int = 108):
+    def __init__(self,
+                 module,
+                 tokenizer,
+                 *,
+                 device,
+                 dtype,
+                 max_length: int = 1000 + HYWORLD_PROMPT_TEMPLATE_TOKEN_LENGTH,
+                 crop_start: int = HYWORLD_PROMPT_TEMPLATE_TOKEN_LENGTH):
         super().__init__(module, device=device, dtype=dtype)
-        self.tokenizer = tokenizer
+        # Qwen2.5-VL ships as a multimodal processor; use its inner tokenizer for text-only encoding (the
+        # fastvideo TextEncodingStage does the same: ``tok = getattr(tokenizer, "tokenizer", tokenizer)``).
+        self.tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
         self.max_length = max_length
         self.crop_start = crop_start  # PROMPT_TEMPLATE_ENCODE_VIDEO prepends 108 template tokens
 
     @torch.no_grad()
     def encode(self, text):
-        toks = self.tokenizer(text or "", return_tensors="pt", max_length=self.max_length, truncation=True)
-        ids = toks.input_ids.to(self.device)
-        mask = toks.attention_mask.to(self.device)
+        # Faithful video chat template (fastvideo qwen_preprocess_text + Qwen2_5_VLConfig.tokenizer_kwargs):
+        # system = PROMPT_TEMPLATE_ENCODE_VIDEO, user = ``prompt if prompt else " "`` (empty -> a space, so
+        # the sequence is never zero-length). add_generation_prompt + tokenize -> input_ids/attention_mask.
+        messages = [{
+            "role": "system",
+            "content": HYWORLD_PROMPT_TEMPLATE_ENCODE_VIDEO
+        }, {
+            "role": "user",
+            "content": text if text else " "
+        }]
+        toks = self.tokenizer.apply_chat_template(messages,
+                                                  add_generation_prompt=True,
+                                                  tokenize=True,
+                                                  return_dict=True,
+                                                  max_length=self.max_length,
+                                                  truncation=True,
+                                                  return_tensors="pt")
+        ids = toks["input_ids"].to(self.device)
+        mask = toks["attention_mask"].to(self.device)
         with self._ctx():
             out = self.module(input_ids=ids, attention_mask=mask, output_hidden_states=True)
         hs = getattr(out, "hidden_states", None)
-        # hidden_states[-3] is the layer the HY-WorldPlay mllm conditioning uses (BRINGUP: confirm on box).
+        # hidden_states[-3] is the layer the HY-WorldPlay mllm conditioning uses (fastvideo qwen_postprocess_text).
         hidden = hs[-3] if hs is not None and len(hs) >= 3 else \
             (out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0])
         hidden = hidden.squeeze(0)

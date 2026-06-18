@@ -29,6 +29,8 @@ Three deltas vs the Wan adapters:
 """
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 
 from v2.platform.backends.torch_backend import (
@@ -151,15 +153,94 @@ class HunyuanVideoCLIPEncoder(TorchComponent):
     """CLIP secondary encoder: returns ``pooler_output`` (the 768-dim global vector, the DiT
     ``text_states_2`` / ``encoder_hidden_states[1]``).
 
-    BRINGUP: the shared ``_make_text_encoder`` passes the ``tokenizer/`` subfolder (the LLaMA tokenizer) as
-    the constructor's ``tokenizer`` arg; HunyuanVideo's CLIP tokenizer lives in ``tokenizer_2/``. GPU-verify
-    must wire the CLIP tokenizer here (e.g. via a card-side stamp of ``tokenizer_2`` or loading it lazily) —
-    on CPU this path is exercised by the ``ToyTextEncoder`` factory, which needs no tokenizer."""
+    The shared ``_make_text_encoder`` passes the ``tokenizer/`` subfolder (the LLaMA tokenizer) as the
+    constructor's ``tokenizer`` arg; HunyuanVideo's CLIP tokenizer lives in ``tokenizer_2/``. So this
+    adapter loads the CLIP tokenizer ITSELF from the sibling ``tokenizer_2/`` (derived from the LLaMA
+    tokenizer's ``name_or_path`` = ``<root>/tokenizer``), ignoring the passed-in LLaMA tokenizer. On CPU
+    this path is exercised by the ``ToyTextEncoder`` factory, which needs no tokenizer."""
 
     def __init__(self, module, tokenizer, *, device, dtype, max_length: int = CLIP_TEXT_LEN):
         super().__init__(module, device=device, dtype=dtype)
-        self.tokenizer = tokenizer
+        self.tokenizer = self._load_clip_tokenizer(tokenizer)
         self.max_length = max_length
+
+    @classmethod
+    def _load_clip_tokenizer(cls, llama_tokenizer: Any) -> Any:
+        """HunyuanVideo's CLIP tokenizer lives in ``tokenizer_2/`` (a CLIPTokenizer), but the shared
+        ``_make_text_encoder`` only loads ``tokenizer/`` (the LLaMA tokenizer) and hands it to both
+        encoders. Resolve the model root from the LLaMA tokenizer's ``name_or_path`` (= ``<root>/tokenizer``)
+        and load the sibling ``tokenizer_2/`` with the right CLIP tokenizer class. Falls back to the
+        passed-in tokenizer if the sibling can't be located (keeps the toy/CPU path working)."""
+        import os
+        name_or_path = getattr(llama_tokenizer, "name_or_path", "") or ""
+        if not name_or_path:
+            return llama_tokenizer
+        tok2_dir = os.path.join(os.path.dirname(os.path.normpath(name_or_path)), "tokenizer_2")
+        if not os.path.isdir(tok2_dir):
+            return llama_tokenizer
+        from transformers import AutoTokenizer
+        try:
+            return AutoTokenizer.from_pretrained(tok2_dir)
+        except TypeError:
+            # transformers 5.x's slow CLIPTokenizer.__init__ calls
+            # ``processors.RobertaProcessing(cls=..., sep=...)``, but tokenizers>=0.23 renamed those kwargs
+            # (``cls`` -> positional ``cls_token``), so the slow load (and even the fast load, which
+            # round-trips through it because tokenizer_2/ ships no tokenizer.json) raises TypeError. This is
+            # an env library-version skew, not a checkpoint issue — build the CLIP fast tokenizer directly
+            # from vocab.json+merges.txt (identical BPE/normalizer/pre-tokenizer/post-processor as CLIP, but
+            # with the corrected positional RobertaProcessing call). Produces the standard CLIP ids
+            # (bos=49406, eos=49407, pad=eos), matching ``CLIPTokenizer``.
+            return cls._build_clip_fast_tokenizer(tok2_dir)
+
+    @staticmethod
+    def _build_clip_fast_tokenizer(tok2_dir: str) -> Any:
+        import json
+        import os
+
+        from tokenizers import Regex, Tokenizer, decoders, normalizers, pre_tokenizers, processors
+        from tokenizers.models import BPE
+        from transformers import PreTrainedTokenizerFast
+
+        with open(os.path.join(tok2_dir, "vocab.json"), encoding="utf-8") as f:
+            vocab = json.load(f)
+        merges = []
+        with open(os.path.join(tok2_dir, "merges.txt"), encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                line = line.rstrip("\n")
+                if i == 0 and line.startswith("#"):
+                    continue
+                if line.strip():
+                    a, _, b = line.partition(" ")
+                    merges.append((a, b))
+        bos, eos, unk, pad = "<|startoftext|>", "<|endoftext|>", "<|endoftext|>", "<|endoftext|>"
+        tk = Tokenizer(
+            BPE(vocab=vocab,
+                merges=merges,
+                continuing_subword_prefix="",
+                end_of_word_suffix="</w>",
+                fuse_unk=False,
+                unk_token=unk))
+        tk.normalizer = normalizers.Sequence(
+            [normalizers.NFC(), normalizers.Replace(Regex(r"\s+"), " "),
+             normalizers.Lowercase()])
+        tk.pre_tokenizer = pre_tokenizers.Sequence([
+            pre_tokenizers.Split(Regex(
+                r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+"""),
+                                 behavior="removed",
+                                 invert=True),
+            pre_tokenizers.ByteLevel(add_prefix_space=False),
+        ])
+        tk.decoder = decoders.ByteLevel()
+        bos_id, eos_id = tk.token_to_id(bos), tk.token_to_id(eos)
+        tk.post_processor = processors.RobertaProcessing((eos, eos_id), (bos, bos_id),
+                                                         add_prefix_space=False,
+                                                         trim_offsets=False)
+        return PreTrainedTokenizerFast(tokenizer_object=tk,
+                                       bos_token=bos,
+                                       eos_token=eos,
+                                       unk_token=unk,
+                                       pad_token=pad,
+                                       model_max_length=CLIP_TEXT_LEN)
 
     @torch.no_grad()
     def encode(self, text):

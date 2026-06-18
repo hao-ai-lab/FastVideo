@@ -166,6 +166,14 @@ def build_hunyuan_video15_card(model_id: str = "hunyuan-video-1.5-t2v-480p",
     card.validate()
     if checkpoint_root:
         stamp_wan21_checkpoints(card, checkpoint_root)
+        # stamp_wan21_checkpoints only knows the Wan superset of subfolders; HunyuanVideo 1.5 adds a
+        # second text encoder (ByT5 in ``text_encoder_2/``) that the shared stamp does not cover. Stamp it
+        # here so the recipe stays self-contained (no edit to the shared stamp). The model root is the
+        # parent of any already-stamped subfolder (stamp resolves HF ids -> a local snapshot).
+        import os
+        if "text_encoder_2" in card.components and not card.components["text_encoder_2"].checkpoint:
+            model_root = os.path.dirname(os.path.normpath(card.components["transformer"].checkpoint))
+            card.components["text_encoder_2"].checkpoint = os.path.join(model_root, "text_encoder_2")
     return card
 
 

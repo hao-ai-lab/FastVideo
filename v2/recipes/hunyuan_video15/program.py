@@ -30,17 +30,57 @@ from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
 from v2.recipes.common import cached_text_encode
 
 
+def _ensure_byt5_checkpoint(instance: Any) -> None:
+    """Stamp ``text_encoder_2``'s weights subfolder if the shared stamp left it empty.
+
+    ``VideoGenerator.from_pretrained`` stamps the card via ``stamp_wan21_checkpoints``, whose subfolder
+    superset is Wan-centric and does NOT cover HunyuanVideo 1.5's second text encoder (ByT5 lives in
+    ``text_encoder_2/``). Rather than edit the shared stamp, the recipe stamps it here at first use,
+    deriving the diffusers model root from the already-stamped primary ``text_encoder`` subfolder
+    (sibling layout). Idempotent: a no-op once ``checkpoint`` is set (e.g. by the card's own stamp path)."""
+    import os
+    spec2 = instance.card.components.get("text_encoder_2")
+    if spec2 is None or spec2.checkpoint:
+        return
+    primary = instance.card.components["text_encoder"].checkpoint  # <root>/text_encoder (already stamped)
+    model_root = os.path.dirname(os.path.normpath(primary))
+    spec2.checkpoint = os.path.join(model_root, "text_encoder_2")
+
+
 def _text_encode(instance: Any, slots: dict, request: Any, ctx: Any) -> None:
-    """Encode prompt + negative prompt. When a second text encoder (ByT5) exists, pack ``(qwen, byt5)``
-    tuples; otherwise (toy backend) write the single embedding ``ToyDiT`` expects."""
+    """Encode prompt + negative prompt. When a second text encoder (ByT5) exists and the prompt carries
+    quoted glyph text, pack the two embeds; otherwise write the single Qwen embedding.
+
+    The shared ``WanDenoiseLoop`` does numpy bookkeeping on the conditioning slot (``np.asarray(e).nbytes``
+    for the resident-bytes estimate, and ``np.array(e)`` to allocate the CUDA-graph static workspace). A
+    plain Python tuple of the (qwen[seq,3584], byt5[bseq,1472]) embeds is INHOMOGENEOUS, so np.asarray /
+    np.array raise. For the common t2v case the ByT5 stream is a zero-length ``[0,1472]`` embedding (no
+    quoted text), which the DiT concatenates as 0 tokens — i.e. a no-op. So we pass ONLY the Qwen embedding
+    then; the ``HunyuanVideo15DiT`` adapter rebuilds the empty ByT5 default internally (its ``byt5_e is
+    None`` branch). When glyph text IS present we pack the pair as a numpy OBJECT array (length 2): an
+    object array is a single ndarray, so ``np.asarray(...).nbytes`` and ``np.array(...)`` both succeed
+    (no stacking), and the adapter unpacks it. This keeps the t2v path capturable (single ndarray) while
+    still threading real ByT5 embeddings for glyph prompts (those steps eager-break on the object array)."""
     has_byt5 = "text_encoder_2" in instance.card.components
+    # The dual-encoder packing is a GPU-path concern: the CPU toy backend's ToyDiT takes a single
+    # [seq,dim] float embedding (and its ToyTextEncoder has no glyph/ByT5 stream), so on the toy we pass
+    # the Qwen embedding alone. Gate on the real cuda backend.
+    on_cuda = getattr(getattr(instance, "platform", None), "device", "cpu") == "cuda"
+    dual = has_byt5 and on_cuda
+    if dual:
+        _ensure_byt5_checkpoint(instance)
 
     def _encode(text: str) -> Any:
         qwen = cached_text_encode(instance, text)  # primary (Qwen2.5-VL) — feature-cached
-        if not has_byt5:
-            return qwen  # toy backend: single embedding
+        if not dual:
+            return qwen  # toy backend / no ByT5: single embedding
         byt5 = instance.component("text_encoder_2").encode(text)
-        return (qwen, byt5)
+        if byt5 is None or getattr(byt5, "shape", (0, ))[0] == 0:
+            return qwen  # no glyph text -> empty ByT5 (the DiT no-op); pass Qwen alone (capturable)
+        import numpy as np
+        pair = np.empty(2, dtype=object)
+        pair[0], pair[1] = qwen, byt5
+        return pair
 
     slots["text_embeds"] = _encode(request.prompt())
     slots["neg_text_embeds"] = _encode(request.diffusion.negative_prompt)
