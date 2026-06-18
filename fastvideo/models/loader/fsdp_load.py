@@ -50,12 +50,19 @@ def _maybe_convert_model_to_nvfp4(model: nn.Module) -> None:
     from fastvideo.layers.quantization.nvfp4_config import (
         NVFP4QuantizeMethod, convert_model_to_nvfp4,
     )
+    from fastvideo.layers.quantization.nvfp4_qat_config import (
+        NVFP4QATQuantizeMethod, convert_model_to_fp4,
+    )
 
     for mod in model.modules():
-        if isinstance(getattr(mod, "quant_method", None),
-                      NVFP4QuantizeMethod):
+        qm = getattr(mod, "quant_method", None)
+        if isinstance(qm, NVFP4QuantizeMethod):
             logger.info("Converting loaded model weights for NVFP4 linear layers")
             convert_model_to_nvfp4(model)
+            return
+        if isinstance(qm, NVFP4QATQuantizeMethod):
+            logger.info("Converting loaded model weights for NVFP4-QAT linear layers")
+            convert_model_to_fp4(model)
             return
 
 
