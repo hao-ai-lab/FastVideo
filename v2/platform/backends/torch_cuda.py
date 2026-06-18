@@ -60,6 +60,16 @@ def _build_upsampler(spec, instance, platform):
     return build_torch_upsampler(spec, instance, platform)
 
 
+def _build_audio_vae(spec, instance, platform):
+    from .torch_adapters import build_torch_audio_vae
+    return build_torch_audio_vae(spec, instance, platform)
+
+
+def _build_vocoder(spec, instance, platform):
+    from .torch_adapters import build_torch_vocoder
+    return build_torch_vocoder(spec, instance, platform)
+
+
 def _flow_match_cuda(*args, **kwargs):
     from .torch_kernels import flow_match_step
     return flow_match_step(*args, **kwargs)
@@ -80,6 +90,10 @@ register_component("text_encoder", _build_text_encoder, device="cuda", available
                    source=f"{_ADAPTERS}:TorchT5Encoder")
 register_component("upsampler", _build_upsampler, device="cuda", available=_cuda_available,
                    source=f"{_ADAPTERS}:TorchLTX2Upsampler")
+register_component("audio_vae", _build_audio_vae, device="cuda", available=_cuda_available,
+                   source=f"{_ADAPTERS}:TorchLTX2AudioVAE")
+register_component("vocoder", _build_vocoder, device="cuda", available=_cuda_available,
+                   source=f"{_ADAPTERS}:TorchLTX2Vocoder")
 
 # --- solver ops: plain torch elementwise (no fused solver kernel exists in fastvideo-kernel) ---- #
 # arch="generic" (elementwise, arch-agnostic), workspace_bytes=0 (no static scratch).
