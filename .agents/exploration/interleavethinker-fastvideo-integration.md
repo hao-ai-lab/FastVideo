@@ -263,6 +263,27 @@ Validation note for the next Modal run:
   This avoids the launcher's limitation that it only captures local diffs from
   the current `HEAD`, not local-only commits.
 
+Full branch validation completed:
+
+- Temporary validation worktree: `/tmp/fastvideo-interleavethinker-validation`
+- Full diff applied from `main..interleavethinker-fastvideo`.
+- Modal app URL shown by CLI:
+  `https://modal.com/apps/hao-ai-lab/main/ap-cREtgFJyncsIfsXn1B5hLL`
+- Command:
+  `pytest tests/local_tests/test_interleave_entrypoint.py -q &&
+  pre-commit run --files fastvideo/entrypoints/cli/main.py
+  fastvideo/entrypoints/cli/interleave_serve.py
+  fastvideo/entrypoints/interleave/__init__.py
+  fastvideo/entrypoints/interleave/schema.py
+  fastvideo/entrypoints/interleave/generator.py
+  fastvideo/entrypoints/interleave/orchestrator.py
+  fastvideo/entrypoints/interleave/server.py
+  fastvideo/entrypoints/interleave/trace.py`
+- Result: `5 passed, 14 warnings in 13.24s`.
+- Pre-commit result: `yapf`, `ruff`, `codespell`, `mypy`, filename check all
+  passed. PyMarkdown/actionlint skipped with no files to check.
+- Temporary validation worktree was removed after validation.
+
 ## Proposed Standardization
 
 If this integration lands cleanly, promote this exploration into a workflow or
