@@ -57,6 +57,12 @@ Wan2.1 model — covered by wan21; those runtime modes are out of scope.
 ## Backlog — goal: port ALL fastvideo models (63 total: 8 ported · 21 reuse-arch · 34 new-arch)
 Ported (8): the 7 above + **Wan2.1-T2V-14B** (bucket B — reuses the Wan recipe/adapter; 720p defaults).
 
+⚠️ Not as trivial as the bucket split implies: the `FastVideo/*` distilled checkpoints (FastWan DMD, VSA,
+Turbo) carry **gated-attention params** (`to_gate_compress`) the generic `WanTransformer3DModel` loader
+can't map (`select_by_architecture` already rejects `WanDMDPipeline` for this) — they need a param-mapping
+fix (as LTX-2.3 did) on top of the few-step schedule, so they're really bucket-C-effort. GPU-verify each
+port before claiming support.
+
 **Bucket B (21 left) — reuse a v2 architecture** (`WanTransformer3DModel` / `CausalWanTransformer3DModel` /
 `LTX2Transformer3DModel`): a `ModelEntry` in `v2/registry.py` + a recipe (parameterize the wan21/wan_causal/
 ltx2 builders) + `SamplingDefaults`, NO new adapter. Includes other Wan T2V sizes; i2v variants (need an

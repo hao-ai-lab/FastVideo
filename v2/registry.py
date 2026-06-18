@@ -53,8 +53,7 @@ def _entries() -> list[ModelEntry]:
     )
     return [
         ModelEntry(("Wan-AI/Wan2.1-T2V-1.3B-Diffusers",), build_wan21_card, build_wan_t2v_program),
-        ModelEntry(("Wan-AI/Wan2.1-T2V-14B-Diffusers", "FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers"),
-                   build_wan_t2v_14b_card, build_wan_t2v_program),
+        ModelEntry(("Wan-AI/Wan2.1-T2V-14B-Diffusers",), build_wan_t2v_14b_card, build_wan_t2v_program),
         ModelEntry(("Wan-AI/Wan2.2-TI2V-5B-Diffusers",), build_wan22_ti2v_card, build_wan_t2v_program),
         ModelEntry(("Wan-AI/Wan2.2-T2V-A14B-Diffusers",), build_wan22_a14b_card, build_wan_t2v_program),
         ModelEntry(("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",), build_wan_causal_card, build_wan_causal_program),
