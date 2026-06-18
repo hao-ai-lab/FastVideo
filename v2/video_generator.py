@@ -18,11 +18,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
-# model_path (HF id, from fastvideo/tests/ssim/*) -> v2 model family. FastWan / DMD-distilled Wan
-# reuse the wan21 card (same WanTransformer3DModel arch); SF-causal -> wan_causal; LTX-2 -> ltx2.
+# model_path (HF id, from fastvideo/tests/ssim/*) -> v2 model family. Wan2.1 -> wan21; Wan2.2-TI2V-5B
+# -> wan2.2-ti2v (same arch classes, 48ch/16x-spatial VAE geometry); SF-causal -> wan_causal; LTX-2 ->
+# ltx2. (FastWan/DMD is NOT a generic wan21 reuse — its checkpoint's to_gate_compress param mapping
+# differs from the generic WanTransformer3DModel load; see V2_PORTING_STATUS.md.)
 _FAMILY_BY_PATH = {
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": "wan21",
-    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": "wan21",
+    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": "wan2.2-ti2v",
     "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": "wan_causal",
     "FastVideo/LTX2-Distilled-Diffusers": "ltx2",
     "FastVideo/LTX-2.3-Distilled-Diffusers": "ltx2",
@@ -37,17 +39,23 @@ def _resolve_family(model_path: str) -> str:
         return "ltx2"
     if "sfwan" in p or "self-forcing" in p or "causal" in p:
         return "wan_causal"
-    if "wan2.1-t2v-1.3b" in p or "fastwan2.1-t2v-1.3b" in p:
+    if "wan2.2-ti2v" in p or "ti2v-5b" in p:
+        return "wan2.2-ti2v"
+    if "wan2.1-t2v-1.3b" in p:
         return "wan21"
     raise ValueError(
         f"v2 VideoGenerator: no v2 card mapped for model_path {model_path!r}. "
-        f"Supported: {sorted(_FAMILY_BY_PATH)} (or names containing ltx / sfwan / wan2.1-t2v-1.3b).")
+        f"Supported: {sorted(_FAMILY_BY_PATH)} (or names containing ltx / sfwan / "
+        f"wan2.2-ti2v / wan2.1-t2v-1.3b).")
 
 
 def _build_card_and_program(family: str):
     if family == "wan21":
         from .models.wan21 import build_wan21_card, build_wan_t2v_program
         return build_wan21_card(), build_wan_t2v_program()
+    if family == "wan2.2-ti2v":
+        from .models.wan21 import build_wan22_ti2v_card, build_wan_t2v_program
+        return build_wan22_ti2v_card(), build_wan_t2v_program()
     if family == "wan_causal":
         from .models.wan_causal import build_wan_causal_card, build_wan_causal_program
         return build_wan_causal_card(), build_wan_causal_program()
