@@ -413,7 +413,7 @@ Current training-loop edits:
   - `tests/local_tests/test_interleave_thinker_reward.py`
   - `tests/local_tests/test_interleave_thinker_method.py`
 - [x] Run Modal validation.
-- [ ] Commit and push.
+- [x] Commit and push.
 
 Implementation details added:
 
@@ -461,6 +461,9 @@ Implementation details added:
   - Pre-commit result: `yapf`, `ruff`, `codespell`, `mypy`, filename check,
     and suggestion hooks passed. PyMarkdown/actionlint skipped with no files to
     check.
+- Commit pushed:
+  - `9521077f` — `[feat] add InterleaveThinker RL training loop`
+  - Pushed to `origin/interleavethinker-fastvideo`
 
 Pending validation command:
 
