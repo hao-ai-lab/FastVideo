@@ -46,6 +46,18 @@ class ToyTextEncoder:
         return self.encode(text), self.encode((text or "") + "\x00audio")
 
 
+class ToyImageEncoder:
+    """Deterministic image→embedding stand-in for the CLIP vision encoder (Wan i2v conditioning context)."""
+
+    def __init__(self, seq: int = TEXT_SEQ, dim: int = TEXT_DIM):
+        self.seq, self.dim = seq, dim
+
+    def encode_image(self, image) -> np.ndarray:
+        a = np.asarray(image, dtype="float32")
+        rng = np.random.default_rng(_seed_from("img:%d:%.4f" % (a.size, float(a.mean()) if a.size else 0.0)))
+        return (rng.standard_normal((self.seq, self.dim)) * 0.1).astype("float32")
+
+
 class ToyDiT:
     """A tiny deterministic velocity predictor (stands in for the 1.3B DiT).
 

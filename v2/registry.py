@@ -51,9 +51,13 @@ def _entries() -> list[ModelEntry]:
         build_wan_t2v_14b_card,
         build_wan_t2v_program,
     )
+    from v2.recipes.wan21.i2v import build_wan21_i2v_card, build_wan21_i2v_program
     return [
         ModelEntry(("Wan-AI/Wan2.1-T2V-1.3B-Diffusers",), build_wan21_card, build_wan_t2v_program),
         ModelEntry(("Wan-AI/Wan2.1-T2V-14B-Diffusers",), build_wan_t2v_14b_card, build_wan_t2v_program),
+        # Wan2.1 i2v (Fun-InP): CLIP image encoder + first-frame VAE conditioning ([mask|cond] -> 36ch DiT).
+        ModelEntry(("weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers",),
+                   build_wan21_i2v_card, build_wan21_i2v_program),
         ModelEntry(("Wan-AI/Wan2.2-TI2V-5B-Diffusers",), build_wan22_ti2v_card, build_wan_t2v_program),
         ModelEntry(("Wan-AI/Wan2.2-T2V-A14B-Diffusers",), build_wan22_a14b_card, build_wan_t2v_program),
         ModelEntry(("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",), build_wan_causal_card, build_wan_causal_program),
