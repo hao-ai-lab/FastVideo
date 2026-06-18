@@ -20,7 +20,7 @@ from v2.deploy import (
     build_deployment_card,
 )
 from v2.extend import InterceptorChain, ObserverBus
-from v2.models import build_default_engine, build_omni_engine, build_wan21_card, build_wan_t2v_program
+from v2.recipes import build_default_engine, build_omni_engine, build_wan21_card, build_wan_t2v_program
 from v2.request import DiffusionParams, OutputSpec, SamplingParams, TaskType, make_request
 from v2.runtime import AsyncEngine, DisaggregatedRunner, Engine, PoolSet, wan_t2v_disaggregated
 from v2.serving import OmniOpenAIServer

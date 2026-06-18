@@ -5,7 +5,7 @@ import asyncio
 
 from v2.card import CostModel
 from v2.deploy import build_deployment_card
-from v2.models import build_default_engine, build_wan21_card, build_wan_t2v_program
+from v2.recipes import build_default_engine, build_wan21_card, build_wan_t2v_program
 from v2.request import Cancelled, DiffusionParams, OutputSpec, TaskType, make_request
 from v2.runtime import AsyncEngine, PoolSet, wan_t2v_disaggregated
 from v2.transport import InProcConnector

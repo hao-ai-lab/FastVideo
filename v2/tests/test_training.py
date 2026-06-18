@@ -8,8 +8,8 @@ from __future__ import annotations
 import numpy as np
 
 from v2._enums import ConsistencyLevel
-from v2.models.wan21 import build_wan21_card
-from v2.models.wan_causal import build_wan_causal_card
+from v2.recipes.wan21 import build_wan21_card
+from v2.recipes.wan_causal import build_wan_causal_card
 from v2.training import (
     WeightRole,
     build_diffusion_nft,

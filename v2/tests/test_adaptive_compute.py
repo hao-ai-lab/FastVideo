@@ -12,8 +12,8 @@ import numpy as np
 
 from v2.cache import CacheManager
 from v2.card import load_card
-from v2.models import build_wan_t2v_program
-from v2.models.adaptive import build_adaptive_card
+from v2.recipes import build_wan_t2v_program
+from v2.recipes.adaptive import build_adaptive_card
 from v2.parity import assert_interleave_parity
 from v2.request import DiffusionParams, TaskType, make_request
 from v2.runtime import Engine

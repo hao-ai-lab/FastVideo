@@ -1,0 +1,9 @@
+"""Shared omni building blocks (design_v3 §4): the AR decode loop + pack/emit program nodes."""
+from __future__ import annotations
+
+from v2.recipes.omni.ar_loop import ARDecodeLoop
+from v2.recipes.omni.pack import emit_text_node, pack_cond_from_tokens, tokenize_node, vae_decode_node
+from v2.recipes.omni.vocoder_loop import VocoderLoop
+
+__all__ = ["ARDecodeLoop", "VocoderLoop", "tokenize_node", "pack_cond_from_tokens",
+           "emit_text_node", "vae_decode_node"]

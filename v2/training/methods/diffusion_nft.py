@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 
 from v2._enums import ConsistencyLevel
-from v2.models.common import cached_text_encode
+from v2.recipes.common import cached_text_encode
 from v2.request import DiffusionParams, TaskType, make_request
 from v2.training.rewards import build_multi_reward_scorer
 from v2.training.rollout import Trajectory, TrajectoryBuffer

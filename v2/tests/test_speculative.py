@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from v2.cache import CacheManager
 from v2.card import load_card
-from v2.models.backend import ToyTokenizer, _spec_target_next
-from v2.models.speculative import build_speculative_card, build_speculative_program
+from v2.platform.backends.toy import ToyTokenizer, _spec_target_next
+from v2.recipes.speculative import build_speculative_card, build_speculative_program
 from v2.parity import assert_interleave_parity
 from v2.request import SamplingParams, TaskType, make_request
 from v2.runtime import Engine

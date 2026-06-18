@@ -12,8 +12,8 @@ import math
 import numpy as np
 
 from v2._enums import ExecutionProfile, LoopKind, WorkUnitKind
-from v2.models.reward import build_reward_card
-from v2.models.wan21 import build_wan21_card
+from v2.recipes.reward import build_reward_card
+from v2.recipes.wan21 import build_wan21_card
 from v2.request import TaskType, make_request
 from v2.training.methods import build_diffusion_nft
 from v2.training.methods.base import new_instance

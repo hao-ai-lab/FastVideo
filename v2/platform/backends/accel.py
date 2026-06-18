@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from v2.models.backend import ToyDiT
+from v2.platform.backends.toy import ToyDiT
 from v2.platform.registry import FLOW_MATCH_STEP, FLOW_SDE_STEP, register_component, register_kernel
 
 

@@ -8,8 +8,8 @@ from __future__ import annotations
 import numpy as np
 
 from v2.memory import MemoryManager, OutOfMemory
-from v2.models import build_default_engine
-from v2.models.wan21.loop import latent_shape
+from v2.recipes import build_default_engine
+from v2.recipes.wan21.loop import latent_shape
 from v2.parity import compare_outputs
 from v2.request import DiffusionParams, TaskType, make_request
 from v2.runtime import AdmissionController, Engine

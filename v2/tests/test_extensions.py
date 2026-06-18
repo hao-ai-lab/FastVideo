@@ -13,7 +13,7 @@ from v2.extend import (
     Profiler,
     ResidualSkipInterceptor,
 )
-from v2.models import build_default_engine
+from v2.recipes import build_default_engine
 from v2.parity import assert_interleave_parity
 from v2.request import DiffusionParams, TaskType, make_request
 from v2.runtime import Engine

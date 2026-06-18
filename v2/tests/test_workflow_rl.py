@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.models import build_flux_t2i_card, build_wan_i2v_card
+from v2.recipes import build_flux_t2i_card, build_wan_i2v_card
 from v2.training.methods import build_workflow_rl
 
 

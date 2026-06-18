@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from v2.models import build_default_engine
+from v2.recipes import build_default_engine
 from v2.request.cancel import Cancelled
 from v2.runtime import WorldModelSession
 

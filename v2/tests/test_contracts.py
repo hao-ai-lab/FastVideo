@@ -12,8 +12,8 @@ from v2.card import (
     RecipeSpec,
 )
 from v2.cache.keys import CacheKey, content_hash
-from v2.models.wan21 import build_wan21_card
-from v2.models.wan_causal import build_wan_causal_card
+from v2.recipes.wan21 import build_wan21_card
+from v2.recipes.wan_causal import build_wan_causal_card
 from v2.parallel import ParallelPlan, ParallelValidationError, validate_plan
 
 

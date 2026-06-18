@@ -83,7 +83,7 @@ class VideoGenerator:
         root = model_path if local else snapshot_download(model_path, revision=rev)   # full weights (cached)
         card, program = build_card(), build_program()
 
-        from v2.models.wan21 import stamp_wan21_checkpoints   # transformer/vae/text_encoder subfolder layout
+        from v2.recipes.wan21 import stamp_wan21_checkpoints   # transformer/vae/text_encoder subfolder layout
         stamp_wan21_checkpoints(card, root)
 
         from v2._enums import Capability
