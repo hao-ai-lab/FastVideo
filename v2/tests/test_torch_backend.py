@@ -74,7 +74,7 @@ def test_loading_backends_does_not_import_torch():
     ensure_backends_loaded()
     component_matrix(); kernel_matrix()
     assert "torch" not in sys.modules
-    assert "v2.platform.backends.torch_adapters" not in sys.modules   # imported only inside builders
+    assert "v2.platform.backends.torch_backend" not in sys.modules   # imported only inside builders
     assert "v2.platform.backends.torch_kernels" not in sys.modules
 
 
