@@ -214,12 +214,18 @@ def train(
             "Invalid HSDP mesh: replicate_dim * shard_dim must equal "
             f"num_gpus ({DEFAULT_HSDP_REPLICATE_DIM} * "
             f"{DEFAULT_HSDP_SHARD_DIM} != {DEFAULT_NUM_GPUS}).")
-    if num_samples_per_prompt % collection_batch_size != 0:
-        raise ValueError("--num-samples-per-prompt must be divisible by "
-                         "--collection-batch-size")
-    if train_batch_size > num_samples_per_prompt:
-        raise ValueError(
-            "--train-batch-size must be <= --num-samples-per-prompt")
+    if (DEFAULT_NUM_GPUS * collection_batch_size) % num_samples_per_prompt != 0:
+        raise ValueError("DiffusionNFT K-repeat sampling requires "
+                         "num_gpus * collection_batch_size to be divisible by "
+                         "--num-samples-per-prompt "
+                         f"({DEFAULT_NUM_GPUS} * {collection_batch_size} vs "
+                         f"{num_samples_per_prompt}).")
+    if (DEFAULT_NUM_GPUS * train_batch_size) % num_samples_per_prompt != 0:
+        raise ValueError("DiffusionNFT training batches should keep full prompt "
+                         "repeat groups: num_gpus * train_batch_size must be "
+                         "divisible by --num-samples-per-prompt "
+                         f"({DEFAULT_NUM_GPUS} * {train_batch_size} vs "
+                         f"{num_samples_per_prompt}).")
 
     output_dir = (f"{OUTPUT_DIR_BASE}_"
                   f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}")

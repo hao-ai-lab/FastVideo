@@ -57,6 +57,20 @@ NUM_GPUS=4 bash examples/train/run.sh \
 W&B logging records the resolved config and a code snapshot by default. Set
 `FASTVIDEO_WANDB_LOG_CODE=0` only when intentionally disabling code capture.
 
+For short 17-frame H100 runs, keep gradient accumulation matched to the number
+of rollout train batches. For example, if you use `--num-batches-per-epoch 4`,
+`--collection-batch-size 4`, `--train-batch-size 4`, and 25 sample steps, use
+`--gradient-accumulation-steps 4` for one full optimizer update per outer
+DiffusionNFT step. A much larger accumulation value, such as 30, still runs, but
+only performs a partial final update for that outer step and W&B will report it
+under `nft/partial_optimizer_step_ratio`.
+
+DiffusionNFT relies on repeated samples for the same prompt to estimate
+per-prompt advantages. `--num-samples-per-prompt 4` is a cheap smoke setting,
+but it is high variance. If the reward curves look noisy and memory allows it,
+try `--num-samples-per-prompt 8` or increase `--num-batches-per-epoch` before
+judging the training run.
+
 For offline logging:
 
 ```bash

@@ -583,6 +583,7 @@ class DiffusionNFTMethod(TrainingMethod):
         effective_grad_accum *= max(1, num_train_timesteps)
         current_accum = 0
         optimizer_steps = 0
+        partial_step_micro_steps = 0
         loss_terms: dict[str, list[torch.Tensor]] = defaultdict(list)
         num_batches = max(1, total_samples // max(1, self._train_batch_size))
         training_batch_size = max(1, total_samples // num_batches)
@@ -646,6 +647,11 @@ class DiffusionNFTMethod(TrainingMethod):
                     progress.update(1)
 
         if current_accum % effective_grad_accum != 0:
+            partial_step_micro_steps = current_accum % effective_grad_accum
+            self._log_progress("[DiffusionNFT] final optimizer step uses a partial "
+                               f"gradient accumulation window "
+                               f"({partial_step_micro_steps}/{effective_grad_accum} "
+                               "timestep micro-steps)")
             self._clip_student_grads()
             self._student_optimizer.step()
             self._student_lr_scheduler.step()
@@ -666,6 +672,9 @@ class DiffusionNFTMethod(TrainingMethod):
             "nft/iteration": float(iteration),
             "nft/num_inner_epochs": float(self._num_inner_epochs),
             "nft/inner_micro_steps": float(current_accum),
+            "nft/effective_grad_accum_micro_steps": float(effective_grad_accum),
+            "nft/partial_optimizer_step_micro_steps": float(partial_step_micro_steps),
+            "nft/partial_optimizer_step_ratio": float(partial_step_micro_steps) / float(effective_grad_accum),
             "nft/optimizer_steps": float(optimizer_steps),
             "ema/update_count": float(self._ema_update_count),
         }
