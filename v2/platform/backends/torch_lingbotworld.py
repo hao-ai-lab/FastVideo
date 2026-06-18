@@ -45,8 +45,12 @@ class LingBotWorldDiT(WanDiT):
 
     def __init__(self, module, *, device, dtype):
         # ``_make_dit`` builds an explicit adapter as ``cls(module, device=, dtype=)`` (no offload_group),
-        # so wire the shared MoE offload group here ourselves (2x14B can't co-reside on 80GB).
-        component_id = getattr(getattr(module, "config", None), "prefix", None) or type(module).__name__
+        # so wire the shared MoE offload group here ourselves (2x14B can't co-reside on 80GB). BOTH experts
+        # carry the SAME ``config.prefix`` ("Wan"), so we must NOT key the offload group on the prefix — the
+        # two adapters would collide on one dict slot and only one expert would ever be offloaded (both end
+        # up GPU-resident -> 2x37GB). Key on the wrapped module's identity instead so each expert gets a
+        # distinct slot and ``_ensure_resident`` correctly evicts the inactive one at the boundary swap.
+        component_id = f"lingbotworld-{id(module):x}"
         super().__init__(module,
                          device=device,
                          dtype=dtype,

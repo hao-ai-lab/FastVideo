@@ -135,19 +135,26 @@ class SFWan22ChunkRolloutLoop:
         self.spatial_ratio = spatial_ratio
         self.temporal_ratio = temporal_ratio
 
-    # --- block layout (the Wan2.2-MoE 1-frame first block + i2v conditioning frame) ---------------- #
+    # --- block layout (uniform causal blocks for the train-forward adapter path) ------------------- #
     def _block_sizes(self, has_image: bool) -> list[int]:
-        """latent frames per causal block. With a boundary (MoE) the FIRST block is 1 frame (the Wan2.2
-        hardcode). With an i2v conditioning frame, that 1-frame block IS the conditioning frame (held
-        fixed, used only to prime the KV) and is dropped from the denoise schedule."""
+        """latent frames per causal block.
+
+        The fastvideo ``CausalDMDDenosingStage`` runs a 1-latent-frame MoE head block then full
+        ``num_frame_per_block`` blocks, carrying cross-chunk causal context through the transformer's
+        INTERNAL kv_cache (``_forward_inference``). The v2 GPU ``WanDiT`` adapter, however, drives the
+        kv_cache-LESS ``_forward_train`` path (the loop math is numpy fp32; no kv_cache is threaded), so:
+          * each DiT call is independent — there is no real cross-chunk KV carryover to preserve, so the
+            1-frame MoE head block (which only mattered to PRIME that kv_cache) is unnecessary; and
+          * ``_forward_train`` caches ``self.block_mask`` on the FIRST call keyed to that call's token
+            count, so VARYING the per-block frame count (the old ``[1, nfpb, nfpb]``) makes the cached
+            flex-attention mask mismatch later blocks. Keeping every block the SAME size keeps the cached
+            mask valid for the whole rollout.
+        We therefore emit UNIFORM ``nfpb``-frame blocks. The trailing ``nfpb-1`` frames are still trimmed
+        at finalize (matching the stage's final crop). For i2v the conditioning frame primes context but
+        is not a denoise block here (the adapter ignores it on the train path), so the layout is the same.
+        """
         nfpb = self.num_frames_per_block
-        # MoE: the first block is 1 latent frame (the Wan2.2 hardcode ``block_sizes[0]=1``), then full
-        # nfpb-sized blocks; the trailing nfpb-1 frames are cropped at finalize (matching the stage).
-        num_full = (nfpb + 1) // nfpb + 1  # enough nfpb blocks to cover one chunk past the 1-frame head
-        blocks = [1] + [nfpb] * num_full
-        if has_image:
-            blocks = blocks[1:]  # the conditioning frame consumes the leading 1-frame block
-        return blocks
+        return [nfpb, nfpb]  # two uniform causal chunks (one full chunk + headroom for the trailing trim)
 
     def init(self, req, model, ctx) -> LoopState:
         seed = req.diffusion.seed if req.diffusion.seed is not None else 0

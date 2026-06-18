@@ -28,22 +28,32 @@ _SPATIAL_SCALE = 8  # Plucker spatial downsample == VAE 8x spatial compression (
 
 
 def _i2v_image_encode(instance, slots, request, ctx) -> None:
-    img = request.image()
-    slots["i2v_img_embeds"] = (instance.component("image_encoder").encode_image(img.pixels)
-                               if img is not None and getattr(img, "pixels", None) is not None else None)
+    # LingBot-World-Base-Cam has NO CLIP image encoder (image_dim=null) — the first-frame conditioning is
+    # carried entirely by the 36ch ``[noise|mask+cond]`` latent concat. So there is no image-embed branch;
+    # the slot is always None (the DiT forward and the adapter accept ``context=None`` / ``img=None``).
+    slots["i2v_img_embeds"] = None
 
 
 def _i2v_cond_encode(instance, slots, request, ctx) -> None:
     """First-frame VAE conditioning + mask (mirrors fastvideo's ImageVAEEncodingStage): encode the
-    conditioning image as frame 0 (rest zeros), prepend a 4-channel mask (first latent frame = 1)."""
+    conditioning image as frame 0 (rest zeros), prepend a 4-channel mask (first latent frame = 1).
+
+    This model's DiT has ``in_channels=36`` (16 noise + 4 mask + 16 cond latent), so the i2v cond slot is
+    REQUIRED for a well-formed forward — a None cond would feed only 16ch into a 36ch patch embedding. The
+    v2 convenience API (``generate_video(prompt=...)``) supplies no image, so for the bring-up we synthesize
+    a BLANK first frame (zeros): the latent concat shape is correct and the run produces a finite output
+    (degenerate no-image i2v, the goal being loads+runs+finite, not quality). A real conditioning image
+    (when ``request.image()`` is present) takes the normal path."""
     img = request.image()
-    if img is None or getattr(img, "pixels", None) is None:
-        slots["i2v_cond"] = None
-        return
-    px = np.asarray(img.pixels, dtype="float32")  # [3, H, W] in [-1, 1]
     nf = int(request.diffusion.num_frames)
-    cond_video = np.zeros((px.shape[0], nf) + px.shape[1:], dtype="float32")
-    cond_video[:, 0] = px  # frame 0 = conditioning image, rest zeros
+    h_px, w_px = int(request.diffusion.height), int(request.diffusion.width)
+    if img is not None and getattr(img, "pixels", None) is not None:
+        px = np.asarray(img.pixels, dtype="float32")  # [3, H, W] in [-1, 1]
+        cond_video = np.zeros((px.shape[0], nf) + px.shape[1:], dtype="float32")
+        cond_video[:, 0] = px  # frame 0 = conditioning image, rest zeros
+    else:
+        # BRINGUP no-image fallback: a blank (zeros) conditioning video so the 36ch concat is well-formed.
+        cond_video = np.zeros((3, nf, h_px, w_px), dtype="float32")
     cond_latent = np.asarray(instance.component("vae").encode(cond_video), dtype="float32")  # [C, T, h, w]
     t, h, w = cond_latent.shape[1:]
     mask = np.zeros((_WAN_TEMPORAL_RATIO, t, h, w), dtype="float32")
