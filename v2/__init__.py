@@ -54,5 +54,15 @@ __all__ = [
     "Engine", "AsyncEngine", "Program", "ProgramKind", "ComponentNode", "ModelLoopNode", "when_task", "when_opt",
     "Request", "Session", "Output", "make_request", "TaskType", "SamplingParams", "DiffusionParams",
     "LoopKind", "WorkUnitKind", "ConsistencyLevel", "ExecutionProfile", "Capability",
+    "VideoGenerator",
     "__version__",
 ]
+
+
+def __getattr__(name: str):
+    # Lazy: the GPU entrypoint imports torch / fastvideo, so resolve it only on access — plain
+    # ``import v2`` (and the CPU-only mini) stay torch-free.
+    if name == "VideoGenerator":
+        from .video_generator import VideoGenerator
+        return VideoGenerator
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
