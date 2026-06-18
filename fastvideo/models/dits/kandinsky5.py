@@ -263,10 +263,9 @@ class Kandinsky5Modulation(nn.Module):
 
 
 def _apply_rotary(x: torch.Tensor, rope: torch.Tensor) -> torch.Tensor:
-    orig_dtype = x.dtype
     x_ = x.reshape(*x.shape[:-1], -1, 1, 2).to(torch.float32)
     x_out = (rope * x_).sum(dim=-1)
-    return x_out.reshape(*x.shape).to(orig_dtype)
+    return x_out.reshape(*x.shape).to(torch.bfloat16)
 
 
 class Kandinsky5Attention(nn.Module):
@@ -350,16 +349,24 @@ class Kandinsky5Attention(nn.Module):
             # parity tests call the model directly, so fallback to Torch SDPA.
             if "Forward context is not set" not in str(exc):
                 raise
-            query = query.transpose(1, 2)
-            key = key.transpose(1, 2)
-            value = value.transpose(1, 2)
-            hidden_states = F.scaled_dot_product_attention(query,
-                                                           key,
-                                                           value,
-                                                           attn_mask=None,
-                                                           is_causal=False)
-            hidden_states = hidden_states.transpose(1, 2)
-        hidden_states = hidden_states.flatten(2)
+            query_shape = query.shape[:-2]
+            key_shape = key.shape[:-2]
+            query = query.reshape(query_shape[0], -1, self.num_heads,
+                                  query.shape[-1]).transpose(1, 2)
+            key = key.reshape(key_shape[0], -1, self.num_heads,
+                              key.shape[-1]).transpose(1, 2)
+            value = value.reshape(key_shape[0], -1, self.num_heads,
+                                  value.shape[-1]).transpose(1, 2)
+            hidden_states = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=None,
+                is_causal=False,
+            )
+            hidden_states = hidden_states.transpose(1, 2).reshape(
+                *query_shape, self.num_heads, -1)
+        hidden_states = hidden_states.flatten(-2, -1)
 
         hidden_states, _ = self.out_layer(hidden_states)
         return hidden_states

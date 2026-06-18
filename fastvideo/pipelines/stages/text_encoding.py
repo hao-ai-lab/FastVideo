@@ -202,6 +202,10 @@ class TextEncodingStage(PipelineStage):
             encoder_config = encoder_cfgs[i]
             preprocess_func = preprocess_funcs[i]
             postprocess_func = postprocess_funcs[i]
+            encoder_device = next(
+                (param.device for param in text_encoder.parameters()),
+                torch.device(target_device),
+            )
 
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
@@ -246,7 +250,7 @@ class TextEncodingStage(PipelineStage):
                     # pre-format prompts into message lists upstream and rely on
                     # the inner tokenizer + full tokenizer_kwargs (which include
                     # add_generation_prompt). Preserve that original path exactly.
-                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(target_device)
+                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(encoder_device)
                 else:
                     # Two-step approach matching Diffusers: format with chat
                     # template first, then tokenize the resulting strings.
@@ -260,9 +264,9 @@ class TextEncodingStage(PipelineStage):
                             enable_thinking=False,
                         )
                         formatted_texts.append(formatted)
-                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(target_device)
+                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(encoder_device)
             else:
-                text_inputs = tok(processed_texts, **tok_kwargs).to(target_device)
+                text_inputs = tok(processed_texts, **tok_kwargs).to(encoder_device)
 
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
@@ -282,15 +286,16 @@ class TextEncodingStage(PipelineStage):
             except Exception:
                 prompt_embeds, attention_mask = postprocess_func(outputs, attention_mask)
             if is_ltx2 and getattr(outputs, "hidden_states", None):
-                audio_embed = outputs.hidden_states[0]
+                audio_embed = outputs.hidden_states[0].to(device=target_device)
                 if dtype is not None:
                     audio_embed = audio_embed.to(dtype=dtype)
                 audio_embeds_list.append(audio_embed)
+            prompt_embeds = prompt_embeds.to(device=target_device)
             if dtype is not None:
                 prompt_embeds = prompt_embeds.to(dtype=dtype)
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
-                attn_masks_list.append(attention_mask)
+                attn_masks_list.append(attention_mask.to(device=target_device))
         self._last_audio_embeds = audio_embeds_list if is_ltx2 else None
         return self.return_embeds(embeds_list, attn_masks_list, return_type, return_attention_mask, indices)
 
