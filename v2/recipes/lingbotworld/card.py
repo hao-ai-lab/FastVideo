@@ -42,7 +42,7 @@ from v2.card import (
 )
 from v2.loop.policies import BoundaryTimestepRouting, ClassicCFG, FlowShiftPolicy, PrecisionPolicy
 from v2.parallel import ParallelPlan
-from v2.platform.backends.toy import ToyDiT, ToyImageEncoder, ToyTextEncoder, ToyVAE, _seed_from
+from v2.platform.backends.toy import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
 from v2.recipes.lingbotworld.loop import LINGBOTWORLD_BOUNDARY, LingBotWorldDenoiseLoop
 from v2.recipes.wan21.card import stamp_wan21_checkpoints
 
@@ -102,12 +102,13 @@ def build_lingbotworld_card(model_id: str = "lingbot-world-base-cam",
                       load_id="fastvideo.models.encoders.t5:T5EncoderModel",
                       factory=lambda inst: ToyTextEncoder(),
                       required_for={"i2v"}),
-        "image_encoder":
-        ComponentSpec("image_encoder",
-                      kind="image_encoder",
-                      load_id="fastvideo.models.encoders.clip:CLIPVisionModel",
-                      factory=lambda inst: ToyImageEncoder(),
-                      required_for={"i2v"}),
+        # NOTE: LingBot-World-Base-Cam has NO CLIP image encoder — model_index.json lists
+        # ``image_encoder`` / ``image_processor`` as ``[null, null]`` and the transformer config has
+        # ``image_dim=null`` (the condition embedder is built without an image branch). Unlike
+        # Wan2.2-I2V-A14B, the first-frame conditioning is carried ENTIRELY by the 36ch ``[noise|mask+cond]``
+        # latent concat (no ``encoder_hidden_states_image``). So this card declares no image_encoder
+        # component (declaring one would make ``stamp_wan21_checkpoints`` point at a non-existent subfolder
+        # and fail the load).
         "vae":
         ComponentSpec("vae",
                       kind="vae",
