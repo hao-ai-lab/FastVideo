@@ -12,7 +12,7 @@ omni-ready (multi-loop ModelInstance, ar_decode/chunk_rollout loop kinds) for th
 Cosmos3 + vllm-omni omni ports.
 
 The core is numpy-only and CPU-testable; heavy Wan/LTX neural forwards become lazy torch
-adapters (see ``v2/models/*/components.py``) that are off the test path.
+adapters (see ``v2/platform/backends/``) that are off the test path.
 """
 from __future__ import annotations
 

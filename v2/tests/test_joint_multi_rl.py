@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.models.multi_expert import build_multi_expert_card, refiner_ids
+from v2.recipes.multi_expert import build_multi_expert_card, refiner_ids
 from v2.training.methods import build_joint_multi_rl
 
 

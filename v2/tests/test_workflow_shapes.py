@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.models import build_default_engine, build_reward_card
+from v2.recipes import build_default_engine, build_reward_card
 from v2.program import BestOfNWorkflow, ParallelWorkflow, WorkflowStage
 from v2.request import DiffusionParams, TaskType, make_request
 from v2.training.methods.base import new_instance

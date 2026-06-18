@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.models import build_wan_t2v_program
-from v2.models.wan21 import build_wan21_card
+from v2.recipes import build_wan_t2v_program
+from v2.recipes.wan21 import build_wan21_card
 from v2.request import DiffusionParams, TaskType, make_request
 from v2.runtime import Engine
 from v2.training.flywheel import run_flywheel

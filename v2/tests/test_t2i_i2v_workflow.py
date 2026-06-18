@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from v2.models import build_image_video_engine, build_t2i_then_i2v_workflow, register_workflows
+from v2.recipes import build_image_video_engine, build_t2i_then_i2v_workflow, register_workflows
 from v2.parity import assert_interleave_parity
 from v2.program import Workflow, WorkflowRegistry, WorkflowStage
 from v2.request import DiffusionParams, TaskType, make_request

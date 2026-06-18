@@ -12,7 +12,7 @@ import numpy as np
 
 from v2.cache import CacheManager
 from v2.card import load_card
-from v2.models.ltx2 import build_ltx2_av_program, build_ltx2_card
+from v2.recipes.ltx2 import build_ltx2_av_program, build_ltx2_card
 from v2.parity import assert_interleave_parity
 from v2.request import DiffusionParams, OutputSpec, TaskType, make_request
 from v2.runtime import Engine
@@ -82,7 +82,7 @@ def test_t2v_path_unchanged_no_audio():
     card = build_ltx2_card()
     inst = load_card(card, cache_manager=CacheManager.from_card(card))
     eng = Engine()
-    from v2.models.ltx2 import build_ltx2_program
+    from v2.recipes.ltx2 import build_ltx2_program
     eng.register(card.model_id, inst, build_ltx2_program())
     out = eng.run(make_request(TaskType.T2V, "ltx2-2stage-distilled", "a sunset",
                                diffusion=DiffusionParams(seed=3)))

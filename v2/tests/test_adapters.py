@@ -13,7 +13,7 @@ import numpy as np
 from v2.cache import CacheManager
 from v2.cache.keys import CacheKey
 from v2.card import load_card
-from v2.models.adapters import build_adapter_card, build_adapter_program
+from v2.recipes.adapters import build_adapter_card, build_adapter_program
 from v2.parity import assert_interleave_parity
 from v2.request import DiffusionParams, TaskType, make_request
 from v2.request.modalpart import ImagePart, TextPart

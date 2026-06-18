@@ -18,9 +18,9 @@ import numpy as np
 
 from v2._enums import ExecutionProfile, LoopKind
 from v2.loop.sampler import flow_sde_step_with_logprob
-from v2.models import build_unified_engine
-from v2.models.common import cached_text_encode
-from v2.models.unified import build_unified_card
+from v2.recipes import build_unified_engine
+from v2.recipes.common import cached_text_encode
+from v2.recipes.unified import build_unified_card
 from v2.parity import assert_interleave_parity
 from v2.request import DiffusionParams, TaskType, make_request
 from v2.training.methods import build_unified_rl

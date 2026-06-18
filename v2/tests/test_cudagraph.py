@@ -15,10 +15,10 @@ from v2._enums import ExecutionProfile
 from v2.cache import CacheManager
 from v2.card import load_card
 from v2.loop.driver import LoopRunner
-from v2.models.backend import ToyDiT
-from v2.models.common import text_encode_node_fn
-from v2.models.wan21 import build_wan21_card
-from v2.models.wan_causal import build_wan_causal_card
+from v2.platform.backends.toy import ToyDiT
+from v2.recipes.common import text_encode_node_fn
+from v2.recipes.wan21 import build_wan21_card
+from v2.recipes.wan_causal import build_wan_causal_card
 from v2.parity import bit_identical
 from v2.platform import Platform
 from v2.request import DiffusionParams, TaskType, make_request

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.models import build_default_engine, build_omni_engine
-from v2.models.wan21 import build_wan21_card
+from v2.recipes import build_default_engine, build_omni_engine
+from v2.recipes.wan21 import build_wan21_card
 from v2.parity import assert_interleave_parity
 from v2.request import DiffusionParams, OutputSpec, SamplingParams, TaskType, make_request
 from v2.training import build_diffusion_nft
@@ -81,7 +81,7 @@ async def _serving_demo() -> None:
     import asyncio
 
     from v2.deploy import DynamoWorkerAdapter, FakeDynamoRuntime, LocalFleet, build_deployment_card
-    from v2.models.wan21 import build_wan21_card, build_wan_t2v_program
+    from v2.recipes.wan21 import build_wan21_card, build_wan_t2v_program
     from v2.runtime import AsyncEngine, PoolSet, wan_t2v_disaggregated
     from v2.serving import OmniOpenAIServer
 
