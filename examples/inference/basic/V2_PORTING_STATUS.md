@@ -35,10 +35,26 @@ samplers/loops live in-package. Registration is one row in `v2/registry.py:_BUCK
 Plus the **Wan2.1 i2v cluster** (Fun-1.3B-InP GPU-verified; I2V-14B-480P/720P + Wan2.2-I2V-A14B MoE reuse
 the i2v card) — CLIP image-encoder + first-frame `[mask|cond]` → 36ch DiT.
 
-## Newly ported — CPU-verified end-to-end; GPU load/run is BRINGUP
+## GPU bring-up results (real weights on H100 NVL, single-GPU, TORCH_SDPA)
+**20 models generate real video/audio on GPU** — the 7 above + **13 of the newly-ported** archs, each run
+end-to-end through the real `VideoGenerator` (resolve → stamp → CUDA load → generate). The rest are blocked
+by a **fastvideo-shared-code / missing-kernel / HF-access** wall, NOT a v2 recipe bug (the v2 recipes are
+faithful — e.g. cosmos25's DiT+VAE produced finite output; only its Qwen2.5-VL encoder hit a library
+incompat). All ports also resolve + run end-to-end on the CPU toy backend (`test_bucket_c_ports.py`).
+
+| GPU status | Models |
+|---|---|
+| ✅ **Verified** (real GPU output) | stable_audio (audio), matrixgame2, matrixgame3, gen3c, wan_fun_control, lucy_edit, hunyuangamecraft, hunyuan_video, hunyuan_video15, longcat (13.58B), sfwan22 (2×14B MoE, expert offload), lingbotworld (2×14B, offload), fastwan (TI2V-5B-FullAttn DMD) |
+| 🚫 fastvideo/env-blocked | **cosmos25** (DiT+VAE ran; Qwen2.5-VL encoder → transformers 5.12.1 incompat in fastvideo); **kandinsky5** (fastvideo registry registers a bare `PipelineConfig`); **hyworld** (fastvideo DiT hardcodes `flash_attn`, not built); **turbowan** 1.3B/i2v + **fastwan** VSA-variants (SLA/VSA sparse-attn params + Triton kernels need nvcc) |
+| 🚫 access-blocked (HF-gated) | cosmos2, flux2, sd35 (no HF token in this env) |
+
+To unblock the env-blocked: build `fastvideo-kernel` (SLA/VSA Triton, needs nvcc); pin a fastvideo-compatible
+`transformers` for the Qwen2.5-VL encoder; add a Kandinsky5 `PipelineConfig` + an SDPA fallback in the
+hyworld DiT (all fastvideo-side / environment, not v2 recipe work).
+
+## Newly ported (recipe details)
 Each resolves through the registry AND runs end-to-end on the CPU toy backend via the public `Engine`
 path (the `v2/tests/test_bucket_c_ports.py` regression guard), emitting the correct modality artifact.
-GPU bring-up pending per-model (cosmos2/flux2/sd35 weights are HF-gated; the FastVideo/* orgs are public).
 
 **15 net-new architectures** (each a new `TorchComponent` adapter + recipe):
 - **cosmos2** (Cosmos-Predict2-2B-Video2World) — EDM-Karras denoiser; new `CosmosDenoiseLoop` +
