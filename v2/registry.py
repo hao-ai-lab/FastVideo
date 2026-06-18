@@ -164,6 +164,14 @@ def _entries() -> list[ModelEntry]:
         ModelEntry(("Davids048/LTX2-Base-Diffusers", ), build_ltx2_base_card, build_ltx2_base_program),
         # LTX-2.3 distilled — single-stage, JOINT text->video+audio (separate connectors + gated attn):
         ModelEntry(("FastVideo/LTX-2.3-Distilled-Diffusers", ), build_ltx2_3_card, build_ltx2_3_program),
+        # LTX-2 / LTX-2.3 repo aliases (naming variants of the already-registered LTX checkpoints; the
+        # arch fallback also resolves LTX2Transformer3DModel from a checkpoint root, refining base-vs-
+        # two-stage by the spatial_upsampler). LTX-2 -> single-stage base; LTX-2.3 -> the distilled joint
+        # A/V card (a non-distilled 2.3 base checkpoint reuses it — override num_steps for many-step).
+        ModelEntry(("FastVideo/LTX2-Diffusers", "FastVideo/LTX2-base", "Lightricks/LTX-2"), build_ltx2_base_card,
+                   build_ltx2_base_program),
+        ModelEntry(("FastVideo/LTX2.3-Diffusers", "FastVideo/LTX2.3-Distilled-Diffusers", "FastVideo/LTX2.3-base",
+                    "Lightricks/LTX-2.3", "lightricks/ltx-2.3"), build_ltx2_3_card, build_ltx2_3_program),
         # Cosmos-Predict2-2B-Video2World — EDM-Karras denoiser (new CosmosDenoiseLoop + CosmosDiT adapter),
         # reusing the Wan VAE adapter + T5. Registered for t2v (video2world conditioning threads later).
         ModelEntry(("nvidia/Cosmos-Predict2-2B-Video2World", ), build_cosmos2_card, build_cosmos2_program),
