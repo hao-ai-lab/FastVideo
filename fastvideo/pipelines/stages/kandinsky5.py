@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 from tqdm.auto import tqdm
@@ -184,7 +186,9 @@ class Kandinsky5DenoisingStage(PipelineStage):
                     continue
 
                 t_expand = timestep.unsqueeze(0).repeat(latents.shape[0]).to(device=device, dtype=target_dtype)
-                with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
+                autocast_ctx = (torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled)
+                                if device.type == "cuda" else contextlib.nullcontext())
+                with autocast_ctx:
                     pred_velocity = self.transformer(
                         hidden_states=latents.to(dtype=target_dtype),
                         encoder_hidden_states=prompt_embeds,
