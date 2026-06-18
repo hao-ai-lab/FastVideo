@@ -55,9 +55,16 @@ def _entries() -> list[ModelEntry]:
     return [
         ModelEntry(("Wan-AI/Wan2.1-T2V-1.3B-Diffusers",), build_wan21_card, build_wan_t2v_program),
         ModelEntry(("Wan-AI/Wan2.1-T2V-14B-Diffusers",), build_wan_t2v_14b_card, build_wan_t2v_program),
-        # Wan2.1 i2v (Fun-InP): CLIP image encoder + first-frame VAE conditioning ([mask|cond] -> 36ch DiT).
+        # Wan2.1 i2v cluster: CLIP image encoder + first-frame VAE conditioning ([mask|cond] -> 36ch DiT).
+        # Fun-1.3B-InP is GPU-verified; the 14B variants reuse the same i2v card/path (weights GPU-pending).
         ModelEntry(("weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers",),
                    build_wan21_i2v_card, build_wan21_i2v_program),
+        ModelEntry(("Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",),
+                   lambda: build_wan21_i2v_card("wan2.1-i2v-14b-480p", flow_shift=3.0, height=480, width=832),
+                   build_wan21_i2v_program),
+        ModelEntry(("Wan-AI/Wan2.1-I2V-14B-720P-Diffusers",),
+                   lambda: build_wan21_i2v_card("wan2.1-i2v-14b-720p", flow_shift=5.0, height=720, width=1280),
+                   build_wan21_i2v_program),
         ModelEntry(("Wan-AI/Wan2.2-TI2V-5B-Diffusers",), build_wan22_ti2v_card, build_wan_t2v_program),
         ModelEntry(("Wan-AI/Wan2.2-T2V-A14B-Diffusers",), build_wan22_a14b_card, build_wan_t2v_program),
         ModelEntry(("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",), build_wan_causal_card, build_wan_causal_program),

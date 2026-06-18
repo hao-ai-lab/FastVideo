@@ -55,7 +55,10 @@ Wan2.1 model — covered by wan21; those runtime modes are out of scope.
 | `basic_ltx2_3_distilled_i2v*.py` | LTX-2.3-Distilled I2V | Image conditioning on the ltx2 single-stage program (encode the input image + condition the denoise). |
 
 ## Backlog — goal: port ALL fastvideo models (63 total: 8 ported · 21 reuse-arch · 34 new-arch)
-Ported (8): the 7 above + **Wan2.1-T2V-14B** (bucket B — reuses the Wan recipe/adapter; 720p defaults).
+Ported (11): the 7 above + **Wan2.1-T2V-14B** + the **Wan2.1 i2v cluster** — Wan2.1-Fun-1.3B-InP
+(GPU-verified: CLIP encoder + first-frame [mask|cond] -> 36ch DiT) and Wan2.1-I2V-14B-480P/720P (reuse the
+same i2v card; 14B weights GPU-pending). i2v required a real sub-system: the image-encoder adapter, the
+loop's i2v conditioning hooks, and the Wan adapter's 36ch concat (all landed + T2V-unregressed).
 
 ⚠️ Not as trivial as the bucket split implies: the `FastVideo/*` distilled checkpoints (FastWan DMD, VSA,
 Turbo) carry **gated-attention params** (`to_gate_compress`) the generic `WanTransformer3DModel` loader
