@@ -28,8 +28,8 @@ def example_a_text_to_video(eng) -> None:
 
 
 def example_b_ltx2_two_stage(eng) -> None:
-    print("\n(b) LTX2.3 two-stage distilled (base 8-step → upsample → refine 3-step), shared transformer")
-    out = eng.run(_t2v("ltx2.3-distilled", "a neon city at night", 2))
+    print("\n(b) LTX-2 two-stage distilled (base 8-step → upsample → refine 3-step), shared transformer")
+    out = eng.run(_t2v("ltx2-2stage-distilled", "a neon city at night", 2))
     print(f"    video {out.artifacts['video'].frames.shape}  "
           f"base={out.metrics['base_steps']:.0f} refine={out.metrics['refine_steps']:.0f}")
 

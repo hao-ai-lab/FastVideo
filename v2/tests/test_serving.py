@@ -262,7 +262,7 @@ def test_server_images_video_job_and_sync():
             await asyncio.sleep(0.01)
         assert status == "completed" and "video" in json.loads(body)["result"]
         # sync video
-        b = b'{"model":"ltx2.3-distilled","prompt":"a sunset","num_inference_steps":4}'
+        b = b'{"model":"ltx2-2stage-distilled","prompt":"a sunset","num_inference_steps":4}'
         st, _, body = await _http(host, port, "POST", "/v1/videos/sync", b)
         assert st == 200 and json.loads(body)["data"]["video"]["type"] == "tensor"
         await s.close()

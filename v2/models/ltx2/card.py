@@ -1,12 +1,16 @@
-"""LTX2.3 ModelCard — the two-stage distilled (recipe, runtime) pair (design_v3 §4, §15).
+"""LTX-2 ModelCards — split by ARCHITECTURE, not by version label (design_v3 §4, §15).
 
-Two loops — ``ltx2_base`` (8-step distilled) and ``ltx2_refine`` (3-step distilled) — BOTH bind
-the same ``transformer`` component (shared by reference). The recipe is ``distilled`` and
-``assumes_loop="ltx2_base"`` with ``assumes_precision`` baked in: serving this under a 50-step
-sampler would be a typed mismatch (the teeth of §2.1).
+* ``build_ltx2_card`` — the **two-stage distilled** pipeline: ``ltx2_base`` (8-step) → learned spatial
+  upsampler → ``ltx2_refine`` (3-step), both binding the same ``transformer``. Serves the distilled
+  checkpoint that ships a ``spatial_upsampler`` (e.g. ``FastVideo/LTX2-Distilled-Diffusers``).
+* ``build_ltx2_base_card`` — the **single-stage** pipeline: one request-driven flow-match loop at full
+  latent res, no upsampler. Serves both the non-distilled base (``Davids048/LTX2-Base-Diffusers``,
+  many-step) and the single-stage distilled (``FastVideo/LTX-2.3-Distilled-Diffusers``, few-step).
 
-Real wiring (repo): DiT ``ltx2:LTX2Transformer3DModel`` (48 layers), causal VAE
-``ltx2vae``, Gemma text encoder, distilled sigma schedules + spatial upsampler between stages.
+The "ltx2" vs "ltx2.3" version names do NOT map cleanly onto these — the real axis is
+two-stage-with-upsampler vs single-stage, and dispatch picks by ``has_spatial_upsampler``.
+
+Real wiring: DiT ``ltx2:LTX2Transformer3DModel``, causal VAE ``ltx2vae``, Gemma text encoder.
 """
 from __future__ import annotations
 
@@ -28,7 +32,7 @@ from ..backend import ToyAudioVAE, ToyDiT, ToyTextEncoder, ToyUpsampler, ToyVAE,
 from .loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop
 
 
-def build_ltx2_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
+def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
     seed = _seed_from(model_id)
     cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1.5e-4, per_unit_seconds=1.2e-7)
 
@@ -92,10 +96,12 @@ def build_ltx2_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
     return card.validate()
 
 
-def build_ltx2_base_card(model_id: str = "ltx2.base") -> ModelCard:
-    """Single-stage LTX-2 *base* model (`Davids048/LTX2-Base-Diffusers`): one many-step flow-match loop
-    at FULL latent res — no distilled base/refine split, no spatial upsampler. Reuses the LTX-2 torch
-    adapters (DiT/VAE/Gemma); the sigma schedule is request-driven (`num_inference_steps`)."""
+def build_ltx2_base_card(model_id: str = "ltx2-single-stage") -> ModelCard:
+    """Single-stage LTX-2 card — one request-driven flow-match loop at FULL latent res (no base/refine
+    split, no spatial upsampler). Serves BOTH the non-distilled base (`Davids048/LTX2-Base-Diffusers`,
+    many-step) AND the single-stage distilled `FastVideo/LTX-2.3-Distilled-Diffusers` (few-step — pass a
+    small num_inference_steps). Reuses the LTX-2 torch adapters (DiT/VAE/Gemma). NOTE: the schedule is a
+    plain linspace; the distilled checkpoint would ideally use its own tuned few-step sigmas (follow-up)."""
     seed = _seed_from(model_id)
     cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1.5e-4, per_unit_seconds=1.2e-7)
 

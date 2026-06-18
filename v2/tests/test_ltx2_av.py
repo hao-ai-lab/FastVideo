@@ -29,7 +29,7 @@ def _engine():
 
 
 def _t2vs(prompt="a thunderstorm", *, seed=3, vg=3.0, ag=6.0):
-    return make_request(TaskType.T2VS, "ltx2.3-distilled", prompt,
+    return make_request(TaskType.T2VS, "ltx2-2stage-distilled", prompt,
                         outputs=OutputSpec(modalities=AV),
                         diffusion=DiffusionParams(guidance_per_modality={"video": vg, "audio": ag}, seed=seed))
 
@@ -84,7 +84,7 @@ def test_t2v_path_unchanged_no_audio():
     eng = Engine()
     from v2.models.ltx2 import build_ltx2_program
     eng.register(card.model_id, inst, build_ltx2_program())
-    out = eng.run(make_request(TaskType.T2V, "ltx2.3-distilled", "a sunset",
+    out = eng.run(make_request(TaskType.T2V, "ltx2-2stage-distilled", "a sunset",
                                diffusion=DiffusionParams(seed=3)))
     assert "audio" not in out.artifacts
     assert np.asarray(out.artifacts["video"].frames).ndim == 4

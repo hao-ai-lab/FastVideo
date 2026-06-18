@@ -26,7 +26,7 @@ def test_wan_t2v_produces_video_and_latents():
 
 def test_ltx2_two_stage_step_counts():
     eng = _eng()
-    out = eng.run(make_request(TaskType.T2V, "ltx2.3-distilled", "a sunset",
+    out = eng.run(make_request(TaskType.T2V, "ltx2-2stage-distilled", "a sunset",
                                diffusion=DiffusionParams(seed=2)))
     # 8-step base + 3-step refine = the distilled schedule
     assert out.metrics["base_steps"] == float(len(BASE_SIGMAS) - 1) == 8.0
