@@ -413,3 +413,17 @@ class ToyVAE:
         video = np.asarray(video, dtype=np.float32)
         pooled = video[:self.C]                                          # crude: take C channels
         return pooled.astype("float32")
+
+
+class ToyUpsampler:
+    """Toy latent upsampler — CPU stand-in for the learned LTX-2 spatial upsampler. Nearest-neighbor 2x
+    spatial repeat on a ``[C,T,H,W]`` latent. The real ``LTX2LatentUpsampler`` learns this super-res; the
+    GPU backend swaps in that module (torch_ltx2.TorchLTX2Upsampler) via the ``upsampler`` component kind,
+    so the program calls ``component('spatial_upsampler').upsample(...)`` on both backends (no device branch)."""
+
+    def __init__(self, scale: int = 2):
+        self.scale = int(scale)
+
+    def upsample(self, latent: np.ndarray) -> np.ndarray:
+        z = np.asarray(latent, dtype="float32")
+        return np.repeat(np.repeat(z, self.scale, axis=-2), self.scale, axis=-1).astype("float32")

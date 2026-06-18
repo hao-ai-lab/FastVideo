@@ -55,6 +55,11 @@ def _build_text_encoder(spec, instance, platform):
     return build_torch_text_encoder(spec, instance, platform)
 
 
+def _build_upsampler(spec, instance, platform):
+    from .torch_adapters import build_torch_upsampler
+    return build_torch_upsampler(spec, instance, platform)
+
+
 def _flow_match_cuda(*args, **kwargs):
     from .torch_kernels import flow_match_step
     return flow_match_step(*args, **kwargs)
@@ -73,6 +78,8 @@ register_component("vae", _build_vae, device="cuda", available=_cuda_available,
                    source=f"{_ADAPTERS}:TorchWanVAE")
 register_component("text_encoder", _build_text_encoder, device="cuda", available=_cuda_available,
                    source=f"{_ADAPTERS}:TorchT5Encoder")
+register_component("upsampler", _build_upsampler, device="cuda", available=_cuda_available,
+                   source=f"{_ADAPTERS}:TorchLTX2Upsampler")
 
 # --- solver ops: plain torch elementwise (no fused solver kernel exists in fastvideo-kernel) ---- #
 # arch="generic" (elementwise, arch-agnostic), workspace_bytes=0 (no static scratch).

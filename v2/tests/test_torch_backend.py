@@ -40,9 +40,9 @@ def _make_cuda_available(monkeypatch):
 # --------------------------------------------------------------------------- #
 # Registration + honest sources                                               #
 # --------------------------------------------------------------------------- #
-def test_cuda_has_all_three_components_and_two_solver_ops():
+def test_cuda_has_all_components_and_two_solver_ops():
     comps = sorted(r["kind"] for r in component_matrix() if r["device"] == "cuda")
-    assert comps == ["dit", "text_encoder", "vae"]        # vae + text_encoder were missing before
+    assert comps == ["dit", "text_encoder", "upsampler", "vae"]   # + upsampler: LTX-2 spatial upsampler
     ops = sorted(r["op"] for r in kernel_matrix() if r["device"] == "cuda")
     assert ops == ["flow_match_step", "flow_sde_step"]
 

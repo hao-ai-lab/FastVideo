@@ -107,3 +107,23 @@ class TorchGemma:
             out = self.module(input_ids=ids, attention_mask=mask)
         hidden = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
         return _to_numpy(hidden.squeeze(0))
+
+
+class TorchLTX2Upsampler:
+    """upsample(latent[C,T,H,W]) -> latent[C,T,2H,2W] (numpy in/out). Wraps the real LTX2LatentUpsampler
+    and applies the repo's ``upsample_video``: un_normalize (via the video VAE's per_channel_statistics)
+    → learned 2× spatial upsample → normalize, so the output stays in the normalized latent space the
+    refine stage integrates. This replaces the toy's nearest-neighbor np.repeat with the learned
+    super-resolution between the base (half-res) and refine (full-res) stages."""
+
+    def __init__(self, module, vae_module, *, device, dtype):
+        self.module = module.to(device=device, dtype=dtype).eval()
+        self.vae_module = vae_module          # CausalVideoAutoencoder: exposes per_channel_statistics
+        self.device, self.dtype = device, dtype
+
+    @torch.no_grad()
+    def upsample(self, latent):
+        from fastvideo.models.upsamplers.ltx2_upsampler import upsample_video
+        z = _to_torch(latent, device=self.device, dtype=self.dtype).unsqueeze(0)   # [1,C,T,H,W]
+        out = upsample_video(z, self.vae_module, self.module)
+        return _to_numpy(out.squeeze(0))

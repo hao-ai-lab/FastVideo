@@ -9,69 +9,85 @@ It consumes the OFFICIAL ``fastvideo.api`` typed configs (``GeneratorConfig`` / 
 
 All torch / fastvideo / huggingface imports are lazy (inside methods) so ``import v2`` stays CPU-clean.
 
-Scope: the three representative models brought up on GPU (Wan2.1, SF-causal Wan, LTX-2). Multi-GPU
-(num_gpus>1), CPU/FSDP offload, and VSA attention are accepted for API parity but the bring-up runs
-single-GPU, resident, on the TORCH_SDPA backend (no fastvideo-kernel) — see GPU_BRINGUP.md.
+Model dispatch is registry-style: ``from_config`` reads the checkpoint's architecture (the pipeline /
+transformer / VAE class names) and picks the v2 card — no hardcoded repo-id table (mirrors fastvideo's
+``get_pipeline_config_cls_from_name``). Wired families: Wan2.1, Wan2.2-TI2V-5B, Wan2.2-A14B (MoE),
+SF-causal Wan, LTX-2. Multi-GPU / CPU-FSDP offload / VSA are accepted for API parity but the bring-up
+runs single-GPU, resident, on the TORCH_SDPA backend (no fastvideo-kernel) — see GPU_BRINGUP.md.
 """
 from __future__ import annotations
 
 import os
 from typing import Any
 
-# model_path (HF id, from fastvideo/tests/ssim/*) -> v2 model family. Wan2.1 -> wan21; Wan2.2-TI2V-5B
-# -> wan2.2-ti2v (same arch classes, 48ch/16x-spatial VAE geometry); SF-causal -> wan_causal; LTX-2 ->
-# ltx2. (FastWan/DMD is NOT a generic wan21 reuse — its checkpoint's to_gate_compress param mapping
-# differs from the generic WanTransformer3DModel load; see V2_PORTING_STATUS.md.)
-_FAMILY_BY_PATH = {
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": "wan21",
-    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": "wan2.2-ti2v",
-    "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": "wan_causal",
-    "FastVideo/LTX2-Distilled-Diffusers": "ltx2",
-    "FastVideo/LTX-2.3-Distilled-Diffusers": "ltx2",
-}
+def _read_arch_signature(root: str) -> dict:
+    """Read a diffusers checkpoint's configs into an architecture signature. Dispatch keys are the
+    *class names* the model declares (pipeline / transformer / VAE) plus the few config fields that
+    distinguish same-class variants (VAE ``z_dim``, a second transformer / ``boundary_ratio`` for MoE)
+    — the same information fastvideo's registry (``get_pipeline_config_cls_from_name``) keys on, not
+    the repo id. ``root`` is a local diffusers dir (or a snapshot of just the ``*.json`` configs)."""
+    import json
+    import os
+
+    def _load(*parts: str) -> dict:
+        p = os.path.join(root, *parts)
+        if os.path.exists(p):
+            with open(p) as f:
+                return json.load(f)
+        return {}
+
+    mi, tcfg, vcfg = _load("model_index.json"), _load("transformer", "config.json"), _load("vae", "config.json")
+    return {
+        "pipeline": mi.get("_class_name"),
+        "boundary_ratio": mi.get("boundary_ratio"),
+        "has_transformer_2": os.path.isdir(os.path.join(root, "transformer_2")),
+        "transformer_cls": tcfg.get("_class_name"),
+        "in_channels": tcfg.get("in_channels"),
+        "vae_z_dim": vcfg.get("z_dim", vcfg.get("latent_channels")),
+    }
 
 
-def _resolve_family(model_path: str) -> str:
-    if model_path in _FAMILY_BY_PATH:
-        return _FAMILY_BY_PATH[model_path]
-    p = model_path.lower()
-    if "ltx" in p:
-        return "ltx2"
-    if "sfwan" in p or "self-forcing" in p or "causal" in p:
-        return "wan_causal"
-    if "wan2.2-ti2v" in p or "ti2v-5b" in p:
-        return "wan2.2-ti2v"
-    if "wan2.1-t2v-1.3b" in p:
-        return "wan21"
-    raise ValueError(
-        f"v2 VideoGenerator: no v2 card mapped for model_path {model_path!r}. "
-        f"Supported: {sorted(_FAMILY_BY_PATH)} (or names containing ltx / sfwan / "
-        f"wan2.2-ti2v / wan2.1-t2v-1.3b).")
-
-
-def _build_card_and_program(family: str):
-    if family == "wan21":
-        from .models.wan21 import build_wan21_card, build_wan_t2v_program
-        return build_wan21_card(), build_wan_t2v_program()
-    if family == "wan2.2-ti2v":
-        from .models.wan21 import build_wan22_ti2v_card, build_wan_t2v_program
-        return build_wan22_ti2v_card(), build_wan_t2v_program()
-    if family == "wan_causal":
-        from .models.wan_causal import build_wan_causal_card, build_wan_causal_program
-        return build_wan_causal_card(), build_wan_causal_program()
-    if family == "ltx2":
+def _select_builders(sig: dict):
+    """Map an architecture signature -> (build_card, build_program). Which v2 card a checkpoint uses is
+    determined by its transformer/pipeline/VAE classes — exactly like fastvideo's registry — so a local
+    path, a renamed repo, or a new distilled variant of a known arch all resolve correctly with no
+    hardcoded HF-id table. New families are added here by class, next to the card that handles them."""
+    tr, pipe = sig.get("transformer_cls"), sig.get("pipeline")
+    if tr == "LTX2Transformer3DModel":
         from .models.ltx2 import build_ltx2_card, build_ltx2_program
-        return build_ltx2_card(), build_ltx2_program()
-    raise ValueError(f"unknown family {family!r}")
+        return build_ltx2_card, build_ltx2_program
+    if tr == "CausalWanTransformer3DModel":
+        from .models.wan_causal import build_wan_causal_card, build_wan_causal_program
+        return build_wan_causal_card, build_wan_causal_program
+    if tr == "WanTransformer3DModel":
+        from .models.wan21 import (
+            build_wan21_card,
+            build_wan22_a14b_card,
+            build_wan22_ti2v_card,
+            build_wan_t2v_program,
+        )
+        if pipe == "WanDMDPipeline":   # FastWan: detected by pipeline class -> precise, not a load crash
+            raise ValueError(
+                "v2 VideoGenerator: WanDMD/FastWan is not supported via the generic Wan path — its "
+                "checkpoint's to_gate_compress param mapping differs from the generic WanTransformer3DModel "
+                "load. See examples/inference/basic/V2_PORTING_STATUS.md.")
+        if sig.get("has_transformer_2") or sig.get("boundary_ratio"):
+            return build_wan22_a14b_card, build_wan_t2v_program     # Wan2.2 MoE (two experts)
+        if sig.get("vae_z_dim") == 48:
+            return build_wan22_ti2v_card, build_wan_t2v_program     # Wan2.2-TI2V-5B (z_dim=48 VAE)
+        return build_wan21_card, build_wan_t2v_program              # Wan2.1
+    raise ValueError(
+        f"v2 VideoGenerator: unsupported architecture (transformer={tr!r}, pipeline={pipe!r}). Supported "
+        f"transformers: WanTransformer3DModel / CausalWanTransformer3DModel / LTX2Transformer3DModel. "
+        f"See examples/inference/basic/V2_PORTING_STATUS.md.")
 
 
 class VideoGenerator:
     """Typed t2v entrypoint over a single resident v2 ``ModelInstance`` (mirrors fastvideo's)."""
 
-    def __init__(self, engine: Any, model_id: str, family: str) -> None:
+    def __init__(self, engine: Any, model_id: str) -> None:
         self._engine = engine
         self._model_id = model_id
-        self._family = family
 
     # --------------------------------------------------------------------- #
     @classmethod
@@ -101,15 +117,24 @@ class VideoGenerator:
         os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
         model_path = config.model_path
-        family = _resolve_family(model_path)
         if getattr(config.engine, "num_gpus", 1) != 1:
             import warnings
             warnings.warn("v2 VideoGenerator bring-up is single-GPU; ignoring num_gpus>1.", stacklevel=2)
 
         from huggingface_hub import snapshot_download
-        root = snapshot_download(model_path, revision=getattr(config, "revision", None))
+        rev = getattr(config, "revision", None)
+        # Registry-style dispatch on the checkpoint's architecture (class names), not the repo id. Read
+        # just the configs first (a local dir, or a cheap ``*.json`` snapshot) so an unsupported arch is
+        # rejected BEFORE the full (possibly 100GB+) weight download; then fetch the weights (cached).
+        if os.path.isdir(model_path):
+            root = model_path
+        else:
+            root = snapshot_download(model_path, revision=rev, allow_patterns=["*.json", "**/*.json"])
+        build_card, build_program = _select_builders(_read_arch_signature(root))
+        if not os.path.isdir(model_path):
+            root = snapshot_download(model_path, revision=rev)   # full weights (idempotent, reuses cache)
+        card, program = build_card(), build_program()
 
-        card, program = _build_card_and_program(family)
         from .models.wan21 import stamp_wan21_checkpoints   # transformer/vae/text_encoder subfolder layout
         stamp_wan21_checkpoints(card, root)
 
@@ -119,7 +144,7 @@ class VideoGenerator:
         inst = load_card(card, cache_manager=CacheManager.from_card(card))   # platform auto-detect -> cuda
         eng = Engine()
         eng.register(card.model_id, inst, program)
-        return cls(eng, card.model_id, family)
+        return cls(eng, card.model_id)
 
     # --------------------------------------------------------------------- #
     def generate(self, request: Any) -> Any:
@@ -186,7 +211,7 @@ class VideoGenerator:
         video_path = None
         if getattr(output, "save_video", True):
             os.makedirs(output.output_path, exist_ok=True)
-            name = output.output_video_name or f"v2_{self._family}_{idx}"
+            name = output.output_video_name or f"v2_{self._model_id}_{idx}"
             name = name if name.endswith(".mp4") else f"{name}.mp4"
             video_path = os.path.join(output.output_path, name)
             import imageio.v2 as imageio

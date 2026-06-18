@@ -309,3 +309,21 @@ def build_torch_text_encoder(spec, instance, platform):
         from .torch_ltx2 import TorchGemma
         return TorchGemma(module, tokenizer, device=device, dtype=dtype)
     return TorchT5Encoder(module, tokenizer, device=device, dtype=dtype)
+
+
+def build_torch_upsampler(spec, instance, platform):
+    ckpt = _require_checkpoint(spec)
+    _ensure_fastvideo_runtime()
+    module = _load_component("UpsamplerLoader", ckpt, _fastvideo_args(spec))   # LTX2LatentUpsampler
+    device = _device(platform)
+    # The LTX-2 spatial upsampler normalizes through the video VAE's per-channel statistics
+    # (upsample_video: un_normalize -> learned upsample -> normalize), so it must share the VAE's
+    # dtype/device. Fetch (build-if-needed) the VAE adapter and hand its real module to the upsampler.
+    vae = instance.component("vae")
+    dtype = getattr(vae, "dtype", _native_dtype(module))
+    vae_module = getattr(vae, "module", None)
+    # ``per_channel_statistics`` lives on the AE's decoder/encoder sub-modules, NOT the top-level
+    # LTX2CausalVideoAutoencoder — upsample_video needs an object exposing it (same stats either side).
+    stats_owner = getattr(vae_module, "decoder", None) or getattr(vae_module, "encoder", None) or vae_module
+    from .torch_ltx2 import TorchLTX2Upsampler
+    return TorchLTX2Upsampler(module, stats_owner, device=device, dtype=dtype)
