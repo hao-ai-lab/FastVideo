@@ -176,3 +176,96 @@ class LTX2DenoiseLoop:
             outs["audio_latents"] = st.latents["audio"]         # threaded to the next stage / decoded
         return LoopResult(outputs=outs, metrics={f"{self.stage}_steps": float(st.step_idx)},
                           behavior=st.trajectory or None)
+
+
+# LTX-2 audio VAE latent geometry: 8 channels, 16 mel bins, ~25 latent frames/sec (16000/160/4).
+LTX2_AUDIO_CHANNELS = 8
+LTX2_AUDIO_MEL_BINS = 16
+
+
+class LTX23DenoiseLoop:
+    """LTX-2.3 single-stage JOINT audio+video denoise (distilled few-step). Unlike the 2.0 toy audio path
+    (separate DiT calls), the real 2.3 cross-attends video<->audio in ONE DiT forward — which the v2 DiT
+    adapter exposes as ``dit(video, video_text, sigma, audio_latent=, audio_text=) -> (v_vel, a_vel)`` —
+    so both latents step together each step. Single-pass (distilled guidance≈1.0). Full-res video latent
+    (//32) + a ``[8, T_aud, 16]`` audio latent. For T2V (no audio requested) it runs video-only."""
+
+    def __init__(self, *, loop_id="ltx2_3", sigmas=None, cfg_scale=1.0, stg_scale=0.0, cost,
+                 audio_channels=LTX2_AUDIO_CHANNELS, audio_mel_bins=LTX2_AUDIO_MEL_BINS):
+        self.loop_id = loop_id
+        self.stage = "single"
+        self.sigmas = list(sigmas) if sigmas else list(BASE_SIGMAS)   # tuned distilled few-step schedule
+        self.cfg_scale = cfg_scale
+        self.stg_scale = stg_scale
+        self.cost = cost
+        self.audio_channels = audio_channels
+        self.audio_mel_bins = audio_mel_bins
+
+    def init(self, req, model, ctx) -> LoopState:
+        seed = req.diffusion.seed if req.diffusion.seed is not None else 0
+        rng = np.random.default_rng(seed)
+        sig = self.sigmas
+        x = (rng.standard_normal(ltx_base_latent_shape(req, model, full_res=True))
+             * float(sig[0])).astype("float32")
+        st = LoopState(loop_id=self.loop_id, instance_id=model.card.model_id, request_id=req.request_id,
+                       profile=ctx.profile, rng=rng, seed=seed, latents={"video": x},
+                       sigmas=[float(s) for s in sig], timesteps=[float(s) for s in sig])
+        st.cond["prompt_embeds"] = ctx.slots.get("text_embeds")
+        st.cond["audio_prompt_embeds"] = ctx.slots.get("audio_text_embeds")
+        want_audio = "audio" in getattr(req.outputs, "modalities", frozenset())
+        st.scratch["want_audio"] = want_audio
+        if want_audio:
+            t_aud = max(2, int(req.diffusion.num_frames))     # ~one audio latent frame per video frame
+            au = (rng.standard_normal((self.audio_channels, t_aud, self.audio_mel_bins))
+                  * float(sig[0])).astype("float32")
+            st.latents["audio"] = au
+        return st
+
+    def next(self, st: LoopState):
+        i = st.step_idx
+        if i >= len(st.sigmas) - 1:
+            return Done()
+        sigma_t, sigma_next = st.sigmas[i], st.sigmas[i + 1]
+        x = st.latents["video"]
+        pe = st.cond["prompt_embeds"]
+        apa = st.cond.get("audio_prompt_embeds")
+        au = st.latents.get("audio")
+
+        def run(model, override=None):
+            fm = model.platform.kernels.get(FLOW_MATCH_STEP)
+            dit = model.component("transformer")
+            if au is not None:                                  # joint A/V: one forward -> both velocities
+                vvel, avel = dit(x, pe, sigma_t, audio_latent=au, audio_text=apa)
+                out = {"latents": fm(x, np.asarray(vvel, "float32"), sigma_t, sigma_next).astype("float32"),
+                       "audio_latents": fm(au, np.asarray(avel, "float32"), sigma_t, sigma_next).astype("float32"),
+                       "noise_pred": np.asarray(vvel, dtype="float32")}
+            else:                                               # video-only (T2V)
+                vvel = dit(x, pe, sigma_t)
+                out = {"latents": fm(x, np.asarray(vvel, "float32"), sigma_t, sigma_next).astype("float32"),
+                       "noise_pred": np.asarray(vvel, dtype="float32")}
+            return StepResult(output=out)
+
+        res = ResourceRequest(compute_seconds=self.cost.predict(int(np.prod(x.shape)), 1.0),
+                              resident_bytes=int(x.nbytes), peak_activation_bytes=int(x.nbytes * 2))
+        return WorkPlan(
+            loop_id=self.loop_id, instance_id=st.instance_id, kind=WorkUnitKind.DIFFUSION_STEP,
+            shape_sig=ShapeSignature(WorkUnitKind.DIFFUSION_STEP, dims=tuple(x.shape),
+                                     extra=(("stage", self.stage),)),
+            resources=res, payload={"step": i, "stage": self.stage}, run=run, label=f"ltx2_3.{i}")
+
+    def advance(self, st: LoopState, result: StepResult) -> LoopState:
+        st.latents["video"] = result.output["latents"]
+        if "audio_latents" in result.output:
+            st.latents["audio"] = result.output["audio_latents"]
+        if st.profile == ExecutionProfile.ROLLOUT:
+            st.trajectory.append({"step": st.step_idx, "stage": self.stage,
+                                  "latents": np.asarray(st.latents["video"]).copy()})
+        st.step_idx += 1
+        return st
+
+    def finalize(self, st: LoopState) -> LoopResult:
+        outs = {"latents": st.latents["video"]}
+        if st.scratch.get("want_audio") and "audio" in st.latents:
+            outs["audio_latents"] = st.latents["audio"]
+        return LoopResult(outputs=outs, metrics={"single_steps": float(st.step_idx)},
+                          behavior=st.trajectory or None)

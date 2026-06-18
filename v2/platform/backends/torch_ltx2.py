@@ -28,7 +28,7 @@ class TorchLTX2DiT:
         self._VideoLatentShape = VideoLatentShape
 
     @torch.no_grad()
-    def __call__(self, latent, text_embed, sigma, audio_latent=None, audio_text=None, context=None):
+    def __call__(self, latent, text_embed, sigma, context=None, *, audio_latent=None, audio_text=None):
         """Video-only (audio_latent=None) -> velocity[C,T,H,W]; joint A/V (audio_latent given) -> a tuple
         (video_velocity, audio_velocity). LTX-2.3 cross-attends video<->audio in one forward, so the
         audio latent + audio text must be passed together (not a separate call)."""
