@@ -118,6 +118,16 @@ def build_wan22_ti2v_card(model_id: str = "wan2.2-ti2v-5b", *,
                                 num_frames=121, fps=24, negative_prompt=WAN_NEG_CN))
 
 
+def build_wan_t2v_14b_card(model_id: str = "wan2.1-t2v-14b", *, checkpoint_root: str | None = None) -> ModelCard:
+    """Wan2.1-T2V-14B (720p). Same WanTransformer3DModel / AutoencoderKLWan / UMT5 + 16/8/4 VAE geometry
+    as the 1.3B — reuses the Wan recipe + torch adapter unchanged; only the size (resolved from the
+    checkpoint by the loader), the 720p flow shift 5.0, and the per-model defaults differ."""
+    return build_wan21_card(model_id=model_id, flow_shift=5.0, checkpoint_root=checkpoint_root,
+                            sampling_defaults=SamplingDefaults(
+                                num_steps=50, guidance_scale=5.0, height=720, width=1280,
+                                num_frames=81, fps=16, negative_prompt=WAN_NEG_EN))
+
+
 def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b", *, checkpoint_root: str | None = None,
                           boundary: float = 0.875) -> ModelCard:
     """Wan2.2-T2V-A14B card — MoE: two WanTransformer3DModel experts (in_ch=16, Wan2.1 16/8/4 geometry)
