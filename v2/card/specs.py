@@ -201,6 +201,24 @@ class CapabilityMatrix:
         return cls(frozenset(caps))
 
 
+@dataclass
+class SamplingDefaults:
+    """Per-model default generation params (the v2 mirror of fastvideo's per-model ``InferencePreset``
+    defaults). Applied by the entrypoint when the caller didn't specify a value; ``None`` => fall back to
+    the generic default. ``shift``/``sigmas``/MoE boundary already live in the card's loop policies — these
+    are the user-facing knobs surfaced at request time."""
+    num_steps: int | None = None
+    guidance_scale: float | None = None
+    guidance_per_modality: dict[str, float] = field(default_factory=dict)  # joint A/V, e.g. {"video":3,"audio":7}
+    height: int | None = None
+    width: int | None = None
+    num_frames: int | None = None
+    fps: int | None = None
+    negative_prompt: str | None = None
+    shift: float | None = None
+    sigmas: tuple[float, ...] | None = None
+
+
 # --------------------------------------------------------------------------- #
 # ModelCard — the (recipe, runtime) pair as one versioned, validatable object  #
 # --------------------------------------------------------------------------- #
@@ -221,6 +239,7 @@ class ModelCard:
     parallelism: ParallelismContract = field(default_factory=ParallelismContract)
     precision: PrecisionContract = field(default_factory=PrecisionContract)
     checkpoint: CheckpointManifest = field(default_factory=CheckpointManifest)
+    sampling_defaults: SamplingDefaults = field(default_factory=SamplingDefaults)
 
     def validate(self) -> "ModelCard":
         """Strict enough to validate before any GPU touches it (design_v3 §4.1).

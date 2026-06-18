@@ -19,10 +19,12 @@ from v2.card import (
     ParitySpec,
     PrecisionContract,
     RecipeSpec,
+    SamplingDefaults,
 )
 from v2.loop.policies import ClassicCFG, FlowShiftPolicy, PrecisionPolicy
 from v2.parallel import ParallelPlan
 from v2.platform.backends.toy import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
+from v2.recipes._prompts import WAN_NEG_CN
 from v2.recipes.wan_causal.loop import ChunkRolloutLoop
 
 
@@ -76,5 +78,8 @@ def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b", *,
         precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()],
                                         default_plan=ParallelPlan.single()),
+        sampling_defaults=SamplingDefaults(
+            num_steps=50, guidance_scale=6.0, height=480, width=832, num_frames=81, fps=16,
+            negative_prompt=WAN_NEG_CN),
     )
     return card.validate()

@@ -18,11 +18,12 @@ from v2.card.specs import (
     ParityTestSpec,
     PrecisionContract,
     RecipeSpec,
+    SamplingDefaults,
 )
 
 __all__ = [
     "ModelCard", "ComponentSpec", "LoopSpec", "RecipeSpec", "ParitySpec", "ParityTestSpec",
-    "CheckpointManifest", "CapabilityMatrix", "CostModel", "CacheContract",
+    "CheckpointManifest", "CapabilityMatrix", "CostModel", "CacheContract", "SamplingDefaults",
     "ParallelismContract", "PrecisionContract", "DataRef", "CardValidationError",
     "ModelInstance", "load_card",
     "Capability", "ConsistencyLevel", "ExecutionProfile", "LoopKind", "WorkUnitKind",

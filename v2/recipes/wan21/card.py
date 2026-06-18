@@ -22,6 +22,7 @@ from v2.card import (
     ParityTestSpec,
     PrecisionContract,
     RecipeSpec,
+    SamplingDefaults,
 )
 from v2.loop.policies import (
     BoundaryTimestepRouting,
@@ -32,12 +33,14 @@ from v2.loop.policies import (
 )
 from v2.parallel import ParallelPlan
 from v2.platform.backends.toy import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
+from v2.recipes._prompts import WAN_NEG_CN, WAN_NEG_EN
 from v2.recipes.wan21.loop import WanDenoiseLoop
 
 
 def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shift: float = 3.0,
                      checkpoint_root: str | None = None, latent_channels: int = 16,
-                     spatial_ratio: int = 8, temporal_ratio: int = 4) -> ModelCard:
+                     spatial_ratio: int = 8, temporal_ratio: int = 4,
+                     sampling_defaults: SamplingDefaults | None = None) -> ModelCard:
     seed = _seed_from(model_id)
     cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg = cfg_policy or ClassicCFG()
@@ -91,6 +94,9 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b", *, cfg_policy=None, flow_shi
             valid_plans=[ParallelPlan.single(),
                          ParallelPlan(axes={"sp": 2, "cfgp": 2}, mesh_order=["cfgp", "sp"])],
             default_plan=ParallelPlan.single()),
+        sampling_defaults=sampling_defaults or SamplingDefaults(
+            num_steps=50, guidance_scale=3.0, height=480, width=832, num_frames=81, fps=16,
+            negative_prompt=WAN_NEG_EN),
     )
     card.validate()
     if checkpoint_root:
@@ -106,7 +112,10 @@ def build_wan22_ti2v_card(model_id: str = "wan2.2-ti2v-5b", *,
     timestep (its 1D path), so no per-frame ``expand_timesteps`` is needed for pure t2v. Uses the same
     ``transformer/vae/text_encoder`` subfolder layout, so ``stamp_wan21_checkpoints`` applies."""
     return build_wan21_card(model_id=model_id, flow_shift=5.0, checkpoint_root=checkpoint_root,
-                            latent_channels=48, spatial_ratio=16, temporal_ratio=4)
+                            latent_channels=48, spatial_ratio=16, temporal_ratio=4,
+                            sampling_defaults=SamplingDefaults(
+                                num_steps=50, guidance_scale=5.0, height=704, width=1280,
+                                num_frames=121, fps=24, negative_prompt=WAN_NEG_CN))
 
 
 def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b", *, checkpoint_root: str | None = None,
@@ -170,6 +179,9 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b", *, checkpoint_root:
         precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()],
                                         default_plan=ParallelPlan.single()),
+        sampling_defaults=SamplingDefaults(
+            num_steps=40, guidance_scale=4.0, height=480, width=832, num_frames=81, fps=16,
+            negative_prompt=WAN_NEG_CN),
     )
     card.validate()
     if checkpoint_root:
