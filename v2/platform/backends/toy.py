@@ -73,7 +73,10 @@ class ToyDiT:
 
     def __call__(self, latent: np.ndarray, text_embed: np.ndarray | None, sigma: float,
                  context: np.ndarray | None = None, *,
-                 audio_latent: np.ndarray | None = None, audio_text: np.ndarray | None = None):
+                 audio_latent: np.ndarray | None = None, audio_text: np.ndarray | None = None,
+                 cond: np.ndarray | None = None):
+        # ``cond`` (i2v mask+cond latent) is the real WanDiT's 36ch concat; the toy denoises the noise
+        # channels only (image-conditioning is a GPU-path concern), so it's accepted and ignored here.
         latent = np.asarray(latent, dtype=np.float32)
         video = np.tanh(self._pre_tanh(latent, text_embed, sigma, context)).astype("float32")
         if audio_latent is None:
