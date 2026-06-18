@@ -24,7 +24,7 @@ from ...card import (
     RecipeSpec,
 )
 from ...parallel import ParallelPlan
-from ..backend import ToyAudioVAE, ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
+from ..backend import ToyAudioVAE, ToyDiT, ToyTextEncoder, ToyUpsampler, ToyVAE, _seed_from
 from .loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop
 
 
@@ -49,6 +49,12 @@ def build_ltx2_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
         "vae": ComponentSpec(component_id="vae", kind="vae",
                              load_id="fastvideo.models.vaes.ltx2vae:VideoDecoder",
                              factory=lambda inst: ToyVAE(), required_for={"t2v"}),
+        # learned 2x spatial latent upsampler between the base and refine stages (real:
+        # LTX2LatentUpsampler; CPU toy: nearest-neighbor). Applied in program.py:_upsample.
+        "spatial_upsampler": ComponentSpec(
+            component_id="spatial_upsampler", kind="upsampler",
+            load_id="fastvideo.models.upsamplers.ltx2_upsampler:LTX2LatentUpsampler",
+            factory=lambda inst: ToyUpsampler(), required_for={"t2v"}),
         "transformer": ComponentSpec(component_id="transformer", kind="dit",
                                      load_id="fastvideo.models.dits.ltx2:LTX2Transformer3DModel",
                                      factory=lambda inst: ToyDiT(seed=seed),

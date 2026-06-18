@@ -16,7 +16,11 @@ from .loop import REFINE_SIGMAS
 
 def _upsample(instance, slots, request, ctx) -> None:
     base = np.asarray(slots["ltx_base_out"]["latents"], dtype="float32")
-    up = np.repeat(np.repeat(base, 2, axis=2), 2, axis=3)          # 2× spatial (learned upsampler stand-in)
+    # Learned 2× spatial latent super-resolution between the base and refine stages. The
+    # ``spatial_upsampler`` component is the real LTX2LatentUpsampler on the GPU backend (un_normalize →
+    # learned upsample → normalize, via the VAE's per-channel stats) and a nearest-neighbor toy on CPU —
+    # same call on both backends (the v2 component-polymorphism seam), no device branch here.
+    up = np.asarray(instance.component("spatial_upsampler").upsample(base), dtype="float32")
     seed = (request.diffusion.seed if request.diffusion.seed is not None else 0) + 7
     noise = np.random.default_rng(seed).standard_normal(up.shape).astype("float32")
     sigma0 = float(REFINE_SIGMAS[0])                                # 0.909375
