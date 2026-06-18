@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .ladder import ConsistencyLevel, Divergence, array_diff
+from v2.parity.ladder import ConsistencyLevel, Divergence, array_diff
 
 
 class ParityAligner:

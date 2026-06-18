@@ -9,11 +9,11 @@ from __future__ import annotations
 import itertools
 from dataclasses import dataclass, field
 
-from .cancel import CancelKind, CancelScope
-from .modalpart import ImagePart, ModalPart, TextPart
-from .params import DiffusionParams, OutputSpec, SamplingParams
-from .streams import Stream
-from .tasks import TaskType
+from v2.request.cancel import CancelKind, CancelScope
+from v2.request.modalpart import ImagePart, ModalPart, TextPart
+from v2.request.params import DiffusionParams, OutputSpec, SamplingParams
+from v2.request.streams import Stream
+from v2.request.tasks import TaskType
 
 _counter = itertools.count(1)
 

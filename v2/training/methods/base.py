@@ -12,11 +12,11 @@ from typing import Any
 
 import numpy as np
 
-from ..._enums import ConsistencyLevel, ExecutionProfile
-from ...cache import CacheManager
-from ...card import load_card
-from ...models.common import text_encode_node_fn
-from ..rollout import rollout_loop
+from v2._enums import ConsistencyLevel, ExecutionProfile
+from v2.cache import CacheManager
+from v2.card import load_card
+from v2.models.common import text_encode_node_fn
+from v2.training.rollout import rollout_loop
 
 
 def new_instance(card) -> Any:

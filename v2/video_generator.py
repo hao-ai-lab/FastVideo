@@ -67,7 +67,7 @@ class VideoGenerator:
 
         from huggingface_hub import snapshot_download
 
-        from .registry import resolve
+        from v2.registry import resolve
         rev = getattr(config, "revision", None)
         local = os.path.isdir(model_path)
         # Resolve card+program via the shared registry (v2/registry.py): a registered HF-id resolves with
@@ -83,13 +83,13 @@ class VideoGenerator:
         root = model_path if local else snapshot_download(model_path, revision=rev)   # full weights (cached)
         card, program = build_card(), build_program()
 
-        from .models.wan21 import stamp_wan21_checkpoints   # transformer/vae/text_encoder subfolder layout
+        from v2.models.wan21 import stamp_wan21_checkpoints   # transformer/vae/text_encoder subfolder layout
         stamp_wan21_checkpoints(card, root)
 
-        from ._enums import Capability
-        from .card import load_card
-        from .cache import CacheManager
-        from .runtime import Engine
+        from v2._enums import Capability
+        from v2.card import load_card
+        from v2.cache import CacheManager
+        from v2.runtime import Engine
         inst = load_card(card, cache_manager=CacheManager.from_card(card))   # platform auto-detect -> cuda
         eng = Engine()
         eng.register(card.model_id, inst, program)
@@ -110,7 +110,7 @@ class VideoGenerator:
         ``want_audio``: ``None`` (default) auto-enables sound for an A/V model (LTX-2.3 → T2VS, both
         video+audio in one joint pass); ``True``/``False`` force it on/off. For a video-only model the
         auto resolves to video-only (T2V), unchanged."""
-        from .request import DiffusionParams, OutputSpec, TaskType, make_request
+        from v2.request import DiffusionParams, OutputSpec, TaskType, make_request
         s = request.sampling
         prompts = request.prompt if isinstance(request.prompt, list) else [request.prompt]
         audio = self._supports_av if want_audio is None else bool(want_audio)

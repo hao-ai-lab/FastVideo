@@ -11,14 +11,14 @@ backend registrations in ``backends/`` are imported lazily on first ``Platform``
 """
 from __future__ import annotations
 
-from .platform import (
+from v2.platform.platform import (
     KernelTable,
     Platform,
     component_matrix,
     ensure_backends_loaded,
     kernel_matrix,
 )
-from .registry import (
+from v2.platform.registry import (
     COMPONENTS,
     FLOW_MATCH_STEP,
     FLOW_SDE_STEP,

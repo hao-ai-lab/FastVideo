@@ -6,8 +6,8 @@ apply (``DiffusionParams.adapters``). Adapters are versioned independently (the 
 """
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -19,10 +19,10 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
-from ...parallel import ParallelPlan
-from ..backend import ToyControlNet, ToyDiT, ToyLoRA, ToyTextEncoder, ToyVAE, _seed_from
-from .loop import AdapterDenoiseLoop
+from v2.loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyControlNet, ToyDiT, ToyLoRA, ToyTextEncoder, ToyVAE, _seed_from
+from v2.models.adapters.loop import AdapterDenoiseLoop
 
 ADAPTERS = ("lora_anime", "lora_realistic", "control_pose")   # the served adapter library
 

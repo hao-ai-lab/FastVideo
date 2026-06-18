@@ -12,10 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .._enums import ExecutionProfile
-from ..loop.contracts import StepResult, WorkPlan
-from ..loop.driver import LoopRunner
-from .behavior import TrajectoryStatus
+from v2._enums import ExecutionProfile
+from v2.loop.contracts import StepResult, WorkPlan
+from v2.loop.driver import LoopRunner
+from v2.training.behavior import TrajectoryStatus
 
 
 class _TrainingContext:

@@ -1,8 +1,8 @@
 """Speculative-decoding program: tokenize → spec_decode (draft+verify) → emit_text (design_v3 §9.16)."""
 from __future__ import annotations
 
-from ...program import ComponentNode, ModelLoopNode, Program, ProgramKind
-from ..omni import emit_text_node, tokenize_node
+from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.models.omni import emit_text_node, tokenize_node
 
 
 def build_speculative_program() -> Program:

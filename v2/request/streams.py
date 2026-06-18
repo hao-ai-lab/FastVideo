@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .._types import TensorLike
+from v2._types import TensorLike
 
 
 @dataclass(frozen=True)

@@ -14,12 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .._enums import ExecutionProfile
-from ..extend.base import InterceptorChain, ObserverBus
-from ..loop.driver import LoopRunner
-from ..parity.aligner import ParityAligner  # noqa: F401  (engine can attach it as an observer)
-from ..program.specs import ComponentNode, ModelLoopNode, Program
-from ..request.artifacts import (
+from v2._enums import ExecutionProfile
+from v2.extend.base import InterceptorChain, ObserverBus
+from v2.loop.driver import LoopRunner
+from v2.parity.aligner import ParityAligner  # noqa: F401  (engine can attach it as an observer)
+from v2.program.specs import ComponentNode, ModelLoopNode, Program
+from v2.request.artifacts import (
     AudioArtifact,
     LatentArtifact,
     Output,
@@ -27,10 +27,10 @@ from ..request.artifacts import (
     TextArtifact,
     VideoArtifact,
 )
-from ..request.cancel import CancelKind, CancelScope
-from ..request.streams import Stream
-from .context import RuntimeLoopContext
-from .scheduler import (
+from v2.request.cancel import CancelKind, CancelScope
+from v2.request.streams import Stream
+from v2.runtime.context import RuntimeLoopContext
+from v2.runtime.scheduler import (
     AdmissionController,
     AdmissionInfeasible,
     BatchScheduler,

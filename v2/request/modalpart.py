@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from .._types import TensorLike
+from v2._types import TensorLike
 
 
 class Modality(str, Enum):

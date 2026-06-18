@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..._enums import WorkUnitKind
-from ...loop.contracts import (
+from v2._enums import WorkUnitKind
+from v2.loop.contracts import (
     Done,
     LoopResult,
     LoopState,

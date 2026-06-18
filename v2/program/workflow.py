@@ -111,7 +111,7 @@ class ParallelWorkflow(Workflow):
     def run(self, engine: Any, **initial: Any) -> Any:
         if not self.stages:
             raise ValueError(f"workflow {self.workflow_id!r} has no stages")
-        from ..request.artifacts import Output
+        from v2.request.artifacts import Output
         merged: dict[str, Any] = {}
         metrics: dict[str, float] = {}
         rid = self.workflow_id

@@ -10,10 +10,10 @@ profiles — the §10 "train ≡ serve through one loop" invariant, now spanning
 """
 from __future__ import annotations
 
-from ...program import ComponentNode, ModelLoopNode, Program, ProgramKind
-from ..common import text_encode_node_fn
-from ..omni import vae_decode_node
-from .card import N_REFINE_ACTIONS
+from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.models.common import text_encode_node_fn
+from v2.models.omni import vae_decode_node
+from v2.models.unified.card import N_REFINE_ACTIONS
 
 
 def apply_refinement_node(refine_slot: str, n_actions: int = N_REFINE_ACTIONS):

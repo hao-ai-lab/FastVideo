@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..._enums import ExecutionProfile, WorkUnitKind
-from ...cache.classes import Slab
-from ...loop.contracts import (
+from v2._enums import ExecutionProfile, WorkUnitKind
+from v2.cache.classes import Slab
+from v2.loop.contracts import (
     Done,
     LoopResult,
     LoopState,
@@ -24,9 +24,9 @@ from ...loop.contracts import (
     StepResult,
     WorkPlan,
 )
-from ...platform import FLOW_MATCH_STEP
-from ...request.streams import StreamChunk
-from ..backend import LATENT_CHANNELS
+from v2.platform import FLOW_MATCH_STEP
+from v2.request.streams import StreamChunk
+from v2.models.backend import LATENT_CHANNELS
 
 
 class ChunkRolloutLoop:

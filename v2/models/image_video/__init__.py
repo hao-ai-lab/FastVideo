@@ -3,8 +3,8 @@
 the design composes across model *instances*, not just loops within one (which LTX-2 already covers)."""
 from __future__ import annotations
 
-from .card import build_flux_t2i_card, build_wan_i2v_card
-from .program import (
+from v2.models.image_video.card import build_flux_t2i_card, build_wan_i2v_card
+from v2.models.image_video.program import (
     build_flux_t2i_program,
     build_t2i_i2v_extend_workflow,
     build_t2i_then_i2v_workflow,

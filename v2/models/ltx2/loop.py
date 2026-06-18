@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..._enums import ExecutionProfile, WorkUnitKind
-from ...loop.contracts import (
+from v2._enums import ExecutionProfile, WorkUnitKind
+from v2.loop.contracts import (
     Done,
     LoopResult,
     LoopState,
@@ -28,8 +28,8 @@ from ...loop.contracts import (
     StepResult,
     WorkPlan,
 )
-from ...platform import FLOW_MATCH_STEP
-from ..backend import LATENT_CHANNELS
+from v2.platform import FLOW_MATCH_STEP
+from v2.models.backend import LATENT_CHANNELS
 
 BASE_SIGMAS = [1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0]
 REFINE_SIGMAS = [0.909375, 0.725, 0.421875, 0.0]

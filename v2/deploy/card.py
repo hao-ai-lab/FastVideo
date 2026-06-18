@@ -12,8 +12,8 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
-from .._enums import Capability
-from ..card import CostModel
+from v2._enums import Capability
+from v2.card import CostModel
 
 
 @dataclass

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..cache.keys import CacheKey, content_hash
+from v2.cache.keys import CacheKey, content_hash
 
 
 def cached_text_encode(instance: Any, text: str) -> Any:

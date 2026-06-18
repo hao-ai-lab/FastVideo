@@ -6,8 +6,8 @@ reduction the vendored RL sampler cannot express.
 """
 from __future__ import annotations
 
-from ...program import ComponentNode, ModelLoopNode, Program, ProgramKind
-from ..common import text_encode_node_fn as _text_encode
+from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.models.common import text_encode_node_fn as _text_encode
 
 
 def _vae_decode(instance, slots, request, ctx) -> None:

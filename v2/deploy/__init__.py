@@ -6,9 +6,9 @@ consumers.
 """
 from __future__ import annotations
 
-from .card import DeploymentCard, HealthSchema, SLOSchema, build_deployment_card
-from .dynamo import DynamoWorkerAdapter, FakeDynamoRuntime
-from .fleet import LocalFleet, NoWorkerAvailable, Worker
+from v2.deploy.card import DeploymentCard, HealthSchema, SLOSchema, build_deployment_card
+from v2.deploy.dynamo import DynamoWorkerAdapter, FakeDynamoRuntime
+from v2.deploy.fleet import LocalFleet, NoWorkerAvailable, Worker
 
 __all__ = ["DeploymentCard", "HealthSchema", "SLOSchema", "build_deployment_card",
            "LocalFleet", "Worker", "NoWorkerAvailable",

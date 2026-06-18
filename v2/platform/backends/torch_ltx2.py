@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import torch
 
-from .torch_adapters import _to_numpy, _to_torch
+from v2.platform.backends.torch_adapters import _to_numpy, _to_torch
 
 
 class TorchLTX2DiT:

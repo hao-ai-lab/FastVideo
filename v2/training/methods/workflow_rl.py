@@ -18,14 +18,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..._enums import ConsistencyLevel, ExecutionProfile
-from ...loop.sampler import flow_sde_ml_velocity, flow_sde_step_with_logprob
-from ...models.common import cached_text_encode
-from ...platform import FLOW_SDE_STEP
-from ...request import DiffusionParams, TaskType, make_request
-from ..rollout import rollout_loop
-from ..weight_sync import WeightRole, WeightSyncPlan
-from .base import TrainingMethod, new_instance
+from v2._enums import ConsistencyLevel, ExecutionProfile
+from v2.loop.sampler import flow_sde_ml_velocity, flow_sde_step_with_logprob
+from v2.models.common import cached_text_encode
+from v2.platform import FLOW_SDE_STEP
+from v2.request import DiffusionParams, TaskType, make_request
+from v2.training.rollout import rollout_loop
+from v2.training.weight_sync import WeightRole, WeightSyncPlan
+from v2.training.methods.base import TrainingMethod, new_instance
 
 
 def _flowgrpo_ppo_step(dit, ref_dit, behavior, emb, advantage, *, lr, ppo_clip, beta, noise_scale,

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from ...program import ComponentNode, ModelLoopNode, Program, ProgramKind
-from ..common import text_encode_node_fn as _text_encode
-from .loop import REFINE_SIGMAS
+from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.models.common import text_encode_node_fn as _text_encode
+from v2.models.ltx2.loop import REFINE_SIGMAS
 
 
 def _upsample(instance, slots, request, ctx) -> None:

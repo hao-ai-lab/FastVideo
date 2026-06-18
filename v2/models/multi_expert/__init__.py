@@ -2,6 +2,6 @@
 substrate for N-way joint RL (design_v3 §4, §10). Generalizes the two-expert ``unified`` card."""
 from __future__ import annotations
 
-from .card import N_REFINE_ACTIONS, build_multi_expert_card, refiner_ids
+from v2.models.multi_expert.card import N_REFINE_ACTIONS, build_multi_expert_card, refiner_ids
 
 __all__ = ["build_multi_expert_card", "refiner_ids", "N_REFINE_ACTIONS"]

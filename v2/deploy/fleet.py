@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator
 
-from ..request.artifacts import Output
-from .card import DeploymentCard, HealthSchema
+from v2.request.artifacts import Output
+from v2.deploy.card import DeploymentCard, HealthSchema
 
 
 class NoWorkerAvailable(RuntimeError):

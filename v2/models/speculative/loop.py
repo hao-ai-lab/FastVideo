@@ -16,8 +16,8 @@ one request — and every round is an ``AR_TOKEN`` WorkUnit.
 """
 from __future__ import annotations
 
-from ..._enums import ExecutionProfile, WorkUnitKind
-from ...loop.contracts import (
+from v2._enums import ExecutionProfile, WorkUnitKind
+from v2.loop.contracts import (
     Done,
     LoopResult,
     LoopState,
@@ -26,7 +26,7 @@ from ...loop.contracts import (
     StepResult,
     WorkPlan,
 )
-from ...request.streams import StreamChunk
+from v2.request.streams import StreamChunk
 
 
 class SpeculativeARLoop:

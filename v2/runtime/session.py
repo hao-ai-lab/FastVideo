@@ -15,13 +15,13 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .._enums import ExecutionProfile
-from ..loop.driver import LoopRunner
-from ..models.common import text_encode_node_fn
-from ..request import DiffusionParams, TaskType, make_request
-from ..request.requests import Session
-from ..request.streams import Stream
-from .context import RuntimeLoopContext
+from v2._enums import ExecutionProfile
+from v2.loop.driver import LoopRunner
+from v2.models.common import text_encode_node_fn
+from v2.request import DiffusionParams, TaskType, make_request
+from v2.request.requests import Session
+from v2.request.streams import Stream
+from v2.runtime.context import RuntimeLoopContext
 
 
 class WorldModelSession:

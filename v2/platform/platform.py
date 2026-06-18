@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Iterator
 
-from .registry import COMPONENTS, KERNELS
+from v2.platform.registry import COMPONENTS, KERNELS
 
 _BACKENDS_LOADED = False
 
@@ -30,7 +30,7 @@ def ensure_backends_loaded() -> None:
         return
     _BACKENDS_LOADED = True
     # imported for side effects (each module calls register_component/register_kernel at import)
-    from .backends import accel, cpu, torch_cuda  # noqa: F401
+    from v2.platform.backends import accel, cpu, torch_cuda  # noqa: F401
 
 
 # Arch fallback chains (newest → oldest → portable terminal). Resolution walks these in order.

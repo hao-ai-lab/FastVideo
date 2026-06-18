@@ -11,8 +11,8 @@ is the point: a new pipeline is cards + a program + a workflow, never a new loop
 """
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -24,10 +24,10 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
-from ...parallel import ParallelPlan
-from ..backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
-from ..wan21.loop import WanDenoiseLoop
+from v2.loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
+from v2.models.wan21.loop import WanDenoiseLoop
 
 
 def _diffusion_card(model_id, family, loop_id, caps, tasks, *, shift):

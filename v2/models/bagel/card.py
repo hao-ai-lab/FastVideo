@@ -11,8 +11,8 @@ differentiation the §1 thesis names.
 """
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -24,11 +24,11 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
-from ...parallel import ParallelPlan
-from ..backend import ToyMoTDiT, ToyTokenizer, ToyVAE, _seed_from
-from ..omni import ARDecodeLoop
-from ..wan21.loop import WanDenoiseLoop
+from v2.loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyMoTDiT, ToyTokenizer, ToyVAE, _seed_from
+from v2.models.omni import ARDecodeLoop
+from v2.models.wan21.loop import WanDenoiseLoop
 
 
 def build_bagel_card(model_id: str = "bagel-mot") -> ModelCard:

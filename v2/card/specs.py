@@ -15,10 +15,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
-from .._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
 
 if TYPE_CHECKING:  # avoid runtime card -> parallel coupling
-    from ..parallel.plan import ParallelPlan
+    from v2.parallel.plan import ParallelPlan
 
 
 # --------------------------------------------------------------------------- #

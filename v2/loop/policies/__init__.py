@@ -1,7 +1,7 @@
 """Policies — the default step decomposition (design_v3 §5.1, §6.2.3)."""
 from __future__ import annotations
 
-from .base import (
+from v2.loop.policies.base import (
     BoundaryTimestepRouting,
     ConditioningInjector,
     ExpertRouting,
@@ -10,7 +10,7 @@ from .base import (
     PassthroughConditioning,
     PrecisionPolicy,
 )
-from .cfg import (
+from v2.loop.policies.cfg import (
     AdaptiveGateCFG,
     BatchedCFG,
     CFGPolicy,

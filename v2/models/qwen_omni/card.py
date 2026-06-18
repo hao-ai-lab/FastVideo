@@ -19,8 +19,8 @@ two language stages, ``LoopKind.AUDIO_DECODE`` for the vocoder — no new primit
 """
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -32,9 +32,9 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...parallel import ParallelPlan
-from ..backend import ToyMoTDiT, ToyTalker, ToyTokenizer, ToyVocoder, _seed_from
-from ..omni import ARDecodeLoop, VocoderLoop
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyMoTDiT, ToyTalker, ToyTokenizer, ToyVocoder, _seed_from
+from v2.models.omni import ARDecodeLoop, VocoderLoop
 
 
 def build_qwen_omni_card(model_id: str = "qwen-omni-tts") -> ModelCard:

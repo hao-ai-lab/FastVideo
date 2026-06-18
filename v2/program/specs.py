@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-from ..request.tasks import TaskType
+from v2.request.tasks import TaskType
 
 
 class ProgramKind(str, Enum):

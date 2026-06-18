@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .._types import TensorLike
-from .modalpart import Modality
+from v2._types import TensorLike
+from v2.request.modalpart import Modality
 
 
 @dataclass

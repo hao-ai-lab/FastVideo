@@ -2,8 +2,8 @@
 ``vae_tile`` loop, so its tiles co-schedule with denoise steps under the one WorkUnit budget."""
 from __future__ import annotations
 
-from ..._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from ...card import (
+from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -15,11 +15,11 @@ from ...card import (
     PrecisionContract,
     RecipeSpec,
 )
-from ...loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
-from ...parallel import ParallelPlan
-from ..backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
-from ..wan21.loop import WanDenoiseLoop
-from .loop import VAETileLoop
+from v2.loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
+from v2.parallel import ParallelPlan
+from v2.models.backend import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
+from v2.models.wan21.loop import WanDenoiseLoop
+from v2.models.tiled.loop import VAETileLoop
 
 
 def build_tiled_card(model_id: str = "wan-tiled", *, tile_rows: int = 1) -> ModelCard:

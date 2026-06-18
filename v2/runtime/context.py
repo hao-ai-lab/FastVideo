@@ -10,9 +10,9 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
-from .._enums import ExecutionProfile
-from ..loop.contracts import StepResult, WorkPlan
-from ..request.streams import OmniEvent, Stream, StreamChunk
+from v2._enums import ExecutionProfile
+from v2.loop.contracts import StepResult, WorkPlan
+from v2.request.streams import OmniEvent, Stream, StreamChunk
 
 
 class RuntimeLoopContext:
@@ -77,7 +77,7 @@ class RuntimeLoopContext:
         if getattr(loop, "graph_capture", "eager") != "breakable_cudagraph":
             return eager(override)
         if self.instance.graphs is None:
-            from .cudagraph import GraphCapturer
+            from v2.runtime.cudagraph import GraphCapturer
             self.instance.graphs = GraphCapturer()
         return self.instance.graphs.dispatch(plan, self.instance, override, eager)
 

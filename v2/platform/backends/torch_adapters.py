@@ -308,7 +308,7 @@ def build_torch_dit(spec, instance, platform):
     module = _load_component("TransformerLoader", ckpt, _fastvideo_args(spec))
     device, dtype = _device(platform), _native_dtype(module)
     if "LTX2" in type(module).__name__:                          # LTX2Transformer3DModel
-        from .torch_ltx2 import TorchLTX2DiT
+        from v2.platform.backends.torch_ltx2 import TorchLTX2DiT
         return TorchLTX2DiT(module, device=device, dtype=dtype)
     # Wan2.2 MoE (A14B): >1 DiT expert -> CPU-offload all but the active one (swapped at the boundary)
     # so the two 14B experts fit one 80GB GPU. A single-expert Wan stays GPU-resident (grp=None).
@@ -328,7 +328,7 @@ def build_torch_vae(spec, instance, platform):
     module = _load_component("VAELoader", ckpt, _fastvideo_args(spec))
     device, dtype = _device(platform), _native_dtype(module)
     if "LTX2" in type(module).__name__:                          # LTX2CausalVideoAutoencoder
-        from .torch_ltx2 import TorchLTX2VAE
+        from v2.platform.backends.torch_ltx2 import TorchLTX2VAE
         return TorchLTX2VAE(module, device=device, dtype=dtype)
     return TorchWanVAE(module, device=device, dtype=dtype)
 
@@ -342,7 +342,7 @@ def build_torch_text_encoder(spec, instance, platform):
     tokenizer = _load_component("TokenizerLoader", os.path.join(_model_root(spec), "tokenizer"), args)
     device, dtype = _device(platform), _native_dtype(module)
     if "Gemma" in type(module).__name__:                          # LTX2GemmaTextEncoderModel
-        from .torch_ltx2 import TorchGemma
+        from v2.platform.backends.torch_ltx2 import TorchGemma
         return TorchGemma(module, tokenizer, device=device, dtype=dtype)
     return TorchT5Encoder(module, tokenizer, device=device, dtype=dtype)
 
@@ -361,7 +361,7 @@ def build_torch_upsampler(spec, instance, platform):
     # ``per_channel_statistics`` lives on the AE's decoder/encoder sub-modules, NOT the top-level
     # LTX2CausalVideoAutoencoder — upsample_video needs an object exposing it (same stats either side).
     stats_owner = getattr(vae_module, "decoder", None) or getattr(vae_module, "encoder", None) or vae_module
-    from .torch_ltx2 import TorchLTX2Upsampler
+    from v2.platform.backends.torch_ltx2 import TorchLTX2Upsampler
     return TorchLTX2Upsampler(module, stats_owner, device=device, dtype=dtype)
 
 
@@ -371,7 +371,7 @@ def build_torch_audio_vae(spec, instance, platform):
     module = _load_component("AudioDecoderLoader", ckpt, _fastvideo_args(spec))   # LTX2AudioDecoder
     device, dtype = _device(platform), _native_dtype(module)
     voc = instance.component("vocoder")   # build/fetch the vocoder; TorchLTX2AudioVAE chains decoder->vocoder
-    from .torch_ltx2 import TorchLTX2AudioVAE
+    from v2.platform.backends.torch_ltx2 import TorchLTX2AudioVAE
     return TorchLTX2AudioVAE(module, voc, device=device, dtype=dtype)
 
 
@@ -380,5 +380,5 @@ def build_torch_vocoder(spec, instance, platform):
     _ensure_fastvideo_runtime()
     module = _load_component("VocoderLoader", ckpt, _fastvideo_args(spec))        # LTX2Vocoder
     device, dtype = _device(platform), _native_dtype(module)
-    from .torch_ltx2 import TorchLTX2Vocoder
+    from v2.platform.backends.torch_ltx2 import TorchLTX2Vocoder
     return TorchLTX2Vocoder(module, device=device, dtype=dtype)

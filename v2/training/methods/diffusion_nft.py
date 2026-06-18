@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..._enums import ConsistencyLevel
-from ...models.common import cached_text_encode
-from ...request import DiffusionParams, TaskType, make_request
-from ..rewards import build_multi_reward_scorer
-from ..rollout import Trajectory, TrajectoryBuffer
-from ..weight_sync import WeightRole, WeightSyncPlan
-from .base import TrainingMethod, new_instance
+from v2._enums import ConsistencyLevel
+from v2.models.common import cached_text_encode
+from v2.request import DiffusionParams, TaskType, make_request
+from v2.training.rewards import build_multi_reward_scorer
+from v2.training.rollout import Trajectory, TrajectoryBuffer
+from v2.training.weight_sync import WeightRole, WeightSyncPlan
+from v2.training.methods.base import TrainingMethod, new_instance
 
 
 class DiffusionNFTMethod(TrainingMethod):
