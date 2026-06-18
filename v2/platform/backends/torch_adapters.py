@@ -279,14 +279,22 @@ def build_torch_dit(spec, instance, platform):
     ckpt = _require_checkpoint(spec)          # fail fast on a mis-stamped card, before any dist init
     _ensure_fastvideo_runtime()
     module = _load_component("TransformerLoader", ckpt, _fastvideo_args(spec))
-    return TorchWanDiT(module, device=_device(platform), dtype=_native_dtype(module))
+    device, dtype = _device(platform), _native_dtype(module)
+    if "LTX2" in type(module).__name__:                          # LTX2Transformer3DModel
+        from .torch_ltx2 import TorchLTX2DiT
+        return TorchLTX2DiT(module, device=device, dtype=dtype)
+    return TorchWanDiT(module, device=device, dtype=dtype)       # WanTransformer3DModel / Causal*
 
 
 def build_torch_vae(spec, instance, platform):
     ckpt = _require_checkpoint(spec)
     _ensure_fastvideo_runtime()
     module = _load_component("VAELoader", ckpt, _fastvideo_args(spec))
-    return TorchWanVAE(module, device=_device(platform), dtype=_native_dtype(module))
+    device, dtype = _device(platform), _native_dtype(module)
+    if "LTX2" in type(module).__name__:                          # LTX2CausalVideoAutoencoder
+        from .torch_ltx2 import TorchLTX2VAE
+        return TorchLTX2VAE(module, device=device, dtype=dtype)
+    return TorchWanVAE(module, device=device, dtype=dtype)
 
 
 def build_torch_text_encoder(spec, instance, platform):
@@ -296,4 +304,8 @@ def build_torch_text_encoder(spec, instance, platform):
     module = _load_component("TextEncoderLoader", ckpt, args)        # text_encoder subfolder
     # The tokenizer is a SIBLING subfolder (<root>/tokenizer), not under text_encoder/. BRINGUP risk E.
     tokenizer = _load_component("TokenizerLoader", os.path.join(_model_root(spec), "tokenizer"), args)
-    return TorchT5Encoder(module, tokenizer, device=_device(platform), dtype=_native_dtype(module))
+    device, dtype = _device(platform), _native_dtype(module)
+    if "Gemma" in type(module).__name__:                          # LTX2GemmaTextEncoderModel
+        from .torch_ltx2 import TorchGemma
+        return TorchGemma(module, tokenizer, device=device, dtype=dtype)
+    return TorchT5Encoder(module, tokenizer, device=device, dtype=dtype)

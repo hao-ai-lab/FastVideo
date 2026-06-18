@@ -35,8 +35,20 @@ BASE_SIGMAS = [1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 
 REFINE_SIGMAS = [0.909375, 0.725, 0.421875, 0.0]
 
 
-def ltx_base_latent_shape(req) -> tuple[int, int, int, int]:
+# Real LTX-2 latent: 128 channels; CausalVideoAutoencoder ~32x spatial / 8x temporal. The base stage
+# runs at HALF the full latent spatial res (stage-2 upsamples 2x), so divide by 64 (=32*2).
+LTX2_LATENT_CHANNELS = 128
+LTX2_SPATIAL_RATIO = 32
+LTX2_TEMPORAL_RATIO = 8
+
+
+def ltx_base_latent_shape(req, model=None) -> tuple[int, int, int, int]:
     d = req.diffusion
+    if model is not None and getattr(getattr(model, "platform", None), "device", "cpu") == "cuda":
+        t = (max(1, d.num_frames) - 1) // LTX2_TEMPORAL_RATIO + 1
+        h = max(1, d.height // (LTX2_SPATIAL_RATIO * 2))      # half-res base; stage-2 upsamples 2x
+        w = max(1, d.width // (LTX2_SPATIAL_RATIO * 2))
+        return (LTX2_LATENT_CHANNELS, t, h, w)
     t = max(1, d.num_frames // 40)
     # refine halves requested resolution for stage-1; stage-2 upsamples 2× (design §15)
     h = max(2, d.height // 240)
@@ -62,7 +74,7 @@ class LTX2DenoiseLoop:
         rng = np.random.default_rng(seed)
         sig = self.sigmas
         if self.input_slot is None:
-            x = (rng.standard_normal(ltx_base_latent_shape(req)) * float(sig[0])).astype("float32")
+            x = (rng.standard_normal(ltx_base_latent_shape(req, model)) * float(sig[0])).astype("float32")
         else:
             x = np.asarray(ctx.slots[self.input_slot], dtype="float32")
         st = LoopState(loop_id=self.loop_id, instance_id=model.card.model_id,
