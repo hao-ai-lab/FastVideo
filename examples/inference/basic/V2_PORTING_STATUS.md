@@ -21,12 +21,12 @@ FP4), so distilled models that depend on VSA/SLA/FP4 kernels or non-flow-match s
 (Wan2.2-A14B MoE is the exception to "resident": its two 14B experts are CPU-offloaded and swapped onto
 the GPU one at a time at the boundary-timestep transition, so it fits a single 80GB GPU.)
 
-**Environment status (current):** the box was rescheduled from an aarch64 host to an x86_64 host
-mid-session (`ipp1a1…` → `ipp2-0493`; `uname -m` = x86_64). The `.venv` is aarch64 wheels
-(numpy/torch/fastvideo/CUDA) which cannot execute on x86 (numpy `_core` is aarch64; `uv` hits a
-missing-aarch64-loader binfmt error). GPU verification is blocked until the box returns to aarch64 (the
-existing venv then works as-is) or the venv is rebuilt for x86. Every model marked *verified* above was
-GPU-confirmed **before** the flip; the ‡ models are code-complete, pending GPU re-verify.
+**Environment status:** the box was rescheduled from an aarch64 host to an x86_64 host mid-session
+(`ipp1a1…` → `ipp2-0493`). The aarch64 `.venv` couldn't execute on x86, so the venv was **rebuilt for
+x86** (torch 2.11.0+cu128 x86 + numpy 2.5.0rc1 x86 + fastvideo[dev]) and re-validated: the v2 CPU suite
+is green and wan21 + LTX-2 base both generate real video on the x86 stack. (If the box flips arch again,
+rebuild the venv for the current arch — system python `/usr/bin/python3.12`, reinstall the matching
+`uv`, `uv pip install -e ".[dev]"` with `fastvideo-kernel` commented out.)
 
 ## Working today (verified, real video) — committed on `v2`
 | Official example(s) | Model | v2 card | v2 example |
@@ -36,22 +36,21 @@ GPU-confirmed **before** the flip; the ‡ models are code-complete, pending GPU
 | `basic_ltx2_distilled.py`, `basic_ltx2_distilled_fast_profile.py` | `FastVideo/LTX2-Distilled-Diffusers` | ltx2 — real `LTX2LatentUpsampler` between base/refine (un_normalize→learned 2× upsample→normalize) | `v2_basic_new_api.py` |
 | `basic_wan2_2_ti2v.py` (T2V branch) | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | wan2.2-ti2v | `v2_basic_wan2_2_ti2v.py` |
 | `basic_wan2_2.py` | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` (MoE) | wan2.2-a14b + **CPU expert offload** (one 14B expert resident at a time, swapped at the boundary → 60GB peak) | `v2_basic_wan2_2.py` |
-| `basic_ltx2.py` ‡ | `Davids048/LTX2-Base-Diffusers` | ltx2 base (single-stage, request-driven steps) | `v2_basic_ltx2.py` |
-| `basic_ltx2_3_distilled.py` ‡ | `FastVideo/LTX-2.3-Distilled-Diffusers` | ltx2 base card (single-stage; pass few steps) | `v2_basic_ltx2_3_distilled.py` |
+| `basic_ltx2.py` | `Davids048/LTX2-Base-Diffusers` | ltx2 base (single-stage, request-driven many-step) | `v2_basic_ltx2.py` |
+| `basic_ltx2_3_distilled.py` | `FastVideo/LTX-2.3-Distilled-Diffusers` (18.99B) | ltx2 base card (single-stage; few-step) | `v2_basic_ltx2_3_distilled.py` |
 
-\* `basic_mps.py` (Apple MPS) and `basic_ray.py` (ray executor) are device/executor variants of the
-same Wan2.1 model — the model itself is covered by wan21; those runtime modes are out of v2 scope.
-‡ Code-complete + CPU-verified (cards/programs build, dispatch routes, schedule correct); GPU re-verify
-pending the env (see **Environment status** below).
+All seven rows GPU-verified to generate real video (LTX-2 base / 2.3 show inter-frame motion 4.5 / 6.6
+on the rebuilt x86 stack). \* `basic_mps.py` (Apple MPS) and `basic_ray.py` (ray executor) are
+device/executor variants of the same Wan2.1 model — covered by wan21; those runtime modes are out of scope.
 
 ## Needs per-model work (architecture/sampler matches partially)
 | Official example(s) | Model | What v2 needs |
 |---|---|---|
 | `basic_dmd.py`, `basic_dmd_new_api.py` | FastWan2.1-T2V-1.3B (WanDMDPipeline) | **Blocked (env):** loading needs a *non-strict* load to skip the VSA-only `to_gate_compress` (root cause: the checkpoint key mis-maps under the generic Wan path, and `TransformerLoader` is strict except Cosmos2.5 — `component_loader.py:1005`). Even loaded, the DMD model is trained for VSA, which is **not built here (no nvcc)**, so SDPA output would be degraded. Needs the fastvideo-kernel VSA build + a non-strict WanDMD load. |
-| `basic_turbodiffusion*.py` | TurboWan2.1/2.2 (RCM) | **New sampler:** Reparameterized Consistency Model — v2 has no consistency loop (flow-match Euler won't match). |
-| `basic_wan2_2_i2v.py`, `basic_wan2_2_Fun.py` | Wan2.2-I2V / Fun | I2V needs an image-encode node + conditioning (the Wan adapter already accepts `encoder_hidden_states_image`; reuse the A14B offload); Fun needs a control input. |
+| `basic_turbodiffusion*.py` | TurboWan2.1/2.2 (RCM) | **New sampler:** Reparameterized Consistency Model (`fastvideo/models/schedulers/scheduling_rcm.py:RCMScheduler`) — v2 has only flow-match/chunk/SDE loops; needs a new RCM consistency loop. |
+| `basic_wan2_2_i2v.py`, `basic_wan2_2_Fun.py` | Wan2.2-I2V / Fun | **I2V mechanism (identified, `pipelines/stages/image_encoding.py`):** SigLIP `image_encoder`+`image_processor` → `image_embeds` (the DiT's `encoder_hidden_states_image`, already accepted) **and** VAE-encode the first frame, concat `[noisy_latent, image_latent, mask]` (first-frame mask=1) → an i2v DiT (larger in_channels). v2 needs: image_encoder/image_processor components+adapters, a VAE-encode-image node, the concat-mask conditioning in the wan loop, the i2v DiT in_channels, `image_path` handling (reuse A14B offload). Fun adds a control input. |
+| `basic_lucy_edit.py` | `decart-ai/Lucy-Edit-Dev` (Wan v2v) | **V2V mechanism (identified):** `WanVideoToVideoPipeline` + `VideoVAEEncodingStage` — VAE-encode the input video to a conditioning latent. v2 needs input-video loading + a VAE-encode-video node + the v2v conditioning (no image_encoder). |
 | `basic_ltx2_3_distilled_i2v*.py` | LTX-2.3-Distilled I2V | Image conditioning on the ltx2 single-stage program (encode the input image + condition the denoise). |
-| `basic_lucy_edit.py` | `decart-ai/Lucy-Edit-Dev` | Wan-family video-edit: input-video conditioning. |
 
 ## Out of current scope — new families (kept as an upstream reference map only)
 Each would need a new card + adapters (DiT/VAE/encoder forwards) + maybe a sampler:
