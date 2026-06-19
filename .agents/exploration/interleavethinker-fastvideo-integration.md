@@ -2086,3 +2086,105 @@ Conclusion:
   separately, the next integration decision is whether to support all three
   models in one process or prefer a split generator service for memory
   isolation.
+
+## Stage 6 Execution: Official Dataset Normalization
+
+Status: validated, pending commit/push.
+
+Scope for this implementation slice:
+
+- Add upstream InterleaveThinker dataset utilities for:
+  - `planner_sft.json`;
+  - `critic_sft.json`;
+  - `critic_rl.jsonl`.
+- Preserve upstream ShareGPT-style SFT rows while adding FastVideo-friendly
+  aliases:
+  - planner user instruction and assistant response;
+  - critic origin/edited image path aliases;
+  - critic `previous_prompt` / `rewritten_prompt` compatibility.
+- Normalize critic RL rows to the reward-loop fields already used by
+  `InterleaveThinkerRLMethod` and `InterleaveThinkerRewardScorer`:
+  - `origin_prompt`;
+  - `previous_prompt`;
+  - `rewritten_prompt`;
+  - `origin_image_path`;
+  - `edited_image_path`;
+  - `previous_image_path`;
+  - `ground_truth`.
+- Support `image_dir` path resolution and image-extension validation for scalar
+  and list image fields.
+- Add clear errors for missing files, empty datasets, malformed JSON, missing
+  required prompt/image fields, and invalid image extensions.
+
+Expected files:
+
+- `fastvideo/train/models/interleave_thinker/data.py`
+- `fastvideo/train/models/interleave_thinker/__init__.py`
+- `tests/local_tests/test_interleave_thinker_data.py`
+- this handoff file
+
+Validation plan:
+
+- Local syntax and `git diff --check`.
+- Modal pytest for new data tests plus existing planner/critic model tests.
+- Modal pre-commit on changed non-excluded files.
+
+Implemented changes:
+
+- Added `fastvideo/train/models/interleave_thinker/data.py` with:
+  - `load_interleave_dataset(...)`;
+  - `load_planner_sft_records(...)`;
+  - `load_critic_sft_records(...)`;
+  - `load_critic_rl_records(...)`;
+  - role-specific normalizers for planner SFT, critic SFT, and critic RL rows;
+  - `image_dir` path resolution for scalar and list image fields;
+  - image extension validation and optional file-existence validation;
+  - normalized critic RL `ground_truth` fields compatible with
+    `InterleaveThinkerRewardScorer`.
+- Exported dataset utilities from
+  `fastvideo.train.models.interleave_thinker`.
+- Added `tests/local_tests/test_interleave_thinker_data.py` covering:
+  - upstream ShareGPT planner SFT rows;
+  - critic SFT rows with `images` -> before/after aliases;
+  - critic RL JSONL rows with `evaluation` -> `ground_truth`;
+  - empty dataset rejection;
+  - missing critic RL ground-truth success rejection;
+  - invalid image extension rejection.
+
+Validation completed:
+
+- Local lightweight checks:
+  - `python -m py_compile` passed for
+    `fastvideo/train/models/interleave_thinker/data.py`,
+    `fastvideo/train/models/interleave_thinker/__init__.py`, and
+    `tests/local_tests/test_interleave_thinker_data.py`.
+  - `git diff --check` passed.
+- First Modal dataset pytest attempt:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-8PYqdvn1QFDZTIRBtrDIV9`
+  - Failed before tests because the submitted `--git-commit` value had an
+    incorrect full SHA for the pushed base commit.
+- Modal dataset pytest rerun:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-bOKl6Q4p0uOjGmER7lvmc5`
+  - Command:
+    `pytest tests/local_tests/test_interleave_thinker_data.py
+    tests/local_tests/test_interleave_thinker_critic_model.py
+    tests/local_tests/test_interleave_thinker_planner_model.py -q`
+  - Result: `17 passed, 14 warnings in 16.27s`.
+- Modal pre-commit:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-ISuDU2lwc6Pl5NYDZnnBEb`
+  - Command:
+    `pre-commit run --files
+    fastvideo/train/models/interleave_thinker/__init__.py
+    fastvideo/train/models/interleave_thinker/data.py
+    tests/local_tests/test_interleave_thinker_data.py`
+  - Result: yapf, ruff, codespell, mypy, filename check, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+
+Conclusion:
+
+- FastVideo now has upstream-file-aware dataset normalization for
+  InterleaveThinker planner SFT, critic SFT, and critic RL data.
+- These utilities do not yet replace the generic `Qwen3VLActorDataset` loader;
+  the next SFT/RL training integration slice should either call these utilities
+  from model `init_preprocessors(...)` by dataset kind or add config fields that
+  explicitly select the normalizer.
