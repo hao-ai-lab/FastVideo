@@ -80,11 +80,11 @@ status.
 
 | Buildkite label | `TEST_TYPE` | Main watched paths |
 |---|---|---|
-| Encoder Tests | `encoder` | `fastvideo/models/encoders/**`, `fastvideo/models/loader/**`, `fastvideo/tests/encoders/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
-| VAE Tests | `vae` | `fastvideo/models/vaes/**`, `fastvideo/models/loader/**`, `fastvideo/tests/vaes/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
-| Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
-| Kernel Tests | `kernel_tests` | `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
-| Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| Encoder Tests | `encoder` | `fastvideo/models/encoders/**`, `fastvideo/models/loader/**`, `fastvideo/tests/encoders/**`, `pyproject.toml`, `docker/Dockerfile` |
+| VAE Tests | `vae` | `fastvideo/models/vaes/**`, `fastvideo/models/loader/**`, `fastvideo/tests/vaes/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Kernel Tests | `kernel_tests` | `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile` |
 | DreamVerse App Tests | `dreamverse_app` | `apps/dreamverse/**`, `pyproject.toml` |
 
 ### Tier 3: Full Suite
@@ -101,18 +101,18 @@ can merge a PR.
 
 | Buildkite label | `TEST_TYPE` | Main watched paths |
 |---|---|---|
-| SSIM Tests | `ssim` | `fastvideo/**/*.py`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| SSIM Tests | `ssim` | `fastvideo/**/*.py`, `pyproject.toml`, `docker/Dockerfile` |
 | LoRA Inference Tests | `inference_lora` | LoRA tests, loader, transformer tests, pipelines, LoRA layers |
-| Training Tests | `training` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| Training Tests | `training` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Distillation DMD Tests | `distillation_dmd` | `fastvideo/training/*distillation_pipeline.py` |
 | Self-Forcing Tests | `self_forcing` | self-forcing distillation pipeline and tests |
-| LoRA Training Tests | `training_lora` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
-| Training Tests VSA | `training_vsa` | `fastvideo/**`, `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| LoRA Training Tests | `training_lora` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Training Tests VSA | `training_vsa` | `fastvideo/**`, `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Inference Tests VMoBA | `inference_vmoba` | `fastvideo-kernel/**`, `fastvideo/attention/backends/vmoba.py` |
 | Performance Tests | `performance` | DiTs, pipelines, attention, layers, worker, entrypoints, performance tests/configs |
 | API Server Tests | `api_server` | OpenAI entrypoints, serve CLI, OpenAI API integration test |
 | Train Framework Tests | `train_framework` | `fastvideo/train/**`, train model/method tests, model loader, DiTs |
-| Eval Metrics Tests | `eval` | `fastvideo/eval/**`, `fastvideo/tests/eval/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| Eval Metrics Tests | `eval` | `fastvideo/eval/**`, `fastvideo/tests/eval/**`, `pyproject.toml`, `docker/Dockerfile` |
 
 See [Performance Benchmarks](performance_benchmarks.md) for the performance
 lane's thresholds, rolling baseline, artifacts, and reseeding process.
