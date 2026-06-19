@@ -2323,7 +2323,7 @@ Conclusion:
 
 ## Stage 8 Execution: Critic GRPO Policy Loss
 
-Status: completed, pending code commit/push.
+Status: completed and pushed.
 
 Scope for this implementation slice:
 
@@ -2447,6 +2447,9 @@ Conclusion:
 - The critic RL path now has a real GRPO/PPO-ratio policy objective over
   response-token logprobs instead of the earlier advantage-weighted NLL
   placeholder.
+- Commit completed:
+  - `b7a923c0` — `[feat] add InterleaveThinker GRPO policy loss`
+  - Pushed to `origin/interleavethinker-fastvideo`.
 - The method still does not yet load or query a separate frozen reference model;
   it can consume per-rollout `reference_logprobs` when provided, and the next
   RL stage should add an optional `models.reference` path to compute them.
