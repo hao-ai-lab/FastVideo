@@ -111,10 +111,17 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         days: int = Query(DEFAULT_DAYS, ge=1, le=3650),
         model_id: str | None = None,
         gpu_type: str | None = None,
+        run_source: str | None = None,
         success: bool | None = None,
     ) -> dict[str, Any]:
         loaded = data_store.load_records(days=days)
-        filtered = filter_records(loaded, model_id=model_id, gpu_type=gpu_type, success=success)
+        filtered = filter_records(
+            loaded,
+            model_id=model_id,
+            gpu_type=gpu_type,
+            run_source=run_source,
+            success=success,
+        )
         return {
             "records": filtered,
             "count": len(filtered),
@@ -122,6 +129,7 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 "days": days,
                 "model_id": model_id,
                 "gpu_type": gpu_type,
+                "run_source": run_source,
                 "success": success,
             },
             "sync": data_store.health(),
@@ -132,6 +140,7 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         days: int = Query(DEFAULT_DAYS, ge=1, le=3650),
         model_id: str | None = None,
         gpu_type: str | None = None,
+        run_source: str | None = None,
     ) -> dict[str, Any]:
         # Latest status should be stable when users change the trend window.
         # Use all cached records for latest/baseline computation; the ``days``
@@ -139,7 +148,11 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         # endpoints without affecting the summary semantics.
         loaded = data_store.load_records(days=None)
         filtered = filter_records(loaded, model_id=model_id, gpu_type=gpu_type)
-        rows = build_latest_summary(filtered, max_regression=float(os.environ.get("PERF_MAX_REGRESSION", "0.05")))
+        rows = build_latest_summary(
+            filtered,
+            max_regression=float(os.environ.get("PERF_MAX_REGRESSION", "0.05")),
+            run_source=run_source,
+        )
         return {
             "rows": rows,
             "count": len(rows),
@@ -152,6 +165,7 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 "trend_window_days": days,
                 "model_id": model_id,
                 "gpu_type": gpu_type,
+                "run_source": run_source,
             },
             "sync": data_store.health(),
         }
@@ -161,9 +175,10 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         days: int = Query(DEFAULT_DAYS, ge=1, le=3650),
         model_id: str | None = None,
         gpu_type: str | None = None,
+        run_source: str | None = None,
     ) -> dict[str, Any]:
         loaded = data_store.load_records(days=days)
-        filtered = filter_records(loaded, model_id=model_id, gpu_type=gpu_type)
+        filtered = filter_records(loaded, model_id=model_id, gpu_type=gpu_type, run_source=run_source)
         groups = build_trends(filtered)
         return {
             "groups": groups,
@@ -172,6 +187,7 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
                 "days": days,
                 "model_id": model_id,
                 "gpu_type": gpu_type,
+                "run_source": run_source,
             },
             "sync": data_store.health(),
         }
