@@ -75,6 +75,19 @@ class ChunkRolloutLoop:
                           caches=getattr(model, "caches", None))
         st.latents["chunk"] = (rng.standard_normal(self._chunk_shape(req, model)) * float(sig[0])).astype("float32")
         st.plugin_state["cfg"] = {}
+        # Real causal cross-chunk conditioning (cuda backend only): allocate the model's persistent
+        # KV + cross-attn caches and own them HERE in LoopState (per request -> interleave-safe), then
+        # thread them through every forward so the self-forcing student conditions each chunk on prior
+        # clean chunks. Toy/CPU keeps the slab mean-context path (``context`` above). See loop.next.
+        st.scratch["real_causal"] = False
+        dit = model.component("transformer")
+        if getattr(getattr(model, "platform", None), "device", "cpu") == "cuda" and hasattr(dit, "alloc_causal_caches"):
+            _, _, lh, lw = self._chunk_shape(req, model)
+            ps = getattr(getattr(dit, "module", None), "patch_size", (1, 2, 2))
+            frame_seqlen = (lh // int(ps[-2])) * (lw // int(ps[-1]))
+            caches = dit.alloc_causal_caches(frame_seqlen)
+            st.scratch.update(causal_kv=caches["kv"], causal_ca=caches["crossattn"],
+                              frame_seqlen=frame_seqlen, real_causal=True)
         return st
 
     def next(self, st: LoopState):
@@ -90,6 +103,13 @@ class ChunkRolloutLoop:
         scale = st.scratch["guidance_scale"]
         context = np.mean(st.scratch["slabs"], axis=0) if st.scratch["slabs"] else None
         cfg, precision = self.cfg, self.precision
+        # real-causal KV-cache threading (cuda backend); else the toy ``context`` path
+        real_causal = st.scratch.get("real_causal", False)
+        kv, ca = st.scratch.get("causal_kv"), st.scratch.get("causal_ca")
+        fsl = st.scratch.get("frame_seqlen", 1560)
+        ci = st.scratch["chunk_idx"]
+        cur_start, start_frame = ci * self.chunk_size * fsl, ci * self.chunk_size
+        is_last = (i == self.steps_per_chunk - 1)
 
         def run(model, override=None):
             fm = model.platform.kernels.get(FLOW_MATCH_STEP)  # solver dispatched per (device, arch)
@@ -97,9 +117,17 @@ class ChunkRolloutLoop:
                 velocity = np.asarray(override["noise_pred"], dtype="float32")
             else:
                 dit = model.component("transformer")
-                preds = {b: dit(x, pe if b == "cond" else ne, sigma_t, context=context) for b in branches}
+                if real_causal:  # condition on prior clean chunks via the model's kv_cache (CausVid Alg 2)
+                    kw = dict(kv_cache=kv, crossattn_cache=ca, current_start=cur_start,
+                              start_frame=start_frame, frame_seqlen=fsl)
+                    preds = {b: dit(x, pe if b == "cond" else ne, sigma_t, **kw) for b in branches}
+                else:
+                    preds = {b: dit(x, pe if b == "cond" else ne, sigma_t, context=context) for b in branches}
                 velocity = cfg.combine(preds, scale, sctx, cfg_state)
             x_next = fm(precision.cast(x), precision.cast(velocity), sigma_t, sigma_next)
+            if real_causal and is_last:  # write the clean chunk's K/V (timestep ~0) so the next chunk attends to it
+                model.component("transformer")(x_next, pe, 0.0, kv_cache=kv, crossattn_cache=ca,
+                                               current_start=cur_start, start_frame=start_frame, frame_seqlen=fsl)
             return StepResult(output={
                 "noise_pred": np.asarray(velocity, dtype="float32"),
                 "latents": x_next.astype("float32")

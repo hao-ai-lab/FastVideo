@@ -207,8 +207,39 @@ class WanDiT(TorchComponent):
         self.module.to(self.device)
         self._on_gpu = True
 
+    def alloc_causal_caches(self, frame_seqlen: int, *, batch: int = 1, max_text_len: int = 512) -> Any:
+        """Allocate the persistent per-block KV + cross-attn caches the causal student needs for
+        cross-chunk conditioning (mirrors CausalDenoisingStage._initialize_kv_cache). The chunk_rollout
+        loop owns these in its LoopState (per request, never on this shared adapter) and threads them
+        through __call__ so the model routes to _forward_inference."""
+        self._ensure_resident()
+        m = self.module
+        nblocks = len(m.blocks)
+        nheads, hdim = int(m.num_attention_heads), int(m.attention_head_dim)
+        local = int(getattr(m, "local_attn_size", -1) or -1)
+        if local != -1:
+            kv_size = local * frame_seqlen
+        else:  # global window: model keeps the last GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES (21) frames
+            arch = getattr(getattr(m, "config", None), "arch_config", None)
+            sliding = int(getattr(arch, "sliding_window_num_frames", 0) or 0)
+            kv_size = max(sliding, 21) * frame_seqlen
+        dev, dt = self.device, self.dtype
+        kv = [{
+            "k": torch.zeros(batch, kv_size, nheads, hdim, device=dev, dtype=dt),
+            "v": torch.zeros(batch, kv_size, nheads, hdim, device=dev, dtype=dt),
+            "global_end_index": torch.tensor([0], dtype=torch.long, device=dev),
+            "local_end_index": torch.tensor([0], dtype=torch.long, device=dev),
+        } for _ in range(nblocks)]
+        ca = [{
+            "k": torch.zeros(batch, max_text_len, nheads, hdim, device=dev, dtype=dt),
+            "v": torch.zeros(batch, max_text_len, nheads, hdim, device=dev, dtype=dt),
+            "is_init": False,
+        } for _ in range(nblocks)]
+        return {"kv": kv, "crossattn": ca}
+
     @torch.no_grad()
-    def __call__(self, latent, text_embed, sigma, context=None, *, cond=None):
+    def __call__(self, latent, text_embed, sigma, context=None, *, cond=None, kv_cache=None,
+                 crossattn_cache=None, current_start=0, start_frame=0, frame_seqlen=1560):
         self._ensure_resident()
         hs = self._t(latent)
         if cond is not None:  # i2v: concat [noise (16ch) ; mask+cond_latent (20ch)] -> 36ch DiT input
@@ -219,11 +250,15 @@ class WanDiT(TorchComponent):
         timestep = (torch.full(
             (1, hs.shape[2]), ts, device=self.device) if self.causal else torch.tensor([ts], device=self.device))
         img = None if self.causal else self._t(context)  # i2v image embedding for standard Wan
+        fwd = dict(hidden_states=hs, encoder_hidden_states=ehs, timestep=timestep, encoder_hidden_states_image=img)
+        if self.causal and kv_cache is not None:
+            # Pass the persistent caches + frame offset so the model runs _forward_inference (CausVid
+            # Algorithm 2) and conditions this chunk on prior clean chunks. Without it the model falls
+            # through to _forward_train (no cross-chunk KV) -> chunks denoise blind -> discontinuity.
+            fwd.update(kv_cache=kv_cache, crossattn_cache=crossattn_cache, current_start=int(current_start),
+                       cache_start=int(current_start), start_frame=int(start_frame), frame_seqlen=int(frame_seqlen))
         with self._ctx():
-            velocity = self.module(hidden_states=hs,
-                                   encoder_hidden_states=ehs,
-                                   timestep=timestep,
-                                   encoder_hidden_states_image=img)
+            velocity = self.module(**fwd)
         return self._n(velocity)  # rectified-flow velocity (BRINGUP risk C)
 
     def clone(self) -> WanDiT:
