@@ -1,13 +1,18 @@
 # syntax=docker/dockerfile:1.7
-ARG CUDA_TAG=12.9.1-cudnn-devel-ubuntu22.04
-FROM nvidia/cuda:${CUDA_TAG}
+# CUDA base. CUDA_VERSION/UBUNTU_VERSION feed the default tag (matches the
+# unified docker/Dockerfile); override BUILD_BASE_IMAGE wholesale for a mirror.
+ARG CUDA_VERSION=12.9.1
+ARG UBUNTU_VERSION=22.04
+ARG BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION}
+FROM ${BUILD_BASE_IMAGE}
 
 ARG BUILD_FASTVIDEO_KERNEL_FROM_SOURCE=0
 ARG BUILD_DREAMVERSE_UI=0
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    UV_CACHE_DIR=/opt/uv/cache
 
 SHELL ["/bin/bash", "-c"]
 
@@ -20,7 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-11
 
-ENV CUDA_HOME=/usr/local/cuda-12.9
+# Version-agnostic /usr/local/cuda symlink so this works for any CUDA_VERSION.
+ENV CUDA_HOME=/usr/local/cuda
 ENV PATH=/root/.local/bin:/opt/venv/bin:${CUDA_HOME}/bin:${PATH}
 ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
 ENV VIRTUAL_ENV=/opt/venv
@@ -34,14 +40,16 @@ WORKDIR /opt/FastVideo
 
 COPY . /opt/FastVideo
 
-RUN source /opt/venv/bin/activate \
-    && uv pip install --no-cache-dir "/opt/FastVideo[dreamverse]"
+RUN --mount=type=cache,target=/opt/uv/cache \
+    source /opt/venv/bin/activate \
+    && uv pip install "/opt/FastVideo[dreamverse]"
 
 # Standard docker build does not expose GPUs, while fastvideo-kernel/build.sh
 # detects the CUDA architecture with torch at build time. The FastVideo package
 # install above brings in the pinned fastvideo-kernel package; rebuild from the
 # copied source only on hosts configured for build-time GPU access.
-RUN if [[ "${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE}" == "1" ]]; then \
+RUN --mount=type=cache,target=/opt/uv/cache \
+    if [[ "${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE}" == "1" ]]; then \
         sed -i 's/^git submodule update --init --recursive$/if [[ -d ..\/.git ]]; then git submodule update --init --recursive; fi/' \
             /opt/FastVideo/fastvideo-kernel/build.sh \
         && source /opt/venv/bin/activate \

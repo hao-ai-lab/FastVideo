@@ -240,7 +240,7 @@ steps:
                 - "fastvideo/models/loader/**"
                 - "fastvideo/tests/encoders/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 20m .buildkite/scripts/pr_test.sh"
                 label: ":microscope: Encoder Tests"
@@ -253,7 +253,7 @@ steps:
                 - "fastvideo/models/loader/**"
                 - "fastvideo/tests/vaes/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 20m .buildkite/scripts/pr_test.sh"
                 label: ":microscope: VAE Tests"
@@ -268,7 +268,7 @@ steps:
                 - "fastvideo/layers/**"
                 - "fastvideo/attention/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: ":microscope: Transformer Tests"
@@ -279,7 +279,7 @@ steps:
             - path:
                 - "fastvideo-kernel/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: ":microscope: Kernel Tests"
@@ -292,7 +292,7 @@ steps:
                 - ".buildkite/**"
                 - ".github/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: ":microscope: Unit Tests"
@@ -333,7 +333,7 @@ steps:
             - path:
                 - "fastvideo/**/*.py"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 90m .buildkite/scripts/pr_test.sh"
                 label: ":bar_chart: SSIM Tests"
@@ -352,7 +352,7 @@ steps:
                 - "fastvideo/pipelines/**"
                 - "fastvideo/layers/lora/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 20m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: LoRA Inference Tests"
@@ -363,7 +363,7 @@ steps:
             - path:
                 - "fastvideo/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Training Tests"
@@ -374,7 +374,7 @@ steps:
             - path:
                 - "fastvideo/training/*distillation_pipeline.py"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Distillation DMD Tests"
@@ -386,7 +386,7 @@ steps:
                 - "fastvideo/training/*self_forcing_distillation_pipeline.py"
                 - "fastvideo/tests/training/self-forcing/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Self-Forcing Tests"
@@ -397,7 +397,7 @@ steps:
             - path:
                 - "fastvideo/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: LoRA Training Tests"
@@ -413,7 +413,7 @@ steps:
                 - "fastvideo/**"
                 - "fastvideo-kernel/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Training Tests VSA"
@@ -429,7 +429,7 @@ steps:
                 - "fastvideo-kernel/**"
                 - "fastvideo/attention/backends/vmoba.py"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Inference Tests VMoBA"
@@ -447,7 +447,7 @@ steps:
                 - "fastvideo/tests/performance/**"
                 - ".buildkite/performance-benchmarks/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Performance Tests"
@@ -460,7 +460,7 @@ steps:
                 - "fastvideo/entrypoints/cli/serve.py"
                 - "fastvideo/tests/entrypoints/test_openai_api_integration.py"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: API Server Tests"
@@ -475,7 +475,7 @@ steps:
                 - "fastvideo/models/dits/**"
                 - "fastvideo/models/loader/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Train Framework Tests"
