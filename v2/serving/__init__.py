@@ -5,5 +5,7 @@ from v2.serving.http import HttpServer, Request, Response
 from v2.serving.protocol import ChatCompletionRequest, ImageGenerationRequest, VideoGenerationRequest
 from v2.serving.server import OmniOpenAIServer
 
-__all__ = ["OmniOpenAIServer", "HttpServer", "Request", "Response",
-           "ImageGenerationRequest", "VideoGenerationRequest", "ChatCompletionRequest"]
+__all__ = [
+    "OmniOpenAIServer", "HttpServer", "Request", "Response", "ImageGenerationRequest", "VideoGenerationRequest",
+    "ChatCompletionRequest"
+]

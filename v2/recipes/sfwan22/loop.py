@@ -85,7 +85,7 @@ def _warp_dmd_timesteps(dmd_steps: list[int], sigmas: np.ndarray) -> np.ndarray:
 
 def _sigma_at(timestep: float, sigmas: np.ndarray) -> float:
     """Nearest-timestep → σ lookup (the scheduler's ``argmin |timesteps - t|``)."""
-    grid = sigmas * NUM_TRAIN_TIMESTEPS
+    grid: np.ndarray = sigmas * NUM_TRAIN_TIMESTEPS
     return float(sigmas[int(np.argmin(np.abs(grid - float(timestep))))])
 
 

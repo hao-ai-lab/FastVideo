@@ -19,13 +19,20 @@ def _vae_decode(instance, slots, request, ctx) -> None:
 
 def build_adapter_program() -> Program:
     return Program(
-        program_id="wan.adapters", kind=ProgramKind.INLINE,
+        program_id="wan.adapters",
+        kind=ProgramKind.INLINE,
         nodes=[
-            ComponentNode("control_signal", fn=_control_signal, writes=("control_signal",)),
+            ComponentNode("control_signal", fn=_control_signal, writes=("control_signal", )),
             ComponentNode("text_encode", fn=_text_encode, writes=("text_embeds", "neg_text_embeds")),
-            ModelLoopNode("denoise", loop_id="diffusion_denoise", output_slot="denoise_out",
-                          reads=("text_embeds", "control_signal"), writes=("denoise_out",)),
-            ComponentNode("vae_decode", fn=_vae_decode, reads=("denoise_out",), writes=("video",)),
+            ModelLoopNode("denoise",
+                          loop_id="diffusion_denoise",
+                          output_slot="denoise_out",
+                          reads=("text_embeds", "control_signal"),
+                          writes=("denoise_out", )),
+            ComponentNode("vae_decode", fn=_vae_decode, reads=("denoise_out", ), writes=("video", )),
         ],
-        output_artifacts={"video": "video", "latents": "denoise_out"},
+        output_artifacts={
+            "video": "video",
+            "latents": "denoise_out"
+        },
     ).validate()

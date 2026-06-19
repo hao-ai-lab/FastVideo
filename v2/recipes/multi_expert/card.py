@@ -11,6 +11,8 @@ so the generator's output depends on every refiner and one reward trains them al
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
 from v2.card import (
     CacheContract,
@@ -53,7 +55,7 @@ def build_multi_expert_card(model_id: str = "multi-expert-rl", *, n_refiners: in
                               expert=expert,
                               cost=dn_cost)
 
-    def ar_factory(rid):
+    def ar_factory(rid: str) -> Callable[[], ARDecodeLoop]:
         return lambda: ARDecodeLoop(
             loop_id=f"ar_decode_{rid}", transformer_id=rid, cost=ar_cost, max_tokens=1, prompt_slot="prompt_tokens")
 

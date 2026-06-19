@@ -45,9 +45,7 @@ class MemoryManager:
         if nbytes > self.available:
             return False
         budget = self.per_tag_budget.get(tag)
-        if budget is not None and self._by_tag.get(tag, 0) + nbytes > budget:
-            return False
-        return True
+        return budget is None or self._by_tag.get(tag, 0) + nbytes <= budget
 
     def reserve(self, tag: str, nbytes: int) -> Reservation:
         if not self.can_reserve(tag, nbytes):

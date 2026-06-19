@@ -7,6 +7,7 @@ request per connection (Connection: close), enough to be real and curl-able, not
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -81,7 +82,7 @@ async def _read_request(reader: asyncio.StreamReader, max_body: int) -> Request:
     try:
         clen = int(raw)
     except ValueError:
-        raise _BadRequest(f"invalid Content-Length {raw!r}")
+        raise _BadRequest(f"invalid Content-Length {raw!r}") from None
     if clen < 0 or clen > max_body:
         raise _TooLarge(f"Content-Length {clen} exceeds limit {max_body}")
     body = await reader.readexactly(clen) if clen else b""
@@ -140,14 +141,13 @@ class HttpServer:
             await _write(writer, resp)
         except Exception:
             if resp.stream is not None:  # client gone mid-SSE → close the generator
-                try:
-                    await resp.stream.aclose()  # → GeneratorExit → submit() cancels the driver
-                except Exception:
-                    pass
-            try:
+                # async-gen close -> GeneratorExit -> submit() cancels the driver
+                aclose = getattr(resp.stream, "aclose", None)
+                if aclose is not None:
+                    with contextlib.suppress(Exception):
+                        await aclose()
+            with contextlib.suppress(Exception):
                 writer.close()
-            except Exception:
-                pass
 
     async def start(self, host: str = "127.0.0.1", port: int = 0) -> tuple[str, int]:
         self._server = await asyncio.start_server(self._conn, host, port, limit=self.header_limit)

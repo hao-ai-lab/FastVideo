@@ -54,7 +54,7 @@ class ToyImageEncoder:
 
     def encode_image(self, image) -> np.ndarray:
         a = np.asarray(image, dtype="float32")
-        rng = np.random.default_rng(_seed_from("img:%d:%.4f" % (a.size, float(a.mean()) if a.size else 0.0)))
+        rng = np.random.default_rng(_seed_from(f"img:{a.size}:{(float(a.mean()) if a.size else 0.0):.4f}"))
         return (rng.standard_normal((self.seq, self.dim)) * 0.1).astype("float32")
 
 
@@ -201,7 +201,7 @@ class ToyPromptRefiner:
     def __init__(self, n_actions: int = 8, dim: int = TEXT_DIM, seq: int = TEXT_SEQ, seed: int = 0):
         self.n = int(n_actions)
         self.dim, self.seq = int(dim), int(seq)
-        self.logits = np.zeros(self.n, dtype="float64")  # the trainable policy params
+        self.logits: np.ndarray = np.zeros(self.n, dtype="float64")  # the trainable policy params
         rng = np.random.default_rng(seed)
         # each action ⇒ a fixed conditioning offset (the "content" of that refined prompt)
         self._emb = (rng.standard_normal((self.n, self.seq, self.dim)) * 0.1).astype("float32")
@@ -237,7 +237,7 @@ class ToyPromptRefiner:
     def pg_step(self, action: int, advantage: float, lr: float) -> float:
         """REINFORCE on the categorical policy. Returns grad_norm (the per-method regression signal)."""
         p = self._probs()
-        onehot = np.zeros(self.n, dtype="float64")
+        onehot: np.ndarray = np.zeros(self.n, dtype="float64")
         onehot[int(action)] = 1.0
         grad = -float(advantage) * (onehot - p)  # ∇_logits (−A·logπ(a))
         self.logits = self.logits - float(lr) * grad  # descent on −A·logπ ⇒ ascent on A·logπ

@@ -15,6 +15,8 @@ Credit assignment (a reward-shaping choice, not an architectural one):
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from v2._enums import ConsistencyLevel, ExecutionProfile
@@ -73,7 +75,7 @@ class JointMultiExpertRL(TrainingMethod):
             self.reference.component(rid).copy_from(self.student.component(rid))
         self.reference.component(generator_id).copy_from(self.student.component(generator_id))
 
-    def refiner(self, rid):
+    def refiner(self, rid: Any) -> Any:
         return self.student.component(rid)
 
     @property
@@ -89,14 +91,14 @@ class JointMultiExpertRL(TrainingMethod):
             t[self.generator_id] = self.dit
         return t
 
-    def _compose(self, base_emb, actions):
+    def _compose(self, base_emb: Any, actions: Any) -> Any:
         """Stack every refiner's chosen offset into the diffusion conditioning."""
         emb = base_emb
         for rid in self.refiner_ids:
             emb = self.refiner(rid).refined_embed(emb, actions[rid])
         return emb
 
-    def _reward(self, latent, actions):
+    def _reward(self, latent: Any, actions: Any) -> tuple[float, dict[Any, float]]:
         """One reward; returns (total, per_expert). The diffusion signal is shared; each refiner adds
         its own bonus when it picks its target (so per-expert reward isolates that refiner's credit)."""
         diff = float(np.tanh(-np.std(np.asarray(latent, dtype="float64"))))
@@ -107,7 +109,7 @@ class JointMultiExpertRL(TrainingMethod):
             per[rid] = diff + hit
         return total, per
 
-    def _rollout_sample(self, prompt, emb, neg_emb, seed):
+    def _rollout_sample(self, prompt: Any, emb: Any, neg_emb: Any, seed: Any) -> Any:
         req = make_request(TaskType.T2V,
                            self.student.card.model_id,
                            prompt,
@@ -122,7 +124,7 @@ class JointMultiExpertRL(TrainingMethod):
         }
         return rollout_loop(self.student, self.student_loop_id, req, slots=slots, profile=ExecutionProfile.ROLLOUT)
 
-    def _dit_ppo(self, behavior, emb, advantage):
+    def _dit_ppo(self, behavior: Any, emb: Any, advantage: Any) -> tuple[float, float, float, float]:
         ref_dit = self.reference.component(self.generator_id)
         # Pin the log-prob recompute to the SAME SDE kernel the rollout used (C2 kernel-pinning).
         sde_step = self.student.platform.kernels.get(FLOW_SDE_STEP)
@@ -149,11 +151,14 @@ class JointMultiExpertRL(TrainingMethod):
             v_target = _ml_velocity(prev, sample, st, sn, noise_scale=self.sde_noise_scale)  # PG direction
             _, gn = self.dit.mse_grad_step(prev, emb, st, v_target, self.dit_lr * float(np.clip(advantage, -1.0, 1.0)))
             gnorms.append(gn)
-        m = lambda xs: float(np.mean(xs)) if xs else 0.0  # noqa: E731
+
+        def m(xs: Any) -> float:
+            return float(np.mean(xs)) if xs else 0.0
+
         return m(ppo_losses), m(kls), m(ratios), m(gnorms)
 
     @staticmethod
-    def _advantage(rewards, clip_max):
+    def _advantage(rewards: Any, clip_max: Any) -> Any:
         r = np.asarray(rewards, dtype="float64")
         return np.clip((r - r.mean()) / (r.std() + 1e-4), -clip_max, clip_max)
 
@@ -162,8 +167,8 @@ class JointMultiExpertRL(TrainingMethod):
         prompts = batch["prompts"]
         seeds = batch.get("seeds", list(range(len(prompts))))
         neg_base = cached_text_encode(self.student, "")
-        refiner_pg = {rid: [] for rid in self.refiner_ids}
-        refiner_gn = {rid: [] for rid in self.refiner_ids}
+        refiner_pg: dict[Any, list[Any]] = {rid: [] for rid in self.refiner_ids}
+        refiner_gn: dict[Any, list[Any]] = {rid: [] for rid in self.refiner_ids}
         dit_losses, kls, ratios, dit_gn, all_reward = [], [], [], [], []
 
         for pi, prompt in enumerate(prompts):
@@ -218,7 +223,9 @@ class JointMultiExpertRL(TrainingMethod):
         if self.joint_generator:
             versions[self.generator_id] = self.sync[self.generator_id].apply(self.dit, self.dit, self.student)
 
-        m = lambda xs: float(np.mean(xs)) if xs else 0.0  # noqa: E731
+        def m(xs: Any) -> float:
+            return float(np.mean(xs)) if xs else 0.0
+
         metrics = {
             "reward_mean": m(all_reward),
             "n_experts": float(len(self.refiner_ids) + (1 if self.joint_generator else 0)),

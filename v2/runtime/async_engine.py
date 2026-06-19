@@ -12,6 +12,7 @@ the next step boundary and delivers partial artifacts + a structured ``cancelled
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 from collections.abc import AsyncIterator
 
@@ -26,10 +27,8 @@ _SENTINEL = object()
 
 def _safe_put(q: asyncio.Queue, item: Any) -> None:
     """Non-blocking put on an unbounded queue — safe to call from finally/cancellation paths."""
-    try:
+    with contextlib.suppress(Exception):
         q.put_nowait(item)
-    except Exception:
-        pass
 
 
 class RequestState:
@@ -171,10 +170,8 @@ class AsyncEngine:
         finally:
             # release any pool this request occupied — a cancel/error mid-loop must NOT leak capacity
             if runner is not None and hasattr(runner, "close"):
-                try:
+                with contextlib.suppress(Exception):
                     runner.close()
-                except Exception:
-                    pass
             _safe_put(evq, _SENTINEL)
             self._evict()
 
@@ -199,10 +196,8 @@ class AsyncEngine:
         finally:
             if not task.done():
                 task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
 
     async def generate(self, request: Any) -> Output:
         """Non-streaming: drive to completion, return the Output (the offline path over the queue)."""

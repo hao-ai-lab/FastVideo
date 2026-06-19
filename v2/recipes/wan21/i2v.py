@@ -37,12 +37,16 @@ from v2.recipes.common import text_encode_node_fn as _text_encode
 from v2.recipes.wan21.card import stamp_wan21_checkpoints
 from v2.recipes.wan21.loop import WanDenoiseLoop
 
-_WAN_TEMPORAL_RATIO = 4   # VAE temporal compression -> the i2v mask has this many channels
+_WAN_TEMPORAL_RATIO = 4  # VAE temporal compression -> the i2v mask has this many channels
 
 
-def build_wan21_i2v_card(model_id: str = "wan2.1-i2v-1.3b", *, flow_shift: float = 3.0,
-                       height: int = 480, width: int = 832, num_frames: int = 81,
-                       checkpoint_root: str | None = None) -> ModelCard:
+def build_wan21_i2v_card(model_id: str = "wan2.1-i2v-1.3b",
+                         *,
+                         flow_shift: float = 3.0,
+                         height: int = 480,
+                         width: int = 832,
+                         num_frames: int = 81,
+                         checkpoint_root: str | None = None) -> ModelCard:
     """Wan2.1 i2v (e.g. Wan2.1-Fun-1.3B-InP, WanI2V480PConfig). Same WanTransformer3DModel (in_ch=36) /
     AutoencoderKLWan / UMT5 as T2V + a CLIP image encoder; reuses the WanDenoiseLoop (i2v hooks)."""
     seed = _seed_from(model_id)
@@ -51,41 +55,72 @@ def build_wan21_i2v_card(model_id: str = "wan2.1-i2v-1.3b", *, flow_shift: float
     precision, expert = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True), NoRouting("transformer")
 
     def loop_factory():
-        return WanDenoiseLoop(loop_id="i2v_denoise", cfg=cfg, flow_shift=flow, precision=precision,
-                              expert=expert, cost=cost)
+        return WanDenoiseLoop(loop_id="i2v_denoise",
+                              cfg=cfg,
+                              flow_shift=flow,
+                              precision=precision,
+                              expert=expert,
+                              cost=cost)
 
     components = {
-        "text_encoder": ComponentSpec("text_encoder", kind="text_encoder",
-                                      load_id="fastvideo.models.encoders.t5:T5EncoderModel",
-                                      factory=lambda inst: ToyTextEncoder(), required_for={"i2v"}),
-        "image_encoder": ComponentSpec("image_encoder", kind="image_encoder",
-                                       load_id="fastvideo.models.encoders.clip:CLIPVisionModel",  # BRINGUP: class/subfolder
-                                       factory=lambda inst: ToyImageEncoder(), required_for={"i2v"}),
-        "vae": ComponentSpec("vae", kind="vae",
-                             load_id="fastvideo.models.vaes.wanvae:AutoencoderKLWan",
-                             factory=lambda inst: ToyVAE(), required_for={"i2v"}),
-        "transformer": ComponentSpec("transformer", kind="dit",
-                                     load_id="fastvideo.models.dits.wanvideo:WanTransformer3DModel",
-                                     factory=lambda inst: ToyDiT(seed=seed),
-                                     resident_for=["i2v_denoise"], required_for={"i2v"}),
+        "text_encoder":
+        ComponentSpec("text_encoder",
+                      kind="text_encoder",
+                      load_id="fastvideo.models.encoders.t5:T5EncoderModel",
+                      factory=lambda inst: ToyTextEncoder(),
+                      required_for={"i2v"}),
+        "image_encoder":
+        ComponentSpec(
+            "image_encoder",
+            kind="image_encoder",
+            load_id="fastvideo.models.encoders.clip:CLIPVisionModel",  # BRINGUP: class/subfolder
+            factory=lambda inst: ToyImageEncoder(),
+            required_for={"i2v"}),
+        "vae":
+        ComponentSpec("vae",
+                      kind="vae",
+                      load_id="fastvideo.models.vaes.wanvae:AutoencoderKLWan",
+                      factory=lambda inst: ToyVAE(),
+                      required_for={"i2v"}),
+        "transformer":
+        ComponentSpec("transformer",
+                      kind="dit",
+                      load_id="fastvideo.models.dits.wanvideo:WanTransformer3DModel",
+                      factory=lambda inst: ToyDiT(seed=seed),
+                      resident_for=["i2v_denoise"],
+                      required_for={"i2v"}),
     }
     loops = {
-        "i2v_denoise": LoopSpec("i2v_denoise", kind=LoopKind.DIFFUSION_DENOISE,
-                                work_unit_kind=WorkUnitKind.DIFFUSION_STEP, step_cost_model=cost,
-                                shared_weight_components=["transformer"], cache_policy=["feature"],
-                                loop_factory=loop_factory),
+        "i2v_denoise":
+        LoopSpec("i2v_denoise",
+                 kind=LoopKind.DIFFUSION_DENOISE,
+                 work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
+                 step_cost_model=cost,
+                 shared_weight_components=["transformer"],
+                 cache_policy=["feature"],
+                 loop_factory=loop_factory),
     }
     card = ModelCard(
-        model_id=model_id, family="wan", components=components, loops=loops,
+        model_id=model_id,
+        family="wan",
+        components=components,
+        loops=loops,
         capabilities=CapabilityMatrix.of(Capability.IMAGE_TO_VIDEO, Capability.VAE_DECODE),
-        recipe=RecipeSpec(method="base", assumes_loop="i2v_denoise", assumes_precision="float32",
+        recipe=RecipeSpec(method="base",
+                          assumes_loop="i2v_denoise",
+                          assumes_precision="float32",
                           consistency_required=ConsistencyLevel.C1),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
         caches={"feature": CacheContract("feature", max_bytes=1 << 24, reuse_across_requests=True)},
         precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
-        sampling_defaults=SamplingDefaults(num_steps=40, guidance_scale=5.0, height=height, width=width,
-                                           num_frames=num_frames, fps=16, negative_prompt=WAN_NEG_EN),
+        sampling_defaults=SamplingDefaults(num_steps=40,
+                                           guidance_scale=5.0,
+                                           height=height,
+                                           width=width,
+                                           num_frames=num_frames,
+                                           fps=16,
+                                           negative_prompt=WAN_NEG_EN),
     )
     card.validate()
     if checkpoint_root:
@@ -93,7 +128,9 @@ def build_wan21_i2v_card(model_id: str = "wan2.1-i2v-1.3b", *, flow_shift: float
     return card
 
 
-def build_wan22_i2v_a14b_card(model_id: str = "wan2.2-i2v-a14b", *, boundary: float = 0.9,
+def build_wan22_i2v_a14b_card(model_id: str = "wan2.2-i2v-a14b",
+                              *,
+                              boundary: float = 0.9,
                               checkpoint_root: str | None = None) -> ModelCard:
     """Wan2.2-I2V-A14B — MoE (two WanTransformer3DModel experts + boundary routing) + i2v conditioning
     (CLIP + first-frame [mask|cond]). Reuses the Wan adapter (cond concat + MoE CPU offload), the shared
@@ -105,42 +142,76 @@ def build_wan22_i2v_a14b_card(model_id: str = "wan2.2-i2v-a14b", *, boundary: fl
     expert = BoundaryTimestepRouting(high_noise="transformer", low_noise="transformer_2", boundary=boundary)
 
     def loop_factory():
-        return WanDenoiseLoop(loop_id="i2v_denoise", cfg=cfg, flow_shift=flow, precision=precision,
-                              expert=expert, cost=cost)
+        return WanDenoiseLoop(loop_id="i2v_denoise",
+                              cfg=cfg,
+                              flow_shift=flow,
+                              precision=precision,
+                              expert=expert,
+                              cost=cost)
 
-    def _dit(cid):
-        return ComponentSpec(cid, kind="dit", load_id="fastvideo.models.dits.wanvideo:WanTransformer3DModel",
-                             factory=lambda inst: ToyDiT(seed=seed), resident_for=["i2v_denoise"],
+    def _dit(cid: str) -> ComponentSpec:
+        return ComponentSpec(cid,
+                             kind="dit",
+                             load_id="fastvideo.models.dits.wanvideo:WanTransformer3DModel",
+                             factory=lambda inst: ToyDiT(seed=seed),
+                             resident_for=["i2v_denoise"],
                              required_for={"i2v"})
 
     components = {
-        "text_encoder": ComponentSpec("text_encoder", kind="text_encoder",
-                                      load_id="fastvideo.models.encoders.t5:T5EncoderModel",
-                                      factory=lambda inst: ToyTextEncoder(), required_for={"i2v"}),
-        "image_encoder": ComponentSpec("image_encoder", kind="image_encoder",
-                                       load_id="fastvideo.models.encoders.clip:CLIPVisionModel",
-                                       factory=lambda inst: ToyImageEncoder(), required_for={"i2v"}),
-        "vae": ComponentSpec("vae", kind="vae", load_id="fastvideo.models.vaes.wanvae:AutoencoderKLWan",
-                             factory=lambda inst: ToyVAE(), required_for={"i2v"}),
-        "transformer": _dit("transformer"), "transformer_2": _dit("transformer_2"),
+        "text_encoder":
+        ComponentSpec("text_encoder",
+                      kind="text_encoder",
+                      load_id="fastvideo.models.encoders.t5:T5EncoderModel",
+                      factory=lambda inst: ToyTextEncoder(),
+                      required_for={"i2v"}),
+        "image_encoder":
+        ComponentSpec("image_encoder",
+                      kind="image_encoder",
+                      load_id="fastvideo.models.encoders.clip:CLIPVisionModel",
+                      factory=lambda inst: ToyImageEncoder(),
+                      required_for={"i2v"}),
+        "vae":
+        ComponentSpec("vae",
+                      kind="vae",
+                      load_id="fastvideo.models.vaes.wanvae:AutoencoderKLWan",
+                      factory=lambda inst: ToyVAE(),
+                      required_for={"i2v"}),
+        "transformer":
+        _dit("transformer"),
+        "transformer_2":
+        _dit("transformer_2"),
     }
     loops = {
-        "i2v_denoise": LoopSpec("i2v_denoise", kind=LoopKind.DIFFUSION_DENOISE,
-                                work_unit_kind=WorkUnitKind.DIFFUSION_STEP, step_cost_model=cost,
-                                shared_weight_components=["transformer", "transformer_2"],
-                                cache_policy=["feature"], loop_factory=loop_factory),
+        "i2v_denoise":
+        LoopSpec("i2v_denoise",
+                 kind=LoopKind.DIFFUSION_DENOISE,
+                 work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
+                 step_cost_model=cost,
+                 shared_weight_components=["transformer", "transformer_2"],
+                 cache_policy=["feature"],
+                 loop_factory=loop_factory),
     }
     card = ModelCard(
-        model_id=model_id, family="wan", components=components, loops=loops,
+        model_id=model_id,
+        family="wan",
+        components=components,
+        loops=loops,
         capabilities=CapabilityMatrix.of(Capability.IMAGE_TO_VIDEO, Capability.VAE_DECODE),
-        recipe=RecipeSpec(method="base", assumes_loop="i2v_denoise", assumes_precision="float32",
+        recipe=RecipeSpec(method="base",
+                          assumes_loop="i2v_denoise",
+                          assumes_precision="float32",
                           consistency_required=ConsistencyLevel.C1),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
         caches={"feature": CacheContract("feature", max_bytes=1 << 24, reuse_across_requests=True)},
         precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
-        sampling_defaults=SamplingDefaults(num_steps=40, guidance_scale=3.5, height=480, width=832,
-                                           num_frames=81, fps=16, negative_prompt=WAN_NEG_CN),
+        sampling_defaults=SamplingDefaults(num_steps=40,
+                                           guidance_scale=3.5,
+                                           height=480,
+                                           width=832,
+                                           num_frames=81,
+                                           fps=16,
+                                           negative_prompt=WAN_NEG_CN),
     )
     card.validate()
     if checkpoint_root:
@@ -162,15 +233,15 @@ def _i2v_cond_encode(instance, slots, request, ctx) -> None:
     if img is None or getattr(img, "pixels", None) is None:
         slots["i2v_cond"] = None
         return
-    px = np.asarray(img.pixels, dtype="float32")          # [3, H, W] in [-1, 1]
+    px = np.asarray(img.pixels, dtype="float32")  # [3, H, W] in [-1, 1]
     nf = int(request.diffusion.num_frames)
     cond_video = np.zeros((px.shape[0], nf) + px.shape[1:], dtype="float32")
-    cond_video[:, 0] = px                                  # frame 0 = conditioning image, rest zeros
+    cond_video[:, 0] = px  # frame 0 = conditioning image, rest zeros
     cond_latent = np.asarray(instance.component("vae").encode(cond_video), dtype="float32")  # [C, T, h, w]
     t, h, w = cond_latent.shape[1:]
     mask = np.zeros((_WAN_TEMPORAL_RATIO, t, h, w), dtype="float32")
-    mask[:, 0] = 1.0                                       # first latent frame is the known (conditional) frame
-    slots["i2v_cond"] = np.concatenate([mask, cond_latent], axis=0)   # [mask | cond] -> WanDiT concats with noise
+    mask[:, 0] = 1.0  # first latent frame is the known (conditional) frame
+    slots["i2v_cond"] = np.concatenate([mask, cond_latent], axis=0)  # [mask | cond] -> WanDiT concats with noise
 
 
 def _i2v_vae_decode(instance, slots, request, ctx) -> None:
@@ -179,14 +250,21 @@ def _i2v_vae_decode(instance, slots, request, ctx) -> None:
 
 def build_wan21_i2v_program() -> Program:
     return Program(
-        program_id="wan21.i2v", kind=ProgramKind.INLINE,
+        program_id="wan21.i2v",
+        kind=ProgramKind.INLINE,
         nodes=[
-            ComponentNode("image_encode", fn=_i2v_image_encode, writes=("i2v_img_embeds",)),
-            ComponentNode("cond_encode", fn=_i2v_cond_encode, writes=("i2v_cond",)),
+            ComponentNode("image_encode", fn=_i2v_image_encode, writes=("i2v_img_embeds", )),
+            ComponentNode("cond_encode", fn=_i2v_cond_encode, writes=("i2v_cond", )),
             ComponentNode("text_encode", fn=_text_encode, writes=("text_embeds", "neg_text_embeds")),
-            ModelLoopNode("denoise", loop_id="i2v_denoise", output_slot="i2v_out",
-                          reads=("text_embeds", "i2v_cond", "i2v_img_embeds"), writes=("i2v_out",)),
-            ComponentNode("vae_decode", fn=_i2v_vae_decode, reads=("i2v_out",), writes=("video",)),
+            ModelLoopNode("denoise",
+                          loop_id="i2v_denoise",
+                          output_slot="i2v_out",
+                          reads=("text_embeds", "i2v_cond", "i2v_img_embeds"),
+                          writes=("i2v_out", )),
+            ComponentNode("vae_decode", fn=_i2v_vae_decode, reads=("i2v_out", ), writes=("video", )),
         ],
-        output_artifacts={"video": "video", "latents": "i2v_out"},
+        output_artifacts={
+            "video": "video",
+            "latents": "i2v_out"
+        },
     ).validate()

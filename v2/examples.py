@@ -6,14 +6,16 @@ Each prints what it demonstrates. This doubles as living documentation of the AP
 """
 from __future__ import annotations
 
+from typing import Any
+
 from v2.recipes import build_default_engine, build_omni_engine
 from v2.recipes.wan21 import build_wan21_card
 from v2.parity import assert_interleave_parity
-from v2.request import DiffusionParams, OutputSpec, SamplingParams, TaskType, make_request
+from v2.request import DiffusionParams, OutputSpec, Request, SamplingParams, TaskType, make_request
 from v2.training import build_diffusion_nft
 
 
-def _t2v(mid, prompt, seed, steps=4, **kw):
+def _t2v(mid: str, prompt: str, seed: int, steps: int = 4, **kw: Any) -> Request:
     return make_request(TaskType.T2V, mid, prompt, diffusion=DiffusionParams(num_steps=steps, seed=seed), **kw)
 
 
@@ -106,7 +108,7 @@ async def _serving_demo() -> None:
     server = OmniOpenAIServer(ae, engine_id="worker-0")
     host, port = await server.serve(port=0)
 
-    async def http(method, path, body=b""):
+    async def http(method: str, path: str, body: bytes = b"") -> str:
         r, w = await asyncio.open_connection(host, port)
         w.write(f"{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body)
         await w.drain()

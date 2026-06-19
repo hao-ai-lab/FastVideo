@@ -19,6 +19,8 @@ refinement) so the advantage contrasts refined vs unrefined — the LM's learnin
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from v2._enums import ConsistencyLevel, ExecutionProfile
@@ -116,7 +118,7 @@ class UnifiedRLMethod(TrainingMethod):
         }
         return rollout_loop(self.student, self.student_loop_id, req, slots=slots, profile=ExecutionProfile.ROLLOUT)
 
-    def _dit_ppo(self, behavior, emb, advantage):
+    def _dit_ppo(self, behavior: Any, emb: Any, advantage: float) -> tuple[float, float, float, float]:
         """FlowGRPO PPO over one rollout's SDE trajectory: per-step ratio + KL, then a toy DiT step.
         Returns (mean_ppo_loss, mean_kl, mean_ratio, grad_norm)."""
         ref_dit = self.reference.component("transformer")
@@ -148,7 +150,10 @@ class UnifiedRLMethod(TrainingMethod):
             v_target = _ml_velocity(prev, sample, st, sn, noise_scale=self.sde_noise_scale)  # PG direction
             _, gn = self.dit.mse_grad_step(prev, emb, st, v_target, self.dit_lr * float(np.clip(advantage, -1.0, 1.0)))
             gnorms.append(gn)
-        m = lambda xs: float(np.mean(xs)) if xs else 0.0  # noqa: E731
+
+        def m(xs: list[Any]) -> float:
+            return float(np.mean(xs)) if xs else 0.0
+
         return m(ppo_losses), m(kls), m(ratios), m(gnorms)
 
     def managed_train_step(self, batch: dict, iteration: int) -> tuple[dict, dict]:

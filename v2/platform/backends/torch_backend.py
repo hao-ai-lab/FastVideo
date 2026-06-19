@@ -238,8 +238,18 @@ class WanDiT(TorchComponent):
         return {"kv": kv, "crossattn": ca}
 
     @torch.no_grad()
-    def __call__(self, latent, text_embed, sigma, context=None, *, cond=None, kv_cache=None,
-                 crossattn_cache=None, current_start=0, start_frame=0, frame_seqlen=1560):
+    def __call__(self,
+                 latent,
+                 text_embed,
+                 sigma,
+                 context=None,
+                 *,
+                 cond=None,
+                 kv_cache=None,
+                 crossattn_cache=None,
+                 current_start=0,
+                 start_frame=0,
+                 frame_seqlen=1560):
         self._ensure_resident()
         hs = self._t(latent)
         if cond is not None:  # i2v: concat [noise (16ch) ; mask+cond_latent (20ch)] -> 36ch DiT input
@@ -255,8 +265,12 @@ class WanDiT(TorchComponent):
             # Pass the persistent caches + frame offset so the model runs _forward_inference (CausVid
             # Algorithm 2) and conditions this chunk on prior clean chunks. Without it the model falls
             # through to _forward_train (no cross-chunk KV) -> chunks denoise blind -> discontinuity.
-            fwd.update(kv_cache=kv_cache, crossattn_cache=crossattn_cache, current_start=int(current_start),
-                       cache_start=int(current_start), start_frame=int(start_frame), frame_seqlen=int(frame_seqlen))
+            fwd.update(kv_cache=kv_cache,
+                       crossattn_cache=crossattn_cache,
+                       current_start=int(current_start),
+                       cache_start=int(current_start),
+                       start_frame=int(start_frame),
+                       frame_seqlen=int(frame_seqlen))
         with self._ctx():
             velocity = self.module(**fwd)
         return self._n(velocity)  # rectified-flow velocity (BRINGUP risk C)

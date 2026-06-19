@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import itertools
 import time
 from typing import Any
@@ -21,6 +22,7 @@ import numpy as np
 from v2.request.artifacts import Output
 from v2.request.streams import StreamChunk
 from v2.serving.http import HttpServer, Request, Response
+from v2.serving.protocol import ChatCompletionRequest, ImageGenerationRequest, VideoGenerationRequest
 
 
 def _json_default(o: Any) -> Any:
@@ -39,8 +41,6 @@ def _json_default(o: Any) -> Any:
         return {"shape": list(o.shape), "dtype": str(o.dtype)}
     return str(o)
 
-
-from v2.serving.protocol import ChatCompletionRequest, ImageGenerationRequest, VideoGenerationRequest
 
 _job_ctr = itertools.count(1)
 _chat_ctr = itertools.count(1)
@@ -272,8 +272,6 @@ class OmniOpenAIServer:
         for t in list(self._tasks):  # cancel + drain in-flight video jobs on shutdown
             t.cancel()
         for t in list(self._tasks):
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await t
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
         await self.http.close()
