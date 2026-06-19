@@ -118,6 +118,12 @@ class FP32LayerNorm(nn.LayerNorm):
         """Return a cached fp32 view of ``t``, recomputed if its storage or version changed."""
         if t is None or t.dtype == torch.float32:
             return t
+        # Inference-only: the cached ``t.float()`` carries an autograd graph for affine
+        # weights, so reusing it across micro-batches under grad accumulation would raise
+        # "backward through the graph a second time". The cache targets weights that never
+        # change during inference, so only engage it when grad is disabled.
+        if torch.is_grad_enabled():
+            return t.float()
         cache = self.__dict__.get(attr)
         key = (t.data_ptr(), t._version)
         if cache is not None and cache[1:] == key:
