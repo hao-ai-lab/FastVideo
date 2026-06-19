@@ -808,3 +808,740 @@ python fastvideo/tests/modal/launch_l40s_job.py run-l40s-1 \
     tests/local_tests/test_interleave_thinker_method.py \
   --cmd 'pytest tests/local_tests/test_interleave_thinker_reward.py tests/local_tests/test_interleave_thinker_method.py tests/local_tests/test_train_rl_sampling.py -q && pre-commit run --files fastvideo/train/methods/rl/__init__.py fastvideo/train/methods/rl/interleave_thinker.py fastvideo/train/methods/rl/rewards/__init__.py fastvideo/train/methods/rl/rewards/interleave_thinker.py fastvideo/train/models/interleave_thinker/__init__.py fastvideo/train/models/interleave_thinker/critic.py'
 ```
+
+## Full Integration Plan
+
+Status: planning record requested by the user after the real critic checkpoint
+smoke passed. This section is the durable roadmap for a complete
+InterleaveThinker integration into FastVideo: planner, critic, generator
+orchestration, rewards, SFT, RL, evaluation, and docs.
+
+Working constraints for all stages:
+
+- Continue work only in `/tmp/fastvideo-interleavethinker`.
+- Do not edit `/home/toolbox/FastVideo`; that checkout belongs to another
+  agent.
+- Keep this file updated before context compaction or interruption.
+- Make focused commits, and push immediately after each commit.
+- Run GPU/model validation on Modal through
+  `fastvideo/tests/modal/launch_l40s_job.py`.
+- Prefer FastVideo's modular `fastvideo/train` stack for new training work.
+- Keep planner/critic VLM details inside `ModelBase` wrappers. RL methods own
+  algorithm logic, rewards own scoring, and orchestration lives under
+  `fastvideo/entrypoints/interleave`.
+
+Definition of "full integration":
+
+- A user can run InterleaveThinker-style inference from FastVideo using a
+  planner, an image generator/edit backend, and a critic.
+- A user can train or fine-tune the planner and critic through FastVideo YAML
+  configs and the modular trainer.
+- A user can run critic RL with InterleaveThinker rewards through FastVideo
+  rather than EasyR1/verl.
+- Closed-source services used by the paper are represented by API wrappers with
+  testable fake backends.
+- The integration has real-checkpoint smoke coverage, fake-backend unit tests,
+  and at least one Modal training smoke that exercises optimizer/checkpoint
+  plumbing.
+
+Current baseline on branch `interleavethinker-fastvideo`:
+
+- FastVideo-compatible `/edit` service and interleave orchestration shell.
+- API wrappers for Gemini / Nano Banana style reward and image backends.
+- InterleaveThinker reward parser/scorer.
+- Initial `InterleaveThinkerRLMethod` with grouped rollouts and advantages.
+- `InterleaveThinkerCriticModel` Qwen3-VL wrapper.
+- Real Modal L40S critic smoke:
+  - model: `InterleaveThinker/Critic-SFT-8B`;
+  - processor: `Qwen/Qwen3-VL-8B-Instruct`;
+  - backend: `Qwen3VLForConditionalGeneration`;
+  - result: non-empty response and `SMOKE_OK`.
+
+### Stage 0: Scope, Contracts, And Branch Hygiene
+
+Goal:
+
+- Convert the existing exploratory branch into a reviewable, staged integration
+  plan with clear acceptance gates.
+
+Work items:
+
+- Keep this handoff as the canonical progress document.
+- Add a short public design doc under `docs/` or `examples/interleave/` that
+  defines the integration surfaces:
+  - inference/orchestration;
+  - planner model;
+  - critic model;
+  - SFT methods/configs;
+  - RL method/configs;
+  - reward backends;
+  - evaluation scripts.
+- Identify which upstream artifacts are required:
+  - `InterleaveThinker/InterleaveThinker-Planner-8B`;
+  - `InterleaveThinker/Critic-SFT-8B`;
+  - `InterleaveThinker/InterleaveThinker-Critic-8B`;
+  - `InterleaveThinker/Train-Data`;
+  - upstream `demo_klein.py`;
+  - upstream `train/EasyR1/local_scripts/run_interleave_thinker_rl.sh`;
+  - upstream reward function.
+- Decide and document the model-port shape:
+  - planner and critic are FastVideo `ModelBase` training adapters around
+    Transformers Qwen3-VL, not native FastVideo DiT components;
+  - no checkpoint conversion is needed for upstream HF checkpoints unless later
+    FastVideo-native Qwen3-VL support is explicitly required;
+  - LoRA adapter save/load should use existing FastVideo/PEFT mechanisms where
+    possible.
+
+Files likely touched:
+
+- `.agents/exploration/interleavethinker-fastvideo-integration.md`
+- `docs/` or `examples/interleave/README.md`
+- `examples/train/configs/rl/interleave_thinker/README.md`
+
+Acceptance gates:
+
+- Design doc reviewed in the branch.
+- Handoff lists exact upstream checkpoints and current validation status.
+- `git status --short --branch` clean after commit and push.
+
+### Stage 1: Public Package Contract And Examples
+
+Goal:
+
+- Make the intended public surface obvious and stable before adding more
+  implementation.
+
+Work items:
+
+- Define package-level exports:
+  - `fastvideo.entrypoints.interleave`;
+  - `fastvideo.train.models.interleave_thinker`;
+  - `fastvideo.train.methods.rl.interleave_thinker`;
+  - `fastvideo.train.methods.rl.rewards.interleave_thinker`.
+- Add or update examples:
+  - single-prompt interleaved inference;
+  - FastVideo-compatible `/edit` server;
+  - planner smoke config;
+  - critic smoke config;
+  - critic RL config;
+  - planner SFT config;
+  - critic SFT config.
+- Ensure example names separate inference, SFT, and RL:
+  - `examples/interleave/run_interleave_prompt.py`;
+  - `examples/interleave/flux2_klein_interleave_serve.yaml`;
+  - `examples/train/configs/interleave_thinker/planner_sft_lora.yaml`;
+  - `examples/train/configs/interleave_thinker/critic_sft_lora.yaml`;
+  - `examples/train/configs/rl/interleave_thinker/critic_grpo_lora.yaml`.
+- Add README content for required credentials:
+  - Hugging Face token, if needed for model/dataset access;
+  - Google/Gemini API key for closed-source reward backends;
+  - FastVideo local generator endpoint for open generator backends.
+
+Acceptance gates:
+
+- Config parse tests prove every public YAML target is importable.
+- Example docs name which commands require Modal/GPU/API credentials.
+
+### Stage 2: Shared Qwen3-VL Actor Base
+
+Goal:
+
+- Remove critic-only duplication and create the shared runtime both planner and
+  critic need.
+
+Work items:
+
+- Add a shared base module, for example:
+  `fastvideo/train/models/interleave_thinker/qwen_actor.py`.
+- Move shared functionality out of `critic.py`:
+  - `AutoProcessor` loading;
+  - model-class selection, preferring `Qwen3VLForConditionalGeneration` when
+    available;
+  - `torch_dtype`, `device_map`, `attn_implementation`, `trust_remote_code`;
+  - chat-template application;
+  - image path normalization;
+  - device movement;
+  - response-token masking for SFT/RL;
+  - trainable/freezing policy;
+  - LoRA enablement.
+- Keep role-specific prompt/message construction in planner and critic
+  subclasses.
+- Add explicit model/runtime diagnostics:
+  - loaded processor class;
+  - loaded model class;
+  - trainable parameter count;
+  - frozen vision/projector counts;
+  - dtype/device summary.
+- Preserve `load_backend=false` for unit tests.
+
+Files likely touched:
+
+- `fastvideo/train/models/interleave_thinker/qwen_actor.py`
+- `fastvideo/train/models/interleave_thinker/critic.py`
+- `fastvideo/train/models/interleave_thinker/__init__.py`
+- `tests/local_tests/test_interleave_thinker_critic_model.py`
+- new `tests/local_tests/test_interleave_thinker_qwen_actor.py`
+
+Acceptance gates:
+
+- Existing critic tests still pass.
+- Fake-backend tests cover shared generation and response-token masking.
+- Modal real critic smoke still passes after the refactor.
+
+### Stage 3: Planner Model Wrapper
+
+Goal:
+
+- Add a first-class FastVideo planner model adapter for
+  `InterleaveThinker/InterleaveThinker-Planner-8B`.
+
+Work items:
+
+- Add `fastvideo/train/models/interleave_thinker/planner.py`.
+- Implement `InterleaveThinkerPlannerModel` with hooks:
+  - `generate_interleave_plan(batch_or_prompt, **kwargs)`;
+  - `train_interleave_supervised(...)` or shared SFT loss hook;
+  - optional `build_messages(...)` for text-only and image-conditioned planning.
+- Port upstream planner prompt formats from:
+  - `UEval/system.py`;
+  - `demo_klein.py`;
+  - data generation scripts if they define the canonical JSON format.
+- Add plan dataclasses or Pydantic models:
+  - execution plan;
+  - step number;
+  - step name;
+  - instruction;
+  - generator prompt;
+  - auxiliary text.
+- Add strict and permissive parsing modes:
+  - strict for training/evaluation;
+  - permissive for inference recovery when the model emits near-valid JSON.
+- Support optional input image paths for guidance-style tasks.
+
+Files likely touched:
+
+- `fastvideo/train/models/interleave_thinker/planner.py`
+- `fastvideo/entrypoints/interleave/schema.py`
+- `fastvideo/entrypoints/interleave/orchestrator.py`
+- `tests/local_tests/test_interleave_thinker_planner_model.py`
+- `tests/local_tests/test_interleave_orchestrator.py`
+
+Acceptance gates:
+
+- Fake backend planner tests pass.
+- Modal real planner smoke:
+  - load `InterleaveThinker/InterleaveThinker-Planner-8B`;
+  - use processor `Qwen/Qwen3-VL-8B-Instruct`;
+  - generate a plan for one text prompt;
+  - parse at least one valid execution step.
+
+### Stage 4: Full Inference Orchestration
+
+Goal:
+
+- Make FastVideo run the whole InterleaveThinker loop, not just individual
+  model calls.
+
+Work items:
+
+- Expand `InterleaveOrchestrator` to match upstream flow:
+  1. accept user prompt and optional input image;
+  2. call planner to create execution plan;
+  3. for each plan step, select generation or edit mode;
+  4. call generator/edit backend;
+  5. call critic with before/after image pair and prompt state;
+  6. retry failed step with `refine_prompt`;
+  7. stop when the step passes or retry budget is exhausted;
+  8. emit final interleaved text/image sequence and full trace.
+- Support multiple generator backend types:
+  - FastVideo local model;
+  - FastVideo `/edit` HTTP service;
+  - upstream-style generator API;
+  - Gemini/Nano Banana wrappers for closed-source comparison;
+  - fake deterministic backend.
+- Trace schema should record:
+  - original user prompt;
+  - planner raw response and parsed plan;
+  - every step attempt;
+  - prompt used for generation/edit;
+  - before and after image paths;
+  - critic raw response and parsed answer;
+  - success/failure;
+  - timing and backend metadata;
+  - random seed and generation parameters.
+- Add CLI:
+  - `fastvideo interleave-run --config ... --prompt ... --output-dir ...`;
+  - optional `--input-image`;
+  - optional `--max-step-iterations`;
+  - optional `--save-trace-json`.
+- Add server route if useful:
+  - `/interleave/run` for a complete prompt-to-trace request.
+
+Files likely touched:
+
+- `fastvideo/entrypoints/interleave/orchestrator.py`
+- `fastvideo/entrypoints/interleave/schema.py`
+- `fastvideo/entrypoints/interleave/generator.py`
+- `fastvideo/entrypoints/interleave/server.py`
+- `fastvideo/entrypoints/cli/main.py`
+- `fastvideo/entrypoints/cli/interleave_run.py`
+- `examples/interleave/`
+- `tests/local_tests/test_interleave_orchestrator.py`
+- `tests/local_tests/test_interleave_cli.py`
+
+Acceptance gates:
+
+- Pure fake-backend orchestrator tests pass:
+  - one-step success;
+  - retry then success;
+  - retry exhaustion;
+  - plan parse failure;
+  - trace serialization.
+- Modal smoke with real planner and critic plus fake generator passes.
+- Modal smoke with real planner, real critic, and FastVideo `/edit` service is
+  added when resources permit.
+
+### Stage 5: Official Data Loaders And Converters
+
+Goal:
+
+- Make upstream InterleaveThinker data directly consumable by FastVideo SFT and
+  RL configs.
+
+Work items:
+
+- Add dataset utilities under one of:
+  - `fastvideo/train/models/interleave_thinker/data.py`;
+  - `fastvideo/train/datasets/interleave_thinker.py` if a dataset bucket exists
+    or is preferred locally.
+- Support upstream files:
+  - `planner_sft.json`;
+  - `critic_sft.json`;
+  - `critic_rl.jsonl`.
+- Support `image_dir` and relative path resolution for all image keys:
+  - `origin_image_path`;
+  - `previous_image_path`;
+  - `edited_image_path`;
+  - `generated_image_path`;
+  - `input_image_path`;
+  - `output_image_path`;
+  - upstream aliases discovered during reference study.
+- Add schema normalization:
+  - planner row -> prompt/messages/completion;
+  - critic SFT row -> two-image evaluation prompt/completion;
+  - critic RL row -> rollout seed record with evaluation labels.
+- Add validation and clear errors for missing files, malformed JSON, empty
+  datasets, missing image paths, and non-image file extensions.
+- Add optional conversion script for local inspection:
+  - `scripts/interleave_thinker/inspect_dataset.py`;
+  - `scripts/interleave_thinker/convert_dataset_preview.py`.
+
+Files likely touched:
+
+- `fastvideo/train/models/interleave_thinker/data.py`
+- `tests/local_tests/test_interleave_thinker_data.py`
+- `examples/train/configs/interleave_thinker/*.yaml`
+- `examples/train/configs/rl/interleave_thinker/*.yaml`
+
+Acceptance gates:
+
+- Unit tests cover minimal upstream-like planner, critic SFT, and critic RL
+  rows.
+- Modal dataset smoke loads a tiny generated fixture with relative image paths.
+- Optional Modal smoke can load the HF dataset if credentials and storage are
+  available.
+
+### Stage 6: Planner And Critic SFT
+
+Goal:
+
+- Train planner and critic with supervised fine-tuning inside FastVideo.
+
+Work items:
+
+- Add an SFT method or reuse an existing generic supervised method if it fits
+  multimodal causal LM response-token masking.
+- Preferred shape if no existing method fits:
+  - `fastvideo/train/methods/fine_tuning/interleave_thinker_sft.py`;
+  - method delegates tokenization and loss to planner/critic model wrappers;
+  - trainer still owns normal optimizer flow unless the method needs custom
+    batching.
+- Add model hooks:
+  - `prepare_interleave_sft_batch(...)`;
+  - `compute_interleave_sft_loss(...)`;
+  - shared label masking for assistant response tokens only.
+- Add LoRA-first training configs:
+  - planner LoRA SFT;
+  - critic LoRA SFT.
+- Add full-finetune configs only after LoRA path is stable.
+- Ensure checkpoint save/resume works:
+  - LoRA adapter checkpoint;
+  - optimizer/scheduler state;
+  - training state.
+
+Files likely touched:
+
+- `fastvideo/train/methods/fine_tuning/interleave_thinker_sft.py`
+- `fastvideo/train/methods/fine_tuning/__init__.py`
+- `fastvideo/train/models/interleave_thinker/qwen_actor.py`
+- `fastvideo/train/models/interleave_thinker/planner.py`
+- `fastvideo/train/models/interleave_thinker/critic.py`
+- `examples/train/configs/interleave_thinker/planner_sft_lora.yaml`
+- `examples/train/configs/interleave_thinker/critic_sft_lora.yaml`
+- `tests/local_tests/test_interleave_thinker_sft_method.py`
+
+Acceptance gates:
+
+- Fake-backend SFT loss tests verify:
+  - prompt tokens are masked with `-100`;
+  - response tokens are trainable;
+  - gradients flow to trainable language parameters;
+  - frozen vision/projector parameters remain frozen.
+- Modal one-step LoRA planner SFT smoke.
+- Modal one-step LoRA critic SFT smoke.
+- Pre-commit passes on changed files.
+
+### Stage 7: Critic RL Upgrade To EasyR1-Parity GRPO
+
+Goal:
+
+- Move from the current useful GRPO-like skeleton to an EasyR1-parity critic RL
+  method that is credible for real training.
+
+Work items:
+
+- Add per-token logprob support to the critic actor wrapper:
+  - generated response token ids;
+  - attention masks;
+  - response masks;
+  - current policy logprobs;
+  - old policy logprobs captured at rollout time;
+  - optional reference policy logprobs.
+- Upgrade `InterleaveThinkerRLMethod` objective:
+  - group-normalized advantages;
+  - PPO/GRPO ratio;
+  - clipping;
+  - optional KL penalty;
+  - configurable KL coefficient;
+  - reward/advantage normalization metrics;
+  - rollout microbatching and update microbatching.
+- Add optional reference model role:
+  - `models.reference`;
+  - frozen Qwen3-VL critic SFT checkpoint;
+  - shared processor.
+- Add rollout controls:
+  - `num_generations`;
+  - `rollout_batch_size`;
+  - `global_batch_size`;
+  - `micro_batch_size_per_device_for_update`;
+  - `micro_batch_size_per_device_for_experience`;
+  - `temperature`;
+  - `top_p`;
+  - `max_new_tokens`.
+- Add memory controls:
+  - LoRA mode;
+  - gradient checkpointing;
+  - flash attention when available;
+  - FSDP/HSDP compatibility investigation;
+  - tensor parallel only if it fits FastVideo's training stack cleanly.
+- Make optimizer behavior explicit:
+  - method-managed optimization remains appropriate;
+  - trainer callbacks/checkpointing should still see optimizer/scheduler state.
+- Add parity notes against upstream EasyR1:
+  - fields intentionally matching;
+  - fields intentionally not supported yet;
+  - semantic differences in distributed execution.
+
+Files likely touched:
+
+- `fastvideo/train/methods/rl/interleave_thinker.py`
+- `fastvideo/train/models/interleave_thinker/qwen_actor.py`
+- `fastvideo/train/models/interleave_thinker/critic.py`
+- `examples/train/configs/rl/interleave_thinker/critic_grpo_lora.yaml`
+- `tests/local_tests/test_interleave_thinker_method.py`
+- new `tests/local_tests/test_interleave_thinker_grpo_math.py`
+
+Acceptance gates:
+
+- Unit tests prove GRPO math on deterministic fake logprobs:
+  - advantage grouping;
+  - ratio/clipping;
+  - KL term;
+  - mask handling;
+  - metric names.
+- Fake actor update test proves only response tokens contribute to loss.
+- Modal one-step LoRA critic RL smoke with real checkpoint and fake edit scorer.
+- Modal one-step critic RL smoke with API reward backend only if credentials are
+  available and cost/rate limits are acceptable.
+
+### Stage 8: Reward Backend Completion
+
+Goal:
+
+- Fully represent the InterleaveThinker paper reward setup in FastVideo with
+  testable open and closed backends.
+
+Work items:
+
+- Keep reusable reward aggregation in
+  `fastvideo/train/methods/rl/rewards/interleave_thinker.py`.
+- Keep network/API clients in
+  `fastvideo/train/methods/rl/rewards/interleave_api.py`.
+- Complete backends:
+  - format reward;
+  - judge accuracy reward;
+  - semantic reward;
+  - quality reward;
+  - Gemini judge wrapper;
+  - Nano Banana image generation/edit wrapper;
+  - Gemini image generation/edit wrapper;
+  - FastVideo `/edit` HTTP wrapper;
+  - local fake scorer for tests.
+- Add operational features:
+  - retries with exponential backoff;
+  - request timeout;
+  - max concurrency;
+  - disk cache keyed by prompt/image/model params;
+  - artifact output directory;
+  - redacted logging for API keys;
+  - fallback reward behavior when backend fails.
+- Add reward request/response schema versioning so saved traces remain
+  inspectable.
+
+Files likely touched:
+
+- `fastvideo/train/methods/rl/rewards/interleave_thinker.py`
+- `fastvideo/train/methods/rl/rewards/interleave_api.py`
+- `fastvideo/train/methods/rl/rewards/__init__.py`
+- `tests/local_tests/test_interleave_thinker_reward.py`
+- `tests/local_tests/test_interleave_thinker_api_models.py`
+
+Acceptance gates:
+
+- Unit tests cover all parsing and aggregation branches.
+- API-wrapper tests use fake clients, not live credentials.
+- Optional Modal live API smoke is recorded only when credentials are present.
+
+### Stage 9: Generator Backend Integration
+
+Goal:
+
+- Make InterleaveThinker generation/edit calls work against both FastVideo and
+  closed-source backends.
+
+Work items:
+
+- Finish generator backend interface:
+  - `generate(prompt, ...)`;
+  - `edit(prompt, image, ...)`;
+  - `supports_edit`;
+  - `supports_text_to_image`;
+  - output image path/base64/PIL handling.
+- Implement or complete backends:
+  - FastVideo local `VideoGenerator` backend;
+  - FastVideo HTTP `/edit` backend;
+  - upstream-compatible HTTP backend;
+  - Gemini image backend;
+  - Nano Banana backend;
+  - fake backend.
+- Ensure request parameter mapping handles:
+  - `num_inference_step` and `num_inference_steps`;
+  - `guidance_scale`;
+  - `width`;
+  - `height`;
+  - `seed`;
+  - `enhance_prompt`;
+  - input image.
+- Define behavior for pure text generation step:
+  - use blank canvas for image-only generators when needed;
+  - preserve auxiliary text-only steps in the trace without forcing image
+    generation.
+
+Files likely touched:
+
+- `fastvideo/entrypoints/interleave/generator.py`
+- `fastvideo/entrypoints/interleave/server.py`
+- `fastvideo/train/methods/rl/rewards/interleave_api.py`
+- `examples/interleave/`
+- `tests/local_tests/test_interleave_generator_backend.py`
+
+Acceptance gates:
+
+- Fake backend tests cover request translation and image serialization.
+- Modal import/server smoke starts the `/edit` service.
+- Real FastVideo generator smoke is added for the smallest practical model
+  target available on Modal.
+
+### Stage 10: Evaluation And Benchmark Harness
+
+Goal:
+
+- Provide enough evaluation tooling to compare FastVideo InterleaveThinker
+  behavior with upstream and to catch regressions.
+
+Work items:
+
+- Add trace-level evaluator:
+  - load saved trace;
+  - validate schema;
+  - summarize success rate, retries, failure reasons, token counts, timing.
+- Add small prompt-set runner:
+  - JSONL prompt list;
+  - output trace directory;
+  - resume from partial results.
+- Add optional UEval/WISE/RISE adapters if datasets are available.
+- Add visual artifact organization:
+  - per-sample directory;
+  - per-step attempt images;
+  - final contact sheet or HTML report.
+- Add comparison mode:
+  - compare two trace directories;
+  - summarize pass/fail deltas and retry counts.
+
+Files likely touched:
+
+- `scripts/interleave_thinker/evaluate_traces.py`
+- `scripts/interleave_thinker/run_prompt_set.py`
+- `examples/interleave/eval_prompts.jsonl`
+- `tests/local_tests/test_interleave_evaluation.py`
+
+Acceptance gates:
+
+- Unit tests validate trace metrics on fake traces.
+- Modal smoke runs a tiny fake-backend prompt set and writes metric JSON.
+- Optional real planner/critic/generator evaluation is documented separately
+  because it may require substantial GPU/API cost.
+
+### Stage 11: Distributed And Checkpointing Hardening
+
+Goal:
+
+- Make the training path usable beyond toy smoke tests.
+
+Work items:
+
+- Verify FastVideo trainer checkpoint lifecycle with:
+  - planner LoRA SFT;
+  - critic LoRA SFT;
+  - critic LoRA RL.
+- Add resume tests or smoke commands:
+  - run one step;
+  - save checkpoint;
+  - resume;
+  - run one additional step.
+- Investigate memory strategy for full 8B training:
+  - LoRA default;
+  - FSDP/HSDP support;
+  - gradient checkpointing;
+  - reference model memory impact;
+  - whether tensor parallelism is compatible with Transformers Qwen3-VL in this
+    wrapper.
+- Add clear config comments for practical hardware:
+  - one L40S LoRA smoke;
+  - multi-GPU full or larger LoRA run;
+  - expected storage for HF weights and outputs.
+
+Files likely touched:
+
+- training configs under `examples/train/configs/interleave_thinker/`
+- RL configs under `examples/train/configs/rl/interleave_thinker/`
+- docs/readmes
+- possibly trainer/checkpoint integration if current callbacks cannot see
+  method-managed optimizer state.
+
+Acceptance gates:
+
+- Modal checkpoint/resume smoke for one LoRA SFT config.
+- Modal checkpoint/resume smoke for one LoRA RL config if memory permits.
+- Documentation clearly states unvalidated full-finetune paths.
+
+### Stage 12: Final Documentation And Review Package
+
+Goal:
+
+- Leave the branch ready for review or decomposition into PRs.
+
+Work items:
+
+- Write final docs:
+  - quickstart inference;
+  - planner SFT;
+  - critic SFT;
+  - critic RL;
+  - reward backend configuration;
+  - evaluation;
+  - troubleshooting.
+- Add a concise design note explaining why planner/critic are Transformers
+  `ModelBase` wrappers rather than native diffusion pipeline components.
+- Add a validation matrix with exact Modal URLs and commit hashes.
+- Remove stale exploratory command snippets that reference old base commits or
+  obsolete Modal invocation shapes.
+- Ensure every public config has:
+  - importable targets;
+  - comments for credentials/hardware;
+  - safe defaults for smoke tests where possible.
+
+Acceptance gates:
+
+- Full focused test suite passes on Modal.
+- Pre-commit passes on all changed non-excluded files.
+- Branch is clean and pushed.
+- Handoff file includes:
+  - latest commit hash;
+  - validation evidence;
+  - unresolved risks;
+  - next recommended PR split.
+
+### Recommended PR Stack
+
+The full integration should be decomposed. Recommended stack:
+
+1. Shared Qwen3-VL actor base plus planner model wrapper.
+2. Official data loaders and SFT method/configs.
+3. Full inference orchestrator, CLI, trace schema, and generator backends.
+4. Reward backend completion with closed-source API wrappers and caching.
+5. EasyR1-parity GRPO upgrade for critic RL.
+6. Evaluation harness and final docs.
+
+Each PR should include:
+
+- focused code changes;
+- config parse tests;
+- fake-backend unit tests;
+- at least one Modal smoke when the PR touches real model loading or training;
+- an update to this handoff file until the work is merged or superseded.
+
+### Open Risks And Decisions
+
+- Full native Qwen3-VL port:
+  - Current plan wraps Transformers Qwen3-VL. A native FastVideo Qwen3-VL port
+    should be considered only if checkpoint conversion, distributed execution,
+    or performance requirements justify the extra work.
+- Full-parameter 8B optimizer memory:
+  - One L40S is enough for inference smoke but likely not for full-parameter
+    Adam RL. LoRA should be the first supported training path.
+- Closed-source backend reproducibility:
+  - Gemini/Nano Banana behavior can change. Unit tests must use fake clients,
+    and live API results should be recorded as smoke evidence rather than
+    deterministic regression tests.
+- Upstream data availability:
+  - HF dataset/model access may require tokens or change over time. Dataset
+    loaders should have tiny checked-in fixtures for tests.
+- EasyR1 parity:
+  - FastVideo does not need to clone EasyR1 internals exactly, but any semantic
+    difference in GRPO objective, KL handling, rollout batching, or distributed
+    behavior must be documented.
+
+### Immediate Next Step After This Plan
+
+Start with Stage 2 and Stage 3 together:
+
+- refactor `InterleaveThinkerCriticModel` onto a shared Qwen3-VL actor base;
+- add `InterleaveThinkerPlannerModel`;
+- add fake-backend planner tests;
+- run a real Modal planner smoke with
+  `InterleaveThinker/InterleaveThinker-Planner-8B`.
+
+This is the smallest next slice that moves from critic-only integration toward
+the complete planner + critic + orchestrator system while preserving the already
+validated critic path.
