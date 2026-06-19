@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from fastvideo.tests.performance.hf_store import safe_float
+from fastvideo.tests.performance.hf_store import is_baseline_eligible_record, safe_float
 
 from .metrics import METRICS
 
@@ -45,6 +45,7 @@ def filter_records(
     *,
     model_id: str | None = None,
     gpu_type: str | None = None,
+    run_source: str | None = None,
     success: bool | None = None,
 ) -> list[Record]:
     filtered = records
@@ -52,9 +53,29 @@ def filter_records(
         filtered = [record for record in filtered if record.get("model_id") == model_id]
     if gpu_type:
         filtered = [record for record in filtered if record.get("gpu_type") == gpu_type]
+    if run_source:
+        filtered = [record for record in filtered if record_run_source(record) == run_source]
     if success is not None:
         filtered = [record for record in filtered if bool(record.get("success", True)) == success]
     return sorted(filtered, key=record_sort_key)
+
+
+def record_run_source(record: Record) -> str:
+    value = str(record.get("run_source") or "unknown")
+    return value if value in {"pr", "local", "scheduled_main", "unknown"} else "unknown"
+
+
+def record_metadata(record: Record) -> Record:
+    return {
+        "run_source": record_run_source(record),
+        "baseline_eligible": is_baseline_eligible_record(record),
+        "branch": record.get("branch") or "",
+        "pr_number": record.get("pr_number") or "",
+        "test_scope": record.get("test_scope") or "",
+        "build_url": record.get("build_url") or "",
+        "build_id": record.get("build_id") or "",
+        "job_id": record.get("job_id") or "",
+    }
 
 
 def group_by_model_gpu(records: list[Record]) -> dict[tuple[str, str], list[Record]]:
@@ -86,12 +107,22 @@ def regression_percent(metric_key: str, current: float | None, baseline: float |
 def build_latest_summary(records: list[Record],
                          *,
                          baseline_window: int = 5,
-                         max_regression: float = 0.05) -> list[Record]:
+                         max_regression: float = 0.05,
+                         run_source: str | None = None) -> list[Record]:
     rows: list[Record] = []
     for (model_id, gpu_type), group in group_by_model_gpu(records).items():
-        latest = group[-1]
-        earlier_successes = [record for record in group[:-1] if record.get("success", True)]
-        baseline_records = earlier_successes[-baseline_window:]
+        latest_candidates = group
+        if run_source:
+            latest_candidates = [record for record in group if record_run_source(record) == run_source]
+        if not latest_candidates:
+            continue
+
+        latest = latest_candidates[-1]
+        baseline_pool = [
+            record for record in group
+            if record is not latest and record.get("success", True) and is_baseline_eligible_record(record)
+        ]
+        baseline_records = baseline_pool[-baseline_window:]
 
         metrics: dict[str, Record] = {}
         regressions: list[float] = []
@@ -123,6 +154,7 @@ def build_latest_summary(records: list[Record],
             latest.get("timestamp"),
             "commit_sha":
             latest.get("commit_sha"),
+            **record_metadata(latest),
             "success":
             success,
             "baseline_n":
@@ -150,6 +182,7 @@ def build_trends(records: list[Record]) -> list[Record]:
             point = {
                 "timestamp": record.get("timestamp"),
                 "commit_sha": record.get("commit_sha"),
+                **record_metadata(record),
                 "success": bool(record.get("success", True)),
                 "metrics": {
                     metric.key: safe_float(record.get(metric.key))
