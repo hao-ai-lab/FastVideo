@@ -47,7 +47,11 @@ class WanT2V480PConfig(PipelineConfig):
 
     # Precision for each component
     precision: str = "bf16"
-    vae_precision: str = "fp32"
+    # bf16 VAE decode is effectively lossless (MS-SSIM 0.9999 vs fp32 on an
+    # identical latent) and faster; the same AutoencoderKLWan already runs bf16
+    # in Cosmos-Predict2.5 and fp16 in Cosmos. fp32 here was just the inherited
+    # PipelineConfig default, not a Wan-specific requirement.
+    vae_precision: str = "bf16"
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
 
     # self-forcing params
