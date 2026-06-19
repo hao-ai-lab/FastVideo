@@ -38,9 +38,9 @@ def test_causal_chunk_rollout_frame_count():
     eng = _eng()
     out = eng.run(make_request(TaskType.T2V, "wan-causal-sf-1.3b", "a river",
                                diffusion=DiffusionParams(seed=3)))
-    assert out.metrics["chunks"] == 3.0
-    # 3 chunks × 2 frames/chunk concatenated over the temporal axis
-    assert out.artifacts["latents"].latent.shape[1] == 6
+    assert out.metrics["chunks"] == 7.0
+    # 7 chunks × 3 latent frames/chunk (the self-forcing native block) over the temporal axis -> 81 video
+    assert out.artifacts["latents"].latent.shape[1] == 21
 
 
 def test_determinism_same_seed_bit_identical():

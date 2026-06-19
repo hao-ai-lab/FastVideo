@@ -20,6 +20,7 @@ on a CPU box never imports torch and the mini stays green. Wan2.1 + LTX-2 A/V GP
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import numpy as np
 import torch
@@ -56,9 +57,8 @@ def _ensure_fastvideo_runtime() -> None:
 def _require_checkpoint(spec) -> str:
     ckpt = getattr(spec, "checkpoint", "") or ""
     if not ckpt:
-        raise RuntimeError(
-            f"component {spec.component_id!r}: set ComponentSpec.checkpoint to the weights path / HF id "
-            f"for the GPU backend (load_id={spec.load_id!r}). See GPU_BRINGUP.md, risk A.")
+        raise RuntimeError(f"component {spec.component_id!r}: set ComponentSpec.checkpoint to the weights path / HF id "
+                           f"for the GPU backend (load_id={spec.load_id!r}). See GPU_BRINGUP.md, risk A.")
     return ckpt
 
 
@@ -68,16 +68,22 @@ def _model_root(spec) -> str:
     return os.path.dirname(os.path.normpath(_require_checkpoint(spec)))
 
 
-def _fastvideo_args(spec):
+def _fastvideo_args(spec: Any) -> Any:
     """Build the FastVideoArgs the real loaders need (BRINGUP risk A). ``from_kwargs`` populates
     ``pipeline_config`` (dit/vae/text-encoder configs + precisions) from the model root. Single-GPU,
     all offload/FSDP OFF — weights resident on one device, the simplest correct bring-up."""
     from v2.fastvideo_args import FastVideoArgs
-    return FastVideoArgs.from_kwargs(
-        model_path=_model_root(spec), num_gpus=1, tp_size=1, sp_size=1,
-        dit_cpu_offload=False, text_encoder_cpu_offload=False, vae_cpu_offload=False,
-        image_encoder_cpu_offload=False, dit_layerwise_offload=False,
-        use_fsdp_inference=False, pin_cpu_memory=False)
+    return FastVideoArgs.from_kwargs(model_path=_model_root(spec),
+                                     num_gpus=1,
+                                     tp_size=1,
+                                     sp_size=1,
+                                     dit_cpu_offload=False,
+                                     text_encoder_cpu_offload=False,
+                                     vae_cpu_offload=False,
+                                     image_encoder_cpu_offload=False,
+                                     dit_layerwise_offload=False,
+                                     use_fsdp_inference=False,
+                                     pin_cpu_memory=False)
 
 
 def load_component(loader_attr: str, path: str, args):
@@ -93,7 +99,7 @@ def _device(platform) -> str:
     return "cuda" if platform.device == "cuda" else platform.device
 
 
-def _native_dtype(module):
+def _native_dtype(module: Any) -> Any:
     """Keep each component at the precision its loader produced (Wan DiT bf16, VAE/text fp32) rather than
     the card's uniform fp32 — faithful to fastvideo and ~2x faster/smaller for the DiT."""
     try:
@@ -102,12 +108,12 @@ def _native_dtype(module):
         return torch.float32
 
 
-def _to_torch(a, *, device, dtype):
+def _to_torch(a: Any, *, device: Any, dtype: Any) -> torch.Tensor | None:
     return None if a is None else torch.as_tensor(np.asarray(a), dtype=dtype, device=device)
 
 
-def _to_numpy(t):
-    if hasattr(t, "sample"):            # some heads wrap output in an object with .sample
+def _to_numpy(t: Any) -> np.ndarray:
+    if hasattr(t, "sample"):  # some heads wrap output in an object with .sample
         t = t.sample
     return t.detach().to("cpu", torch.float32).numpy()
 
@@ -119,21 +125,21 @@ class TorchComponent:
     """Wraps a real ``fastvideo.models.*`` module to the mini's numpy duck-typed surface. Subclasses
     override only the forward semantics (``__call__`` / ``encode`` / ``decode`` / ``upsample`` / ...)."""
 
-    def __init__(self, module, *, device, dtype, eager: bool = True):
+    def __init__(self, module: Any, *, device: Any, dtype: Any, eager: bool = True) -> None:
         self.device, self.dtype = device, dtype
         self.module = module.to(device=device, dtype=dtype).eval() if eager else module
 
     # numpy<->torch marshalling at the loop boundary (ONE place — torch-native is a later swap) ------- #
-    def _t(self, a, *, batch: bool = True):
+    def _t(self, a: Any, *, batch: bool = True) -> Any:
         t = _to_torch(a, device=self.device, dtype=self.dtype)
         return t.unsqueeze(0) if (t is not None and batch) else t
 
     @staticmethod
-    def _n(t):
+    def _n(t: Any) -> np.ndarray:
         return _to_numpy(t.squeeze(0))
 
     @staticmethod
-    def _ctx(current_timestep=0):
+    def _ctx(current_timestep: Any = 0) -> Any:
         """The FastVideo attention layer reads attn_metadata via get_forward_context(), so every forward
         runs inside set_forward_context(...). attn_metadata=None selects the dense SDPA path."""
         from v2.forward_context import set_forward_context
@@ -143,16 +149,16 @@ class TorchComponent:
     def copy_from(self, other) -> None:
         self.module.load_state_dict(other.module.state_dict())
 
-    def blend_from(self, other, decay: float) -> None:     # EMA / decayed-old-policy
+    def blend_from(self, other, decay: float) -> None:  # EMA / decayed-old-policy
         with torch.no_grad():
-            for p, q in zip(self.module.parameters(), other.module.parameters()):
+            for p, q in zip(self.module.parameters(), other.module.parameters(), strict=False):
                 p.mul_(decay).add_(q, alpha=1.0 - decay)
 
-    def clone(self):
+    def clone(self) -> TorchComponent:
         import copy
         c = self.__class__.__new__(self.__class__)
-        c.__dict__.update(self.__dict__)         # tokenizer / shapes / sibling refs shared
-        c.module = copy.deepcopy(self.module)     # independent weights
+        c.__dict__.update(self.__dict__)  # tokenizer / shapes / sibling refs shared
+        c.module = copy.deepcopy(self.module)  # independent weights
         return c
 
     def mse_grad_step(self, *a, **k):
@@ -168,7 +174,13 @@ class WanDiT(TorchComponent):
     (wanvideo.py): forward(hidden_states[B,C,T,H,W], encoder_hidden_states, timestep,
     encoder_hidden_states_image=None) -> velocity (bare tensor)."""
 
-    def __init__(self, module, *, device, dtype, offload_group=None, component_id="transformer"):
+    def __init__(self,
+                 module: Any,
+                 *,
+                 device: Any,
+                 dtype: Any,
+                 offload_group: Any = None,
+                 component_id: str = "transformer") -> None:
         # Wan2.2 MoE (A14B): two 14B experts don't both fit one 80GB GPU. With ``offload_group`` set, keep
         # this expert on CPU and bring only the *active* one onto the GPU on demand (single swap at the
         # boundary, not per-step thrash). Single-expert Wan stays resident (offload_group=None).
@@ -200,22 +212,25 @@ class WanDiT(TorchComponent):
     def __call__(self, latent, text_embed, sigma, context=None, *, cond=None):
         self._ensure_resident()
         hs = self._t(latent)
-        if cond is not None:        # i2v: concat [noise (16ch) ; mask+cond_latent (20ch)] -> 36ch DiT input
+        if cond is not None:  # i2v: concat [noise (16ch) ; mask+cond_latent (20ch)] -> 36ch DiT input
             hs = torch.cat([hs, self._t(cond)], dim=1)
         ehs = self._t(text_embed)
         # timestep = sigma*1000 (BRINGUP risk B). Causal model needs per-latent-frame [B, num_frames].
         ts = float(sigma) * NUM_TRAIN_TIMESTEPS
-        timestep = (torch.full((1, hs.shape[2]), ts, device=self.device) if self.causal
-                    else torch.tensor([ts], device=self.device))
-        img = None if self.causal else self._t(context)   # i2v image embedding for standard Wan
+        timestep = (torch.full(
+            (1, hs.shape[2]), ts, device=self.device) if self.causal else torch.tensor([ts], device=self.device))
+        img = None if self.causal else self._t(context)  # i2v image embedding for standard Wan
         with self._ctx():
-            velocity = self.module(hidden_states=hs, encoder_hidden_states=ehs, timestep=timestep,
+            velocity = self.module(hidden_states=hs,
+                                   encoder_hidden_states=ehs,
+                                   timestep=timestep,
                                    encoder_hidden_states_image=img)
-        return self._n(velocity)                           # rectified-flow velocity (BRINGUP risk C)
+        return self._n(velocity)  # rectified-flow velocity (BRINGUP risk C)
 
-    def clone(self):
+    def clone(self) -> WanDiT:
         c = super().clone()
-        c.offload_group, c._on_gpu = None, True            # standalone resident copy
+        assert isinstance(c, WanDiT)
+        c.offload_group, c._on_gpu = None, True  # standalone resident copy
         return c
 
 
@@ -225,7 +240,7 @@ class LTX2DiT(TorchComponent):
     returns the flow-match velocity ``(x_t - x0)/sigma`` the loop integrates. Joint A/V (audio_latent
     given) -> (video_velocity, audio_velocity) in one forward."""
 
-    def __init__(self, module, *, device, dtype):
+    def __init__(self, module: Any, *, device: Any, dtype: Any) -> None:
         super().__init__(module, device=device, dtype=dtype)
         from v2.models.dits.ltx2 import VideoLatentShape
         self._VideoLatentShape = VideoLatentShape
@@ -240,19 +255,23 @@ class LTX2DiT(TorchComponent):
         video_sigma = torch.tensor([s], device=self.device, dtype=torch.float32)
         av_kwargs: dict = {}
         au = None
-        if audio_latent is not None:                       # joint A/V: audio latent [1,8,T,16] + audio text
+        if audio_latent is not None:  # joint A/V: audio latent [1,8,T,16] + audio text
             from v2.models.audio.ltx2_audio_vae import AudioLatentShape
             au = self._t(audio_latent)
             aeh = self._t(audio_text)
             atok = self.module.audio_patchifier.get_token_count(AudioLatentShape.from_torch_shape(tuple(au.shape)))
-            av_kwargs = dict(
-                audio_hidden_states=au, audio_encoder_hidden_states=aeh,
-                audio_timestep=torch.full((1, atok, 1), s, device=self.device, dtype=torch.float32),
-                audio_sigma=torch.tensor([s], device=self.device, dtype=torch.float32))
+            av_kwargs = dict(audio_hidden_states=au,
+                             audio_encoder_hidden_states=aeh,
+                             audio_timestep=torch.full((1, atok, 1), s, device=self.device, dtype=torch.float32),
+                             audio_sigma=torch.tensor([s], device=self.device, dtype=torch.float32))
         with self._ctx(current_timestep=s):
-            out = self.module(hidden_states=hs, encoder_hidden_states=ehs, timestep=timestep,
-                              video_sigma=video_sigma, encoder_attention_mask=None, **av_kwargs)
-        if au is not None:                                 # LTX-2 DiT predicts x0; integrate velocity
+            out = self.module(hidden_states=hs,
+                              encoder_hidden_states=ehs,
+                              timestep=timestep,
+                              video_sigma=video_sigma,
+                              encoder_attention_mask=None,
+                              **av_kwargs)
+        if au is not None:  # LTX-2 DiT predicts x0; integrate velocity
             denoised_v, denoised_a = out
             vel_v = (hs.float() - denoised_v.float()) / max(s, 1e-6)
             vel_a = (au.float() - denoised_a.float()) / max(s, 1e-6)
@@ -268,11 +287,10 @@ class WanVAE(TorchComponent):
     """The DiT operates in NORMALIZED latent space, so encode applies ``(z - mean)/std`` and decode
     inverts it; ``AutoencoderKLWan.encode/decode`` operate in RAW latent space (BRINGUP risk D)."""
 
-    def _mean_invstd(self, like):
-        mean = torch.tensor(self.module.latents_mean, device=like.device,
-                            dtype=torch.float32).view(1, -1, 1, 1, 1)
-        inv_std = (1.0 / torch.tensor(self.module.latents_std, device=like.device,
-                                      dtype=torch.float32)).view(1, -1, 1, 1, 1)
+    def _mean_invstd(self, like: Any) -> tuple[torch.Tensor, torch.Tensor]:
+        mean = torch.tensor(self.module.latents_mean, device=like.device, dtype=torch.float32).view(1, -1, 1, 1, 1)
+        inv_std = (1.0 / torch.tensor(self.module.latents_std, device=like.device, dtype=torch.float32)).view(
+            1, -1, 1, 1, 1)
         return mean, inv_std
 
     @torch.no_grad()
@@ -281,19 +299,27 @@ class WanVAE(TorchComponent):
         dist = self.module.encode(x)
         z = dist.mode() if hasattr(dist, "mode") else (dist.sample() if hasattr(dist, "sample") else dist)
         mean, inv_std = self._mean_invstd(z)
-        return self._n((z.float() - mean) * inv_std)       # -> the normalized latent the DiT expects
+        return self._n((z.float() - mean) * inv_std)  # -> the normalized latent the DiT expects
 
     @torch.no_grad()
     def decode(self, latent):
         z = self._t(latent).float()
         mean, inv_std = self._mean_invstd(z)
-        z = z / inv_std + mean                             # invert encode normalization -> raw latent
-        video = self.module.decode(z.to(self.dtype))       # -> video [B,3,T,H,W] in [-1,1]
+        z = z / inv_std + mean  # invert encode normalization -> raw latent
+        video = self.module.decode(z.to(self.dtype))  # -> video [B,3,T,H,W] in [-1,1]
         return self._n(video)
 
 
 class LTX2VAE(TorchComponent):
     """LTX-2 VideoDecoder un-normalizes internally (per-channel stats); the adapter just marshals."""
+
+    def __init__(self, module: Any, *, device: Any, dtype: Any) -> None:
+        super().__init__(module, device=device, dtype=dtype)
+        # Tiled decode (spatial tiles concatenated): the LTX-2 CausalVideoAutoencoder decode of a full-res,
+        # full-length (121f / 1536x1024) latent allocates >80GB of conv activations otherwise. fastvideo
+        # defaults vae_tiling=True for LTX-2; mirror it so the full clip fits on one GPU.
+        if hasattr(self.module, "enable_tiling"):
+            self.module.enable_tiling()
 
     @torch.no_grad()
     def decode(self, latent):
@@ -315,7 +341,7 @@ class LTX2VAE(TorchComponent):
 class T5Encoder(TorchComponent):
     """(U)MT5 text_encoder.encode(text) -> embedding[text_len, dim] (numpy out)."""
 
-    def __init__(self, module, tokenizer, *, device, dtype, max_length: int = 512):
+    def __init__(self, module: Any, tokenizer: Any, *, device: Any, dtype: Any, max_length: int = 512) -> None:
         super().__init__(module, device=device, dtype=dtype)
         self.tokenizer = tokenizer
         self.max_length = max_length
@@ -340,14 +366,17 @@ class Gemma(TorchComponent):
     """LTX-2 Gemma text encoder. ``encode`` -> video projection; ``encode_av`` -> (video, audio): the 2.3
     connector emits SEPARATE projections (audio in ``hidden_states[0]`` only when output_hidden_states)."""
 
-    def __init__(self, module, tokenizer, *, device, dtype, max_length: int = 256):
+    def __init__(self, module: Any, tokenizer: Any, *, device: Any, dtype: Any, max_length: int = 256) -> None:
         super().__init__(module, device=device, dtype=dtype)
         self.tokenizer = tokenizer
         self.max_length = max_length
 
-    def _tok(self, text):
-        toks = self.tokenizer(text or "", return_tensors="pt", max_length=self.max_length,
-                              truncation=True, padding="max_length")
+    def _tok(self, text: Any) -> tuple[torch.Tensor, torch.Tensor]:
+        toks = self.tokenizer(text or "",
+                              return_tensors="pt",
+                              max_length=self.max_length,
+                              truncation=True,
+                              padding="max_length")
         return toks.input_ids.to(self.device), toks.attention_mask.to(self.device)
 
     @torch.no_grad()
@@ -365,7 +394,7 @@ class Gemma(TorchComponent):
             out = self.module(input_ids=ids, attention_mask=mask, output_hidden_states=True)
         video = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
         hs = getattr(out, "hidden_states", None)
-        audio = hs[0] if hs else video                     # separate audio connector projection
+        audio = hs[0] if hs else video  # separate audio connector projection
         return _to_numpy(video.squeeze(0)), _to_numpy(audio.squeeze(0))
 
 
@@ -375,7 +404,7 @@ class CLIPImageEncoder(TorchComponent):
     preprocesses, the encoder returns ``last_hidden_state``. BRINGUP: written-not-run; GPU-verify the
     processor/encoder subfolders + dtype against a real i2v checkpoint (see GPU_BRINGUP.md)."""
 
-    def __init__(self, module, processor, *, device, dtype):
+    def __init__(self, module: Any, processor: Any, *, device: Any, dtype: Any) -> None:
         super().__init__(module, device=device, dtype=dtype)
         self.processor = processor
 
@@ -395,9 +424,9 @@ class LTX2Upsampler(TorchComponent):
     """upsample(latent[C,T,H,W]) -> [C,T,2H,2W]. Applies the repo's ``upsample_video``: un_normalize (via
     the video VAE's per_channel_statistics) -> learned 2x upsample -> normalize."""
 
-    def __init__(self, module, stats_owner, *, device, dtype):
+    def __init__(self, module: Any, stats_owner: Any, *, device: Any, dtype: Any) -> None:
         super().__init__(module, device=device, dtype=dtype)
-        self.stats_owner = stats_owner          # exposes per_channel_statistics (the VAE decoder/encoder)
+        self.stats_owner = stats_owner  # exposes per_channel_statistics (the VAE decoder/encoder)
 
     @torch.no_grad()
     def upsample(self, latent):
@@ -414,9 +443,9 @@ class LTX2AudioVAE(TorchComponent):
     """audio_vae.decode(audio_latent[8,T,16]) -> waveform. Runs AudioDecoder (latent->mel) then the
     Vocoder (mel->waveform). ``sample_rate`` = the vocoder's output rate (so a saver writes the right wav)."""
 
-    def __init__(self, module, vocoder, *, device, dtype):
+    def __init__(self, module: Any, vocoder: Any, *, device: Any, dtype: Any) -> None:
         super().__init__(module, device=device, dtype=dtype)
-        self.vocoder = vocoder                  # LTX2Vocoder | None
+        self.vocoder = vocoder  # LTX2Vocoder | None
         self.sample_rate = int(getattr(getattr(vocoder, "module", None), "output_sample_rate", 24000))
 
     @torch.no_grad()
@@ -436,7 +465,7 @@ class LTX2AudioVAE(TorchComponent):
 # --------------------------------------------------------------------------- #
 # build_component — one dispatch (replaces the six build_torch_* + trampolines) #
 # --------------------------------------------------------------------------- #
-def _explicit_adapter(spec, module, device, dtype, *extra):
+def _explicit_adapter(spec: Any, module: Any, device: Any, dtype: Any, *extra: Any) -> Any:
     """Build the card's explicitly-declared adapter (``ComponentSpec.adapter='module:Class'``) if set —
     the seam that lets a NEW architecture's recipe carry its own TorchComponent subclass without editing
     the dispatch here (so a port is a self-contained recipe package). Constructed as
@@ -449,7 +478,7 @@ def _explicit_adapter(spec, module, device, dtype, *extra):
     return getattr(importlib.import_module(mod), cls)(module, *extra, device=device, dtype=dtype)
 
 
-def _make_dit(spec, instance, platform, args):
+def _make_dit(spec: Any, instance: Any, platform: Any, args: Any) -> TorchComponent:
     module = load_component("TransformerLoader", spec.checkpoint, args)
     device, dtype = _device(platform), _native_dtype(module)
     explicit = _explicit_adapter(spec, module, device, dtype)
@@ -467,7 +496,7 @@ def _make_dit(spec, instance, platform, args):
     return WanDiT(module, device=device, dtype=dtype, offload_group=grp, component_id=spec.component_id)
 
 
-def _make_vae(spec, instance, platform, args):
+def _make_vae(spec: Any, instance: Any, platform: Any, args: Any) -> TorchComponent:
     module = load_component("VAELoader", spec.checkpoint, args)
     device, dtype = _device(platform), _native_dtype(module)
     explicit = _explicit_adapter(spec, module, device, dtype)
@@ -477,26 +506,26 @@ def _make_vae(spec, instance, platform, args):
     return cls(module, device=device, dtype=dtype)
 
 
-def _make_text_encoder(spec, instance, platform, args):
+def _make_text_encoder(spec: Any, instance: Any, platform: Any, args: Any) -> TorchComponent:
     module = load_component("TextEncoderLoader", spec.checkpoint, args)
     tokenizer = load_component("TokenizerLoader", os.path.join(_model_root(spec), "tokenizer"), args)
     device, dtype = _device(platform), _native_dtype(module)
-    explicit = _explicit_adapter(spec, module, device, dtype, tokenizer)   # adapter cls(module, tokenizer, ...)
+    explicit = _explicit_adapter(spec, module, device, dtype, tokenizer)  # adapter cls(module, tokenizer, ...)
     if explicit is not None:
         return explicit
     cls = Gemma if "Gemma" in type(module).__name__ else T5Encoder
     return cls(module, tokenizer, device=device, dtype=dtype)
 
 
-def _make_image_encoder(spec, instance, platform, args):
-    module = load_component("ImageEncoderLoader", spec.checkpoint, args)   # CLIP vision
+def _make_image_encoder(spec: Any, instance: Any, platform: Any, args: Any) -> TorchComponent:
+    module = load_component("ImageEncoderLoader", spec.checkpoint, args)  # CLIP vision
     # the HF image processor is a sibling subfolder (BRINGUP: confirm path on a real i2v checkpoint)
     processor = load_component("ImageProcessorLoader", os.path.join(_model_root(spec), "image_processor"), args)
     return CLIPImageEncoder(module, processor, device=_device(platform), dtype=_native_dtype(module))
 
 
-def _make_upsampler(spec, instance, platform, args):
-    module = load_component("UpsamplerLoader", spec.checkpoint, args)   # LTX2LatentUpsampler
+def _make_upsampler(spec: Any, instance: Any, platform: Any, args: Any) -> TorchComponent:
+    module = load_component("UpsamplerLoader", spec.checkpoint, args)  # LTX2LatentUpsampler
     vae = instance.component("vae")
     dtype = getattr(vae, "dtype", _native_dtype(module))
     vae_module = getattr(vae, "module", None)
@@ -505,33 +534,37 @@ def _make_upsampler(spec, instance, platform, args):
     return LTX2Upsampler(module, stats_owner, device=_device(platform), dtype=dtype)
 
 
-def _make_audio_vae(spec, instance, platform, args):
-    module = load_component("AudioDecoderLoader", spec.checkpoint, args)   # LTX2AudioDecoder
-    voc = instance.component("vocoder")    # chained: decoder -> vocoder
+def _make_audio_vae(spec: Any, instance: Any, platform: Any, args: Any) -> TorchComponent:
+    module = load_component("AudioDecoderLoader", spec.checkpoint, args)  # LTX2AudioDecoder
+    voc = instance.component("vocoder")  # chained: decoder -> vocoder
     return LTX2AudioVAE(module, voc, device=_device(platform), dtype=_native_dtype(module))
 
 
-def _make_vocoder(spec, instance, platform, args):
-    module = load_component("VocoderLoader", spec.checkpoint, args)        # LTX2Vocoder
+def _make_vocoder(spec: Any, instance: Any, platform: Any, args: Any) -> TorchComponent:
+    module = load_component("VocoderLoader", spec.checkpoint, args)  # LTX2Vocoder
     return LTX2Vocoder(module, device=_device(platform), dtype=_native_dtype(module))
 
 
 _MAKERS = {
-    "dit": _make_dit, "vae": _make_vae, "text_encoder": _make_text_encoder,
-    "image_encoder": _make_image_encoder, "upsampler": _make_upsampler,
-    "audio_vae": _make_audio_vae, "vocoder": _make_vocoder,
+    "dit": _make_dit,
+    "vae": _make_vae,
+    "text_encoder": _make_text_encoder,
+    "image_encoder": _make_image_encoder,
+    "upsampler": _make_upsampler,
+    "audio_vae": _make_audio_vae,
+    "vocoder": _make_vocoder,
 }
 
 
-def build_component(spec, instance, platform):
+def build_component(spec: Any, instance: Any, platform: Any) -> TorchComponent:
     """The single cuda component builder (registered for every kind in ``torch_cuda.py``). Shared prefix
     — checkpoint check, dist-init, FastVideoArgs — then dispatch by ``spec.kind`` to its maker."""
-    _require_checkpoint(spec)             # fail fast on a mis-stamped card, before any dist init
+    _require_checkpoint(spec)  # fail fast on a mis-stamped card, before any dist init
     _ensure_fastvideo_runtime()
     args = _fastvideo_args(spec)
     try:
         maker = _MAKERS[spec.kind]
     except KeyError:
         raise RuntimeError(f"torch backend: no builder for component kind {spec.kind!r} "
-                           f"(have {sorted(_MAKERS)})")
+                           f"(have {sorted(_MAKERS)})") from None
     return maker(spec, instance, platform, args)

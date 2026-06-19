@@ -28,9 +28,17 @@ from v2.recipes._prompts import WAN_NEG_CN
 from v2.recipes.wan_causal.loop import ChunkRolloutLoop
 
 
-def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b", *,
-                          num_chunks: int = 3, chunk_size: int = 2, steps_per_chunk: int = 2,
+def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b",
+                          *,
+                          num_chunks: int = 7,
+                          chunk_size: int = 3,
+                          steps_per_chunk: int = 4,
                           training_mode: bool = False) -> ModelCard:
+    # Self-forcing DMD reference (fastvideo SelfForcingWanT2V480PConfig + causal_denoising.py): the
+    # distilled student is CFG-FREE (guidance 1.0, single forward/step) and denoises with the 4-step DMD
+    # schedule (dmd_denoising_steps=[1000,750,500,250], warped — reproduced by FlowShiftPolicy(5.0) over 4
+    # steps); the native causal block is chunk_size=3 latent frames (7 chunks x 3 = 21 latent -> 81 video
+    # frames). Earlier defaults (CFG 6.0, 2 steps, block 2) overcooked + under-denoised the output.
     seed = _seed_from(model_id)
     cost = CostModel(kind=WorkUnitKind.CHUNK_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg = ClassicCFG()
@@ -38,48 +46,73 @@ def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b", *,
     precision = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True)
 
     def loop_factory():
-        return ChunkRolloutLoop(loop_id="chunk_rollout", num_chunks=num_chunks, chunk_size=chunk_size,
-                                steps_per_chunk=steps_per_chunk, cfg=cfg, flow_shift=flow,
-                                precision=precision, cost=cost)
+        return ChunkRolloutLoop(loop_id="chunk_rollout",
+                                num_chunks=num_chunks,
+                                chunk_size=chunk_size,
+                                steps_per_chunk=steps_per_chunk,
+                                cfg=cfg,
+                                flow_shift=flow,
+                                precision=precision,
+                                cost=cost)
 
     components = {
-        "text_encoder": ComponentSpec(component_id="text_encoder", kind="text_encoder",
-                                      load_id="fastvideo.models.encoders.t5:T5EncoderModel",
-                                      factory=lambda inst: ToyTextEncoder(), required_for={"t2v", "v2w"}),
-        "vae": ComponentSpec(component_id="vae", kind="vae",
-                             load_id="fastvideo.models.vaes.wanvae:AutoencoderKLWan",
-                             factory=lambda inst: ToyVAE(), required_for={"t2v", "v2w"}),
-        "transformer": ComponentSpec(component_id="transformer", kind="dit",
-                                     load_id="fastvideo.models.dits.causal_wanvideo:CausalWanTransformer3DModel",
-                                     factory=lambda inst: ToyDiT(seed=seed),
-                                     resident_for=["chunk_rollout"], required_for={"t2v", "v2w"}),
+        "text_encoder":
+        ComponentSpec(component_id="text_encoder",
+                      kind="text_encoder",
+                      load_id="fastvideo.models.encoders.t5:T5EncoderModel",
+                      factory=lambda inst: ToyTextEncoder(),
+                      required_for={"t2v", "v2w"}),
+        "vae":
+        ComponentSpec(component_id="vae",
+                      kind="vae",
+                      load_id="fastvideo.models.vaes.wanvae:AutoencoderKLWan",
+                      factory=lambda inst: ToyVAE(),
+                      required_for={"t2v", "v2w"}),
+        "transformer":
+        ComponentSpec(component_id="transformer",
+                      kind="dit",
+                      load_id="fastvideo.models.dits.causal_wanvideo:CausalWanTransformer3DModel",
+                      factory=lambda inst: ToyDiT(seed=seed),
+                      resident_for=["chunk_rollout"],
+                      required_for={"t2v", "v2w"}),
     }
     loops = {
-        "chunk_rollout": LoopSpec(loop_id="chunk_rollout", kind=LoopKind.CHUNK_ROLLOUT,
-                                  work_unit_kind=WorkUnitKind.CHUNK_STEP, step_cost_model=cost,
-                                  shared_weight_components=["transformer"],
-                                  cache_policy=["feature", "slab_kv"], loop_factory=loop_factory),
+        "chunk_rollout":
+        LoopSpec(loop_id="chunk_rollout",
+                 kind=LoopKind.CHUNK_ROLLOUT,
+                 work_unit_kind=WorkUnitKind.CHUNK_STEP,
+                 step_cost_model=cost,
+                 shared_weight_components=["transformer"],
+                 cache_policy=["feature", "slab_kv"],
+                 loop_factory=loop_factory),
     }
     card = ModelCard(
-        model_id=model_id, family="wan",
-        components=components, loops=loops,
-        capabilities=CapabilityMatrix.of(
-            Capability.TEXT_TO_VIDEO, Capability.STREAMING_VIDEO_CONTINUATION,
-            Capability.VAE_DECODE, Capability.POLICY_ROLLOUT),
-        recipe=RecipeSpec(method="self_forcing", parents=["wan2.1-1.3b"], assumes_loop="chunk_rollout",
-                          assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
+        model_id=model_id,
+        family="wan",
+        components=components,
+        loops=loops,
+        capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.STREAMING_VIDEO_CONTINUATION,
+                                         Capability.VAE_DECODE, Capability.POLICY_ROLLOUT),
+        recipe=RecipeSpec(method="self_forcing",
+                          parents=["wan2.1-1.3b"],
+                          assumes_loop="chunk_rollout",
+                          assumes_precision="float32",
+                          consistency_required=ConsistencyLevel.C1),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
         caches={
-            "feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True),
-            "slab_kv": CacheContract(cache_class="slab_kv", max_bytes=1 << 26, reuse_across_requests=False,
-                                     per_component={"window": (num_chunks if training_mode else 2)},
-                                     training_mode_disables_recycle=training_mode),
+            "feature":
+            CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True),
+            "slab_kv":
+            CacheContract(cache_class="slab_kv",
+                          max_bytes=1 << 26,
+                          reuse_across_requests=False,
+                          per_component={"window": (num_chunks if training_mode else 2)},
+                          training_mode_disables_recycle=training_mode),
         },
         precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
-        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()],
-                                        default_plan=ParallelPlan.single()),
+        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
         sampling_defaults=SamplingDefaults(
-            num_steps=50, guidance_scale=6.0, height=480, width=832, num_frames=81, fps=16,
-            negative_prompt=WAN_NEG_CN),
+            num_steps=4, guidance_scale=1.0, height=480, width=832, num_frames=81, fps=16,
+            negative_prompt=WAN_NEG_CN),  # CFG-free distilled, 4 DMD steps (see build_wan_causal_card)
     )
     return card.validate()
