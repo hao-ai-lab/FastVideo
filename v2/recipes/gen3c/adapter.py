@@ -43,7 +43,7 @@ import math
 import torch
 
 from v2.platform.backends.torch_backend import TorchComponent, _to_numpy
-from v2.platform.backends.torch_cosmos import CosmosT5Encoder
+from v2.recipes.cosmos2.adapter import CosmosT5Encoder
 
 
 def _c_noise(sigma: float) -> float:
@@ -133,5 +133,5 @@ class Gen3CT5Encoder(CosmosT5Encoder):
     matches the converted T5-Large tokenizer on the GPU box.)"""
 
 
-# Re-export so a reader can ``from v2.platform.backends.torch_gen3c import _to_numpy`` if needed.
+# Re-export so a reader can ``from v2.recipes.gen3c.adapter import _to_numpy`` if needed.
 __all__ = ["Gen3CDiT", "Gen3CVAE", "Gen3CT5Encoder", "_to_numpy"]

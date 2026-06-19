@@ -2,7 +2,7 @@
 
 Self-contained recipe package (the bucket-C pattern): the card declares its torch adapters via
 ``ComponentSpec.adapter`` (``StableAudioDiT``/``OobleckVAE``/``StableAudioConditioner`` in
-``v2/platform/backends/torch_stable_audio.py``) and a new ``StableAudioDenoiseLoop`` (polyexponential
+``v2/recipes/stable_audio/adapter.py``) and a new ``StableAudioDenoiseLoop`` (polyexponential
 schedule + VDenoiser v->x0 + DPM++ multistep), reusing ``stamp_wan21_checkpoints``. AUDIO modality —
 the audio output artifact + a TEXT_TO_AUDIO capability/request field are the request-API extension
 (BRINGUP). Registered in ``v2/registry.py`` by the orchestrator.

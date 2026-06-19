@@ -1,7 +1,7 @@
 """LingBot-World-Base-Cam (camera-conditioned dual-guidance MoE i2v) ported into the v2 substrate.
 
 Self-contained recipe package: the card declares its torch adapter via ``ComponentSpec.adapter``
-(``LingBotWorldDiT`` in ``v2/platform/backends/torch_lingbotworld.py``) and a new
+(``LingBotWorldDiT`` in ``v2/recipes/lingbotworld/adapter.py``) and a new
 ``LingBotWorldDenoiseLoop`` (Wan i2v flow-match + boundary-routed MoE + dual guidance + camera/Plucker
 conditioning), reusing the Wan VAE / T5 adapters + ``stamp_wan21_checkpoints``. The program adds a
 ``camera_encode`` node (Plucker tensor; BRINGUP — needs a per-request camera input). Registered in

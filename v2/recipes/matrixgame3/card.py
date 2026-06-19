@@ -1,7 +1,7 @@
 """Matrix-Game 3.0 ModelCard — image+action+camera -> video autoregressive world model.
 
 Self-contained recipe package (bucket-C pattern, mirroring cosmos2): the card declares its torch adapter
-via ``ComponentSpec.adapter`` (``MatrixGame3DiT`` in ``v2/platform/backends/torch_matrixgame3.py``) plus
+via ``ComponentSpec.adapter`` (``MatrixGame3DiT`` in ``v2/recipes/matrixgame3/adapter.py``) plus
 ``MatrixGame3DenoiseLoop`` (the autoregressive multi-clip loop), reusing the Wan VAE adapter + T5 +
 ``stamp_wan21_checkpoints``.
 
@@ -55,7 +55,7 @@ from v2.recipes.wan21.card import stamp_wan21_checkpoints
 # self-contained-recipe rule — not added to the shared v2/recipes/_prompts.py).
 MG3_NEG = ""
 
-_MG3_DIT = "v2.platform.backends.torch_matrixgame3:MatrixGame3DiT"
+_MG3_DIT = "v2.recipes.matrixgame3.adapter:MatrixGame3DiT"
 
 
 def build_matrixgame3_card(model_id: str = "matrixgame3-i2v",

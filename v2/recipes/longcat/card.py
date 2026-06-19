@@ -3,7 +3,7 @@
 Architecture deltas vs Wan (all declared on the card so the recipe is self-contained):
   * DiT  ``fastvideo.models.dits.longcat:LongCatTransformer3DModel`` (depth 48, hidden 4096, 32 heads,
     in/out 16ch, patch [1,2,2], caption_channels 4096). The adapter (``LongCatDiT`` in
-    ``v2/platform/backends/torch_longcat.py``) returns the **negated** velocity (folding the fastvideo
+    ``v2/recipes/longcat/adapter.py``) returns the **negated** velocity (folding the fastvideo
     stage's ``noise_pred = -noise_pred`` before the scheduler step) so the loop's flow-match Euler matches.
   * VAE  ``fastvideo.models.vaes.wanvae:AutoencoderKLWan`` — Wan-style (z=16, 8x/4x) in normalized latent
     space (mean/std). Reuses the v2 ``WanVAE`` torch adapter (no adapter override).
@@ -48,7 +48,7 @@ LONGCAT_NEG = ("Bright tones, overexposed, static, blurred details, subtitles, s
                "misshapen limbs, fused fingers, still picture, messy background, three legs, many people in "
                "the background, walking backwards")
 
-_LONGCAT_DIT = "v2.platform.backends.torch_longcat:LongCatDiT"
+_LONGCAT_DIT = "v2.recipes.longcat.adapter:LongCatDiT"
 
 
 def build_longcat_card(model_id: str = "longcat-video-t2v",

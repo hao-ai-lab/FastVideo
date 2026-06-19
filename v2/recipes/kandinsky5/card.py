@@ -57,10 +57,10 @@ from v2.recipes.kandinsky5.loop import (
 KANDINSKY5_NEG = ("Static, 2D cartoon, cartoon, 2d animation, paintings, images, worst quality, "
                   "low quality, ugly, deformed, walking backwards")
 
-_KANDINSKY5_DIT = "v2.platform.backends.torch_kandinsky5:Kandinsky5DiT"
-_KANDINSKY5_QWEN = "v2.platform.backends.torch_kandinsky5:Kandinsky5QwenEncoder"
-_KANDINSKY5_CLIP = "v2.platform.backends.torch_kandinsky5:Kandinsky5ClipEncoder"
-_KANDINSKY5_VAE = "v2.platform.backends.torch_kandinsky5:Kandinsky5VAE"
+_KANDINSKY5_DIT = "v2.recipes.kandinsky5.adapter:Kandinsky5DiT"
+_KANDINSKY5_QWEN = "v2.recipes.kandinsky5.adapter:Kandinsky5QwenEncoder"
+_KANDINSKY5_CLIP = "v2.recipes.kandinsky5.adapter:Kandinsky5ClipEncoder"
+_KANDINSKY5_VAE = "v2.recipes.kandinsky5.adapter:Kandinsky5VAE"
 
 
 def build_kandinsky5_card(model_id: str = "kandinsky-5.0-t2v-lite-5s",

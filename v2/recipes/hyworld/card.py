@@ -58,11 +58,11 @@ from v2.recipes.wan21.card import stamp_wan21_checkpoints
 
 # Adapter refs declared on the card -> built lazily on a GPU box by ``_explicit_adapter`` (so the port
 # never edits the shared ``_make_dit``/``_make_vae``/``_make_text_encoder``/``_make_image_encoder``).
-_HYWORLD_DIT = "v2.platform.backends.torch_hyworld:HYWorldDiT"
-_HYWORLD_VAE = "v2.platform.backends.torch_hyworld:HYWorldVAE"
-_HYWORLD_QWEN = "v2.platform.backends.torch_hyworld:HYWorldQwenEncoder"
-_HYWORLD_BYT5 = "v2.platform.backends.torch_hyworld:HYWorldByT5Encoder"
-_HYWORLD_SIGLIP = "v2.platform.backends.torch_hyworld:HYWorldSiglipEncoder"
+_HYWORLD_DIT = "v2.recipes.hyworld.adapter:HYWorldDiT"
+_HYWORLD_VAE = "v2.recipes.hyworld.adapter:HYWorldVAE"
+_HYWORLD_QWEN = "v2.recipes.hyworld.adapter:HYWorldQwenEncoder"
+_HYWORLD_BYT5 = "v2.recipes.hyworld.adapter:HYWorldByT5Encoder"
+_HYWORLD_SIGLIP = "v2.recipes.hyworld.adapter:HYWorldSiglipEncoder"
 
 # The preset's negative prompt is empty (kept as a LOCAL module constant, not in the shared _prompts.py).
 HYWORLD_NEG = ""

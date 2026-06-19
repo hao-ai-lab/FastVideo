@@ -48,10 +48,10 @@ SD35_NEG = ""
 # real scheduler config at deploy time; SD35Config.flow_shift is None, the shift lives in the scheduler).
 SD35_FLOW_SHIFT = 3.0
 
-_SD3_DIT = "v2.platform.backends.torch_sd35:SD3DiT"
-_SD3_VAE = "v2.platform.backends.torch_sd35:SD3VAE"
-_SD3_CLIP = "v2.platform.backends.torch_sd35:SD3ClipEncoder"
-_SD3_T5 = "v2.platform.backends.torch_sd35:SD3T5Encoder"
+_SD3_DIT = "v2.recipes.sd35.adapter:SD3DiT"
+_SD3_VAE = "v2.recipes.sd35.adapter:SD3VAE"
+_SD3_CLIP = "v2.recipes.sd35.adapter:SD3ClipEncoder"
+_SD3_T5 = "v2.recipes.sd35.adapter:SD3T5Encoder"
 
 
 def build_sd35_card(model_id: str = "stable-diffusion-3.5-medium",

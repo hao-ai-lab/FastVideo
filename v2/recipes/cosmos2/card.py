@@ -35,8 +35,8 @@ from v2.recipes._prompts import COSMOS_NEG
 from v2.recipes.cosmos2.loop import CosmosDenoiseLoop
 from v2.recipes.wan21.card import stamp_wan21_checkpoints
 
-_COSMOS_DIT = "v2.platform.backends.torch_cosmos:CosmosDiT"
-_COSMOS_T5 = "v2.platform.backends.torch_cosmos:CosmosT5Encoder"
+_COSMOS_DIT = "v2.recipes.cosmos2.adapter:CosmosDiT"
+_COSMOS_T5 = "v2.recipes.cosmos2.adapter:CosmosT5Encoder"
 
 
 def build_cosmos2_card(model_id: str = "cosmos-predict2-2b-video2world",

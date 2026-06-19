@@ -52,9 +52,9 @@ _COSMOS25_NEG = ("The video captures a series of frames showing ugly scenes, sta
                  "effects, fake elements, unconvincing visuals, poorly edited content, jump cuts, visual noise, and "
                  "flickering. Overall, the video is of poor quality.")
 
-_COSMOS25_DIT = "v2.platform.backends.torch_cosmos25:Cosmos25DiT"
-_COSMOS25_VAE = "v2.platform.backends.torch_cosmos25:Cosmos25WanVAE"
-_COSMOS25_TEXT = "v2.platform.backends.torch_cosmos25:Cosmos25Reason1Encoder"
+_COSMOS25_DIT = "v2.recipes.cosmos25.adapter:Cosmos25DiT"
+_COSMOS25_VAE = "v2.recipes.cosmos25.adapter:Cosmos25WanVAE"
+_COSMOS25_TEXT = "v2.recipes.cosmos25.adapter:Cosmos25Reason1Encoder"
 
 
 def build_cosmos25_card(model_id: str = "cosmos-predict2.5-2b",

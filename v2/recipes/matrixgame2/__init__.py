@@ -2,7 +2,7 @@
 recipe package (bucket-C pattern).
 
 The card declares its torch adapters via ``ComponentSpec.adapter`` (``MatrixGame2CausalDiT`` /
-``MatrixGame2CLIPImageEncoder`` in ``v2/platform/backends/torch_matrixgame2.py``) plus
+``MatrixGame2CLIPImageEncoder`` in ``v2/recipes/matrixgame2/adapter.py``) plus
 ``MatrixGame2CausalDMDLoop`` (few-step DMD: epsilon->x0 via the FlowUniPC sigma table + re-add_noise, causal
 block-autoregressive with a sliding-window KV cache, action-conditioned). Reuses the Wan VAE adapter +
 ``stamp_wan21_checkpoints``. Registered in ``v2/registry.py``.

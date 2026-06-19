@@ -2,7 +2,7 @@
 
 Self-contained recipe package (the bucket-C pattern): the card declares its torch adapters via
 ``ComponentSpec.adapter`` (``Kandinsky5DiT`` / ``Kandinsky5QwenEncoder`` / ``Kandinsky5ClipEncoder`` /
-``Kandinsky5VAE`` in ``v2/platform/backends/torch_kandinsky5.py``) and a new ``Kandinsky5DenoiseLoop``
+``Kandinsky5VAE`` in ``v2/recipes/kandinsky5/adapter.py``) and a new ``Kandinsky5DenoiseLoop``
 (flow-match Euler over a CHANNELS-LAST latent with a dual Qwen+CLIP conditioning stream). It reuses the
 shared flow-match sampler (``FlowShiftPolicy.build_schedule`` + ``FLOW_MATCH_STEP``) and ``ClassicCFG``.
 Registered in ``v2/registry.py`` by the orchestrator.

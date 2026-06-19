@@ -45,10 +45,10 @@ from v2.recipes.wan21.card import stamp_wan21_checkpoints
 # as a LOCAL module constant (the recipe is self-contained; nothing is added to the shared _prompts.py).
 FLUX2_NEG: str | None = None
 
-_FLUX2_DIT = "v2.platform.backends.torch_flux2:Flux2DiT"
-_FLUX2_VAE = "v2.platform.backends.torch_flux2:Flux2VAE"
-_FLUX2_MISTRAL3 = "v2.platform.backends.torch_flux2:Flux2Mistral3Encoder"
-_FLUX2_QWEN3 = "v2.platform.backends.torch_flux2:Flux2Qwen3Encoder"
+_FLUX2_DIT = "v2.recipes.flux2.adapter:Flux2DiT"
+_FLUX2_VAE = "v2.recipes.flux2.adapter:Flux2VAE"
+_FLUX2_MISTRAL3 = "v2.recipes.flux2.adapter:Flux2Mistral3Encoder"
+_FLUX2_QWEN3 = "v2.recipes.flux2.adapter:Flux2Qwen3Encoder"
 
 
 def _build_flux2_card(model_id: str, *, text_encoder_load_id: str, text_encoder_adapter: str,

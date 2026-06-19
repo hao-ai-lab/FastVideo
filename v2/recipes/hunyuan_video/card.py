@@ -44,10 +44,10 @@ from v2.platform.backends.toy import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
 from v2.recipes.hunyuan_video.loop import HunyuanDenoiseLoop
 from v2.recipes.wan21.card import stamp_wan21_checkpoints
 
-_HUNYUAN_DIT = "v2.platform.backends.torch_hunyuan_video:HunyuanVideoDiT"
-_HUNYUAN_VAE = "v2.platform.backends.torch_hunyuan_video:HunyuanVideoVAE"
-_HUNYUAN_LLAMA = "v2.platform.backends.torch_hunyuan_video:HunyuanVideoLlamaEncoder"
-_HUNYUAN_CLIP = "v2.platform.backends.torch_hunyuan_video:HunyuanVideoCLIPEncoder"
+_HUNYUAN_DIT = "v2.recipes.hunyuan_video.adapter:HunyuanVideoDiT"
+_HUNYUAN_VAE = "v2.recipes.hunyuan_video.adapter:HunyuanVideoVAE"
+_HUNYUAN_LLAMA = "v2.recipes.hunyuan_video.adapter:HunyuanVideoLlamaEncoder"
+_HUNYUAN_CLIP = "v2.recipes.hunyuan_video.adapter:HunyuanVideoCLIPEncoder"
 
 # Base HunyuanVideo runs guidance_scale=1.0 (CFG effectively off), so it has no published negative prompt;
 # a LOCAL module constant so the recipe owns its own data (empty string = no negative conditioning).
