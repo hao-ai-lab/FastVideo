@@ -1972,7 +1972,7 @@ Conclusion:
 
 ### Stage 5 Follow-up: CLI Config Deferral Fix
 
-Status: validated, pending commit/push.
+Status: completed and pushed.
 
 Issue found during real generator smoke:
 
@@ -2025,6 +2025,9 @@ Validation completed:
     tests/local_tests/test_interleave_run_cli.py`
   - Result: yapf, ruff, codespell, mypy, filename check, and suggestion hooks
     passed; PyMarkdown/actionlint skipped with no files to check.
+- Commit completed:
+  - `375b944b` — `[bugfix] preserve interleave CLI config paths`
+  - Pushed to `origin/interleavethinker-fastvideo`.
 
 Next step after this fix is committed:
 
