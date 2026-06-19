@@ -2715,7 +2715,7 @@ Conclusion:
 
 ## Stage 10 Execution: Planner GRPO Path
 
-Status: validation complete; ready to commit and push.
+Status: completed and pushed.
 
 Goal:
 
@@ -2861,5 +2861,10 @@ Conclusion:
 - The planner and critic share the same Qwen response-token GRPO actor update.
 - The planner and critic GRPO paths both have real one-step Modal smoke
   validation against actual InterleaveThinker 8B checkpoints.
-- Next action: commit this Stage 10 planner GRPO integration and push it to
-  `origin/interleavethinker-fastvideo`.
+- Commit completed:
+  - `2cf9aa0d` — `[feat] add InterleaveThinker planner GRPO path`
+  - Pushed to `origin/interleavethinker-fastvideo`.
+- Next full-integration stage: add a first-class end-to-end
+  planner-generator-critic training/evaluation workflow that wires the planner
+  provider, FastVideo generation service, critic provider, and trace/reward
+  logging into a single reproducible command or config.
