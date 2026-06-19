@@ -2033,3 +2033,56 @@ Next step after this fix is committed:
 
 - Rerun the real FastVideo generator smoke for `fastvideo interleave-run` from
   the new pushed commit, using the same L40S command above.
+
+### Stage 5 Follow-up: Real FastVideo Generator Smoke
+
+Status: completed, pending handoff commit/push.
+
+Validation completed:
+
+- First rerun after parser fix:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-IyyHODKZKwUlDTbuKNVLf0`
+  - Commit: `38513d896c42616bb24c1004ca789a3dba70811e`
+  - Result: did not reach FastVideo code. `uv pip install -e '.[dev]'` failed
+    downloading/extracting `plotly==6.8.0` due to the default 30 second
+    `UV_HTTP_TIMEOUT`.
+- Successful rerun:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-Tz4VQKximS0bSWx6Fb9aFe`
+  - Commit: `38513d896c42616bb24c1004ca789a3dba70811e`
+  - Env vars:
+    `FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA,UV_HTTP_TIMEOUT=120`
+  - Command:
+    `fastvideo interleave-run --config examples/interleave/interleave_run.yaml
+    --prompt 'a simple centered red circle on a white background'
+    --output-dir /tmp/interleave_run_smoke
+    --trace-path /tmp/interleave_run_smoke/trace.json
+    --request.sampling.width 512
+    --request.sampling.height 512
+    --request.sampling.num-inference-steps 2
+    --request.sampling.seed 123`
+    followed by a Python assertion that the trace has attempts, a final image
+    path, and an existing output image file.
+  - Loaded FastVideo FLUX.2-klein from
+    `black-forest-labs/FLUX.2-klein-4B`.
+  - Ran fallback `SinglePromptPlanner`, `FastVideoImageGeneratorBackend`, and
+    `AcceptAllCritic`.
+  - Generated image:
+    `/tmp/interleave_run_smoke/interleave/2c860365e22440f4999e3c496b448341.png`
+  - Trace:
+    `/tmp/interleave_run_smoke/trace.json`
+  - CLI output: `Success: True`.
+  - Smoke marker printed:
+    `INTERLEAVE_RUN_FASTVIDEO_SMOKE_OK
+    /tmp/interleave_run_smoke/interleave/2c860365e22440f4999e3c496b448341.png`
+  - Modal volume committed.
+
+Conclusion:
+
+- The native `fastvideo interleave-run` command is now validated with a real
+  FastVideo image backend on Modal L40S.
+- The remaining full-orchestration GPU gap is real planner + real critic +
+  generator residency. Since the real planner+critic smoke already loaded both
+  8B Qwen3-VL models together on L40S and this smoke loaded FLUX.2-klein
+  separately, the next integration decision is whether to support all three
+  models in one process or prefer a split generator service for memory
+  isolation.
