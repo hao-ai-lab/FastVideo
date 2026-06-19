@@ -42,8 +42,7 @@ def main(argv: list[str]) -> int:
     failures: list[str] = []
     for f in files:
         mod = _load(f)
-        fns = [(n, getattr(mod, n)) for n in sorted(dir(mod))
-               if n.startswith("test_") and callable(getattr(mod, n))]
+        fns = [(n, getattr(mod, n)) for n in sorted(dir(mod)) if n.startswith("test_") and callable(getattr(mod, n))]
         for name, fn in fns:
             label = f"{f.name}::{name}"
             try:

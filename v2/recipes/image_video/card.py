@@ -30,13 +30,14 @@ from v2.platform.backends.toy import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
 from v2.recipes.wan21.loop import WanDenoiseLoop
 
 
-def _diffusion_card(model_id, family, loop_id, caps, tasks, *, shift):
+def _diffusion_card(model_id: str, family: str, loop_id: str, caps: tuple[Capability, ...], tasks: set[str], *,
+                    shift: float) -> ModelCard:
     seed = _seed_from(model_id)
     cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg, flow = ClassicCFG(), FlowShiftPolicy(shift=shift)
     precision, expert = PrecisionPolicy(), NoRouting("transformer")
 
-    def loop_factory():
+    def loop_factory() -> WanDenoiseLoop:
         return WanDenoiseLoop(loop_id=loop_id, cfg=cfg, flow_shift=flow, precision=precision, expert=expert, cost=cost)
 
     components = {

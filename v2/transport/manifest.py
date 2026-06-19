@@ -14,7 +14,7 @@ def payload_nbytes(value: Any) -> int:
         return int(value.nbytes)
     if isinstance(value, dict):
         return sum(payload_nbytes(v) for v in value.values())
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return sum(payload_nbytes(v) for v in value)
     return 0
 

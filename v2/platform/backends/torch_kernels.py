@@ -10,11 +10,13 @@ forward->combine->solver — a perf follow-up).
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import torch
 
 
-def _as_torch(a):
+def _as_torch(a: Any) -> tuple[Any, bool]:
     """numpy → cuda torch (passthrough if already torch). Returns (tensor, was_numpy)."""
     if torch.is_tensor(a):
         return a, False

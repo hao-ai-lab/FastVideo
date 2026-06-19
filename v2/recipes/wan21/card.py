@@ -193,7 +193,7 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b",
                               expert=expert,
                               cost=cost)  # 16/8/4 default geometry
 
-    def _dit_spec(cid):
+    def _dit_spec(cid: str) -> ComponentSpec:
         return ComponentSpec(component_id=cid,
                              kind="dit",
                              load_id="fastvideo.models.dits.wanvideo:WanTransformer3DModel",

@@ -8,6 +8,8 @@ state lives in ``LoopState`` (interleave-safe).
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from v2._enums import ExecutionProfile, WorkUnitKind
@@ -128,7 +130,7 @@ class WanDenoiseLoop:
 
         i2v_ctx, i2v_cond = st.scratch.get("i2v_img_embeds"), st.scratch.get("i2v_cond")
 
-        def _velocity(model, x_, sigma_t_, pe_, ne_, scale_):
+        def _velocity(model: Any, x_: Any, sigma_t_: float, pe_: Any, ne_: Any, scale_: float) -> Any:
             # The conditioned forward + CFG combine. Solver/forward dispatch through the platform's
             # kernel table (numpy on CPU, the device kernel on a GPU/accel backend).
             # i2v_ctx/i2v_cond are None for T2V (the plain forward); for i2v the adapter concats the

@@ -67,7 +67,7 @@ def _control_video_encode(instance: Any, slots: dict, request: Any, ctx: Any) ->
         # No control video: encode a zero control video (the real pipeline's zeros-``video_latent`` path).
         # Pixel-space zeros -> VAE -> the model's "empty control" latent; concat with the zero pad → 32ch.
         h, w = int(request.diffusion.height), int(request.diffusion.width)
-        frames = np.zeros((3, nf, h, w), dtype="float32")
+        frames: Any = np.zeros((3, nf, h, w), dtype="float32")
     else:
         frames = np.asarray(part.frames, dtype="float32")  # [T, H, W, 3] or [3, T, H, W]
         if frames.ndim == 4 and frames.shape[-1] == 3:  # [T, H, W, 3] -> [3, T, H, W]

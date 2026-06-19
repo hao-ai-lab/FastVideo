@@ -166,7 +166,7 @@ class MatrixGame2CausalDMDLoop:
              frame_seq_len: int) -> np.ndarray:
         """One forward returning the RAW epsilon prediction. Per-frame timestep [num_frames] (long-ish);
         the GPU adapter keeps it 2-D. ``hasattr(dit, 'call')`` selects the causal adapter; else the toy."""
-        per_frame_t = np.full((num_frames, ), float(timestep), dtype="float32")
+        per_frame_t: np.ndarray = np.full((num_frames, ), float(timestep), dtype="float32")
         if hasattr(dit, "call"):  # MatrixGame2CausalDiT (GPU): full causal/i2v/action plumbing
             return np.asarray(dit.call(
                 latent,

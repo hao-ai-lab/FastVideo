@@ -20,7 +20,7 @@ def content_hash(obj: Any) -> str:
     h = hashlib.sha256()
     if isinstance(obj, str):
         h.update(obj.encode("utf-8"))
-    elif isinstance(obj, (bytes, bytearray)):
+    elif isinstance(obj, bytes | bytearray):
         h.update(obj)
     elif hasattr(obj, "tobytes") and hasattr(obj, "shape"):  # numpy / torch tensor
         h.update(str(getattr(obj, "shape", "")).encode())

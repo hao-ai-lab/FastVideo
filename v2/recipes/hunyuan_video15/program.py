@@ -75,7 +75,7 @@ def _text_encode(instance: Any, slots: dict, request: Any, ctx: Any) -> None:
         if byt5 is None or getattr(byt5, "shape", (0, ))[0] == 0:
             return qwen  # no glyph text -> empty ByT5 (the DiT no-op); pass Qwen alone (capturable)
         import numpy as np
-        pair = np.empty(2, dtype=object)
+        pair: np.ndarray = np.empty(2, dtype=object)
         pair[0], pair[1] = qwen, byt5
         return pair
 

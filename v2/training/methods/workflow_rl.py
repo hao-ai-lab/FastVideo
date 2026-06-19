@@ -14,6 +14,8 @@ Workflow does.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from v2._enums import ConsistencyLevel, ExecutionProfile
@@ -26,7 +28,17 @@ from v2.training.weight_sync import WeightRole, WeightSyncPlan
 from v2.training.methods.base import TrainingMethod, new_instance
 
 
-def _flowgrpo_ppo_step(dit, ref_dit, behavior, emb, advantage, *, lr, ppo_clip, beta, noise_scale, sde_step=None):
+def _flowgrpo_ppo_step(dit: Any,
+                       ref_dit: Any,
+                       behavior: Any,
+                       emb: Any,
+                       advantage: float,
+                       *,
+                       lr: float,
+                       ppo_clip: float,
+                       beta: float,
+                       noise_scale: float,
+                       sde_step: Any = None) -> tuple[float, float, float, float]:
     """One FlowGRPO PPO pass over an SDE trajectory: per-step ratio + KL, then move the policy toward
     the max-likelihood velocity of each realized sample (advantage-weighted). Returns
     (ppo_loss, kl, ratio, grad_norm). Shared by both stages. ``sde_step`` is the platform-resolved SDE
@@ -50,7 +62,10 @@ def _flowgrpo_ppo_step(dit, ref_dit, behavior, emb, advantage, *, lr, ppo_clip, 
         v_target = flow_sde_ml_velocity(prev, sample, st, sn, noise_scale=noise_scale)
         _, gn = dit.mse_grad_step(prev, emb, st, v_target, lr * float(np.clip(advantage, -1.0, 1.0)))
         gnorms.append(gn)
-    m = lambda xs: float(np.mean(xs)) if xs else 0.0  # noqa: E731
+
+    def m(xs: Any) -> float:
+        return float(np.mean(xs)) if xs else 0.0
+
     return m(ppo_losses), m(kls), m(ratios), m(gnorms)
 
 
@@ -96,14 +111,14 @@ class WorkflowRLMethod(TrainingMethod):
             "i2v.transformer": self.i2v.component("transformer")
         }
 
-    def _sde_params(self, **extra):
+    def _sde_params(self, **extra: Any) -> DiffusionParams:
         return DiffusionParams(num_steps=self.rollout_steps,
                                guidance_scale=1.0,
                                sde_rollout=True,
                                sde_noise_scale=self.sde_noise_scale,
                                **extra)
 
-    def _rollout_t2i(self, prompt, seed):
+    def _rollout_t2i(self, prompt: Any, seed: Any) -> tuple[Any, Any, Any]:
         emb = cached_text_encode(self.t2i, prompt)
         neg = cached_text_encode(self.t2i, "")
         req = make_request(TaskType.T2I,
@@ -121,7 +136,7 @@ class WorkflowRLMethod(TrainingMethod):
         image = self.t2i.component("vae").decode(res.outputs["latents"])
         return res, emb, image
 
-    def _rollout_i2v(self, prompt, image, seed):
+    def _rollout_i2v(self, prompt: Any, image: Any, seed: Any) -> tuple[Any, Any, Any]:
         emb = cached_text_encode(self.i2v, prompt)
         neg = cached_text_encode(self.i2v, "")
         cond = self.i2v.component("vae").encode(np.asarray(image, dtype="float32"))  # image conditioning
@@ -142,7 +157,7 @@ class WorkflowRLMethod(TrainingMethod):
         return res, emb, video
 
     @staticmethod
-    def _reward(video):
+    def _reward(video: Any) -> float:
         return float(np.tanh(-np.std(np.asarray(video, dtype="float64"))))  # lower-spread video = better
 
     def managed_train_step(self, batch: dict, iteration: int) -> tuple[dict, dict]:
@@ -195,7 +210,10 @@ class WorkflowRLMethod(TrainingMethod):
 
         t2i_ver = self.t2i_sync.apply(self.t2i.component("transformer"), self.t2i.component("transformer"), self.t2i)
         i2v_ver = self.i2v_sync.apply(self.i2v.component("transformer"), self.i2v.component("transformer"), self.i2v)
-        m = lambda xs: float(np.mean(xs)) if xs else 0.0  # noqa: E731
+
+        def m(xs: Any) -> float:
+            return float(np.mean(xs)) if xs else 0.0
+
         metrics = {
             "reward_mean": m(all_reward),
             "grad_norm/t2i": m(t2i_gn),

@@ -54,7 +54,7 @@ def pack_conditioning(cross_attn_cond: np.ndarray, global_embed: np.ndarray) -> 
     loop carries this opaque array as ``text_embed``; ``StableAudioDiT.__call__`` (and the CPU toy, which
     just means-pools it) consume it. Keeps the loop modality-agnostic — it never sees the SA tuple."""
     g = np.asarray(global_embed, dtype="float32").reshape(-1)
-    head = np.zeros((_GLOBAL_HEAD_ROWS, _CROSS_COND_DIM), dtype="float32")
+    head: np.ndarray = np.zeros((_GLOBAL_HEAD_ROWS, _CROSS_COND_DIM), dtype="float32")
     head.reshape(-1)[:min(g.shape[0], _GLOBAL_COND_DIM)] = g[:_GLOBAL_COND_DIM]  # row-major lay-down
     cross = np.asarray(cross_attn_cond, dtype="float32").reshape(-1, _CROSS_COND_DIM)
     return np.concatenate([head, cross], axis=0)  # [2 + seq, 768]; rows0-1=global, rows2..=cross-attn

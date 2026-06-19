@@ -86,8 +86,10 @@ class ChunkRolloutLoop:
             ps = getattr(getattr(dit, "module", None), "patch_size", (1, 2, 2))
             frame_seqlen = (lh // int(ps[-2])) * (lw // int(ps[-1]))
             caches = dit.alloc_causal_caches(frame_seqlen)
-            st.scratch.update(causal_kv=caches["kv"], causal_ca=caches["crossattn"],
-                              frame_seqlen=frame_seqlen, real_causal=True)
+            st.scratch.update(causal_kv=caches["kv"],
+                              causal_ca=caches["crossattn"],
+                              frame_seqlen=frame_seqlen,
+                              real_causal=True)
         return st
 
     def next(self, st: LoopState):
@@ -118,16 +120,25 @@ class ChunkRolloutLoop:
             else:
                 dit = model.component("transformer")
                 if real_causal:  # condition on prior clean chunks via the model's kv_cache (CausVid Alg 2)
-                    kw = dict(kv_cache=kv, crossattn_cache=ca, current_start=cur_start,
-                              start_frame=start_frame, frame_seqlen=fsl)
+                    kw = dict(kv_cache=kv,
+                              crossattn_cache=ca,
+                              current_start=cur_start,
+                              start_frame=start_frame,
+                              frame_seqlen=fsl)
                     preds = {b: dit(x, pe if b == "cond" else ne, sigma_t, **kw) for b in branches}
                 else:
                     preds = {b: dit(x, pe if b == "cond" else ne, sigma_t, context=context) for b in branches}
                 velocity = cfg.combine(preds, scale, sctx, cfg_state)
             x_next = fm(precision.cast(x), precision.cast(velocity), sigma_t, sigma_next)
             if real_causal and is_last:  # write the clean chunk's K/V (timestep ~0) so the next chunk attends to it
-                model.component("transformer")(x_next, pe, 0.0, kv_cache=kv, crossattn_cache=ca,
-                                               current_start=cur_start, start_frame=start_frame, frame_seqlen=fsl)
+                model.component("transformer")(x_next,
+                                               pe,
+                                               0.0,
+                                               kv_cache=kv,
+                                               crossattn_cache=ca,
+                                               current_start=cur_start,
+                                               start_frame=start_frame,
+                                               frame_seqlen=fsl)
             return StepResult(output={
                 "noise_pred": np.asarray(velocity, dtype="float32"),
                 "latents": x_next.astype("float32")

@@ -275,8 +275,8 @@ class ModelCard:
                 errs.append(f"loop {lid!r} is missing the REQUIRED step_cost_model")
 
         # 4) required_for / optional_for tasks must be disjoint per component
-        for cid, comp in self.components.items():
-            overlap = comp.required_for & comp.optional_for
+        for cid, comp_spec in self.components.items():
+            overlap = comp_spec.required_for & comp_spec.optional_for
             if overlap:
                 errs.append(f"component {cid!r} lists tasks {overlap} as both required and optional")
 
