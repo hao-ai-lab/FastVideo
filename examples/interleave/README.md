@@ -4,6 +4,8 @@ This directory contains two InterleaveThinker-oriented entrypoints:
 
 - `flux2_klein_interleave_serve.yaml`: run FastVideo as an
   InterleaveThinker-compatible generator service.
+- `interleave_run.yaml`: run the native planner -> generator -> critic loop
+  through `fastvideo interleave-run`.
 - `interleave_single_prompt.py`: run the native FastVideo interleave
   orchestrator with a fallback single-prompt planner and accept-all critic.
 
@@ -50,6 +52,57 @@ export EDIT_MODEL_NAME=klein
 ```
 
 The same app also exposes `/generate` and `/v1/interleave/edit` aliases.
+
+## Native Interleave Run CLI
+
+Run the native orchestrator from a config file:
+
+```bash
+FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
+  fastvideo interleave-run --config examples/interleave/interleave_run.yaml
+```
+
+Override common per-run fields from the CLI:
+
+```bash
+fastvideo interleave-run \
+  --config examples/interleave/interleave_run.yaml \
+  --prompt "create a clean product photo of a red ceramic mug" \
+  --output-dir outputs/interleave_mug \
+  --trace-path outputs/interleave_mug/trace.json
+```
+
+The example defaults to `planner.kind: single_prompt` and
+`critic.kind: accept_all` so it can smoke-test the FastVideo image backend
+without loading planner/critic checkpoints. To run the real InterleaveThinker
+loop, switch those blocks to `interleave_thinker` and set:
+
+```yaml
+planner:
+  kind: interleave_thinker
+  init_from: InterleaveThinker/InterleaveThinker-Planner-8B
+  processor_from: Qwen/Qwen3-VL-8B-Instruct
+  trainable: false
+  torch_dtype: bf16
+  device_map: cuda:0
+  attn_implementation: sdpa
+  max_new_tokens: 2048
+
+critic:
+  kind: interleave_thinker
+  init_from: InterleaveThinker/Critic-SFT-8B
+  processor_from: Qwen/Qwen3-VL-8B-Instruct
+  trainable: false
+  torch_dtype: bf16
+  device_map: cuda:0
+  attn_implementation: sdpa
+  max_new_tokens: 512
+```
+
+Loading the planner, critic, and image generator in one process can be memory
+intensive. On tighter GPUs, run the `/edit` compatibility service separately or
+load only the planner/critic in the native runner while the generator is served
+out-of-process.
 
 ## Nano Banana / Gemini API Backends
 

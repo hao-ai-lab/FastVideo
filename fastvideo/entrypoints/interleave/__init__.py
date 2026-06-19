@@ -1,6 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """InterleaveThinker-compatible FastVideo app layer."""
 
+from fastvideo.entrypoints.interleave.config import (
+    InterleaveCriticConfig,
+    InterleaveImageBackendConfig,
+    InterleavePlannerConfig,
+    InterleaveRunConfig,
+    InterleaveRunStateConfig,
+    load_interleave_run_config,
+    resolve_interleave_instruction,
+)
 from fastvideo.entrypoints.interleave.generator import (
     FastVideoImageGeneratorBackend,
     ImageGeneratorBackend,
@@ -15,6 +24,10 @@ from fastvideo.entrypoints.interleave.orchestrator import (
 from fastvideo.entrypoints.interleave.providers import (
     InterleaveThinkerCriticProvider,
     InterleaveThinkerPlannerProvider,
+)
+from fastvideo.entrypoints.interleave.runner import (
+    InterleaveRunResult,
+    run_interleave_config,
 )
 from fastvideo.entrypoints.interleave.schema import (
     CriticDecision,
@@ -42,9 +55,15 @@ __all__ = [
     "GeneratedImage",
     "ImageGeneratorBackend",
     "InterleaveAttempt",
+    "InterleaveCriticConfig",
     "InterleaveEditRequest",
     "InterleaveEditResponse",
+    "InterleaveImageBackendConfig",
     "InterleaveOrchestrator",
+    "InterleavePlannerConfig",
+    "InterleaveRunConfig",
+    "InterleaveRunResult",
+    "InterleaveRunStateConfig",
     "InterleaveThinkerCriticProvider",
     "InterleaveThinkerPlannerProvider",
     "InterleaveTrace",
@@ -53,6 +72,9 @@ __all__ = [
     "PlannerProvider",
     "SinglePromptPlanner",
     "build_app",
+    "load_interleave_run_config",
+    "resolve_interleave_instruction",
+    "run_interleave_config",
     "save_trace",
     "trace_to_dict",
 ]

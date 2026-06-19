@@ -39,12 +39,15 @@ class CriticProvider(Protocol):
 class SinglePromptPlanner:
     """Fallback planner that runs the instruction as one generator prompt."""
 
+    def __init__(self, *, max_attempts: int = 1) -> None:
+        self.max_attempts = max(1, int(max_attempts))
+
     def plan(self, request: PlannerInput) -> Sequence[PlannedInterleaveStep]:
         return [
             PlannedInterleaveStep(
                 prompt=request.instruction,
                 input_image_path=request.initial_image_path,
-                max_attempts=1,
+                max_attempts=self.max_attempts,
             )
         ]
 

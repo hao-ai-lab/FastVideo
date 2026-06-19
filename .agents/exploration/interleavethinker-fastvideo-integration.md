@@ -1841,3 +1841,128 @@ Conclusion:
   FastVideo image-generation model/config, then decide whether the planner and
   critic should stay resident together or be unloaded/reloaded around the
   generator for tighter GPU memory budgets.
+
+## Stage 5 Execution: Native Interleave Run CLI
+
+Status: validated, pending commit/push.
+
+Scope for this implementation slice:
+
+- Add a first-class `fastvideo interleave-run` command that runs the complete
+  native orchestration path from a config file.
+- Reuse existing pieces rather than adding another execution framework:
+  - `InterleaveOrchestrator`;
+  - `FastVideoImageGeneratorBackend`;
+  - `NanoBananaImageGeneratorBackend`;
+  - `InterleaveThinkerPlannerProvider`;
+  - `InterleaveThinkerCriticProvider`;
+  - `SinglePromptPlanner` and `AcceptAllCritic` for lightweight smoke paths.
+- Add a typed interleave run config with blocks for:
+  - `generator`: regular FastVideo `GeneratorConfig` for local generation;
+  - `request`: regular `GenerationRequest` defaults for per-step generation;
+  - `image_backend`: FastVideo or Nano Banana backend selection;
+  - `planner`: single-prompt or InterleaveThinker planner backend;
+  - `critic`: none, accept-all, or InterleaveThinker critic backend;
+  - `interleave`: instruction, optional initial image, output directory, trace
+    path, and trace image payload policy.
+- Keep the command testable without loading GPU models by allowing runner tests
+  to inject a fake image backend.
+
+Expected files:
+
+- `fastvideo/entrypoints/interleave/config.py`
+- `fastvideo/entrypoints/interleave/runner.py`
+- `fastvideo/entrypoints/cli/interleave_run.py`
+- `fastvideo/entrypoints/cli/main.py`
+- `fastvideo/entrypoints/interleave/orchestrator.py`
+- `fastvideo/entrypoints/interleave/__init__.py`
+- `examples/interleave/interleave_run.yaml`
+- `examples/interleave/README.md`
+- `tests/local_tests/test_interleave_run_cli.py`
+- this handoff file
+
+Validation plan:
+
+- Local syntax and `git diff --check`.
+- Modal pytest for interleave entrypoint/provider/run CLI tests.
+- Modal pre-commit on changed non-excluded files.
+- Modal import/config smoke for `fastvideo interleave-run` using injected/fake
+  components in tests.
+- A later GPU smoke should run real planner + real critic + real FastVideo
+  generator once a small practical model/config is selected and GPU memory
+  residency is measured.
+
+Implemented changes:
+
+- Added `fastvideo/entrypoints/interleave/config.py` with typed config blocks:
+  - `InterleaveRunConfig`;
+  - `InterleaveRunStateConfig`;
+  - `InterleaveImageBackendConfig`;
+  - `InterleavePlannerConfig`;
+  - `InterleaveCriticConfig`.
+- Added `load_interleave_run_config(...)` with:
+  - FastVideo-style YAML/JSON loading;
+  - dotted CLI overrides for `interleave.`, `image_backend.`, `planner.`,
+    `critic.`, `request.`, and `generator.`;
+  - CLI convenience fields for prompt, input image, output directory, and trace
+    path;
+  - explicit-path binding for the nested `GenerationRequest` so per-step
+    generation defaults behave like existing `generate`/`serve` configs.
+- Added `fastvideo/entrypoints/interleave/runner.py` with:
+  - `run_interleave_config(...)`;
+  - `build_planner(...)`;
+  - `build_critic(...)`;
+  - `build_image_backend(...)`;
+  - trace path resolution and cleanup of local `VideoGenerator` instances.
+- Added `fastvideo interleave-run` in
+  `fastvideo/entrypoints/cli/interleave_run.py` and registered it in
+  `fastvideo/entrypoints/cli/main.py`.
+- Updated `SinglePromptPlanner` to accept a configurable retry count.
+- Exported the new config/runner API from `fastvideo.entrypoints.interleave`.
+- Added `examples/interleave/interleave_run.yaml` and updated the README with
+  native CLI usage plus the real InterleaveThinker planner/critic config block.
+- Added `tests/local_tests/test_interleave_run_cli.py` covering:
+  - config loading from YAML;
+  - CLI field overrides and dotted override normalization;
+  - rejection of unsupported override prefixes;
+  - full runner execution with an injected fake image backend;
+  - configurable fallback planner attempt count.
+
+Validation completed:
+
+- Local lightweight checks:
+  - `python -m py_compile` passed for the new/changed Python files.
+  - `git diff --check` passed.
+- Modal focused pytest:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-XyjjWxk63VMMAgyefDV9iz`
+  - Command:
+    `pytest tests/local_tests/test_interleave_entrypoint.py
+    tests/local_tests/test_interleave_model_providers.py
+    tests/local_tests/test_interleave_run_cli.py -q`
+  - Result: `14 passed, 14 warnings in 15.93s`.
+- Modal pre-commit:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-4lOvHURSxKqFmit8TqnhBe`
+  - Command:
+    `pre-commit run --files examples/interleave/README.md
+    examples/interleave/interleave_run.yaml
+    fastvideo/entrypoints/cli/interleave_run.py
+    fastvideo/entrypoints/cli/main.py
+    fastvideo/entrypoints/interleave/__init__.py
+    fastvideo/entrypoints/interleave/config.py
+    fastvideo/entrypoints/interleave/orchestrator.py
+    fastvideo/entrypoints/interleave/runner.py
+    tests/local_tests/test_interleave_run_cli.py`
+  - Result: yapf, ruff, codespell, mypy, filename check, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+
+Conclusion:
+
+- FastVideo now has a native config-driven `interleave-run` entrypoint that can
+  wire planner, generator, and critic backends without hand-written scripts.
+- The default example provides a lightweight FastVideo image-backend smoke path;
+  the same config can switch to the real InterleaveThinker planner and critic
+  checkpoints.
+- Next step: run a GPU smoke with `fastvideo interleave-run` and a real
+  FastVideo image backend. Use fallback planner/accept-all critic first to
+  validate the CLI + generator path, then test real planner/critic residency or
+  a split-process `/edit` generator to avoid loading all models in one process.
