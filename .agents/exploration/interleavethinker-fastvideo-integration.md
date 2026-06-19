@@ -2194,7 +2194,7 @@ Conclusion:
 
 ## Stage 7 Execution: Planner/Critic SFT Method
 
-Status: completed, pending code commit/push.
+Status: completed and pushed.
 
 Scope for this implementation slice:
 
@@ -2313,6 +2313,9 @@ Conclusion:
   InterleaveThinker Qwen actors.
 - The SFT loop can consume upstream planner/critic SFT files through the
   `dataset_kind` normalizers introduced in Stage 6.
+- Commit completed:
+  - `df88af31` — `[feat] add InterleaveThinker SFT method`
+  - Pushed to `origin/interleavethinker-fastvideo`.
 - The next integration stage is to upgrade the existing InterleaveThinker RL
   method from reward-scoring smoke coverage toward a real critic-policy
   optimization loop with rollouts, reward aggregation, and GRPO-style
