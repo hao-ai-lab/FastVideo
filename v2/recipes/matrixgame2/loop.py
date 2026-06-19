@@ -291,6 +291,11 @@ class MatrixGame2CausalDMDLoop:
     # advance                                                                #
     # --------------------------------------------------------------------- #
     def advance(self, st: LoopState, result: StepResult) -> LoopState:
+        # Monotonic progress counter: this loop drives control flow off block_idx/dmd_idx/phase (in
+        # scratch), but the runtime's no-progress watchdog (engine ProgramRunner._progress) keys on
+        # st.step_idx. Bump it on EVERY executed work unit (each DMD step AND each clean-context pass)
+        # so a multi-block causal rollout is seen to advance — every other recipe loop does the same.
+        st.step_idx += 1
         out = result.output
         start, num = out["start"], out["num"]
         # Write the (denoised or unchanged) block back into the full latent.

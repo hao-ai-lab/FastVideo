@@ -60,6 +60,12 @@ MG3_NUM_TRAIN_TIMESTEPS = 1000  # FlowUniPC timestep ~ sigma * num_train_timeste
 MG3_CLIP_FRAME = 56
 MG3_FIRST_CLIP_FRAME = MG3_CLIP_FRAME + 1  # 57
 MG3_PAST_FRAME = 16
+# DiT patch stride on the spatial latent dims (patch_size (1,2,2)). The 5B MatrixGame3WanModel folds
+# (H/2, W/2) tokens, so the latent H/W must be patch-aligned (even) before denoise or the unpatchified
+# velocity comes back one row/col short of the noise latent (faithful to MatrixGame3DenoisingStage's
+# ``latent_h_aligned = (latent_h // patch_h) * patch_h`` crop). 720px -> latent_h 45 (odd) -> 44.
+MG3_PATCH_H = 2
+MG3_PATCH_W = 2
 
 
 def _toy_latent_shape(req) -> tuple[int, int, int, int]:
@@ -76,7 +82,14 @@ def _toy_latent_shape(req) -> tuple[int, int, int, int]:
 def _gpu_latent_shape(req, channels: int, spatial_ratio: int, temporal_ratio: int) -> tuple[int, int, int, int]:
     d = req.diffusion
     t = (max(1, d.num_frames) - 1) // temporal_ratio + 1
-    return (channels, max(1, t), max(1, d.height // spatial_ratio), max(1, d.width // spatial_ratio))
+    h = max(1, d.height // spatial_ratio)
+    w = max(1, d.width // spatial_ratio)
+    # Patch-align the spatial latent dims to the DiT patch stride (faithful to MatrixGame3DenoisingStage):
+    # an odd latent_h/w (e.g. 720px -> 45) would otherwise leave the unpatchified velocity one row short
+    # of the noise latent and break the flow-match step's elementwise add.
+    h = max(MG3_PATCH_H, (h // MG3_PATCH_H) * MG3_PATCH_H)
+    w = max(MG3_PATCH_W, (w // MG3_PATCH_W) * MG3_PATCH_W)
+    return (channels, max(1, t), h, w)
 
 
 def _cond_compatible(latent: np.ndarray, img_cond: np.ndarray) -> bool:
