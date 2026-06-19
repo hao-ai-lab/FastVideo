@@ -2586,7 +2586,7 @@ Conclusion:
 
 ## Stage 9 Execution: Optional Reference Policy KL For Critic GRPO
 
-Status: validation complete; ready to commit and push.
+Status: completed and pushed.
 
 Goal:
 
@@ -2706,5 +2706,9 @@ Conclusion:
   path in FastVideo.
 - The path has both fake-unit coverage and a real one-step Modal smoke against
   actual InterleaveThinker critic checkpoints.
-- Next action: commit this Stage 9 reference-policy integration and push it to
-  `origin/interleavethinker-fastvideo`.
+- Commit completed:
+  - `42c2fe6a` — `[feat] add InterleaveThinker reference policy KL`
+  - Pushed to `origin/interleavethinker-fastvideo`.
+- Next full-integration stage: add a planner-policy RL path so the
+  InterleaveThinker planner can be optimized with the same FastVideo GRPO loop,
+  using planner-specific rollouts and rewards instead of only critic RL/SFT.
