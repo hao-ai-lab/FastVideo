@@ -534,6 +534,92 @@ Next recommended integration step:
   current slice validates the FastVideo contract with a fake backend; it does
   not download or execute the real Qwen critic weights.
 
+## Real Critic Checkpoint Smoke
+
+Status: completed and Modal-validated.
+
+Goal:
+
+- Run `InterleaveThinkerCriticModel` with a real Qwen3-VL-compatible checkpoint
+  on Modal L40S, using the pushed `interleavethinker-fastvideo` branch.
+- First target the upstream public critic SFT checkpoint:
+  `InterleaveThinker/Critic-SFT-8B`, with processor
+  `Qwen/Qwen3-VL-8B-Instruct`.
+- Use a tiny two-image fixture generated on the Modal worker to validate:
+  - backend load through the FastVideo wrapper,
+  - dataset `image_dir` resolution,
+  - Qwen3-VL chat-template/image preprocessing,
+  - one short `generate_interleave_responses(...)` call.
+
+Smoke command shape:
+
+- Modal launcher:
+  `python -m modal run fastvideo/tests/modal/launch_l40s_job.py`
+- GPU: `L40S:1`
+- Install extra: `dev`
+- Git commit: current pushed branch head.
+- Remote command: create two 128x128 PNGs and one JSONL row, instantiate
+  `InterleaveThinkerCriticModel(load_backend=True, trainable=False,
+  torch_dtype="bf16", device_map="cuda:0", attn_implementation="sdpa")`, build
+  the dataloader, run one generation with `max_new_tokens=16`.
+
+Success criteria:
+
+- Model and processor load successfully.
+- The dataloader yields one row with image paths resolved under the fixture
+  image directory.
+- `generate_interleave_responses(...)` returns one rollout with a non-empty
+  response.
+
+Known risk:
+
+- This is intentionally a real-weight smoke. It may fail because the upstream
+  HF checkpoint is unavailable/gated, because the Modal image lacks a Qwen3-VL
+  runtime dependency, or because the wrapper needs a Qwen3-specific model class.
+  Any of those failures should be captured as integration work, not ignored.
+
+Validation completed:
+
+- Modal app URL:
+  `https://modal.com/apps/hao-ai-lab/main/ap-hDxj5MhLgdnGq22mRLjgIK`
+- Commit tested:
+  `9973307b11b837a280cc81f1a0e61676fb55acf8`
+- Local patch applied: `false`; the job used the pushed branch state.
+- Modal volume commit: `true`; downloaded HF weights were saved back to the
+  `hf-model-weights` volume.
+- Remote smoke details:
+  - Created two 128x128 PNGs under
+    `/tmp/interleave_real_critic_smoke/images`.
+  - Created one JSONL row with relative `origin_image_path` and
+    `edited_image_path`.
+  - Loaded model `InterleaveThinker/Critic-SFT-8B`.
+  - Loaded processor `Qwen/Qwen3-VL-8B-Instruct`.
+  - Instantiated `InterleaveThinkerCriticModel(load_backend=True,
+    trainable=False, image_dir=<fixture images>, torch_dtype="bf16",
+    device_map="cuda:0", attn_implementation="sdpa")`.
+  - Ran `init_preprocessors(...)`.
+  - Ran `generate_interleave_responses(..., num_generations=1,
+    max_new_tokens=16)`.
+- Observed output:
+  - CUDA device: `NVIDIA L40S`.
+  - Backend class: `Qwen3VLForConditionalGeneration`.
+  - Resolved paths:
+    `/tmp/interleave_real_critic_smoke/images/before.png` and
+    `/tmp/interleave_real_critic_smoke/images/after.png`.
+  - Rollout count: `1`.
+  - Response prefix began with `<think>`.
+  - Smoke marker printed: `SMOKE_OK`.
+
+Conclusion:
+
+- The critic wrapper is properly set up for real checkpoint load, image-root
+  resolution, Qwen3-VL chat/image preprocessing, and short rollout generation
+  on Modal L40S.
+- This smoke did not run a full real-weight optimizer update. The fake-backend
+  tests cover `train_interleave_rollouts(...)`; a real 8B optimizer-step smoke
+  should be done separately with LoRA or sharding because full-parameter Adam on
+  one L40S is likely too memory-heavy.
+
 ## Training Loop Extension
 
 Status: in progress as of the user request to "Add a training loop" for
