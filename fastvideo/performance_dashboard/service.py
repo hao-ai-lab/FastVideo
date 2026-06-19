@@ -13,21 +13,11 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from fastvideo.tests.performance.hf_store import safe_float
+from fastvideo.tests.performance.hf_store import is_baseline_eligible_record, safe_float
 
 from .metrics import METRICS
 
 Record = dict[str, Any]
-METADATA_KEYS = (
-    "run_source",
-    "baseline_eligible",
-    "branch",
-    "pr_number",
-    "test_scope",
-    "build_url",
-    "build_id",
-    "job_id",
-)
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -78,7 +68,7 @@ def record_run_source(record: Record) -> str:
 def record_metadata(record: Record) -> Record:
     return {
         "run_source": record_run_source(record),
-        "baseline_eligible": bool(record.get("baseline_eligible", False)),
+        "baseline_eligible": is_baseline_eligible_record(record),
         "branch": record.get("branch") or "",
         "pr_number": record.get("pr_number") or "",
         "test_scope": record.get("test_scope") or "",
@@ -117,12 +107,22 @@ def regression_percent(metric_key: str, current: float | None, baseline: float |
 def build_latest_summary(records: list[Record],
                          *,
                          baseline_window: int = 5,
-                         max_regression: float = 0.05) -> list[Record]:
+                         max_regression: float = 0.05,
+                         run_source: str | None = None) -> list[Record]:
     rows: list[Record] = []
     for (model_id, gpu_type), group in group_by_model_gpu(records).items():
-        latest = group[-1]
-        earlier_successes = [record for record in group[:-1] if record.get("success", True)]
-        baseline_records = earlier_successes[-baseline_window:]
+        latest_candidates = group
+        if run_source:
+            latest_candidates = [record for record in group if record_run_source(record) == run_source]
+        if not latest_candidates:
+            continue
+
+        latest = latest_candidates[-1]
+        baseline_pool = [
+            record for record in group
+            if record is not latest and record.get("success", True) and is_baseline_eligible_record(record)
+        ]
+        baseline_records = baseline_pool[-baseline_window:]
 
         metrics: dict[str, Record] = {}
         regressions: list[float] = []

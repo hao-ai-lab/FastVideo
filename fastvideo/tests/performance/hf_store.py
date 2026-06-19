@@ -48,6 +48,20 @@ def safe_float(value: Any) -> float | None:
         return None
 
 
+def is_baseline_eligible_record(record: dict[str, Any]) -> bool:
+    """Return whether *record* may contribute to rolling baselines.
+
+    Legacy records predate ``baseline_eligible`` and ``run_source``. They were
+    uploaded only by the old successful main/full-suite path, so keep them
+    eligible until the HF history naturally rolls forward.
+    """
+    if record.get("baseline_eligible") is True:
+        return True
+    if "baseline_eligible" not in record and "run_source" not in record:
+        return True
+    return False
+
+
 def resolve_hf_token() -> str | None:
     """Return the first configured Hugging Face token env var."""
     for env_var in HF_TOKEN_ENV_VARS:
@@ -207,8 +221,9 @@ def load_records(
             many days. Records with a missing/unparsable timestamp are kept.
         successful_only: When True, only records with ``success=True`` are
             returned. Useful when building a regression baseline.
-        baseline_eligible_only: When True, only records explicitly marked with
-            ``baseline_eligible=True`` are returned.
+        baseline_eligible_only: When True, only baseline-eligible records are
+            returned. Legacy records missing both ``baseline_eligible`` and
+            ``run_source`` are treated as eligible.
 
     Returns:
         List of raw dicts sorted by ``timestamp`` ascending (records that could
@@ -230,7 +245,7 @@ def load_records(
         if successful_only and not data.get("success", True):
             continue
 
-        if baseline_eligible_only and data.get("baseline_eligible") is not True:
+        if baseline_eligible_only and not is_baseline_eligible_record(data):
             continue
 
         if cutoff is not None:

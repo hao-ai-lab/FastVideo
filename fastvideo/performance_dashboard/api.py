@@ -147,8 +147,12 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         # query is kept only so the frontend can share filter state across
         # endpoints without affecting the summary semantics.
         loaded = data_store.load_records(days=None)
-        filtered = filter_records(loaded, model_id=model_id, gpu_type=gpu_type, run_source=run_source)
-        rows = build_latest_summary(filtered, max_regression=float(os.environ.get("PERF_MAX_REGRESSION", "0.05")))
+        filtered = filter_records(loaded, model_id=model_id, gpu_type=gpu_type)
+        rows = build_latest_summary(
+            filtered,
+            max_regression=float(os.environ.get("PERF_MAX_REGRESSION", "0.05")),
+            run_source=run_source,
+        )
         return {
             "rows": rows,
             "count": len(rows),

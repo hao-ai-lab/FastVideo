@@ -52,6 +52,37 @@ def test_build_latest_summary_status_uses_latest_record_success_field():
     assert rows[0]["success"] is False
 
 
+def test_build_latest_summary_run_source_filter_keeps_canonical_baseline():
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            run_source="scheduled_main",
+            baseline_eligible=True,
+        ),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            11.0,
+            9.0,
+            run_source="pr",
+            baseline_eligible=False,
+            pr_number="123",
+        ),
+    ]
+
+    rows = build_latest_summary(records, max_regression=0.05, run_source="pr")
+
+    assert len(rows) == 1
+    assert rows[0]["run_source"] == "pr"
+    assert rows[0]["pr_number"] == "123"
+    assert rows[0]["baseline_n"] == 1
+    assert rows[0]["metrics"]["latency"]["baseline"] == 10.0
+    assert rows[0]["computed_regression_status"] == "fail"
+
+
 def test_filter_records_and_trends_preserve_metric_points():
     records = [
         _record("2026-01-01T00:00:00+00:00", "a" * 40, 10.0, 10.0),
@@ -91,7 +122,7 @@ def test_trends_include_source_metadata_with_legacy_defaults():
     assert trends[0]["points"][0]["branch"] == "feature/dashboard"
     assert trends[0]["points"][0]["build_url"] == "https://buildkite.example/build"
     assert trends[0]["points"][1]["run_source"] == "unknown"
-    assert trends[0]["points"][1]["baseline_eligible"] is False
+    assert trends[0]["points"][1]["baseline_eligible"] is True
 
 
 def test_hf_token_resolution_accepts_standard_env_names(monkeypatch):
@@ -114,8 +145,15 @@ def test_load_records_can_filter_baseline_eligible_records(tmp_path):
         '{"timestamp": "2026-01-02T00:00:00+00:00", "success": true, "baseline_eligible": true}',
         encoding="utf-8",
     )
+    (model_dir / "legacy.json").write_text(
+        '{"timestamp": "2026-01-03T00:00:00+00:00", "success": true}',
+        encoding="utf-8",
+    )
 
     records = hf_store.load_records(str(tmp_path), successful_only=True, baseline_eligible_only=True)
 
-    assert len(records) == 1
-    assert records[0]["baseline_eligible"] is True
+    assert len(records) == 2
+    assert {record["timestamp"] for record in records} == {
+        "2026-01-02T00:00:00+00:00",
+        "2026-01-03T00:00:00+00:00",
+    }

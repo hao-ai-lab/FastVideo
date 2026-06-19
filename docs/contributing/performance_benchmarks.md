@@ -226,6 +226,8 @@ result, used as the rolling-baseline source of truth.
 Older records in the HF dataset may not have component timing fields. The
 comparator ignores missing or `null` metrics when computing a median, and the
 dashboard lists skipped plots for metric series that have no non-null values.
+Records missing both `run_source` and `baseline_eligible` are treated as legacy
+successful main/full-suite uploads and remain eligible for rolling baselines.
 
 ## Environment variable reference
 
