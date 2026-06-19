@@ -1,12 +1,10 @@
-"""Worked examples (design_v3 §15), runnable as a demo:
+"""Worked examples, runnable as a demo:
 
     python3 -m v2.examples
 
 Each prints what it demonstrates. This doubles as living documentation of the API.
 """
 from __future__ import annotations
-
-import numpy as np
 
 from v2.recipes import build_default_engine, build_omni_engine
 from v2.recipes.wan21 import build_wan21_card
@@ -16,8 +14,7 @@ from v2.training import build_diffusion_nft
 
 
 def _t2v(mid, prompt, seed, steps=4, **kw):
-    return make_request(TaskType.T2V, mid, prompt,
-                        diffusion=DiffusionParams(num_steps=steps, seed=seed), **kw)
+    return make_request(TaskType.T2V, mid, prompt, diffusion=DiffusionParams(num_steps=steps, seed=seed), **kw)
 
 
 def example_a_text_to_video(eng) -> None:
@@ -36,8 +33,8 @@ def example_b_ltx2_two_stage(eng) -> None:
 
 def example_c_causal_streaming(eng) -> None:
     print("\n(c) Causal streaming (Wan-causal): chunk rollout + slab-KV, streamable by chunk")
-    out = eng.run(_t2v("wan-causal-sf-1.3b", "a drone flight over mountains", 3,
-                       outputs=OutputSpec(stream={"video": True})))
+    out = eng.run(
+        _t2v("wan-causal-sf-1.3b", "a drone flight over mountains", 3, outputs=OutputSpec(stream={"video": True})))
     print(f"    latents {out.artifacts['latents'].latent.shape}  chunks={out.metrics['chunks']:.0f}  "
           f"streamed_chunks={out.metrics.get('stream_chunks', 0)}")
 
@@ -63,14 +60,20 @@ def example_d_rl_rollout() -> None:
 def example_g_omni_mot() -> None:
     print("\n(g) Omni / MoT (§16): ONE resident instance runs AR + diffusion loops on shared weights")
     eng = build_omni_engine()
-    o = eng.run(make_request(TaskType.T2V, "cosmos3-vfm", "a phoenix",
-                             sampling=SamplingParams(max_tokens=6, seed=1),
-                             diffusion=DiffusionParams(num_steps=4, seed=1)))
+    o = eng.run(
+        make_request(TaskType.T2V,
+                     "cosmos3-vfm",
+                     "a phoenix",
+                     sampling=SamplingParams(max_tokens=6, seed=1),
+                     diffusion=DiffusionParams(num_steps=4, seed=1)))
     print(f"    Cosmos3 (reason→joint denoise): text={o.artifacts['text'].text} "
           f"video={o.artifacts['video'].frames.shape}")
-    o2 = eng.run(make_request(TaskType.T2I, "bagel-mot", "a teapot",
-                              sampling=SamplingParams(max_tokens=6, seed=2),
-                              diffusion=DiffusionParams(num_steps=4, seed=2)))
+    o2 = eng.run(
+        make_request(TaskType.T2I,
+                     "bagel-mot",
+                     "a teapot",
+                     sampling=SamplingParams(max_tokens=6, seed=2),
+                     diffusion=DiffusionParams(num_steps=4, seed=2)))
     print(f"    BAGEL (generate_text→generate_image): text={o2.artifacts['text'].text} "
           f"image={o2.artifacts['image'].tensor.shape}")
     print(f"    scheduler priced BOTH WorkUnit kinds (runtime-visible, not one opaque stage): "
@@ -94,8 +97,8 @@ async def _serving_demo() -> None:
     pools = PoolSet(wan_t2v_disaggregated(), card)
     pools.warmup()
     ae.register_disaggregated("wan-disagg", pools, build_wan_t2v_program())
-    out = await ae.generate(make_request(TaskType.T2V, "wan-disagg", "a wave",
-                                         diffusion=DiffusionParams(num_steps=4, seed=1)))
+    out = await ae.generate(
+        make_request(TaskType.T2V, "wan-disagg", "a wave", diffusion=DiffusionParams(num_steps=4, seed=1)))
     print(f"    disaggregated T2V (enc→den→dec): video={out.artifacts['video'].frames.shape} "
           f"cross-pool transfers={out.metrics['transfers']:.0f}")
 
@@ -107,14 +110,17 @@ async def _serving_demo() -> None:
         r, w = await asyncio.open_connection(host, port)
         w.write(f"{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body)
         await w.drain()
-        data = await r.read(); w.close()
+        data = await r.read()
+        w.close()
         return data.decode("utf-8", "replace")
 
     health = await http("GET", "/health")
     sse = await http("POST", "/v1/chat/completions",
                      b'{"model":"cosmos3-vfm","messages":[{"role":"user","content":"a comet"}],"stream":true}')
     n_chunks = sse.count("data: ")
-    print(f"    OpenAI server: /health ok={'healthy' in health}; chat SSE streamed {n_chunks} chunks (omni reason→denoise)")
+    print(
+        f"    OpenAI server: /health ok={'healthy' in health}; chat SSE streamed {n_chunks} chunks (omni reason→denoise)"
+    )
     await server.close()
 
     # our own fleet router + Dynamo adapter (frontable, not relied upon) — same DeploymentCard
@@ -136,7 +142,7 @@ def example_h_serving_and_fleet() -> None:
 
 def main() -> None:
     print("=" * 78)
-    print("v2 — worked examples (design_v3 §6,§13-16). One runtime, many loops.")
+    print("v2 — worked examples. One runtime, many loops.")
     print("=" * 78)
     eng = build_default_engine()
     print(f"registered (recipe, runtime) cards: {list(eng._registry)}")

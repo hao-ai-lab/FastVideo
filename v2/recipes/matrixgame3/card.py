@@ -1,20 +1,20 @@
 """Matrix-Game 3.0 ModelCard — image+action+camera -> video autoregressive world model.
 
-Self-contained recipe package (the bucket-C pattern, mirroring cosmos2): the card declares its torch
-adapter via ``ComponentSpec.adapter`` (``MatrixGame3DiT`` in ``v2/platform/backends/torch_matrixgame3.py``)
-and a new ``MatrixGame3DenoiseLoop`` (the autoregressive multi-clip loop), reusing the Wan VAE adapter +
-T5 + ``stamp_wan21_checkpoints``.
+Self-contained recipe package (bucket-C pattern, mirroring cosmos2): the card declares its torch adapter
+via ``ComponentSpec.adapter`` (``MatrixGame3DiT`` in ``v2/platform/backends/torch_matrixgame3.py``) plus
+``MatrixGame3DenoiseLoop`` (the autoregressive multi-clip loop), reusing the Wan VAE adapter + T5 +
+``stamp_wan21_checkpoints``.
 
-Architecture deltas vs Wan (all GPU-path, declared on the card so the recipe is self-contained):
+Architecture deltas vs Wan (all GPU-path, declared on the card):
   * DiT  ``fastvideo.models.dits.matrixgame3.model:MatrixGame3WanModel`` — a 5B autoregressive
     world-model DiT (30 layers, dim 24*128=3072, ffn 14336, patch (1,2,2), in/out_channels=48,
     ``use_memory=True``, ``sigma_theta=0.8``, action_config on the first 15 blocks). Predicts a velocity
-    (``flow_prediction``). The adapter (``ComponentSpec.adapter`` -> ``MatrixGame3DiT``) takes a PER-TOKEN
-    timestep (cond-frame rows zeroed) + the action/camera/KV-memory bundle — built INTERNALLY so the
-    loop's dit-call stays ``dit(latent, text_embed, sigma)``-shaped.
+    (``flow_prediction``). The adapter takes a PER-TOKEN timestep (cond-frame rows zeroed) + the
+    action/camera/KV-memory bundle, built INTERNALLY so the loop's dit-call stays
+    ``dit(latent, text_embed, sigma)``-shaped.
   * VAE  ``fastvideo.models.vaes.wanvae:AutoencoderKLWan`` — the ``light_vae`` variant (z_dim=48, 16x
     spatial / 4x temporal, Wan2.2-TI2V geometry); reuses the v2 ``WanVAE`` adapter unchanged (its
-    ``_mean_invstd`` normalization path is the MG3 normalized-latent convention).
+    ``_mean_invstd`` normalization is the MG3 normalized-latent convention).
   * Text ``fastvideo.models.encoders.t5:T5EncoderModel`` (T5, fp32, text_len 512) via the default
     ``T5Encoder`` adapter (Wan zero-pad-to-512 convention). NO image/CLIP encoder — the conditioning
     image goes only through the VAE (BRINGUP risk 6).

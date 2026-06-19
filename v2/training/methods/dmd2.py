@@ -1,8 +1,8 @@
-"""DMD2 distribution-matching distillation (design_v3 §10; repo: train/methods/distribution_matching).
+"""DMD2 distribution-matching distillation (repo: train/methods/distribution_matching).
 
 Roles: student (trainable) · teacher (frozen real score) · critic (trainable fake score).
-The student rollout is driven through the SHARED denoise loop (not a vendored sampler) — the §10
-collocation moat. Loss math (repo dmd2.py):
+The student rollout is driven through the shared denoise loop (not a vendored sampler). Loss math
+(repo dmd2.py):
 
   real_cfg_x0 = teacher_uncond_x0 + s·(teacher_cond_x0 − teacher_uncond_x0)
   faker_x0    = critic_x0
@@ -22,11 +22,19 @@ from v2.training.methods.base import TrainingMethod, new_instance, predict_x0
 
 class DMD2Method(TrainingMethod):
     name = "dmd2"
-    consistency = ConsistencyLevel.C1                    # kernel-pinned: rollout under trainer kernels
+    consistency = ConsistencyLevel.C1  # kernel-pinned: rollout under trainer kernels
 
-    def __init__(self, student_instance, teacher_instance, critic_instance, *,
-                 lr: float = 0.05, critic_lr: float = 0.05, guidance_scale: float = 4.5,
-                 generator_update_interval: int = 5, rollout_steps: int = 3, **kw):
+    def __init__(self,
+                 student_instance,
+                 teacher_instance,
+                 critic_instance,
+                 *,
+                 lr: float = 0.05,
+                 critic_lr: float = 0.05,
+                 guidance_scale: float = 4.5,
+                 generator_update_interval: int = 5,
+                 rollout_steps: int = 3,
+                 **kw):
         super().__init__(student_instance, lr=lr, **kw)
         self.teacher = teacher_instance
         self.critic = critic_instance
@@ -42,7 +50,9 @@ class DMD2Method(TrainingMethod):
         return t
 
     def _rollout_sample(self, prompt: str, seed: int) -> np.ndarray:
-        req = make_request(TaskType.T2V, self.student.card.model_id, prompt,
+        req = make_request(TaskType.T2V,
+                           self.student.card.model_id,
+                           prompt,
                            diffusion=DiffusionParams(num_steps=self.rollout_steps, seed=seed))
         return np.asarray(self._rollout(req).outputs["latents"], dtype="float32")
 
@@ -55,7 +65,7 @@ class DMD2Method(TrainingMethod):
             seed = batch.get("seeds", list(range(len(batch["prompts"]))))[i]
             emb = cached_text_encode(self.student, p)
             neg = cached_text_encode(self.student, "")
-            x0g = self._rollout_sample(p, seed)                  # student rollout via SHARED loop
+            x0g = self._rollout_sample(p, seed)  # student rollout via SHARED loop
 
             rng = np.random.default_rng(seed ^ 0xD2)
             sigma = float(rng.uniform(0.1, 0.9))
@@ -69,7 +79,7 @@ class DMD2Method(TrainingMethod):
             faker = predict_x0(critic(noised, emb, sigma), noised, sigma)
             denom = float(np.mean(np.abs(x0g - real_cfg))) + 1e-6
             grad = np.nan_to_num((faker - real_cfg) / denom).astype("float32")
-            gen_losses.append(0.5 * float(np.mean(grad ** 2)))   # DMD generator loss value
+            gen_losses.append(0.5 * float(np.mean(grad**2)))  # DMD generator loss value
 
             # generator (student) update toward (gen_x0 − grad), converted to velocity space
             if iteration % self.generator_update_interval == 0:
@@ -82,8 +92,7 @@ class DMD2Method(TrainingMethod):
             sigma2 = float(rng.uniform(0.1, 0.9))
             noise2 = rng.standard_normal(x0g.shape).astype("float32")
             noised2 = ((1.0 - sigma2) * x0g + sigma2 * noise2).astype("float32")
-            c_loss, gc = critic.mse_grad_step(noised2, emb, sigma2, (noise2 - x0g).astype("float32"),
-                                              self.critic_lr)
+            c_loss, gc = critic.mse_grad_step(noised2, emb, sigma2, (noise2 - x0g).astype("float32"), self.critic_lr)
             critic_losses.append(c_loss)
             gnorm_c.append(gc)
 

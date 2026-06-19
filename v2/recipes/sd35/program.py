@@ -1,16 +1,16 @@
-"""SD3.5 t2i program: sd3_text_encode → diffusion_denoise (flow-match) → vae_decode.
+"""SD3.5 t2i program: sd3_text_encode -> diffusion_denoise (flow-match) -> vae_decode.
 
-Single-stage INLINE program (like ``build_ltx2_base_program``). The SD3-specific work lives in the
-custom text-encode node (the triple-encoder joint-embed + dual-CLIP pooled assembly that
-``SD35ConditioningStage`` does) and the VAE decode node (the [-1,1] -> [0,1] remap of
-``SD35DecodingStage``); the denoise node is the generic ``ModelLoopNode`` binding ``SD3DenoiseLoop``.
+Single-stage INLINE program. The SD3-specific work lives in the custom text-encode node (the
+triple-encoder joint-embed + dual-CLIP pooled assembly of ``SD35ConditioningStage``) and the VAE decode
+node (the [-1,1] -> [0,1] remap of ``SD35DecodingStage``); the denoise node is the generic
+``ModelLoopNode`` binding ``SD3DenoiseLoop``.
 
 The text-encode node is backend-agnostic: on the GPU torch backend the CLIP adapters
 (``SD3ClipEncoder``) return ``{"hidden": penultimate[-2], "pooled": pooler_output}`` and ``SD3T5Encoder``
 returns ``last_hidden_state``, which ``assemble_sd3_conditioning`` combines into (joint_embed, pooled).
 On the CPU toy backend the encoders return plain arrays (``ToyTextEncoder.encode``), so the node falls
 back to a degenerate-but-finite assembly (joint = the array, pooled = its channel-mean broadcast) — enough
-to exercise the dual-conditioning plumbing end-to-end without any GPU/torch.
+to exercise the dual-conditioning plumbing without any GPU/torch.
 """
 from __future__ import annotations
 

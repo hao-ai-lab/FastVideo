@@ -64,8 +64,8 @@ class MatrixGame2CausalDiT(TorchComponent):
     The loop drives the causal block-autoregressive schedule and the DMD epsilon->x0 conversion; this
     adapter is a single ``_forward_inference`` call with the cache/i2v/action plumbing. It is NOT the toy
     ``dit(latent, text_embed, sigma)`` shape — the loop calls ``MatrixGame2CausalDiT.call`` explicitly with
-    the causal kwargs (the toy backend exercises the SAME loop via its degenerate path; see the recipe
-    loop). All arch-specifics are built INTERNALLY here so the loop stays backend-agnostic.
+    the causal kwargs (the toy backend exercises the same loop via its degenerate path). All arch-specifics
+    are built internally here so the loop stays backend-agnostic.
 
     KV-CACHE OWNERSHIP: ``forward`` dispatches to ``_forward_inference`` ONLY when ``kv_cache is not None``;
     otherwise it falls into the train forward (which expects a non-empty text-embed list and uses the

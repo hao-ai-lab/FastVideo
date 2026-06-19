@@ -1,4 +1,4 @@
-"""Nested workflows — recursive cross-model composition (design_v3 §13; §9.13).
+"""Nested workflows — recursive cross-model composition.
 
 A workflow id is a servable, so a `WorkflowStage` can invoke a *workflow* exactly as it invokes a
 model. These tests build a workflow whose first stage IS the T2I→I2V workflow (then extends its video),

@@ -1,24 +1,22 @@
-"""TurboWan ModelCards — rCM few-step distilled Wan (the bucket-C self-contained pattern).
+"""TurboWan ModelCards — rCM few-step distilled Wan (self-contained recipe package).
 
-TurboWan (= Reparameterized/recurrent Consistency Model distilled Wan, TurboDiffusion arXiv:2512.16093)
-REUSES the Wan architecture end-to-end: ``WanTransformer3DModel`` velocity DiT, ``AutoencoderKLWan`` VAE,
-UMT5 text encoder, (+ a CLIP vision encoder for the I2V variant). So there is NO new torch adapter — the
-components carry the same ``load_id`` strings as ``v2/recipes/wan21`` and the existing ``_make_dit`` /
-``WanDiT`` dispatch in ``torch_backend.py`` builds them as-is. The ONLY new work is the sampler/loop: the
-rCM consistency schedule + step (``v2/recipes/turbowan/{sampler,loop}.py``).
+TurboWan (Reparameterized Consistency Model distilled Wan, TurboDiffusion arXiv:2512.16093) reuses the Wan
+architecture end-to-end: ``WanTransformer3DModel`` velocity DiT, ``AutoencoderKLWan`` VAE, UMT5 text encoder
+(+ CLIP vision encoder for I2V). There is no new torch adapter — components carry the same ``load_id`` strings
+as ``v2/recipes/wan21``, built by the existing ``WanDiT`` dispatch in ``torch_backend.py``. The only new work
+is the rCM sampler/loop (``v2/recipes/turbowan/{sampler,loop}.py``).
 
 Three HF ids, two builders:
-  * ``build_turbowan_card`` (size-agnostic T2V) serves ``TurboWan2.1-T2V-1.3B`` (480p, flow geometry
-    notwithstanding — rCM has no flow-shift schedule) and ``TurboWan2.1-T2V-14B`` (720p). The size is
-    resolved from the checkpoint by the loader; the per-id deltas are just the default h/w.
-  * ``build_turbowan_i2v_a14b_card`` serves ``TurboWan2.2-I2V-A14B`` — a MoE (two WanTransformer3DModel
-    experts, boundary-routed) + i2v conditioning (CLIP image encoder + first-frame [mask|cond]), reusing
-    ``BoundaryTimestepRouting`` and the Wan i2v hooks. sigma_max=200 (vs 80 for T2V).
+  * ``build_turbowan_card`` (size-agnostic T2V) serves ``TurboWan2.1-T2V-1.3B`` (480p) and
+    ``TurboWan2.1-T2V-14B`` (720p); rCM has no flow-shift schedule. Size is resolved from the checkpoint by
+    the loader, so the per-id delta is just the default h/w.
+  * ``build_turbowan_i2v_a14b_card`` serves ``TurboWan2.2-I2V-A14B`` — a boundary-routed MoE (two
+    WanTransformer3DModel experts) + i2v conditioning (CLIP image encoder + first-frame [mask|cond]), reusing
+    ``BoundaryTimestepRouting`` and the Wan i2v hooks. sigma_max=200 vs 80 for T2V.
 
-SamplingDefaults are taken from ``fastvideo/pipelines/basic/turbodiffusion/presets.py``: 4 inference steps,
-guidance_scale 1.0 (CFG OFF — the few-step recipe), EMPTY negative prompt (a local constant here, since the
-shared WAN_NEG_* are not what the TurboWan preset uses). ``stamp_wan21_checkpoints`` applies (diffusers
-transformer/transformer_2/vae/text_encoder/image_encoder subfolder layout).
+SamplingDefaults match ``fastvideo/pipelines/basic/turbodiffusion/presets.py``: 4 steps, guidance_scale 1.0
+(CFG off), and an empty negative prompt (a local constant — the shared WAN_NEG_* are not what the preset uses).
+``stamp_wan21_checkpoints`` applies the diffusers subfolder layout.
 """
 from __future__ import annotations
 
@@ -43,8 +41,8 @@ from v2.platform.backends.toy import ToyDiT, ToyImageEncoder, ToyTextEncoder, To
 from v2.recipes.turbowan.loop import TurboWanDenoiseLoop
 from v2.recipes.wan21.card import stamp_wan21_checkpoints
 
-# The registered TurboWan presets use an EMPTY negative prompt (guidance is off at scale 1.0), so the
-# shared Wan negatives do not apply. Local constant per the self-contained-package rule.
+# TurboWan presets use an empty negative prompt (guidance off at scale 1.0), so the shared Wan negatives
+# do not apply. Local constant per the self-contained-package rule.
 TURBOWAN_NEG = ""
 
 _WAN_DIT = "fastvideo.models.dits.wanvideo:WanTransformer3DModel"
@@ -151,8 +149,8 @@ def build_turbowan_i2v_a14b_card(model_id: str = "turbowan2.2-i2v-a14b",
                                  checkpoint_root: str | None = None) -> ModelCard:
     """TurboWan2.2-I2V-A14B — rCM few-step MoE i2v. Two WanTransformer3DModel experts boundary-routed
     (``boundary_ratio`` 0.9, compared in raw-sigma space) + i2v conditioning (CLIP + first-frame
-    [mask|cond]). sigma_max=200 (the I2V pipeline's value vs 80 for T2V). Reuses the Wan adapter, the
-    boundary policy, and the i2v hooks; only the rCM sampler/loop is new."""
+    [mask|cond]). sigma_max=200 (the I2V pipeline's value vs 80 for T2V). Reuses the Wan adapter, boundary
+    policy, and i2v hooks; only the rCM sampler/loop is new."""
     seed = _seed_from(model_id)
     cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg = ClassicCFG()

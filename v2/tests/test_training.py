@@ -1,4 +1,4 @@
-"""Training methods on Wan2.1-1.3B (design_v3 §10) — all over the SHARED loops, train ≡ serve.
+"""Training methods on Wan2.1-1.3B — all over the SHARED loops, train ≡ serve.
 
 Verifies: finetune learns (loss ↓), DMD2 real/fake scores, NFT likelihood-free C2 + group reuse +
 old-as-behavior-policy, self-forcing on the causal chunk loop + slab-KV.
@@ -40,7 +40,7 @@ def test_dmd2_real_and_fake_scores_finite_with_two_optimizers():
 def test_diffusion_nft_is_likelihood_free_c2_with_group_reuse():
     nft = build_diffusion_nft(build_wan21_card(), num_video_per_prompt=4, num_inner_timesteps=2)
     assert nft.manages_optimization() and nft.consistency_level() is ConsistencyLevel.C2
-    assert nft.old_sync.role is WeightRole.OLD_POLICY     # sample from OLD, not student (§8.4)
+    assert nft.old_sync.role is WeightRole.OLD_POLICY     # sample from OLD, not student
     lm, m = nft.managed_train_step(BATCH, 0)
     assert np.isfinite(lm["policy_loss"]) and np.isfinite(m["old_deviate"])
     assert m["advantage_std"] >= 0.0

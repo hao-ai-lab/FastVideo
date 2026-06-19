@@ -1,14 +1,14 @@
-"""HunyuanVideo 1.5 ModelCard — text→video (the registered 480p t2v preset; i2v + SR are later
-capabilities the loop/adapter thread but the t2v program does not yet exercise on CPU).
+"""HunyuanVideo 1.5 ModelCard — text→video (the registered 480p t2v preset). i2v + SR are later
+capabilities the loop/adapter thread but the t2v program does not yet exercise on CPU.
 
 Architecture deltas vs Wan (all declared on the card so the recipe is self-contained):
-  * DiT  ``fastvideo.models.dits.hunyuanvideo15:HunyuanVideo15Transformer3DModel`` — a rectified-flow
-    velocity network (54 dual-stream MMDoubleStream blocks, hidden 2048, in/out 65/32). Its forward takes
-    a LIST of two text embeds (Qwen2.5-VL + ByT5) and a LIST image-embed; the new ``HunyuanVideo15DiT``
-    adapter marshals those, so ``HunyuanVideo15DenoiseLoop`` (a thin ``WanDenoiseLoop`` subclass with
-    z=32/16×/4× geometry) drives it with the unchanged flow-match math.
-  * VAE  ``fastvideo.models.vaes.hunyuan15vae`` — causal-3D, z=32, 16× spatial / 4× temporal, normalized
-    by a SCALAR ``scaling_factor=1.03682`` -> the ``HunyuanVideo15VAE`` adapter (NOT Wan's mean/std).
+  * DiT  ``HunyuanVideo15Transformer3DModel`` — a rectified-flow velocity network (54 dual-stream
+    MMDoubleStream blocks, hidden 2048, in/out 65/32). Its forward takes a list of two text embeds
+    (Qwen2.5-VL + ByT5) and a list image-embed; the ``HunyuanVideo15DiT`` adapter marshals those, so
+    ``HunyuanVideo15DenoiseLoop`` (a thin ``WanDenoiseLoop`` subclass with z=32/16×/4× geometry) drives it
+    with the unchanged flow-match math.
+  * VAE  ``hunyuan15vae`` — causal-3D, z=32, 16× spatial / 4× temporal, normalized by a SCALAR
+    ``scaling_factor=1.03682`` via the ``HunyuanVideo15VAE`` adapter (not Wan's mean/std).
   * Text encoders: ``text_encoder`` = Qwen2.5-VL (3584-d, ``hidden_states[-3]`` cropped of 108 template
     tokens) via ``HunyuanVideo15QwenEncoder``; ``text_encoder_2`` = ByT5/Glyph (1472-d, quoted-glyph text,
     may be empty) via ``HunyuanVideo15ByT5Encoder``.
@@ -60,7 +60,7 @@ _DEFAULT_STEPS = 50
 
 def _linspace_sigmas(num_steps: int) -> tuple[float, ...]:
     """Faithful to ``presets.py:_sigmas`` — ``np.linspace(1,0,n+1)[:-1]`` (drops the terminal 0). The
-    loop's ``build_schedule`` consumes this verbatim when present (FlowShiftPolicy passes it through)."""
+    loop's ``build_schedule`` consumes it verbatim when present (FlowShiftPolicy passes it through)."""
     return tuple((1.0 - i / num_steps) for i in range(num_steps))
 
 
@@ -166,10 +166,10 @@ def build_hunyuan_video15_card(model_id: str = "hunyuan-video-1.5-t2v-480p",
     card.validate()
     if checkpoint_root:
         stamp_wan21_checkpoints(card, checkpoint_root)
-        # stamp_wan21_checkpoints only knows the Wan superset of subfolders; HunyuanVideo 1.5 adds a
-        # second text encoder (ByT5 in ``text_encoder_2/``) that the shared stamp does not cover. Stamp it
-        # here so the recipe stays self-contained (no edit to the shared stamp). The model root is the
-        # parent of any already-stamped subfolder (stamp resolves HF ids -> a local snapshot).
+        # stamp_wan21_checkpoints does not cover HunyuanVideo 1.5's second text encoder (ByT5 in
+        # ``text_encoder_2/``), so stamp it here to keep the recipe self-contained (no edit to the shared
+        # stamp). The model root is the parent of any already-stamped subfolder (stamp resolves HF ids -> a
+        # local snapshot).
         import os
         if "text_encoder_2" in card.components and not card.components["text_encoder_2"].checkpoint:
             model_root = os.path.dirname(os.path.normpath(card.components["transformer"].checkpoint))

@@ -1,4 +1,4 @@
-"""The consistency ladder (design_v3 §9.2) + numeric comparison helpers.
+"""The consistency ladder + numeric comparison helpers.
 
 C0 component · C1 loop · C2 behavioral · C3 distribution · C4 artifact.
 
@@ -18,7 +18,7 @@ from v2._enums import ConsistencyLevel  # re-exported for the package
 
 @dataclass
 class Divergence:
-    where: str                 # tap name / artifact path
+    where: str  # tap name / artifact path
     level: ConsistencyLevel
     max_abs_diff: float
     max_rel_diff: float

@@ -3,9 +3,9 @@
 This is the causal *student* of the Wan2.2 MoE produced by self-forcing distillation:
   * ``recipe.method='self_forcing'`` / ``assumes_loop='chunk_rollout'`` (causal/AR; ``pp_patch`` rejected);
   * DiT  ``fastvideo.models.dits.causal_wanvideo:CausalWanTransformer3DModel`` — TWO experts
-    (``transformer`` high-noise + ``transformer_2`` low-noise) switched by ``boundary_ratio`` (design_v3
-    §6.2.3); the GPU adapter is the existing CausalWan/Wan torch path (pure Wan arch -> ``load_id`` only,
-    no ``adapter=``, exactly like the wan_causal + wan21 cards);
+    (``transformer`` high-noise + ``transformer_2`` low-noise) switched by ``boundary_ratio``; the GPU
+    adapter is the existing CausalWan/Wan torch path (pure Wan arch -> ``load_id`` only, no ``adapter=``,
+    exactly like the wan_causal + wan21 cards);
   * VAE  ``fastvideo.models.vaes.wanvae:AutoencoderKLWan`` (z=16, 8x/4x) and UMT5 text encoder — reused;
   * a ``slab_kv`` (chunk-KV) cache class in addition to the text feature cache.
 

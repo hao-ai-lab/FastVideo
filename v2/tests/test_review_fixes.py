@@ -1,7 +1,7 @@
 """Regression tests for the adversarial-review findings (untested paths now covered).
 
 Locks in: fail-fast on infeasible/deadlocked admission (no busy-spin), refundable compute budget
-(concurrency gate, not lifetime cap), §7.1 feature-key partitioning by adapter stack + precision,
+(concurrency gate, not lifetime cap), feature-key partitioning by adapter stack + precision,
 component-scoped weight invalidation (transformer sync keeps the text-encoder cache), and the
 interleave gate flagging symmetric-empty output.
 """
@@ -55,7 +55,7 @@ def test_feature_key_partitions_by_adapter_stack():
     assert inst.caches.stats()["feature"]["hits"] == h + 1
     inst.adapter_versions = {"te_lora": "2"}         # swap te-LoRA stack on the resident instance
     m = inst.caches.stats()["feature"]["misses"]
-    cached_text_encode(inst, "p")                   # different stack ⇒ MISS, never a stale hit (§7.1)
+    cached_text_encode(inst, "p")                   # different stack ⇒ MISS, never a stale hit
     assert inst.caches.stats()["feature"]["misses"] == m + 1
 
 

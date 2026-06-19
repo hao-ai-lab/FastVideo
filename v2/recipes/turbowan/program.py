@@ -1,9 +1,9 @@
 """TurboWan programs (node graphs identical to Wan — the rCM specifics live in the loop/sampler).
 
 T2V: text_encode -> diffusion_denoise (rCM) -> vae_decode (same inline shape as the Wan/cosmos2 t2v
-programs). I2V: the Wan2.2-I2V-A14B variant reuses the ``v2/recipes/wan21/i2v.py`` conditioning nodes
-verbatim (CLIP image encode + first-frame [mask|cond] VAE encode), just bound to TurboWan's ``i2v_denoise``
-loop id. No new conditioning math — the only TurboWan delta is the loop's rCM sampler.
+programs). I2V (Wan2.2-I2V-A14B): reuses the ``v2/recipes/wan21/i2v.py`` conditioning nodes verbatim (CLIP
+image encode + first-frame [mask|cond] VAE encode), bound to TurboWan's ``i2v_denoise`` loop. No new
+conditioning math — the only TurboWan delta is the loop's rCM sampler.
 """
 from __future__ import annotations
 

@@ -1,9 +1,8 @@
-"""Pre-flight parallelism validation (design_v3 §8).
+"""Pre-flight parallelism validation.
 
-> Pre-flight or it fails at load, never halfway. Ownership conflicts are build errors
-> ... Applicability conditions travel with axes: ``pp_patch`` is invalid for causal/AR.
-
-All checks are CPU-testable on a fake mesh (design.md §6.3.4: CPU-testability).
+Validate at load or fail, never halfway. Ownership conflicts are build errors, and
+applicability conditions travel with axes (e.g. ``pp_patch`` is invalid for causal/AR).
+All checks are CPU-testable on a fake mesh.
 """
 from __future__ import annotations
 
@@ -19,16 +18,19 @@ class ParallelValidationError(ValueError):
 _CAUSAL_KINDS = {LoopKind.CHUNK_ROLLOUT, LoopKind.AR_DECODE}
 
 
-def validate_plan(plan: ParallelPlan, card=None, *, world_size: int | None = None,
+def validate_plan(plan: ParallelPlan,
+                  card=None,
+                  *,
+                  world_size: int | None = None,
                   cfg_policy_batched: bool = False) -> ParallelPlan:
     """Validate a plan, optionally against a card. Returns the plan or raises.
 
-    Checks (design_v3 §8):
+    Checks:
       1. axis names are known; degrees >= 1
       2. cfgp <= 2
       3. product of degrees matches world_size (when given)
       4. pp_patch invalid for any causal/AR loop on the card
-      5. ownership conflict: cfgp>1 AND a batched CFGPolicy is rejected (§5.3, §9 build-guard)
+      5. ownership conflict: cfgp>1 AND a batched CFGPolicy is rejected
     """
     errs: list[str] = []
 
@@ -45,8 +47,7 @@ def validate_plan(plan: ParallelPlan, card=None, *, world_size: int | None = Non
         errs.append(f"product of degrees {plan.world_size()} != world_size {world_size}")
 
     if plan.degree("cfgp") > 1 and cfg_policy_batched:
-        errs.append("ownership conflict: a request owns a BatchedCFG policy OR a cfgp group, never both "
-                    "(design_v3 §5.3 / §9 build-guard)")
+        errs.append("ownership conflict: a request owns a BatchedCFG policy OR a cfgp group, never both")
 
     if card is not None and plan.degree("pp_patch") > 1:
         causal = [lid for lid, lp in card.loops.items() if lp.kind in _CAUSAL_KINDS]

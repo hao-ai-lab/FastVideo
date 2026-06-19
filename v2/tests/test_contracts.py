@@ -1,4 +1,4 @@
-"""Card / recipe / parallelism / cache-key contracts (design_v3 §4, §7.1, §8, §9.2)."""
+"""Card / recipe / parallelism / cache-key contracts."""
 from __future__ import annotations
 
 import numpy as np

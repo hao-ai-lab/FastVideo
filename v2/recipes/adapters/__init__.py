@@ -1,4 +1,4 @@
-"""Adapter plane: one base + swappable LoRA/ControlNet adapters, selected per request (design_v3 §9.19)."""
+"""Adapter plane: one base + swappable LoRA/ControlNet adapters, selected per request."""
 from __future__ import annotations
 
 from v2.recipes.adapters.card import ADAPTERS, build_adapter_card

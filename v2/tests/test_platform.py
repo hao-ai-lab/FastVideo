@@ -1,10 +1,9 @@
-"""Multi-backend dispatch substrate: device/arch resolution, fallback, and the parity oracle (§17).
+"""Multi-backend dispatch substrate: device/arch resolution, fallback, and the parity oracle.
 
-These tests prove the two tuple-keyed registries (COMPONENTS, KERNELS) + the Platform resolve
-implementations generically across devices, with the numpy reference as the terminal rung — and
-that a second backend (the pure-python ``accel`` stand-in) is bit-for-bit identical to it. The
-``cuda`` cells are declared-but-unavailable here, so the matrix is enumerable without a GPU and
-without importing torch.
+The two tuple-keyed registries (COMPONENTS, KERNELS) plus Platform resolve implementations
+generically across devices, with the numpy reference as the terminal rung; a second backend (the
+pure-python ``accel`` stand-in) is bit-for-bit identical to it. The ``cuda`` cells are
+declared-but-unavailable here, so the matrix is enumerable without a GPU and without importing torch.
 """
 from __future__ import annotations
 
@@ -153,8 +152,8 @@ def test_cuda_component_falls_back_to_factory_when_unavailable():
 # (checked with the typed C1 instrument `parity.bit_identical`, not a bare ==) #
 # --------------------------------------------------------------------------- #
 def test_parity_oracle_accel_equals_cpu_ode():
-    """accel's ODE solver kernel is an INDEPENDENT impl (`_accel_flow_match_step`) — this is the real
-    oracle: a separately-written backend kernel must match the numpy reference, C1 bit-identical."""
+    """accel's ODE solver kernel is an independent impl (`_accel_flow_match_step`): a
+    separately-written backend kernel must match the numpy reference, C1 bit-identical."""
     cpu_latent = _drive_denoise(_instance(Platform.cpu()), seed=7, steps=8)
     accel_latent = _drive_denoise(_instance(Platform.accel("sm90")), seed=7, steps=8)
     assert bit_identical(cpu_latent, accel_latent)

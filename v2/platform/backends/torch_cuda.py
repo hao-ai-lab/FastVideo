@@ -1,4 +1,4 @@
-"""``cuda`` registration — the real torch/GPU backend (design_v3 §17; README "Running the real models").
+"""``cuda`` registration — the real torch/GPU backend (see v2/README.md "Running the real models").
 
 Torch-free at import (stdlib only): gates every cell on ``available=_cuda_available`` (a ``find_spec``
 check that never imports torch) and registers ONE lazy component builder for all cuda component kinds +
@@ -50,17 +50,28 @@ def _flow_sde_cuda(*args, **kwargs):
 # --- components: one generic builder; torch_backend.build_component dispatches by spec.kind ---------- #
 _B = "v2.platform.backends.torch_backend"
 _KIND_SOURCE = {
-    "dit": "WanDiT/LTX2DiT", "vae": "WanVAE/LTX2VAE", "text_encoder": "T5Encoder/Gemma",
-    "image_encoder": "CLIPImageEncoder", "upsampler": "LTX2Upsampler",
-    "audio_vae": "LTX2AudioVAE", "vocoder": "LTX2Vocoder",
+    "dit": "WanDiT/LTX2DiT",
+    "vae": "WanVAE/LTX2VAE",
+    "text_encoder": "T5Encoder/Gemma",
+    "image_encoder": "CLIPImageEncoder",
+    "upsampler": "LTX2Upsampler",
+    "audio_vae": "LTX2AudioVAE",
+    "vocoder": "LTX2Vocoder",
 }
 for _kind, _cls in _KIND_SOURCE.items():
-    register_component(_kind, _build_component, device="cuda", available=_cuda_available,
-                       source=f"{_B}:{_cls}")
+    register_component(_kind, _build_component, device="cuda", available=_cuda_available, source=f"{_B}:{_cls}")
 del _kind, _cls
 
 # --- solver ops: plain torch elementwise (no fused solver kernel in fastvideo-kernel) ---------------- #
-register_kernel(FLOW_MATCH_STEP, _flow_match_cuda, device="cuda", arch="generic",
-                available=_cuda_available, source="torch elementwise (no fused solver kernel)")
-register_kernel(FLOW_SDE_STEP, _flow_sde_cuda, device="cuda", arch="generic",
-                available=_cuda_available, source="torch elementwise (no fused solver kernel)")
+register_kernel(FLOW_MATCH_STEP,
+                _flow_match_cuda,
+                device="cuda",
+                arch="generic",
+                available=_cuda_available,
+                source="torch elementwise (no fused solver kernel)")
+register_kernel(FLOW_SDE_STEP,
+                _flow_sde_cuda,
+                device="cuda",
+                arch="generic",
+                available=_cuda_available,
+                source="torch elementwise (no fused solver kernel)")

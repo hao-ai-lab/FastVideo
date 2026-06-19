@@ -1,4 +1,4 @@
-"""WorldModelSession — a long-lived interactive world-model rollout (design_v3 §16, §12, §15e).
+"""WorldModelSession — a long-lived interactive world-model rollout.
 
 The realtime/interactive plane, made concrete. A one-shot ``engine.run`` generates a clip and forgets;
 a *session* continues the world: each ``.act(action)`` resumes the causal ``chunk_rollout`` loop from
@@ -13,7 +13,8 @@ cancelled rollout leaves the session resumable from the last good frame.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from v2._enums import ExecutionProfile
 from v2.loop.driver import LoopRunner
@@ -25,16 +26,22 @@ from v2.runtime.context import RuntimeLoopContext
 
 
 class WorldModelSession:
-    def __init__(self, engine: Any, model_id: str, *, session_id: str = "world",
-                 window: int = 2, loop_id: str = "chunk_rollout"):
+
+    def __init__(self,
+                 engine: Any,
+                 model_id: str,
+                 *,
+                 session_id: str = "world",
+                 window: int = 2,
+                 loop_id: str = "chunk_rollout"):
         self.engine = engine
         self.model_id = model_id
-        self.window = window                 # how many prior chunks of world state to carry forward
+        self.window = window  # how many prior chunks of world state to carry forward
         self.loop_id = loop_id
         self.session = Session(session_id=session_id)
         self.stream = Stream(session_id)
         self.session.streams["video"] = self.stream
-        self.world_context: list = []        # the persistent world chunks (the §16 cross-request KV)
+        self.world_context: list = []  # persistent world chunks (the cross-request KV)
         self.session.kv_handle = self.world_context
         self.step = 0
 
@@ -44,33 +51,42 @@ class WorldModelSession:
             raise KeyError(f"no model {self.model_id!r} registered on engine")
         return self.engine._registry[self.model_id][0]
 
-    def act(self, action: str, *, seed: int | None = None,
-            step_hook: Callable[["WorldModelSession", int], None] | None = None) -> Any:
+    def act(self,
+            action: str,
+            *,
+            seed: int | None = None,
+            step_hook: Callable[[WorldModelSession, int], None] | None = None) -> Any:
         """Advance the world by one action, continuing from persistent context; stream frames.
 
         Raises ``request.Cancelled`` if cancelled at a step boundary — and because the world state is
         only committed after the loop completes, a cancelled act leaves the session resumable."""
         inst = self.instance
-        req = make_request(TaskType.V2W, self.model_id, action,
+        req = make_request(TaskType.V2W,
+                           self.model_id,
+                           action,
                            diffusion=DiffusionParams(seed=self.step if seed is None else seed))
         slots: dict[str, Any] = {}
         text_encode_node_fn(inst, slots, req, None)
-        slots["world_context"] = list(self.world_context)        # thread the persistent state in
-        ctx = RuntimeLoopContext(
-            inst, observers=self.engine.observers, interceptors=self.engine.interceptors,
-            slots=slots, stream=self.stream, cancel_scope=self.session.cancel_scope,
-            profile=ExecutionProfile.SERVE, metrics={},
-            request_id=f"{self.session.session_id}.{self.step}")
+        slots["world_context"] = list(self.world_context)  # thread the persistent state in
+        ctx = RuntimeLoopContext(inst,
+                                 observers=self.engine.observers,
+                                 interceptors=self.engine.interceptors,
+                                 slots=slots,
+                                 stream=self.stream,
+                                 cancel_scope=self.session.cancel_scope,
+                                 profile=ExecutionProfile.SERVE,
+                                 metrics={},
+                                 request_id=f"{self.session.session_id}.{self.step}")
         runner = LoopRunner(inst.loop(self.loop_id), ctx, req, inst)
         n = 0
         while not runner.done:
             if step_hook is not None:
-                step_hook(self, n)                 # test seam: may call self.cancel() at a boundary
-            runner.step()                          # peek() raises request.Cancelled if cancelled
+                step_hook(self, n)  # test seam: may call self.cancel() at a boundary
+            runner.step()  # peek() raises request.Cancelled if cancelled
             n += 1
         result = runner.result
         new_chunks = list(result.outputs.get("chunks") or [])
-        self.world_context = (self.world_context + new_chunks)[-self.window:]   # slide window; commit
+        self.world_context = (self.world_context + new_chunks)[-self.window:]  # slide window; commit
         self.session.kv_handle = self.world_context
         self.step += 1
         return result

@@ -1,4 +1,4 @@
-"""Policy semantics (design_v3 §5.3, §6.2.3): CFG taxonomy, flow-shift, expert routing."""
+"""Policy semantics: CFG taxonomy, flow-shift, expert routing."""
 from __future__ import annotations
 
 import numpy as np

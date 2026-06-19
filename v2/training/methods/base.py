@@ -1,9 +1,8 @@
-"""TrainingMethod base (design_v3 §10; mirrors the repo's train/methods contract).
+"""TrainingMethod base (mirrors the repo's train/methods contract).
 
-The load-bearing principle: every method's *rollout* drives the SAME loop the engine serves
-(via ``_rollout`` → ``rollout_loop``), so there is one numerics surface. Methods differ only in
-loss math, roles, and capture — not in a second sampler. ``manages_optimization`` matches the
-landed ``TrainingMethod.manages_optimization()`` seam (RL owns its sample→score→inner-train cadence).
+Every method's rollout drives the same loop the engine serves (via ``_rollout`` → ``rollout_loop``),
+so there is one numerics surface. Methods differ only in loss math, roles, and capture — not in a
+second sampler. ``manages_optimization`` lets RL own its sample→score→inner-train cadence.
 """
 from __future__ import annotations
 
@@ -61,7 +60,10 @@ class TrainingMethod(ABC):
     def _rollout(self, request, *, instance: Any = None, loop_id: str | None = None):
         inst = instance or self.student
         slots = self._encode_slots(request, inst)
-        return rollout_loop(inst, loop_id or self.student_loop_id, request, slots=slots,
+        return rollout_loop(inst,
+                            loop_id or self.student_loop_id,
+                            request,
+                            slots=slots,
                             profile=ExecutionProfile.ROLLOUT)
 
     @abstractmethod

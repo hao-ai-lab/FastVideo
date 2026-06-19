@@ -1,9 +1,8 @@
 """Cosmos-Predict2 t2v program: text_encode → diffusion_denoise (EDM) → vae_decode.
 
-Same inline shape as the Wan t2v program — the EDM specifics live entirely in ``CosmosDenoiseLoop`` and
-the ``CosmosDiT`` adapter, so the node graph is unchanged. (video2world conditioning would add a
-VAE-encode node writing ``conditioning_latents``/``cond_indicator`` into slots; the loop already reads
-them.)
+Same inline shape as the Wan t2v program — the EDM specifics live in ``CosmosDenoiseLoop`` and the
+``CosmosDiT`` adapter, so the node graph is unchanged. (video2world conditioning would add a VAE-encode
+node writing ``conditioning_latents``/``cond_indicator`` into slots; the loop already reads them.)
 """
 from __future__ import annotations
 

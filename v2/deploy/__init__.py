@@ -1,4 +1,4 @@
-"""Deployment & fleet plane (design_v3 §14) — DeploymentCard, our own LocalFleet, Dynamo adapter.
+"""Deployment & fleet plane — DeploymentCard, our own LocalFleet, Dynamo adapter.
 
 The engine exports a DeploymentCard; our LocalFleet routes over it (so we don't rely on Dynamo),
 and the DynamoWorkerAdapter exports the same card so Dynamo can front us too — one object, two
@@ -10,6 +10,7 @@ from v2.deploy.card import DeploymentCard, HealthSchema, SLOSchema, build_deploy
 from v2.deploy.dynamo import DynamoWorkerAdapter, FakeDynamoRuntime
 from v2.deploy.fleet import LocalFleet, NoWorkerAvailable, Worker
 
-__all__ = ["DeploymentCard", "HealthSchema", "SLOSchema", "build_deployment_card",
-           "LocalFleet", "Worker", "NoWorkerAvailable",
-           "DynamoWorkerAdapter", "FakeDynamoRuntime"]
+__all__ = [
+    "DeploymentCard", "HealthSchema", "SLOSchema", "build_deployment_card", "LocalFleet", "Worker", "NoWorkerAvailable",
+    "DynamoWorkerAdapter", "FakeDynamoRuntime"
+]

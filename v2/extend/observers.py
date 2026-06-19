@@ -1,32 +1,29 @@
-"""Built-in read-only observers (design_v3 §11): Profiler, NaNWatch.
+"""Built-in read-only observers: Profiler, NaNWatch.
 
-ParityAligner lives in ``parity/`` (it is a first-class package, §18) but also implements
-the Observer ``observe`` protocol so it attaches to the same bus.
+ParityAligner lives in its own ``parity/`` package but also implements the Observer ``observe``
+protocol so it attaches to the same bus.
 """
 from __future__ import annotations
-
-from typing import Any
 
 import numpy as np
 
 
 class Profiler:
-    """Per-step wall/CUDA timing; calibrates the cost model (design_v3 §6.1, §11).
+    """Per-step wall/CUDA timing that calibrates the cost model.
 
-    Here it accumulates (work_units, actual_seconds) samples and can fit a card's
-    CostModel coefficients — the online calibration the conservative baseline refines.
+    Accumulates (work_units, actual_seconds) samples and fits a card's CostModel
+    coefficients — the online calibration that refines the conservative baseline.
     """
 
     def __init__(self) -> None:
-        self.samples: list[tuple[str, float, float]] = []   # (batch_key_repr, work_units, seconds)
+        self.samples: list[tuple[str, float, float]] = []  # (batch_key_repr, work_units, seconds)
 
     def observe(self, event: str, **kw) -> None:
         if event == "step_complete":
             plan, result = kw.get("plan"), kw.get("result")
             if plan is not None and result is not None:
-                self.samples.append((repr(plan.shape_sig.batch_key),
-                                     float(plan.shape_sig.work_units),
-                                     float(result.actual_seconds)))
+                self.samples.append(
+                    (repr(plan.shape_sig.batch_key), float(plan.shape_sig.work_units), float(result.actual_seconds)))
 
     def calibrate(self, cost_model) -> None:
         """Fit base + per_unit seconds from observed samples (least squares)."""
@@ -43,10 +40,10 @@ class Profiler:
 
 
 class NaNWatch:
-    """First-NaN/Inf localization (design_v3 §11). Request-fatal → SPMD-consistent abort (§6.4)."""
+    """First-NaN/Inf localization. Request-fatal, triggering an SPMD-consistent abort."""
 
     def __init__(self) -> None:
-        self.first: tuple[str, int] | None = None   # (tap/output name, step)
+        self.first: tuple[str, int] | None = None  # (tap/output name, step)
 
     def observe(self, event: str, **kw) -> None:
         if event == "step_complete" and self.first is None:

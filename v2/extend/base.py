@@ -1,6 +1,6 @@
-"""Observers and interceptors (design_v3 §11) — the optimization/debug/parity surface.
+"""Observers and interceptors — the optimization/debug/parity surface.
 
-They compose with §5 cleanly: the hooks wrap ``ctx.execute(plan)``.
+They compose with the loop cleanly: the hooks wrap ``ctx.execute(plan)``.
   * Observers (read-only): cannot mutate state. An unused hook is *literally absent* from
     the hot path (the bus only iterates when observers are attached).
   * Interceptors (compute-altering): ``before_step`` may supply a cached prediction (skip);
@@ -18,7 +18,9 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class Observer(Protocol):
-    def observe(self, event: str, **kw) -> None: ...
+
+    def observe(self, event: str, **kw) -> None:
+        ...
 
 
 @runtime_checkable
@@ -27,8 +29,11 @@ class Interceptor(Protocol):
     distribution_altering: bool
     graph_safe: bool
 
-    def before_step(self, plan: Any, state: Any) -> Any | None: ...   # return override output to skip, or None
-    def after_step(self, plan: Any, state: Any, result: Any) -> None: ...
+    def before_step(self, plan: Any, state: Any) -> Any | None:
+        ...  # return override output to skip, or None
+
+    def after_step(self, plan: Any, state: Any, result: Any) -> None:
+        ...
 
 
 class ObserverBus:
@@ -45,7 +50,7 @@ class ObserverBus:
         return bool(self._observers)
 
     def emit(self, event: str, **kw) -> None:
-        if not self._observers:          # absent from the hot path when off
+        if not self._observers:  # absent from the hot path when off
             return
         for obs in self._observers:
             obs.observe(event, **kw)
@@ -56,7 +61,7 @@ class InterceptorConflict(ValueError):
 
 
 class InterceptorChain:
-    """Ordered interceptor chain; conflicting interceptors rejected pre-flight (§11)."""
+    """Ordered interceptor chain; conflicting interceptors rejected pre-flight."""
 
     def __init__(self, interceptors: list[Interceptor] | None = None, *, exact_mode: bool = False):
         self._chain = list(interceptors or [])
@@ -65,9 +70,8 @@ class InterceptorChain:
     def _validate(self, exact_mode: bool) -> None:
         skippers = [i for i in self._chain if getattr(i, "distribution_altering", False)]
         if len(skippers) > 1:
-            raise InterceptorConflict(
-                f"multiple distribution-altering interceptors {[i.plugin_id for i in skippers]} "
-                "conflict — only one step-skipper allowed (design_v3 §11)")
+            raise InterceptorConflict(f"multiple distribution-altering interceptors {[i.plugin_id for i in skippers]} "
+                                      "conflict — only one step-skipper allowed")
         if exact_mode and skippers:
             raise InterceptorConflict(
                 f"exact-mode rejects distribution_altering interceptors {[i.plugin_id for i in skippers]}")

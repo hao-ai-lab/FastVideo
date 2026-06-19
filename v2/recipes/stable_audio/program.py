@@ -1,8 +1,8 @@
 """Stable Audio Open T2A program: conditioning -> stable_audio_denoise (v-prediction DPM++) -> audio_decode.
 
-Mirrors the cosmos2 t2v inline program shape — the SA specifics (the conditioner's (cross_attn_cond,
-global_embed) packing; the v-prediction sampler) live entirely in the conditioning node, the
-``StableAudioDenoiseLoop``, and the torch adapters, so the node graph stays a clean 3-node line.
+The SA specifics (the conditioner's (cross_attn_cond, global_embed) packing; the v-prediction sampler)
+live in the conditioning node, the ``StableAudioDenoiseLoop``, and the torch adapters, so the node graph
+stays a clean 3-node line.
 
 Deltas vs the video programs:
   * The first node is ``conditioning`` (NOT the generic ``text_encode``): it runs the SA multi-conditioner
@@ -10,15 +10,13 @@ Deltas vs the video programs:
     payload (so the loop->dit call stays modality-agnostic). It degrades to the generic text encoder on
     the CPU toy (which exposes only ``.encode(text)``), so the loop still runs end-to-end.
   * The last node is ``audio_decode`` (OobleckVAE.decode + slice [start,end] seconds) writing an ``audio``
-    artifact (NOT ``video``). BRINGUP: the v2 output-artifact surface is video-shaped (cards/programs
-    declare a ``video`` artifact); the registered ``output_artifacts`` here declares ``audio`` (+ latents),
-    which an audio-aware saver/output path must consume — that audio output node is the request-API
-    extension flagged in the spec (blocker #6). The slot value is the decoded waveform numpy array.
+    artifact (NOT ``video``). BRINGUP: the v2 output-artifact surface is video-shaped, so the ``audio``
+    artifact declared here needs an audio-aware saver/output path to consume it. The slot value is the
+    decoded waveform numpy array.
 
 Audio duration knobs: ``DiffusionParams`` has no ``audio_start_in_s``/``audio_end_in_s`` (the v2 request
-surface is video-shaped — spec blocker #6). They are read from ``request.node_params['conditioning']``
-(the per-node override surface) with the card's defaults as fallback. A first-class audio request field is
-the request-API extension (BRINGUP).
+surface is video-shaped). They are read from ``request.node_params['conditioning']`` (the per-node
+override surface) with the card's defaults as fallback. A first-class audio request field is TODO (BRINGUP).
 """
 from __future__ import annotations
 

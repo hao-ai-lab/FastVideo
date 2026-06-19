@@ -1,4 +1,4 @@
-"""Self-Forcing Wan2.2-A14B programs (design_v3 §4 causal, §15e).
+"""Self-Forcing Wan2.2-A14B programs.
 
   * t2v: text_encode -> chunk_rollout -> vae_decode (the wan_causal streaming shape, with the SF Wan2.2
     boundary-routed DMD loop bound to ``chunk_rollout``).

@@ -28,12 +28,12 @@ step math (see ``build_edm_euler_sigmas`` in ``sampler.py``):
 
 Camera / MoGe-depth / 3D-cache conditioning fills ``condition_video_pose`` / ``conditioning_latents`` /
 ``cond_indicator`` from program slots; ALL are ``None`` for the registered degenerate **t2v** path → the
-frame-replace branches are inert and the DiT's internal pose concat is zeroed, exactly as the fastvideo
+frame-replace branches are inert and the DiT's internal pose concat is zeroed, matching how the fastvideo
 pipeline degrades when no image/camera is given. Faithful port of ``Gen3CDenoisingStage.forward`` +
 ``Gen3CLatentPreparationStage`` (fastvideo/pipelines/stages/gen3c_stages.py).
 
-The DiT call is ``dit(model_input, text_embed, sigma, cond=bundle)`` — compatible with ``ToyDiT`` (which
-accepts and ignores ``cond``), so the loop CPU-verifies on the toy backend.
+The DiT call is ``dit(model_input, text_embed, sigma, cond=bundle)`` — ``ToyDiT`` accepts and ignores
+``cond``, so the loop CPU-verifies on the toy backend.
 """
 from __future__ import annotations
 

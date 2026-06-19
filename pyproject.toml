@@ -223,8 +223,9 @@ follow_imports = "silent"
 skip = "./data,./wandb,apps/fastvideo_studio/package-lock.json,apps/performance_dashboard/frontend/package-lock.json,*/_vendored/*"
 # "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
 # Early Drop). codespell lowercases ignore-words entries, so the single
-# lowercase form silences all case variants.
-ignore-words-list = "tread,passt"
+# lowercase form silences all case variants. "mot" = Mixture-of-Transformers
+# (MoT); "clen" = a Content-Length local; "te" = a text-embeds local.
+ignore-words-list = "tread,passt,mot,clen,te"
 
 [tool.ruff]
 # Allow lines to be as long as 120.

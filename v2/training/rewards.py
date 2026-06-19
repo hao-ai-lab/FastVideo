@@ -1,14 +1,12 @@
-"""Reward layer (design_v3 §10; verl-omni's shape): weighted multi-reward, duck-typed scorers.
-
-> Landed ``train/methods/rl/rewards/`` is the right seed: thin PickScore/CLIP scorers, duck-typed
-> ``RewardScorer = Callable[[media, prompts], Tensor]``, weighted aggregation in MultiRewardScorer.
+"""Reward layer: weighted multi-reward over duck-typed scorers
+(``RewardScorer = Callable[[media, prompts], Tensor]``).
 
 Toy scorers here are deterministic functions of (media, prompt) — enough to exercise group-relative
-advantages and the reward→advantage→update loop without a real reward model.
+advantages and the reward->advantage->update loop without a real reward model.
 """
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 
@@ -21,7 +19,7 @@ RewardScorer = Callable[[list, list], np.ndarray]
 def toy_pickscore(media: list, prompts: list) -> np.ndarray:
     """Deterministic 'preference' score: blends a prompt-seeded target with media statistics."""
     out = []
-    for m, p in zip(media, prompts):
+    for m, p in zip(media, prompts, strict=False):
         target = np.random.default_rng(int(content_hash(p)[:8], 16)).standard_normal(1)[0]
         score = -abs(float(np.mean(np.asarray(m))) - 0.1 * target)
         out.append(score)
@@ -37,7 +35,7 @@ _REGISTRY: dict[str, RewardScorer] = {"pickscore": toy_pickscore, "clipscore": t
 
 
 class MultiRewardScorer:
-    """Weighted aggregation of named scorers (design_v3 §10)."""
+    """Weighted aggregation of named scorers."""
 
     def __init__(self, weights: dict[str, float]):
         self.weights = weights
@@ -55,7 +53,7 @@ def build_multi_reward_scorer(config: dict[str, float]) -> MultiRewardScorer:
 
 
 class ServedRewardScorer:
-    """A reward scorer backed by a SERVED reward-model card (design_v3 §10).
+    """A reward scorer backed by a served reward-model card.
 
     Drop-in for ``MultiRewardScorer`` (same ``score(media, prompts) -> {"avg": ...}`` interface), but
     instead of a numpy heuristic it runs a reward MODEL through its ``score`` loop — so the K rollout
@@ -70,8 +68,7 @@ class ServedRewardScorer:
         from v2._enums import ExecutionProfile
         from v2.request import TaskType, make_request
         from v2.training.rollout import rollout_loop
-        req = make_request(TaskType.REASON, self.inst.card.model_id, "")     # task is cosmetic here
-        res = rollout_loop(self.inst, self.loop_id, req, slots={"media": list(media)},
-                           profile=ExecutionProfile.SERVE)
+        req = make_request(TaskType.REASON, self.inst.card.model_id, "")  # task is cosmetic here
+        res = rollout_loop(self.inst, self.loop_id, req, slots={"media": list(media)}, profile=ExecutionProfile.SERVE)
         rewards = np.asarray(res.outputs["rewards"], dtype="float64")
         return {"served": rewards, "avg": rewards}

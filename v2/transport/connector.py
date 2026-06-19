@@ -1,8 +1,8 @@
-"""Connectors + flow control (design_v3 §7.3; design.md §6.3.4).
+"""Connectors + flow control.
 
-Two mechanisms, both modeled (the design distinguishes them):
-  * ``chunk_ready`` readiness signal — vllm-omni's ``OmniConnectorBase`` (readiness-set parking);
-  * credit-based flow control — sglang-omni's Relay (a bounded in-flight window).
+Two distinct mechanisms are modeled:
+  * ``chunk_ready`` readiness signal (readiness-set parking);
+  * credit-based flow control (a bounded in-flight window).
 
 Backends are pluggable: ``InProcConnector`` (zero-copy reference handoff — the single-node default)
 and ``ShmFakeConnector`` (copies on put to model a serialization boundary). A ``KVConnector`` exposes
@@ -18,7 +18,7 @@ from v2.transport.manifest import TransferManifest, payload_nbytes
 
 
 class CreditWindow:
-    """Credit-based flow control (sglang-omni Relay): a bounded number of in-flight transfers."""
+    """Credit-based flow control: a bounded number of in-flight transfers."""
 
     def __init__(self, capacity: int = 8):
         self.capacity = capacity
@@ -38,16 +38,27 @@ class CreditWindow:
 class Connector(Protocol):
     name: str
 
-    def put(self, key: str, value: Any, manifest: TransferManifest | None = None) -> None: ...
-    def chunk_ready(self, key: str) -> bool: ...
-    def get(self, key: str) -> Any: ...
-    def take(self, key: str) -> Any: ...
-    def acquire_credit(self, n: int = 1) -> bool: ...
-    def release_credit(self, n: int = 1) -> None: ...
+    def put(self, key: str, value: Any, manifest: TransferManifest | None = None) -> None:
+        ...
+
+    def chunk_ready(self, key: str) -> bool:
+        ...
+
+    def get(self, key: str) -> Any:
+        ...
+
+    def take(self, key: str) -> Any:
+        ...
+
+    def acquire_credit(self, n: int = 1) -> bool:
+        ...
+
+    def release_credit(self, n: int = 1) -> None:
+        ...
 
 
 class InProcConnector:
-    """Zero-copy in-process handoff with readiness + credits (the single-node default, §6.3.4)."""
+    """Zero-copy in-process handoff with readiness + credits (the single-node default)."""
 
     def __init__(self, name: str = "inproc", credit_capacity: int = 8):
         self.name = name
@@ -56,10 +67,10 @@ class InProcConnector:
         self.credits = CreditWindow(credit_capacity)
         self.transfers = 0
         self.bytes_moved = 0
-        self.parked = 0           # how many get()s waited on a not-yet-ready key (readiness parking)
+        self.parked = 0  # how many get()s waited on a not-yet-ready key (readiness parking)
 
     def _materialize(self, value: Any) -> Any:
-        return value               # in-proc: pass by reference (zero overhead)
+        return value  # in-proc: pass by reference (zero overhead)
 
     def put(self, key: str, value: Any, manifest: TransferManifest | None = None) -> None:
         self._store[key] = self._materialize(value)
@@ -104,17 +115,27 @@ class ShmFakeConnector(InProcConnector):
 
 @runtime_checkable
 class KVConnector(Protocol):
-    """Cache-bearing edge protocol (design_v3 §7.3): scheduler-side query/alloc/finish +
-    worker-side save/load — the shape NIXL/LMCache/Mooncake/KVBM implement."""
+    """Cache-bearing edge protocol: scheduler-side query/alloc/finish + worker-side save/load —
+    the shape NIXL/LMCache/Mooncake/KVBM implement."""
 
-    def query(self, key: str) -> bool: ...
-    def alloc(self, key: str, nbytes: int) -> bool: ...
-    def finish(self, key: str) -> None: ...
-    def save(self, key: str, value: Any) -> None: ...
-    def load(self, key: str) -> Any: ...
+    def query(self, key: str) -> bool:
+        ...
+
+    def alloc(self, key: str, nbytes: int) -> bool:
+        ...
+
+    def finish(self, key: str) -> None:
+        ...
+
+    def save(self, key: str, value: Any) -> None:
+        ...
+
+    def load(self, key: str) -> Any:
+        ...
 
 
 class InProcKVConnector:
+
     def __init__(self, capacity_bytes: int = 1 << 30):
         self.capacity_bytes = capacity_bytes
         self.used = 0

@@ -1,21 +1,23 @@
-"""Plugin registry + trust boundary (design_v3 §11).
+"""Plugin registry + trust boundary.
 
-> Plugins are enabled at deploy scope only (never a per-request ``plugins=[...]`` field
-> that would wire third-party code selection into the public API); requests only
-> *parameterize* pre-enabled plugins through validated schemas.
+Plugins are enabled at deploy scope only (never a per-request ``plugins=[...]`` field that
+would wire third-party code selection into the public API); requests only *parameterize*
+pre-enabled plugins through validated schemas.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from v2.extend.base import InterceptorChain, Observer
 
 
 class PluginRegistry:
+
     def __init__(self) -> None:
         self._interceptors: dict[str, Callable[..., Any]] = {}
         self._observers: dict[str, Callable[..., Observer]] = {}
-        self._enabled: set[str] = set()        # deploy-scope enablement
+        self._enabled: set[str] = set()  # deploy-scope enablement
 
     def register_interceptor(self, plugin_id: str, factory: Callable[..., Any]) -> None:
         self._interceptors[plugin_id] = factory

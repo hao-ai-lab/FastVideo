@@ -1,4 +1,4 @@
-"""Piecewise CUDA-graph capture/replay at the step boundary (Path A; design_v3 §6.2).
+"""Piecewise CUDA-graph capture/replay at the step boundary.
 
 These tests exercise the capture LIFECYCLE that is correctness-critical regardless of device: the
 capture key (capture-once / replay-many for compatible steps), eager-break for data-dependent steps

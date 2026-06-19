@@ -1,17 +1,16 @@
-"""Real torch component adapters for the GPU backend (design_v3 §17; README "Running the real models").
+"""Real torch component adapters for the GPU backend. See v2/README.md ("Running the real models").
 
-ONE cohesive module (was the torch_adapters.py + torch_ltx2.py split): a ``TorchComponent`` base that
-centralizes the shared mechanics — ``.to(device,dtype).eval()``, the numpy<->torch marshalling at the
-loop boundary, the ``set_forward_context`` wrap every fastvideo forward needs, and the weight surface
-(copy_from / blend_from / clone) — plus thin per-model subclasses that carry ONLY the forward semantics
-(Wan ``sigma*1000`` -> velocity; LTX-2 per-token sigma, x0 -> ``(x_t-x0)/sigma``, joint A/V; VAE
-normalization; T5 padding; Gemma dual-projection; upsampler; audio decode->vocoder). A single
-``build_component(spec, instance, platform)`` dispatches by ``spec.kind`` through ``_MAKERS`` (replacing
-the six ``build_torch_*`` builders + six lazy trampolines).
+A ``TorchComponent`` base centralizes the shared mechanics — ``.to(device,dtype).eval()``, the
+numpy<->torch marshalling at the loop boundary, the ``set_forward_context`` wrap every fastvideo
+forward needs, and the weight surface (copy_from / blend_from / clone). Thin per-model subclasses
+carry only the forward semantics (Wan ``sigma*1000`` -> velocity; LTX-2 per-token sigma,
+x0 -> ``(x_t-x0)/sigma``, joint A/V; VAE normalization; T5 padding; Gemma dual-projection; upsampler;
+audio decode->vocoder). A single ``build_component(spec, instance, platform)`` dispatches by
+``spec.kind`` through ``_MAKERS``.
 
 The loops / CFG / scheduler math stay numpy fp32 (lowest-risk bring-up); the boundary marshals
 numpy<->torch in ONE place (``TorchComponent._t``/``_n``) so a torch-native path is a later swap.
-Component construction goes through ``load_component`` — the v2-owned loader seam (currently delegates to
+Component construction goes through ``load_component``, the v2-owned loader seam (currently delegates to
 fastvideo's component_loader; a per-module vendored cutover replaces it later, no caller changes).
 
 Imported ONLY lazily — inside ``torch_cuda.py``'s registered builder — so importing the platform package
@@ -87,7 +86,7 @@ def _fastvideo_args(spec: Any) -> Any:
 
 
 def load_component(loader_attr: str, path: str, args):
-    """v2-owned loader seam (design: ``v2/loader``). Constructs a real component from a checkpoint via the
+    """v2-owned loader seam (``v2/loader``). Constructs a real component from a checkpoint via the
     component loaders. ``WanTransformer3DModel`` / ``AutoencoderKLWan`` have NO ``from_pretrained``; the
     loader reads the checkpoint config, resolves the class (UMT5 vs T5 from config), and loads weights.
     Currently delegates to fastvideo's loader; a vendored cutover swaps the body, not the callers."""
@@ -145,7 +144,7 @@ class TorchComponent:
         from v2.forward_context import set_forward_context
         return set_forward_context(current_timestep=current_timestep, attn_metadata=None)
 
-    # weight surface used by serving weight-sync + training (design_v3 §10) ------------------------- #
+    # weight surface used by serving weight-sync + training ----------------------------------------- #
     def copy_from(self, other) -> None:
         self.module.load_state_dict(other.module.state_dict())
 

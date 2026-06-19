@@ -1,28 +1,27 @@
 """LingBot-World-Base-Cam ModelCard — camera-conditioned, dual-guidance MoE image-to-video.
 
-LingBot-World-Base-Cam (``FastVideo/LingBot-World-Base-Cam-Diffusers``) is Wan2.2-I2V-A14B with a NEW
-camera/Plucker conditioning input. Architecture (all declared on the card so the recipe is self-contained
-— no edit to the shared ``_make_dit`` dispatch):
+LingBot-World-Base-Cam (``FastVideo/LingBot-World-Base-Cam-Diffusers``) is Wan2.2-I2V-A14B plus a
+camera/Plucker conditioning input. Everything is declared on the card so the recipe is self-contained:
 
   * DiT (x2)  ``fastvideo.models.dits.lingbotworld.model:LingBotWorldTransformer3DModel`` — a 2x14B
     boundary-routed MoE (``transformer`` high-noise, ``transformer_2`` low-noise; ``boundary_ratio=0.947``).
-    The forward gains ``c2ws_plucker_emb`` (FiLM camera injection per block) which a vanilla WanDiT reuse
-    would drop, so both experts use the ``LingBotWorldDiT`` adapter (``ComponentSpec.adapter``) that threads
-    the Plucker tensor + keeps the Wan i2v 36ch ``[noise|mask+cond]`` concat + CLIP image embeds.
+    The forward takes ``c2ws_plucker_emb`` (per-block FiLM camera injection) that a vanilla WanDiT would
+    drop, so both experts use the ``LingBotWorldDiT`` adapter, which threads the Plucker tensor and keeps
+    the Wan i2v 36ch ``[noise|mask+cond]`` concat.
   * VAE  ``fastvideo.models.vaes.wanvae:AutoencoderKLWan`` (z=16, 8x spatial / 4x temporal, mean/std
-    normalized latent space) — reuses the v2 ``WanVAE`` adapter unchanged. ``spatial_scale=8`` for the
-    Plucker downsample matches this 8x spatial compression.
+    normalized latent space) — reuses the v2 ``WanVAE`` adapter. ``spatial_scale=8`` for the Plucker
+    downsample matches the 8x spatial compression.
   * Text  ``fastvideo.models.encoders.t5:T5EncoderModel`` (UMT5, text_len=512) — reuses ``T5Encoder``.
-  * Image ``fastvideo.models.encoders.clip:CLIPVisionModel`` — first-frame CLIP conditioning (i2v), reuses
-    ``CLIPImageEncoder``.
+  * No CLIP image encoder: ``image_dim=null``, so first-frame conditioning is carried entirely by the
+    36ch ``[noise|mask+cond]`` latent concat (see the ``cond_encode`` node).
 
-Sampler: flow-match (``FlowUniPCMultistepScheduler``, ``prediction_type='flow_prediction'``) -> the v2
-``FlowShiftPolicy`` + ``FLOW_MATCH_STEP``, exactly as Wan. NOTE the unusual defaults: ``flow_shift=10.0``,
-``num_inference_steps=70``, dual ``guidance_scale``/``guidance_scale_2`` (both 5.0), and the Chinese
-negative prompt — these must NOT inherit the Wan defaults.
+Sampler: flow-match (``FlowUniPCMultistepScheduler``, ``prediction_type='flow_prediction'``) via the v2
+``FlowShiftPolicy`` + ``FLOW_MATCH_STEP``, as in Wan. The defaults are unusual and must NOT inherit Wan's:
+``flow_shift=10.0``, ``num_inference_steps=70``, dual ``guidance_scale``/``guidance_scale_2`` (both 5.0),
+and a Chinese negative prompt.
 
-``stamp_wan21_checkpoints`` applies (diffusers ``transformer``/``transformer_2``/``vae``/``text_encoder``/
-``image_encoder`` subfolder layout, all in ``_WAN21_SUBFOLDERS``).
+``stamp_wan21_checkpoints`` applies (diffusers ``transformer``/``transformer_2``/``vae``/``text_encoder``
+subfolder layout, all in ``_WAN21_SUBFOLDERS``).
 """
 from __future__ import annotations
 
@@ -65,10 +64,10 @@ def build_lingbotworld_card(model_id: str = "lingbot-world-base-cam",
                             sampling_defaults: SamplingDefaults | None = None) -> ModelCard:
     """LingBot-World-Base-Cam card — 2x14B camera-conditioned dual-guidance MoE i2v.
 
-    Mirrors ``build_wan22_i2v_a14b_card`` but: ``flow_shift=10.0``; ``boundary_ratio=0.947``; both DiT
-    experts use the ``LingBotWorldDiT`` adapter (threads ``c2ws_plucker_emb`` + Wan i2v cond); the
-    ``LingBotWorldDenoiseLoop`` (dual guidance + camera); and the LingBot defaults (70 steps, gs 5.0,
-    480x832, Chinese negative prompt). 2x14B bf16 won't co-reside on 80GB -> the adapter keeps the WanDiT
+    Mirrors ``build_wan22_i2v_a14b_card`` but with ``flow_shift=10.0``, ``boundary_ratio=0.947``, both DiT
+    experts on the ``LingBotWorldDiT`` adapter (threads ``c2ws_plucker_emb`` + Wan i2v cond), the
+    ``LingBotWorldDenoiseLoop`` (dual guidance + camera), and the LingBot defaults (70 steps, gs 5.0,
+    480x832, Chinese negative prompt). 2x14B bf16 won't co-reside on 80GB, so the adapter keeps the WanDiT
     CPU-offload swap (GPU-pending)."""
     seed = _seed_from(model_id)
     cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)

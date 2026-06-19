@@ -1,4 +1,4 @@
-"""Heterogeneous WorkUnit co-scheduling (design_v3 §6.1, §9.3, §17 falsifier).
+"""Heterogeneous WorkUnit co-scheduling.
 
 The `VAE_TILE` WorkUnit kind had zero coverage. These tests put tiled VAE decode (one `VAE_TILE` unit
 per latent row-band) through the same admission/scheduler/interleave machinery as denoise steps, and
@@ -7,11 +7,11 @@ assert:
   * **tiling is exact** — tiled decode == one-shot decode (a C0 component parity);
   * **the kind is real WorkUnits** — the tiled run emits one `VAE_TILE` unit per row;
   * **mixed kinds interleave bit-identically** — a `VAE_TILE` pipeline and a `DIFFUSION_STEP` pipeline,
-    interleaved, equal their serial run (the §9.3 gate over *heterogeneous* units);
+    interleaved, equal their serial run (the interleave gate over *heterogeneous* units);
   * **the scheduler co-runs both kinds** in one interleaved batch.
 
-This validates the *mechanism* the §17 falsifier questions (non-step kinds flow through one budget). Whether
-it *pays* on a real GPU duty-cycle is the empirical half of the falsifier — deferred to the port.
+This validates the *mechanism*: non-step kinds flow through one budget. Whether it *pays* on a real GPU
+duty-cycle is the empirical half — deferred to the port.
 """
 from __future__ import annotations
 

@@ -1,9 +1,9 @@
-"""ChunkRolloutLoop — causal/AR video (design_v3 §4 causal, §5; design.md taxonomy).
+"""ChunkRolloutLoop — causal/AR video.
 
 Loop shape: outer loop over latent-frame chunks × inner denoise per chunk, carrying a per-chunk
 KV/context via the slab-KV cache (sink/local window in inference; full history in self-forcing
 training mode). Each completed chunk is streamable (``StepResult.emit``), and the rollout profile
-captures per-chunk behavior for the self-forcing distillation method (design_v3 §10).
+captures per-chunk behavior for the self-forcing distillation method.
 
 State is entirely in ``LoopState`` (the slab list + chunk position), so interleaving causal
 rollouts of two sessions cannot smear context — and the slab-KV pool is namespaced per request.
@@ -30,8 +30,8 @@ from v2.platform.backends.toy import LATENT_CHANNELS
 
 
 class ChunkRolloutLoop:
-    def __init__(self, *, loop_id, num_chunks, chunk_size, steps_per_chunk, cfg, flow_shift,
-                 precision, cost):
+
+    def __init__(self, *, loop_id, num_chunks, chunk_size, steps_per_chunk, cfg, flow_shift, precision, cost):
         self.loop_id = loop_id
         self.num_chunks = num_chunks
         self.chunk_size = chunk_size
@@ -54,15 +54,23 @@ class ChunkRolloutLoop:
         seed = req.diffusion.seed if req.diffusion.seed is not None else 0
         rng = np.random.default_rng(seed)
         sig = self.flow_shift.build_schedule(self.steps_per_chunk, req.diffusion.height, req.diffusion.width)
-        st = LoopState(loop_id=self.loop_id, instance_id=model.card.model_id,
-                       request_id=req.request_id, profile=ctx.profile, rng=rng, seed=seed,
-                       sigmas=[float(s) for s in sig], timesteps=[float(s) * 1000.0 for s in sig])
+        st = LoopState(loop_id=self.loop_id,
+                       instance_id=model.card.model_id,
+                       request_id=req.request_id,
+                       profile=ctx.profile,
+                       rng=rng,
+                       seed=seed,
+                       sigmas=[float(s) for s in sig],
+                       timesteps=[float(s) * 1000.0 for s in sig])
         st.cond["prompt_embeds"] = ctx.slots.get("text_embeds")
         st.cond["negative_prompt_embeds"] = ctx.slots.get("neg_text_embeds")
         # world-model continuation: seed the chunk context from prior chunks (an interactive session's
-        # persistent world state; design_v3 §16). Default [] ⇒ a fresh rollout (unchanged one-shot path).
+        # persistent world state). Default [] ⇒ a fresh rollout (unchanged one-shot path).
         prior = [np.asarray(c, dtype="float32") for c in (ctx.slots.get("world_context") or [])]
-        st.scratch.update(chunk_idx=0, step_in_chunk=0, slabs=prior, chunks_out=[],
+        st.scratch.update(chunk_idx=0,
+                          step_in_chunk=0,
+                          slabs=prior,
+                          chunks_out=[],
                           guidance_scale=float(req.diffusion.guidance_scale),
                           caches=getattr(model, "caches", None))
         st.latents["chunk"] = (rng.standard_normal(self._chunk_shape(req, model)) * float(sig[0])).astype("float32")
@@ -84,7 +92,7 @@ class ChunkRolloutLoop:
         cfg, precision = self.cfg, self.precision
 
         def run(model, override=None):
-            fm = model.platform.kernels.get(FLOW_MATCH_STEP)    # solver dispatched per (device, arch)
+            fm = model.platform.kernels.get(FLOW_MATCH_STEP)  # solver dispatched per (device, arch)
             if override is not None and "noise_pred" in override:
                 velocity = np.asarray(override["noise_pred"], dtype="float32")
             else:
@@ -92,22 +100,37 @@ class ChunkRolloutLoop:
                 preds = {b: dit(x, pe if b == "cond" else ne, sigma_t, context=context) for b in branches}
                 velocity = cfg.combine(preds, scale, sctx, cfg_state)
             x_next = fm(precision.cast(x), precision.cast(velocity), sigma_t, sigma_next)
-            return StepResult(output={"noise_pred": np.asarray(velocity, dtype="float32"),
-                                      "latents": x_next.astype("float32")})
+            return StepResult(output={
+                "noise_pred": np.asarray(velocity, dtype="float32"),
+                "latents": x_next.astype("float32")
+            })
 
         emits = []
-        if i == self.steps_per_chunk - 1:                       # last step of this chunk → streamable
-            emits.append(StreamChunk(stream_id=st.request_id, modality="video",
-                                     seq=st.scratch["chunk_idx"], data=x, preview=False))
-        res = ResourceRequest(
-            compute_seconds=self.cost.predict(int(np.prod(x.shape)), float(len(branches))),
-            resident_bytes=int(x.nbytes), peak_activation_bytes=int(x.nbytes * len(branches)))
-        return WorkPlan(
-            loop_id=self.loop_id, instance_id=st.instance_id, kind=WorkUnitKind.CHUNK_STEP,
-            shape_sig=ShapeSignature(WorkUnitKind.CHUNK_STEP, dims=tuple(x.shape),
-                                     extra=(("chunk", st.scratch["chunk_idx"]),)),
-            resources=res, payload={"branch": "combined", "chunk": st.scratch["chunk_idx"], "step": i},
-            run=run, label=f"causal.c{st.scratch['chunk_idx']}.s{i}", emits=emits)
+        if i == self.steps_per_chunk - 1:  # last step of this chunk → streamable
+            emits.append(
+                StreamChunk(stream_id=st.request_id,
+                            modality="video",
+                            seq=st.scratch["chunk_idx"],
+                            data=x,
+                            preview=False))
+        res = ResourceRequest(compute_seconds=self.cost.predict(int(np.prod(x.shape)), float(len(branches))),
+                              resident_bytes=int(x.nbytes),
+                              peak_activation_bytes=int(x.nbytes * len(branches)))
+        return WorkPlan(loop_id=self.loop_id,
+                        instance_id=st.instance_id,
+                        kind=WorkUnitKind.CHUNK_STEP,
+                        shape_sig=ShapeSignature(WorkUnitKind.CHUNK_STEP,
+                                                 dims=tuple(x.shape),
+                                                 extra=(("chunk", st.scratch["chunk_idx"]), )),
+                        resources=res,
+                        payload={
+                            "branch": "combined",
+                            "chunk": st.scratch["chunk_idx"],
+                            "step": i
+                        },
+                        run=run,
+                        label=f"causal.c{st.scratch['chunk_idx']}.s{i}",
+                        emits=emits)
 
     def advance(self, st: LoopState, result: StepResult) -> LoopState:
         st.latents["chunk"] = result.output["latents"]
@@ -115,10 +138,10 @@ class ChunkRolloutLoop:
         st.step_idx += 1
         if st.scratch["step_in_chunk"] >= self.steps_per_chunk:
             chunk = np.asarray(st.latents["chunk"]).copy()
-            st.scratch["slabs"].append(chunk)                   # context for the next chunk
+            st.scratch["slabs"].append(chunk)  # context for the next chunk
             st.scratch["chunks_out"].append(chunk)
             caches = st.scratch.get("caches")
-            if caches is not None and caches.has("slab_kv"):     # demonstrate the slab-KV class
+            if caches is not None and caches.has("slab_kv"):  # demonstrate the slab-KV class
                 caches.pool("slab_kv").append(st.request_id, Slab(st.scratch["chunk_idx"], k=chunk, v=None))
             if st.profile == ExecutionProfile.ROLLOUT:
                 st.trajectory.append({"chunk": st.scratch["chunk_idx"], "latents": chunk})
@@ -130,6 +153,9 @@ class ChunkRolloutLoop:
 
     def finalize(self, st: LoopState) -> LoopResult:
         video = np.concatenate(st.scratch["chunks_out"], axis=1) if st.scratch["chunks_out"] else None
-        return LoopResult(outputs={"latents": video, "chunks": list(st.scratch["chunks_out"])},
+        return LoopResult(outputs={
+            "latents": video,
+            "chunks": list(st.scratch["chunks_out"])
+        },
                           metrics={"chunks": float(st.scratch["chunk_idx"])},
                           behavior=st.trajectory or None)

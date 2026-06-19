@@ -58,10 +58,9 @@ class CFGZeroPolicy(CFGPolicy):
 
     Per sample, project cond onto uncond to get the optimized scale
     ``st_star = <v_cond, v_uncond> / (||v_uncond||^2 + 1e-8)``, then combine
-    ``out = v_uncond*st_star + scale*(v_cond - v_uncond*st_star)``. This is the exact algebra of
-    ``LongCatDenoisingStage.optimized_scale`` + the CFG application (longcat_denoising.py lines 28-149), with
-    the dot-products taken per leading "batch" group. In the v2 loop a step works on ONE unbatched sample
-    ([C,T,H,W]), so ``st_star`` is a single scalar over the whole tensor (B=1 in fastvideo's reshape(B,-1))."""
+    ``out = v_uncond*st_star + scale*(v_cond - v_uncond*st_star)``. This matches
+    ``LongCatDenoisingStage.optimized_scale`` + its CFG application (longcat_denoising.py). A v2 step works on
+    ONE unbatched sample ([C,T,H,W]), so ``st_star`` is a single scalar over the whole tensor (B=1)."""
 
     def combine(self, preds, guidance_scale, ctx, state):
         cond = np.asarray(preds["cond"], dtype=np.float64)

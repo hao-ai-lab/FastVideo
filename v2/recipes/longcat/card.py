@@ -2,20 +2,20 @@
 
 Architecture deltas vs Wan (all declared on the card so the recipe is self-contained):
   * DiT  ``fastvideo.models.dits.longcat:LongCatTransformer3DModel`` (depth 48, hidden 4096, 32 heads,
-    in/out 16ch, patch [1,2,2], caption_channels 4096). The adapter (``ComponentSpec.adapter`` -> ``LongCatDiT``
-    in ``v2/platform/backends/torch_longcat.py``) returns the **negated** velocity (the fastvideo stage's
-    ``noise_pred = -noise_pred`` before the scheduler step) so the loop's flow-match Euler reproduces it.
-  * VAE  ``fastvideo.models.vaes.wanvae:AutoencoderKLWan`` — Wan-style (z=16, 8x/4x) in NORMALIZED latent
-    space (mean/std). Reuses the v2 ``WanVAE`` torch adapter UNCHANGED (no adapter override).
+    in/out 16ch, patch [1,2,2], caption_channels 4096). The adapter (``LongCatDiT`` in
+    ``v2/platform/backends/torch_longcat.py``) returns the **negated** velocity (folding the fastvideo
+    stage's ``noise_pred = -noise_pred`` before the scheduler step) so the loop's flow-match Euler matches.
+  * VAE  ``fastvideo.models.vaes.wanvae:AutoencoderKLWan`` — Wan-style (z=16, 8x/4x) in normalized latent
+    space (mean/std). Reuses the v2 ``WanVAE`` torch adapter (no adapter override).
   * Text ``fastvideo.models.encoders.t5:T5EncoderModel`` (UMT5, 4096-dim) via the v2 ``T5Encoder`` (zero-pads
     to max_length=512 for the CFG-concat uniform-seq contract — no adapter override needed).
-  * Sampler: ``FlowMatchEulerDiscreteScheduler`` with an EXPLICIT ``linspace(1.0, 0.001, num_steps)`` sigma
+  * Sampler: ``FlowMatchEulerDiscreteScheduler`` with an explicit ``linspace(1.0, 0.001, num_steps)`` sigma
     schedule (NOT flow-shift) + CFG-zero optimized-scale guidance — both live in ``LongCatDenoiseLoop``.
 
-``stamp_wan21_checkpoints`` applies (the diffusers transformer/vae/text_encoder/tokenizer subfolder layout is
-identical to Wan). i2v/VC (first-frame latent replacement + per-frame timestep masking + num_cond_latents),
-the refine stages (t_thresh crop, which is the latent-prep branch that SKIPS the init-noise re-scale), KV-cache,
-and BSA are deferred (spec blocker #8) — the registered preset is base T2V.
+``stamp_wan21_checkpoints`` applies (the diffusers transformer/vae/text_encoder/tokenizer subfolder layout
+is identical to Wan). i2v/VC (first-frame latent replacement + per-frame timestep masking + num_cond_latents),
+the refine stages (t_thresh crop, the latent-prep branch that SKIPS the init-noise re-scale), KV-cache, and
+BSA are deferred — the registered preset is base T2V.
 """
 from __future__ import annotations
 

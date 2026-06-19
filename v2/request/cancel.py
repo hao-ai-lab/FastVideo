@@ -1,9 +1,8 @@
-"""Structured cancellation (design_v3 §6.4, §12).
+"""Structured cancellation.
 
-"Cancellation is common-path, not exceptional" — vibe-directing makes abandoning
-in-flight work the *normal* user action. Cancel takes effect at the next loop step
-boundary: the driver checks the scope between steps, drops queued work, releases
-LoopState + cache handles, and reports ``cancelled``.
+Cancellation is a common-path action, not exceptional. Cancel takes effect at the
+next loop step boundary: the driver checks the scope between steps, drops queued
+work, releases LoopState + cache handles, and reports ``cancelled``.
 """
 from __future__ import annotations
 

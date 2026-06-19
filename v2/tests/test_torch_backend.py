@@ -1,4 +1,4 @@
-"""GPU torch backend — the CPU-verifiable tier (design_v3 §17).
+"""GPU torch backend — the CPU-verifiable tier.
 
 The torch adapters/kernels themselves need a GPU box (see GPU_BRINGUP.md). What IS verifiable on a
 torchless laptop is the wiring that must be right for the GPU path to even resolve correctly: the

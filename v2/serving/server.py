@@ -1,12 +1,12 @@
-"""OmniOpenAIServer — our own OpenAI-compatible worker server (design.md §6.3.5; vllm-omni pattern).
+"""OmniOpenAIServer — OpenAI-compatible worker server (vllm-omni pattern).
 
 Fronts ONE AsyncEngine (the per-pool worker surface). Routes OpenAI-shaped endpoints to typed
 OmniRequests, streams chat via SSE, and serves video as an async job (POST returns a job id;
 GET polls) plus a /sync variant — mirroring vllm-omni's `/v1/videos` + `/v1/videos/sync`. The fleet
 (deploy/fleet.py) or Dynamo routes across multiple such servers/engines above this layer.
 
-Unlike vllm-omni's request-scheduled opaque DIFFUSION stage, the engine underneath is step-scheduled
-— the endpoint is a thin shim; the runtime-visible loop scheduler is the substance.
+Unlike vllm-omni's request-scheduled opaque DIFFUSION stage, the engine underneath is step-scheduled;
+the endpoint is a thin shim over the loop scheduler.
 """
 from __future__ import annotations
 
@@ -27,11 +27,19 @@ def _json_default(o: Any) -> Any:
     """Make SSE event payloads JSON-safe (media.chunk carries a StreamChunk with an array)."""
     if isinstance(o, StreamChunk):
         shape = list(np.asarray(o.data).shape) if o.data is not None else None
-        return {"stream_id": o.stream_id, "modality": o.modality, "seq": o.seq,
-                "preview": o.preview, "final": o.final, "shape": shape}
+        return {
+            "stream_id": o.stream_id,
+            "modality": o.modality,
+            "seq": o.seq,
+            "preview": o.preview,
+            "final": o.final,
+            "shape": shape
+        }
     if isinstance(o, np.ndarray):
         return {"shape": list(o.shape), "dtype": str(o.dtype)}
     return str(o)
+
+
 from v2.serving.protocol import ChatCompletionRequest, ImageGenerationRequest, VideoGenerationRequest
 
 _job_ctr = itertools.count(1)
@@ -55,20 +63,25 @@ def _ser_artifacts(out: Output) -> dict:
             res[name] = {"type": "empty"}
         else:
             a = np.asarray(p)
-            res[name] = {"type": "tensor", "shape": list(a.shape), "dtype": str(a.dtype),
-                         "b64_json": base64.b64encode(np.ascontiguousarray(a).tobytes()).decode()}
+            res[name] = {
+                "type": "tensor",
+                "shape": list(a.shape),
+                "dtype": str(a.dtype),
+                "b64_json": base64.b64encode(np.ascontiguousarray(a).tobytes()).decode()
+            }
     return res
 
 
 class OmniOpenAIServer:
+
     def __init__(self, engine: Any, *, engine_id: str = "v2", max_jobs: int = 512):
-        self.engine = engine                       # an AsyncEngine
+        self.engine = engine  # an AsyncEngine
         self.engine_id = engine_id
-        self.jobs: dict[str, dict] = {}            # video job store
+        self.jobs: dict[str, dict] = {}  # video job store
         self.http = HttpServer(self.dispatch)
         self.served = 0
         self.max_jobs = max_jobs
-        self._tasks: set = set()                   # tracked video-job tasks (no fire-and-forget leak)
+        self._tasks: set = set()  # tracked video-job tasks (no fire-and-forget leak)
 
     def _evict_jobs(self) -> None:
         terminal = ("completed", "failed")
@@ -101,20 +114,30 @@ class OmniOpenAIServer:
 
     # --- metadata endpoints ------------------------------------------------- #
     def _health(self) -> dict:
-        return {"status": "healthy", "engine_id": self.engine_id,
-                "in_flight": self.engine.in_flight, "queue_depth": self.engine.queue_depth}
+        return {
+            "status": "healthy",
+            "engine_id": self.engine_id,
+            "in_flight": self.engine.in_flight,
+            "queue_depth": self.engine.queue_depth
+        }
 
     def _metrics(self) -> dict:
         sm = self.engine.engine.metrics
         adm = self.engine.engine.admission.metrics
-        return {"served": self.served, "in_flight": self.engine.in_flight,
-                "stepped_units": sm.stepped_units, "batches": sm.batches,
-                "admitted": adm.admitted, "deferred": adm.deferred,
-                "gpu_seconds": round(adm.gpu_seconds, 6), "by_kind": dict(adm.by_kind)}
+        return {
+            "served": self.served,
+            "in_flight": self.engine.in_flight,
+            "stepped_units": sm.stepped_units,
+            "batches": sm.batches,
+            "admitted": adm.admitted,
+            "deferred": adm.deferred,
+            "gpu_seconds": round(adm.gpu_seconds, 6),
+            "by_kind": dict(adm.by_kind)
+        }
 
     def _models(self) -> dict:
-        ids = (list(self.engine.engine._registry) + list(self.engine._disagg)
-               + list(self.engine.engine._workflows))           # workflows are servables too
+        ids = (list(self.engine.engine._registry) + list(self.engine._disagg) + list(self.engine.engine._workflows)
+               )  # workflows are servables too
         return {"object": "list", "data": [{"id": m, "object": "model"} for m in ids]}
 
     # --- images ------------------------------------------------------------- #
@@ -124,9 +147,16 @@ class OmniOpenAIServer:
         self.served += 1
         arts = _ser_artifacts(out)
         primary = arts.get("image") or arts.get("video") or arts.get("latents")
-        return Response.json({"created": int(time.time()), "model": ig.model,
-                              "data": [primary] * max(1, ig.n), "omni": arts,
-                              "metrics": {k: round(v, 6) for k, v in out.metrics.items()}})
+        return Response.json({
+            "created": int(time.time()),
+            "model": ig.model,
+            "data": [primary] * max(1, ig.n),
+            "omni": arts,
+            "metrics": {
+                k: round(v, 6)
+                for k, v in out.metrics.items()
+            }
+        })
 
     # --- video: async job + poll + sync ------------------------------------- #
     async def _video_create(self, req: Request) -> Response:
@@ -135,7 +165,7 @@ class OmniOpenAIServer:
         self.jobs[job_id] = {"id": job_id, "status": "queued", "model": vg.model}
         t = asyncio.create_task(self._run_video_job(job_id, vg))
         self._tasks.add(t)
-        t.add_done_callback(self._tasks.discard)   # tracked, not fire-and-forget
+        t.add_done_callback(self._tasks.discard)  # tracked, not fire-and-forget
         self._evict_jobs()
         return Response.json({"id": job_id, "status": "queued", "model": vg.model}, status=202)
 
@@ -144,8 +174,12 @@ class OmniOpenAIServer:
         try:
             out = await self.engine.generate(vg.to_omni())
             self.served += 1
-            self.jobs[job_id].update(status="completed", result=_ser_artifacts(out),
-                                     metrics={k: round(v, 6) for k, v in out.metrics.items()})
+            self.jobs[job_id].update(status="completed",
+                                     result=_ser_artifacts(out),
+                                     metrics={
+                                         k: round(v, 6)
+                                         for k, v in out.metrics.items()
+                                     })
         except Exception as e:  # noqa: BLE001
             self.jobs[job_id].update(status="failed", error=str(e))
 
@@ -159,8 +193,14 @@ class OmniOpenAIServer:
         vg = VideoGenerationRequest.from_json(req.json())
         out = await self.engine.generate(vg.to_omni())
         self.served += 1
-        return Response.json({"model": vg.model, "data": _ser_artifacts(out),
-                              "metrics": {k: round(v, 6) for k, v in out.metrics.items()}})
+        return Response.json({
+            "model": vg.model,
+            "data": _ser_artifacts(out),
+            "metrics": {
+                k: round(v, 6)
+                for k, v in out.metrics.items()
+            }
+        })
 
     # --- chat: SSE stream or JSON ------------------------------------------- #
     async def _chat(self, req: Request) -> Response:
@@ -173,26 +213,54 @@ class OmniOpenAIServer:
         arts = _ser_artifacts(out)
         content = arts.get("text", {}).get("text", "") if "text" in arts else ""
         return Response.json({
-            "id": f"chatcmpl-{next(_chat_ctr)}", "object": "chat.completion",
-            "created": int(time.time()), "model": cc.model,
-            "choices": [{"index": 0, "finish_reason": "stop",
-                         "message": {"role": "assistant", "content": content}}],
-            "omni": arts, "metrics": {k: round(v, 6) for k, v in out.metrics.items()}})
+            "id":
+            f"chatcmpl-{next(_chat_ctr)}",
+            "object":
+            "chat.completion",
+            "created":
+            int(time.time()),
+            "model":
+            cc.model,
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": content
+                }
+            }],
+            "omni":
+            arts,
+            "metrics": {
+                k: round(v, 6)
+                for k, v in out.metrics.items()
+            }
+        })
 
     async def _chat_sse(self, omni: Any, model: str):
         import json
         cid = f"chatcmpl-{next(_chat_ctr)}"
-        async for ev in self.engine.submit(omni):     # live OmniEvents → SSE chunks
-            chunk = {"id": cid, "object": "chat.completion.chunk", "model": model,
-                     "event": ev.type, "data": ev.payload}
+        async for ev in self.engine.submit(omni):  # live OmniEvents → SSE chunks
+            chunk = {"id": cid, "object": "chat.completion.chunk", "model": model, "event": ev.type, "data": ev.payload}
             yield f"data: {json.dumps(chunk, default=_json_default)}\n\n"
         self.served += 1
         out = self.engine.result(omni.request_id)
         arts = _ser_artifacts(out) if out is not None else {}
         content = arts.get("text", {}).get("text", "") if "text" in arts else ""
-        final = {"id": cid, "object": "chat.completion.chunk", "model": model,
-                 "choices": [{"index": 0, "delta": {"role": "assistant", "content": content},
-                              "finish_reason": "stop"}], "omni": arts}
+        final = {
+            "id": cid,
+            "object": "chat.completion.chunk",
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "role": "assistant",
+                    "content": content
+                },
+                "finish_reason": "stop"
+            }],
+            "omni": arts
+        }
         yield f"data: {json.dumps(final, default=_json_default)}\n\n"
         yield "data: [DONE]\n\n"
 
@@ -201,7 +269,7 @@ class OmniOpenAIServer:
         return await self.http.start(host, port)
 
     async def close(self) -> None:
-        for t in list(self._tasks):                # cancel + drain in-flight video jobs on shutdown
+        for t in list(self._tasks):  # cancel + drain in-flight video jobs on shutdown
             t.cancel()
         for t in list(self._tasks):
             try:

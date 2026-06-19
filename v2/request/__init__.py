@@ -1,4 +1,4 @@
-"""Request plane — typed runtime objects crossing the product boundary (design_v3 §12)."""
+"""Request plane — typed runtime objects crossing the product boundary."""
 from __future__ import annotations
 
 from v2.request.artifacts import (
@@ -27,12 +27,34 @@ from v2.request.streams import OmniEvent, Stream, StreamChunk
 from v2.request.tasks import TaskType
 
 __all__ = [
-    "TaskType", "Modality", "ModalPart", "TextPart", "ImagePart", "VideoPart",
-    "AudioPart", "ActionPart", "LatentPart",
-    "SamplingParams", "DiffusionParams", "OutputSpec", "CaptureMode",
-    "Request", "Session", "make_request", "new_request_id",
-    "Artifact", "VideoArtifact", "AudioArtifact", "TextArtifact",
-    "TensorArtifact", "LatentArtifact", "Output",
-    "Stream", "OmniEvent", "StreamChunk",
-    "CancelScope", "CancelKind", "Cancelled",
+    "TaskType",
+    "Modality",
+    "ModalPart",
+    "TextPart",
+    "ImagePart",
+    "VideoPart",
+    "AudioPart",
+    "ActionPart",
+    "LatentPart",
+    "SamplingParams",
+    "DiffusionParams",
+    "OutputSpec",
+    "CaptureMode",
+    "Request",
+    "Session",
+    "make_request",
+    "new_request_id",
+    "Artifact",
+    "VideoArtifact",
+    "AudioArtifact",
+    "TextArtifact",
+    "TensorArtifact",
+    "LatentArtifact",
+    "Output",
+    "Stream",
+    "OmniEvent",
+    "StreamChunk",
+    "CancelScope",
+    "CancelKind",
+    "Cancelled",
 ]

@@ -2,37 +2,33 @@
 so the recipe is self-contained (no edit to the shared ``_make_dit``/``_make_vae``/``_make_text_encoder``
 dispatch in ``torch_backend.py``). Imported lazily by ``_explicit_adapter`` only on a GPU box.
 
-Architecture deltas vs Wan that force NEW adapters (all faithful to
+Architecture deltas vs Wan that force NEW adapters (faithful to
 ``fastvideo/models/dits/hunyuanvideo15.py`` + ``fastvideo/pipelines/stages/denoising.py``):
 
-* ``HunyuanVideo15DiT`` — the rectified-flow velocity network ``F_θ``. Unlike ``WanDiT`` (single text
-  embed, single image embed), the real ``forward`` takes ``encoder_hidden_states`` as a **LIST of two**
-  tensors ``[qwen_hidden(3584-d), byt5_hidden(1472-d)]`` and ``encoder_hidden_states_image`` as a
-  **LIST of one** image-embed tensor (all-zeros ``[1,729,1152]`` for t2v → the DiT's
-  ``torch.all(image_embeds==0)`` auto-selects the t2v token-ordering branch). The loop hands the two
-  text embeds as a tuple in ``text_embed`` and the image embeds in ``context``; this adapter marshals
-  them into the two lists internally and builds the zero image-embed default, so the loop's dit-call
-  signature stays ``dit(latent, text_embed, sigma, context=, cond=)`` (toy-compatible). For i2v the
-  loop passes the 33-channel first-frame conditioning latent (32 VAE + 1 mask) in ``cond``; the adapter
-  concats it onto the noisy latent on the channel dim to reach ``in_channels=65`` BEFORE the forward
-  (mirrors ``denoising.py`` line 393's ``torch.cat([latent, image_latent], dim=1)``). ``timestep`` is
-  ``sigma*1000`` (the scheduler's discrete timestep; ``scale_model_input`` is identity for flow-match).
-  The network predicts velocity directly → returned via ``self._n()`` with NO x0→velocity conversion
-  (unlike ``LTX2DiT``). ``use_meanflow`` SR variants pass ``timestep_r`` — out of scope here (t2v/i2v
-  ship with ``use_meanflow=False``), so ``timestep_r=None``.
-* ``HunyuanVideo15VAE`` — the HunyuanVideo 1.5 causal-3D VAE (z=32, 16× spatial / 4× temporal). Its DiT
-  latent space is normalized by a single **scalar** ``scaling_factor=1.03682`` (NOT Wan's per-channel
+* ``HunyuanVideo15DiT`` — rectified-flow velocity network. Unlike ``WanDiT`` (single text/image embed),
+  the real ``forward`` takes ``encoder_hidden_states`` as a LIST of two ``[qwen_hidden(3584-d),
+  byt5_hidden(1472-d)]`` and ``encoder_hidden_states_image`` as a LIST of one image-embed (all-zeros
+  ``[1,729,1152]`` for t2v -> the DiT's ``torch.all(image_embeds==0)`` selects the t2v token-ordering
+  branch). The loop hands the two text embeds as a tuple in ``text_embed`` and the image embeds in
+  ``context``; this adapter marshals them into the two lists and builds the zero image-embed default, so
+  the loop's dit-call signature stays ``dit(latent, text_embed, sigma, context=, cond=)``. For i2v the
+  loop passes the 33-channel first-frame cond latent (32 VAE + 1 mask) in ``cond``; the adapter concats
+  it onto the noisy latent to reach ``in_channels=65`` before the forward. ``timestep`` is ``sigma*1000``
+  (``scale_model_input`` is identity for flow-match). Predicts velocity directly, returned via
+  ``self._n()`` with NO x0->velocity conversion. ``timestep_r`` (``use_meanflow`` SR variants) is out of
+  scope here (t2v/i2v ship with ``use_meanflow=False``), so ``timestep_r=None``.
+* ``HunyuanVideo15VAE`` — HunyuanVideo 1.5 causal-3D VAE (z=32, 16x spatial / 4x temporal). DiT latent
+  space normalized by a single scalar ``scaling_factor=1.03682`` (NOT Wan's per-channel
   ``latents_mean``/``latents_std`` — the ``WanVAE`` adapter would corrupt these latents, BRINGUP risk D).
   Decode: ``module.decode(latent / scaling_factor)``; encode (i2v first-frame cond): ``z * scaling_factor``.
-* ``HunyuanVideo15QwenEncoder`` — Qwen2.5-VL primary text encoder. Faithful to
-  ``configs/pipelines/hunyuan15.py:qwen_preprocess_text/qwen_postprocess_text``: wraps the prompt in the
-  system+chat template, requests ``output_hidden_states=True``, takes ``hidden_states[-3]`` (3rd-from-last
-  layer, NOT ``last_hidden_state``), and crops the first 108 prompt-template tokens. The generic
-  ``T5Encoder.encode`` (last_hidden_state, pad-to-max) is WRONG for Qwen (BRINGUP risk B).
-* ``HunyuanVideo15ByT5Encoder`` — ByT5/Glyph secondary encoder. ``byt5_preprocess_text`` extracts quoted
-  glyph texts via regex; when the prompt has no quoted text it is ``None`` and the real pipeline emits a
-  zero-length ``[1, 0, 1472]`` embedding (the DiT always concatenates the txt_in_2 output) — this adapter
-  reproduces that (BRINGUP risk C). Output is the raw ``last_hidden_state``.
+* ``HunyuanVideo15QwenEncoder`` — Qwen2.5-VL primary text encoder. Wraps the prompt in the system+chat
+  template, requests ``output_hidden_states=True``, takes ``hidden_states[-3]`` (3rd-from-last layer, NOT
+  ``last_hidden_state``), and crops the first 108 template tokens. The generic ``T5Encoder.encode`` is
+  WRONG for Qwen (BRINGUP risk B).
+* ``HunyuanVideo15ByT5Encoder`` — ByT5/Glyph secondary encoder. Extracts quoted glyph texts via regex;
+  when the prompt has no quoted text the real pipeline emits a zero-length ``[1, 0, 1472]`` embedding (the
+  DiT always concatenates the txt_in_2 output) — this adapter reproduces that (BRINGUP risk C). Output is
+  the raw ``last_hidden_state``.
 
 All forwards run inside ``self._ctx()`` (FastVideo attention reads attn_metadata via the forward
 context). BRINGUP: the DiT's ``sequence_model_parallel_shard``/all-gather is a no-op at sp=1 (the card

@@ -1,12 +1,12 @@
-"""Samplers as a small library (design_v3 §5.1: families use samplers as a library).
+"""Samplers as a small library; model families compose them.
 
-Flow-match Euler is shared by the Wan and LTX-2 denoise step bodies. On a GPU box the real
-UniPC multistep / distilled schedulers are wrapped by the torch component adapters; this
-numpy form is the CPU-testable, bit-reproducible reference used by the loop tests.
+Flow-match Euler is shared by the Wan and LTX-2 denoise step bodies. On GPU the real UniPC
+multistep / distilled schedulers are wrapped by the torch component adapters; this numpy form
+is the CPU-testable, bit-reproducible reference used by the loop tests.
 
 Flow-match interpolation: ``x_t = (1-σ_t)·x0 + σ_t·ε``; the model predicts velocity
-``v = ε - x0``. Then a deterministic Euler step to σ_next is simply ``x_next = x_t + (σ_next-σ_t)·v``
-(this is exactly LTX-2's ``velocity=(latents-denoised)/σ; latents += velocity·dt``).
+``v = ε - x0``. A deterministic Euler step to σ_next is ``x_next = x_t + (σ_next-σ_t)·v``
+(exactly LTX-2's ``velocity=(latents-denoised)/σ; latents += velocity·dt``).
 """
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def flow_sde_step_with_logprob(x_t,
                                noise=None,
                                prev_sample=None,
                                noise_scale: float = 0.7):
-    """FlowGRPO-style stochastic step + Gaussian log-prob (PromptRL/UniRL §6; FlowGRPO lineage).
+    """FlowGRPO-style stochastic step + Gaussian log-prob.
 
     The RL *rollout* sampler (vs the deterministic ODE ``flow_match_euler_step`` used at serve time).
     Injects noise for exploration and returns the log-prob of the realized sample under the step's
@@ -95,8 +95,8 @@ def flow_sde_step_with_logprob(x_t,
 def flow_sde_ml_velocity(x_t, sample, sigma_t: float, sigma_next: float, *, noise_scale: float = 0.7):
     """The velocity whose deterministic SDE mean lands exactly on ``sample`` (the max-likelihood
     velocity for a realized FlowGRPO sample). Moving the policy toward it, advantage-weighted, is the
-    policy-gradient direction — and is nonzero even at ratio==1, so it is the *correct* FlowGRPO update
-    surrogate (nudging toward the velocity the model already produced would be a no-op). PromptRL §6.
+    policy-gradient direction — and is nonzero even at ratio==1, so it is the correct FlowGRPO update
+    surrogate (nudging toward the velocity the model already produced would be a no-op).
     """
     x_t = np.asarray(x_t, dtype=np.float64)
     sample = np.asarray(sample, dtype=np.float64)

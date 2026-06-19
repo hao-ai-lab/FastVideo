@@ -1,10 +1,10 @@
-"""Matrix-Game 3.0 (Base-Distilled) — autoregressive multi-clip world model ported into the v2 substrate.
+"""Matrix-Game 3.0 (Base-Distilled) — autoregressive multi-clip world model, as a self-contained v2 recipe.
 
-Self-contained recipe package (the bucket-C pattern): the card declares its torch adapter via
-``ComponentSpec.adapter`` (``MatrixGame3DiT`` in ``v2/platform/backends/torch_matrixgame3.py``) and a new
-``MatrixGame3DenoiseLoop`` (the autoregressive multi-clip loop: per-token timesteps + first-frame pinning;
-action/camera/KV-memory are BRINGUP), reusing the Wan VAE adapter + T5 + ``stamp_wan21_checkpoints``. The
-orchestrator registers it in ``v2/registry.py`` (the ``MatrixGame3WanModel`` transformer fallback).
+Bucket-C pattern: the card declares its torch adapter via ``ComponentSpec.adapter`` (``MatrixGame3DiT`` in
+``v2/platform/backends/torch_matrixgame3.py``) plus ``MatrixGame3DenoiseLoop`` (autoregressive multi-clip
+loop: per-token timesteps + first-frame pinning; action/camera/KV-memory are BRINGUP), reusing the Wan VAE
+adapter + T5 + ``stamp_wan21_checkpoints``. Registered in ``v2/registry.py`` (the ``MatrixGame3WanModel``
+transformer fallback).
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Program plane — compose a card's loops into a task (design_v3 §13)."""
+"""Program plane — compose a card's loops into a task."""
 from __future__ import annotations
 
 from v2.program.specs import (
@@ -21,6 +21,7 @@ from v2.program.workflow import (
     WorkflowStage,
 )
 
-__all__ = ["Program", "ProgramKind", "ProgramNode", "ComponentNode", "ModelLoopNode",
-           "Edge", "EdgeKind", "always", "when_task", "when_opt",
-           "Workflow", "WorkflowStage", "WorkflowRegistry", "ParallelWorkflow", "BestOfNWorkflow"]
+__all__ = [
+    "Program", "ProgramKind", "ProgramNode", "ComponentNode", "ModelLoopNode", "Edge", "EdgeKind", "always",
+    "when_task", "when_opt", "Workflow", "WorkflowStage", "WorkflowRegistry", "ParallelWorkflow", "BestOfNWorkflow"
+]

@@ -1,4 +1,4 @@
-"""CPU / numpy backend — the terminal rung and parity oracle (design_v3 §17).
+"""CPU / numpy backend — the terminal rung and parity oracle.
 
 This backend registers the numpy reference kernels. It is the bottom of every device fallback
 chain: any op a richer backend hasn't implemented resolves here, and every other backend's output
@@ -16,7 +16,13 @@ from v2.platform.registry import FLOW_MATCH_STEP, FLOW_SDE_STEP, register_kernel
 # The numpy solver primitives, registered as the terminal (cpu, numpy) kernels. These are the exact
 # same functions the loops used to call directly — so dispatching through the registry on a CPU box
 # is bit-for-bit identical to the pre-registry behavior.
-register_kernel(FLOW_MATCH_STEP, flow_match_euler_step,
-                device="cpu", arch="numpy", source="loop.sampler:flow_match_euler_step")
-register_kernel(FLOW_SDE_STEP, flow_sde_step_with_logprob,
-                device="cpu", arch="numpy", source="loop.sampler:flow_sde_step_with_logprob")
+register_kernel(FLOW_MATCH_STEP,
+                flow_match_euler_step,
+                device="cpu",
+                arch="numpy",
+                source="loop.sampler:flow_match_euler_step")
+register_kernel(FLOW_SDE_STEP,
+                flow_sde_step_with_logprob,
+                device="cpu",
+                arch="numpy",
+                source="loop.sampler:flow_sde_step_with_logprob")

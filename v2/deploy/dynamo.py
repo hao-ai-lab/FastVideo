@@ -1,11 +1,11 @@
-"""Dynamo worker adapter (design_v3 §14; design.md §6.3.5) — Dynamo as an *option*, not a dependency.
+"""Dynamo worker adapter — Dynamo as an *option*, not a dependency.
 
-> NVIDIA Dynamo is the named first-class partner for the fleet layer ... the engine's job is to be an
-> excellent Dynamo citizen: registration, health/drain, cost metrics, affinity events.
+NVIDIA Dynamo is the named first-class partner for the fleet layer; the engine's job is to be a good
+Dynamo citizen: registration, health/drain, cost metrics, affinity events.
 
 This adapter exposes exactly that contract over an AsyncEngine + DeploymentCard, so Dynamo CAN front
-this engine. Crucially, it consumes the **same** DeploymentCard + cost model as our own LocalFleet —
-one object, two consumers — so choosing Dynamo vs. our fleet is a deployment decision, not a rewrite.
+this engine. It consumes the same DeploymentCard + cost model as our own LocalFleet — one object, two
+consumers — so choosing Dynamo vs. our fleet is a deployment decision, not a rewrite.
 ``FakeDynamoRuntime`` proves the contract is satisfiable end-to-end without importing Dynamo.
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from v2.deploy.card import DeploymentCard
 
 
 class DynamoWorkerAdapter:
-    """Implements the Dynamo worker surface (design.md §6.3.5 work items 1–4)."""
+    """Implements the Dynamo worker surface: registration, metrics, affinity, handle."""
 
     def __init__(self, engine: Any, card: DeploymentCard, *, worker_type: str = "Aggregated"):
         self.engine = engine
@@ -30,19 +30,23 @@ class DynamoWorkerAdapter:
     def registration(self) -> dict[str, Any]:
         self.registered = True
         return {
-            "engine_id": self.card.engine_id,
+            "engine_id":
+            self.card.engine_id,
             "model_type": ["Videos", "Images"] + (["Chat"] if any("omni" in m or "cosmos" in m or "bagel" in m
-                                                                   for m in self.card.model_cards) else []),
-            "worker_type": self.worker_type,
-            "models": list(self.card.model_cards),
-            "capabilities": sorted(c.value for c in self.card.capabilities),
-            "supported_programs": list(self.card.supported_programs),
+                                                                  for m in self.card.model_cards) else []),
+            "worker_type":
+            self.worker_type,
+            "models":
+            list(self.card.model_cards),
+            "capabilities":
+            sorted(c.value for c in self.card.capabilities),
+            "supported_programs":
+            list(self.card.supported_programs),
         }
 
-    # 2) metrics for routing + the SLA Planner (the SAME §6 cost model)
+    # 2) metrics for routing + the SLA Planner (the SAME cost model the scheduler uses)
     def metrics(self) -> dict[str, Any]:
-        return {"in_flight": self.engine.in_flight, "queue_depth": self.engine.queue_depth,
-                "draining": self.draining}
+        return {"in_flight": self.engine.in_flight, "queue_depth": self.engine.queue_depth, "draining": self.draining}
 
     def cost_estimate(self, request: Any) -> float:
         cm = self.card.cost_model
@@ -57,7 +61,7 @@ class DynamoWorkerAdapter:
     def drain(self) -> None:
         self.draining = True
 
-    # 3) affinity / cache events (KvCacheEventData shape) — checkpoint/session residency (ask A1)
+    # 3) affinity / cache events (KvCacheEventData shape) — checkpoint/session residency
     def cache_event(self, kind: str, key: str) -> dict[str, Any]:
         return {"event": kind, "engine_id": self.card.engine_id, "key": key}
 

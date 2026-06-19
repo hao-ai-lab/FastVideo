@@ -1,6 +1,4 @@
-"""The driven-loop contract (design_v3 §5) — the keystone.
-
-A loop is a **serializable state machine the runtime drives**:
+"""The driven-loop contract — a serializable state machine the runtime drives:
 
     state = loop.init(req, model_state, ctx)
     while True:
@@ -11,13 +9,12 @@ A loop is a **serializable state machine the runtime drives**:
         for chunk in plan.emits: ctx.emit(chunk)
     return loop.finalize(state)
 
-Two properties this contract buys (design_v3 §5.1):
+Two properties this contract buys:
   * content-adaptive steps are natural — ``next`` reads ``state``, which already folded
     in the previous ``StepResult`` via ``advance``;
   * cross-request state safety is *structural* — all per-request mutable state lives in
     ``LoopState`` (incl. ``plugin_state`` per request/CFG-branch), never module globals,
-    so interleaving requests through one ModelInstance cannot smear state. This is what
-    the batch-of-N interleave gate (§9.3) verifies.
+    so interleaving requests through one ModelInstance cannot smear state.
 
 This module is pure stdlib (tensors typed as ``TensorLike``) so it imports no backend.
 """
@@ -36,11 +33,11 @@ from v2.request.streams import StreamChunk
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class ShapeSignature:
-    """Batch-compatibility + graph-capture key (design_v3 §6.2)."""
+    """Batch-compatibility + graph-capture key."""
     kind: WorkUnitKind
     dims: tuple[int, ...] = ()
     dtype: str = "float32"
-    extra: tuple[tuple[str, Any], ...] = ()   # e.g. (("cfg","classic"),("expert","e0"))
+    extra: tuple[tuple[str, Any], ...] = ()  # e.g. (("cfg","classic"),("expert","e0"))
 
     @property
     def work_units(self) -> int:
@@ -51,13 +48,13 @@ class ShapeSignature:
 
     @property
     def batch_key(self) -> tuple:
-        """Two WorkPlans batch together iff their batch_keys are equal (§6.3 BatchScheduler)."""
+        """Two WorkPlans batch together iff their batch_keys are equal."""
         return (self.kind, self.dims, self.dtype, self.extra)
 
 
 @dataclass
 class ResourceRequest:
-    """Everything admission must reserve (design_v3 §6.2 admission rule)."""
+    """Everything admission must reserve."""
     compute_seconds: float = 0.0
     resident_bytes: int = 0
     peak_activation_bytes: int = 0
@@ -69,7 +66,7 @@ class ResourceRequest:
 @dataclass
 class CacheOp:
     cache_class: str
-    key: Any                     # CacheKey
+    key: Any  # CacheKey
     nbytes: int = 0
 
 
@@ -91,7 +88,7 @@ class PlacementHint:
 # --------------------------------------------------------------------------- #
 @dataclass
 class WorkPlan:
-    """A typed description of the next step (design_v3 §6.2).
+    """A typed description of the next step.
 
     ``run`` is the kernel thunk built by ``next()`` but NOT called there (kernel-free
     planning). The runtime's ``ctx.execute`` calls it — possibly after batching with
@@ -105,14 +102,14 @@ class WorkPlan:
     cache: CachePlan = field(default_factory=CachePlan)
     placement: PlacementHint = field(default_factory=PlacementHint)
     emits: list[StreamChunk] = field(default_factory=list)
-    payload: dict[str, Any] = field(default_factory=dict)   # inspectable inputs (debug/parity)
+    payload: dict[str, Any] = field(default_factory=dict)  # inspectable inputs (debug/parity)
     # the kernel thunk: run(model_instance, override=None) -> StepResult | dict.
     # Built by next() but NOT called there (kernel-free planning). ``override`` is an optional
     # interceptor-supplied forward result (e.g. a cached prediction); the step body still runs
     # the cheap solver step with it.
     run: Any = None
     label: str = ""
-    # --- piecewise CUDA-graph capture (design_v3 §6.2; Path A) ----------------------------------- #
+    # --- piecewise CUDA-graph capture ------------------------------------------------------------ #
     # ``capturable``: the model's static declaration that this step is safe to capture/replay — i.e.
     # no host RNG / data-dependent control flow inside the captured region. A stochastic step (the
     # FlowGRPO SDE rollout) sets this False, forcing the runtime to eager-break it.
@@ -121,7 +118,7 @@ class WorkPlan:
     # the captured graph's *shape of computation*. Part of the capture key so a step with a different
     # branch set / expert never replays an incompatible graph. Empty ⇒ structure fixed by shape alone.
     graph_key: tuple = ()
-    # The static-buffer capture form (design_v3 §6.2). A capturable step exposes its deterministic op
+    # The static-buffer capture form. A capturable step exposes its deterministic op
     # structure as ``graph_fn(model, workspace) -> StepResult`` reading EVERY per-step-varying input
     # (latent, sigmas, conditioning) from ``workspace`` — never from closure — plus ``graph_inputs``,
     # the dict of those current values. The runtime allocates address-stable buffers once per key and
@@ -136,22 +133,22 @@ class WorkPlan:
 class Done:
     """Sentinel returned by ``next`` when the loop is finished. ``finalize`` produces the
     actual LoopResult; ``result`` here is optional (kept for loops that want to carry it)."""
-    result: "LoopResult | None" = None
+    result: LoopResult | None = None
 
 
 @dataclass
 class StepResult:
-    output: dict[str, Any] = field(default_factory=dict)    # typed per-loop (e.g. {"noise_pred": ...})
+    output: dict[str, Any] = field(default_factory=dict)  # typed per-loop (e.g. {"noise_pred": ...})
     actual_seconds: float = 0.0
     cache_writes: list[CacheOp] = field(default_factory=list)
-    behavior: Any = None                                    # BehaviorRecord slice (rollout profile)
+    behavior: Any = None  # BehaviorRecord slice (rollout profile)
 
 
 @dataclass
 class LoopResult:
-    outputs: dict[str, Any] = field(default_factory=dict)   # final latents / tokens / artifacts
+    outputs: dict[str, Any] = field(default_factory=dict)  # final latents / tokens / artifacts
     metrics: dict[str, float] = field(default_factory=dict)
-    behavior: Any = None                                    # full BehaviorRecord (rollout)
+    behavior: Any = None  # full BehaviorRecord (rollout)
 
 
 # --------------------------------------------------------------------------- #
@@ -159,23 +156,23 @@ class LoopResult:
 # --------------------------------------------------------------------------- #
 @dataclass
 class LoopState:
-    """All per-request mutable state lives here (design_v3 §5.1 structural safety)."""
+    """All per-request mutable state lives here (structural cross-request safety)."""
     loop_id: str
     instance_id: str
     request_id: str
     profile: ExecutionProfile = ExecutionProfile.SERVE
     step_idx: int = 0
     done: bool = False
-    rng: Any = None                                         # seeded numpy Generator (per request)
+    rng: Any = None  # seeded numpy Generator (per request)
     seed: int | None = None
     # common typed fields (resolved at init)
     latents: dict[str, TensorLike] = field(default_factory=dict)
-    cond: dict[str, Any] = field(default_factory=dict)      # conditioning written by ConditioningInjector
+    cond: dict[str, Any] = field(default_factory=dict)  # conditioning written by ConditioningInjector
     timesteps: list[float] = field(default_factory=list)
     sigmas: list[float] = field(default_factory=list)
     # per-model extension (Cosmos3PackedSeq, MatrixGameState, ...) — typed by LoopSpec.extension_schema
     extension: Any = None
-    # interceptor/policy state, keyed per plugin id AND per CFG branch (design_v3 §5.1, §11)
+    # interceptor/policy state, keyed per plugin id AND per CFG branch
     plugin_state: dict[str, Any] = field(default_factory=dict)
     cache_handles: dict[str, Any] = field(default_factory=dict)
     # capture buffers (rollout): trajectory of per-step records
@@ -184,15 +181,15 @@ class LoopState:
 
 
 # --------------------------------------------------------------------------- #
-# StepContext — what policies read each step (design_v3 §6.2.3 rule 2)         #
+# StepContext — what policies read each step                                  #
 # --------------------------------------------------------------------------- #
 @dataclass
 class StepContext:
     step_idx: int
     timestep: float
     sigma: float
-    branch: str = "cond"                  # current guidance branch
-    active_expert_id: str | None = None   # set by ExpertRouting; observed by AdaptiveGateCFG
+    branch: str = "cond"  # current guidance branch
+    active_expert_id: str | None = None  # set by ExpertRouting; observed by AdaptiveGateCFG
     sampler_coeffs: dict[str, float] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -206,16 +203,31 @@ class LoopContext(Protocol):
     scheduler; the scheduler never sees the model's math."""
     profile: ExecutionProfile
 
-    def execute(self, plan: WorkPlan) -> StepResult: ...   # THE INVERSION POINT
-    def emit(self, chunk: StreamChunk) -> None: ...
-    def check_cancel(self) -> None: ...                    # raises request.Cancelled at boundary
-    def observe(self, event: str, **kw) -> None: ...       # observer bus hook
+    def execute(self, plan: WorkPlan) -> StepResult:
+        ...  # THE INVERSION POINT
+
+    def emit(self, chunk: StreamChunk) -> None:
+        ...
+
+    def check_cancel(self) -> None:
+        ...  # raises request.Cancelled at boundary
+
+    def observe(self, event: str, **kw) -> None:
+        ...  # observer bus hook
 
 
 @runtime_checkable
 class Loop(Protocol):
-    """The model-owned control flow (design_v3 §5.1). Four methods; ``next`` is kernel-free."""
-    def init(self, req: Any, model: Any, ctx: LoopContext) -> LoopState: ...
-    def next(self, state: LoopState) -> "WorkPlan | Done": ...
-    def advance(self, state: LoopState, result: StepResult) -> LoopState: ...
-    def finalize(self, state: LoopState) -> LoopResult: ...
+    """The model-owned control flow. Four methods; ``next`` is kernel-free."""
+
+    def init(self, req: Any, model: Any, ctx: LoopContext) -> LoopState:
+        ...
+
+    def next(self, state: LoopState) -> WorkPlan | Done:
+        ...
+
+    def advance(self, state: LoopState, result: StepResult) -> LoopState:
+        ...
+
+    def finalize(self, state: LoopState) -> LoopResult:
+        ...

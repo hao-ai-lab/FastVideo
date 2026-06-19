@@ -1,15 +1,15 @@
 """HunyuanVideo t2v program: hunyuan_text_encode -> diffusion_denoise (flow-match) -> vae_decode.
 
-Same inline shape as the Wan/cosmos2 t2v programs, with ONE delta: HunyuanVideo has TWO text encoders
-(a LLaMA per-token sequence + a CLIP-pooled global vector), so the text-encode node writes BOTH a
+Same inline shape as the Wan/cosmos2 t2v programs, with one delta: HunyuanVideo has TWO text encoders
+(a LLaMA per-token sequence + a CLIP-pooled global vector), so the text-encode node writes both a
 ``text_embeds`` slot (the LLaMA sequence, the loop's primary ``text_embed``) and a ``text_pooled`` slot
 (the CLIP vector, threaded to the DiT via the loop's ``context=`` channel). The dual-encode node uses the
-content-hash feature cache (like ``recipes.common.text_encode_node_fn``) so a repeated prompt encodes once.
+content-hash feature cache so a repeated prompt encodes once.
 
 On the CPU toy backend both components are ``ToyTextEncoder`` (single arrays), so ``ToyDiT`` — which means
 over both ``text_embed`` and ``context`` — runs end-to-end; on the GPU backend the real LLaMA/CLIP adapters
 produce the sequence + pooled pair the ``HunyuanVideoDiT`` adapter reassembles into the 2-element
-``encoder_hidden_states`` the Hunyuan forward expects.
+``encoder_hidden_states``.
 """
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ def _ensure_text_encoder_2_stamped(instance: Any) -> None:
     """The shared ``stamp_wan21_checkpoints`` (called by the entrypoint after ``build_card``) only knows
     Wan's subfolder superset, which does NOT include ``text_encoder_2`` (HunyuanVideo's CLIP secondary
     encoder). Stamp it here — right before the component is materialized — from the already-stamped
-    ``transformer`` checkpoint's parent (the model root). Idempotent / no-op once set; this keeps the fix
-    inside the recipe (no edit to the shared stamp). Build-time stamping via ``build_*_card(checkpoint_root)``
-    already covers the local-path path; this covers the registry+entrypoint path."""
+    ``transformer`` checkpoint's parent (the model root). Idempotent / no-op once set; keeps the fix in the
+    recipe. Build-time stamping via ``build_*_card(checkpoint_root)`` covers the local-path case; this covers
+    the registry+entrypoint case."""
     import os
     te2 = instance.card.components.get("text_encoder_2")
     if te2 is None or te2.checkpoint:

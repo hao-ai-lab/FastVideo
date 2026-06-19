@@ -1,11 +1,11 @@
-"""The scheduler, in layers (design_v3 §6.3) — each testable on a fake pool, no GPU.
+"""The scheduler, in layers — each testable on a fake pool, no GPU.
 
 Mini-fastvideo implements the load-bearing layers:
-  * ``AdmissionController`` — the reservation gate (§6.2): do not admit a WorkUnit unless its
+  * ``AdmissionController`` — the reservation gate: do not admit a WorkUnit unless its
     compute budget AND memory (resident + worst-case peak) can be reserved. Reservations are
     *refundable* (compute is a concurrency gate, not a lifetime cap), and infeasible reservations
     (need > pool capacity) fail fast with ``AdmissionInfeasible`` instead of spinning.
-  * ``BatchScheduler`` — groups compatible WorkPlans by ``shape_sig.batch_key`` (§6.3). NOTE: in this
+  * ``BatchScheduler`` — groups compatible WorkPlans by ``shape_sig.batch_key``. NOTE: in this
     single-process mini, grouping drives *accounting* (how many units would co-batch); kernels still
     execute per-plan. Real cross-request batched execution is a GPU-path concern (documented, not faked).
 """
@@ -25,7 +25,7 @@ class AdmissionInfeasible(RuntimeError):
 
 @dataclass
 class WorkUnit:
-    """The smallest schedulable action (design_v3 §6.1)."""
+    """The smallest schedulable action."""
     request_id: str
     plan: WorkPlan
     priority: int = 0
@@ -49,7 +49,7 @@ class SchedulerMetrics:
 
 
 class AdmissionController:
-    """Reservation before admission (design_v3 §6.2). Compute budget + memory both gate; both refund."""
+    """Reservation before admission. Compute budget + memory both gate; both refund."""
 
     def __init__(self, memory: MemoryManager | None = None, compute_budget_seconds: float = float("inf")):
         self.memory = memory or MemoryManager()
@@ -96,11 +96,11 @@ class AdmissionController:
             return
         if ticket.memory_res is not None:
             self.memory.release(ticket.memory_res)
-        self.compute_spent = max(0.0, self.compute_spent - ticket.compute_seconds)   # refund
+        self.compute_spent = max(0.0, self.compute_spent - ticket.compute_seconds)  # refund
 
 
 class BatchScheduler:
-    """Group compatible WorkPlans across requests (design_v3 §6.3 layer 3)."""
+    """Group compatible WorkPlans across requests."""
 
     @staticmethod
     def group(units: list[WorkUnit]) -> list[list[WorkUnit]]:

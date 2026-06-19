@@ -1,28 +1,28 @@
-"""HY-WorldPlay-Bidirectional ModelCard — interactive world model ported into the v2 substrate.
+"""HY-WorldPlay-Bidirectional ModelCard: interactive world model on the v2 substrate.
 
-HY-WorldPlay is a chunk-rollout *world model*: it generates video in temporal chunks where each
-chunk after the first retrieves camera-aligned history "memory" frames as frozen context, and it
-conditions on THREE text/image streams (Qwen2.5-VL mllm + ByT5 glyph + SigLIP image) plus per-frame
-camera (viewmats/Ks, injected via ProPE attention) and per-frame action ids. The registered preset
-here is the **bidirectional t2v / degenerate (no-action, single straight-trajectory pose) path** that
-CPU-verifies; the full action/camera/memory conditioning is BRINGUP (needs a request-API extension to
-carry the pose string -> viewmats/Ks/action expansion + the point-cloud memory retrieval). See
-``loop.py`` and ``torch_hyworld.py`` for the BRINGUP markers.
+HY-WorldPlay is a chunk-rollout world model: it generates video in temporal chunks where each chunk
+after the first retrieves camera-aligned history "memory" frames as frozen context, and conditions on
+three text/image streams (Qwen2.5-VL mllm + ByT5 glyph + SigLIP image) plus per-frame camera
+(viewmats/Ks, injected via ProPE attention) and per-frame action ids. The registered preset is the
+bidirectional t2v / degenerate (no-action, single straight-trajectory pose) path that CPU-verifies;
+the full action/camera/memory conditioning is BRINGUP (needs a request-API extension to carry the pose
+string -> viewmats/Ks/action expansion + point-cloud memory retrieval). See ``loop.py`` and
+``torch_hyworld.py`` for the BRINGUP markers.
 
 Architecture deltas vs Wan/Cosmos (all declared on the card so the recipe is self-contained):
   * DiT  ``fastvideo.models.dits.hyworld.hyworld:HYWorldTransformer3DModel`` (subclasses
-    HunyuanVideo15Transformer3DModel) — a **rectified-flow velocity** predictor whose forward takes a
-    65ch pre-concatenated latent ``[noise(32) | cond(32) + mask(1)]``, a LIST of text embeds
-    ``[qwen, byt5]``, a LIST image embed ``[siglip]``, a PER-LATENT-FRAME LongTensor ``timestep`` (+ a
+    HunyuanVideo15Transformer3DModel) — a rectified-flow velocity predictor whose forward takes a
+    65ch pre-concatenated latent ``[noise(32) | cond(32) + mask(1)]``, a list of text embeds
+    ``[qwen, byt5]``, a list image embed ``[siglip]``, a per-latent-frame LongTensor ``timestep`` (+ a
     scalar ``timestep_txt``), and ``viewmats/Ks/action`` per-frame camera/action conditioning. The
-    adapter (``HYWorldDiT``) marshals all of this INTERNALLY so the loop only hands it
+    adapter (``HYWorldDiT``) marshals all of this internally so the loop only hands it
     ``dit(latent, text_embed, sigma)`` (the cosmos2/ToyDiT-compatible signature).
   * VAE  ``fastvideo.models.vaes.hyworldvae:AutoencoderKLHYWorld`` (z=32, 16x spatial, 4x temporal,
     scaling_factor=1.03682) — encode -> ``.mode() * scaling_factor`` (no shift/mean), decode inverts.
   * Encoders: Qwen2.5-VL (mllm primary text) + ByT5/T5 (glyph) + SigLIP (image). For the t2v preset the
     glyph + image streams are zeroed (the DiT detects an all-zero image and masks it).
-  * Sampler: flow-match (``FlowMatchEulerDiscreteScheduler``) but the preset OVERRIDES the schedule with
-    explicit sigmas ``linspace(1.0, 0.0, 51)[:-1]`` (50 steps), flow_shift 5.0, guidance 6.0.
+  * Sampler: flow-match (``FlowMatchEulerDiscreteScheduler``), but the preset overrides the schedule
+    with explicit sigmas ``linspace(1.0, 0.0, 51)[:-1]`` (50 steps), flow_shift 5.0, guidance 6.0.
 ``stamp_wan21_checkpoints`` applies (diffusers transformer/vae/text_encoder/text_encoder_2/image_encoder
 subfolder layout); the superset stamp helper already covers ``text_encoder_2`` + ``image_encoder``.
 """

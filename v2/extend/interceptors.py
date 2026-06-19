@@ -1,9 +1,9 @@
-"""cache-dit-style interceptors (design_v3 §11).
+"""cache-dit-style interceptors.
 
 ``ResidualSkipInterceptor`` is the reference step-skip integration. The load-bearing
 correctness property: its per-step state lives in ``LoopState.plugin_state[id][branch]``,
 keyed per request AND per CFG branch — NOT a module global. This is exactly why the
-interleave gate (§9.3) passes with it on: two interleaved requests have disjoint plugin
+interleave gate passes with it on: two interleaved requests have disjoint plugin
 state, so neither smears the other's cached prediction.
 
 A 4-step distilled card *rejects* this interceptor (capability negotiation) rather than

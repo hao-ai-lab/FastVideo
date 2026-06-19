@@ -1,10 +1,8 @@
 """FastWan (DMD) t2v program: text_encode -> diffusion_denoise (DMD few-step) -> vae_decode.
 
-Same inline node graph as the Wan t2v program — the DMD specifics live entirely in
-``FastWanDMDLoop`` (the in-package loop), so the program is unchanged. (i2v conditioning for the TI2V
-variant would add image-encode / first-frame-VAE nodes writing ``i2v_img_embeds`` / ``i2v_cond`` into
-slots, exactly like ``v2/recipes/wan21/i2v.py``; the loop already reads them. The registered preset is
-t2v, so the base program covers it.)
+Same inline node graph as the Wan t2v program — the DMD specifics live entirely in ``FastWanDMDLoop``.
+The TI2V variant would add image-encode / first-frame-VAE nodes writing ``i2v_img_embeds`` / ``i2v_cond``
+(see ``v2/recipes/wan21/i2v.py``; the loop already reads them), but the registered preset is t2v.
 """
 from __future__ import annotations
 

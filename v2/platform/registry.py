@@ -1,4 +1,4 @@
-"""The two tuple-keyed backend registries — the dispatch membrane (design_v3 §17; multi-backend RFC).
+"""The two tuple-keyed backend registries — the dispatch membrane.
 
 Everything device/arch-specific resolves through one of two registries, keyed by a tuple:
 
@@ -33,13 +33,14 @@ are imported lazily (``Platform.ensure_backends_loaded``) to keep this import-cy
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any
+from collections.abc import Callable, Iterable
 
 # --------------------------------------------------------------------------- #
 # Op names — the stable identifiers a loop dispatches on (not free functions). #
 # --------------------------------------------------------------------------- #
-FLOW_MATCH_STEP = "flow_match_step"     # deterministic flow-match Euler solver step (ODE serve)
-FLOW_SDE_STEP = "flow_sde_step"         # FlowGRPO stochastic step + log-prob (RL rollout)
+FLOW_MATCH_STEP = "flow_match_step"  # deterministic flow-match Euler solver step (ODE serve)
+FLOW_SDE_STEP = "flow_sde_step"  # FlowGRPO stochastic step + log-prob (RL rollout)
 
 
 def _always_available() -> bool:
@@ -75,14 +76,20 @@ class TupleRegistry:
         self.key_fields = key_fields
         self._reg: dict[tuple, Registration] = {}
 
-    def put(self, key: tuple, fn: Callable[..., Any], *,
-            available: Callable[[], bool] | None = None, source: str = "",
+    def put(self,
+            key: tuple,
+            fn: Callable[..., Any],
+            *,
+            available: Callable[[], bool] | None = None,
+            source: str = "",
             meta: dict[str, Any] | None = None) -> None:
         if len(key) != len(self.key_fields):
             raise ValueError(f"{self.name}: key {key} does not match fields {self.key_fields}")
-        self._reg[key] = Registration(key=key, fn=fn,
+        self._reg[key] = Registration(key=key,
+                                      fn=fn,
                                       available=available or _always_available,
-                                      source=source, meta=dict(meta or {}))
+                                      source=source,
+                                      meta=dict(meta or {}))
 
     def lookup(self, key: tuple) -> Registration | None:
         """Exact lookup, ignoring availability (used by ``manifest``/diagnostics)."""
@@ -104,33 +111,47 @@ class TupleRegistry:
         """
         rows: list[dict[str, Any]] = []
         for key, reg in sorted(self._reg.items(), key=lambda kv: tuple(map(str, kv[0]))):
-            row = dict(zip(self.key_fields, key))
+            row = dict(zip(self.key_fields, key, strict=False))
             row["available"] = reg.is_available()
             row["source"] = reg.source
-            row.update(reg.meta)              # surface declared metadata (e.g. workspace_bytes)
+            row.update(reg.meta)  # surface declared metadata (e.g. workspace_bytes)
             rows.append(row)
         return rows
 
 
-# The two registries (design_v3 §17). Populated by ``backends/`` modules (lazily imported).
+# The two registries, populated by ``backends/`` modules (lazily imported).
 COMPONENTS = TupleRegistry("components", ("kind", "device", "variant"))
 KERNELS = TupleRegistry("kernels", ("op", "device", "arch", "variant"))
 
 
-def register_component(kind: str, fn: Callable[..., Any], *, device: str, variant: str = "default",
-                       available: Callable[[], bool] | None = None, source: str = "") -> None:
+def register_component(kind: str,
+                       fn: Callable[..., Any],
+                       *,
+                       device: str,
+                       variant: str = "default",
+                       available: Callable[[], bool] | None = None,
+                       source: str = "") -> None:
     """Register a component builder. ``fn(spec, instance, platform) -> live component``."""
     COMPONENTS.put((kind, device, variant), fn, available=available, source=source)
 
 
-def register_kernel(op: str, fn: Callable[..., Any], *, device: str, arch: str, variant: str = "default",
-                    available: Callable[[], bool] | None = None, source: str = "",
+def register_kernel(op: str,
+                    fn: Callable[..., Any],
+                    *,
+                    device: str,
+                    arch: str,
+                    variant: str = "default",
+                    available: Callable[[], bool] | None = None,
+                    source: str = "",
                     workspace_bytes: int = 0) -> None:
     """Register a stateless kernel. ``fn(*args, **kwargs)`` — same signature as its numpy reference.
 
-    ``workspace_bytes`` is the kernel's static scratch requirement — the capture-safety contract
-    (design_v3 §6.2): a kernel used inside a captured CUDA graph must draw its workspace from the
-    pool-provided static buffer, not malloc per call, or replay corrupts. Declared here so the
-    requirement is enumerable in the matrix; the numpy reference needs none (0)."""
-    KERNELS.put((op, device, arch, variant), fn, available=available, source=source,
+    ``workspace_bytes`` is the kernel's static scratch requirement — the capture-safety contract: a
+    kernel used inside a captured CUDA graph must draw its workspace from the pool-provided static
+    buffer, not malloc per call, or replay corrupts. Declared here so the requirement is enumerable
+    in the matrix; the numpy reference needs none (0)."""
+    KERNELS.put((op, device, arch, variant),
+                fn,
+                available=available,
+                source=source,
                 meta={"workspace_bytes": int(workspace_bytes)})

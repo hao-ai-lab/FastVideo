@@ -1,30 +1,27 @@
-"""RCM (Reparameterized / recurrent Consistency Model) sampler helpers — TurboWan's few-step distilled
-schedule + SDE consistency step.
+"""RCM (Reparameterized Consistency Model) sampler helpers — TurboWan's few-step schedule + SDE step.
 
-Faithful CPU-testable port of ``fastvideo/models/schedulers/scheduling_rcm.py:RCMScheduler`` (the
-TurboDiffusion rCM sampler, arXiv:2512.16093). The math has two pieces that this module mirrors exactly:
+Faithful CPU-testable port of ``fastvideo/models/schedulers/scheduling_rcm.py:RCMScheduler`` (TurboDiffusion
+rCM sampler, arXiv:2512.16093). Two pieces mirrored exactly:
 
-  1. ``build_rcm_sigmas`` — the TrigFlow -> RectifiedFlow timestep schedule. Starting from
-     ``[atan(sigma_max), *mid_timesteps, 0]`` in TrigFlow angle space, each entry is converted with
-     ``t = sin(t) / (cos(t) + sin(t))`` to a RectifiedFlow sigma in ``[0, 1]``. ``mid_timesteps`` defaults
-     to ``[1.5, 1.4, 1.0]`` (the scheduler's visual-quality default), sliced to ``num_steps - 1`` so the
-     final schedule has ``num_steps + 1`` points (the appended terminal ``0``). This matches the loop
-     convention everywhere else in v2 (``i`` ranges over ``len(sigmas) - 1`` pairwise intervals).
+  1. ``build_rcm_sigmas`` — the TrigFlow -> RectifiedFlow timestep schedule. From the TrigFlow angles
+     ``[atan(sigma_max), *mid_timesteps, 0]``, each entry is converted with ``t = sin(t)/(cos(t)+sin(t))`` to a
+     RectifiedFlow sigma in ``[0, 1]``. ``mid_timesteps`` defaults to ``[1.5, 1.4, 1.0]`` (the scheduler's
+     quality default), sliced to ``num_steps - 1`` so the schedule has ``num_steps + 1`` points (terminal
+     ``0``), matching the v2 loop convention (``i`` ranges over ``len(sigmas) - 1`` intervals).
 
-  2. ``rcm_step`` — the rCM SDE consistency update. The model predicts a velocity ``v_pred`` at the
-     CURRENT (raw) sigma ``t_cur``; the scheduler reconstructs the clean estimate
-     ``x_denoised = x - t_cur * v_pred`` and re-noises it to the NEXT sigma with FRESH Gaussian noise:
+  2. ``rcm_step`` — the rCM SDE consistency update. The model predicts a velocity ``v_pred`` at the current
+     (raw) sigma ``t_cur``; the scheduler reconstructs the clean estimate ``x_denoised = x - t_cur * v_pred``
+     and re-noises it to the next sigma with fresh Gaussian noise:
 
          x_next = (1 - t_next) * x_denoised + t_next * noise
 
-     This is NOT a deterministic flow-match Euler step — it is a stochastic consistency step that
-     injects fresh noise every step (which is why TurboWan reaches quality in 1-4 steps). The fresh
-     host RNG is exactly why the loop must run this on the eager path (like the FlowGRPO SDE rollout),
-     never inside a captured CUDA graph.
+     This stochastic consistency step (not a deterministic Euler step) injects fresh noise every step, which
+     is why TurboWan reaches quality in 1-4 steps — and why the loop must run it on the eager path (like the
+     FlowGRPO SDE rollout), never inside a captured CUDA graph.
 
-The real scheduler scales the model-input timestep by 1000 (``timesteps = sigmas * 1000``) — the loop
-passes that scaled timestep to the DiT; the step formula here uses the RAW sigmas. ``init_noise_sigma``
-is ``sigmas[0]`` (the loop scales the initial latent by it, matching ``scale_noise``).
+The real scheduler scales the model-input timestep by 1000 (``timesteps = sigmas * 1000``); the loop passes
+that scaled timestep to the DiT while the step formula here uses the raw sigmas. ``init_noise_sigma`` is
+``sigmas[0]`` (the loop scales the initial latent by it, matching ``scale_noise``).
 """
 from __future__ import annotations
 

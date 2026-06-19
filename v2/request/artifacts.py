@@ -1,8 +1,8 @@
-"""Artifact — a named, typed output with provenance (design_v3 §12).
+"""Artifact — a named, typed output with provenance.
 
-"This kills the ``extra['audio']`` pattern — audio carries its sample rate as a
-first-class artifact, not a dict passenger." Every artifact records which program
-node produced it (``producer``), so multi-modal fan-out outputs are traceable.
+Each modality is its own typed artifact (e.g. audio carries its sample rate as a
+field, not via an ``extra`` dict). Every artifact records which program node
+produced it (``producer``), so multi-modal fan-out outputs are traceable.
 """
 from __future__ import annotations
 
@@ -14,21 +14,21 @@ from v2.request.modalpart import Modality
 
 @dataclass
 class Artifact:
-    name: str                       # output slot name, e.g. "video", "audio", "text"
-    producer: str = ""              # program node id that produced it (provenance)
+    name: str  # output slot name, e.g. "video", "audio", "text"
+    producer: str = ""  # program node id that produced it (provenance)
     meta: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
 class VideoArtifact(Artifact):
-    frames: TensorLike = None       # T x H x W x C
+    frames: TensorLike = None  # T x H x W x C
     fps: int = 16
 
 
 @dataclass
 class AudioArtifact(Artifact):
     samples: TensorLike = None
-    sample_rate: int = 44100        # first-class, not an extra-dict passenger
+    sample_rate: int = 44100  # first-class, not an extra-dict passenger
 
 
 @dataclass
@@ -39,7 +39,7 @@ class TextArtifact(Artifact):
 
 @dataclass
 class TensorArtifact(Artifact):
-    tensor: TensorLike = None       # generic (e.g. action stream)
+    tensor: TensorLike = None  # generic (e.g. action stream)
 
 
 @dataclass
@@ -54,7 +54,7 @@ class Output:
     request_id: str
     artifacts: dict[str, Artifact] = field(default_factory=dict)
     metrics: dict[str, float] = field(default_factory=dict)
-    error: str | None = None         # set on partial/aborted delivery (failure isolation)
+    error: str | None = None  # set on partial/aborted delivery (failure isolation)
 
     def get(self, name: str) -> Artifact | None:
         return self.artifacts.get(name)

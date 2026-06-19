@@ -1,13 +1,12 @@
-"""Cosmos-Predict2-2B-Video2World ModelCard — text→video (the registered preset; video2world
+"""Cosmos-Predict2-2B-Video2World ModelCard — text->video (the registered preset; video2world
 conditioning is a later capability the loop already threads).
 
-Architecture deltas vs Wan (all GPU-path, declared on the card so the recipe is self-contained):
-  * DiT  ``fastvideo.models.dits.cosmos:CosmosTransformer3DModel`` — an **EDM denoiser** (NOT flow-match);
-    the adapter (``ComponentSpec.adapter`` -> ``CosmosDiT``) returns the raw network output and
-    ``CosmosDenoiseLoop`` does the EDM ``c_in/c_skip/c_out`` → x0 reconstruction + x0-space CFG + the
-    Karras (ρ=7, σ_max=80→σ_min=0.002) schedule.
-  * VAE  ``fastvideo.models.vaes.wanvae:AutoencoderKLWan`` — Wan-style (z=16, 8×/4×); reuses the v2
-    ``WanVAE`` adapter unchanged (sigma_data=1.0 makes the Cosmos *σ_data factor a no-op).
+Architecture deltas vs Wan (declared on the card so the recipe is self-contained):
+  * DiT  ``fastvideo.models.dits.cosmos:CosmosTransformer3DModel`` — an EDM denoiser (not flow-match); the
+    ``CosmosDiT`` adapter returns the raw network output and ``CosmosDenoiseLoop`` does the EDM
+    ``c_in/c_skip/c_out`` -> x0 reconstruction + x0-space CFG + the Karras (rho=7, sigma 80->0.002) schedule.
+  * VAE  ``fastvideo.models.vaes.wanvae:AutoencoderKLWan`` — Wan-style (z=16, 8x/4x); reuses the v2
+    ``WanVAE`` adapter unchanged (sigma_data=1.0 makes the Cosmos sigma_data factor a no-op).
   * Text ``fastvideo.models.encoders.t5:T5EncoderModel`` (T5-Large, 1024-dim) via ``CosmosT5Encoder``
     (raw last_hidden_state, no Wan zero-pad).
 ``stamp_wan21_checkpoints`` applies (diffusers transformer/vae/text_encoder subfolder layout).

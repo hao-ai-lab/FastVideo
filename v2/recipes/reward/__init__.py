@@ -1,4 +1,4 @@
-"""Reward-model card: a served scorer/verifier emitting REWARD_BATCH work units (design_v3 §10)."""
+"""Reward-model card: a served scorer/verifier emitting REWARD_BATCH work units."""
 from __future__ import annotations
 
 from v2.recipes.reward.card import build_reward_card

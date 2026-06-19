@@ -1,4 +1,4 @@
-"""v2 — a scoped, CPU-testable realization of the design_v3 model-native runtime.
+"""v2 — a scoped, CPU-testable realization of the model-native runtime (see v2/README.md).
 
 > A model card is a (recipe, runtime) pair with a parity obligation.
 > The model owns loop semantics; the runtime owns loop lifecycle.
@@ -49,11 +49,35 @@ from v2.runtime import AsyncEngine, Engine
 __version__ = "0.2.0"
 
 __all__ = [
-    "ModelCard", "ComponentSpec", "LoopSpec", "RecipeSpec", "ParitySpec", "CostModel",
-    "CapabilityMatrix", "ModelInstance", "load_card",
-    "Engine", "AsyncEngine", "Program", "ProgramKind", "ComponentNode", "ModelLoopNode", "when_task", "when_opt",
-    "Request", "Session", "Output", "make_request", "TaskType", "SamplingParams", "DiffusionParams",
-    "LoopKind", "WorkUnitKind", "ConsistencyLevel", "ExecutionProfile", "Capability",
+    "ModelCard",
+    "ComponentSpec",
+    "LoopSpec",
+    "RecipeSpec",
+    "ParitySpec",
+    "CostModel",
+    "CapabilityMatrix",
+    "ModelInstance",
+    "load_card",
+    "Engine",
+    "AsyncEngine",
+    "Program",
+    "ProgramKind",
+    "ComponentNode",
+    "ModelLoopNode",
+    "when_task",
+    "when_opt",
+    "Request",
+    "Session",
+    "Output",
+    "make_request",
+    "TaskType",
+    "SamplingParams",
+    "DiffusionParams",
+    "LoopKind",
+    "WorkUnitKind",
+    "ConsistencyLevel",
+    "ExecutionProfile",
+    "Capability",
     "VideoGenerator",
     "__version__",
 ]

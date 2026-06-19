@@ -1,16 +1,16 @@
 """CosmosDenoiseLoop — EDM-Karras preconditioning folded into a flow-match Euler integrator.
 
-Cosmos-Predict2 is NOT a plain flow-match model despite the pipeline wrapping a
+Cosmos-Predict2 is not a plain flow-match model despite the pipeline wrapping a
 ``FlowMatchEulerDiscreteScheduler``. The network is an EDM denoiser ``F_θ`` whose preconditioned output
-reconstructs ``x0`` (``x0 = c_skip·x + c_out·F_θ(x·c_in)``, ``sigma_data=1``); CFG combines in **x0
-space**; then ``x0`` is converted to a flow-match velocity ``(x - x0)/σ`` for the deterministic Euler
-update ``x_next = x + (σ_next - σ)·v``. The σ schedule is Karras (ρ=7, σ_max=80 → σ_min=0.002), NOT the
-flow-shift linspace, and the latent is initialized at ``randn·σ_max``. Faithful port of
+reconstructs ``x0`` (``x0 = c_skip·x + c_out·F_θ(x·c_in)``, ``sigma_data=1``); CFG combines in x0 space;
+then ``x0`` is converted to a flow-match velocity ``(x - x0)/σ`` for the Euler update
+``x_next = x + (σ_next - σ)·v``. The σ schedule is Karras (ρ=7, σ_max=80 -> σ_min=0.002), not the
+flow-shift linspace, and the latent starts at ``randn·σ_max``. Port of
 ``fastvideo/pipelines/stages/denoising.py:CosmosDenoisingStage`` (see that file for the exact math).
 
 video2world (frame_replace) conditioning is threaded (``conditioning_latents``/``cond_indicator`` from
-slots) but is ``None`` for the registered t2v preset → the gated injection branch is inert; the loop
-degrades to pure t2v exactly as the fastvideo pipeline does when no image/video is given.
+slots) but is ``None`` for the registered t2v preset -> the gated injection is inert; the loop degrades
+to pure t2v exactly as the fastvideo pipeline does when no image/video is given.
 """
 from __future__ import annotations
 

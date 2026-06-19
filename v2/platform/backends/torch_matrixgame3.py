@@ -4,7 +4,7 @@ so the MG3 recipe is self-contained (no edit to the shared ``_make_dit`` dispatc
 
 ``MatrixGame3DiT`` is the autoregressive world-model DiT (``MatrixGame3WanModel``, 30 layers, dim 3072,
 in/out_channels=48, patch (1,2,2), ``use_memory=True``, ``sigma_theta=0.8``). It departs from ``WanDiT``
-in three load-bearing ways (BRINGUP risks 1/2/7 in the spec):
+in three load-bearing ways:
 
   1. PER-TOKEN timestep, NOT ``sigma*1000`` scalar. The model's ``timestep`` arg is a flattened
      ``[1, T*(H/2)*(W/2)]`` LongTensor whose value is the raw FlowUniPC scheduler timestep, with the
@@ -59,9 +59,9 @@ class MatrixGame3DiT(TorchComponent):
 
     def _per_token_timestep(self, hs: torch.Tensor, sigma_value: float, cond_frames: int,
                             x_memory: torch.Tensor | None) -> torch.Tensor:
-        """Build the flattened per-token timestep [1, T*(H/p)*(W/p)] (BRINGUP risk 1). The raw FlowUniPC
-        timestep value fills every token; ``cond_frames`` latent rows are zeroed (pinned, not denoised);
-        an all-zeros memory block is prepended when ``x_memory`` is present."""
+        """Build the flattened per-token timestep [1, T*(H/p)*(W/p)]. The raw FlowUniPC timestep value fills
+        every token; ``cond_frames`` latent rows are zeroed (pinned, not denoised); an all-zeros memory block
+        is prepended when ``x_memory`` is present."""
         _b, _c, t, h, w = hs.shape
         tokens_per_frame = (h // self.patch_h) * (w // self.patch_w)
         tt = hs.new_full((t, tokens_per_frame), float(sigma_value))

@@ -1,11 +1,10 @@
-"""DiffusionNFT — likelihood-free RL (design_v3 §10, §9.2 C2; repo: train/methods/rl/diffusion_nft).
+"""DiffusionNFT — likelihood-free RL (repo: train/methods/rl/diffusion_nft).
 
-The landed RL method, the C2-split's reason for being: it is **likelihood-free** — no log-probs to
-match — so consistency is the C2 *behavioral* rung (seeded final sample + prediction-space identity:
-``old_deviate`` / ref-MSE), declared on the recipe. Sampling is from the **old** (decay-blended
-behavior) policy, NOT the student (the §8.4 caveat the WeightSyncPlan must carry). K samples of one
-prompt form a homogeneous group; group-relative advantages drive the update; the shared prompt
-encodes once via the feature cache (the §10 ``24×`` text-encode reduction).
+Likelihood-free (no log-probs to match), so consistency is the C2 behavioral rung: seeded final
+sample plus prediction-space identity (``old_deviate`` / ref-MSE), declared on the recipe. Sampling
+is from the old (decay-blended behavior) policy, NOT the student — a caveat the WeightSyncPlan must
+carry. K samples of one prompt form a homogeneous group; group-relative advantages drive the update;
+the shared prompt encodes once via the feature cache.
 
 NFT objective (repo diffusion_nft.py):
   positive   = β·forward + (1−β)·old ;  implicit_neg = (1+β)·old − β·forward
@@ -28,15 +27,26 @@ from v2.training.methods.base import TrainingMethod, new_instance
 
 class DiffusionNFTMethod(TrainingMethod):
     name = "diffusion_nft"
-    consistency = ConsistencyLevel.C2                    # likelihood-free behavioral identity
+    consistency = ConsistencyLevel.C2  # likelihood-free behavioral identity
 
-    def __init__(self, student_instance, old_instance, reference_instance, *,
-                 reward_fn: dict | None = None, num_video_per_prompt: int = 4, rollout_steps: int = 3,
-                 beta: float = 0.1, kl_beta: float = 1e-4, adv_clip_max: float = 5.0,
-                 num_inner_timesteps: int = 2, lr: float = 0.05, decay_type: int = 1, **kw):
+    def __init__(self,
+                 student_instance,
+                 old_instance,
+                 reference_instance,
+                 *,
+                 reward_fn: dict | None = None,
+                 num_video_per_prompt: int = 4,
+                 rollout_steps: int = 3,
+                 beta: float = 0.1,
+                 kl_beta: float = 1e-4,
+                 adv_clip_max: float = 5.0,
+                 num_inner_timesteps: int = 2,
+                 lr: float = 0.05,
+                 decay_type: int = 1,
+                 **kw):
         super().__init__(student_instance, lr=lr, **kw)
-        self.old = old_instance                          # behavior policy (sampled from!)
-        self.reference = reference_instance              # frozen KL anchor
+        self.old = old_instance  # behavior policy (sampled from!)
+        self.reference = reference_instance  # frozen KL anchor
         self.K = num_video_per_prompt
         self.rollout_steps = rollout_steps
         self.beta = beta
@@ -50,11 +60,11 @@ class DiffusionNFTMethod(TrainingMethod):
         self.old.component("transformer").copy_from(self.student_dit)
         self.reference.component("transformer").copy_from(self.student_dit)
 
-    def manages_optimization(self) -> bool:               # RL owns its sample→score→train cadence
+    def manages_optimization(self) -> bool:  # RL owns its sample→score→train cadence
         return True
 
     def get_grad_clip_targets(self, iteration: int = 0) -> dict:
-        return {"student": self.student_dit}              # NFT clips internally (matches repo)
+        return {"student": self.student_dit}  # NFT clips internally (matches repo)
 
     @staticmethod
     def _decay(step: int, decay_type: int) -> float:
@@ -69,12 +79,18 @@ class DiffusionNFTMethod(TrainingMethod):
         buf = TrajectoryBuffer()
         for k in range(self.K):
             seed = base_seed * 1000 + k
-            req = make_request(TaskType.T2V, self.old.card.model_id, prompt,
+            req = make_request(TaskType.T2V,
+                               self.old.card.model_id,
+                               prompt,
                                diffusion=DiffusionParams(num_steps=self.rollout_steps, seed=seed))
-            res = self._rollout(req, instance=self.old)   # behavior policy = OLD
-            buf.add(Trajectory(request_id=req.request_id, prompt=prompt, seed=seed,
-                               latents=np.asarray(res.outputs["latents"], dtype="float32"),
-                               behavior=res.behavior, weights_version=self.old.weights_version))
+            res = self._rollout(req, instance=self.old)  # behavior policy = OLD
+            buf.add(
+                Trajectory(request_id=req.request_id,
+                           prompt=prompt,
+                           seed=seed,
+                           latents=np.asarray(res.outputs["latents"], dtype="float32"),
+                           behavior=res.behavior,
+                           weights_version=self.old.weights_version))
         return buf
 
     def managed_train_step(self, batch: dict, iteration: int) -> tuple[dict, dict]:
@@ -88,12 +104,12 @@ class DiffusionNFTMethod(TrainingMethod):
             media = [t.latents for t in group]
             scored = self.scorer.score(media, [prompt] * len(group))
             rewards = scored["avg"]
-            adv = (rewards - rewards.mean()) / (rewards.std() + 1e-4)        # group-relative
+            adv = (rewards - rewards.mean()) / (rewards.std() + 1e-4)  # group-relative
             adv = np.clip(adv, -self.adv_clip_max, self.adv_clip_max)
             all_reward.extend(rewards.tolist())
             all_adv.extend(adv.tolist())
 
-            emb = cached_text_encode(self.student, prompt)                  # encoded ONCE for the group
+            emb = cached_text_encode(self.student, prompt)  # encoded ONCE for the group
             old_dit, ref_dit = self.old.component("transformer"), self.reference.component("transformer")
             for k, traj in enumerate(group):
                 x0 = traj.latents
@@ -112,13 +128,13 @@ class DiffusionNFTMethod(TrainingMethod):
                     x0n = xt - t * neg
                     wfp = max(float(np.mean(np.abs(x0p - x0))), 1e-5)
                     wfn = max(float(np.mean(np.abs(x0n - x0))), 1e-5)
-                    pos_loss = float(np.mean((x0p - x0) ** 2) / wfp)
-                    neg_loss = float(np.mean((x0n - x0) ** 2) / wfn)
+                    pos_loss = float(np.mean((x0p - x0)**2) / wfp)
+                    neg_loss = float(np.mean((x0n - x0)**2) / wfn)
                     policy_loss = (r * pos_loss / self.beta + (1 - r) * neg_loss / self.beta) * self.adv_clip_max
-                    kl = float(np.mean((fwd - ref_p) ** 2))
+                    kl = float(np.mean((fwd - ref_p)**2))
                     policy_losses.append(policy_loss)
                     kl_losses.append(kl)
-                    old_devs.append(float(np.mean((fwd - old_p) ** 2)))
+                    old_devs.append(float(np.mean((fwd - old_p)**2)))
                     # update student toward x0 along the (reward-weighted) positive direction
                     v_target = ((xt - x0) / max(t, 1e-3)).astype("float32")
                     _, gn = self.student_dit.mse_grad_step(xt, emb, t, v_target, self.lr * max(r, 0.05))

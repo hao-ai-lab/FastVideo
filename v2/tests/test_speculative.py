@@ -1,4 +1,4 @@
-"""Speculative (draft-verify) decoding — exact + lower-latency AR (design_v3 §2.2; §9.16).
+"""Speculative (draft-verify) decoding — exact + lower-latency AR.
 
 A cheap draft model proposes K tokens, the target verifies them, and the loop accepts the matching
 prefix + one target correction — a variable accepted-length per round (a ragged AR loop). The two

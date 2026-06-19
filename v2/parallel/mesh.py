@@ -1,7 +1,4 @@
-"""FakeDeviceMesh — a ParallelDims-style builder, CPU-testable (design_v3 §8; torchtitan).
-
-> Declarative, validated, compiled to a PyTorch ``DeviceMesh`` via a ``ParallelDims``-
-> style builder (product-of-degrees validation, cached submeshes).
+"""FakeDeviceMesh — a torchtitan-style ParallelDims builder, CPU-testable.
 
 On a GPU box this compiles to ``torch.distributed.device_mesh.DeviceMesh``. Here it is a
 pure-Python mesh of rank tuples so topology logic is unit-tested without GPUs.
@@ -16,6 +13,7 @@ from v2.parallel.validation import validate_plan
 
 
 class FakeDeviceMesh:
+
     def __init__(self, plan: ParallelPlan):
         self.plan = plan
         self.order = plan.mesh_order or list(plan.axes.keys())
@@ -45,7 +43,7 @@ class FakeDeviceMesh:
 
     def _coord_to_rank(self, coord: tuple[int, ...]) -> int:
         rank = 0
-        for c, d in zip(coord, self.shape):
+        for c, d in zip(coord, self.shape, strict=False):
             rank = rank * d + c
         return rank
 

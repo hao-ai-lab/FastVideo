@@ -8,14 +8,13 @@ The three Cosmos2.5 deltas vs Wan (all GPU-path, all carried HERE so the loop st
 * ``Cosmos25DiT`` — a flow-match velocity DiT, but the per-step call differs from ``WanDiT`` in three
   load-bearing ways (see ``fastvideo/pipelines/stages/denoising.py:Cosmos25DenoisingStage``):
     1. timestep is a PER-FRAME 2D tensor ``[B, T]`` filled with the PLAIN sigma (in [0,1]) — NOT Wan's
-       scalar ``sigma*1000``. (The fastvideo stage feeds ``t*0.001`` of the 0..1000 schedule, i.e. the
-       shifted sigma directly; ``Cosmos25DenoiseLoop`` already hands us that plain sigma.)
+       scalar ``sigma*1000``. ``Cosmos25DenoiseLoop`` already hands us that plain sigma.
     2. the forward REQUIRES a ``condition_mask[B,1,T,H,W]`` (zeros for t2v) + a ``padding_mask[B,1,H,W]``
        (ones for t2v) every step — the model concats them internally (16 -> 17 -> 18ch patch_embed),
        so we feed the RAW 16-channel latent (the OPPOSITE of Wan i2v, where the adapter pre-concats).
     3. an ``fps`` scalar is required for RoPE temporal scaling (NTK fps-modulation).
-  The model output is the rectified-flow velocity (a bare tensor); the loop integrates it with the
-  shared ``FLOW_MATCH_STEP`` Euler solver and combines branches with the standard ``ClassicCFG``.
+  The output is the rectified-flow velocity (a bare tensor); the loop integrates it with the shared
+  ``FLOW_MATCH_STEP`` Euler solver and combines branches with ``ClassicCFG``.
 * ``Cosmos25WanVAE`` — a Wan-style causal 3D VAE (z=16, 8x/4x), BUT unlike ``AutoencoderKLWan`` its
   ``encode``/``decode`` already apply the (z-mean)/std normalization INTERNALLY (the Cosmos latent
   contract: encode -> normalized, decode <- normalized). So this is a thin marshalling wrapper (like

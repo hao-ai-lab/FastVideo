@@ -1,19 +1,17 @@
-"""LingBotWorldDenoiseLoop — Wan flow-match denoise + boundary-routed MoE, extended with (a) the camera
-(Plucker) conditioning slot threaded to the DiT and (b) DUAL classifier-free guidance.
+"""LingBotWorldDenoiseLoop — Wan flow-match denoise + boundary-routed MoE, extended with (a) a camera
+(Plucker) conditioning slot threaded to the DiT and (b) dual classifier-free guidance.
 
-LingBot-World-Base-Cam is Wan2.2-I2V-A14B i2v conditioning (CLIP + first-frame ``[mask|cond]`` latent)
-plus a camera/Plucker tensor. The denoise math is otherwise the canonical Wan flow-match Euler step with
+LingBot-World-Base-Cam is Wan2.2-I2V-A14B i2v conditioning (first-frame ``[mask|cond]`` latent) plus a
+camera/Plucker tensor. The denoise math is otherwise the canonical Wan flow-match Euler step with
 ``BoundaryTimestepRouting`` between the high-noise ``transformer`` and the low-noise ``transformer_2``. Two
-deltas vs ``WanDenoiseLoop`` (faithful to ``LingBotWorldImageToVideoPipeline`` == the Wan i2v denoise
-stage, denoising.py:352-375):
+deltas vs ``WanDenoiseLoop`` (matching the fastvideo Wan i2v denoise stage):
 
-  * DUAL guidance — fastvideo switches ``guidance_scale -> guidance_scale_2`` at the SAME expert boundary:
-    ``t >= boundary_timestep`` (the high-noise expert) uses ``guidance_scale``; below it (the low-noise
-    expert) uses ``guidance_scale_2``. The boundary is in timestep space ``boundary_ratio*1000``, i.e.
-    sigma-space ``ctx.sigma >= boundary`` (preset ``boundary_ratio=0.947``). The preset sets both scales
-    to 5.0, so the registered path is numerically a single scale — but the loop honors a distinct
-    ``guidance_scale_2`` whenever the request carries one.
-  * CAMERA — the program's camera node writes ``c2ws_plucker_emb`` into slots; the loop publishes it onto
+  * Dual guidance — fastvideo switches ``guidance_scale -> guidance_scale_2`` at the SAME expert boundary:
+    the high-noise expert (``ctx.sigma >= boundary``) uses ``guidance_scale``; the low-noise expert uses
+    ``guidance_scale_2``. The boundary is ``boundary_ratio*1000`` in timestep space, i.e. sigma-space
+    ``boundary`` (preset ``boundary_ratio=0.947``). The preset sets both scales to 5.0, so the registered
+    path is numerically a single scale, but the loop honors a distinct ``guidance_scale_2`` when one is set.
+  * Camera — the program's camera node writes ``c2ws_plucker_emb`` into slots; the loop publishes it onto
     the active DiT adapter (``dit.c2ws_plucker_emb = ...``) before the forward, because the v2 dit-call
     surface (and ``ToyDiT``) has no such kwarg. On the CPU toy backend the slot is ``None`` -> the
     degenerate no-camera path (a plain Wan i2v step), so the loop CPU-verifies end-to-end.
@@ -21,7 +19,7 @@ stage, denoising.py:352-375):
 BRINGUP (needs request-API extension): the Plucker tensor is built from a per-request camera trajectory
 (``poses.npy``/``intrinsics.npy``); v2's ``Request`` has no camera slot yet, so the program node writes
 ``None`` unless an ``action_path`` override is supplied. GPU-verify (a) the 2x14B MoE CPU-offload swap,
-(b) the camera FiLM injection actually steers the generation, (c) the dual-scale boundary parity.
+(b) that the camera FiLM injection steers the generation, (c) the dual-scale boundary parity.
 """
 from __future__ import annotations
 

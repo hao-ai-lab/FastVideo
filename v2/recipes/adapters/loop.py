@@ -1,10 +1,10 @@
-"""AdapterDenoiseLoop — per-request LoRA / ControlNet over one resident base (design_v3 §9.19).
+"""AdapterDenoiseLoop — per-request LoRA / ControlNet over one resident base.
 
-The adapter plane: a request selects adapters (``DiffusionParams.adapters``); the loop applies each
-active adapter's velocity delta on top of the base DiT's prediction, then re-integrates. Many adapters
-are served over ONE resident base; the active set lives in the request/``LoopState`` (never global), so
-two requests using different adapters interleave without smearing. Isolated ``WanDenoiseLoop`` subclass
-(empty adapter set ⇒ identical to the base), so nothing else is touched.
+A request selects adapters (``DiffusionParams.adapters``); the loop applies each active adapter's
+velocity delta on top of the base DiT's prediction, then re-integrates. Many adapters are served over
+ONE resident base; the active set lives in the request/``LoopState`` (never global), so two requests
+using different adapters interleave without smearing. An empty adapter set is identical to the base
+``WanDenoiseLoop``.
 """
 from __future__ import annotations
 
@@ -16,10 +16,11 @@ from v2.recipes.wan21.loop import WanDenoiseLoop
 
 
 class AdapterDenoiseLoop(WanDenoiseLoop):
+
     def init(self, req, model, ctx):
         st = super().init(req, model, ctx)
         st.scratch["adapters"] = tuple(getattr(req.diffusion, "adapters", ()) or ())
-        st.scratch["control"] = ctx.slots.get("control_signal")     # ControlNet conditioning (optional)
+        st.scratch["control"] = ctx.slots.get("control_signal")  # ControlNet conditioning (optional)
         return st
 
     def next(self, st):
@@ -34,12 +35,12 @@ class AdapterDenoiseLoop(WanDenoiseLoop):
         prec = self.precision
 
         def run(model, override=None):
-            res = base_run(model, override)                         # base velocity (CFG combine)
+            res = base_run(model, override)  # base velocity (CFG combine)
             v = np.asarray(res.output["noise_pred"], dtype="float32")
-            for aid in adapters:                                    # apply each active adapter's delta
+            for aid in adapters:  # apply each active adapter's delta
                 v = v + model.component(aid).delta(x, control)
             res.output["noise_pred"] = v
-            fm = model.platform.kernels.get(FLOW_MATCH_STEP)    # solver dispatched per (device, arch)
+            fm = model.platform.kernels.get(FLOW_MATCH_STEP)  # solver dispatched per (device, arch)
             res.output["latents"] = fm(prec.cast(x), v, sigma_t, sigma_next).astype("float32")
             return res
 

@@ -1,16 +1,16 @@
 """A tiny framework-free async HTTP/1.1 server (stdlib asyncio only).
 
-No FastAPI/uvicorn dependency — the design says the production OpenAI *fleet* frontend is Dynamo's
-job; this is the per-engine worker server (our own version). Supports JSON responses and streamed
-(SSE) responses. Deliberately minimal: one request per connection (Connection: close), enough to be
-real and curl-able, not a hardened web server.
+No FastAPI/uvicorn dependency — the production OpenAI *fleet* frontend is Dynamo's job; this is the
+per-engine worker server. Supports JSON and streamed (SSE) responses. Deliberately minimal: one
+request per connection (Connection: close), enough to be real and curl-able, not a hardened server.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Awaitable, Callable
+from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 
 @dataclass
@@ -30,20 +30,27 @@ class Response:
     status: int = 200
     body: bytes = b""
     content_type: str = "application/json"
-    stream: AsyncIterator | None = None          # if set, body is ignored and chunks are streamed
+    stream: AsyncIterator | None = None  # if set, body is ignored and chunks are streamed
 
     @classmethod
-    def json(cls, obj: Any, status: int = 200) -> "Response":
+    def json(cls, obj: Any, status: int = 200) -> Response:
         return cls(status=status, body=json.dumps(obj).encode(), content_type="application/json")
 
     @classmethod
-    def sse(cls, gen: AsyncIterator) -> "Response":
+    def sse(cls, gen: AsyncIterator) -> Response:
         return cls(status=200, content_type="text/event-stream", stream=gen)
 
 
-_STATUS = {200: "OK", 201: "Created", 202: "Accepted", 400: "Bad Request",
-           404: "Not Found", 408: "Request Timeout", 413: "Payload Too Large",
-           500: "Internal Server Error"}
+_STATUS = {
+    200: "OK",
+    201: "Created",
+    202: "Accepted",
+    400: "Bad Request",
+    404: "Not Found",
+    408: "Request Timeout",
+    413: "Payload Too Large",
+    500: "Internal Server Error"
+}
 
 Handler = Callable[[Request], Awaitable[Response]]
 
@@ -102,12 +109,17 @@ async def _write(writer: asyncio.StreamWriter, resp: Response) -> None:
 
 
 class HttpServer:
-    def __init__(self, dispatch: Handler, *, read_timeout: float = 30.0,
-                 max_body_bytes: int = 64 << 20, header_limit: int = 1 << 20):
+
+    def __init__(self,
+                 dispatch: Handler,
+                 *,
+                 read_timeout: float = 30.0,
+                 max_body_bytes: int = 64 << 20,
+                 header_limit: int = 1 << 20):
         self.dispatch = dispatch
-        self.read_timeout = read_timeout              # slowloris guard
-        self.max_body_bytes = max_body_bytes          # body-size cap → 413
-        self.header_limit = header_limit              # StreamReader buffer for the header block
+        self.read_timeout = read_timeout  # slowloris guard
+        self.max_body_bytes = max_body_bytes  # body-size cap → 413
+        self.header_limit = header_limit  # StreamReader buffer for the header block
         self._server: asyncio.AbstractServer | None = None
 
     async def _conn(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -127,9 +139,9 @@ class HttpServer:
         try:
             await _write(writer, resp)
         except Exception:
-            if resp.stream is not None:               # client gone mid-SSE → close the generator
+            if resp.stream is not None:  # client gone mid-SSE → close the generator
                 try:
-                    await resp.stream.aclose()        # → GeneratorExit → submit() cancels the driver
+                    await resp.stream.aclose()  # → GeneratorExit → submit() cancels the driver
                 except Exception:
                     pass
             try:
