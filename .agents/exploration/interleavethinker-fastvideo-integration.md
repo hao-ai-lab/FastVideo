@@ -2191,3 +2191,129 @@ Conclusion:
   the next SFT/RL training integration slice should either call these utilities
   from model `init_preprocessors(...)` by dataset kind or add config fields that
   explicitly select the normalizer.
+
+## Stage 7 Execution: Planner/Critic SFT Method
+
+Status: completed, pending code commit/push.
+
+Scope for this implementation slice:
+
+- Add a native supervised fine-tuning method for InterleaveThinker Qwen3-VL
+  actors.
+- Reuse the shared Qwen actor response-token NLL path so prompt tokens stay
+  masked and only assistant response tokens train.
+- Let Qwen actor dataloaders opt into the new dataset normalizers via a model
+  `dataset_kind` field:
+  - `planner_sft`;
+  - `critic_sft`;
+  - `critic_rl`.
+- Add LoRA-first planner and critic SFT config examples.
+- Add fake-backend unit tests for SFT loss/backward behavior and dataset-kind
+  loader selection.
+
+Expected files:
+
+- `fastvideo/train/models/interleave_thinker/qwen_actor.py`
+- `fastvideo/train/methods/fine_tuning/interleave_thinker_sft.py`
+- `fastvideo/train/methods/fine_tuning/__init__.py`
+- `examples/train/configs/interleave_thinker/planner_sft_lora.yaml`
+- `examples/train/configs/interleave_thinker/critic_sft_lora.yaml`
+- `tests/local_tests/test_interleave_thinker_sft_method.py`
+- this handoff file
+
+Validation plan:
+
+- Local syntax and `git diff --check`.
+- Modal pytest for SFT method tests plus data/planner/critic tests.
+- Modal pre-commit on changed non-excluded files.
+
+Implemented changes:
+
+- Added `InterleaveThinkerSFTMethod` under
+  `fastvideo/train/methods/fine_tuning/`.
+  - Subclasses the modular `TrainingMethod`.
+  - Requires a trainable `student` role model.
+  - Calls `student.init_preprocessors(...)`.
+  - Builds optimizer and scheduler with the existing
+    `build_optimizer_and_scheduler(...)` helper.
+  - Delegates loss construction to
+    `student.compute_interleave_sft_loss(...)` so model-specific message
+    construction stays in the InterleaveThinker actor wrappers.
+- Exported the method lazily from
+  `fastvideo.train.methods.fine_tuning`.
+- Extended the shared Qwen actor wrapper:
+  - `InterleaveJSONLDataset` can now load records through
+    `load_interleave_dataset(..., kind=...)`.
+  - `Qwen3VLActorBase` accepts `dataset_kind`.
+  - `compute_interleave_sft_loss(...)` reuses
+    `response_nll_from_messages(...)`, masking prompt labels and training only
+    assistant response labels.
+  - `_sft_response_from_item(...)` accepts `response`, `completion`, `target`,
+    or the first assistant message in ShareGPT-style data.
+- Extended planner and critic model constructors with `dataset_kind`.
+- Added LoRA-first example configs:
+  - `examples/train/configs/interleave_thinker/planner_sft_lora.yaml`
+  - `examples/train/configs/interleave_thinker/critic_sft_lora.yaml`
+- Added `tests/local_tests/test_interleave_thinker_sft_method.py`, covering:
+  - response-token-only label masking;
+  - optimizer/backward path on a fake critic backend;
+  - planner SFT dataset normalizer selection through `dataset_kind`;
+  - public YAML parse checks for planner and critic SFT configs.
+
+Validation completed:
+
+- Local lightweight checks:
+  - `python -m py_compile` passed for
+    `fastvideo/train/models/interleave_thinker/qwen_actor.py`,
+    `fastvideo/train/models/interleave_thinker/planner.py`,
+    `fastvideo/train/models/interleave_thinker/critic.py`,
+    `fastvideo/train/methods/fine_tuning/interleave_thinker_sft.py`,
+    `fastvideo/train/methods/fine_tuning/__init__.py`, and
+    `tests/local_tests/test_interleave_thinker_sft_method.py`.
+  - `git diff --check` passed.
+- Modal pytest on the formatted patch:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-X6a2Yhar42nkdfXIY4zvAD`
+  - Repo: `https://github.com/macthecadillac/FastVideo.git`
+  - Base commit: `033b75a6620316ecefdf956b7914ba0b933639f6`
+  - Command:
+    `pytest tests/local_tests/test_interleave_thinker_sft_method.py
+    tests/local_tests/test_interleave_thinker_data.py
+    tests/local_tests/test_interleave_thinker_critic_model.py
+    tests/local_tests/test_interleave_thinker_planner_model.py -q`
+  - Result: `20 passed, 14 warnings in 17.32s`.
+- Modal pre-commit:
+  - First app URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-Z9ReKctEaYcxSpM0AVI5rA`
+  - Result: failed because `yapf` reformatted files; ruff, codespell, mypy,
+    filename, and suggestion hooks passed.
+  - Applied the same formatting locally via
+    `env PRE_COMMIT_HOME=/tmp/pre-commit-cache pre-commit run --files ...`.
+  - Local pre-commit caveat: after formatting, local mypy failed before normal
+    checking with `fastvideo-interleavethinker is not a valid Python package
+    name`, caused by the hyphenated temporary worktree path. Modal mypy is the
+    authoritative result.
+  - Final app URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-1jmIczO3KwZoP3WtLYOIxc`
+  - Final command:
+    `pre-commit run --files
+    examples/train/configs/interleave_thinker/critic_sft_lora.yaml
+    examples/train/configs/interleave_thinker/planner_sft_lora.yaml
+    fastvideo/train/methods/fine_tuning/__init__.py
+    fastvideo/train/methods/fine_tuning/interleave_thinker_sft.py
+    fastvideo/train/models/interleave_thinker/critic.py
+    fastvideo/train/models/interleave_thinker/planner.py
+    fastvideo/train/models/interleave_thinker/qwen_actor.py
+    tests/local_tests/test_interleave_thinker_sft_method.py`
+  - Final result: yapf, ruff, codespell, mypy, filename, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+
+Conclusion:
+
+- FastVideo now has native planner/critic SFT entrypoints for the
+  InterleaveThinker Qwen actors.
+- The SFT loop can consume upstream planner/critic SFT files through the
+  `dataset_kind` normalizers introduced in Stage 6.
+- The next integration stage is to upgrade the existing InterleaveThinker RL
+  method from reward-scoring smoke coverage toward a real critic-policy
+  optimization loop with rollouts, reward aggregation, and GRPO-style
+  advantage/loss computation.

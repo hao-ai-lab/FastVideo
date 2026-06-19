@@ -16,6 +16,10 @@ from torch.utils.data import DataLoader, Dataset
 
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.base import ModelBase
+from fastvideo.train.models.interleave_thinker.data import (
+    InterleaveDatasetKind,
+    load_interleave_dataset,
+)
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.lora import LoraConfig
@@ -30,11 +34,19 @@ class InterleaveJSONLDataset(Dataset):
         data_path: str,
         *,
         image_dir: str = "",
+        dataset_kind: InterleaveDatasetKind | None = None,
     ) -> None:
-        self.records = list(load_interleave_records(
-            data_path,
-            image_dir=image_dir,
-        ))
+        if dataset_kind is None:
+            self.records = list(load_interleave_records(
+                data_path,
+                image_dir=image_dir,
+            ))
+        else:
+            self.records = list(load_interleave_dataset(
+                data_path,
+                kind=dataset_kind,
+                image_dir=image_dir,
+            ))
         if not self.records:
             raise ValueError(f"No InterleaveThinker records found at {data_path!r}")
 
@@ -74,6 +86,7 @@ class Qwen3VLActorBase(ModelBase):
         enable_gradient_checkpointing: bool = True,
         max_prompt_length: int = 16384,
         max_response_length: int = 4096,
+        dataset_kind: InterleaveDatasetKind | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -83,6 +96,7 @@ class Qwen3VLActorBase(ModelBase):
         self.processor_from = str(processor_from or init_from)
         self.image_dir = str(image_dir or "")
         self.training_config = training_config
+        self.dataset_kind = dataset_kind
         self.max_prompt_length = int(max_prompt_length)
         self.max_response_length = int(max_response_length)
         self.processor: Any | None = None
@@ -176,6 +190,7 @@ class Qwen3VLActorBase(ModelBase):
         dataset = InterleaveJSONLDataset(
             data_path,
             image_dir=self.image_dir,
+            dataset_kind=self.dataset_kind,
         )
         self.dataloader = DataLoader(
             dataset,
@@ -255,6 +270,42 @@ class Qwen3VLActorBase(ModelBase):
             raise ValueError("InterleaveThinker rollout has no trainable response tokens")
         outputs = self.transformer(**full_inputs, labels=labels)
         return outputs.loss, token_count
+
+    def compute_interleave_sft_loss(
+        self,
+        batch: Mapping[str, Any],
+    ) -> tuple[dict[str, torch.Tensor], dict[str, float]]:
+        self._require_backend()
+        self.transformer.train()
+        losses: list[torch.Tensor] = []
+        token_counts: list[int] = []
+        for item in batch_to_items(batch):
+            response = _sft_response_from_item(item)
+            nll, token_count = self.response_nll_from_messages(
+                self.build_messages(item),
+                response,
+            )
+            losses.append(nll)
+            token_counts.append(token_count)
+        if not losses:
+            raise ValueError("InterleaveThinker SFT batch is empty")
+        loss = torch.stack(losses).mean()
+        return (
+            {
+                "total_loss": loss,
+                "sft_loss": loss,
+            },
+            {
+                "sft/response_tokens": float(sum(token_counts) / max(1, len(token_counts))),
+                "sft/num_items": float(len(token_counts)),
+            },
+        )
+
+    def build_messages(
+        self,
+        item: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        raise NotImplementedError(f"{type(self).__name__} must implement build_messages().")
 
     def build_text_image_messages(
         self,
@@ -377,6 +428,24 @@ def load_interleave_records(
         else:
             raise ValueError(f"Unsupported InterleaveThinker data file: {file_path}")
     return records
+
+
+def _sft_response_from_item(item: Mapping[str, Any]) -> str:
+    for key in ("response", "completion", "target"):
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value
+    messages = item.get("messages")
+    if isinstance(messages, Sequence) and not isinstance(messages, str | bytes):
+        for message in messages:
+            if not isinstance(message, Mapping):
+                continue
+            if message.get("role") != "assistant":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content:
+                return content
+    raise ValueError("InterleaveThinker SFT item requires response, completion, target, or assistant message")
 
 
 def normalize_interleave_record(

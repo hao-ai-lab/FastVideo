@@ -7,10 +7,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from fastvideo.train.methods.fine_tuning.dfsft import DiffusionForcingSFTMethod
     from fastvideo.train.methods.fine_tuning.finetune import FineTuneMethod
+    from fastvideo.train.methods.fine_tuning.interleave_thinker_sft import (
+        InterleaveThinkerSFTMethod, )
 
 __all__ = [
     "DiffusionForcingSFTMethod",
     "FineTuneMethod",
+    "InterleaveThinkerSFTMethod",
 ]
 
 
@@ -25,4 +28,9 @@ def __getattr__(name: str) -> object:
         from fastvideo.train.methods.fine_tuning.finetune import FineTuneMethod
 
         return FineTuneMethod
+    if name == "InterleaveThinkerSFTMethod":
+        from fastvideo.train.methods.fine_tuning.interleave_thinker_sft import (
+            InterleaveThinkerSFTMethod, )
+
+        return InterleaveThinkerSFTMethod
     raise AttributeError(name)

@@ -1,0 +1,67 @@
+# InterleaveThinker critic LoRA SFT config.
+#
+# Expects upstream `critic_sft.json` from InterleaveThinker/Train-Data.
+
+models:
+  student:
+    _target_: fastvideo.train.models.interleave_thinker.InterleaveThinkerCriticModel
+    init_from: InterleaveThinker/Critic-SFT-8B
+    processor_from: Qwen/Qwen3-VL-8B-Instruct
+    load_backend: true
+    trainable: true
+    dataset_kind: critic_sft
+    image_dir: data/InterleaveThinker/Train-Data
+    torch_dtype: auto
+    attn_implementation: flash_attention_2
+    freeze_vision_tower: true
+    freeze_multi_modal_projector: true
+    enable_gradient_checkpointing: true
+    max_prompt_length: 16384
+    max_response_length: 4096
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - q_proj
+        - k_proj
+        - v_proj
+        - o_proj
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.InterleaveThinkerSFTMethod
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 4
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: data/InterleaveThinker/Train-Data/critic_sft.json
+    preprocessed_data_type: text_only
+    train_batch_size: 1
+    dataloader_num_workers: 0
+    seed: 42
+
+  optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/interleave_thinker_critic_sft_lora
+    training_state_checkpointing_steps: 50
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: InterleaveThinker-SFT
+    run_name: interleave_thinker_critic_sft_lora

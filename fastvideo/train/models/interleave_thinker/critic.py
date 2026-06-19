@@ -15,6 +15,7 @@ from fastvideo.train.models.interleave_thinker.qwen_actor import (
     first_string,
     rollout_group_key,
 )
+from fastvideo.train.models.interleave_thinker.data import InterleaveDatasetKind
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.lora import LoraConfig
@@ -75,6 +76,7 @@ class InterleaveThinkerCriticModel(Qwen3VLActorBase):
         enable_gradient_checkpointing: bool = True,
         max_prompt_length: int = 16384,
         max_response_length: int = 4096,
+        dataset_kind: InterleaveDatasetKind | None = None,
         prompt_template: str = INTERLEAVE_CRITIC_PROMPT,
         lora: LoraConfig | dict[str, Any] | None = None,
         **kwargs: Any,
@@ -97,6 +99,7 @@ class InterleaveThinkerCriticModel(Qwen3VLActorBase):
             enable_gradient_checkpointing=enable_gradient_checkpointing,
             max_prompt_length=max_prompt_length,
             max_response_length=max_response_length,
+            dataset_kind=dataset_kind,
             lora=lora,
             **kwargs,
         )
