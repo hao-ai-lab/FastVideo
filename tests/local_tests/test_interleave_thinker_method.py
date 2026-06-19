@@ -218,6 +218,7 @@ def test_interleave_thinker_config_parses_public_yaml():
     assert cfg.models["student"]["_target_"] == (
         "fastvideo.train.models.interleave_thinker.InterleaveThinkerCriticModel")
     assert cfg.models["student"]["init_from"] == "InterleaveThinker/Critic-SFT-8B"
+    assert cfg.models["student"]["image_dir"] == "data"
     assert cfg.method["_target_"] == "fastvideo.train.methods.rl.interleave_thinker.InterleaveThinkerRLMethod"
     assert cfg.method["edit_scorer"]["_target_"] == (
         "fastvideo.train.methods.rl.rewards.GeminiNanoBananaEditScorer")

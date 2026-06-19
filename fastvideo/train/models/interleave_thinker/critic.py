@@ -60,8 +60,13 @@ class _InterleaveJSONLDataset(Dataset):
     def __init__(
         self,
         data_path: str,
+        *,
+        image_dir: str = "",
     ) -> None:
-        self.records = list(_load_interleave_records(data_path))
+        self.records = list(_load_interleave_records(
+            data_path,
+            image_dir=image_dir,
+        ))
         if not self.records:
             raise ValueError(f"No InterleaveThinker records found at {data_path!r}")
 
@@ -101,6 +106,7 @@ class InterleaveThinkerCriticModel(ModelBase):
         training_config: TrainingConfig | None = None,
         trainable: bool = True,
         load_backend: bool = True,
+        image_dir: str = "",
         torch_dtype: str = "auto",
         device_map: str | dict[str, Any] | None = None,
         attn_implementation: str | None = None,
@@ -119,6 +125,7 @@ class InterleaveThinkerCriticModel(ModelBase):
         super().__init__(trainable=trainable, lora=lora)
         self.init_from = str(init_from)
         self.processor_from = str(processor_from or init_from)
+        self.image_dir = str(image_dir or "")
         self.training_config = training_config
         self.max_prompt_length = int(max_prompt_length)
         self.max_response_length = int(max_response_length)
@@ -214,7 +221,10 @@ class InterleaveThinkerCriticModel(ModelBase):
             return
         if not os.path.exists(os.path.expanduser(data_path)):
             raise FileNotFoundError(f"InterleaveThinker data_path not found: {data_path}")
-        dataset = _InterleaveJSONLDataset(data_path)
+        dataset = _InterleaveJSONLDataset(
+            data_path,
+            image_dir=self.image_dir,
+        )
         self.dataloader = DataLoader(
             dataset,
             batch_size=max(1, int(training_config.data.train_batch_size or 1)),
@@ -295,10 +305,11 @@ class InterleaveThinkerCriticModel(ModelBase):
         weighted_losses: list[torch.Tensor] = []
         nll_values: list[torch.Tensor] = []
         token_counts: list[int] = []
+        loss_scale = max(1, len(rollouts) * grad_accum)
         for idx, rollout in enumerate(rollouts):
             nll, token_count = self._response_nll(rollout)
             weighted = nll * advantages[idx]
-            (weighted / grad_accum).backward()
+            (weighted / loss_scale).backward()
             weighted_losses.append(weighted.detach())
             nll_values.append(nll.detach())
             token_counts.append(token_count)
@@ -446,7 +457,11 @@ class InterleaveThinkerCriticModel(ModelBase):
         raise NotImplementedError("InterleaveThinkerCriticModel uses train_interleave_rollouts().")
 
 
-def _load_interleave_records(data_path: str, ) -> list[dict[str, Any]]:
+def _load_interleave_records(
+    data_path: str,
+    *,
+    image_dir: str = "",
+) -> list[dict[str, Any]]:
     path = Path(os.path.expanduser(data_path))
     files = sorted(path.glob("*.json*")) if path.is_dir() else [path]
     records: list[dict[str, Any]] = []
@@ -456,16 +471,53 @@ def _load_interleave_records(data_path: str, ) -> list[dict[str, Any]]:
                 if line.strip():
                     raw = json.loads(line)
                     if isinstance(raw, Mapping):
-                        records.append(dict(raw))
+                        records.append(_normalize_interleave_record(raw, image_dir=image_dir))
         elif file_path.suffix == ".json":
             raw_json = json.loads(file_path.read_text())
             if isinstance(raw_json, list):
-                records.extend(dict(item) for item in raw_json if isinstance(item, Mapping))
+                records.extend(
+                    _normalize_interleave_record(item, image_dir=image_dir) for item in raw_json
+                    if isinstance(item, Mapping))
             elif isinstance(raw_json, Mapping):
-                records.append(dict(raw_json))
+                records.append(_normalize_interleave_record(raw_json, image_dir=image_dir))
         else:
             raise ValueError(f"Unsupported InterleaveThinker data file: {file_path}")
     return records
+
+
+def _normalize_interleave_record(
+    record: Mapping[str, Any],
+    *,
+    image_dir: str = "",
+) -> dict[str, Any]:
+    normalized = dict(record)
+    for key in (
+            "origin_image_path",
+            "previous_image_path",
+            "edited_image_path",
+            "generated_image_path",
+            "input_image_path",
+            "output_image_path",
+    ):
+        value = normalized.get(key)
+        if isinstance(value, str) and value:
+            normalized[key] = _resolve_image_path(value, image_dir=image_dir)
+    return normalized
+
+
+def _resolve_image_path(
+    value: str,
+    *,
+    image_dir: str = "",
+) -> str:
+    expanded = os.path.expanduser(value)
+    if not image_dir or os.path.isabs(expanded) or _looks_like_uri(expanded):
+        return expanded
+    return str(Path(os.path.expanduser(image_dir)) / expanded)
+
+
+def _looks_like_uri(value: str) -> bool:
+    return "://" in value or value.startswith("data:")
 
 
 def _collate_interleave_records(records: Sequence[Mapping[str, Any]], ) -> dict[str, Any]:
@@ -493,14 +545,23 @@ def _batch_to_items(batch: Mapping[str, Any], ) -> list[dict[str, Any]]:
 
 
 def _item_image_paths(item: Mapping[str, Any], ) -> list[str]:
-    image_paths: list[str] = []
-    for key in ("origin_image_path", "previous_image_path", "edited_image_path"):
-        value = item.get(key)
-        if isinstance(value, str) and value:
-            image_paths.append(value)
+    before = _first_string(item, "previous_image_path", "origin_image_path", "input_image_path")
+    after = _first_string(item, "edited_image_path", "generated_image_path", "output_image_path")
+    image_paths = [value for value in (before, after) if value]
     if len(image_paths) == 1:
         image_paths.append(image_paths[0])
     return image_paths[:2]
+
+
+def _first_string(
+    item: Mapping[str, Any],
+    *keys: str,
+) -> str | None:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def _move_to_device(

@@ -11,6 +11,7 @@ models:
     init_from: InterleaveThinker/Critic-SFT-8B
     processor_from: Qwen/Qwen3-VL-8B-Instruct
     load_backend: true
+    image_dir: data
     torch_dtype: auto
     attn_implementation: flash_attention_2
     freeze_vision_tower: true

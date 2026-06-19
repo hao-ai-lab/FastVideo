@@ -435,6 +435,98 @@ Pending:
 - Commit this model/API integration slice.
 - Push the commit immediately after committing, per user instruction.
 
+Commit completed:
+
+- `fc04d019` — `[feat] integrate InterleaveThinker model backends`
+- Pushed to `origin/interleavethinker-fastvideo`.
+
+## Critic Backend Hardening Extension
+
+Status: implemented and Modal-validated; pending commit/push.
+
+Goal for this slice:
+
+- Tighten the Qwen3-VL critic wrapper from config/import-ready toward
+  executable-backend-ready without pulling real Qwen weights into unit tests.
+- Preserve user constraints:
+  - work only in `/tmp/fastvideo-interleavethinker`,
+  - do not touch `/home/toolbox/FastVideo`,
+  - validate via Modal,
+  - commit and push immediately after commit.
+
+Planned changes:
+
+1. Add `image_dir` handling to `InterleaveThinkerCriticModel`, matching
+   upstream EasyR1's convention that relative `origin_image_path` and
+   `edited_image_path` are resolved under a configured image root.
+2. Normalize image paths at dataset load/collate time, and expose an explicit
+   before/after image pair:
+   - before: `previous_image_path`, then `origin_image_path`, then
+     `input_image_path`;
+   - after: `edited_image_path`, then `generated_image_path`, then
+     `output_image_path`.
+3. Improve actor-update scaling so per-rollout backward computes the mean batch
+   policy gradient instead of summing all rollout losses.
+4. Add fake Qwen backend tests that exercise:
+   - `generate_interleave_responses(...)`,
+   - `train_interleave_rollouts(...)`,
+   - image path resolution,
+   - public YAML parse for the new config knobs.
+
+Validation plan:
+
+- Modal pytest:
+  `pytest tests/local_tests/test_interleave_thinker_reward.py
+  tests/local_tests/test_interleave_thinker_method.py
+  tests/local_tests/test_interleave_thinker_api_models.py
+  tests/local_tests/test_interleave_thinker_critic_model.py
+  tests/local_tests/test_train_rl_sampling.py -q`
+- Modal pre-commit on changed files.
+
+Implemented changes:
+
+- `InterleaveThinkerCriticModel` accepts `image_dir` and passes it into the
+  JSON/JSONL dataset loader.
+- Dataset loading normalizes relative image paths under `image_dir` while
+  leaving absolute paths, URI-style paths, and `data:` URLs unchanged.
+- Qwen3-VL message assembly now selects an explicit before/after image pair.
+  This avoids sending `origin`, `previous`, and `edited` together when the
+  critic task expects two images.
+- Actor update scaling now averages over `len(rollouts) *
+  gradient_accumulation_steps`, preventing the loss from growing with rollout
+  count.
+- Added fake-backend tests for generation and response-token-only actor
+  training without downloading real Qwen weights.
+- Added `image_dir: data` to
+  `examples/train/configs/rl/interleave_thinker/critic_grpo.yaml`.
+
+Validation completed:
+
+- Modal pytest:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-fRlUUdFx19OWpSvDSrWoAe`
+  - Command:
+    `pytest tests/local_tests/test_interleave_thinker_reward.py
+    tests/local_tests/test_interleave_thinker_method.py
+    tests/local_tests/test_interleave_thinker_api_models.py
+    tests/local_tests/test_interleave_thinker_critic_model.py
+    tests/local_tests/test_train_rl_sampling.py -q`
+  - Result: `30 passed, 14 warnings in 19.47s`.
+- Modal pre-commit:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-DplMFq23YYfBx34e6TcsRc`
+  - Command:
+    `pre-commit run --files
+    examples/train/configs/rl/interleave_thinker/critic_grpo.yaml
+    fastvideo/train/models/interleave_thinker/critic.py
+    tests/local_tests/test_interleave_thinker_critic_model.py
+    tests/local_tests/test_interleave_thinker_method.py`
+  - Result: yapf, ruff, codespell, mypy, filename check, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+
+Pending:
+
+- Commit this critic-backend hardening slice.
+- Push the commit immediately after committing, per user instruction.
+
 ## Training Loop Extension
 
 Status: in progress as of the user request to "Add a training loop" for
