@@ -442,7 +442,7 @@ Commit completed:
 
 ## Critic Backend Hardening Extension
 
-Status: implemented and Modal-validated; pending commit/push.
+Status: completed and pushed.
 
 Goal for this slice:
 
@@ -522,10 +522,17 @@ Validation completed:
   - Result: yapf, ruff, codespell, mypy, filename check, and suggestion hooks
     passed; PyMarkdown/actionlint skipped with no files to check.
 
-Pending:
+Commit completed:
 
-- Commit this critic-backend hardening slice.
-- Push the commit immediately after committing, per user instruction.
+- `ace421bc` — `[feat] harden InterleaveThinker critic backend`
+- Pushed to `origin/interleavethinker-fastvideo`.
+
+Next recommended integration step:
+
+- Run a real small-checkpoint smoke for `InterleaveThinkerCriticModel` on Modal
+  with a Qwen3-VL-compatible checkpoint and a two-image JSONL fixture. The
+  current slice validates the FastVideo contract with a fake backend; it does
+  not download or execute the real Qwen critic weights.
 
 ## Training Loop Extension
 
