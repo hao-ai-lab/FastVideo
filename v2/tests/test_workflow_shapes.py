@@ -1,4 +1,4 @@
-"""Non-linear workflow shapes — fan-out + best-of-N feedback (design_v3 §13; §9.17).
+"""Non-linear workflow shapes — fan-out + best-of-N feedback.
 
 Every workflow so far was a linear chain. These exercise the two non-linear shapes:
 
@@ -6,7 +6,7 @@ Every workflow so far was a linear chain. These exercise the two non-linear shap
     branch). The engine can interleave the branches' steps.
   * **Best-of-N** (`BestOfNWorkflow`): generate N candidates, score each with a reward scorer, return
     the best — inference-time scaling / rejection sampling, a feedback loop composing a generator with
-    the served REWARD_BATCH card (§9.15).
+    the served REWARD_BATCH card.
 """
 from __future__ import annotations
 

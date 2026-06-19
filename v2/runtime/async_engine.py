@@ -1,18 +1,19 @@
-"""AsyncEngine — the serving runtime (design_v3 §6; plan M3).
+"""AsyncEngine — the serving runtime.
 
-A real request queue, lifecycle state machine, live streaming, and step-level concurrency over the
-same step scheduler. Each request runs as an asyncio task that ticks its runner one step at a time
-and yields the event loop (`await asyncio.sleep(0)`), so concurrent requests interleave at step
+A request queue, lifecycle state machine, live streaming, and step-level concurrency over the same
+step scheduler. Each request runs as an asyncio task that ticks its runner one step at a time and
+yields the event loop (`await asyncio.sleep(0)`), so concurrent requests interleave at step
 granularity — and a per-request stall backs off instead of busy-spinning. Drives BOTH inline
 ``ProgramRunner`` and ``DisaggregatedRunner`` (capacity-aware pool dispatch) through one driver.
 
-Cancellation is common-path (design_v3 §6.4): ``cancel(request_id)`` trips the runner's CancelScope,
-which raises at the next step boundary and delivers partial artifacts + a structured ``cancelled``.
+Cancellation is common-path: ``cancel(request_id)`` trips the runner's CancelScope, which raises at
+the next step boundary and delivers partial artifacts + a structured ``cancelled``.
 """
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator
+from typing import Any
+from collections.abc import AsyncIterator
 
 from v2.request.artifacts import Output
 from v2.request.cancel import Cancelled
@@ -23,7 +24,7 @@ from v2.runtime.engine import Engine
 _SENTINEL = object()
 
 
-def _safe_put(q: "asyncio.Queue", item: Any) -> None:
+def _safe_put(q: asyncio.Queue, item: Any) -> None:
     """Non-blocking put on an unbounded queue — safe to call from finally/cancellation paths."""
     try:
         q.put_nowait(item)
@@ -40,15 +41,15 @@ class RequestState:
 
 
 class AsyncEngine:
-    def __init__(self, engine: Engine | None = None, *, max_stall_ticks: int = 200_000,
-                 max_history: int = 512):
+
+    def __init__(self, engine: Engine | None = None, *, max_stall_ticks: int = 200_000, max_history: int = 512):
         self.engine = engine if engine is not None else Engine()
-        self._disagg: dict[str, tuple] = {}                 # model_id -> (PoolSet, Program)
+        self._disagg: dict[str, tuple] = {}  # model_id -> (PoolSet, Program)
         self._events: dict[str, asyncio.Queue] = {}
         self._states: dict[str, str] = {}
         self._results: dict[str, Output] = {}
         self._runners: dict[str, Any] = {}
-        self._order: list[str] = []                         # submission order, for bounded eviction
+        self._order: list[str] = []  # submission order, for bounded eviction
         self.max_stall_ticks = max_stall_ticks
         self.max_history = max_history
 
@@ -83,8 +84,11 @@ class AsyncEngine:
     def _make_runner(self, request: Any) -> Any:
         if request.model_id in self._disagg:
             pools, program = self._disagg[request.model_id]
-            return DisaggregatedRunner(pools, program, request,
-                                       observers=self.engine.observers, interceptors=self.engine.interceptors)
+            return DisaggregatedRunner(pools,
+                                       program,
+                                       request,
+                                       observers=self.engine.observers,
+                                       interceptors=self.engine.interceptors)
         return self.engine._make_runner(request)
 
     # --- lifecycle / control ------------------------------------------------ #
@@ -110,8 +114,7 @@ class AsyncEngine:
         return sum(1 for s in self._states.values() if s == RequestState.WAITING)
 
     def serves(self, model_id: str) -> bool:
-        return (model_id in self.engine._registry or model_id in self._disagg
-                or model_id in self.engine._workflows)
+        return (model_id in self.engine._registry or model_id in self._disagg or model_id in self.engine._workflows)
 
     # --- the driver: one asyncio task per request --------------------------- #
     async def _run(self, request: Any) -> None:
@@ -126,7 +129,7 @@ class AsyncEngine:
             self._states[rid] = RequestState.RUNNING
             await evq.put(OmniEvent("request.start", rid, payload={"task": request.task.value}))
             while not runner.done:
-                runner.cancel_scope.check()                  # common-path cancellation (step boundary)
+                runner.cancel_scope.check()  # common-path cancellation (step boundary)
                 p0 = runner._progress
                 runner.tick()
                 # surface any newly emitted media chunks as live events
@@ -138,10 +141,10 @@ class AsyncEngine:
                     stall += 1
                     if stall > self.max_stall_ticks:
                         raise RuntimeError(f"request {rid} stalled (state={getattr(runner,'state','?')})")
-                    await asyncio.sleep(0.0005)              # backpressure backoff (capacity wait)
+                    await asyncio.sleep(0.0005)  # backpressure backoff (capacity wait)
                 else:
                     stall = 0
-                    await asyncio.sleep(0)                   # cooperative yield → step interleaving
+                    await asyncio.sleep(0)  # cooperative yield → step interleaving
             out = runner.output()
             self._results[rid] = out
             for name in out.artifacts:
@@ -158,7 +161,7 @@ class AsyncEngine:
                 except Exception:
                     pass
             _safe_put(evq, OmniEvent("request.cancelled", rid))
-        except asyncio.CancelledError:                       # driver task cancelled (e.g. client gone)
+        except asyncio.CancelledError:  # driver task cancelled (e.g. client gone)
             self._states[rid] = RequestState.CANCELLED
             raise
         except Exception as e:  # noqa: BLE001 — request-fatal isolation: one request's error
@@ -198,7 +201,7 @@ class AsyncEngine:
                 task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):     # noqa: BLE001
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
 
     async def generate(self, request: Any) -> Output:

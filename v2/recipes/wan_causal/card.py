@@ -1,9 +1,9 @@
-"""Wan-causal (self-forcing) ModelCard — causal/streaming video (design_v3 §4, §10).
+"""Wan-causal (self-forcing) ModelCard — causal/streaming video.
 
-This is the causal student *created by* self-forcing distillation: ``recipe.method='self_forcing'``,
-``assumes_loop='chunk_rollout'``. It declares a ``slab_kv`` cache class (chunk-KV) in addition to the
-text feature cache. The chunk_rollout loop is causal/AR, so ``pp_patch`` parallelism is rejected for
-this card by the validator (stale KV breaks causality).
+The causal student *created by* self-forcing distillation: ``recipe.method='self_forcing'``,
+``assumes_loop='chunk_rollout'``. Declares a ``slab_kv`` cache class (chunk-KV) alongside the text
+feature cache. The chunk_rollout loop is causal/AR, so the validator rejects ``pp_patch`` parallelism
+for this card (stale KV breaks causality).
 """
 from __future__ import annotations
 

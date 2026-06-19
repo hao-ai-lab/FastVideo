@@ -1,32 +1,29 @@
-"""MatrixGame2CausalDMDLoop — the few-step, causal/autoregressive, action-conditioned DMD denoise loop for
-Matrix-Game 2.0 (the INTERACTIVE world model). Cannot reuse ``WanDenoiseLoop``/``CosmosDenoiseLoop``:
+"""MatrixGame2CausalDMDLoop — few-step, causal/autoregressive, action-conditioned DMD denoise loop for
+Matrix-Game 2.0. Cannot reuse ``WanDenoiseLoop``/``CosmosDenoiseLoop`` because:
 
   (a) Few-step DMD, NOT a flow-match velocity ODE. The model output is EPSILON; each DMD step converts
-      ``eps -> x0`` via ``pred_video = x - sigma_t*eps`` (the scheduler sigma table), then RE-ADDS noise to
-      the next DMD timestep. Fixed schedule ``dmd_denoising_steps=[1000,666,333]`` (3 steps), warped through
-      the FlowUniPC timestep grid (``warp_denoising_step``). CFG is OFF (guidance_scale=1.0).
+      ``eps -> x0`` via ``pred_video = x - sigma_t*eps`` (scheduler sigma table), then RE-ADDS noise to
+      the next DMD timestep. Fixed 3-step schedule ``[1000,666,333]``, warped through the FlowUniPC
+      timestep grid (``warp_denoising_step``). CFG is OFF (guidance_scale=1.0).
   (b) Causal block-autoregressive: the video latent is split into blocks of ``num_frames_per_block`` (=3);
       each block is fully DMD-denoised, then a context pass at ``timestep=context_noise(=0)`` writes its
       CLEAN K/V into a sliding-window KV cache before the next block. Per-frame timestep ``[B, num_frames]``.
   (c) Action-conditioned: per-frame mouse[F,2] / keyboard[F,4] feed ActionModule blocks with their own KV
-      caches. The DEGENERATE (no-action) path is what CPU-verifies here; live action routing is BRINGUP
-      (needs a request-API extension — the loop exposes the ``mouse_cond``/``keyboard_cond`` slots and a
-      ``streaming_reset``/``streaming_step`` surface for interactive play).
+      caches. The no-action degenerate path is what CPU-verifies here; live action routing is BRINGUP
+      (needs a request-API extension — the loop exposes ``mouse_cond``/``keyboard_cond`` slots).
 
-Faithful port of ``fastvideo/pipelines/stages/matrixgame2_denoising.py:MatrixGame2CausalDenoisingStage``
-(``forward`` / ``_process_single_block`` / ``_update_context_cache``). The DiT call is dispatched two ways
-so the SAME loop runs on the CPU toy AND the GPU adapter:
+Faithful port of ``fastvideo/pipelines/stages/matrixgame2_denoising.py:MatrixGame2CausalDenoisingStage``.
+The DiT call is dispatched two ways so the SAME loop runs on the CPU toy AND the GPU adapter:
   * GPU: ``model.component('transformer')`` is a ``MatrixGame2CausalDiT`` exposing ``.call(...)`` with the
     causal kv_cache / i2v / action plumbing built INTERNALLY (the loop just passes numpy + the cache lists).
-  * CPU toy: ``ToyDiT`` has only ``dit(latent, text_embed, sigma)``; the loop's ``_eps`` falls back to that
-    (no kv_cache — the toy is a degenerate stand-in exercising the DMD + block + epsilon->x0 control flow
-    with real numbers). The KV caches are still allocated + threaded so the structure is identical.
+  * CPU toy: ``ToyDiT`` has only ``dit(latent, text_embed, sigma)``; ``_eps`` falls back to that (no
+    kv_cache — a degenerate stand-in exercising the DMD + block + epsilon->x0 control flow with real
+    numbers). The KV caches are still allocated + threaded so the structure is identical.
 
-BRINGUP: the GPU kv_cache / crossattn_cache / action-cache shapes (``local_attn_size`` window, mouse-cache
-batch dim ``B*frame_seq_len``) come from the loaded arch_config and are allocated by the GPU adapter's
-companion init; on CPU we allocate lightweight placeholder dict lists so the threading is faithful but the
-toy ignores them. The MoE high/low-noise boundary path (``pred_noise_to_x_bound`` + ``add_noise_high``)
-exists for GTA/TempleRun variants (``boundary_ratio`` set); the Base distilled checkpoint is single-expert.
+The GPU kv_cache / crossattn_cache / action-cache shapes come from the loaded arch_config and are
+allocated by the GPU adapter's companion init; on CPU we allocate placeholder dict lists the toy ignores.
+The MoE high/low-noise boundary path (``pred_noise_to_x_bound`` + ``add_noise_high``) exists for
+GTA/TempleRun variants (``boundary_ratio`` set); the Base distilled checkpoint is single-expert.
 """
 from __future__ import annotations
 
@@ -57,7 +54,7 @@ from v2.recipes.matrixgame2.sampler import (
 )
 from v2.recipes.wan21.loop import latent_shape
 
-# Real Wan2.1 VAE (AutoencoderKLWan): z=16, 4x temporal, 8x spatial. The DiT patch_embedding is 32-in
+# Wan2.1 VAE (AutoencoderKLWan): z=16, 4x temporal, 8x spatial. The DiT patch_embedding is 32-in
 # (16 noise + 16 i2v cond_concat) but the LOOP's latent is the 16ch noise; the adapter does the concat.
 MATRIXGAME2_LATENT_CHANNELS = 16
 MATRIXGAME2_TEMPORAL_RATIO = 4
@@ -291,10 +288,10 @@ class MatrixGame2CausalDMDLoop:
     # advance                                                                #
     # --------------------------------------------------------------------- #
     def advance(self, st: LoopState, result: StepResult) -> LoopState:
-        # Monotonic progress counter: this loop drives control flow off block_idx/dmd_idx/phase (in
-        # scratch), but the runtime's no-progress watchdog (engine ProgramRunner._progress) keys on
-        # st.step_idx. Bump it on EVERY executed work unit (each DMD step AND each clean-context pass)
-        # so a multi-block causal rollout is seen to advance — every other recipe loop does the same.
+        # Monotonic progress counter: control flow runs off block_idx/dmd_idx/phase in scratch, but the
+        # runtime's no-progress watchdog (engine ProgramRunner._progress) keys on st.step_idx. Bump it on
+        # EVERY executed work unit (each DMD step AND each clean-context pass) so a multi-block causal
+        # rollout is seen to advance.
         st.step_idx += 1
         out = result.output
         start, num = out["start"], out["num"]

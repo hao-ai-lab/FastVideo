@@ -17,15 +17,15 @@ the 65ch latent concat, the 3-stream conditioning list, the per-frame heterogene
 camera/action tensors INTERNALLY, so this loop only calls the cosmos2/ToyDiT-compatible
 ``dit(latent, text_embed, sigma)`` (with the per-chunk camera context threaded via ``context=``).
 
-BRINGUP (documented honestly — needs a request-API extension to be real):
-  * The default preset (num_frames=125 -> ~32 latent frames, chunk 16 -> 2 chunks) WILL execute chunk>0.
+BRINGUP (needs a request-API extension to be real):
+  * The default preset (num_frames=125 -> ~32 latent frames, chunk 16 -> 2 chunks) will execute chunk>0.
     Camera-aligned memory retrieval, ProPE camera attention, and per-frame action conditioning all need
     ``viewmats``/``Ks``/``action`` carried from a pose string (``pose="w-31"`` -> ``pose_to_input`` +
-    ``compute_latent_num``). The v2 request/program has no slot for the pose string yet, so on the CPU
-    toy path (and absent a pose) this loop runs the **degenerate single-chunk t2v path**: it clamps
-    ``chunk_num`` to the number of whole chunks but the camera/memory selection is skipped (the adapter
-    builds zero camera/action internally). On a GPU box with a pose-carrying request, the chunk>0 branch
-    (memory retrieval + frozen context) activates — that path is written-not-run here.
+    ``compute_latent_num``). The v2 request/program has no slot for the pose string yet, so absent a
+    pose (the CPU toy path) this loop runs the degenerate per-chunk t2v path: it clamps ``chunk_num`` to
+    the number of whole chunks but skips camera/memory selection (the adapter builds zero camera/action
+    internally). On a GPU box with a pose-carrying request the chunk>0 branch (memory retrieval + frozen
+    context) activates; that path is written-not-run here.
 """
 from __future__ import annotations
 

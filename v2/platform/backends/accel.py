@@ -1,8 +1,8 @@
-"""``accel`` — a pure-python stand-in accelerator backend (design_v3 §17 honesty note).
+"""``accel`` — a pure-python stand-in accelerator backend.
 
-There is no GPU in this environment, so to *prove* the dispatch substrate is genuinely
-device-generic — not a single-backend abstraction with a CPU special case — this backend registers
-a second device, ``accel``, entirely in CPU-resident Python. It exercises everything a real GPU
+There is no GPU in this environment, so to prove the dispatch substrate is genuinely
+device-generic (not a single-backend abstraction with a CPU special case) this backend registers a
+second device, ``accel``, entirely in CPU-resident Python. It exercises everything a real GPU
 backend would:
 
   * a **component** override — ``AccelDiT`` is built via ``COMPONENTS[("dit", "accel", …)]`` instead
@@ -11,12 +11,12 @@ backend would:
   * **kernels at different arch rungs** — ``flow_sde_step`` is registered at ``sm90`` directly, while
     ``flow_match_step`` is registered only at ``generic``, so resolving it on an ``sm90`` accel
     platform must walk the arch fallback ``sm90 → sm80 → generic`` to find it;
-  * the **parity oracle** — the ODE solver op (``_accel_flow_match_step``) is an *independently
-    written* kernel that nonetheless matches the numpy reference bit-for-bit, so a denoise run on the
-    accel platform equals the cpu run. That independent-impl-vs-reference equality is the oracle a
-    real backend must pass; the stand-in shows the check has teeth. (The SDE op below deliberately
-    *reuses* the reference impl — a backend may legitimately not specialize every op — so the SDE
-    test exercises the dispatch path, not an independent implementation.)
+  * the **parity oracle** — the ODE solver op (``_accel_flow_match_step``) is an independently
+    written kernel that matches the numpy reference bit-for-bit, so a denoise run on the accel
+    platform equals the cpu run. That independent-impl-vs-reference equality is the oracle a real
+    backend must pass. (The SDE op below deliberately reuses the reference impl — a backend may
+    legitimately not specialize every op — so the SDE test exercises the dispatch path, not an
+    independent implementation.)
 
 On a real box this file is where a torch/cuda backend would register its adapters and fused kernels
 (unified primitives + model-co-located fusion variants) through the same two functions.
@@ -79,8 +79,7 @@ def _build_accel_component(spec: Any, instance: Any, platform: Any) -> AccelComp
 # Override more than one component kind on accel (proving the seam is kind-generic, not dit-special).
 # text_encoder is deliberately left UNregistered so the device→cpu fallback path stays demonstrated.
 for _kind in ("vae", "audio_vae"):
-    register_component(_kind, _build_accel_component, device="accel",
-                       source="accel(stand-in):AccelComponent")
+    register_component(_kind, _build_accel_component, device="accel", source="accel(stand-in):AccelComponent")
 
 
 # --------------------------------------------------------------------------- #
@@ -93,8 +92,11 @@ def _accel_flow_match_step(x_t, velocity, sigma_t: float, sigma_next: float):
 
 # flow_match_step lives only at the `generic` arch rung → resolving on sm90 must fall back through
 # the arch chain (sm90 → sm80 → generic). This proves the arch-fallback walk.
-register_kernel(FLOW_MATCH_STEP, _accel_flow_match_step,
-                device="accel", arch="generic", source="accel(stand-in):fused_flow_match")
+register_kernel(FLOW_MATCH_STEP,
+                _accel_flow_match_step,
+                device="accel",
+                arch="generic",
+                source="accel(stand-in):fused_flow_match")
 
 # flow_sde_step is registered at sm90 directly. This backend does NOT specialize the SDE op — it
 # reuses the numpy reference, so the accel SDE path is the same function as cpu (the SDE parity test
@@ -102,5 +104,8 @@ register_kernel(FLOW_MATCH_STEP, _accel_flow_match_step,
 # independent oracle). A device that DID specialize SDE would be checked the same way the ODE op is.
 from v2.loop.sampler import flow_sde_step_with_logprob  # noqa: E402
 
-register_kernel(FLOW_SDE_STEP, flow_sde_step_with_logprob,
-                device="accel", arch="sm90", source="accel(stand-in):sde_logprob")
+register_kernel(FLOW_SDE_STEP,
+                flow_sde_step_with_logprob,
+                device="accel",
+                arch="sm90",
+                source="accel(stand-in):sde_logprob")

@@ -1,9 +1,8 @@
-"""The (recipe, runtime) flywheel — RL → distill → faster card (design_v3 §16; §9.18).
+"""The (recipe, runtime) flywheel — RL → distill → faster card.
 
-design_v3's central product claim, made concrete: RL the base (DiffusionNFT), then distill from the
-RL'd model (a DMD2 student whose teacher IS the RL'd policy), producing a faster card whose recipe
-records the provenance chain base → rl → distilled. Both stages drive the same denoise loop the engine
-serves — the flywheel is real, not aspirational.
+RL the base (DiffusionNFT), then distill from the RL'd model (a DMD2 student whose teacher IS the
+RL'd policy), producing a faster card whose recipe records the provenance chain base → rl →
+distilled. Both stages drive the same denoise loop the engine serves.
 """
 from __future__ import annotations
 

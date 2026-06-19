@@ -1,20 +1,20 @@
-"""LingBot-World i2v program: image_encode (CLIP) -> cond_encode (first-frame VAE [mask|cond]) ->
+"""LingBot-World i2v program: image_encode -> cond_encode (first-frame VAE [mask|cond]) ->
 camera_encode (Plucker) -> text_encode -> i2v_denoise (dual-guidance MoE) -> vae_decode.
 
-Same inline shape as the Wan i2v program (the i2v conditioning is identical to Wan2.2-I2V-A14B), with one
-NEW node: ``camera_encode`` builds the camera/Plucker tensor ``c2ws_plucker_emb`` the LingBot-World DiT
-FiLM-injects per block. The ``LingBotWorldDenoiseLoop`` reads that slot and publishes it onto the active
-expert adapter; the dual-guidance / MoE specifics live in the loop + adapter, so the node graph is a thin
-superset of Wan i2v.
+Same inline shape as the Wan i2v program (the i2v conditioning matches Wan2.2-I2V-A14B), plus one new
+node: ``camera_encode`` builds the camera/Plucker tensor ``c2ws_plucker_emb`` that the DiT FiLM-injects
+per block. The ``LingBotWorldDenoiseLoop`` reads that slot and publishes it onto the active expert adapter;
+the dual-guidance / MoE specifics live in the loop + adapter, so the node graph is a thin superset of Wan
+i2v.
 
-BRINGUP (blocker #2 — needs a request-API extension): v2's ``Request`` has no camera-trajectory input
-slot. The camera node therefore looks for an ``action_path`` in the node override
+BRINGUP (needs a request-API extension): v2's ``Request`` has no camera-trajectory input slot. The camera
+node therefore looks for an ``action_path`` in the node override
 (``request.node_override("camera_encode")["action_path"]``, pointing at a dir with ``poses.npy`` +
 ``intrinsics.npy``) and, if present, builds the Plucker tensor via the fastvideo
 ``prepare_camera_embedding`` (``spatial_scale=8`` to match the VAE 8x). Absent (the default, and the CPU
-toy path) -> it writes ``None`` and the loop runs the degenerate no-camera i2v step. ``prepare_camera_embedding``
-also re-clamps ``num_frames`` to the trajectory length (4k+1); the v2 frame count is taken from the
-request, so on GPU the camera node and the request num_frames must agree (verify at bring-up).
+toy path) -> it writes ``None`` and the loop runs the degenerate no-camera i2v step.
+``prepare_camera_embedding`` also re-clamps ``num_frames`` to the trajectory length (4k+1); the v2 frame
+count comes from the request, so on GPU the camera node and the request num_frames must agree.
 """
 from __future__ import annotations
 
@@ -38,12 +38,12 @@ def _i2v_cond_encode(instance, slots, request, ctx) -> None:
     """First-frame VAE conditioning + mask (mirrors fastvideo's ImageVAEEncodingStage): encode the
     conditioning image as frame 0 (rest zeros), prepend a 4-channel mask (first latent frame = 1).
 
-    This model's DiT has ``in_channels=36`` (16 noise + 4 mask + 16 cond latent), so the i2v cond slot is
-    REQUIRED for a well-formed forward — a None cond would feed only 16ch into a 36ch patch embedding. The
-    v2 convenience API (``generate_video(prompt=...)``) supplies no image, so for the bring-up we synthesize
-    a BLANK first frame (zeros): the latent concat shape is correct and the run produces a finite output
-    (degenerate no-image i2v, the goal being loads+runs+finite, not quality). A real conditioning image
-    (when ``request.image()`` is present) takes the normal path."""
+    The DiT has ``in_channels=36`` (16 noise + 4 mask + 16 cond latent), so the i2v cond slot is REQUIRED
+    for a well-formed forward — a None cond would feed only 16ch into a 36ch patch embedding. The v2
+    convenience API (``generate_video(prompt=...)``) supplies no image, so for bring-up we synthesize a
+    blank (zeros) first frame: the latent concat shape is correct and the run produces a finite output
+    (degenerate no-image i2v). A real conditioning image (``request.image()`` present) takes the normal
+    path."""
     img = request.image()
     nf = int(request.diffusion.num_frames)
     h_px, w_px = int(request.diffusion.height), int(request.diffusion.width)

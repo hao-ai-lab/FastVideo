@@ -1,4 +1,4 @@
-"""Disaggregated program execution (design_v3 §13; design.md §6.3.4; sglang multimodal_gen).
+"""Disaggregated program execution (cf. sglang multimodal_gen).
 
 Runs a Program across role pools: each node executes on its assigned pool's resident instance, and
 cross-pool edges move slots through the producing pool's connector (with credit flow-control +
@@ -25,6 +25,7 @@ from v2.runtime.engine import _to_artifact
 
 
 class DisaggregatedRunner:
+
     def __init__(self, pools, program: Program, request: Any, *, observers, interceptors):
         self.pools = pools
         self.program = program
@@ -32,7 +33,7 @@ class DisaggregatedRunner:
         self.observers = observers
         self.interceptors = interceptors
         self.slots: dict[str, Any] = {}
-        self.slot_pool: dict[str, str] = {}          # slot name -> pool_id currently holding it
+        self.slot_pool: dict[str, str] = {}  # slot name -> pool_id currently holding it
         self.metrics: dict[str, float] = {}
         self.transfers = 0
         self.node_idx = 0
@@ -53,10 +54,15 @@ class DisaggregatedRunner:
 
     def _ctx_for(self, pool) -> RuntimeLoopContext:
         if pool.pool_id not in self._ctxs:
-            self._ctxs[pool.pool_id] = RuntimeLoopContext(
-                pool.instance, observers=self.observers, interceptors=self.interceptors,
-                slots=self.slots, stream=self.stream, cancel_scope=self.cancel_scope,
-                profile=ExecutionProfile.SERVE, metrics=self.metrics, request_id=self.request.request_id)
+            self._ctxs[pool.pool_id] = RuntimeLoopContext(pool.instance,
+                                                          observers=self.observers,
+                                                          interceptors=self.interceptors,
+                                                          slots=self.slots,
+                                                          stream=self.stream,
+                                                          cancel_scope=self.cancel_scope,
+                                                          profile=ExecutionProfile.SERVE,
+                                                          metrics=self.metrics,
+                                                          request_id=self.request.request_id)
         return self._ctxs[pool.pool_id]
 
     def _leave_current(self) -> None:
@@ -70,19 +76,22 @@ class DisaggregatedRunner:
             holder_id = self.slot_pool.get(r)
             if holder_id and holder_id != pool.pool_id and r in self.slots:
                 src = self.pools.by_id[holder_id]
-                got = src.connector.acquire_credit()                  # credit-based flow control
+                got = src.connector.acquire_credit()  # credit-based flow control
                 try:
-                    manifest = TransferManifest(keys=(r,), producer_id=holder_id, consumer_id=pool.pool_id,
-                                                src_location=src.connector.name, dst_location=pool.connector.name,
+                    manifest = TransferManifest(keys=(r, ),
+                                                producer_id=holder_id,
+                                                consumer_id=pool.pool_id,
+                                                src_location=src.connector.name,
+                                                dst_location=pool.connector.name,
                                                 nbytes=payload_nbytes(self.slots.get(r)))
                     src.connector.put(r, self.slots.get(r), manifest)  # producer publishes (chunk_ready)
-                    if src.connector.chunk_ready(r):                   # readiness signal
-                        self.slots[r] = src.connector.take(r)          # consumer fetches
-                        self.slot_pool[r] = pool.pool_id               # re-home ONLY on a successful fetch
+                    if src.connector.chunk_ready(r):  # readiness signal
+                        self.slots[r] = src.connector.take(r)  # consumer fetches
+                        self.slot_pool[r] = pool.pool_id  # re-home ONLY on a successful fetch
                         self.transfers += 1
                         self.metrics["transfers"] = self.metrics.get("transfers", 0) + 1
                 finally:
-                    if got:                                            # never leak a credit on an error path
+                    if got:  # never leak a credit on an error path
                         src.connector.release_credit()
 
     def _commit_node_writes(self, node, pool) -> None:
@@ -92,7 +101,7 @@ class DisaggregatedRunner:
     def tick(self) -> bool:
         if self.done:
             return True
-        self.cancel_scope.check()                  # common-path cancellation (online + offline, all nodes)
+        self.cancel_scope.check()  # common-path cancellation (online + offline, all nodes)
         nodes = self.program.active_nodes(self.request)
         while True:
             if self.node_idx >= len(nodes):
@@ -103,10 +112,10 @@ class DisaggregatedRunner:
             node = nodes[self.node_idx]
             pool = self.pools.pool_for(node.node_id)
 
-            if pool is not self._cur_pool:                 # switching pools: capacity-aware dispatch
+            if pool is not self._cur_pool:  # switching pools: capacity-aware dispatch
                 if not pool.can_admit():
                     self.state = f"waiting:{pool.role}"
-                    return False                            # backpressure — pool at capacity
+                    return False  # backpressure — pool at capacity
                 self._leave_current()
                 pool.enter()
                 self._cur_pool = pool
@@ -123,8 +132,8 @@ class DisaggregatedRunner:
 
             if isinstance(node, ModelLoopNode):
                 if self.loop_runner is None:
-                    self.loop_runner = LoopRunner(pool.instance.loop(node.loop_id),
-                                                  self._ctx_for(pool), self.request, pool.instance)
+                    self.loop_runner = LoopRunner(pool.instance.loop(node.loop_id), self._ctx_for(pool), self.request,
+                                                  pool.instance)
                 plan = self.loop_runner.peek()
                 if plan is None:
                     self._finish_loop(node, pool)
@@ -133,7 +142,7 @@ class DisaggregatedRunner:
                 self.metrics["stepped_units"] = self.metrics.get("stepped_units", 0) + 1
                 if self.loop_runner.done:
                     self._finish_loop(node, pool)
-                return False                                # yield one loop step (for interleaving)
+                return False  # yield one loop step (for interleaving)
 
             self.node_idx += 1
 
@@ -153,7 +162,7 @@ class DisaggregatedRunner:
             self.tick()
             if not self.done and self._progress == p0:
                 stuck += 1
-                if stuck > 3:                               # single-runner: a stall means real OOM/capacity-0
+                if stuck > 3:  # single-runner: a stall means real OOM/capacity-0
                     raise RuntimeError(f"disaggregated request {self.request.request_id} stalled "
                                        f"(state={self.state}); a pool cannot admit it")
             else:
@@ -161,11 +170,15 @@ class DisaggregatedRunner:
 
     def close(self) -> None:
         """Release any pool this request is occupying (idempotent). Called on terminal exit so a
-        cancel/error mid-loop never leaks pool capacity (the §6.4 failure-isolation guarantee)."""
+        cancel/error mid-loop never leaks pool capacity (failure-isolation guarantee)."""
         self._leave_current()
 
     def output(self) -> Output:
-        artifacts = {name: _to_artifact(name, self.slots.get(slot), producer=slot)
-                     for name, slot in self.program.output_artifacts.items()}
-        return Output(request_id=self.request.request_id, artifacts=artifacts,
-                      metrics=dict(self.metrics, transfers=float(self.transfers)), error=self.error)
+        artifacts = {
+            name: _to_artifact(name, self.slots.get(slot), producer=slot)
+            for name, slot in self.program.output_artifacts.items()
+        }
+        return Output(request_id=self.request.request_id,
+                      artifacts=artifacts,
+                      metrics=dict(self.metrics, transfers=float(self.transfers)),
+                      error=self.error)

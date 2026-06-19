@@ -1,10 +1,9 @@
-"""LoopRunner — the only place iteration lives (design_v3 §5.1).
+"""LoopRunner — the only place iteration lives.
 
-This is the runtime's driver, factored so the engine can either run it to completion
+The runtime's driver, factored so the engine can either run it to completion
 (``run``) or advance it one step at a time (``peek`` + ``step``) to **interleave** the steps
 of concurrent requests. Per-request state is entirely in ``LoopState``; the runner holds no
-hidden iteration state beyond a cached pending plan, so interleaving is safe by construction
-(the property the §9.3 interleave gate verifies).
+hidden iteration state beyond a cached pending plan, so interleaving is safe by construction.
 """
 from __future__ import annotations
 
@@ -14,6 +13,7 @@ from v2.loop.contracts import Done, LoopContext, LoopResult, LoopState, WorkPlan
 
 
 class LoopRunner:
+
     def __init__(self, loop: Any, ctx: LoopContext, request: Any, model: Any):
         self.loop = loop
         self.ctx = ctx

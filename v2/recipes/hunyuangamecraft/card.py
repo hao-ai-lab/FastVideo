@@ -1,20 +1,19 @@
-"""HunyuanGameCraft ModelCard — camera/action-conditioned interactive i2v (the registered preset is the
-t2v/degenerate path; the action/camera conditioning is BRINGUP — see the recipe ``__init__`` docstring).
+"""HunyuanGameCraft ModelCard — camera/action-conditioned interactive i2v. The registered preset is the
+t2v/degenerate path; the action/camera conditioning is BRINGUP (see the recipe ``__init__`` docstring).
 
 Architecture deltas vs Wan (all declared on the card so the recipe is self-contained):
-  * DiT  ``fastvideo.models.dits.hunyuangamecraft:HunyuanGameCraftTransformer3DModel`` — a flow-match DiT
-    whose forward takes a **33-channel** input ``cat([latent16|gt_latent16|mask1])`` (assembled by the
-    loop/adapter, NOT the DiT), a **list** of text states ``[LLaMA(4096d), CLIP-pooled(768d)]``, an
-    optional ``camera_states`` (CameraNet Plücker), and ``guidance=None`` (plain ClassicCFG, NO embedded
-    guidance). Adapter -> ``GameCraftDiT``; the new ``GameCraftDenoiseLoop`` does the 33ch concat
-    (via the adapter), per-step clean-ref injection, and flow-match Euler.
-  * VAE  ``fastvideo.models.vaes.gamecraftvae:GameCraftVAE`` — SCALAR ``scaling_factor=0.476986``
-    normalization (NOT Wan per-channel stats). Adapter -> ``GameCraftVAE`` (cannot reuse ``WanVAE``).
-  * Text ``fastvideo.models.encoders.llama:LlamaModel`` (LLaVA-LLaMA-3-8B, 4096d -> ``text_states``) and
-    ``fastvideo.models.encoders.clip:CLIPTextModel`` (CLIP ViT-L/14, 768d pooled -> ``text_states_2``).
-    Adapters -> ``GameCraftLlamaEncoder`` / ``GameCraftClipEncoder``.
-The diffusers checkpoint layout has extra ``text_encoder_2/`` + ``tokenizer_2/`` subfolders the Wan stamp
-lacks, so this file extends ``stamp_wan21_checkpoints`` with a GameCraft-specific stamp.
+  * DiT  ``HunyuanGameCraftTransformer3DModel`` — a flow-match DiT whose forward takes a 33-channel input
+    ``cat([latent16|gt_latent16|mask1])`` (assembled by the adapter, not the DiT), a list of text states
+    ``[LLaMA(4096d), CLIP-pooled(768d)]``, an optional ``camera_states`` (CameraNet Plücker), and
+    ``guidance=None`` (plain ClassicCFG, no embedded guidance). Adapter ``GameCraftDiT``; the
+    ``GameCraftDenoiseLoop`` does the 33ch concat (via the adapter), per-step clean-ref injection, and
+    flow-match Euler.
+  * VAE  ``GameCraftVAE`` — SCALAR ``scaling_factor=0.476986`` normalization (not Wan per-channel stats);
+    cannot reuse ``WanVAE``.
+  * Text  ``LlamaModel`` (LLaVA-LLaMA-3-8B, 4096d -> ``text_states``) and ``CLIPTextModel`` (CLIP ViT-L/14,
+    768d pooled -> ``text_states_2``). Adapters ``GameCraftLlamaEncoder`` / ``GameCraftClipEncoder``.
+The diffusers layout adds ``text_encoder_2/`` + ``tokenizer_2/`` subfolders the Wan stamp lacks, so this
+file extends ``stamp_wan21_checkpoints`` with a GameCraft-specific stamp.
 """
 from __future__ import annotations
 
@@ -159,11 +158,11 @@ _GAMECRAFT_SUBFOLDERS = {
 
 
 def stamp_gamecraft_checkpoints(card: ModelCard, model_root: str) -> ModelCard:
-    """GPU deploy-time: point each component's ``ComponentSpec.checkpoint`` at its weights subfolder under
-    ``model_root`` (a local diffusers dir or an HF id resolved via ``snapshot_download``). Mirrors
-    ``stamp_wan21_checkpoints`` but covers GameCraft's ``text_encoder_2`` (the Wan stamp lacks it). The
-    sibling ``tokenizer/`` (LLaMA) and ``tokenizer_2/`` (CLIP) + ``scheduler/`` subfolders are loaded by
-    the torch adapters from ``dirname(checkpoint)``. Mutates and returns the card. BRINGUP risk A."""
+    """Point each component's ``ComponentSpec.checkpoint`` at its weights subfolder under ``model_root`` (a
+    local diffusers dir or an HF id resolved via ``snapshot_download``). Like ``stamp_wan21_checkpoints``
+    but also covers GameCraft's ``text_encoder_2`` (the Wan stamp lacks it). The torch adapters load the
+    sibling ``tokenizer/`` (LLaMA), ``tokenizer_2/`` (CLIP), and ``scheduler/`` subfolders from
+    ``dirname(checkpoint)``. Mutates and returns the card. BRINGUP risk A."""
     import os
     if not os.path.isdir(model_root):
         from huggingface_hub import snapshot_download

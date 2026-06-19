@@ -1,4 +1,4 @@
-"""Speculative (draft-verify) decoding: a draft + target AR pair, exact + lower-latency (design_v3 §9.16)."""
+"""Speculative (draft-verify) decoding: a draft + target AR pair, exact + lower-latency."""
 from __future__ import annotations
 
 from v2.recipes.speculative.card import build_speculative_card

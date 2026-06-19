@@ -1,7 +1,7 @@
-"""Piecewise CUDA-graph capture/replay at the driven-loop step boundary (Path A; design_v3 §6.2).
+"""Piecewise CUDA-graph capture/replay at the driven-loop step boundary.
 
-The chosen optimization path (Path A) is hand-fused kernels behind the registry + piecewise CUDA
-graphs captured at the step boundary — NOT a compiler. This module is the capture/replay LIFECYCLE:
+The chosen optimization path is hand-fused kernels behind the registry + piecewise CUDA graphs
+captured at the step boundary — NOT a compiler. This module is the capture/replay LIFECYCLE:
 when to capture a step into a graph, when to replay it, when to eager-break (a data-dependent step a
 static graph cannot hold), and when to invalidate (shape or resident-weights change).
 
@@ -54,7 +54,8 @@ Honest scope — what this mini still does NOT model (bites a real GPU, not the 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import numpy as np
 
@@ -69,14 +70,14 @@ class StaticWorkspace:
 
     @staticmethod
     def _mk(v: Any):
-        return None if v is None else np.array(v)      # scalars become 0-d arrays; arrays are copied
+        return None if v is None else np.array(v)  # scalars become 0-d arrays; arrays are copied
 
     @classmethod
-    def alloc(cls, inputs: dict[str, Any]) -> "StaticWorkspace":
+    def alloc(cls, inputs: dict[str, Any]) -> StaticWorkspace:
         b = {k: cls._mk(v) for k, v in inputs.items()}
         x = inputs.get("x")
         if x is not None:
-            b["out"] = np.array(x)                      # static output buffer, latent-shaped
+            b["out"] = np.array(x)  # static output buffer, latent-shaped
         return cls(b)
 
     def bind(self, inputs: dict[str, Any]) -> None:
@@ -86,7 +87,7 @@ class StaticWorkspace:
                 if v is not None:
                     raise ValueError(f"workspace[{k!r}] was None at capture but has a value on replay")
                 continue
-            np.copyto(cur, v)                           # in place; raises if shapes/dtypes don't fit
+            np.copyto(cur, v)  # in place; raises if shapes/dtypes don't fit
 
     def __getitem__(self, k: str):
         return self._b[k]
@@ -96,7 +97,7 @@ class StaticWorkspace:
 class CapturedGraph:
     """A keyed record standing in for a captured ``torch.cuda.CUDAGraph`` + its static buffers."""
     key: tuple
-    workspace: Any                  # StaticWorkspace (the reused fixed buffers), or None
+    workspace: Any  # StaticWorkspace (the reused fixed buffers), or None
     workspace_bytes: int
     replays: int = 0
 
@@ -106,7 +107,7 @@ class GraphCapturer:
     captured graph is valid only for that instance's resident weights + shapes."""
 
     def __init__(self, enabled: bool = True) -> None:
-        self.enabled = enabled                  # off ⇒ always eager (the no-cudagraph baseline)
+        self.enabled = enabled  # off ⇒ always eager (the no-cudagraph baseline)
         self._graphs: dict[tuple, CapturedGraph] = {}
         self.stats = {"captures": 0, "replays": 0, "eager_breaks": 0}
 
@@ -116,14 +117,12 @@ class GraphCapturer:
         backend (device, arch) · loop · batch-shape signature · resident-weight versions · the
         op-structure discriminators (CFG branch set / expert) the plan declares."""
         loop = instance.card.loops.get(plan.loop_id) if instance.card else None
-        resident = tuple(sorted((cid, instance.version_of(cid))
-                                for cid in (loop.shared_weight_components if loop else ())))
+        resident = tuple(
+            sorted((cid, instance.version_of(cid)) for cid in (loop.shared_weight_components if loop else ())))
         p = instance.platform
-        return (p.device, p.arch, plan.loop_id, plan.shape_sig.batch_key,
-                resident, tuple(plan.graph_key))
+        return (p.device, p.arch, plan.loop_id, plan.shape_sig.batch_key, resident, tuple(plan.graph_key))
 
-    def dispatch(self, plan: Any, instance: Any, override: Any,
-                 eager: Callable[[Any], Any]) -> Any:
+    def dispatch(self, plan: Any, instance: Any, override: Any, eager: Callable[[Any], Any]) -> Any:
         """Run one step under the capture lifecycle. ``eager(override)`` runs the eager step thunk
         (override / stochastic / no-capture paths). A capturable step runs its ``graph_fn`` against
         the keyed ``StaticWorkspace``; replay rebinds the current inputs into the SAME buffers and
@@ -150,10 +149,9 @@ class GraphCapturer:
 
         # HIT → replay. peak-workspace proxy guard (declared static workspace must match)...
         if g.workspace_bytes != ws_bytes:
-            raise RuntimeError(
-                f"cudagraph key collision: key {key} captured a {g.workspace_bytes}-byte workspace "
-                f"but this step needs {ws_bytes} — the capture key is insufficient and would corrupt "
-                f"a real graph. This is a keying bug, not a runtime condition.")
+            raise RuntimeError(f"cudagraph key collision: key {key} captured a {g.workspace_bytes}-byte workspace "
+                               f"but this step needs {ws_bytes} — the capture key is insufficient and would corrupt "
+                               f"a real graph. This is a keying bug, not a runtime condition.")
         # ...and the real backstop: rebinding into the fixed buffers raises if shapes don't fit.
         g.workspace.bind(plan.graph_inputs)
         g.replays += 1

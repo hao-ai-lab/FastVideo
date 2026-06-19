@@ -1,4 +1,4 @@
-"""Qwen-Omni thinker→talker→vocoder — the third weight-sharing topology (design_v3 §4; vllm-omni
+"""Qwen-Omni thinker→talker→vocoder — the third weight-sharing topology (vllm-omni
 ``qwen2_5_omni`` pipeline).
 
 Asserts the Card/Loop/Program vocabulary holds for a THREE-expert, THREE-loop cascade — the topology

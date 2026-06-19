@@ -34,12 +34,12 @@ class ModelEntry:
 
 
 # Bucket-C ports — each is a self-contained recipe package (card-declared torch adapter via
-# ``ComponentSpec.adapter`` + a new/forked loop, no shared-backend edit). ONE table drives BOTH the
+# ``ComponentSpec.adapter`` + a new/forked loop, no shared-backend edit). One table drives both the
 # explicit HF-id registry (PRIMARY) and the ``select_by_architecture`` fallback, so adding a port is one
 # row. Rows: (hf_ids, package, card_builder, program_builder, transformer_cls). ``transformer_cls`` is the
 # diffusers/EntryClass name for the fallback ("" = explicit-id-only; confirm against the real checkpoint's
-# transformer/config.json _class_name). Builders are resolved lazily (``import v2.registry`` stays cheap /
-# torch-free; the recipe packages are CPU-clean but importing 14 of them eagerly on every resolve is waste).
+# transformer/config.json _class_name). Builders are resolved lazily so ``import v2.registry`` stays cheap
+# and torch-free (the recipe packages are CPU-clean, but importing them all eagerly on every resolve is waste).
 _BUCKET_C: tuple[tuple, ...] = (
     (("KyleShao/Cosmos-Predict2.5-2B-Diffusers", "nvidia/Cosmos-Predict2.5-14B"), "cosmos25", "build_cosmos25_card",
      "build_cosmos25_program", "Cosmos25Transformer3DModel"),
@@ -217,7 +217,7 @@ def select_by_architecture(sig: dict):
     """FALLBACK: map an architecture signature -> (build_card, build_program) by class names, so a local
     path / renamed repo / new distilled variant of a known arch still resolves with no registry entry."""
     tr, pipe = sig.get("transformer_cls"), sig.get("pipeline")
-    for (_hf, pkg, cb, pb, cls) in _BUCKET_C:  # the 14 bucket-C ports, keyed by transformer cls
+    for (_hf, pkg, cb, pb, cls) in _BUCKET_C:  # the bucket-C ports, keyed by transformer cls
         if cls and tr == cls:
             import importlib
             mod = importlib.import_module(f"v2.recipes.{pkg}")

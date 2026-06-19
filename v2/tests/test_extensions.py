@@ -1,6 +1,6 @@
-"""Observers + interceptors (design_v3 §11). The headline: per-request interceptor state is
-interleave-safe; a module-global version provably is NOT — which is *why* §11 scopes state to
-``LoopState.plugin_state`` per request and per CFG branch.
+"""Observers + interceptors. Per-request interceptor state is interleave-safe; a module-global
+version provably is NOT — which is why state is scoped to ``LoopState.plugin_state`` per request
+and per CFG branch.
 """
 from __future__ import annotations
 

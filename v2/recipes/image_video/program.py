@@ -1,4 +1,4 @@
-"""T2I and I2V programs + the cross-model workflow that chains them (design_v3 §13, §15).
+"""T2I and I2V programs + the cross-model workflow that chains them.
 
     Workflow "t2i_then_i2v":
         stage 1 (flux-t2i):  text_encode → t2i_denoise → vae_decode        → image
@@ -28,14 +28,21 @@ def _t2i_vae_decode(instance, slots, request, ctx) -> None:
 
 def build_flux_t2i_program() -> Program:
     return Program(
-        program_id="flux.t2i", kind=ProgramKind.INLINE,
+        program_id="flux.t2i",
+        kind=ProgramKind.INLINE,
         nodes=[
             ComponentNode("text_encode", fn=_text_encode, writes=("text_embeds", "neg_text_embeds")),
-            ModelLoopNode("denoise", loop_id="t2i_denoise", output_slot="t2i_out",
-                          reads=("text_embeds",), writes=("t2i_out",)),
-            ComponentNode("vae_decode", fn=_t2i_vae_decode, reads=("t2i_out",), writes=("image",)),
+            ModelLoopNode("denoise",
+                          loop_id="t2i_denoise",
+                          output_slot="t2i_out",
+                          reads=("text_embeds", ),
+                          writes=("t2i_out", )),
+            ComponentNode("vae_decode", fn=_t2i_vae_decode, reads=("t2i_out", ), writes=("image", )),
         ],
-        output_artifacts={"image": "image", "latents": "t2i_out"},
+        output_artifacts={
+            "image": "image",
+            "latents": "t2i_out"
+        },
     ).validate()
 
 
@@ -55,7 +62,7 @@ def _condition_on_image(instance, slots, request, ctx) -> None:
     cond = slots.get("cond_latent")
     if cond is None:
         return
-    shift = float(np.tanh(np.mean(np.asarray(cond, dtype="float64"))))   # image-derived conditioning
+    shift = float(np.tanh(np.mean(np.asarray(cond, dtype="float64"))))  # image-derived conditioning
     te = np.asarray(slots["text_embeds"], dtype="float32")
     slots["text_embeds"] = (te + shift).astype("float32")
     slots["image_shift"] = shift
@@ -67,57 +74,81 @@ def _i2v_vae_decode(instance, slots, request, ctx) -> None:
 
 def build_wan_i2v_program() -> Program:
     return Program(
-        program_id="wan.i2v", kind=ProgramKind.INLINE,
+        program_id="wan.i2v",
+        kind=ProgramKind.INLINE,
         nodes=[
-            ComponentNode("encode_cond_image", fn=_encode_cond_image, writes=("cond_latent",)),
+            ComponentNode("encode_cond_image", fn=_encode_cond_image, writes=("cond_latent", )),
             ComponentNode("text_encode", fn=_text_encode, writes=("text_embeds", "neg_text_embeds")),
-            ComponentNode("condition_on_image", fn=_condition_on_image,
-                          reads=("cond_latent", "text_embeds"), writes=("text_embeds", "image_shift")),
-            ModelLoopNode("denoise", loop_id="i2v_denoise", output_slot="i2v_out",
-                          reads=("text_embeds",), writes=("i2v_out",)),
-            ComponentNode("vae_decode", fn=_i2v_vae_decode, reads=("i2v_out",), writes=("video",)),
+            ComponentNode("condition_on_image",
+                          fn=_condition_on_image,
+                          reads=("cond_latent", "text_embeds"),
+                          writes=("text_embeds", "image_shift")),
+            ModelLoopNode("denoise",
+                          loop_id="i2v_denoise",
+                          output_slot="i2v_out",
+                          reads=("text_embeds", ),
+                          writes=("i2v_out", )),
+            ComponentNode("vae_decode", fn=_i2v_vae_decode, reads=("i2v_out", ), writes=("video", )),
         ],
-        output_artifacts={"video": "video", "latents": "i2v_out"},
+        output_artifacts={
+            "video": "video",
+            "latents": "i2v_out"
+        },
     ).validate()
 
 
 # --- the cross-model workflow ----------------------------------------------------- #
 def build_t2i_then_i2v_workflow(t2i_id: str = "flux-t2i", i2v_id: str = "wan-i2v") -> Workflow:
+
     def t2i_stage(state):
-        return make_request(TaskType.T2I, t2i_id, state["prompt"],
-                            diffusion=DiffusionParams(num_steps=4, num_frames=1,
-                                                      seed=state.get("seed", 0)))
+        return make_request(TaskType.T2I,
+                            t2i_id,
+                            state["prompt"],
+                            diffusion=DiffusionParams(num_steps=4, num_frames=1, seed=state.get("seed", 0)))
 
     def i2v_stage(state):
-        image = state["t2i:image"].tensor            # the decoded image from stage 1
-        return make_request(TaskType.I2V, i2v_id, state["prompt"],
-                            inputs=(TextPart(state["prompt"]), ImagePart(pixels=image)),
-                            diffusion=DiffusionParams(num_steps=4, num_frames=81,   # → multi-frame video
-                                                      seed=state.get("seed", 0)))
+        image = state["t2i:image"].tensor  # the decoded image from stage 1
+        return make_request(
+            TaskType.I2V,
+            i2v_id,
+            state["prompt"],
+            inputs=(TextPart(state["prompt"]), ImagePart(pixels=image)),
+            diffusion=DiffusionParams(
+                num_steps=4,
+                num_frames=81,  # → multi-frame video
+                seed=state.get("seed", 0)))
 
-    return Workflow("image_video.t2i_i2v", [          # namespaced id: <package>.<pipeline> (a servable)
-        WorkflowStage(t2i_id, t2i_stage, label="t2i"),
-        WorkflowStage(i2v_id, i2v_stage, label="i2v"),
-    ])
+    return Workflow(
+        "image_video.t2i_i2v",
+        [  # namespaced id: <package>.<pipeline> (a servable)
+            WorkflowStage(t2i_id, t2i_stage, label="t2i"),
+            WorkflowStage(i2v_id, i2v_stage, label="i2v"),
+        ])
 
 
 def build_t2i_i2v_extend_workflow(inner_id: str = "image_video.t2i_i2v", i2v_id: str = "wan-i2v") -> Workflow:
-    """A NESTED workflow (design_v3 §13; §9.13): its first stage is *another workflow* (the T2I→I2V
-    pipeline), whose video is then extended by an I2V pass. Proves composition is recursive — a
-    workflow id is a servable, so a stage can invoke a workflow exactly as it invokes a model."""
-    def shot1(state):                                 # stage 1 IS a workflow (engine.run routes it)
-        return make_request(TaskType.T2V, inner_id, state["prompt"],
+    """A NESTED workflow: its first stage is *another workflow* (the T2I→I2V pipeline), whose video
+    is then extended by an I2V pass. Composition is recursive — a workflow id is a servable, so a
+    stage can invoke a workflow exactly as it invokes a model."""
+
+    def shot1(state):  # stage 1 IS a workflow (engine.run routes it)
+        return make_request(TaskType.T2V,
+                            inner_id,
+                            state["prompt"],
                             diffusion=DiffusionParams(num_steps=4, num_frames=1, seed=state.get("seed", 0)))
 
     def shot2(state):
-        video = np.asarray(state["shot1:video"].frames)        # the inner workflow's output
-        first_frame = video[:, :1]                             # extend from its first frame
-        return make_request(TaskType.I2V, i2v_id, state["prompt"],
+        video = np.asarray(state["shot1:video"].frames)  # the inner workflow's output
+        first_frame = video[:, :1]  # extend from its first frame
+        return make_request(TaskType.I2V,
+                            i2v_id,
+                            state["prompt"],
                             inputs=(TextPart(state["prompt"]), ImagePart(pixels=first_frame)),
-                            diffusion=DiffusionParams(num_steps=4, num_frames=81,
-                                                      seed=state.get("seed", 0) + 1))
+                            diffusion=DiffusionParams(num_steps=4, num_frames=81, seed=state.get("seed", 0) + 1))
 
-    return Workflow("image_video.t2i_i2v_extend", [
-        WorkflowStage(inner_id, shot1, label="shot1"),         # ← a workflow stage
-        WorkflowStage(i2v_id, shot2, label="shot2"),
-    ])
+    return Workflow(
+        "image_video.t2i_i2v_extend",
+        [
+            WorkflowStage(inner_id, shot1, label="shot1"),  # ← a workflow stage
+            WorkflowStage(i2v_id, shot2, label="shot2"),
+        ])

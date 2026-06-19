@@ -1,4 +1,4 @@
-"""N-way joint RL over arbitrary experts (design_v3 §10) — generalizing the UniRL stress test.
+"""N-way joint RL over arbitrary experts — generalizing the UniRL stress test.
 
 Answers "can we do joint RL over MORE than two experts, or does it need a rewrite?": no rewrite. The
 substrate is already N-ready (a card holds N components/loops — Qwen-Omni shipped three; WeightSyncPlan
@@ -97,7 +97,7 @@ def test_each_expert_versions_independently_text_encoder_cache_preserved():
     m, rids, _ = _method(2)
     _train(m, iters=10)
     inst = m.student
-    assert inst.version_of("text_encoder") == "v0"                  # frozen encoder cache survives (§7.1)
+    assert inst.version_of("text_encoder") == "v0"                  # frozen encoder cache survives
     expert_vers = {inst.version_of(r) for r in rids} | {inst.version_of("transformer")}
     assert "v0" not in expert_vers                                  # every trained expert bumped
     assert len(expert_vers) == 3                                    # and each independently

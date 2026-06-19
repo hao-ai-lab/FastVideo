@@ -1,15 +1,15 @@
-"""Tagged memory pools with reservation-before-admission (design_v3 §6.2, §7.3).
+"""Tagged memory pools with reservation-before-admission.
 
-> Reservation must be pre-flight. A scheduler that admits a diffusion step and then
-> discovers it cannot allocate the VAE tile is wrong.
+Reservation must be pre-flight: a scheduler that admits a diffusion step and then discovers it
+cannot allocate the VAE tile is wrong.
 
 Sleep/wake is component-granular (tags are component names) for RL: drop DiT + caches,
-keep VAE/text-encoder resident (design_v3 §7.3; CuMem-style).
+keep VAE/text-encoder resident (CuMem-style).
 """
 from __future__ import annotations
 
 import itertools
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 class OutOfMemory(Exception):
@@ -28,6 +28,7 @@ class Reservation:
 
 
 class MemoryManager:
+
     def __init__(self, total_bytes: int = 1 << 40, per_tag_budget: dict[str, int] | None = None):
         self.total_bytes = total_bytes
         self.per_tag_budget = dict(per_tag_budget or {})

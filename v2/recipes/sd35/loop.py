@@ -1,7 +1,7 @@
 """SD3DenoiseLoop — a thin flow-match Euler denoise loop for Stable Diffusion 3.5 (image / 4D latents).
 
 SD3.5 is a plain FLOW-MATCH MMDiT, so this loop reuses the canonical pieces (``FLOW_MATCH_STEP`` kernel,
-``FlowShiftPolicy.build_schedule``, ``ClassicCFG``) — the only deltas vs ``WanDenoiseLoop`` are:
+``FlowShiftPolicy.build_schedule``, ``ClassicCFG``). Deltas vs ``WanDenoiseLoop``:
 
   * IMAGE modality / 4D latents: the latent is ``[16, h//8, w//8]`` (num_frames=1), with NO temporal
     dim. The fastvideo stage carries a fake T dim in its 5D ForwardBatch (unsqueeze(2)/squeeze(2)) but
@@ -15,8 +15,8 @@ SD3.5 is a plain FLOW-MATCH MMDiT, so this loop reuses the canonical pieces (``F
     Euler update is the plain ``x_next = x + (sigma_next - sigma)*v``.
 
 Faithful to ``fastvideo/pipelines/stages/sd35_conditioning.py:SD35DenoisingStage`` (uncond + s·(cond −
-uncond) CFG over the FlowMatchEuler schedule). The σ schedule is the flow-shift linspace; ``shift`` comes
-from the diffusers ``FlowMatchEulerDiscreteScheduler`` config (3.0 for SD3.5-medium) — see ``card.py``.
+uncond) CFG over the FlowMatchEuler schedule). The σ schedule is the flow-shift linspace; ``shift`` is
+the diffusers ``FlowMatchEulerDiscreteScheduler`` config (3.0 for SD3.5-medium) — see ``card.py``.
 """
 from __future__ import annotations
 

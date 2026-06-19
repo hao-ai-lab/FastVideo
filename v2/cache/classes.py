@@ -1,10 +1,7 @@
-"""Per-class cache pools (design_v3 §7.2).
+"""Per-class cache pools.
 
-> There is **no single unified block pool**, because a unified pool requires uniform
-> bytes-per-block and our cache classes differ by 150–500× in natural granularity ...
-> Each class gets a statically budgeted pool behind one ``CacheHandle``.
-
-Mini-fastvideo implements four classes (the §7.2 minimal set):
+No single unified block pool: cache classes differ by 150-500x in natural granularity, so
+each gets its own statically budgeted pool behind one ``CacheHandle``. Four classes:
   * ``FeatureCache``   — content-hash keyed, partitioned by adapter+weights (text/vision encoders)
   * ``ResidualCache``  — cache-dit residuals, scoped per request AND per CFG branch
   * ``SlabKVCache``    — chunk-KV slabs (self-forcing / world models); training mode disables recycle
@@ -15,7 +12,7 @@ KV is the minority case — a pure bidirectional deployment (Wan/LTX T2V) alloca
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from v2.cache.keys import CacheKey, CachePolicy
@@ -28,6 +25,7 @@ def _nbytes(value: Any) -> int:
 
 
 class _Pool:
+
     def __init__(self, policy: CachePolicy):
         self.policy = policy
         self.used_bytes = 0
@@ -36,7 +34,7 @@ class _Pool:
 
 
 class FeatureCache(_Pool):
-    """content-hash keyed, reference-counted-ish FIFO/LRU, budget-aware (§7.2).
+    """Content-hash keyed, budget-aware FIFO/LRU.
 
     Partitioned by ``adapter_versions``/``weights_version`` through the CacheKey, so two
     workflows sharing a prompt but differing in te-LoRA stack never serve stale embeddings.
@@ -44,7 +42,7 @@ class FeatureCache(_Pool):
 
     def __init__(self, policy: CachePolicy):
         super().__init__(policy)
-        self._store: "OrderedDict[str, tuple[Any, int, CacheKey]]" = OrderedDict()
+        self._store: OrderedDict[str, tuple[Any, int, CacheKey]] = OrderedDict()
 
     def get(self, key: CacheKey) -> Any | None:
         if not self.policy.reuse_across_requests:
@@ -52,7 +50,7 @@ class FeatureCache(_Pool):
         h = key.hash
         if h in self._store:
             self.hits += 1
-            self._store.move_to_end(h)       # LRU
+            self._store.move_to_end(h)  # LRU
             return self._store[h][0]
         self.misses += 1
         return None
@@ -80,7 +78,7 @@ class FeatureCache(_Pool):
             self.used_bytes -= nb
 
     def invalidate_components(self, components: set[str]) -> None:
-        """Drop only entries produced by the changed components (design_v3 §7.1 partition-not-flush):
+        """Drop only entries produced by the changed components (partition, not flush):
         a transformer-only weight sync must NOT evict text-encoder embeddings."""
         drop = [h for h, (_v, _nb, k) in self._store.items() if k.component_id in components]
         for h in drop:
@@ -89,7 +87,7 @@ class FeatureCache(_Pool):
 
 
 class ResidualCache(_Pool):
-    """cache-dit residual store, scoped per ``LoopState`` AND per CFG branch (§5.1, §11).
+    """cache-dit residual store, scoped per ``LoopState`` AND per CFG branch.
 
     Keyed by (namespace, branch, name) where namespace is the request/loop id. This is the
     structural fix for the module-global residual state that corrupts cache-dit forks under
@@ -124,10 +122,10 @@ class Slab:
 
 
 class SlabKVCache(_Pool):
-    """Chunk-KV slabs for causal/world-model rollout (§7.2).
+    """Chunk-KV slabs for causal/world-model rollout.
 
-    ``training_mode`` disables mid-rollout recycling and keeps grad-aware index snapshots
-    so activation-checkpoint recompute doesn't double-advance the cache (self-forcing).
+    ``training_mode`` disables mid-rollout recycling so activation-checkpoint recompute
+    doesn't double-advance the cache (self-forcing).
     """
 
     def __init__(self, policy: CachePolicy):

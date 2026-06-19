@@ -1,4 +1,4 @@
-"""Cross-model T2I→I2V workflow — composition across model *instances* (design_v3 §13).
+"""Cross-model T2I→I2V workflow — composition across model *instances*.
 
 LTX-2 already proves same-card multi-stage diffusion (base→refine). This proves the harder case the
 single-instance ``Program`` runner cannot express: chaining two *different* models (a T2I model and an

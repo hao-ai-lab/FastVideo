@@ -1,10 +1,9 @@
 """StableAudioDenoiseLoop — a v-prediction (EDM-v / VDenoiser) DPM++ denoise loop for Stable Audio Open.
 
-Stable Audio is NOT a flow-match model and NOT an EDM-Karras model: it is a v-prediction network sampled
-by k-diffusion's ``dpmpp-3m-sde`` (a 3rd-order multistep stochastic DPM-Solver++) over a POLYEXPONENTIAL
+Stable Audio is not a flow-match model and not an EDM-Karras model: it is a v-prediction network sampled
+by k-diffusion's ``dpmpp-3m-sde`` (a 3rd-order multistep stochastic DPM-Solver++) over a polyexponential
 sigma schedule (sigma_min=0.3, sigma_max=500, rho=1.0). So neither ``WanDenoiseLoop`` (flow-match) nor
-``CosmosDenoiseLoop`` (EDM-Karras x0) can be reused — this is a NEW loop (the spec's
-``NEEDS_NEW:StableAudioDenoiseLoop``).
+``CosmosDenoiseLoop`` (EDM-Karras x0) can be reused — this needs a new loop.
 
 Faithfulness vs ``fastvideo/pipelines/basic/stable_audio/stages/denoising.py``:
   * The schedule is polyexponential (``sampler.build_polyexponential_sigmas``), seeded noise scaled by
@@ -15,15 +14,15 @@ Faithfulness vs ``fastvideo/pipelines/basic/stable_audio/stages/denoising.py``:
   * CFG: ``denoised = uncond + (cond - uncond)·scale``, combined in x0 space (the
     ``_DiTAdapter`` convention; the negative cross-attn is null/zero, applied by the conditioning node).
 
-GPU PATH (BRINGUP — k_diffusion is an external dep, NOT installed in this env): the faithful, lowest-risk
-GPU route is to NOT decompose ``dpmpp-3m-sde`` into per-step v2 WorkPlans but to run the whole
-k-diffusion sampler inside ONE thunk: ``import k_diffusion as K; K.sampling.sample_dpmpp_3m_sde(
-K.external.VDenoiser(adapter), x, sigmas, ...)`` — a direct lift of the fastvideo stage. That requires a
-per-loop "single-shot" execution mode the v2 ``ctx.execute`` per-step contract does not yet expose
-(BRINGUP: needs a loop-as-one-thunk hook). For CPU-verification + per-step serving granularity, this loop
-ships a DETERMINISTIC DPM-Solver++(2M) recurrence in numpy over the SAME VDenoiser x0 — a faithful
-v-prediction multistep integrator that runs end-to-end on the CPU toy. The SDE (stochastic) higher-order
-``dpmpp-3m-sde`` terms are the GPU-parity refinement (BRINGUP) layered on top of this deterministic spine.
+GPU PATH (BRINGUP — k_diffusion is an external dep, not installed in this env): the faithful, lowest-risk
+GPU route is to run the whole k-diffusion sampler inside one thunk rather than decomposing
+``dpmpp-3m-sde`` into per-step v2 WorkPlans: ``K.sampling.sample_dpmpp_3m_sde(K.external.VDenoiser(adapter),
+x, sigmas, ...)`` — a direct lift of the fastvideo stage. That needs a per-loop "single-shot" execution
+mode the v2 ``ctx.execute`` per-step contract does not yet expose (BRINGUP: needs a loop-as-one-thunk hook).
+For CPU-verification + per-step serving granularity, this loop ships a deterministic DPM-Solver++(2M)
+recurrence in numpy over the same VDenoiser x0 — a faithful v-prediction multistep integrator that runs
+end-to-end on the CPU toy. The stochastic higher-order ``dpmpp-3m-sde`` terms are the GPU-parity refinement
+(BRINGUP) layered on top of this deterministic spine.
 
 A2A (init_audio -> lowered sigma_max) and RePaint inpainting (per-step blend callback) are threaded as
 inert hooks (None for the registered T2A preset) and documented BRINGUP — base port is pure text->audio.

@@ -1,10 +1,10 @@
-"""Role / stage pools (design_v3 §13, design.md §6.3.4; port of sglang multimodal_gen disagg).
+"""Role / stage pools (port of sglang multimodal_gen disagg).
 
 A ``RolePool`` is a single-node worker pool for one role (encoder / denoiser / decoder / …) holding
 its OWN resident ModelInstance (a component subset), its OWN cache manager, an outbound connector,
 and a capacity (max concurrent requests → capacity-aware dispatch). ``DeployConfig`` maps program
-nodes onto pools. Pools are single-node; multi-node scale is *multiple pools* fronted by the fleet
-(§14) — never a cross-node mesh inside one pool.
+nodes onto pools. Pools are single-node; multi-node scale is *multiple pools* fronted by the fleet —
+never a cross-node mesh inside one pool.
 """
 from __future__ import annotations
 
@@ -18,26 +18,27 @@ from v2.transport import Connector, make_connector
 
 @dataclass
 class RolePoolSpec:
-    role: str                                   # "encoder" | "denoiser" | "decoder" | ...
+    role: str  # "encoder" | "denoiser" | "decoder" | ...
     pool_id: str
-    components: tuple[str, ...] = ()             # components this pool is responsible for
-    capacity: int = 2                            # max concurrent requests occupying this pool
+    components: tuple[str, ...] = ()  # components this pool is responsible for
+    capacity: int = 2  # max concurrent requests occupying this pool
     replicas: int = 1
-    connector: str = "in_proc"                   # outbound transport backend
-    slo_class: str = "throughput"                # "latency" | "throughput" | "cost"
+    connector: str = "in_proc"  # outbound transport backend
+    slo_class: str = "throughput"  # "latency" | "throughput" | "cost"
 
 
 @dataclass
 class DeployConfig:
-    """Maps a Program's nodes onto role pools (the vllm-omni deploy-YAML analog, §6.3.4)."""
+    """Maps a Program's nodes onto role pools (the vllm-omni deploy-YAML analog)."""
     pools: list[RolePoolSpec] = field(default_factory=list)
-    placement: dict[str, str] = field(default_factory=dict)   # node_id -> pool_id
+    placement: dict[str, str] = field(default_factory=dict)  # node_id -> pool_id
 
     def pool_id_for(self, node_id: str, default: str | None = None) -> str:
         return self.placement.get(node_id, default or (self.pools[0].pool_id if self.pools else ""))
 
 
 class RolePool:
+
     def __init__(self, spec: RolePoolSpec, card: Any):
         self.spec = spec
         self.role = spec.role
@@ -66,9 +67,14 @@ class RolePool:
         return self.in_flight / max(1, self.capacity)
 
     def stats(self) -> dict[str, Any]:
-        return {"role": self.role, "in_flight": self.in_flight, "capacity": self.capacity,
-                "served": self.served, "transfers_out": self.connector.transfers,
-                "credits_available": self.connector.credits.available}
+        return {
+            "role": self.role,
+            "in_flight": self.in_flight,
+            "capacity": self.capacity,
+            "served": self.served,
+            "transfers_out": self.connector.transfers,
+            "credits_available": self.connector.credits.available
+        }
 
 
 class PoolSet:
@@ -85,7 +91,7 @@ class PoolSet:
         return self.by_id[self.deploy.pool_id_for(node_id)]
 
     def warmup(self) -> dict[str, int]:
-        """Instantiate each pool's components ahead of first request (design.md §6.3.5 warmup)."""
+        """Instantiate each pool's components ahead of first request."""
         built: dict[str, int] = {}
         for pool in self.by_id.values():
             for cid in pool.components:
@@ -102,11 +108,17 @@ def wan_t2v_disaggregated() -> DeployConfig:
     """The canonical N:M:K split for Wan T2V (encoder → denoiser → decoder)."""
     return DeployConfig(
         pools=[
-            RolePoolSpec(role="encoder", pool_id="enc", components=("text_encoder",), capacity=4,
-                         slo_class="latency"),
-            RolePoolSpec(role="denoiser", pool_id="den", components=("transformer",), capacity=1,
-                         slo_class="throughput"),       # jumbo video step stays batch-of-1
-            RolePoolSpec(role="decoder", pool_id="dec", components=("vae",), capacity=2),
+            RolePoolSpec(role="encoder", pool_id="enc", components=("text_encoder", ), capacity=4, slo_class="latency"),
+            RolePoolSpec(role="denoiser",
+                         pool_id="den",
+                         components=("transformer", ),
+                         capacity=1,
+                         slo_class="throughput"),  # jumbo video step stays batch-of-1
+            RolePoolSpec(role="decoder", pool_id="dec", components=("vae", ), capacity=2),
         ],
-        placement={"text_encode": "enc", "denoise": "den", "vae_decode": "dec"},
+        placement={
+            "text_encode": "enc",
+            "denoise": "den",
+            "vae_decode": "dec"
+        },
     )

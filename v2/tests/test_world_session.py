@@ -1,14 +1,14 @@
-"""Interactive world-model session (design_v3 §16, §12) — the realtime/interactive plane.
+"""Interactive world-model session — the realtime/interactive plane.
 
 The Session plane had zero coverage. These tests drive the causal ``chunk_rollout`` loop as a
 long-lived session and assert the seams a one-shot ``generate()`` can't reach:
 
-  * **persistent cross-request world state** — each ``act`` continues from the last (the §16 KV);
+  * **persistent cross-request world state** — each ``act`` continues from the last (the carried KV);
   * **history-dependence** — the same action with a different history yields a different world;
   * **transactional step-boundary cancellation** — a cancelled act leaves the session resumable;
   * **frame streaming** — chunks stream as they complete;
   * **no cross-session smearing** — interleaving two sessions is bit-identical to running them apart
-    (the §9.3 interleave guarantee, now for sessions).
+    (the interleave guarantee, now for sessions).
 """
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def test_cancel_mid_rollout_is_transactional():
 
 def test_two_sessions_do_not_smear():
     """Interleaving a second session's acts between this session's acts must not change this session's
-    output — per-session state isolation (the §9.3 interleave guarantee for the session plane)."""
+    output — per-session state isolation (the interleave guarantee for the session plane)."""
     eng = build_default_engine()
     a = WorldModelSession(eng, MID)
     a.act("x", seed=1)

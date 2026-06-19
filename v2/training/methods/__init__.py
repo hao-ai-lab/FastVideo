@@ -1,4 +1,4 @@
-"""Training methods — all on Wan2.1-1.3B, all over the SHARED loops (design_v3 §10)."""
+"""Training methods — all on Wan2.1-1.3B, all over the SHARED loops."""
 from __future__ import annotations
 
 from v2.training.methods.base import TrainingMethod, new_instance, predict_x0
@@ -11,12 +11,21 @@ from v2.training.methods.unified_rl import UnifiedRLMethod, build_unified_rl
 from v2.training.methods.workflow_rl import WorkflowRLMethod, build_workflow_rl
 
 __all__ = [
-    "TrainingMethod", "new_instance", "predict_x0",
-    "FineTuneMethod", "build_finetune",
-    "DMD2Method", "build_dmd2",
-    "DiffusionNFTMethod", "build_diffusion_nft",
-    "SelfForcingMethod", "build_self_forcing",
-    "UnifiedRLMethod", "build_unified_rl",
-    "JointMultiExpertRL", "build_joint_multi_rl",
-    "WorkflowRLMethod", "build_workflow_rl",
+    "TrainingMethod",
+    "new_instance",
+    "predict_x0",
+    "FineTuneMethod",
+    "build_finetune",
+    "DMD2Method",
+    "build_dmd2",
+    "DiffusionNFTMethod",
+    "build_diffusion_nft",
+    "SelfForcingMethod",
+    "build_self_forcing",
+    "UnifiedRLMethod",
+    "build_unified_rl",
+    "JointMultiExpertRL",
+    "build_joint_multi_rl",
+    "WorkflowRLMethod",
+    "build_workflow_rl",
 ]

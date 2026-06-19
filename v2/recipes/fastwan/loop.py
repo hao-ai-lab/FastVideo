@@ -1,9 +1,9 @@
-"""FastWanDMDLoop — Distribution-Matching-Distillation few-step denoise for FastWan (design_v3 §5).
+"""FastWanDMDLoop — Distribution-Matching-Distillation few-step denoise for FastWan.
 
 FastWan is a DMD-distilled Wan: instead of N flow-match Euler steps it runs a handful (3) of
 *predict-x0-then-renoise* steps over a fixed list of discrete model timesteps. This is NOT a plain
 flow-match Euler integrator (``WanDenoiseLoop``), so it ships its own ``next``/``advance`` and uses the
-shared policies as a library (the design_v3 §5.1 escape hatch for braided math).
+shared policies as a library.
 
 Faithful port of ``fastvideo/pipelines/stages/denoising.py:DmdDenoisingStage`` (+ ``pred_noise_to_pred_video``
 in ``fastvideo/models/utils.py``). The exact math, per discrete model timestep ``t_i`` (e.g. [1000, 757, 522]):

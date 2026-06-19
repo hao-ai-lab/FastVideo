@@ -1,7 +1,7 @@
 """Shared component-node helpers (text encode with feature cache, etc.).
 
-The content-hash feature cache (design_v3 §7.2) is the reuse mechanism behind the §10 claim that
-a K-sample RL group encodes its shared prompt once instead of K times.
+The content-hash feature cache lets a K-sample RL group encode its shared prompt once instead of
+K times.
 """
 from __future__ import annotations
 
@@ -14,14 +14,15 @@ def cached_text_encode(instance: Any, text: str) -> Any:
     enc = instance.component("text_encoder")
     cache = instance.caches
     if cache is not None and cache.has("feature"):
-        # §7.1: every output-semantic field is in the key — adapter stack + precision partition it,
-        # and the text-encoder's OWN version (not the instance's) so a transformer weight sync
-        # does not invalidate the (frozen) text encoder's embeddings.
-        key = CacheKey(model_id=instance.card.model_id, component_id="text_encoder",
+        # Every output-semantic field is in the key — adapter stack + precision partition it, and the
+        # text-encoder's OWN version (not the instance's) so a transformer weight sync does not
+        # invalidate the (frozen) text encoder's embeddings.
+        key = CacheKey(model_id=instance.card.model_id,
+                       component_id="text_encoder",
                        weights_version=instance.version_of("text_encoder"),
                        adapter_versions=CacheKey.adapters(instance.adapter_versions),
                        precision=instance.card.precision.dtype_for("text_encoder"),
-                       input_hashes=(("text", content_hash(text)),))
+                       input_hashes=(("text", content_hash(text)), ))
         hit = cache.pool("feature").get(key)
         if hit is not None:
             return hit

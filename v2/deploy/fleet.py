@@ -1,15 +1,15 @@
-"""LocalFleet — OUR OWN fleet router (design_v3 §14; design.md §6.3.5/6.3.6 fallbacks).
+"""LocalFleet — OUR OWN fleet router.
 
-design.md names Dynamo as the first-class fleet partner, but every Dynamo ask (§6.3.6) has a
-*first-class fallback* — and this is it: a self-contained fleet that does discovery, health/drain,
-and routing (least-loaded / cost-model / affinity) over multiple engine workers, so we are never
-*reliant* on Dynamo. The router's cost input is the SAME §6 cost model the scheduler uses (one
-object, two consumers). Affinity routing is the A1 fallback (sticky-by-key for checkpoint/session
-residency, "least-loaded + engine redirects").
+Dynamo is the first-class fleet partner, but every Dynamo ask has a first-class fallback — and this
+is it: a self-contained fleet that does discovery, health/drain, and routing (least-loaded /
+cost-model / affinity) over multiple engine workers, so we are never *reliant* on Dynamo. The
+router's cost input is the SAME cost model the scheduler uses (one object, two consumers). Affinity
+routing is sticky-by-key for checkpoint/session residency (least-loaded + engine redirects).
 """
 from __future__ import annotations
 
-from typing import Any, AsyncIterator
+from typing import Any
+from collections.abc import AsyncIterator
 
 from v2.request.artifacts import Output
 from v2.deploy.card import DeploymentCard, HealthSchema
@@ -40,7 +40,7 @@ class Worker:
         return self.engine.serves(model_id) or self.card.serves(model_id)
 
     def cost_estimate(self, request: Any) -> float:
-        """Predicted GPU-time for this request — the §6 cost model as the fleet's routing input."""
+        """Predicted GPU-time for this request — the cost model as the fleet's routing input."""
         cm = self.card.cost_model
         steps = max(1, int(getattr(request.diffusion, "num_steps", 1) or 1))
         work = max(1, int(getattr(request.diffusion, "height", 1)) * int(getattr(request.diffusion, "width", 1)))
@@ -49,16 +49,18 @@ class Worker:
 
     def health(self) -> HealthSchema:
         return HealthSchema(status=("draining" if self.draining else "healthy"),
-                            in_flight=self.engine.in_flight, queue_depth=self.engine.queue_depth)
+                            in_flight=self.engine.in_flight,
+                            queue_depth=self.engine.queue_depth)
 
 
 class LocalFleet:
+
     def __init__(self, policy: str = "least_loaded", *, max_affinity: int = 100_000):
         assert policy in ("least_loaded", "cost", "affinity")
         self.policy = policy
         self.max_affinity = max_affinity
         self.workers: dict[str, Worker] = {}
-        self._affinity: dict[str, str] = {}      # affinity key -> worker_id (sticky), FIFO-bounded
+        self._affinity: dict[str, str] = {}  # affinity key -> worker_id (sticky), FIFO-bounded
 
     # --- discovery / health (what Dynamo's registry + planner would do) ------ #
     def register(self, worker_id: str, engine: Any, card: DeploymentCard) -> Worker:
@@ -89,14 +91,14 @@ class LocalFleet:
             wid = self._affinity.get(key)
             if wid in self.workers and self.workers[wid] in cands:
                 return self.workers[wid]
-            chosen = min(cands, key=lambda w: w.load)         # cold key → least-loaded, then pin
-            if len(self._affinity) >= self.max_affinity:       # FIFO-bound the sticky map
+            chosen = min(cands, key=lambda w: w.load)  # cold key → least-loaded, then pin
+            if len(self._affinity) >= self.max_affinity:  # FIFO-bound the sticky map
                 self._affinity.pop(next(iter(self._affinity)), None)
             self._affinity[key] = chosen.worker_id
             return chosen
         if self.policy == "cost":
             return min(cands, key=lambda w: w.cost_estimate(request) * (1.0 + w.load))
-        return min(cands, key=lambda w: w.load)               # least_loaded (default)
+        return min(cands, key=lambda w: w.load)  # least_loaded (default)
 
     # --- serving (delegates to the chosen worker's engine) ------------------- #
     async def generate(self, request: Any, *, affinity_key: str | None = None) -> Output:

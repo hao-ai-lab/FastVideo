@@ -1,16 +1,15 @@
-"""Rollout = serve loop + capture (design_v3 §10). The moat, made literal.
+"""Rollout = serve loop + capture.
 
 ``rollout_loop`` drives the *same* ``Loop`` the engine serves, in the ROLLOUT execution profile,
-through a minimal training context — so there is one numerics surface, not a second sampler. This
-is the structural answer to the two-runtime tax: the landed RL stack vendors a bare-model loop
-(``rl/common/sampling.py``); here the method drives the shared denoise/chunk loop directly.
+through a minimal training context — so there is one numerics surface, not a second sampler.
 
-``training`` imports ``loop``/``runtime`` here; the engine never imports ``training`` (the §10 rule).
+``training`` imports ``loop``/``runtime`` here; the engine never imports ``training`` (one-way rule).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from v2._enums import ExecutionProfile
 from v2.loop.contracts import StepResult, WorkPlan
@@ -22,8 +21,7 @@ class _TrainingContext:
     """A minimal LoopContext for in-process (library-mode) rollout. Runs the kernel thunk directly;
     optional observers attach (e.g. ParityAligner for the consistency ladder)."""
 
-    def __init__(self, instance: Any, slots: dict[str, Any], profile: ExecutionProfile,
-                 observers: list | None = None):
+    def __init__(self, instance: Any, slots: dict[str, Any], profile: ExecutionProfile, observers: list | None = None):
         self.instance = instance
         self.slots = slots
         self.profile = profile
@@ -53,8 +51,13 @@ class _TrainingContext:
             o.observe(event, **kw)
 
 
-def rollout_loop(instance: Any, loop_id: str, request: Any, *, slots: dict[str, Any] | None = None,
-                 profile: ExecutionProfile = ExecutionProfile.ROLLOUT, observers: list | None = None):
+def rollout_loop(instance: Any,
+                 loop_id: str,
+                 request: Any,
+                 *,
+                 slots: dict[str, Any] | None = None,
+                 profile: ExecutionProfile = ExecutionProfile.ROLLOUT,
+                 observers: list | None = None):
     """Drive the SHARED loop to completion in the given profile; return its LoopResult."""
     ctx = _TrainingContext(instance, slots or {}, profile, observers)
     runner = LoopRunner(instance.loop(loop_id), ctx, request, instance)
@@ -63,7 +66,7 @@ def rollout_loop(instance: Any, loop_id: str, request: Any, *, slots: dict[str, 
 
 @dataclass
 class Trajectory:
-    """Our ``Sample`` (design_v3 §10): request + seeds + per-step records + reward + advantage."""
+    """One rollout sample: request + seed + per-step records + reward + advantage."""
     request_id: str
     prompt: str
     seed: int
@@ -77,6 +80,7 @@ class Trajectory:
 
 
 class TrajectoryBuffer:
+
     def __init__(self) -> None:
         self.items: list[Trajectory] = []
 
@@ -98,7 +102,7 @@ class TrajectoryBuffer:
 
 @dataclass
 class RolloutContext:
-    """What a ``RolloutFn`` receives (design_v3 §8.7): an engine/instance client + a seed source."""
+    """What a ``RolloutFn`` receives: an engine/instance client + a seed source."""
     instance: Any
     text_encode: Callable[[Any, Any, dict], None]
     base_seed: int = 0

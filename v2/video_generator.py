@@ -1,19 +1,18 @@
 """v2 ``VideoGenerator`` — a typed entrypoint mirroring ``fastvideo.entrypoints.VideoGenerator``,
-wrapping the v2 ``Engine`` so a ``basic_dmd_new_api.py``-style script runs against the v2
-(recipe, runtime) substrate + the real torch backend on a GPU box.
+wrapping the v2 ``Engine`` so an upstream-style script runs against the v2 (recipe, runtime) substrate
+and the real torch backend on a GPU box.
 
-It consumes the OFFICIAL ``fastvideo.api`` typed configs (``GeneratorConfig`` / ``GenerationRequest`` /
-``EngineConfig`` / ``OutputConfig`` / ...) — so the only delta from the upstream example is importing
-``VideoGenerator`` from ``v2`` instead of ``fastvideo``. ``from_config(GeneratorConfig)`` →
+It consumes the official ``fastvideo.api`` typed configs (``GeneratorConfig`` / ``GenerationRequest`` /
+``EngineConfig`` / ``OutputConfig`` / ...), so the only delta from the upstream example is importing
+``VideoGenerator`` from ``v2`` instead of ``fastvideo``. Flow: ``from_config(GeneratorConfig)`` →
 ``generate(GenerationRequest)`` → ``GenerationResult`` with ``.video_path``.
 
 All torch / fastvideo / huggingface imports are lazy (inside methods) so ``import v2`` stays CPU-clean.
 
-Model dispatch lives in the SHARED ``v2/registry.py`` (so a CLI / server resolve identically): an
-explicit HF-id registry PRIMARY + architecture inference FALLBACK, mirroring fastvideo's
-``fastvideo/registry.py``. Wired: Wan2.1, Wan2.2-TI2V-5B, Wan2.2-A14B (MoE), SF-causal Wan, LTX-2
-(two-stage distilled + single-stage base/2.3). Multi-GPU / CPU-FSDP offload / VSA are accepted for API
-parity but the bring-up runs single-GPU, resident, on TORCH_SDPA (no fastvideo-kernel) — see GPU_BRINGUP.md.
+Model dispatch lives in the shared ``v2/registry.py`` (HF-id registry primary + architecture-inference
+fallback) so a CLI or server resolve identically. Multi-GPU / CPU-FSDP offload / VSA are accepted for
+API parity but the bring-up runs single-GPU, resident, on TORCH_SDPA (no fastvideo-kernel) — see
+GPU_BRINGUP.md.
 """
 from __future__ import annotations
 
@@ -27,8 +26,8 @@ from typing import Any
 def _resolve_default(key: str, generic: Any, kwargs: dict, sp: Any, sd: Any, card_attr: str | None = None) -> Any:
     """Resolve one sampling param with precedence kwargs > SamplingParam override > card
     ``SamplingDefaults`` > generic fallback. ``card_attr`` aliases the card field name when it differs
-    from the request key (e.g. ``num_inference_steps`` -> ``SamplingDefaults.num_steps``). Pure +
-    torch-free so it's unit-testable without a GPU."""
+    from the request key (e.g. ``num_inference_steps`` -> ``SamplingDefaults.num_steps``). Pure and
+    torch-free, so it's unit-testable without a GPU."""
     if key in kwargs and kwargs[key] is not None:
         return kwargs[key]
     if sp is not None and getattr(sp, key, None) is not None:
@@ -233,9 +232,9 @@ class VideoGenerator:
                 image_path = os.path.join(out_dir, f"{stem}.png")
                 import imageio.v2 as imageio
                 imageio.imwrite(image_path, img)
-        # Audio (T2VS / Stable Audio): the AudioArtifact carries the raw stereo waveform; save a sibling .wav at the
-        # vocoder's real rate (read from the built audio_vae adapter — the artifact's default rate is a
-        # placeholder). A plain T2V request produces no audio artifact, so this is skipped.
+        # Audio (T2VS / Stable Audio): the AudioArtifact carries the raw stereo waveform; save a sibling
+        # .wav at the vocoder's real rate (read from the built audio_vae adapter — the artifact's default
+        # rate is a placeholder). A plain T2V request produces no audio artifact, so this is skipped.
         audio = audio_sr = audio_path = None
         art = out.artifacts.get("audio") if hasattr(out.artifacts, "get") else None
         wav = getattr(art, "samples", None) if art is not None else None

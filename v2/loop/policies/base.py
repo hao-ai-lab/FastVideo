@@ -1,12 +1,10 @@
-"""Policy base classes (design_v3 §5.1, §6.2.3) — the *default* step decomposition.
+"""Policy base classes — the *default* step decomposition.
 
-> Policies (CFG, expert routing, precision, flow-shift, conditioning) are the default
-> decomposition that deletes duplication for the families that fit — never an admission
-> requirement.
-
-A family whose math is braided ships a custom ``next``/``advance`` and uses these as a
-library (LTX-2's multi-pass guidance does exactly that). Policy *bindings* resolve at build;
-policy *state* is per-request in ``LoopState`` (the adaptive-gate cached delta).
+Policies (CFG, expert routing, precision, flow-shift, conditioning) delete duplication for
+the families that fit; they are never required. A family whose math is braided ships a custom
+``next``/``advance`` and uses these as a library (LTX-2's multi-pass guidance does exactly
+that). Policy *bindings* resolve at build; policy *state* is per-request in ``LoopState``
+(the adaptive-gate cached delta).
 """
 from __future__ import annotations
 
@@ -23,7 +21,7 @@ from v2.loop.sampler import build_flow_sigmas
 # FlowShiftPolicy — resolution-bucket shift + sigma schedule                  #
 # --------------------------------------------------------------------------- #
 class FlowShiftPolicy:
-    """config-driven flow-shift lookup (design_v3 §6.2.3; Wan 480p shift=3.0, 720p=5.0)."""
+    """config-driven flow-shift lookup (e.g. Wan 480p shift=3.0, 720p=5.0)."""
 
     def __init__(self, shift: float = 3.0, bucket_lookup: dict[int, float] | None = None):
         self.shift = shift
@@ -32,9 +30,12 @@ class FlowShiftPolicy:
     def shift_for(self, height: int = 0, width: int = 0) -> float:
         return self.bucket_lookup.get(height * width, self.shift)
 
-    def build_schedule(self, num_steps: int, height: int = 0, width: int = 0,
+    def build_schedule(self,
+                       num_steps: int,
+                       height: int = 0,
+                       width: int = 0,
                        sigmas: list[float] | None = None) -> np.ndarray:
-        if sigmas is not None:                       # explicit distilled schedule (LTX-2)
+        if sigmas is not None:  # explicit distilled schedule (LTX-2)
             return np.asarray(sigmas, dtype=np.float64)
         return build_flow_sigmas(num_steps, shift=self.shift_for(height, width))
 
@@ -43,7 +44,7 @@ class FlowShiftPolicy:
 # PrecisionPolicy — autocast / scheduler-step dtype control                   #
 # --------------------------------------------------------------------------- #
 class PrecisionPolicy:
-    """Replaces ``prefix=='Flux'`` autocast hacks + ``scheduler_step_in_fp32`` (§6.2.3)."""
+    """Replaces ``prefix=='Flux'`` autocast hacks + ``scheduler_step_in_fp32``."""
 
     def __init__(self, compute_dtype: str = "float32", scheduler_step_in_fp32: bool = True):
         self.compute_dtype = compute_dtype
@@ -61,8 +62,10 @@ class PrecisionPolicy:
 # ExpertRouting — Wan2.2 boundary-timestep transformer switch                 #
 # --------------------------------------------------------------------------- #
 class ExpertRouting(ABC):
+
     @abstractmethod
-    def expert_for(self, ctx: StepContext) -> str: ...
+    def expert_for(self, ctx: StepContext) -> str:
+        ...
 
 
 class NoRouting(ExpertRouting):
@@ -76,7 +79,7 @@ class NoRouting(ExpertRouting):
 
 
 class BoundaryTimestepRouting(ExpertRouting):
-    """Wan2.2 ``boundary_ratio`` switch between two transformers (design_v3 §6.2.3)."""
+    """Wan2.2 ``boundary_ratio`` switch between two transformers."""
 
     def __init__(self, high_noise: str, low_noise: str, boundary: float = 0.5):
         self.high_noise = high_noise
@@ -91,8 +94,10 @@ class BoundaryTimestepRouting(ExpertRouting):
 # ConditioningInjector — writes RequestState.cond; the loop stays agnostic     #
 # --------------------------------------------------------------------------- #
 class ConditioningInjector(ABC):
+
     @abstractmethod
-    def inject(self, state: Any, request: Any) -> None: ...
+    def inject(self, state: Any, request: Any) -> None:
+        ...
 
 
 class PassthroughConditioning(ConditioningInjector):

@@ -2,11 +2,10 @@
 1-frame video (num_frames=1, 4D latents) throughout the v2 substrate.
 
 Architecture deltas vs Wan (all declared on the card so the recipe is self-contained):
-  * DiT  ``fastvideo.models.dits.sd3:SD3Transformer2DModel`` — a FLOW-MATCH MMDiT (reuses the
-    flow-match step), but the forward needs TWO text conditioners: the assembled triple-encoder joint
-    embed (``encoder_hidden_states``) AND a separate ``pooled_projections`` vector. The adapter
-    (``ComponentSpec.adapter`` -> ``SD3DiT``) takes both (joint embed as ``text_embed``, pooled as the
-    positional ``context`` arg) and ``SD3DenoiseLoop`` threads them per CFG branch.
+  * DiT  ``fastvideo.models.dits.sd3:SD3Transformer2DModel`` — a FLOW-MATCH MMDiT, but the forward needs
+    TWO text conditioners: the assembled triple-encoder joint embed (``encoder_hidden_states``) AND a
+    separate ``pooled_projections`` vector. The ``SD3DiT`` adapter takes both (joint embed as
+    ``text_embed``, pooled as the positional ``context`` arg) and ``SD3DenoiseLoop`` threads them per CFG branch.
   * VAE  ``fastvideo.models.vaes.autoencoder_kl:AutoencoderKL`` — SD3.5 shift/scale normalization
     (``scaling_factor=1.5305``, ``shift_factor=0.0609`` read from the checkpoint vae config); the
     ``SD3VAE`` adapter normalizes/denormalizes around the raw AutoencoderKL space (4D image, not 5D video).

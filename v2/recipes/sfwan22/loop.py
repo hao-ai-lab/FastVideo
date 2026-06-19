@@ -1,4 +1,4 @@
-"""SFWan22ChunkRolloutLoop — Self-Forcing Wan2.2-A14B causal DMD rollout (design_v3 §4 causal, §5, §10).
+"""SFWan22ChunkRolloutLoop — Self-Forcing Wan2.2-A14B causal DMD rollout.
 
 Self-Forcing Wan2.2-A14B is the CAUSAL student of the Wan2.2 MoE: a few-step DMD denoiser run
 block-by-block (causal chunks, carrying per-chunk KV context) over TWO transformer experts switched by
@@ -177,7 +177,7 @@ class SFWan22ChunkRolloutLoop:
         st.cond["prompt_embeds"] = ctx.slots.get("text_embeds")
         st.cond["negative_prompt_embeds"] = ctx.slots.get("neg_text_embeds")
         boundary_t = self.boundary_ratio * NUM_TRAIN_TIMESTEPS
-        # world-model continuation: seed the chunk context from prior chunks (interactive sessions, §16).
+        # world-model continuation: seed the chunk context from prior chunks (interactive sessions).
         prior = [np.asarray(c, dtype="float32") for c in (ctx.slots.get("world_context") or [])]
         st.scratch.update(sched_sigmas=sched_sigmas,
                           dmd_timesteps=dmd_t,

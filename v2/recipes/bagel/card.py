@@ -1,13 +1,12 @@
-"""BAGEL/lance-style MoT ModelCard — the canonical vllm-omni omni model (design_v3 §1, §16, §19).
+"""BAGEL/lance-style MoT ModelCard — canonical vllm-omni omni model.
 
-vllm-omni's ``bagel_single_stage``/``lance`` prove one resident MoT instance can run both AR
-``generate_text`` and diffusion ``generate_image`` on co-resident experts in a single request — BUT
-they bury that interleaving inside one opaque ``DIFFUSION`` stage the scheduler never sees inside
-(``max_num_running_reqs=1``). This card expresses the same shared-weight MoT, but makes both loops
-**runtime-visible, step-scheduled, and batchable**: ``generate_text`` (ar_decode) and
-``generate_image`` (diffusion_denoise) both bind the one resident ``transformer``, and every AR token
-and denoise step is a WorkUnit the scheduler can interleave and price. That visibility is the
-differentiation the §1 thesis names.
+vllm-omni's ``bagel_single_stage``/``lance`` run one resident MoT instance doing both AR
+``generate_text`` and diffusion ``generate_image`` on co-resident experts in a single request, but
+bury the interleaving inside one opaque ``DIFFUSION`` stage the scheduler can't see into
+(``max_num_running_reqs=1``). This card expresses the same shared-weight MoT with both loops
+runtime-visible, step-scheduled, and batchable: ``generate_text`` (ar_decode) and ``generate_image``
+(diffusion_denoise) both bind the one resident ``transformer``, and every AR token and denoise step
+is a WorkUnit the scheduler can interleave and price.
 """
 from __future__ import annotations
 
@@ -42,44 +41,64 @@ def build_bagel_card(model_id: str = "bagel-mot") -> ModelCard:
         return ARDecodeLoop(loop_id="generate_text", transformer_id="transformer", cost=ar_cost, max_tokens=6)
 
     def image_factory():
-        return WanDenoiseLoop(loop_id="generate_image", cfg=cfg, flow_shift=flow,
-                              precision=precision, expert=expert, cost=dn_cost)
+        return WanDenoiseLoop(loop_id="generate_image",
+                              cfg=cfg,
+                              flow_shift=flow,
+                              precision=precision,
+                              expert=expert,
+                              cost=dn_cost)
 
     components = {
-        "tokenizer": ComponentSpec("tokenizer", kind="tokenizer", factory=lambda inst: ToyTokenizer(),
-                                   required_for={"reason", "t2i"}),
-        "transformer": ComponentSpec(
-            "transformer", kind="dit",
+        "tokenizer":
+        ComponentSpec("tokenizer",
+                      kind="tokenizer",
+                      factory=lambda inst: ToyTokenizer(),
+                      required_for={"reason", "t2i"}),
+        "transformer":
+        ComponentSpec(
+            "transformer",
+            kind="dit",
             load_id="vllm_omni.diffusion.models.bagel:BagelTransformer",
             factory=lambda inst: ToyMoTDiT(seed=seed),
-            resident_for=["generate_text", "generate_image"],   # one resident copy for BOTH loops
+            resident_for=["generate_text", "generate_image"],  # one resident copy for BOTH loops
             required_for={"reason", "t2i"}),
-        "vae": ComponentSpec("vae", kind="vae", factory=lambda inst: ToyVAE(), required_for={"t2i"}),
+        "vae":
+        ComponentSpec("vae", kind="vae", factory=lambda inst: ToyVAE(), required_for={"t2i"}),
     }
     loops = {
-        "generate_text": LoopSpec("generate_text", kind=LoopKind.AR_DECODE,
-                                  work_unit_kind=WorkUnitKind.AR_TOKEN, step_cost_model=ar_cost,
-                                  shared_weight_components=["transformer"], cache_policy=["paged_kv"],
-                                  loop_factory=text_factory),
-        "generate_image": LoopSpec("generate_image", kind=LoopKind.DIFFUSION_DENOISE,
-                                   work_unit_kind=WorkUnitKind.DIFFUSION_STEP, step_cost_model=dn_cost,
-                                   shared_weight_components=["transformer"], cache_policy=["feature"],
-                                   loop_factory=image_factory),
+        "generate_text":
+        LoopSpec("generate_text",
+                 kind=LoopKind.AR_DECODE,
+                 work_unit_kind=WorkUnitKind.AR_TOKEN,
+                 step_cost_model=ar_cost,
+                 shared_weight_components=["transformer"],
+                 cache_policy=["paged_kv"],
+                 loop_factory=text_factory),
+        "generate_image":
+        LoopSpec("generate_image",
+                 kind=LoopKind.DIFFUSION_DENOISE,
+                 work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
+                 step_cost_model=dn_cost,
+                 shared_weight_components=["transformer"],
+                 cache_policy=["feature"],
+                 loop_factory=image_factory),
     }
     card = ModelCard(
-        model_id=model_id, family="bagel", components=components, loops=loops,
-        capabilities=CapabilityMatrix.of(Capability.TEXT_TO_IMAGE, Capability.REASONING_TEXT,
-                                         Capability.VAE_DECODE),
-        recipe=RecipeSpec(method="base", assumes_loop="generate_image",
-                          assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
+        model_id=model_id,
+        family="bagel",
+        components=components,
+        loops=loops,
+        capabilities=CapabilityMatrix.of(Capability.TEXT_TO_IMAGE, Capability.REASONING_TEXT, Capability.VAE_DECODE),
+        recipe=RecipeSpec(method="base",
+                          assumes_loop="generate_image",
+                          assumes_precision="float32",
+                          consistency_required=ConsistencyLevel.C1),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
         caches={
             "feature": CacheContract("feature", max_bytes=1 << 24, reuse_across_requests=True),
-            "paged_kv": CacheContract("paged_kv", max_bytes=1 << 24, block_bytes=1 << 12,
-                                      reuse_across_requests=False),
+            "paged_kv": CacheContract("paged_kv", max_bytes=1 << 24, block_bytes=1 << 12, reuse_across_requests=False),
         },
         precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
-        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()],
-                                        default_plan=ParallelPlan.single()),
+        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
     )
     return card.validate()

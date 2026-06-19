@@ -1,4 +1,4 @@
-"""RuntimeLoopContext — the concrete inversion point (design_v3 §5.1, §11).
+"""RuntimeLoopContext — the concrete inversion point.
 
 This is the single seam: ``execute(plan)`` runs the kernel thunk built by the model's
 ``next()``, wrapped by interceptors (compute-altering) and observers (read-only). The model
@@ -16,19 +16,19 @@ from v2.request.streams import OmniEvent, Stream, StreamChunk
 
 
 class RuntimeLoopContext:
-    def __init__(self, instance: Any, *, observers, interceptors, slots: dict[str, Any],
-                 stream: Stream, cancel_scope, profile: ExecutionProfile, metrics: dict,
-                 request_id: str):
+
+    def __init__(self, instance: Any, *, observers, interceptors, slots: dict[str, Any], stream: Stream, cancel_scope,
+                 profile: ExecutionProfile, metrics: dict, request_id: str):
         self.instance = instance
         self.observers = observers
         self.interceptors = interceptors
-        self.slots = slots                  # the program's typed named edges
+        self.slots = slots  # the program's typed named edges
         self.stream = stream
         self.cancel_scope = cancel_scope
         self.profile = profile
         self.metrics = metrics
         self.request_id = request_id
-        self.state = None                   # bound per step by the LoopRunner
+        self.state = None  # bound per step by the LoopRunner
 
     def bind_state(self, state) -> None:
         self.state = state
@@ -68,9 +68,9 @@ class RuntimeLoopContext:
 
     def _run_step(self, plan: WorkPlan, override, eager):
         """Execute the step body, under piecewise CUDA-graph capture/replay when the loop declares
-        graph_capture="breakable_cudagraph" (design_v3 §6.2; Path A). Otherwise plain eager — the
-        unchanged path. Replay still runs the current thunk (CPU models the lifecycle, not the
-        speedup); see runtime/cudagraph.py."""
+        graph_capture="breakable_cudagraph". Otherwise plain eager — the unchanged path. Replay
+        still runs the current thunk (CPU models the lifecycle, not the speedup); see
+        runtime/cudagraph.py."""
         if plan.run is None:
             return {}
         loop = self.instance.card.loops.get(plan.loop_id) if self.instance.card else None
@@ -82,13 +82,13 @@ class RuntimeLoopContext:
         return self.instance.graphs.dispatch(plan, self.instance, override, eager)
 
     def emit(self, chunk: StreamChunk) -> None:
-        self.stream.emit(OmniEvent(type="media.chunk", request_id=self.request_id,
-                                   seq=chunk.seq, payload={"chunk": chunk}))
+        self.stream.emit(
+            OmniEvent(type="media.chunk", request_id=self.request_id, seq=chunk.seq, payload={"chunk": chunk}))
         self.metrics["stream_chunks"] = self.metrics.get("stream_chunks", 0) + 1
 
     def check_cancel(self) -> None:
         if self.cancel_scope is not None:
-            self.cancel_scope.check()              # raises request.Cancelled at the step boundary
+            self.cancel_scope.check()  # raises request.Cancelled at the step boundary
 
     def observe(self, event: str, **kw) -> None:
         self.observers.emit(event, **kw)

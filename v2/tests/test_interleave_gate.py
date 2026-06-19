@@ -1,4 +1,4 @@
-"""The batch-of-N interleave parity gate (design_v3 §9.3) — the bet loop-inversion lives/dies on.
+"""The batch-of-N interleave parity gate — the bet loop-inversion lives or dies on.
 
 Two+ concurrent requests, interleaved at step granularity, MUST be bit-identical to the same
 requests run serially. A batch-of-1 gate is structurally blind to cross-request state smearing;

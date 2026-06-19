@@ -1,4 +1,4 @@
-"""LTX-2 joint audio+video denoise — T2VS with per-modality guidance (design_v3 §15b; §9.11).
+"""LTX-2 joint audio+video denoise — T2VS with per-modality guidance.
 
 LTX-2 declared an `audio_vae` (`required_for={"t2vs"}`) but never used it. These tests light it up: a
 single two-stage denoise carries a **synchronized audio latent** alongside the video (audio conditioned

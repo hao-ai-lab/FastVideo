@@ -1,4 +1,4 @@
-"""Content-adaptive control flow — the loop owns it (design_v3 §2.2, §9.12).
+"""Content-adaptive control flow — the loop owns it.
 
 Because the model owns control flow (the driven loop), content-adaptive compute is natural: the
 `CacheDiTDenoiseLoop`'s `next()` reuses the cached velocity when consecutive predictions barely change

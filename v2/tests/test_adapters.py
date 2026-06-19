@@ -1,10 +1,9 @@
-"""The adapter plane — per-request LoRA / ControlNet over one base (design_v3 §7.1, §9.19).
+"""The adapter plane — per-request LoRA / ControlNet over one base.
 
 Many adapters served over ONE resident base; a request picks which to apply (`DiffusionParams.adapters`).
-The `adapter_versions` cache-key field existed but the serving capability didn't. These assert:
-per-request selection changes output, multi-LoRA composes, ControlNet conditions on a control image,
-mixed-adapter requests interleave without smearing, hot-swap changes generation, and the cache key
-partitions by the active adapter stack (adapted ≠ base, and version A ≠ version B).
+These assert: per-request selection changes output, multi-LoRA composes, ControlNet conditions on a
+control image, mixed-adapter requests interleave without smearing, hot-swap changes generation, and the
+cache key partitions by the active adapter stack (adapted ≠ base, and version A ≠ version B).
 """
 from __future__ import annotations
 

@@ -1,9 +1,9 @@
-"""Reward-model-as-a-served-card — REWARD_BATCH work units (design_v3 §10).
+"""Reward-model-as-a-served-card — REWARD_BATCH work units.
 
-In real RL the reward is a *model* (PickScore/CLIP/a VLM judge), not a heuristic. These tests make the
+In real RL the reward is a model (PickScore/CLIP/a VLM judge), not a heuristic. These tests make the
 reward a first-class card: a `scorer` component + a `score` loop emitting `REWARD_BATCH` work units, and
 a `ServedRewardScorer` that drop-in replaces the numpy scorer so any RL method becomes RLHF/RLAIF with a
-learned reward — no method change. Exercises the `REWARD_BATCH` WorkUnit kind (previously zero coverage).
+learned reward, no method change. Exercises the `REWARD_BATCH` WorkUnit kind.
 """
 from __future__ import annotations
 

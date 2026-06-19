@@ -1,4 +1,4 @@
-"""Toy numpy components — the CPU-testable backend (design_v3 §17 honesty note).
+"""Toy numpy components — the CPU-testable backend.
 
 There is no GPU/torch/weights in this environment, so the heavy Wan/LTX neural forwards are
 represented by small, deterministic numpy components. They exercise the *real* loop control
@@ -75,17 +75,22 @@ class ToyDiT:
         self.s_ctx = 0.3
 
     def _pre_tanh(self, latent: np.ndarray, text_embed, sigma: float, context) -> np.ndarray:
-        mixed = np.tensordot(self.w_x, latent, axes=([1], [0]))          # [C,...] channel mix
-        mixed = mixed + self.w_t.reshape((self.C,) + (1,) * (latent.ndim - 1)) * float(sigma)
+        mixed = np.tensordot(self.w_x, latent, axes=([1], [0]))  # [C,...] channel mix
+        mixed = mixed + self.w_t.reshape((self.C, ) + (1, ) * (latent.ndim - 1)) * float(sigma)
         cond = float(np.mean(text_embed)) if text_embed is not None else 0.0
         mixed = mixed + self.s_text * cond
         if context is not None:
             mixed = mixed + self.s_ctx * float(np.mean(context))
         return mixed
 
-    def __call__(self, latent: np.ndarray, text_embed: np.ndarray | None, sigma: float,
-                 context: np.ndarray | None = None, *,
-                 audio_latent: np.ndarray | None = None, audio_text: np.ndarray | None = None,
+    def __call__(self,
+                 latent: np.ndarray,
+                 text_embed: np.ndarray | None,
+                 sigma: float,
+                 context: np.ndarray | None = None,
+                 *,
+                 audio_latent: np.ndarray | None = None,
+                 audio_text: np.ndarray | None = None,
                  cond: np.ndarray | None = None):
         # ``cond`` (i2v mask+cond latent) is the real WanDiT's 36ch concat; the toy denoises the noise
         # channels only (image-conditioning is a GPU-path concern), so it's accepted and ignored here.
@@ -101,22 +106,28 @@ class ToyDiT:
         return video, audio
 
     # --- minimal trainable surface (so training methods do real optimizer steps) --------- #
-    def clone(self) -> "ToyDiT":
+    def clone(self) -> ToyDiT:
         c = ToyDiT.__new__(ToyDiT)
         c.C, c.s_text, c.s_ctx = self.C, self.s_text, self.s_ctx
         c.w_x, c.w_t = self.w_x.copy(), self.w_t.copy()
         return c
 
-    def blend_from(self, other: "ToyDiT", decay: float) -> None:
-        """EMA / decay-blended-old-policy update: self ← decay·self + (1-decay)·other (design_v3 §10)."""
+    def blend_from(self, other: ToyDiT, decay: float) -> None:
+        """EMA / decay-blended-old-policy update: self ← decay·self + (1-decay)·other."""
         self.w_x = (decay * self.w_x + (1.0 - decay) * other.w_x).astype("float32")
         self.w_t = (decay * self.w_t + (1.0 - decay) * other.w_t).astype("float32")
 
-    def copy_from(self, other: "ToyDiT") -> None:
+    def copy_from(self, other: ToyDiT) -> None:
         self.w_x, self.w_t = other.w_x.copy(), other.w_t.copy()
 
-    def mse_grad_step(self, latent: np.ndarray, text_embed, sigma: float, target: np.ndarray,
-                      lr: float, context=None, weight: float = 1.0) -> tuple[float, float]:
+    def mse_grad_step(self,
+                      latent: np.ndarray,
+                      text_embed,
+                      sigma: float,
+                      target: np.ndarray,
+                      lr: float,
+                      context=None,
+                      weight: float = 1.0) -> tuple[float, float]:
         """One exact SGD step minimizing ``weight·MSE(forward(latent), target)`` w.r.t. ``w_x``.
 
         Returns (loss, grad_norm). The grad_norm is the #1396-style per-method regression signal.
@@ -127,11 +138,11 @@ class ToyDiT:
         z = self._pre_tanh(latent, text_embed, sigma, context)
         pred = np.tanh(z)
         err = pred - target
-        loss = float(weight * np.mean(err ** 2))
+        loss = float(weight * np.mean(err**2))
         n = err.size
-        g = weight * (2.0 * err / n) * (1.0 - pred ** 2)
+        g = weight * (2.0 * err / n) * (1.0 - pred**2)
         axes = (list(range(1, g.ndim)), list(range(1, latent.ndim)))
-        grad_wx = np.tensordot(g, latent, axes=axes)                     # [C_out, C_in]
+        grad_wx = np.tensordot(g, latent, axes=axes)  # [C_out, C_in]
         grad_norm = float(np.linalg.norm(grad_wx))
         self.w_x = (self.w_x - lr * grad_wx).astype("float32")
         return loss, grad_norm
@@ -152,7 +163,7 @@ class ToyTokenizer:
 
 class ToyMoTDiT(ToyDiT):
     """Mixture-of-Transformers stand-in: ONE resident module that runs BOTH an AR (understanding)
-    pathway and a diffusion (generation) pathway on shared weights (design_v3 §4.2, §16).
+    pathway and a diffusion (generation) pathway on shared weights.
 
     ``ar_forward`` is the und pathway (next-token); ``__call__`` (inherited) is the gen pathway
     (velocity). Binding both the ar_decode and diffusion_denoise loops to one instance of this
@@ -181,7 +192,7 @@ class ToyPromptRefiner:
     refined prompt). Sampling an action picks an embedding offset that shifts the diffusion
     conditioning; the realized reward then drives the policy by REINFORCE. This is the *second
     trainable expert* in the unified-RL stress test: one reward → a token-policy-gradient update
-    here AND a FlowGRPO update on the DiT, under one advantage (design_v3 §10; PromptRL §6).
+    here AND a FlowGRPO update on the DiT, under one advantage (PromptRL §6).
 
     Real gradient: loss = −A·logπ(a); ∇_logits = −A·(onehot(a) − softmax). So the toy LM actually
     learns to prefer the reward-favored action — the LM-side analogue of ToyDiT.mse_grad_step.
@@ -190,7 +201,7 @@ class ToyPromptRefiner:
     def __init__(self, n_actions: int = 8, dim: int = TEXT_DIM, seq: int = TEXT_SEQ, seed: int = 0):
         self.n = int(n_actions)
         self.dim, self.seq = int(dim), int(seq)
-        self.logits = np.zeros(self.n, dtype="float64")                  # the trainable policy params
+        self.logits = np.zeros(self.n, dtype="float64")  # the trainable policy params
         rng = np.random.default_rng(seed)
         # each action ⇒ a fixed conditioning offset (the "content" of that refined prompt)
         self._emb = (rng.standard_normal((self.n, self.seq, self.dim)) * 0.1).astype("float32")
@@ -228,25 +239,25 @@ class ToyPromptRefiner:
         p = self._probs()
         onehot = np.zeros(self.n, dtype="float64")
         onehot[int(action)] = 1.0
-        grad = -float(advantage) * (onehot - p)                          # ∇_logits (−A·logπ(a))
-        self.logits = self.logits - float(lr) * grad                     # descent on −A·logπ ⇒ ascent on A·logπ
+        grad = -float(advantage) * (onehot - p)  # ∇_logits (−A·logπ(a))
+        self.logits = self.logits - float(lr) * grad  # descent on −A·logπ ⇒ ascent on A·logπ
         return float(np.linalg.norm(grad))
 
-    def kl_to(self, other: "ToyPromptRefiner") -> float:
+    def kl_to(self, other: ToyPromptRefiner) -> float:
         """KL(π_self ‖ π_other) over the categorical — the LM-PG reference-KL penalty term."""
         p, q = self._probs(), other._probs()
         return float(np.sum(p * (np.log(p + 1e-12) - np.log(q + 1e-12))))
 
-    def clone(self) -> "ToyPromptRefiner":
+    def clone(self) -> ToyPromptRefiner:
         c = ToyPromptRefiner.__new__(ToyPromptRefiner)
         c.n, c.dim, c.seq = self.n, self.dim, self.seq
         c.logits, c._emb = self.logits.copy(), self._emb.copy()
         return c
 
-    def copy_from(self, other: "ToyPromptRefiner") -> None:
+    def copy_from(self, other: ToyPromptRefiner) -> None:
         self.logits = other.logits.copy()
 
-    def blend_from(self, other: "ToyPromptRefiner", decay: float) -> None:
+    def blend_from(self, other: ToyPromptRefiner, decay: float) -> None:
         self.logits = decay * self.logits + (1.0 - decay) * other.logits
 
 
@@ -265,7 +276,7 @@ class ToyTalker(ToyMoTDiT):
 
     def ar_forward(self, tokens) -> int:
         ctx = sum(int(t) for t in tokens)
-        return int((ctx * 7 + 13 + self.salt) % self.VOCAB)     # weight-dependent (salt) + context
+        return int((ctx * 7 + 13 + self.salt) % self.VOCAB)  # weight-dependent (salt) + context
 
 
 class ToyVocoder:
@@ -279,7 +290,7 @@ class ToyVocoder:
     def __init__(self, samples_per_token: int = 16, vocab: int = 256, seed: int = 7):
         self.spt = int(samples_per_token)
         rng = np.random.default_rng(seed)
-        self.bank = (rng.standard_normal(vocab) * 0.3).astype("float32")   # per-token timbre offset
+        self.bank = (rng.standard_normal(vocab) * 0.3).astype("float32")  # per-token timbre offset
 
     def synthesize(self, token_chunk) -> np.ndarray:
         """One chunk of codec tokens → a waveform segment in [-1, 1], length spt·len(chunk)."""
@@ -296,11 +307,15 @@ class ToyLoRA:
 
     Many of these are served over ONE resident base (the adapter is tiny: a rank-r channel delta);
     a request picks which to apply. Swappable/versioned independently (the cache key's
-    ``adapter_versions``). Stand-in for a real LoRA / DoRA / IP-Adapter (design_v3 §9.19)."""
+    ``adapter_versions``). Stand-in for a real LoRA / DoRA / IP-Adapter."""
     kind = "lora"
 
-    def __init__(self, adapter_id: str, channels: int = LATENT_CHANNELS, scale: float = 0.6,
-                 rank: int = 2, seed: int = 0):
+    def __init__(self,
+                 adapter_id: str,
+                 channels: int = LATENT_CHANNELS,
+                 scale: float = 0.6,
+                 rank: int = 2,
+                 seed: int = 0):
         self.adapter_id = adapter_id
         self.scale = float(scale)
         rng = np.random.default_rng(seed)
@@ -308,18 +323,18 @@ class ToyLoRA:
         self.b = (rng.standard_normal((rank, channels)) * 0.4).astype("float32")
 
     def delta(self, latent, control=None) -> np.ndarray:
-        w = self.a @ self.b                                   # [C, C] low-rank weight delta
-        d = np.tensordot(w, np.asarray(latent, dtype="float32"), axes=([1], [0]))   # [C, ...]
+        w = self.a @ self.b  # [C, C] low-rank weight delta
+        d = np.tensordot(w, np.asarray(latent, dtype="float32"), axes=([1], [0]))  # [C, ...]
         return (self.scale * np.tanh(d)).astype("float32")
 
-    def update(self, seed: int) -> None:                      # hot-swap: replace the adapter's weights
+    def update(self, seed: int) -> None:  # hot-swap: replace the adapter's weights
         rng = np.random.default_rng(seed)
         self.a = (rng.standard_normal(self.a.shape) * 0.4).astype("float32")
 
 
 class ToyControlNet:
     """Toy ControlNet adapter — conditions the velocity on a control signal (pose/depth/edge stand-in).
-    Different control ⇒ different generation; selected per request like a LoRA (design_v3 §9.19)."""
+    Different control ⇒ different generation; selected per request like a LoRA."""
     kind = "controlnet"
 
     def __init__(self, adapter_id: str, channels: int = LATENT_CHANNELS, scale: float = 0.8, seed: int = 1):
@@ -330,8 +345,8 @@ class ToyControlNet:
 
     def delta(self, latent, control=None) -> np.ndarray:
         latent = np.asarray(latent, dtype="float32")
-        c = float(np.mean(control)) if control is not None else 0.0   # the control image's signal
-        shape = (latent.shape[0],) + (1,) * (latent.ndim - 1)
+        c = float(np.mean(control)) if control is not None else 0.0  # the control image's signal
+        shape = (latent.shape[0], ) + (1, ) * (latent.ndim - 1)
         return (self.scale * c * self.proj.reshape(shape)).astype("float32")
 
     def update(self, seed: int) -> None:
@@ -366,7 +381,7 @@ class ToyDraftModel:
     are accepted) and diverges otherwise (→ a rejection + a target correction). The accept rate varies
     *within* a decode, so different rounds accept different lengths (a ragged loop). The demonstration is
     exact regardless of draft quality: speculative decoding accepts only tokens the target would have
-    produced, so the output equals the target's own greedy decode (design_v3 §2.2)."""
+    produced, so the output equals the target's own greedy decode."""
     VOCAB = 256
     EOS = 0
 
@@ -376,9 +391,9 @@ class ToyDraftModel:
     def ar_forward(self, tokens) -> int:
         target = _spec_target_next(tokens)
         s, n = sum(int(t) for t in tokens), len(tokens)
-        if ((s * 13 + n * 7) % 10) < int(round(self.agree * 10)):   # agree on a varying subset
+        if ((s * 13 + n * 7) % 10) < int(round(self.agree * 10)):  # agree on a varying subset
             return int(target)
-        return int((target + 1) % self.VOCAB)                       # a cheap wrong guess (rejected)
+        return int((target + 1) % self.VOCAB)  # a cheap wrong guess (rejected)
 
 
 class ToyRewardModel:
@@ -387,7 +402,7 @@ class ToyRewardModel:
     Maps a media latent → a scalar reward in [-1, 1] via a fixed projection over per-channel features.
     The point isn't the math: it's that the reward is computed by a *model* (served, scheduled as
     ``REWARD_BATCH`` work units, place-able on its own pool), not a numpy heuristic bolted onto the
-    method — the reward plane composing with the serving plane (design_v3 §10)."""
+    method — the reward plane composing with the serving plane."""
 
     def __init__(self, dim: int = LATENT_CHANNELS, seed: int = 5):
         rng = np.random.default_rng(seed)
@@ -407,7 +422,7 @@ class ToyAudioVAE:
     Decodes a small ``[C, A, 1, 1]`` audio latent (denoised jointly with the video latent) into a 1-D
     waveform: channel-collapse via a fixed projection, then upsample along time. Deterministic, so the
     joint A/V denoise loop stays interleave-safe. The video VAE and this share nothing — two decoders,
-    one synchronized latent pair (design_v3 §15b joint A/V)."""
+    one synchronized latent pair."""
 
     def __init__(self, samples_per_frame: int = 16, seed: int = 2):
         self.spf = int(samples_per_frame)
@@ -416,12 +431,12 @@ class ToyAudioVAE:
 
     def decode(self, audio_latent: np.ndarray) -> np.ndarray:
         a = np.asarray(audio_latent, dtype="float32")
-        flat = a.reshape(a.shape[0], -1)                       # [C, A·...]
+        flat = a.reshape(a.shape[0], -1)  # [C, A·...]
         # project over the actual channel count (LTX-2.3 audio latent is 8ch; the 2-stage toy is
         # LATENT_CHANNELS) — np.resize is identity when they already match, so existing T2VS is unchanged.
         proj = np.resize(self.proj, a.shape[0]).astype("float32")
-        mono = np.tensordot(proj, flat, axes=([0], [0]))       # [A·...]
-        return np.tanh(np.repeat(mono, self.spf)).astype("float32")     # [A·spf] mono waveform
+        mono = np.tensordot(proj, flat, axes=([0], [0]))  # [A·...]
+        return np.tanh(np.repeat(mono, self.spf)).astype("float32")  # [A·spf] mono waveform
 
 
 class ToyVAE:
@@ -437,13 +452,13 @@ class ToyVAE:
     def decode(self, latent: np.ndarray) -> np.ndarray:
         """latent [C,T,H,W] -> video [3, T, H*spatial, W*spatial] (deterministic upsample)."""
         latent = np.asarray(latent, dtype=np.float32)
-        rgb = np.tensordot(self.dec_proj, latent, axes=([1], [0]))       # [3,T,H,W]
+        rgb = np.tensordot(self.dec_proj, latent, axes=([1], [0]))  # [3,T,H,W]
         up = np.repeat(np.repeat(rgb, self.spatial, axis=2), self.spatial, axis=3)
         return np.tanh(up).astype("float32")
 
     def encode(self, video: np.ndarray) -> np.ndarray:
         video = np.asarray(video, dtype=np.float32)
-        pooled = video[:self.C]                                          # crude: take C channels
+        pooled = video[:self.C]  # crude: take C channels
         return pooled.astype("float32")
 
 

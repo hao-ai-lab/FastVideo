@@ -1,4 +1,4 @@
-"""Transport plane — manifest-based, pluggable connectors with readiness + credit flow-control (§7.3)."""
+"""Transport plane — manifest-based, pluggable connectors with readiness + credit flow-control."""
 from __future__ import annotations
 
 from v2.transport.connector import (
@@ -12,5 +12,7 @@ from v2.transport.connector import (
 )
 from v2.transport.manifest import TransferManifest, payload_nbytes
 
-__all__ = ["Connector", "CreditWindow", "InProcConnector", "ShmFakeConnector", "make_connector",
-           "KVConnector", "InProcKVConnector", "TransferManifest", "payload_nbytes"]
+__all__ = [
+    "Connector", "CreditWindow", "InProcConnector", "ShmFakeConnector", "make_connector", "KVConnector",
+    "InProcKVConnector", "TransferManifest", "payload_nbytes"
+]

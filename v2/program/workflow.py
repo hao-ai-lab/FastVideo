@@ -1,4 +1,4 @@
-"""Workflow — multi-MODEL composition above the engine (design_v3 §13; ``ProgramKind.WORKFLOW``).
+"""Workflow — multi-MODEL composition above the engine (``ProgramKind.WORKFLOW``).
 
 A ``Program`` composes the loops of ONE resident model instance (the omni/MoT default — every
 ``ModelLoopNode`` resolves on the program's single instance). A ``Workflow`` composes *across model
@@ -21,7 +21,8 @@ the program runner is what preserves the interleave-parity guarantee for the sin
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 
 @dataclass
@@ -36,8 +37,8 @@ class WorkflowStage:
 
 def _engine_serves(engine: Any, model_id: str) -> bool:
     if hasattr(engine, "serves"):
-        return engine.serves(model_id)                     # AsyncEngine
-    return model_id in getattr(engine, "_registry", {})    # Engine
+        return engine.serves(model_id)  # AsyncEngine
+    return model_id in getattr(engine, "_registry", {})  # Engine
 
 
 @dataclass
@@ -46,7 +47,7 @@ class Workflow:
     the SAME namespace as a card's ``model_id`` (so the engine, server, and fleet route to it the same
     way), and by convention is dotted/namespaced to avoid colliding with a card id (e.g.
     ``"image_video.t2i_i2v"``). ``requires`` is the set of cards it composes — declared, validated,
-    never inferred (design.md P7)."""
+    never inferred."""
     workflow_id: str
     stages: list[WorkflowStage] = field(default_factory=list)
 
@@ -62,7 +63,7 @@ class Workflow:
                 out.append(s.model_id)
         return out
 
-    def validate(self, engine: Any) -> "Workflow":
+    def validate(self, engine: Any) -> Workflow:
         """Fail-fast: every required card must already be registered on ``engine`` (no silent skips)."""
         if not self.stages:
             raise ValueError(f"workflow {self.workflow_id!r} has no stages")
@@ -106,7 +107,7 @@ class ParallelWorkflow(Workflow):
     """Fan-out: run every stage on the SAME initial input (conceptually in parallel — the engine can
     interleave their steps), then merge their artifacts into one Output, namespaced by stage label.
     The non-linear shape a linear chain can't express: one prompt → N models → a merged result (e.g.
-    variants, or video+audio+upscale in parallel). Design_v3 §13."""
+    variants, or video+audio+upscale in parallel)."""
 
     def run(self, engine: Any, **initial: Any) -> Any:
         if not self.stages:
@@ -117,13 +118,13 @@ class ParallelWorkflow(Workflow):
         rid = self.workflow_id
         for stage in self.stages:
             label = stage.label or stage.model_id
-            req = stage.make_request(dict(initial))          # each branch sees the ORIGINAL input
+            req = stage.make_request(dict(initial))  # each branch sees the ORIGINAL input
             if req.model_id != stage.model_id:
                 raise ValueError(f"{self.workflow_id!r} stage {label!r}: model mismatch")
             out = engine.run(req)
             rid = out.request_id
             for name, art in out.artifacts.items():
-                merged[f"{label}:{name}"] = art              # namespaced — branches don't collide
+                merged[f"{label}:{name}"] = art  # namespaced — branches don't collide
             for k, v in out.metrics.items():
                 metrics[f"{label}:{k}"] = v
         return Output(request_id=rid, artifacts=merged, metrics=metrics)
@@ -132,11 +133,11 @@ class ParallelWorkflow(Workflow):
 class BestOfNWorkflow(Workflow):
     """Inference-time scaling / rejection sampling: generate N candidates (varying seed), score each with
     a reward scorer, return the best. A feedback loop across models — generator + reward (e.g. the served
-    REWARD_BATCH card, §9.15) — the other non-linear shape. Design_v3 §10/§13."""
+    REWARD_BATCH card) — the other non-linear shape."""
 
     def __init__(self, workflow_id, generator_stage, *, scorer, n: int = 4, score_key: str = "latents"):
         super().__init__(workflow_id, [generator_stage])
-        self.scorer = scorer                                 # any .score(media, prompts) -> {"avg": ...}
+        self.scorer = scorer  # any .score(media, prompts) -> {"avg": ...}
         self.n = int(n)
         self.score_key = score_key
 

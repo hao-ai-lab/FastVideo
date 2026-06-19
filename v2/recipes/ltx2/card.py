@@ -1,4 +1,4 @@
-"""LTX-2 ModelCards — split by ARCHITECTURE, not by version label (design_v3 §4, §15).
+"""LTX-2 ModelCards — split by ARCHITECTURE, not by version label.
 
 * ``build_ltx2_card`` — the **two-stage distilled** pipeline: ``ltx2_base`` (8-step) → learned spatial
   upsampler → ``ltx2_refine`` (3-step), both binding the same ``transformer``. Serves the distilled
@@ -92,7 +92,7 @@ def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
                       factory=lambda inst: ToyDiT(seed=seed),
                       resident_for=["ltx2_base", "ltx2_refine"],
                       required_for={"t2v"}),
-        # audio branch: lazy for T2V (not loaded), required for T2VS (joint audio+video, §9.11)
+        # audio branch: lazy for T2V (not loaded), required for T2VS (joint audio+video)
         "audio_vae":
         ComponentSpec(component_id="audio_vae",
                       kind="audio_vae",

@@ -1,6 +1,6 @@
 """Stable Audio sampler helpers (recipe-local — NOT in v2/loop/sampler.py, which is flow-match/EDM-Karras).
 
-Three numpy primitives the ``StableAudioDenoiseLoop`` composes, faithful to k-diffusion's behavior for the
+Three numpy primitives the ``StableAudioDenoiseLoop`` composes, matching k-diffusion's behavior for the
 Stable Audio ``dpmpp-3m-sde`` sampler over a v-prediction (VDenoiser) network:
 
   * ``build_polyexponential_sigmas`` — k-diffusion ``get_sigmas_polyexponential(n, sigma_min, sigma_max,

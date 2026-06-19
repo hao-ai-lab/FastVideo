@@ -1,4 +1,4 @@
-"""Live weight-sync under in-flight serving — the RL flywheel's hardest correctness (designv4 §9.14).
+"""Live weight-sync under in-flight serving — the RL flywheel's hardest correctness.
 
 Collocated RL serves rollouts and receives weight updates on the same instance. The hazard: if new
 weights are swapped in *while a denoise loop is mid-flight*, that request's trajectory becomes a
@@ -84,6 +84,6 @@ def test_sync_versions_and_invalidates_only_the_synced_component():
     hits0 = inst.caches.stats()["feature"]["hits"]
     WeightSyncController(inst).sync(ToyDiT(seed=7))                 # transformer-only sync
     assert inst.version_of("transformer") != "v0"                  # synced component bumped
-    assert inst.version_of("text_encoder") == "v0"                 # frozen encoder untouched (§7.1)
+    assert inst.version_of("text_encoder") == "v0"                 # frozen encoder untouched
     cached_text_encode(inst, "a shared prompt")                    # same prompt after the sync
     assert inst.caches.stats()["feature"]["hits"] == hits0 + 1     # text cache SURVIVED the transformer sync

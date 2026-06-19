@@ -1,4 +1,4 @@
-"""Per-class cache pools (design_v3 §7.2): feature partition/invalidation, slab-KV window/training."""
+"""Per-class cache pools: feature partition/invalidation, slab-KV window/training."""
 from __future__ import annotations
 
 import numpy as np

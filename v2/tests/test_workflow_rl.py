@@ -1,4 +1,4 @@
-"""End-to-end RL over a cross-model workflow (design_v3 §10 + §13).
+"""End-to-end RL over a cross-model workflow.
 
 Probes the training-plane / Workflow boundary: can "rollout == serve + capture" span *two model
 instances*, and can one final reward train an *earlier* model? These tests train both stages of the

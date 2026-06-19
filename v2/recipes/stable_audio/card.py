@@ -8,14 +8,14 @@ Two variants from the converted Diffusers repos:
     loader from the checkpoint config; the card carries the per-variant sample_size + audio defaults.)
 
 Architecture deltas vs the video recipes (all declared on the card so the recipe is self-contained):
-  * DiT  ``fastvideo.models.dits.stable_audio:StableAudioDiT`` — a v-PREDICTION network (EDM-v / VDenoiser),
-    NOT flow-match and NOT EDM-Karras. The adapter (``ComponentSpec.adapter`` -> ``StableAudioDiT``) packs
-    the conditioner payload into (cross_attn_cond, global_embed), passes the RAW continuous sigma as the
-    timestep, and returns the raw v output; ``StableAudioDenoiseLoop`` does the VDenoiser v->x0 + x0-space
-    CFG + the polyexponential schedule (sigma_min 0.3, sigma_max 500, rho 1) and a DPM++ multistep step.
-  * VAE  ``fastvideo.models.vaes.oobleck:OobleckVAE`` — 1-D conv audio VAE (hop_length 2048). The
-    ``OobleckVAE`` adapter is RAW latent space (NO mean/std normalization, unlike WanVAE) and exposes
-    ``sampling_rate`` for the decode-slice.
+  * DiT  ``fastvideo.models.dits.stable_audio:StableAudioDiT`` — a v-prediction network (EDM-v / VDenoiser),
+    not flow-match and not EDM-Karras. The adapter packs the conditioner payload into (cross_attn_cond,
+    global_embed), passes the raw continuous sigma as the timestep, and returns the raw v output;
+    ``StableAudioDenoiseLoop`` does the VDenoiser v->x0 + x0-space CFG + the polyexponential schedule
+    (sigma_min 0.3, sigma_max 500, rho 1) and a DPM++ multistep step.
+  * VAE  ``fastvideo.models.vaes.oobleck:OobleckVAE`` — 1-D conv audio VAE (hop_length 2048). The adapter
+    is raw latent space (no mean/std normalization, unlike WanVAE) and exposes ``sampling_rate`` for the
+    decode-slice.
   * Conditioner ``fastvideo.models.encoders.stable_audio_conditioner:StableAudioMultiConditioner`` — T5-base
     (max_length 128) + duration NumberConditioners. Declared with ``kind="text_encoder"`` (kind reuse —
     the shared ``_MAKERS`` has no ``conditioner`` kind and editing it is out of scope) + the explicit
@@ -186,10 +186,10 @@ class _ToyAudioDiT:
     """CPU toy v-prediction stand-in for ``StableAudioDiT`` (1-D audio latent [64, L]).
 
     The shared ``ToyDiT`` is channel-fixed (4 channels) and shaped for video; SA's latent is 64-channel
-    1-D. This tiny deterministic toy honors the same contract the loop needs — ``__call__(latent,
-    text_embed, sigma) -> v`` with the loop-supplied VDenoiser-scaled input — so the loop runs end-to-end
-    on CPU. ``text_embed`` is the packed conditioning payload (the toy just means-pools it as a scalar
-    conditioning signal, matching ToyDiT's text handling). Deterministic given (seed, inputs)."""
+    1-D. This deterministic toy honors the contract the loop needs — ``__call__(latent, text_embed, sigma)
+    -> v`` with the loop-supplied VDenoiser-scaled input — so the loop runs end-to-end on CPU.
+    ``text_embed`` is the packed conditioning payload (the toy means-pools it as a scalar conditioning
+    signal, matching ToyDiT's text handling). Deterministic given (seed, inputs)."""
 
     def __init__(self, seed: int = 0):
         import numpy as np
@@ -207,8 +207,8 @@ class _ToyAudioDiT:
 
 
 class _ToyOobleckVAE:
-    """CPU toy 1-D audio VAE stand-in for ``OobleckVAE`` (the shared ``ToyVAE`` is a video VAE that decodes
-    a 4-channel ``[C,T,H,W]`` latent). Decodes the 64-channel ``[64, L]`` audio latent to a
+    """CPU toy 1-D audio VAE stand-in for ``OobleckVAE`` (the shared ``ToyVAE`` is a video VAE decoding a
+    4-channel ``[C,T,H,W]`` latent). Decodes the 64-channel ``[64, L]`` audio latent to a
     ``[channels, samples]`` waveform (channel-collapse projection + hop_length upsample), deterministic so
     the program node is interleave-safe. Exposes ``hop_length`` / ``sampling_rate`` like the real adapter."""
 

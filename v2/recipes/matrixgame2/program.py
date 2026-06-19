@@ -5,9 +5,8 @@ Deltas vs the Wan2.1 i2v program (faithful to ``matrixgame2_causal_dmd_pipeline.
 ``MatrixGame2ImageVAEEncodingStage``):
   * NO text_encode node — Matrix-Game 2.0 ignores text; the CLIP image embeds are the sole cross-attn
     context (written to ``i2v_img_embeds``).
-  * cond_encode writes the RAW first-frame VAE latent to ``i2v_cond`` with NO 4-channel mask (unlike Wan2.1
-    i2v's ``[mask|cond]``); the DiT channel-concats this raw cond onto the noise latent internally (the
-    patch_embedding is the 32-in checkpoint).
+  * cond_encode writes a 20-channel ``cond_concat`` (4 first-frame mask channels + 16 VAE-latent channels)
+    to ``i2v_cond``; the DiT channel-concats this onto the 16ch noise latent internally.
   * action_prepare is a HOOK that routes per-frame mouse/keyboard arrays into ``mouse_cond``/``keyboard_cond``
     when the request carries them. BRINGUP: the request API does not yet surface game-action arrays, so this
     is a no-op on the registered path (the world model degrades to a first-frame-conditioned rollout). When
@@ -28,12 +27,11 @@ _MG2_TEMPORAL_RATIO = 4
 
 
 def _first_frame_pixels(request) -> np.ndarray:
-    """Return the first-frame conditioning image as ``[3, H, W]`` float32 in [-1, 1]. Matrix-Game 2.0 is an
-    i2v world model: a first frame is MANDATORY (it is the only spatial conditioning + drives the cond_concat
-    that makes the DiT's 36 in-channels). When the request carries no image (degenerate world-rollout / a
-    plain text smoke request), synthesize a neutral mid-gray frame at the requested resolution -- the world
-    model then extends from a blank first frame. Faithful to fastvideo's ``create_default_image`` fallback
-    in ``MatrixGame2ImageEncodingStage`` (which uses a default image when ``batch.pil_image is None``)."""
+    """Return the first-frame conditioning image as ``[3, H, W]`` float32 in [-1, 1]. A first frame is
+    MANDATORY: it is the only spatial conditioning and drives the cond_concat for the DiT's 36 in-channels.
+    When the request carries no image (degenerate world-rollout / plain text smoke request), synthesize a
+    neutral mid-gray frame at the requested resolution and extend from there. Mirrors fastvideo's
+    ``create_default_image`` fallback in ``MatrixGame2ImageEncodingStage`` (``batch.pil_image is None``)."""
     img = request.image()
     h = int(request.diffusion.height)
     w = int(request.diffusion.width)

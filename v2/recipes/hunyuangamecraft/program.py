@@ -3,26 +3,26 @@
 
 Same backbone as the Wan/Cosmos t2v programs, with two GameCraft-specific deltas:
 
-  * **Dual text encode.** ``_text_encode_dual`` runs BOTH encoders: the LLaMA encoder (``text_encoder``)
-    writes the DiT's ``text_states`` into ``text_embeds``/``neg_text_embeds`` (the usual slots the loop
-    reads), and the CLIP encoder (``text_encoder_2``) writes the pooled ``text_states_2`` into
+  * **Dual text encode.** ``_text_encode_dual`` runs both encoders: LLaMA (``text_encoder``) writes the
+    DiT's ``text_states`` into ``text_embeds``/``neg_text_embeds`` (the usual slots the loop reads), and
+    CLIP (``text_encoder_2``) writes the pooled ``text_states_2`` into
     ``clip_text_embeds``/``clip_neg_text_embeds`` (threaded to the adapter's ``context=`` per CFG branch).
     On the CPU toy both are ``ToyTextEncoder`` (cached via the content-hash feature cache).
 
   * **Image conditioning node (i2v).** ``_image_cond_encode`` mirrors ``GameCraftImageVAEEncodingStage``:
-    VAE-encode the reference image -> scaled ``ref_latent`` (the ``GameCraftVAE`` adapter applies the
-    scalar ``scaling_factor`` already), repeat to ``T_lat`` frames -> ``gt_latents``, build the binary
+    VAE-encode the reference image -> scaled ``ref_latent`` (the ``GameCraftVAE`` adapter already applies
+    the scalar ``scaling_factor``), repeat to ``T_lat`` frames -> ``gt_latents``, build the binary
     ``conditioning_mask`` (latent_frames<=10: only frame 0; else first half), zero ``gt_latents`` on
     non-conditioned frames, and expose ``ref_latent_for_injection = gt_latents[:, 0:1]`` for the loop's
-    per-step frame_replace. No request image -> a no-op (slots stay unset) -> the loop runs pure t2v
-    (zero gt/mask), exactly the fastvideo fallback.
+    per-step frame_replace. No request image -> no-op (slots stay unset) -> the loop runs pure t2v (zero
+    gt/mask), exactly the fastvideo fallback.
 
 BRINGUP — the camera/action conditioning node is intentionally omitted: GameCraft's CameraNet needs a
 Plücker-coordinate ``camera_states`` tensor derived from an action/camera sequence the v2 request API does
-not carry yet, and the DiT's autoregressive latent-length special-casing (18/9/10) for multi-chunk
-generation has no request surface. Adding a ``camera_encode`` node that writes the ``camera_states`` slot
-(which the loop already reads) is the follow-up once the request API is extended. T_lat helper below
-matches the GameCraft geometry (4x temporal compression).
+not carry yet, and the DiT's autoregressive latent-length special-casing (18/9/10) has no request surface.
+Adding a ``camera_encode`` node that writes the ``camera_states`` slot (which the loop already reads) is the
+follow-up once the request API is extended. The T_lat helper below matches GameCraft's 4x temporal
+compression.
 """
 from __future__ import annotations
 
@@ -38,12 +38,12 @@ GAMECRAFT_SPATIAL_RATIO = 8
 
 
 def _stamp_text_encoder_2(instance: Any) -> None:
-    """The shared ``from_config`` stamps the card via ``stamp_wan21_checkpoints``, whose subfolder map
-    knows only ``transformer/vae/text_encoder`` — NOT GameCraft's second text encoder. So ``text_encoder_2``
-    arrives at GPU build time with an empty ``checkpoint`` and ``_require_checkpoint`` fails. Derive the
-    model root from the already-stamped ``text_encoder`` (LLaMA) checkpoint and point ``text_encoder_2`` at
-    the sibling ``text_encoder_2/`` subfolder, here in the recipe's own node (no edit to the shared stamp).
-    No-op once stamped or on the CPU toy (empty LLaMA checkpoint -> the toy factory needs no weights)."""
+    """``stamp_wan21_checkpoints`` knows only ``transformer/vae/text_encoder``, not GameCraft's second text
+    encoder, so ``text_encoder_2`` reaches GPU build time with an empty ``checkpoint`` and
+    ``_require_checkpoint`` fails. Derive the model root from the already-stamped ``text_encoder`` (LLaMA)
+    checkpoint and point ``text_encoder_2`` at the sibling ``text_encoder_2/`` subfolder, here in the
+    recipe's own node (no edit to the shared stamp). No-op once stamped or on the CPU toy (empty LLaMA
+    checkpoint -> the toy factory needs no weights)."""
     import os
     comps = instance.card.components
     spec2 = comps.get("text_encoder_2")
@@ -84,10 +84,10 @@ def _image_cond_encode(instance: Any, slots: dict, request: Any, ctx: Any) -> No
         return  # T2V mode: leave the i2v slots unset (loop falls back to zero gt/mask)
 
     d = request.diffusion
-    # The GameCraftVAE adapter applies the scalar scaling_factor in ``encode`` (matches the fastvideo
-    # stage's ``ref_latents.mul_(scaling_factor)``), so we use the returned latent directly. The real
-    # adapter also runs the resize/center-crop/normalize preprocessing on the PIL image (BRINGUP); the
-    # CPU toy VAE consumes the pixel array directly.
+    # The GameCraftVAE adapter applies the scalar scaling_factor in ``encode`` (matching the fastvideo
+    # stage's ``ref_latents.mul_(scaling_factor)``), so use the returned latent directly. The real adapter
+    # also runs resize/center-crop/normalize on the PIL image (BRINGUP); the toy VAE consumes the pixel
+    # array directly.
     ref_latent = np.asarray(instance.component("vae").encode(pixels), dtype="float32")  # [C,1,h,w] (or [C,h,w])
     if ref_latent.ndim == 3:  # [C, h, w] -> add the singleton temporal axis
         ref_latent = ref_latent[:, None]

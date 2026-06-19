@@ -128,10 +128,9 @@ class Gen3CVAE(TorchComponent):
 
 
 class Gen3CT5Encoder(CosmosT5Encoder):
-    """GEN3C T5-Large (1024-dim): raw last_hidden_state (NaN→0), no Wan zero-pad — identical to Cosmos.
-    Reuses ``CosmosT5Encoder.encode`` verbatim. (BRINGUP: GEN3C pads with ``max_length`` and zeros rows
-    past the attention-mask length, which ``CosmosT5Encoder`` already does — verify the max_length /
-    mask-zeroing matches the converted T5-Large tokenizer on the GPU box.)"""
+    """GEN3C T5-Large (1024-dim): raw last_hidden_state (NaN→0), no Wan zero-pad — identical to Cosmos,
+    so it reuses ``CosmosT5Encoder.encode`` verbatim. (BRINGUP: verify the max_length / mask-zeroing
+    matches the converted T5-Large tokenizer on the GPU box.)"""
 
 
 # Re-export so a reader can ``from v2.platform.backends.torch_gen3c import _to_numpy`` if needed.

@@ -1,12 +1,12 @@
-"""The multi-backend dispatch substrate (design_v3 §17).
+"""The multi-backend dispatch substrate.
 
 Two tuple-keyed registries (``COMPONENTS``, ``KERNELS``) + a ``Platform`` that detects ``(device,
-arch)`` and resolves both — with the numpy reference as the terminal fallback rung and parity
-oracle. This package is the membrane that lets CPU, GPU, and other backends coexist: a model's
-loops, policies, scheduler, caches, and training code never name a device; they call through the
-component/kernel seams and the resolved ``Platform`` decides the implementation.
+arch)`` and resolves both, with the numpy reference as the terminal fallback rung and parity oracle.
+Lets CPU, GPU, and other backends coexist: a model's loops, policies, scheduler, caches, and
+training code never name a device; they call through the component/kernel seams and the resolved
+``Platform`` decides the implementation.
 
-Importing this package is cheap and cycle-free (registry + platform classes only). The concrete
+Importing this package is cheap and cycle-free (registry + platform classes only); the concrete
 backend registrations in ``backends/`` are imported lazily on first ``Platform`` use.
 """
 from __future__ import annotations

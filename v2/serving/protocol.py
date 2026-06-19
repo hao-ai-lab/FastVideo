@@ -1,12 +1,11 @@
-"""OpenAI-shaped request schemas (design_v3 §12; the vllm-omni protocol, framework-free).
+"""OpenAI-shaped request schemas (vllm-omni protocol, framework-free).
 
 Plain dataclasses parsed from JSON (no pydantic dep). Each translates to a typed ``OmniRequest`` at
-the server boundary — "the request is the only currency crossing the product boundary" (§12).
+the server boundary — the request is the only currency crossing the product boundary.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from v2.request import DiffusionParams, OutputSpec, SamplingParams, TaskType, make_request
 
@@ -45,17 +44,25 @@ class ImageGenerationRequest:
     seed: int = 0
 
     @classmethod
-    def from_json(cls, d: dict) -> "ImageGenerationRequest":
-        return cls(prompt=d.get("prompt", ""), model=d.get("model", ""), n=int(d.get("n", 1)),
-                   size=d.get("size", "832x480"), num_inference_steps=int(d.get("num_inference_steps", 4)),
-                   guidance_scale=float(d.get("guidance_scale", 5.0)), seed=int(d.get("seed", 0)))
+    def from_json(cls, d: dict) -> ImageGenerationRequest:
+        return cls(prompt=d.get("prompt", ""),
+                   model=d.get("model", ""),
+                   n=int(d.get("n", 1)),
+                   size=d.get("size", "832x480"),
+                   num_inference_steps=int(d.get("num_inference_steps", 4)),
+                   guidance_scale=float(d.get("guidance_scale", 5.0)),
+                   seed=int(d.get("seed", 0)))
 
     def to_omni(self):
         w, h = _wh(self.size)
-        return make_request(_task_for(self.model, "image"), self.model, self.prompt,
+        return make_request(_task_for(self.model, "image"),
+                            self.model,
+                            self.prompt,
                             diffusion=DiffusionParams(num_steps=self.num_inference_steps,
                                                       guidance_scale=self.guidance_scale,
-                                                      height=h, width=w, seed=self.seed))
+                                                      height=h,
+                                                      width=w,
+                                                      seed=self.seed))
 
 
 @dataclass
@@ -71,20 +78,28 @@ class VideoGenerationRequest:
     stream: dict = field(default_factory=dict)
 
     @classmethod
-    def from_json(cls, d: dict) -> "VideoGenerationRequest":
-        return cls(prompt=d.get("prompt", ""), model=d.get("model", ""),
-                   seconds=float(d.get("seconds", 2.0)), size=d.get("size", "832x480"),
+    def from_json(cls, d: dict) -> VideoGenerationRequest:
+        return cls(prompt=d.get("prompt", ""),
+                   model=d.get("model", ""),
+                   seconds=float(d.get("seconds", 2.0)),
+                   size=d.get("size", "832x480"),
                    num_frames=int(d.get("num_frames", 81)),
                    num_inference_steps=int(d.get("num_inference_steps", 4)),
-                   guidance_scale=float(d.get("guidance_scale", 5.0)), seed=int(d.get("seed", 0)),
+                   guidance_scale=float(d.get("guidance_scale", 5.0)),
+                   seed=int(d.get("seed", 0)),
                    stream={"video": True} if d.get("stream") else {})
 
     def to_omni(self):
         w, h = _wh(self.size)
-        return make_request(TaskType.T2V, self.model, self.prompt,
+        return make_request(TaskType.T2V,
+                            self.model,
+                            self.prompt,
                             diffusion=DiffusionParams(num_steps=self.num_inference_steps,
-                                                      guidance_scale=self.guidance_scale, height=h, width=w,
-                                                      num_frames=self.num_frames, seed=self.seed),
+                                                      guidance_scale=self.guidance_scale,
+                                                      height=h,
+                                                      width=w,
+                                                      num_frames=self.num_frames,
+                                                      seed=self.seed),
                             outputs=OutputSpec(modalities=frozenset({"video"}), stream=self.stream))
 
 
@@ -98,10 +113,13 @@ class ChatCompletionRequest:
     seed: int = 0
 
     @classmethod
-    def from_json(cls, d: dict) -> "ChatCompletionRequest":
-        return cls(model=d.get("model", ""), messages=d.get("messages", []),
-                   stream=bool(d.get("stream", False)), max_tokens=int(d.get("max_tokens", 6)),
-                   num_inference_steps=int(d.get("num_inference_steps", 4)), seed=int(d.get("seed", 0)))
+    def from_json(cls, d: dict) -> ChatCompletionRequest:
+        return cls(model=d.get("model", ""),
+                   messages=d.get("messages", []),
+                   stream=bool(d.get("stream", False)),
+                   max_tokens=int(d.get("max_tokens", 6)),
+                   num_inference_steps=int(d.get("num_inference_steps", 4)),
+                   seed=int(d.get("seed", 0)))
 
     def prompt(self) -> str:
         for m in reversed(self.messages):
@@ -111,7 +129,9 @@ class ChatCompletionRequest:
         return ""
 
     def to_omni(self):
-        return make_request(_task_for(self.model, "chat"), self.model, self.prompt(),
+        return make_request(_task_for(self.model, "chat"),
+                            self.model,
+                            self.prompt(),
                             sampling=SamplingParams(max_tokens=self.max_tokens, seed=self.seed),
                             diffusion=DiffusionParams(num_steps=self.num_inference_steps, seed=self.seed),
                             outputs=OutputSpec(stream={"video": True} if self.stream else {}))

@@ -1,4 +1,4 @@
-"""ParityAligner + consistency ladder (design_v3 §9.1, §9.2)."""
+"""ParityAligner + consistency ladder."""
 from __future__ import annotations
 
 import numpy as np

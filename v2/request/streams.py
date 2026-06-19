@@ -1,10 +1,10 @@
-"""Streams + typed event taxonomy (design_v3 §12).
+"""Streams + typed event taxonomy.
 
-"A ``Stream`` is one ordered event channel for previews, media chunks, progress,
-logs, finals." Event taxonomy: ``request.*``, ``session.*``, ``artifact.*``,
-``media.{init,chunk,complete}``, ``trace.*``. A ``media.chunk`` must know its
+A ``Stream`` is one ordered event channel for previews, media chunks, progress,
+logs, and finals. Event taxonomy: ``request.*``, ``session.*``, ``artifact.*``,
+``media.{init,chunk,complete}``, ``trace.*``. A ``media.chunk`` carries its
 stream, byte-range/buffer-ref, codec/container, timestamp range, and
-preview-vs-final — invalid combinations are unrepresentable.
+preview-vs-final flag, so invalid combinations are unrepresentable.
 
 For v2 the Stream is a simple synchronous ordered channel (the core is
 numpy/sync and CPU-testable); a GPU/server deployment swaps in an async channel
@@ -19,7 +19,7 @@ from v2._types import TensorLike
 
 @dataclass(frozen=True)
 class OmniEvent:
-    type: str                       # e.g. "request.start", "media.chunk", "artifact.ready", "trace.step"
+    type: str  # e.g. "request.start", "media.chunk", "artifact.ready", "trace.step"
     request_id: str
     seq: int = 0
     payload: dict[str, object] = field(default_factory=dict)
@@ -29,14 +29,14 @@ class OmniEvent:
 class StreamChunk:
     """A media.chunk payload — invalid field combinations are unrepresentable."""
     stream_id: str
-    modality: str                   # "video" | "audio" | "text"
+    modality: str  # "video" | "audio" | "text"
     seq: int
-    data: TensorLike = None         # in-proc buffer (frames / samples / token ids)
-    codec: str = "raw"              # raw | h264 | opus | ...
-    ts_start: float = 0.0           # presentation timestamp range (seconds)
+    data: TensorLike = None  # in-proc buffer (frames / samples / token ids)
+    codec: str = "raw"  # raw | h264 | opus | ...
+    ts_start: float = 0.0  # presentation timestamp range (seconds)
     ts_end: float = 0.0
-    preview: bool = False           # preview vs final
-    final: bool = False             # last chunk of the stream
+    preview: bool = False  # preview vs final
+    final: bool = False  # last chunk of the stream
 
 
 class Stream:

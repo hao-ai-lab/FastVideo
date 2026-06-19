@@ -1,18 +1,17 @@
-"""Matrix-Game 2.0 DMD sampler helpers — the few-step distilled epsilon->x0 math, ported faithfully from
+"""Matrix-Game 2.0 DMD sampler helpers — the few-step distilled epsilon->x0 math, ported from
 ``fastvideo/models/utils.py`` (``pred_noise_to_pred_video`` / ``pred_noise_to_x_bound``) and the
-``FlowUniPCMultistepScheduler`` sigma/timestep table it indexes. Kept HERE (a recipe-local sibling), NOT
-in ``v2/loop/sampler.py``, because the DMD epsilon->x0 + re-add_noise schedule is specific to this arch.
+``FlowUniPCMultistepScheduler`` sigma/timestep table it indexes. Kept recipe-local (not in
+``v2/loop/sampler.py``) because the DMD epsilon->x0 + re-add_noise schedule is specific to this arch.
 
-The shipped distilled checkpoints run a FIXED 3-step DMD schedule ``dmd_denoising_steps=[1000,666,333]``.
-The scheduler (``FlowUniPCMultistepScheduler(shift=5.0)``) is used ONLY as a sigma/timestep lookup table +
-``add_noise``, never as a UniPC multistep corrector. With ``warp_denoising_step=True`` the nominal integer
-steps are remapped through the scheduler's timestep grid:
-``timesteps = cat(scheduler.timesteps, [0])[1000 - dmd_steps]``.
+The distilled checkpoints run a FIXED 3-step DMD schedule ``[1000,666,333]``. The scheduler
+(``FlowUniPCMultistepScheduler(shift=5.0)``) is used ONLY as a sigma/timestep lookup table + ``add_noise``,
+never as a UniPC multistep corrector. With ``warp_denoising_step=True`` the nominal integer steps are
+remapped through its timestep grid: ``timesteps = cat(scheduler.timesteps, [0])[1000 - dmd_steps]``.
 
 This numpy form is the CPU-testable, bit-reproducible reference. ``build_flow_unipc_table`` reproduces the
-scheduler's ``sigmas``/``timesteps`` (flow-shift over a 1000-step alpha ramp; identical formula to
-``FlowShiftPolicy``) so the loop can run on the CPU toy without instantiating the real scheduler. On a GPU
-box the torch scheduler is built from the card's ``scheduler`` load_id and the SAME math applies.
+scheduler's ``sigmas``/``timesteps`` (flow-shift over a 1000-step alpha ramp; same formula as
+``FlowShiftPolicy``) so the loop runs on the CPU toy without the real scheduler. On GPU the torch scheduler
+is built from the card's ``scheduler`` load_id and the SAME math applies.
 """
 from __future__ import annotations
 

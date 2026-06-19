@@ -1,8 +1,8 @@
 """Phase-2 omni: one resident MoT instance runs AR + diffusion loops on shared weights.
 
-This is the §16 claim — true omni/MoT serving: one resident model, many loop types, scheduled at
-step granularity, in one request — made native (not a DAG doubling weights, not a monolith bypassing
-the abstraction). Cosmos3 = reason → joint denoise; BAGEL/lance = generate_text → generate_image.
+True omni/MoT serving: one resident model, many loop types, scheduled at step granularity, in one
+request — made native (not a DAG doubling weights, not a monolith bypassing the abstraction).
+Cosmos3 = reason → joint denoise; BAGEL/lance = generate_text → generate_image.
 """
 from __future__ import annotations
 

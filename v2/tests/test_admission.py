@@ -1,6 +1,6 @@
-"""Admission = reservation before stepping (design_v3 §6.2).
+"""Admission = reservation before stepping.
 
-> Two requests that fit individually but jointly OOM are rejected at admission, not at step 37.
+Two requests that fit individually but jointly OOM are rejected at admission, not at step 37.
 And crucially: admission-forced serialization does NOT change outputs (still bit-identical).
 """
 from __future__ import annotations

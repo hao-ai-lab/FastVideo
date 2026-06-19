@@ -1,25 +1,17 @@
-"""The batch-of-N interleave parity gate (design_v3 §9.3) — non-negotiable.
+"""The batch-of-N interleave parity gate — required, not optional.
 
-> Loop inversion's real hazard is cross-request state smearing under interleaving — and a
-> batch-of-1 parity gate is structurally blind to it. So v3 makes a batch-of-N interleave
-> parity test a *required* gate: two (or more) concurrent requests, interleaved at step
-> granularity, must be bit-identical to the same requests run serially.
+Loop inversion's real hazard is cross-request state smearing under interleaving, which a
+batch-of-1 parity gate cannot detect. So this gate runs two or more concurrent requests
+interleaved at step granularity and requires bit-identical output versus running them serially.
 
-This is the test the whole loop-inversion bet lives or dies on. The gate is pure and
-duck-typed: it takes any engine exposing ``run_serial`` and ``run_interleaved``.
+The gate is pure and duck-typed: it takes any engine exposing ``run_serial`` and ``run_interleaved``.
 """
 from __future__ import annotations
 
 from typing import Any
 
 from v2.request.artifacts import (
-    AudioArtifact,
-    LatentArtifact,
-    Output,
-    TensorArtifact,
-    TextArtifact,
-    VideoArtifact,
-)
+    Output, )
 from v2.parity.ladder import ConsistencyLevel, Divergence, bit_identical
 
 
@@ -34,27 +26,32 @@ def compare_outputs(serial: dict[str, Output], interleaved: dict[str, Output]) -
     """Bitwise-compare per-request outputs from serial vs interleaved runs."""
     divs: list[Divergence] = []
     if set(serial) != set(interleaved):
-        divs.append(Divergence("request_set", ConsistencyLevel.C1, float("inf"), float("inf"),
-                               f"serial reqs {set(serial)} != interleaved {set(interleaved)}"))
+        divs.append(
+            Divergence("request_set", ConsistencyLevel.C1, float("inf"), float("inf"),
+                       f"serial reqs {set(serial)} != interleaved {set(interleaved)}"))
         return divs
     for rid in sorted(serial):
         so, io = serial[rid], interleaved[rid]
         if set(so.artifacts) != set(io.artifacts):
-            divs.append(Divergence(f"{rid}:artifacts", ConsistencyLevel.C1, float("inf"), float("inf"),
-                                   f"artifact names differ: {set(so.artifacts)} vs {set(io.artifacts)}"))
+            divs.append(
+                Divergence(f"{rid}:artifacts", ConsistencyLevel.C1, float("inf"), float("inf"),
+                           f"artifact names differ: {set(so.artifacts)} vs {set(io.artifacts)}"))
             continue
         for name in sorted(so.artifacts):
             a, b = _artifact_payload(so.artifacts[name]), _artifact_payload(io.artifacts[name])
             if a is None and b is None:
                 # both empty is NOT parity — a deferred/aborted request must not pass the gate vacuously
-                divs.append(Divergence(f"{rid}:{name}", ConsistencyLevel.C1, float("inf"), float("inf"),
-                                       "both serial and interleaved produced EMPTY output for a declared "
-                                       "artifact (deferred/aborted?) — suspicious, not parity"))
+                divs.append(
+                    Divergence(
+                        f"{rid}:{name}", ConsistencyLevel.C1, float("inf"), float("inf"),
+                        "both serial and interleaved produced EMPTY output for a declared "
+                        "artifact (deferred/aborted?) — suspicious, not parity"))
                 continue
             if not bit_identical(a, b):
-                divs.append(Divergence(f"{rid}:{name}", ConsistencyLevel.C1, float("nan"), float("nan"),
-                                       "serial vs interleaved output not bit-identical "
-                                       "(cross-request state smearing!)"))
+                divs.append(
+                    Divergence(f"{rid}:{name}", ConsistencyLevel.C1, float("nan"), float("nan"),
+                               "serial vs interleaved output not bit-identical "
+                               "(cross-request state smearing!)"))
     return divs
 
 

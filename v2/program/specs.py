@@ -1,4 +1,4 @@
-"""Programs compose a card's loops into a task (design_v3 §13).
+"""Programs compose a card's loops into a task.
 
 > The card says what loops *exist*, the program says how to *run* them for this request.
 
@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from v2.request.tasks import TaskType
 
@@ -24,7 +25,7 @@ class ProgramKind(str, Enum):
     WORKFLOW = "workflow"
 
 
-# --- node predicates (replace geometry heuristics; design.md P7) -------------- #
+# --- node predicates (declarative, replacing geometry heuristics) ------------- #
 def always(_request: Any) -> bool:
     return True
 
@@ -43,8 +44,8 @@ def when_opt(node_id: str, key: str) -> Callable[[Any], bool]:
 class ProgramNode:
     node_id: str
     when: Callable[[Any], bool] = always
-    reads: tuple[str, ...] = ()     # input slot names (typed edges in)
-    writes: tuple[str, ...] = ()    # output slot names (typed edges out)
+    reads: tuple[str, ...] = ()  # input slot names (typed edges in)
+    writes: tuple[str, ...] = ()  # output slot names (typed edges out)
 
 
 @dataclass
@@ -59,7 +60,7 @@ class ComponentNode(ProgramNode):
 @dataclass
 class ModelLoopNode(ProgramNode):
     """Binds one of the card's loops. The engine drives it via a LoopRunner, one step per tick,
-    so its steps interleave with other requests' steps (design_v3 §5, §6.3)."""
+    so its steps interleave with other requests' steps."""
     loop_id: str = ""
     output_slot: str = "latents"
 
@@ -76,7 +77,7 @@ class EdgeKind(str, Enum):
 
 @dataclass
 class Edge:
-    src: str             # slot or node id
+    src: str  # slot or node id
     dst: str
     kind: EdgeKind = EdgeKind.TENSOR
 
@@ -88,13 +89,13 @@ class Program:
     kind: ProgramKind
     nodes: list[ProgramNode] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
-    # artifact name -> slot that holds its value at the end (design_v3 §12 named artifacts)
+    # artifact name -> slot that holds its value at the end
     output_artifacts: dict[str, str] = field(default_factory=dict)
 
     def active_nodes(self, request: Any) -> list[ProgramNode]:
         return [n for n in self.nodes if n.when(request)]
 
-    def validate(self) -> "Program":
+    def validate(self) -> Program:
         produced: set[str] = set()
         for n in self.nodes:
             for r in n.reads:

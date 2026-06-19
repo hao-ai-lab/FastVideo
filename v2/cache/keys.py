@@ -1,12 +1,9 @@
-"""CacheKey — cache correctness is a contract, not hope (design_v3 §7.1).
+"""CacheKey — cache correctness is a contract.
 
-> If a field can change output semantics, it is in the key. Incorrect reuse is worse
-> than no reuse.
-
-The serving hazard this kills: a workflow-cloud request that shares a prompt but
-differs in te-LoRA stack must not serve stale embeddings — so the key is *partitioned*
-by ``adapter_versions``, not flushed. An RL ``update_weights`` bumps ``weights_version``
-and invalidates wholesale.
+If a field can change output semantics, it is in the key (incorrect reuse is worse than no reuse).
+The serving hazard this kills: a request that shares a prompt but differs in te-LoRA stack must not
+serve stale embeddings — so the key is *partitioned* by ``adapter_versions``, not flushed. An RL
+``update_weights`` bumps ``weights_version`` and invalidates wholesale.
 """
 from __future__ import annotations
 
@@ -16,17 +13,16 @@ from typing import Any
 
 
 def content_hash(obj: Any) -> str:
-    """Stable content hash for feature-cache keys (text/vision embeddings, §7.2).
+    """Stable content hash for feature-cache keys (text/vision embeddings).
 
-    Lets K rollout samples of one prompt reuse a single text encode (design_v3 §10:
-    24× text-encode reduction).
+    Lets K rollout samples of one prompt reuse a single text encode.
     """
     h = hashlib.sha256()
     if isinstance(obj, str):
         h.update(obj.encode("utf-8"))
     elif isinstance(obj, (bytes, bytearray)):
         h.update(obj)
-    elif hasattr(obj, "tobytes") and hasattr(obj, "shape"):   # numpy / torch tensor
+    elif hasattr(obj, "tobytes") and hasattr(obj, "shape"):  # numpy / torch tensor
         h.update(str(getattr(obj, "shape", "")).encode())
         h.update(str(getattr(obj, "dtype", "")).encode())
         try:
@@ -44,7 +40,7 @@ class CacheKey:
     component_id: str
     loop_id: str | None = None
     weights_version: str = "v0"
-    adapter_versions: tuple[tuple[str, str], ...] = ()       # sorted (adapter_id, version) pairs
+    adapter_versions: tuple[tuple[str, str], ...] = ()  # sorted (adapter_id, version) pairs
     precision: str = "float32"
     parallel_plan_hash: str = ""
     shape_sig: str = ""
@@ -75,11 +71,11 @@ class CacheKey:
 
 @dataclass
 class CachePolicy:
-    """Runtime config for one cache class pool (design_v3 §7.2; designv2 cache plane)."""
-    class_name: str                       # "feature" | "residual" | "slab_kv" | "paged_kv"
+    """Runtime config for one cache class pool."""
+    class_name: str  # "feature" | "residual" | "slab_kv" | "paged_kv"
     max_bytes: int = 1 << 30
     block_bytes: int = 1 << 16
-    eviction: str = "lru"                 # "lru" | "fifo" | "none"
+    eviction: str = "lru"  # "lru" | "fifo" | "none"
     reuse_across_requests: bool = True
     per_component: dict[str, int] = field(default_factory=dict)
     training_mode_disables_recycle: bool = False

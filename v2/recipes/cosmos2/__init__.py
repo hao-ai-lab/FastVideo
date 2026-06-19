@@ -1,9 +1,8 @@
-"""Cosmos-Predict2 (Video2World) — EDM-Karras denoiser ported into the v2 substrate.
+"""Cosmos-Predict2 (Video2World) EDM-Karras denoiser recipe.
 
-Self-contained recipe package (the bucket-C pattern): card declares its torch adapters via
-``ComponentSpec.adapter`` (``CosmosDiT``/``CosmosT5Encoder`` in ``v2/platform/backends/torch_cosmos.py``)
-and a new ``CosmosDenoiseLoop`` (EDM preconditioning folded into flow-match Euler), reusing the Wan VAE
-adapter + T5 + ``stamp_wan21_checkpoints``. Registered in ``v2/registry.py``.
+Self-contained recipe: the card declares torch adapters (``CosmosDiT``/``CosmosT5Encoder`` in
+``v2/platform/backends/torch_cosmos.py``) plus ``CosmosDenoiseLoop`` (EDM preconditioning folded into
+flow-match Euler), reusing the Wan VAE adapter + T5 + ``stamp_wan21_checkpoints``.
 """
 from __future__ import annotations
 

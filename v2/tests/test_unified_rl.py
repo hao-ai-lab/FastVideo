@@ -1,4 +1,4 @@
-"""UniRL/PromptRL joint LM+generator RL — the design stress test (design_v3 §4, §10; arXiv 2510.17937).
+"""UniRL/PromptRL joint LM+generator RL — the design stress test (arXiv 2510.17937).
 
 These tests assert the *design holds*: a joint two-expert RL recipe fits inside the existing
 Card/Loop/Program + training-plane vocabulary with no new primitive. Specifically:
@@ -67,7 +67,7 @@ def test_two_separate_experts_not_a_shared_mot():
     assert inst.component("llm") is not inst.component("transformer")     # genuinely separate weights
 
 
-# --- serve ODE vs rollout SDE (gated, §9.4) --------------------------------------- #
+# --- serve ODE vs rollout SDE (gated) --------------------------------------------- #
 
 def test_serve_is_ode_rollout_is_sde():
     eng = build_unified_engine()
@@ -136,7 +136,7 @@ def test_joint_rl_updates_both_experts():
     # 4) two experts versioned INDEPENDENTLY; the frozen text-encoder cache is NOT invalidated
     inst = m.student
     assert last["llm_weights_version"] != last["transformer_weights_version"]
-    assert inst.version_of("text_encoder") == "v0"                       # §7.1 cache scope preserved
+    assert inst.version_of("text_encoder") == "v0"                       # cache scope preserved
     assert inst.version_of("llm") != "v0" and inst.version_of("transformer") != "v0"
 
 

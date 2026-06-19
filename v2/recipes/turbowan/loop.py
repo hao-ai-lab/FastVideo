@@ -1,25 +1,22 @@
 """TurboWanDenoiseLoop — the rCM (Reparameterized Consistency Model) few-step denoise loop.
 
-TurboWan reuses the Wan architecture (``WanTransformer3DModel`` velocity predictor, ``AutoencoderKLWan``,
-UMT5) but replaces the multistep flow-match sampler with the rCM consistency sampler. So this loop is the
-ONLY genuinely new piece vs ``v2/recipes/wan21``: the standard FLOW_MATCH schedule + Euler step are
-swapped for the TrigFlow->RectifiedFlow RCM schedule + the stochastic consistency step in
-``v2/recipes/turbowan/sampler.py`` (a faithful port of ``RCMScheduler``).
+TurboWan reuses the Wan architecture but swaps the multistep flow-match sampler for the rCM consistency
+sampler, so this loop is the only genuinely new piece vs ``v2/recipes/wan21``: the FLOW_MATCH schedule +
+Euler step become the TrigFlow->RectifiedFlow schedule + stochastic consistency step in ``sampler.py``
+(a faithful port of ``RCMScheduler``).
 
-Per step (mirroring ``fastvideo/pipelines/stages/denoising.py`` driving ``RCMScheduler``):
-  * the model timestep is the SCALED sigma ``t = sigma * 1000`` (the DiT's training convention);
-  * the DiT predicts a velocity (CFG-combined when a guidance scale != 1 and a negative branch exists —
-    the registered TurboWan presets use guidance_scale 1.0, so CFG is OFF, matching the few-step recipe);
-  * the rCM SDE step ``x_next = (1 - t_next)*(x - t_cur*v) + t_next*noise`` injects FRESH per-step noise.
-    The host RNG (and the consistency math, which is not the platform's flow-match kernel) means every
-    step is eager — ``capturable=False`` — exactly like the cosmos2 EDM loop and the FlowGRPO SDE rollout.
+Per step (mirroring ``fastvideo/pipelines/stages/denoising.py``):
+  * the model timestep is the scaled sigma ``t = sigma * 1000`` (the DiT's training convention);
+  * the DiT predicts a velocity (CFG-combined when guidance_scale != 1 and a negative branch exists — the
+    presets use guidance_scale 1.0, so CFG is off);
+  * the rCM SDE step ``x_next = (1 - t_next)*(x - t_cur*v) + t_next*noise`` injects fresh per-step noise.
+    The host RNG makes every step eager (``capturable=False``), like the cosmos2 EDM and FlowGRPO SDE loops.
 
-MoE + i2v (Wan2.2-I2V-A14B): expert routing and the i2v conditioning hooks are reused unchanged from the
-Wan loop. ``self.expert`` (a ``BoundaryTimestepRouting`` for the MoE variant) picks the high/low-noise
-transformer per step by comparing the RAW sigma against the boundary (0.9 == ``boundary_ratio`` 0.9, since
-the fastvideo boundary ``0.9*num_train_timesteps`` is compared against the scaled timestep ``sigma*1000``).
-The i2v ``[mask|cond]`` latent + CLIP image embeds flow from slots to the WanDiT adapter exactly as in
-``v2/recipes/wan21/i2v.py``; ``None`` for T2V -> the plain forward. The toy DiT accepts (and ignores) both.
+MoE + i2v (Wan2.2-I2V-A14B): expert routing and i2v conditioning hooks are reused unchanged from the Wan
+loop. ``self.expert`` (a ``BoundaryTimestepRouting`` for the MoE variant) picks the high/low-noise transformer
+per step by comparing the raw sigma against the boundary (fastvideo's ``0.9*num_train_timesteps`` vs the
+scaled timestep ``sigma*1000``). The i2v ``[mask|cond]`` latent + CLIP image embeds flow from slots to the
+WanDiT adapter as in ``v2/recipes/wan21/i2v.py``; ``None`` for T2V -> the plain forward.
 """
 from __future__ import annotations
 

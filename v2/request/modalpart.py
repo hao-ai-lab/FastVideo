@@ -1,9 +1,9 @@
-"""ModalPart — typed multimodal request inputs (design_v3 §12; design.md §6.1 G2).
+"""ModalPart — typed multimodal request inputs.
 
 Requests carry a list of typed modality parts instead of a god-batch with
-per-model fields. This kills the ``ForwardBatch`` blackboard / ``extra[...]``
-pattern (design.md P3) at the input boundary; artifacts (outputs) do the same
-on the way out (see ``artifacts.py``).
+per-model fields, avoiding a ``ForwardBatch`` blackboard / ``extra[...]`` pattern
+at the input boundary; artifacts (outputs) do the same on the way out (see
+``artifacts.py``).
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class TextPart(ModalPart):
 
 @dataclass(frozen=True)
 class ImagePart(ModalPart):
-    pixels: TensorLike = None          # HxWxC or CxHxW (backend decides), or a path
+    pixels: TensorLike = None  # HxWxC or CxHxW (backend decides), or a path
     path: str | None = None
 
     def __init__(self, pixels: TensorLike = None, path: str | None = None):
@@ -49,7 +49,7 @@ class ImagePart(ModalPart):
 
 @dataclass(frozen=True)
 class VideoPart(ModalPart):
-    frames: TensorLike = None          # T x H x W x C
+    frames: TensorLike = None  # T x H x W x C
     fps: float = 16.0
     path: str | None = None
 

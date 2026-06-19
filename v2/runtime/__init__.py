@@ -1,4 +1,4 @@
-"""Execution plane — engine + scheduler (design_v3 §6)."""
+"""Execution plane — engine + scheduler."""
 from __future__ import annotations
 
 from v2.runtime.async_engine import AsyncEngine, RequestState
@@ -16,7 +16,8 @@ from v2.runtime.scheduler import (
     WorkUnit,
 )
 
-__all__ = ["Engine", "ProgramRunner", "RuntimeLoopContext", "AdmissionController",
-           "AdmissionInfeasible", "BatchScheduler", "SchedulerMetrics", "StepTicket", "WorkUnit",
-           "AsyncEngine", "RequestState", "DisaggregatedRunner", "WorldModelSession",
-           "DeployConfig", "PoolSet", "RolePool", "RolePoolSpec", "wan_t2v_disaggregated"]
+__all__ = [
+    "Engine", "ProgramRunner", "RuntimeLoopContext", "AdmissionController", "AdmissionInfeasible", "BatchScheduler",
+    "SchedulerMetrics", "StepTicket", "WorkUnit", "AsyncEngine", "RequestState", "DisaggregatedRunner",
+    "WorldModelSession", "DeployConfig", "PoolSet", "RolePool", "RolePoolSpec", "wan_t2v_disaggregated"
+]

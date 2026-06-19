@@ -1,9 +1,7 @@
-"""BehaviorRecord — captured at generation time on the serving loop (design_v3 §10).
+"""BehaviorRecord — captured at generation time on the serving loop.
 
-> The rollout forward *is* the serve forward plus capture.
-
-Sized honestly (design_v3 §10): full routing capture is GB/sample for omni, so it is an opt-in
-instrument. ``logprobs`` is None for likelihood-free methods (DiffusionNFT) — the C2 split.
+The rollout forward is the serve forward plus capture. Full routing capture is GB/sample for omni,
+so it is opt-in. ``logprobs`` is None for likelihood-free methods (DiffusionNFT).
 """
 from __future__ import annotations
 
@@ -30,8 +28,8 @@ class BehaviorRecord:
     seeds: dict[str, int] = field(default_factory=dict)
     timesteps: list[float] = field(default_factory=list)
     sigmas: list[float] = field(default_factory=list)
-    latents: Any = None                       # final clean latents (or refs if too large)
-    logprobs: list[float] | None = None       # None for likelihood-free methods (NFT)
+    latents: Any = None  # final clean latents (or refs if too large)
+    logprobs: list[float] | None = None  # None for likelihood-free methods (NFT)
     sampled_tokens: list[int] = field(default_factory=list)
     guidance: dict[str, float] = field(default_factory=dict)
     reward_inputs: dict[str, Any] = field(default_factory=dict)

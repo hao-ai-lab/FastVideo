@@ -13,11 +13,11 @@ Architecture deltas vs Wan (all declared on the card so the recipe is self-conta
 
 ``stamp_wan21_checkpoints`` applies (diffusers transformer/vae/text_encoder subfolder layout); HunyuanVideo
 additionally ships ``text_encoder_2/`` (CLIP) + ``tokenizer_2/`` — the stamp helper points each declared
-component (incl. ``text_encoder_2``) at its subfolder (see the BRINGUP note in ``card.py`` and the CLIP
-adapter for the ``tokenizer_2`` wiring caveat).
+component (incl. ``text_encoder_2``) at its subfolder (see the BRINGUP note below and the CLIP adapter for
+the ``tokenizer_2`` wiring caveat).
 
-Defaults (fastvideo HUNYUAN_T2V preset): 50 steps, guidance_scale 1.0 (CFG effectively off),
-720x1280, 125 frames @ 24fps, flow_shift 7.0. A FastHunyuan variant ships shift 17, 6 steps.
+Defaults (fastvideo HUNYUAN_T2V preset): 50 steps, guidance_scale 1.0 (CFG effectively off), 720x1280,
+125 frames @ 24fps, flow_shift 7.0. A FastHunyuan variant ships shift 17, 6 steps.
 """
 from __future__ import annotations
 

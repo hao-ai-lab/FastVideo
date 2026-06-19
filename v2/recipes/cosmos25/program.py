@@ -1,11 +1,10 @@
 """Cosmos-Predict2.5 t2v program: text_encode -> diffusion_denoise (flow-match) -> vae_decode.
 
 Same inline shape as the Wan / Cosmos2 t2v programs — the Cosmos2.5 specifics (per-frame plain-sigma
-timestep, the mandatory masks + fps, the Reason1 100352-dim embedding) live entirely in
-``Cosmos25DenoiseLoop`` and the ``torch_cosmos25`` adapters, so the node graph is unchanged. fps is read
-by the loop from the request (``req.diffusion.fps``, default 24) into scratch and threaded to the DiT
-adapter. (video2world/image2world conditioning would add a VAE-encode node writing
-``conditioning_latents``/``cond_indicator`` into slots; the loop already reads them — BRINGUP.)
+timestep, the mandatory masks + fps, the Reason1 100352-dim embedding) live in ``Cosmos25DenoiseLoop``
+and the ``torch_cosmos25`` adapters, so the node graph is unchanged. The loop reads fps from the request
+(``req.diffusion.fps``, default 24). (video2world/image2world conditioning would add a VAE-encode node
+writing ``conditioning_latents``/``cond_indicator`` into slots; the loop already reads them — BRINGUP.)
 """
 from __future__ import annotations
 

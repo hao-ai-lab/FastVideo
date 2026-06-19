@@ -1,4 +1,4 @@
-"""Inference paths: Wan2.1 T2V, LTX2.3 two-stage distilled, Wan-causal streaming (design_v3 §15)."""
+"""Inference paths: Wan2.1 T2V, LTX2.3 two-stage distilled, Wan-causal streaming."""
 from __future__ import annotations
 
 import numpy as np

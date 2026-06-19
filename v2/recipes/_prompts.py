@@ -1,6 +1,6 @@
 """Default negative prompts per model family — copied verbatim from fastvideo's pipeline presets
-(`fastvideo/pipelines/basic/{wan,ltx2}/presets.py`). These are stable recipe DATA (not model code), so
-v2 owns its own copy rather than importing private symbols from fastvideo's pipelines package."""
+(`fastvideo/pipelines/basic/{wan,ltx2}/presets.py`). These are stable recipe DATA, not model code,
+so v2 keeps its own copy rather than importing private symbols from fastvideo's pipelines package."""
 from __future__ import annotations
 
 # Wan family — English (Wan2.1 T2V) and Chinese (Wan2.2 / self-forcing) negative prompts.

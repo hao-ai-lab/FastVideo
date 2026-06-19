@@ -1,10 +1,9 @@
 """FLUX.2 flow-match sigma schedule — the BFL empirical-mu grid (recipe-local; NOT in v2/loop/sampler.py).
 
 FLUX.2 does NOT use ``FlowShiftPolicy.build_schedule`` (the Wan/LTX resolution-bucket shift). It builds a
-resolution-dependent ``mu`` from the *packed* image token count and feeds it, together with a custom
+resolution-dependent ``mu`` from the *packed* image token count and feeds it, with a custom
 ``sigmas = linspace(1, 1/N, N)`` grid, to diffusers' ``FlowMatchEulerDiscreteScheduler.set_timesteps``
-under ``use_dynamic_shifting=True``. This module reproduces that scheduler's numpy result exactly so the
-CPU-toy loop is bit-faithful to the GPU pipeline.
+under ``use_dynamic_shifting=True``. This module reproduces that scheduler's numpy result exactly.
 
 Faithful to:
   * ``fastvideo/pipelines/basic/flux_2/flux_2_timestep_preparation.py:compute_empirical_mu`` (the BFL
@@ -49,7 +48,7 @@ def flux2_sigmas(num_steps: int, image_seq_len: int) -> np.ndarray:
     1. base grid ``sigmas = linspace(1.0, 1/N, N)`` (the custom grid the pipeline passes);
     2. resolution-dependent ``mu`` shift ``time_shift(mu, 1.0, sigmas)`` (use_dynamic_shifting=True);
     3. append the terminal ``0.0`` (FlowMatchEuler's ``invert_sigmas=False`` tail).
-    The loop integrates these pairwise via the deterministic flow-match Euler step (FLOW_MATCH_STEP).
+    The loop integrates these pairwise via the flow-match Euler step (FLOW_MATCH_STEP).
     """
     n = max(1, int(num_steps))
     base = np.linspace(1.0, 1.0 / n, n, dtype=np.float64)

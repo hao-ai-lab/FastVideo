@@ -1,4 +1,4 @@
-"""Policies — the default step decomposition (design_v3 §5.1, §6.2.3)."""
+"""Policies — the default step decomposition."""
 from __future__ import annotations
 
 from v2.loop.policies.base import (
@@ -20,7 +20,17 @@ from v2.loop.policies.cfg import (
 )
 
 __all__ = [
-    "CFGPolicy", "ClassicCFG", "BatchedCFG", "EmbeddedGuidance", "AdaptiveGateCFG", "PerModalityCFG",
-    "FlowShiftPolicy", "PrecisionPolicy", "ExpertRouting", "NoRouting", "BoundaryTimestepRouting",
-    "ConditioningInjector", "PassthroughConditioning",
+    "CFGPolicy",
+    "ClassicCFG",
+    "BatchedCFG",
+    "EmbeddedGuidance",
+    "AdaptiveGateCFG",
+    "PerModalityCFG",
+    "FlowShiftPolicy",
+    "PrecisionPolicy",
+    "ExpertRouting",
+    "NoRouting",
+    "BoundaryTimestepRouting",
+    "ConditioningInjector",
+    "PassthroughConditioning",
 ]
