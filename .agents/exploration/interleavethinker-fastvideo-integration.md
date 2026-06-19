@@ -2583,3 +2583,128 @@ Conclusion:
 - Next full-integration stage: add optional frozen reference-policy support for
   InterleaveThinker GRPO so the method can compute KL against
   `models.reference` rather than only consuming precomputed reference logprobs.
+
+## Stage 9 Execution: Optional Reference Policy KL For Critic GRPO
+
+Status: validation complete; ready to commit and push.
+
+Goal:
+
+- Add first-class FastVideo `models.reference` support to the
+  InterleaveThinker RL method.
+- Keep the reference model frozen/eval-only.
+- Compute per-response reference logprobs for generated critic rollouts before
+  the student actor update.
+- Feed those reference logprobs into the existing GRPO KL term.
+- Keep offline/precomputed-rollout flows working when `models.reference` is not
+  configured.
+
+Planned implementation:
+
+- `fastvideo/train/methods/rl/interleave_thinker.py`
+  - Read optional `role_models["reference"]`.
+  - Require `models.reference.trainable: false` when present.
+  - Freeze and eval the reference transformer.
+  - If present, attach `reference_logprobs` to rollouts that do not already
+    include `reference_logprobs` or `ref_logprobs`.
+  - Use a model-owned hook rather than putting Qwen tokenizer logic in the
+    method.
+  - Log how many rollouts received computed reference logprobs.
+- `fastvideo/train/models/interleave_thinker/qwen_actor.py`
+  - Add a reusable no-grad
+    `reference_logprobs_for_interleave_rollouts(...)` hook that calls each
+    actor wrapper's `build_messages(...)` and
+    `response_logprobs_from_messages(...)`.
+  - Preserve and restore the transformer's training/eval state.
+- `examples/train/configs/rl/interleave_thinker/critic_grpo.yaml`
+  - Add a frozen `models.reference` critic actor using the same base
+    checkpoint and processor as the student.
+  - Set `kl_coef` to a small nonzero value so the public config demonstrates
+    actual reference-policy KL.
+- Tests:
+  - Method unit test proving a fake reference actor receives rollouts and the
+    actor train call receives `reference_logprobs`.
+  - Config parse test proving `models.reference` is present and frozen.
+  - Critic/Qwen fake-backend test for the new reference-logprob hook.
+
+Validation plan:
+
+- Local syntax checks and `git diff --check`.
+- Modal focused pytest for InterleaveThinker RL method, critic model, and GRPO
+  math tests.
+- Modal pre-commit on changed files.
+- If the focused tests pass, run a one-step Modal smoke with a frozen reference
+  actor on the same tiny critic RL fixture.
+
+Implemented changes:
+
+- `fastvideo/train/methods/rl/interleave_thinker.py`
+  - Added optional `self.reference = role_models.get("reference")`.
+  - Requires `models.reference.trainable=false` when a reference role is
+    configured.
+  - Freezes/evals the reference transformer during init and train start.
+  - Computes reference logprobs for mutable rollout dictionaries that do not
+    already contain `reference_logprobs` or `ref_logprobs`.
+  - Keeps precomputed-reference offline rollouts working by leaving existing
+    reference logprobs untouched.
+  - Logs `interleave/reference_logprob_rollouts`.
+- `fastvideo/train/models/interleave_thinker/qwen_actor.py`
+  - Added `reference_logprobs_for_interleave_rollouts(...)`.
+  - The hook is no-grad, uses the model wrapper's own `build_messages(...)`,
+    returns JSON-serializable float rows, and restores the previous
+    training/eval state.
+- `examples/train/configs/rl/interleave_thinker/critic_grpo.yaml`
+  - Added a frozen `models.reference` critic actor on
+    `InterleaveThinker/Critic-SFT-8B`.
+  - Set public `method.kl_coef` to `0.01`.
+- Tests:
+  - Added method coverage for attaching reference logprobs and rejecting a
+    trainable reference model.
+  - Updated public YAML parse coverage for `models.reference`.
+  - Added fake Qwen critic coverage for the reference-logprob hook.
+
+Validation completed:
+
+- Local lightweight checks:
+  - `python -m py_compile` passed for
+    `fastvideo/train/methods/rl/interleave_thinker.py`,
+    `fastvideo/train/models/interleave_thinker/qwen_actor.py`,
+    `tests/local_tests/test_interleave_thinker_method.py`, and
+    `tests/local_tests/test_interleave_thinker_critic_model.py`.
+  - `git diff --check` passed.
+- Modal focused pytest:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-zE4Vc67urAQpS5n5z28BWH`
+  - Command:
+    `pytest tests/local_tests/test_interleave_thinker_method.py
+    tests/local_tests/test_interleave_thinker_critic_model.py
+    tests/local_tests/test_interleave_thinker_grpo_math.py -q`
+  - Result: `16 passed, 14 warnings in 15.84s`.
+- Modal pre-commit:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-qJ3d8tDt6EklobhX1x0CTM`
+  - Result: yapf, ruff, codespell, mypy, filename, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+- Real one-step critic RL smoke with frozen reference actor:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-UQ38OTnymREO9bz0L1QzC5`
+  - Result:
+    - Loaded the trainable LoRA student
+      `InterleaveThinker/Critic-SFT-8B`.
+    - Enabled PEFT LoRA with rank 4 and alpha 8 on
+      `['q_proj', 'k_proj', 'v_proj', 'o_proj']`.
+    - Loaded the frozen reference
+      `InterleaveThinker/Critic-SFT-8B`.
+    - Generated two rollouts, computed old and reference response-token
+      logprobs, scored with `ConstantInterleaveEditScorer`, and completed one
+      GRPO update step with `kl_coef=0.01`.
+    - The job printed `INTERLEAVE_CRITIC_RL_REFERENCE_SMOKE_OK`.
+
+Conclusion:
+
+- InterleaveThinker critic GRPO now has a first-class frozen reference-policy
+  path in FastVideo.
+- The path has both fake-unit coverage and a real one-step Modal smoke against
+  actual InterleaveThinker critic checkpoints.
+- Next action: commit this Stage 9 reference-policy integration and push it to
+  `origin/interleavethinker-fastvideo`.

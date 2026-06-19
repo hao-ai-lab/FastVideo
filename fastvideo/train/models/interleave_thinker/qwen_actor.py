@@ -351,6 +351,29 @@ class Qwen3VLActorBase(ModelBase):
             raise ValueError("InterleaveThinker rollout has no unmasked response tokens")
         return response_logprobs.squeeze(0), response_mask.squeeze(0)
 
+    @torch.no_grad()
+    def reference_logprobs_for_interleave_rollouts(
+        self,
+        rollouts: Sequence[Mapping[str, Any]],
+    ) -> list[list[float]]:
+        """Compute frozen-policy response logprobs for GRPO KL terms."""
+        self._require_backend()
+        was_training = bool(getattr(self.transformer, "training", False))
+        self.transformer.eval()
+        try:
+            rows: list[list[float]] = []
+            for rollout in rollouts:
+                response = str(rollout.get("response", "") or "")
+                logprobs, _ = self.response_logprobs_from_messages(
+                    self.build_messages(rollout),
+                    response,
+                )
+                rows.append(logprobs.detach().cpu().float().flatten().tolist())
+            return rows
+        finally:
+            if was_training:
+                self.transformer.train()
+
     def compute_interleave_sft_loss(
         self,
         batch: Mapping[str, Any],

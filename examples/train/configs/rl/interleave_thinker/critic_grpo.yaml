@@ -30,6 +30,21 @@ models:
         - k_proj
         - v_proj
         - o_proj
+  reference:
+    _target_: fastvideo.train.models.interleave_thinker.InterleaveThinkerCriticModel
+    init_from: InterleaveThinker/Critic-SFT-8B
+    processor_from: Qwen/Qwen3-VL-8B-Instruct
+    load_backend: true
+    dataset_kind: critic_rl
+    image_dir: data/InterleaveThinker/Train-Data
+    torch_dtype: auto
+    attn_implementation: flash_attention_2
+    freeze_vision_tower: true
+    freeze_multi_modal_projector: true
+    enable_gradient_checkpointing: false
+    max_prompt_length: 16384
+    max_response_length: 4096
+    trainable: false
 
 method:
   _target_: fastvideo.train.methods.rl.interleave_thinker.InterleaveThinkerRLMethod
@@ -44,7 +59,7 @@ method:
   quality_weight: 0.2
   fallback_edit_reward: 0.5
   clip_range: 0.2
-  kl_coef: 0.0
+  kl_coef: 0.01
   micro_batch_size_per_device_for_update: 1
   edit_scorer:
     _target_: fastvideo.train.methods.rl.rewards.GeminiNanoBananaEditScorer

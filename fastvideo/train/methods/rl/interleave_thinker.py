@@ -52,6 +52,12 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         if not self.student._trainable:
             raise ValueError("InterleaveThinkerRLMethod requires a trainable student")
 
+        self.reference = role_models.get("reference")
+        if self.reference is not None:
+            if self.reference._trainable:
+                raise ValueError("InterleaveThinkerRLMethod requires models.reference.trainable=false")
+            self._freeze_reference_model()
+
         self.student.init_preprocessors(self.training_config)
         self._num_generations = self._read_int("num_generations", 8)
         self._num_batches_per_step = self._read_int("num_batches_per_step", 1)
@@ -124,6 +130,8 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         if not rollouts:
             raise RuntimeError("InterleaveThinkerRLMethod generated no rollouts")
 
+        reference_logprob_count = self._attach_reference_logprobs(rollouts)
+
         self._log_progress(f"[InterleaveThinkerRL] step {iteration}: scoring {len(rollouts)} rollouts")
         reward_inputs = self._make_reward_inputs(rollouts)
         reward_tensors = self._reward_scorer.as_tensors(reward_inputs, device=self.student.device)
@@ -151,6 +159,7 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         metrics["interleave/num_rollouts"] = float(len(rollouts))
         metrics["interleave/num_groups"] = float(len(set(group_keys)))
         metrics["interleave/num_batches_per_step"] = float(self._num_batches_per_step)
+        metrics["interleave/reference_logprob_rollouts"] = float(reference_logprob_count)
         return loss_map, {}, metrics
 
     def get_optimizers(
@@ -176,6 +185,10 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         if isinstance(transformer, torch.nn.Module):
             return {"student": transformer}
         return {}
+
+    def on_train_start(self) -> None:
+        super().on_train_start()
+        self._freeze_reference_model()
 
     def _init_optimizer_and_scheduler(self) -> None:
         transformer = getattr(self.student, "transformer", None)
@@ -208,6 +221,63 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         if isinstance(raw, Mapping):
             return instantiate(dict(raw))
         raise TypeError("method.edit_scorer must be a callable or a mapping with _target_")
+
+    def _freeze_reference_model(self) -> None:
+        if self.reference is None:
+            return
+        transformer = getattr(self.reference, "transformer", None)
+        if isinstance(transformer, torch.nn.Module):
+            transformer.requires_grad_(False)
+            transformer.eval()
+
+    def _attach_reference_logprobs(
+        self,
+        rollouts: Sequence[Mapping[str, Any]],
+    ) -> int:
+        if self.reference is None:
+            return 0
+        pending: list[dict[str, Any]] = []
+        for rollout in rollouts:
+            if self._has_reference_logprobs(rollout):
+                continue
+            if not isinstance(rollout, dict):
+                raise TypeError("InterleaveThinker reference logprobs require mutable rollout dictionaries")
+            pending.append(rollout)
+        if not pending:
+            return 0
+
+        hook = getattr(self.reference, "reference_logprobs_for_interleave_rollouts", None)
+        if not callable(hook):
+            raise RuntimeError("models.reference must implement reference_logprobs_for_interleave_rollouts()")
+
+        self._log_progress(f"[InterleaveThinkerRL] computing reference logprobs for {len(pending)} rollouts")
+        self._freeze_reference_model()
+        with torch.no_grad():
+            rows = hook(pending)
+        if not isinstance(rows, Sequence) or isinstance(rows, str | bytes):
+            raise TypeError("reference_logprobs_for_interleave_rollouts() must return a sequence")
+        reference_rows = list(rows)
+        if len(reference_rows) != len(pending):
+            raise ValueError("reference logprob row count must match rollout count")
+        for rollout, row in zip(pending, reference_rows, strict=True):
+            rollout["reference_logprobs"] = self._coerce_reference_logprobs(row)
+        return len(pending)
+
+    @staticmethod
+    def _has_reference_logprobs(rollout: Mapping[str, Any]) -> bool:
+        return rollout.get("reference_logprobs") is not None or rollout.get("ref_logprobs") is not None
+
+    @staticmethod
+    def _coerce_reference_logprobs(row: Any) -> list[float]:
+        if torch.is_tensor(row):
+            values = row.detach().cpu().float().flatten().tolist()
+        elif isinstance(row, Sequence) and not isinstance(row, str | bytes):
+            values = [float(value) for value in row]
+        else:
+            raise TypeError("reference logprob rows must be tensors or sequences of floats")
+        if not values:
+            raise ValueError("reference logprob rows must be non-empty")
+        return values
 
     def _generate_rollouts(
         self,

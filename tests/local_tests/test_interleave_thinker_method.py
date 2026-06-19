@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from typing import Any, Literal
 
+import pytest
 import torch
 
 from fastvideo.pipelines import TrainingBatch
@@ -30,9 +31,9 @@ def _response(success=True):
 
 class _FakeInterleaveActor(ModelBase):
 
-    def __init__(self):
-        super().__init__(trainable=True)
-        self.transformer = torch.nn.Module()
+    def __init__(self, *, trainable=True):
+        super().__init__(trainable=trainable)
+        self.transformer = torch.nn.Linear(1, 1)
         self.noise_scheduler = SimpleNamespace(num_train_timesteps=0)
         self.generate_calls = []
         self.train_calls = []
@@ -106,6 +107,18 @@ class _FakeInterleaveActor(ModelBase):
         raise NotImplementedError
 
 
+class _FakeReferenceActor(_FakeInterleaveActor):
+
+    def __init__(self):
+        super().__init__(trainable=False)
+        self.reference_calls = []
+        self.transformer.train()
+
+    def reference_logprobs_for_interleave_rollouts(self, rollouts):
+        self.reference_calls.append([dict(rollout) for rollout in rollouts])
+        return [[-0.1, -0.2] for _ in rollouts]
+
+
 def _cfg(method_overrides=None):
     method = {
         "num_generations": 2,
@@ -168,6 +181,43 @@ def test_interleave_thinker_managed_step_scores_advantages_and_calls_actor_updat
     assert train_kwargs["clip_range"] == 0.15
     assert train_kwargs["kl_coef"] == 0.05
     assert train_kwargs["update_micro_batch_size"] == 2
+    assert train_kwargs["rollouts"][0].get("reference_logprobs") is None
+
+
+def test_interleave_thinker_method_attaches_reference_logprobs_to_rollouts():
+    actor = _FakeInterleaveActor()
+    reference = _FakeReferenceActor()
+    method = InterleaveThinkerRLMethod(
+        cfg=_cfg({
+            "kl_coef": 0.01
+        }),
+        role_models={
+            "student": actor,
+            "reference": reference,
+        },
+    )
+    batch = {"origin_prompt": ["prompt-a", "prompt-b"]}
+
+    _, _, metrics = method.managed_train_step(iter([batch]), iteration=3)
+
+    assert metrics["interleave/reference_logprob_rollouts"] == 4.0
+    assert len(reference.reference_calls) == 1
+    assert len(reference.reference_calls[0]) == 4
+    assert reference.transformer.training is False
+    assert all(not param.requires_grad for param in reference.transformer.parameters())
+    train_rollouts = actor.train_calls[0]["rollouts"]
+    assert [rollout["reference_logprobs"] for rollout in train_rollouts] == [[-0.1, -0.2]] * 4
+
+
+def test_interleave_thinker_method_requires_frozen_reference_model():
+    with pytest.raises(ValueError, match="models.reference.trainable=false"):
+        InterleaveThinkerRLMethod(
+            cfg=_cfg(),
+            role_models={
+                "student": _FakeInterleaveActor(),
+                "reference": _FakeInterleaveActor(trainable=True),
+            },
+        )
 
 
 def test_interleave_thinker_method_can_use_offline_response_batches():
@@ -231,12 +281,16 @@ def test_interleave_thinker_config_parses_public_yaml():
     assert cfg.models["student"]["dataset_kind"] == "critic_rl"
     assert cfg.models["student"]["image_dir"] == "data/InterleaveThinker/Train-Data"
     assert cfg.models["student"]["lora"]["enable"] is True
+    assert cfg.models["reference"]["_target_"] == (
+        "fastvideo.train.models.interleave_thinker.InterleaveThinkerCriticModel")
+    assert cfg.models["reference"]["init_from"] == "InterleaveThinker/Critic-SFT-8B"
+    assert cfg.models["reference"]["trainable"] is False
     assert cfg.method["_target_"] == "fastvideo.train.methods.rl.interleave_thinker.InterleaveThinkerRLMethod"
     assert cfg.method["edit_scorer"]["_target_"] == (
         "fastvideo.train.methods.rl.rewards.GeminiNanoBananaEditScorer")
     assert cfg.method["num_generations"] == 8
     assert cfg.method["clip_range"] == 0.2
-    assert cfg.method["kl_coef"] == 0.0
+    assert cfg.method["kl_coef"] == 0.01
     assert cfg.method["micro_batch_size_per_device_for_update"] == 1
     assert cfg.training.data.data_path.endswith("critic_rl.jsonl")
     assert cfg.training.optimizer.learning_rate == 2.0e-6

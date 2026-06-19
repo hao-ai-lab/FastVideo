@@ -223,3 +223,23 @@ def test_interleave_thinker_critic_fake_backend_trains_response_tokens_only():
     assert metrics["actor/mean_ratio"] == 1.0
     assert metrics["actor/response_tokens"] == 2.0
     assert float(model.transformer.weight.detach()) > before
+
+
+def test_interleave_thinker_critic_reference_logprob_hook_restores_training_state():
+    model = _FakeBackendCritic(load_backend=False)
+    model.processor = _FakeProcessor()
+    model.transformer = _FakeQwen()
+    model.transformer.train()
+
+    rows = model.reference_logprobs_for_interleave_rollouts([{
+        "origin_prompt": "draw a chair",
+        "previous_prompt": "a wooden chair",
+        "origin_image_path": "before.png",
+        "edited_image_path": "after.png",
+        "response": '<think>ok</think><answer>{"previous_step_success": true, "refine_prompt": "better"}</answer>',
+    }])
+
+    assert len(rows) == 1
+    assert len(rows[0]) == 2
+    assert all(isinstance(value, float) for value in rows[0])
+    assert model.transformer.training is True
