@@ -299,6 +299,8 @@ def write_run_config(
         sampling_config["num_steps"] = int(args.sample_num_steps)
     if args.sample_flow_shift is not None:
         sampling_config["flow_shift"] = float(args.sample_flow_shift)
+    if args.sample_guidance_scale is not None:
+        sampling_config["guidance_scale"] = float(args.sample_guidance_scale)
     if args.reward in {"multi_reward", "image_multi_reward"}:
         method_config["beta"] = 0.1
 
@@ -392,7 +394,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hsdp-replicate-dim", type=int, default=1)
     parser.add_argument("--hsdp-shard-dim", type=int, default=4)
     parser.add_argument("--max-train-steps", type=int, default=100)
-    parser.add_argument("--gradient-accumulation-steps", type=int, default=60)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=24)
     parser.add_argument("--learning-rate", type=float)
     parser.add_argument("--num-samples-per-prompt", type=int, default=24)
     parser.add_argument("--collection-batch-size", type=int, default=6)
@@ -400,6 +402,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-batch-size", type=int, default=6)
     parser.add_argument("--sample-num-steps", type=int)
     parser.add_argument("--sample-flow-shift", type=float)
+    parser.add_argument("--sample-guidance-scale", type=float)
     parser.add_argument("--log-sample-max-videos", type=int, default=2)
     parser.add_argument("--project-name", default="diffusion_nft_wan")
     parser.add_argument("--run-name")

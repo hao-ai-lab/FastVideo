@@ -38,14 +38,14 @@ DEFAULT_NUM_BATCHES_PER_EPOCH = 0
 DEFAULT_COLLECTION_BATCH_SIZE = 6
 DEFAULT_INNER_EPOCHS = 1
 DEFAULT_TRAIN_BATCH_SIZE = 6
-DEFAULT_GRADIENT_ACCUMULATION_STEPS = 60
+DEFAULT_GRADIENT_ACCUMULATION_STEPS = 24
 DEFAULT_LEARNING_RATE = -1.0
 DEFAULT_SAMPLE_NUM_STEPS = 0
 DEFAULT_SAMPLE_FLOW_SHIFT = -1.0
 DEFAULT_SAMPLE_GUIDANCE_SCALE = -1.0
-DEFAULT_VALIDATION_NUM_STEPS = 2
-DEFAULT_VALIDATION_NUM_PROMPTS = 1
-DEFAULT_VALIDATION_BATCH_SIZE = 1
+DEFAULT_VALIDATION_NUM_STEPS = 0
+DEFAULT_VALIDATION_NUM_PROMPTS = 0
+DEFAULT_VALIDATION_BATCH_SIZE = 0
 DEFAULT_NUM_FRAMES = 77
 DEFAULT_NUM_LATENT_T = 0
 DEFAULT_LOG_SAMPLE_MAX_VIDEOS = 0
@@ -200,12 +200,12 @@ def train(
     if (sample_guidance_scale < 0.0
             and sample_guidance_scale != DEFAULT_SAMPLE_GUIDANCE_SCALE):
         raise ValueError("--sample-guidance-scale must be >= 0")
-    if validation_num_steps <= 0:
-        raise ValueError("--validation-num-steps must be positive")
-    if validation_num_prompts <= 0:
-        raise ValueError("--validation-num-prompts must be positive")
-    if validation_batch_size <= 0:
-        raise ValueError("--validation-batch-size must be positive")
+    if validation_num_steps < 0:
+        raise ValueError("--validation-num-steps must be >= 0")
+    if validation_num_prompts < 0:
+        raise ValueError("--validation-num-prompts must be >= 0")
+    if validation_batch_size < 0:
+        raise ValueError("--validation-batch-size must be >= 0")
     if preprocess_num_gpus != 1:
         raise ValueError("FastVideo text preprocessing currently supports "
                          "--preprocess-num-gpus 1 only.")
@@ -293,11 +293,7 @@ def train(
     if sample_flow_shift >= 0.0:
         prep_cmd.extend(["--sample-flow-shift", str(sample_flow_shift)])
     if sample_guidance_scale >= 0.0:
-        print(
-            "Ignoring --sample-guidance-scale: the clean DiffusionNFT sampler "
-            "follows method.sampling and does not use CFG.",
-            flush=True,
-        )
+        prep_cmd.extend(["--sample-guidance-scale", str(sample_guidance_scale)])
 
     print("Preparing DiffusionNFT assets with tracked example CLI:", flush=True)
     completed = subprocess.run(
@@ -332,9 +328,9 @@ def train(
         f"sample_num_steps={sample_num_steps if sample_num_steps > 0 else 'config'} "
         f"sample_flow_shift={sample_flow_shift if sample_flow_shift >= 0 else 'config'} "
         f"sample_guidance_scale={sample_guidance_scale if sample_guidance_scale >= 0 else 'config'} "
-        f"validation_num_steps={validation_num_steps} "
-        f"validation_num_prompts={validation_num_prompts} "
-        f"validation_batch_size={validation_batch_size} "
+        f"validation_num_steps={validation_num_steps if validation_num_steps > 0 else 'config'} "
+        f"validation_num_prompts={validation_num_prompts if validation_num_prompts > 0 else 'config'} "
+        f"validation_batch_size={validation_batch_size if validation_batch_size > 0 else 'config'} "
         f"num_frames={resolved_num_frames} "
         f"num_latent_t={resolved_num_latent_t} "
         f"log_sample_max_videos={log_sample_max_videos} "
@@ -379,13 +375,13 @@ def train(
         str(int(inner_epochs)),
         "--method.train_batch_size",
         str(int(train_batch_size)),
-        "--method.validation.num_steps",
-        str(validation_num_steps),
-        "--method.validation.num_prompts",
-        str(validation_num_prompts),
-        "--method.validation.batch_size",
-        str(validation_batch_size),
     ]
+    if validation_num_steps > 0:
+        cmd.extend(["--method.validation.num_steps", str(validation_num_steps)])
+    if validation_num_prompts > 0:
+        cmd.extend(["--method.validation.num_prompts", str(validation_num_prompts)])
+    if validation_batch_size > 0:
+        cmd.extend(["--method.validation.batch_size", str(validation_batch_size)])
     if num_batches_per_epoch > 0:
         cmd.extend(["--method.num_batches_per_epoch", str(num_batches_per_epoch)])
 
