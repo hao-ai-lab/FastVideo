@@ -34,7 +34,7 @@ def test_session_persists_world_state_across_acts():
     assert s.session.kv_handle is s.world_context             # the persistent state lives on the Session
     s.act("turn left", seed=1)
     assert s.step == 2 and len(s.world_context) == 2          # still carrying world state
-    assert len(s.frames()) == 6                               # 3 chunks/act × 2 acts streamed
+    assert len(s.frames()) == 14                              # 7 chunks/act × 2 acts streamed
 
 
 def test_continuation_depends_on_history():

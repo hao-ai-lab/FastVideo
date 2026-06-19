@@ -41,7 +41,7 @@ def test_wan22_a14b_defaults():
 
 def test_wan_causal_defaults():
     sd = build_wan_causal_card().sampling_defaults
-    assert (sd.num_steps, sd.guidance_scale, sd.height, sd.width, sd.num_frames, sd.fps) == (50, 6.0, 480, 832, 81, 16)
+    assert (sd.num_steps, sd.guidance_scale, sd.height, sd.width, sd.num_frames, sd.fps) == (4, 1.0, 480, 832, 81, 16)
 
 
 def test_ltx2_two_stage_defaults():

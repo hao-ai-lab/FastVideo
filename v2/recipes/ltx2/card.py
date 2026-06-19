@@ -39,64 +39,110 @@ def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
     cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1.5e-4, per_unit_seconds=1.2e-7)
 
     def base_factory():
-        return LTX2DenoiseLoop(loop_id="ltx2_base", stage="base", sigmas=BASE_SIGMAS,
-                               cfg_scale=3.0, stg_scale=0.1, cost=cost, input_slot=None, seed_offset=0)
+        # The frame-jump/blockiness was the OOM-forced 57-frame reduction (only 8 latent temporal frames);
+        # at the model's intended 121 (16 latent frames, VAE tiling enabled) the shot is temporally coherent.
+        # CFG drives brightness/contrast here (cfg=3 -> mean~86, cfg=1 -> washed out ~66), so keep cfg=3.
+        # STG=0.0: the v2 "drop text" perturbation is NOT real skip-layer STG, so leave it off.
+        return LTX2DenoiseLoop(loop_id="ltx2_base",
+                               stage="base",
+                               sigmas=BASE_SIGMAS,
+                               cfg_scale=3.0,
+                               stg_scale=0.0,
+                               cost=cost,
+                               input_slot=None,
+                               seed_offset=0)
 
     def refine_factory():
-        return LTX2DenoiseLoop(loop_id="ltx2_refine", stage="refine", sigmas=REFINE_SIGMAS,
-                               cfg_scale=1.0, stg_scale=0.0, cost=cost,
-                               input_slot="ltx_upsampled", seed_offset=1000,
-                               audio_input_slot="ltx_audio")   # read threaded audio in T2VS (else unused)
+        return LTX2DenoiseLoop(loop_id="ltx2_refine",
+                               stage="refine",
+                               sigmas=REFINE_SIGMAS,
+                               cfg_scale=1.0,
+                               stg_scale=0.0,
+                               cost=cost,
+                               input_slot="ltx_upsampled",
+                               seed_offset=1000,
+                               audio_input_slot="ltx_audio")  # read threaded audio in T2VS (else unused)
 
     components = {
-        "text_encoder": ComponentSpec(component_id="text_encoder", kind="text_encoder",
-                                      load_id="transformers:AutoModel",  # Gemma
-                                      factory=lambda inst: ToyTextEncoder(), required_for={"t2v"}),
-        "vae": ComponentSpec(component_id="vae", kind="vae",
-                             load_id="fastvideo.models.vaes.ltx2vae:VideoDecoder",
-                             factory=lambda inst: ToyVAE(), required_for={"t2v"}),
+        "text_encoder":
+        ComponentSpec(
+            component_id="text_encoder",
+            kind="text_encoder",
+            load_id="transformers:AutoModel",  # Gemma
+            factory=lambda inst: ToyTextEncoder(),
+            required_for={"t2v"}),
+        "vae":
+        ComponentSpec(component_id="vae",
+                      kind="vae",
+                      load_id="fastvideo.models.vaes.ltx2vae:VideoDecoder",
+                      factory=lambda inst: ToyVAE(),
+                      required_for={"t2v"}),
         # learned 2x spatial latent upsampler between the base and refine stages (real:
         # LTX2LatentUpsampler; CPU toy: nearest-neighbor). Applied in program.py:_upsample.
-        "spatial_upsampler": ComponentSpec(
-            component_id="spatial_upsampler", kind="upsampler",
-            load_id="fastvideo.models.upsamplers.ltx2_upsampler:LTX2LatentUpsampler",
-            factory=lambda inst: ToyUpsampler(), required_for={"t2v"}),
-        "transformer": ComponentSpec(component_id="transformer", kind="dit",
-                                     load_id="fastvideo.models.dits.ltx2:LTX2Transformer3DModel",
-                                     factory=lambda inst: ToyDiT(seed=seed),
-                                     resident_for=["ltx2_base", "ltx2_refine"], required_for={"t2v"}),
+        "spatial_upsampler":
+        ComponentSpec(component_id="spatial_upsampler",
+                      kind="upsampler",
+                      load_id="fastvideo.models.upsamplers.ltx2_upsampler:LTX2LatentUpsampler",
+                      factory=lambda inst: ToyUpsampler(),
+                      required_for={"t2v"}),
+        "transformer":
+        ComponentSpec(component_id="transformer",
+                      kind="dit",
+                      load_id="fastvideo.models.dits.ltx2:LTX2Transformer3DModel",
+                      factory=lambda inst: ToyDiT(seed=seed),
+                      resident_for=["ltx2_base", "ltx2_refine"],
+                      required_for={"t2v"}),
         # audio branch: lazy for T2V (not loaded), required for T2VS (joint audio+video, §9.11)
-        "audio_vae": ComponentSpec(component_id="audio_vae", kind="audio_vae",
-                                   load_id="fastvideo.models.audio.ltx2_audio_vae:AudioVAE",
-                                   factory=lambda inst: ToyAudioVAE(),
-                                   optional_for={"t2v"}, required_for={"t2vs"}),
+        "audio_vae":
+        ComponentSpec(component_id="audio_vae",
+                      kind="audio_vae",
+                      load_id="fastvideo.models.audio.ltx2_audio_vae:AudioVAE",
+                      factory=lambda inst: ToyAudioVAE(),
+                      optional_for={"t2v"},
+                      required_for={"t2vs"}),
     }
     loops = {
-        "ltx2_base": LoopSpec(loop_id="ltx2_base", kind=LoopKind.DIFFUSION_DENOISE,
-                              work_unit_kind=WorkUnitKind.DIFFUSION_STEP, step_cost_model=cost,
-                              shared_weight_components=["transformer"], cache_policy=["feature"],
-                              loop_factory=base_factory),
-        "ltx2_refine": LoopSpec(loop_id="ltx2_refine", kind=LoopKind.DIFFUSION_DENOISE,
-                                work_unit_kind=WorkUnitKind.DIFFUSION_STEP, step_cost_model=cost,
-                                shared_weight_components=["transformer"], cache_policy=["feature"],
-                                loop_factory=refine_factory),
+        "ltx2_base":
+        LoopSpec(loop_id="ltx2_base",
+                 kind=LoopKind.DIFFUSION_DENOISE,
+                 work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
+                 step_cost_model=cost,
+                 shared_weight_components=["transformer"],
+                 cache_policy=["feature"],
+                 loop_factory=base_factory),
+        "ltx2_refine":
+        LoopSpec(loop_id="ltx2_refine",
+                 kind=LoopKind.DIFFUSION_DENOISE,
+                 work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
+                 step_cost_model=cost,
+                 shared_weight_components=["transformer"],
+                 cache_policy=["feature"],
+                 loop_factory=refine_factory),
     }
     card = ModelCard(
-        model_id=model_id, family="ltx2",
-        components=components, loops=loops,
+        model_id=model_id,
+        family="ltx2",
+        components=components,
+        loops=loops,
         capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.TEXT_TO_VIDEO_SOUND,
                                          Capability.VAE_DECODE),
-        recipe=RecipeSpec(method="distilled", parents=["ltx2.3-base"], assumes_loop="ltx2_base",
-                          assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
+        recipe=RecipeSpec(method="distilled",
+                          parents=["ltx2.3-base"],
+                          assumes_loop="ltx2_base",
+                          assumes_precision="float32",
+                          consistency_required=ConsistencyLevel.C1),
         sampling_defaults=SamplingDefaults(  # two-stage distilled: 8-step base (+ 2-step refine in loop)
-            num_steps=8, guidance_scale=1.0, height=1024, width=1536, num_frames=121, fps=24,
+            num_steps=8,
+            guidance_scale=1.0,
+            height=1024,
+            width=1536,
+            num_frames=121,
+            fps=24,
             negative_prompt=""),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
-        caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24,
-                                         reuse_across_requests=True)},
+        caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True)},
         precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
-        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()],
-                                        default_plan=ParallelPlan.single()),
+        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
     )
     return card.validate()
 
@@ -111,43 +157,71 @@ def build_ltx2_base_card(model_id: str = "ltx2-single-stage") -> ModelCard:
     cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1.5e-4, per_unit_seconds=1.2e-7)
 
     def single_factory():
-        return LTX2DenoiseLoop(loop_id="ltx2_single", stage="single", sigmas=[1.0, 0.0],
-                               cfg_scale=3.0, stg_scale=0.0, cost=cost, input_slot=None,
-                               seed_offset=0, full_res=True, request_steps=True, shift=1.0)
+        return LTX2DenoiseLoop(loop_id="ltx2_single",
+                               stage="single",
+                               sigmas=[1.0, 0.0],
+                               cfg_scale=3.0,
+                               stg_scale=0.0,
+                               cost=cost,
+                               input_slot=None,
+                               seed_offset=0,
+                               full_res=True,
+                               request_steps=True,
+                               shift=1.0)
 
     components = {
-        "text_encoder": ComponentSpec(component_id="text_encoder", kind="text_encoder",
-                                      load_id="transformers:AutoModel",  # Gemma
-                                      factory=lambda inst: ToyTextEncoder(), required_for={"t2v"}),
-        "vae": ComponentSpec(component_id="vae", kind="vae",
-                             load_id="fastvideo.models.vaes.ltx2vae:VideoDecoder",
-                             factory=lambda inst: ToyVAE(), required_for={"t2v"}),
-        "transformer": ComponentSpec(component_id="transformer", kind="dit",
-                                     load_id="fastvideo.models.dits.ltx2:LTX2Transformer3DModel",
-                                     factory=lambda inst: ToyDiT(seed=seed),
-                                     resident_for=["ltx2_single"], required_for={"t2v"}),
+        "text_encoder":
+        ComponentSpec(
+            component_id="text_encoder",
+            kind="text_encoder",
+            load_id="transformers:AutoModel",  # Gemma
+            factory=lambda inst: ToyTextEncoder(),
+            required_for={"t2v"}),
+        "vae":
+        ComponentSpec(component_id="vae",
+                      kind="vae",
+                      load_id="fastvideo.models.vaes.ltx2vae:VideoDecoder",
+                      factory=lambda inst: ToyVAE(),
+                      required_for={"t2v"}),
+        "transformer":
+        ComponentSpec(component_id="transformer",
+                      kind="dit",
+                      load_id="fastvideo.models.dits.ltx2:LTX2Transformer3DModel",
+                      factory=lambda inst: ToyDiT(seed=seed),
+                      resident_for=["ltx2_single"],
+                      required_for={"t2v"}),
     }
     loops = {
-        "ltx2_single": LoopSpec(loop_id="ltx2_single", kind=LoopKind.DIFFUSION_DENOISE,
-                                work_unit_kind=WorkUnitKind.DIFFUSION_STEP, step_cost_model=cost,
-                                shared_weight_components=["transformer"], cache_policy=["feature"],
-                                loop_factory=single_factory),
+        "ltx2_single":
+        LoopSpec(loop_id="ltx2_single",
+                 kind=LoopKind.DIFFUSION_DENOISE,
+                 work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
+                 step_cost_model=cost,
+                 shared_weight_components=["transformer"],
+                 cache_policy=["feature"],
+                 loop_factory=single_factory),
     }
     card = ModelCard(
-        model_id=model_id, family="ltx2",
-        components=components, loops=loops,
+        model_id=model_id,
+        family="ltx2",
+        components=components,
+        loops=loops,
         capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.VAE_DECODE),
-        recipe=RecipeSpec(method="base", assumes_loop="ltx2_single",
-                          assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
-        sampling_defaults=SamplingDefaults(
-            num_steps=40, guidance_scale=3.0, height=512, width=768, num_frames=121, fps=24,
-            negative_prompt=LTX2_NEG),
+        recipe=RecipeSpec(method="base",
+                          assumes_loop="ltx2_single",
+                          assumes_precision="float32",
+                          consistency_required=ConsistencyLevel.C1),
+        sampling_defaults=SamplingDefaults(num_steps=40,
+                                           guidance_scale=3.0,
+                                           height=512,
+                                           width=768,
+                                           num_frames=121,
+                                           fps=24,
+                                           negative_prompt=LTX2_NEG),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
-        caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24,
-                                         reuse_across_requests=True)},
+        caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True)},
         precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
-        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()],
-                                        default_plan=ParallelPlan.single()),
+        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
     )
     return card.validate()
 
@@ -166,47 +240,79 @@ def build_ltx2_3_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
         return LTX23DenoiseLoop(loop_id="ltx2_3", sigmas=BASE_SIGMAS, cfg_scale=1.0, stg_scale=0.0, cost=cost)
 
     components = {
-        "text_encoder": ComponentSpec(component_id="text_encoder", kind="text_encoder",
-                                      load_id="transformers:AutoModel",  # LTX2GemmaTextEncoderModel
-                                      factory=lambda inst: ToyTextEncoder(), required_for={"t2v", "t2vs"}),
-        "vae": ComponentSpec(component_id="vae", kind="vae",
-                             load_id="fastvideo.models.vaes.ltx2vae:VideoDecoder",
-                             factory=lambda inst: ToyVAE(), required_for={"t2v", "t2vs"}),
-        "transformer": ComponentSpec(component_id="transformer", kind="dit",
-                                     load_id="fastvideo.models.dits.ltx2:LTX2Transformer3DModel",
-                                     factory=lambda inst: ToyDiT(seed=seed),
-                                     resident_for=["ltx2_3"], required_for={"t2v", "t2vs"}),
+        "text_encoder":
+        ComponentSpec(
+            component_id="text_encoder",
+            kind="text_encoder",
+            load_id="transformers:AutoModel",  # LTX2GemmaTextEncoderModel
+            factory=lambda inst: ToyTextEncoder(),
+            required_for={"t2v", "t2vs"}),
+        "vae":
+        ComponentSpec(component_id="vae",
+                      kind="vae",
+                      load_id="fastvideo.models.vaes.ltx2vae:VideoDecoder",
+                      factory=lambda inst: ToyVAE(),
+                      required_for={"t2v", "t2vs"}),
+        "transformer":
+        ComponentSpec(component_id="transformer",
+                      kind="dit",
+                      load_id="fastvideo.models.dits.ltx2:LTX2Transformer3DModel",
+                      factory=lambda inst: ToyDiT(seed=seed),
+                      resident_for=["ltx2_3"],
+                      required_for={"t2v", "t2vs"}),
         # audio branch (T2VS only): AudioDecoder (latent->mel) + Vocoder (mel->waveform). Not built for t2v.
-        "audio_vae": ComponentSpec(component_id="audio_vae", kind="audio_vae",
-                                   load_id="fastvideo.models.audio.ltx2_audio_vae:AudioDecoder",
-                                   factory=lambda inst: ToyAudioVAE(),
-                                   required_for={"t2vs"}, optional_for={"t2v"}),
-        "vocoder": ComponentSpec(component_id="vocoder", kind="vocoder",
-                                 load_id="fastvideo.models.audio.ltx2_audio_vae:Vocoder",
-                                 factory=lambda inst: ToyVocoder(),
-                                 required_for={"t2vs"}, optional_for={"t2v"}),
+        "audio_vae":
+        ComponentSpec(component_id="audio_vae",
+                      kind="audio_vae",
+                      load_id="fastvideo.models.audio.ltx2_audio_vae:AudioDecoder",
+                      factory=lambda inst: ToyAudioVAE(),
+                      required_for={"t2vs"},
+                      optional_for={"t2v"}),
+        "vocoder":
+        ComponentSpec(component_id="vocoder",
+                      kind="vocoder",
+                      load_id="fastvideo.models.audio.ltx2_audio_vae:Vocoder",
+                      factory=lambda inst: ToyVocoder(),
+                      required_for={"t2vs"},
+                      optional_for={"t2v"}),
     }
     loops = {
-        "ltx2_3": LoopSpec(loop_id="ltx2_3", kind=LoopKind.DIFFUSION_DENOISE,
-                           work_unit_kind=WorkUnitKind.DIFFUSION_STEP, step_cost_model=cost,
-                           shared_weight_components=["transformer"], cache_policy=["feature"],
-                           loop_factory=loop_factory),
+        "ltx2_3":
+        LoopSpec(loop_id="ltx2_3",
+                 kind=LoopKind.DIFFUSION_DENOISE,
+                 work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
+                 step_cost_model=cost,
+                 shared_weight_components=["transformer"],
+                 cache_policy=["feature"],
+                 loop_factory=loop_factory),
     }
     card = ModelCard(
-        model_id=model_id, family="ltx2",
-        components=components, loops=loops,
+        model_id=model_id,
+        family="ltx2",
+        components=components,
+        loops=loops,
         capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.TEXT_TO_VIDEO_SOUND,
                                          Capability.VAE_DECODE),
-        recipe=RecipeSpec(method="distilled", parents=["ltx2.3-base"], assumes_loop="ltx2_3",
-                          assumes_precision="float32", consistency_required=ConsistencyLevel.C1),
+        recipe=RecipeSpec(method="distilled",
+                          parents=["ltx2.3-base"],
+                          assumes_loop="ltx2_3",
+                          assumes_precision="float32",
+                          consistency_required=ConsistencyLevel.C1),
         sampling_defaults=SamplingDefaults(  # joint A/V: per-modality cfg video 3 / audio 7
-            num_steps=30, guidance_scale=3.0, height=512, width=768, num_frames=121, fps=24,
-            negative_prompt=LTX2_NEG, guidance_per_modality={"video": 3.0, "audio": 7.0}),
+            num_steps=30,
+            guidance_scale=3.0,
+            height=512,
+            width=768,
+            num_frames=121,
+            fps=24,
+            negative_prompt=LTX2_NEG,
+            guidance_per_modality={
+                "video": 3.0,
+                "audio": 7.0
+            }),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
-        caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24,
-                                         reuse_across_requests=True)},
+        caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True)},
         precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
-        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()],
-                                        default_plan=ParallelPlan.single()),
+        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
     )
     return card.validate()
