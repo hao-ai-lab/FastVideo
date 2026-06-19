@@ -2089,7 +2089,7 @@ Conclusion:
 
 ## Stage 6 Execution: Official Dataset Normalization
 
-Status: validated, pending commit/push.
+Status: completed and pushed.
 
 Scope for this implementation slice:
 
@@ -2184,6 +2184,9 @@ Conclusion:
 
 - FastVideo now has upstream-file-aware dataset normalization for
   InterleaveThinker planner SFT, critic SFT, and critic RL data.
+- Commit completed:
+  - `dcd82f93` — `[feat] add InterleaveThinker data normalizers`
+  - Pushed to `origin/interleavethinker-fastvideo`.
 - These utilities do not yet replace the generic `Qwen3VLActorDataset` loader;
   the next SFT/RL training integration slice should either call these utilities
   from model `init_preprocessors(...)` by dataset kind or add config fields that
