@@ -21,9 +21,7 @@ def _supports_fp8_compute() -> bool:
     return cap[0] > 8 or (cap[0] == 8 and cap[1] >= 9)
 
 
-def _quantize_tensorwise(
-    x_2d: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
+def _quantize_tensorwise(x_2d: torch.Tensor, ) -> tuple[torch.Tensor, torch.Tensor]:
     """Returns ``(x_fp8 [M, K], x_scale [1] float32)``."""
     x_absmax = x_2d.abs().amax().float()
     x_scale = (x_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE)
@@ -31,9 +29,7 @@ def _quantize_tensorwise(
     return x_fp8, x_scale.view(1)
 
 
-def _quantize_rowwise(
-    x_2d: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
+def _quantize_rowwise(x_2d: torch.Tensor, ) -> tuple[torch.Tensor, torch.Tensor]:
     """Returns ``(x_fp8 [M, K], x_scale [M, 1] float32)``."""
     x_absmax = x_2d.abs().amax(dim=-1, keepdim=True).float()
     x_scale = (x_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE)
@@ -51,6 +47,7 @@ def _fake_quant(x_2d: torch.Tensor, granularity: str) -> torch.Tensor:
 
 
 class _LinearFWD8BWD16Fn(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, x, weight, bias, granularity="tensor"):
         # assert/normalize activation dtype
@@ -130,6 +127,4 @@ class _LinearFWD8BWD16Fn(torch.autograd.Function):
 
 def fp8_linear_forward(self, x: torch.Tensor) -> torch.Tensor:
     # pass config **positionally**; autograd.Function.apply ignores kwargs
-    return _LinearFWD8BWD16Fn.apply(
-        x, self.weight, self.bias, "tensor"
-    ), None
+    return _LinearFWD8BWD16Fn.apply(x, self.weight, self.bias, "tensor"), None
