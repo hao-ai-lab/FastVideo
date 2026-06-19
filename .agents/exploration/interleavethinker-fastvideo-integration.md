@@ -1844,7 +1844,7 @@ Conclusion:
 
 ## Stage 5 Execution: Native Interleave Run CLI
 
-Status: validated, pending commit/push.
+Status: completed and pushed.
 
 Scope for this implementation slice:
 
@@ -1962,6 +1962,9 @@ Conclusion:
 - The default example provides a lightweight FastVideo image-backend smoke path;
   the same config can switch to the real InterleaveThinker planner and critic
   checkpoints.
+- Commit completed:
+  - `ee4021e5` — `[feat] add InterleaveThinker run CLI`
+  - Pushed to `origin/interleavethinker-fastvideo`.
 - Next step: run a GPU smoke with `fastvideo interleave-run` and a real
   FastVideo image backend. Use fallback planner/accept-all critic first to
   validate the CLI + generator path, then test real planner/critic residency or
