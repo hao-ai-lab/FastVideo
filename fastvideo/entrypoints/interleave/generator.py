@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import os
 import time
 import uuid
@@ -22,6 +23,12 @@ from fastvideo.entrypoints.interleave.schema import (
     GeneratedImage,
     InterleaveEditRequest,
 )
+
+_NANO_BANANA_MODEL_ALIASES = {
+    "nano-banana": "gemini-2.5-flash-image",
+    "nano-banana-pro": "gemini-3-pro-image",
+    "nano-banana-2": "gemini-3.1-flash-image",
+}
 
 
 class ImageGeneratorBackend(Protocol):
@@ -138,6 +145,107 @@ class FastVideoImageGeneratorBackend:
         )
 
 
+class NanoBananaImageGeneratorBackend:
+    """Google Gemini API image backend for Nano Banana models.
+
+    This wraps the closed-source Gemini native-image API behind the same
+    ``ImageGeneratorBackend`` protocol used by the FastVideo compatibility
+    service. The SDK import and API-key validation are intentionally lazy so
+    installing FastVideo does not require ``google-genai`` unless this backend is
+    configured.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str = "gemini-3.1-flash-image",
+        api_key: str | None = None,
+        base_url: str | None = None,
+        output_dir: str = "outputs/nano_banana",
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
+        max_attempts: int = 3,
+        retry_delay_s: float = 2.0,
+    ) -> None:
+        self.model = _NANO_BANANA_MODEL_ALIASES.get(model, model)
+        self.api_key = api_key
+        self.base_url = base_url
+        self.output_dir = output_dir
+        self.aspect_ratio = aspect_ratio
+        self.image_size = image_size
+        self.max_attempts = max(1, int(max_attempts))
+        self.retry_delay_s = float(retry_delay_s)
+        self._client: Any | None = None
+
+    def generate(
+        self,
+        request: InterleaveEditRequest,
+        *,
+        request_id: str | None = None,
+    ) -> GeneratedImage:
+        request_id = request_id or uuid.uuid4().hex
+        output_format = (request.output_format or "png").lower()
+        if output_format == "jpg":
+            output_format = "jpeg"
+        output_path = Path(self.output_dir) / "interleave" / f"{request_id}.{output_format}"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        contents: list[Any] = [request.prompt]
+        if request.image:
+            contents.append(_decode_base64_to_pil(request.image))
+
+        last_exc: Exception | None = None
+        start = time.perf_counter()
+        for attempt in range(self.max_attempts):
+            try:
+                response = self._client_instance().models.generate_content(
+                    model=self.model,
+                    contents=contents,
+                    config=self._make_generate_config(),
+                )
+                image = _extract_first_response_image(response)
+                image.save(output_path)
+                return GeneratedImage(
+                    prompt=request.prompt,
+                    image_base64=encode_file_to_base64(output_path),
+                    file_path=str(output_path.resolve()),
+                    inference_time_s=time.perf_counter() - start,
+                    metadata={
+                        "request_id": request_id,
+                        "model": self.model,
+                        "attempt": attempt + 1,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 - remote API errors vary by SDK version
+                last_exc = exc
+                if attempt + 1 < self.max_attempts:
+                    time.sleep(self.retry_delay_s)
+        raise RuntimeError(
+            f"Nano Banana generation failed after {self.max_attempts} attempts: {last_exc}") from last_exc
+
+    def _client_instance(self) -> Any:
+        if self._client is not None:
+            return self._client
+        genai, _ = _import_google_genai()
+        kwargs: dict[str, Any] = {"api_key": _resolve_google_api_key(self.api_key)}
+        if self.base_url:
+            kwargs["http_options"] = {"base_url": self.base_url}
+        self._client = genai.Client(**kwargs)
+        return self._client
+
+    def _make_generate_config(self) -> Any:
+        _, types = _import_google_genai()
+        kwargs: dict[str, Any] = {"response_modalities": ["TEXT", "IMAGE"]}
+        if self.aspect_ratio or self.image_size:
+            image_kwargs: dict[str, Any] = {}
+            if self.aspect_ratio:
+                image_kwargs["aspect_ratio"] = self.aspect_ratio
+            if self.image_size:
+                image_kwargs["image_size"] = self.image_size
+            kwargs["image_config"] = types.ImageConfig(**image_kwargs)
+        return types.GenerateContentConfig(**kwargs)
+
+
 def _safe_explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
     try:
         return explicit_request_updates(request)
@@ -170,3 +278,59 @@ def decode_base64_image_to_path(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return str(path)
+
+
+def _resolve_google_api_key(explicit: str | None = None) -> str:
+    if explicit:
+        return explicit.strip()
+    for env_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        value = os.environ.get(env_name)
+        if value:
+            return value.strip()
+    token_path = Path("~/.gemini_token").expanduser()
+    if token_path.is_file():
+        return token_path.read_text().strip()
+    raise ValueError("Google Gemini API access requires GEMINI_API_KEY, GOOGLE_API_KEY, "
+                     "an explicit api_key, or ~/.gemini_token.")
+
+
+def _import_google_genai() -> tuple[Any, Any]:
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError as exc:
+        raise RuntimeError("Nano Banana API backend requires google-genai. "
+                           "Install with `uv pip install -e '.[interleave-api]'`.") from exc
+    return genai, types
+
+
+def _decode_base64_to_pil(image_base64: str) -> Any:
+    from PIL import Image
+
+    payload = image_base64.strip()
+    if payload.startswith("data:") and "," in payload:
+        payload = payload.split(",", 1)[1]
+    return Image.open(io.BytesIO(base64.b64decode(payload))).convert("RGB")
+
+
+def _extract_first_response_image(response: Any) -> Any:
+    from PIL import Image
+
+    parts = getattr(response, "parts", None)
+    if parts is None:
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            parts = getattr(getattr(candidates[0], "content", None), "parts", None)
+    for part in parts or []:
+        as_image = getattr(part, "as_image", None)
+        if callable(as_image):
+            image = as_image()
+            if isinstance(image, Image.Image):
+                return image
+        inline_data = getattr(part, "inline_data", None) or getattr(part, "inlineData", None)
+        data = getattr(inline_data, "data", None)
+        if data:
+            if isinstance(data, str):
+                data = base64.b64decode(data)
+            return Image.open(io.BytesIO(data)).convert("RGB")
+    raise RuntimeError("Gemini image response did not include an image part")

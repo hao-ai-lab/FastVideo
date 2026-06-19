@@ -2,16 +2,22 @@
 #
 # Upstream InterleaveThinker trains a Qwen3-VL critic checkpoint with EasyR1
 # GRPO. This config expresses the same outer loop through FastVideo's modular
-# trainer. The default model target is an adapter shell; replace or extend it
-# with a concrete Qwen/VLM backend that implements:
-#
-#   generate_interleave_responses(...)
-#   train_interleave_rollouts(...)
+# trainer with a local Qwen3-VL actor wrapper plus API-backed Gemini/Nano
+# Banana rewards.
 
 models:
   student:
     _target_: fastvideo.train.models.interleave_thinker.InterleaveThinkerCriticModel
-    init_from: ckpt/critic_sft
+    init_from: InterleaveThinker/Critic-SFT-8B
+    processor_from: Qwen/Qwen3-VL-8B-Instruct
+    load_backend: true
+    torch_dtype: auto
+    attn_implementation: flash_attention_2
+    freeze_vision_tower: true
+    freeze_multi_modal_projector: true
+    enable_gradient_checkpointing: true
+    max_prompt_length: 16384
+    max_response_length: 4096
     trainable: true
 
 method:
@@ -26,6 +32,15 @@ method:
   semantic_weight: 0.6
   quality_weight: 0.2
   fallback_edit_reward: 0.5
+  edit_scorer:
+    _target_: fastvideo.train.methods.rl.rewards.GeminiNanoBananaEditScorer
+    image_model: gemini-3.1-flash-image
+    judge_model: gemini-2.5-pro
+    output_dir: outputs/interleave_thinker_critic_grpo/reward_api
+    width: 1024
+    height: 1024
+    num_inference_steps: 4
+    guidance_scale: 1.0
   advantage_eps: 0.0001
   advantage_clip: 5.0
   max_grad_norm: 1.0

@@ -295,6 +295,146 @@ skill for adding agentic app layers over FastVideo generators:
 - fake-provider unit tests,
 - Modal smoke-test pattern.
 
+## Model / API Backend Integration Extension
+
+Status: in progress as of the user request to integrate the remaining
+InterleaveThinker models and wrap closed-source Nano Banana / Gemini APIs.
+
+User constraints still active:
+
+- Work only in `/tmp/fastvideo-interleavethinker`.
+- Do not edit or overwrite `/home/toolbox/FastVideo`; that checkout belongs to
+  another agent.
+- Commit useful checkpoints and push each commit immediately.
+- Run validation on Modal through `fastvideo/tests/modal/launch_l40s_job.py`.
+- Keep this handoff file current before interruptions or context compaction.
+
+Scope for this slice:
+
+1. Replace the placeholder InterleaveThinker critic actor shell with a concrete
+   Hugging Face Qwen3-VL-compatible `ModelBase` wrapper.
+   - Load `InterleaveThinker/Critic-SFT-8B`,
+     `InterleaveThinker/InterleaveThinker-Critic-8B`, or a local
+     `ckpt/critic_sft` / `ckpt/critic_rl` checkpoint via Transformers.
+   - Preserve FastVideo's `ModelBase` role-module/checkpoint visibility through
+     `self.transformer`.
+   - Implement `generate_interleave_responses(...)` for grouped RL rollouts.
+   - Implement `train_interleave_rollouts(...)` as a lightweight
+     advantage-weighted policy-gradient update over generated critic responses.
+     This is not a full EasyR1/vLLM/FSDP parity port, but it makes the FastVideo
+     RL loop executable with a real Qwen3-VL actor backend.
+   - Add a small JSON/JSONL dataloader for InterleaveThinker critic RL records
+     so the standard FastVideo trainer can receive batches.
+2. Add closed-source API wrappers:
+   - Nano Banana image generation/editing via the official `google-genai`
+     `models.generate_content` API, with model aliases for Nano Banana,
+     Nano Banana Pro, and Nano Banana 2.
+   - Gemini VLM scoring via the same SDK, returning InterleaveThinker
+     semantic/quality scores.
+   - A composite `GeminiNanoBananaEditScorer` callable that the RL reward
+     scorer can instantiate from YAML.
+3. Wire the API scorer into `InterleaveThinkerRLMethod` through an optional
+   `_target_` config block while keeping existing offline/fake-score tests
+   credential-free.
+4. Update examples and focused tests.
+
+Official API facts verified against Google AI docs on 2026-06-19:
+
+- Nano Banana image generation/editing is exposed through Gemini API native
+  image models. Current documented model IDs include:
+  `gemini-3.1-flash-image` (Nano Banana 2), `gemini-3-pro-image`
+  (Nano Banana Pro), and `gemini-2.5-flash-image` (Nano Banana).
+- Python SDK pattern:
+  `from google import genai`; `client = genai.Client(...)`;
+  `client.models.generate_content(model=..., contents=[prompt, image])`.
+- Image responses are returned as response parts with inline data / `as_image`.
+- Structured Gemini outputs use `response_mime_type="application/json"` and a
+  response schema in `GenerateContentConfig`.
+
+Implementation boundary:
+
+- The Qwen3-VL critic is a local/open model wrapper because it must train in the
+  RL loop.
+- Nano Banana and Gemini remain API models; FastVideo should not pretend they
+  are local trainable modules.
+- The API wrappers must import `google-genai` lazily and raise clear dependency
+  / API-key errors only when used.
+- Tests must stub the SDK; no real API calls in CI/Modal validation.
+
+Implementation completed for this slice:
+
+- Replaced the placeholder
+  `fastvideo/train/models/interleave_thinker/critic.py` adapter with a
+  Qwen3-VL-compatible `InterleaveThinkerCriticModel`.
+  - Loads a processor and model through Transformers when `load_backend=true`.
+  - Keeps `load_backend=false` for import/config/unit-test dry runs.
+  - Exposes `self.transformer` for FastVideo role-module/checkpoint visibility.
+  - Freezes visual tower and multimodal projector by default, matching upstream
+    critic SFT.
+  - Implements `build_messages(...)` with the InterleaveThinker two-image
+    critic prompt.
+  - Implements `generate_interleave_responses(...)` for grouped critic
+    rollouts.
+  - Implements `train_interleave_rollouts(...)` as an advantage-weighted
+    policy-gradient update over response token NLL.
+  - Adds a small JSON/JSONL dataloader for critic RL records.
+- Added `NanoBananaImageGeneratorBackend` to
+  `fastvideo/entrypoints/interleave/generator.py`.
+  - Supports model aliases: `nano-banana`, `nano-banana-pro`,
+    `nano-banana-2`.
+  - Uses the official `google-genai` `models.generate_content` API lazily.
+  - Implements the existing `ImageGeneratorBackend` protocol.
+- Added `fastvideo/train/methods/rl/rewards/interleave_api.py`.
+  - `GeminiInterleaveImageScorer` wraps Gemini VLM JSON scoring.
+  - `GeminiNanoBananaEditScorer` generates edits with Nano Banana and scores
+    them with Gemini, matching `EditScoreProvider`.
+  - `ConstantInterleaveEditScorer` gives tests/offline configs a deterministic
+    scorer.
+- Wired `InterleaveThinkerRLMethod` to accept an optional `method.edit_scorer`
+  `_target_` block.
+- Updated `examples/train/configs/rl/interleave_thinker/critic_grpo.yaml` to
+  point at the Qwen3-VL critic wrapper and the Gemini/Nano Banana scorer.
+- Added optional dependency extra: `fastvideo[interleave-api] = google-genai`.
+- Documented the API-backed path in `examples/interleave/README.md`.
+- Added tests:
+  - `tests/local_tests/test_interleave_thinker_api_models.py`
+  - `tests/local_tests/test_interleave_thinker_critic_model.py`
+  - extended `tests/local_tests/test_interleave_thinker_method.py`
+
+Validation for this slice:
+
+- Initial Modal pytest run:
+  - App: `https://modal.com/apps/hao-ai-lab/main/ap-rGgMjcQcI2bNAl3Viy0eES`
+  - Result: one test assertion failure in
+    `test_interleave_thinker_critic_builds_qwen_vl_messages_without_loading_backend`.
+  - Cause: test assumed fixed content indices, but adjacent `<image><image>`
+    placeholders produce adjacent image parts.
+  - Fix: assert by part type instead of index.
+- Second Modal pytest run:
+  - App: `https://modal.com/apps/hao-ai-lab/main/ap-SIztyW6PC3yRAKdybFxEEE`
+  - Result: `27 passed, 14 warnings in 19.71s`.
+- First Modal pre-commit run:
+  - App: `https://modal.com/apps/hao-ai-lab/main/ap-E0mnD27dHXDDnOquRHU5QD`
+  - Result: yapf and ruff modified files; mypy passed on Modal.
+- Local formatter convergence:
+  - Installed `pre-commit==4.0.1` locally with hook cache under `/tmp`.
+  - Local hook run converged for yapf/ruff/codespell.
+  - Local mypy cannot run from `/tmp/fastvideo-interleavethinker` because the
+    hyphenated directory name is interpreted as an invalid package name; Modal
+    mypy remains the authoritative result.
+- Post-format Modal pytest:
+  - App: `https://modal.com/apps/hao-ai-lab/main/ap-ykgfYTZyJgO4EgRlHv6l81`
+  - Result: `27 passed, 14 warnings in 17.04s`.
+- Final Modal pre-commit:
+  - App: `https://modal.com/apps/hao-ai-lab/main/ap-QOKlzapm5bSAo3c21lprwv`
+  - Result: yapf, ruff, codespell, mypy, filename check, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+
+Pending:
+
+- Commit this model/API integration slice.
+- Push the commit immediately after committing, per user instruction.
+
 ## Training Loop Extension
 
 Status: in progress as of the user request to "Add a training loop" for

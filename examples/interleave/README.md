@@ -51,6 +51,29 @@ export EDIT_MODEL_NAME=klein
 
 The same app also exposes `/generate` and `/v1/interleave/edit` aliases.
 
+## Nano Banana / Gemini API Backends
+
+The InterleaveThinker RL config can use closed-source Google models through
+lazy wrappers:
+
+- `fastvideo.train.methods.rl.rewards.GeminiNanoBananaEditScorer`
+  generates edits with Nano Banana and scores them with Gemini.
+- `fastvideo.entrypoints.interleave.generator.NanoBananaImageGeneratorBackend`
+  implements the same image backend protocol as the local FastVideo generator.
+
+Install the optional SDK and provide a key only when using these API backends:
+
+```bash
+uv pip install -e ".[interleave-api]"
+export GEMINI_API_KEY=...
+```
+
+Supported Nano Banana aliases are:
+
+- `nano-banana` -> `gemini-2.5-flash-image`
+- `nano-banana-pro` -> `gemini-3-pro-image`
+- `nano-banana-2` -> `gemini-3.1-flash-image`
+
 ## Native Single-Prompt Trace
 
 Run:

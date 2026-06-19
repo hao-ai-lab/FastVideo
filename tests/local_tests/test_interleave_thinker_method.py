@@ -184,12 +184,43 @@ def test_interleave_thinker_method_can_use_offline_response_batches():
     assert len(actor.train_calls) == 1
 
 
+def test_interleave_thinker_method_instantiates_configured_edit_scorer():
+    actor = _FakeInterleaveActor()
+    actor.generate_interleave_responses = None
+    method = InterleaveThinkerRLMethod(
+        cfg=_cfg({
+            "edit_scorer": {
+                "_target_": "fastvideo.train.methods.rl.rewards.ConstantInterleaveEditScorer",
+                "semantic_reward": 0.9,
+                "quality_reward": 0.1,
+            }
+        }),
+        role_models={"student": actor},
+    )
+    batch = {
+        "origin_prompt": ["prompt-a"],
+        "previous_prompt": ["prompt-a previous"],
+        "ground_truth": [{
+            "success": True
+        }],
+        "response": [_response(True)],
+    }
+
+    _, _, metrics = method.managed_train_step(iter([batch]), iteration=2)
+
+    assert torch.isclose(metrics["interleave/reward/edited_image_reward_semantic"], torch.tensor(0.9))
+    assert torch.isclose(metrics["interleave/reward/edited_image_reward_quality"], torch.tensor(0.1))
+
+
 def test_interleave_thinker_config_parses_public_yaml():
     cfg = load_run_config("examples/train/configs/rl/interleave_thinker/critic_grpo.yaml")
 
     assert cfg.models["student"]["_target_"] == (
         "fastvideo.train.models.interleave_thinker.InterleaveThinkerCriticModel")
+    assert cfg.models["student"]["init_from"] == "InterleaveThinker/Critic-SFT-8B"
     assert cfg.method["_target_"] == "fastvideo.train.methods.rl.interleave_thinker.InterleaveThinkerRLMethod"
+    assert cfg.method["edit_scorer"]["_target_"] == (
+        "fastvideo.train.methods.rl.rewards.GeminiNanoBananaEditScorer")
     assert cfg.method["num_generations"] == 8
     assert cfg.training.data.data_path.endswith("critic_rl.jsonl")
     assert cfg.training.optimizer.learning_rate == 2.0e-6

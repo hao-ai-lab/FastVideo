@@ -5,6 +5,11 @@ from fastvideo.train.methods.rl.rewards.frame_rewards import (
     ClipScoreScorer,
     PickScoreScorer,
 )
+from fastvideo.train.methods.rl.rewards.interleave_api import (
+    ConstantInterleaveEditScorer,
+    GeminiInterleaveImageScorer,
+    GeminiNanoBananaEditScorer,
+)
 from fastvideo.train.methods.rl.rewards.interleave_thinker import (
     EditScoreProvider,
     InterleaveThinkerAnswer,
@@ -42,7 +47,10 @@ def build_multi_reward_scorer(
 
 __all__ = [
     "ClipScoreScorer",
+    "ConstantInterleaveEditScorer",
     "EditScoreProvider",
+    "GeminiInterleaveImageScorer",
+    "GeminiNanoBananaEditScorer",
     "InterleaveThinkerAnswer",
     "InterleaveThinkerEditRequest",
     "InterleaveThinkerEditScore",

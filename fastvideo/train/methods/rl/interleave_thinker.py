@@ -13,17 +13,17 @@ import torch.distributed as dist
 from fastvideo.logger import init_logger
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.methods.rl.rewards import (
-    InterleaveThinkerRewardScorer,
-)
+    InterleaveThinkerRewardScorer, )
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.config import (
     get_optional_float,
     get_optional_int,
     parse_betas,
 )
+from fastvideo.train.utils.instantiate import (
+    instantiate, )
 from fastvideo.train.utils.optimizer import (
-    build_optimizer_and_scheduler,
-)
+    build_optimizer_and_scheduler, )
 
 logger = init_logger(__name__)
 
@@ -76,6 +76,7 @@ class InterleaveThinkerRLMethod(TrainingMethod):
             semantic_weight=self._read_float("semantic_weight", 0.6),
             quality_weight=self._read_float("quality_weight", 0.2),
             fallback_edit_reward=self._read_float("fallback_edit_reward", 0.5),
+            edit_scorer=self._build_edit_scorer(self.method_config.get("edit_scorer")),
         )
         self._student_optimizer: torch.optim.Optimizer | None = None
         self._student_lr_scheduler: Any | None = None
@@ -185,6 +186,18 @@ class InterleaveThinkerRLMethod(TrainingMethod):
             betas=betas,
             scheduler_name=str(self.training_config.optimizer.lr_scheduler),
         )
+
+    def _build_edit_scorer(
+        self,
+        raw: Any,
+    ) -> Any:
+        if raw is None:
+            return None
+        if callable(raw):
+            return raw
+        if isinstance(raw, Mapping):
+            return instantiate(dict(raw))
+        raise TypeError("method.edit_scorer must be a callable or a mapping with _target_")
 
     def _generate_rollouts(
         self,
@@ -353,9 +366,7 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         raise TypeError(f"Expected scalar metric, got {type(value).__name__}")
 
     @staticmethod
-    def _batch_to_items(
-        batch: Mapping[str, Any],
-    ) -> list[dict[str, Any]]:
+    def _batch_to_items(batch: Mapping[str, Any], ) -> list[dict[str, Any]]:
         if "items" in batch and isinstance(batch["items"], Sequence):
             return [dict(item) for item in batch["items"]]
 
@@ -372,9 +383,8 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         for idx in range(batch_size):
             item: dict[str, Any] = {}
             for key, value in batch.items():
-                if isinstance(value, list | tuple) and len(value) == batch_size:
-                    item[key] = value[idx]
-                elif torch.is_tensor(value) and value.ndim > 0 and int(value.shape[0]) == batch_size:
+                if isinstance(value, list | tuple) and len(value) == batch_size or torch.is_tensor(
+                        value) and value.ndim > 0 and int(value.shape[0]) == batch_size:
                     item[key] = value[idx]
                 else:
                     item[key] = value
@@ -435,9 +445,7 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         group_sizes: dict[str, int] = defaultdict(int)
         for key in group_keys:
             group_sizes[key] += 1
-        group_size_values = torch.tensor(list(group_sizes.values()),
-                                         device=advantages.device,
-                                         dtype=torch.float32)
+        group_size_values = torch.tensor(list(group_sizes.values()), device=advantages.device, dtype=torch.float32)
         return {
             "interleave/advantage_mean": advantages.detach().float().mean(),
             "interleave/advantage_std": advantages.detach().float().std(unbiased=False),
