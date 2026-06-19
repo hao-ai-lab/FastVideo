@@ -1703,7 +1703,15 @@ Conclusion:
 - The planner smoke should use at least `max_new_tokens=2048` for this prompt;
   lower budgets can stop before the `<answer>` block.
 
-Pending:
+Commit completed:
 
-- Commit implementation slice.
-- Push immediately after commit, per user instruction.
+- `3b9ecb34` — `[feat] add InterleaveThinker planner actor`
+- Pushed to `origin/interleavethinker-fastvideo`.
+
+Next recommended integration step:
+
+- Start Stage 4: wire the real planner and critic actor wrappers into the
+  `fastvideo.entrypoints.interleave` orchestrator behind provider adapters.
+  The first Stage 4 smoke should use the real planner + fake generator + real
+  critic so the full loop can be validated without paying image-generation
+  cost yet.
