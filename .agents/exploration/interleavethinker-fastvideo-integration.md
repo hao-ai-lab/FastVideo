@@ -1545,3 +1545,165 @@ Start with Stage 2 and Stage 3 together:
 This is the smallest next slice that moves from critic-only integration toward
 the complete planner + critic + orchestrator system while preserving the already
 validated critic path.
+
+## Stage 2/3 Execution: Shared Qwen Actor And Planner
+
+Status: in progress as of the user request to "Execute the plan".
+
+Scope for this implementation slice:
+
+- Stay inside `/tmp/fastvideo-interleavethinker`; do not edit the dirty
+  `/home/toolbox/FastVideo` checkout.
+- Refactor shared Qwen3-VL runtime out of
+  `InterleaveThinkerCriticModel` into a shared actor base.
+- Preserve the existing critic public API and previously validated real
+  checkpoint path.
+- Add `InterleaveThinkerPlannerModel` for
+  `InterleaveThinker/InterleaveThinker-Planner-8B`.
+- Reuse upstream planner prompts from `/tmp/InterleaveThinker-src/UEval/system.py`:
+  - `NARRATIVE_PROMPT_JSON` for text-only planning;
+  - `GUIDANCE_GLOBAL_PROMPT_JSON` for image-conditioned sequence planning.
+- Add parser utilities for planner `<answer>{execution_plan: [...]}</answer>`
+  responses.
+- Add fake-backend tests for:
+  - shared placeholder/backend guard behavior;
+  - critic still generates and trains through the refactored base;
+  - planner message construction;
+  - planner raw-response generation;
+  - planner plan parsing;
+  - public config import/parse for a planner smoke config.
+
+Expected files:
+
+- `fastvideo/train/models/interleave_thinker/qwen_actor.py`
+- `fastvideo/train/models/interleave_thinker/critic.py`
+- `fastvideo/train/models/interleave_thinker/planner.py`
+- `fastvideo/train/models/interleave_thinker/__init__.py`
+- `examples/train/configs/interleave_thinker/planner_smoke.yaml`
+- `tests/local_tests/test_interleave_thinker_critic_model.py`
+- `tests/local_tests/test_interleave_thinker_planner_model.py`
+- this handoff file
+
+Validation plan:
+
+- Local lightweight checks:
+  - `python -m py_compile` on changed Python files;
+  - `git diff --check`;
+  - local pre-commit where the environment can run it.
+- Modal focused pytest:
+  - `pytest tests/local_tests/test_interleave_thinker_reward.py
+    tests/local_tests/test_interleave_thinker_method.py
+    tests/local_tests/test_interleave_thinker_api_models.py
+    tests/local_tests/test_interleave_thinker_critic_model.py
+    tests/local_tests/test_interleave_thinker_planner_model.py
+    tests/local_tests/test_train_rl_sampling.py -q`
+- Modal pre-commit on changed non-excluded files.
+- Modal real planner smoke:
+  - load `InterleaveThinker/InterleaveThinker-Planner-8B`;
+  - use `Qwen/Qwen3-VL-8B-Instruct` processor;
+  - generate a short plan for one text prompt;
+  - parse at least one execution step.
+
+Known risks:
+
+- Refactor could accidentally change the critic smoke path; rerun the real
+  critic smoke if fake tests or planner smoke expose shared runtime issues.
+- Planner real checkpoint may be larger or slower to fetch than critic, but the
+  same Modal HF volume should cache it once downloaded.
+- The planner may emit Python-literal JSON-like dicts rather than strict JSON;
+  parser should support both, matching upstream parsing behavior.
+
+Implemented changes:
+
+- Added `fastvideo/train/models/interleave_thinker/qwen_actor.py` with shared
+  Qwen3-VL actor loading, chat-template generation, response-token loss
+  masking, image-path normalization, JSON/JSONL dataset loading, and
+  non-diffusion `ModelBase` guard methods.
+- Refactored `InterleaveThinkerCriticModel` to inherit from the shared actor
+  base while preserving:
+  - `generate_interleave_responses(...)`;
+  - `train_interleave_rollouts(...)`;
+  - critic-specific before/after image pairing;
+  - `INTERLEAVE_CRITIC_PROMPT`;
+  - compatibility re-export of `_PlaceholderActorModule`.
+- Added `fastvideo/train/models/interleave_thinker/planner.py` with:
+  - `InterleaveThinkerPlannerModel`;
+  - `INTERLEAVE_PLANNER_PROMPT`;
+  - `INTERLEAVE_GUIDANCE_PLANNER_PROMPT`;
+  - `extract_interleave_plan(...)`;
+  - dataclasses for parsed planner output and steps;
+  - strict JSON and upstream Python-literal answer parsing.
+- Added `examples/train/configs/interleave_thinker/planner_smoke.yaml`.
+- Added `tests/local_tests/test_interleave_thinker_planner_model.py`.
+- Updated package exports in
+  `fastvideo/train/models/interleave_thinker/__init__.py`.
+
+Validation completed:
+
+- Local lightweight checks:
+  - `python -m py_compile` passed for changed Python files.
+  - `git diff --check` passed.
+  - Local pre-commit passed `yapf`, `ruff`, `codespell`, filename check, and
+    suggestion hooks. Local `mypy` failed only because
+    `/tmp/fastvideo-interleavethinker` is not a valid package name; Modal mypy
+    below is authoritative.
+- Modal pytest:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-Q8Vc3IhXjRwr4fGm62v2vo`
+  - Command:
+    `pytest tests/local_tests/test_interleave_thinker_reward.py
+    tests/local_tests/test_interleave_thinker_method.py
+    tests/local_tests/test_interleave_thinker_api_models.py
+    tests/local_tests/test_interleave_thinker_critic_model.py
+    tests/local_tests/test_interleave_thinker_planner_model.py
+    tests/local_tests/test_train_rl_sampling.py -q`
+  - Result: `36 passed, 14 warnings in 18.51s`.
+- Modal pre-commit:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-ZapOKZPOmhyMZFxZ0X1fQm`
+  - Command:
+    `pre-commit run --files
+    examples/train/configs/interleave_thinker/planner_smoke.yaml
+    fastvideo/train/models/interleave_thinker/__init__.py
+    fastvideo/train/models/interleave_thinker/critic.py
+    fastvideo/train/models/interleave_thinker/planner.py
+    fastvideo/train/models/interleave_thinker/qwen_actor.py
+    tests/local_tests/test_interleave_thinker_critic_model.py
+    tests/local_tests/test_interleave_thinker_planner_model.py`
+  - Result: yapf, ruff, codespell, mypy, filename check, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+- First Modal real planner smoke:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-axZzqI8yL4pMTJlLQyCq15`
+  - Model loaded successfully as `Qwen3VLForConditionalGeneration`.
+  - Failed parser assertion because `max_new_tokens=512` cut off before the
+    `<answer>` block. This confirmed the backend load path but not plan parsing.
+  - Modal volume was committed, so planner weights were cached.
+- Second Modal real planner smoke:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-BzH7QxVXoc5XFXBah5cJ2H`
+  - Model: `InterleaveThinker/InterleaveThinker-Planner-8B`.
+  - Processor: `Qwen/Qwen3-VL-8B-Instruct`.
+  - Backend class: `Qwen3VLForConditionalGeneration`.
+  - Generation budget: `max_new_tokens=2048`.
+  - Parsed step count: `3`.
+  - Smoke marker printed: `PLANNER_SMOKE_OK`.
+  - Modal volume committed.
+- Modal real critic refactor smoke:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-NGxUDBNJFiU30Wef0yAQN1`
+  - Model: `InterleaveThinker/Critic-SFT-8B`.
+  - Processor: `Qwen/Qwen3-VL-8B-Instruct`.
+  - Backend class: `Qwen3VLForConditionalGeneration`.
+  - Resolved relative fixture paths under `image_dir`.
+  - Rollout count: `1`.
+  - Smoke marker printed: `CRITIC_REFACTOR_SMOKE_OK`.
+  - Modal volume committed.
+
+Conclusion:
+
+- Stage 2/3 is ready to commit: the shared actor base works for both real
+  planner and real critic checkpoints, and fake/unit coverage verifies parser,
+  message construction, generation, training loss masking, and config parsing.
+- The planner smoke should use at least `max_new_tokens=2048` for this prompt;
+  lower budgets can stop before the `<answer>` block.
+
+Pending:
+
+- Commit implementation slice.
+- Push immediately after commit, per user instruction.

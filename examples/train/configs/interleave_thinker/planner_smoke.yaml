@@ -1,0 +1,43 @@
+# InterleaveThinker planner backend smoke config.
+#
+# This config is intentionally minimal: it verifies that the planner Qwen3-VL
+# actor target is importable and documents the real checkpoint/processor pair
+# used by Modal smoke tests. Planner SFT configs are a later integration stage.
+
+models:
+  student:
+    _target_: fastvideo.train.models.interleave_thinker.InterleaveThinkerPlannerModel
+    init_from: InterleaveThinker/InterleaveThinker-Planner-8B
+    processor_from: Qwen/Qwen3-VL-8B-Instruct
+    load_backend: true
+    torch_dtype: auto
+    attn_implementation: flash_attention_2
+    freeze_vision_tower: true
+    freeze_multi_modal_projector: true
+    enable_gradient_checkpointing: true
+    max_prompt_length: 16384
+    max_response_length: 4096
+    trainable: false
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.FineTuneMethod
+
+training:
+  data:
+    data_path: ""
+    train_batch_size: 1
+    dataloader_num_workers: 0
+    seed: 42
+
+  optimizer:
+    learning_rate: 0.0
+
+  loop:
+    max_train_steps: 1
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/interleave_thinker_planner_smoke
+
+  tracker:
+    trackers: []
