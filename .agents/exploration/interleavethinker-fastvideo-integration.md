@@ -1715,3 +1715,126 @@ Next recommended integration step:
   The first Stage 4 smoke should use the real planner + fake generator + real
   critic so the full loop can be validated without paying image-generation
   cost yet.
+
+## Stage 4 Execution: Planner/Critic Provider Adapters
+
+Status: validated, pending commit/push.
+
+Scope for this implementation slice:
+
+- Add provider adapters that let `InterleaveOrchestrator` call
+  `InterleaveThinkerPlannerModel` and `InterleaveThinkerCriticModel`.
+- Keep the adapter layer under `fastvideo/entrypoints/interleave` so
+  train-model wrappers remain model-specific and do not import orchestration
+  concerns.
+- Support fake-model unit tests first:
+  - planner model response -> `PlannedInterleaveStep`;
+  - critic model response -> `CriticDecision`;
+  - orchestrator loop with planner adapter, fake generator, and critic adapter.
+- Defer real planner + fake generator + real critic Modal smoke until the
+  adapters pass unit and pre-commit validation. That smoke should create
+  deterministic fixture images and avoid image-generation API cost.
+
+Expected files:
+
+- `fastvideo/entrypoints/interleave/providers.py`
+- `fastvideo/entrypoints/interleave/__init__.py`
+- `tests/local_tests/test_interleave_model_providers.py`
+- this handoff file
+
+Validation plan:
+
+- Local syntax and `git diff --check`.
+- Modal pytest including:
+  - existing interleave tests;
+  - new provider tests;
+  - planner/critic model tests.
+- Modal pre-commit on changed non-excluded files.
+
+Implemented changes:
+
+- Added `fastvideo/entrypoints/interleave/providers.py` with:
+  - `InterleaveThinkerPlannerProvider`, adapting
+    `InterleaveThinkerPlannerModel.generate_interleave_plan(...)` into
+    `PlannedInterleaveStep` values for the native orchestrator;
+  - `InterleaveThinkerCriticProvider`, adapting
+    `InterleaveThinkerCriticModel.generate_interleave_responses(...)` into
+    `CriticDecision` values via the shared `extract_interleave_answer(...)`
+    parser;
+  - request translation that preserves planner metadata on each step and sends
+    previous/generated image paths to the critic under the fields used by the
+    InterleaveThinker dataset path.
+- Exported both providers from `fastvideo.entrypoints.interleave`.
+- Added `tests/local_tests/test_interleave_model_providers.py` covering:
+  - planner-step conversion from fake `InterleaveThinkerPlannerModel` output;
+  - critic-answer conversion from fake `InterleaveThinkerCriticModel` output;
+  - unparseable critic response handling;
+  - a full `InterleaveOrchestrator` retry/refine loop using planner and critic
+    adapters with a fake image generator.
+
+Validation completed:
+
+- Local lightweight checks:
+  - `python -m py_compile` passed for
+    `fastvideo/entrypoints/interleave/providers.py`,
+    `fastvideo/entrypoints/interleave/__init__.py`, and
+    `tests/local_tests/test_interleave_model_providers.py`.
+  - `git diff --check` passed.
+  - Local pre-commit passed `yapf`, `ruff`, `codespell`, filename check, and
+    suggestion hooks. Local `mypy` still has the known false failure because
+    `/tmp/fastvideo-interleavethinker` is not a valid package name; Modal mypy
+    below is authoritative.
+- First Modal provider pytest:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-HMmSpubEVYKYiJIH08PTOm`
+  - Failed one orchestrator provider test because the fake generator returned a
+    `file_path` but did not create the file. This was a test double bug, not a
+    provider bug.
+  - Fix: update the fake generator in
+    `tests/local_tests/test_interleave_model_providers.py` to write a small
+    deterministic file before returning `GeneratedImage`.
+- Second Modal provider pytest:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-05SJShABrygVCKDhgiNLuL`
+  - Command:
+    `pytest tests/local_tests/test_interleave_entrypoint.py
+    tests/local_tests/test_interleave_model_providers.py
+    tests/local_tests/test_interleave_thinker_planner_model.py
+    tests/local_tests/test_interleave_thinker_critic_model.py -q`
+  - Result: `20 passed, 14 warnings in 15.99s`.
+- Modal provider pre-commit:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-wfRX2DCt30DN903gETbDpj`
+  - Command:
+    `pre-commit run --files
+    fastvideo/entrypoints/interleave/__init__.py
+    fastvideo/entrypoints/interleave/providers.py
+    tests/local_tests/test_interleave_model_providers.py`
+  - Result: yapf, ruff, codespell, mypy, filename check, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+- Modal real provider loop smoke:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-ZABadeyKBuGVcfy67LqmXt`
+  - Checked out pushed commit `a2dd0b63988b575e534480ec27e2de90dfb97a4c` and
+    applied the local Stage 4 patch.
+  - Loaded planner model `InterleaveThinker/InterleaveThinker-Planner-8B` with
+    processor `Qwen/Qwen3-VL-8B-Instruct`.
+  - Loaded critic model `InterleaveThinker/Critic-SFT-8B` with the same
+    processor.
+  - Both backends loaded as `Qwen3VLForConditionalGeneration` on one NVIDIA
+    L40S using bfloat16 and SDPA attention.
+  - Ran `InterleaveOrchestrator` with real planner, fake deterministic PIL image
+    generator, and real critic.
+  - The trace produced one attempt. The critic returned a parsed decision with
+    `success=False` and a non-empty `refine_prompt`, which is expected because
+    the fake image contained a text label and off-white background.
+  - Smoke marker printed: `INTERLEAVE_PROVIDER_REAL_LOOP_SMOKE_OK`.
+  - Modal volume committed.
+
+Conclusion:
+
+- Stage 4 adapters are validated against fake provider tests, the existing
+  entrypoint tests, real planner/critic model wrapper tests, Modal pre-commit,
+  and a real planner + fake generator + real critic end-to-end orchestrator
+  smoke.
+- Next step after commit: start Stage 5 by replacing the fake generator in the
+  orchestrator smoke with `FastVideoImageGeneratorBackend` and a small
+  FastVideo image-generation model/config, then decide whether the planner and
+  critic should stay resident together or be unloaded/reloaded around the
+  generator for tighter GPU memory budgets.

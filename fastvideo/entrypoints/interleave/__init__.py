@@ -12,6 +12,10 @@ from fastvideo.entrypoints.interleave.orchestrator import (
     PlannerProvider,
     SinglePromptPlanner,
 )
+from fastvideo.entrypoints.interleave.providers import (
+    InterleaveThinkerCriticProvider,
+    InterleaveThinkerPlannerProvider,
+)
 from fastvideo.entrypoints.interleave.schema import (
     CriticDecision,
     CriticInput,
@@ -41,6 +45,8 @@ __all__ = [
     "InterleaveEditRequest",
     "InterleaveEditResponse",
     "InterleaveOrchestrator",
+    "InterleaveThinkerCriticProvider",
+    "InterleaveThinkerPlannerProvider",
     "InterleaveTrace",
     "PlannedInterleaveStep",
     "PlannerInput",
