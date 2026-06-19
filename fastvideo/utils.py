@@ -181,7 +181,7 @@ class SortedHelpFormatter(argparse.HelpFormatter):
 class FlexibleArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that allows both underscore and dash in names."""
 
-    _DEFER_CONFIG_SUBCOMMANDS = frozenset({"generate", "serve"})
+    _DEFER_CONFIG_SUBCOMMANDS = frozenset({"generate", "interleave-run", "interleave-serve", "serve"})
 
     def __init__(self, *args, **kwargs) -> None:
         # Set the default 'formatter_class' to SortedHelpFormatter

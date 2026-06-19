@@ -1969,3 +1969,64 @@ Conclusion:
   FastVideo image backend. Use fallback planner/accept-all critic first to
   validate the CLI + generator path, then test real planner/critic residency or
   a split-process `/edit` generator to avoid loading all models in one process.
+
+### Stage 5 Follow-up: CLI Config Deferral Fix
+
+Status: validated, pending commit/push.
+
+Issue found during real generator smoke:
+
+- Modal app URL: `https://modal.com/apps/hao-ai-lab/main/ap-unER4iqFrsNMavpmCOjiMx`
+- Command attempted:
+  `fastvideo interleave-run --config examples/interleave/interleave_run.yaml
+  --prompt 'a simple centered red circle on a white background'
+  --output-dir /tmp/interleave_run_smoke
+  --trace-path /tmp/interleave_run_smoke/trace.json
+  --request.sampling.width 512
+  --request.sampling.height 512
+  --request.sampling.num-inference-steps 2
+  --request.sampling.seed 123`
+- Result: failed before model load because `args.config` was empty in
+  `InterleaveRunSubcommand.validate(...)`.
+- Root cause: `FlexibleArgumentParser` auto-expands `--config` unless the
+  subcommand is listed in `_DEFER_CONFIG_SUBCOMMANDS`. The list included
+  `generate` and `serve` only, so it consumed the nested interleave config path
+  before the subcommand validator saw it. This also affected the existing
+  `interleave-serve` command.
+
+Implemented fix:
+
+- Updated `fastvideo/utils.py` so `_DEFER_CONFIG_SUBCOMMANDS` includes:
+  - `generate`;
+  - `interleave-run`;
+  - `interleave-serve`;
+  - `serve`.
+- Added a parser regression test to
+  `tests/local_tests/test_interleave_run_cli.py` verifying that
+  `interleave-run --config <path>` preserves `args.config` and leaves dotted
+  request overrides in the unknown list for the interleave config loader.
+
+Validation completed:
+
+- Local lightweight checks:
+  - `python -m py_compile` passed for `fastvideo/utils.py`,
+    `tests/local_tests/test_interleave_run_cli.py`,
+    `fastvideo/entrypoints/cli/interleave_run.py`, and
+    `fastvideo/entrypoints/cli/main.py`.
+  - `git diff --check` passed.
+- Modal focused pytest:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-bKcUOFZU95EC4jOaLzrqVV`
+  - Command: `pytest tests/local_tests/test_interleave_run_cli.py -q`
+  - Result: `6 passed, 14 warnings in 16.58s`.
+- Modal pre-commit:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-CgQLuAvM35IBPru299v2re`
+  - Command:
+    `pre-commit run --files fastvideo/utils.py
+    tests/local_tests/test_interleave_run_cli.py`
+  - Result: yapf, ruff, codespell, mypy, filename check, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+
+Next step after this fix is committed:
+
+- Rerun the real FastVideo generator smoke for `fastvideo interleave-run` from
+  the new pushed commit, using the same L40S command above.
