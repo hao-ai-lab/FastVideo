@@ -11,7 +11,8 @@ models:
     init_from: InterleaveThinker/Critic-SFT-8B
     processor_from: Qwen/Qwen3-VL-8B-Instruct
     load_backend: true
-    image_dir: data
+    dataset_kind: critic_rl
+    image_dir: data/InterleaveThinker/Train-Data
     torch_dtype: auto
     attn_implementation: flash_attention_2
     freeze_vision_tower: true
@@ -20,6 +21,15 @@ models:
     max_prompt_length: 16384
     max_response_length: 4096
     trainable: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - q_proj
+        - k_proj
+        - v_proj
+        - o_proj
 
 method:
   _target_: fastvideo.train.methods.rl.interleave_thinker.InterleaveThinkerRLMethod
@@ -33,6 +43,9 @@ method:
   semantic_weight: 0.6
   quality_weight: 0.2
   fallback_edit_reward: 0.5
+  clip_range: 0.2
+  kl_coef: 0.0
+  micro_batch_size_per_device_for_update: 1
   edit_scorer:
     _target_: fastvideo.train.methods.rl.rewards.GeminiNanoBananaEditScorer
     image_model: gemini-3.1-flash-image

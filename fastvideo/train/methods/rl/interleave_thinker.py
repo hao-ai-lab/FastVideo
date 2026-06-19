@@ -68,6 +68,16 @@ class InterleaveThinkerRLMethod(TrainingMethod):
             "advantage_clip",
             where="method.advantage_clip",
         )
+        self._clip_range = self._read_float("clip_range", 0.2)
+        if self._clip_range < 0.0:
+            raise ValueError("method.clip_range must be non-negative")
+        self._kl_coef = self._read_float("kl_coef", 0.0)
+        if self._kl_coef < 0.0:
+            raise ValueError("method.kl_coef must be non-negative")
+        self._update_micro_batch_size = self._read_optional_int_alias(
+            "micro_batch_size_per_device_for_update",
+            "update_micro_batch_size",
+        )
         self._max_grad_norm = self._read_float("max_grad_norm", 0.0)
         self._terminal_progress = bool(self.method_config.get("terminal_progress", True))
         self._reward_scorer = InterleaveThinkerRewardScorer(
@@ -321,6 +331,9 @@ class InterleaveThinkerRLMethod(TrainingMethod):
             optimizer=self._student_optimizer,
             lr_scheduler=self._student_lr_scheduler,
             gradient_accumulation_steps=max(1, int(self.training_config.loop.gradient_accumulation_steps or 1)),
+            clip_range=self._clip_range,
+            kl_coef=self._kl_coef,
+            update_micro_batch_size=self._update_micro_batch_size,
             max_grad_norm=self._max_grad_norm,
         )
         return self._coerce_train_result(result)
@@ -463,6 +476,19 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         if value <= 0:
             raise ValueError(f"method.{key} must be a positive integer")
         return int(value)
+
+    def _read_optional_int_alias(
+        self,
+        *keys: str,
+    ) -> int | None:
+        for key in keys:
+            value = get_optional_int(self.method_config, key, where=f"method.{key}")
+            if value is None:
+                continue
+            if value <= 0:
+                raise ValueError(f"method.{key} must be a positive integer")
+            return int(value)
+        return None
 
     def _read_float(
         self,

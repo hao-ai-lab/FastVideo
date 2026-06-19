@@ -69,10 +69,26 @@ class _FakeQwen(torch.nn.Module):
         return torch.cat([input_ids.repeat(num_return_sequences, 1), suffix.repeat(num_return_sequences, 1)], dim=1)
 
     def forward(self, **kwargs):
-        labels = kwargs["labels"]
-        self.last_labels = labels.detach().clone()
-        trainable_fraction = (labels != -100).float().mean()
-        return SimpleNamespace(loss=self.weight.pow(2).sum() * trainable_fraction)
+        input_ids = kwargs["input_ids"]
+        vocab_size = max(16, int(input_ids.max().detach().cpu()) + 1)
+        logits = torch.zeros(
+            *input_ids.shape,
+            vocab_size,
+            dtype=self.weight.dtype,
+            device=input_ids.device,
+        )
+        for idx in range(input_ids.shape[1] - 1):
+            next_token = input_ids[:, idx + 1]
+            logits[:, idx].scatter_(1, next_token[:, None], self.weight.expand(input_ids.shape[0], 1))
+        labels = kwargs.get("labels")
+        if labels is not None:
+            self.last_labels = labels.detach().clone()
+            trainable_fraction = (labels != -100).float().mean()
+            return SimpleNamespace(
+                loss=self.weight.pow(2).sum() * trainable_fraction,
+                logits=logits,
+            )
+        return SimpleNamespace(logits=logits)
 
 
 def test_interleave_thinker_critic_builds_qwen_vl_messages_without_loading_backend():
@@ -172,6 +188,8 @@ def test_interleave_thinker_critic_fake_backend_generates_rollouts():
     assert all("previous_step_success" in rollout["response"] for rollout in rollouts)
     assert rollouts[0]["group_key"] == rollouts[1]["group_key"]
     assert rollouts[0]["sample_index"] == 0
+    assert len(rollouts[0]["old_logprobs"]) == 2
+    assert rollouts[0]["response_mask"] == [1.0, 1.0]
     assert model.transformer.generate_kwargs["num_return_sequences"] == 2
     assert model.transformer.generate_kwargs["max_new_tokens"] == 8
 
@@ -200,7 +218,8 @@ def test_interleave_thinker_critic_fake_backend_trains_response_tokens_only():
     )
 
     assert "total_loss" in loss_map
+    assert metrics["actor/policy_loss"] == -1.0
+    assert metrics["actor/clipped_fraction"] == 0.0
+    assert metrics["actor/mean_ratio"] == 1.0
     assert metrics["actor/response_tokens"] == 2.0
-    assert float(model.transformer.weight.detach()) < before
-    assert model.transformer.last_labels.tolist()[0][:3] == [-100, -100, -100]
-    assert all(label != -100 for label in model.transformer.last_labels.tolist()[0][3:])
+    assert float(model.transformer.weight.detach()) > before

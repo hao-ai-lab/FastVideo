@@ -1,15 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Reusable reward models for training methods."""
 
-from fastvideo.train.methods.rl.rewards.frame_rewards import (
-    ClipScoreScorer,
-    PickScoreScorer,
-)
-from fastvideo.train.methods.rl.rewards.interleave_api import (
-    ConstantInterleaveEditScorer,
-    GeminiInterleaveImageScorer,
-    GeminiNanoBananaEditScorer,
-)
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from fastvideo.train.methods.rl.rewards.interleave_thinker import (
     EditScoreProvider,
     InterleaveThinkerAnswer,
@@ -23,11 +18,21 @@ from fastvideo.train.methods.rl.rewards.interleave_thinker import (
     normalize_interleave_response,
     score_interleave_thinker_rewards,
 )
-from fastvideo.train.methods.rl.rewards.media import (
-    MultiRewardScorer,
-    RewardScorer,
-    select_first_frame,
-)
+
+if TYPE_CHECKING:
+    from fastvideo.train.methods.rl.rewards.frame_rewards import (
+        ClipScoreScorer,
+        PickScoreScorer,
+    )
+    from fastvideo.train.methods.rl.rewards.interleave_api import (
+        ConstantInterleaveEditScorer,
+        GeminiInterleaveImageScorer,
+        GeminiNanoBananaEditScorer,
+    )
+    from fastvideo.train.methods.rl.rewards.media import (
+        MultiRewardScorer,
+        RewardScorer,
+    )
 
 
 def build_multi_reward_scorer(
@@ -36,6 +41,12 @@ def build_multi_reward_scorer(
     device="cuda",
     scorers: dict[str, RewardScorer] | None = None,
 ) -> MultiRewardScorer:
+    from fastvideo.train.methods.rl.rewards.frame_rewards import (
+        ClipScoreScorer,
+        PickScoreScorer,
+    )
+    from fastvideo.train.methods.rl.rewards.media import MultiRewardScorer
+
     available: dict[str, RewardScorer] = dict(scorers or {})
     if not available:
         available = {
@@ -43,6 +54,48 @@ def build_multi_reward_scorer(
             "clipscore": ClipScoreScorer(device=device),
         }
     return MultiRewardScorer(reward_weights, scorers=available)
+
+
+def __getattr__(name: str) -> object:
+    if name in {"ClipScoreScorer", "PickScoreScorer"}:
+        from fastvideo.train.methods.rl.rewards.frame_rewards import (
+            ClipScoreScorer,
+            PickScoreScorer,
+        )
+
+        return {
+            "ClipScoreScorer": ClipScoreScorer,
+            "PickScoreScorer": PickScoreScorer,
+        }[name]
+    if name in {
+            "ConstantInterleaveEditScorer",
+            "GeminiInterleaveImageScorer",
+            "GeminiNanoBananaEditScorer",
+    }:
+        from fastvideo.train.methods.rl.rewards.interleave_api import (
+            ConstantInterleaveEditScorer,
+            GeminiInterleaveImageScorer,
+            GeminiNanoBananaEditScorer,
+        )
+
+        return {
+            "ConstantInterleaveEditScorer": ConstantInterleaveEditScorer,
+            "GeminiInterleaveImageScorer": GeminiInterleaveImageScorer,
+            "GeminiNanoBananaEditScorer": GeminiNanoBananaEditScorer,
+        }[name]
+    if name in {"MultiRewardScorer", "RewardScorer", "select_first_frame"}:
+        from fastvideo.train.methods.rl.rewards.media import (
+            MultiRewardScorer,
+            RewardScorer,
+            select_first_frame,
+        )
+
+        return {
+            "MultiRewardScorer": MultiRewardScorer,
+            "RewardScorer": RewardScorer,
+            "select_first_frame": select_first_frame,
+        }[name]
+    raise AttributeError(name)
 
 
 __all__ = [

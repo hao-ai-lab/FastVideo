@@ -134,7 +134,14 @@ def _cfg(method_overrides=None):
 
 def test_interleave_thinker_managed_step_scores_advantages_and_calls_actor_update():
     actor = _FakeInterleaveActor()
-    method = InterleaveThinkerRLMethod(cfg=_cfg(), role_models={"student": actor})
+    method = InterleaveThinkerRLMethod(
+        cfg=_cfg({
+            "clip_range": 0.15,
+            "kl_coef": 0.05,
+            "micro_batch_size_per_device_for_update": 2,
+        }),
+        role_models={"student": actor},
+    )
     batch = {"origin_prompt": ["prompt-a", "prompt-b"]}
 
     loss_map, outputs, metrics = method.managed_train_step(iter([batch]), iteration=7)
@@ -158,6 +165,9 @@ def test_interleave_thinker_managed_step_scores_advantages_and_calls_actor_updat
     assert torch.isclose(advantages[:2].sum(), torch.tensor(0.0), atol=1.0e-5)
     assert torch.isclose(advantages[2:].sum(), torch.tensor(0.0), atol=1.0e-5)
     assert train_kwargs["gradient_accumulation_steps"] == 3
+    assert train_kwargs["clip_range"] == 0.15
+    assert train_kwargs["kl_coef"] == 0.05
+    assert train_kwargs["update_micro_batch_size"] == 2
 
 
 def test_interleave_thinker_method_can_use_offline_response_batches():
@@ -218,11 +228,16 @@ def test_interleave_thinker_config_parses_public_yaml():
     assert cfg.models["student"]["_target_"] == (
         "fastvideo.train.models.interleave_thinker.InterleaveThinkerCriticModel")
     assert cfg.models["student"]["init_from"] == "InterleaveThinker/Critic-SFT-8B"
-    assert cfg.models["student"]["image_dir"] == "data"
+    assert cfg.models["student"]["dataset_kind"] == "critic_rl"
+    assert cfg.models["student"]["image_dir"] == "data/InterleaveThinker/Train-Data"
+    assert cfg.models["student"]["lora"]["enable"] is True
     assert cfg.method["_target_"] == "fastvideo.train.methods.rl.interleave_thinker.InterleaveThinkerRLMethod"
     assert cfg.method["edit_scorer"]["_target_"] == (
         "fastvideo.train.methods.rl.rewards.GeminiNanoBananaEditScorer")
     assert cfg.method["num_generations"] == 8
+    assert cfg.method["clip_range"] == 0.2
+    assert cfg.method["kl_coef"] == 0.0
+    assert cfg.method["micro_batch_size_per_device_for_update"] == 1
     assert cfg.training.data.data_path.endswith("critic_rl.jsonl")
     assert cfg.training.optimizer.learning_rate == 2.0e-6
 

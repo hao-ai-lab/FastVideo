@@ -271,6 +271,51 @@ class Qwen3VLActorBase(ModelBase):
         outputs = self.transformer(**full_inputs, labels=labels)
         return outputs.loss, token_count
 
+    def response_logprobs_from_messages(
+        self,
+        prompt_messages: list[dict[str, Any]],
+        response: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return per-token logprobs and mask for the assistant response."""
+        self._require_backend()
+        if not response:
+            raise ValueError("InterleaveThinker rollout response is empty")
+        full_messages = [*prompt_messages, {
+            "role": "assistant",
+            "content": response,
+        }]
+        prompt_inputs = self._apply_chat_template(
+            prompt_messages,
+            add_generation_prompt=True,
+        )
+        full_inputs = self._apply_chat_template(
+            full_messages,
+            add_generation_prompt=False,
+        )
+        input_ids = full_inputs["input_ids"]
+        prompt_len = int(prompt_inputs["input_ids"].shape[-1])
+        response_ids = input_ids[:, prompt_len:]
+        if int(response_ids.shape[-1]) == 0:
+            raise ValueError("InterleaveThinker rollout has no response tokens")
+
+        outputs = self.transformer(**full_inputs)
+        logits = _output_logits(outputs)
+        token_logits = logits[:, prompt_len - 1:-1, :]
+        if int(token_logits.shape[1]) != int(response_ids.shape[1]):
+            token_logits = token_logits[:, -int(response_ids.shape[1]):, :]
+        if int(token_logits.shape[1]) != int(response_ids.shape[1]):
+            raise ValueError("Could not align response logits with response token ids")
+
+        logprobs = torch.log_softmax(token_logits.float(), dim=-1)
+        response_logprobs = logprobs.gather(-1, response_ids.unsqueeze(-1)).squeeze(-1)
+        response_mask = torch.ones_like(response_logprobs, dtype=torch.float32)
+        attention_mask = full_inputs.get("attention_mask")
+        if isinstance(attention_mask, torch.Tensor):
+            response_mask = attention_mask[:, prompt_len:].to(device=response_logprobs.device, dtype=torch.float32)
+        if float(response_mask.sum().detach().cpu()) <= 0.0:
+            raise ValueError("InterleaveThinker rollout has no unmasked response tokens")
+        return response_logprobs.squeeze(0), response_mask.squeeze(0)
+
     def compute_interleave_sft_loss(
         self,
         batch: Mapping[str, Any],
@@ -515,6 +560,65 @@ def batch_to_items(batch: Mapping[str, Any], ) -> list[dict[str, Any]]:
     return items
 
 
+def coerce_logprob_vector(
+    value: Any,
+    *,
+    expected_len: int,
+    device: torch.device,
+    name: str,
+) -> torch.Tensor | None:
+    if value is None:
+        return None
+    if torch.is_tensor(value):
+        tensor = value.detach().to(device=device, dtype=torch.float32).flatten()
+    elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
+        tensor = torch.tensor(list(value), device=device, dtype=torch.float32).flatten()
+    else:
+        raise TypeError(f"{name} must be a tensor or sequence of floats")
+    if int(tensor.numel()) != int(expected_len):
+        raise ValueError(f"{name} length {int(tensor.numel())} does not match response token count {expected_len}")
+    return tensor
+
+
+def coerce_response_mask(
+    value: Any,
+    *,
+    expected_len: int,
+    device: torch.device,
+) -> torch.Tensor | None:
+    if value is None:
+        return None
+    if torch.is_tensor(value):
+        tensor = value.detach().to(device=device, dtype=torch.float32).flatten()
+    elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
+        tensor = torch.tensor(list(value), device=device, dtype=torch.float32).flatten()
+    else:
+        raise TypeError("response_mask must be a tensor or sequence of numbers")
+    if int(tensor.numel()) != int(expected_len):
+        raise ValueError(
+            f"response_mask length {int(tensor.numel())} does not match response token count {expected_len}")
+    return tensor
+
+
+def pad_1d_tensors(
+    values: Sequence[torch.Tensor],
+    *,
+    pad_value: float = 0.0,
+) -> torch.Tensor:
+    if not values:
+        raise ValueError("Cannot pad an empty tensor sequence")
+    max_len = max(int(value.numel()) for value in values)
+    if max_len <= 0:
+        raise ValueError("Cannot pad empty tensors")
+    device = values[0].device
+    dtype = values[0].dtype
+    padded = torch.full((len(values), max_len), float(pad_value), device=device, dtype=dtype)
+    for idx, value in enumerate(values):
+        flat = value.to(device=device, dtype=dtype).flatten()
+        padded[idx, :int(flat.numel())] = flat
+    return padded
+
+
 def first_string(
     item: Mapping[str, Any],
     *keys: str,
@@ -571,6 +675,18 @@ def rollout_group_key(
     return str(index)
 
 
+def _output_logits(outputs: Any) -> torch.Tensor:
+    if hasattr(outputs, "logits"):
+        logits = outputs.logits
+    elif isinstance(outputs, Mapping):
+        logits = outputs.get("logits")
+    else:
+        logits = None
+    if not torch.is_tensor(logits):
+        raise TypeError("Qwen actor forward output must include tensor logits")
+    return logits
+
+
 def _preferred_qwen_model_class(transformers_module: Any) -> Any:
     for class_name in (
             "Qwen3VLForConditionalGeneration",
@@ -590,9 +706,12 @@ __all__ = [
     "_PlaceholderActorModule",
     "batch_to_items",
     "collate_interleave_records",
+    "coerce_logprob_vector",
+    "coerce_response_mask",
     "first_string",
     "load_interleave_records",
     "normalize_interleave_record",
+    "pad_1d_tensors",
     "resolve_image_path",
     "rollout_group_key",
 ]

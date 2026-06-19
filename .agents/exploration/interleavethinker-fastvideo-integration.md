@@ -2320,3 +2320,139 @@ Conclusion:
   method from reward-scoring smoke coverage toward a real critic-policy
   optimization loop with rollouts, reward aggregation, and GRPO-style
   advantage/loss computation.
+
+## Stage 8 Execution: Critic GRPO Policy Loss
+
+Status: completed, pending code commit/push.
+
+Scope for this implementation slice:
+
+- Keep the existing managed `InterleaveThinkerRLMethod` outer loop.
+- Add reusable, deterministic GRPO/PPO-ratio loss math under the RL common
+  helpers.
+- Add policy-loss controls to the InterleaveThinker RL method:
+  - `clip_range`;
+  - `kl_coef`;
+  - update microbatch size aliases compatible with EasyR1-style configs.
+- Upgrade Qwen critic actor training from advantage-weighted NLL to:
+  - response-token logprobs;
+  - old policy logprobs captured at rollout time when possible;
+  - PPO/GRPO ratio;
+  - clipping;
+  - optional reference-logprob KL penalty;
+  - response mask handling;
+  - policy/ratio/KL/token metrics.
+- Add focused fake-backend tests for GRPO math and critic actor update.
+
+Expected files:
+
+- `fastvideo/train/methods/rl/common/grpo.py`
+- `fastvideo/train/methods/rl/common/__init__.py`
+- `fastvideo/train/methods/rl/interleave_thinker.py`
+- `fastvideo/train/models/interleave_thinker/qwen_actor.py`
+- `fastvideo/train/models/interleave_thinker/critic.py`
+- `examples/train/configs/rl/interleave_thinker/critic_grpo.yaml`
+- `tests/local_tests/test_interleave_thinker_grpo_math.py`
+- existing RL/SFT tests as needed
+
+Validation plan:
+
+- Local syntax and `git diff --check`.
+- Modal pytest for new GRPO math tests plus existing InterleaveThinker method,
+  reward, data, planner/critic model, and SFT tests.
+- Modal pre-commit on changed non-excluded files.
+
+Implemented changes:
+
+- Added `fastvideo/train/methods/rl/common/grpo.py` with
+  `compute_grpo_loss(...)` and `GRPOLossResult`.
+  - Supports current/old logprobs, response masks, grouped advantages,
+    PPO/GRPO ratio, clipping, optional reference-logprob KL, and scalar
+    diagnostics.
+- Exported GRPO helpers from `fastvideo.train.methods.rl.common`.
+- Made `fastvideo.train.methods.rl` lazy-loaded so importing
+  `fastvideo.train.methods.rl.common.grpo` does not initialize all RL methods
+  and reward backends.
+- Made `fastvideo.train.methods.rl.rewards` lazy-load optional frame scorers
+  and Gemini/Nano Banana API wrappers while keeping the pure InterleaveThinker
+  reward parser available immediately. This fixed a real circular import:
+  `rewards -> interleave_api -> entrypoints.interleave.providers -> rewards`.
+- Extended `InterleaveThinkerRLMethod` with:
+  - `clip_range` (default `0.2`);
+  - `kl_coef` (default `0.0`);
+  - `micro_batch_size_per_device_for_update` /
+    `update_micro_batch_size` aliasing.
+- Extended `Qwen3VLActorBase` with:
+  - `response_logprobs_from_messages(...)`;
+  - logprob/mask coercion helpers;
+  - 1D tensor padding for variable-length response token batches.
+- Upgraded `InterleaveThinkerCriticModel`:
+  - rollout generation now stores `old_logprobs` and `response_mask`;
+  - `train_interleave_rollouts(...)` now computes the GRPO policy loss over
+    response-token logprobs, with clipping, optional KL, update microbatching,
+    and actor metrics.
+- Updated `examples/train/configs/rl/interleave_thinker/critic_grpo.yaml`:
+  - uses `dataset_kind: critic_rl`;
+  - points `image_dir` at `data/InterleaveThinker/Train-Data`;
+  - enables LoRA by default;
+  - exposes `clip_range`, `kl_coef`, and
+    `micro_batch_size_per_device_for_update`.
+- Added `tests/local_tests/test_interleave_thinker_grpo_math.py`.
+- Updated existing RL and critic fake-backend tests for the new policy-logprob
+  training contract.
+
+Validation completed:
+
+- Local lightweight checks:
+  - `python -m py_compile` passed for the changed RL method/common/reward
+    modules, Qwen actor, critic actor, and updated tests.
+  - `git diff --check` passed.
+  - Local `pre-commit` with `PRE_COMMIT_HOME=/tmp/pre-commit-cache` applied
+    yapf formatting. Local mypy still cannot run in this hyphenated worktree
+    path and reports `fastvideo-interleavethinker is not a valid Python package
+    name`; Modal mypy is authoritative.
+- Modal pytest attempts:
+  - `https://modal.com/apps/hao-ai-lab/main/ap-TrbqhbpPK1oQOVluAgnxQF`
+    failed during collection because the new `rl.common.grpo` import exposed
+    eager imports in `fastvideo.train.methods.rl.__init__`.
+  - `https://modal.com/apps/hao-ai-lab/main/ap-EHjgwAiV9NRQU4STIsPA3c`
+    failed during collection because `rewards.__init__` eagerly imported the
+    optional API wrapper and hit a rewards/provider circular import.
+  - `https://modal.com/apps/hao-ai-lab/main/ap-6QcN6Oa44Spgbwrky8ebOv`
+    reached tests and failed only because old fake critic tests expected a
+    label-loss-only Qwen fake.
+  - `https://modal.com/apps/hao-ai-lab/main/ap-Wd3oTM0NvoHz0DrQihwOIz`
+    passed the broad InterleaveThinker test set:
+    `28 passed, 14 warnings in 14.90s`.
+  - After yapf formatting:
+    `https://modal.com/apps/hao-ai-lab/main/ap-1fLTfUteBKtC0HWIrPmdqM`
+    passed the same broad test set:
+    `28 passed, 14 warnings in 14.38s`.
+  - After the final mypy type-guard fix:
+    `https://modal.com/apps/hao-ai-lab/main/ap-I7hWfZT8l9dXqz39gmwr6M`
+    passed focused GRPO/critic/method tests:
+    `13 passed, 14 warnings in 17.75s`.
+- Modal pre-commit:
+  - `https://modal.com/apps/hao-ai-lab/main/ap-Iuh9l2XpAibion2oURXvd2`
+    failed mypy on `qwen_actor.py` because `torch.is_tensor(...)` did not
+    narrow `attention_mask`.
+  - Fixed with `isinstance(attention_mask, torch.Tensor)`.
+  - Final app URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-aYBz0F0ZiQ2nTGndudnGaH`
+  - Final result: yapf, ruff, codespell, mypy, filename, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+
+Conclusion:
+
+- The critic RL path now has a real GRPO/PPO-ratio policy objective over
+  response-token logprobs instead of the earlier advantage-weighted NLL
+  placeholder.
+- The method still does not yet load or query a separate frozen reference model;
+  it can consume per-rollout `reference_logprobs` when provided, and the next
+  RL stage should add an optional `models.reference` path to compute them.
+- The next full-integration step should be either:
+  1. a one-step Modal LoRA critic RL smoke using the real
+     `InterleaveThinker/Critic-SFT-8B` checkpoint and constant/fake edit
+     scorer; or
+  2. Stage 8 reward backend hardening, especially cache/concurrency/retry
+     controls for live Gemini/Nano Banana calls.
