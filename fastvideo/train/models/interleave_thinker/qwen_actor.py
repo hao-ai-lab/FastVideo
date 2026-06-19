@@ -14,6 +14,7 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.models.interleave_thinker.data import (
@@ -24,6 +25,10 @@ from fastvideo.train.models.interleave_thinker.data import (
 if TYPE_CHECKING:
     from fastvideo.train.utils.lora import LoraConfig
     from fastvideo.train.utils.training_config import TrainingConfig
+
+logger = init_logger(__name__)
+
+DEFAULT_QWEN_LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
 
 class InterleaveJSONLDataset(Dataset):
@@ -124,7 +129,7 @@ class Qwen3VLActorBase(ModelBase):
         )
         if trainable and enable_gradient_checkpointing and hasattr(self.transformer, "gradient_checkpointing_enable"):
             self.transformer.gradient_checkpointing_enable()
-        self._enable_lora_if_configured(self.transformer)
+        self._enable_peft_lora_if_configured()
 
     def _load_backend(
         self,
@@ -176,6 +181,42 @@ class Qwen3VLActorBase(ModelBase):
             if freeze_multi_modal_projector and is_mm_projector_parameter(lower_name):
                 requires_grad = False
             param.requires_grad_(requires_grad)
+
+    def _enable_peft_lora_if_configured(self) -> bool:
+        cfg = self._lora_config
+        if cfg is None or not cfg.enable:
+            return False
+        if not self._trainable:
+            raise ValueError("PEFT LoRA training requires trainable=true for the role model")
+        if cfg.rank is None:
+            raise ValueError("PEFT LoRA requires lora.rank when lora.enable=true")
+
+        from peft import LoraConfig as PeftLoraConfig
+        from peft import TaskType, get_peft_model
+
+        target_modules = list(cfg.target_modules or DEFAULT_QWEN_LORA_TARGET_MODULES)
+        peft_config = PeftLoraConfig(
+            r=int(cfg.rank),
+            lora_alpha=int(cfg.alpha or cfg.rank),
+            target_modules=target_modules,
+            lora_dropout=0.0,
+            bias="none",
+            task_type=TaskType.CAUSAL_LM,
+        )
+        self.transformer = get_peft_model(self.transformer, peft_config)
+        self._num_lora_layers = sum(1 for module in self.transformer.modules() if hasattr(module, "lora_A"))
+        trainable_params = sum(param.numel() for param in self.transformer.parameters() if param.requires_grad)
+        total_params = sum(param.numel() for param in self.transformer.parameters())
+        logger.info(
+            "Enabled PEFT LoRA for %s with rank=%d alpha=%d targets=%s trainable=%d/%d",
+            type(self).__name__,
+            int(cfg.rank),
+            int(cfg.alpha or cfg.rank),
+            target_modules,
+            trainable_params,
+            total_params,
+        )
+        return True
 
     def init_preprocessors(
         self,
@@ -250,10 +291,7 @@ class Qwen3VLActorBase(ModelBase):
         self._require_backend()
         if not response:
             raise ValueError("InterleaveThinker rollout response is empty")
-        full_messages = [*prompt_messages, {
-            "role": "assistant",
-            "content": response,
-        }]
+        full_messages = [*prompt_messages, make_assistant_text_message(response)]
         prompt_inputs = self._apply_chat_template(
             prompt_messages,
             add_generation_prompt=True,
@@ -280,10 +318,7 @@ class Qwen3VLActorBase(ModelBase):
         self._require_backend()
         if not response:
             raise ValueError("InterleaveThinker rollout response is empty")
-        full_messages = [*prompt_messages, {
-            "role": "assistant",
-            "content": response,
-        }]
+        full_messages = [*prompt_messages, make_assistant_text_message(response)]
         prompt_inputs = self._apply_chat_template(
             prompt_messages,
             add_generation_prompt=True,
@@ -578,6 +613,16 @@ def coerce_logprob_vector(
     if int(tensor.numel()) != int(expected_len):
         raise ValueError(f"{name} length {int(tensor.numel())} does not match response token count {expected_len}")
     return tensor
+
+
+def make_assistant_text_message(response: str) -> dict[str, Any]:
+    return {
+        "role": "assistant",
+        "content": [{
+            "type": "text",
+            "text": response,
+        }],
+    }
 
 
 def coerce_response_mask(

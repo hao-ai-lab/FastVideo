@@ -2459,3 +2459,123 @@ Conclusion:
      scorer; or
   2. Stage 8 reward backend hardening, especially cache/concurrency/retry
      controls for live Gemini/Nano Banana calls.
+
+### Stage 8 Follow-up: Real Critic RL Smoke And PEFT LoRA Gap
+
+Status: validation complete; ready to commit and push.
+
+Smoke attempted:
+
+- App URL: `https://modal.com/apps/hao-ai-lab/main/ap-Uown6cfw8eGTKnXR48KVzK`
+- Commit: `a312d7c6e138b843e15a4e8f1ee18aef83aea05c`
+- Command shape:
+  - created `/tmp/interleave_rl_smoke/critic_rl.jsonl` with one critic RL row;
+  - created white/red PNG fixture images;
+  - ran `torchrun --standalone --nproc_per_node=1 -m
+    fastvideo.train.entrypoint.train`;
+  - used the public
+    `examples/train/configs/rl/interleave_thinker/critic_grpo.yaml`;
+  - overrode the scorer to
+    `fastvideo.train.methods.rl.rewards.ConstantInterleaveEditScorer`;
+  - used two critic generations and one train step.
+- Result:
+  - distributed init succeeded;
+  - `InterleaveThinker/Critic-SFT-8B` loaded successfully from 4 shards;
+  - failure happened during LoRA setup before training:
+    `No LoRA-compatible layers were found for target modules
+    ['q_proj', 'k_proj', 'v_proj', 'o_proj']`.
+
+Root cause:
+
+- FastVideo's existing `fastvideo.train.utils.lora.enable_lora_training(...)`
+  wraps FastVideo native linear layer classes such as `ColumnParallelLinear`,
+  `QKVParallelLinear`, and `ReplicatedLinear`.
+- Transformers Qwen3-VL checkpoints use standard HF modules, so the Qwen actor
+  wrappers need PEFT LoRA rather than FastVideo's DiT LoRA wrapper.
+- `peft>=0.15.0` is already a project dependency, so this can be fixed in the
+  Qwen actor wrapper without adding a new dependency.
+
+Planned follow-up implementation:
+
+- In `Qwen3VLActorBase`, replace the call to
+  `_enable_lora_if_configured(...)` with a Qwen-specific PEFT path.
+- Use the same `models.<role>.lora` config block already present in examples.
+- Default target modules remain `q_proj`, `k_proj`, `v_proj`, `o_proj`.
+- Preserve `load_backend=false` behavior for tests.
+- Validate with focused unit tests/pre-commit and rerun the real one-step critic
+  RL smoke.
+
+Implemented follow-up:
+
+- Added a Qwen actor PEFT LoRA path in
+  `fastvideo/train/models/interleave_thinker/qwen_actor.py`.
+  - Uses the existing FastVideo `models.<role>.lora` config object.
+  - Defaults target modules to `q_proj`, `k_proj`, `v_proj`, and `o_proj`.
+  - Wraps real Transformers Qwen backends with `peft.get_peft_model(...)`.
+  - Keeps `load_backend=false` placeholder actors untouched for unit tests.
+  - Logs LoRA layer count and trainable/total parameter counts.
+- Fixed real Qwen-VL assistant response formatting for response NLL/logprob
+  recomputation.
+  - The real processor expects assistant text in the same structured content
+    format used by Qwen chat templates when image messages are present.
+  - Added `make_assistant_text_message(...)` and used it in both
+    `response_nll_from_messages(...)` and
+    `response_logprobs_from_messages(...)`.
+
+Validation completed:
+
+- Local lightweight checks:
+  - `python -m py_compile
+    fastvideo/train/models/interleave_thinker/qwen_actor.py` passed.
+  - `git diff --check` passed.
+  - Local pre-commit still hits the known hyphenated-worktree mypy startup
+    issue, but yapf/ruff/codespell passed.
+- Modal focused pytest:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-yUmFCjyTWmxH77TqlhqKqq`
+  - Result: `17 passed, 14 warnings in 15.77s`.
+- Modal pre-commit after initial PEFT patch:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-Wd4zFHLoktBQHnAgm6tTCP`
+  - Result: yapf, ruff, codespell, mypy, filename, and suggestion hooks
+    passed.
+- Real one-step critic RL smoke after initial PEFT patch:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-An28kFRstJ5ffKiSjREZjw`
+  - Result:
+    - PEFT LoRA enabled successfully:
+      `trainable=3833856/8770957552`.
+    - Failed during old-logprob recomputation because the assistant response
+      was appended as a bare string:
+      `TypeError: string indices must be integers`.
+  - Fix: structured assistant text message in Qwen response helpers.
+- Modal focused pytest after structured assistant-message fix:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-uWF2WjtiT1M1M2RwP2Ggog`
+  - Result: `17 passed, 14 warnings in 14.23s`.
+- Modal pre-commit after structured assistant-message fix:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-huN0Y2YY4ZRXvp5AEB89PM`
+  - Result: yapf, ruff, codespell, mypy, filename, and suggestion hooks
+    passed.
+- Final real one-step critic RL smoke:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-eXMO3I81OcCyxj53XbPWj9`
+  - Result:
+    - `InterleaveThinker/Critic-SFT-8B` loaded from 4 shards.
+    - PEFT LoRA enabled for `InterleaveThinkerCriticModel` with rank 4,
+      alpha 8, targets `['q_proj', 'k_proj', 'v_proj', 'o_proj']`, and
+      `3833856/8770957552` trainable parameters.
+    - The trainer generated two critic rollouts, scored them with
+      `ConstantInterleaveEditScorer`, recomputed response-token logprobs,
+      completed one GRPO update step, and logged actor/interleave metrics.
+    - The job printed `INTERLEAVE_CRITIC_RL_SMOKE_OK`.
+
+Conclusion:
+
+- The real Qwen critic RL loop now runs end-to-end for one step inside
+  FastVideo with LoRA enabled.
+- The smoke used the actual
+  `InterleaveThinker/Critic-SFT-8B` checkpoint, not a fake actor.
+- Next action: commit this PEFT/Qwen formatting fix and push it to
+  `origin/interleavethinker-fastvideo`.
