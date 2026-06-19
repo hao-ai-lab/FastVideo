@@ -2462,7 +2462,7 @@ Conclusion:
 
 ### Stage 8 Follow-up: Real Critic RL Smoke And PEFT LoRA Gap
 
-Status: validation complete; ready to commit and push.
+Status: completed and pushed.
 
 Smoke attempted:
 
@@ -2577,5 +2577,9 @@ Conclusion:
   FastVideo with LoRA enabled.
 - The smoke used the actual
   `InterleaveThinker/Critic-SFT-8B` checkpoint, not a fake actor.
-- Next action: commit this PEFT/Qwen formatting fix and push it to
-  `origin/interleavethinker-fastvideo`.
+- Commit completed:
+  - `0cc04784` — `[feat] add PEFT LoRA for InterleaveThinker actors`
+  - Pushed to `origin/interleavethinker-fastvideo`.
+- Next full-integration stage: add optional frozen reference-policy support for
+  InterleaveThinker GRPO so the method can compute KL against
+  `models.reference` rather than only consuming precomputed reference logprobs.
