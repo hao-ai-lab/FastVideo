@@ -38,13 +38,15 @@ class _FakeProcessor:
     ):
         del tokenize, add_generation_prompt, return_dict, return_tensors
         assert messages[0]["role"] == "user"
+        has_assistant = any(message["role"] == "assistant" for message in messages)
+        length = 5 if has_assistant else 3
         return {
-            "input_ids": torch.arange(1, 4).unsqueeze(0),
-            "attention_mask": torch.ones(1, 3, dtype=torch.long),
+            "input_ids": torch.arange(1, length + 1).unsqueeze(0),
+            "attention_mask": torch.ones(1, length, dtype=torch.long),
         }
 
     def batch_decode(self, sequences, **kwargs):
-        del sequences, kwargs
+        del kwargs
         return [
             """
             <think>plan</think>
@@ -54,6 +56,7 @@ class _FakeProcessor:
             ]}
             </answer>
             """
+            for _ in sequences
         ]
 
 
@@ -67,8 +70,23 @@ class _FakeQwen(torch.nn.Module):
     def generate(self, **kwargs):
         self.generate_kwargs = kwargs
         input_ids = kwargs["input_ids"]
+        num_return_sequences = int(kwargs["num_return_sequences"])
         suffix = torch.tensor([[9, 10]], dtype=input_ids.dtype)
-        return torch.cat([input_ids, suffix], dim=1)
+        return torch.cat([input_ids.repeat(num_return_sequences, 1), suffix.repeat(num_return_sequences, 1)], dim=1)
+
+    def forward(self, **kwargs):
+        input_ids = kwargs["input_ids"]
+        vocab_size = max(16, int(input_ids.max().detach().cpu()) + 1)
+        logits = torch.zeros(
+            *input_ids.shape,
+            vocab_size,
+            dtype=self.weight.dtype,
+            device=input_ids.device,
+        )
+        for idx in range(input_ids.shape[1] - 1):
+            next_token = input_ids[:, idx + 1]
+            logits[:, idx].scatter_(1, next_token[:, None], self.weight.expand(input_ids.shape[0], 1))
+        return SimpleNamespace(logits=logits)
 
 
 def test_extract_interleave_plan_accepts_json_answer_block():
@@ -168,6 +186,32 @@ def test_interleave_thinker_planner_fake_backend_generates_parseable_plan():
     assert model.transformer.generate_kwargs["num_return_sequences"] == 1
 
 
+def test_interleave_thinker_planner_fake_backend_generates_rl_rollouts():
+    model = _FakeBackendPlanner(load_backend=False)
+    model.processor = _FakeProcessor()
+    model.transformer = _FakeQwen()
+
+    rollouts = model.generate_interleave_responses(
+        {
+            "items": [{
+                "instruction": "Show how to draw a cat step by step."
+            }]
+        },
+        num_generations=2,
+        temperature=0.7,
+        top_p=0.9,
+        max_new_tokens=12,
+    )
+
+    assert len(rollouts) == 2
+    assert all(rollout["plan"] is not None for rollout in rollouts)
+    assert rollouts[0]["group_key"] == rollouts[1]["group_key"]
+    assert rollouts[0]["group_key"] == "Show how to draw a cat step by step."
+    assert len(rollouts[0]["old_logprobs"]) == 2
+    assert rollouts[0]["response_mask"] == [1.0, 1.0]
+    assert model.transformer.generate_kwargs["num_return_sequences"] == 2
+
+
 def test_interleave_thinker_planner_config_parses_public_yaml():
     cfg = load_run_config("examples/train/configs/interleave_thinker/planner_smoke.yaml")
 
@@ -176,3 +220,20 @@ def test_interleave_thinker_planner_config_parses_public_yaml():
     assert cfg.models["student"]["init_from"] == "InterleaveThinker/InterleaveThinker-Planner-8B"
     assert cfg.models["student"]["processor_from"] == "Qwen/Qwen3-VL-8B-Instruct"
     assert cfg.models["student"]["trainable"] is False
+
+
+def test_interleave_thinker_planner_grpo_config_parses_public_yaml():
+    cfg = load_run_config("examples/train/configs/rl/interleave_thinker/planner_grpo.yaml")
+
+    assert cfg.models["student"]["_target_"] == (
+        "fastvideo.train.models.interleave_thinker.InterleaveThinkerPlannerModel")
+    assert cfg.models["student"]["dataset_kind"] == "planner_rl"
+    assert cfg.models["student"]["lora"]["enable"] is True
+    assert cfg.models["reference"]["_target_"] == (
+        "fastvideo.train.models.interleave_thinker.InterleaveThinkerPlannerModel")
+    assert cfg.models["reference"]["trainable"] is False
+    assert cfg.method["_target_"] == "fastvideo.train.methods.rl.interleave_thinker.InterleaveThinkerRLMethod"
+    assert cfg.method["reward_scorer"]["_target_"] == (
+        "fastvideo.train.methods.rl.rewards.InterleavePlannerRewardScorer")
+    assert cfg.method["kl_coef"] == 0.01
+    assert cfg.training.data.data_path.endswith("planner_rl.jsonl")

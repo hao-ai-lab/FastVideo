@@ -7,15 +7,20 @@ from typing import TYPE_CHECKING
 
 from fastvideo.train.methods.rl.rewards.interleave_thinker import (
     EditScoreProvider,
+    InterleavePlannerRewardResult,
+    InterleavePlannerRewardScorer,
     InterleaveThinkerAnswer,
     InterleaveThinkerEditRequest,
     InterleaveThinkerEditScore,
     InterleaveThinkerRewardResult,
     InterleaveThinkerRewardScorer,
     extract_interleave_answer,
+    extract_interleave_plan_payload,
     interleave_format_reward,
+    interleave_planner_format_reward,
     interleave_judge_accuracy_reward,
     normalize_interleave_response,
+    score_interleave_planner_rewards,
     score_interleave_thinker_rewards,
 )
 
@@ -104,6 +109,8 @@ __all__ = [
     "EditScoreProvider",
     "GeminiInterleaveImageScorer",
     "GeminiNanoBananaEditScorer",
+    "InterleavePlannerRewardResult",
+    "InterleavePlannerRewardScorer",
     "InterleaveThinkerAnswer",
     "InterleaveThinkerEditRequest",
     "InterleaveThinkerEditScore",
@@ -114,9 +121,12 @@ __all__ = [
     "RewardScorer",
     "build_multi_reward_scorer",
     "extract_interleave_answer",
+    "extract_interleave_plan_payload",
     "interleave_format_reward",
+    "interleave_planner_format_reward",
     "interleave_judge_accuracy_reward",
     "normalize_interleave_response",
+    "score_interleave_planner_rewards",
     "score_interleave_thinker_rewards",
     "select_first_frame",
 ]

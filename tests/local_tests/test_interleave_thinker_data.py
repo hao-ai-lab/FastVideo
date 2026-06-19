@@ -11,6 +11,7 @@ from fastvideo.train.models.interleave_thinker import (
     load_critic_rl_records,
     load_critic_sft_records,
     load_interleave_dataset,
+    load_planner_rl_records,
     load_planner_sft_records,
     normalize_critic_rl_record,
     resolve_interleave_image_path,
@@ -44,6 +45,27 @@ def test_load_planner_sft_records_normalizes_sharegpt_images(tmp_path: Path) -> 
     assert records[0]["instruction"] == "draw a cat step by step"
     assert records[0]["response"] == '<answer>{"execution_plan": []}</answer>'
     assert records[0]["images"] == [str(image_dir / "planner/cat_step.png")]
+    assert records[0]["input_image_paths"] == [str(image_dir / "planner/cat_step.png")]
+
+
+def test_load_planner_rl_records_accepts_prompt_only_rows(tmp_path: Path) -> None:
+    image_dir = tmp_path / "images"
+    data_path = tmp_path / "planner_rl.jsonl"
+    data_path.write_text(
+        json.dumps({
+            "text_input": "draw a cat in three clear steps",
+            "images": ["planner/start.png"],
+            "plan_score": 0.75,
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+    records = load_planner_rl_records(data_path, image_dir=image_dir)
+
+    assert records[0]["instruction"] == "draw a cat in three clear steps"
+    assert records[0]["images"] == [str(image_dir / "planner/start.png")]
+    assert records[0]["input_image_paths"] == [str(image_dir / "planner/start.png")]
+    assert records[0]["plan_score"] == 0.75
 
 
 def test_load_critic_sft_records_adds_image_pair_aliases(tmp_path: Path) -> None:

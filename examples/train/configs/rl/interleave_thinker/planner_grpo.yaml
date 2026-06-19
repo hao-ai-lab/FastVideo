@@ -1,0 +1,101 @@
+# InterleaveThinker planner GRPO bridge.
+#
+# This config trains the Qwen3-VL planner policy with FastVideo's managed GRPO
+# loop. It uses a lightweight planner reward by default: valid
+# <think>...</think><answer>{"execution_plan": [...]}</answer> format, plus an
+# optional scalar plan score when present in the dataset.
+
+models:
+  student:
+    _target_: fastvideo.train.models.interleave_thinker.InterleaveThinkerPlannerModel
+    init_from: InterleaveThinker/InterleaveThinker-Planner-8B
+    processor_from: Qwen/Qwen3-VL-8B-Instruct
+    load_backend: true
+    trainable: true
+    dataset_kind: planner_rl
+    image_dir: data/InterleaveThinker/Train-Data
+    torch_dtype: auto
+    attn_implementation: flash_attention_2
+    freeze_vision_tower: true
+    freeze_multi_modal_projector: true
+    enable_gradient_checkpointing: true
+    max_prompt_length: 16384
+    max_response_length: 4096
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - q_proj
+        - k_proj
+        - v_proj
+        - o_proj
+  reference:
+    _target_: fastvideo.train.models.interleave_thinker.InterleaveThinkerPlannerModel
+    init_from: InterleaveThinker/InterleaveThinker-Planner-8B
+    processor_from: Qwen/Qwen3-VL-8B-Instruct
+    load_backend: true
+    trainable: false
+    dataset_kind: planner_rl
+    image_dir: data/InterleaveThinker/Train-Data
+    torch_dtype: auto
+    attn_implementation: flash_attention_2
+    freeze_vision_tower: true
+    freeze_multi_modal_projector: true
+    enable_gradient_checkpointing: false
+    max_prompt_length: 16384
+    max_response_length: 4096
+
+method:
+  _target_: fastvideo.train.methods.rl.interleave_thinker.InterleaveThinkerRLMethod
+  reward_scorer:
+    _target_: fastvideo.train.methods.rl.rewards.InterleavePlannerRewardScorer
+    format_weight: 1.0
+    fallback_plan_reward: 0.0
+  num_generations: 8
+  num_batches_per_step: 1
+  temperature: 1.0
+  top_p: 1.0
+  max_new_tokens: 2048
+  clip_range: 0.2
+  kl_coef: 0.01
+  micro_batch_size_per_device_for_update: 1
+  advantage_eps: 0.0001
+  advantage_clip: 5.0
+  max_grad_norm: 1.0
+  terminal_progress: true
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 4
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: data/InterleaveThinker/Train-Data/planner_rl.jsonl
+    preprocessed_data_type: text_only
+    train_batch_size: 16
+    dataloader_num_workers: 0
+    seed: 42
+
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/interleave_thinker_planner_grpo
+    training_state_checkpointing_steps: 50
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: InterleaveThinker-GRPO
+    run_name: interleave_thinker_planner_grpo_fastvideo

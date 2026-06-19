@@ -87,6 +87,24 @@ class InterleaveThinkerRewardResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class InterleavePlannerRewardResult:
+    """One scored InterleaveThinker planner rollout."""
+
+    overall: float
+    format_reward: float
+    planner_score: float
+    index: int
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "overall": float(self.overall),
+            "format_reward": float(self.format_reward),
+            "planner_score": float(self.planner_score),
+            "idx": float(self.index),
+        }
+
+
 EditScoreProvider = Callable[[InterleaveThinkerEditRequest], InterleaveThinkerEditScore | Mapping[str, Any] | None]
 
 
@@ -141,6 +159,40 @@ def interleave_format_reward(response: str) -> float:
     return 1.0 if extract_interleave_answer(normalized) is not None else 0.0
 
 
+def extract_interleave_plan_payload(response: str) -> dict[str, Any] | None:
+    """Extract the planner ``execution_plan`` answer payload."""
+    match = _ANSWER_PATTERN.search(normalize_interleave_response(response))
+    if not match:
+        return None
+    payload = _jsonish_loads(match.group(1))
+    if payload is None:
+        return None
+    raw_steps = payload.get("execution_plan")
+    if not isinstance(raw_steps, Sequence) or isinstance(raw_steps, str | bytes) or not raw_steps:
+        return None
+    for step in raw_steps:
+        if not isinstance(step, Mapping):
+            return None
+        has_prompt = _non_empty_optional_text(step.get("prompt")) is not None
+        has_instruction = _non_empty_optional_text(step.get("instruction")) is not None
+        has_auxiliary = _non_empty_optional_text(step.get("auxiliary_text")) is not None
+        if not (has_prompt or has_instruction or has_auxiliary):
+            return None
+    return payload
+
+
+def interleave_planner_format_reward(response: str) -> float:
+    """Return 1 when a planner response has valid reasoning and plan JSON."""
+    normalized = normalize_interleave_response(response)
+    think_match = _THINK_PATTERN.search(normalized)
+    answer_match = _ANSWER_PATTERN.search(normalized)
+    if think_match is None or answer_match is None:
+        return 0.0
+    if think_match.start() >= answer_match.start():
+        return 0.0
+    return 1.0 if extract_interleave_plan_payload(normalized) is not None else 0.0
+
+
 def interleave_judge_accuracy_reward(
     predicted_previous_step_success: bool | None,
     ground_truth_previous_step_success: bool | None,
@@ -159,6 +211,15 @@ def _coerce_float(value: Any, *, default: float = 0.0) -> float:
             raise ValueError(f"Expected scalar tensor, got shape={tuple(value.shape)}")
         return float(value.detach().cpu())
     return float(value)
+
+
+def _non_empty_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "null"}:
+        return None
+    return text
 
 
 def _mapping_get_bool(mapping: Mapping[str, Any], *keys: str) -> bool | None:
@@ -244,6 +305,24 @@ def _normalized_edit_rewards(
     )
 
 
+def _planner_score_from_item(
+    item: Mapping[str, Any],
+    *,
+    fallback: float,
+) -> float:
+    for key in ("planner_score", "plan_score", "reward", "score"):
+        if key in item:
+            return _coerce_float(item.get(key), default=fallback)
+    raw = item.get("ground_truth", item.get("evaluation", {}))
+    if isinstance(raw, str):
+        raw = _jsonish_loads(raw) or {}
+    if isinstance(raw, Mapping):
+        for key in ("planner_score", "plan_score", "reward", "score"):
+            if key in raw:
+                return _coerce_float(raw.get(key), default=fallback)
+    return fallback
+
+
 class InterleaveThinkerRewardScorer:
     """Batch scorer for InterleaveThinker critic outputs.
 
@@ -303,10 +382,8 @@ class InterleaveThinkerRewardScorer:
                 previous_quality=previous_quality,
                 fallback=self.fallback_edit_reward,
             )
-            non_format_reward = (
-                self.judge_accuracy_weight * judge_reward + self.semantic_weight * semantic_reward +
-                self.quality_weight * quality_reward
-            ) / inner_total
+            non_format_reward = (self.judge_accuracy_weight * judge_reward + self.semantic_weight * semantic_reward +
+                                 self.quality_weight * quality_reward) / inner_total
             overall = self.format_weight * format_reward + (1.0 - self.format_weight) * non_format_reward
             results.append(
                 InterleaveThinkerRewardResult(
@@ -344,6 +421,64 @@ class InterleaveThinkerRewardScorer:
         return tensors
 
 
+class InterleavePlannerRewardScorer:
+    """Batch scorer for InterleaveThinker planner outputs.
+
+    This scorer is intentionally lightweight: by default it rewards valid
+    planner response format and can blend in an externally supplied scalar plan
+    score from each rollout for stronger supervision.
+    """
+
+    def __init__(
+        self,
+        *,
+        format_weight: float = 1.0,
+        fallback_plan_reward: float = 0.0,
+    ) -> None:
+        self.format_weight = float(format_weight)
+        self.fallback_plan_reward = float(fallback_plan_reward)
+        if not 0.0 <= self.format_weight <= 1.0:
+            raise ValueError("format_weight must be in [0, 1]")
+
+    def __call__(
+        self,
+        reward_inputs: Sequence[Mapping[str, Any]],
+    ) -> list[InterleavePlannerRewardResult]:
+        results: list[InterleavePlannerRewardResult] = []
+        for index, item in enumerate(reward_inputs):
+            response = str(item.get("response", "") or "")
+            format_reward = interleave_planner_format_reward(response)
+            planner_score = _planner_score_from_item(
+                item,
+                fallback=self.fallback_plan_reward,
+            )
+            overall = self.format_weight * format_reward + (1.0 - self.format_weight) * planner_score
+            results.append(
+                InterleavePlannerRewardResult(
+                    overall=float(overall),
+                    format_reward=float(format_reward),
+                    planner_score=float(planner_score),
+                    index=index,
+                ))
+        return results
+
+    def as_tensors(
+        self,
+        reward_inputs: Sequence[Mapping[str, Any]],
+        *,
+        device: torch.device | str = "cpu",
+    ) -> dict[str, torch.Tensor]:
+        results = self(reward_inputs)
+        names = ["overall", "format_reward", "planner_score"]
+        tensors: dict[str, torch.Tensor] = {}
+        for name in names:
+            tensors[name] = torch.tensor([getattr(result, name) for result in results],
+                                         device=device,
+                                         dtype=torch.float32)
+        tensors["avg"] = tensors["overall"]
+        return tensors
+
+
 def score_interleave_thinker_rewards(
     reward_inputs: Sequence[Mapping[str, Any]],
     **kwargs: Any,
@@ -353,16 +488,30 @@ def score_interleave_thinker_rewards(
     return [result.as_dict() for result in scorer(reward_inputs)]
 
 
+def score_interleave_planner_rewards(
+    reward_inputs: Sequence[Mapping[str, Any]],
+    **kwargs: Any,
+) -> list[dict[str, float]]:
+    """Convenience wrapper for planner rollout rewards."""
+    scorer = InterleavePlannerRewardScorer(**kwargs)
+    return [result.as_dict() for result in scorer(reward_inputs)]
+
+
 __all__ = [
     "EditScoreProvider",
+    "InterleavePlannerRewardResult",
     "InterleaveThinkerAnswer",
     "InterleaveThinkerEditRequest",
     "InterleaveThinkerEditScore",
     "InterleaveThinkerRewardResult",
+    "InterleavePlannerRewardScorer",
     "InterleaveThinkerRewardScorer",
     "extract_interleave_answer",
+    "extract_interleave_plan_payload",
     "interleave_format_reward",
+    "interleave_planner_format_reward",
     "interleave_judge_accuracy_reward",
     "normalize_interleave_response",
+    "score_interleave_planner_rewards",
     "score_interleave_thinker_rewards",
 ]

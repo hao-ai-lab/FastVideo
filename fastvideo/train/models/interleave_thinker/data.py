@@ -9,10 +9,11 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-InterleaveDatasetKind = Literal["planner_sft", "critic_sft", "critic_rl"]
+InterleaveDatasetKind = Literal["planner_sft", "planner_rl", "critic_sft", "critic_rl"]
 
 DEFAULT_FILENAMES: dict[InterleaveDatasetKind, str] = {
     "planner_sft": "planner_sft.json",
+    "planner_rl": "planner_rl.jsonl",
     "critic_sft": "critic_sft.json",
     "critic_rl": "critic_rl.jsonl",
 }
@@ -80,6 +81,20 @@ def load_planner_sft_records(
     )
 
 
+def load_planner_rl_records(
+    data_path: str | os.PathLike[str],
+    *,
+    image_dir: str | os.PathLike[str] = "",
+    validate_image_files: bool = False,
+) -> list[dict[str, Any]]:
+    return load_interleave_dataset(
+        data_path,
+        kind="planner_rl",
+        image_dir=image_dir,
+        validate_image_files=validate_image_files,
+    )
+
+
 def load_critic_sft_records(
     data_path: str | os.PathLike[str],
     *,
@@ -122,6 +137,8 @@ def normalize_interleave_dataset_record(
     )
     if kind == "planner_sft":
         return normalize_planner_sft_record(normalized)
+    if kind == "planner_rl":
+        return normalize_planner_rl_record(normalized)
     if kind == "critic_sft":
         return normalize_critic_sft_record(normalized)
     if kind == "critic_rl":
@@ -140,6 +157,29 @@ def normalize_planner_sft_record(record: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("planner_sft record requires an assistant message")
     normalized.setdefault("instruction", user_message)
     normalized.setdefault("response", assistant_message)
+    images = _string_sequence(normalized.get("images"))
+    if images:
+        normalized.setdefault("input_image_paths", images)
+    return normalized
+
+
+def normalize_planner_rl_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(record)
+    if "messages" in normalized:
+        messages = _require_messages(normalized, where="planner_rl")
+        normalized.setdefault("instruction", _first_message_content(messages, "user"))
+    instruction = _first_text(
+        normalized.get("instruction"),
+        normalized.get("text_input"),
+        normalized.get("origin_prompt"),
+        normalized.get("prompt"),
+    )
+    if not instruction:
+        raise ValueError("planner_rl record requires instruction, text_input, origin_prompt, or prompt")
+    normalized["instruction"] = instruction
+    images = _string_sequence(normalized.get("images"))
+    if images:
+        normalized.setdefault("input_image_paths", images)
     return normalized
 
 
@@ -199,8 +239,7 @@ def normalize_ground_truth(record: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raw = {}
 
-    success = _optional_bool(
-        raw.get("success", raw.get("previous_step_success", record.get("previous_step_success"))))
+    success = _optional_bool(raw.get("success", raw.get("previous_step_success", record.get("previous_step_success"))))
     if success is None:
         raise ValueError("critic_rl ground_truth requires boolean success or previous_step_success")
     return {
@@ -380,12 +419,14 @@ __all__ = [
     "load_critic_rl_records",
     "load_critic_sft_records",
     "load_interleave_dataset",
+    "load_planner_rl_records",
     "load_planner_sft_records",
     "looks_like_uri",
     "normalize_critic_rl_record",
     "normalize_critic_sft_record",
     "normalize_ground_truth",
     "normalize_interleave_dataset_record",
+    "normalize_planner_rl_record",
     "normalize_planner_sft_record",
     "resolve_interleave_image_path",
     "validate_image_path",

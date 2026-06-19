@@ -86,14 +86,7 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         )
         self._max_grad_norm = self._read_float("max_grad_norm", 0.0)
         self._terminal_progress = bool(self.method_config.get("terminal_progress", True))
-        self._reward_scorer = InterleaveThinkerRewardScorer(
-            format_weight=self._read_float("format_weight", 0.5),
-            judge_accuracy_weight=self._read_float("judge_accuracy_weight", 0.2),
-            semantic_weight=self._read_float("semantic_weight", 0.6),
-            quality_weight=self._read_float("quality_weight", 0.2),
-            fallback_edit_reward=self._read_float("fallback_edit_reward", 0.5),
-            edit_scorer=self._build_edit_scorer(self.method_config.get("edit_scorer")),
-        )
+        self._reward_scorer = self._build_reward_scorer()
         self._student_optimizer: torch.optim.Optimizer | None = None
         self._student_lr_scheduler: Any | None = None
         self._init_optimizer_and_scheduler()
@@ -221,6 +214,23 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         if isinstance(raw, Mapping):
             return instantiate(dict(raw))
         raise TypeError("method.edit_scorer must be a callable or a mapping with _target_")
+
+    def _build_reward_scorer(self) -> Any:
+        raw = self.method_config.get("reward_scorer")
+        if raw is not None:
+            if callable(raw):
+                return raw
+            if isinstance(raw, Mapping):
+                return instantiate(dict(raw))
+            raise TypeError("method.reward_scorer must be a callable or a mapping with _target_")
+        return InterleaveThinkerRewardScorer(
+            format_weight=self._read_float("format_weight", 0.5),
+            judge_accuracy_weight=self._read_float("judge_accuracy_weight", 0.2),
+            semantic_weight=self._read_float("semantic_weight", 0.6),
+            quality_weight=self._read_float("quality_weight", 0.2),
+            fallback_edit_reward=self._read_float("fallback_edit_reward", 0.5),
+            edit_scorer=self._build_edit_scorer(self.method_config.get("edit_scorer")),
+        )
 
     def _freeze_reference_model(self) -> None:
         if self.reference is None:

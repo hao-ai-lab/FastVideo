@@ -15,6 +15,7 @@ import torch
 from fastvideo.train.models.interleave_thinker.qwen_actor import (
     Qwen3VLActorBase,
     batch_to_items,
+    rollout_group_key,
 )
 from fastvideo.train.models.interleave_thinker.data import InterleaveDatasetKind
 
@@ -193,6 +194,45 @@ class InterleaveThinkerPlannerModel(Qwen3VLActorBase):
                 })
         return outputs
 
+    @torch.no_grad()
+    def generate_interleave_responses(
+        self,
+        batch: dict[str, Any],
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        num_generations = max(1, int(kwargs.get("num_generations", 1) or 1))
+        temperature = float(kwargs.get("temperature", 1.0) or 1.0)
+        top_p = float(kwargs.get("top_p", 1.0) or 1.0)
+        max_new_tokens = int(kwargs.get("max_new_tokens") or self.max_response_length)
+
+        rollouts: list[dict[str, Any]] = []
+        for item_idx, item in enumerate(batch_to_items(batch)):
+            messages = self.build_messages(item)
+            decoded = self.generate_qwen_responses(
+                messages,
+                num_generations=num_generations,
+                temperature=temperature,
+                top_p=top_p,
+                max_new_tokens=max_new_tokens,
+            )
+            for generation_idx, response in enumerate(decoded):
+                parsed = extract_interleave_plan(response)
+                rollout = dict(item)
+                rollout["response"] = response
+                rollout["plan"] = parsed
+                rollout["steps"] = list(parsed.steps) if parsed is not None else []
+                rollout.setdefault("sample_index", item_idx)
+                rollout.setdefault("generation_index", generation_idx)
+                rollout.setdefault("group_key", _planner_group_key(rollout, item_idx))
+                old_logprobs, response_mask = self.response_logprobs_from_messages(
+                    messages,
+                    response,
+                )
+                rollout["old_logprobs"] = old_logprobs.detach().cpu().tolist()
+                rollout["response_mask"] = response_mask.detach().cpu().tolist()
+                rollouts.append(rollout)
+        return rollouts
+
     def generate_interleave_plan(
         self,
         instruction: str,
@@ -298,7 +338,7 @@ def _planner_instruction(item: Mapping[str, Any]) -> str:
 
 def _planner_image_paths(item: Mapping[str, Any]) -> list[str]:
     paths: list[str] = []
-    for key in ("input_image_paths", "image_paths"):
+    for key in ("input_image_paths", "image_paths", "images"):
         value = item.get(key)
         if isinstance(value, Sequence) and not isinstance(value, str | bytes):
             paths.extend(str(path) for path in value if path)
@@ -307,6 +347,17 @@ def _planner_image_paths(item: Mapping[str, Any]) -> list[str]:
         if isinstance(value, str) and value:
             paths.append(value)
     return paths
+
+
+def _planner_group_key(
+    rollout: Mapping[str, Any],
+    index: int,
+) -> str:
+    for key in ("group_key", "problem_id", "instruction", "text_input", "origin_prompt", "prompt"):
+        value = rollout.get(key)
+        if value is not None:
+            return str(value)
+    return rollout_group_key(rollout, index)
 
 
 __all__ = [

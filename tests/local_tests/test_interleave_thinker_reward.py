@@ -1,10 +1,14 @@
 import pytest
 
 from fastvideo.train.methods.rl.rewards import (
+    InterleavePlannerRewardScorer,
     InterleaveThinkerEditScore,
     InterleaveThinkerRewardScorer,
     extract_interleave_answer,
+    extract_interleave_plan_payload,
     interleave_format_reward,
+    interleave_planner_format_reward,
+    score_interleave_planner_rewards,
     score_interleave_thinker_rewards,
 )
 
@@ -96,3 +100,43 @@ def test_reward_scorer_uses_injected_edit_scorer_and_json_string_ground_truth():
             "success": True
         },
     }])[0].overall >= 0.0
+
+
+def _planner_response(prompt="a clean cat sketch"):
+    prompt = prompt.replace('"', '\\"')
+    return f"""
+    <think>Plan the sequence.</think>
+    <answer>
+    {{"execution_plan": [
+      {{"step_number": 1, "step_name": "Sketch", "instruction": "Draw a cat", "prompt": "{prompt}", "auxiliary_text": null}}
+    ]}}
+    </answer>
+    """
+
+
+def test_planner_reward_accepts_execution_plan_answer_block():
+    payload = extract_interleave_plan_payload(_planner_response())
+
+    assert payload is not None
+    assert interleave_planner_format_reward(_planner_response()) == 1.0
+    assert interleave_planner_format_reward("<answer>{}</answer>") == 0.0
+
+
+def test_planner_reward_scorer_blends_format_and_scalar_plan_score():
+    scorer = InterleavePlannerRewardScorer(format_weight=0.25, fallback_plan_reward=0.1)
+
+    result = scorer([{
+        "response": _planner_response(),
+        "plan_score": 0.9,
+    }])[0]
+    wrapped = score_interleave_planner_rewards([{
+        "response": _planner_response(),
+        "ground_truth": {
+            "score": 0.5
+        },
+    }], format_weight=0.5)[0]
+
+    assert result.format_reward == 1.0
+    assert result.planner_score == pytest.approx(0.9)
+    assert result.overall == pytest.approx(0.25 * 1.0 + 0.75 * 0.9)
+    assert wrapped["overall"] == pytest.approx(0.5 * 1.0 + 0.5 * 0.5)

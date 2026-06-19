@@ -2712,3 +2712,154 @@ Conclusion:
 - Next full-integration stage: add a planner-policy RL path so the
   InterleaveThinker planner can be optimized with the same FastVideo GRPO loop,
   using planner-specific rollouts and rewards instead of only critic RL/SFT.
+
+## Stage 10 Execution: Planner GRPO Path
+
+Status: validation complete; ready to commit and push.
+
+Goal:
+
+- Let `InterleaveThinkerPlannerModel` participate in the same FastVideo
+  managed GRPO loop as the critic actor.
+- Keep Qwen response-token policy optimization shared between planner and
+  critic wrappers.
+- Add a planner-specific reward scorer for valid
+  `<think>...</think><answer>{"execution_plan": [...]}</answer>` outputs, with
+  optional external/fixture plan scores.
+- Add a public planner GRPO YAML using a trainable planner student and frozen
+  planner reference model.
+
+Planned implementation:
+
+- Move or duplicate the Qwen GRPO actor update onto `Qwen3VLActorBase` so both
+  planner and critic actors can train over response-token logprobs.
+- Add `InterleaveThinkerPlannerModel.generate_interleave_responses(...)`
+  returning rollouts compatible with `InterleaveThinkerRLMethod`:
+  `response`, parsed plan metadata, `old_logprobs`, `response_mask`,
+  `sample_index`, `generation_index`, and `group_key`.
+- Add `planner_rl` dataset normalization that can consume prompt-only planner
+  RL files without requiring an assistant response.
+- Add `InterleavePlannerRewardScorer` under
+  `fastvideo/train/methods/rl/rewards/`.
+- Add `examples/train/configs/rl/interleave_thinker/planner_grpo.yaml`.
+- Add focused unit tests for:
+  - planner RL data normalization;
+  - planner reward parsing/scoring;
+  - planner rollout generation with old logprobs;
+  - planner public YAML parsing;
+  - shared Qwen actor policy update behavior remains intact.
+
+Validation plan:
+
+- Local syntax checks and `git diff --check`.
+- Modal focused pytest for planner model/data/reward/method/GRPO tests.
+- Modal pre-commit on changed files.
+- If feasible after unit validation, run a one-step Modal smoke with real
+  `InterleaveThinker/InterleaveThinker-Planner-8B` student and frozen
+  reference planner using format-only planner rewards.
+
+Implemented changes:
+
+- Shared Qwen actor update:
+  - Moved the response-token GRPO actor update into
+    `Qwen3VLActorBase.train_interleave_rollouts(...)`.
+  - Moved `_grpo_logprob_batch(...)` and weighted actor-metric aggregation into
+    `qwen_actor.py`.
+  - Removed the duplicate critic-local GRPO update; the critic now inherits the
+    shared Qwen actor path.
+- Planner rollouts:
+  - Added `InterleaveThinkerPlannerModel.generate_interleave_responses(...)`.
+  - Planner rollouts now include `response`, parsed plan metadata, `steps`,
+    `sample_index`, `generation_index`, `group_key`, `old_logprobs`, and
+    `response_mask`.
+  - Planner image prompt construction now accepts the upstream `images` list as
+    an image-source alias.
+- Planner RL data:
+  - Added `planner_rl` to `InterleaveDatasetKind`.
+  - Added `planner_rl.jsonl` default filename.
+  - Added `load_planner_rl_records(...)` and
+    `normalize_planner_rl_record(...)`.
+  - Planner RL records can be prompt-only and do not require an assistant SFT
+    response.
+- Planner rewards:
+  - Added `InterleavePlannerRewardScorer`.
+  - Added `extract_interleave_plan_payload(...)`,
+    `interleave_planner_format_reward(...)`, and
+    `score_interleave_planner_rewards(...)`.
+  - Exported planner reward utilities from
+    `fastvideo.train.methods.rl.rewards`.
+  - `InterleaveThinkerRLMethod` now accepts optional
+    `method.reward_scorer` for scorer injection; when absent, it keeps the
+    existing critic reward scorer behavior.
+- Public config:
+  - Added
+    `examples/train/configs/rl/interleave_thinker/planner_grpo.yaml` with a
+    trainable LoRA planner student, frozen planner reference, planner reward
+    scorer, and GRPO/reference-KL knobs.
+- Tests:
+  - Added planner RL data normalization coverage.
+  - Added planner reward parsing/scoring coverage.
+  - Added planner RL rollout generation coverage with old logprobs.
+  - Added planner GRPO public YAML parse coverage.
+  - Reused existing critic GRPO tests to verify the shared Qwen refactor.
+
+Validation completed:
+
+- Local lightweight checks:
+  - `python -m py_compile` passed for the changed InterleaveThinker model,
+    reward, method, and test modules.
+  - `git diff --check` passed.
+  - Local pre-commit applied yapf/ruff formatting; local mypy still cannot run
+    in this hyphenated worktree path and reports
+    `fastvideo-interleavethinker is not a valid Python package name`.
+    Modal mypy is authoritative.
+- Modal focused pytest:
+  - First app URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-aHGkQGhbijME5oLBFIdZOH`
+  - Result: `36 passed`, `1 failed`.
+  - Failure was a test fake issue: the fake planner processor returned one
+    decoded response even when generation returned two sequences.
+  - Fixed by making the fake `batch_decode(...)` return one response per
+    sequence.
+- Modal focused pytest after fake fix:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-CUch3nJsv7MWZfzik5y1wP`
+  - Result: `37 passed, 14 warnings in 19.09s`.
+- Modal pre-commit before local formatter application:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-TM7tfdNJ9ZfGReagJGpw8P`
+  - Result: yapf and ruff modified files; codespell and mypy passed.
+  - Applied the same formatter changes locally.
+- Modal focused pytest after formatter changes:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-wccYJm9hNWdmEqyLZZfcnv`
+  - Result: `37 passed, 14 warnings in 15.25s`.
+- Final Modal pre-commit:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-xdYf7BFSVVyZqKx3Qdd0Yt`
+  - Result: yapf, ruff, codespell, mypy, filename, and suggestion hooks
+    passed; PyMarkdown/actionlint skipped with no files to check.
+- Real one-step planner GRPO smoke:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-PDBijC8opxsMiMU0Uc064A`
+  - Result:
+    - Loaded the trainable LoRA student
+      `InterleaveThinker/InterleaveThinker-Planner-8B`.
+    - Enabled PEFT LoRA with rank 4 and alpha 8 on
+      `['q_proj', 'k_proj', 'v_proj', 'o_proj']`.
+    - Loaded the frozen planner reference
+      `InterleaveThinker/InterleaveThinker-Planner-8B`.
+    - Generated two planner rollouts, computed old and reference response-token
+      logprobs, scored with `InterleavePlannerRewardScorer`, and completed one
+      GRPO update step with `kl_coef=0.01`.
+    - The job printed `INTERLEAVE_PLANNER_RL_SMOKE_OK`.
+
+Conclusion:
+
+- FastVideo now has planner SFT, critic SFT, critic GRPO, and planner GRPO
+  paths for the InterleaveThinker Qwen actors.
+- The planner and critic share the same Qwen response-token GRPO actor update.
+- The planner and critic GRPO paths both have real one-step Modal smoke
+  validation against actual InterleaveThinker 8B checkpoints.
+- Next action: commit this Stage 10 planner GRPO integration and push it to
+  `origin/interleavethinker-fastvideo`.
