@@ -18,8 +18,18 @@ export type SummaryRow = {
   regression_threshold_pct: number;
   computed_regression_status: "pass" | "fail";
   status: "pass" | "fail";
+  run_source: RunSource;
+  baseline_eligible: boolean;
+  branch: string;
+  pr_number: string;
+  test_scope: string;
+  build_url: string;
+  build_id: string;
+  job_id: string;
   metrics: Record<string, MetricValue>;
 };
+
+export type RunSource = "pr" | "local" | "scheduled_main" | "unknown";
 
 export type SummaryResponse = {
   rows: SummaryRow[];
@@ -29,9 +39,11 @@ export type SummaryResponse = {
     fail: number;
   };
   filters: {
-    days: number;
+    days: number | null;
+    trend_window_days?: number;
     model_id: string | null;
     gpu_type: string | null;
+    run_source: string | null;
   };
   sync: SyncState;
 };
@@ -40,6 +52,14 @@ export type TrendPoint = {
   timestamp: string | null;
   commit_sha: string | null;
   success: boolean;
+  run_source: RunSource;
+  baseline_eligible: boolean;
+  branch: string;
+  pr_number: string;
+  test_scope: string;
+  build_url: string;
+  build_id: string;
+  job_id: string;
   metrics: Record<string, number | null>;
 };
 
@@ -85,15 +105,15 @@ async function getJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function fetchSummary(days = 90, modelId?: string, gpuType?: string) {
+export async function fetchSummary(days = 90, modelId?: string, gpuType?: string, runSource?: string) {
   return getJson<SummaryResponse>(
-    `/api/performance/summary?${params({ days, model_id: modelId, gpu_type: gpuType })}`
+    `/api/performance/summary?${params({ days, model_id: modelId, gpu_type: gpuType, run_source: runSource })}`
   );
 }
 
-export async function fetchTrends(days = 90, modelId?: string, gpuType?: string) {
+export async function fetchTrends(days = 90, modelId?: string, gpuType?: string, runSource?: string) {
   return getJson<TrendsResponse>(
-    `/api/performance/trends?${params({ days, model_id: modelId, gpu_type: gpuType })}`
+    `/api/performance/trends?${params({ days, model_id: modelId, gpu_type: gpuType, run_source: runSource })}`
   );
 }
 
