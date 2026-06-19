@@ -53,8 +53,8 @@ from v2.recipes.wan21.card import stamp_wan21_checkpoints
 # Matrix-Game 2.0 ignores text -> no negative prompt (kept as a LOCAL constant, not shared _prompts.py).
 MATRIXGAME2_NEG = ""
 
-_MG2_DIT = "v2.platform.backends.torch_matrixgame2:MatrixGame2CausalDiT"
-_MG2_CLIP = "v2.platform.backends.torch_matrixgame2:MatrixGame2CLIPImageEncoder"
+_MG2_DIT = "v2.recipes.matrixgame2.adapter:MatrixGame2CausalDiT"
+_MG2_CLIP = "v2.recipes.matrixgame2.adapter:MatrixGame2CLIPImageEncoder"
 
 
 def build_matrixgame2_card(model_id: str = "matrix-game-2.0-base-distilled",

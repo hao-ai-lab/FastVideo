@@ -42,10 +42,10 @@ from v2.recipes.hunyuangamecraft.loop import GameCraftDenoiseLoop
 # self-contained-recipe rule). CFG still runs (uncond branch encodes the empty string).
 GAMECRAFT_NEG = ""
 
-_GAMECRAFT_DIT = "v2.platform.backends.torch_hunyuangamecraft:GameCraftDiT"
-_GAMECRAFT_VAE = "v2.platform.backends.torch_hunyuangamecraft:GameCraftVAE"
-_GAMECRAFT_LLAMA = "v2.platform.backends.torch_hunyuangamecraft:GameCraftLlamaEncoder"
-_GAMECRAFT_CLIP = "v2.platform.backends.torch_hunyuangamecraft:GameCraftClipEncoder"
+_GAMECRAFT_DIT = "v2.recipes.hunyuangamecraft.adapter:GameCraftDiT"
+_GAMECRAFT_VAE = "v2.recipes.hunyuangamecraft.adapter:GameCraftVAE"
+_GAMECRAFT_LLAMA = "v2.recipes.hunyuangamecraft.adapter:GameCraftLlamaEncoder"
+_GAMECRAFT_CLIP = "v2.recipes.hunyuangamecraft.adapter:GameCraftClipEncoder"
 
 
 def build_hunyuangamecraft_card(model_id: str = "hunyuan-gamecraft",

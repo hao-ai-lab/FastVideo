@@ -18,7 +18,7 @@ from typing import Any
 
 import numpy as np
 
-from v2.platform.backends.torch_sd35 import assemble_sd3_conditioning
+from v2.recipes.sd35.adapter import assemble_sd3_conditioning
 from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
 
 _CLIP_L = "text_encoder"

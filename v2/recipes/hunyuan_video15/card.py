@@ -49,10 +49,10 @@ from v2.recipes.wan21.card import stamp_wan21_checkpoints
 # (the recipe owns its prompts; not added to the shared v2/recipes/_prompts.py).
 HUNYUAN15_NEG = ""
 
-_HY15_DIT = "v2.platform.backends.torch_hunyuan_video15:HunyuanVideo15DiT"
-_HY15_VAE = "v2.platform.backends.torch_hunyuan_video15:HunyuanVideo15VAE"
-_HY15_QWEN = "v2.platform.backends.torch_hunyuan_video15:HunyuanVideo15QwenEncoder"
-_HY15_BYT5 = "v2.platform.backends.torch_hunyuan_video15:HunyuanVideo15ByT5Encoder"
+_HY15_DIT = "v2.recipes.hunyuan_video15.adapter:HunyuanVideo15DiT"
+_HY15_VAE = "v2.recipes.hunyuan_video15.adapter:HunyuanVideo15VAE"
+_HY15_QWEN = "v2.recipes.hunyuan_video15.adapter:HunyuanVideo15QwenEncoder"
+_HY15_BYT5 = "v2.recipes.hunyuan_video15.adapter:HunyuanVideo15ByT5Encoder"
 
 # 480p t2v explicit sigma schedule = linspace(1, 0, num_steps+1)[:-1] (presets.py:_sigmas).
 _DEFAULT_STEPS = 50

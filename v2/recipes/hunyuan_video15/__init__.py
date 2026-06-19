@@ -2,7 +2,7 @@
 
 Self-contained recipe package: the card declares its torch adapters via ``ComponentSpec.adapter``
 (``HunyuanVideo15DiT``/``HunyuanVideo15VAE``/``HunyuanVideo15QwenEncoder``/``HunyuanVideo15ByT5Encoder`` in
-``v2/platform/backends/torch_hunyuan_video15.py``) plus a ``HunyuanVideo15DenoiseLoop`` (a thin
+``v2/recipes/hunyuan_video15/adapter.py``) plus a ``HunyuanVideo15DenoiseLoop`` (a thin
 ``WanDenoiseLoop`` subclass with z=32/16×/4× geometry). The flow-match loop math is unchanged from Wan; the
 arch deltas (two text embeds, an image-embed list, the 33-channel i2v cond concat, the scalar-scaling VAE)
 live in the adapters. Registered in ``v2/registry.py`` (by the orchestrator) for

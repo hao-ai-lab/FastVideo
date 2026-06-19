@@ -2,7 +2,7 @@
 
 Self-contained recipe package (the bucket-C pattern): the card declares its torch adapters via
 ``ComponentSpec.adapter`` (``HYWorldDiT`` / ``HYWorldVAE`` / ``HYWorldQwenEncoder`` /
-``HYWorldByT5Encoder`` / ``HYWorldSiglipEncoder`` in ``v2/platform/backends/torch_hyworld.py``) and a new
+``HYWorldByT5Encoder`` / ``HYWorldSiglipEncoder`` in ``v2/recipes/hyworld/adapter.py``) and a new
 ``HYWorldDenoiseLoop`` (chunk-rollout flow-match: per-chunk sweep + camera-aligned frozen context for
 chunk>0). It reuses the flow-match ``FLOW_MATCH_STEP`` kernel + ``ClassicCFG`` policy and the Wan
 ``stamp_wan21_checkpoints`` superset (which covers ``text_encoder_2`` + ``image_encoder``).

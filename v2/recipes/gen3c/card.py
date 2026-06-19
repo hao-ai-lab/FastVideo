@@ -47,9 +47,9 @@ from v2.platform.backends.toy import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
 from v2.recipes.gen3c.loop import Gen3CDenoiseLoop
 from v2.recipes.wan21.card import stamp_wan21_checkpoints
 
-_GEN3C_DIT = "v2.platform.backends.torch_gen3c:Gen3CDiT"
-_GEN3C_VAE = "v2.platform.backends.torch_gen3c:Gen3CVAE"
-_GEN3C_T5 = "v2.platform.backends.torch_gen3c:Gen3CT5Encoder"
+_GEN3C_DIT = "v2.recipes.gen3c.adapter:Gen3CDiT"
+_GEN3C_VAE = "v2.recipes.gen3c.adapter:Gen3CVAE"
+_GEN3C_T5 = "v2.recipes.gen3c.adapter:Gen3CT5Encoder"
 
 # The GEN3C default negative prompt (kept LOCAL to this recipe — the v2/recipes/_prompts.py shared bank
 # is off-limits for a self-contained port). Used at guidance_scale > 1 (the official_uncond_at_unity

@@ -7,7 +7,7 @@ Euler solver are Wan's (``FlowShiftPolicy.build_schedule`` + ``FLOW_MATCH_STEP``
 [0,1]. So we set ``st.timesteps = st.sigmas`` (no *1000) and the ``Cosmos25DiT`` adapter broadcasts the
 plain sigma to ``[B, T]`` and builds the mandatory zero ``condition_mask`` / ones ``padding_mask`` +
 ``fps`` the forward requires (the model concats the masks itself — we feed the raw 16ch latent). See
-``v2/platform/backends/torch_cosmos25.py:Cosmos25DiT`` and the source
+``v2/recipes/cosmos25/adapter.py:Cosmos25DiT`` and the source
 ``fastvideo/pipelines/stages/denoising.py:Cosmos25DenoisingStage``.
 
 video2world / image2world (frame_replace) conditioning exists in fastvideo

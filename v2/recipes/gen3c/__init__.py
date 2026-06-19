@@ -2,7 +2,7 @@
 
 Self-contained recipe package (the bucket-C pattern): the card declares its torch adapters via
 ``ComponentSpec.adapter`` (``Gen3CDiT`` / ``Gen3CVAE`` / ``Gen3CT5Encoder`` in
-``v2/platform/backends/torch_gen3c.py``) and a new ``Gen3CDenoiseLoop`` (a TRUE EDM /
+``v2/recipes/gen3c/adapter.py``) and a new ``Gen3CDenoiseLoop`` (a TRUE EDM /
 ``EDMEulerScheduler`` denoiser: Karras ρ=7 σ schedule, ``c_in/c_skip/c_out`` preconditioning, model
 timestep ``c_noise = 0.25·log σ``, frame-replace conditioning + pose-zeroed-uncond CFG). The
 camera/MoGe-depth/3D-cache conditioning that fills the pose buffer is documented as BRINGUP (a pre-loop

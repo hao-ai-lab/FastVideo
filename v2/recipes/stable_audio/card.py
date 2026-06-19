@@ -55,16 +55,16 @@ STABLE_AUDIO_NEG = ""
 # Oobleck VAE io_channels — the 1-D audio latent's channel dim (shared by the toy DiT + toy VAE below).
 SA_IO_CHANNELS = 64
 
-_SA_DIT = "v2.platform.backends.torch_stable_audio:StableAudioDiT"
-_SA_VAE = "v2.platform.backends.torch_stable_audio:OobleckVAE"
-_SA_CONDITIONER = "v2.platform.backends.torch_stable_audio:StableAudioConditioner"
+_SA_DIT = "v2.recipes.stable_audio.adapter:StableAudioDiT"
+_SA_VAE = "v2.recipes.stable_audio.adapter:OobleckVAE"
+_SA_CONDITIONER = "v2.recipes.stable_audio.adapter:StableAudioConditioner"
 
 
 def _SA_CONDITIONER_FACTORY(instance):
     """Lazy ``ComponentSpec.factory`` for the conditioner — keeps the card torch-free at import
     (the torch backend module is only imported on the GPU box, when the factory is actually called).
     CPU -> ToyTextEncoder; cuda -> the real ``StableAudioMultiConditioner`` adapter."""
-    from v2.platform.backends.torch_stable_audio import make_stable_audio_conditioner
+    from v2.recipes.stable_audio.adapter import make_stable_audio_conditioner
     return make_stable_audio_conditioner(instance)
 
 
