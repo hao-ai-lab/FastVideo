@@ -4,10 +4,10 @@
 This script:
 1) reads current benchmark results from fastvideo/tests/performance/results,
 2) syncs the canonical baseline from the configured HF dataset repo,
-3) compares each current record against the median of up to 5 prior records
-   (filtered by gpu_type, successful only),
-4) on persist runs (full-suite on main branch), writes the normalized record
-   back to the HF dataset repo,
+3) compares each current record against the median of up to 5 prior
+   baseline-eligible successful records (filtered by gpu_type),
+4) writes normalized records back to the HF dataset repo according to
+   PERF_UPLOAD_POLICY,
 5) exits non-zero if any metric regresses by more than PERF_MAX_REGRESSION
    (default 5%).
 """
@@ -20,13 +20,22 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from hf_store import (
-    load_records_for_model,
-    safe_float,
-    sanitize,
-    sync_from_hf,
-    upload_record,
-)
+try:
+    from .hf_store import (
+        load_records_for_model,
+        safe_float,
+        sanitize,
+        sync_from_hf,
+        upload_record,
+    )
+except ImportError:
+    from hf_store import (
+        load_records_for_model,
+        safe_float,
+        sanitize,
+        sync_from_hf,
+        upload_record,
+    )
 
 RESULTS_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -38,6 +47,9 @@ TRACKING_ROOT = os.environ.get(
 )
 PERF_REPORTS_DIR = os.environ.get("PERF_REPORTS_DIR", "/root/data/perf_reports")
 MAX_REGRESSION = float(os.environ.get("PERF_MAX_REGRESSION", "0.05"))
+UPLOAD_POLICY = os.environ.get("PERF_UPLOAD_POLICY", "never").strip().lower()
+VALID_UPLOAD_POLICIES = {"never", "pass", "always"}
+VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
 METRICS = (
     ("latency", "Latency", 3),
     ("throughput", "Throughput", 3),
@@ -56,9 +68,74 @@ LOWER_IS_BETTER_METRICS = {
 
 
 def _should_persist_tracking() -> bool:
-    test_scope = os.environ.get("TEST_SCOPE", "")
-    branch = os.environ.get("BUILDKITE_BRANCH", "")
-    return test_scope == "full" and branch == "main"
+    return _normalized_upload_policy() != "never"
+
+
+def _normalized_upload_policy() -> str:
+    if UPLOAD_POLICY in VALID_UPLOAD_POLICIES:
+        return UPLOAD_POLICY
+    print(f"Invalid PERF_UPLOAD_POLICY={UPLOAD_POLICY!r}; using 'never'")
+    return "never"
+
+
+def _truthy_pr_number(value: str | None) -> bool:
+    return bool(value and value not in {"false", "0", "None", "none"})
+
+
+def _detect_run_source() -> str:
+    explicit = os.environ.get("PERF_RUN_SOURCE", "").strip().lower()
+    if explicit in VALID_RUN_SOURCES:
+        return explicit
+    if explicit:
+        print(f"Invalid PERF_RUN_SOURCE={explicit!r}; inferring run source")
+
+    if _truthy_pr_number(os.environ.get("BUILDKITE_PULL_REQUEST")):
+        return "pr"
+    if os.environ.get("BUILDKITE_BRANCH") == "main" and os.environ.get("TEST_SCOPE") == "full":
+        return "scheduled_main"
+    if not os.environ.get("BUILDKITE_COMMIT"):
+        return "local"
+    return "unknown"
+
+
+def _is_baseline_eligible(run_source: str, success: bool) -> bool:
+    return run_source == "scheduled_main" and success
+
+
+def _upload_allowed(record: dict[str, Any]) -> bool:
+    policy = _normalized_upload_policy()
+    if policy == "always":
+        return True
+    if policy == "pass":
+        return bool(record.get("success", True))
+    return False
+
+
+def _result_failed_static_thresholds() -> bool:
+    value = os.environ.get("PERF_PYTEST_RC", "")
+    if not value:
+        return False
+    try:
+        return int(value) != 0
+    except ValueError:
+        return False
+
+
+def _record_metadata(run_source: str, result: dict[str, Any]) -> dict[str, Any]:
+    pr_number = result.get("pr_number") or os.environ.get("BUILDKITE_PULL_REQUEST", "")
+    if not _truthy_pr_number(str(pr_number)):
+        pr_number = ""
+    return {
+        "run_source": run_source,
+        "baseline_eligible": False,
+        "branch": os.environ.get("BUILDKITE_BRANCH", ""),
+        "pr_number": pr_number,
+        "test_scope": os.environ.get("TEST_SCOPE", ""),
+        "build_url": os.environ.get("BUILDKITE_BUILD_URL", ""),
+        "build_id": os.environ.get("BUILDKITE_BUILD_ID", ""),
+        "job_id": os.environ.get("BUILDKITE_JOB_ID", ""),
+    }
+
 
 def _load_current_results() -> list[dict[str, Any]]:
     pattern = os.path.join(RESULTS_DIR, "perf_*.json")
@@ -104,6 +181,7 @@ def normalize_performance_result(result: dict[str, Any]) -> dict[str, Any]:
         "dit_time_s": dit_time,
         "vae_decode_time_s": vae_decode_time,
         "success": True,
+        **_record_metadata(_detect_run_source(), result),
     }
 
 
@@ -297,8 +375,11 @@ def _emit_markdown_summary(markdown: str, commit_sha: str) -> None:
 
 def main() -> int:
     persist_tracking = _should_persist_tracking()
+    upload_policy = _normalized_upload_policy()
+    static_threshold_failed = _result_failed_static_thresholds()
 
-    # Strict on persist: a silent sync failure would pollute the baseline.
+    # Strict on upload-enabled runs: silent sync failure would make comparison
+    # and upload state ambiguous.
     sync_from_hf(TRACKING_ROOT, strict=persist_tracking)
 
     current_results = _load_current_results()
@@ -310,10 +391,12 @@ def main() -> int:
     summary_rows: list[dict[str, Any]] = []
 
     if persist_tracking:
-        print("Tracking persistence enabled: full-suite run on main branch")
+        print(f"Tracking persistence enabled: PERF_UPLOAD_POLICY={upload_policy}")
     else:
-        print("Tracking persistence disabled: "
-              "only full-suite runs on main branch are persisted")
+        print("Tracking persistence disabled: PERF_UPLOAD_POLICY=never")
+
+    if static_threshold_failed:
+        print(f"Static-threshold phase failed: PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')}")
 
     for raw in current_results:
         record = _normalize_record(raw)
@@ -324,6 +407,7 @@ def main() -> int:
             record["gpu_type"],
             last_n=5,
             successful_only=True,
+            baseline_eligible_only=True,
         )
 
         if not baseline_records:
@@ -333,15 +417,22 @@ def main() -> int:
             record["success"] = True
         else:
             failures = _check_regressions(record, baseline_records, MAX_REGRESSION)
-            record["success"] = not failures
-            all_failures.extend(failures)
+        if static_threshold_failed:
+            failures.append(f"{record['model_id']} fixed-threshold phase failed "
+                            f"(PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')})")
+
+        record["success"] = not failures
+        record["baseline_eligible"] = _is_baseline_eligible(record["run_source"], record["success"])
+        all_failures.extend(failures)
 
         _write_normalized_artifact(record)
 
-        # Strict upload: a silent failure would freeze the rolling baseline.
-        if persist_tracking:
+        if _upload_allowed(record):
             current_path = _write_tracking_record(record)
             upload_record(current_path, record, strict=True)
+        else:
+            print("Tracking upload skipped for "
+                  f"{record['model_id']} ({record['run_source']}, success={record['success']})")
 
         summary_rows.append(_build_summary_row(record, baseline_records, bool(failures)))
 

@@ -84,7 +84,7 @@ h3 {
 
 .filters {
   display: grid;
-  grid-template-columns: 120px minmax(220px, 1fr) minmax(220px, 1fr);
+  grid-template-columns: 120px minmax(200px, 1fr) minmax(200px, 1fr) minmax(180px, 0.8fr);
   gap: 14px;
   margin-bottom: 18px;
 }
@@ -186,7 +186,7 @@ h3 {
 
 table {
   width: 100%;
-  min-width: 900px;
+  min-width: 1120px;
   border-collapse: collapse;
 }
 
@@ -235,6 +235,33 @@ td {
   opacity: 0.78;
 }
 
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: #1f2933;
+  background: #e8edf2;
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.source-scheduled_main {
+  color: #065f46;
+  background: #d1fae5;
+}
+
+.source-pr {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.source-local {
+  color: #7c2d12;
+  background: #ffedd5;
+}
+
 .empty {
   padding: 28px 16px;
   color: #607080;
@@ -246,7 +273,7 @@ td {
 
 .trend-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 12px;
   padding: 14px;
 }
@@ -260,16 +287,101 @@ td {
 
 .trend-chart {
   width: 100%;
-  min-height: 96px;
+  min-height: 190px;
   color: #0f6b8f;
+  overflow: visible;
+}
+
+.chart-shell {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.axis-line {
+  stroke: #9aa8b6;
+  stroke-width: 1;
+}
+
+.grid-line {
+  stroke: #e4e9ee;
+  stroke-width: 1;
+}
+
+.axis-label {
+  fill: #667789;
+  font-size: 10px;
 }
 
 .point-pass {
   fill: #0f6b8f;
+  outline: none;
 }
 
 .point-fail {
   fill: #d94f4f;
+  outline: none;
+}
+
+.point-hit-area {
+  fill: transparent;
+  outline: none;
+  cursor: pointer;
+}
+
+.point-marker {
+  pointer-events: none;
+}
+
+.point-hit-area:focus + .point-marker {
+  stroke: #17212b;
+  stroke-width: 2;
+}
+
+.hover-tooltip {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  gap: 2px;
+  min-width: 132px;
+  max-width: 190px;
+  border: 1px solid #22313f;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #ffffff;
+  background: #17212b;
+  font-size: 0.78rem;
+  pointer-events: none;
+  transform: translate(10px, -100%);
+  box-shadow: 0 10px 24px rgb(15 23 42 / 22%);
+}
+
+.hover-tooltip strong {
+  font-size: 0.9rem;
+}
+
+.point-tooltip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 10px;
+  border: 1px solid #d5dde5;
+  border-radius: 6px;
+  padding: 10px;
+  color: #263646;
+  background: #f8fafc;
+  font-size: 0.78rem;
+}
+
+.point-tooltip strong {
+  grid-column: 1 / -1;
+  color: #132232;
+  font-size: 0.9rem;
+}
+
+.point-tooltip a {
+  color: #0f6b8f;
+  font-weight: 700;
 }
 
 .empty-chart {
