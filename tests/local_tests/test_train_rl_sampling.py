@@ -50,18 +50,23 @@ class _FakeModel:
         self.noise_scheduler = _FakeScheduler()
         self.add_noise_calls = 0
         self.timestep_shapes = []
+        self.conditional_calls = []
 
     def predict_noise(self, noisy_latents, timestep, batch, *, conditional, attn_kind):
-        del conditional, attn_kind
+        del attn_kind
+        self.conditional_calls.append(bool(conditional))
         self.timestep_shapes.append(tuple(timestep.shape))
         assert batch.timesteps is timestep
-        return torch.zeros_like(noisy_latents)
+        value = 1.0 if conditional else -1.0
+        return torch.full_like(noisy_latents, value)
 
     def predict_x0(self, noisy_latents, timestep, batch, *, conditional, attn_kind):
-        del conditional, attn_kind
+        del attn_kind
+        self.conditional_calls.append(bool(conditional))
         self.timestep_shapes.append(tuple(timestep.shape))
         assert batch.timesteps is timestep
-        return noisy_latents
+        value = 1.0 if conditional else -1.0
+        return noisy_latents + value
 
     def add_noise(self, clean_latents, noise, timestep):
         del timestep
@@ -119,6 +124,17 @@ def test_sampling_config_rejects_unknown_keys():
         SamplingConfig.from_mapping({"solver": "dpm2"})
 
 
+def test_sampling_config_accepts_flow_unipc_and_rejects_explicit_timesteps():
+    cfg = SamplingConfig.from_mapping({"scheduler": "flow_unipc", "num_steps": 50, "flow_shift": 8})
+
+    assert cfg.scheduler == "flow_unipc"
+    assert cfg.num_steps == 50
+    assert cfg.flow_shift == 8.0
+
+    with pytest.raises(ValueError, match="timesteps is not supported with flow_unipc"):
+        SamplingConfig.from_mapping({"scheduler": "flow_unipc", "timesteps": [1000, 500, 0]})
+
+
 def test_sampler_restores_original_batch_timestep_after_sampling():
     model = _FakeModel()
     sampler = DiffusionSampler(SamplingConfig(num_steps=2))
@@ -139,6 +155,31 @@ def test_euler_sampler_does_not_renoise_between_steps():
 
     assert model.add_noise_calls == 0
     assert model.timestep_shapes == [(2,), (2,), (2,), (2,)]
+    assert model.conditional_calls == [True, True, True, True]
+
+
+def test_euler_sampler_applies_cfg_guidance_when_requested():
+    baseline_model = _FakeModel()
+    guided_model = _FakeModel()
+    baseline_sampler = DiffusionSampler(SamplingConfig(num_steps=1))
+    guided_sampler = DiffusionSampler(SamplingConfig(num_steps=1, guidance_scale=3.0))
+
+    baseline = baseline_sampler.sample(
+        baseline_model,
+        _batch(),
+        generator=torch.Generator().manual_seed(0),
+    )
+    guided = guided_sampler.sample(
+        guided_model,
+        _batch(),
+        generator=torch.Generator().manual_seed(0),
+    )
+
+    # Fake cond prediction is +1 and uncond is -1, so guidance=3 changes
+    # the one-step scheduler update from +1 to +5.
+    assert torch.allclose(guided.latents - baseline.latents, torch.full_like(guided.latents, 4.0))
+    assert baseline_model.conditional_calls == [True]
+    assert guided_model.conditional_calls == [True, False]
 
 
 def test_sde_reflow_sampler_renoises_between_steps():
@@ -187,8 +228,17 @@ def test_diffusion_nft_video_config_uses_genrl_rewards_in_clean_layout():
         "videoalign_mq": 1.0,
         "videoalign_ta": 1.0,
     }
-    assert cfg.method["sampling"]["scheduler"] == "flow_match_euler"
+    assert cfg.method["sampling"]["scheduler"] == "flow_unipc"
     assert cfg.method["sampling"]["trajectory"] == "ode"
+    assert cfg.method["sampling"]["num_steps"] == 50
+    assert cfg.method["sampling"]["flow_shift"] == 8.0
+    assert cfg.method["sampling"]["guidance_scale"] == 6.0
+    assert cfg.method["validation"]["num_steps"] == 50
+    assert cfg.method["validation"]["num_prompts"] == 16
+    assert cfg.method["validation"]["batch_size"] == 4
+    assert cfg.method["beta"] == 0.1
+    assert cfg.method["kl_beta"] == 0.0001
+    assert cfg.training.loop.gradient_accumulation_steps == 24
     assert cfg.training.data.num_latent_t == 20
     assert cfg.training.data.num_frames == 77
     assert "rl/reward/" not in raw_text

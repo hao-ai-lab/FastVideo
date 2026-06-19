@@ -27,7 +27,10 @@ python examples/train/prepare_diffusion_nft_assets.py \
     --hsdp-replicate-dim 1 \
     --hsdp-shard-dim 4 \
     --max-train-steps 100 \
-    --gradient-accumulation-steps 60 \
+    --gradient-accumulation-steps 24 \
+    --sample-num-steps 50 \
+    --sample-flow-shift 8 \
+    --sample-guidance-scale 6 \
     --preprocess-batch-size 128 \
     --check-rewards \
     --json
@@ -57,9 +60,14 @@ NUM_GPUS=4 bash examples/train/run.sh \
 W&B logging records the resolved config and a code snapshot by default. Set
 `FASTVIDEO_WANDB_LOG_CODE=0` only when intentionally disabling code capture.
 
+The video config intentionally uses the Wan/MAY-30 rollout sampler profile:
+`flow_unipc`, 50 denoising steps, flow shift 8, and CFG 6. Validation uses the
+same 50-step sampler so W&B qualitative videos are comparable to rollout
+quality.
+
 For short 17-frame H100 runs, keep gradient accumulation matched to the number
 of rollout train batches. For example, if you use `--num-batches-per-epoch 4`,
-`--collection-batch-size 4`, `--train-batch-size 4`, and 25 sample steps, use
+`--collection-batch-size 4`, `--train-batch-size 4`, and 50 sample steps, use
 `--gradient-accumulation-steps 4` for one full optimizer update per outer
 DiffusionNFT step. A much larger accumulation value, such as 30, still runs, but
 only performs a partial final update for that outer step and W&B will report it
@@ -70,6 +78,11 @@ per-prompt advantages. `--num-samples-per-prompt 4` is a cheap smoke setting,
 but it is high variance. If the reward curves look noisy and memory allows it,
 try `--num-samples-per-prompt 8` or increase `--num-batches-per-epoch` before
 judging the training run.
+
+For Wan video reward rollouts, keep `method.sampling.guidance_scale` enabled
+unless you are intentionally testing unguided generation. The May 30 video run
+used CFG sampling at `6.0`; unguided rollouts can look foggy and static before
+the reward model ever sees them.
 
 For offline logging:
 

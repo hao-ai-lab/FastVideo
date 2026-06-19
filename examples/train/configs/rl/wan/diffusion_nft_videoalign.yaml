@@ -29,16 +29,17 @@ method:
       videoalign_ta: 1.0
 
   sampling:
-    num_steps: 25
-    scheduler: flow_match_euler
+    num_steps: 50
+    scheduler: flow_unipc
     trajectory: ode
-    flow_shift: inherit
+    flow_shift: 8.0
+    guidance_scale: 6.0
 
   validation:
     every_steps: 10
-    num_steps: 40
-    num_prompts: 8
-    batch_size: 2
+    num_steps: 50
+    num_prompts: 16
+    batch_size: 4
     log_samples: true
     seed: 42
     data_path:
@@ -92,7 +93,7 @@ training:
 
   loop:
     max_train_steps: 100000
-    gradient_accumulation_steps: 60
+    gradient_accumulation_steps: 24
 
   checkpoint:
     output_dir: outputs/wan2.1_diffusion_nft_videoalign
