@@ -1718,7 +1718,7 @@ Next recommended integration step:
 
 ## Stage 4 Execution: Planner/Critic Provider Adapters
 
-Status: validated, pending commit/push.
+Status: completed and pushed.
 
 Scope for this implementation slice:
 
@@ -1833,6 +1833,9 @@ Conclusion:
   entrypoint tests, real planner/critic model wrapper tests, Modal pre-commit,
   and a real planner + fake generator + real critic end-to-end orchestrator
   smoke.
+- Commit completed:
+  - `2d3bb7c7` — `[feat] wire InterleaveThinker model providers`
+  - Pushed to `origin/interleavethinker-fastvideo`.
 - Next step after commit: start Stage 5 by replacing the fake generator in the
   orchestrator smoke with `FastVideoImageGeneratorBackend` and a small
   FastVideo image-generation model/config, then decide whether the planner and
