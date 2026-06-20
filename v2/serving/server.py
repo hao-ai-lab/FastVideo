@@ -131,7 +131,6 @@ class OmniOpenAIServer:
             "batches": sm.batches,
             "admitted": adm.admitted,
             "deferred": adm.deferred,
-            "gpu_seconds": round(adm.gpu_seconds, 6),
             "by_kind": dict(adm.by_kind)
         }
 

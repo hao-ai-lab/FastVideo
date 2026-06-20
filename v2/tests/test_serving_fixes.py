@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 
-from v2.card import CostModel
 from v2.deploy import build_deployment_card
 from v2.recipes import build_default_engine, build_wan21_card, build_wan_t2v_program
 from v2.request import Cancelled, DiffusionParams, OutputSpec, TaskType, make_request
@@ -75,15 +74,6 @@ def test_duplicate_request_id_rejected_not_deadlocked():
         async for _ in g1:
             pass
     asyncio.run(run())
-
-
-def test_deployment_cards_do_not_alias_cost_model():
-    card = build_wan21_card()
-    a = build_deployment_card("A", [card])
-    b = build_deployment_card("B", [card])
-    assert a.cost_model is not b.cost_model                            # independent calibration state
-    a.cost_model.per_unit_seconds = 999.0
-    assert b.cost_model.per_unit_seconds != 999.0
 
 
 def test_offline_runner_honors_cancellation():

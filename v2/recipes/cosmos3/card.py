@@ -14,7 +14,6 @@ from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
-    CostModel,
     LoopSpec,
     ModelCard,
     ParallelismContract,
@@ -31,13 +30,11 @@ from v2.recipes.wan21.loop import WanDenoiseLoop
 
 def build_cosmos3_card(model_id: str = "cosmos3-vfm") -> ModelCard:
     seed = _seed_from(model_id)
-    ar_cost = CostModel(kind=WorkUnitKind.AR_TOKEN, base_seconds=5e-5, per_unit_seconds=1e-7)
-    dn_cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg, flow = ClassicCFG(), FlowShiftPolicy(shift=5.0)
     precision, expert = PrecisionPolicy(), NoRouting("transformer")
 
     def ar_factory():
-        return ARDecodeLoop(loop_id="ar_decode", transformer_id="transformer", cost=ar_cost, max_tokens=6)
+        return ARDecodeLoop(loop_id="ar_decode", transformer_id="transformer", max_tokens=6)
 
     def dn_factory():
         return WanDenoiseLoop(loop_id="diffusion_denoise",
@@ -45,7 +42,7 @@ def build_cosmos3_card(model_id: str = "cosmos3-vfm") -> ModelCard:
                               flow_shift=flow,
                               precision=precision,
                               expert=expert,
-                              cost=dn_cost)
+                              )
 
     components = {
         "tokenizer":
@@ -75,7 +72,6 @@ def build_cosmos3_card(model_id: str = "cosmos3-vfm") -> ModelCard:
         LoopSpec("ar_decode",
                  kind=LoopKind.AR_DECODE,
                  work_unit_kind=WorkUnitKind.AR_TOKEN,
-                 step_cost_model=ar_cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["paged_kv"],
                  loop_factory=ar_factory),
@@ -83,7 +79,6 @@ def build_cosmos3_card(model_id: str = "cosmos3-vfm") -> ModelCard:
         LoopSpec("diffusion_denoise",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=dn_cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["feature"],
                  loop_factory=dn_factory),

@@ -23,7 +23,6 @@ from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
-    CostModel,
     LoopSpec,
     ModelCard,
     ParallelismContract,
@@ -38,27 +37,22 @@ from v2.recipes.omni import ARDecodeLoop, VocoderLoop
 
 def build_qwen_omni_card(model_id: str = "qwen-omni-tts") -> ModelCard:
     seed = _seed_from(model_id)
-    ar_cost = CostModel(kind=WorkUnitKind.AR_TOKEN, base_seconds=5e-5, per_unit_seconds=1e-7)
-    wav_cost = CostModel(kind=WorkUnitKind.AUDIO_CHUNK, base_seconds=3e-5, per_unit_seconds=2e-7)
 
     def thinker_factory():
         return ARDecodeLoop(loop_id="thinker_decode",
                             transformer_id="thinker",
-                            cost=ar_cost,
                             max_tokens=4,
                             prompt_slot="prompt_tokens")
 
     def talker_factory():
         return ARDecodeLoop(loop_id="talker_decode",
                             transformer_id="talker",
-                            cost=ar_cost,
                             max_tokens=4,
                             prompt_slot="talker_prompt_tokens")
 
     def vocoder_factory():
         return VocoderLoop(loop_id="vocoder",
                            vocoder_id="vocoder",
-                           cost=wav_cost,
                            chunk_tokens=2,
                            speech_slot="speech_tokens")
 
@@ -98,7 +92,6 @@ def build_qwen_omni_card(model_id: str = "qwen-omni-tts") -> ModelCard:
         LoopSpec("thinker_decode",
                  kind=LoopKind.AR_DECODE,
                  work_unit_kind=WorkUnitKind.AR_TOKEN,
-                 step_cost_model=ar_cost,
                  shared_weight_components=["thinker"],
                  cache_policy=["paged_kv"],
                  loop_factory=thinker_factory),
@@ -106,7 +99,6 @@ def build_qwen_omni_card(model_id: str = "qwen-omni-tts") -> ModelCard:
         LoopSpec("talker_decode",
                  kind=LoopKind.AR_DECODE,
                  work_unit_kind=WorkUnitKind.AR_TOKEN,
-                 step_cost_model=ar_cost,
                  shared_weight_components=["talker"],
                  cache_policy=["paged_kv"],
                  loop_factory=talker_factory),
@@ -114,7 +106,6 @@ def build_qwen_omni_card(model_id: str = "qwen-omni-tts") -> ModelCard:
         LoopSpec("vocoder",
                  kind=LoopKind.AUDIO_DECODE,
                  work_unit_kind=WorkUnitKind.AUDIO_CHUNK,
-                 step_cost_model=wav_cost,
                  shared_weight_components=["vocoder"],
                  cache_policy=[],
                  loop_factory=vocoder_factory),

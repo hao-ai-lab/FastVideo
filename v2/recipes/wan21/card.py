@@ -14,7 +14,6 @@ from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
-    CostModel,
     LoopSpec,
     ModelCard,
     ParallelismContract,
@@ -47,7 +46,6 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b",
                      temporal_ratio: int = 4,
                      sampling_defaults: SamplingDefaults | None = None) -> ModelCard:
     seed = _seed_from(model_id)
-    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg = cfg_policy or ClassicCFG()
     flow = FlowShiftPolicy(shift=flow_shift, bucket_lookup={480 * 832: 3.0, 720 * 1280: 5.0})
     precision = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True)
@@ -59,7 +57,6 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b",
                               flow_shift=flow,
                               precision=precision,
                               expert=expert,
-                              cost=cost,
                               latent_channels=latent_channels,
                               spatial_ratio=spatial_ratio,
                               temporal_ratio=temporal_ratio)
@@ -90,7 +87,6 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b",
         LoopSpec(loop_id="diffusion_denoise",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["feature"],
                  graph_capture="breakable_cudagraph",
@@ -180,7 +176,6 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b",
     matching diffusers' ``t >= boundary_ratio*num_train_timesteps`` on the shifted timesteps. NOTE: 2x14B
     bf16 (~56GB) + UMT5 resident is near an 80GB GPU's limit — use modest res/frames."""
     seed = _seed_from(model_id)
-    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg = ClassicCFG()
     flow = FlowShiftPolicy(shift=5.0, bucket_lookup={480 * 832: 3.0, 720 * 1280: 5.0})
     precision = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True)
@@ -192,7 +187,7 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b",
                               flow_shift=flow,
                               precision=precision,
                               expert=expert,
-                              cost=cost)  # 16/8/4 default geometry
+                              )  # 16/8/4 default geometry
 
     def _dit_spec(cid: str) -> ComponentSpec:
         return ComponentSpec(component_id=cid,
@@ -225,7 +220,6 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b",
         LoopSpec(loop_id="diffusion_denoise",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=cost,
                  shared_weight_components=["transformer", "transformer_2"],
                  cache_policy=["feature"],
                  graph_capture="breakable_cudagraph",

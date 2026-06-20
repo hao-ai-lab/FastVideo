@@ -25,7 +25,6 @@ from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
-    CostModel,
     LoopSpec,
     ModelCard,
     ParallelismContract,
@@ -54,13 +53,12 @@ _FLUX2_QWEN3 = "v2.recipes.flux2.adapter:Flux2Qwen3Encoder"
 def _build_flux2_card(model_id: str, *, text_encoder_load_id: str, text_encoder_adapter: str,
                       checkpoint_root: str | None, sampling_defaults: SamplingDefaults) -> ModelCard:
     seed = _seed_from(model_id)
-    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg = EmbeddedGuidance()  # single conditioned forward; no uncond branch
     precision = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True)
     expert = NoRouting("transformer")
 
     def loop_factory():
-        return Flux2DenoiseLoop(loop_id="diffusion_denoise", cfg=cfg, precision=precision, expert=expert, cost=cost)
+        return Flux2DenoiseLoop(loop_id="diffusion_denoise", cfg=cfg, precision=precision, expert=expert)
 
     components = {
         "text_encoder":
@@ -91,7 +89,6 @@ def _build_flux2_card(model_id: str, *, text_encoder_load_id: str, text_encoder_
         LoopSpec(loop_id="diffusion_denoise",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["feature"],
                  graph_capture="breakable_cudagraph",

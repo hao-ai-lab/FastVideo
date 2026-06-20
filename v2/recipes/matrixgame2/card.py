@@ -28,7 +28,6 @@ from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
-    CostModel,
     LoopSpec,
     ModelCard,
     ParallelismContract,
@@ -64,7 +63,6 @@ def build_matrixgame2_card(model_id: str = "matrix-game-2.0-base-distilled",
                            checkpoint_root: str | None = None,
                            sampling_defaults: SamplingDefaults | None = None) -> ModelCard:
     seed = _seed_from(model_id)
-    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg = ClassicCFG()  # carried for the op-structure key; guidance_scale=1.0 makes it a no-op (CFG OFF)
     flow = FlowShiftPolicy(shift=flow_shift)  # seeds the FlowUniPC sigma table the eps->x0 conversion needs
     precision = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True)
@@ -76,7 +74,6 @@ def build_matrixgame2_card(model_id: str = "matrix-game-2.0-base-distilled",
                                         flow_shift=flow,
                                         precision=precision,
                                         expert=expert,
-                                        cost=cost,
                                         dmd_steps=MATRIXGAME2_DMD_STEPS,
                                         context_noise=MATRIXGAME2_CONTEXT_NOISE,
                                         num_frames_per_block=MATRIXGAME2_NUM_FRAMES_PER_BLOCK,
@@ -111,7 +108,6 @@ def build_matrixgame2_card(model_id: str = "matrix-game-2.0-base-distilled",
             loop_id="causal_dmd_denoise",
             kind=LoopKind.DIFFUSION_DENOISE,
             work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-            step_cost_model=cost,
             shared_weight_components=["transformer"],
             cache_policy=["feature"],
             graph_capture="eager",  # causal KV-cache mutation + host-RNG re-noise -> not capturable

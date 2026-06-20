@@ -49,10 +49,8 @@ class DynamoWorkerAdapter:
         return {"in_flight": self.engine.in_flight, "queue_depth": self.engine.queue_depth, "draining": self.draining}
 
     def cost_estimate(self, request: Any) -> float:
-        cm = self.card.cost_model
-        steps = max(1, int(getattr(request.diffusion, "num_steps", 1) or 1))
-        work = max(1, int(getattr(request.diffusion, "height", 1)) * int(getattr(request.diffusion, "width", 1)))
-        return steps * (cm.predict(work) if cm is not None else 1e-3)
+        # coarse routing weight (step count) — no time/cost model under pooled serving
+        return float(max(1, int(getattr(request.diffusion, "num_steps", 1) or 1)))
 
     # health / graceful drain wired to the engine
     def health(self) -> dict[str, Any]:

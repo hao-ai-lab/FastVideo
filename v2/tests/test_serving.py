@@ -10,8 +10,6 @@ import asyncio
 
 import numpy as np
 
-from v2._enums import WorkUnitKind
-from v2.card import CostModel
 from v2.deploy import (
     DynamoWorkerAdapter,
     FakeDynamoRuntime,
@@ -161,14 +159,6 @@ def test_fleet_drain_reroutes_and_affinity_sticks():
     w1 = af.route(_req(), affinity_key="sess-1")
     w2 = af.route(_req(2), affinity_key="sess-1")
     assert w1.worker_id == w2.worker_id                   # sticky by key
-
-
-def test_fleet_cost_routing_picks_cheaper_worker():
-    A, B, cardA, cardB = _two_workers()
-    cardB.cost_model = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-9, per_unit_seconds=1e-12)
-    fleet = LocalFleet("cost")
-    fleet.register("A", A, cardA); fleet.register("B", B, cardB)
-    assert fleet.route(_req()).worker_id == "B"
 
 
 def test_fleet_generate_delegates_to_worker():

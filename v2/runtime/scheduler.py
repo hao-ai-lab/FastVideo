@@ -33,9 +33,8 @@ class WorkUnit:
 
 @dataclass
 class StepTicket:
-    """Returned by ``admit_step``; carries what ``release`` must refund (memory + compute)."""
+    """Returned by ``admit_step``; carries the memory reservation ``release`` must refund."""
     memory_res: Reservation | None
-    compute_seconds: float
 
 
 @dataclass
@@ -44,17 +43,15 @@ class SchedulerMetrics:
     deferred: int = 0
     batches: int = 0
     stepped_units: int = 0
-    gpu_seconds: float = 0.0
     by_kind: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
 
 class AdmissionController:
-    """Reservation before admission. Compute budget + memory both gate; both refund."""
+    """Reservation before admission — a refundable memory (OOM) guard. No compute/time budget
+    (pooled run-to-completion prices nothing; concurrency is bounded by the RolePool)."""
 
-    def __init__(self, memory: MemoryManager | None = None, compute_budget_seconds: float = float("inf")):
+    def __init__(self, memory: MemoryManager | None = None):
         self.memory = memory or MemoryManager()
-        self.compute_budget = compute_budget_seconds
-        self.compute_spent = 0.0
         self.metrics = SchedulerMetrics()
 
     def feasible_resident(self, nbytes: int) -> bool:
@@ -62,8 +59,7 @@ class AdmissionController:
 
     def feasible_step(self, plan: WorkPlan) -> bool:
         """Could this step EVER be admitted on an empty pool? If not, the caller fails fast."""
-        return (plan.resources.peak_activation_bytes <= self.memory.total_bytes
-                and plan.resources.compute_seconds <= self.compute_budget)
+        return plan.resources.peak_activation_bytes <= self.memory.total_bytes
 
     def reserve_resident(self, tag: str, nbytes: int) -> Reservation | None:
         if nbytes <= 0:
@@ -73,11 +69,7 @@ class AdmissionController:
         return self.memory.reserve(tag, nbytes)
 
     def admit_step(self, plan: WorkPlan) -> StepTicket | None:
-        """Reserve a step's peak activation + check the compute budget. None ⇒ deferred."""
-        c = plan.resources.compute_seconds
-        if self.compute_spent + c > self.compute_budget:
-            self.metrics.deferred += 1
-            return None
+        """Reserve a step's peak activation memory. None ⇒ deferred (no free memory yet)."""
         peak = plan.resources.peak_activation_bytes
         res: Reservation | None = None
         if peak > 0:
@@ -85,18 +77,15 @@ class AdmissionController:
                 self.metrics.deferred += 1
                 return None
             res = self.memory.reserve(plan.loop_id, peak)
-        self.compute_spent += c
         self.metrics.admitted += 1
-        self.metrics.gpu_seconds += c
         self.metrics.by_kind[plan.kind.value] += 1
-        return StepTicket(res, c)
+        return StepTicket(res)
 
     def release(self, ticket: StepTicket | None) -> None:
         if ticket is None:
             return
         if ticket.memory_res is not None:
             self.memory.release(ticket.memory_res)
-        self.compute_spent = max(0.0, self.compute_spent - ticket.compute_seconds)  # refund
 
 
 class BatchScheduler:

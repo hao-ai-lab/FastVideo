@@ -12,7 +12,6 @@ from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
-    CostModel,
     LoopSpec,
     ModelCard,
     ParallelismContract,
@@ -40,7 +39,6 @@ def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b",
     # steps); the native causal block is chunk_size=3 latent frames (7 chunks x 3 = 21 latent -> 81 video
     # frames). Earlier defaults (CFG 6.0, 2 steps, block 2) overcooked + under-denoised the output.
     seed = _seed_from(model_id)
-    cost = CostModel(kind=WorkUnitKind.CHUNK_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg = ClassicCFG()
     flow = FlowShiftPolicy(shift=5.0)
     precision = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True)
@@ -53,7 +51,7 @@ def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b",
                                 cfg=cfg,
                                 flow_shift=flow,
                                 precision=precision,
-                                cost=cost)
+                                )
 
     components = {
         "text_encoder":
@@ -81,7 +79,6 @@ def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b",
         LoopSpec(loop_id="chunk_rollout",
                  kind=LoopKind.CHUNK_ROLLOUT,
                  work_unit_kind=WorkUnitKind.CHUNK_STEP,
-                 step_cost_model=cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["feature", "slab_kv"],
                  loop_factory=loop_factory),

@@ -54,8 +54,8 @@ class ShapeSignature:
 
 @dataclass
 class ResourceRequest:
-    """Everything admission must reserve."""
-    compute_seconds: float = 0.0
+    """Memory the pool's OOM guard reserves for a step (no compute/time accounting — pooled
+    run-to-completion serving prices nothing)."""
     resident_bytes: int = 0
     peak_activation_bytes: int = 0
     cache_blocks: dict[str, int] = field(default_factory=dict)
@@ -139,7 +139,6 @@ class Done:
 @dataclass
 class StepResult:
     output: dict[str, Any] = field(default_factory=dict)  # typed per-loop (e.g. {"noise_pred": ...})
-    actual_seconds: float = 0.0
     cache_writes: list[CacheOp] = field(default_factory=list)
     behavior: Any = None  # BehaviorRecord slice (rollout profile)
 

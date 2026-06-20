@@ -4,13 +4,10 @@ and per CFG branch.
 """
 from __future__ import annotations
 
-from v2._enums import WorkUnitKind
-from v2.card import CostModel
 from v2.extend import (
     InterceptorChain,
     InterceptorConflict,
     NaNWatch,
-    Profiler,
     ResidualSkipInterceptor,
 )
 from v2.recipes import build_default_engine
@@ -73,14 +70,9 @@ def test_exact_mode_rejects_distribution_altering():
         pass
 
 
-def test_profiler_calibrates_cost_model_and_nanwatch_clean():
+def test_nanwatch_clean_on_good_run():
     eng = build_default_engine()
-    prof, nan = Profiler(), NaNWatch()
-    eng.observers.add(prof)
+    nan = NaNWatch()
     eng.observers.add(nan)
     eng.run(_req("x", 1))
-    assert len(prof.samples) > 0
-    cm = CostModel(kind=WorkUnitKind.DIFFUSION_STEP)
-    prof.calibrate(cm)
-    assert cm.base_seconds >= 0.0
     assert not nan.tripped              # clean run, no NaNs

@@ -23,10 +23,9 @@ from v2.request.streams import StreamChunk
 
 class ARDecodeLoop:
 
-    def __init__(self, *, loop_id, transformer_id="transformer", cost, max_tokens=8, prompt_slot="prompt_tokens"):
+    def __init__(self, *, loop_id, transformer_id="transformer", max_tokens=8, prompt_slot="prompt_tokens"):
         self.loop_id = loop_id
         self.transformer_id = transformer_id
-        self.cost = cost
         self.max_tokens = max_tokens
         self.prompt_slot = prompt_slot  # which slot holds the prefill (chained AR loops differ)
 
@@ -62,7 +61,7 @@ class ARDecodeLoop:
                         instance_id=st.instance_id,
                         kind=WorkUnitKind.AR_TOKEN,
                         shape_sig=ShapeSignature(WorkUnitKind.AR_TOKEN, dims=(len(tokens), )),
-                        resources=ResourceRequest(compute_seconds=self.cost.predict(len(tokens)),
+                        resources=ResourceRequest(
                                                   resident_bytes=8 * len(tokens),
                                                   peak_activation_bytes=8),
                         payload={

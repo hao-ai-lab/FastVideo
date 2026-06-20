@@ -21,26 +21,6 @@ if TYPE_CHECKING:  # avoid runtime card -> parallel coupling
     pass
 
 
-# --------------------------------------------------------------------------- #
-# Cost model — the budget currency, REQUIRED on every LoopSpec                  #
-# --------------------------------------------------------------------------- #
-@dataclass
-class CostModel:
-    """Predicted GPU-time per WorkUnit at (shape, precision, policy).
-
-    The budget currency is predicted GPU-time, not counts. One object, two consumers:
-    the scheduler's internal budget and the fleet's routing input. Calibrated online by
-    the Profiler observer.
-    """
-    kind: WorkUnitKind
-    # synthetic seconds = base + per_unit * work_units(shape) * policy_factor
-    base_seconds: float = 1.0e-3
-    per_unit_seconds: float = 1.0e-6
-    coefficients: dict[str, float] = field(default_factory=dict)
-
-    def predict(self, work_units: float, policy_factor: float = 1.0) -> float:
-        """Conservative baseline cost: admission is never optimistic."""
-        return (self.base_seconds + self.per_unit_seconds * float(work_units)) * policy_factor
 
 
 # --------------------------------------------------------------------------- #
@@ -166,7 +146,6 @@ class LoopSpec:
     loop_id: str
     kind: LoopKind
     work_unit_kind: WorkUnitKind
-    step_cost_model: CostModel  # REQUIRED
     state_schema: type | None = None  # the typed LoopState
     step_schema: type | None = None  # the typed WorkPlan a step emits
     result_schema: type | None = None  # the typed StepResult
@@ -275,8 +254,6 @@ class ModelCard:
             for cc in loop.cache_policy:
                 if cc not in self.caches:
                     errs.append(f"loop {lid!r} references cache class {cc!r} not in card.caches")
-            if loop.step_cost_model is None:
-                errs.append(f"loop {lid!r} is missing the REQUIRED step_cost_model")
 
         # 4) required_for / optional_for tasks must be disjoint per component
         for cid, comp_spec in self.components.items():

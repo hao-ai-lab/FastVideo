@@ -62,7 +62,6 @@ class WanDenoiseLoop:
                  flow_shift,
                  precision,
                  expert,
-                 cost,
                  latent_channels=WAN_LATENT_CHANNELS,
                  spatial_ratio=WAN_SPATIAL_RATIO,
                  temporal_ratio=WAN_TEMPORAL_RATIO):
@@ -71,7 +70,6 @@ class WanDenoiseLoop:
         self.flow_shift = flow_shift
         self.precision = precision
         self.expert = expert
-        self.cost = cost
         self.latent_channels = latent_channels
         self.spatial_ratio = spatial_ratio
         self.temporal_ratio = temporal_ratio
@@ -189,7 +187,6 @@ class WanDenoiseLoop:
 
         cond_bytes = sum(int(e.nbytes) for e in (pe, ne) if e is not None)  # .nbytes works on numpy + torch
         res = ResourceRequest(
-            compute_seconds=self.cost.predict(int(np.prod(x.shape)), float(len(branches))),
             resident_bytes=int(x.nbytes) + cond_bytes,  # latents + conditioning held for the loop
             peak_activation_bytes=int(x.nbytes))  # one step's transient working buffer
         emits = []

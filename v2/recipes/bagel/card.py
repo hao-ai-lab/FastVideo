@@ -15,7 +15,6 @@ from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
-    CostModel,
     LoopSpec,
     ModelCard,
     ParallelismContract,
@@ -32,13 +31,11 @@ from v2.recipes.wan21.loop import WanDenoiseLoop
 
 def build_bagel_card(model_id: str = "bagel-mot") -> ModelCard:
     seed = _seed_from(model_id)
-    ar_cost = CostModel(kind=WorkUnitKind.AR_TOKEN, base_seconds=5e-5, per_unit_seconds=1e-7)
-    dn_cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg, flow = ClassicCFG(), FlowShiftPolicy(shift=3.0)
     precision, expert = PrecisionPolicy(), NoRouting("transformer")
 
     def text_factory():
-        return ARDecodeLoop(loop_id="generate_text", transformer_id="transformer", cost=ar_cost, max_tokens=6)
+        return ARDecodeLoop(loop_id="generate_text", transformer_id="transformer", max_tokens=6)
 
     def image_factory():
         return WanDenoiseLoop(loop_id="generate_image",
@@ -46,7 +43,7 @@ def build_bagel_card(model_id: str = "bagel-mot") -> ModelCard:
                               flow_shift=flow,
                               precision=precision,
                               expert=expert,
-                              cost=dn_cost)
+                              )
 
     components = {
         "tokenizer":
@@ -70,7 +67,6 @@ def build_bagel_card(model_id: str = "bagel-mot") -> ModelCard:
         LoopSpec("generate_text",
                  kind=LoopKind.AR_DECODE,
                  work_unit_kind=WorkUnitKind.AR_TOKEN,
-                 step_cost_model=ar_cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["paged_kv"],
                  loop_factory=text_factory),
@@ -78,7 +74,6 @@ def build_bagel_card(model_id: str = "bagel-mot") -> ModelCard:
         LoopSpec("generate_image",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=dn_cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["feature"],
                  loop_factory=image_factory),

@@ -7,7 +7,6 @@ is bound here so interceptors read state from ``LoopState`` (never module global
 """
 from __future__ import annotations
 
-from time import perf_counter
 from typing import Any
 
 from v2._enums import ExecutionProfile
@@ -48,22 +47,14 @@ class RuntimeLoopContext:
         def _eager(ov):
             return plan.run(self.instance, ov) if plan.run is not None else {}
 
-        t0 = perf_counter()
         out = self._run_step(plan, override, _eager)
-        dt = perf_counter() - t0
-        if isinstance(out, StepResult):
-            result = out
-            if result.actual_seconds == 0.0:
-                result.actual_seconds = dt
-        else:
-            result = StepResult(output=dict(out), actual_seconds=dt)
+        result = out if isinstance(out, StepResult) else StepResult(output=dict(out))
 
         if self.interceptors.active and self.state is not None:
             self.interceptors.after(plan, self.state, result)
 
         self.observers.emit("step_complete", plan=plan, result=result)
         self.metrics["steps"] = self.metrics.get("steps", 0) + 1
-        self.metrics["gpu_seconds"] = self.metrics.get("gpu_seconds", 0.0) + result.actual_seconds
         return result
 
     def _run_step(self, plan: WorkPlan, override, eager):

@@ -6,7 +6,6 @@ import numpy as np
 from v2._enums import ConsistencyLevel, LoopKind, WorkUnitKind
 from v2.card import (
     CardValidationError,
-    CostModel,
     LoopSpec,
     ModelCard,
     RecipeSpec,
@@ -33,13 +32,12 @@ def test_recipe_assumes_missing_loop_is_rejected():
         assert "assumes_loop" in str(e)
 
 
-def test_loop_requires_cost_model_and_declared_cache():
+def test_loop_rejects_undeclared_cache():
     # a loop referencing an undeclared cache class fails validation
     card = ModelCard(
         model_id="x", family="x",
         loops={"d": LoopSpec(loop_id="d", kind=LoopKind.DIFFUSION_DENOISE,
                              work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                             step_cost_model=CostModel(kind=WorkUnitKind.DIFFUSION_STEP),
                              cache_policy=["nonexistent"])})
     try:
         card.validate()

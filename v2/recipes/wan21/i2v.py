@@ -19,7 +19,6 @@ from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
-    CostModel,
     LoopSpec,
     ModelCard,
     ParallelismContract,
@@ -50,7 +49,6 @@ def build_wan21_i2v_card(model_id: str = "wan2.1-i2v-1.3b",
     """Wan2.1 i2v (e.g. Wan2.1-Fun-1.3B-InP, WanI2V480PConfig). Same WanTransformer3DModel (in_ch=36) /
     AutoencoderKLWan / UMT5 as T2V + a CLIP image encoder; reuses the WanDenoiseLoop (i2v hooks)."""
     seed = _seed_from(model_id)
-    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg, flow = ClassicCFG(), FlowShiftPolicy(shift=flow_shift)
     precision, expert = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True), NoRouting("transformer")
 
@@ -60,7 +58,7 @@ def build_wan21_i2v_card(model_id: str = "wan2.1-i2v-1.3b",
                               flow_shift=flow,
                               precision=precision,
                               expert=expert,
-                              cost=cost)
+                              )
 
     components = {
         "text_encoder":
@@ -95,7 +93,6 @@ def build_wan21_i2v_card(model_id: str = "wan2.1-i2v-1.3b",
         LoopSpec("i2v_denoise",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["feature"],
                  loop_factory=loop_factory),
@@ -136,7 +133,6 @@ def build_wan22_i2v_a14b_card(model_id: str = "wan2.2-i2v-a14b",
     (CLIP + first-frame [mask|cond]). Reuses the Wan adapter (cond concat + MoE CPU offload), the shared
     WanDenoiseLoop (i2v hooks + the boundary expert), and the i2v program. Structural (GPU-pending: 2x14B)."""
     seed = _seed_from(model_id)
-    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1e-4, per_unit_seconds=1e-7)
     cfg, flow = ClassicCFG(), FlowShiftPolicy(shift=5.0)
     precision = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True)
     expert = BoundaryTimestepRouting(high_noise="transformer", low_noise="transformer_2", boundary=boundary)
@@ -147,7 +143,7 @@ def build_wan22_i2v_a14b_card(model_id: str = "wan2.2-i2v-a14b",
                               flow_shift=flow,
                               precision=precision,
                               expert=expert,
-                              cost=cost)
+                              )
 
     def _dit(cid: str) -> ComponentSpec:
         return ComponentSpec(cid,
@@ -186,7 +182,6 @@ def build_wan22_i2v_a14b_card(model_id: str = "wan2.2-i2v-a14b",
         LoopSpec("i2v_denoise",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=cost,
                  shared_weight_components=["transformer", "transformer_2"],
                  cache_policy=["feature"],
                  loop_factory=loop_factory),
