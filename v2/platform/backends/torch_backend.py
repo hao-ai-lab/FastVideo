@@ -93,7 +93,7 @@ def load_component(loader_attr: str, path: str, args):
     component loaders. ``WanTransformer3DModel`` / ``AutoencoderKLWan`` have NO ``from_pretrained``; the
     loader reads the checkpoint config, resolves the class (UMT5 vs T5 from config), and loads weights.
     Currently delegates to fastvideo's loader; a vendored cutover swaps the body, not the callers."""
-    from v2.loader import component_loader as _cl
+    from v2.models.loader import component_loader as _cl
     return getattr(_cl, loader_attr)().load(path, args)
 
 

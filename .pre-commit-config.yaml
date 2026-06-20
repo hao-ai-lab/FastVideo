@@ -10,6 +10,8 @@ exclude: |
     scripts/.*|
     fastvideo/dataset/.*|
     fastvideo/models/.*|
+    v2/(layers|attention|platforms|configs|distributed|models|logging_utils|third_party|hooks|api)/.*|
+    v2/(envs|logger|utils|version|forward_context|fastvideo_args)\.py|
     ^apps/dreamverse/web/.*|
     examples/.*|
     \.agents/.*|
