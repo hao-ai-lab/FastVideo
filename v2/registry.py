@@ -41,67 +41,13 @@ class ModelEntry:
 # transformer/config.json _class_name). Builders are resolved lazily so ``import v2.registry`` stays cheap
 # and torch-free (the recipe packages are CPU-clean, but importing them all eagerly on every resolve is waste).
 _BUCKET_C: tuple[tuple, ...] = (
-    (("KyleShao/Cosmos-Predict2.5-2B-Diffusers", "nvidia/Cosmos-Predict2.5-14B"), "cosmos25", "build_cosmos25_card",
-     "build_cosmos25_program", "Cosmos25Transformer3DModel"),
-    (("hunyuanvideo-community/HunyuanVideo", ), "hunyuan_video", "build_hunyuan_video_card",
-     "build_hunyuan_video_program", "HunyuanVideoTransformer3DModel"),
-    (("FastVideo/FastHunyuan-diffusers", ), "hunyuan_video", "build_fast_hunyuan_video_card",
-     "build_hunyuan_video_program", ""),
-    (("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
-      "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled"), "hunyuan_video15",
-     "build_hunyuan_video15_card", "build_hunyuan_video15_program", "HunyuanVideo15Transformer3DModel"),
-    (("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v",
-      "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_i2v_distilled",
-      "weizhou03/HunyuanVideo-1.5-Diffusers-1080p", "weizhou03/HunyuanVideo-1.5-Diffusers-1080p-2SR"),
-     "hunyuan_video15", "build_hunyuan_video15_720p_card", "build_hunyuan_video15_program", ""),
-    (("FastVideo/LongCat-Video-T2V-Diffusers", "FastVideo/LongCat-Video-I2V-Diffusers",
-      "FastVideo/LongCat-Video-VC-Diffusers"), "longcat", "build_longcat_card", "build_longcat_program",
-     "LongCatTransformer3DModel"),
-    (("stabilityai/stable-diffusion-3.5-medium", ), "sd35", "build_sd35_card", "build_sd35_program",
-     "SD3Transformer2DModel"),
-    (("FastVideo/GEN3C-Cosmos-7B-Diffusers", ), "gen3c", "build_gen3c_card", "build_gen3c_program",
-     "Gen3CTransformer3DModel"),
-    (("kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers", ), "kandinsky5", "build_kandinsky5_card",
-     "build_kandinsky5_program", "Kandinsky5Transformer3DModel"),
     (("black-forest-labs/FLUX.2-dev", ), "flux2", "build_flux2_card", "build_flux2_program", "Flux2Transformer2DModel"),
     (("black-forest-labs/FLUX.2-klein-4B", "black-forest-labs/FLUX.2-klein-9B"), "flux2", "build_flux2_klein_card",
      "build_flux2_program", ""),
-    (("FastVideo/stable-audio-open-1.0-Diffusers", ), "stable_audio", "build_stable_audio_card",
-     "build_stable_audio_program", "StableAudioDiT"),
-    (("FastVideo/stable-audio-open-small-Diffusers", ), "stable_audio", "build_stable_audio_small_card",
-     "build_stable_audio_program", ""),
-    (("FastVideo/HunyuanGameCraft-Diffusers", ), "hunyuangamecraft", "build_hunyuangamecraft_card",
-     "build_hunyuangamecraft_program", "HunyuanGameCraftTransformer3DModel"),
-    (("FastVideo/HY-WorldPlay-Bidirectional-Diffusers", ), "hyworld", "build_hyworld_card", "build_hyworld_program",
-     "HYWorldTransformer3DModel"),
-    (("FastVideo/LingBot-World-Base-Cam-Diffusers", ), "lingbotworld", "build_lingbotworld_card",
-     "build_lingbotworld_program", "LingBotWorldTransformer3DModel"),
     (("FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers", "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
       "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers", "FastVideo/Matrix-Game-2.0-Base-Diffusers",
       "FastVideo/Matrix-Game-2.0-GTA-Diffusers", "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers"), "matrixgame2",
      "build_matrixgame2_card", "build_matrixgame2_program", "CausalMatrixGame2WanModel"),
-    (("FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers", ), "matrixgame3", "build_matrixgame3_card",
-     "build_matrixgame3_program", "MatrixGame3WanModel"),
-    # Residual Wan-family variants — reuse the Wan/Causal ARCH (NO new torch adapter; a new in-package
-    # sampler/loop/conditioning). transformer_cls="" -> explicit-HF-id-ONLY: the generic Wan/Causal arch
-    # fallback already serves unregistered Wan checkpoints, and only the exact id distinguishes these
-    # capability variants (rCM/DMD few-step, v2v, control, causal-MoE) from a base Wan of the same class.
-    (("loayrashid/TurboWan2.1-T2V-1.3B-Diffusers", ), "turbowan", "build_turbowan_card", "build_turbowan_program", ""
-     ),  # rCM 4-step
-    (("loayrashid/TurboWan2.2-I2V-A14B-Diffusers", ), "turbowan", "build_turbowan_i2v_a14b_card",
-     "build_turbowan_i2v_program", ""),  # rCM MoE i2v
-    (("decart-ai/Lucy-Edit-Dev", "decart-ai/Lucy-Edit-1.1-Dev"), "lucy_edit", "build_lucy_edit_card",
-     "build_lucy_edit_program", ""),  # v2v editor
-    (("IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers", ), "wan_fun_control", "build_wan_fun_control_card",
-     "build_wan_fun_control_program", ""),  # control input
-    (("FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers", ), "sfwan22", "build_sfwan22_i2v_a14b_card",
-     "build_sfwan22_i2v_program", ""),  # causal MoE i2v
-    (("rand0nmr/SFWan2.2-T2V-A14B-Diffusers", ), "sfwan22", "build_sfwan22_t2v_a14b_card", "build_sfwan22_t2v_program",
-     ""),  # causal MoE t2v
-    (("FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers", "FastVideo/FastWan2.2-TI2V-5B-Diffusers"), "fastwan",
-     "build_fastwan_card", "build_fastwan_program", ""),  # DMD 3-step (FullAttn loadable; VSA BRINGUP)
-    (("FastVideo/FastWan2.1-T2V-1.3B-Diffusers", "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers"), "fastwan",
-     "build_fastwan_t2v_1_3b_card", "build_fastwan_program", ""),  # DMD (VSA + non-strict load BRINGUP)
 )
 
 
@@ -140,7 +86,6 @@ def _entries() -> list[ModelEntry]:
         build_wan_t2v_program,
     )
     from v2.recipes.wan21.i2v import build_wan21_i2v_card, build_wan21_i2v_program, build_wan22_i2v_a14b_card
-    from v2.recipes.cosmos2 import build_cosmos2_card, build_cosmos2_program
     return [  # noqa: RUF005 — explicit list, extended with the bucket-C ports below via _bucket_c_entries()
         ModelEntry(("Wan-AI/Wan2.1-T2V-1.3B-Diffusers", ), build_wan21_card, build_wan_t2v_program),
         ModelEntry(("Wan-AI/Wan2.1-T2V-14B-Diffusers", ), build_wan_t2v_14b_card, build_wan_t2v_program),
@@ -172,14 +117,7 @@ def _entries() -> list[ModelEntry]:
                    build_ltx2_base_program),
         ModelEntry(("FastVideo/LTX2.3-Diffusers", "FastVideo/LTX2.3-Distilled-Diffusers", "FastVideo/LTX2.3-base",
                     "Lightricks/LTX-2.3", "lightricks/ltx-2.3"), build_ltx2_3_card, build_ltx2_3_program),
-        # Cosmos-Predict2-2B-Video2World — EDM-Karras denoiser (new CosmosDenoiseLoop + CosmosDiT adapter),
-        # reusing the Wan VAE adapter + T5. Registered for t2v (video2world conditioning threads later).
-        ModelEntry(("nvidia/Cosmos-Predict2-2B-Video2World", ), build_cosmos2_card, build_cosmos2_program),
-        # TurboWan2.1-T2V-14B: same rCM card as the 1.3B but the 720p resolution default (args override).
-        ModelEntry(("loayrashid/TurboWan2.1-T2V-14B-Diffusers", ),
-                   _lazy("turbowan", "build_turbowan_card", "turbowan2.1-t2v-14b", height=720, width=1280),
-                   _lazy("turbowan", "build_turbowan_program")),
-    ] + _bucket_c_entries()  # the bucket-C + Wan-variant self-contained recipe packages (rows in _BUCKET_C)
+    ] + _bucket_c_entries()  # the bucket-C self-contained recipe packages (flux2 + matrixgame2; rows in _BUCKET_C)
 
 
 def _short(p: str) -> str:
@@ -222,9 +160,6 @@ def select_by_architecture(sig: dict):
             import importlib
             mod = importlib.import_module(f"v2.recipes.{pkg}")
             return getattr(mod, cb), getattr(mod, pb)
-    if tr == "CosmosTransformer3DModel":
-        from v2.recipes.cosmos2 import build_cosmos2_card, build_cosmos2_program
-        return build_cosmos2_card, build_cosmos2_program
     if tr == "LTX2Transformer3DModel":
         from v2.recipes.ltx2 import (
             build_ltx2_base_card,
