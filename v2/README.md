@@ -471,16 +471,22 @@ v2/
   extend/      observers (Profiler/NaNWatch), interceptors (cache-dit), registry, base
   platform/    Platform.detect(); COMPONENTS(kind,device,variant) + KERNELS(op,device,arch,variant) registries;
                backends/{toy.py (numpy reference + parity oracle), torch_backend.py (real GPU)}
-  loader/      v2-owned component-loader seam (currently delegates to fastvideo; vendored cutover later)
-  models/      v2-namespaced model code (re-export stubs over fastvideo until vendored; see vendoring memory)
   recipes/     the concrete cards/programs/loops — the kept families: wan21 (+ i2v / 2.2 variants),
                wan_causal (self-forcing), ltx2 (distilled / base / 2.3 joint A/V), flux2, matrixgame2,
                and the omni cards cosmos3 / bagel / qwen_omni (+ omni, their shared AR/vocoder loops)
+  --- vendored from fastvideo (FULL cutover; v2 imports zero `fastvideo.*` — see "Vendoring" below) ---
+  models/      the real nn.Module architectures for the kept models (dits/ vaes/ encoders/ audio/
+               upsamplers/) + the component loader/ + the lazy class registry — vendored, not stubs
+  layers/      tensor-parallel linear/attention/norm/rotary/etc (copied verbatim)
+  attention/   attention backend registry + SDPA (sparse/MoBA backends use the optional fastvideo_kernel)
+  configs/     arch + pipeline config dataclasses + pipeline_registry (config-class resolution)
+  distributed/ parallel_state + communication_op (single-process 1×1 device mesh dist-init)
+  platforms/   device/CUDA platform detection (distinct from the v2 runtime `platform/`)
+  api/         slim inference-config dataclasses (schema + results) the VideoGenerator consumes
   training/    rollout, behavior, rewards (+ServedRewardScorer), weight_sync (+WeightSyncController),
                flywheel, methods/{finetune,dmd2,diffusion_nft,self_forcing,unified_rl,joint_multi_rl,workflow_rl}
   serving/     AsyncEngine glue, OpenAI server (http.py)
   deploy/      DeploymentCard (card.py), LocalFleet (fleet.py), DynamoWorkerAdapter (dynamo.py)
-  distributed/ single-process dist-init seam (1×1 device mesh)
   tests/       34 files, 216 tests — `pytest v2/tests/` OR `python3 v2/run_tests.py` (zero deps)
 ```
 
