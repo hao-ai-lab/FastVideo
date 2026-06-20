@@ -2934,6 +2934,22 @@ Validation so far:
   approval reviewer because it would upload uncommitted patch contents to
   Modal. Next validation should commit and push this slice first, then run the
   same Modal tests against the pushed branch without `--apply-local-patch`.
+- Commit completed:
+  - `eca14441` — `[feat] add InterleaveThinker prompt-set eval`
+  - Pushed to `origin/interleavethinker-fastvideo`.
+- First pushed-branch Modal validation:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-fCNtScbJVYrewckzqMvWcg`
+  - Commit tested: `eca1444101c2398cbeb9fce495487f4e91a6627d`.
+  - Result: `14 passed`, `1 failed`.
+  - Failure:
+    `test_interleave_eval_cli_defers_nested_config_loading` saw
+    `args.config == ""`.
+  - Cause: `FlexibleArgumentParser._DEFER_CONFIG_SUBCOMMANDS` did not include
+    `interleave-eval`, so the global parser consumed `--config` before argparse
+    handled the subcommand.
+  - Fix implemented locally: add `interleave-eval` to
+    `_DEFER_CONFIG_SUBCOMMANDS` in `fastvideo/utils.py`.
 
 Planned pushed-branch Modal validation:
 
