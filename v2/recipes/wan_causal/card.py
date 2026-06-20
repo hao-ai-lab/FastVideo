@@ -95,7 +95,7 @@ def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b",
                           assumes_loop="chunk_rollout",
                           assumes_precision="float32",
                           consistency_required=ConsistencyLevel.C1),
-        parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
+        parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1]),
         caches={
             "feature":
             CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True),

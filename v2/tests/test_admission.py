@@ -41,18 +41,3 @@ def _req(prompt, seed):
                         diffusion=DiffusionParams(num_steps=3, seed=seed))
 
 
-def test_jointly_oom_defers_but_output_is_identical():
-    reqs = [_req("a", 1), _req("b", 2)]
-    # compute resident (latent + 2 text embeds) and peak (one latent) for the budget
-    nb = int(np.prod(latent_shape(reqs[0]))) * 4
-    cond = 2 * (4 * 8 * 4)                  # two (4,8) float32 embeds
-    R, P = nb + cond, nb
-    budget = R + P + (R - P) // 2          # fits ONE request's step, not TWO residents
-
-    big = build_default_engine()                        # ample memory
-    small = build_default_engine(Engine(admission=AdmissionController(MemoryManager(total_bytes=budget))))
-
-    serial = big.run_serial(reqs)
-    interleaved_small = small.run_interleaved(reqs)
-    assert small.metrics.deferred > 0, "second request should be deferred at admission"
-    assert not compare_outputs(serial, interleaved_small), "deferral must not change outputs"

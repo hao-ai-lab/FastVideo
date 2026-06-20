@@ -1,13 +1,11 @@
 """The engine — drives Programs over resident ModelInstances.
 
-Two execution modes share one ProgramRunner:
-  * ``run_serial``      — each request's program runs to completion before the next.
-  * ``run_interleaved`` — round-robin one *unit* per request per tick (a unit = one loop step,
-    or one one-shot node), so the denoise steps of concurrent requests interleave. This is the
-    mode the interleave parity gate exercises: serial and interleaved must be bit-identical.
+Pooled run-to-completion: each request's program runs start-to-finish via one ProgramRunner
+(``run`` for a single request, ``run_serial`` for a batch). Concurrency is bounded by the pool at
+the serving layer (AsyncEngine), not by a step-interleaved scheduler.
 
-The engine owns admission (reservation before stepping), the observer bus, and the interceptor
-chain (deploy scope). It never imports ``training`` (dependency rule).
+The engine owns admission (a refundable memory/OOM reservation before stepping), the observer bus,
+and the interceptor chain (deploy scope). It never imports ``training`` (dependency rule).
 """
 from __future__ import annotations
 
@@ -35,9 +33,7 @@ from v2.runtime.context import RuntimeLoopContext
 from v2.runtime.scheduler import (
     AdmissionController,
     AdmissionInfeasible,
-    BatchScheduler,
     SchedulerMetrics,
-    WorkUnit,
 )
 
 
@@ -65,7 +61,7 @@ def _to_artifact(name: str, value: Any, producer: str = "") -> Any:
 
 
 class ProgramRunner:
-    """Drives one Program for one request. Advances one *unit* per ``tick`` for interleaving."""
+    """Drives one Program for one request to completion (``tick`` advances one unit at a time)."""
 
     def __init__(self, engine: Engine, program: Program, instance: Any, request: Any):
         self.engine = engine
@@ -158,7 +154,7 @@ class ProgramRunner:
                 self.engine.metrics.stepped_units += 1
                 if self.loop_runner.done:
                     self._finish_loop(node)
-                return False  # yielded one loop step → return for interleaving
+                return False  # advanced one loop step; run_to_completion loops until done
             # unknown node kind
             self.node_idx += 1
 
@@ -254,7 +250,7 @@ class Engine:
         r.run_to_completion()
         return r.output()
 
-    # --- serial vs interleaved (the interleave-parity gate drives both) ------- #
+    # --- offline batch: each request runs to completion ---------------------- #
     def run_serial(self, requests: list[Any]) -> dict[str, Output]:
         out: dict[str, Output] = {}
         for req in requests:
@@ -262,25 +258,3 @@ class Engine:
             r.run_to_completion()
             out[req.request_id] = r.output()
         return out
-
-    def run_interleaved(self, requests: list[Any]) -> dict[str, Output]:
-        runners = [self._make_runner(req) for req in requests]
-        while not all(r.done for r in runners):
-            # accounting: how many ready WorkPlans would co-batch this round (BatchScheduler)
-            units = [
-                WorkUnit(r.request.request_id, r.loop_runner.peek()) for r in runners
-                if not r.done and r.loop_runner is not None and r.loop_runner.peek() is not None
-            ]
-            if units:
-                self.metrics.batches += len(BatchScheduler.group(units))
-            progressed = False
-            for r in runners:
-                if not r.done:
-                    p0 = r._progress
-                    r.tick()
-                    if r.done or r._progress != p0:
-                        progressed = True
-            if not progressed:  # nobody could be admitted → real deadlock, fail fast
-                raise AdmissionInfeasible("interleaved scheduling deadlocked: no request could be admitted this round "
-                                          "(jointly infeasible — would require step-boundary preemption, §6.4)")
-        return {r.request.request_id: r.output() for r in runners}

@@ -11,7 +11,6 @@ import numpy as np
 from v2._enums import WorkUnitKind
 from v2.recipes import build_omni_engine
 from v2.recipes.cosmos3 import build_cosmos3_card
-from v2.parity import assert_interleave_parity
 from v2.request import DiffusionParams, SamplingParams, TaskType, make_request
 
 
@@ -61,12 +60,6 @@ def test_omni_scheduler_sees_both_work_unit_kinds():
     assert by_kind[WorkUnitKind.AR_TOKEN.value] > 0
     assert by_kind[WorkUnitKind.DIFFUSION_STEP.value] > 0
 
-
-def test_omni_interleave_parity_holds_across_loop_types():
-    eng = _eng()
-    reqs = [_omni_req("cosmos3-vfm", TaskType.T2V, "alpha", 11),
-            _omni_req("cosmos3-vfm", TaskType.T2V, "beta", 22)]
-    assert not assert_interleave_parity(eng, reqs)         # ar+denoise interleave is still bit-identical
 
 
 def test_cosmos3_sound_vae_is_optional_declared_not_loaded():

@@ -1,10 +1,10 @@
 """AsyncEngine — the serving runtime.
 
-A request queue, lifecycle state machine, live streaming, and step-level concurrency over the same
-step scheduler. Each request runs as an asyncio task that ticks its runner one step at a time and
-yields the event loop (`await asyncio.sleep(0)`), so concurrent requests interleave at step
-granularity — and a per-request stall backs off instead of busy-spinning. Drives BOTH inline
-``ProgramRunner`` and ``DisaggregatedRunner`` (capacity-aware pool dispatch) through one driver.
+A request queue, lifecycle state machine, and live streaming over a concurrency pool: each request
+waits for a free pool slot, then runs its program to completion in its own asyncio task (cooperatively
+yielding so streaming events flow and a stalled request backs off instead of busy-spinning). Pooled
+run-to-completion — no step-interleaved scheduler, no batching. Drives BOTH inline ``ProgramRunner``
+and ``DisaggregatedRunner`` (capacity-aware pool dispatch) through one driver.
 
 Cancellation is common-path: ``cancel(request_id)`` trips the runner's CancelScope, which raises at
 the next step boundary and delivers partial artifacts + a structured ``cancelled``.
@@ -41,7 +41,12 @@ class RequestState:
 
 class AsyncEngine:
 
-    def __init__(self, engine: Engine | None = None, *, max_stall_ticks: int = 200_000, max_history: int = 512):
+    def __init__(self,
+                 engine: Engine | None = None,
+                 *,
+                 max_concurrent: int = 8,
+                 max_stall_ticks: int = 200_000,
+                 max_history: int = 512):
         self.engine = engine if engine is not None else Engine()
         self._disagg: dict[str, tuple] = {}  # model_id -> (PoolSet, Program)
         self._events: dict[str, asyncio.Queue] = {}
@@ -49,6 +54,10 @@ class AsyncEngine:
         self._results: dict[str, Output] = {}
         self._runners: dict[str, Any] = {}
         self._order: list[str] = []  # submission order, for bounded eviction
+        # the serving pool: bounds how many requests run concurrently (each runs its program to
+        # completion in a slot — no step-interleaving / batching). A request waits for a free slot.
+        self.max_concurrent = max_concurrent
+        self._pool = asyncio.Semaphore(max_concurrent)
         self.max_stall_ticks = max_stall_ticks
         self.max_history = max_history
 
@@ -122,7 +131,10 @@ class AsyncEngine:
         runner = None
         stream_cursor = 0
         stall = 0
+        slot = False
         try:
+            await self._pool.acquire()  # wait for a free serving slot (pooled run-to-completion)
+            slot = True
             runner = self._make_runner(request)
             self._runners[rid] = runner
             self._states[rid] = RequestState.RUNNING
@@ -143,7 +155,7 @@ class AsyncEngine:
                     await asyncio.sleep(0.0005)  # backpressure backoff (capacity wait)
                 else:
                     stall = 0
-                    await asyncio.sleep(0)  # cooperative yield → step interleaving
+                    await asyncio.sleep(0)  # cooperative yield so streaming + other slots progress
             out = runner.output()
             self._results[rid] = out
             for name in out.artifacts:
@@ -172,6 +184,8 @@ class AsyncEngine:
             if runner is not None and hasattr(runner, "close"):
                 with contextlib.suppress(Exception):
                     runner.close()
+            if slot:
+                self._pool.release()  # free the serving slot for a waiting request
             _safe_put(evq, _SENTINEL)
             self._evict()
 

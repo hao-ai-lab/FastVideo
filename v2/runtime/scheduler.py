@@ -1,19 +1,15 @@
-"""The scheduler, in layers — each testable on a fake pool, no GPU.
+"""The scheduler — a refundable memory (OOM) admission guard.
 
-Mini-fastvideo implements the load-bearing layers:
-  * ``AdmissionController`` — the reservation gate: do not admit a WorkUnit unless its
-    compute budget AND memory (resident + worst-case peak) can be reserved. Reservations are
-    *refundable* (compute is a concurrency gate, not a lifetime cap), and infeasible reservations
-    (need > pool capacity) fail fast with ``AdmissionInfeasible`` instead of spinning.
-  * ``BatchScheduler`` — groups compatible WorkPlans by ``shape_sig.batch_key``. NOTE: in this
-    single-process mini, grouping drives *accounting* (how many units would co-batch); kernels still
-    execute per-plan. Real cross-request batched execution is a GPU-path concern (documented, not faked).
+``AdmissionController`` is the only layer: do not admit a step unless its peak-activation memory can
+be reserved (resident memory is reserved once for the whole loop). Reservations are *refundable* (a
+concurrency gate, not a lifetime cap); an infeasible reservation (need > pool capacity) fails fast
+with ``AdmissionInfeasible`` instead of spinning. No compute/time budget and no cross-request
+batching — serving is pooled run-to-completion (concurrency bounded by the pool).
 """
 from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any
 
 from v2.loop.contracts import WorkPlan
 from v2.memory.allocator import MemoryManager, Reservation
@@ -21,14 +17,6 @@ from v2.memory.allocator import MemoryManager, Reservation
 
 class AdmissionInfeasible(RuntimeError):
     """A reservation can never be satisfied (need > pool capacity) — fail fast, don't spin."""
-
-
-@dataclass
-class WorkUnit:
-    """The smallest schedulable action."""
-    request_id: str
-    plan: WorkPlan
-    priority: int = 0
 
 
 @dataclass
@@ -41,7 +29,6 @@ class StepTicket:
 class SchedulerMetrics:
     admitted: int = 0
     deferred: int = 0
-    batches: int = 0
     stepped_units: int = 0
     by_kind: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
@@ -86,14 +73,3 @@ class AdmissionController:
             return
         if ticket.memory_res is not None:
             self.memory.release(ticket.memory_res)
-
-
-class BatchScheduler:
-    """Group compatible WorkPlans across requests."""
-
-    @staticmethod
-    def group(units: list[WorkUnit]) -> list[list[WorkUnit]]:
-        groups: dict[Any, list[WorkUnit]] = defaultdict(list)
-        for u in units:
-            groups[u.plan.shape_sig.batch_key].append(u)
-        return list(groups.values())

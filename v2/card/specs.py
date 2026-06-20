@@ -71,7 +71,6 @@ class ParitySpec:
     consistency_levels: list[ConsistencyLevel] = field(default_factory=lambda: [ConsistencyLevel.C1])
     tests: list[ParityTestSpec] = field(default_factory=list)
     tap_tolerances: dict[str, float] = field(default_factory=dict)
-    interleave_required: bool = True  # the batch-of-N gate is non-negotiable
 
     @property
     def max_level(self) -> ConsistencyLevel:
@@ -156,7 +155,6 @@ class LoopSpec:
     graph_capture: str = "eager"  # eager | breakable_cudagraph
     # omni-ready:
     shared_weight_components: list[str] = field(default_factory=list)
-    allows_interleaving: bool = True
     # v2: the Loop implementation factory (built at bind time)
     loop_factory: Callable[..., Any] | None = None
 

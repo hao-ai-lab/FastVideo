@@ -1,10 +1,7 @@
-"""The batch-of-N interleave parity gate — required, not optional.
+"""Bitwise output comparison — used to prove two execution paths agree (e.g. disaggregated vs
+inline serving produce bit-identical artifacts for the same request).
 
-Loop inversion's real hazard is cross-request state smearing under interleaving, which a
-batch-of-1 parity gate cannot detect. So this gate runs two or more concurrent requests
-interleaved at step granularity and requires bit-identical output versus running them serially.
-
-The gate is pure and duck-typed: it takes any engine exposing ``run_serial`` and ``run_interleaved``.
+Pure and duck-typed: takes two ``{request_id: Output}`` dicts and returns the divergences.
 """
 from __future__ import annotations
 
@@ -50,13 +47,5 @@ def compare_outputs(serial: dict[str, Output], interleaved: dict[str, Output]) -
             if not bit_identical(a, b):
                 divs.append(
                     Divergence(f"{rid}:{name}", ConsistencyLevel.C1, float("nan"), float("nan"),
-                               "serial vs interleaved output not bit-identical "
-                               "(cross-request state smearing!)"))
+                               "outputs not bit-identical between the two execution paths"))
     return divs
-
-
-def assert_interleave_parity(engine: Any, requests: list[Any]) -> list[Divergence]:
-    """Drive ``engine`` both ways and return divergences (empty list == gate PASSES)."""
-    serial = engine.run_serial(requests)
-    interleaved = engine.run_interleaved(requests)
-    return compare_outputs(serial, interleaved)

@@ -8,8 +8,7 @@ neither MoT (one shared module, two loops) nor joint-RL (two disjoint experts, t
     audio_decode) in one request — every token and vocoder chunk a runtime-visible WorkUnit;
   * cascaded conditioning — the talker reads the thinker's tokens+hidden state, the vocoder the
     talker's speech tokens (the model-native form of vllm-omni's ``custom_process_input_func``);
-  * streaming codec→waveform via AUDIO_CHUNK WorkUnits;
-  * the three-loop program still passes the interleave parity gate.
+  * streaming codec→waveform via AUDIO_CHUNK WorkUnits.
 """
 from __future__ import annotations
 
@@ -20,7 +19,6 @@ from v2.card import load_card
 from v2.cache import CacheManager
 from v2.recipes import build_qwen_omni_card, build_qwen_omni_program
 from v2.recipes.qwen_omni.program import thinker_to_talker_node
-from v2.parity import assert_interleave_parity
 from v2.request import OutputSpec, TaskType, make_request
 from v2.runtime import Engine
 
@@ -105,10 +103,3 @@ def test_vocoder_streams_audio_chunks():
     assert on.metrics["stream_chunks"] - off.metrics["stream_chunks"] == n_chunks
 
 
-# --- the three-loop program still passes the core parity gate --------------------- #
-
-def test_qwen_omni_interleave_parity():
-    eng, _ = _engine()
-    reqs = [make_request(TaskType.T2A, "qwen-omni-tts", p) for p in ("alpha", "beta", "alpha")]
-    divs = assert_interleave_parity(eng, reqs)
-    assert not divs, f"thinker→talker→vocoder failed interleave parity: {divs}"

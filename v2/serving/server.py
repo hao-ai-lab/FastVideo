@@ -128,7 +128,6 @@ class OmniOpenAIServer:
             "served": self.served,
             "in_flight": self.engine.in_flight,
             "stepped_units": sm.stepped_units,
-            "batches": sm.batches,
             "admitted": adm.admitted,
             "deferred": adm.deferred,
             "by_kind": dict(adm.by_kind)
