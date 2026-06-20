@@ -50,8 +50,13 @@ class PrecisionPolicy:
         self.compute_dtype = compute_dtype
         self.scheduler_step_in_fp32 = scheduler_step_in_fp32
 
-    def cast(self, arr: np.ndarray) -> np.ndarray:
-        return np.asarray(arr, dtype=np.dtype(self.compute_dtype))
+    def cast(self, arr: Any) -> Any:
+        # Array-preserving: a device (torch) tensor is cast in place on its device — never pulled to
+        # host. numpy on CPU is unchanged. (torch is imported lazily, only on the tensor path.)
+        if isinstance(arr, np.ndarray):
+            return np.asarray(arr, dtype=np.dtype(self.compute_dtype))
+        import torch
+        return arr.to(getattr(torch, self.compute_dtype, torch.float32))
 
     @property
     def scheduler_dtype(self):

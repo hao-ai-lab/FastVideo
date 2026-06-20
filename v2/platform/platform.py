@@ -96,6 +96,7 @@ class Platform:
         self.device_chain = tuple(device_chain)
         self.arch_chains = dict(arch_chains)
         self._kernels: KernelTable | None = None
+        self._xp: Any = None
 
     # --- the kernel table (lazy, cached) ------------------------------------- #
     @property
@@ -104,6 +105,16 @@ class Platform:
             ensure_backends_loaded()
             self._kernels = KernelTable(self)
         return self._kernels
+
+    # --- the array namespace (numpy on CPU, torch-on-device on a GPU box) ----- #
+    @property
+    def xp(self) -> Any:
+        """Birth/cast/marshal helpers so the denoise loop is array-agnostic: numpy on CPU (torch-free),
+        torch-on-device on cuda (the latent stays resident — no per-step host<->device round-trip)."""
+        if self._xp is None:
+            from v2.platform.array_ns import get_array_ns
+            self._xp = get_array_ns(self.device)
+        return self._xp
 
     def arch_chain(self, device: str) -> tuple[str, ...]:
         return self.arch_chains.get(device, ("generic", ))
