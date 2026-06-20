@@ -78,14 +78,6 @@ class ParitySpec:
 
 
 @dataclass
-class DataRef:
-    """What a recipe trained on, for governance/reproduction."""
-    dataset_id: str = ""
-    revision: str = ""
-    description: str = ""
-
-
-@dataclass
 class RecipeSpec:
     """The provenance half of the (recipe, runtime) pair.
 
@@ -95,7 +87,6 @@ class RecipeSpec:
     """
     method: str = "base"  # base | dmd2 | self_forcing | diffusion_nft | attn_qat_nvfp4
     parents: list[str] = field(default_factory=list)  # teacher / base model_ids
-    data_contract: DataRef = field(default_factory=DataRef)
     assumes_loop: str = ""  # loop_id this recipe's weights require
     assumes_precision: str = "float32"
     consistency_required: ConsistencyLevel = ConsistencyLevel.C1
