@@ -112,11 +112,8 @@ class ComponentSpec:
     component_id: str
     kind: str  # dit | vae | text_encoder | audio_vae | reasoner_tower | ...
     load_id: str = ""  # "module:Class" for the real (torch) adapter
-    config_schema: type | None = None
-    io_schema: tuple[type | None, type | None] = (None, None)
     precision_policy: str | None = None
     placement_policy: str = "colocated"
-    parallel_constraints: dict[str, Any] = field(default_factory=dict)
     parity_tests: list[ParityTestSpec] = field(default_factory=list)
     # omni-ready:
     resident_for: list[str] = field(default_factory=list)  # loop_ids that keep this resident mid-request
@@ -145,13 +142,9 @@ class LoopSpec:
     loop_id: str
     kind: LoopKind
     work_unit_kind: WorkUnitKind
-    state_schema: type | None = None  # the typed LoopState
-    step_schema: type | None = None  # the typed WorkPlan a step emits
-    result_schema: type | None = None  # the typed StepResult
     behavior_schema: type | None = None  # what to capture for RL (None if not training-relevant)
     extension_schema: type | None = None  # per-model LoopState extension (Cosmos3PackedSeq, etc.)
     cache_policy: list[str] = field(default_factory=list)  # cache class names this loop draws from
-    valid_parallel_plans: list = field(default_factory=list)
     graph_capture: str = "eager"  # eager | breakable_cudagraph
     # omni-ready:
     shared_weight_components: list[str] = field(default_factory=list)

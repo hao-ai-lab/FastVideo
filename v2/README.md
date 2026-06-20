@@ -163,7 +163,7 @@ cache policies exist and that `recipe.assumes_loop` is a declared loop.
   `required_for`/`optional_for`/`resident_for` task sets, precision/placement policies. (Note: `required_for`
   is currently declared on every card but not yet consumed by the executor — see §18 roadmap P0.)
 - **`LoopSpec`** — `loop_id`, `kind` (`LoopKind.DIFFUSION_DENOISE`/`AR_DECODE`/`CHUNK_ROLLOUT`/`AUDIO_DECODE`/…),
-  `work_unit_kind`, `step_cost_model` (predicted GPU-time per step — §6), `shared_weight_components`,
+  `work_unit_kind`, `shared_weight_components`,
   `cache_policy`, `loop_factory`.
 
 A `ModelInstance` is a resident, loaded card: component instances, model state, caches, compiled graphs, a
