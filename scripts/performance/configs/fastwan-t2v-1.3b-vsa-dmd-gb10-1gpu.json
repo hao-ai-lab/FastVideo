@@ -1,0 +1,51 @@
+{
+  "benchmark_id": "fastwan-t2v-1.3b-vsa-dmd-gb10-1gpu",
+  "description": "FastWan2.1 T2V 1.3B DMD/VSA local Nsight profile for one DGX Spark GB10 GPU",
+  "model": {
+    "model_path": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+    "model_short_name": "FastWan2.1-T2V-1.3B-DMD-VSA"
+  },
+  "init_kwargs": {
+    "num_gpus": 1,
+    "sp_size": 1,
+    "tp_size": 1,
+    "vae_sp": false,
+    "vae_tiling": true,
+    "VSA_sparsity": 0.8,
+    "dmd_denoising_steps": [1000, 757, 522],
+    "enable_torch_compile": false,
+    "dit_cpu_offload": false,
+    "dit_layerwise_offload": false,
+    "vae_cpu_offload": false,
+    "text_encoder_cpu_offload": true,
+    "pin_cpu_memory": false,
+    "text_encoder_precisions": ["fp32"]
+  },
+  "generation_kwargs": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 81,
+    "num_inference_steps": 3,
+    "seed": 1024,
+    "fps": 16,
+    "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+  },
+  "test_prompts": [
+    "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting."
+  ],
+  "run_config": {
+    "num_warmup_runs": 2,
+    "num_measurement_runs": 5,
+    "required_gpus": 1
+  },
+  "thresholds": {
+    "GB10": {
+      "max_generation_time_s": 120.0,
+      "max_peak_memory_mb": 30000.0
+    },
+    "default": {
+      "max_generation_time_s": 120.0,
+      "max_peak_memory_mb": 30000.0
+    }
+  }
+}
