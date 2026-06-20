@@ -3074,3 +3074,39 @@ Next recommended integration step:
   - validation matrix covering service, run CLI, prompt-set eval, trace eval,
     SFT, critic GRPO, planner GRPO, and real-checkpoint smokes;
   - PR split recommendation and unresolved risks.
+
+## Stage 13 Execution: Review Package
+
+Status: completed locally, pending commit/push.
+
+Goal:
+
+- Add a stable review entrypoint outside the long exploration log.
+- Summarize public surfaces, validation evidence, PR split, and remaining risks
+  for reviewers.
+
+Implemented changes:
+
+- Added `docs/design/interleave_thinker.md`.
+  - Public inference/orchestration surfaces.
+  - Public training/model/reward surfaces.
+  - Architecture boundaries.
+  - Representative Modal validation matrix.
+  - Recommended PR stack.
+  - Remaining risks and review checklist.
+- Added the page to the MkDocs Design nav in `mkdocs.yml`.
+
+Validation completed:
+
+- Local `git diff --check` passed.
+- Local `pre-commit run --files docs/design/interleave_thinker.md mkdocs.yml`
+  passed:
+  - codespell;
+  - PyMarkdown;
+  - filename check;
+  - suggestion hook.
+  - yapf, ruff, mypy, and actionlint had no files to check.
+- Local `python scripts/check_docs_links.py` failed on pre-existing generated
+  examples links under `docs/examples/`, `docs/getting_started/`, `docs/inference/`,
+  and `docs/training/`. No failures referenced the new
+  `docs/design/interleave_thinker.md` page.
