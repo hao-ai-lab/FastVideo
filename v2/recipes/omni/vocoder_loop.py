@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2._enums import ExecutionProfile, WorkUnitKind
-from v2.loop.contracts import (
+from v2.core.enums import ExecutionProfile, WorkUnitKind
+from v2.core.loop.contracts import (
     Done,
     LoopResult,
     LoopState,
@@ -20,7 +20,7 @@ from v2.loop.contracts import (
     StepResult,
     WorkPlan,
 )
-from v2.request.streams import StreamChunk
+from v2.core.request.streams import StreamChunk
 
 
 class VocoderLoop:

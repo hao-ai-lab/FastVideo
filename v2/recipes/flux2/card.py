@@ -20,8 +20,8 @@ GATED weights (``black-forest-labs/FLUX.2-*``) → GPU is BRINGUP; the toy facto
 """
 from __future__ import annotations
 
-from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from v2.card import (
+from v2.core.enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.core.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -34,8 +34,8 @@ from v2.card import (
     RecipeSpec,
     SamplingDefaults,
 )
-from v2.loop.policies import EmbeddedGuidance, NoRouting, PrecisionPolicy
-from v2.parallel import ParallelPlan
+from v2.core.loop.policies import EmbeddedGuidance, NoRouting, PrecisionPolicy
+from v2.core.parallel import ParallelPlan
 from v2.platform.backends.toy import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
 from v2.recipes.flux2.loop import Flux2DenoiseLoop
 from v2.recipes.wan21.card import stamp_wan21_checkpoints

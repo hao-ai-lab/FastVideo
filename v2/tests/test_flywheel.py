@@ -10,7 +10,7 @@ import numpy as np
 
 from v2.recipes import build_wan_t2v_program
 from v2.recipes.wan21 import build_wan21_card
-from v2.request import DiffusionParams, TaskType, make_request
+from v2.core.request import DiffusionParams, TaskType, make_request
 from v2.runtime import Engine
 from v2.training.flywheel import run_flywheel
 from v2.training.methods.base import new_instance

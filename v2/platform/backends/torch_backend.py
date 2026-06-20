@@ -51,7 +51,7 @@ def _ensure_fastvideo_runtime() -> None:
     os.environ.setdefault("LOCAL_RANK", "0")
     if torch.cuda.is_available():
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
-    from v2.distributed import maybe_init_distributed_environment_and_model_parallel
+    from v2._vendor.distributed import maybe_init_distributed_environment_and_model_parallel
     maybe_init_distributed_environment_and_model_parallel(tp_size=1, sp_size=1)
     _RUNTIME_READY = True
 
@@ -74,7 +74,7 @@ def _fastvideo_args(spec: Any) -> Any:
     """Build the FastVideoArgs the real loaders need (BRINGUP risk A). ``from_kwargs`` populates
     ``pipeline_config`` (dit/vae/text-encoder configs + precisions) from the model root. Single-GPU,
     all offload/FSDP OFF — weights resident on one device, the simplest correct bring-up."""
-    from v2.fastvideo_args import FastVideoArgs
+    from v2._vendor.fastvideo_args import FastVideoArgs
     return FastVideoArgs.from_kwargs(model_path=_model_root(spec),
                                      num_gpus=1,
                                      tp_size=1,
@@ -93,7 +93,7 @@ def load_component(loader_attr: str, path: str, args):
     component loaders. ``WanTransformer3DModel`` / ``AutoencoderKLWan`` have NO ``from_pretrained``; the
     loader reads the checkpoint config, resolves the class (UMT5 vs T5 from config), and loads weights.
     Currently delegates to fastvideo's loader; a vendored cutover swaps the body, not the callers."""
-    from v2.models.loader import component_loader as _cl
+    from v2._vendor.models.loader import component_loader as _cl
     return getattr(_cl, loader_attr)().load(path, args)
 
 
@@ -163,7 +163,7 @@ class TorchComponent:
     def _ctx(current_timestep: Any = 0) -> Any:
         """The FastVideo attention layer reads attn_metadata via get_forward_context(), so every forward
         runs inside set_forward_context(...). attn_metadata=None selects the dense SDPA path."""
-        from v2.forward_context import set_forward_context
+        from v2._vendor.forward_context import set_forward_context
         return set_forward_context(current_timestep=current_timestep, attn_metadata=None)
 
     # weight surface used by serving weight-sync + training ----------------------------------------- #
@@ -312,7 +312,7 @@ class LTX2DiT(TorchComponent):
 
     def __init__(self, module: Any, *, device: Any, dtype: Any) -> None:
         super().__init__(module, device=device, dtype=dtype)
-        from v2.models.dits.ltx2 import VideoLatentShape
+        from v2._vendor.models.dits.ltx2 import VideoLatentShape
         self._VideoLatentShape = VideoLatentShape
 
     @torch.no_grad()
@@ -326,7 +326,7 @@ class LTX2DiT(TorchComponent):
         av_kwargs: dict = {}
         au = None
         if audio_latent is not None:  # joint A/V: audio latent [1,8,T,16] + audio text
-            from v2.models.audio.ltx2_audio_vae import AudioLatentShape
+            from v2._vendor.models.audio.ltx2_audio_vae import AudioLatentShape
             au = self._t(audio_latent)
             aeh = self._t(audio_text)
             atok = self.module.audio_patchifier.get_token_count(AudioLatentShape.from_torch_shape(tuple(au.shape)))
@@ -500,7 +500,7 @@ class LTX2Upsampler(TorchComponent):
 
     @torch.no_grad()
     def upsample(self, latent):
-        from v2.models.upsamplers.ltx2_upsampler import upsample_video
+        from v2._vendor.models.upsamplers.ltx2_upsampler import upsample_video
         out = upsample_video(self._t(latent), self.stats_owner, self.module)
         return self._n(out)
 

@@ -12,8 +12,8 @@ from typing import Any
 
 import numpy as np
 
-from v2._enums import ExecutionProfile, WorkUnitKind
-from v2.loop.contracts import (
+from v2.core.enums import ExecutionProfile, WorkUnitKind
+from v2.core.loop.contracts import (
     Done,
     LoopResult,
     LoopState,
@@ -24,7 +24,7 @@ from v2.loop.contracts import (
     WorkPlan,
 )
 from v2.platform import FLOW_MATCH_STEP, FLOW_SDE_STEP
-from v2.request.streams import StreamChunk
+from v2.core.request.streams import StreamChunk
 from v2.platform.backends.toy import LATENT_CHANNELS
 
 # Real Wan2.1 VAE (AutoencoderKLWan) compression: z_dim=16, 4x temporal, 8x spatial.

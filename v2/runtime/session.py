@@ -16,12 +16,12 @@ from __future__ import annotations
 from typing import Any
 from collections.abc import Callable
 
-from v2._enums import ExecutionProfile
-from v2.loop.driver import LoopRunner
+from v2.core.enums import ExecutionProfile
+from v2.core.loop.driver import LoopRunner
 from v2.recipes.common import text_encode_node_fn
-from v2.request import DiffusionParams, TaskType, make_request
-from v2.request.requests import Session
-from v2.request.streams import Stream
+from v2.core.request import DiffusionParams, TaskType, make_request
+from v2.core.request.requests import Session
+from v2.core.request.streams import Stream
 from v2.runtime.context import RuntimeLoopContext
 
 

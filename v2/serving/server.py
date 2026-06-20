@@ -19,8 +19,8 @@ from typing import Any
 
 import numpy as np
 
-from v2.request.artifacts import Output
-from v2.request.streams import StreamChunk
+from v2.core.request.artifacts import Output
+from v2.core.request.streams import StreamChunk
 from v2.serving.http import HttpServer, Request, Response
 from v2.serving.protocol import ChatCompletionRequest, ImageGenerationRequest, VideoGenerationRequest
 

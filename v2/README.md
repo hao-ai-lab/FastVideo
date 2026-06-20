@@ -111,9 +111,9 @@ axis, still no new primitive.)
 
 ```
    Products: Python · CLI · OpenAI server · ComfyUI · Dreamverse · RTC · Trainer   (thin: validate, request, subscribe)
-   Request / Session / Artifact / Stream                                           v2/request/, v2/runtime/session.py
-   Program Plane  (typed loop programs; cross-model Workflows)                      v2/program/
-   ┌──────────────── Model Plane (CENTER) ────────────────┐                         v2/card/, v2/recipes/*/card.py
+   Request / Session / Artifact / Stream                                           v2/core/request/, v2/runtime/session.py
+   Program Plane  (typed loop programs; cross-model Workflows)                      v2/core/program/
+   ┌──────────────── Model Plane (CENTER) ────────────────┐                         v2/core/card/, v2/recipes/*/card.py
    │  ModelCard: components · loops · recipe · parity ·    │
    │  capabilities · caches · parallelism · precision      │
    └───────────────────────┬───────────────────────────────┘
@@ -121,10 +121,10 @@ axis, still no new primitive.)
    │ Runtime / Scheduler      │ Training / RL          │     v2/runtime/  ·  v2/training/
    │ WorkUnits · GPU-time budget │ rollout·reward·sync │
    └────────────────────────┼────────────────────────┘
-   Memory · Cache · Transport · Compile                                             v2/memory, v2/cache, v2/transport, v2/runtime/cudagraph.py
-   Parallelism (named axes → DeviceMesh, validated, part of the cache key)          v2/parallel/
+   Memory · Cache · Transport · Compile                                             v2/runtime/{memory,cache,transport}, v2/runtime/cudagraph.py
+   Parallelism (named axes → DeviceMesh, validated, part of the cache key)          v2/core/parallel/
    Platform dispatch (COMPONENTS/KERNELS registries → toy | torch backend)          v2/platform/
-   Deployment / Fleet (DeploymentCard → LocalFleet | Dynamo; never the core)        v2/deploy/, v2/serving/
+   Deployment / Fleet (DeploymentCard → LocalFleet | Dynamo; never the core)        v2/serving/deploy/, v2/serving/
 ```
 
 **Enforced boundaries:** `card/` imports no product/runtime; `runtime/` executes `card/` loops but defines no
@@ -176,7 +176,7 @@ live object* via `instance.component()` (no weight duplication, no DAG split).
 ## 5. The driven-loop contract
 
 ```python
-class Loop(Protocol):                 # v2/loop/contracts.py — protocols, not ABCs
+class Loop(Protocol):                 # v2/core/loop/contracts.py — protocols, not ABCs
     def init(self, req, model, ctx) -> LoopState         # per-request state (seeded rng, latents…)
     def next(self, st)              -> WorkPlan | Done    # describe the next step (KERNEL-FREE: a run() thunk)
     def advance(self, st, result)   -> LoopState          # fold result; capture behavior under ROLLOUT
@@ -258,7 +258,7 @@ version-eviction on weight sync.
 ## 8. Parallelism as a model contract
 
 Parallelism is not a launch flag — it affects cache keys, scheduling, transport, capture, and parity, so it
-lives on the card. `ParallelPlan` axes (`v2/parallel/plan.py`):
+lives on the card. `ParallelPlan` axes (`v2/core/parallel/plan.py`):
 `("dp","tp","sp","cp","cfgp","pp_patch","vae","ep","fsdp","role","replica")`. Declarative, validated
 (`validation.py`: `cfgp ≤ 2`; `pp_patch` is **invalid for causal/AR** because stale KV breaks causality;
 ownership conflicts like a `BatchedCFG` policy *and* a `cfgp` group are build errors), compiled to a PyTorch
@@ -437,38 +437,42 @@ denoiser share weights).
 
 ```
 v2/
-  card/        ModelCard, ComponentSpec, LoopSpec, RecipeSpec, ParitySpec, instance, load_card
-  loop/        contracts (LoopState/WorkPlan/StepResult/Done), driver (LoopRunner), policies (cfg/flowshift/
-               precision/routing), sampler (flow-match + FlowGRPO SDE)
-  program/     ComponentNode/ModelLoopNode/Program; Workflow + WorkflowRegistry (cross-model; §12)
-  request/     requests, params (DiffusionParams + sde_rollout), tasks (TaskType), streams, artifacts, cancel
+  core/        the model-native vocabulary — contracts everything depends on (no kernels):
+    enums.py / types.py   Capability/LoopKind/WorkUnitKind/ConsistencyLevel/ExecutionProfile + shared types
+    card/        ModelCard, ComponentSpec, LoopSpec, RecipeSpec, ParitySpec, instance, load_card
+    loop/        contracts (LoopState/WorkPlan/StepResult/Done), driver (LoopRunner), policies (cfg/flowshift/
+                 precision/routing), sampler (flow-match + FlowGRPO SDE)
+    program/     ComponentNode/ModelLoopNode/Program; Workflow + WorkflowRegistry (cross-model; §12)
+    request/     requests, params (DiffusionParams + sde_rollout), tasks (TaskType), streams, artifacts, cancel
+    parity/      aligner, ladder, compare (compare_outputs — bit-parity between execution paths)
+    parallel/    plan (axis vocab), mesh, validation
   runtime/     engine (run/run_serial, workflow-aware), async_engine (pooled run-to-completion), scheduler
                (memory admission), cudagraph (piecewise capture), disaggregated (DisaggregatedRunner), pools, session, context
-  cache/       keys (CacheKey, content_hash), classes (feature/residual/slab_kv/paged_kv), manager
-  memory/      allocator, reservations, refundable budget
-  transport/   manifests + connectors (in-proc; chunk_ready + credit flow)
-  parallel/    plan (axis vocab), mesh, validation
-  parity/      aligner, ladder, compare (compare_outputs — bit-parity between execution paths)
-  extend/      observers (NaNWatch), interceptors (cache-dit), registry, base
+    cache/       keys (CacheKey, content_hash), classes (feature/residual/slab_kv/paged_kv), manager
+    memory/      allocator, reservations, refundable budget
+    transport/   manifests + connectors (in-proc; chunk_ready + credit flow)
+    extend/      observers (NaNWatch), interceptors (cache-dit), registry, base
   platform/    Platform.detect(); COMPONENTS(kind,device,variant) + KERNELS(op,device,arch,variant) registries;
                backends/{toy.py (numpy reference + parity oracle), torch_backend.py (real GPU)}
   recipes/     the concrete cards/programs/loops — the kept families: wan21 (+ i2v / 2.2 variants),
                wan_causal (self-forcing), ltx2 (distilled / base / 2.3 joint A/V), flux2, matrixgame2,
                and the omni cards cosmos3 / bagel / qwen_omni (+ omni, their shared AR/vocoder loops)
-  --- vendored from fastvideo (FULL cutover; v2 imports zero `fastvideo.*` — see "Vendoring" below) ---
-  models/      the real nn.Module architectures for the kept models (dits/ vaes/ encoders/ audio/
-               upsamplers/) + the component loader/ + the lazy class registry — vendored, not stubs
-  layers/      tensor-parallel linear/attention/norm/rotary/etc (copied verbatim)
-  attention/   attention backend registry + SDPA (sparse/MoBA backends use the optional fastvideo_kernel)
-  configs/     arch + pipeline config dataclasses + pipeline_registry (config-class resolution)
-  distributed/ parallel_state + communication_op (single-process 1×1 device mesh dist-init)
-  platforms/   device/CUDA platform detection (distinct from the v2 runtime `platform/`)
-  api/         slim inference-config dataclasses (schema + results) the VideoGenerator consumes
   training/    rollout, behavior, rewards (+ServedRewardScorer), weight_sync (+WeightSyncController),
                flywheel, methods/{finetune,dmd2,diffusion_nft,self_forcing,unified_rl,joint_multi_rl,workflow_rl}
-  serving/     AsyncEngine glue, OpenAI server (http.py)
-  deploy/      DeploymentCard (card.py), LocalFleet (fleet.py), DynamoWorkerAdapter (dynamo.py)
-  tests/       34 files, 216 tests — `pytest v2/tests/` OR `python3 v2/run_tests.py` (zero deps)
+  serving/     AsyncEngine glue, OpenAI server (http.py); deploy/ — DeploymentCard, LocalFleet, DynamoWorkerAdapter
+  tests/       22 files, 143 tests — `pytest v2/tests/` OR `python3 v2/run_tests.py` (zero deps)
+  (root)       __init__.py · version.py · run_tests.py · registry.py · video_generator.py · examples.py
+  --- _vendor/ : copied from fastvideo (FULL cutover; v2 imports zero `fastvideo.*`; internal layout mirrors upstream for diffing) ---
+  _vendor/
+    models/      the real nn.Module architectures for the kept models (dits/ vaes/ encoders/ audio/
+                 upsamplers/) + the component loader/ + the lazy class registry — vendored, not stubs
+    layers/      tensor-parallel linear/attention/norm/rotary/etc (copied verbatim)
+    attention/   attention backend registry + SDPA (sparse/MoBA backends use the optional fastvideo_kernel)
+    configs/     arch + pipeline config dataclasses + pipeline_registry (config-class resolution)
+    distributed/ parallel_state + communication_op (single-process 1×1 device mesh dist-init)
+    platforms/   device/CUDA platform detection (distinct from the v2 runtime `platform/`)
+    api/         slim inference-config dataclasses (schema + results) the VideoGenerator consumes
+    hooks/ · logging_utils/ · third_party/ + fastvideo_args.py · utils.py · logger.py · envs.py · forward_context.py
 ```
 
 ---
@@ -500,7 +504,7 @@ torch-native loop surface (loops still marshal numpy↔torch at the boundary —
 
 ```bash
 cd /home/scratch.willlin_ent/FastVideo
-python3 -m pytest v2/tests/ -q      # 216 tests
+python3 -m pytest v2/tests/ -q      # 143 tests
 python3 v2/run_tests.py             # same suite, zero deps
 ```
 

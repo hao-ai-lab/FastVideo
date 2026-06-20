@@ -19,9 +19,9 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from v2.models import build_default_engine
-from v2.parity import assert_interleave_parity
-from v2.request import DiffusionParams, TaskType, make_request
+from v2._vendor.models import build_default_engine
+from v2.core.parity import assert_interleave_parity
+from v2.core.request import DiffusionParams, TaskType, make_request
 
 MODEL = "wan2.1-1.3b"
 

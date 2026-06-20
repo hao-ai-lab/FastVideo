@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from v2.models.wan21 import build_wan21_card
+from v2._vendor.models.wan21 import build_wan21_card
 from v2.training.methods import build_dmd2
 
 

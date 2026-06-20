@@ -16,14 +16,14 @@ adapters (see ``v2/platform/backends/``) that are off the test path.
 """
 from __future__ import annotations
 
-from v2._enums import (
+from v2.core.enums import (
     Capability,
     ConsistencyLevel,
     ExecutionProfile,
     LoopKind,
     WorkUnitKind,
 )
-from v2.card import (
+from v2.core.card import (
     CapabilityMatrix,
     ComponentSpec,
     LoopSpec,
@@ -33,8 +33,8 @@ from v2.card import (
     RecipeSpec,
     load_card,
 )
-from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind, when_opt, when_task
-from v2.request import (
+from v2.core.program import ComponentNode, ModelLoopNode, Program, ProgramKind, when_opt, when_task
+from v2.core.request import (
     DiffusionParams,
     Output,
     Request,

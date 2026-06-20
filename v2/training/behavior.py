@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from v2._enums import ConsistencyLevel
+from v2.core.enums import ConsistencyLevel
 
 
 class TrajectoryStatus(str, Enum):

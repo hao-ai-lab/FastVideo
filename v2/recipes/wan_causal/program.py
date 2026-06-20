@@ -1,7 +1,7 @@
 """Wan-causal streaming program: text_encode → chunk_rollout → vae_decode."""
 from __future__ import annotations
 
-from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.core.program import ComponentNode, ModelLoopNode, Program, ProgramKind
 from v2.recipes.common import text_encode_node_fn as _text_encode
 
 

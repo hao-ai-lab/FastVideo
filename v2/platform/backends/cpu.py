@@ -10,7 +10,7 @@ matches). That keeps every existing card working with zero registration.
 """
 from __future__ import annotations
 
-from v2.loop.sampler import flow_match_euler_step, flow_sde_step_with_logprob
+from v2.core.loop.sampler import flow_match_euler_step, flow_sde_step_with_logprob
 from v2.platform.registry import FLOW_MATCH_STEP, FLOW_SDE_STEP, register_kernel
 
 # The numpy solver primitives, registered as the terminal (cpu, numpy) kernels. These are the exact

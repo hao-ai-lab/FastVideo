@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.cache import CacheManager
-from v2.card import load_card
-from v2.memory import MemoryManager
+from v2.runtime.cache import CacheManager
+from v2.core.card import load_card
+from v2.runtime.memory import MemoryManager
 from v2.recipes import build_default_engine
 from v2.recipes.common import cached_text_encode
 from v2.recipes.wan21 import build_wan21_card
-from v2.parity import compare_outputs
-from v2.request import DiffusionParams, Output, TaskType, VideoArtifact, make_request
+from v2.core.parity import compare_outputs
+from v2.core.request import DiffusionParams, Output, TaskType, VideoArtifact, make_request
 from v2.runtime import AdmissionController, AdmissionInfeasible, Engine
 
 

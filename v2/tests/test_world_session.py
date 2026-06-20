@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 from v2.recipes import build_default_engine
-from v2.request.cancel import Cancelled
+from v2.core.request.cancel import Cancelled
 from v2.runtime import WorldModelSession
 
 MID = "wan-causal-sf-1.3b"

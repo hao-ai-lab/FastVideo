@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from v2.card import (
+from v2.core.enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.core.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -27,10 +27,10 @@ from v2.card import (
     RecipeSpec,
     SamplingDefaults,
 )
-from v2.loop.policies import BoundaryTimestepRouting, ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
-from v2.parallel import ParallelPlan
+from v2.core.loop.policies import BoundaryTimestepRouting, ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
+from v2.core.parallel import ParallelPlan
 from v2.platform.backends.toy import ToyDiT, ToyImageEncoder, ToyTextEncoder, ToyVAE, _seed_from
-from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.core.program import ComponentNode, ModelLoopNode, Program, ProgramKind
 from v2.recipes._prompts import WAN_NEG_CN, WAN_NEG_EN
 from v2.recipes.common import text_encode_node_fn as _text_encode
 from v2.recipes.wan21.card import stamp_wan21_checkpoints

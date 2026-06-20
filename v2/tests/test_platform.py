@@ -13,15 +13,15 @@ import sys
 import numpy as np
 import pytest
 
-from v2._enums import ExecutionProfile
-from v2.cache import CacheManager
-from v2.card import load_card
-from v2.loop.driver import LoopRunner
+from v2.core.enums import ExecutionProfile
+from v2.runtime.cache import CacheManager
+from v2.core.card import load_card
+from v2.core.loop.driver import LoopRunner
 from v2.platform.backends.toy import ToyDiT, ToyTextEncoder, ToyVAE
 from v2.recipes.common import text_encode_node_fn
 from v2.recipes.wan21 import build_wan21_card
 from v2.recipes.wan_causal import build_wan_causal_card
-from v2.parity import bit_identical               # the typed C1 instrument (ladder.py)
+from v2.core.parity import bit_identical               # the typed C1 instrument (ladder.py)
 from v2.platform import (
     FLOW_MATCH_STEP,
     FLOW_SDE_STEP,
@@ -30,8 +30,8 @@ from v2.platform import (
     kernel_matrix,
 )
 from v2.platform.backends.accel import AccelComponent, AccelDiT
-from v2.request import DiffusionParams, TaskType, make_request
-from v2.request.streams import Stream
+from v2.core.request import DiffusionParams, TaskType, make_request
+from v2.core.request.streams import Stream
 from v2.runtime import Engine
 from v2.runtime.context import RuntimeLoopContext
 

@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from v2.models.wan_causal import build_wan_causal_card
+from v2._vendor.models.wan_causal import build_wan_causal_card
 from v2.training.methods import build_self_forcing
 
 

@@ -14,8 +14,8 @@ Real wiring: DiT ``ltx2:LTX2Transformer3DModel``, causal VAE ``ltx2vae``, Gemma 
 """
 from __future__ import annotations
 
-from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from v2.card import (
+from v2.core.enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.core.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -27,7 +27,7 @@ from v2.card import (
     RecipeSpec,
     SamplingDefaults,
 )
-from v2.parallel import ParallelPlan
+from v2.core.parallel import ParallelPlan
 from v2.platform.backends.toy import ToyAudioVAE, ToyDiT, ToyTextEncoder, ToyUpsampler, ToyVAE, ToyVocoder, _seed_from
 from v2.recipes._prompts import LTX2_NEG
 from v2.recipes.ltx2.loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop, LTX23DenoiseLoop

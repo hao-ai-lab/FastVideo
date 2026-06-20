@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from typing import Any
 from collections.abc import Callable
 
-from v2._enums import ExecutionProfile
-from v2.loop.contracts import StepResult, WorkPlan
-from v2.loop.driver import LoopRunner
+from v2.core.enums import ExecutionProfile
+from v2.core.loop.contracts import StepResult, WorkPlan
+from v2.core.loop.driver import LoopRunner
 from v2.training.behavior import TrajectoryStatus
 
 

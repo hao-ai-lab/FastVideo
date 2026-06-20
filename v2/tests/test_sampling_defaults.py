@@ -1,7 +1,7 @@
 """Phase 1a: per-model sampling defaults on the card + the kwargs>SamplingParam>card>generic precedence."""
 from types import SimpleNamespace
 
-from v2.card import SamplingDefaults
+from v2.core.card import SamplingDefaults
 from v2.recipes.ltx2 import build_ltx2_3_card, build_ltx2_base_card, build_ltx2_card
 from v2.recipes.wan21 import (
     build_wan21_card,

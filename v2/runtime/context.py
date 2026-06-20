@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from v2._enums import ExecutionProfile
-from v2.loop.contracts import StepResult, WorkPlan
-from v2.request.streams import OmniEvent, Stream, StreamChunk
+from v2.core.enums import ExecutionProfile
+from v2.core.loop.contracts import StepResult, WorkPlan
+from v2.core.request.streams import OmniEvent, Stream, StreamChunk
 
 
 class RuntimeLoopContext:
