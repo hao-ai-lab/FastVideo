@@ -473,11 +473,9 @@ v2/
                backends/{toy.py (numpy reference + parity oracle), torch_backend.py (real GPU)}
   loader/      v2-owned component-loader seam (currently delegates to fastvideo; vendored cutover later)
   models/      v2-namespaced model code (re-export stubs over fastvideo until vendored; see vendoring memory)
-  recipes/     the concrete cards/programs/loops — 35+ families: wan21, ltx2, wan_causal, sfwan22, fastwan,
-               turbowan, flux2, sd35, kandinsky5, hunyuan_video(15), longcat, cosmos2/25/3, gen3c, hyworld,
-               hunyuangamecraft, matrixgame2/3, lingbotworld, lucy_edit, stable_audio, wan_fun_control,
-               bagel, qwen_omni, omni, unified, multi_expert, image_video, tiled, adaptive, adapters,
-               speculative, reward
+  recipes/     the concrete cards/programs/loops — the kept families: wan21 (+ i2v / 2.2 variants),
+               wan_causal (self-forcing), ltx2 (distilled / base / 2.3 joint A/V), flux2, matrixgame2,
+               and the omni cards cosmos3 / bagel / qwen_omni (+ omni, their shared AR/vocoder loops)
   training/    rollout, behavior, rewards (+ServedRewardScorer), weight_sync (+WeightSyncController),
                flywheel, methods/{finetune,dmd2,diffusion_nft,self_forcing,unified_rl,joint_multi_rl,workflow_rl}
   serving/     AsyncEngine glue, OpenAI server (http.py)

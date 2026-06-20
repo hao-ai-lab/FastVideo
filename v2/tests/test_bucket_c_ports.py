@@ -26,9 +26,8 @@ _CAP_TASK = [
     (Capability.IMAGE_TO_VIDEO, TaskType.I2V),
 ]
 
-# (primary hf id, package) for each registered net-new port — cosmos2 (the reference) + the _BUCKET_C table.
-_PORTS = [("nvidia/Cosmos-Predict2-2B-Video2World", "cosmos2")] + \
-         [(row[0][0], row[1]) for row in registry._BUCKET_C]
+# (primary hf id, package) for each registered net-new bucket-C port (the _BUCKET_C table).
+_PORTS = [(row[0][0], row[1]) for row in registry._BUCKET_C]
 
 
 def _task_for(card) -> TaskType:

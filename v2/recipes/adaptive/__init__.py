@@ -1,7 +1,0 @@
-"""Adaptive-compute denoise: the loop owns cache-dit skip + early-exit."""
-from __future__ import annotations
-
-from v2.recipes.adaptive.card import build_adaptive_card
-from v2.recipes.adaptive.loop import CacheDiTDenoiseLoop
-
-__all__ = ["build_adaptive_card", "CacheDiTDenoiseLoop"]
