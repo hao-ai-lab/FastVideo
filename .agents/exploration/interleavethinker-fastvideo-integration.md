@@ -2997,8 +2997,7 @@ Next recommended integration step:
 
 ## Stage 12 Execution: Trace Evaluation Reports
 
-Status: implemented locally, pending commit/push and pushed-branch Modal
-validation.
+Status: completed and pushed.
 
 Goal:
 
@@ -3046,3 +3045,32 @@ Validation so far:
 - Local mypy still fails for the known hyphenated worktree path issue:
   `fastvideo-interleavethinker is not a valid Python package name`.
   Modal mypy remains the authoritative type gate.
+- Commit completed:
+  - `47335f09` — `[feat] add InterleaveThinker trace evaluation`
+  - Pushed to `origin/interleavethinker-fastvideo`.
+- Final pushed-branch Modal validation:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-s7ewT9rDZSTdPNhyYrEYO7`
+  - Commit tested: `47335f09ee54ae178a93ea298754a10bffe23d6d`.
+  - Command:
+    `pytest tests/local_tests/test_interleave_run_cli.py
+    tests/local_tests/test_interleave_model_providers.py
+    tests/local_tests/test_interleave_trace_eval.py -q && pre-commit run
+    --files examples/interleave/README.md
+    fastvideo/entrypoints/interleave/__init__.py
+    fastvideo/entrypoints/interleave/trace_eval.py
+    scripts/interleave_thinker/evaluate_traces.py
+    tests/local_tests/test_interleave_trace_eval.py`
+  - Pytest result: `19 passed, 14 warnings in 39.53s`.
+  - Pre-commit result: yapf, ruff, codespell, mypy, filename, and suggestion
+    hooks passed; PyMarkdown/actionlint skipped with no files to check.
+  - Modal result metadata:
+    `local_patch_applied=false`, `install_extra=dev`, `build_kernel=false`.
+
+Next recommended integration step:
+
+- Prepare the review/decomposition package:
+  - concise design doc for public Interleave surfaces;
+  - validation matrix covering service, run CLI, prompt-set eval, trace eval,
+    SFT, critic GRPO, planner GRPO, and real-checkpoint smokes;
+  - PR split recommendation and unresolved risks.
