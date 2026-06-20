@@ -14,12 +14,12 @@ from typing import Any
 
 import numpy as np
 
-from v2._enums import ExecutionProfile
-from v2.extend.base import InterceptorChain, ObserverBus
-from v2.loop.driver import LoopRunner
-from v2.parity.aligner import ParityAligner  # noqa: F401  (engine can attach it as an observer)
-from v2.program.specs import ComponentNode, ModelLoopNode, Program
-from v2.request.artifacts import (
+from v2.core.enums import ExecutionProfile
+from v2.runtime.extend.base import InterceptorChain, ObserverBus
+from v2.core.loop.driver import LoopRunner
+from v2.core.parity.aligner import ParityAligner  # noqa: F401  (engine can attach it as an observer)
+from v2.core.program.specs import ComponentNode, ModelLoopNode, Program
+from v2.core.request.artifacts import (
     AudioArtifact,
     LatentArtifact,
     Output,
@@ -27,8 +27,8 @@ from v2.request.artifacts import (
     TextArtifact,
     VideoArtifact,
 )
-from v2.request.cancel import CancelKind, CancelScope
-from v2.request.streams import Stream
+from v2.core.request.cancel import CancelKind, CancelScope
+from v2.core.request.streams import Stream
 from v2.runtime.context import RuntimeLoopContext
 from v2.runtime.scheduler import (
     AdmissionController,

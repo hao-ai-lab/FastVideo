@@ -14,7 +14,7 @@ import sys
 
 import pytest
 
-from v2.card import load_card
+from v2.core.card import load_card
 from v2.recipes.wan21 import build_wan21_card
 from v2.platform import (
     COMPONENTS,

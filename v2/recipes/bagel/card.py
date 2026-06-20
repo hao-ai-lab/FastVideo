@@ -10,8 +10,8 @@ is a WorkUnit the scheduler can interleave and price.
 """
 from __future__ import annotations
 
-from v2._enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
-from v2.card import (
+from v2.core.enums import Capability, ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.core.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
@@ -22,8 +22,8 @@ from v2.card import (
     PrecisionContract,
     RecipeSpec,
 )
-from v2.loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
-from v2.parallel import ParallelPlan
+from v2.core.loop.policies import ClassicCFG, FlowShiftPolicy, NoRouting, PrecisionPolicy
+from v2.core.parallel import ParallelPlan
 from v2.platform.backends.toy import ToyMoTDiT, ToyTokenizer, ToyVAE, _seed_from
 from v2.recipes.omni import ARDecodeLoop
 from v2.recipes.wan21.loop import WanDenoiseLoop

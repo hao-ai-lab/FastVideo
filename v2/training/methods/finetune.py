@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2._enums import ConsistencyLevel
+from v2.core.enums import ConsistencyLevel
 from v2.platform.backends.toy import LATENT_CHANNELS
 from v2.recipes.common import cached_text_encode
 from v2.training.methods.base import TrainingMethod, new_instance

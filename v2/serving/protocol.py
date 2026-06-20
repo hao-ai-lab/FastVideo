@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from v2.request import DiffusionParams, OutputSpec, SamplingParams, TaskType, make_request
+from v2.core.request import DiffusionParams, OutputSpec, SamplingParams, TaskType, make_request
 
 
 def _wh(size: str, default=(832, 480)) -> tuple[int, int]:

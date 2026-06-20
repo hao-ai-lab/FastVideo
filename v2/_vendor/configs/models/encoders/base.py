@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: Apache-2.0
+from dataclasses import dataclass, field
+from typing import Any
+
+import torch
+
+from v2._vendor.configs.models.base import ArchConfig, ModelConfig
+from v2._vendor.layers.quantization import QuantizationConfig
+from v2._vendor.platforms import AttentionBackendEnum
+
+
+@dataclass
+class EncoderArchConfig(ArchConfig):
+    architectures: list[str] = field(default_factory=lambda: [])
+    _supported_attention_backends: tuple[AttentionBackendEnum,
+                                         ...] = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
+    output_hidden_states: bool = False
+    use_return_dict: bool = True
+
+
+@dataclass
+class TextEncoderArchConfig(EncoderArchConfig):
+    vocab_size: int = 0
+    hidden_size: int = 0
+    num_hidden_layers: int = 0
+    num_attention_heads: int = 0
+    pad_token_id: int = 0
+    eos_token_id: int = 0
+    text_len: int = 0
+    hidden_state_skip_layer: int = 0
+    decoder_start_token_id: int = 0
+    output_past: bool = True
+    scalable_attention: bool = True
+    tie_word_embeddings: bool = False
+    stacked_params_mapping: list[tuple[str, str, str]] = field(
+        default_factory=list)  # mapping from huggingface weight names to custom names
+    tokenizer_kwargs: dict[str, Any] = field(default_factory=dict)
+    _fsdp_shard_conditions: list = field(default_factory=lambda: [])
+    # When True, the tokenizer loader prefers AutoProcessor over AutoTokenizer
+    # for encoders whose tokenizer dir ships a processor_config.json (e.g. Flux2
+    # full's Mistral3 multimodal processor). Default False keeps every existing
+    # encoder on the historical AutoTokenizer path.
+    require_processor: bool = False
+
+    def __post_init__(self) -> None:
+        self.tokenizer_kwargs = {
+            "truncation": True,
+            "max_length": self.text_len,
+            "return_tensors": "pt",
+        }
+
+
+@dataclass
+class ImageEncoderArchConfig(EncoderArchConfig):
+    pass
+
+
+@dataclass
+class BaseEncoderOutput:
+    last_hidden_state: torch.FloatTensor | None = None
+    pooler_output: torch.FloatTensor | None = None
+    hidden_states: tuple[torch.FloatTensor, ...] | None = None
+    attentions: tuple[torch.FloatTensor, ...] | None = None
+    attention_mask: torch.Tensor | None = None
+
+
+@dataclass
+class EncoderConfig(ModelConfig):
+    arch_config: ArchConfig = field(default_factory=EncoderArchConfig)
+
+    prefix: str = ""
+    quant_config: QuantizationConfig | None = None
+    lora_config: Any | None = None
+
+
+@dataclass
+class TextEncoderConfig(EncoderConfig):
+    arch_config: ArchConfig = field(default_factory=TextEncoderArchConfig)
+    is_chat_model: bool = False
+    treat_empty_as_dot: bool = False
+
+
+@dataclass
+class ImageEncoderConfig(EncoderConfig):
+    arch_config: ArchConfig = field(default_factory=ImageEncoderArchConfig)

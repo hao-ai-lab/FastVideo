@@ -11,8 +11,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from v2.loop.contracts import WorkPlan
-from v2.memory.allocator import MemoryManager, Reservation
+from v2.core.loop.contracts import WorkPlan
+from v2.runtime.memory.allocator import MemoryManager, Reservation
 
 
 class AdmissionInfeasible(RuntimeError):

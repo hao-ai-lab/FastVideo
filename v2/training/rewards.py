@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from v2.cache.keys import content_hash
+from v2.runtime.cache.keys import content_hash
 
 # RewardScorer: (list of media arrays, list of prompts) -> per-sample scores
 RewardScorer = Callable[[list, list], np.ndarray]
@@ -65,8 +65,8 @@ class ServedRewardScorer:
         self.loop_id = loop_id
 
     def score(self, media: list, prompts: list | None = None) -> dict[str, np.ndarray]:
-        from v2._enums import ExecutionProfile
-        from v2.request import TaskType, make_request
+        from v2.core.enums import ExecutionProfile
+        from v2.core.request import TaskType, make_request
         from v2.training.rollout import rollout_loop
         req = make_request(TaskType.REASON, self.inst.card.model_id, "")  # task is cosmetic here
         res = rollout_loop(self.inst, self.loop_id, req, slots={"media": list(media)}, profile=ExecutionProfile.SERVE)

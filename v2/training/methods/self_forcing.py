@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2._enums import ConsistencyLevel
-from v2.request import DiffusionParams, TaskType, make_request
+from v2.core.enums import ConsistencyLevel
+from v2.core.request import DiffusionParams, TaskType, make_request
 from v2.training.methods.base import new_instance
 from v2.training.methods.dmd2 import DMD2Method
 

@@ -4,14 +4,14 @@ and per CFG branch.
 """
 from __future__ import annotations
 
-from v2.extend import (
+from v2.runtime.extend import (
     InterceptorChain,
     InterceptorConflict,
     NaNWatch,
     ResidualSkipInterceptor,
 )
 from v2.recipes import build_default_engine
-from v2.request import DiffusionParams, TaskType, make_request
+from v2.core.request import DiffusionParams, TaskType, make_request
 from v2.runtime import Engine
 
 

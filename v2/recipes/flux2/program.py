@@ -9,7 +9,7 @@ the VAE unpacks + decodes to pixels).
 """
 from __future__ import annotations
 
-from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.core.program import ComponentNode, ModelLoopNode, Program, ProgramKind
 from v2.recipes.common import cached_text_encode
 
 

@@ -3,17 +3,17 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2._enums import ConsistencyLevel, LoopKind, WorkUnitKind
-from v2.card import (
+from v2.core.enums import ConsistencyLevel, LoopKind, WorkUnitKind
+from v2.core.card import (
     CardValidationError,
     LoopSpec,
     ModelCard,
     RecipeSpec,
 )
-from v2.cache.keys import CacheKey, content_hash
+from v2.runtime.cache.keys import CacheKey, content_hash
 from v2.recipes.wan21 import build_wan21_card
 from v2.recipes.wan_causal import build_wan_causal_card
-from v2.parallel import ParallelPlan, ParallelValidationError, validate_plan
+from v2.core.parallel import ParallelPlan, ParallelValidationError, validate_plan
 
 
 def test_wan_card_validates():

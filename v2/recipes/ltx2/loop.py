@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2._enums import ExecutionProfile, WorkUnitKind
-from v2.loop.contracts import (
+from v2.core.enums import ExecutionProfile, WorkUnitKind
+from v2.core.loop.contracts import (
     Done,
     LoopResult,
     LoopState,

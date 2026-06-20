@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2._enums import ConsistencyLevel
+from v2.core.enums import ConsistencyLevel
 from v2.recipes.common import cached_text_encode
-from v2.request import DiffusionParams, TaskType, make_request
+from v2.core.request import DiffusionParams, TaskType, make_request
 from v2.training.methods.base import TrainingMethod, new_instance, predict_x0
 
 

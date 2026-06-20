@@ -19,7 +19,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
-from v2.models import build_flux_t2i_card, build_wan_i2v_card
+from v2._vendor.models import build_flux_t2i_card, build_wan_i2v_card
 from v2.training.methods import build_workflow_rl
 
 

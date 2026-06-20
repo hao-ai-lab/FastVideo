@@ -10,7 +10,7 @@ from typing import Any
 
 from v2.recipes import build_default_engine, build_omni_engine
 from v2.recipes.wan21 import build_wan21_card
-from v2.request import DiffusionParams, OutputSpec, Request, SamplingParams, TaskType, make_request
+from v2.core.request import DiffusionParams, OutputSpec, Request, SamplingParams, TaskType, make_request
 from v2.training import build_diffusion_nft
 
 
@@ -77,7 +77,7 @@ def example_g_omni_mot() -> None:
 async def _serving_demo() -> None:
     import asyncio
 
-    from v2.deploy import DynamoWorkerAdapter, FakeDynamoRuntime, LocalFleet, build_deployment_card
+    from v2.serving.deploy import DynamoWorkerAdapter, FakeDynamoRuntime, LocalFleet, build_deployment_card
     from v2.recipes.wan21 import build_wan21_card, build_wan_t2v_program
     from v2.runtime import AsyncEngine, PoolSet, wan_t2v_disaggregated
     from v2.serving import OmniOpenAIServer

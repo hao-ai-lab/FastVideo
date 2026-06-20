@@ -180,7 +180,7 @@ class MatrixGame2CausalDiT(TorchComponent):
         # producing fp32 activations fed back into bf16 linears; fastvideo's stage wraps the whole forward in
         # ``torch.autocast(bf16)`` so those linears cast their inputs. Mirror that here (skip when the module
         # itself is fp32). Faithful to ``MatrixGame2CausalDenoisingStage._process_single_block``.
-        from v2.forward_context import set_forward_context
+        from v2._vendor.forward_context import set_forward_context
         autocast_enabled = self.dtype != torch.float32
         with torch.autocast(device_type="cuda", dtype=self.dtype, enabled=autocast_enabled), \
                 set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=_CondBatch(cond_lat)):

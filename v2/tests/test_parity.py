@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.parity import ConsistencyLevel, ParityAligner, array_diff, bit_identical, within
+from v2.core.parity import ConsistencyLevel, ParityAligner, array_diff, bit_identical, within
 
 
 def test_aligner_no_divergence_on_identical_runs():

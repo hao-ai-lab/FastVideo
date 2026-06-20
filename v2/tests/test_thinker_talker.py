@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2._enums import LoopKind, WorkUnitKind
-from v2.card import load_card
-from v2.cache import CacheManager
+from v2.core.enums import LoopKind, WorkUnitKind
+from v2.core.card import load_card
+from v2.runtime.cache import CacheManager
 from v2.recipes import build_qwen_omni_card, build_qwen_omni_program
 from v2.recipes.qwen_omni.program import thinker_to_talker_node
-from v2.request import OutputSpec, TaskType, make_request
+from v2.core.request import OutputSpec, TaskType, make_request
 from v2.runtime import Engine
 
 

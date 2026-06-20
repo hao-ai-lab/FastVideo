@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.cache import CacheManager
-from v2.card import load_card
+from v2.runtime.cache import CacheManager
+from v2.core.card import load_card
 from v2.recipes.ltx2 import build_ltx2_av_program, build_ltx2_card
-from v2.request import DiffusionParams, OutputSpec, TaskType, make_request
+from v2.core.request import DiffusionParams, OutputSpec, TaskType, make_request
 from v2.runtime import Engine
 
 AV = frozenset({"video", "audio"})

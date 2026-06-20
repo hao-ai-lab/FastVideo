@@ -12,10 +12,10 @@ from __future__ import annotations
 import pytest
 
 from v2 import registry
-from v2._enums import Capability
-from v2.cache import CacheManager
-from v2.card import load_card
-from v2.request import DiffusionParams, TaskType, make_request
+from v2.core.enums import Capability
+from v2.runtime.cache import CacheManager
+from v2.core.card import load_card
+from v2.core.request import DiffusionParams, TaskType, make_request
 from v2.runtime import Engine
 
 # A generation capability -> the request task that drives it (first match wins, in this priority order).

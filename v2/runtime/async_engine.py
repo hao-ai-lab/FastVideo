@@ -16,9 +16,9 @@ import contextlib
 from typing import Any
 from collections.abc import AsyncIterator
 
-from v2.request.artifacts import Output
-from v2.request.cancel import Cancelled
-from v2.request.streams import OmniEvent
+from v2.core.request.artifacts import Output
+from v2.core.request.cancel import Cancelled
+from v2.core.request.streams import OmniEvent
 from v2.runtime.disaggregated import DisaggregatedRunner
 from v2.runtime.engine import Engine
 

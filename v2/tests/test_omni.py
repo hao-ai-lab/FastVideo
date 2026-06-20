@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2._enums import WorkUnitKind
+from v2.core.enums import WorkUnitKind
 from v2.recipes import build_omni_engine
 from v2.recipes.cosmos3 import build_cosmos3_card
-from v2.request import DiffusionParams, SamplingParams, TaskType, make_request
+from v2.core.request import DiffusionParams, SamplingParams, TaskType, make_request
 
 
 def _eng():

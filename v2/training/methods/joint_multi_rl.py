@@ -19,11 +19,11 @@ from typing import Any
 
 import numpy as np
 
-from v2._enums import ConsistencyLevel, ExecutionProfile
-from v2.loop.sampler import flow_sde_ml_velocity as _ml_velocity
+from v2.core.enums import ConsistencyLevel, ExecutionProfile
+from v2.core.loop.sampler import flow_sde_ml_velocity as _ml_velocity
 from v2.recipes.common import cached_text_encode
 from v2.platform import FLOW_SDE_STEP
-from v2.request import DiffusionParams, TaskType, make_request
+from v2.core.request import DiffusionParams, TaskType, make_request
 from v2.training.rollout import rollout_loop
 from v2.training.weight_sync import WeightRole, WeightSyncPlan
 from v2.training.methods.base import TrainingMethod, new_instance

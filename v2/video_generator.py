@@ -62,7 +62,7 @@ class VideoGenerator:
         (``num_gpus`` / ``use_fsdp_inference`` / ``*_cpu_offload`` / ``pin_cpu_memory`` / ``VSA_sparsity``
         / ...). The v2 bring-up runs single-GPU, resident, on SDPA, so these are accepted for parity but
         not all applied."""
-        from v2.api import EngineConfig, GeneratorConfig, OffloadConfig
+        from v2._vendor.api import EngineConfig, GeneratorConfig, OffloadConfig
         engine = EngineConfig(num_gpus=int(kwargs.get("num_gpus", 1)),
                               use_fsdp_inference=bool(kwargs.get("use_fsdp_inference", False)),
                               offload=OffloadConfig(text_encoder=bool(kwargs.get("text_encoder_cpu_offload", False)),
@@ -106,9 +106,9 @@ class VideoGenerator:
         from v2.recipes.wan21 import stamp_wan21_checkpoints  # transformer/vae/text_encoder subfolder layout
         stamp_wan21_checkpoints(card, root)
 
-        from v2._enums import Capability
-        from v2.card import load_card
-        from v2.cache import CacheManager
+        from v2.core.enums import Capability
+        from v2.core.card import load_card
+        from v2.runtime.cache import CacheManager
         from v2.runtime import Engine
         inst = load_card(card, cache_manager=CacheManager.from_card(card))  # platform auto-detect -> cuda
         eng = Engine()
@@ -130,7 +130,7 @@ class VideoGenerator:
         ``want_audio``: ``None`` (default) auto-enables sound for an A/V model (LTX-2.3 → T2VS, both
         video+audio in one joint pass); ``True``/``False`` force it on/off. For a video-only model the
         auto resolves to video-only (T2V), unchanged."""
-        from v2.request import DiffusionParams, OutputSpec, TaskType, make_request
+        from v2.core.request import DiffusionParams, OutputSpec, TaskType, make_request
         s = request.sampling
         prompts = request.prompt if isinstance(request.prompt, list) else [request.prompt]
         audio = self._supports_av if want_audio is None else bool(want_audio)
@@ -164,7 +164,7 @@ class VideoGenerator:
         guidance_scale / fps / sigmas / negative_prompt / output_path / output_video_name /
         save_video / return_frames / audio (None=auto for an A/V model, True/False to force; the audio
         is saved as a sibling ``.wav`` next to the mp4)."""
-        from v2.api import GenerationRequest, OutputConfig, SamplingConfig
+        from v2._vendor.api import GenerationRequest, OutputConfig, SamplingConfig
         audio = kwargs.pop("audio", None)  # None -> auto (by model capability), True/False -> force
         sp = sampling_param
         # Per-model defaults (LTX-2 wants 8/30 steps + its own res, Wan2.2-TI2V 704x1280@24fps, etc.) come
@@ -195,7 +195,7 @@ class VideoGenerator:
     # --------------------------------------------------------------------- #
     def _result(self, out: Any, output: Any, fps: int, idx: int) -> Any:
         import numpy as np
-        from v2.api import GenerationResult
+        from v2._vendor.api import GenerationResult
         arts = out.artifacts
         save = bool(getattr(output, "save_video", True))
         out_dir = getattr(output, "output_path", "outputs/")

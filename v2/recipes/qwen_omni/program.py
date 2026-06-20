@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.core.program import ComponentNode, ModelLoopNode, Program, ProgramKind
 from v2.recipes.omni import emit_text_node, tokenize_node
 
 

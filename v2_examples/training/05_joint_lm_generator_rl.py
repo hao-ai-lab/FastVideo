@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from v2.models.unified import build_unified_card
+from v2._vendor.models.unified import build_unified_card
 from v2.training.methods import build_unified_rl
 
 TARGET = 3

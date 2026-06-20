@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.cache import CacheKey, CacheManager, CachePolicy
-from v2.cache.classes import FeatureCache, Slab, SlabKVCache
+from v2.runtime.cache import CacheKey, CacheManager, CachePolicy
+from v2.runtime.cache.classes import FeatureCache, Slab, SlabKVCache
 from v2.recipes.wan_causal import build_wan_causal_card
 
 

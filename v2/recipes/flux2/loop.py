@@ -29,8 +29,8 @@ from typing import Any
 
 import numpy as np
 
-from v2._enums import ExecutionProfile, WorkUnitKind
-from v2.loop.contracts import (
+from v2.core.enums import ExecutionProfile, WorkUnitKind
+from v2.core.loop.contracts import (
     Done,
     LoopResult,
     LoopState,
@@ -155,7 +155,7 @@ class Flux2DenoiseLoop:
                               peak_activation_bytes=int(x.nbytes))
         emits = []
         if st.scratch.get("stream_image"):
-            from v2.request.streams import StreamChunk
+            from v2.core.request.streams import StreamChunk
             emits.append(StreamChunk(stream_id=st.request_id, modality="image", seq=i, data=x, preview=True))
         return WorkPlan(loop_id=self.loop_id,
                         instance_id=st.instance_id,

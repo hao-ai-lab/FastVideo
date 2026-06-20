@@ -51,8 +51,8 @@ _OMNI_BUILDERS = [
 
 def build_default_engine(engine: Any = None) -> Any:
     """Register Wan2.1, LTX2.3, and Wan-causal onto one engine (one resident instance each)."""
-    from v2.cache import CacheManager
-    from v2.card import load_card
+    from v2.runtime.cache import CacheManager
+    from v2.core.card import load_card
     from v2.runtime import Engine
     eng = engine if engine is not None else Engine()
     for build_card, build_program in _BUILDERS:
@@ -68,8 +68,8 @@ def build_omni_engine(engine: Any = None) -> Any:
     Each MoT card is ONE resident instance whose ``transformer`` runs BOTH an ar_decode loop and a
     diffusion_denoise loop (shared weights) — true omni/MoT serving.
     """
-    from v2.cache import CacheManager
-    from v2.card import load_card
+    from v2.runtime.cache import CacheManager
+    from v2.core.card import load_card
     from v2.runtime import Engine
     eng = engine if engine is not None else Engine()
     for build_card, build_program in _OMNI_BUILDERS:

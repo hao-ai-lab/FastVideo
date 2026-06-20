@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.loop.contracts import StepContext
-from v2.loop.policies import (
+from v2.core.loop.contracts import StepContext
+from v2.core.loop.policies import (
     AdaptiveGateCFG,
     BoundaryTimestepRouting,
     ClassicCFG,

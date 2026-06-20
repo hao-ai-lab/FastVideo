@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.core.program import ComponentNode, ModelLoopNode, Program, ProgramKind
 from v2.recipes.common import text_encode_node_fn as _text_encode
 from v2.recipes.ltx2.loop import REFINE_SIGMAS
 

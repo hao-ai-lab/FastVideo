@@ -7,7 +7,7 @@ from v2.recipes import build_default_engine
 from v2.recipes.ltx2 import BASE_SIGMAS, REFINE_SIGMAS, build_ltx2_card
 from v2.recipes.wan21 import build_wan21_card
 from v2.recipes.wan_causal import build_wan_causal_card
-from v2.request import DiffusionParams, OutputSpec, TaskType, make_request
+from v2.core.request import DiffusionParams, OutputSpec, TaskType, make_request
 
 
 def _eng():

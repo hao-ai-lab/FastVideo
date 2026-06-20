@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from v2.program import ComponentNode, ModelLoopNode, Program, ProgramKind
+from v2.core.program import ComponentNode, ModelLoopNode, Program, ProgramKind
 
 # Wan2.1 VAE compression (z=16, 8x spatial, 4x temporal). The DiT's i2v cond_concat is 20ch:
 # 4 mask channels + 16 VAE-latent channels (faithful to MatrixGame2ImageVAEEncodingStage).

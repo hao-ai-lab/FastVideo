@@ -102,7 +102,7 @@ register_kernel(FLOW_MATCH_STEP,
 # reuses the numpy reference, so the accel SDE path is the same function as cpu (the SDE parity test
 # therefore checks dispatch-path equivalence, not an independent impl; the ODE op above is the real
 # independent oracle). A device that DID specialize SDE would be checked the same way the ODE op is.
-from v2.loop.sampler import flow_sde_step_with_logprob  # noqa: E402
+from v2.core.loop.sampler import flow_sde_step_with_logprob  # noqa: E402
 
 register_kernel(FLOW_SDE_STEP,
                 flow_sde_step_with_logprob,
