@@ -29,26 +29,6 @@ def x0_from_velocity(x_t: np.ndarray, velocity: np.ndarray, sigma_t: float) -> n
     return x_t - sigma_t * velocity
 
 
-def build_karras_sigmas(num_steps: int,
-                        sigma_max: float = 80.0,
-                        sigma_min: float = 0.002,
-                        rho: float = 7.0) -> np.ndarray:
-    """Karras et al. (2022) ρ-interpolated σ schedule + the terminal σ, as Cosmos/EDM models use it.
-
-    Reproduces ``FlowMatchEulerDiscreteScheduler(use_karras_sigmas=True)`` the Cosmos pipeline configures
-    (``sigma_max=80, sigma_min=0.002, rho=7``): a length-``num_steps`` ramp ``σ_max→σ_min`` via
-    ``σ_i = (max_inv_rho + i/(n-1)·(min_inv_rho-max_inv_rho))^ρ``, then ONE appended terminal value. The
-    scheduler appends ``0.0`` and, with ``final_sigmas_type='sigma_min'``, the Cosmos stage overwrites it
-    with ``σ[-2]`` to avoid a divide-by-zero in the EDM coeffs / velocity — so the terminal here is
-    ``σ_min`` (the last ramp value), giving ``num_steps+1`` points the EDM loop integrates pairwise.
-    """
-    ramp = np.linspace(0.0, 1.0, num_steps, dtype=np.float64)
-    min_inv_rho = sigma_min**(1.0 / rho)
-    max_inv_rho = sigma_max**(1.0 / rho)
-    sigmas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho))**rho  # σ_max -> σ_min
-    return np.concatenate([sigmas, sigmas[-1:]]).astype(np.float64)  # + sigma_min terminal clamp
-
-
 def flow_match_euler_step(x_t: np.ndarray, velocity: np.ndarray, sigma_t: float, sigma_next: float) -> np.ndarray:
     """One deterministic Euler step along the flow ODE."""
     return x_t + (sigma_next - sigma_t) * velocity
