@@ -24,6 +24,12 @@ STAGE_METRIC_MAP: dict[str, str] = {
 }
 
 _CUDART: ctypes.CDLL | None = None
+_CUDART_LIBRARY_NAMES: tuple[str, ...] = (
+    "libcudart.so",
+    "libcudart.so.13",
+    "libcudart.so.12",
+    "libcudart.so.11.0",
+)
 
 
 def _load_cudart() -> ctypes.CDLL:
@@ -32,7 +38,7 @@ def _load_cudart() -> ctypes.CDLL:
         return _CUDART
 
     errors: list[str] = []
-    for name in ("libcudart.so", "libcudart.so.12", "libcudart.so.11.0"):
+    for name in _CUDART_LIBRARY_NAMES:
         try:
             lib = ctypes.CDLL(name)
         except OSError as exc:
@@ -61,11 +67,13 @@ def _cuda_profiler_stop() -> None:
 def _make_worker_cuda_profiler_start_payload() -> bytes:
     import cloudpickle
 
+    library_names = _CUDART_LIBRARY_NAMES
+
     def worker_cuda_profiler_start(worker_wrapper: Any) -> dict[str, Any]:
         import ctypes
         import os
 
-        for name in ("libcudart.so", "libcudart.so.12", "libcudart.so.11.0"):
+        for name in library_names:
             try:
                 lib = ctypes.CDLL(name)
                 break
@@ -89,13 +97,15 @@ def _make_worker_cuda_profiler_start_payload() -> bytes:
 def _make_worker_cuda_profiler_stop_payload() -> bytes:
     import cloudpickle
 
+    library_names = _CUDART_LIBRARY_NAMES
+
     def worker_cuda_profiler_stop(worker_wrapper: Any) -> dict[str, Any]:
         import ctypes
         import os
         import torch
 
         torch.cuda.synchronize()
-        for name in ("libcudart.so", "libcudart.so.12", "libcudart.so.11.0"):
+        for name in library_names:
             try:
                 lib = ctypes.CDLL(name)
                 break
@@ -210,6 +220,20 @@ def _write_summary(path: Path, summary: dict[str, Any]) -> None:
         f.write("\n")
 
 
+def _collect_torch_runtime_info(torch_module: Any, num_devices: int) -> dict[str, Any]:
+    return {
+        "torch_version": torch_module.__version__,
+        "torch_cuda_version": torch_module.version.cuda,
+        "cuda_device_count": torch_module.cuda.device_count(),
+        "cuda_arch_list": torch_module.cuda.get_arch_list(),
+        "device_capabilities": [
+            list(torch_module.cuda.get_device_capability(i))
+            for i in range(num_devices)
+        ],
+        "fastvideo_attention_backend": os.environ.get("FASTVIDEO_ATTENTION_BACKEND"),
+    }
+
+
 def run_profile(args: argparse.Namespace) -> None:
     global logger
 
@@ -263,6 +287,7 @@ def run_profile(args: argparse.Namespace) -> None:
         _shutdown_executor(generator)
 
     device_names = [torch.cuda.get_device_name(i) for i in range(required_gpus)]
+    runtime_info = _collect_torch_runtime_info(torch, required_gpus)
     throughput_fps = None
     num_frames = generation_kwargs.get("num_frames")
     if isinstance(num_frames, (int, float)) and elapsed > 0:
@@ -275,8 +300,13 @@ def run_profile(args: argparse.Namespace) -> None:
         "config_path": str(args.config),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "device_names": device_names,
+        "device_capabilities": runtime_info["device_capabilities"],
         "available_gpus": available_gpus,
         "required_gpus": required_gpus,
+        "torch_version": runtime_info["torch_version"],
+        "torch_cuda_version": runtime_info["torch_cuda_version"],
+        "cuda_arch_list": runtime_info["cuda_arch_list"],
+        "fastvideo_attention_backend": runtime_info["fastvideo_attention_backend"],
         "num_warmup_runs": num_warmup,
         "num_profiled_runs": 1,
         "profiled_generation_time_s": round(elapsed, 3),
