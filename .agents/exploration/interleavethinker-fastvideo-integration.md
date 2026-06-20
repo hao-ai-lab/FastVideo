@@ -2868,3 +2868,82 @@ Conclusion:
   planner-generator-critic training/evaluation workflow that wires the planner
   provider, FastVideo generation service, critic provider, and trace/reward
   logging into a single reproducible command or config.
+
+## Stage 11 Execution: Prompt-Set Evaluation Workflow
+
+Status: implemented locally, pending commit/push and pushed-branch Modal
+validation.
+
+Goal:
+
+- Add a first-class end-to-end evaluation workflow that runs the existing
+  planner -> generator -> critic orchestration over a prompt set, writes one
+  trace per prompt, and records aggregate success/attempt metrics.
+- Keep the workflow provider/back-end driven so it can use fake providers in
+  tests, a local FastVideo generator, Nano Banana, or real InterleaveThinker
+  planner/critic models through config.
+
+Implemented changes:
+
+- Added `fastvideo/entrypoints/interleave/evaluation.py`.
+  - Loads prompt sets from JSONL, JSON, or plain text.
+  - Supports rows with `id`, `prompt` / `instruction`, optional
+    `initial_image_path`, and arbitrary metadata.
+  - Reuses planner, image backend, and critic instances across prompt rows.
+  - Writes per-sample `trace.json` files under sanitized sample directories.
+  - Writes aggregate `summary.json` with sample count, success count, success
+    rate, total attempts, average attempts, resumed count, and per-sample
+    trace paths.
+  - `resume=true` skips existing traces; if all rows are already complete it
+    summarizes without loading heavy backends.
+- Added `fastvideo/entrypoints/cli/interleave_eval.py` and registered
+  `fastvideo interleave-eval`.
+  - CLI shape:
+    `fastvideo interleave-eval --config <interleave_run.yaml> --prompts
+    <prompts.jsonl> --output-dir <dir> [--limit N] [--resume]`.
+  - Uses `load_interleave_run_config(..., require_instruction=false)` so the
+    base config does not need a single prompt when a prompt set supplies rows.
+- Extended `fastvideo/entrypoints/interleave/config.py` with an optional
+  `require_instruction` validation flag. Existing `interleave-run` behavior
+  remains strict by default.
+- Exported prompt-set dataclasses and helpers from
+  `fastvideo.entrypoints.interleave`.
+- Added `examples/interleave/eval_prompts.jsonl` and README docs for
+  prompt-set evaluation.
+- Extended `tests/local_tests/test_interleave_run_cli.py` for:
+  - promptless base config loading for eval;
+  - `interleave-eval` CLI dotted override deferral;
+  - JSONL prompt-set loading;
+  - summary/trace writing with an injected fake image backend;
+  - resume behavior.
+
+Validation so far:
+
+- Local `python -m py_compile` passed for changed Python files.
+- Local `git diff --check` passed.
+- Local `pytest` is unavailable (`pytest: command not found` /
+  `No module named pytest`) and this task should validate on Modal anyway.
+- Local import smoke is unavailable because local deps are not installed
+  (`No module named torch` on FastVideo import).
+- Local pre-commit with `PRE_COMMIT_HOME=/tmp/fastvideo-pre-commit-cache`
+  passed yapf, ruff, codespell, filename, and suggestion hooks.
+- Local mypy still fails for the known hyphenated worktree path issue:
+  `fastvideo-interleavethinker is not a valid Python package name`.
+  Modal mypy remains the authoritative type gate.
+- First Modal validation attempt with `--apply-local-patch` was blocked by the
+  approval reviewer because it would upload uncommitted patch contents to
+  Modal. Next validation should commit and push this slice first, then run the
+  same Modal tests against the pushed branch without `--apply-local-patch`.
+
+Planned pushed-branch Modal validation:
+
+- `pytest tests/local_tests/test_interleave_run_cli.py
+  tests/local_tests/test_interleave_model_providers.py -q`
+- `pre-commit run --files examples/interleave/README.md
+  examples/interleave/eval_prompts.jsonl
+  fastvideo/entrypoints/cli/interleave_eval.py
+  fastvideo/entrypoints/cli/main.py
+  fastvideo/entrypoints/interleave/__init__.py
+  fastvideo/entrypoints/interleave/config.py
+  fastvideo/entrypoints/interleave/evaluation.py
+  tests/local_tests/test_interleave_run_cli.py`

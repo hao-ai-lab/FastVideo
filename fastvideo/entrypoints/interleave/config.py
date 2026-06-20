@@ -110,6 +110,7 @@ def load_interleave_run_config(
     input_image: str | None = None,
     output_dir: str | None = None,
     trace_path: str | None = None,
+    require_instruction: bool = True,
 ) -> InterleaveRunConfig:
     raw = load_raw_config(path)
     raw = _apply_interleave_cli_fields(
@@ -125,7 +126,10 @@ def load_interleave_run_config(
         config.request,
         raw.get("request") if isinstance(raw.get("request"), Mapping) else {},
     )
-    validate_interleave_run_config(config)
+    validate_interleave_run_config(
+        config,
+        require_instruction=require_instruction,
+    )
     return config
 
 
@@ -141,8 +145,13 @@ def resolve_interleave_instruction(config: InterleaveRunConfig) -> str:
     raise ValueError("interleave-run requires interleave.instruction or a single request.prompt")
 
 
-def validate_interleave_run_config(config: InterleaveRunConfig) -> None:
-    resolve_interleave_instruction(config)
+def validate_interleave_run_config(
+    config: InterleaveRunConfig,
+    *,
+    require_instruction: bool = True,
+) -> None:
+    if require_instruction:
+        resolve_interleave_instruction(config)
     if config.image_backend.kind == "fastvideo" and config.generator is None:
         raise ValueError("interleave-run with image_backend.kind=fastvideo requires a generator config")
     if config.planner.kind == "interleave_thinker" and config.planner.max_new_tokens is not None:

@@ -6,6 +6,8 @@ This directory contains two InterleaveThinker-oriented entrypoints:
   InterleaveThinker-compatible generator service.
 - `interleave_run.yaml`: run the native planner -> generator -> critic loop
   through `fastvideo interleave-run`.
+- `eval_prompts.jsonl`: tiny prompt-set fixture for
+  `fastvideo interleave-eval`.
 - `interleave_single_prompt.py`: run the native FastVideo interleave
   orchestrator with a fallback single-prompt planner and accept-all critic.
 
@@ -103,6 +105,24 @@ Loading the planner, critic, and image generator in one process can be memory
 intensive. On tighter GPUs, run the `/edit` compatibility service separately or
 load only the planner/critic in the native runner while the generator is served
 out-of-process.
+
+## Prompt-Set Evaluation
+
+Run the same planner -> generator -> critic workflow over a JSONL prompt set:
+
+```bash
+FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
+  fastvideo interleave-eval \
+    --config examples/interleave/interleave_run.yaml \
+    --prompts examples/interleave/eval_prompts.jsonl \
+    --output-dir outputs/interleave_eval
+```
+
+Each prompt row writes `outputs/interleave_eval/<id>/trace.json`; the aggregate
+summary is written to `outputs/interleave_eval/summary.json`. The prompt-set
+loader accepts JSONL rows with `id`, `prompt` or `instruction`, optional
+`initial_image_path`, and arbitrary metadata fields. Use `--resume` to skip
+rows whose trace already exists and `--limit N` for small smoke runs.
 
 ## Nano Banana / Gemini API Backends
 

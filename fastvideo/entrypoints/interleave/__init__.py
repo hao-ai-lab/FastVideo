@@ -10,6 +10,16 @@ from fastvideo.entrypoints.interleave.config import (
     load_interleave_run_config,
     resolve_interleave_instruction,
 )
+from fastvideo.entrypoints.interleave.evaluation import (
+    InterleavePromptItem,
+    InterleavePromptResult,
+    InterleavePromptSetSummary,
+    load_interleave_prompt_set,
+    prompt_set_summary_to_dict,
+    run_interleave_prompt_set,
+    run_interleave_prompt_set_config,
+    save_prompt_set_summary,
+)
 from fastvideo.entrypoints.interleave.generator import (
     FastVideoImageGeneratorBackend,
     ImageGeneratorBackend,
@@ -61,6 +71,9 @@ __all__ = [
     "InterleaveImageBackendConfig",
     "InterleaveOrchestrator",
     "InterleavePlannerConfig",
+    "InterleavePromptItem",
+    "InterleavePromptResult",
+    "InterleavePromptSetSummary",
     "InterleaveRunConfig",
     "InterleaveRunResult",
     "InterleaveRunStateConfig",
@@ -72,9 +85,14 @@ __all__ = [
     "PlannerProvider",
     "SinglePromptPlanner",
     "build_app",
+    "load_interleave_prompt_set",
     "load_interleave_run_config",
+    "prompt_set_summary_to_dict",
     "resolve_interleave_instruction",
+    "run_interleave_prompt_set",
+    "run_interleave_prompt_set_config",
     "run_interleave_config",
+    "save_prompt_set_summary",
     "save_trace",
     "trace_to_dict",
 ]

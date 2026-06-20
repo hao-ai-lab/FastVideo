@@ -11,8 +11,11 @@ from fastvideo.entrypoints.cli.main import cmd_init
 from fastvideo.entrypoints.interleave import (
     GeneratedImage,
     InterleaveEditRequest,
+    InterleavePromptItem,
+    load_interleave_prompt_set,
     load_interleave_run_config,
     resolve_interleave_instruction,
+    run_interleave_prompt_set,
     run_interleave_config,
 )
 from fastvideo.entrypoints.interleave.orchestrator import SinglePromptPlanner
@@ -65,6 +68,18 @@ def test_interleave_run_config_rejects_unknown_override_prefix(tmp_path: Path) -
         )
 
 
+def test_interleave_eval_config_can_omit_single_instruction(tmp_path: Path) -> None:
+    config_path = _write_run_config(tmp_path, include_prompt=False)
+
+    config = load_interleave_run_config(
+        str(config_path),
+        require_instruction=False,
+    )
+
+    with pytest.raises(ValueError, match="requires interleave.instruction"):
+        resolve_interleave_instruction(config)
+
+
 def test_interleave_cli_defers_nested_config_loading(tmp_path: Path) -> None:
     config_path = _write_run_config(tmp_path)
     parser = FlexibleArgumentParser(description="FastVideo CLI")
@@ -85,6 +100,31 @@ def test_interleave_cli_defers_nested_config_loading(tmp_path: Path) -> None:
     assert unknown == ["--request.sampling.width", "256"]
 
 
+def test_interleave_eval_cli_defers_nested_config_loading(tmp_path: Path) -> None:
+    config_path = _write_run_config(tmp_path, include_prompt=False)
+    prompt_path = tmp_path / "prompts.jsonl"
+    prompt_path.write_text('{"id": "mug", "prompt": "draw a mug"}\n', encoding="utf-8")
+    parser = FlexibleArgumentParser(description="FastVideo CLI")
+    subparsers = parser.add_subparsers(required=False, dest="subparser")
+    for cmd in cmd_init():
+        cmd.subparser_init(subparsers).set_defaults(dispatch_function=cmd.cmd)
+
+    args, unknown = parser.parse_known_args([
+        "interleave-eval",
+        "--config",
+        str(config_path),
+        "--prompts",
+        str(prompt_path),
+        "--request.sampling.width",
+        "256",
+    ])
+
+    assert args.subparser == "interleave-eval"
+    assert args.config == str(config_path)
+    assert args.prompts == str(prompt_path)
+    assert unknown == ["--request.sampling.width", "256"]
+
+
 def test_run_interleave_config_with_injected_backend_writes_trace(tmp_path: Path) -> None:
     config_path = _write_run_config(tmp_path)
     config = load_interleave_run_config(str(config_path))
@@ -100,6 +140,85 @@ def test_run_interleave_config_with_injected_backend_writes_trace(tmp_path: Path
     assert "draw a red mug" in trace_text
     assert "image_base64" not in trace_text
     assert backend.requests[0].prompt == "draw a red mug"
+
+
+def test_load_interleave_prompt_set_accepts_jsonl_rows(tmp_path: Path) -> None:
+    prompt_path = tmp_path / "prompts.jsonl"
+    prompt_path.write_text(
+        '{"id": "mug", "prompt": "draw a mug", "metadata": {"split": "smoke"}, "difficulty": "easy"}\n'
+        '"draw a kettle"\n',
+        encoding="utf-8",
+    )
+
+    items = load_interleave_prompt_set(prompt_path)
+
+    assert [item.sample_id for item in items] == ["mug", "sample_00001"]
+    assert items[0].instruction == "draw a mug"
+    assert items[0].metadata == {
+        "split": "smoke",
+        "difficulty": "easy",
+    }
+    assert items[1].instruction == "draw a kettle"
+
+
+def test_run_interleave_prompt_set_writes_traces_and_summary(tmp_path: Path) -> None:
+    config_path = _write_run_config(tmp_path, include_prompt=False)
+    config = load_interleave_run_config(
+        str(config_path),
+        require_instruction=False,
+    )
+    backend = _FakeImageBackend(tmp_path / "generated.png")
+    items = [
+        InterleavePromptItem(sample_id="red/mug", instruction="draw a red mug"),
+        InterleavePromptItem(sample_id="blue mug", instruction="draw a blue mug"),
+    ]
+
+    summary = run_interleave_prompt_set(
+        config,
+        items,
+        output_dir=str(tmp_path / "eval"),
+        image_backend=backend,
+    )
+
+    assert summary.num_samples == 2
+    assert summary.num_success == 2
+    assert summary.success_rate == 1.0
+    assert summary.total_attempts == 2
+    assert [request.prompt for request in backend.requests] == ["draw a red mug", "draw a blue mug"]
+    assert Path(summary.summary_path).exists()
+    assert Path(summary.results[0].trace_path).exists()
+    assert "red_mug" in summary.results[0].trace_path
+    summary_text = Path(summary.summary_path).read_text(encoding="utf-8")
+    assert "draw a blue mug" in summary_text
+
+
+def test_run_interleave_prompt_set_resume_uses_existing_trace(tmp_path: Path) -> None:
+    config_path = _write_run_config(tmp_path, include_prompt=False)
+    config = load_interleave_run_config(
+        str(config_path),
+        require_instruction=False,
+    )
+    item = InterleavePromptItem(sample_id="mug", instruction="draw a mug")
+    backend = _FakeImageBackend(tmp_path / "generated.png")
+    first = run_interleave_prompt_set(
+        config,
+        [item],
+        output_dir=str(tmp_path / "eval"),
+        image_backend=backend,
+    )
+
+    resumed = run_interleave_prompt_set(
+        config,
+        [item],
+        output_dir=str(tmp_path / "eval"),
+        image_backend=_FakeImageBackend(tmp_path / "unused.png"),
+        resume=True,
+    )
+
+    assert first.num_resumed == 0
+    assert resumed.num_resumed == 1
+    assert resumed.results[0].resumed is True
+    assert resumed.results[0].trace_path == first.results[0].trace_path
 
 
 def test_single_prompt_planner_uses_configured_attempt_count() -> None:
@@ -134,9 +253,10 @@ class _FakeImageBackend:
         )
 
 
-def _write_run_config(tmp_path: Path) -> Path:
+def _write_run_config(tmp_path: Path, *, include_prompt: bool = True) -> Path:
     output_path = tmp_path / "generated.png"
     config_path = tmp_path / "interleave_run.yaml"
+    request_prompt = "  prompt: draw a red mug\n" if include_prompt else ""
     config_path.write_text(
         f"""
 generator:
@@ -161,14 +281,13 @@ interleave:
   trace_path: {tmp_path / "trace.json"}
 
 request:
-  prompt: draw a red mug
+{request_prompt}  extensions:
+    test_output_path: {output_path}
   sampling:
     width: 512
     height: 512
     seed: 7
     num_inference_steps: 4
-  extensions:
-    test_output_path: {output_path}
 """,
         encoding="utf-8",
     )
