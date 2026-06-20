@@ -21,8 +21,8 @@ permissions:
 
 jobs:
   # CUDA matrix: Python 3.12 x {CUDA 12.8.0, 12.9.1, 13.0.0}.
-  # 12.8.0 gets the bare `py3.12` tag (and `latest`); other CUDA versions get a
-  # `-cudaX.Y.Z` suffix. flash-attn is the same prebuilt wheel for every cell (it
+  # 12.8.0 gets the `py3.12` tag; 12.9.1/13.0.0 get a `-cudaX.Y.Z` suffix; the
+  # 13.0.0 build is additionally tagged `latest`. flash-attn is the same prebuilt wheel for every cell (it
   # tracks torch 2.12.1+cu130 from pyproject, not the base image's CUDA -- see
   # docker/Dockerfile); the base image only changes the nvcc that compiles
   # fastvideo-kernel.
@@ -43,7 +43,7 @@ jobs:
       python_version: '3.12'
       dockerfile_path: docker/Dockerfile
       tag_suffix: py3.12${{ matrix.cuda.suffix }}
-      mark_as_latest: ${{ matrix.cuda.version == '12.8.0' }}
+      mark_as_latest: ${{ matrix.cuda.version == '13.0.0' }}
       build_args: |
         PYTHON_VERSION=3.12
         CUDA_VERSION=${{ matrix.cuda.version }}
