@@ -1,21 +1,18 @@
 # FastVideo v2 — A Model-Native Runtime for the (Recipe, Runtime) Era
 
-**Status:** source of truth. This README is the single design document for v2 — it supersedes and absorbs
-the four prior design docs (`design.md` v19 strategic proposal, `designv2.md` model-plane thesis,
-`design_v3.md` unconstrained north star, `designv4.md` as-built + joint-RL validation), which have been
-removed. It carries their load-bearing ideas, reflects **what is actually built and running in `v2/`**, and
-states the **forward roadmap** (including the M\* paper comparison — see §18 and
-[`.agents/exploration/mstar-v2-roadmap.md`](../.agents/exploration/mstar-v2-roadmap.md)).
+**Status:** source of truth. This README is the single design document for v2 — **what is actually built and
+running in `v2/`** plus the forward roadmap.
 
 **What v2 is.** A model-native serving **and** training substrate for composite multimodal models — video,
 image, audio, omni/MoT, world models, VLAs — where the atomic unit is a typed **(recipe, runtime) pair**
-owned by a `ModelCard`, every iterative computation is a **driven loop**, and one scheduler runs the *steps*
-of all loops in one currency. The control flow, contracts, scheduling, caching, parity gates, and training
-math are real and CPU-testable (216 tests, 34 files, two runners); the heavy neural forwards run either on a
-numpy **toy backend** (laptop, no GPU) or the real **torch backend** (`platform/backends/torch_backend.py`),
-selected by the `platform/` dispatch substrate with **no change to loops/scheduler/caches/parity/training**.
-As of this writing **20+ real model families are GPU-verified on H100**, and the omni trio
-(BAGEL, Qwen2.5-Omni, Cosmos3) runs real via **vllm-omni** (§17).
+owned by a `ModelCard` and every iterative computation is a **driven loop**. Serving is **pooled
+run-to-completion**: a request takes a pool slot and runs its program (its loops) start-to-finish. The
+control flow, contracts, scheduling, caching, parity gates, and training math are real and CPU-testable; the
+heavy neural forwards run either on a numpy **toy backend** (laptop, no GPU) or the real **torch backend**
+(`platform/backends/torch_backend.py`), selected by the `platform/` dispatch substrate with **no change to
+loops/caches/parity/training**. The model + layer code is **vendored into `v2/` (zero `fastvideo` imports)**.
+The kept model set is 8 families — Wan2.1, Wan-causal (self-forcing), LTX-2, Flux2, MatrixGame2, and the omni
+cards Cosmos3 / BAGEL / Qwen-Omni.
 
 ---
 
@@ -52,9 +49,8 @@ Three facts about video/omni generation dictate the architecture:
   denoiser are the *same resident weights*, driven by an AR loop then a diffusion loop in one request. This
   cannot be a DAG of separate engines (that doubles 30B+ of weights and severs the shared KV/denoise state); it
   must be one resident instance running many loops. The hard part — the differentiation — is making those loops
-  **runtime-visible, step-scheduled, batchable, and cost-priced** (vllm-omni's `bagel_single_stage`/`lance`
-  prove the sharing is *expressible*, but bury it in one opaque `DIFFUSION` stage the scheduler never sees
-  inside).
+  **runtime-visible and step-scheduled** (vllm-omni's `bagel_single_stage`/`lance` prove the sharing is
+  *expressible*, but bury it in one opaque `DIFFUSION` stage the scheduler never sees inside).
 
 **The one invariant, stated once:**
 
@@ -87,9 +83,9 @@ step it needs* (`next` is kernel-free — it returns a typed `WorkPlan` thunk), 
 with whom that step runs* (`await ctx.execute(plan)` — the inversion point: admission, batching, placement,
 streaming, behavior capture), and the model folds the result back (`advance`) and decides what to do next.
 Content-adaptive decisions (cache-dit skips, EOS, VSA tile selection) are ordinary control flow in the model;
-per-request state lives in a typed `LoopState`, **never in module globals**, so interleaving requests through
-one instance cannot smear state — the failure mode that makes naive loop-inversion dangerous is *structurally*
-excluded (and proven by the interleave gate, §9).
+per-request state lives in a typed `LoopState`, **never in module globals**, so concurrent requests sharing
+one resident instance through the pool cannot smear state — the failure mode that makes naive loop-inversion
+dangerous is *structurally* excluded.
 
 ### 2.3 One vocabulary spans every weight-sharing topology
 The Card/Loop/Program split is not specialized to one sharing pattern. The **same primitives** express the
@@ -194,7 +190,7 @@ emitting `plan.emits` as stream chunks. Why this contract is right, against the 
   `StepResult`), so cache-dit's skip, AR's EOS, and VSA's tile selection are ordinary control flow; `next()`
   is still kernel-free (it *describes* work), which is all the scheduler needs.
 - **Cross-request state safety is structural** — all per-request state is in `LoopState`; there are no
-  module-level residual/KV globals, so interleaving cannot smear state (the §9.3 interleave gate proves it).
+  module-level residual/KV globals, so concurrent pooled requests cannot smear state.
 - **Serializable ⇒ resumable/migratable** — a `LoopState` is a resume point (preempt, migrate, crash-recover).
 
 **Policies decompose the step body** (CFG/flow-shift/precision/expert-routing) — composed *into* a loop, not
@@ -218,26 +214,16 @@ with a resource reservation and a loop boundary. Kinds: `AR_TOKEN`, `AR_PREFILL`
 `TRANSFER`, `CACHE_IO`, `GRAPH_CAPTURE` (a 13-kind taxonomy). Tokens are *one kind*, not the scheduler — the
 generalization of vLLM's token scheduler that diffusion forces.
 
-**The budget currency is predicted GPU-time, not counts.** A bidirectional denoise step re-attends the full
-latent at O(L²) with zero KV amortization; an AR decode step is ~O(context) against a cache. Counting "steps"
-or "tokens" puts items three orders of magnitude apart in one bucket. Each WorkUnit converts to GPU-seconds via
-`LoopSpec.step_cost_model`, online-calibrated by the Profiler. **The same cost model is the object published to
-the fleet** (§13) — internal budget and Dynamo routing input are one thing.
+**Serving is pooled run-to-completion.** A request takes a slot in the serving pool (`AsyncEngine`, bounded by
+`max_concurrent`) and runs its program to completion — its loops stepped one unit at a time by a
+`ProgramRunner`. There is **no GPU-time cost model, no cross-request step-interleaving, and no batching**:
+concurrency is the pool size, and the only admission gate is **memory**.
 
-**Admission rule (the soundness condition of multiplexing):** do not admit a waiting WorkUnit unless *every*
-resource it requests can be reserved — compute budget AND memory (resident + worst-case peak) AND cache blocks
-AND transfer bandwidth AND graph-capture shape AND output sinks. Infeasible requests fail fast
-(`AdmissionInfeasible`); budget is refunded on completion. Honesty caveats kept from contact with reality:
-admission uses the *conservative baseline* (cache-dit skips, VSA tiles, AR length are unknowable in advance —
-budgeted at the cap, refunded on early EOS); a denoise step is *indivisible* (mitigated by cost-class pools +
-SP-within-a-node + SLO classes).
-
-**Scheduler in layers** (each testable on a fake pool, no GPU): `RequestScheduler` → `LoopScheduler` →
-`BatchScheduler` (groups compatible WorkPlans by `(instance, loop_kind, shape_sig, precision, parallel_plan,
-graph_key)`) → `PlacementScheduler` → `TransferScheduler` → `AdmissionController`. **SPMD consistency**: rank-0
-decides and broadcasts (the same channel as the abort broadcast — scheduling and failure isolation share one
-mechanism). **Cancellation is common-path** (vibe-directing makes abandoning in-flight work normal): it takes
-effect at the next step boundary, drops queued WorkUnits, releases `LoopState` + cache handles.
+**Admission rule (the soundness condition):** before a loop step runs, reserve its memory — resident (held for
+the whole loop) + worst-case peak activation. An infeasible reservation (need > pool capacity) fails fast
+(`AdmissionInfeasible`); reservations are **refundable** (released on completion), so memory is a concurrency
+gate, not a lifetime cap. **Cancellation is common-path** (abandoning in-flight work is normal): it takes
+effect at the next step boundary, drops the request, and releases `LoopState` + cache handles + the pool slot.
 
 ---
 
@@ -303,14 +289,12 @@ The **C2 split** is load-bearing and the lesson of the landed RL stack: the ship
 likelihood-free (no log-probs; "log-prob identity" is undefined for it), while UniRL is likelihood-based — both
 are demonstrated, on opposite halves of the rung.
 
-**The interleave gate (§9.3) — the bet loop-inversion lives or dies on.** Loop inversion's real hazard is
-cross-request state smearing under interleaving, and a batch-of-1 gate is *structurally blind* to it. So a
-**batch-of-N interleave parity test** is a *required* gate: N concurrent requests interleaved at step
-granularity must be **bit-identical** to the same requests run serially — and it holds across every model, the
-MoT omni cards, the two-loop unified program, the three-loop cascade, and heterogeneous WorkUnit kinds. (A
-buggy module-global interceptor *breaks* the gate; the per-request one passes.) **Three execution profiles, one
-loop definition:** serve (no-grad, graphed, cached), rollout (serve + behavior capture), train (grad,
-checkpointed) — they differ only in grad mode and capture; the ladder measures the gap.
+**Execution-path parity.** Parity is measured, not assumed: the typed consistency ladder (C0–C3) bounds the
+per-tap gap, and `compare_outputs` proves two execution paths agree **bit-for-bit** (e.g. disaggregated
+serving == inline). Per-request state lives only in `LoopState` (never module globals), so it cannot smear
+across requests sharing a pool. **Three execution profiles, one loop definition:** serve (no-grad, graphed,
+cached), rollout (serve + behavior capture), train (grad, checkpointed) — they differ only in grad mode and
+capture; the ladder measures the gap.
 
 ---
 
@@ -366,8 +350,8 @@ only real bug any test surfaced — a no-op generator gradient — was a fix in 
   the serve path is byte-for-byte unchanged.
 - **Qwen-Omni cascade** — three disjoint experts, three loop types (`ar_decode→ar_decode→audio_decode`),
   chained cross-stage conditioning, streaming codec→waveform.
-- **Cross-model Workflow** (T2I→I2V) — composition across *distinct* model instances; each model keeps its own
-  interleave-parity guarantee; a `workflow_id` is a first-class servable in the same namespace as a `model_id`,
+- **Cross-model Workflow** (T2I→I2V) — composition across *distinct* model instances; a `workflow_id` is a
+  first-class servable in the same namespace as a `model_id`,
   registered via `WorkflowRegistry`. Plus **nested workflows** (recursive) and **non-linear shapes** (fan-out,
   best-of-N feedback).
 - **N-way joint RL** — generalizes joint RL to arbitrary N (per-component sync, dict grad-targets); surfaced a
@@ -377,10 +361,8 @@ only real bug any test surfaced — a no-op generator gradient — was a fix in 
   cancellation, no cross-session smearing.
 - **End-to-end RL over a workflow** — one *final-video* reward trains an *earlier* model; proven causal by a
   control (constant reward ⇒ nothing moves).
-- **Heterogeneous WorkUnit co-scheduling** — `VAE_TILE` interleaves bit-identically with `DIFFUSION_STEP`
-  through one budget (the §20 falsifier's *mechanism* half).
 - **Joint A/V** (LTX-2 T2VS, per-modality guidance), **content-adaptive compute** (cache-dit skip + early-exit,
-  ragged step counts that still pass the interleave gate), **hot weight-sync under in-flight serving**
+  ragged step counts), **hot weight-sync under in-flight serving**
   (drain-correct), **served reward model** (`REWARD_BATCH`), **speculative decoding** (exact, lower-latency
   AR), the **RL→distill flywheel** (RL-improve → distill from the RL'd teacher → faster card with provenance),
   and the **adapter plane** (per-request LoRA/ControlNet over one base).
@@ -410,18 +392,17 @@ streaming, step-boundary cancellation) + an OpenAI-compatible server on stdlib a
 `/v1/chat` SSE, `/v1/images`, `/v1/videos` job+poll, `/v1/models`, `/health`, `/metrics`); a
 **`DisaggregatedRunner`** proven **bit-identical to inline** + role/stage pools; connectors with
 `chunk_ready` + credit-based flow control; **our own `LocalFleet`** (cost/affinity/least-loaded routing,
-health/drain) and a **`DynamoWorkerAdapter`** exporting the *same* `DeploymentCard` + cost model (one object,
-two consumers) so Dynamo *can* front us but never *defines* the core. The clean line: the fleet owns global
-routing / cold start / role-pool scaling / SLO placement / failover; the engine owns model load / loop
-execution / local scheduling / local memory+cache / parity / WorkUnit batching.
+health/drain) and a **`DynamoWorkerAdapter`** exporting a `DeploymentCard` so Dynamo *can* front us but never
+*defines* the core. The clean line: the fleet owns global routing / cold start / role-pool scaling / SLO
+placement / failover; the engine owns model load / loop execution / local memory+cache / parity.
 
 ---
 
 ## 14. Extensions
 
 Versioned hook points assembled at loop build (an unused hook is *literally absent* from the hot path), wrapping
-`ctx.execute(plan)`. **Observers (read-only):** `ParityAligner`, `Profiler` (calibrates the cost model),
-`NaNWatch`, `ActivationTrace`. **Interceptors (compute-altering):** `StepInterceptor` (step-skip / cached
+`ctx.execute(plan)`. **Observers (read-only):** `ParityAligner`, `NaNWatch`. **Interceptors
+(compute-altering):** `StepInterceptor` (step-skip / cached
 prediction) and `BlockInterceptor` (cache-dit DBCache/FBCache/TaylorSeer). State lives in
 `LoopState.plugin_state[id]`, keyed **per request and per CFG branch** — the structural fix for module-global
 residual state that silently corrupts cache-dit/TeaCache forks under concurrency. **Capability negotiation:** a
@@ -461,14 +442,14 @@ v2/
                precision/routing), sampler (flow-match + FlowGRPO SDE)
   program/     ComponentNode/ModelLoopNode/Program; Workflow + WorkflowRegistry (cross-model; §12)
   request/     requests, params (DiffusionParams + sde_rollout), tasks (TaskType), streams, artifacts, cancel
-  runtime/     engine (run/run_serial/run_interleaved, workflow-aware), async_engine, scheduler, admission,
-               cudagraph (piecewise capture), disaggregated (DisaggregatedRunner), pools, session (WorldModelSession), context
+  runtime/     engine (run/run_serial, workflow-aware), async_engine (pooled run-to-completion), scheduler
+               (memory admission), cudagraph (piecewise capture), disaggregated (DisaggregatedRunner), pools, session, context
   cache/       keys (CacheKey, content_hash), classes (feature/residual/slab_kv/paged_kv), manager
   memory/      allocator, reservations, refundable budget
   transport/   manifests + connectors (in-proc; chunk_ready + credit flow)
   parallel/    plan (axis vocab), mesh, validation
-  parity/      aligner, ladder, interleave_gate, compare_outputs
-  extend/      observers (Profiler/NaNWatch), interceptors (cache-dit), registry, base
+  parity/      aligner, ladder, compare (compare_outputs — bit-parity between execution paths)
+  extend/      observers (NaNWatch), interceptors (cache-dit), registry, base
   platform/    Platform.detect(); COMPONENTS(kind,device,variant) + KERNELS(op,device,arch,variant) registries;
                backends/{toy.py (numpy reference + parity oracle), torch_backend.py (real GPU)}
   recipes/     the concrete cards/programs/loops — the kept families: wan21 (+ i2v / 2.2 variants),
@@ -535,8 +516,8 @@ verified against the code) is in [`.agents/exploration/mstar-v2-roadmap.md`](../
 essentially v2's thesis one step more mature: "every composite model is a dataflow graph; every request is a
 *Walk* over it." It beats vLLM-Omni/SGLang-Omni on exactly the models v2 now runs (BAGEL, Qwen3-Omni) and
 explicitly names **FastVideo** as an integratable technique. **v2 already implements the harder half** (its
-`Program` *is* M\*'s graph; `shared_weight_components` *is* cross-Walk node sharing) and **exceeds** M\* on a
-validated cost model, the interleave **bit-parity** gate, integrated training, and the `extend/` plugin seam.
+`Program` *is* M\*'s graph; `shared_weight_components` *is* cross-Walk node sharing) and **exceeds** M\* on
+execution-path **bit-parity**, integrated training, and the `extend/` plugin seam.
 The insight: v2's substrate is ~80% built but parts are **inert** (authored metadata never wired to an
 executor).
 
@@ -551,10 +532,9 @@ executor).
 | **P1** | `ParitySpec.output_determinism` | Close the dormant C3 rung so SDE/stochastic RL can declare its parity contract honestly. |
 | **P2** | Pluggable data plane; per-(node,Walk) placement; declarative TP/SP degrees; loop-spanning CUDA graphs | Gated on the multi-GPU runtime; the live 2-GPU Qwen-Omni bring-up is the natural first test. Keep the cheap declarative halves now (`EngineKind` tag, placement key, populate `parallel_plan_hash` on the serving cache path). |
 
-**Do NOT regress** (where v2 already meets or beats M\*): the validated per-loop cost model, the interleave
-bit-parity gate, the C0–C4 consistency ladder, the integrated training plane (RL→distill flywheel,
-drain-correct hot weight-sync), CPU-toy parity for the whole stack, the `extend/` plugin seam, Dynamo
-citizenship.
+**Do NOT regress** (where v2 already meets or beats M\*): execution-path bit-parity, the C0–C4 consistency
+ladder, the integrated training plane (RL→distill flywheel, drain-correct hot weight-sync), CPU-toy parity for
+the whole stack, the `extend/` plugin seam, Dynamo citizenship.
 
 **GPU-port track:** wire real distributed collectives (one-pool TP/SP); torch-native loop surface (drop the
 numpy↔torch boundary marshalling); admission budgeting of capture cost; per-stream workspace pool for a
@@ -571,9 +551,9 @@ What v2 takes and what it constrains, per surveyed system (the design is a synth
 | Cosmos3 (official + port) | Shared instance across reason/diffusion/action/sound; packed multimodal sequences; component+scheduler parity matrices | A strong `ModelCard`, not the framework; no Cosmos branching in the global runtime |
 | vLLM core | Running-first scheduling, reservation-before-admission, model-owned state, KV/encoder cache managers, CuMem sleep/wake, CUDA-graph dispatch, KV-connector split | Token scheduling is one WorkUnit kind; **never** full-graph compile |
 | sglang `multimodal_gen` | Role pools, request lifecycle, capacity dispatch, transfer manifests, disagg state machine, cache-dit integration | No giant mutable `Req`/`ForwardBatch` as the API; not single-item diffusion scheduling |
-| vLLM-Omni | Frozen pipeline-spec ⟂ deploy-YAML split; `OmniConnectorBase` + `chunk_ready`; `SupportsStepExecution` as loop-inversion prior art (we generalize to always-on); `CFGParallelMixin` proves CFG-as-policy; 3 cache subsystems confirm per-class pools | Expresses MoT only as one **opaque** request-scheduled stage (no step visibility, no cross-request batching); cross-stage KV is a *copy*; **no cost model** |
+| vLLM-Omni | Frozen pipeline-spec ⟂ deploy-YAML split; `OmniConnectorBase` + `chunk_ready`; `SupportsStepExecution` as loop-inversion prior art (we generalize to always-on); `CFGParallelMixin` proves CFG-as-policy; 3 cache subsystems confirm per-class pools | Expresses MoT only as one **opaque** request-scheduled stage (no step visibility); cross-stage KV is a *copy* |
 | sglang-omni | The `next/wait_for/merge_fn/stream_to` edge vocabulary; Relay + **credit-based flow control** | Stages own disjoint weights; hybrid only as AR-stage→DiT-stage |
-| Dynamo | Fleet routing, disagg role pools, KV-aware routing, KVBM, SLA planner, cold-start weight streaming | Orchestrates engines; never the core. Export a `DeploymentCard` + cost model to it |
+| Dynamo | Fleet routing, disagg role pools, KV-aware routing, KVBM, SLA planner, cold-start weight streaming | Orchestrates engines; never the core. Export a `DeploymentCard` to it |
 | diffusers Modular | `ComponentSpec`/`modular_model_index.json` interchange; Guiders ≈ CFG policies | A Python pipeline interpreter is not the perf boundary; loop blocks own their iteration (not inversion) |
 | xDiT / PipeFusion / USP | DiT parallelism catalog (USP, ring/ulysses, PipeFusion, CFG-parallel, DistVAE) + world-size validation | Parallelism lives in the runtime + card, not a wrapper-per-model; `pp_patch` invalid for causal |
 | TorchTitan | Named mesh axes, `ParallelDims` validation, ModelSpec discipline, batch-invariance utils | Adopt the discipline, not the stack; `WeightSyncPlan` owns layout (DCP/TorchStore don't reshard) |
@@ -596,7 +576,7 @@ An ambitious design is not an unfalsifiable one. The bets, with the experiment t
   streaming/cancellation/behavior seams (which still justify it). The contract is safe even if the scheduling
   bet loses — that is the insurance.
 - **The general WorkUnit scheduler may be over-general.** The *mechanism* half is validated (`VAE_TILE` and
-  `REWARD_BATCH` interleave/schedule through one budget); the *economic* half (does it pay vs an in-loop call)
+  `REWARD_BATCH` schedule through one pool); the *economic* half (does it pay vs an in-loop call)
   is a GPU-port measurement.
 - **Cost-model admission is a modeling bet** — argued on its narrow window (many small concurrent jobs),
   measured on the port.
@@ -604,8 +584,8 @@ An ambitious design is not an unfalsifiable one. The bets, with the experiment t
   and they gate every product claim ("fast mode is equivalent", RL reward validity, distillation comparisons).
 
 **Final position.** A model card is a (recipe, runtime) pair with a parity obligation; the model owns loop
-semantics, the runtime owns loop lifecycle; one resident instance runs many loops, one scheduler runs their
-steps in one currency; caches are correct by key, parity by test, and the interleave gate is non-negotiable;
-training records behavior on the same loops it serves. The weight-sharing topology, the composition graph, the
+semantics, the runtime owns loop lifecycle; one resident instance runs many loops, served pooled
+run-to-completion; caches are correct by key, parity by test; training records behavior on the same loops it
+serves. The weight-sharing topology, the composition graph, the
 training recipe, the reward, and the session/sync lifecycle are all **data** over cards, loops, workflows, and
 controllers — so a new frontier capability is a card or a driver, not a rewrite.

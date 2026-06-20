@@ -2,7 +2,7 @@
 
 Locks in: fail-fast on infeasible/deadlocked admission (no busy-spin), feature-key partitioning by
 adapter stack + precision, component-scoped weight invalidation (transformer sync keeps the
-text-encoder cache), and the interleave gate flagging symmetric-empty output.
+text-encoder cache), and output comparison flagging symmetric-empty output.
 """
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def test_transformer_weight_sync_keeps_text_encoder_cache():
     assert inst.caches.stats()["feature"]["hits"] == h + 1
 
 
-def test_interleave_gate_flags_symmetric_empty_output():
+def test_compare_outputs_flags_symmetric_empty_output():
     empty = {"r": Output(request_id="r",
                          artifacts={"video": VideoArtifact(name="video", frames=None)})}
     divs = compare_outputs(empty, empty)            # identical BUT empty — must not pass vacuously

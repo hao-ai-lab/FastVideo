@@ -95,7 +95,7 @@ def build_cosmos3_card(model_id: str = "cosmos3-vfm") -> ModelCard:
                           assumes_loop="diffusion_denoise",
                           assumes_precision="float32",
                           consistency_required=ConsistencyLevel.C1),
-        parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1], interleave_required=True),
+        parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1]),
         caches={
             "feature": CacheContract("feature", max_bytes=1 << 24, reuse_across_requests=True),
             "paged_kv": CacheContract("paged_kv", max_bytes=1 << 24, block_bytes=1 << 12, reuse_across_requests=False),

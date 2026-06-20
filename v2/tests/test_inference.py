@@ -76,4 +76,3 @@ def test_all_cards_recipe_runtime_bound():
     for build in (build_wan21_card, build_ltx2_card, build_wan_causal_card):
         card = build()
         assert card.recipe.assumes_loop in card.loops
-        assert card.parity.interleave_required is True

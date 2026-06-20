@@ -13,7 +13,6 @@ import numpy as np
 from v2.cache import CacheManager
 from v2.card import load_card
 from v2.recipes.ltx2 import build_ltx2_av_program, build_ltx2_card
-from v2.parity import assert_interleave_parity
 from v2.request import DiffusionParams, OutputSpec, TaskType, make_request
 from v2.runtime import Engine
 
@@ -68,12 +67,6 @@ def test_per_modality_guidance_is_independent():
     # bump ONLY video guidance → video changes
     only_video = eng.run(_t2vs(vg=7.0, ag=6.0))
     assert not np.array_equal(base_v, np.asarray(only_video.artifacts["video"].frames))
-
-
-def test_t2vs_interleave_parity():
-    eng = _engine()
-    reqs = [_t2vs("alpha", seed=1), _t2vs("beta", seed=2), _t2vs("alpha", seed=1)]
-    assert not assert_interleave_parity(eng, reqs)
 
 
 def test_t2v_path_unchanged_no_audio():

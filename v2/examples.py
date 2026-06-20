@@ -10,7 +10,6 @@ from typing import Any
 
 from v2.recipes import build_default_engine, build_omni_engine
 from v2.recipes.wan21 import build_wan21_card
-from v2.parity import assert_interleave_parity
 from v2.request import DiffusionParams, OutputSpec, Request, SamplingParams, TaskType, make_request
 from v2.training import build_diffusion_nft
 
@@ -39,13 +38,6 @@ def example_c_causal_streaming(eng) -> None:
         _t2v("wan-causal-sf-1.3b", "a drone flight over mountains", 3, outputs=OutputSpec(stream={"video": True})))
     print(f"    latents {out.artifacts['latents'].latent.shape}  chunks={out.metrics['chunks']:.0f}  "
           f"streamed_chunks={out.metrics.get('stream_chunks', 0)}")
-
-
-def example_c2_interleave_gate(eng) -> None:
-    print("\n(c2) Interleave parity gate — serial == interleaved, bit-identical (the §9.3 obligation)")
-    reqs = [_t2v("wan2.1-1.3b", "alpha", 11), _t2v("wan2.1-1.3b", "beta", 22)]
-    divs = assert_interleave_parity(eng, reqs)
-    print(f"    divergences: {divs or 'NONE — gate PASSES ✓'}")
 
 
 def example_d_rl_rollout() -> None:
@@ -151,7 +143,6 @@ def main() -> None:
     example_a_text_to_video(eng)
     example_b_ltx2_two_stage(eng)
     example_c_causal_streaming(eng)
-    example_c2_interleave_gate(eng)
     example_d_rl_rollout()
     example_g_omni_mot()
     example_h_serving_and_fleet()
