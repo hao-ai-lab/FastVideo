@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -127,17 +127,17 @@ def run_interleave_prompt_set(
 
     planned_rows = _planned_trace_rows(prompt_items, root)
     if resume and all(trace_path.exists() for _, item, trace_path in planned_rows):
-        results = [_result_from_saved_trace(item, trace_path) for _, item, trace_path in planned_rows]
+        resumed_results = [_result_from_saved_trace(item, trace_path) for _, item, trace_path in planned_rows]
         resolved_summary_path = Path(summary_path or root / "summary.json")
         summary = _build_summary(
-            results,
+            resumed_results,
             output_dir=root,
             summary_path=resolved_summary_path,
         )
         save_prompt_set_summary(summary, resolved_summary_path)
         return summary
 
-    cleanup = lambda: None
+    cleanup: Callable[[], None] = _noop_cleanup
     if image_backend is None:
         image_backend, cleanup = build_image_backend(run_config)
 
@@ -215,6 +215,10 @@ def _build_prompt_set_orchestrator(
         generator=image_backend,
         critic=build_critic(config.critic),
     )
+
+
+def _noop_cleanup() -> None:
+    pass
 
 
 def _load_jsonl(path: Path) -> list[Any]:

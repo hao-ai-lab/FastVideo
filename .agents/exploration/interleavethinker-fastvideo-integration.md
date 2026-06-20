@@ -2950,6 +2950,21 @@ Validation so far:
     handled the subcommand.
   - Fix implemented locally: add `interleave-eval` to
     `_DEFER_CONFIG_SUBCOMMANDS` in `fastvideo/utils.py`.
+- Commit completed:
+  - `874e4e2f` — `[bugfix] defer interleave eval config loading`
+  - Pushed to `origin/interleavethinker-fastvideo`.
+- Second pushed-branch Modal validation:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-LMynCR2q4HKdR7TV3BxaEf`
+  - Commit tested: `874e4e2f9cd24e521ff10d9cde75ba652d6cb804`.
+  - Pytest result: `15 passed, 14 warnings in 14.55s`.
+  - Pre-commit result: yapf, ruff, and codespell passed; mypy failed on
+    `fastvideo/entrypoints/interleave/evaluation.py`.
+  - Mypy failures:
+    - `Name "results" already defined`;
+    - `Call to untyped function (unknown) in typed context`.
+  - Fix implemented locally: renamed the all-resumed branch result variable and
+    replaced the untyped cleanup lambda with a typed `_noop_cleanup()`.
 
 Planned pushed-branch Modal validation:
 
