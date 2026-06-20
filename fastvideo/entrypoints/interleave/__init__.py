@@ -55,6 +55,16 @@ from fastvideo.entrypoints.interleave.trace import (
     save_trace,
     trace_to_dict,
 )
+from fastvideo.entrypoints.interleave.trace_eval import (
+    InterleaveTraceEvaluationSummary,
+    InterleaveTraceMetrics,
+    discover_interleave_trace_paths,
+    evaluate_interleave_traces,
+    interleave_trace_evaluation_to_dict,
+    load_interleave_trace_metrics,
+    write_interleave_trace_evaluation,
+    write_interleave_trace_html_report,
+)
 
 __all__ = [
     "AcceptAllCritic",
@@ -80,13 +90,19 @@ __all__ = [
     "InterleaveThinkerCriticProvider",
     "InterleaveThinkerPlannerProvider",
     "InterleaveTrace",
+    "InterleaveTraceEvaluationSummary",
+    "InterleaveTraceMetrics",
     "PlannedInterleaveStep",
     "PlannerInput",
     "PlannerProvider",
     "SinglePromptPlanner",
     "build_app",
+    "discover_interleave_trace_paths",
+    "evaluate_interleave_traces",
+    "interleave_trace_evaluation_to_dict",
     "load_interleave_prompt_set",
     "load_interleave_run_config",
+    "load_interleave_trace_metrics",
     "prompt_set_summary_to_dict",
     "resolve_interleave_instruction",
     "run_interleave_prompt_set",
@@ -95,4 +111,6 @@ __all__ = [
     "save_prompt_set_summary",
     "save_trace",
     "trace_to_dict",
+    "write_interleave_trace_evaluation",
+    "write_interleave_trace_html_report",
 ]

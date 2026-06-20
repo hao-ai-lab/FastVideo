@@ -124,6 +124,20 @@ loader accepts JSONL rows with `id`, `prompt` or `instruction`, optional
 `initial_image_path`, and arbitrary metadata fields. Use `--resume` to skip
 rows whose trace already exists and `--limit N` for small smoke runs.
 
+Evaluate saved traces after a prompt-set run:
+
+```bash
+python scripts/interleave_thinker/evaluate_traces.py \
+  outputs/interleave_eval \
+  --output outputs/interleave_eval/metrics.json \
+  --html-output outputs/interleave_eval/report.html
+```
+
+The evaluator accepts a prompt-set output directory, a `summary.json`, or one
+or more explicit `trace.json` files. It reports success rate, attempts, retry
+counts, failure reasons, inference timing when present, and an optional HTML
+table with final-image thumbnails.
+
 ## Nano Banana / Gemini API Backends
 
 The InterleaveThinker RL config can use closed-source Google models through

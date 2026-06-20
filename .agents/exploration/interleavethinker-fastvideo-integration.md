@@ -2994,3 +2994,55 @@ Next recommended integration step:
   `scripts/interleave_thinker/evaluate_traces.py` and/or a small HTML/contact
   sheet report. The prompt-set runner now produces the trace and summary
   artifacts those tools can consume.
+
+## Stage 12 Execution: Trace Evaluation Reports
+
+Status: implemented locally, pending commit/push and pushed-branch Modal
+validation.
+
+Goal:
+
+- Add a trace-level evaluator for the prompt-set output produced by
+  `fastvideo interleave-eval`.
+- Support both machine-readable aggregate metrics and a lightweight HTML report
+  with final-image thumbnails.
+
+Implemented changes:
+
+- Added `fastvideo/entrypoints/interleave/trace_eval.py`.
+  - Discovers traces from:
+    - prompt-set output directories;
+    - `summary.json` files;
+    - explicit `trace.json` files.
+  - Computes:
+    - trace count, success count, success rate;
+    - total/average attempts;
+    - total/average retry attempts;
+    - traces with final images;
+    - total/average inference time when attempt timing is present;
+    - failure-reason counts;
+    - category-level success rates from `prompt_set_metadata.category`;
+    - per-trace rows with sample id, prompt, final image, and failure fields.
+  - Writes JSON metrics and an optional HTML report.
+- Added `scripts/interleave_thinker/evaluate_traces.py`.
+  - CLI shape:
+    `python scripts/interleave_thinker/evaluate_traces.py
+    <trace-or-summary-or-dir> [--output metrics.json] [--html-output
+    report.html]`.
+- Exported trace-evaluation helpers from `fastvideo.entrypoints.interleave`.
+- Updated `examples/interleave/README.md` with post-run evaluation commands.
+- Added `tests/local_tests/test_interleave_trace_eval.py` for:
+  - evaluating traces discovered through `summary.json`;
+  - directory discovery;
+  - HTML report generation;
+  - script-level JSON and HTML output.
+
+Validation so far:
+
+- Local `python -m py_compile` passed for changed Python files.
+- Local `git diff --check` passed.
+- Local pre-commit with `PRE_COMMIT_HOME=/tmp/fastvideo-pre-commit-cache`
+  passed yapf, ruff, codespell, filename, and suggestion hooks.
+- Local mypy still fails for the known hyphenated worktree path issue:
+  `fastvideo-interleavethinker is not a valid Python package name`.
+  Modal mypy remains the authoritative type gate.
