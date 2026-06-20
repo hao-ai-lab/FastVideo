@@ -88,7 +88,10 @@ class WanDenoiseLoop:
                              channels=self.latent_channels,
                              spatial_ratio=self.spatial_ratio,
                              temporal_ratio=self.temporal_ratio)
-        x = (rng.standard_normal(shape) * float(sig[0])).astype("float32")
+        # Seed the latent with numpy (same values on every device) then hand it to the platform's array
+        # namespace: numpy on CPU (identity), a single upload to a resident device tensor on a GPU box.
+        xp = model.platform.xp
+        x = xp.from_host((rng.standard_normal(shape) * float(sig[0])).astype("float32"))
         st = LoopState(loop_id=self.loop_id,
                        instance_id=model.card.model_id,
                        request_id=req.request_id,
@@ -100,6 +103,8 @@ class WanDenoiseLoop:
                        timesteps=[float(s) * 1000.0 for s in sig])
         st.cond["prompt_embeds"] = ctx.slots.get("text_embeds")
         st.cond["negative_prompt_embeds"] = ctx.slots.get("neg_text_embeds")
+        st.scratch["xp"] = xp  # array namespace (numpy on CPU, torch-on-device on cuda)
+        st.scratch["on_device"] = (getattr(model.platform, "device", "cpu") == "cuda")
         st.scratch["guidance_scale"] = float(req.diffusion.guidance_scale)
         st.scratch["stream_video"] = bool(req.outputs.stream.get("video"))
         # I2V (optional): the program writes the CLIP image embeds + the [mask|cond] latent into slots;
@@ -126,6 +131,7 @@ class WanDenoiseLoop:
         pe, ne = st.cond["prompt_embeds"], st.cond["negative_prompt_embeds"]
         scale = st.scratch["guidance_scale"]
         cfg, precision = self.cfg, self.precision
+        xp, on_device = st.scratch["xp"], st.scratch.get("on_device", False)
         sde, noise_scale, rng = st.scratch.get("sde", False), st.scratch.get("sde_noise_scale", 0.7), st.rng
 
         i2v_ctx, i2v_cond = st.scratch.get("i2v_img_embeds"), st.scratch.get("i2v_cond")
@@ -160,16 +166,13 @@ class WanDenoiseLoop:
                                                                   noise_scale=noise_scale)
                 return StepResult(
                     output={
-                        "noise_pred": np.asarray(velocity, dtype="float32"),
-                        "latents": x_next.astype("float32"),
+                        "noise_pred": xp.to_f32(velocity),
+                        "latents": xp.to_f32(x_next),
                         "sde_logprob": logp,
-                        "prev": np.asarray(x, dtype="float32")
+                        "prev": xp.to_f32(x)
                     })
             x_next = kernels.get(FLOW_MATCH_STEP)(precision.cast(x), velocity, sigma_t, sigma_next)
-            return StepResult(output={
-                "noise_pred": np.asarray(velocity, dtype="float32"),
-                "latents": x_next.astype("float32")
-            })
+            return StepResult(output={"noise_pred": xp.to_f32(velocity), "latents": xp.to_f32(x_next)})
 
         def graph_fn(model, ws):
             # The CAPTURABLE op-structure: reads EVERY per-step input from the static workspace (never
@@ -184,15 +187,15 @@ class WanDenoiseLoop:
                 "latents": np.array(ws["out"], copy=True)
             })
 
-        cond_bytes = sum(int(np.asarray(e).nbytes) for e in (pe, ne) if e is not None)
+        cond_bytes = sum(int(e.nbytes) for e in (pe, ne) if e is not None)  # .nbytes works on numpy + torch
         res = ResourceRequest(
             compute_seconds=self.cost.predict(int(np.prod(x.shape)), float(len(branches))),
             resident_bytes=int(x.nbytes) + cond_bytes,  # latents + conditioning held for the loop
             peak_activation_bytes=int(x.nbytes))  # one step's transient working buffer
         emits = []
         if st.scratch.get("stream_video"):
-            emits.append(StreamChunk(stream_id=st.request_id, modality="video", seq=i, data=x,
-                                     preview=True))  # carry the latent as a preview payload
+            emits.append(StreamChunk(stream_id=st.request_id, modality="video", seq=i, data=xp.to_host(x),
+                                     preview=True))  # carry the latent as a (host) preview payload
         return WorkPlan(
             loop_id=self.loop_id,
             instance_id=st.instance_id,
@@ -217,7 +220,9 @@ class WanDenoiseLoop:
             # incompatible captured graph. (Compute dtype rides in shape_sig.dtype above.) NOTE: this
             # is sound for branch-set/expert-determined policies (ClassicCFG); a policy whose op
             # structure forks on other state (PerModalityCFG modality) would need a graph_key hook.
-            capturable=not sde and i2v_cond is None,  # i2v threads non-workspace conditioning -> eager
+            # i2v threads non-workspace conditioning -> eager; on-device uses the eager resident path
+            # (the numpy static-workspace capture form below is the CPU/accel path)
+            capturable=not sde and i2v_cond is None and not on_device,
             graph_key=(tuple(sorted(branches)), expert_id, precision.scheduler_step_in_fp32),
             # the static-buffer capture form: graph_fn reads all per-step inputs from the workspace
             graph_fn=graph_fn,
@@ -233,17 +238,18 @@ class WanDenoiseLoop:
     def advance(self, st: LoopState, result: StepResult) -> LoopState:
         st.latents["video"] = result.output["latents"]
         if st.profile == ExecutionProfile.ROLLOUT:
+            to_host = st.scratch["xp"].to_host  # device tensor -> host numpy for the captured trajectory
             i = st.step_idx
             rec = {
                 "step": i,
                 "sigma": st.sigmas[i],
-                "velocity": np.asarray(result.output["noise_pred"]).copy(),
-                "latents": np.asarray(st.latents["video"]).copy()
+                "velocity": to_host(result.output["noise_pred"]).copy(),
+                "latents": to_host(st.latents["video"]).copy()
             }
             if "sde_logprob" in result.output:  # FlowGRPO: capture the PPO log-prob slice
                 rec.update(sde_logprob=result.output["sde_logprob"],
-                           prev=np.asarray(result.output["prev"]).copy(),
-                           sample=np.asarray(result.output["latents"]).copy(),
+                           prev=to_host(result.output["prev"]).copy(),
+                           sample=to_host(result.output["latents"]).copy(),
                            sigma_t=st.sigmas[i],
                            sigma_next=st.sigmas[i + 1])
             st.trajectory.append(rec)

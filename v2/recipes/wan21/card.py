@@ -123,6 +123,7 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b",
             default_plan=ParallelPlan.single()),
         sampling_defaults=sampling_defaults or SamplingDefaults(
             num_steps=50, guidance_scale=3.0, height=480, width=832, num_frames=81, fps=16, negative_prompt=WAN_NEG_EN),
+        device_io=True,  # WanDenoiseLoop + Wan adapters are array-agnostic -> keep the latent on-device
     )
     card.validate()
     if checkpoint_root:
@@ -253,6 +254,7 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b",
                                            num_frames=81,
                                            fps=16,
                                            negative_prompt=WAN_NEG_CN),
+        device_io=True,  # WanDenoiseLoop + Wan adapters are array-agnostic -> keep the latent on-device
     )
     card.validate()
     if checkpoint_root:

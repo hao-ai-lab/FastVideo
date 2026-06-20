@@ -8,10 +8,13 @@ x0 -> ``(x_t-x0)/sigma``, joint A/V; VAE normalization; T5 padding; Gemma dual-p
 audio decode->vocoder). A single ``build_component(spec, instance, platform)`` dispatches by
 ``spec.kind`` through ``_MAKERS``.
 
-The loops / CFG / scheduler math stay numpy fp32 (lowest-risk bring-up); the boundary marshals
-numpy<->torch in ONE place (``TorchComponent._t``/``_n``) so a torch-native path is a later swap.
-Component construction goes through ``load_component``, the v2-owned loader seam (currently delegates to
-fastvideo's component_loader; a per-module vendored cutover replaces it later, no caller changes).
+The loop math (CFG combine, flow-match Euler) is array-agnostic, so the boundary is the ONLY place
+host<->device crossing happens (``TorchComponent._t``/``_out``). When the card sets ``device_io`` (a GPU
+box), egress keeps tensors on-device and the latent stays resident for the whole denoise loop — no
+per-step round-trip; otherwise the default marshals to host numpy (un-migrated families / CPU toy). See
+``v2/platform/array_ns`` for the loop-side namespace. Component construction goes through
+``load_component``, the v2-owned loader seam (currently delegates to fastvideo's component_loader; a
+per-module vendored cutover replaces it later, no caller changes).
 
 Imported ONLY lazily — inside ``torch_cuda.py``'s registered builder — so importing the platform package
 on a CPU box never imports torch and the mini stays green. Wan2.1 + LTX-2 A/V GPU-verified.
@@ -127,15 +130,34 @@ class TorchComponent:
     def __init__(self, module: Any, *, device: Any, dtype: Any, eager: bool = True) -> None:
         self.device, self.dtype = device, dtype
         self.module = module.to(device=device, dtype=dtype).eval() if eager else module
+        # When True (set by build_component from the card's device_io flag on a GPU box), the loop
+        # boundary keeps tensors on-device — no per-step host<->device copy. Default False = today's
+        # numpy in/out, so un-migrated families and the CPU toy are unchanged.
+        self.device_io = False
 
-    # numpy<->torch marshalling at the loop boundary (ONE place — torch-native is a later swap) ------- #
+    # host<->device marshalling at the loop boundary (ONE place) ------------------------------------- #
     def _t(self, a: Any, *, batch: bool = True) -> Any:
-        t = _to_torch(a, device=self.device, dtype=self.dtype)
-        return t.unsqueeze(0) if (t is not None and batch) else t
+        if a is None:
+            return None
+        # Ingress: an already-on-device tensor (the loop kept it resident) is moved to our dtype, never
+        # round-tripped through numpy; a host array is uploaded here.
+        t = a.to(device=self.device, dtype=self.dtype) if torch.is_tensor(a) else _to_torch(
+            a, device=self.device, dtype=self.dtype)
+        return t.unsqueeze(0) if batch else t
 
-    @staticmethod
-    def _n(t: Any) -> np.ndarray:
-        return _to_numpy(t.squeeze(0))
+    def _out(self, t: Any) -> Any:
+        """Egress: keep the tensor on-device when ``device_io`` (it stays resident for the next step),
+        else marshal to host numpy (the default — un-migrated families / the CPU toy are unchanged).
+        Either way it lands in fp32 — matching the host path's ``_to_numpy`` (``.to(cpu, float32)``) so
+        the loop's CFG combine runs in fp32 regardless of the module's native dtype (e.g. Wan DiT bf16)."""
+        if not self.device_io:
+            return _to_numpy(t)
+        if hasattr(t, "sample"):  # unwrap heads that wrap output in an object with .sample
+            t = t.sample
+        return t.float()
+
+    def _n(self, t: Any) -> Any:
+        return self._out(t.squeeze(0))
 
     @staticmethod
     def _ctx(current_timestep: Any = 0) -> Any:
@@ -407,7 +429,7 @@ class T5Encoder(TorchComponent):
         if hidden.shape[0] < self.max_length:
             pad = hidden.new_zeros(self.max_length - hidden.shape[0], hidden.shape[1])
             hidden = torch.cat([hidden, pad], dim=0)
-        return _to_numpy(hidden)
+        return self._out(hidden)
 
 
 class Gemma(TorchComponent):
@@ -462,7 +484,7 @@ class CLIPImageEncoder(TorchComponent):
         with self._ctx():
             out = self.module(**inputs)
         embeds = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
-        return _to_numpy(embeds.squeeze(0))
+        return self._out(embeds.squeeze(0))
 
 
 # --------------------------------------------------------------------------- #
@@ -615,4 +637,10 @@ def build_component(spec: Any, instance: Any, platform: Any) -> TorchComponent:
     except KeyError:
         raise RuntimeError(f"torch backend: no builder for component kind {spec.kind!r} "
                            f"(have {sorted(_MAKERS)})") from None
-    return maker(spec, instance, platform, args)
+    comp = maker(spec, instance, platform, args)
+    # On-device I/O opt-in: keep this component's loop boundary on-device when the card declares it
+    # (and we're actually on cuda). Off by default -> numpy in/out (un-migrated families unchanged).
+    if isinstance(comp, TorchComponent):
+        comp.device_io = bool(platform.device == "cuda"
+                              and getattr(getattr(instance, "card", None), "device_io", False))
+    return comp

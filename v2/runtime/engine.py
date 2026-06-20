@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+
 from v2._enums import ExecutionProfile
 from v2.extend.base import InterceptorChain, ObserverBus
 from v2.loop.driver import LoopRunner
@@ -39,9 +41,18 @@ from v2.runtime.scheduler import (
 )
 
 
+def _host(v: Any) -> Any:
+    """The single request-boundary marshal: a device (torch) tensor -> host numpy; numpy passes through.
+    On-device loops keep tensors resident the whole run and land here exactly once, at output."""
+    if not isinstance(v, np.ndarray) and hasattr(v, "detach") and hasattr(v, "cpu"):
+        return v.detach().float().cpu().numpy()
+    return v
+
+
 def _to_artifact(name: str, value: Any, producer: str = "") -> Any:
     if isinstance(value, dict):
         value = value.get(name, value.get("latents", next(iter(value.values()), None)))
+    value = _host(value)
     if name == "video":
         return VideoArtifact(name=name, producer=producer, frames=value)
     if name == "audio":

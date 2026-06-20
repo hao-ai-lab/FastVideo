@@ -244,6 +244,10 @@ class ModelCard:
     precision: PrecisionContract = field(default_factory=PrecisionContract)
     checkpoint: CheckpointManifest = field(default_factory=CheckpointManifest)
     sampling_defaults: SamplingDefaults = field(default_factory=SamplingDefaults)
+    # On a GPU box, keep this model's components' I/O on-device (torch tensors) instead of marshalling
+    # numpy<->torch at every loop step — the latent stays resident for the whole denoise loop. Opt-in
+    # per recipe: set True only when the model's loop+program are array-agnostic (see v2/platform/array_ns).
+    device_io: bool = False
 
     def validate(self) -> ModelCard:
         """Strict enough to validate before any GPU touches it.
