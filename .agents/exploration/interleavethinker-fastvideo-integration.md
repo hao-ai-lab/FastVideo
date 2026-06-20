@@ -2871,8 +2871,7 @@ Conclusion:
 
 ## Stage 11 Execution: Prompt-Set Evaluation Workflow
 
-Status: implemented locally, pending commit/push and pushed-branch Modal
-validation.
+Status: completed and pushed.
 
 Goal:
 
@@ -2965,16 +2964,33 @@ Validation so far:
     - `Call to untyped function (unknown) in typed context`.
   - Fix implemented locally: renamed the all-resumed branch result variable and
     replaced the untyped cleanup lambda with a typed `_noop_cleanup()`.
+- Commit completed:
+  - `022aedb0` — `[bugfix] clean up interleave eval mypy`
+  - Pushed to `origin/interleavethinker-fastvideo`.
+- Final pushed-branch Modal validation:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-eeQpAgNQvQGi2H8MB0kJCU`
+  - Commit tested: `022aedb0e10492e64f30dc169eb852f51e6be4af`.
+  - Command:
+    `pytest tests/local_tests/test_interleave_run_cli.py
+    tests/local_tests/test_interleave_model_providers.py -q && pre-commit
+    run --files examples/interleave/README.md
+    examples/interleave/eval_prompts.jsonl
+    fastvideo/entrypoints/cli/interleave_eval.py
+    fastvideo/entrypoints/cli/main.py
+    fastvideo/entrypoints/interleave/__init__.py
+    fastvideo/entrypoints/interleave/config.py
+    fastvideo/entrypoints/interleave/evaluation.py fastvideo/utils.py
+    tests/local_tests/test_interleave_run_cli.py`
+  - Pytest result: `15 passed, 14 warnings in 19.96s`.
+  - Pre-commit result: yapf, ruff, codespell, mypy, filename, and suggestion
+    hooks passed; PyMarkdown/actionlint skipped with no files to check.
+  - Modal result metadata:
+    `local_patch_applied=false`, `install_extra=dev`, `build_kernel=false`.
 
-Planned pushed-branch Modal validation:
+Next recommended integration step:
 
-- `pytest tests/local_tests/test_interleave_run_cli.py
-  tests/local_tests/test_interleave_model_providers.py -q`
-- `pre-commit run --files examples/interleave/README.md
-  examples/interleave/eval_prompts.jsonl
-  fastvideo/entrypoints/cli/interleave_eval.py
-  fastvideo/entrypoints/cli/main.py
-  fastvideo/entrypoints/interleave/__init__.py
-  fastvideo/entrypoints/interleave/config.py
-  fastvideo/entrypoints/interleave/evaluation.py
-  tests/local_tests/test_interleave_run_cli.py`
+- Add trace-level evaluation scripts for saved prompt-set outputs:
+  `scripts/interleave_thinker/evaluate_traces.py` and/or a small HTML/contact
+  sheet report. The prompt-set runner now produces the trace and summary
+  artifacts those tools can consume.
