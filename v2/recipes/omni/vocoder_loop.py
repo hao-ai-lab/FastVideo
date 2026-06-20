@@ -25,10 +25,9 @@ from v2.request.streams import StreamChunk
 
 class VocoderLoop:
 
-    def __init__(self, *, loop_id, vocoder_id="vocoder", cost, chunk_tokens=2, speech_slot="speech_tokens"):
+    def __init__(self, *, loop_id, vocoder_id="vocoder", chunk_tokens=2, speech_slot="speech_tokens"):
         self.loop_id = loop_id
         self.vocoder_id = vocoder_id
-        self.cost = cost
         self.chunk_tokens = chunk_tokens
         self.speech_slot = speech_slot
 
@@ -63,7 +62,7 @@ class VocoderLoop:
                         instance_id=st.instance_id,
                         kind=WorkUnitKind.AUDIO_CHUNK,
                         shape_sig=ShapeSignature(WorkUnitKind.AUDIO_CHUNK, dims=(len(chunk), )),
-                        resources=ResourceRequest(compute_seconds=self.cost.predict(len(chunk)),
+                        resources=ResourceRequest(
                                                   resident_bytes=8 * len(st.scratch["tokens"]),
                                                   peak_activation_bytes=64),
                         payload={"chunk": i},

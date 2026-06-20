@@ -23,7 +23,7 @@ def example_a_text_to_video(eng) -> None:
     print("\n(a) Text → video, one instance (Wan2.1-1.3B)")
     out = eng.run(_t2v("wan2.1-1.3b", "a cat surfing a wave", 7))
     print(f"    video {out.artifacts['video'].frames.shape}  "
-          f"denoise_steps={out.metrics['denoise_steps']:.0f}  gpu_s={out.metrics['gpu_seconds']:.2e}")
+          f"denoise_steps={out.metrics['denoise_steps']:.0f}")
 
 
 def example_b_ltx2_two_stage(eng) -> None:

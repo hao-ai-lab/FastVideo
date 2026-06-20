@@ -19,7 +19,6 @@ from v2.card import (
     CacheContract,
     CapabilityMatrix,
     ComponentSpec,
-    CostModel,
     LoopSpec,
     ModelCard,
     ParallelismContract,
@@ -36,7 +35,6 @@ from v2.recipes.ltx2.loop import BASE_SIGMAS, REFINE_SIGMAS, LTX2DenoiseLoop, LT
 
 def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
     seed = _seed_from(model_id)
-    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1.5e-4, per_unit_seconds=1.2e-7)
 
     def base_factory():
         # The frame-jump/blockiness was the OOM-forced 57-frame reduction (only 8 latent temporal frames);
@@ -48,7 +46,6 @@ def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
                                sigmas=BASE_SIGMAS,
                                cfg_scale=3.0,
                                stg_scale=0.0,
-                               cost=cost,
                                input_slot=None,
                                seed_offset=0)
 
@@ -58,7 +55,6 @@ def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
                                sigmas=REFINE_SIGMAS,
                                cfg_scale=1.0,
                                stg_scale=0.0,
-                               cost=cost,
                                input_slot="ltx_upsampled",
                                seed_offset=1000,
                                audio_input_slot="ltx_audio")  # read threaded audio in T2VS (else unused)
@@ -106,7 +102,6 @@ def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
         LoopSpec(loop_id="ltx2_base",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["feature"],
                  loop_factory=base_factory),
@@ -114,7 +109,6 @@ def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
         LoopSpec(loop_id="ltx2_refine",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["feature"],
                  loop_factory=refine_factory),
@@ -154,7 +148,6 @@ def build_ltx2_base_card(model_id: str = "ltx2-single-stage") -> ModelCard:
     small num_inference_steps). Reuses the LTX-2 torch adapters (DiT/VAE/Gemma). NOTE: the schedule is a
     plain linspace; the distilled checkpoint would ideally use its own tuned few-step sigmas (follow-up)."""
     seed = _seed_from(model_id)
-    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1.5e-4, per_unit_seconds=1.2e-7)
 
     def single_factory():
         return LTX2DenoiseLoop(loop_id="ltx2_single",
@@ -162,7 +155,6 @@ def build_ltx2_base_card(model_id: str = "ltx2-single-stage") -> ModelCard:
                                sigmas=[1.0, 0.0],
                                cfg_scale=3.0,
                                stg_scale=0.0,
-                               cost=cost,
                                input_slot=None,
                                seed_offset=0,
                                full_res=True,
@@ -196,7 +188,6 @@ def build_ltx2_base_card(model_id: str = "ltx2-single-stage") -> ModelCard:
         LoopSpec(loop_id="ltx2_single",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["feature"],
                  loop_factory=single_factory),
@@ -234,10 +225,9 @@ def build_ltx2_3_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
     Adds ``audio_vae`` (AudioDecoder) + ``vocoder`` for the audio branch; a plain T2V request runs
     video-only (audio components stay unbuilt)."""
     seed = _seed_from(model_id)
-    cost = CostModel(kind=WorkUnitKind.DIFFUSION_STEP, base_seconds=1.5e-4, per_unit_seconds=1.2e-7)
 
     def loop_factory():
-        return LTX23DenoiseLoop(loop_id="ltx2_3", sigmas=BASE_SIGMAS, cfg_scale=1.0, stg_scale=0.0, cost=cost)
+        return LTX23DenoiseLoop(loop_id="ltx2_3", sigmas=BASE_SIGMAS, cfg_scale=1.0, stg_scale=0.0)
 
     components = {
         "text_encoder":
@@ -281,7 +271,6 @@ def build_ltx2_3_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
         LoopSpec(loop_id="ltx2_3",
                  kind=LoopKind.DIFFUSION_DENOISE,
                  work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
-                 step_cost_model=cost,
                  shared_weight_components=["transformer"],
                  cache_policy=["feature"],
                  loop_factory=loop_factory),

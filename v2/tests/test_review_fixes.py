@@ -1,18 +1,15 @@
 """Regression tests for the adversarial-review findings (untested paths now covered).
 
-Locks in: fail-fast on infeasible/deadlocked admission (no busy-spin), refundable compute budget
-(concurrency gate, not lifetime cap), feature-key partitioning by adapter stack + precision,
-component-scoped weight invalidation (transformer sync keeps the text-encoder cache), and the
-interleave gate flagging symmetric-empty output.
+Locks in: fail-fast on infeasible/deadlocked admission (no busy-spin), feature-key partitioning by
+adapter stack + precision, component-scoped weight invalidation (transformer sync keeps the
+text-encoder cache), and the interleave gate flagging symmetric-empty output.
 """
 from __future__ import annotations
 
 import numpy as np
 
-from v2._enums import WorkUnitKind
 from v2.cache import CacheManager
 from v2.card import load_card
-from v2.loop.contracts import ResourceRequest, ShapeSignature, WorkPlan
 from v2.memory import MemoryManager
 from v2.recipes import build_default_engine
 from v2.recipes.common import cached_text_encode
@@ -30,19 +27,6 @@ def test_infeasible_reservation_fails_fast_not_busy_spin():
         assert False, "expected AdmissionInfeasible (resident need >> 16 bytes)"
     except AdmissionInfeasible:
         pass
-
-
-def test_compute_budget_is_a_refundable_concurrency_gate():
-    ac = AdmissionController(compute_budget_seconds=1.0)
-    plan = WorkPlan(loop_id="l", instance_id="i", kind=WorkUnitKind.DIFFUSION_STEP,
-                    shape_sig=ShapeSignature(WorkUnitKind.DIFFUSION_STEP),
-                    resources=ResourceRequest(compute_seconds=0.6))
-    t1 = ac.admit_step(plan)
-    assert t1 is not None and abs(ac.compute_spent - 0.6) < 1e-9
-    assert ac.admit_step(plan) is None              # 0.6+0.6 > 1.0 ⇒ deferred (concurrency gate)
-    ac.release(t1)
-    assert ac.compute_spent == 0.0                  # refunded — NOT a permanent lifetime cap
-    assert ac.admit_step(plan) is not None          # fits again after the refund
 
 
 def test_feature_key_partitions_by_adapter_stack():

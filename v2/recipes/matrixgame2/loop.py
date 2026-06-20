@@ -70,7 +70,6 @@ class MatrixGame2CausalDMDLoop:
                  flow_shift,
                  precision,
                  expert,
-                 cost,
                  dmd_steps: tuple[int, ...] = MATRIXGAME2_DMD_STEPS,
                  context_noise: int = MATRIXGAME2_CONTEXT_NOISE,
                  num_frames_per_block: int = MATRIXGAME2_NUM_FRAMES_PER_BLOCK,
@@ -83,7 +82,6 @@ class MatrixGame2CausalDMDLoop:
         self.flow_shift = flow_shift
         self.precision = precision
         self.expert = expert
-        self.cost = cost
         self.dmd_steps = tuple(dmd_steps)
         self.context_noise = int(context_noise)
         self.num_frames_per_block = int(num_frames_per_block)
@@ -261,7 +259,7 @@ class MatrixGame2CausalDMDLoop:
                     "context": False
                 })
 
-        res = ResourceRequest(compute_seconds=self.cost.predict(int(np.prod(block.shape)), 1.0),
+        res = ResourceRequest(
                               resident_bytes=int(x_full.nbytes),
                               peak_activation_bytes=int(block.nbytes))
         label = (f"matrixgame2.context.{b_idx}" if is_context else f"matrixgame2.denoise.{b_idx}.{dmd_idx}")

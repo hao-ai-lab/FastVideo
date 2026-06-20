@@ -73,12 +73,11 @@ class Flux2DenoiseLoop:
     schedule + packed geometry are the only deltas. All per-request state lives in ``LoopState``
     (interleave-safe)."""
 
-    def __init__(self, *, loop_id, cfg, precision, expert, cost, packed_channels: int = FLUX2_PACKED_CHANNELS):
+    def __init__(self, *, loop_id, cfg, precision, expert, packed_channels: int = FLUX2_PACKED_CHANNELS):
         self.loop_id = loop_id
         self.cfg = cfg  # EmbeddedGuidance (dev) — carried for the WorkPlan op-structure key
         self.precision = precision
         self.expert = expert
-        self.cost = cost
         self.packed_channels = packed_channels
 
     def init(self, req, model, ctx) -> LoopState:
@@ -151,7 +150,7 @@ class Flux2DenoiseLoop:
             })
 
         cond_bytes = int(np.asarray(pe).nbytes) if pe is not None else 0
-        res = ResourceRequest(compute_seconds=self.cost.predict(int(np.prod(x.shape)), float(len(branches))),
+        res = ResourceRequest(
                               resident_bytes=int(x.nbytes) + cond_bytes,
                               peak_activation_bytes=int(x.nbytes))
         emits = []

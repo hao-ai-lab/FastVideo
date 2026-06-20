@@ -73,7 +73,6 @@ class LTX2DenoiseLoop:
                  sigmas,
                  cfg_scale,
                  stg_scale,
-                 cost,
                  input_slot=None,
                  seed_offset=0,
                  audio_input_slot=None,
@@ -85,7 +84,6 @@ class LTX2DenoiseLoop:
         self.sigmas = list(sigmas)
         self.cfg_scale = cfg_scale
         self.stg_scale = stg_scale
-        self.cost = cost
         self.input_slot = input_slot  # None => fresh noise (base); slot name => read latents (refine)
         self.audio_input_slot = audio_input_slot  # joint A/V: where to read the threaded audio latent
         self.seed_offset = seed_offset
@@ -164,7 +162,7 @@ class LTX2DenoiseLoop:
             return StepResult(output=out)
 
         res = ResourceRequest(
-            compute_seconds=self.cost.predict(int(np.prod(x.shape)), 3.0),  # 3 passes
+            # 3 passes
             resident_bytes=int(x.nbytes),
             peak_activation_bytes=int(x.nbytes * 3))
         return WorkPlan(loop_id=self.loop_id,
@@ -222,7 +220,6 @@ class LTX23DenoiseLoop:
                  sigmas=None,
                  cfg_scale=1.0,
                  stg_scale=0.0,
-                 cost,
                  audio_channels=LTX2_AUDIO_CHANNELS,
                  audio_mel_bins=LTX2_AUDIO_MEL_BINS):
         self.loop_id = loop_id
@@ -230,7 +227,6 @@ class LTX23DenoiseLoop:
         self.sigmas = list(sigmas) if sigmas else list(BASE_SIGMAS)  # tuned distilled few-step schedule
         self.cfg_scale = cfg_scale
         self.stg_scale = stg_scale
-        self.cost = cost
         self.audio_channels = audio_channels
         self.audio_mel_bins = audio_mel_bins
 
@@ -287,7 +283,7 @@ class LTX23DenoiseLoop:
                 }
             return StepResult(output=out)
 
-        res = ResourceRequest(compute_seconds=self.cost.predict(int(np.prod(x.shape)), 1.0),
+        res = ResourceRequest(
                               resident_bytes=int(x.nbytes),
                               peak_activation_bytes=int(x.nbytes * 2))
         return WorkPlan(loop_id=self.loop_id,

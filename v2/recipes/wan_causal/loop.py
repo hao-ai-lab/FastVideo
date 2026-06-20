@@ -31,7 +31,7 @@ from v2.platform.backends.toy import LATENT_CHANNELS
 
 class ChunkRolloutLoop:
 
-    def __init__(self, *, loop_id, num_chunks, chunk_size, steps_per_chunk, cfg, flow_shift, precision, cost):
+    def __init__(self, *, loop_id, num_chunks, chunk_size, steps_per_chunk, cfg, flow_shift, precision):
         self.loop_id = loop_id
         self.num_chunks = num_chunks
         self.chunk_size = chunk_size
@@ -39,7 +39,6 @@ class ChunkRolloutLoop:
         self.cfg = cfg
         self.flow_shift = flow_shift
         self.precision = precision
-        self.cost = cost
 
     def _chunk_shape(self, req, model=None) -> tuple[int, int, int, int]:
         # Real Wan geometry on the cuda backend (16 latent channels; chunk_size latent frames; 8x
@@ -152,7 +151,7 @@ class ChunkRolloutLoop:
                             seq=st.scratch["chunk_idx"],
                             data=x,
                             preview=False))
-        res = ResourceRequest(compute_seconds=self.cost.predict(int(np.prod(x.shape)), float(len(branches))),
+        res = ResourceRequest(
                               resident_bytes=int(x.nbytes),
                               peak_activation_bytes=int(x.nbytes * len(branches)))
         return WorkPlan(loop_id=self.loop_id,

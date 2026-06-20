@@ -148,8 +148,8 @@ class ProgramRunner:
                     return False
                 if not self.engine.admission.feasible_step(plan):
                     raise AdmissionInfeasible(
-                        f"{node.loop_id}: step needs peak {plan.resources.peak_activation_bytes}B / "
-                        f"{plan.resources.compute_seconds:.4g}s — exceeds pool/budget capacity")
+                        f"{node.loop_id}: step needs peak {plan.resources.peak_activation_bytes}B "
+                        f"— exceeds pool memory capacity")
                 step_res = self.engine.admission.admit_step(plan)
                 if step_res is None:
                     return False  # deferred this tick (will retry; refundable)

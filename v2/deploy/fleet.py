@@ -40,12 +40,9 @@ class Worker:
         return self.engine.serves(model_id) or self.card.serves(model_id)
 
     def cost_estimate(self, request: Any) -> float:
-        """Predicted GPU-time for this request — the cost model as the fleet's routing input."""
-        cm = self.card.cost_model
-        steps = max(1, int(getattr(request.diffusion, "num_steps", 1) or 1))
-        work = max(1, int(getattr(request.diffusion, "height", 1)) * int(getattr(request.diffusion, "width", 1)))
-        per = cm.predict(work) if cm is not None else 1e-3
-        return steps * per
+        """A coarse routing weight — the request's step count. No time/cost model under pooled
+        run-to-completion serving; just a relative-load proxy for the fleet router."""
+        return float(max(1, int(getattr(request.diffusion, "num_steps", 1) or 1)))
 
     def health(self) -> HealthSchema:
         return HealthSchema(status=("draining" if self.draining else "healthy"),

@@ -26,7 +26,6 @@ from v2._enums import (
 from v2.card import (
     CapabilityMatrix,
     ComponentSpec,
-    CostModel,
     LoopSpec,
     ModelCard,
     ModelInstance,
@@ -54,7 +53,6 @@ __all__ = [
     "LoopSpec",
     "RecipeSpec",
     "ParitySpec",
-    "CostModel",
     "CapabilityMatrix",
     "ModelInstance",
     "load_card",
