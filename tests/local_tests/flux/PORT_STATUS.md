@@ -3,7 +3,7 @@
 Model family: flux
 Official ref: black-forest-labs/FLUX.1-dev (Diffusers layout)
 Workload: T2I
-Last updated: 2026-05-11
+Last updated: 2026-06-20
 
 ## Component Status
 
@@ -45,9 +45,15 @@ DiT parity test compares FastVideo `FluxTransformer2DModel` vs Diffusers under i
 
 ## Known Blockers
 
-1. SSIM reference images not committed — test will FileNotFoundError before comparison.
-   Resolution: run seed-ssim-references skill on L40S after weights are available.
+None. (Both prior blockers resolved — see below.)
 
-2. Registry early-return guard (registry.py) — if any test pre-populates
-   _CONFIG_REGISTRY before _register_configs() runs, FLUX registration will be
-   silently skipped. Known pre-existing pattern; accepted risk for now.
+## Resolved
+
+1. SSIM reference image — RESOLVED. The TORCH_SDPA reference (A40, 256×256, 8 steps,
+   seed=0) is committed, so the SSIM gate runs against it. A FLASH_ATTN reference is
+   still pending (see Quality table) but is not required for the default backend.
+
+2. Registry registration — RESOLVED. FLUX is registered unconditionally in
+   `_register_configs()` (fastvideo/registry.py); there is no early-return guard that
+   could silently skip it. The earlier `_CONFIG_REGISTRY` pre-population concern no
+   longer applies after the registry refactor.

@@ -7,7 +7,7 @@ import os
 import pytest
 import torch
 
-from fastvideo.configs.sample.flux import FluxSamplingParam
+from fastvideo.api.flux import FluxSamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     run_text_to_video_similarity_test,
