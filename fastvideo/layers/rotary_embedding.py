@@ -296,7 +296,6 @@ def get_1d_rotary_pos_embed(
     dtype: torch.dtype = torch.float32,
     use_real: bool = True,
     freqs_dtype: torch.dtype | None = None,
-    repeat_interleave_real: bool | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Precompute the frequency tensor for complex exponential (cis) with given dimensions.
