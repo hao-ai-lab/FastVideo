@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""InterleaveThinker-compatible FastVideo app layer."""
+"""InterleaveThinker workflow helpers for FastVideo."""
 
-from fastvideo.entrypoints.interleave.config import (
+from fastvideo.workflows.interleave_thinker.config import (
     InterleaveCriticConfig,
     InterleaveImageBackendConfig,
     InterleavePlannerConfig,
@@ -10,7 +10,7 @@ from fastvideo.entrypoints.interleave.config import (
     load_interleave_run_config,
     resolve_interleave_instruction,
 )
-from fastvideo.entrypoints.interleave.evaluation import (
+from fastvideo.workflows.interleave_thinker.evaluation import (
     InterleavePromptItem,
     InterleavePromptResult,
     InterleavePromptSetSummary,
@@ -20,26 +20,26 @@ from fastvideo.entrypoints.interleave.evaluation import (
     run_interleave_prompt_set_config,
     save_prompt_set_summary,
 )
-from fastvideo.entrypoints.interleave.generator import (
+from fastvideo.workflows.interleave_thinker.generator import (
     FastVideoImageGeneratorBackend,
     ImageGeneratorBackend,
 )
-from fastvideo.entrypoints.interleave.orchestrator import (
+from fastvideo.workflows.interleave_thinker.orchestrator import (
     AcceptAllCritic,
     CriticProvider,
     InterleaveOrchestrator,
     PlannerProvider,
     SinglePromptPlanner,
 )
-from fastvideo.entrypoints.interleave.providers import (
+from fastvideo.workflows.interleave_thinker.providers import (
     InterleaveThinkerCriticProvider,
     InterleaveThinkerPlannerProvider,
 )
-from fastvideo.entrypoints.interleave.runner import (
+from fastvideo.workflows.interleave_thinker.runner import (
     InterleaveRunResult,
     run_interleave_config,
 )
-from fastvideo.entrypoints.interleave.schema import (
+from fastvideo.workflows.interleave_thinker.schema import (
     CriticDecision,
     CriticInput,
     GeneratedImage,
@@ -50,11 +50,11 @@ from fastvideo.entrypoints.interleave.schema import (
     PlannedInterleaveStep,
     PlannerInput,
 )
-from fastvideo.entrypoints.interleave.trace import (
+from fastvideo.workflows.interleave_thinker.trace import (
     save_trace,
     trace_to_dict,
 )
-from fastvideo.entrypoints.interleave.trace_eval import (
+from fastvideo.workflows.interleave_thinker.trace_eval import (
     InterleaveTraceEvaluationSummary,
     InterleaveTraceMetrics,
     discover_interleave_trace_paths,

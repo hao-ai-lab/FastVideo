@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from fastvideo.entrypoints.interleave import (
+from fastvideo.workflows.interleave_thinker import (
     GeneratedImage,
     InterleaveEditRequest,
     InterleavePromptItem,
@@ -17,8 +17,8 @@ from fastvideo.entrypoints.interleave import (
     run_interleave_prompt_set,
     run_interleave_config,
 )
-from fastvideo.entrypoints.interleave.orchestrator import SinglePromptPlanner
-from fastvideo.entrypoints.interleave.schema import PlannerInput
+from fastvideo.workflows.interleave_thinker.orchestrator import SinglePromptPlanner
+from fastvideo.workflows.interleave_thinker.schema import PlannerInput
 
 
 def test_interleave_run_config_loads_prompt_and_request_defaults(tmp_path: Path) -> None:
@@ -33,7 +33,7 @@ def test_interleave_run_config_loads_prompt_and_request_defaults(tmp_path: Path)
     assert config.request.sampling.num_inference_steps == 4
 
 
-def test_interleave_run_config_accepts_cli_fields_and_dotted_overrides(tmp_path: Path) -> None:
+def test_interleave_run_config_accepts_runtime_fields_and_dotted_overrides(tmp_path: Path) -> None:
     config_path = _write_run_config(tmp_path)
 
     config = load_interleave_run_config(

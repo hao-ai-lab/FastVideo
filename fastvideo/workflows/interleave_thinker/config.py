@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Typed config for native interleaved generation runs."""
+"""Typed config for native interleaved generation workflows."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
+from fastvideo.api.overrides import apply_overrides, parse_cli_overrides as parse_dotted_overrides
 from fastvideo.api.parser import load_raw_config, parse_config
 from fastvideo.api.request_metadata import bind_generation_request_raw
 from fastvideo.api.schema import GenerationRequest, GeneratorConfig
@@ -113,7 +113,7 @@ def load_interleave_run_config(
     require_instruction: bool = True,
 ) -> InterleaveRunConfig:
     raw = load_raw_config(path)
-    raw = _apply_interleave_cli_fields(
+    raw = _apply_interleave_runtime_fields(
         raw,
         prompt=prompt,
         input_image=input_image,
@@ -161,7 +161,7 @@ def validate_interleave_run_config(
         _require_positive_int(config.critic.max_new_tokens, "critic.max_new_tokens")
 
 
-def _apply_interleave_cli_fields(
+def _apply_interleave_runtime_fields(
     raw: Mapping[str, Any],
     *,
     prompt: str | None,
@@ -191,10 +191,10 @@ def _apply_interleave_overrides(
     if not overrides:
         return deepcopy(dict(raw))
 
-    parsed = parse_cli_overrides(overrides)
+    parsed = parse_dotted_overrides(overrides)
     for key in parsed:
         if "." not in key:
-            raise ValueError("CLI overrides must use dotted config paths like --request.sampling.seed 42")
+            raise ValueError("Overrides must use dotted config paths like --request.sampling.seed 42")
         if not key.startswith(_INTERLEAVE_RUN_OVERRIDE_PREFIXES):
             allowed = ", ".join(_INTERLEAVE_RUN_OVERRIDE_PREFIXES)
             raise ValueError(f"Unsupported override path {key!r}. Allowed prefixes: {allowed}")

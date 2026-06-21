@@ -8,7 +8,7 @@ Current working location:
 
 - Directory: `/home/toolbox/FastVideo`
 - Branch: `interleavethinker-fastvideo`
-- Latest observed branch head: `704e5667` (`[docs] record InterleaveThinker CLI cleanup validation`)
+- Latest observed branch head: `d2c53951` (`[docs] update InterleaveThinker handoff instructions`)
 
 This file is the canonical handoff for the InterleaveThinker integration work.
 It intentionally summarizes older execution logs; use git history for the full
@@ -47,9 +47,9 @@ append-only detail if needed.
   - VLM model details live in planner/critic model wrappers.
   - RL algorithms live in `fastvideo/train/methods/rl`.
   - Reward parsing/scoring lives under `fastvideo/train/methods/rl/rewards`.
-  - Interleaved inference helpers should move out of
-    `fastvideo/entrypoints/interleave` because the standalone CLI/API surface
-    was removed.
+  - Interleaved inference helpers live under
+    `fastvideo/workflows/interleave_thinker`; the old entrypoints namespace is
+    being removed because the standalone CLI/API surface was removed.
 
 ## Goal
 
@@ -72,9 +72,9 @@ Out of scope unless explicitly re-opened:
 
 ## Architecture Snapshot
 
-Implemented and retained surfaces before the namespace migration:
+Implemented and retained surfaces:
 
-- `fastvideo.entrypoints.interleave`
+- `fastvideo.workflows.interleave_thinker`
   - schema objects, generator backend translation, orchestrator, provider
     adapters, config/runner helpers, prompt-set evaluation, and trace metrics.
   - Standalone command registration and standalone server modules were removed.
@@ -105,10 +105,10 @@ Removed by the API/CLI cleanup:
 - command/service-oriented examples and scripts.
 - `interleave-api` optional extra.
 
-Planned namespace integration:
+Namespace integration plan:
 
-- Move the reusable helper layer from `fastvideo/entrypoints/interleave` to a
-  workflow-oriented package such as `fastvideo/workflows/interleave_thinker`.
+- Move the reusable helper layer from the old entrypoints package to
+  `fastvideo/workflows/interleave_thinker`.
 - Update internal imports, tests, examples, and docs to use the new workflow
   namespace.
 - Do not keep the old `fastvideo.entrypoints.interleave` package unless a
@@ -252,8 +252,8 @@ Broad-suite status:
 2. Read the relevant per-directory `AGENTS.md` before touching files under
    `fastvideo/`, `examples/`, `docs/`, `scripts/`, or tests.
 3. Finish API cleanup by moving the reusable
-   `fastvideo/entrypoints/interleave` helper package to a workflow namespace,
-   updating all imports/docs/tests, and deleting the old entrypoints package.
+   `fastvideo/workflows/interleave_thinker` helper package into place, updating
+   all imports/docs/tests, and deleting the old entrypoints package.
 4. Validate only on Modal. Local syntax-only commands such as `git diff --check`
    are acceptable, but no local pytest or other local test execution should be
    used.

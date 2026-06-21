@@ -6,11 +6,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Protocol
 
-from fastvideo.entrypoints.interleave.generator import (
+from fastvideo.workflows.interleave_thinker.generator import (
     ImageGeneratorBackend,
     encode_file_to_base64,
 )
-from fastvideo.entrypoints.interleave.schema import (
+from fastvideo.workflows.interleave_thinker.schema import (
     CriticDecision,
     CriticInput,
     GeneratedImage,

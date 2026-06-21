@@ -36,7 +36,7 @@ The RL reward config can use closed-source Google models through lazy wrappers:
 
 - `fastvideo.train.methods.rl.rewards.GeminiNanoBananaEditScorer` generates
   edits with Nano Banana and scores them with Gemini.
-- `fastvideo.entrypoints.interleave.generator.NanoBananaImageGeneratorBackend`
+- `fastvideo.workflows.interleave_thinker.generator.NanoBananaImageGeneratorBackend`
   implements the same image backend protocol as the local FastVideo generator.
 
 Install the optional SDK and provide a key only when using these API backends:
