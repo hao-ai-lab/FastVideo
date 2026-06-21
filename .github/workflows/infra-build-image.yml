@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       build_cuda_matrix:
-        description: 'Build the CUDA image matrix (py3.12 x CUDA 12.8.0/12.9.1/13.0.0)'
+        description: 'Build the CUDA image matrix (py3.12 x CUDA 12.9.1/13.0.0)'
         required: false
         default: true
         type: boolean
       build_dreamverse_matrix:
-        description: 'Build the Dreamverse matrix (backend + UI x CUDA 12.8.0/12.9.1/13.0.0)'
+        description: 'Build the Dreamverse matrix (backend + UI x CUDA 12.9.1/13.0.0)'
         required: false
         default: false
         type: boolean
@@ -20,10 +20,10 @@ permissions:
   packages: write
 
 jobs:
-  # CUDA matrix: Python 3.12 x {CUDA 12.8.0, 12.9.1, 13.0.0}.
-  # 12.8.0 gets the `py3.12` tag; 12.9.1/13.0.0 get a `-cudaX.Y.Z` suffix; the
-  # 13.0.0 build is additionally tagged `latest`. flash-attn is the same prebuilt wheel for every cell (it
-  # tracks torch 2.12.1+cu130 from pyproject, not the base image's CUDA -- see
+  # CUDA matrix: Python 3.12 x {CUDA 12.9.1, 13.0.0}. (12.8.0 dropped: torch 2.12
+  # is not published for cu128.) 12.9.1 gets the `py3.12` tag and `latest`; 13.0.0
+  # gets a `-cuda13.0.0` suffix. flash-attn is the same prebuilt wheel for every
+  # cell (it tracks torch 2.12.1+cu130, not the base image's CUDA -- see
   # docker/Dockerfile); the base image only changes the nvcc that compiles
   # fastvideo-kernel.
   build-cuda-images:
@@ -32,10 +32,8 @@ jobs:
       fail-fast: false
       matrix:
         cuda:
-          - version: '12.8.0'
-            suffix: ''
           - version: '12.9.1'
-            suffix: '-cuda12.9.1'
+            suffix: ''
           - version: '13.0.0'
             suffix: '-cuda13.0.0'
     uses: ./.github/workflows/_template-build-image.yml
@@ -43,20 +41,20 @@ jobs:
       python_version: '3.12'
       dockerfile_path: docker/Dockerfile
       tag_suffix: py3.12${{ matrix.cuda.suffix }}
-      mark_as_latest: ${{ matrix.cuda.version == '13.0.0' }}
+      mark_as_latest: ${{ matrix.cuda.version == '12.9.1' }}
       build_args: |
         PYTHON_VERSION=3.12
         CUDA_VERSION=${{ matrix.cuda.version }}
     secrets: inherit
 
-  # Dreamverse matrix: {backend, UI} x {CUDA 12.8.0, 12.9.1, 13.0.0}, Python 3.12.
+  # Dreamverse matrix: {backend, UI} x {CUDA 12.9.1, 13.0.0}, Python 3.12.
   # Each image is tagged dreamverse-<variant>-cuda<version> (no `latest`).
   build-dreamverse:
     if: ${{ github.event.inputs.build_dreamverse_matrix == 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        cuda: ['12.8.0', '12.9.1', '13.0.0']
+        cuda: ['12.9.1', '13.0.0']
         variant:
           - name: backend
             ui: '0'
