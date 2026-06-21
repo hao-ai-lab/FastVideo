@@ -55,7 +55,6 @@ class FluxPosEmbed(nn.Module):
                 self.axes_dim[i],
                 pos[:, i],
                 theta=self.theta,
-                repeat_interleave_real=True,
                 use_real=True,
                 freqs_dtype=freqs_dtype,
             )

@@ -11,11 +11,14 @@ from diffusers.utils.torch_utils import randn_tensor
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.timestep_preparation import TimestepPreparationStage
 from fastvideo.utils import PRECISION_TO_TYPE
+
+logger = init_logger(__name__)
 
 
 def _pack_latents(
@@ -122,11 +125,20 @@ class FluxTimestepPreparationStage(TimestepPreparationStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         sig = inspect.signature(self.scheduler.set_timesteps)
         if "mu" not in sig.parameters:
+            logger.warning(
+                "FLUX timestep prep: scheduler %s.set_timesteps does not accept 'mu'; falling back to the base "
+                "timestep schedule. FLUX expects a FlowMatchEulerDiscreteScheduler with resolution-dependent "
+                "dynamic shifting — output quality may degrade.",
+                type(self.scheduler).__name__)
             return super().forward(batch, fastvideo_args)
 
         cfg = getattr(self.scheduler, "config", None)
         use_dynamic = bool(getattr(cfg, "use_dynamic_shifting", False)) if cfg is not None else False
         if not use_dynamic:
+            logger.warning(
+                "FLUX timestep prep: scheduler has use_dynamic_shifting=False; falling back to the base timestep "
+                "schedule and skipping the resolution-dependent 'mu' shift. FLUX requires dynamic shifting for "
+                "correct timesteps — output quality may degrade.")
             return super().forward(batch, fastvideo_args)
 
         if batch.height is None or batch.width is None:
