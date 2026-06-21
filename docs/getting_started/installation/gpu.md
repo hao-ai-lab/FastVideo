@@ -80,16 +80,21 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 
 #### 2. Install FastVideo
 
+FastVideo doesn't pin the PyTorch CUDA build. Set `UV_TORCH_BACKEND` so uv picks
+it: `auto` matches your GPU driver, or pin one explicitly (e.g. `cu130`/`cu129`).
+The pinned torch (2.12.1) is published only for `cu129`/`cu130`, so `auto` needs
+a CUDA 12.9+/13 driver.
+
 Basic installation:
 
 ```bash
-uv pip install -e .
+UV_TORCH_BACKEND=auto uv pip install -e .
 ```
 
 Alternative with Conda environment:
 
 ```bash
-uv pip install -e .
+UV_TORCH_BACKEND=auto uv pip install -e .
 ```
 
 ### Optional Dependencies

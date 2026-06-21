@@ -97,6 +97,12 @@ ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 ENV UV_CACHE_DIR=/opt/uv/cache
 ENV UV_LINK_MODE=copy
 
+# pyproject no longer pins a PyTorch index; select the build at resolve time.
+# Build hosts have no GPU driver (auto-detect would fall back to CPU), so pin
+# explicitly. torch 2.12.1 lives on cu129/cu130; cu130 covers every CUDA base.
+ARG UV_TORCH_BACKEND=cu130
+ENV UV_TORCH_BACKEND=${UV_TORCH_BACKEND}
+
 # Install uv and source its environment
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     echo 'source $HOME/.local/bin/env' >> /root/.bashrc

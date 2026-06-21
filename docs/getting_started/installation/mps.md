@@ -76,13 +76,13 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 Basic installation:
 
 ```bash
-uv pip install -e .
+UV_TORCH_BACKEND=auto uv pip install -e .
 ```
 
 Alternative with Conda environment:
 
 ```bash
-uv pip install -e .
+UV_TORCH_BACKEND=auto uv pip install -e .
 ```
 
 ## Development Environment Setup
