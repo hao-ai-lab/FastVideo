@@ -6,10 +6,10 @@ import types
 from PIL import Image
 import pytest
 
-from fastvideo.workflows.interleave_thinker.generator import (
+from fastvideo.workflow.interleave_thinker.generator import (
     NanoBananaImageGeneratorBackend,
 )
-from fastvideo.workflows.interleave_thinker.schema import InterleaveEditRequest
+from fastvideo.workflow.interleave_thinker.schema import InterleaveEditRequest
 from fastvideo.train.methods.rl.rewards.interleave_api import (
     GeminiNanoBananaEditScorer,
 )

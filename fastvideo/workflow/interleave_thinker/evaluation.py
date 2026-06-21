@@ -11,14 +11,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fastvideo.workflows.interleave_thinker.generator import ImageGeneratorBackend
-from fastvideo.workflows.interleave_thinker.runner import (
+from fastvideo.workflow.interleave_thinker.generator import ImageGeneratorBackend
+from fastvideo.workflow.interleave_thinker.runner import (
     build_critic,
     build_image_backend,
     build_planner,
 )
-from fastvideo.workflows.interleave_thinker.schema import InterleaveTrace
-from fastvideo.workflows.interleave_thinker.trace import save_trace
+from fastvideo.workflow.interleave_thinker.schema import InterleaveTrace
+from fastvideo.workflow.interleave_thinker.trace import save_trace
 
 
 @dataclass(frozen=True)
@@ -208,7 +208,7 @@ def _build_prompt_set_orchestrator(
     config: Any,
     image_backend: ImageGeneratorBackend,
 ) -> Any:
-    from fastvideo.workflows.interleave_thinker.orchestrator import InterleaveOrchestrator
+    from fastvideo.workflow.interleave_thinker.orchestrator import InterleaveOrchestrator
 
     return InterleaveOrchestrator(
         planner=build_planner(config.planner),

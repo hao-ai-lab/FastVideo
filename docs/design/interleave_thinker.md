@@ -44,7 +44,7 @@ Training examples live under:
 
 ### Orchestration Helpers
 
-The Python helper layer under `fastvideo.workflows.interleave_thinker` is intentionally
+The Python helper layer under `fastvideo.workflow.interleave_thinker` is intentionally
 not registered as a CLI or server contract. It provides reusable dataclasses,
 provider adapters, image-backend adapters, trace serialization, prompt-set
 execution helpers, and saved-trace metrics for tests, examples, and downstream
@@ -61,9 +61,9 @@ The runnable example is:
 | Planner and critic actors | `fastvideo/train/models/interleave_thinker/` | Wrap Transformers Qwen3-VL checkpoints. They are training actors, not diffusion pipeline components. |
 | RL/SFT algorithms | `fastvideo/train/methods/` | Own loss, reward aggregation, advantage computation, KL, and optimizer cadence. |
 | Rewards and API clients | `fastvideo/train/methods/rl/rewards/` | Offline reward aggregation is separate from network-backed Gemini/Nano Banana clients. |
-| Image generation/editing helpers | `fastvideo/workflows/interleave_thinker/generator.py` | Presents a small image backend protocol for FastVideo, Nano Banana, and fake backends. |
-| Runtime orchestration helpers | `fastvideo/workflows/interleave_thinker/` | Plans steps, calls generator/edit backends, calls critic providers, records traces. |
-| Evaluation helpers | `fastvideo/workflows/interleave_thinker/evaluation.py` and `trace_eval.py` | Prompt-set execution and saved-trace reporting remain outside training methods. |
+| Image generation/editing helpers | `fastvideo/workflow/interleave_thinker/generator.py` | Presents a small image backend protocol for FastVideo, Nano Banana, and fake backends. |
+| Runtime orchestration helpers | `fastvideo/workflow/interleave_thinker/` | Plans steps, calls generator/edit backends, calls critic providers, records traces. |
+| Evaluation helpers | `fastvideo/workflow/interleave_thinker/evaluation.py` and `trace_eval.py` | Prompt-set execution and saved-trace reporting remain outside training methods. |
 
 This keeps the Qwen actor implementation reusable by SFT, planner GRPO, critic
 GRPO, and inference providers without coupling those paths to a specific

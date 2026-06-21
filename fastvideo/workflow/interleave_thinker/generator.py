@@ -19,7 +19,7 @@ from fastvideo.api.compat import (
 )
 from fastvideo.api.results import GenerationResult
 from fastvideo.api.schema import GenerationRequest
-from fastvideo.workflows.interleave_thinker.schema import (
+from fastvideo.workflow.interleave_thinker.schema import (
     GeneratedImage,
     InterleaveEditRequest,
 )

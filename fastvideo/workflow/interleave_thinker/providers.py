@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastvideo.workflows.interleave_thinker.schema import (
+from fastvideo.workflow.interleave_thinker.schema import (
     CriticDecision,
     CriticInput,
     PlannedInterleaveStep,

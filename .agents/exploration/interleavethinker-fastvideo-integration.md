@@ -8,7 +8,7 @@ Current working location:
 
 - Directory: `/home/toolbox/FastVideo`
 - Branch: `interleavethinker-fastvideo`
-- Latest observed branch head: `91d8fb85` (`[misc] format InterleaveThinker workflow helpers`)
+- Latest observed branch head: `58256b12` (`[docs] record InterleaveThinker workflow migration`)
 
 This file is the canonical handoff for the InterleaveThinker integration work.
 It intentionally summarizes older execution logs; use git history for the full
@@ -48,8 +48,9 @@ append-only detail if needed.
   - RL algorithms live in `fastvideo/train/methods/rl`.
   - Reward parsing/scoring lives under `fastvideo/train/methods/rl/rewards`.
   - Interleaved inference helpers live under
-    `fastvideo/workflows/interleave_thinker`; the old entrypoints namespace was
-    removed because the standalone CLI/API surface was removed.
+    `fastvideo/workflow/interleave_thinker`; use the pre-existing singular
+    `fastvideo/workflow` namespace, not a parallel `fastvideo/workflows`
+    package.
 
 ## Goal
 
@@ -74,7 +75,7 @@ Out of scope unless explicitly re-opened:
 
 Implemented and retained surfaces:
 
-- `fastvideo.workflows.interleave_thinker`
+- `fastvideo.workflow.interleave_thinker`
   - schema objects, generator backend translation, orchestrator, provider
     adapters, config/runner helpers, prompt-set evaluation, and trace metrics.
   - Standalone command registration and standalone server modules were removed.
@@ -107,12 +108,14 @@ Removed by the API/CLI cleanup:
 
 Namespace integration status:
 
-- Completed. The reusable helper layer moved from the old entrypoints package
-  to `fastvideo/workflows/interleave_thinker`.
-- Internal imports, tests, examples, and docs now use the workflow namespace.
-- The old `fastvideo.entrypoints.interleave` package was deleted rather than
-  kept as a compatibility shim. This branch has not merged, so preserving the
-  old public path was not required.
+- Correction in progress. The reusable helper layer should live under the
+  pre-existing singular `fastvideo/workflow/interleave_thinker` package, not
+  under a new parallel `fastvideo/workflows` package.
+- Internal imports, tests, examples, docs, and this handoff should use
+  `fastvideo.workflow.interleave_thinker`.
+- The old `fastvideo.entrypoints.interleave` package remains deleted rather
+  than kept as a compatibility shim. This branch has not merged, so preserving
+  the old public path is not required.
 - Do not scatter the helper code into unrelated core modules unless a genuinely
   generic abstraction emerges. The planner -> generator/edit -> critic loop is
   InterleaveThinker-specific workflow code, not `VideoGenerator`, training
@@ -163,10 +166,13 @@ Namespace integration status:
   library/training integration. Commits: `555a600f`, `704e5667`.
 - Handoff instructions were condensed and updated with standing Modal approval
   and the no-local-tests rule. Commit: `d2c53951`.
-- Namespace integration moved the helper package to
+- Namespace integration first moved the helper package to
   `fastvideo.workflows.interleave_thinker`, renamed stale tests, updated docs
   and examples, and deleted the old entrypoints package. Commits: `11d55fb5`,
   `91d8fb85`.
+- Follow-up correction requested by the user: move the helper package into the
+  pre-existing singular `fastvideo.workflow.interleave_thinker` namespace and
+  remove the parallel `fastvideo.workflows` package.
 
 ## Validation Evidence
 
@@ -269,9 +275,9 @@ Broad-suite status:
    before editing.
 2. Read the relevant per-directory `AGENTS.md` before touching files under
    `fastvideo/`, `examples/`, `docs/`, `scripts/`, or tests.
-3. The API cleanup and namespace migration are complete. Continue with review
-   preparation, PR decomposition, reward-backend hardening, or broad-suite
-   environment repair.
+3. Complete the namespace correction from `fastvideo.workflows` to the existing
+   `fastvideo.workflow` package, then continue with review preparation, PR
+   decomposition, reward-backend hardening, or broad-suite environment repair.
 4. Validate only on Modal. Local syntax-only commands such as `git diff --check`
    are acceptable, but no local pytest or other local test execution should be
    used.

@@ -8,31 +8,31 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastvideo.workflows.interleave_thinker.config import (
+from fastvideo.workflow.interleave_thinker.config import (
     InterleaveCriticConfig,
     InterleaveImageBackendConfig,
     InterleavePlannerConfig,
     InterleaveRunConfig,
     resolve_interleave_instruction,
 )
-from fastvideo.workflows.interleave_thinker.generator import (
+from fastvideo.workflow.interleave_thinker.generator import (
     FastVideoImageGeneratorBackend,
     ImageGeneratorBackend,
     NanoBananaImageGeneratorBackend,
 )
-from fastvideo.workflows.interleave_thinker.orchestrator import (
+from fastvideo.workflow.interleave_thinker.orchestrator import (
     AcceptAllCritic,
     CriticProvider,
     InterleaveOrchestrator,
     PlannerProvider,
     SinglePromptPlanner,
 )
-from fastvideo.workflows.interleave_thinker.providers import (
+from fastvideo.workflow.interleave_thinker.providers import (
     InterleaveThinkerCriticProvider,
     InterleaveThinkerPlannerProvider,
 )
-from fastvideo.workflows.interleave_thinker.schema import InterleaveTrace
-from fastvideo.workflows.interleave_thinker.trace import save_trace
+from fastvideo.workflow.interleave_thinker.schema import InterleaveTrace
+from fastvideo.workflow.interleave_thinker.trace import save_trace
 from fastvideo.train.models.interleave_thinker import (
     InterleaveThinkerCriticModel,
     InterleaveThinkerPlannerModel,

@@ -5,12 +5,12 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-from fastvideo.workflows.interleave_thinker.orchestrator import InterleaveOrchestrator
-from fastvideo.workflows.interleave_thinker.providers import (
+from fastvideo.workflow.interleave_thinker.orchestrator import InterleaveOrchestrator
+from fastvideo.workflow.interleave_thinker.providers import (
     InterleaveThinkerCriticProvider,
     InterleaveThinkerPlannerProvider,
 )
-from fastvideo.workflows.interleave_thinker.schema import (
+from fastvideo.workflow.interleave_thinker.schema import (
     CriticInput,
     GeneratedImage,
     PlannedInterleaveStep,

@@ -22,11 +22,11 @@ import time
 import uuid
 from typing import Any
 
-from fastvideo.workflows.interleave_thinker.generator import (
+from fastvideo.workflow.interleave_thinker.generator import (
     NanoBananaImageGeneratorBackend,
     encode_file_to_base64,
 )
-from fastvideo.workflows.interleave_thinker.schema import (
+from fastvideo.workflow.interleave_thinker.schema import (
     InterleaveEditRequest as InterleaveAPIEditRequest, )
 from fastvideo.train.methods.rl.rewards.interleave_thinker import (
     InterleaveThinkerEditRequest,
