@@ -25,7 +25,7 @@ If `dreamverse-server` is missing, install FastVideo with the `dreamverse`
 extra from the checkout:
 
 ```bash
-uv pip install -e ".[dreamverse]"
+UV_TORCH_BACKEND=auto uv pip install -e ".[dreamverse]"
 ```
 
 ## Frontend build and tests

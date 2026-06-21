@@ -52,7 +52,7 @@ brew install ffmpeg
 #### With uv (recommended)
 
 ```bash
-uv pip install fastvideo
+UV_TORCH_BACKEND=auto uv pip install fastvideo
 ```
 
 #### With Conda environment (alternative)
@@ -60,7 +60,7 @@ uv pip install fastvideo
 `uv` works inside an active conda env too, so prefer `uv pip` for the actual install:
 
 ```bash
-uv pip install fastvideo
+UV_TORCH_BACKEND=auto uv pip install fastvideo
 ```
 
 ### Installation from Source
