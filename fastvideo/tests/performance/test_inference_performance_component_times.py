@@ -100,3 +100,24 @@ def test_extract_component_times_ignores_unmapped_stages():
         "dit_time_s": None,
         "vae_decode_time_s": None,
     }
+
+
+def test_extract_component_times_skips_malformed_stage_data():
+    result = {
+        "logging_info": {
+            "stages": {
+                "prompt_encoding_stage": None,
+                "denoising_stage": "not-a-stage-metric-dict",
+                "decoding_stage": {
+                    "execution_time": 0.8,
+                    "stage_class": "DecodingStage",
+                },
+            },
+        },
+    }
+
+    assert _extract_component_times(result) == {
+        "text_encoder_time_s": None,
+        "dit_time_s": None,
+        "vae_decode_time_s": 0.8,
+    }

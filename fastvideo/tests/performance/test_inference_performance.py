@@ -98,6 +98,9 @@ def _extract_component_times(result: dict) -> dict[str, float | None]:
         return component_times
     logger.info("Discovered pipeline stages: %s", list(stages.keys()))
     for stage_name, stage_data in stages.items():
+        if not isinstance(stage_data, Mapping):
+            logger.debug("Skipping malformed stage '%s' data: %r", stage_name, stage_data)
+            continue
         stage_class = stage_data.get("stage_class", stage_name)
         metric_key = STAGE_METRIC_MAP.get(stage_class)
         if metric_key is None:
