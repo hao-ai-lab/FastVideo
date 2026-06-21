@@ -62,23 +62,26 @@ pytest tests/local_tests/zimage/ -v -s
 | Scheduler (`FlowMatchEulerDiscreteScheduler` + `use_reference_discrete_timesteps`) | [`test_zimage_scheduler_parity.py`](./test_zimage_scheduler_parity.py) | full `scheduler_config.json` forwarded; pipeline must also pin the new flag at load time | PASS |
 | Tokenizer (`TokenizerLoader` vs `AutoTokenizer`) | [`test_zimage_tokenizer_parity.py`](./test_zimage_tokenizer_parity.py) | `apply_chat_template` parity included | PASS |
 | VAE decode (`AutoencoderKL`) | [`test_zimage_vae_parity.py`](./test_zimage_vae_parity.py) | decode-only; encode path deferred until pipeline | PASS |
-| Text encoder (`Qwen3Model`) | [`test_zimage_encoder_parity.py`](./test_zimage_encoder_parity.py) | parametrized fp32 + bf16; bf16 uses calibrated `atol=0.05` + diagnostic prints + abs-mean drift check | PASS |
+| Text encoder (shared `Qwen3ForCausalLM`, reused) | [`test_zimage_encoder_parity.py`](./test_zimage_encoder_parity.py) | parametrized fp32 + bf16; bf16 uses calibrated distribution checks + diagnostic prints. Z-Image's `Qwen3Model` checkpoint routes to the shared encoder via the registry | PASS (fp32 bit-exact + bf16, L40S 2026-06-21) |
 
 ## Known Blockers / Open Items
 
 See [`PORT_STATUS.md`](./PORT_STATUS.md) for the live tracker. Highlights:
 
-- `Qwen3Model.ALLOWED_UNEXPECTED_KEYS = {"lm_head.weight"}` — `Qwen3ForCausalLM`
-  checkpoints carry an LM head the encoder bucket does not need. Loader raises
-  if any other unexpected key appears.
+- The text encoder reuses the shared `Qwen3ForCausalLM` (added for Flux2 Klein,
+  #1349); Z-Image-Turbo's `Qwen3Model` architecture string routes to it via the
+  model registry. Z-Image-Turbo's full Qwen3 checkpoint carries an `lm_head.weight`
+  the body-only encoder does not own, so the encoder parity test allowlists exactly
+  that key (`_ALLOWED_UNEXPECTED_KEYS`) and fails on any other unmatched key.
 - `tests/local_tests/zimage/test_zimage_scheduler_parity.py` builds the
   FastVideo scheduler with `use_reference_discrete_timesteps=True` programmatically.
   When the pipeline lands, `<repo_root>/official_weights/Z-Image/scheduler/scheduler_config.json`
   must pin this flag, otherwise stock loaders will silently fall back to the
   default Diffusers timestep mode (numerically different).
-- `Qwen3ArchConfig.text_len = 512` derives `tokenizer_kwargs.max_length = 512`
+- The shared `Qwen3TextArchConfig.text_len = 512` derives `tokenizer_kwargs.max_length = 512`
   via `TextEncoderArchConfig.__post_init__`, but the parity tests tokenize at
-  `max_length=96..128`. Reconcile when the pipeline preset lands.
+  `max_length=96..128`. Reconcile when the pipeline preset lands. (Also note the
+  shared config defaults `is_chat_model=True`, vs Z-Image's removed bespoke `False`.)
 
 ## Review Notes
 

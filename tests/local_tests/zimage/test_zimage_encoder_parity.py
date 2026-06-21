@@ -4,7 +4,9 @@ Parity test for Z-Image Qwen3 text encoder support in FastVideo.
 
 This compares:
 1) direct transformers AutoModel output, and
-2) FastVideo Qwen3Model wrapper output,
+2) FastVideo's shared Qwen3 encoder (``Qwen3ForCausalLM``, added for Flux2
+   Klein and reused here — Z-Image-Turbo's ``Qwen3Model`` checkpoint routes
+   to it via the model registry),
 
 using identical local checkpoint, tokenization, and inputs.
 
@@ -15,18 +17,45 @@ Usage:
 from __future__ import annotations
 
 from pathlib import Path
+import gc
 import json
 import os
 
 import pytest
 import torch
+
+
+def _reclaim_vram() -> None:
+    """Actually reclaim VRAM after the caller has ``del``'d its model refs.
+
+    HF transformer models hold reference cycles, so ``del`` alone does not free
+    them — a ``gc.collect()`` is required before the CUDA caching allocator will
+    release the blocks. Without this the parity test keeps two full encoder
+    copies resident and OOMs on a 44 GB GPU.
+    """
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def _gpu_mem_mb() -> float:
+    if torch.cuda.is_available():
+        return torch.cuda.memory_allocated() / (1024 ** 2)
+    return 0.0
 from torch.testing import assert_close
 from transformers import AutoModel, AutoTokenizer
 from safetensors.torch import safe_open
 
-from fastvideo.configs.models.encoders.qwen3 import Qwen3Config
+from fastvideo.configs.models.encoders.qwen3 import Qwen3TextConfig
 from fastvideo.distributed.parallel_state import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
 from fastvideo.models.registry import ModelRegistry
+
+# Strict-load contract: the shared Qwen3 encoder is body-only (embed_tokens +
+# layers + norm, no lm_head). Z-Image-Turbo ships a full Qwen3 checkpoint, so
+# `lm_head.weight` is the only key that may go unmatched; anything else means a
+# real silent drop. Enforced here in the test since the shared encoder's loader
+# is intentionally lenient (it's used by multiple models).
+_ALLOWED_UNEXPECTED_KEYS = {"lm_head.weight"}
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -167,22 +196,31 @@ def test_zimage_qwen3_encoder_parity_forward(dtype: torch.dtype):
         ref_last = ref_out.last_hidden_state.detach().float().cpu()
         ref_hs_m2 = ref_out.hidden_states[-2].detach().float().cpu()
 
+    print(f"[mem] after HF ref forward: {_gpu_mem_mb():.0f} MiB", flush=True)
+    # Free the HF reference before loading the FastVideo model — its outputs
+    # are already on CPU, so keeping it resident just doubles peak VRAM (two
+    # full encoder copies OOMs a 44 GB L40S in fp32).
+    del ref, ref_out
+    _reclaim_vram()
+    print(f"[mem] after freeing HF ref:  {_gpu_mem_mb():.0f} MiB", flush=True)
+
     fv_cls, _ = ModelRegistry.resolve_model_cls("Qwen3Model")
     cfg_raw = _load_json(ZIMAGE_TEXT_ENCODER_DIR / "config.json")
     for k in ("_name_or_path", "transformers_version", "model_type", "torch_dtype"):
         cfg_raw.pop(k, None)
 
-    cfg = Qwen3Config()
+    cfg = Qwen3TextConfig()
     cfg.update_model_arch(cfg_raw)
     fv = fv_cls(cfg).eval()
     loaded = fv.load_weights(_iter_pretrained_safetensors(ZIMAGE_TEXT_ENCODER_DIR))
     assert loaded, "No Qwen3 weights were loaded into FastVideo model"
     fv = fv.to(device=device, dtype=dtype)
+    print(f"[mem] after FastVideo load:  {_gpu_mem_mb():.0f} MiB", flush=True)
 
-    # Per add-model-02-parity strict-load contract: assert the production
-    # loader's allowlist matches the actual checkpoint surface. Non-encoder
-    # heads like `lm_head.weight` (from `Qwen3ForCausalLM` checkpoints) are
-    # the only acceptable unexpected keys; anything else means a real drop.
+    # Strict-load contract: assert the checkpoint surface matches the model's
+    # params modulo the allowlist. Non-encoder heads like `lm_head.weight`
+    # (the body-only encoder has no lm_head) are the only acceptable unmatched
+    # keys; anything else means a real silent drop.
     checkpoint_keys = {name for name, _ in _iter_pretrained_safetensors(ZIMAGE_TEXT_ENCODER_DIR)}
     checkpoint_keys = {k[len("model."):] if k.startswith("model.") else k for k in checkpoint_keys}
     param_names = {name for name, _ in fv.named_parameters()}
@@ -198,9 +236,9 @@ def test_zimage_qwen3_encoder_parity_forward(dtype: torch.dtype):
         else:
             mapped_keys.add(ckpt_name)
     unexpected = mapped_keys - param_names - {"rotary_emb.inv_freq", "rotary_emb.cos_cached", "rotary_emb.sin_cached"}
-    assert unexpected <= fv_cls.ALLOWED_UNEXPECTED_KEYS, (
-        f"Unexpected checkpoint keys not in ALLOWED_UNEXPECTED_KEYS: "
-        f"{sorted(unexpected - fv_cls.ALLOWED_UNEXPECTED_KEYS)}"
+    assert unexpected <= _ALLOWED_UNEXPECTED_KEYS, (
+        f"Unexpected checkpoint keys not in allowlist: "
+        f"{sorted(unexpected - _ALLOWED_UNEXPECTED_KEYS)}"
     )
 
     with torch.no_grad():
@@ -297,16 +335,6 @@ def test_zimage_qwen3_encoder_per_layer_bf16_diagnostic():
         low_cpu_mem_usage=True,
     ).eval().to(device=device, dtype=dtype)
 
-    fv_cls, _ = ModelRegistry.resolve_model_cls("Qwen3Model")
-    cfg_raw = _load_json(ZIMAGE_TEXT_ENCODER_DIR / "config.json")
-    for k in ("_name_or_path", "transformers_version", "model_type", "torch_dtype"):
-        cfg_raw.pop(k, None)
-    cfg = Qwen3Config()
-    cfg.update_model_arch(cfg_raw)
-    fv = fv_cls(cfg).eval()
-    fv.load_weights(_iter_pretrained_safetensors(ZIMAGE_TEXT_ENCODER_DIR))
-    fv = fv.to(device=device, dtype=dtype)
-
     with torch.no_grad():
         ref_out = ref(
             input_ids=input_ids,
@@ -314,21 +342,38 @@ def test_zimage_qwen3_encoder_per_layer_bf16_diagnostic():
             output_hidden_states=True,
             return_dict=True,
         )
+        # Cache the reference hidden states on CPU, then free the HF model so
+        # only one encoder is resident when FastVideo runs (avoids OOM).
+        ref_hidden_cpu = [h.detach().float().cpu() for h in ref_out.hidden_states]
+    del ref, ref_out
+    _reclaim_vram()
+
+    fv_cls, _ = ModelRegistry.resolve_model_cls("Qwen3Model")
+    cfg_raw = _load_json(ZIMAGE_TEXT_ENCODER_DIR / "config.json")
+    for k in ("_name_or_path", "transformers_version", "model_type", "torch_dtype"):
+        cfg_raw.pop(k, None)
+    cfg = Qwen3TextConfig()
+    cfg.update_model_arch(cfg_raw)
+    fv = fv_cls(cfg).eval()
+    fv.load_weights(_iter_pretrained_safetensors(ZIMAGE_TEXT_ENCODER_DIR))
+    fv = fv.to(device=device, dtype=dtype)
+
+    with torch.no_grad():
         fv_out = fv(
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_hidden_states=True,
         )
+        fv_hidden_cpu = [h.detach().float().cpu() for h in fv_out.hidden_states]
 
-    assert ref_out.hidden_states is not None
     assert fv_out.hidden_states is not None
-    assert len(ref_out.hidden_states) == len(fv_out.hidden_states), (
-        f"len mismatch: HF={len(ref_out.hidden_states)} FV={len(fv_out.hidden_states)}"
+    assert len(ref_hidden_cpu) == len(fv_hidden_cpu), (
+        f"len mismatch: HF={len(ref_hidden_cpu)} FV={len(fv_hidden_cpu)}"
     )
 
     mask_cpu = attention_mask.detach().bool().cpu()[0]
     print(
-        f"\n[per-layer bf16 diagnostic] num_hidden_states={len(ref_out.hidden_states)}  "
+        f"\n[per-layer bf16 diagnostic] num_hidden_states={len(ref_hidden_cpu)}  "
         f"valid_tokens={mask_cpu.sum().item()}/{mask_cpu.numel()}",
         flush=True,
     )
@@ -336,15 +381,15 @@ def test_zimage_qwen3_encoder_per_layer_bf16_diagnostic():
         f"{'idx':>3}  {'kind':<10}  {'max':>8}  {'mean':>8}  {'median':>8}  {'p99':>8}",
         flush=True,
     )
-    for idx, (ref_h, fv_h) in enumerate(zip(ref_out.hidden_states, fv_out.hidden_states)):
-        ref_v = ref_h.detach().float().cpu()[0][mask_cpu]
-        fv_v = fv_h.detach().float().cpu()[0][mask_cpu]
+    for idx, (ref_h, fv_h) in enumerate(zip(ref_hidden_cpu, fv_hidden_cpu)):
+        ref_v = ref_h[0][mask_cpu]
+        fv_v = fv_h[0][mask_cpu]
         diff = (ref_v - fv_v).abs()
         flat = diff.flatten()
         p99 = torch.quantile(flat, 0.99).item()
         if idx == 0:
             kind = "embedding"
-        elif idx == len(ref_out.hidden_states) - 1:
+        elif idx == len(ref_hidden_cpu) - 1:
             kind = "post-norm"
         else:
             kind = f"layer{idx - 1}-out"

@@ -368,9 +368,15 @@ class Qwen3ForCausalLM(TextEncoder):
         residual = None
 
         if position_ids is None:
+            # Expand to [batch_size, seq_len]: the rotary layer flattens
+            # positions to ``num_tokens`` and reshapes q/k to
+            # ``(num_tokens, -1, head_dim)``. A bare [1, seq_len] only matches
+            # ``num_tokens`` when batch_size == 1; for batched inputs it folds
+            # the batch dim into the head dim and misaligns RoPE. Expanding to
+            # ``batch_size * seq_len`` tokens keeps the layout correct.
             position_ids = torch.arange(
                 0, hidden_states.shape[1], device=hidden_states.device
-            ).unsqueeze(0)
+            ).unsqueeze(0).expand(hidden_states.shape[0], -1)
 
         all_hidden_states: tuple[Any, ...] | None = (
             () if output_hidden_states else None
