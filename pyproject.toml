@@ -27,7 +27,7 @@ dependencies = [
     "timm>=1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.38.0",
-    "torch==2.12.1",
+    "torch>=2.11,<2.13",
     "torchvision",
     "torchaudio",
     "flashinfer-python",
@@ -107,8 +107,9 @@ fastvideo-kernel = [
 # index here. Pick the build at install time with uv's backend selection:
 #   UV_TORCH_BACKEND=auto  uv pip install -e ".[dev]"   # detects the GPU driver
 #   UV_TORCH_BACKEND=cu130 uv pip install -e ".[dev]"   # explicit (GPU-less builds)
-# uv reads UV_TORCH_BACKEND / --torch-backend (not a pyproject setting); torch
-# 2.12.1 is available on the cu129 and cu130 indexes.
+# uv reads UV_TORCH_BACKEND / --torch-backend (not a pyproject setting). The
+# version range spans torch 2.11 (cu128) and 2.12 (cu126, cu130); the chosen
+# backend determines which.
 imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
 flash-attn-cute = { git = "https://github.com/XOR-op/flash-attention.git", branch = "fa4-compile", subdirectory = "flash_attn/cute" }
 

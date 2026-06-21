@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       build_cuda_matrix:
-        description: 'Build the CUDA image matrix (py3.12 x CUDA 12.9.1/13.0.0)'
+        description: 'Build the CUDA image matrix (py3.12 x CUDA 12.6.3/12.8.0/13.0.0)'
         required: false
         default: true
         type: boolean
       build_dreamverse_matrix:
-        description: 'Build the Dreamverse matrix (backend + UI x CUDA 12.9.1/13.0.0)'
+        description: 'Build the Dreamverse matrix (backend + UI x CUDA 12.6.3/13.0.0)'
         required: false
         default: false
         type: boolean
@@ -20,41 +20,58 @@ permissions:
   packages: write
 
 jobs:
-  # CUDA matrix: Python 3.12 x {CUDA 12.9.1, 13.0.0}. (12.8.0 dropped: torch 2.12
-  # is not published for cu128.) 12.9.1 gets the `py3.12` tag and `latest`; 13.0.0
-  # gets a `-cuda13.0.0` suffix. flash-attn is the same prebuilt wheel for every
-  # cell (it tracks torch 2.12.1+cu130, not the base image's CUDA -- see
-  # docker/Dockerfile); the base image only changes the nvcc that compiles
-  # fastvideo-kernel.
+  # CUDA matrix: Python 3.12 x {12.6.3, 12.8.0, 13.0.0}. Each cell pins the torch
+  # backend + flash-attn wheel to its base CUDA (cu128 only has torch 2.11; cu126
+  # and cu130 have 2.12). 12.6.3 is the default `latest` (broadest 2.12 image,
+  # CUDA 12.6+ driver); 12.8.0 is the torch-2.11 backward-compat image; 13.0.0 is
+  # the newest CUDA. The base image only changes the nvcc that compiles the kernel.
   build-cuda-images:
     if: ${{ github.event.inputs.build_cuda_matrix == 'true' }}
     strategy:
       fail-fast: false
       matrix:
         cuda:
-          - version: '12.9.1'
+          - version: '12.6.3'
             suffix: ''
+            torch_backend: 'cu126'
+            fa_tag: 'cu126torch2.12'
+            fa_release: 'v0.9.17'
+          - version: '12.8.0'
+            suffix: '-cuda12.8.0'
+            torch_backend: 'cu128'
+            fa_tag: 'cu128torch2.11'
+            fa_release: 'v0.9.4'
           - version: '13.0.0'
             suffix: '-cuda13.0.0'
+            torch_backend: 'cu130'
+            fa_tag: 'cu130torch2.12'
+            fa_release: 'v0.9.17'
     uses: ./.github/workflows/_template-build-image.yml
     with:
       python_version: '3.12'
       dockerfile_path: docker/Dockerfile
       tag_suffix: py3.12${{ matrix.cuda.suffix }}
-      mark_as_latest: ${{ matrix.cuda.version == '12.9.1' }}
+      mark_as_latest: ${{ matrix.cuda.version == '12.6.3' }}
       build_args: |
         PYTHON_VERSION=3.12
         CUDA_VERSION=${{ matrix.cuda.version }}
+        UV_TORCH_BACKEND=${{ matrix.cuda.torch_backend }}
+        FLASH_ATTN_WHEEL_TAG=${{ matrix.cuda.fa_tag }}
+        FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/${{ matrix.cuda.fa_release }}
     secrets: inherit
 
-  # Dreamverse matrix: {backend, UI} x {CUDA 12.9.1, 13.0.0}, Python 3.12.
-  # Each image is tagged dreamverse-<variant>-cuda<version> (no `latest`).
+  # Dreamverse matrix: {backend, UI} x {12.6.3, 13.0.0}, Python 3.12. Torch backend
+  # matches the base CUDA (cu126 / cu130). Tagged dreamverse-<variant>-cuda<version>.
   build-dreamverse:
     if: ${{ github.event.inputs.build_dreamverse_matrix == 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        cuda: ['12.9.1', '13.0.0']
+        cuda:
+          - version: '12.6.3'
+            torch_backend: 'cu126'
+          - version: '13.0.0'
+            torch_backend: 'cu130'
         variant:
           - name: backend
             ui: '0'
@@ -64,10 +81,11 @@ jobs:
     with:
       python_version: '3.12'
       dockerfile_path: apps/dreamverse/docker/Dockerfile
-      tag_suffix: dreamverse-${{ matrix.variant.name }}-cuda${{ matrix.cuda }}
+      tag_suffix: dreamverse-${{ matrix.variant.name }}-cuda${{ matrix.cuda.version }}
       image_name: dreamverse
       build_args: |
-        CUDA_VERSION=${{ matrix.cuda }}
+        CUDA_VERSION=${{ matrix.cuda.version }}
+        UV_TORCH_BACKEND=${{ matrix.cuda.torch_backend }}
         BUILD_DREAMVERSE_UI=${{ matrix.variant.ui }}
       include_latest_tags: false
     secrets: inherit
