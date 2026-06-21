@@ -98,10 +98,12 @@ def _extract_component_times(result: dict) -> dict[str, float | None]:
         return component_times
     logger.info("Discovered pipeline stages: %s", list(stages.keys()))
     for stage_name, stage_data in stages.items():
-        metric_key = STAGE_METRIC_MAP.get(stage_name)
+        stage_class = stage_data.get("stage_class", stage_name)
+        metric_key = STAGE_METRIC_MAP.get(stage_class)
         if metric_key is None:
-            logger.debug("Unmapped stage '%s' (%.3fs)",
+            logger.debug("Unmapped stage '%s' class '%s' (%.3fs)",
                          stage_name,
+                         stage_class,
                          stage_data.get("execution_time", 0))
             continue
         elapsed = stage_data.get("execution_time")
