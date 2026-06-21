@@ -35,6 +35,10 @@ app = modal.App("fastvideo-gpu-job")
 REPO_DIR = "/FastVideo"
 MODEL_VOLUME_NAME = os.environ.get("FASTVIDEO_MODAL_VOLUME", "hf-model-weights")
 IMAGE_VERSION = os.environ.get("IMAGE_VERSION", "latest")
+# Match torch backend to the image's CUDA (not `auto` -- deterministic CI).
+_iv = IMAGE_VERSION or ""
+UV_TORCH_BACKEND = ("cu126" if "cuda12.6" in _iv else
+                    "cu128" if "cuda12.8" in _iv else "cu130")
 IMAGE_TAG = os.environ.get(
     "FASTVIDEO_MODAL_IMAGE",
     f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{IMAGE_VERSION}",
@@ -75,6 +79,7 @@ image = (
         "PATH": "/root/.cargo/bin:$PATH",
         "HF_HOME": "/root/data/.cache",
         "TOKENIZERS_PARALLELISM": "false",
+        "UV_TORCH_BACKEND": UV_TORCH_BACKEND,
         "FASTVIDEO_ATTENTION_BACKEND": os.environ.get("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN"),
     })
 )

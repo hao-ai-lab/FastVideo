@@ -22,9 +22,9 @@ permissions:
 jobs:
   # CUDA matrix: Python 3.12 x {12.6.3, 12.8.0, 13.0.0}. Each cell pins the torch
   # backend + flash-attn wheel to its base CUDA (cu128 only has torch 2.11; cu126
-  # and cu130 have 2.12). 12.6.3 is the default `latest` (broadest 2.12 image,
-  # CUDA 12.6+ driver); 12.8.0 is the torch-2.11 backward-compat image; 13.0.0 is
-  # the newest CUDA. The base image only changes the nvcc that compiles the kernel.
+  # and cu130 have 2.12). 13.0.0 is the default `py3.12`/`latest` (CUDA 13, cu130);
+  # 12.6.3 is the broader-driver 2.12 build; 12.8.0 is the torch-2.11 backward-compat
+  # image. The base image only changes the nvcc that compiles the kernel.
   build-cuda-images:
     if: ${{ github.event.inputs.build_cuda_matrix == 'true' }}
     strategy:
@@ -32,7 +32,7 @@ jobs:
       matrix:
         cuda:
           - version: '12.6.3'
-            suffix: ''
+            suffix: '-cuda12.6.3'
             torch_backend: 'cu126'
             fa_tag: 'cu126torch2.12'
             fa_release: 'v0.9.17'
@@ -42,7 +42,7 @@ jobs:
             fa_tag: 'cu128torch2.11'
             fa_release: 'v0.9.4'
           - version: '13.0.0'
-            suffix: '-cuda13.0.0'
+            suffix: ''
             torch_backend: 'cu130'
             fa_tag: 'cu130torch2.12'
             fa_release: 'v0.9.17'
@@ -51,7 +51,7 @@ jobs:
       python_version: '3.12'
       dockerfile_path: docker/Dockerfile
       tag_suffix: py3.12${{ matrix.cuda.suffix }}
-      mark_as_latest: ${{ matrix.cuda.version == '12.6.3' }}
+      mark_as_latest: ${{ matrix.cuda.version == '13.0.0' }}
       build_args: |
         PYTHON_VERSION=3.12
         CUDA_VERSION=${{ matrix.cuda.version }}
