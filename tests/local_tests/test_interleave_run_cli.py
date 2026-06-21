@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from fastvideo.entrypoints.cli.main import cmd_init
 from fastvideo.entrypoints.interleave import (
     GeneratedImage,
     InterleaveEditRequest,
@@ -20,7 +19,6 @@ from fastvideo.entrypoints.interleave import (
 )
 from fastvideo.entrypoints.interleave.orchestrator import SinglePromptPlanner
 from fastvideo.entrypoints.interleave.schema import PlannerInput
-from fastvideo.utils import FlexibleArgumentParser
 
 
 def test_interleave_run_config_loads_prompt_and_request_defaults(tmp_path: Path) -> None:
@@ -78,51 +76,6 @@ def test_interleave_eval_config_can_omit_single_instruction(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="requires interleave.instruction"):
         resolve_interleave_instruction(config)
-
-
-def test_interleave_cli_defers_nested_config_loading(tmp_path: Path) -> None:
-    config_path = _write_run_config(tmp_path)
-    parser = FlexibleArgumentParser(description="FastVideo CLI")
-    subparsers = parser.add_subparsers(required=False, dest="subparser")
-    for cmd in cmd_init():
-        cmd.subparser_init(subparsers).set_defaults(dispatch_function=cmd.cmd)
-
-    args, unknown = parser.parse_known_args([
-        "interleave-run",
-        "--config",
-        str(config_path),
-        "--request.sampling.width",
-        "256",
-    ])
-
-    assert args.subparser == "interleave-run"
-    assert args.config == str(config_path)
-    assert unknown == ["--request.sampling.width", "256"]
-
-
-def test_interleave_eval_cli_defers_nested_config_loading(tmp_path: Path) -> None:
-    config_path = _write_run_config(tmp_path, include_prompt=False)
-    prompt_path = tmp_path / "prompts.jsonl"
-    prompt_path.write_text('{"id": "mug", "prompt": "draw a mug"}\n', encoding="utf-8")
-    parser = FlexibleArgumentParser(description="FastVideo CLI")
-    subparsers = parser.add_subparsers(required=False, dest="subparser")
-    for cmd in cmd_init():
-        cmd.subparser_init(subparsers).set_defaults(dispatch_function=cmd.cmd)
-
-    args, unknown = parser.parse_known_args([
-        "interleave-eval",
-        "--config",
-        str(config_path),
-        "--prompts",
-        str(prompt_path),
-        "--request.sampling.width",
-        "256",
-    ])
-
-    assert args.subparser == "interleave-eval"
-    assert args.config == str(config_path)
-    assert args.prompts == str(prompt_path)
-    assert unknown == ["--request.sampling.width", "256"]
 
 
 def test_run_interleave_config_with_injected_backend_writes_trace(tmp_path: Path) -> None:

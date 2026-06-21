@@ -2,7 +2,7 @@
 """Run a one-step interleaved generation trace through FastVideo.
 
 This is intentionally small: it uses the fallback single-prompt planner and an
-accept-all critic, so it exercises the native Interleave app layer without
+accept-all critic, so it exercises the native Interleave helper layer without
 requiring InterleaveThinker planner/critic checkpoints.
 """
 

@@ -282,7 +282,7 @@ def _import_google_genai() -> tuple[Any, Any]:
         from google.genai import types
     except ImportError as exc:
         raise RuntimeError("Gemini / Nano Banana API wrappers require google-genai. "
-                           "Install with `uv pip install -e '.[interleave-api]'`.") from exc
+                           "Install google-genai directly or with `uv pip install -e '.[eval-judge]'`.") from exc
     return genai, types
 
 

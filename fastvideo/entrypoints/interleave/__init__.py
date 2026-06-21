@@ -50,7 +50,6 @@ from fastvideo.entrypoints.interleave.schema import (
     PlannedInterleaveStep,
     PlannerInput,
 )
-from fastvideo.entrypoints.interleave.server import build_app
 from fastvideo.entrypoints.interleave.trace import (
     save_trace,
     trace_to_dict,
@@ -96,7 +95,6 @@ __all__ = [
     "PlannerInput",
     "PlannerProvider",
     "SinglePromptPlanner",
-    "build_app",
     "discover_interleave_trace_paths",
     "evaluate_interleave_traces",
     "interleave_trace_evaluation_to_dict",

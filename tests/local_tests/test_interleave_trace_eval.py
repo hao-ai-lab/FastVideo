@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from fastvideo.entrypoints.interleave import (
@@ -60,31 +58,6 @@ def test_write_interleave_trace_html_report(tmp_path: Path) -> None:
     assert "mug" in html_text
     assert "critic rejected final attempt" in html_text
     assert "<img" in html_text
-
-
-def test_evaluate_traces_script_writes_json_and_html(tmp_path: Path) -> None:
-    output_dir = _write_trace_fixture(tmp_path)
-    metrics_path = tmp_path / "metrics.json"
-    html_path = tmp_path / "report.html"
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "scripts/interleave_thinker/evaluate_traces.py",
-            str(output_dir),
-            "--output",
-            str(metrics_path),
-            "--html-output",
-            str(html_path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert "Wrote metrics" in result.stdout
-    assert json.loads(metrics_path.read_text(encoding="utf-8"))["num_traces"] == 2
-    assert html_path.exists()
 
 
 def _write_trace_fixture(tmp_path: Path) -> Path:

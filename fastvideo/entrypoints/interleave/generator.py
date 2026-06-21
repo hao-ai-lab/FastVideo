@@ -149,8 +149,8 @@ class NanoBananaImageGeneratorBackend:
     """Google Gemini API image backend for Nano Banana models.
 
     This wraps the closed-source Gemini native-image API behind the same
-    ``ImageGeneratorBackend`` protocol used by the FastVideo compatibility
-    service. The SDK import and API-key validation are intentionally lazy so
+    ``ImageGeneratorBackend`` protocol used by Interleave orchestration. The SDK
+    import and API-key validation are intentionally lazy so
     installing FastVideo does not require ``google-genai`` unless this backend is
     configured.
     """
@@ -300,7 +300,7 @@ def _import_google_genai() -> tuple[Any, Any]:
         from google.genai import types
     except ImportError as exc:
         raise RuntimeError("Nano Banana API backend requires google-genai. "
-                           "Install with `uv pip install -e '.[interleave-api]'`.") from exc
+                           "Install google-genai directly or with `uv pip install -e '.[eval-judge]'`.") from exc
     return genai, types
 
 

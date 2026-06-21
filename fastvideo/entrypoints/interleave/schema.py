@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Schemas for InterleaveThinker-style orchestration and compatibility APIs."""
+"""Schemas for InterleaveThinker-style orchestration."""
 
 from __future__ import annotations
 
@@ -10,13 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class InterleaveEditRequest(BaseModel):
-    """JSON body accepted by the InterleaveThinker-compatible ``/edit`` route.
+    """Image edit/generation request used by Interleave orchestration backends.
 
     InterleaveThinker sends `num_inference_step` while FastVideo uses
     `num_inference_steps`; accept both and let the plural form win when both are
-    provided. Unknown fields are tolerated so the endpoint can sit behind
-    several generator clients without rejecting model-specific knobs it does not
-    use yet.
+    provided. Unknown fields are tolerated so model-specific knobs can pass
+    through without forcing every backend to implement them immediately.
     """
 
     model_config = ConfigDict(extra="allow")

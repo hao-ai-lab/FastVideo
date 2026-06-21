@@ -156,7 +156,6 @@ eval = [
 ]
 eval-fast-decode = ["decord"]
 eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "qwen-omni-utils"]
-interleave-api = ["google-genai"]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 

@@ -1,44 +1,25 @@
 # InterleaveThinker Integration Design
 
-This page summarizes the InterleaveThinker integration branch for reviewers. It
-captures the public FastVideo surfaces, validation evidence, recommended PR
-split, and remaining risks. The detailed execution log remains in
+This page summarizes the InterleaveThinker integration branch for reviewers.
+The detailed execution log remains in
 `.agents/exploration/interleavethinker-fastvideo-integration.md`.
 
 ## Scope
 
-The branch adds FastVideo-native support for InterleaveThinker-style workflows:
+The branch adds FastVideo-native support for InterleaveThinker-style workflows
+without adding new `fastvideo` CLI commands or HTTP API routes:
 
-- generator compatibility through a FastVideo-backed `/edit` API;
-- planner -> generator -> critic inference orchestration;
-- prompt-set and trace-level evaluation tools;
 - Qwen3-VL planner and critic model wrappers;
 - planner and critic SFT configs;
 - planner and critic GRPO configs with optional reference-policy KL;
-- Gemini and Nano Banana API wrappers for reward and image-generation backends.
+- InterleaveThinker reward parsing and scoring utilities;
+- Gemini and Nano Banana wrappers for optional network-backed rewards;
+- Python orchestration helpers for planner -> generator -> critic traces.
 
 It does not vendor InterleaveThinker, EasyR1, Verl, LLaMA-Factory, or training
-framework internals from those projects. FastVideo owns the public orchestration,
-model-wrapper, reward, and training-method boundaries.
+framework internals from those projects.
 
-## Public Surfaces
-
-### Inference And Orchestration
-
-| Surface | Purpose |
-|---------|---------|
-| `fastvideo.entrypoints.interleave` | Public package exports for orchestration, providers, prompt-set evaluation, trace serialization, and trace evaluation. |
-| `fastvideo interleave-serve` | Starts an InterleaveThinker-compatible FastVideo image edit service with `/edit`, `/generate`, and `/v1/interleave/edit` routes. |
-| `fastvideo interleave-run` | Runs one planner -> generator -> critic trace from a nested YAML config. |
-| `fastvideo interleave-eval` | Runs the same workflow over a JSONL/JSON/text prompt set and writes per-sample traces plus `summary.json`. |
-| `scripts/interleave_thinker/evaluate_traces.py` | Evaluates saved trace outputs and optionally writes an HTML report with final-image thumbnails. |
-
-Examples live under `examples/interleave/`:
-
-- `flux2_klein_interleave_serve.yaml`;
-- `interleave_run.yaml`;
-- `eval_prompts.jsonl`;
-- `interleave_single_prompt.py`.
+## Integrated Surfaces
 
 ### Training
 
@@ -51,7 +32,7 @@ Examples live under `examples/interleave/`:
 | `InterleaveThinkerRLMethod` | Managed GRPO-style loop for planner and critic actors. |
 | `fastvideo.train.methods.rl.common.grpo` | Shared GRPO math helpers. |
 | `fastvideo.train.methods.rl.rewards.interleave_thinker` | Format, critic, and planner reward utilities. |
-| `fastvideo.train.methods.rl.rewards.interleave_api` | Gemini and Nano Banana API-backed reward/image wrappers. |
+| `fastvideo.train.methods.rl.rewards.interleave_api` | Optional Gemini and Nano Banana API-backed reward wrappers. |
 
 Training examples live under:
 
@@ -61,18 +42,28 @@ Training examples live under:
 - `examples/train/configs/rl/interleave_thinker/critic_grpo.yaml`;
 - `examples/train/configs/rl/interleave_thinker/planner_grpo.yaml`.
 
-## Architecture Boundaries
+### Orchestration Helpers
 
-The integration is intentionally split into independent layers:
+The Python helper layer under `fastvideo.entrypoints.interleave` is intentionally
+not registered as a CLI or server contract. It provides reusable dataclasses,
+provider adapters, image-backend adapters, trace serialization, prompt-set
+execution helpers, and saved-trace metrics for tests, examples, and downstream
+integration code that already imports FastVideo as a library.
+
+The runnable example is:
+
+- `examples/interleave/interleave_single_prompt.py`.
+
+## Architecture Boundaries
 
 | Layer | Owner | Notes |
 |-------|-------|-------|
 | Planner and critic actors | `fastvideo/train/models/interleave_thinker/` | Wrap Transformers Qwen3-VL checkpoints. They are training actors, not diffusion pipeline components. |
 | RL/SFT algorithms | `fastvideo/train/methods/` | Own loss, reward aggregation, advantage computation, KL, and optimizer cadence. |
-| Rewards and API clients | `fastvideo/train/methods/rl/rewards/` | Testable offline reward aggregation is separate from network-backed Gemini/Nano Banana clients. |
-| Image generation/editing | `fastvideo/entrypoints/interleave/generator.py` | Presents a small image backend protocol for FastVideo, Nano Banana, and fake backends. |
-| Runtime orchestration | `fastvideo/entrypoints/interleave/` | Plans steps, calls generator/edit backends, calls critic providers, records traces. |
-| Evaluation | `fastvideo/entrypoints/interleave/evaluation.py` and `trace_eval.py` | Prompt-set execution and saved-trace reporting remain outside training methods. |
+| Rewards and API clients | `fastvideo/train/methods/rl/rewards/` | Offline reward aggregation is separate from network-backed Gemini/Nano Banana clients. |
+| Image generation/editing helpers | `fastvideo/entrypoints/interleave/generator.py` | Presents a small image backend protocol for FastVideo, Nano Banana, and fake backends. |
+| Runtime orchestration helpers | `fastvideo/entrypoints/interleave/` | Plans steps, calls generator/edit backends, calls critic providers, records traces. |
+| Evaluation helpers | `fastvideo/entrypoints/interleave/evaluation.py` and `trace_eval.py` | Prompt-set execution and saved-trace reporting remain outside training methods. |
 
 This keeps the Qwen actor implementation reusable by SFT, planner GRPO, critic
 GRPO, and inference providers without coupling those paths to a specific
@@ -85,7 +76,6 @@ All GPU/model validation below ran on Modal L40S through
 
 | Area | Evidence | Modal app |
 |------|----------|-----------|
-| Initial compatibility service and orchestration tests | `5 passed, 14 warnings`; pre-commit passed. | `ap-cREtgFJyncsIfsXn1B5hLL` |
 | API-backed model/reward wrappers | `27 passed, 14 warnings`; final pre-commit passed. | `ap-QOKlzapm5bSAo3c21lprwv` |
 | Critic backend hardening | `30 passed, 14 warnings`; pre-commit passed. | `ap-DplMFq23YYfBx34e6TcsRc` |
 | Real critic checkpoint smoke | Loaded `InterleaveThinker/Critic-SFT-8B`; generated one rollout; printed `SMOKE_OK`. | `ap-hDxj5MhLgdnGq22mRLjgIK` |
@@ -95,26 +85,21 @@ All GPU/model validation below ran on Modal L40S through
 | Real critic refactor smoke | Loaded critic wrapper after Qwen base refactor; printed `CRITIC_REFACTOR_SMOKE_OK`. | `ap-NGxUDBNJFiU30Wef0yAQN1` |
 | Planner/critic provider adapters | `20 passed, 14 warnings`; pre-commit passed. | `ap-wfRX2DCt30DN903gETbDpj` |
 | Real provider loop smoke | Real planner and critic with fake generator; printed `INTERLEAVE_PROVIDER_REAL_LOOP_SMOKE_OK`. | `ap-ZABadeyKBuGVcfy67LqmXt` |
-| Native interleave-run CLI | `14 passed, 14 warnings`; pre-commit passed. | `ap-4lOvHURSxKqFmit8TqnhBe` |
-| Real FastVideo generator smoke | FastVideo generator produced a real image through the run CLI; printed `INTERLEAVE_RUN_FASTVIDEO_SMOKE_OK`. | `ap-Tz4VQKximS0bSWx6Fb9aFe` |
 | Dataset normalization | `17 passed, 14 warnings`; pre-commit passed. | `ap-ISuDU2lwc6Pl5NYDZnnBEb` |
 | Planner and critic SFT | `20 passed, 14 warnings`; final pre-commit passed. | `ap-1jmIczO3KwZoP3WtLYOIxc` |
 | Critic GRPO policy loss | Broad InterleaveThinker test set: `28 passed, 14 warnings`; pre-commit passed. | `ap-aYBz0F0ZiQ2nTGndudnGaH` |
 | Real critic RL smoke | Loaded LoRA critic student; generated rollouts; completed one GRPO update; printed `INTERLEAVE_CRITIC_RL_SMOKE_OK`. | `ap-eXMO3I81OcCyxj53XbPWj9` |
 | Reference-policy KL | `16 passed, 14 warnings`; real reference smoke printed `INTERLEAVE_CRITIC_RL_REFERENCE_SMOKE_OK`. | `ap-UQ38OTnymREO9bz0L1QzC5` |
 | Planner GRPO | `37 passed, 14 warnings`; real planner GRPO smoke printed `INTERLEAVE_PLANNER_RL_SMOKE_OK`. | `ap-PDBijC8opxsMiMU0Uc064A` |
-| Prompt-set evaluation workflow | `15 passed, 14 warnings`; pre-commit passed. | `ap-eeQpAgNQvQGi2H8MB0kJCU` |
-| Trace-level evaluation reports | `19 passed, 14 warnings`; pre-commit passed. | `ap-s7ewT9rDZSTdPNhyYrEYO7` |
+| Prompt-set evaluation helpers | `15 passed, 14 warnings`; pre-commit passed. | `ap-eeQpAgNQvQGi2H8MB0kJCU` |
+| Trace-level evaluation helpers | `19 passed, 14 warnings`; pre-commit passed. | `ap-s7ewT9rDZSTdPNhyYrEYO7` |
 
 ## Recommended PR Stack
 
-The branch is large and should be split before review:
-
-1. **Inference service and orchestration shell**
-   - `fastvideo/entrypoints/interleave/schema.py`;
+1. **Python orchestration shell**
+   - schema and trace dataclasses;
    - generator backend protocol;
-   - compatibility `/edit` service;
-   - `interleave-run` CLI;
+   - provider adapters;
    - fake-backend tests.
 2. **Qwen3-VL actor wrappers**
    - shared Qwen actor base;
@@ -136,7 +121,7 @@ The branch is large and should be split before review:
    - real one-step LoRA smokes.
 6. **Evaluation and docs**
    - prompt-set runner;
-   - trace evaluator and HTML report;
+   - trace evaluator and HTML report helpers;
    - examples and design docs.
 
 Each PR should keep the handoff updated until it lands or is superseded.

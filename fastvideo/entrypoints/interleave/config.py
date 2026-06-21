@@ -142,7 +142,7 @@ def resolve_interleave_instruction(config: InterleaveRunConfig) -> str:
         prompt = config.request.prompt[0]
         if isinstance(prompt, str) and prompt:
             return prompt
-    raise ValueError("interleave-run requires interleave.instruction or a single request.prompt")
+    raise ValueError("Interleave config requires interleave.instruction or a single request.prompt")
 
 
 def validate_interleave_run_config(
@@ -153,7 +153,7 @@ def validate_interleave_run_config(
     if require_instruction:
         resolve_interleave_instruction(config)
     if config.image_backend.kind == "fastvideo" and config.generator is None:
-        raise ValueError("interleave-run with image_backend.kind=fastvideo requires a generator config")
+        raise ValueError("Interleave config with image_backend.kind=fastvideo requires a generator config")
     if config.planner.kind == "interleave_thinker" and config.planner.max_new_tokens is not None:
         _require_positive_int(config.planner.max_new_tokens, "planner.max_new_tokens")
     _require_positive_int(config.planner.max_attempts_per_step, "planner.max_attempts_per_step")
