@@ -3113,3 +3113,138 @@ Validation completed:
 - Commit completed:
   - `6a6ebf1e` — `[docs] add InterleaveThinker review package`
   - Pushed to `origin/interleavethinker-fastvideo`.
+
+## Stage 14 Execution: API/CLI Surface Cleanup
+
+Status: completed in `/home/toolbox/FastVideo` on branch
+`interleavethinker-fastvideo`.
+
+User correction:
+
+- Do not add standalone InterleaveThinker `fastvideo` subcommands such as
+  `interleave-run`, `interleave-serve`, or `interleave-eval`.
+- Do not add a separate InterleaveThinker HTTP API surface unless strictly
+  necessary.
+- Keep useful additions integrated into existing FastVideo library/training
+  surfaces.
+- Work in the current checkout; do not use the old `/tmp` worktree.
+
+Implemented cleanup:
+
+- Removed CLI registration for `interleave-run`, `interleave-serve`, and
+  `interleave-eval` from `fastvideo/entrypoints/cli/main.py`.
+- Restored `FlexibleArgumentParser._DEFER_CONFIG_SUBCOMMANDS` to the existing
+  `{"generate", "serve"}` set.
+- Deleted standalone CLI modules:
+  - `fastvideo/entrypoints/cli/interleave_run.py`;
+  - `fastvideo/entrypoints/cli/interleave_serve.py`;
+  - `fastvideo/entrypoints/cli/interleave_eval.py`.
+- Deleted the separate Interleave compatibility server:
+  - `fastvideo/entrypoints/interleave/server.py`.
+- Removed `build_app` from `fastvideo.entrypoints.interleave` exports.
+- Deleted command/service-oriented examples and scripts:
+  - `examples/interleave/flux2_klein_interleave_serve.yaml`;
+  - `examples/interleave/interleave_run.yaml`;
+  - `examples/interleave/eval_prompts.jsonl`;
+  - `scripts/interleave_thinker/evaluate_traces.py`.
+- Removed the `interleave-api` optional extra and updated Gemini/Nano Banana
+  install guidance to use the existing `eval-judge` extra or direct
+  `google-genai` installation.
+- Rewrote `examples/interleave/README.md` and
+  `docs/design/interleave_thinker.md` so they document library/training
+  integration, not new FastVideo CLI/API commands.
+- Kept the reusable Python helper layer and training integration:
+  - `fastvideo.entrypoints.interleave` schema/generator/orchestrator/providers/
+    runner/evaluation/trace helpers;
+  - `fastvideo.train.models.interleave_thinker`;
+  - `InterleaveThinkerSFTMethod`;
+  - `InterleaveThinkerRLMethod`;
+  - InterleaveThinker reward utilities and training YAMLs.
+
+Validation completed locally:
+
+- `python -m py_compile` passed for the touched Python files.
+- `git diff --check` passed.
+- `pre-commit run --files ...` passed for all surviving changed files:
+  yapf, ruff, codespell, PyMarkdown, mypy, filename check, and suggestion hook.
+- Focused local pytest initially failed collection because importing FastVideo
+  loads `fastvideo_kernel`; Triton reports `0 active drivers` on this CPU-only
+  machine.
+- With a temporary local `/tmp` `fastvideo_kernel` import stub used only for
+  CPU collection, all Interleave local tests passed:
+  `PYTHONPATH=/tmp/fastvideo-test-stubs:$PYTHONPATH UV_CACHE_DIR=/tmp/uv-cache
+  uv run pytest tests/local_tests/test_interleave_*.py -q`
+  -> `62 passed, 16 warnings`.
+
+Full-suite validation status:
+
+- Attempted local broad suite:
+  `PYTHONPATH=/tmp/fastvideo-test-stubs:$PYTHONPATH UV_CACHE_DIR=/tmp/uv-cache
+  uv run pytest tests/ fastvideo/tests/ -q`.
+- It failed during collection due environment/test-infra prerequisites, not a
+  completed behavioral failure:
+  - `flashinfer` missing for `tests/local_tests/test_nvfp4_fa4.py`;
+  - several encoder/transformer/VAE tests attempted Hugging Face downloads, but
+    DNS/network is blocked locally;
+  - SSIM reference videos were not present locally and download failed;
+  - eval tests hit missing `libxcb.so.1` for `cv2`;
+  - local CPU-only import paths need a GPU or stubs for `fastvideo_kernel`.
+- Attempted to launch the focused Modal L40S validation with
+  `--apply-local-patch`, but the sandbox approval reviewer rejected uploading
+  the unpublished local patch to Modal as external data exfiltration.
+- To run the true full Modal suite for this cleanup, get explicit user approval
+  to either:
+  - upload this local patch to Modal with `--apply-local-patch`; or
+  - commit/push the cleanup branch and run Modal against the pushed commit.
+
+Follow-up after explicit user approval to upload unpublished local patches to
+Modal:
+
+- Focused Modal Interleave/pre-commit validation:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-LMa9TsYd1e0t54NWnNyX8A`.
+  - Command:
+    `pytest tests/local_tests/test_interleave_entrypoint.py
+    tests/local_tests/test_interleave_model_providers.py
+    tests/local_tests/test_interleave_run_cli.py
+    tests/local_tests/test_interleave_trace_eval.py
+    tests/local_tests/test_interleave_thinker_api_models.py -q &&
+    pre-commit run --files ...`.
+  - Result: `22 passed, 14 warnings`; pre-commit hooks passed.
+  - Metadata: `local_patch_applied=true`, `install_extra=dev`,
+    `build_kernel=false`.
+- Broad combined Modal suite attempt:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-7CTQcRbDhvSyV4FdPZ2rJW`.
+  - Command: `pytest tests/ fastvideo/tests/ -q`.
+  - Result: failed during collection with 23 errors after SSIM refs downloaded.
+    Main causes shown in output:
+    - `tests/local_tests/test_nvfp4_fa4.py` requires missing `flashinfer`;
+    - many subsequent errors were `ImportError: cannot import name
+      'VideoGenerator' from 'fastvideo' (unknown location)` or similar
+      `fastvideo.pipelines` import errors, consistent with collection-path /
+      partial-import fallout during the combined run.
+- Documented-suite Modal attempt with separate pytest processes:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-HnpvrSW5AX1VKolTKolBBI`.
+  - Command:
+    `pytest tests/ -q; pytest fastvideo/tests/ -q`.
+  - Result:
+    - `tests/` exited status `2` during collection because
+      `tests/local_tests/test_nvfp4_fa4.py` imports `flashinfer`, which is not
+      installed in the dev image.
+    - `fastvideo/tests/` downloaded SSIM refs, ran for a long time, emitted
+      multiple failures/errors, then exited status `131` (`Quit`) before pytest
+      printed a final failure summary.
+- Existing API/CLI regression tests after CLI cleanup:
+  - App URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-yl4NSHKpSL6ayDC8P1lPov`.
+  - Command:
+    `pytest fastvideo/tests/api/test_cli_translation.py
+    fastvideo/tests/api/test_schema_parity_inventory.py
+    fastvideo/tests/api/test_extra_overrides_routing.py -q`.
+  - Result: `42 passed, 14 warnings`.
+
+Commit completed:
+
+- `555a600f` — `[bugfix] remove InterleaveThinker CLI surface`.
