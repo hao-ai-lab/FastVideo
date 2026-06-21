@@ -8,7 +8,7 @@ Current working location:
 
 - Directory: `/home/toolbox/FastVideo`
 - Branch: `interleavethinker-fastvideo`
-- Latest observed branch head: `d2c53951` (`[docs] update InterleaveThinker handoff instructions`)
+- Latest observed branch head: `91d8fb85` (`[misc] format InterleaveThinker workflow helpers`)
 
 This file is the canonical handoff for the InterleaveThinker integration work.
 It intentionally summarizes older execution logs; use git history for the full
@@ -48,8 +48,8 @@ append-only detail if needed.
   - RL algorithms live in `fastvideo/train/methods/rl`.
   - Reward parsing/scoring lives under `fastvideo/train/methods/rl/rewards`.
   - Interleaved inference helpers live under
-    `fastvideo/workflows/interleave_thinker`; the old entrypoints namespace is
-    being removed because the standalone CLI/API surface was removed.
+    `fastvideo/workflows/interleave_thinker`; the old entrypoints namespace was
+    removed because the standalone CLI/API surface was removed.
 
 ## Goal
 
@@ -105,15 +105,14 @@ Removed by the API/CLI cleanup:
 - command/service-oriented examples and scripts.
 - `interleave-api` optional extra.
 
-Namespace integration plan:
+Namespace integration status:
 
-- Move the reusable helper layer from the old entrypoints package to
-  `fastvideo/workflows/interleave_thinker`.
-- Update internal imports, tests, examples, and docs to use the new workflow
-  namespace.
-- Do not keep the old `fastvideo.entrypoints.interleave` package unless a
-  reviewer explicitly requests a compatibility shim. This branch has not merged,
-  so preserving the old public path is not required.
+- Completed. The reusable helper layer moved from the old entrypoints package
+  to `fastvideo/workflows/interleave_thinker`.
+- Internal imports, tests, examples, and docs now use the workflow namespace.
+- The old `fastvideo.entrypoints.interleave` package was deleted rather than
+  kept as a compatibility shim. This branch has not merged, so preserving the
+  old public path was not required.
 - Do not scatter the helper code into unrelated core modules unless a genuinely
   generic abstraction emerges. The planner -> generator/edit -> critic loop is
   InterleaveThinker-specific workflow code, not `VideoGenerator`, training
@@ -162,6 +161,12 @@ Namespace integration plan:
 - API/CLI cleanup removed standalone InterleaveThinker FastVideo commands and
   the separate server, restored normal parser behavior, and rewrote docs toward
   library/training integration. Commits: `555a600f`, `704e5667`.
+- Handoff instructions were condensed and updated with standing Modal approval
+  and the no-local-tests rule. Commit: `d2c53951`.
+- Namespace integration moved the helper package to
+  `fastvideo.workflows.interleave_thinker`, renamed stale tests, updated docs
+  and examples, and deleted the old entrypoints package. Commits: `11d55fb5`,
+  `91d8fb85`.
 
 ## Validation Evidence
 
@@ -215,6 +220,19 @@ Latest cleanup validation:
   `22 passed, 14 warnings`; pre-commit hooks passed.
 - Existing API/CLI regression tests after cleanup passed on Modal:
   `42 passed, 14 warnings`.
+- Namespace migration validation passed on Modal L40S:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-APG1eoMxnajN1wpzPd0S4r`
+  - Commit: `91d8fb85e6bb36bbeacde5e82aac8ccb22a2c9ee`
+  - Pytest:
+    `tests/local_tests/test_interleave_workflow_backend.py`,
+    `tests/local_tests/test_interleave_model_providers.py`,
+    `tests/local_tests/test_interleave_workflow_runner.py`,
+    `tests/local_tests/test_interleave_trace_eval.py`, and
+    `tests/local_tests/test_interleave_thinker_api_models.py`
+    -> `22 passed, 14 warnings`.
+  - Pre-commit on changed docs/examples/workflow/reward/test files passed:
+    yapf, ruff, codespell, PyMarkdown, mypy, filename check, and suggestion.
+  - `local_patch_applied=false`; validation used the pushed commit.
 
 Broad-suite status:
 
@@ -251,16 +269,16 @@ Broad-suite status:
    before editing.
 2. Read the relevant per-directory `AGENTS.md` before touching files under
    `fastvideo/`, `examples/`, `docs/`, `scripts/`, or tests.
-3. Finish API cleanup by moving the reusable
-   `fastvideo/workflows/interleave_thinker` helper package into place, updating
-   all imports/docs/tests, and deleting the old entrypoints package.
+3. The API cleanup and namespace migration are complete. Continue with review
+   preparation, PR decomposition, reward-backend hardening, or broad-suite
+   environment repair.
 4. Validate only on Modal. Local syntax-only commands such as `git diff --check`
    are acceptable, but no local pytest or other local test execution should be
    used.
-5. After the namespace migration, either decompose the branch into reviewable
-   PRs using `docs/design/interleave_thinker.md` as the reviewer entrypoint, or
-   harden reward backends/cache/concurrency and the broad-suite validation
-   environment.
+5. For the next implementation slice, either decompose the branch into
+   reviewable PRs using `docs/design/interleave_thinker.md` as the reviewer
+   entrypoint, or harden reward backends/cache/concurrency and the broad-suite
+   validation environment.
 
 ## Useful Commands
 
