@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import torch
 if torch.cuda.is_available():
-    from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
+    try:
+        from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
+    except (ImportError, AttributeError) as e:
+        # flash_attn.cute (FA4) loads the cutlass CuTe DSL, whose API can be
+        # version-skewed against the installed flash-attn wheel (e.g.
+        # "module 'cutlass.cute.core' has no attribute 'ThrMma'"). That import
+        # raises AttributeError, not ImportError, so re-raise as ImportError to
+        # match the contract callers rely on: fall back to FA3/FA2 rather than
+        # crash worker init.
+        raise ImportError(f"flash_attn.cute (FA4) is unavailable: {e!r}") from e
 else:
     # This error will be caught in flash_attn.py or flash_attn_no_pad.py
     raise ImportError("flash_attn.cute is only available on CUDA devices; this error must be handled internally")
