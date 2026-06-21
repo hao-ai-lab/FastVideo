@@ -166,7 +166,7 @@ class LoopState:
     seed: int | None = None
     # common typed fields (resolved at init)
     latents: dict[str, TensorLike] = field(default_factory=dict)
-    cond: dict[str, Any] = field(default_factory=dict)  # conditioning written by ConditioningInjector
+    cond: dict[str, Any] = field(default_factory=dict)  # conditioning the loop fills from encoder slots
     timesteps: list[float] = field(default_factory=list)
     sigmas: list[float] = field(default_factory=list)
     # per-model extension (Cosmos3PackedSeq, MatrixGameState, ...) — typed by LoopSpec.extension_schema

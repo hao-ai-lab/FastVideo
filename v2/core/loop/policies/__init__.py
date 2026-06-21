@@ -3,11 +3,9 @@ from __future__ import annotations
 
 from v2.core.loop.policies.base import (
     BoundaryTimestepRouting,
-    ConditioningInjector,
     ExpertRouting,
     FlowShiftPolicy,
     NoRouting,
-    PassthroughConditioning,
     PrecisionPolicy,
 )
 from v2.core.loop.policies.cfg import (
@@ -31,6 +29,4 @@ __all__ = [
     "ExpertRouting",
     "NoRouting",
     "BoundaryTimestepRouting",
-    "ConditioningInjector",
-    "PassthroughConditioning",
 ]

@@ -1,6 +1,6 @@
 """Policy base classes — the *default* step decomposition.
 
-Policies (CFG, expert routing, precision, flow-shift, conditioning) delete duplication for
+Policies (CFG, expert routing, precision, flow-shift) delete duplication for
 the families that fit; they are never required. A family whose math is braided ships a custom
 ``next``/``advance`` and uses these as a library (LTX-2's multi-pass guidance does exactly
 that). Policy *bindings* resolve at build; policy *state* is per-request in ``LoopState``
@@ -93,21 +93,3 @@ class BoundaryTimestepRouting(ExpertRouting):
 
     def expert_for(self, ctx: StepContext) -> str:
         return self.high_noise if ctx.sigma >= self.boundary else self.low_noise
-
-
-# --------------------------------------------------------------------------- #
-# ConditioningInjector — writes RequestState.cond; the loop stays agnostic     #
-# --------------------------------------------------------------------------- #
-class ConditioningInjector(ABC):
-
-    @abstractmethod
-    def inject(self, state: Any, request: Any) -> None:
-        ...
-
-
-class PassthroughConditioning(ConditioningInjector):
-    """Copies precomputed encoder outputs (text/image embeds) into ``state.cond``."""
-
-    def inject(self, state: Any, request: Any) -> None:
-        # encoder ComponentNodes write into state.scratch["cond"] upstream of the loop
-        state.cond.update(state.scratch.get("cond", {}))
