@@ -99,7 +99,7 @@ cd /FastVideo
 **Install the package**
 
 ```bash
-uv pip install -e ".[dev]"
+UV_TORCH_BACKEND=auto uv pip install -e ".[dev]"
 ```
 
 The Docker image already includes Flash Attention and most heavy dependencies, so this is fast.
