@@ -95,12 +95,9 @@ class FP8QuantizeMethod(QuantizeMethodBase):
         layer.register_parameter("weight", weight)
         set_weight_attrs(weight, extra_weight_attrs)
 
-    def quantize_input(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, None]:
+    def quantize_input(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, None]:
         """Pre-quantize an activation for reuse across q/k/v projections."""
-        assert x.dtype in (torch.bfloat16, torch.float16), (
-            f"only allow bf16/fp16 inputs to fp8 linear, got {x.dtype}")
+        assert x.dtype in (torch.bfloat16, torch.float16), (f"only allow bf16/fp16 inputs to fp8 linear, got {x.dtype}")
         x_2d = x.view(-1, x.shape[-1])
         if self.granularity == "channel":
             x_fp8, x_scale = _quantize_rowwise(x_2d)
@@ -174,8 +171,7 @@ class FP8Config(QuantizationConfig):
     def __init__(self, granularity: str = "tensor"):
         super().__init__()
         if granularity not in ("tensor", "channel"):
-            raise ValueError(
-                f"granularity must be 'tensor' or 'channel', got {granularity!r}")
+            raise ValueError(f"granularity must be 'tensor' or 'channel', got {granularity!r}")
         self.granularity = granularity
 
     def get_name(self) -> str:
@@ -221,7 +217,8 @@ def convert_model_to_fp8(model: torch.nn.Module) -> None:
             if getattr(qm, "granularity", "tensor") == "channel":
                 w_absmax = weight_local.detach().abs().amax(dim=1).nan_to_num().float()
                 w_scale = (w_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE)
-                w_fp8 = (weight_local / w_scale.to(weight_local.dtype).unsqueeze(1)).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
+                w_fp8 = (weight_local / w_scale.to(weight_local.dtype).unsqueeze(1)).clamp(-FP8_MAX,
+                                                                                           FP8_MAX).to(FP8_DTYPE)
             else:
                 w_absmax = weight_local.detach().abs().amax().nan_to_num().to(torch.float32)
                 w_scale = (w_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE).view(1)
