@@ -6,6 +6,12 @@ app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
 image_version = os.getenv("IMAGE_VERSION")
+# Match the torch backend to the image's CUDA so the in-container editable
+# reinstall stays a no-op (the image bakes the matching torch). Not `auto`:
+# CI must be deterministic, not keyed to the test box's driver.
+_iv = image_version or ""
+uv_torch_backend = ("cu126" if "cuda12.6" in _iv else
+                    "cu128" if "cuda12.8" in _iv else "cu130")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
 
@@ -36,6 +42,8 @@ image = (modal.Image.from_registry(
     os.environ.get("TEST_SCOPE", ""),
     "IMAGE_VERSION":
     os.environ.get("IMAGE_VERSION", ""),
+    "UV_TORCH_BACKEND":
+    uv_torch_backend,
     "HF_REPO_ID":
     "FastVideo/performance-tracking",
 }))

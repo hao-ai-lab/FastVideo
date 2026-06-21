@@ -6,7 +6,7 @@
 # (Dockerfile.python3.10 / 3.11 / 3.12 / 3.12.cuda12.9.1): pick a variant with
 # --build-arg instead of maintaining a separate near-identical file.
 #
-#   # Default image (Python 3.12, CUDA 12.6.3, Ubuntu 22.04, Hopper sm_90a):
+#   # Default image (Python 3.12, CUDA 13.0.0, Ubuntu 22.04, Hopper sm_90a):
 #   docker build -f docker/Dockerfile -t fastvideo-dev:py3.12 .
 #
 #   # Python 3.10 / 3.11:
@@ -33,7 +33,7 @@
 # Build on the -devel- image: nvcc + the full toolkit are needed to compile
 # fastvideo-kernel. CUDA_VERSION/UBUNTU_VERSION feed the default tag, or override
 # BUILD_BASE_IMAGE wholesale for a mirror.
-ARG CUDA_VERSION=12.6.3
+ARG CUDA_VERSION=13.0.0
 ARG UBUNTU_VERSION=22.04
 ARG BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION}
 
@@ -52,11 +52,11 @@ ARG TORCH_CUDA_ARCH_LIST=9.0a
 # flash-attn: when FLASH_ATTN_WHEEL_TAG is set (and the target is x86_64), install
 # the matching prebuilt wheel; otherwise -- empty tag, or an arm64 target where no
 # prebuilt wheel exists -- build it from source. The wheel's cuXXXtorchY.Y tag must
-# match UV_TORCH_BACKEND (below): cu126torch2.12 for the default 12.6 base,
-# cu128torch2.11 for 12.8, cu130torch2.12 for 13.0 (cu126/cu130 -> torch 2.12,
+# match UV_TORCH_BACKEND (below): cu130torch2.12 for the default 13.0 base,
+# cu126torch2.12 for 12.6, cu128torch2.11 for 12.8 (cu126/cu130 -> torch 2.12,
 # cu128 -> torch 2.11).
 ARG FLASH_ATTN_VERSION=2.8.3
-ARG FLASH_ATTN_WHEEL_TAG=cu126torch2.12
+ARG FLASH_ATTN_WHEEL_TAG=cu130torch2.12
 ARG FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17
 
 # Provided automatically by buildx (e.g. "amd64" / "arm64"); used to skip the
@@ -100,9 +100,9 @@ ENV UV_LINK_MODE=copy
 
 # pyproject no longer pins a PyTorch index; select the build at resolve time.
 # Build hosts have no GPU driver (auto-detect would fall back to CPU), so pin
-# explicitly, matching the base CUDA: cu126 (12.6) / cu130 (13.0) -> torch 2.12,
-# cu128 (12.8) -> torch 2.11. Keep FLASH_ATTN_WHEEL_TAG in sync with this.
-ARG UV_TORCH_BACKEND=cu126
+# explicitly, matching the base CUDA: cu130 (default, 13.0) / cu126 (12.6) ->
+# torch 2.12, cu128 (12.8) -> torch 2.11. Keep FLASH_ATTN_WHEEL_TAG in sync.
+ARG UV_TORCH_BACKEND=cu130
 ENV UV_TORCH_BACKEND=${UV_TORCH_BACKEND}
 
 # Install uv and source its environment

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # CUDA base. CUDA_VERSION/UBUNTU_VERSION feed the default tag (matches the
 # unified docker/Dockerfile); override BUILD_BASE_IMAGE wholesale for a mirror.
-ARG CUDA_VERSION=12.6.3
+ARG CUDA_VERSION=13.0.0
 ARG UBUNTU_VERSION=22.04
 ARG BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION}
 FROM ${BUILD_BASE_IMAGE}
@@ -15,8 +15,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     UV_CACHE_DIR=/opt/uv/cache
 
 # pyproject no longer pins a PyTorch index; GPU-less build host -> pin explicitly
-# (auto would fall back to CPU). Matches the base CUDA: cu126 (12.6) / cu130 (13.0).
-ARG UV_TORCH_BACKEND=cu126
+# (auto would fall back to CPU). Matches the base CUDA: cu130 (13.0) / cu126 (12.6).
+ARG UV_TORCH_BACKEND=cu130
 ENV UV_TORCH_BACKEND=${UV_TORCH_BACKEND}
 
 SHELL ["/bin/bash", "-c"]
