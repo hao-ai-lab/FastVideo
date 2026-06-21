@@ -8,7 +8,7 @@ Current working location:
 
 - Directory: `/home/toolbox/FastVideo`
 - Branch: `interleavethinker-fastvideo`
-- Latest observed branch head: `58256b12` (`[docs] record InterleaveThinker workflow migration`)
+- Latest observed branch head: `bb1e8935` (`[refactor] use existing workflow namespace for InterleaveThinker`)
 
 This file is the canonical handoff for the InterleaveThinker integration work.
 It intentionally summarizes older execution logs; use git history for the full
@@ -108,10 +108,10 @@ Removed by the API/CLI cleanup:
 
 Namespace integration status:
 
-- Correction in progress. The reusable helper layer should live under the
-  pre-existing singular `fastvideo/workflow/interleave_thinker` package, not
-  under a new parallel `fastvideo/workflows` package.
-- Internal imports, tests, examples, docs, and this handoff should use
+- Completed correction. The reusable helper layer lives under the pre-existing
+  singular `fastvideo/workflow/interleave_thinker` package, not under a new
+  parallel `fastvideo/workflows` package.
+- Internal imports, tests, examples, docs, and this handoff now use
   `fastvideo.workflow.interleave_thinker`.
 - The old `fastvideo.entrypoints.interleave` package remains deleted rather
   than kept as a compatibility shim. This branch has not merged, so preserving
@@ -172,7 +172,7 @@ Namespace integration status:
   `91d8fb85`.
 - Follow-up correction requested by the user: move the helper package into the
   pre-existing singular `fastvideo.workflow.interleave_thinker` namespace and
-  remove the parallel `fastvideo.workflows` package.
+  remove the parallel `fastvideo.workflows` package. Commit: `bb1e8935`.
 
 ## Validation Evidence
 
@@ -239,6 +239,19 @@ Latest cleanup validation:
   - Pre-commit on changed docs/examples/workflow/reward/test files passed:
     yapf, ruff, codespell, PyMarkdown, mypy, filename check, and suggestion.
   - `local_patch_applied=false`; validation used the pushed commit.
+- Singular workflow namespace correction validation passed on Modal L40S:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-zAYZ80ExlxJbpvSDVWbtTu`
+  - Commit: `bb1e8935ee37ea1e99896cf96fa1ea4139ff119e`
+  - Pytest:
+    `tests/local_tests/test_interleave_workflow_backend.py`,
+    `tests/local_tests/test_interleave_model_providers.py`,
+    `tests/local_tests/test_interleave_workflow_runner.py`,
+    `tests/local_tests/test_interleave_trace_eval.py`, and
+    `tests/local_tests/test_interleave_thinker_api_models.py`
+    -> `22 passed, 14 warnings`.
+  - Pre-commit on changed docs/examples/workflow/reward/test files passed:
+    yapf, ruff, codespell, PyMarkdown, mypy, filename check, and suggestion.
+  - `local_patch_applied=false`; validation used the pushed commit.
 
 Broad-suite status:
 
@@ -275,9 +288,9 @@ Broad-suite status:
    before editing.
 2. Read the relevant per-directory `AGENTS.md` before touching files under
    `fastvideo/`, `examples/`, `docs/`, `scripts/`, or tests.
-3. Complete the namespace correction from `fastvideo.workflows` to the existing
-   `fastvideo.workflow` package, then continue with review preparation, PR
-   decomposition, reward-backend hardening, or broad-suite environment repair.
+3. The API cleanup and namespace correction are complete. Continue with review
+   preparation, PR decomposition, reward-backend hardening, or broad-suite
+   environment repair.
 4. Validate only on Modal. Local syntax-only commands such as `git diff --check`
    are acceptable, but no local pytest or other local test execution should be
    used.
