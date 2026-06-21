@@ -27,12 +27,10 @@ def trace_to_dict(
             trace.final_image,
             include_images=include_images,
         ),
-        "attempts": [
-            _attempt_to_dict(
-                attempt,
-                include_images=include_images,
-            ) for attempt in trace.attempts
-        ],
+        "attempts": [_attempt_to_dict(
+            attempt,
+            include_images=include_images,
+        ) for attempt in trace.attempts],
         "metadata": dict(trace.metadata),
     }
 

@@ -95,9 +95,7 @@ def build_planner(config: InterleavePlannerConfig) -> PlannerProvider:
     if config.kind == "single_prompt":
         return SinglePromptPlanner(max_attempts=config.max_attempts_per_step)
 
-    model = InterleaveThinkerPlannerModel(
-        **_actor_model_kwargs(config),
-    )
+    model = InterleaveThinkerPlannerModel(**_actor_model_kwargs(config), )
     return InterleaveThinkerPlannerProvider(
         model,
         num_generations=config.num_generations,
@@ -114,9 +112,7 @@ def build_critic(config: InterleaveCriticConfig) -> CriticProvider | None:
     if config.kind == "accept_all":
         return AcceptAllCritic()
 
-    model = InterleaveThinkerCriticModel(
-        **_actor_model_kwargs(config),
-    )
+    model = InterleaveThinkerCriticModel(**_actor_model_kwargs(config), )
     return InterleaveThinkerCriticProvider(
         model,
         num_generations=config.num_generations,
