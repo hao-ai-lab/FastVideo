@@ -26,7 +26,7 @@ build needs. The steps below handle both, **without requiring `sudo`**.
 
 ## Install
 
-Three commands, run from the repository root:
+Run from the repository root:
 
 ```bash
 # 0. (once) install uv and put it on PATH
@@ -34,57 +34,32 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 
-# 1. Create a venv on a uv-MANAGED CPython 3.12. A managed interpreter bundles
-#    the dev headers the kernel's C++/CUDA build needs (the system python3.12 on
-#    the Spark has none); this avoids `sudo apt install python3.12-dev`.
+# 1. Create a venv on a uv-managed CPython 3.12 (bundles the dev headers the
+#    kernel build needs; the Spark's system python3.12 lacks them).
 uv venv .venv --python 3.12 --python-preference only-managed --seed
 source .venv/bin/activate
 
-# 2. Initialise the kernel's git submodules (cutlass + ThunderKittens headers).
-#    A fresh clone leaves them empty and the GEMM kernel won't compile.
+# 2. Initialise the kernel submodules (cutlass + ThunderKittens headers).
 git submodule update --init --recursive \
   fastvideo-kernel/include/cutlass fastvideo-kernel/include/tk
 
-# 3. Install FastVideo (editable). uv compiles the in-tree CUDA kernel for the
-#    GB10 automatically — no arch flags, no separate build step, no --no-sources.
-uv pip install -e .
+# 3. Install FastVideo (editable; compiles the in-tree kernel for the GB10).
+#    UV_TORCH_BACKEND=auto selects the CUDA-13 (cu130) torch for this box.
+UV_TORCH_BACKEND=auto uv pip install -e .
 ```
 
-Contributors who want the lint/test tooling: `uv pip install -e ".[dev]"`.
+Contributors who want the lint/test tooling:
+`UV_TORCH_BACKEND=auto uv pip install -e ".[dev]"`.
 
 Then jump to [Verify the install](#verify-the-install).
 
-## Why this is just `uv pip install -e .`
-
-On the Spark this single editable install does what used to be a multi-step
-dance, because two things are wired up for you:
-
-- **uv builds the in-tree kernel.** `pyproject.toml` maps `fastvideo-kernel` to
-  the local `./fastvideo-kernel` source on `aarch64` (a
-  `platform_machine == 'aarch64'` entry in `[tool.uv.sources]`), since PyPI has
-  no ARM wheel. `x86_64` still gets the published wheel.
-- **The arch is auto-detected.** `fastvideo-kernel`'s CMake build probes the
-  live GPU and targets `sm_121` itself — you no longer set `TORCH_CUDA_ARCH_LIST`
-  or `CMAKE_CUDA_ARCHITECTURES`. It works even though uv builds the kernel under
-  build isolation: on `aarch64` the isolated build pulls a **CUDA 13** torch and
-  the GPU stays visible, so detection succeeds and the compiled kernel is
-  ABI-compatible with the `2.x+cu130` torch in your venv.
-
-PyTorch resolves to **`2.x+cu130` (CUDA 13)** from the cu130 index pinned in
-`pyproject.toml`, matching the system `nvcc` 13 — a matched toolchain for the
-compile.
-
-> **ThunderKittens** kernels are Hopper-only (`sm_90a`); on the GB10 they are
-> disabled automatically and FastVideo uses Triton fallbacks at runtime.
-
 ## Building without a visible GPU (CI / Docker)
 
-The kernel build probes the GPU to choose the arch; with **no GPU visible** it
-**errors loudly** rather than silently compiling for the wrong architecture.
-On a GPU-less builder, name the target arch explicitly:
+With no GPU visible the kernel build can't probe the arch and `auto` can't detect
+the driver — name both explicitly:
 
 ```bash
-TORCH_CUDA_ARCH_LIST=12.1 uv pip install -e .
+UV_TORCH_BACKEND=cu130 TORCH_CUDA_ARCH_LIST=12.1 uv pip install -e .
 ```
 
 ## Verify the install
@@ -126,9 +101,8 @@ are iterating on the CUDA source or the auto-build fails:
 
 ```bash
 # install torch + the kernel's build deps into the active venv first
-uv pip install torch torchvision torchaudio scikit-build-core cmake ninja setuptools wheel
-# build just the kernel, in the active env, against the torch you just installed
-# (auto-detects sm_121; --no-build-isolation links the venv's cu130 torch)
+UV_TORCH_BACKEND=auto uv pip install torch torchvision torchaudio scikit-build-core cmake ninja setuptools wheel
+# build just the kernel against that torch (auto-detects sm_121)
 uv pip install ./fastvideo-kernel --no-build-isolation
 # then the rest of FastVideo
 uv pip install -e .

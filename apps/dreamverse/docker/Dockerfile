@@ -14,6 +14,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     UV_LINK_MODE=copy \
     UV_CACHE_DIR=/opt/uv/cache
 
+# pyproject no longer pins a PyTorch index; GPU-less build host -> pin
+# explicitly (auto would fall back to CPU). torch 2.12.1 is on cu130.
+ENV UV_TORCH_BACKEND=cu130
+
 SHELL ["/bin/bash", "-c"]
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
