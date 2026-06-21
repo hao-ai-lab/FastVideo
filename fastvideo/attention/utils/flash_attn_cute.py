@@ -1,17 +1,31 @@
 from __future__ import annotations
 
 import torch
+
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
+
 if torch.cuda.is_available():
     try:
         from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
-    except (ImportError, AttributeError) as e:
-        # flash_attn.cute (FA4) loads the cutlass CuTe DSL, whose API can be
-        # version-skewed against the installed flash-attn wheel (e.g.
-        # "module 'cutlass.cute.core' has no attribute 'ThrMma'"). That import
-        # raises AttributeError, not ImportError, so re-raise as ImportError to
-        # match the contract callers rely on: fall back to FA3/FA2 rather than
-        # crash worker init.
-        raise ImportError(f"flash_attn.cute (FA4) is unavailable: {e!r}") from e
+    except ImportError:
+        # flash_attn.cute (FA4) is simply not installed -- expected on builds
+        # without it; callers fall back to FA3/FA2 quietly.
+        raise
+    except Exception as e:
+        # flash_attn.cute IS installed but failed to import -- almost always an
+        # nvidia-cutlass-dsl (CuTe DSL) version skew, e.g. "module
+        # 'cutlass.cute.core' has no attribute 'ThrMma'" (an AttributeError, not
+        # ImportError). This is fixable by pinning a compatible
+        # nvidia-cutlass-dsl, so warn loudly, then re-raise as ImportError so
+        # callers fall back to FA3/FA2 instead of crashing worker init.
+        logger.warning(
+            "flash_attn.cute (FA4) is installed but failed to import (%r); "
+            "falling back to FA3/FA2. This is usually an nvidia-cutlass-dsl "
+            "version mismatch -- pin a compatible nvidia-cutlass-dsl to "
+            "restore FA4.", e)
+        raise ImportError(f"flash_attn.cute (FA4) import failed: {e!r}") from e
 else:
     # This error will be caught in flash_attn.py or flash_attn_no_pad.py
     raise ImportError("flash_attn.cute is only available on CUDA devices; this error must be handled internally")
