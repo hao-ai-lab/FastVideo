@@ -56,12 +56,12 @@ uv venv --python 3.12 --seed
 source .venv/bin/activate
 
 # Install FastVideo
-uv pip install fastvideo
+UV_TORCH_BACKEND=auto uv pip install fastvideo
 ```
 
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.
 
-> **On an NVIDIA DGX Spark (GB10 / ARM64 + CUDA 13)?** There's no prebuilt ARM wheel for the CUDA kernel, so it's an editable from-source install (`uv pip install -e .`, which compiles the kernel for you) rather than `uv pip install fastvideo`. Follow the [DGX Spark install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/spark/).
+> **On an NVIDIA DGX Spark (GB10 / ARM64 + CUDA 13)?** There's no prebuilt ARM wheel for the CUDA kernel, so it's an editable from-source install (`UV_TORCH_BACKEND=auto uv pip install -e .`, which compiles the kernel for you) rather than `UV_TORCH_BACKEND=auto uv pip install fastvideo`. Follow the [DGX Spark install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/spark/).
 
 ### Install with an AI coding agent
 

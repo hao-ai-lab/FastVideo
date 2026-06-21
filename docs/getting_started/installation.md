@@ -18,7 +18,7 @@ Use uv as the default environment manager for faster and more stable installs.
 uv venv --python 3.12 --seed
 source .venv/bin/activate
 
-uv pip install fastvideo
+UV_TORCH_BACKEND=auto uv pip install fastvideo
 ```
 
 ### Using Conda (alternative)
@@ -28,7 +28,7 @@ uv pip install fastvideo
 conda create -n fastvideo python=3.12 -y
 conda activate fastvideo
 
-uv pip install fastvideo
+UV_TORCH_BACKEND=auto uv pip install fastvideo
 ```
 
 ### From source
