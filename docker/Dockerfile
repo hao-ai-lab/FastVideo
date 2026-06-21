@@ -6,7 +6,7 @@
 # (Dockerfile.python3.10 / 3.11 / 3.12 / 3.12.cuda12.9.1): pick a variant with
 # --build-arg instead of maintaining a separate near-identical file.
 #
-#   # Default image (Python 3.12, CUDA 12.8.0, Ubuntu 22.04, Hopper sm_90a):
+#   # Default image (Python 3.12, CUDA 12.9.1, Ubuntu 22.04, Hopper sm_90a):
 #   docker build -f docker/Dockerfile -t fastvideo-dev:py3.12 .
 #
 #   # Python 3.10 / 3.11:
@@ -32,7 +32,7 @@
 # Build on the -devel- image: nvcc + the full toolkit are needed to compile
 # fastvideo-kernel. CUDA_VERSION/UBUNTU_VERSION feed the default tag, or override
 # BUILD_BASE_IMAGE wholesale for a mirror.
-ARG CUDA_VERSION=12.8.0
+ARG CUDA_VERSION=12.9.1
 ARG UBUNTU_VERSION=22.04
 ARG BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION}
 
