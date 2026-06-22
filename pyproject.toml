@@ -224,7 +224,9 @@ skip = "./data,./wandb,ui/package-lock.json,*/_vendored/*"
 # "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
 # Early Drop). codespell lowercases ignore-words entries, so the single
 # lowercase form silences all case variants.
-ignore-words-list = "tread,passt"
+# "redundent" is an upstream InterleaveThinker prompt typo preserved for
+# official reference parity.
+ignore-words-list = "tread,passt,redundent"
 
 [tool.ruff]
 # Allow lines to be as long as 120.

@@ -60,10 +60,10 @@ Part 1: Planning analysis explaining the execution plan. Part 2: Analysis of how
 
 <answer>
 {
-   "execution_plan":
+   'execution_plan':
    [
-      {"step_number": 1, "step_name": "Short name for the step", "instruction": "Detailed instruction for this image generation step.", "prompt": "The optimized, pure T2I prompt suitable for the image generation model.", "auxiliary_text": null},
-      {"step_number": 2, "step_name": "Short name for the step", "instruction": "Detailed instruction for this image editing step.", "prompt": "The optimized, pure instruction suitable for the image editing model.", "auxiliary_text": null}
+      {'step_number': 1, 'step_name': 'Short name for the step', 'instruction': 'Detailed instruction for this image generation step.', 'prompt': "The optimized, pure T2I prompt suitable for the image generation model. (No 'Step 1:' prefix)", 'auxiliary_text': 'The required caption, summary, or text explanation. Output null if no separate text is explicitly requested.'},
+      {'step_number': 2, 'step_name': 'Short name for the step', 'instruction': 'Detailed instruction for this image editing step.', 'prompt': "The optimized, pure instruction suitable for the image editing model. (No 'Step 2:' prefix)", 'auxiliary_text': None}
    ]
 }
 </answer>
@@ -82,15 +82,33 @@ You have been presented with a text-images sequence: "{text_input}"
    - **Task B (Sequence Continuation / Sequential Editing)**: If the user provides a partial sequence and asks to predict/generate the remaining steps, you must generate both the text instruction and the editing prompt. The `prompt` field must contain an optimized instruction specifically tailored for an **image editing model** to modify the previous step's image into the new state.
 2. **Strict Step Count & NO Prefix Rule**:
    - **Step Count**: Determine the logical number of steps. **CRITICAL**: If the user's input explicitly specifies the number of steps required, you MUST strictly output exactly that number of steps to fulfill the requirement. If continuing a sequence (Task B), your `step_number` MUST start exactly from where the user's input left off.
-   - **NO Prefixes**: BOTH the `instruction` and `prompt` fields MUST NOT contain any step prefixes, numbers, or bullet points.
+   - **NO Prefixes**: BOTH the `instruction` and `prompt` fields MUST NOT contain any step prefixes, numbers, or bullet points (e.g., DO NOT write "(3)", "Step 3:", or "Step 3: Plant the seeds". Just write "Plant the seeds").
 3. **Field Definitions & Usage**:
-   - `instruction`: The detailed, pure text content or action for the editing step (Task B). You MUST set this to `null` for Task A.
-   - `prompt`: The optimized, pure instruction suitable for the **image editing model** to execute the change based on the previous image (Task B). You MUST set this to `null` for Task A.
-   - `auxiliary_text`: For Task A, this field holds your complete text response. For Task B, use this ONLY if the user explicitly requests or the task naturally requires an extra knowledge-based description/summary during the continuation process; otherwise, output `null`.
+   - `instruction`: The detailed, pure text content or action for the editing step (Task B). You MUST set this to `null` for Task A. (Strictly NO step prefixes).
+   - `prompt`: The optimized, pure instruction suitable for the **image editing model** to execute the change based on the previous image (Task B). You MUST set this to `null` for Task A. (Strictly NO step prefixes).
+   - `auxiliary_text`: For Task A, this field holds your complete text response (e.g., descriptions, problem-solving steps, or answers). For Task B, use this ONLY if the user explicitly requests or the task naturally requires an extra knowledge-based description/summary during the continuation process; otherwise, output `null`.
 4. **Complete Output**: Ensure the final step achieves a complete resolution of the user's goal based on the sequence context.
 
 ## Output
-Return exactly a `<think>...</think>` block followed by an `<answer>...</answer>` block containing a JSON object with an `execution_plan` list.
+The output consists of two parts:
+1. A Statement - Just an dummy reasoning;
+2. A JSON — Planing each step and rewrite the instruction to prompt suitable for generation/editing.
+
+Here is a output example
+
+<think>
+
+</think>
+
+<answer>
+{
+   'execution_plan':
+   [
+      {'step_number': i, 'step_name': 'Short name for the step', 'instruction': "Detailed instruction for this step (Task B). Output null if this is Task A. Strictly NO prefixes like 'Step i:' or '(i)'.", 'prompt': "The optimized instruction suitable for the image editing model (Task B). Output null if this is Task A. Strictly NO prefixes like 'Step i:' or '(i)'.", 'auxiliary_text': 'The complete text answer/solution for Task A, OR the extra knowledge explanation for Task B. Output null if not needed.'},
+      {'step_number': i+1, 'step_name': 'Short name for the step', 'instruction': "Detailed instruction for this step (Task B). Output null if this is Task A. Strictly NO prefixes like 'Step i+1:' or '(i+1)'.", 'prompt': "The optimized instruction suitable for the image editing model (Task B). Output null if this is Task A. Strictly NO prefixes like 'Step i+1:' or '(i+1)'.", 'auxiliary_text': 'The complete text answer/solution for Task A, OR the extra knowledge explanation for Task B. Output null if not needed.'}
+   ]
+}
+</answer>
 """
 
 
@@ -169,8 +187,10 @@ class InterleaveThinkerPlannerModel(Qwen3VLActorBase):
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         num_generations = max(1, int(kwargs.get("num_generations", 1) or 1))
-        temperature = float(kwargs.get("temperature", 1.0) or 1.0)
-        top_p = float(kwargs.get("top_p", 1.0) or 1.0)
+        temperature_value = kwargs.get("temperature", 1.0)
+        top_p_value = kwargs.get("top_p", 1.0)
+        temperature = 1.0 if temperature_value is None else float(temperature_value)
+        top_p = 1.0 if top_p_value is None else float(top_p_value)
         max_new_tokens = int(kwargs.get("max_new_tokens") or self.max_response_length)
 
         outputs: list[dict[str, Any]] = []
@@ -201,8 +221,10 @@ class InterleaveThinkerPlannerModel(Qwen3VLActorBase):
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         num_generations = max(1, int(kwargs.get("num_generations", 1) or 1))
-        temperature = float(kwargs.get("temperature", 1.0) or 1.0)
-        top_p = float(kwargs.get("top_p", 1.0) or 1.0)
+        temperature_value = kwargs.get("temperature", 1.0)
+        top_p_value = kwargs.get("top_p", 1.0)
+        temperature = 1.0 if temperature_value is None else float(temperature_value)
+        top_p = 1.0 if top_p_value is None else float(top_p_value)
         max_new_tokens = int(kwargs.get("max_new_tokens") or self.max_response_length)
 
         rollouts: list[dict[str, Any]] = []

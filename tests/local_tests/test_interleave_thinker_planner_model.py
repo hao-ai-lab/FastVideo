@@ -70,7 +70,7 @@ class _FakeQwen(torch.nn.Module):
     def generate(self, **kwargs):
         self.generate_kwargs = kwargs
         input_ids = kwargs["input_ids"]
-        num_return_sequences = int(kwargs["num_return_sequences"])
+        num_return_sequences = int(kwargs.get("num_return_sequences", 1))
         suffix = torch.tensor([[9, 10]], dtype=input_ids.dtype)
         return torch.cat([input_ids.repeat(num_return_sequences, 1), suffix.repeat(num_return_sequences, 1)], dim=1)
 
@@ -183,7 +183,7 @@ def test_interleave_thinker_planner_fake_backend_generates_parseable_plan():
     assert plans[0]["plan"] is not None
     assert plans[0]["steps"][0].prompt == "a clean cat sketch"
     assert model.transformer.generate_kwargs["max_new_tokens"] == 12
-    assert model.transformer.generate_kwargs["num_return_sequences"] == 1
+    assert model.transformer.generate_kwargs.get("num_return_sequences", 1) == 1
 
 
 def test_interleave_thinker_planner_fake_backend_generates_rl_rollouts():

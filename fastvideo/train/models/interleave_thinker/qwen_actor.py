@@ -260,19 +260,25 @@ class Qwen3VLActorBase(ModelBase):
             add_generation_prompt=True,
         )
         input_ids = inputs["input_ids"]
-        generate_kwargs: dict[str, Any] = {
-            "max_new_tokens": max_tokens,
-            "num_return_sequences": num_return_sequences,
-            "do_sample": num_return_sequences > 1 or float(temperature) > 0.0,
-            "temperature": float(temperature),
-            "top_p": float(top_p),
-        }
-        pad_token_id = getattr(getattr(self.processor, "tokenizer", None), "pad_token_id", None)
-        eos_token_id = getattr(getattr(self.processor, "tokenizer", None), "eos_token_id", None)
-        if pad_token_id is not None:
-            generate_kwargs["pad_token_id"] = pad_token_id
-        if eos_token_id is not None:
-            generate_kwargs["eos_token_id"] = eos_token_id
+        temperature = float(temperature)
+        top_p = float(top_p)
+        generate_kwargs: dict[str, Any] = {"max_new_tokens": max_tokens}
+        uses_custom_sampling = num_return_sequences > 1 or temperature > 0.0 or top_p < 1.0
+        if uses_custom_sampling:
+            generate_kwargs["do_sample"] = True
+            if num_return_sequences > 1:
+                generate_kwargs["num_return_sequences"] = num_return_sequences
+            if temperature > 0.0:
+                generate_kwargs["temperature"] = temperature
+            if top_p < 1.0:
+                generate_kwargs["top_p"] = top_p
+
+            pad_token_id = getattr(getattr(self.processor, "tokenizer", None), "pad_token_id", None)
+            eos_token_id = getattr(getattr(self.processor, "tokenizer", None), "eos_token_id", None)
+            if pad_token_id is not None:
+                generate_kwargs["pad_token_id"] = pad_token_id
+            if eos_token_id is not None:
+                generate_kwargs["eos_token_id"] = eos_token_id
         generated_ids = self.transformer.generate(**inputs, **generate_kwargs)
         prompt_len = int(input_ids.shape[-1])
         decoded = self.processor.batch_decode(
@@ -562,16 +568,22 @@ class Qwen3VLActorBase(ModelBase):
                     "text": text,
                 })
             if idx < len(images):
-                content.append({
+                image_content: dict[str, Any] = {
                     "type": "image",
                     "image": images[idx],
-                })
+                }
+                if len(images) >= 5:
+                    image_content["max_pixels"] = 384 * 384
+                content.append(image_content)
                 consumed_images += 1
         for image_path in images[consumed_images:]:
-            content.append({
+            image_content = {
                 "type": "image",
                 "image": image_path,
-            })
+            }
+            if len(images) >= 5:
+                image_content["max_pixels"] = 384 * 384
+            content.append(image_content)
         return [{
             "role": "user",
             "content": content,

@@ -2,13 +2,15 @@
 
 ## Status
 
-Draft handoff, shortened on 2026-06-21.
+Draft handoff, shortened on 2026-06-21 and updated on 2026-06-22 after
+official InterleaveThinker parity validation.
 
 Current working location:
 
 - Directory: `/home/toolbox/FastVideo`
 - Branch: `interleavethinker-fastvideo`
-- Latest observed branch head: `bb1e8935` (`[refactor] use existing workflow namespace for InterleaveThinker`)
+- Latest observed branch head before the official parity patch:
+  `9363caf6` (`[docs] record InterleaveThinker workflow namespace correction`)
 
 This file is the canonical handoff for the InterleaveThinker integration work.
 It intentionally summarizes older execution logs; use git history for the full
@@ -173,6 +175,12 @@ Namespace integration status:
 - Follow-up correction requested by the user: move the helper package into the
   pre-existing singular `fastvideo.workflow.interleave_thinker` namespace and
   remove the parallel `fastvideo.workflows` package. Commit: `bb1e8935`.
+- Official parity hardening aligned planner, guidance-planner, and critic
+  prompt literals with upstream InterleaveThinker; matched the upstream demo
+  message constructor for text/image interleaving including the `max_pixels`
+  behavior for five or more images; and adjusted Qwen generation so
+  official-style single-output inference preserves checkpoint generation config
+  while multi-output/custom-sampling RL paths still pass sampling controls.
 
 ## Validation Evidence
 
@@ -252,6 +260,41 @@ Latest cleanup validation:
   - Pre-commit on changed docs/examples/workflow/reward/test files passed:
     yapf, ruff, codespell, PyMarkdown, mypy, filename check, and suggestion.
   - `local_patch_applied=false`; validation used the pushed commit.
+- Official InterleaveThinker parity validation passed on Modal L40S:
+  - FastVideo base commit: `9363caf64edfe4013c0525f4092b155987974253` with
+    local patch applied.
+  - Official InterleaveThinker reference commit observed before validation:
+    `93511614902c5e4f0c167951a4b78343bd864122`.
+  - Passing app URL:
+    `https://modal.com/apps/hao-ai-lab/main/ap-3UpF5p9UD9wiC8geNSJ1eP`
+  - Command cloned `https://github.com/zhengdian1/InterleaveThinker.git` inside
+    the Modal job and ran
+    `pytest tests/local_tests/test_interleave_thinker_official_parity.py -q -s`
+    with `INTERLEAVETHINKER_REAL_PARITY=1`.
+  - Result: `5 passed, 14 warnings`.
+  - Coverage: official prompt-template parity, official demo message-constructor
+    parity, fake Qwen API-call parity, and real planner/critic checkpoint
+    generation parity against upstream `UEval.qwen3_vl_api.predict`.
+  - Modal emitted the known FlashAttention ABI warning after dev dependency
+    installation; the real checkpoint tests used `attn_implementation=sdpa`.
+- Focused InterleaveThinker regression validation passed on Modal L40S:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-qdLoZdm5OkqE9nNqwtBQAz`
+  - Same FastVideo base commit with local patch applied.
+  - Pytest covered planner/critic model fakes, providers, workflow backend and
+    runner, API models, RL method/math, SFT method, rewards, data normalization,
+    and trace evaluation.
+  - Result: `62 passed, 14 warnings`.
+- Pre-commit validation for the parity patch passed on Modal L40S:
+  - App URL: `https://modal.com/apps/hao-ai-lab/main/ap-cQkolTKGy7J24OP7ZR5mFh`
+  - Command:
+    `pre-commit run --files pyproject.toml fastvideo/train/models/interleave_thinker/planner.py fastvideo/train/models/interleave_thinker/critic.py fastvideo/train/models/interleave_thinker/qwen_actor.py tests/local_tests/test_interleave_thinker_planner_model.py tests/local_tests/test_interleave_thinker_critic_model.py tests/local_tests/test_interleave_thinker_official_parity.py`
+  - Result: yapf, ruff, codespell, PyMarkdown, actionlint, mypy, filename check,
+    and suggestion passed or were correctly skipped when no files applied.
+- Local validation for the parity patch was limited to syntax and diff hygiene:
+  - `PYTHONDONTWRITEBYTECODE=1 python -m py_compile ...` passed for touched
+    Python files.
+  - `git diff --check` passed.
+  - No local pytest was run.
 
 Broad-suite status:
 

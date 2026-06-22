@@ -64,7 +64,7 @@ class _FakeQwen(torch.nn.Module):
     def generate(self, **kwargs):
         self.generate_kwargs = kwargs
         input_ids = kwargs["input_ids"]
-        num_return_sequences = int(kwargs["num_return_sequences"])
+        num_return_sequences = int(kwargs.get("num_return_sequences", 1))
         suffix = torch.tensor([[9, 10]], dtype=input_ids.dtype)
         return torch.cat([input_ids.repeat(num_return_sequences, 1), suffix.repeat(num_return_sequences, 1)], dim=1)
 
