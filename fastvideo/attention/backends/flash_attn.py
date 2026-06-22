@@ -11,11 +11,12 @@ try:
     fa_version = "4"
 except ImportError:
     try:
-        from flash_attn_interface import flash_attn_func as flash_attn_3_func
-
-        # flash_attn 3 no longer have a different API, see following commit:
-        # https://github.com/Dao-AILab/flash-attention/commit/ed209409acedbb2379f870bbd03abce31a7a51b7
-        flash_attn_func = flash_attn_3_func
+        # Wrap FA3 in torch.library.custom_op so torch.compile can graph through
+        # it (otherwise inductor sees the raw `flash_attn_interface` Python call
+        # as an opaque eager region and forces a graph break in every caller).
+        # The wrapper module imports `flash_attn_interface` at top-level, so if
+        # FA3 is not installed the ImportError propagates and we fall through.
+        from fastvideo.attention.utils.flash_attn_3_compile import flash_attn_func
         fa_version = "3"
     except ImportError:
         from flash_attn import flash_attn_func as flash_attn_2_func
