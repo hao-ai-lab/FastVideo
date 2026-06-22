@@ -9,6 +9,8 @@ Current working location:
 
 - Directory: `/home/toolbox/FastVideo`
 - Branch: `interleavethinker-fastvideo`
+- Latest completed integration checkpoint:
+  `f04e6750` (`[test] add InterleaveThinker official parity checks`)
 - Latest observed branch head before the official parity patch:
   `9363caf6` (`[docs] record InterleaveThinker workflow namespace correction`)
 
@@ -181,6 +183,7 @@ Namespace integration status:
   behavior for five or more images; and adjusted Qwen generation so
   official-style single-output inference preserves checkpoint generation config
   while multi-output/custom-sampling RL paths still pass sampling controls.
+  Commit: `f04e6750`.
 
 ## Validation Evidence
 
