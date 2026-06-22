@@ -105,11 +105,16 @@ Each benchmark records six metrics:
 
 `test_inference_performance.py` temporarily sets `FASTVIDEO_STAGE_LOGGING=1`
 while it runs so pipeline stage execution times are available in
-`generate_video(...).logging_info`. It maps `TextEncodingStage` to
-`text_encoder_time_s`, `DenoisingStage` and `DmdDenoisingStage` to
-`dit_time_s`, and `DecodingStage` to `vae_decode_time_s`. If a pipeline does
-not report one of those stages, that component metric is stored as `null` and
-is skipped by the static threshold and rolling baseline checks.
+`generate_video(...).logging_info`. Stage logs use pipeline-unique keys such as
+`prompt_encoding_stage` so duplicate stage classes do not collide. For
+`PipelineStage` entries, the extractor maps the `stage_class` field:
+`TextEncodingStage` maps to `text_encoder_time_s`, `DenoisingStage` and
+`DmdDenoisingStage` map to `dit_time_s`, and `DecodingStage` maps to
+`vae_decode_time_s`, with a fallback for older logs that used the class name as
+the stage key. Generator-side timings such as `PostDecodeFrameProcessStage`,
+`VideoSaveStage`, and `AudioMuxStage` are intentionally ignored. If a pipeline
+does not report one of the mapped stages, that component metric is stored as
+`null` and is skipped by the static threshold and rolling baseline checks.
 
 ## The two gates
 
