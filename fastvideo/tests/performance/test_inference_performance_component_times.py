@@ -17,6 +17,8 @@ def test_extract_component_times_handles_pipeline_logging_info_object():
 
 
 def test_extract_component_times_uses_stage_class_for_pipeline_stage_keys():
+    # Regression guard for #1377: pre-fix code looked up the pipeline stage key
+    # and returned all component metrics as None for this shape.
     result = {
         "logging_info": {
             "stages": {
@@ -44,6 +46,8 @@ def test_extract_component_times_uses_stage_class_for_pipeline_stage_keys():
 
 
 def test_extract_component_times_keeps_legacy_class_name_keys():
+    # Backward-compatibility check for logs produced before pipeline-unique
+    # stage keys carried a separate stage_class field.
     result = {
         "logging_info": {
             "stages": {
@@ -85,6 +89,8 @@ def test_extract_component_times_accumulates_duplicate_component_classes():
 
 
 def test_extract_component_times_ignores_unmapped_stages():
+    # Generator-side bookkeeping timings are intentionally excluded from the
+    # component gates.
     result = {
         "logging_info": {
             "stages": {
