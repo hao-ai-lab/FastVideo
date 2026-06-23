@@ -272,7 +272,7 @@ pull_request_rules:
         remove: [needs-rebase]
 
   # ============================================================
-  # Auto-merge and auto-rebase
+  # Auto-merge
   # ============================================================
 
   - name: auto-merge when ready and all checks pass
@@ -289,16 +289,6 @@ pull_request_rules:
     actions:
       merge:
         method: squash
-
-  - name: auto-update when ready
-    conditions:
-      - label=ready
-      - "#approved-reviews-by>=1"
-      - -conflict
-      - -closed
-      - -draft
-    actions:
-      update: {}
 
   # ============================================================
   # PR title format help
