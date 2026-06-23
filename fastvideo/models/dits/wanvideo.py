@@ -2,6 +2,7 @@
 
 import copy
 import math
+from contextlib import nullcontext
 from typing import Any
 
 import torch
@@ -9,7 +10,9 @@ import torch.nn as nn
 
 import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
-                                 LocalAttention)
+                                  LocalAttention)
+from fastvideo.attention.selector import (get_global_forced_attn_backend,
+                                          global_force_attn_backend_context_manager)
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
@@ -651,21 +654,30 @@ class WanTransformer3DModel(BaseDiT):
         )
 
         # 3. Transformer blocks
-        attn_backend = envs.FASTVIDEO_ATTENTION_BACKEND
+        required_attn_backend = config.required_attention_backend
+        selected_attn_backend = required_attn_backend
+        if selected_attn_backend is None:
+            selected_attn_backend = get_global_forced_attn_backend()
+        attn_backend = (selected_attn_backend.name
+                        if selected_attn_backend is not None else envs.FASTVIDEO_ATTENTION_BACKEND)
         transformer_block = WanTransformerBlock_VSA if attn_backend == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
-        self.blocks = nn.ModuleList([
-            transformer_block(inner_dim,
-                              config.ffn_dim,
-                              config.num_attention_heads,
-                              config.qk_norm,
-                              config.cross_attn_norm,
-                              config.eps,
-                              config.added_kv_proj_dim,
-                              self._supported_attention_backends,
-                              quant_config=config.quant_config,
-                              prefix=f"{config.prefix}.blocks.{i}")
-            for i in range(config.num_layers)
-        ])
+        force_attn_context = (
+            global_force_attn_backend_context_manager(AttentionBackendEnum.VIDEO_SPARSE_ATTN)
+            if required_attn_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN else nullcontext())
+        with force_attn_context:
+            self.blocks = nn.ModuleList([
+                transformer_block(inner_dim,
+                                  config.ffn_dim,
+                                  config.num_attention_heads,
+                                  config.qk_norm,
+                                  config.cross_attn_norm,
+                                  config.eps,
+                                  config.added_kv_proj_dim,
+                                  self._supported_attention_backends,
+                                  quant_config=config.quant_config,
+                                  prefix=f"{config.prefix}.blocks.{i}")
+                for i in range(config.num_layers)
+            ])
 
         # 4. Output norm & projection
         self.norm_out = LayerNormScaleShift(inner_dim,
