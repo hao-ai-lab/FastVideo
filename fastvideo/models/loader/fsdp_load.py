@@ -61,6 +61,7 @@ def _maybe_quantize_model(model: nn.Module) -> None:
         if isinstance(qm, NVFP4QATQuantizeMethod):
             logger.info("Converting loaded model weights for NVFP4-QAT linear layers")
             convert_model_to_fp4(model)
+            return
         if isinstance(qm, FP8QuantizeMethod):
             logger.info("Converting loaded model weights for FP8 linear layers")
             convert_model_to_fp8(model)
