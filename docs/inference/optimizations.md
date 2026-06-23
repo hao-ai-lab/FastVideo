@@ -11,6 +11,9 @@ This page describes the various options for speeding up generation times in Fast
   - [Sliding Tile Attention (Archived)](#sliding-tile-attention-archived)
   - [Sage Attention](#sage-attention)
   - [Sage Attention 3](#sage-attention-3)
+
+- [FP8 Weight Quantization](#fp8-weight-quantization)
+
 - [Adaptive Guidance (CFG gating)](#adaptive-guidance-cfg-gating)
 
 - [torch.compile](#torch-compile)
@@ -217,6 +220,50 @@ To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repos
 These backends are model-specific and require the corresponding kernels and
 dependencies. Use the support matrix and model examples to confirm compatibility
 before enabling them.
+
+## FP8 Weight Quantization
+
+**`transformer_quant="FP8"`**
+
+Quantizes DiT linear layers (attention projections and FFN) to FP8 e4m3.
+
+On GPUs older than sm89, the FP8 matmul falls back to a bf16 dequant path
+automatically.
+
+### Requirements
+
+- **GPU**: sm89+ (H100, L40S, RTX 4090, or newer) for hardware FP8 compute
+- No additional packages required beyond the base FastVideo install
+
+### Usage
+
+```python
+from fastvideo import VideoGenerator
+from fastvideo.layers.quantization import get_quantization_config
+
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    # Pass an instance — the bare string is not resolved on the from_pretrained path.
+    transformer_quant=get_quantization_config("FP8")(),          # per-tensor (default)
+    # transformer_quant=get_quantization_config("FP8")(granularity="channel"),  # slower, higher accuracy
+)
+gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
+```
+
+Or run the example script:
+
+```bash
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py --granularity channel
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py --bf16  # baseline
+```
+
+### Granularity
+
+| Mode | Weight scales | Activation scales | Speed | Accuracy |
+|------|--------------|-------------------|-------|----------|
+| `tensor` (default) | per-tensor | per-tensor | faster | lower |
+| `channel` | per-output-channel | per-token (rowwise) | slower | higher |
 
 <a id="torch-compile"></a>
 
