@@ -82,8 +82,7 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 
 FastVideo doesn't pin the PyTorch CUDA build. Set `UV_TORCH_BACKEND` so uv picks
 it: `auto` matches your GPU driver, or pin one explicitly (e.g. `cu126`/`cu130`).
-torch resolves to 2.12 on `cu126`/`cu130` and 2.11 on `cu128`; `auto` works on a
-CUDA 12.6+ driver.
+torch resolves to 2.12 on `cu126`/`cu130`; `auto` works on a CUDA 12.6+ driver.
 
 Basic installation:
 

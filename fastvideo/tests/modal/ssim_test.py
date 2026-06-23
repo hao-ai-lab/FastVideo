@@ -17,8 +17,7 @@ model_vol = modal.Volume.from_name("hf-model-weights")
 image_version = os.getenv("IMAGE_VERSION", "latest")
 # Match torch backend to the image's CUDA (not `auto` -- CI stays deterministic).
 _iv = image_version or ""
-uv_torch_backend = ("cu126" if "cuda12.6" in _iv else
-                    "cu128" if "cuda12.8" in _iv else "cu130")
+uv_torch_backend = "cu126" if "cuda12.6" in _iv else "cu130"
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
 
