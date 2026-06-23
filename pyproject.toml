@@ -27,7 +27,7 @@ dependencies = [
     "timm>=1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.38.0",
-    "torch>=2.11,<2.13",
+    "torch>=2.12,<2.13",
     "torchvision",
     "torchaudio",
     "flashinfer-python",
@@ -108,8 +108,7 @@ fastvideo-kernel = [
 #   UV_TORCH_BACKEND=auto  uv pip install -e ".[dev]"   # detects the GPU driver
 #   UV_TORCH_BACKEND=cu130 uv pip install -e ".[dev]"   # explicit (GPU-less builds)
 # uv reads UV_TORCH_BACKEND / --torch-backend (not a pyproject setting). The
-# version range spans torch 2.11 (cu128) and 2.12 (cu126, cu130); the chosen
-# backend determines which.
+# supported backends (cu126, cu130) are both on torch 2.12.
 imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
 # FA4 cute: upstream Dao-AILab (cutlass-4.5-safe; uses cute.ThrMma). torch.compile
 # support comes from FastVideo's own custom_op wrappers, so no fork is needed.

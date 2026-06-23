@@ -53,8 +53,7 @@ ARG TORCH_CUDA_ARCH_LIST=9.0a
 # the matching prebuilt wheel; otherwise -- empty tag, or an arm64 target where no
 # prebuilt wheel exists -- build it from source. The wheel's cuXXXtorchY.Y tag must
 # match UV_TORCH_BACKEND (below): cu130torch2.12 for the default 13.0 base,
-# cu126torch2.12 for 12.6, cu128torch2.11 for 12.8 (cu126/cu130 -> torch 2.12,
-# cu128 -> torch 2.11).
+# cu126torch2.12 for 12.6 (both backends are on torch 2.12).
 ARG FLASH_ATTN_VERSION=2.8.3
 ARG FLASH_ATTN_WHEEL_TAG=cu130torch2.12
 ARG FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17
@@ -106,8 +105,8 @@ ENV UV_LINK_MODE=copy
 
 # pyproject no longer pins a PyTorch index; select the build at resolve time.
 # Build hosts have no GPU driver (auto-detect would fall back to CPU), so pin
-# explicitly, matching the base CUDA: cu130 (default, 13.0) / cu126 (12.6) ->
-# torch 2.12, cu128 (12.8) -> torch 2.11. Keep FLASH_ATTN_WHEEL_TAG in sync.
+# explicitly, matching the base CUDA: cu130 (default, 13.0) / cu126 (12.6), both
+# on torch 2.12. Keep FLASH_ATTN_WHEEL_TAG in sync.
 ARG UV_TORCH_BACKEND=cu130
 ENV UV_TORCH_BACKEND=${UV_TORCH_BACKEND}
 

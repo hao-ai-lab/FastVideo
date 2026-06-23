@@ -10,8 +10,7 @@ image_version = os.getenv("IMAGE_VERSION")
 # reinstall stays a no-op (the image bakes the matching torch). Not `auto`:
 # CI must be deterministic, not keyed to the test box's driver.
 _iv = image_version or ""
-uv_torch_backend = ("cu126" if "cuda12.6" in _iv else
-                    "cu128" if "cuda12.8" in _iv else "cu130")
+uv_torch_backend = "cu126" if "cuda12.6" in _iv else "cu130"
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
 

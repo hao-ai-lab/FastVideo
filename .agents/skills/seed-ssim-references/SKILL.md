@@ -153,8 +153,8 @@ Env prefix rationale (parity with CI; see `.buildkite/pipeline.yml:1-3` and
   uses. With the unified `docker/Dockerfile`, the default `py3.12`, `py3.12-latest`,
   and `latest` tags all point at the same image — `PYTHON_VERSION=3.12` / CUDA
   13.0.0 / cu130 (the `build-cuda-images` matrix sets `mark_as_latest` on the 13.0.0
-  cell). `IMAGE_VERSION=py3.12-latest` keeps CI on that image; the cu126 (12.6) and
-  cu128 (12.8) builds are `-cudaX.Y.Z`-suffixed alternates (`infra-build-image.yml`,
+  cell). `IMAGE_VERSION=py3.12-latest` keeps CI on that image; the cu126 (12.6) build
+  is a `-cudaX.Y.Z`-suffixed alternate (`infra-build-image.yml`,
   `_template-build-image.yml`).
 - `BUILDKITE_REPO`/`BUILDKITE_COMMIT`/`BUILDKITE_PULL_REQUEST`: mirror what
   Buildkite exports. `ssim_test.py:38-46` bakes these into the image's
