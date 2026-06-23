@@ -9,7 +9,7 @@ import torch.nn as nn
 
 import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
-                                  LocalAttention)
+                                 LocalAttention)
 from fastvideo.attention.selector import (get_global_forced_attn_backend,
                                           global_force_attn_backend_context_manager)
 from fastvideo.configs.models.dits import WanVideoConfig
@@ -601,16 +601,18 @@ class WanTransformer3DModel(BaseDiT):
         )
 
         # 3. Transformer blocks
+        # A model config may require a specific attention backend; otherwise fall
+        # back to the global force / env-var selection used everywhere else.
         required_attn_backend = config.required_attention_backend
-        selected_attn_backend = required_attn_backend
-        if selected_attn_backend is None:
-            selected_attn_backend = get_global_forced_attn_backend()
+        selected_attn_backend = required_attn_backend or get_global_forced_attn_backend()
         attn_backend = (selected_attn_backend.name
                         if selected_attn_backend is not None else envs.FASTVIDEO_ATTENTION_BACKEND)
-        transformer_block = WanTransformerBlock_VSA if attn_backend == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
-        force_attn_context = (
-            global_force_attn_backend_context_manager(AttentionBackendEnum.VIDEO_SPARSE_ATTN)
-            if required_attn_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN else nullcontext())
+        transformer_block = (WanTransformerBlock_VSA
+                             if attn_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN.name else WanTransformerBlock)
+        # When the config requires a backend, force it during block construction so
+        # each block's attention layer resolves to it regardless of env/global state.
+        force_attn_context = (global_force_attn_backend_context_manager(required_attn_backend)
+                              if required_attn_backend is not None else nullcontext())
         with force_attn_context:
             self.blocks = nn.ModuleList([
                 transformer_block(inner_dim,
