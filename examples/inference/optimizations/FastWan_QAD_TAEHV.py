@@ -52,7 +52,7 @@ DISTILLED_WEIGHTS_FILE = (
 
 # TAEHV checkpoint for Wan2.1. Clone https://github.com/madebyollin/taehv to get
 # ``taew2_1.pth`` (Wan 2.1 / Wan 2.2-14B / Qwen-Image all use this VAE).
-DEFAULT_TAEHV_CHECKPOINT = "/root/taehv/taew2_1.pth"
+DEFAULT_TAEHV_CHECKPOINT = "/workspace/taehv/taew2_1.pth"
 
 PROMPT = (
     "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
