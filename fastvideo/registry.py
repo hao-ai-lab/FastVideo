@@ -615,6 +615,8 @@ def _register_configs() -> None:
                 "cosmos-predict2.5",
             )) and "14b" not in path.lower(),
         ],
+        model_family="cosmos25",
+        default_preset="cosmos25_predict2_2b",
     )
 
     # Cosmos 2.5 (14B)
