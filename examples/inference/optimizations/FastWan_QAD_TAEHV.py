@@ -260,7 +260,6 @@ def main() -> None:
         },
     })
     torch.cuda.synchronize()
-    # denoise_elapsed = time.perf_counter() - start
     denoise_elapsed = result.generation_time
     
     if args.taehv:
