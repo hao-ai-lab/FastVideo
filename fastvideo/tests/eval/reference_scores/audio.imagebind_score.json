@@ -1,0 +1,11 @@
+{
+  "metric": "audio.imagebind_score",
+  "score": 0.33291810750961304,
+  "details": {
+    "model": "imagebind_huge",
+    "upstream": "facebookresearch/ImageBind",
+    "asset_video": "fastvideo/tests/eval/asset/ltx2.mp4",
+    "asset_audio": "fastvideo/tests/eval/asset/ltx2.wav",
+    "decoder": "pyav (aarch64 patch for upstream's decord default)"
+  }
+}

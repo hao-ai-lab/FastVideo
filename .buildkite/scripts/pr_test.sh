@@ -219,6 +219,10 @@ case "$TEST_TYPE" in
         log "Running fastvideo.train framework tests..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_train_framework_tests"
         ;;
+    "eval")
+        log "Running eval metric tests..."
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_eval_tests"
+        ;;
     "lora_extraction")
         log "Running LoRA extraction tests..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_lora_extraction_tests"
