@@ -32,7 +32,7 @@ checkout with the `dreamverse` extra, installs the FA4
 flash-attention fork, builds native FFmpeg, and installs FlashInfer for NVFP4
 quantization.
 
-FastVideo's pinned `fastvideo-kernel==0.2.6` package is installed by default.
+FastVideo's pinned `fastvideo-kernel==0.3.0` package is installed by default.
 To rebuild `fastvideo-kernel` from this checkout during the image build, set:
 
 ```bash
