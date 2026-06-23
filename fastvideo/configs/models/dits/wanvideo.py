@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
+from fastvideo.platforms.interface import AttentionBackendEnum
 
 
 def is_blocks(n: str, m) -> bool:
@@ -92,6 +93,7 @@ class WanVideoArchConfig(DiTArchConfig):
 
 @dataclass
 class WanVideoConfig(DiTConfig):
-    arch_config: DiTArchConfig = field(default_factory=WanVideoArchConfig)
+    arch_config: WanVideoArchConfig = field(default_factory=WanVideoArchConfig)
 
     prefix: str = "Wan"
+    required_attention_backend: AttentionBackendEnum | None = None

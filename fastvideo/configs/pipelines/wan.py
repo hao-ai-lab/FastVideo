@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import torch
 
-from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
+from fastvideo.configs.models import EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConfig, T5Config,
@@ -12,6 +12,9 @@ from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConf
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.models.vaes.wanvae import WanVAEArchConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.platforms import AttentionBackendEnum
+
+FASTWAN_REQUIRED_ATTENTION_BACKEND = AttentionBackendEnum.VIDEO_SPARSE_ATTN
 
 
 def t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
@@ -31,7 +34,7 @@ class WanT2V480PConfig(PipelineConfig):
 
     # WanConfig-specific parameters with defaults
     # DiT
-    dit_config: DiTConfig = field(default_factory=WanVideoConfig)
+    dit_config: WanVideoConfig = field(default_factory=WanVideoConfig)
     # VAE
     vae_config: VAEConfig = field(default_factory=WanVAEConfig)
     vae_tiling: bool = False
@@ -55,7 +58,7 @@ class WanT2V480PConfig(PipelineConfig):
 
     # WanConfig-specific added parameters
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
 
@@ -114,6 +117,10 @@ class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
     flow_shift: float | None = 8.0
     dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.dit_config.required_attention_backend = FASTWAN_REQUIRED_ATTENTION_BACKEND
+
 
 @dataclass
 class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
@@ -132,7 +139,7 @@ class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
 class LucyEditDevConfig(Wan2_2_TI2V_5B_Config):
     """Configuration for Decart Lucy Edit Dev video editing."""
 
-    dit_config: DiTConfig = field(default_factory=lambda: WanVideoConfig(arch_config=WanVideoArchConfig(
+    dit_config: WanVideoConfig = field(default_factory=lambda: WanVideoConfig(arch_config=WanVideoArchConfig(
         num_attention_heads=24,
         in_channels=96,
         out_channels=48,
@@ -267,6 +274,10 @@ class LucyEditDevConfig(Wan2_2_TI2V_5B_Config):
 class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
     flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.dit_config.required_attention_backend = FASTWAN_REQUIRED_ATTENTION_BACKEND
 
 
 @dataclass

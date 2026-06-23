@@ -69,6 +69,7 @@ def global_force_attn_backend(attn_backend: AttentionBackendEnum | None) -> None
     '''
     global forced_attn_backend
     forced_attn_backend = attn_backend
+    _cached_get_attn_backend.cache_clear()
 
 
 def get_global_forced_attn_backend() -> AttentionBackendEnum | None:

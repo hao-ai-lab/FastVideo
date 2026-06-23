@@ -126,8 +126,10 @@ class CudaPlatformBase(Platform):
 
                 return "fastvideo.attention.backends.sage_attn.SageAttentionBackend"
             except ImportError as e:
-                logger.info(e)
-                logger.info("Sage Attention backend is not installed. Fall back to Flash Attention.")
+                raise ImportError("SageAttention backend was explicitly requested via "
+                                  "FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN but the `sageattention` "
+                                  "package is not installed. Install it with: "
+                                  "uv pip install sageattention") from e
         elif selected_backend == AttentionBackendEnum.SAGE_ATTN_THREE:
             try:
                 from sageattn3 import sageattn3_blackwell  # noqa: F401
@@ -138,15 +140,26 @@ class CudaPlatformBase(Platform):
 
                 return "fastvideo.attention.backends.sage_attn3.SageAttention3Backend"
             except ImportError as e:
-                logger.info(e)
-                logger.info("Sage Attention 3 backend is not installed. Fall back to Flash Attention.")
+                raise ImportError("SageAttention 3 backend was explicitly requested via "
+                                  "FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE but the `sageattn3` "
+                                  "package is not installed. Install it with: "
+                                  "uv pip install sageattn3") from e
         elif selected_backend == AttentionBackendEnum.ATTN_QAT_INFER:
-            from fastvideo.attention.backends.attn_qat_infer import (  # noqa: F401
-                AttnQatInferBackend, is_attn_qat_infer_available)
+            try:
+                from fastvideo.attention.backends.attn_qat_infer import (  # noqa: F401
+                    AttnQatInferBackend, is_attn_qat_infer_available)
+            except ImportError as e:
+                raise ImportError("Attn-QAT inference backend was explicitly requested via "
+                                  "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER but the `attn_qat_infer` "
+                                  "kernel package is not installed. Install the FastVideo Attn-QAT "
+                                  "inference kernel or see: https://hao-ai-lab.github.io/FastVideo/") from e
             if is_attn_qat_infer_available():
                 logger.info("Using Attn-QAT inference (modified SageAttention3 FP4) backend.")
                 return "fastvideo.attention.backends.attn_qat_infer.AttnQatInferBackend"
-            logger.info("Attn-QAT inference kernel is not built. Fall back to Flash Attention.")
+            raise ImportError("Attn-QAT inference backend was explicitly requested via "
+                              "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER but the `attn_qat_infer` "
+                              "kernel package is not built. Install the FastVideo Attn-QAT inference "
+                              "kernel or see: https://hao-ai-lab.github.io/FastVideo/")
         elif selected_backend == AttentionBackendEnum.ATTN_QAT_TRAIN:
             from fastvideo.attention.backends.attn_qat_train import (  # noqa: F401
                 AttnQatTrainBackend, is_attn_qat_train_available)
