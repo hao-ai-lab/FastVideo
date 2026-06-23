@@ -23,12 +23,14 @@ Usage:
     python fp4_linear_taehv_wan2_1_1_3b.py --no-compile       # eager
     python fp4_linear_taehv_wan2_1_1_3b.py --baseline         # dense bf16 reference
     python fp4_linear_taehv_wan2_1_1_3b.py --distilled_model ''  # base Wan2.1 weights
+    python fp4_linear_taehv_wan2_1_1_3b.py --warmups 5 --benchmark-runs 20  # timing stats (default)
 """
 
 import argparse
 import contextlib
 import logging
 import os
+import statistics
 import time
 
 import imageio
@@ -200,6 +202,10 @@ def main() -> None:
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--infer_steps", type=int, default=3)
     parser.add_argument("--guidance_scale", type=float, default=1.0)
+    parser.add_argument("--warmups", type=int, default=5,
+                        help="Warmup runs before timing (default: 5).")
+    parser.add_argument("--benchmark-runs", type=int, default=20,
+                        help="Timed runs to collect min/max/mean/std over (default: 20).")
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
@@ -226,14 +232,11 @@ def main() -> None:
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
 
-    # Warmup: with compile enabled the first call(s) pay the DiT compilation
-    # cost. When using TAEHV we also decode the warmup latents so the timed
-    # decode below is warm -- TAEHV's decoder is all conv/upsample, so the
-    # first call otherwise pays cuDNN algo selection + allocator growth
-    # (~0.2s), which is exactly the cold-start overhead we want to exclude.
-    n_warmup = 2 if not args.no_compile else 1
+    # Warmup: pay the DiT torch.compile cost and warm TAEHV's cuDNN algo
+    # selection + allocator growth (~0.2s on the first decode) so the timed
+    # runs below measure steady-state latency only.
     with silence_request_log():
-        for _ in range(n_warmup):
+        for _ in range(args.warmups):
             warm = generator.generate(request={
                 "prompt": PROMPT,
                 "sampling": {"num_inference_steps": 2, "guidance_scale": args.guidance_scale},
@@ -243,41 +246,68 @@ def main() -> None:
                 taehv.decode(warm.samples)
 
     output_path = os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")
-    torch.cuda.synchronize()
-    start = time.perf_counter()
-    result = generator.generate(request={
-        "prompt": PROMPT,
-        "sampling": {
-            "num_inference_steps": args.infer_steps,
-            "guidance_scale": args.guidance_scale,
-        },
-        # When using TAEHV we need the latents back and save manually; the Wan
-        # VAE path lets the pipeline decode and save the mp4 itself.
-        "output": {
-            "save_video": not args.taehv,
-            "return_frames": args.taehv,
-            "output_path": output_path,
-        },
-    })
-    torch.cuda.synchronize()
-    denoise_elapsed = result.generation_time
-    
-    if args.taehv:
-        torch.cuda.synchronize()
-        decode_start = time.perf_counter()
-        frames = taehv.decode(result.samples)
-        torch.cuda.synchronize()
-        decode_elapsed = time.perf_counter() - decode_start
 
+    # Benchmark: time each run end-to-end. ``denoise`` is the generator's own
+    # generation_time; for TAEHV we add the in-script decode. The mp4 is not
+    # written inside the loop (only the final run's frames are saved below) so
+    # disk I/O never pollutes the timings.
+    denoise_times: list[float] = []
+    decode_times: list[float] = []
+    totals: list[float] = []
+    frames = None
+    with silence_request_log():
+        for i in range(args.benchmark_runs):
+            result = generator.generate(request={
+                "prompt": PROMPT,
+                "sampling": {
+                    "num_inference_steps": args.infer_steps,
+                    "guidance_scale": args.guidance_scale,
+                },
+                "output": {
+                    "save_video": False,
+                    "return_frames": args.taehv,
+                    "output_path": output_path,
+                },
+            })
+            denoise_elapsed = result.generation_time
+            denoise_times.append(denoise_elapsed)
+
+            if args.taehv:
+                torch.cuda.synchronize()
+                decode_start = time.perf_counter()
+                frames = taehv.decode(result.samples)
+                torch.cuda.synchronize()
+                decode_elapsed = time.perf_counter() - decode_start
+                decode_times.append(decode_elapsed)
+                total = denoise_elapsed + decode_elapsed
+            else:
+                total = denoise_elapsed
+            totals.append(total)
+
+            line = f"  run {i + 1:02d}/{args.benchmark_runs}: {total:.3f}s"
+            if args.taehv:
+                line += (f" (denoise {denoise_elapsed:.3f}s + "
+                         f"decode {decode_elapsed:.3f}s)")
+            print(line)
+
+    if args.taehv and frames is not None:
         imageio.mimsave(output_path, frames, fps=16, format="mp4")
-        total = denoise_elapsed + decode_elapsed
-        print(f"[{mode.upper()}] denoise {denoise_elapsed:.2f}s + TAEHV decode "
-              f"{decode_elapsed:.2f}s = {total:.2f}s "
-              f"({frames.shape[0]} frames @ {tuple(frames.shape[1:3])})")
         print(f"Saved video to {output_path}")
-    else:
-        print(f"[{mode.upper()}] {args.infer_steps} steps in {denoise_elapsed:.2f}s "
-              f"({args.infer_steps / denoise_elapsed:.2f} it/s)")
+
+    # Report min / max / mean / std over the timed runs.
+    def _stat_row(name: str, xs: list[float]) -> str:
+        std = statistics.stdev(xs) if len(xs) > 1 else 0.0
+        return (f"  {name:<11}{min(xs):>8.3f}{max(xs):>9.3f}"
+                f"{statistics.mean(xs):>9.3f}{std:>9.3f}")
+
+    if totals:
+        print(f"\n[{mode.upper()}] {args.benchmark_runs} runs, {args.warmups} warmup, "
+              f"{args.infer_steps} steps:")
+        print(f"  {'metric':<11}{'min':>8}{'max':>9}{'mean':>9}{'std':>9}   (s)")
+        print(_stat_row("total", totals))
+        if args.taehv:
+            print(_stat_row("denoise", denoise_times))
+            print(_stat_row("decode", decode_times))
 
     generator.shutdown()
 
