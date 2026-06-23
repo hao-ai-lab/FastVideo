@@ -1,20 +1,17 @@
-"""FP8 weight quantization inference example.
+"""NVFP4 QAD inference example with SageAttention 2 backend.
 
-Runs Wan2.1-T2V-1.3B with FP8 e4m3 quantized DiT linear layers (attention
-projections and FFN). Weights are quantized in-place after loading; activations
-are quantized dynamically at runtime. Reduces GPU memory relative to BF16 and
-can improve throughput on sm89+ GPUs.
+Runs Wan2.1-T2V-1.3B with the FastWan-QAD-1.3B-SA2 distilled checkpoint and
+NVFP4QATConfig quantization. Uses the SAGE_ATTN attention backend.
 
 Requirements:
     - GPU: sm89+ (H100, L40S, RTX 4090, Ada Lovelace, or newer)
-      Falls back to a bf16 dequant path on older GPUs.
+    - sageattention: pip install sageattention
     - TAEHV (optional): Follow install instructions at https://github.com/madebyollin/taehv
 
 Usage:
-    python fp8_wan2_1_1_3b.py              # FP8 per-tensor (default)
-    python fp8_wan2_1_1_3b.py --bf16       # BF16 baseline
-    python fp8_wan2_1_1_3b.py --granularity channel  # per-channel (higher accuracy but slower)
-    python fp8_wan2_1_1_3b.py --taehv-checkpoint /path/to/taew2_1.pth
+    python fp4_sa2_wan2_1_1_3b.py                              # NVFP4 + SageAttn2 (default)
+    python fp4_sa2_wan2_1_1_3b.py --bf16                       # BF16 baseline
+    python fp4_sa2_wan2_1_1_3b.py --taehv-checkpoint /path/to/taew2_1.pth
 """
 
 import argparse
@@ -52,14 +49,12 @@ def decode_with_taehv(taehv_model, latents):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="FP8 video generation benchmark")
+    parser = argparse.ArgumentParser(description="NVFP4 QAD + SageAttention2 video generation benchmark")
     parser.add_argument("--bf16", action="store_true",
-                        help="BF16 baseline (no FP8 quantization)")
-    parser.add_argument("--granularity", choices=["tensor", "channel"], default="tensor",
-                        help="FP8 weight scale granularity: tensor (faster) or channel (more accurate)")
+                        help="BF16 baseline (no NVFP4 quantization)")
     parser.add_argument("--taehv-checkpoint", default=None, metavar="PATH",
                         help="Path to taew2_1.pth; enables TAEHV tiny autoencoder decoding")
-    parser.add_argument("--model", default="FastVideo/FastWan-QAD-FP8-1.3B",
+    parser.add_argument("--model", default="FastVideo/FastWan-QAD-1.3B-SA2",
                         help="Model path or HuggingFace ID")
     parser.add_argument("--no-compile", action="store_true", help="Disable torch.compile for the DiT")
     parser.add_argument("--num_gpus", type=int, default=1)
@@ -67,11 +62,15 @@ def main():
     args = parser.parse_args()
 
     os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    os.environ["FASTVIDEO_DISABLE_ATTENTION_COMPILE"] = "0"
+    os.environ["FLASHINFER_CUDA_ARCH_LIST"] = "12.0a"
+    os.environ["FLASHINFER_EXTRA_CFLAGS"] = "-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK"
+    os.environ["FLASHINFER_EXTRA_CUDAFLAGS"] = "-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK"
 
     from fastvideo import VideoGenerator
     from fastvideo.configs.pipelines.base import PipelineConfig
 
-    mode = "bf16" if args.bf16 else f"fp8_{args.granularity}"
+    mode = "bf16" if args.bf16 else "nvfp4_sa2"
     if not args.no_compile:
         mode += "_compile"
     use_taehv = args.taehv_checkpoint is not None
@@ -82,8 +81,8 @@ def main():
     pipeline_config = PipelineConfig.from_pretrained(args.model)
     pipeline_config.text_encoder_precisions = ("bf16",)
     if not args.bf16:
-        from fastvideo.layers.quantization import get_quantization_config
-        pipeline_config.dit_config.quant_config = get_quantization_config("FP8")(granularity=args.granularity)
+        from fastvideo.layers.quantization.nvfp4_qat_config import NVFP4QATConfig
+        pipeline_config.dit_config.quant_config = NVFP4QATConfig()
 
     generator = VideoGenerator.from_pretrained(
         args.model,
