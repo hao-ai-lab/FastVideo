@@ -96,9 +96,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install CUDA ${{ matrix.torch-cuda.cuda-version }}
-        # v0.2.21 predates CUDA 13 (its link table stops at 12.8.0), so the cu130 leg
-        # failed with "Version not available: 13.0.0". v0.2.27+ added CUDA 13.0.0;
-        # v0.2.35 (Node 24) covers both 12.6.3 and 13.0.0.
         uses: Jimver/cuda-toolkit@v0.2.35
         id: cuda-toolkit
         with:
