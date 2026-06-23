@@ -88,17 +88,19 @@ def _apply_activation_checkpointing_ops(module: torch.nn.Module, ops) -> torch.n
 
 
 def _is_attention_forward(func) -> bool:
-    """True for the (expensive-to-recompute) attention forward op, across
-    backends: flash_attn lib FA2 (`flash_attn::_flash_attn_forward`), FA3
-    (`flash_attn_3::fwd`), FastVideo custom ops, CuTe variants, and aten SDPA.
-    Matched by op name so we don't depend on which op object is registered at
-    import time (the active backend varies at runtime). Backward ops are
-    excluded so only the forward output is saved."""
+    """True for an attention *forward* op (expensive to recompute). Matched by
+    op name, not op object: the backend is chosen at runtime. Backward excluded.
+
+    Covered: flash-attn FA2 ("...forward") / FA3 ("...fwd") + FastVideo CuTe +
+    vMoBA (via _flash_attn_varlen_forward); aten SDPA; VSA
+    (block_sparse_attn_triton/_sm90). Not covered: SLA / SageAttention run
+    attention inside an autograd Function via opaque pybind kernels (no
+    dispatcher op to save), so attn_only safely recomputes them as `full` does."""
     s = str(func)
     if "backward" in s:
         return False
-    # FA2 names the op "...forward", FA3 (flash_attn_interface) names it "...fwd".
-    return ("flash_attn" in s and ("forward" in s or "fwd" in s)) or "_scaled_dot_product" in s
+    return (("flash_attn" in s and ("forward" in s or "fwd" in s)) or "_scaled_dot_product" in s
+            or "block_sparse_attn" in s)
 
 
 # Decision cache keyed by op: the set of distinct ops in a training step is tiny,

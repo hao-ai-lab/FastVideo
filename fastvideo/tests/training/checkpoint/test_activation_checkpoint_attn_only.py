@@ -1,7 +1,7 @@
 """Unit tests for the ``attn_only`` selective activation-checkpointing policy.
 
-CPU-only: exercises the op classifier and the per-block wrapping structure
-without running a forward/backward (so no GPU or distributed init needed).
+CPU-only (no GPU or distributed init): the op classifier, per-block wrapping,
+and a real SDPA forward/backward parity check against none/full.
 """
 import torch
 from torch import nn
@@ -24,6 +24,29 @@ def test_is_attention_forward_matches_flash_and_sdpa_forward():
     assert _is_attention_forward("flash_attn_3::fwd")
     assert _is_attention_forward(torch.ops.aten._scaled_dot_product_flash_attention.default)
     assert _is_attention_forward(torch.ops.aten._scaled_dot_product_efficient_attention.default)
+
+
+def test_is_attention_forward_matches_fastvideo_cute_ops():
+    # FastVideo CuTe ops carry "flash_attn" + "forward" -> flash branch.
+    assert _is_attention_forward("fastvideo::_flash_attn_default_forward")
+    assert _is_attention_forward("fastvideo::_flash_attn_cute_forward")
+    assert _is_attention_forward("fastvideo::_flash_attn_cute_varlen_forward")
+    assert _is_attention_forward("fastvideo::_flash_attn_cute_fp4_forward")
+
+
+def test_is_attention_forward_matches_video_sparse_attn():
+    # VSA forward op; without this, attn_only recomputes VSA attention.
+    assert _is_attention_forward("fastvideo_kernel::block_sparse_attn_triton")
+    assert _is_attention_forward("fastvideo_kernel::block_sparse_attn_sm90")
+    # VSA backward stays excluded.
+    assert not _is_attention_forward("fastvideo_kernel::block_sparse_attn_backward_triton")
+    assert not _is_attention_forward("fastvideo_kernel::block_sparse_attn_backward_sm90")
+
+
+def test_is_attention_forward_matches_vmoba_flash_varlen():
+    # vMoBA's MixedAttention issues _flash_attn_varlen_forward -> covered.
+    assert _is_attention_forward("flash_attn::_flash_attn_varlen_forward")
+    assert not _is_attention_forward("flash_attn::_flash_attn_varlen_backward")
 
 
 def test_is_attention_forward_excludes_backward_and_unrelated_ops():
@@ -113,3 +136,85 @@ def test_apply_activation_checkpointing_rejects_unknown_type():
         pass
     else:
         raise AssertionError("expected ValueError for an unsupported checkpointing type")
+
+
+# --- forward/backward numerical-parity coverage (CPU/SDPA, no GPU/dist) ---
+
+
+class _AttnMLPBlock(nn.Module):
+    """Real attention (aten SDPA, CPU) + MLP, so the policy sees a
+    `_scaled_dot_product_*` forward to save and a GEMM to recompute."""
+
+    def __init__(self, dim: int = 16, heads: int = 2):
+        super().__init__()
+        self.heads = heads
+        self.qkv = nn.Linear(dim, 3 * dim)
+        self.proj = nn.Linear(dim, dim)
+        self.mlp = nn.Sequential(nn.Linear(dim, 4 * dim), nn.GELU(), nn.Linear(4 * dim, dim))
+
+    def forward(self, x):  # x: [B, S, D]
+        b, s, d = x.shape
+        qkv = self.qkv(x).reshape(b, s, 3, self.heads, d // self.heads)
+        q, k, v = (t.transpose(1, 2) for t in qkv.unbind(dim=2))  # [B, H, S, Dh]
+        attn = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        attn = attn.transpose(1, 2).reshape(b, s, d)
+        x = x + self.proj(attn)
+        x = x + self.mlp(x)
+        return x
+
+
+class _AttnTransformer(nn.Module):
+    def __init__(self, n_blocks: int = 2, dim: int = 16):
+        super().__init__()
+        self.blocks = nn.ModuleList([_AttnMLPBlock(dim) for _ in range(n_blocks)])
+
+    def forward(self, x):
+        for block in self.blocks:
+            x = block(x)
+        return x
+
+
+def _run_fwd_bwd(checkpointing_type, dim: int = 16, n_blocks: int = 2):
+    """Fixed-seed fwd/bwd; returns loss, input grad, and parameter grads."""
+    torch.manual_seed(0)
+    model = _AttnTransformer(n_blocks=n_blocks, dim=dim)
+    if checkpointing_type is not None:
+        apply_activation_checkpointing(model, checkpointing_type=checkpointing_type)
+
+    torch.manual_seed(1)
+    x = torch.randn(2, 8, dim, requires_grad=True)
+    out = model(x)
+    loss = out.float().pow(2).mean()
+    loss.backward()
+
+    # named_parameters strips the checkpoint-wrapper prefix, so names align
+    # across the wrapped and unwrapped models.
+    # Drop the checkpoint-wrapper prefix so names align across wrapped/unwrapped.
+    grads = {
+        name.replace("._checkpoint_wrapped_module", ""): p.grad.detach().clone()
+        for name, p in model.named_parameters()
+    }
+    return loss.detach().clone(), x.grad.detach().clone(), grads
+
+
+def test_attn_only_matches_no_checkpointing_fwd_bwd():
+    # attn_only == uncheckpointed path: loss, input grad, every param grad.
+    ref_loss, ref_xgrad, ref_grads = _run_fwd_bwd(None)
+    loss, xgrad, grads = _run_fwd_bwd(CheckpointType.ATTN_ONLY)
+
+    torch.testing.assert_close(loss, ref_loss)
+    torch.testing.assert_close(xgrad, ref_xgrad)
+    assert grads.keys() == ref_grads.keys()
+    for name in ref_grads:
+        torch.testing.assert_close(grads[name], ref_grads[name], msg=f"grad mismatch for {name}")
+
+
+def test_attn_only_matches_full_checkpointing_fwd_bwd():
+    # attn_only and full save vs recompute differently -> identical grads.
+    ref_loss, ref_xgrad, ref_grads = _run_fwd_bwd(CheckpointType.FULL)
+    loss, xgrad, grads = _run_fwd_bwd(CheckpointType.ATTN_ONLY)
+
+    torch.testing.assert_close(loss, ref_loss)
+    torch.testing.assert_close(xgrad, ref_xgrad)
+    for name in ref_grads:
+        torch.testing.assert_close(grads[name], ref_grads[name], msg=f"grad mismatch for {name}")
