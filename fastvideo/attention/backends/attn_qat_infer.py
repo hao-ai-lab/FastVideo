@@ -120,6 +120,6 @@ class AttnQatInferImpl(AttentionImpl[AttentionMetadata]):
             value,
             attn_mask=None,
             is_causal=self.causal,
-            # sm_scale omitted: let kernel default to 1/sqrt(2*D), matching SAGE_ATTN_THREE
+            sm_scale=self.softmax_scale,
         )
         return output.transpose(1, 2).contiguous()
