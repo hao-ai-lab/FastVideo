@@ -285,8 +285,12 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
 
     def quantize_input(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         SfLayout, _, _ = _require_flashinfer()
-        assert x.dtype == torch.bfloat16 or x.dtype == torch.float16, (
-            f"only allow bf16/fp16 inputs to fp4 linear, got {x.dtype}")
+        # The pre-attention norm can emit fp32 (e.g. in eager mode, without the
+        # torch.compile fusion that keeps it bf16). FP4 linear emits bf16 regardless
+        # (see apply(): _mm_fp4 out dtype is bf16), so cast fp32 inputs to bf16
+        # instead of failing — matching the sibling fastvideo/layers/fp4linear.py.
+        if x.dtype not in (torch.bfloat16, torch.float16):
+            x = x.to(torch.bfloat16)
         x_2d = x.view(-1, x.shape[-1])
         x_fp4, x_scale = _nvfp4_quantize(
             x_2d,
@@ -332,8 +336,8 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
             if x_scale.dim() > 2:
                 x_scale = x_scale.view(-1, x_scale.shape[-1])
         else:
-            assert x.dtype == torch.bfloat16 or x.dtype == torch.float16, (
-                f"only allow bf16/fp16 inputs to fp4 linear, got {x.dtype}")
+            if x.dtype not in (torch.bfloat16, torch.float16):
+                x = x.to(torch.bfloat16)
             x = x.view(-1, x.shape[-1])
             x_global_sf = self.x_global_sf
             x_fp4, x_scale = _nvfp4_quantize(
