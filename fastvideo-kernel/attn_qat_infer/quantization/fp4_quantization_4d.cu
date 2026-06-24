@@ -286,24 +286,19 @@
  
    // load input
    const int token_id = token_block_id * BLOCK_SIZE + threadIdx.x / NUM_THREADS_PER_TOKEN;
-   // Permute V rows within each 32-element block so the PV MMA K-indexed
-   // access reads the correct CLayout N-indexed values (Edenzzzz causal fix).
-   const int k_intra = token_id & 31;
-   const int load_token_id = (token_id & ~31)
-       | ((k_intra & 6) << 2) | ((k_intra & 24) >> 2) | (k_intra & 1);
- 
+
    PackedVec in_vec;
-   
+
    #pragma unroll
    for (int i = 0; i < CVT_FP4_ELTS_PER_THREAD / 2; i++) {
      reinterpret_cast<uint32_t&>(in_vec.elts[i]) = 0;
    }
-   
-   if (load_token_id < num_tokens) {
-     in_vec = reinterpret_cast<PackedVec const*>(input + 
+
+   if (token_id < num_tokens) {
+     in_vec = reinterpret_cast<PackedVec const*>(input +
                                            batch_id * stride_bz_input + // batch dim
                                            head_id * stride_h_input +   // head dim
-                                           load_token_id * stride_seq_input + // seq dim (permuted)
+                                           token_id * stride_seq_input + // seq dim
                                            (threadIdx.x % NUM_THREADS_PER_TOKEN) * CVT_FP4_ELTS_PER_THREAD)[0]; // feature dim
    }
  
