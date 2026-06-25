@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from contextlib import nullcontext
 from typing import Any
 
 import torch
@@ -10,8 +9,7 @@ import torch.nn as nn
 import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
                                  LocalAttention)
-from fastvideo.attention.selector import (get_global_forced_attn_backend,
-                                          global_force_attn_backend_context_manager)
+from fastvideo.attention.selector import check_attn_backend_requirement
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
@@ -601,32 +599,29 @@ class WanTransformer3DModel(BaseDiT):
         )
 
         # 3. Transformer blocks
-        # A model config may require a specific attention backend; otherwise fall
-        # back to the global force / env-var selection used everywhere else.
-        required_attn_backend = config.required_attention_backend
-        selected_attn_backend = required_attn_backend or get_global_forced_attn_backend()
-        attn_backend = (selected_attn_backend.name
-                        if selected_attn_backend is not None else envs.FASTVIDEO_ATTENTION_BACKEND)
+        # Some model families (e.g. FastWan) are only correct with a specific
+        # attention backend. Fail loudly if the required backend is not the one
+        # the user selected, rather than silently forcing it -- a force would
+        # only reach block construction here and leave the denoising stage
+        # resolving a different backend. Returns the selected backend
+        # (global force > FASTVIDEO_ATTENTION_BACKEND).
+        attn_backend = check_attn_backend_requirement(config.required_attention_backend,
+                                                      model_name=type(self).__name__)
         transformer_block = (WanTransformerBlock_VSA
-                             if attn_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN.name else WanTransformerBlock)
-        # When the config requires a backend, force it during block construction so
-        # each block's attention layer resolves to it regardless of env/global state.
-        force_attn_context = (global_force_attn_backend_context_manager(required_attn_backend)
-                              if required_attn_backend is not None else nullcontext())
-        with force_attn_context:
-            self.blocks = nn.ModuleList([
-                transformer_block(inner_dim,
-                                  config.ffn_dim,
-                                  config.num_attention_heads,
-                                  config.qk_norm,
-                                  config.cross_attn_norm,
-                                  config.eps,
-                                  config.added_kv_proj_dim,
-                                  self._supported_attention_backends,
-                                  quant_config=config.quant_config,
-                                  prefix=f"{config.prefix}.blocks.{i}")
-                for i in range(config.num_layers)
-            ])
+                             if attn_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN else WanTransformerBlock)
+        self.blocks = nn.ModuleList([
+            transformer_block(inner_dim,
+                              config.ffn_dim,
+                              config.num_attention_heads,
+                              config.qk_norm,
+                              config.cross_attn_norm,
+                              config.eps,
+                              config.added_kv_proj_dim,
+                              self._supported_attention_backends,
+                              quant_config=config.quant_config,
+                              prefix=f"{config.prefix}.blocks.{i}")
+            for i in range(config.num_layers)
+        ])
 
         # 4. Output norm & projection
         self.norm_out = LayerNormScaleShift(inner_dim,

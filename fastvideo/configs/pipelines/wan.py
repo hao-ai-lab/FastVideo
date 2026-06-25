@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import torch
 
-from fastvideo.configs.models import EncoderConfig, VAEConfig
+from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConfig, T5Config,
@@ -34,7 +34,7 @@ class WanT2V480PConfig(PipelineConfig):
 
     # WanConfig-specific parameters with defaults
     # DiT
-    dit_config: WanVideoConfig = field(default_factory=WanVideoConfig)
+    dit_config: DiTConfig = field(default_factory=WanVideoConfig)
     # VAE
     vae_config: VAEConfig = field(default_factory=WanVAEConfig)
     vae_tiling: bool = False
@@ -139,7 +139,7 @@ class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
 class LucyEditDevConfig(Wan2_2_TI2V_5B_Config):
     """Configuration for Decart Lucy Edit Dev video editing."""
 
-    dit_config: WanVideoConfig = field(default_factory=lambda: WanVideoConfig(arch_config=WanVideoArchConfig(
+    dit_config: DiTConfig = field(default_factory=lambda: WanVideoConfig(arch_config=WanVideoArchConfig(
         num_attention_heads=24,
         in_channels=96,
         out_channels=48,
@@ -278,6 +278,20 @@ class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
     def __post_init__(self) -> None:
         super().__post_init__()
         self.dit_config.required_attention_backend = FASTWAN_REQUIRED_ATTENTION_BACKEND
+
+
+@dataclass
+class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
+    """FullAttn (dense-attention) DMD variant of FastWan 2.2 TI2V 5B.
+
+    Shares FastWan's DMD denoising schedule but runs dense attention, so -- unlike
+    the sparse-distilled FastWan2.2-TI2V-5B-Diffusers -- it does NOT require VSA.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # This checkpoint is dense; clear the VSA requirement inherited from FastWan.
+        self.dit_config.required_attention_backend = None
 
 
 @dataclass

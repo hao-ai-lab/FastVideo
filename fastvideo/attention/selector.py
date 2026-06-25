@@ -80,6 +80,63 @@ def get_global_forced_attn_backend() -> AttentionBackendEnum | None:
     return forced_attn_backend
 
 
+def get_selected_attn_backend() -> AttentionBackendEnum | None:
+    '''
+    The attention backend selected before any per-layer filtering.
+
+    A global force (see `global_force_attn_backend`) takes precedence over the
+    `FASTVIDEO_ATTENTION_BACKEND` env var; returns None when neither is set
+    (automatic selection). This is the single source of the force-over-env
+    precedence rule, shared by `_cached_get_attn_backend` and
+    `check_attn_backend_requirement`.
+    '''
+    forced_backend = get_global_forced_attn_backend()
+    if forced_backend is not None:
+        return forced_backend
+    backend_by_env_var = envs.FASTVIDEO_ATTENTION_BACKEND
+    return backend_name_to_enum(backend_by_env_var) if backend_by_env_var is not None else None
+
+
+def check_attn_backend_requirement(
+    required_backend: AttentionBackendEnum | None,
+    *,
+    model_name: str = "This model",
+) -> AttentionBackendEnum | None:
+    '''
+    Resolve the selected attention backend, enforcing a model's hard requirement.
+
+    Some model families are only numerically correct with a specific backend
+    (e.g. FastWan is sparse-distilled with VSA and produces wrong outputs
+    otherwise). Rather than silently forcing the backend -- which would only
+    reach some construction sites and leave others (e.g. the denoising stage)
+    resolving a different backend -- we require the user to select it explicitly
+    and fail loudly otherwise, mirroring how the platform layer hard-fails on
+    missing explicitly-requested backends.
+
+    Arguments:
+
+    * required_backend: backend the model requires, or None for no requirement
+    * model_name: name used in the error message
+
+    Returns:
+
+    * the selected attention backend (`get_selected_attn_backend`), or None if
+      unset and unrequired
+
+    Raises:
+
+    * ValueError if `required_backend` is set but is not the selected backend
+    '''
+    selected_backend = get_selected_attn_backend()
+    if required_backend is not None and selected_backend != required_backend:
+        selected_name = selected_backend.name if selected_backend is not None else "unset"
+        raise ValueError(f"{model_name} requires the {required_backend.name} attention backend, but the effective "
+                         f"FASTVIDEO_ATTENTION_BACKEND is {selected_name}. This checkpoint is only correct with "
+                         f"{required_backend.name}; set FASTVIDEO_ATTENTION_BACKEND={required_backend.name} before "
+                         f"loading the model.")
+    return selected_backend
+
+
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
@@ -96,28 +153,15 @@ def _cached_get_attn_backend(
     supported_attention_backends: tuple[AttentionBackendEnum, ...]
     | None = None,
 ) -> type[AttentionBackend]:
-    # Check whether a particular choice of backend was
-    # previously forced.
-    #
-    # THIS SELECTION OVERRIDES THE FASTVIDEO_ATTENTION_BACKEND
-    # ENVIRONMENT VARIABLE.
     if not supported_attention_backends:
         raise ValueError("supported_attention_backends is empty")
-    selected_backend = None
-    backend_by_global_setting: AttentionBackendEnum | None = (get_global_forced_attn_backend())
-    if backend_by_global_setting is not None:
-        selected_backend = backend_by_global_setting
-    else:
-        # Check the environment variable and override if specified
-        backend_by_env_var: str | None = envs.FASTVIDEO_ATTENTION_BACKEND
-        if backend_by_env_var is not None:
-            selected_backend = backend_name_to_enum(backend_by_env_var)
+    # A global force overrides the FASTVIDEO_ATTENTION_BACKEND env var.
+    selected_backend = get_selected_attn_backend()
 
     # get device-specific attn_backend
     from fastvideo.platforms import current_platform
 
-    if (selected_backend is not None and
-            selected_backend not in supported_attention_backends):
+    if (selected_backend is not None and selected_backend not in supported_attention_backends):
         logger.warning(
             "Requested attention backend %s is not supported by this "
             "layer; supported backends are %s. Falling back to automatic "
