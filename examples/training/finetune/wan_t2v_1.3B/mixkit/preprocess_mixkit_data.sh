@@ -58,11 +58,33 @@ fi
 #    organises clips into category subdirectories (Airplane/, Business/, ...)
 #    whose paths match the entries in ``video2caption_replace.json``, so we
 #    symlink the whole tree into place rather than copying ~25 GB.
+#
+#    ``video2caption_replace.json`` carries path/cap/resolution/fps/duration but
+#    NOT ``num_frames`` — which the preprocess validator and batch builder hard-
+#    require (components.py: _validate_data_type / _validate_frame_sampling /
+#    VideoForwardBatchBuilder all index ``num_frames``). Loading the file as-is
+#    yields a dataset with no such column, so ``filter(validator)`` raises
+#    KeyError before any frame is read. Derive it from ``round(duration * fps)``
+#    while writing the staged JSON instead of symlinking the source verbatim.
 echo "[preprocess] staging ${STAGE_DIR} from ${RAW_SRC_DIR}"
 mkdir -p "${STAGE_DIR}"
 ln -sfn "$(realpath "${RAW_SRC_DIR}")" "${STAGE_DIR}/videos"
-ln -sfn "$(realpath "${RAW_SRC_DIR}/video2caption_replace.json")" \
-    "${STAGE_DIR}/videos2caption.json"
+python - "${RAW_SRC_DIR}/video2caption_replace.json" "${STAGE_DIR}/videos2caption.json" <<'PY'
+import json, sys
+
+src, dst = sys.argv[1], sys.argv[2]
+rows = json.load(open(src))
+filled = 0
+for r in rows:
+    if not r.get("num_frames"):
+        fps = r.get("fps") or 0
+        dur = r.get("duration") or 0
+        r["num_frames"] = int(round(dur * fps)) if fps and dur else 0
+        filled += 1
+with open(dst, "w") as f:
+    json.dump(rows, f)
+print(f"[preprocess] staged {len(rows)} caption rows ({filled} num_frames filled) -> {dst}")
+PY
 
 # 3. VAE + text encode at 480x832, 77 frames, 16 fps. ``samples_per_file=8``
 #    matches the published HD-Mixkit-Finetune-Wan shard layout
