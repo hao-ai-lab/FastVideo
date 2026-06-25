@@ -9,6 +9,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+try: 
+    from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+    from torch.nn.attention.flex_attention import BlockMask
+    flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+    CAN_USE_FLEX_ATTN = True
+except:
+    print("\n" * 10, "Flex Attention is not present in your version of PyTorch, therefore NABLA can not be used.", "\n" * 10)
+    CAN_USE_FLEX_ATTN = False
+    
+    
 from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits import Kandinsky5VideoConfig
 from fastvideo.layers.layernorm import LayerNormScaleShift
@@ -111,6 +121,37 @@ def fractal_unflatten(x: torch.Tensor,
     else:
         x = x.reshape(*shape, *x.shape[2:])
     return x
+
+
+def nablaT_v2(
+    q: Tensor,
+    k: Tensor,
+    sta: Tensor,
+    thr: float = 0.9,
+):
+    q = q.transpose(1, 2).contiguous()
+    k = k.transpose(1, 2).contiguous()
+    
+    # Map estimation
+    B, h, S, D = q.shape
+    s1 = S // 64
+    qa = q.reshape(B, h, s1, 64, D).mean(-2)
+    ka = k.reshape(B, h, s1, 64, D).mean(-2).transpose(-2, -1)
+    map = qa @ ka
+
+    map = torch.softmax(map / math.sqrt(D), dim=-1)
+    # Map binarization
+    vals, inds = map.sort(-1)
+    cvals = vals.cumsum_(-1)
+    mask = (cvals >= 1 - thr).int()
+    mask = mask.gather(-1, inds.argsort(-1))
+
+    mask = torch.logical_or(mask, sta)
+
+    # BlockMask creation
+    kv_nb = mask.sum(-1).to(torch.int32)
+    kv_inds = mask.argsort(dim=-1, descending=True).to(torch.int32)
+    return BlockMask.from_kv_blocks(torch.zeros_like(kv_nb), kv_inds, kv_nb, kv_inds, BLOCK_SIZE=64, mask_mod=None)
 
 
 class Kandinsky5TimeEmbeddings(nn.Module):
@@ -337,35 +378,48 @@ class Kandinsky5Attention(nn.Module):
             query = _apply_rotary(query, rotary_emb).type_as(query)
             key = _apply_rotary(key, rotary_emb).type_as(key)
 
-        if sparse_params is not None:
-            raise NotImplementedError(
-                "Sparse attention is not yet supported for Kandinsky5 in FastVideo."
-            )
-
-        try:
-            hidden_states = self.local_attention(query, key, value)
-        except AssertionError as exc:
-            # LocalAttention requires pipeline forward context. Standalone
-            # parity tests call the model directly, so fallback to Torch SDPA.
-            if "Forward context is not set" not in str(exc):
-                raise
-            query_shape = query.shape[:-2]
-            key_shape = key.shape[:-2]
-            query = query.reshape(query_shape[0], -1, self.num_heads,
-                                  query.shape[-1]).transpose(1, 2)
-            key = key.reshape(key_shape[0], -1, self.num_heads,
-                              key.shape[-1]).transpose(1, 2)
-            value = value.reshape(key_shape[0], -1, self.num_heads,
-                                  value.shape[-1]).transpose(1, 2)
-            hidden_states = F.scaled_dot_product_attention(
+        if sparse_params is not None and CAN_USE_FLEX_ATTN:
+            attn_mask = nablaT_v2(
                 query,
                 key,
-                value,
-                attn_mask=None,
-                is_causal=False,
+                sparse_params["sta_mask"],
+                thr=sparse_params["P"],
             )
-            hidden_states = hidden_states.transpose(1, 2).reshape(
-                *query_shape, self.num_heads, -1)
+            
+            hidden_states = flex_attention(
+                query=query.transpose(1, 2),
+                key=key.transpose(1, 2),
+                value=value.transpose(1, 2),
+                block_mask=attn_mask
+            ).transpose(1, 2)
+        else:
+            try:
+                hidden_states = self.local_attention(query, key, value)
+
+            except AssertionError as exc:
+                # LocalAttention requires pipeline forward context. Standalone
+                # parity tests call the model directly, so fallback to Torch SDPA.
+                if "Forward context is not set" not in str(exc):
+                    raise
+
+                query_shape = query.shape[:-2]
+                key_shape = key.shape[:-2]
+                query = query.reshape(query_shape[0], -1, self.num_heads,
+                                      query.shape[-1]).transpose(1, 2)
+                key = key.reshape(key_shape[0], -1, self.num_heads,
+                                  key.shape[-1]).transpose(1, 2)
+                value = value.reshape(key_shape[0], -1, self.num_heads,
+                                      value.shape[-1]).transpose(1, 2)
+                hidden_states = F.scaled_dot_product_attention(
+                    query,
+                    key,
+                    value,
+                    attn_mask=None,
+                    is_causal=False,
+                )
+                hidden_states = hidden_states.transpose(1, 2).reshape(
+                    *query_shape, self.num_heads, -1)
+                
         hidden_states = hidden_states.flatten(-2, -1)
 
         hidden_states, _ = self.out_layer(hidden_states)
@@ -701,6 +755,7 @@ class Kandinsky5Transformer3DModel(BaseDiT):
                                                   scale_factor)
         to_fractal = sparse_params[
             "to_fractal"] if sparse_params is not None else False
+        
         visual_embed, visual_rope = fractal_flatten(visual_embed, visual_rope,
                                                     visual_shape,
                                                     block_mask=to_fractal)
@@ -731,6 +786,7 @@ class Kandinsky5Transformer3DModel(BaseDiT):
 
         if return_dict:
             return Kandinsky5TransformerOutput(sample=x)
+        
         return x
 
     def materialize_non_persistent_buffers(self, device: torch.device,

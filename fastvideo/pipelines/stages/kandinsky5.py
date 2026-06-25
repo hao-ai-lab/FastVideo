@@ -131,6 +131,90 @@ class Kandinsky5DenoisingStage(PipelineStage):
     def _text_rope_pos(mask: torch.Tensor, device: torch.device) -> torch.Tensor:
         seq_len = int(mask.sum(1).max().item())
         return torch.arange(seq_len, device=device)
+    
+    @staticmethod
+    def fast_sta_nabla(T: int, H: int, W: int, wT: int = 3, wH: int = 3, wW: int = 3, device="cuda") -> torch.Tensor:
+        """
+        Create a sparse temporal attention (STA) mask for efficient video generation.
+
+        This method generates a mask that limits attention to nearby frames and spatial positions, reducing
+        computational complexity for video generation.
+
+        Args:
+            T (int): Number of temporal frames
+            H (int): Height in latent space
+            W (int): Width in latent space
+            wT (int): Temporal attention window size
+            wH (int): Height attention window size
+            wW (int): Width attention window size
+            device (str): Device to create tensor on
+
+        Returns:
+            torch.Tensor: Sparse attention mask of shape (T*H*W, T*H*W)
+        """
+        l = torch.Tensor([T, H, W]).amax()
+        r = torch.arange(0, l, 1, dtype=torch.int16, device=device)
+        mat = (r.unsqueeze(1) - r.unsqueeze(0)).abs()
+        sta_t, sta_h, sta_w = (
+            mat[:T, :T].flatten(),
+            mat[:H, :H].flatten(),
+            mat[:W, :W].flatten(),
+        )
+        sta_t = sta_t <= wT // 2
+        sta_h = sta_h <= wH // 2
+        sta_w = sta_w <= wW // 2
+        sta_hw = (sta_h.unsqueeze(1) * sta_w.unsqueeze(0)).reshape(H, H, W, W).transpose(1, 2).flatten()
+        sta = (sta_t.unsqueeze(1) * sta_hw.unsqueeze(0)).reshape(T, T, H * W, H * W).transpose(1, 2)
+        return sta.reshape(T * H * W, T * H * W)
+    
+    def get_sparse_params(self, sample, device):
+        """
+        Generate sparse attention parameters for the transformer based on sample dimensions.
+
+        This method computes the sparse attention configuration needed for efficient video processing in the
+        transformer model.
+
+        Args:
+            sample (torch.Tensor): Input sample tensor
+            device (torch.device): Device to place tensors on
+
+        Returns:
+            Dict: Dictionary containing sparse attention parameters
+        """
+        assert self.transformer.config.patch_size[0] == 1
+        B, T, H, W, _ = sample.shape
+        T, H, W = (
+            T // self.transformer.config.patch_size[0],
+            H // self.transformer.config.patch_size[1],
+            W // self.transformer.config.patch_size[2],
+        )
+        if self.transformer.config.attention_type == "nabla":
+            sta_mask = self.fast_sta_nabla(
+                T,
+                H // 8,
+                W // 8,
+                self.transformer.config.attention_wT,
+                self.transformer.config.attention_wH,
+                self.transformer.config.attention_wW,
+                device=device,
+            )
+
+            sparse_params = {
+                "sta_mask": sta_mask.unsqueeze_(0).unsqueeze_(0),
+                "attention_type": self.transformer.config.attention_type,
+                "to_fractal": True,
+                "P": self.transformer.config.attention_P,
+                "wT": self.transformer.config.attention_wT,
+                "wW": self.transformer.config.attention_wW,
+                "wH": self.transformer.config.attention_wH,
+                "add_sta": self.transformer.config.attention_add_sta,
+                "visual_shape": (T, H, W),
+                "method": self.transformer.config.attention_method,
+            }
+        else:
+            sparse_params = None
+
+        return sparse_params
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         if batch.timesteps is None:
@@ -179,6 +263,8 @@ class Kandinsky5DenoisingStage(PipelineStage):
             torch.arange(width // spatial_ratio // 2, device=device),
         ]
         scale_factor = self._scale_factor(height, width)
+        
+        sparse_params = self.get_sparse_params(latents, device)
 
         with tqdm(total=batch.num_inference_steps, desc="Kandinsky5 Denoising") as progress_bar:
             for i, timestep in enumerate(batch.timesteps):
@@ -197,7 +283,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
                         visual_rope_pos=visual_rope_pos,
                         text_rope_pos=text_rope_pos,
                         scale_factor=scale_factor,
-                        sparse_params=None,
+                        sparse_params=sparse_params,
                         return_dict=True,
                     ).sample
 
@@ -210,7 +296,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
                             visual_rope_pos=visual_rope_pos,
                             text_rope_pos=negative_text_rope_pos,
                             scale_factor=scale_factor,
-                            sparse_params=None,
+                            sparse_params=sparse_params,
                             return_dict=True,
                         ).sample
                         pred_velocity = uncond_pred_velocity + batch.guidance_scale * (pred_velocity -
