@@ -43,7 +43,7 @@ COPY . .
 # Install dependencies using uv and set up shell configuration
 RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    uv pip install --no-cache-dir -e .[rocm] && \
+    uv pip install --no-cache-dir -e ".[rocm]" && \
     git config --unset-all http.https://github.com/.extraheader || true && \
     echo 'source /opt/venv/bin/activate' >> /root/.bashrc && \
     echo 'if [ -n "$ZSH_VERSION" ] && [ -f ~/.zshrc ]; then . ~/.zshrc; elif [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile

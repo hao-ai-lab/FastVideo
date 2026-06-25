@@ -17,6 +17,8 @@ import torch
 if TYPE_CHECKING:
     from torchcodec.decoders import VideoDecoder
 
+    from fastvideo.api.schema import ContinuationState
+
 import time
 from collections import OrderedDict
 
@@ -77,7 +79,6 @@ class ForwardBatch:
     image_embeds: list[torch.Tensor] = field(default_factory=list)
     pil_image: torch.Tensor | PIL.Image.Image | None = None
     preprocessed_image: torch.Tensor | None = None
-
     # Text inputs
     prompt: str | list[str] | None = None
     negative_prompt: str | list[str] | None = None
@@ -129,6 +130,8 @@ class ForwardBatch:
     mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
     keyboard_cond: torch.Tensor | None = None  # Shape: (B, T, K)
     grid_sizes: torch.Tensor | None = None  # Shape: (3,) [F,H,W]
+    num_iterations: int | None = None
+    use_base_model: bool = False
 
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
@@ -190,6 +193,28 @@ class ForwardBatch:
     ltx2_stg_blocks_video: list[int] = field(default_factory=list)
     ltx2_stg_blocks_audio: list[int] = field(default_factory=list)
 
+    # LTX-2 image / video / continuation conditioning
+    ltx2_images: list[tuple[str, int, float]] | None = None
+    ltx2_image_crf: float = 33.0
+    ltx2_conditioning_latent_stage1: torch.Tensor | None = None
+    ltx2_conditioning_latent_stage2: torch.Tensor | None = None
+    ltx2_video_conditions: list[tuple[list[str], int, float]] | None = None
+
+    # Stable Audio (T2A): clip start/end in seconds. Parallels the
+    # `SamplingParam` fields of the same name; the
+    # `StableAudioConditioningStage` / `DecodingStage` read them.
+    audio_start_in_s: float | None = None
+    audio_end_in_s: float | None = None
+
+    # Stable Audio A2A variation + inpainting payloads (parallel to
+    # `SamplingParam`). `Any` because we accept torch tensors or numpy
+    # arrays the user supplies; the latent-prep stage normalises shapes.
+    init_audio: Any = None
+    init_audio_strength: float | None = None
+    init_noise_level: float | None = None
+    inpaint_audio: Any = None
+    inpaint_mask: Any = None
+
     n_tokens: int | None = None
 
     # Other parameters that may be needed by specific schedulers
@@ -205,6 +230,9 @@ class ForwardBatch:
     trajectory_timesteps: list[torch.Tensor] | None = None
     trajectory_latents: torch.Tensor | None = None
     trajectory_decoded: list[torch.Tensor] | None = None
+
+    continuation_state: "ContinuationState | None" = None
+    return_continuation_state: bool = False
 
     # Extra parameters that might be needed by specific pipeline implementations
     extra: dict[str, Any] = field(default_factory=dict)

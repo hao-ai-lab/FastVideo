@@ -36,6 +36,10 @@ from fastvideo.models.dits.wanvideo import WanT2VCrossAttention, WanTimeTextImag
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 logger = init_logger(__name__)
+
+GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES = 21
+
+
 class CausalWanSelfAttention(nn.Module):
 
     def __init__(self,
@@ -56,7 +60,6 @@ class CausalWanSelfAttention(nn.Module):
         self.qk_norm = qk_norm
         self.eps = eps
         self.parallel_attention = parallel_attention
-        self.max_attention_size = 32760 if local_attn_size == -1 else local_attn_size * 1560
 
         # Scaled dot product attention
         self.attn = LocalAttention(
@@ -76,13 +79,16 @@ class CausalWanSelfAttention(nn.Module):
                 block_mask: BlockMask,
                 kv_cache: dict | None = None,
                 current_start: int = 0,
-                cache_start: int | None = None):
+                cache_start: int | None = None,
+                frame_seqlen: int = 1560):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
             seq_lens(Tensor): Shape [B]
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+            frame_seqlen (int): Number of tokens per latent frame,
+                e.g. 1560 for 480x832 resolution.
         """
         if cache_start is None:
             cache_start = current_start
@@ -120,9 +126,19 @@ class CausalWanSelfAttention(nn.Module):
                 block_mask=block_mask
             )[:, :, :-padded_length].transpose(2, 1)
         else:
-            frame_seqlen = q.shape[1]
             current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
+            if self.local_attn_size == -1:
+                max_attention_size = (GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES * frame_seqlen)
+            else:
+                max_attention_size = self.local_attn_size * frame_seqlen
+            if self.local_attn_size == -1 and current_end > max_attention_size:
+                raise ValueError(
+                    "Causal Wan local_attn_size=-1 keeps the previous "
+                    f"{GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES}-latent-frame KV "
+                    "window for compatibility. Set local_attn_size for "
+                    f"longer rollouts; got current_end={current_end} tokens "
+                    f"with frame_seqlen={frame_seqlen}.")
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
@@ -164,8 +180,8 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             x = self.attn(
                 roped_query,
-                kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
-                kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
+                kv_cache["k"][:, max(0, local_end_index - max_attention_size):local_end_index],
+                kv_cache["v"][:, max(0, local_end_index - max_attention_size):local_end_index]
             )
             if isinstance(kv_cache["global_end_index"], torch.Tensor):
                 kv_cache["global_end_index"].fill_(current_end)
@@ -260,26 +276,31 @@ class CausalWanTransformerBlock(nn.Module):
         crossattn_cache: dict | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
+        frame_seqlen: int | None = None,
     ) -> torch.Tensor:
         # hidden_states.shape: [batch_size, seq_length, inner_dim]
-        # temb.shape: [batch_size, num_frames, 6, inner_dim]
+        # temb.shape: [batch_size, temb_seq_len, 6, inner_dim]
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
-        num_frames = temb.shape[1]
-        frame_seqlen = hidden_states.shape[1] // num_frames    
+        temb_seq_len = temb.shape[1]
+        tokens_per_temb = hidden_states.shape[1] // temb_seq_len
+        if frame_seqlen is None:
+            frame_seqlen = tokens_per_temb
+        else:
+            frame_seqlen = int(frame_seqlen)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
         e = self.scale_shift_table + temb
-        # e.shape: [batch_size, num_frames, 6, inner_dim]
-        assert e.shape == (bs, num_frames, 6, self.hidden_dim)
+        # e.shape: [batch_size, temb_seq_len, 6, inner_dim]
+        assert e.shape == (bs, temb_seq_len, 6, self.hidden_dim)
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
             6, dim=2)
-        # *_msa.shape: [batch_size, num_frames, 1, inner_dim]
+        # *_msa.shape: [batch_size, temb_seq_len, 1, inner_dim]
         # assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
+        norm_hidden_states = (self.norm1(hidden_states).unflatten(dim=1, sizes=(temb_seq_len, tokens_per_temb)) *
                         (1 + scale_msa) + shift_msa).flatten(1, 2)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
@@ -294,7 +315,17 @@ class CausalWanTransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        attn_output = self.attn1(query, key, value, freqs_cis, block_mask, kv_cache, current_start, cache_start)
+        attn_output = self.attn1(
+            query,
+            key,
+            value,
+            freqs_cis,
+            block_mask,
+            kv_cache,
+            current_start,
+            cache_start,
+            frame_seqlen=frame_seqlen,
+        )
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
@@ -532,7 +563,8 @@ class CausalWanTransformer3DModel(BaseDiT):
                     "kv_cache": kv_cache[block_index],
                     "current_start": current_start,
                     "cache_start": cache_start,
-                    "block_mask": self.block_mask
+                    "block_mask": self.block_mask,
+                    "frame_seqlen": post_patch_height * post_patch_width,
                 }
                 hidden_states = self._gradient_checkpointing_func(
                     block, hidden_states, encoder_hidden_states,
@@ -544,7 +576,8 @@ class CausalWanTransformer3DModel(BaseDiT):
                     "crossattn_cache": crossattn_cache[block_index],
                     "current_start": current_start,
                     "cache_start": cache_start,
-                    "block_mask": self.block_mask
+                    "block_mask": self.block_mask,
+                    "frame_seqlen": post_patch_height * post_patch_width,
                 }
                 hidden_states = block(hidden_states, encoder_hidden_states,
                                         timestep_proj, freqs_cis,

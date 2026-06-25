@@ -1,0 +1,9 @@
+{
+  "metric": "vbench.appearance_style",
+  "score": null,
+  "details": {
+    "skipped": "upstream VBench.check_dimension_requires_extra_info refuses appearance_style in mode='custom_input' — it needs the structured 'style:' auxiliary_info from the curated VBench prompt set.",
+    "upstream": "Vchitect/VBench",
+    "deferred_to_stage": 2
+  }
+}

@@ -12,6 +12,12 @@ This page describes the various options for speeding up generation times in Fast
   - [Sage Attention](#sage-attention)
   - [Sage Attention 3](#sage-attention-3)
 
+- [FP8 Weight Quantization](#fp8-weight-quantization)
+
+- [Adaptive Guidance (CFG gating)](#adaptive-guidance-cfg-gating)
+
+- [torch.compile](#torch-compile)
+
 ## Attention Backends
 
 ### Available Backends
@@ -21,6 +27,7 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
+- Attn-QAT inference (modified SageAttention3 FP4, sm_120/RTX 5090): `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
@@ -54,7 +61,7 @@ FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN python example.py
 We recommend always installing [Flash Attention 2](https://github.com/Dao-AILab/flash-attention):
 
 ```bash
-pip install flash-attn==2.7.4.post1 --no-build-isolation
+uv pip install flash-attn==2.7.4.post1 --no-build-isolation
 ```
 
 And if using a Hopper+ GPU (ie H100), installing [Flash Attention 3](https://github.com/Dao-AILab/flash-attention?tab=readme-ov-file#flashattention-3-beta-release) by compiling it from source (takes about 10 minutes for me):
@@ -63,8 +70,99 @@ And if using a Hopper+ GPU (ie H100), installing [Flash Attention 3](https://git
 git clone https://github.com/Dao-AILab/flash-attention.git && cd flash-attention
 
 cd hopper
-pip install ninja
+uv pip install ninja
 python setup.py install
+```
+
+### FP4 Flash Attention 4 (Blackwell only)
+
+**`FLASH_ATTN`** with **`--nvfp4_fa4`**
+
+On Blackwell GPUs (B200/B300), you can enable FP4 quantized Q/K attention for up to **1.31x kernel speedup** over BF16 FA4, peaking at **2018 TFLOPS**. This quantizes Q and K to NVFP4 E2M1 with per-block E4M3 scale factors while keeping V in BF16 or FP8.
+
+See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040) and [flash-attention-fp4 benchmark results](https://github.com/hao-ai-lab/flash-attention-fp4/blob/fp4/flash_attn/cute/README.md) for details.
+
+#### Requirements
+
+- **GPU**: NVIDIA Blackwell (sm100a or sm103a) — B200, B300, GB200, GB300
+- **CUDA**: 12.8+
+- **Python**: 3.10 or 3.11
+
+#### Installation
+
+Install the FP4 flash attention kernel (without upgrading your existing torch):
+
+```bash
+pip install --no-deps "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fp4#subdirectory=flash_attn/cute"
+pip install "nvidia-cutlass-dsl>=4.4.2" apache-tvm-ffi flashinfer-python
+```
+
+The `--no-deps` flag prevents upgrading torch/torchvision. The kernel requires torch >= 2.4 with CUDA 12.8+ support (already present in FastVideo's environment).
+
+#### Usage
+
+Enable FP4 attention via the `--nvfp4_fa4` flag:
+
+```bash
+python examples/inference/optimizations/fp4_attn_wan2_1_1_3b.py --nvfp4_fa4
+```
+
+Or in Python via the `nvfp4_fa4` kwarg (sets env vars automatically):
+
+```python
+from fastvideo import VideoGenerator
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    nvfp4_fa4=True,
+    num_gpus=1,
+    use_fsdp_inference=False,  # FSDP is incompatible with FP4 pointer path
+)
+gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
+```
+
+#### Known Limitations
+
+- `use_fsdp_inference=True` is incompatible with the FP4 path (FSDP shards invalidate tensor pointers)
+- Per-call cosine similarity vs BF16: ~0.99 (slight quantization error accumulates over denoising steps)
+- Only supports `headdim >= 128`
+
+### NVFP4 + Attn-QAT (modified SageAttention3, Blackwell sm_120)
+
+**`ATTN_QAT_INFER`** with **`transformer_quant=nvfp4_qat`**
+
+Runs the DiT fully in 4-bit: NVFP4 linear layers (activations quantized on the
+fly) plus the modified SageAttention3 FP4 attention backend. This is the
+inference half of the Quantization-Aware Distillation (QAD) recipe and the path
+used for the RTX 5090 release.
+
+The `attn_qat_infer` kernel hard-gates on **sm_120 (consumer Blackwell / RTX
+5090)**; on other GPUs the backend logs a notice and falls back to Flash
+Attention. See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040).
+
+Enable both halves — attention via the env var, linear via `transformer_quant`:
+
+```python
+import os
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
+
+from fastvideo import VideoGenerator
+from fastvideo.layers.quantization import get_quantization_config
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    num_gpus=1,
+    # Wan-2.1 uses the nvfp4_qat config (NVFP4 is LTX2-specific). Pass an
+    # instance — the bare string is not resolved on the from_pretrained path.
+    transformer_quant=get_quantization_config("nvfp4_qat")(),
+    use_fsdp_inference=False,     # FSDP shards invalidate the FP4 tensor pointers
+)
+gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
+```
+
+Or run the example script:
+
+```bash
+python examples/inference/optimizations/nvfp4_qat_wan2_1_1_3b.py
+python examples/inference/optimizations/nvfp4_qat_wan2_1_1_3b.py --bf16  # baseline
 ```
 
 ### Sliding Tile Attention (Archived)
@@ -98,7 +196,7 @@ To use [SageAttention](https://github.com/thu-ml/SageAttention) 2.1.1, please co
 ```bash
 git clone https://github.com/thu-ml/SageAttention.git
 cd sageattention
-python setup.py install  # or pip install -e .
+python setup.py install  # or uv pip install -e .
 ```
 
 ### Sage Attention 3
@@ -123,6 +221,150 @@ These backends are model-specific and require the corresponding kernels and
 dependencies. Use the support matrix and model examples to confirm compatibility
 before enabling them.
 
+## FP8 Weight Quantization
+
+**`transformer_quant="FP8"`**
+
+Quantizes DiT linear layers (attention projections and FFN) to FP8 e4m3.
+
+On GPUs older than sm89, the FP8 matmul falls back to a bf16 dequant path
+automatically.
+
+### Requirements
+
+- **GPU**: sm89+ (H100, L40S, RTX 4090, or newer) for hardware FP8 compute
+- No additional packages required beyond the base FastVideo install
+
+### Usage
+
+```python
+from fastvideo import VideoGenerator
+from fastvideo.layers.quantization import get_quantization_config
+
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    # Pass an instance — the bare string is not resolved on the from_pretrained path.
+    transformer_quant=get_quantization_config("FP8")(),          # per-tensor (default)
+    # transformer_quant=get_quantization_config("FP8")(granularity="channel"),  # slower, higher accuracy
+)
+gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
+```
+
+Or run the example script:
+
+```bash
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py --granularity channel
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py --bf16  # baseline
+```
+
+### Granularity
+
+| Mode | Weight scales | Activation scales | Speed | Accuracy |
+|------|--------------|-------------------|-------|----------|
+| `tensor` (default) | per-tensor | per-tensor | faster | lower |
+| `channel` | per-output-channel | per-token (rowwise) | slower | higher |
+
+<a id="torch-compile"></a>
+
+## torch.compile
+
+FastVideo can `torch.compile` the DiT (transformer) for a substantial
+end-to-end speedup. It is **off by default** and enabled per-run.
+
+### Enabling
+
+```python
+generator = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    enable_torch_compile=True,
+)
+```
+
+A complete A/B example (eager vs compiled, warmup excluded) is in
+[`examples/inference/optimizations/torch_compile_example.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/optimizations/torch_compile_example.py).
+
+`fastvideo generate` is config-file driven; to enable `torch.compile`
+from the CLI, set the relevant field in your run config and pass it via
+`fastvideo generate --config run.yaml`. There is no top-level
+`--enable-torch-compile` flag on the subcommand.
+
+Only DiT submodules that declare `_compile_conditions` are compiled
+(most shipped models). The text encoder and VAE are not compiled by this
+flag.
+
+### What to expect
+
+| Config | Effect |
+|---|---|
+| Wan2.1-T2V-1.3B, A100-80GB, 480×832×81f, 50 steps | end-to-end **259.7s → 198.1s (−23.7%)**; per-step **4.91 → 3.78 s/it** |
+
+The speedup is **configuration-dependent** — it varies with model,
+resolution, step count, and GPU. Treat the number above as one measured
+data point, not a guarantee; benchmark your own config (recipe below).
+
+There is a **one-time graph-build cost** on the first generation (tens of
+seconds to minutes, model-dependent). It amortizes over subsequent
+generations with the same input shapes. Always exclude the first
+(warmup) generation when measuring steady-state latency — measuring the
+warmup is the most common way to wrongly conclude "compile is slower".
+
+**Numerics.** Inductor's lowering is designed to preserve eager
+semantics within floating-point tolerance, but per-model equivalence is
+not asserted by any standing SSIM regression here — the SSIM tests in
+[`fastvideo/tests/ssim/`](https://github.com/hao-ai-lab/FastVideo/tree/main/fastvideo/tests/ssim)
+run with `enable_torch_compile` disabled. If you depend on compile
+output staying close to eager (or your previous compiled run), run an
+MS-SSIM gate on *your* config, especially when combining
+`enable_torch_compile=True` with other numerics-affecting flags
+(quantized attention backends, FP4, layerwise offload edge cases).
+
+### Known interactions
+
+- **Layerwise CPU offload** (`dit_layerwise_offload=True`, the default):
+  the offload hook previously caused an implicit graph break once per
+  transformer layer, fragmenting the compiled region. Addressed in
+  hao-ai-lab/FastVideo#1365 — keep that fix to get a clean compiled
+  region under the default offload path.
+- **`mode="reduce-overhead"` / CUDA graphs**: not yet supported
+  end-to-end. The attention dispatch is an untraceable custom op and
+  still breaks the graph, which CUDA-graph trees cannot span. Use the
+  default inductor mode (shown above) until that is resolved.
+
+Extra `torch.compile` options are passed through `torch_compile_kwargs`
+(a dict), accepted by `VideoGenerator.from_pretrained(...)` and by the
+CLI as a JSON string via `--torch-compile-kwargs`. Example (currently
+**not** recommended — see the CUDA-graphs caveat above):
+
+```python
+VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    enable_torch_compile=True,
+    torch_compile_kwargs={"mode": "reduce-overhead"},  # may error today
+)
+```
+
+### Benchmarking torch.compile
+
+Same discipline as attention backends — same prompt, same seed, same
+config; **discard the first generation** (graph build):
+
+```python
+import time
+from fastvideo import VideoGenerator
+
+gen = VideoGenerator.from_pretrained("your-model-id", enable_torch_compile=True)
+req = {"prompt": "Your prompt", "sampling": {"seed": 1024},
+       "output": {"save_video": False}}
+gen.generate(req)                                            # warmup: graph build, discard
+t0 = time.perf_counter()
+gen.generate(req)                                            # measured: shapes reused
+print(f"compiled steady-state: {time.perf_counter() - t0:.2f}s")
+```
+
+See `examples/inference/optimizations/torch_compile_example.py` for a
+baseline-vs-compile A/B with the warmup correctly excluded.
+
 ## Benchmarking different optimizations
 
 To benchmark backend performance, generate the same prompt with the same seed and compare end-to-end generation times:
@@ -144,3 +386,37 @@ for backend in ["TORCH_SDPA", "FLASH_ATTN", "SAGE_ATTN"]:
 ```
 
 Note: reinstantiate `VideoGenerator` after changing `FASTVIDEO_ATTENTION_BACKEND`.
+
+## Adaptive Guidance (CFG gating)
+
+CFG gating accelerates classifier-free guidance by reusing the cached
+`noise_pred_cond - noise_pred_uncond` delta after a configurable fraction of
+the denoising schedule, skipping the unconditional model forward for the
+remaining steps. The technique is the LinearAG variant of Adaptive Guidance
+(Castillo et al. 2023, [arXiv:2312.12487](https://arxiv.org/abs/2312.12487)).
+
+### Enabling
+
+Set the `FASTVIDEO_CFG_GATE_STEP` environment variable to a float in `[0, 1]`:
+
+| Value | Behavior |
+|-------|----------|
+| `1.0` (default) | Disabled — legacy two-pass CFG every step. |
+| `0.5` | Cache the delta after `len(timesteps) * 0.5` steps; reuse for the rest. |
+| `0.0` | Cache from the very first step (most aggressive). |
+
+```bash
+export FASTVIDEO_CFG_GATE_STEP=0.5
+```
+
+### Trade-offs
+
+- **Memory**: one extra model-output-sized tensor per rank held during the
+  gating window.
+- **Quality**: VBench-measured quality is preserved within noise on 4 of 5
+  dimensions at `FASTVIDEO_CFG_GATE_STEP=0.5` for Wan T2V 1.3B per the PR's
+  reported numbers (see [#1372](https://github.com/hao-ai-lab/FastVideo/pull/1372)).
+- **Speed**: ~22% e2e on 4xL40S and ~24% on 1xH100 at the same settings.
+
+Default behavior is byte-for-byte equivalent to the legacy two-pass CFG path;
+the feature is fully opt-in.

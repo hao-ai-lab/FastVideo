@@ -77,6 +77,17 @@ steps:
             limit: 2
       agents:
         queue: "default"
+    - label: ":microscope: DreamVerse App Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "dreamverse_app"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
 
   # --- Full-suite-scope direct tests ---
     - label: ":bar_chart: SSIM Tests"
@@ -195,6 +206,28 @@ steps:
             limit: 2
       agents:
         queue: "default"
+    - label: ":test_tube: Train Framework Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "train_framework"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Eval Metrics Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "eval"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
 
   # ============================================================
   # Fastcheck: Runs on every PR (~10-15 min parallel)
@@ -276,6 +309,16 @@ steps:
                 label: ":microscope: Unit Tests"
                 env:
                   - TEST_TYPE=unit_test
+                agents:
+                  queue: "default"
+            - path:
+                - "apps/dreamverse/**"
+                - "pyproject.toml"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: ":microscope: DreamVerse App Tests"
+                env:
+                  - TEST_TYPE=dreamverse_app
                 agents:
                   queue: "default"
 
@@ -434,5 +477,32 @@ steps:
                 label: ":test_tube: API Server Tests"
                 env:
                   - TEST_TYPE=api_server
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/train/**"
+                - "fastvideo/tests/train/models/**"
+                - "fastvideo/tests/train/fixtures/**"
+                - "fastvideo/models/dits/**"
+                - "fastvideo/models/loader/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: ":test_tube: Train Framework Tests"
+                env:
+                  - TEST_TYPE=train_framework
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/eval/**"
+                - "fastvideo/tests/eval/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 90m .buildkite/scripts/pr_test.sh"
+                label: ":test_tube: Eval Metrics Tests"
+                env:
+                  - TEST_TYPE=eval
                 agents:
                   queue: "default"

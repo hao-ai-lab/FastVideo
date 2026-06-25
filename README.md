@@ -9,8 +9,9 @@
 **FastVideo is a unified post-training and real-time inference framework for accelerated video generation.**
 
 ## NEWS
-- `2026/03/17`: Release Live demo: [Into the Dreamverse: Vibe Directing in FastVideo](https://dreamverse.fastvideo.org/), check out the [Blog](https://haoailab.com/blogs/dreamverse/).
-- `2026/03/13`: Release Live demo: [Create a 5s 1080p Video in 4.5s with FastVideo on a Single GPU](https://1080p.fastvideo.org/), check out the [Blog](https://haoailab.com/blogs/fastvideo_realtime_1080p/).
+- `2026/06/23`: Release FastWan-QAD: 5s of Video generated in 1.8s E2E. [FastWan-QAD models](https://huggingface.co/FastVideo/FastWan-QAD-FP8-1.3B), check out the [Blog](https://haoailab.com/blogs/fastwan-qad/).
+- `2026/03/17`: Release demo: [Into the Dreamverse: Vibe Directing in FastVideo](), check out the [Blog](https://haoailab.com/blogs/dreamverse/).
+- `2026/03/13`: Release demo: [Create a 5s 1080p Video in 4.5s with FastVideo on a Single GPU](), check out the [Blog](https://haoailab.com/blogs/fastvideo_realtime_1080p/).
 - `2025/11/19`: Release [CausalWan2.2 I2V A14B Preview](https://huggingface.co/FastVideo/CausalWan2.2-I2V-A14B-Preview-Diffusers) models, [Blog](https://hao-ai-lab.github.io/blogs/fastvideo_causalwan_preview/) and [Inference Code!](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_self_forcing_causal_wan2_2_i2v.py).
 - `2025/08/04`: Release [FastWan](https://hao-ai-lab.github.io/FastVideo/distillation/dmd) models and [Sparse-Distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
 
@@ -42,6 +43,8 @@ FastVideo has the following features:
   - Support H100, A100, 4090
   - Support Linux, Windows, MacOS
   - See this [page](https://hao-ai-lab.github.io/FastVideo/inference/support_matrix/) for full list of supported models, hardware assumptions, and optimization compatibility.
+- Realtime video generation & editing
+  - [Dreamverse](apps/dreamverse/README.md): stream and "vibe direct" video in realtime ([live demo](https://dreamverse.fastvideo.org/)), deployable on local GPU, a self-hosted B200 server, Docker, or serverless Modal
 
 ## Getting Started
 
@@ -68,6 +71,19 @@ See below for recipes and datasets:
 | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | [FastWan2.1-T2V-1.3B](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers) | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P)       | [FastVideo Synthetic Wan2.1 480P](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x448x832_600k)     |
 | [FastWan2.2-TI2V-5B](https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-Diffusers)   | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free) | [FastVideo Synthetic Wan2.2 720P](https://huggingface.co/datasets/FastVideo/Wan2.2-Syn-121x704x1280_32k) |
+
+## Dreamverse — Realtime Video Generation & Editing
+
+[Dreamverse](apps/dreamverse/README.md) is FastVideo's realtime video generation
+and editing platform — "vibe directing" a video as it streams. It lives in the
+monorepo under [`apps/dreamverse/`](apps/dreamverse/) and ships its own backend
+(`dreamverse-server`) plus a web UI.
+
+Try the [live demo](https://dreamverse.fastvideo.org/), read the
+[blog](https://haoailab.com/blogs/dreamverse/), or run it yourself. Dreamverse
+deploys on a local GPU, a self-hosted B200 server over SSH, Docker, or
+serverless [Modal](apps/dreamverse/scripts/modal/README.md) — see the
+[Dreamverse README](apps/dreamverse/README.md).
 
 ## Inference
 

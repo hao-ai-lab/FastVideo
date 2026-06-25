@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import copy
-import gc
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
@@ -19,10 +18,6 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import TrainingBatch
-from fastvideo.pipelines.basic.wan.wan_pipeline import (
-    WanPipeline, )
-from fastvideo.pipelines.pipeline_batch_info import (
-    ForwardBatch, )
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing, )
 from fastvideo.training.training_utils import (
@@ -41,10 +36,12 @@ from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
     load_module_from_path, )
+from fastvideo.train.utils.negative_prompt import encode_negative_prompt
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+    from fastvideo.train.utils.lora import LoraConfig
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
@@ -73,9 +70,13 @@ class WanModel(ModelBase):
         | None = None,
         transformer_override_safetensor: str
         | None = None,
+        lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
+        super().__init__(
+            trainable=trainable,
+            lora=lora,
+        )
         self._init_from = str(init_from)
-        self._trainable = bool(trainable)
 
         self.transformer = self._load_transformer(
             init_from=self._init_from,
@@ -100,6 +101,7 @@ class WanModel(ModelBase):
 
         self.negative_prompt_embeds: (torch.Tensor | None) = None
         self.negative_prompt_attention_mask: (torch.Tensor | None) = None
+        self._requires_negative_conditioning = True
 
         # Timestep mechanics.
         self.timestep_shift: float = float(flow_shift)
@@ -125,7 +127,6 @@ class WanModel(ModelBase):
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
         )
-        transformer = apply_trainable(transformer, trainable=trainable)
         # Fall back to training_config.model if not set on the
         # model YAML section directly.
         ckpt_type = (enable_gradient_checkpointing_type or getattr(
@@ -138,6 +139,9 @@ class WanModel(ModelBase):
                 transformer,
                 checkpointing_type=ckpt_type,
             )
+        if self._enable_lora_if_configured(transformer):
+            return transformer
+        transformer = apply_trainable(transformer, trainable=trainable)
         return transformer
 
     # ------------------------------------------------------------------
@@ -157,9 +161,23 @@ class WanModel(ModelBase):
         self._init_timestep_mechanics()
 
         from fastvideo.dataset.dataloader.schema import (
-            pyarrow_schema_t2v, )
+            pyarrow_schema_t2v,
+            pyarrow_schema_text_only,
+        )
         from fastvideo.train.utils.dataloader import (
             build_parquet_t2v_train_dataloader, )
+
+        preprocessed_data_type = str(getattr(
+            training_config.data,
+            "preprocessed_data_type",
+            "t2v",
+        )).strip().lower()
+        parquet_schema = pyarrow_schema_t2v
+        if preprocessed_data_type == "text_only":
+            parquet_schema = pyarrow_schema_text_only
+        elif preprocessed_data_type != "t2v":
+            raise ValueError("Unsupported Wan preprocessed_data_type: "
+                             f"{preprocessed_data_type!r}")
 
         text_len = (
             training_config.pipeline_config.text_encoder_configs[  # type: ignore[union-attr]
@@ -167,13 +185,16 @@ class WanModel(ModelBase):
         self.dataloader = build_parquet_t2v_train_dataloader(
             training_config.data,
             text_len=int(text_len),
-            parquet_schema=pyarrow_schema_t2v,
+            parquet_schema=parquet_schema,
         )
         self.start_step = 0
 
     @property
     def num_train_timesteps(self) -> int:
         return int(self.num_train_timestep)
+
+    def set_requires_negative_conditioning(self, requires: bool) -> None:
+        self._requires_negative_conditioning = bool(requires)
 
     def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
         timestep = shift_timestep(
@@ -184,7 +205,25 @@ class WanModel(ModelBase):
         return timestep.clamp(self.min_timestep, self.max_timestep)
 
     def on_train_start(self) -> None:
-        self.ensure_negative_conditioning()
+        if self._requires_negative_conditioning:
+            self.ensure_negative_conditioning()
+
+    @torch.no_grad()
+    def decode_latents(
+        self,
+        latents_b_t_c_h_w: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.vae is None:
+            raise RuntimeError("Wan VAE is not initialized")
+        latents = latents_b_t_c_h_w.permute(0, 2, 1, 3, 4).float()
+        if bool(getattr(self.vae, "handles_latent_denorm", False)):
+            denorm = latents
+        else:
+            mean = torch.tensor(self.vae.latents_mean, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            std = torch.tensor(self.vae.latents_std, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            denorm = latents * std + mean
+        media = self.vae.to(latents.device).decode(denorm)
+        return (media / 2 + 0.5).clamp(0, 1)
 
     # ------------------------------------------------------------------
     # Runtime primitives
@@ -197,7 +236,8 @@ class WanModel(ModelBase):
         generator: torch.Generator,
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
-        self.ensure_negative_conditioning()
+        if self._requires_negative_conditioning:
+            self.ensure_negative_conditioning()
         assert self.training_config is not None
         tc = self.training_config
 
@@ -247,7 +287,11 @@ class WanModel(ModelBase):
         training_batch = self._prepare_dit_inputs(training_batch, generator)
         training_batch = self._build_attention_metadata(training_batch)
 
-        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
+        # Shallow copy keeps the lru_cache'd LongTensor index fields shared
+        # with the original metadata; only the float ``VSA_sparsity`` differs
+        # between the two views. deepcopy here would materialize a fresh copy
+        # of all four cached index tensors on every training step.
+        training_batch.attn_metadata_vsa = copy.copy(training_batch.attn_metadata)
         if training_batch.attn_metadata is not None:
             training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
 
@@ -278,7 +322,7 @@ class WanModel(ModelBase):
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
         device_type = self.device.type
-        dtype = noisy_latents.dtype
+        dtype = self._get_training_dtype()
         if conditional:
             text_dict = batch.conditional_dict
             if text_dict is None:
@@ -294,6 +338,11 @@ class WanModel(ModelBase):
         else:
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
 
+        if noisy_latents.is_floating_point():
+            noisy_latents = noisy_latents.to(dtype=dtype)
+
+        # Keep Wan training autocast tied to the model's training dtype, not
+        # to caller-created intermediates that may accidentally be fp32.
         with torch.autocast(device_type, dtype=dtype), set_forward_context(
                 current_timestep=batch.timesteps,
                 attn_metadata=attn_metadata,
@@ -341,98 +390,15 @@ class WanModel(ModelBase):
 
         assert self.training_config is not None
         tc = self.training_config
-        world_group = self.world_group
-        device = self.device
-        dtype = self._get_training_dtype()
-
-        from fastvideo.train.utils.moduleloader import (
-            make_inference_args, )
-
-        neg_embeds: torch.Tensor | None = None
-        neg_mask: torch.Tensor | None = None
-
-        if world_group.rank_in_group == 0:
-            sampling_param = SamplingParam.from_pretrained(tc.model_path)
-            negative_prompt = sampling_param.negative_prompt
-
-            inference_args = make_inference_args(tc, model_path=tc.model_path)
-
-            prompt_pipeline = WanPipeline.from_pretrained(
-                tc.model_path,
-                args=inference_args,
-                inference_mode=True,
-                loaded_modules={"transformer": self.transformer},
-                tp_size=tc.distributed.tp_size,
-                sp_size=tc.distributed.sp_size,
-                num_gpus=tc.distributed.num_gpus,
-                pin_cpu_memory=(tc.distributed.pin_cpu_memory),
-                dit_cpu_offload=True,
-            )
-
-            batch_negative = ForwardBatch(
-                data_type="video",
-                prompt=negative_prompt,
-                prompt_embeds=[],
-                prompt_attention_mask=[],
-            )
-            result_batch = prompt_pipeline.prompt_encoding_stage(  # type: ignore[attr-defined]
-                batch_negative,
-                inference_args,
-            )
-
-            neg_embeds = result_batch.prompt_embeds[0].to(device=device, dtype=dtype)
-            neg_mask = (result_batch.prompt_attention_mask[0].to(device=device, dtype=dtype))
-
-            del prompt_pipeline
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-        meta = torch.zeros((2, ), device=device, dtype=torch.int64)
-        if world_group.rank_in_group == 0:
-            assert neg_embeds is not None
-            assert neg_mask is not None
-            meta[0] = neg_embeds.ndim
-            meta[1] = neg_mask.ndim
-        world_group.broadcast(meta, src=0)
-        embed_ndim, mask_ndim = (
-            int(meta[0].item()),
-            int(meta[1].item()),
+        sampling_param = SamplingParam.from_pretrained(tc.model_path)
+        embeds, mask = encode_negative_prompt(
+            tc,
+            prompt=sampling_param.negative_prompt,
+            device=self.device,
+            dtype=self._get_training_dtype(),
         )
-
-        max_ndim = 8
-        embed_shape = torch.full((max_ndim, ), -1, device=device, dtype=torch.int64)
-        mask_shape = torch.full((max_ndim, ), -1, device=device, dtype=torch.int64)
-        if world_group.rank_in_group == 0:
-            assert neg_embeds is not None
-            assert neg_mask is not None
-            embed_shape[:embed_ndim] = torch.tensor(
-                list(neg_embeds.shape),
-                device=device,
-                dtype=torch.int64,
-            )
-            mask_shape[:mask_ndim] = torch.tensor(
-                list(neg_mask.shape),
-                device=device,
-                dtype=torch.int64,
-            )
-        world_group.broadcast(embed_shape, src=0)
-        world_group.broadcast(mask_shape, src=0)
-
-        embed_sizes = tuple(int(x) for x in embed_shape[:embed_ndim].tolist())
-        mask_sizes = tuple(int(x) for x in mask_shape[:mask_ndim].tolist())
-
-        if world_group.rank_in_group != 0:
-            neg_embeds = torch.empty(embed_sizes, device=device, dtype=dtype)
-            neg_mask = torch.empty(mask_sizes, device=device, dtype=dtype)
-        assert neg_embeds is not None
-        assert neg_mask is not None
-
-        world_group.broadcast(neg_embeds, src=0)
-        world_group.broadcast(neg_mask, src=0)
-
-        self.negative_prompt_embeds = neg_embeds
-        self.negative_prompt_attention_mask = neg_mask
+        self.negative_prompt_embeds = embeds
+        self.negative_prompt_attention_mask = mask
 
     def _sample_timesteps(
         self,
@@ -477,6 +443,7 @@ class WanModel(ModelBase):
                 patch_size=patch_size,
                 VSA_sparsity=tc.vsa_sparsity,
                 device=self.device,
+                cache_tile_buf=False,
             )
         elif (envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN"):
             if (not is_vmoba_available() or VideoMobaAttentionMetadataBuilder is None):

@@ -24,6 +24,8 @@ from fastvideo.train.utils.training_config import (
 
 logger = init_logger(__name__)
 
+_TRAINING_DIT_ARCH_OVERRIDE_KEYS = ("local_attn_size", "sink_size")
+
 
 @dataclass(slots=True)
 class RunConfig:
@@ -260,6 +262,8 @@ def _parse_pipeline_config(
     if pipeline_raw is None:
         return None
 
+    pipeline_raw, dit_arch_overrides = _split_training_dit_arch_overrides(pipeline_raw)
+
     # Derive model_path from models.student.init_from —
     # needed by PipelineConfig.from_kwargs.
     model_path: str | None = None
@@ -276,7 +280,38 @@ def _parse_pipeline_config(
     if isinstance(pipeline_raw, str):
         kwargs["pipeline_config"] = _resolve_existing_file(pipeline_raw)
 
-    return PipelineConfig.from_kwargs(kwargs)
+    pipeline_config = PipelineConfig.from_kwargs(kwargs)
+    _apply_training_dit_arch_overrides(pipeline_config, dit_arch_overrides)
+    return pipeline_config
+
+
+def _split_training_dit_arch_overrides(pipeline_raw: Any) -> tuple[Any, dict[str, Any]]:
+    """Remove train-only DiT arch overrides before generic config parsing."""
+    if not isinstance(pipeline_raw, dict) or not isinstance(pipeline_raw.get("dit_config"), dict):
+        return pipeline_raw, {}
+
+    dit_raw = pipeline_raw["dit_config"]
+    overrides = {key: dit_raw[key] for key in _TRAINING_DIT_ARCH_OVERRIDE_KEYS if key in dit_raw}
+    if not overrides:
+        return pipeline_raw, {}
+
+    pipeline_raw = dict(pipeline_raw)
+    pipeline_raw["dit_config"] = {key: value for key, value in dit_raw.items() if key not in overrides}
+    return pipeline_raw, overrides
+
+
+def _apply_training_dit_arch_overrides(pipeline_config: Any, overrides: dict[str, Any]) -> None:
+    """Apply train-only DiT arch overrides after PipelineConfig construction."""
+    if not overrides:
+        return
+
+    arch_config = pipeline_config.dit_config.arch_config
+    for key, value in overrides.items():
+        if not hasattr(arch_config, key):
+            raise ValueError(f"pipeline.dit_config.{key} is not a valid field for {type(arch_config).__name__}")
+        setattr(arch_config, key, value)
+    if hasattr(arch_config, "__post_init__"):
+        arch_config.__post_init__()
 
 
 def _build_training_config(
@@ -308,6 +343,12 @@ def _build_training_config(
             if init_from is not None:
                 model_path = str(init_from)
 
+    preprocessed_data_type = str(da.get("preprocessed_data_type", "t2v") or "t2v").strip().lower()
+    if preprocessed_data_type not in {"t2v", "text_only"}:
+        raise ValueError("training.data.preprocessed_data_type must be one of "
+                         "{'t2v', 'text_only'}, got "
+                         f"{preprocessed_data_type!r}")
+
     return TrainingConfig(
         distributed=DistributedConfig(
             num_gpus=num_gpus,
@@ -319,6 +360,7 @@ def _build_training_config(
         ),
         data=DataConfig(
             data_path=str(da.get("data_path", "") or ""),
+            preprocessed_data_type=preprocessed_data_type,
             train_batch_size=int(da.get("train_batch_size", 1) or 1),
             dataloader_num_workers=int(da.get("dataloader_num_workers", 0) or 0),
             training_cfg_rate=float(da.get("training_cfg_rate", 0.0) or 0.0),

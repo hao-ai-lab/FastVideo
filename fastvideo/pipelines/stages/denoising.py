@@ -4,6 +4,7 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
+import os
 import weakref
 from collections.abc import Iterable
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 import torch
 from tqdm.auto import tqdm
 
+import fastvideo.envs as envs
 from fastvideo.attention import get_attn_backend
 from fastvideo.distributed import (get_local_torch_device, get_world_group)
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -102,7 +104,37 @@ class DenoisingStage(PipelineStage):
         # TODO(will): make the precision configurable for inference
         # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        # Flux2-only denoising compensations.
+        #
+        # `_is_flux` gates four behaviors that exist because Flux2's transformer
+        # forward() does things internally that the generic pipeline must undo or
+        # match. These are architectural facts about the Flux2 transformer, not
+        # tunable precision policies (the precision policies #5/#6 — prompt-embed
+        # casting and scheduler-step placement — were already moved to config:
+        # DiTArchConfig.cast_prompt_embeds_to_dit_dtype and
+        # PipelineConfig.scheduler_step_in_fp32).
+        #
+        # The four behaviors gated below:
+        #   1. env-var bf16-reduced-precision matmul disable (4-step Klein drift)
+        #   2. autocast disabled (Flux2 long-sequence attention breaks parity under autocast)
+        #   3. guidance: skip the external x1000 (Flux2 multiplies guidance by 1000 internally)
+        #   4. timestep: divide by 1000 with cast-before-divide (Flux2 multiplies timestep by 1000 internally)
+        #
+        # Contract: `prefix == "Flux"` is set ONLY by Flux2 (fastvideo/configs/
+        # models/dits/flux_2.py). No other model uses that prefix, so this exact
+        # match cannot false-positive. A future Flux variant that needs the same
+        # compensations must either set prefix == "Flux" too, OR (preferred) these
+        # gates should graduate to arch-config declarations like the precision
+        # policies above.
+        _is_flux = (getattr(fastvideo_args.pipeline_config.dit_config, "prefix", "") == "Flux")
+        if _is_flux and os.getenv("FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION",
+                                  "").lower() in {"1", "true", "yes"}:
+            # Gate 1: tighten bf16 matmul accumulation for the 4-step Klein model (opt-in via env var).
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+        # Gate 2: Flux2 runs its bf16 transformer WITHOUT autocast — autocast perturbs long-sequence attention enough to break 4-step latent parity.
+        autocast_enabled = ((target_dtype != torch.float32) and not fastvideo_args.disable_autocast and not _is_flux)
+        scheduler_fp32 = getattr(fastvideo_args.pipeline_config, "scheduler_step_in_fp32", False)
+        local_device = get_local_torch_device()
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
@@ -158,13 +190,40 @@ class DenoisingStage(PipelineStage):
             },
         )
 
+        for key in ("flux2_txt_ids", "flux2_img_ids"):
+            value = batch.extra.get(key)
+            if torch.is_tensor(value):
+                batch.extra[key] = value.to(device=local_device)
+
+        flux2_id_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "txt_ids": batch.extra.get("flux2_txt_ids"),
+                "img_ids": batch.extra.get("flux2_img_ids"),
+            },
+        )
+
         # Get latents and embeddings
         latents = batch.latents
-        prompt_embeds = batch.prompt_embeds
+        cast_embeds = getattr(fastvideo_args.pipeline_config.dit_config, "cast_prompt_embeds_to_dit_dtype", False)
+        if cast_embeds:
+            prompt_embeds = [
+                embed.to(device=local_device, dtype=target_dtype) if torch.is_tensor(embed) else embed
+                for embed in batch.prompt_embeds
+            ]
+        else:
+            prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
+            if cast_embeds:
+                neg_prompt_embeds = [
+                    embed.to(device=local_device, dtype=target_dtype) if torch.is_tensor(embed) else embed
+                    for embed in neg_prompt_embeds
+                ]
+            else:
+                neg_prompt_embeds = batch.negative_prompt_embeds
             assert not torch.isnan(neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
@@ -211,6 +270,77 @@ class DenoisingStage(PipelineStage):
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
         trajectory_latents: list[torch.Tensor] = []
+        is_lucy_edit = fastvideo_args.pipeline_config.lucy_edit_task
+
+        # Hoisted out of the per-step loop: depends only on inputs that
+        # are constant across denoising steps.
+        use_meanflow = getattr(self.transformer.config, "use_meanflow", False)
+        # Gate 3: Flux2's transformer multiplies guidance by 1000 internally, so we
+        # skip the external *1000 pre-scaling for Flux models.
+        embedded_cfg_scale = fastvideo_args.pipeline_config.embedded_cfg_scale
+        if _is_flux and embedded_cfg_scale is not None:
+            embedded_cfg_scale = batch.guidance_scale
+        if embedded_cfg_scale is not None:
+            guidance_expand = (torch.tensor(
+                [embedded_cfg_scale] * latents.shape[0],
+                dtype=torch.float32,
+                device=get_local_torch_device(),
+            ).to(target_dtype) * (1.0 if _is_flux else 1000.0))
+        else:
+            guidance_expand = None
+        # V2V padding: zero-filled tensor concatenated with each step's
+        # latent_model_input.  Shape is fixed by latents and is never
+        # written to, so we allocate once.
+        v2v_zero_pad = torch.zeros_like(latents) if batch.video_latent is not None else None
+        lucy_timestep_seq_len = None
+        if is_lucy_edit:
+            patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+            assert patch_size[0] == 1, "Lucy Edit timestep expansion assumes temporal patch size 1"
+            lucy_timestep_seq_len = (latents.shape[2] * (latents.shape[3] // patch_size[1]) *
+                                     (latents.shape[4] // patch_size[2]))
+
+        # CFG gating / stale-uncond reuse setup (Adaptive Guidance LinearAG
+        # variant, Castillo et al. 2023).  When envs.FASTVIDEO_CFG_GATE_STEP
+        # < 1.0, the uncond forward is skipped after the gating step and the
+        # guidance delta (cond - uncond) is reused from the last fresh
+        # compute.  See envs.py for semantics.  delta_cached_model_id tracks
+        # which underlying transformer produced the cache so we invalidate on
+        # Wan2.2 expert switch.
+        _cfg_gate_fraction = envs.FASTVIDEO_CFG_GATE_STEP
+        if not 0.0 <= _cfg_gate_fraction <= 1.0:
+            raise ValueError(f"FASTVIDEO_CFG_GATE_STEP must be in [0.0, 1.0], got {_cfg_gate_fraction!r}. "
+                             "Use 1.0 (default) to disable; lower values trade quality for speed.")
+        _cfg_gate_active = _cfg_gate_fraction < 1.0 and batch.do_classifier_free_guidance
+        _is_rank0 = get_world_group().local_rank == 0
+        if _cfg_gate_active:
+            # Use len(timesteps), not num_inference_steps: the loop iterates
+            # over timesteps directly, and for schedulers with order > 1
+            # (e.g. DPM-Solver++ 2M, Heun) len(timesteps) is a multiple of
+            # num_inference_steps. Using num_inference_steps would cause the
+            # gate to fire at fraction/order of the loop instead of fraction.
+            _cfg_gate_step_idx = int(len(timesteps) * _cfg_gate_fraction)
+            if _is_rank0:
+                logger.info("CFG gating enabled: fraction=%.3f, gate_step=%d/%d", _cfg_gate_fraction,
+                            _cfg_gate_step_idx, len(timesteps))
+            if batch.guidance_rescale > 0.0 and _is_rank0:
+                # guidance_rescale rescales CFG output stats to match cond
+                # stats (Lin et al. §3.4).  When `delta_cached` goes stale,
+                # the rescaling still computes but is no longer guaranteed
+                # to preserve the original quality semantics.  Warn so the
+                # caller knows this combo is unvalidated; tighten or
+                # fallback once VBench data lands.
+                logger.warning(
+                    "CFG gating (fraction=%.3f) combined with guidance_rescale=%.3f is unvalidated; "
+                    "quality may degrade beyond CFG-gating-alone expectations.", _cfg_gate_fraction,
+                    batch.guidance_rescale)
+        else:
+            _cfg_gate_step_idx = len(timesteps) + 1  # never gates
+        delta_cached: torch.Tensor | None = None
+        delta_cached_model_id: int | None = None
+        # Telemetry — logged at end of denoising loop on rank 0.
+        _cfg_gate_fresh_uncond = 0
+        _cfg_gate_reused_delta = 0
+        _cfg_gate_invalidations = 0
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -248,15 +378,25 @@ class DenoisingStage(PipelineStage):
                 # Expand latents for V2V/I2V
                 latent_model_input = latents.to(target_dtype)
                 if batch.video_latent is not None:
-                    latent_model_input = torch.cat([latent_model_input, batch.video_latent,
-                                                    torch.zeros_like(latents)],
-                                                   dim=1).to(target_dtype)
+                    if is_lucy_edit:
+                        latent_model_input = torch.cat(
+                            [latent_model_input, batch.video_latent],
+                            dim=1,
+                        ).to(target_dtype)
+                    else:
+                        latent_model_input = torch.cat(
+                            [latent_model_input, batch.video_latent, v2v_zero_pad],
+                            dim=1,
+                        ).to(target_dtype)
                 elif batch.image_latent is not None:
                     assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
                     latent_model_input = torch.cat([latent_model_input, batch.image_latent], dim=1).to(target_dtype)
 
                 assert not torch.isnan(latent_model_input).any(), "latent_model_input contains nan"
-                if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+                if is_lucy_edit:
+                    assert lucy_timestep_seq_len is not None
+                    t_expand = t.repeat(latent_model_input.shape[0], lucy_timestep_seq_len)
+                elif fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
                     timestep = torch.stack([t]).to(get_local_torch_device())
                     temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
                     temp_ts = torch.cat([temp_ts, temp_ts.new_ones(seq_len - temp_ts.size(0)) * timestep])
@@ -264,9 +404,20 @@ class DenoisingStage(PipelineStage):
                     t_expand = timestep.repeat(latent_model_input.shape[0], 1)
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
-                t_expand = t_expand.to(get_local_torch_device())
+                # Gate 4: Flux2 transformer multiplies timestep by 1000 internally, so
+                # the pipeline must pass timestep/1000 (matching Diffusers).
+                # Diffusers casts to the latent dtype before the division; doing
+                # the division in fp32 first changes BF16 rounding for the final
+                # Klein timestep and breaks latent parity.
+                if _is_flux:
+                    t_expand = t_expand.to(
+                        device=get_local_torch_device(),
+                        dtype=latent_model_input.dtype,
+                    )
+                    t_expand = t_expand / 1000.0
+                else:
+                    t_expand = t_expand.to(get_local_torch_device())
 
-                use_meanflow = getattr(self.transformer.config, "use_meanflow", False)
                 if use_meanflow:
                     if i == len(timesteps) - 1:
                         timesteps_r = torch.tensor([0.0], device=get_local_torch_device())
@@ -284,13 +435,6 @@ class DenoisingStage(PipelineStage):
                 )
 
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
-
-                # Prepare inputs for transformer
-                guidance_expand = (torch.tensor(
-                    [fastvideo_args.pipeline_config.embedded_cfg_scale] * latent_model_input.shape[0],
-                    dtype=torch.float32,
-                    device=get_local_torch_device(),
-                ).to(target_dtype) * 1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale is not None else None)
 
                 # Predict noise residual
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
@@ -351,29 +495,63 @@ class DenoisingStage(PipelineStage):
                             **action_kwargs,
                             **camera_kwargs,
                             **timesteps_r_kwarg,
+                            **flux2_id_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
-                        batch.is_cfg_negative = True
-                        with set_forward_context(
-                                current_timestep=i,
-                                attn_metadata=attn_metadata,
-                                forward_batch=batch,
-                        ):
-                            noise_pred_uncond = current_model(
-                                latent_model_input,
-                                neg_prompt_embeds,
-                                t_expand,
-                                guidance=guidance_expand,
-                                **image_kwargs,
-                                **neg_cond_kwargs,
-                                **action_kwargs,
-                                **camera_kwargs,
-                                **timesteps_r_kwarg,
-                            )
+                        # CFG gating: invalidate cached delta when the underlying
+                        # transformer changes (Wan2.2 high/low-noise expert
+                        # switch at `boundary_timestep`).  delta_cached is tied
+                        # to the model that produced it; reusing it across the
+                        # boundary is silently wrong.
+                        if delta_cached_model_id is not None and delta_cached_model_id != id(current_model):
+                            delta_cached = None
+                            delta_cached_model_id = None
+                            _cfg_gate_invalidations += 1
+
+                        _use_cached_delta = (i >= _cfg_gate_step_idx and delta_cached is not None)
 
                         noise_pred_text = noise_pred
-                        noise_pred = noise_pred_uncond + current_guidance_scale * (noise_pred_text - noise_pred_uncond)
+                        if _use_cached_delta:
+                            # Reuse frozen delta = cond - uncond from the last
+                            # fresh compute.  Algebra:
+                            #   pred = uncond + s * (cond - uncond)
+                            #        = cond + (s - 1) * (cond - uncond)
+                            #        = cond + (s - 1) * delta_cached
+                            noise_pred = noise_pred_text + (current_guidance_scale - 1.0) * delta_cached
+                            _cfg_gate_reused_delta += 1
+                        else:
+                            batch.is_cfg_negative = True
+                            with set_forward_context(
+                                    current_timestep=i,
+                                    attn_metadata=attn_metadata,
+                                    forward_batch=batch,
+                            ):
+                                noise_pred_uncond = current_model(
+                                    latent_model_input,
+                                    neg_prompt_embeds,
+                                    t_expand,
+                                    guidance=guidance_expand,
+                                    **image_kwargs,
+                                    **neg_cond_kwargs,
+                                    **action_kwargs,
+                                    **camera_kwargs,
+                                    **timesteps_r_kwarg,
+                                    **flux2_id_kwargs,
+                                )
+                            _cfg_gate_fresh_uncond += 1
+
+                            # Refresh cache only when gating is active; under the
+                            # default (FASTVIDEO_CFG_GATE_STEP=1.0, _cfg_gate_step_idx
+                            # > len(timesteps)) we never reuse, so skip the
+                            # tensor allocation.
+                            if _cfg_gate_step_idx <= len(timesteps):
+                                delta_cached = noise_pred_text - noise_pred_uncond
+                                delta_cached_model_id = id(current_model)
+                                noise_pred = noise_pred_uncond + current_guidance_scale * delta_cached
+                            else:
+                                noise_pred = noise_pred_uncond + current_guidance_scale * (noise_pred_text -
+                                                                                           noise_pred_uncond)
 
                         # Apply guidance rescale if needed
                         if batch.guidance_rescale > 0.0:
@@ -383,12 +561,16 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
-                    # Compute the previous noisy sample
+                if scheduler_fp32:
+                    # Diffusers-style: fp32 Euler update outside autocast avoids BF16 drift.
                     latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
-                    if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
-                        latents = latents.squeeze(0)
-                        latents = (1. - mask2[0]) * z + mask2[0] * latents
-                        # latents = latents.unsqueeze(0)
+                else:
+                    with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
+                        latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+                if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+                    latents = latents.squeeze(0)
+                    latents = (1. - mask2[0]) * z + mask2[0] * latents
+                    # latents = latents.unsqueeze(0)
 
                 # save trajectory latents if needed
                 if batch.return_trajectory_latents:
@@ -399,6 +581,22 @@ class DenoisingStage(PipelineStage):
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
                                                (i + 1) % self.scheduler.order == 0 and progress_bar is not None):
                     progress_bar.update()
+
+        # CFG gating telemetry — log once on rank 0 after the loop ends.  When
+        # gating is disabled (or CFG itself is off) fresh_uncond equals the
+        # number of CFG-on steps and reused/invalidations are zero; we still
+        # emit the line so users can confirm the env var is wired through.
+        if _is_rank0 and batch.do_classifier_free_guidance:
+            logger.info(
+                "CFG gating summary: fraction=%.3f gate_step=%d/%d "
+                "fresh_uncond=%d reused=%d invalidations=%d",
+                _cfg_gate_fraction,
+                _cfg_gate_step_idx if _cfg_gate_active else -1,
+                len(timesteps),
+                _cfg_gate_fresh_uncond,
+                _cfg_gate_reused_delta,
+                _cfg_gate_invalidations,
+            )
 
         trajectory_tensor: torch.Tensor | None = None
         if trajectory_latents:
@@ -518,12 +716,41 @@ class DenoisingStage(PipelineStage):
 
 
 class CosmosDenoisingStage(DenoisingStage):
-    """
-    Denoising stage for Cosmos models using FlowMatchEulerDiscreteScheduler.
+    """Denoising stage for Cosmos models.
+
+    Uses FlowMatchEulerDiscreteScheduler with manual EDM
+    preconditioning (c_in, c_skip, c_out) to match the
+    pretrained Cosmos model's training convention.
     """
 
     def __init__(self, transformer, scheduler, pipeline=None) -> None:
         super().__init__(transformer, scheduler, pipeline)
+
+    def _run_transformer(
+        self,
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        condition_mask: torch.Tensor,
+        padding_mask: torch.Tensor,
+        target_dtype: torch.dtype,
+        step_index: int,
+        batch: ForwardBatch,
+    ) -> torch.Tensor:
+        with set_forward_context(
+                current_timestep=step_index,
+                attn_metadata=None,
+                forward_batch=batch,
+        ):
+            return self.transformer(
+                hidden_states=hidden_states.to(target_dtype),
+                timestep=timestep.to(target_dtype),
+                encoder_hidden_states=encoder_hidden_states.to(target_dtype),
+                fps=24,
+                condition_mask=condition_mask,
+                padding_mask=padding_mask,
+                return_dict=False,
+            )[0]
 
     def forward(
         self,
@@ -533,199 +760,188 @@ class CosmosDenoisingStage(DenoisingStage):
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
+            self.transformer = loader.load(
+                fastvideo_args.model_paths["transformer"],
+                fastvideo_args,
+            )
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
-        extra_step_kwargs = self.prepare_extra_func_kwargs(
-            self.scheduler.step,
-            {
-                "generator": batch.generator,
-                "eta": batch.eta
-            },
-        )
-
-        if hasattr(self.transformer, 'module'):
+        if hasattr(self.transformer, "module"):
             transformer_dtype = next(self.transformer.module.parameters()).dtype
         else:
             transformer_dtype = next(self.transformer.parameters()).dtype
         target_dtype = transformer_dtype
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32 and not fastvideo_args.disable_autocast)
 
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
+        do_cfg = (batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None)
 
-        sigma_max = 80.0
-        sigma_min = 0.002
-        sigma_data = 1.0
-        final_sigmas_type = "sigma_min"
+        sigma_data = float(getattr(self.scheduler.config, "sigma_data", 1.0))
 
-        if self.scheduler is not None:
-            self.scheduler.register_to_config(
-                sigma_max=sigma_max,
-                sigma_min=sigma_min,
-                sigma_data=sigma_data,
-                final_sigmas_type=final_sigmas_type,
-            )
-
-        self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
+        self.scheduler.set_timesteps(
+            num_inference_steps,
+            device=latents.device,
+        )
         timesteps = self.scheduler.timesteps
 
-        if (hasattr(self.scheduler.config, 'final_sigmas_type')
+        # Clamp terminal sigma to sigma_min (avoid zero).
+        if (hasattr(self.scheduler.config, "final_sigmas_type")
                 and self.scheduler.config.final_sigmas_type == "sigma_min" and len(self.scheduler.sigmas) > 1):
             self.scheduler.sigmas[-1] = self.scheduler.sigmas[-2]
 
-        conditioning_latents = getattr(batch, 'conditioning_latents', None)
-        unconditioning_latents = conditioning_latents
+        conditioning_latents = getattr(
+            batch,
+            "conditioning_latents",
+            None,
+        )
+        cond_indicator = getattr(batch, "cond_indicator", None)
+        uncond_indicator = getattr(
+            batch,
+            "uncond_indicator",
+            None,
+        )
 
-        with self.progress_bar(total=num_inference_steps) as progress_bar:
+        augment_sigma = torch.tensor(
+            [0.001],
+            device=latents.device,
+            dtype=torch.float32,
+        )
+
+        padding_mask = torch.zeros(
+            1,
+            1,
+            batch.height,
+            batch.width,
+            device=latents.device,
+            dtype=target_dtype,
+        )
+
+        condition_mask = (batch.cond_mask.to(target_dtype)
+                          if hasattr(batch, "cond_mask") and batch.cond_mask is not None else None)
+        uncond_condition_mask = (batch.uncond_mask.to(target_dtype)
+                                 if hasattr(batch, "uncond_mask") and batch.uncond_mask is not None else condition_mask)
+        if condition_mask is None:
+            b, c, tf, h, w = latents.shape
+            condition_mask = torch.zeros(
+                b,
+                1,
+                tf,
+                h,
+                w,
+                device=latents.device,
+                dtype=target_dtype,
+            )
+            uncond_condition_mask = condition_mask
+
+        with self.progress_bar(total=num_inference_steps, ) as progress_bar:
             for i, t in enumerate(timesteps):
-                if hasattr(self, 'interrupt') and self.interrupt:
+                if hasattr(self, "interrupt") and self.interrupt:
                     continue
 
-                current_sigma = self.scheduler.sigmas[i]
-                current_t = current_sigma / (current_sigma + 1)
-                c_in = 1 - current_t
-                c_skip = 1 - current_t
-                c_out = -current_t
+                sigma = self.scheduler.sigmas[i]
+                is_aug_greater = bool(augment_sigma >= sigma)
 
-                timestep = current_t.view(1, 1, 1, 1, 1).expand(latents.size(0), -1, latents.size(2), -1,
-                                                                -1)  # [B, 1, T, 1, 1]
+                # EDM preconditioning coefficients.
+                c_in = 1.0 / (sigma**2 + sigma_data**2)**0.5
+                c_in_aug = 1.0 / (augment_sigma**2 + sigma_data**2)**0.5
+                c_skip = sigma_data**2 / (sigma**2 + sigma_data**2)
+                c_out = (sigma * sigma_data / (sigma**2 + sigma_data**2)**0.5)
 
-                with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
+                # The model expects timestep = sigma * 1000
+                # (FlowMatchEulerDiscreteScheduler convention).
+                timestep_expanded = t.expand(latents.shape[0], ).to(target_dtype)
 
-                    cond_latent = latents * c_in
+                with torch.autocast(
+                        device_type="cuda",
+                        dtype=target_dtype,
+                        enabled=autocast_enabled,
+                ):
+                    # --- Conditioning frame injection ---
+                    cur_ci = (cond_indicator * 0 if cond_indicator is not None and is_aug_greater else cond_indicator)
 
-                    if hasattr(
+                    cond_latent = latents.clone()
+                    if (cur_ci is not None and conditioning_latents is not None):
+                        cn = torch.randn_like(
+                            latents,
+                            dtype=torch.float32,
+                        )
+                        cf = (conditioning_latents + cn * augment_sigma[:, None, None, None, None])
+                        cf = cf * c_in_aug / c_in
+                        cond_latent = (cur_ci * cf + (1 - cur_ci) * cond_latent)
+
+                    # Manual EDM input scaling.
+                    model_input = cond_latent * c_in
+
+                    noise_pred_cond = self._run_transformer(
+                        model_input,
+                        timestep_expanded,
+                        batch.prompt_embeds[0],
+                        condition_mask,
+                        padding_mask,
+                        target_dtype,
+                        i,
+                        batch,
+                    )
+
+                    # EDM output → x0 prediction.
+                    cond_x0 = (c_skip * latents + c_out * noise_pred_cond.float())
+                    if (cur_ci is not None and conditioning_latents is not None):
+                        cond_x0 = (cur_ci * conditioning_latents + (1 - cur_ci) * cond_x0)
+
+                    # --- CFG: unconditional pass ---
+                    if do_cfg:
+                        cur_ui = (uncond_indicator *
+                                  0 if uncond_indicator is not None and is_aug_greater else uncond_indicator)
+
+                        uncond_latent = latents.clone()
+                        if (cur_ui is not None and conditioning_latents is not None):
+                            un = torch.randn_like(
+                                latents,
+                                dtype=torch.float32,
+                            )
+                            uf = (conditioning_latents + un * augment_sigma[:, None, None, None, None])
+                            uf = uf * c_in_aug / c_in
+                            uncond_latent = (cur_ui * uf + (1 - cur_ui) * uncond_latent)
+
+                        uncond_input = uncond_latent * c_in
+
+                        noise_pred_uncond = (self._run_transformer(
+                            uncond_input,
+                            timestep_expanded,
+                            batch.negative_prompt_embeds[0],
+                            uncond_condition_mask,
+                            padding_mask,
+                            target_dtype,
+                            i,
                             batch,
-                            'cond_indicator') and batch.cond_indicator is not None and conditioning_latents is not None:
-                        cond_latent = batch.cond_indicator * conditioning_latents + (1 -
-                                                                                     batch.cond_indicator) * cond_latent
+                        ))
+
+                        uncond_x0 = (c_skip * latents + c_out * noise_pred_uncond.float())
+                        if (cur_ui is not None and conditioning_latents is not None):
+                            uncond_x0 = (cur_ui * conditioning_latents + (1 - cur_ui) * uncond_x0)
+
+                        final_x0 = (cond_x0 + guidance_scale * (cond_x0 - uncond_x0))
                     else:
-                        logger.warning(
-                            "Step %s: Missing conditioning data - cond_indicator: %s, conditioning_latents: %s", i,
-                            hasattr(batch, 'cond_indicator'), conditioning_latents is not None)
+                        final_x0 = cond_x0
 
-                    cond_latent = cond_latent.to(target_dtype)
+                # Convert x0 to velocity for
+                # FlowMatchEulerDiscreteScheduler.
+                velocity = (latents - final_x0) / sigma.clamp(min=1e-6)
 
-                    cond_timestep = timestep
-                    if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None:
-                        sigma_conditioning = 0.0001
-                        t_conditioning = sigma_conditioning / (sigma_conditioning + 1)
-                        cond_timestep = batch.cond_indicator * t_conditioning + (1 - batch.cond_indicator) * timestep
-                        cond_timestep = cond_timestep.to(target_dtype)
-
-                    with set_forward_context(
-                            current_timestep=i,
-                            attn_metadata=None,
-                            forward_batch=batch,
-                    ):
-                        # Use conditioning masks from CosmosLatentPreparationStage
-                        condition_mask = batch.cond_mask.to(target_dtype) if hasattr(batch, 'cond_mask') else None
-                        padding_mask = torch.zeros(1,
-                                                   1,
-                                                   batch.height,
-                                                   batch.width,
-                                                   device=cond_latent.device,
-                                                   dtype=target_dtype)
-
-                        # Fallback if masks not available
-                        if condition_mask is None:
-                            batch_size, num_channels, num_frames, height, width = cond_latent.shape
-                            condition_mask = torch.zeros(batch_size,
-                                                         1,
-                                                         num_frames,
-                                                         height,
-                                                         width,
-                                                         device=cond_latent.device,
-                                                         dtype=target_dtype)
-
-                        noise_pred = self.transformer(
-                            hidden_states=cond_latent,
-                            timestep=cond_timestep.to(target_dtype),
-                            encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
-                            fps=24,  # TODO: get fps from batch or config
-                            condition_mask=condition_mask,
-                            padding_mask=padding_mask,
-                            return_dict=False,
-                        )[0]
-
-                    cond_pred = (c_skip * latents + c_out * noise_pred.float()).to(target_dtype)
-
-                    if hasattr(
-                            batch,
-                            'cond_indicator') and batch.cond_indicator is not None and conditioning_latents is not None:
-                        cond_pred = batch.cond_indicator * conditioning_latents + (1 - batch.cond_indicator) * cond_pred
-
-                    if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
-                        uncond_latent = latents * c_in
-
-                        if hasattr(batch, 'uncond_indicator'
-                                   ) and batch.uncond_indicator is not None and unconditioning_latents is not None:
-                            uncond_latent = batch.uncond_indicator * unconditioning_latents + (
-                                1 - batch.uncond_indicator) * uncond_latent
-
-                        with set_forward_context(
-                                current_timestep=i,
-                                attn_metadata=None,
-                                forward_batch=batch,
-                        ):
-                            uncond_condition_mask = batch.uncond_mask.to(target_dtype) if hasattr(
-                                batch, 'uncond_mask') and batch.uncond_mask is not None else condition_mask
-
-                            uncond_timestep = timestep
-                            if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None:
-                                sigma_conditioning = 0.0001
-                                t_conditioning = sigma_conditioning / (sigma_conditioning + 1)
-                                uncond_timestep = batch.uncond_indicator * t_conditioning + (
-                                    1 - batch.uncond_indicator) * timestep
-                                uncond_timestep = uncond_timestep.to(target_dtype)
-
-                            noise_pred_uncond = self.transformer(
-                                hidden_states=uncond_latent.to(target_dtype),
-                                timestep=uncond_timestep.to(target_dtype),
-                                encoder_hidden_states=batch.negative_prompt_embeds[0].to(target_dtype),
-                                fps=24,  # TODO: get fps from batch or config
-                                condition_mask=uncond_condition_mask,
-                                padding_mask=padding_mask,
-                                return_dict=False,
-                            )[0]
-
-                        uncond_pred = (c_skip * latents + c_out * noise_pred_uncond.float()).to(target_dtype)
-
-                        if hasattr(batch, 'uncond_indicator'
-                                   ) and batch.uncond_indicator is not None and unconditioning_latents is not None:
-                            uncond_pred = batch.uncond_indicator * unconditioning_latents + (
-                                1 - batch.uncond_indicator) * uncond_pred
-
-                        guidance_diff = cond_pred - uncond_pred
-                        final_pred = cond_pred + guidance_scale * guidance_diff
-                    else:
-                        final_pred = cond_pred
-
-                # Convert to noise for scheduler step
-                if current_sigma > 1e-8:
-                    noise_for_scheduler = (latents - final_pred) / current_sigma
-                else:
-                    logger.warning("Step %s: current_sigma too small (%s), using final_pred directly", i, current_sigma)
-                    noise_for_scheduler = final_pred
-
-                if torch.isnan(noise_for_scheduler).sum() > 0:
-                    logger.error("Step %s: NaN detected in noise_for_scheduler, sum: %s", i,
-                                 noise_for_scheduler.float().sum().item())
-                    logger.error("Step %s: latents sum: %s, final_pred sum: %s, current_sigma: %s", i,
-                                 latents.float().sum().item(),
-                                 final_pred.float().sum().item(), current_sigma)
-
-                latents = self.scheduler.step(noise_for_scheduler, t, latents, **extra_step_kwargs,
-                                              return_dict=False)[0]
+                latents = self.scheduler.step(
+                    velocity,
+                    t,
+                    latents,
+                    return_dict=False,
+                )[0]
 
                 progress_bar.update()
 
         batch.latents = latents
-
         return batch
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -771,16 +987,21 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
             },
         )
 
-        if hasattr(self.transformer, 'module'):
-            transformer_dtype = next(self.transformer.module.parameters()).dtype
-        else:
-            transformer_dtype = next(self.transformer.parameters()).dtype
-        target_dtype = transformer_dtype
+        # Detect the actual weight dtype.  FSDP-wrapped models may
+        # report fp32 via next(parameters()) even when the physical
+        # weights are bf16.  Walk through parameters to find one
+        # that is NOT fp32 (the real checkpoint dtype).
+        target_dtype = torch.bfloat16  # safe default for Cosmos 2.5
+        for p in self.transformer.parameters():
+            if p.dtype != torch.float32:
+                target_dtype = p.dtype
+                break
         autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         latents = batch.latents
         if latents is None:
-            raise ValueError("latents must be provided for Cosmos25DenoisingStage")
+            raise ValueError("latents must be provided for "
+                             "Cosmos25DenoisingStage")
         guidance_scale = batch.guidance_scale
 
         if batch.timesteps is None:

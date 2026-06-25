@@ -33,17 +33,20 @@ is_first_frame = contextvars.ContextVar("is_first_frame", default=False)
 feat_cache = contextvars.ContextVar("feat_cache", default=None)
 feat_idx = contextvars.ContextVar("feat_idx", default=0)
 first_chunk = contextvars.ContextVar("first_chunk", default=None)
+use_light_vae = contextvars.ContextVar("use_light_vae", default=False)
 
 
 @contextmanager
 def forward_context(first_frame_arg=False,
                     feat_cache_arg=None,
                     feat_idx_arg=None,
-                    first_chunk_arg=None):
+                    first_chunk_arg=None,
+                    use_light_vae_arg=False):
     is_first_frame_token = is_first_frame.set(first_frame_arg)
     feat_cache_token = feat_cache.set(feat_cache_arg)
     feat_idx_token = feat_idx.set(feat_idx_arg)
     first_chunk_token = first_chunk.set(first_chunk_arg)
+    use_light_vae_token = use_light_vae.set(use_light_vae_arg)
     try:
         yield
     finally:
@@ -51,6 +54,7 @@ def forward_context(first_frame_arg=False,
         feat_cache.reset(feat_cache_token)
         feat_idx.reset(feat_idx_token)
         first_chunk.reset(first_chunk_token)
+        use_light_vae.reset(use_light_vae_token)
 
 class AvgDown3D(nn.Module):
     def __init__(
@@ -302,6 +306,8 @@ class WanResample(nn.Module):
     def forward(self, x):
         b, c, t, h, w = x.size()
         first_frame = is_first_frame.get()
+        _first_chunk = first_chunk.get()
+        _use_light_vae = use_light_vae.get()
         if first_frame:
             assert t == 1
         _feat_cache = feat_cache.get()
@@ -309,34 +315,60 @@ class WanResample(nn.Module):
         if self.mode == "upsample3d":
             if _feat_cache is not None:
                 idx = _feat_idx
-                if _feat_cache[idx] is None:
-                    _feat_cache[idx] = "Rep"
-                    _feat_idx += 1
-                else:
+                if _use_light_vae:
+                    if _feat_cache[idx] is None:
+                        _feat_cache[idx] = "Rep"
                     cache_x = x[:, :, -CACHE_T:, :, :].clone()
-                    if cache_x.shape[2] < 2 and _feat_cache[
-                            idx] is not None and _feat_cache[idx] != "Rep":
-                        # cache last frame of last two chunk
-                        cache_x = torch.cat([
-                            _feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                                cache_x.device), cache_x
-                        ],
-                                            dim=2)
-                    if cache_x.shape[2] < 2 and _feat_cache[
-                            idx] is not None and _feat_cache[idx] == "Rep":
-                        cache_x = torch.cat([
-                            torch.zeros_like(cache_x).to(cache_x.device),
-                            cache_x
-                        ],
-                                            dim=2)
-                    x = self.time_conv(x) if _feat_cache[idx] == "Rep" else self.time_conv(x, _feat_cache[idx])
+                    # "Rep" sentinel on first chunk, cache tensor after; isinstance avoids `tensor == str` version surprises.
+                    if isinstance(_feat_cache[idx], str):
+                        x = self.time_conv(x)
+                    else:
+                        if cache_x.shape[2] < 2:
+                            cache_x = torch.cat([
+                                _feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
+                                    x.device
+                                ),
+                                cache_x,
+                            ], dim=2)
+                        x = self.time_conv(x, _feat_cache[idx])
+
                     _feat_cache[idx] = cache_x
                     _feat_idx += 1
 
                     x = x.reshape(b, 2, c, t, h, w)
-                    x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]),
-                                    3)
+                    x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]), 3)
                     x = x.reshape(b, c, t * 2, h, w)
+
+                    if _first_chunk:
+                        x = x[:, :, 1:, :, :]
+                else:
+                    if _feat_cache[idx] is None:
+                        _feat_cache[idx] = "Rep"
+                        _feat_idx += 1
+                    else:
+                        cache_x = x[:, :, -CACHE_T:, :, :].clone()
+                        if cache_x.shape[2] < 2 and _feat_cache[
+                                idx] is not None and _feat_cache[idx] != "Rep":
+                            cache_x = torch.cat([
+                                _feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
+                                    cache_x.device), cache_x
+                            ],
+                                                dim=2)
+                        if cache_x.shape[2] < 2 and _feat_cache[
+                                idx] is not None and _feat_cache[idx] == "Rep":
+                            cache_x = torch.cat([
+                                torch.zeros_like(cache_x).to(cache_x.device),
+                                cache_x
+                            ],
+                                                dim=2)
+                        x = self.time_conv(x) if _feat_cache[idx] == "Rep" else self.time_conv(x, _feat_cache[idx])
+                        _feat_cache[idx] = cache_x
+                        _feat_idx += 1
+
+                        x = x.reshape(b, 2, c, t, h, w)
+                        x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]),
+                                        3)
+                        x = x.reshape(b, c, t * 2, h, w)
                 feat_cache.set(_feat_cache)
                 feat_idx.set(_feat_idx)
             elif not first_frame and hasattr(self, "time_conv"):
@@ -1129,13 +1161,28 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
             self._enc_conv_idx = 0
             self._enc_feat_map = [None] * self._enc_conv_num
 
+    def optimize_memory_format(self) -> None:
+        """Optional CUDA-only weight layout optimization used by MG3 LightVAE."""
+
+        def _convert(module: nn.Module) -> None:
+            for child in module.children():
+                if isinstance(child, nn.Conv3d):
+                    child.weight.data = child.weight.data.to(
+                        memory_format=torch.channels_last_3d
+                    )
+                else:
+                    _convert(child)
+
+        _convert(self)
+
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         if self.use_feature_cache:
             self.clear_cache()
             if self.config.patch_size is not None:
                 x = patchify(x, patch_size=self.config.patch_size)
             with forward_context(feat_cache_arg=self._enc_feat_map,
-                                 feat_idx_arg=self._enc_conv_idx):
+                                 feat_idx_arg=self._enc_conv_idx,
+                                 use_light_vae_arg=self.config.use_light_vae):
                 t = x.shape[2]
                 iter_ = 1 + (t - 1) // 4
                 for i in range(iter_):
@@ -1164,7 +1211,8 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         return enc
 
     def _encode(self, x: torch.Tensor, first_frame=False) -> torch.Tensor:
-        with forward_context(first_frame_arg=first_frame):
+        with forward_context(first_frame_arg=first_frame,
+                             use_light_vae_arg=self.config.use_light_vae):
             out = self.encoder(x)
         enc = self.quant_conv(out)
         mu, logvar = enc[:, :self.z_dim, :, :, :], enc[:, self.z_dim:, :, :, :]
@@ -1195,7 +1243,8 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
             iter_ = z.shape[2]
             x = self.post_quant_conv(z)
             with forward_context(feat_cache_arg=self._feat_map,
-                                 feat_idx_arg=self._conv_idx):
+                                 feat_idx_arg=self._conv_idx,
+                                 use_light_vae_arg=self.config.use_light_vae):
                 for i in range(iter_):
                     feat_idx.set(0)
                     if i == 0:
@@ -1219,7 +1268,8 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
 
     def _decode(self, z: torch.Tensor, first_frame=False) -> torch.Tensor:
         x = self.post_quant_conv(z)
-        with forward_context(first_frame_arg=first_frame):
+        with forward_context(first_frame_arg=first_frame,
+                             use_light_vae_arg=self.config.use_light_vae):
             out = self.decoder(x)
 
         out = torch.clamp(out, min=-1.0, max=1.0)
@@ -1275,7 +1325,8 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         iter_ = z.shape[2]
         x = self.post_quant_conv(z)
         
-        with forward_context(feat_cache_arg=cache, feat_idx_arg=0):
+        with forward_context(feat_cache_arg=cache, feat_idx_arg=0,
+                             use_light_vae_arg=self.config.use_light_vae):
             outputs = []
             for i in range(iter_):
                 feat_idx.set(0)

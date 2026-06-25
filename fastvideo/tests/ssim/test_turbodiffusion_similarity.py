@@ -145,6 +145,7 @@ TURBODIFFUSION_I2V_IMAGE_PATHS = [
 ]
 
 
+@pytest.mark.skip(reason="Disabled: causes OOM too often in CI")
 @pytest.mark.parametrize("prompt", TURBODIFFUSION_I2V_TEST_PROMPTS)
 @pytest.mark.parametrize(
     "model_id",

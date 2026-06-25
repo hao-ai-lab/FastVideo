@@ -334,7 +334,7 @@ class TestLtx2Presets:
         import fastvideo.registry  # noqa: F401
         presets = get_presets_for_family("ltx2")
         names = {p.name for p in presets}
-        assert names == {"ltx2_base", "ltx2_distilled"}
+        assert names == {"ltx2_base", "ltx2_3_base", "ltx2_distilled", "ltx2_two_stage"}
 
     def test_ltx2_base_lookup(self) -> None:
         import fastvideo.registry  # noqa: F401
@@ -348,6 +348,43 @@ class TestLtx2Presets:
         p = get_preset("ltx2_distilled", "ltx2")
         assert p.defaults["num_inference_steps"] == 8
         assert p.defaults["guidance_scale"] == 1.0
+
+    def test_ltx2_two_stage_is_two_stage(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        p = get_preset("ltx2_two_stage", "ltx2")
+        assert len(p.stage_schemas) == 2
+        assert p.stage_schemas[0].name == "denoise"
+        assert p.stage_schemas[1].name == "refine"
+        assert p.stage_schemas[1].kind == "refinement"
+
+    def test_ltx2_two_stage_stage_defaults(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        p = get_preset("ltx2_two_stage", "ltx2")
+        refine = p.stage_defaults["refine"]
+        # stage-2 refine only supports 2 or 3 denoising steps; preset
+        # defaults to 2 (matches gpu_pool.py load_kwargs).
+        assert refine["num_inference_steps"] == 2
+        assert refine["guidance_scale"] == 1.0
+
+    def test_ltx2_two_stage_refine_overrides_valid(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        p = get_preset("ltx2_two_stage", "ltx2")
+        validate_stage_overrides(
+            p, {"refine": {"num_inference_steps": 3}})
+        validate_stage_overrides(
+            p, {"refine": {"guidance_scale": 1.0}})
+        validate_stage_overrides(
+            p, {"refine": {"image_crf": 18}})
+        validate_stage_overrides(
+            p, {"refine": {"video_position_offset_sec": 2.5}})
+
+    def test_ltx2_two_stage_rejects_unknown_refine_override(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.api.errors import ConfigValidationError
+        p = get_preset("ltx2_two_stage", "ltx2")
+        with pytest.raises(ConfigValidationError):
+            validate_stage_overrides(
+                p, {"refine": {"bogus_field": 1}})
 
 
 # -------------------------------------------------------------------
@@ -426,6 +463,18 @@ class TestCosmosPresets:
         presets = get_presets_for_family("cosmos25")
         assert len(presets) == 1
         assert presets[0].name == "cosmos25_predict2_2b"
+
+    def test_cosmos25_2b_path_resolves_to_preset(self) -> None:
+        """Regression: the Cosmos-Predict2.5 2B model path must select the
+        cosmos25 preset (guidance_scale=7.0), not fall back to the generic
+        default (guidance_scale=1.0) which produced blurry output.
+        """
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.api.sampling_param import SamplingParam
+        sp = SamplingParam.from_pretrained(
+            "KyleShao/Cosmos-Predict2.5-2B-Diffusers")
+        assert sp.guidance_scale == 7.0
+        assert sp.num_inference_steps == 35
 
     def test_cosmos_and_cosmos25_different_fps(self) -> None:
         import fastvideo.registry  # noqa: F401
@@ -523,9 +572,12 @@ class TestSinglePresetFamilies:
 
     def test_matrixgame_registered(self) -> None:
         import fastvideo.registry  # noqa: F401
-        p = get_preset("matrixgame_i2v", "matrixgame")
-        assert p.defaults["num_inference_steps"] == 3
-        assert p.defaults["fps"] == 25
+        p2 = get_preset("matrixgame2_i2v", "matrixgame")
+        assert p2.defaults["num_inference_steps"] == 3
+        assert p2.defaults["fps"] == 25
+        p3 = get_preset("matrixgame3_i2v", "matrixgame")
+        assert p3.defaults["num_inference_steps"] == 3
+        assert p3.defaults["height"] == 720
 
     def test_longcat_presets_registered(self) -> None:
         import fastvideo.registry  # noqa: F401
@@ -548,3 +600,40 @@ class TestPresetCountIntegrity:
         import fastvideo.registry  # noqa: F401
         names = get_all_preset_names()
         assert len(names) >= 37
+
+
+class TestPresetDefaultTypes:
+    """Preset ``defaults`` values must match the types on
+    :class:`SamplingParam`. Assigning ``None`` to a typed-``str`` field
+    (e.g. ``negative_prompt``) breaks downstream stages that assert the
+    runtime type — see the CFG branch in
+    ``pipelines/stages/text_encoding.py:81``."""
+
+    def test_ltx2_cfg_defaults_are_off(self) -> None:
+        """SamplingParam's LTX-2 CFG class defaults must be 1.0 (CFG
+        off). ``ForwardBatch.__post_init__`` force-enables
+        ``do_classifier_free_guidance`` when either
+        ``ltx2_cfg_scale_video`` or ``ltx2_cfg_scale_audio`` is != 1.0,
+        so any non-1.0 default silently forces CFG on for every model
+        family that doesn't explicitly override these fields. Guard
+        against the regression that surfaced as the TurboDiffusion I2V
+        SSIM crash (``text_encoding.py:81`` assertion on
+        ``negative_prompt``)."""
+        from fastvideo.api.sampling_param import SamplingParam
+        sp = SamplingParam()
+        assert sp.ltx2_cfg_scale_video == 1.0
+        assert sp.ltx2_cfg_scale_audio == 1.0
+
+    def test_no_preset_sets_negative_prompt_to_none(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.api.presets import _PRESET_REGISTRY
+        offenders = [
+            f"{preset.model_family}/{preset.name}"
+            for preset in _PRESET_REGISTRY.values()
+            if preset.defaults.get("negative_prompt", "") is None
+        ]
+        assert not offenders, (
+            "These presets set negative_prompt=None, which violates "
+            "SamplingParam.negative_prompt's typed str contract and "
+            "crashes the CFG path in text_encoding. Use \"\" instead:\n"
+            + "\n".join(f"  - {p}" for p in offenders))

@@ -296,8 +296,10 @@ Action:
 
 - Add or reuse a numerical parity test that loads the official model and the
   FastVideo model and compares outputs.
-- See examples in `tests/local_tests/` (e.g., `tests/local_tests/upsamplers/`)
-  and the commands in `tests/local_tests/README.md`.
+- See examples in `tests/local_tests/` organized by model family
+  (e.g., `tests/local_tests/sd35/`, `tests/local_tests/ltx2/`,
+  `tests/local_tests/stable_audio/`) and the navigation index in
+  `tests/local_tests/README.md`.
 - If there are discrepancies, add opt‑in logging to both models and compare
   activation summaries (layer output sums, per‑stage logs).
 - First align the loaded weights (validate `param_names_mapping`).
@@ -348,7 +350,8 @@ Purpose:
 
 Action:
 
-- Add a pipeline parity test under `tests/local_tests/pipelines/`.
+- Add a pipeline parity test under `tests/local_tests/<family>/`
+  (e.g., `tests/local_tests/<family>/test_<family>_pipeline_parity.py`).
 - See the [Testing Guide](testing.md) for test conventions.
 
 ### 7) Add user‑facing examples

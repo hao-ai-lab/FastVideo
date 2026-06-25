@@ -23,6 +23,7 @@ DEVICE_MAPPINGS = (
     ("L40S", "L40S"),
     ("H100", "H100"),
     ("H200", "H200"),
+    ("B200", "B200"),
 )
 
 
@@ -131,7 +132,7 @@ def _assert_similarity(
     )
 
 
-def _build_init_kwargs(
+def build_init_kwargs(
     base_params: dict[str, object],
 ) -> dict[str, object]:
     init_kwargs: dict[str, object] = {
@@ -166,7 +167,7 @@ def _build_init_kwargs(
     return init_kwargs
 
 
-def _build_generation_kwargs(
+def build_generation_kwargs(
     base_params: dict[str, object],
     num_inference_steps: int,
     output_dir: str,
@@ -221,11 +222,11 @@ def run_text_to_video_similarity_test(
         base_params = params_map[model_id]
         num_inference_steps = int(base_params["num_inference_steps"])
 
-        init_kwargs = _build_init_kwargs(base_params)
+        init_kwargs = build_init_kwargs(base_params)
         if init_kwargs_override:
             init_kwargs.update(init_kwargs_override)
 
-        generation_kwargs = _build_generation_kwargs(
+        generation_kwargs = build_generation_kwargs(
             base_params,
             num_inference_steps,
             output_dir,
@@ -296,11 +297,11 @@ def run_image_to_video_similarity_test(
         base_params = params_map[model_id]
         num_inference_steps = int(base_params["num_inference_steps"])
 
-        init_kwargs = _build_init_kwargs(base_params)
+        init_kwargs = build_init_kwargs(base_params)
         if init_kwargs_override:
             init_kwargs.update(init_kwargs_override)
 
-        generation_kwargs = _build_generation_kwargs(
+        generation_kwargs = build_generation_kwargs(
             base_params,
             num_inference_steps,
             output_dir,

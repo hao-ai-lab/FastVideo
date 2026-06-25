@@ -13,7 +13,7 @@ from typing import cast
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from safetensors.torch import load_file as safetensors_load_file
+from safetensors.torch import load_file as safetensors_load_file, safe_open
 from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
@@ -78,9 +78,11 @@ class ComponentLoader(ABC):
         module_loaders = {
             "scheduler": (SchedulerLoader, "diffusers"),
             "transformer": (TransformerLoader, "diffusers"),
+            "sr_transformer": (TransformerLoader, "diffusers"),
             "transformer_2": (TransformerLoader, "diffusers"),
             "transformer_3": (TransformerLoader, "diffusers"),
             "vae": (VAELoader, "diffusers"),
+            "light_vae": (VAELoader, "diffusers"),
             "audio_vae": (AudioDecoderLoader, "diffusers"),
             "audio_decoder": (AudioDecoderLoader, "diffusers"),
             "vocoder": (VocoderLoader, "diffusers"),
@@ -95,6 +97,16 @@ class ComponentLoader(ABC):
             "image_encoder": (ImageEncoderLoader, "transformers"),
             "upsampler": (UpsamplerLoader, "diffusers"),
             "upsampler_2": (UpsamplerLoader, "diffusers"),
+            # Stable Audio's `StableAudioMultiConditioner` bundles T5 +
+            # NumberConditioners; not a pure text encoder, so it gets
+            # its own loader.
+            "conditioner": (ConditionerLoader, "fastvideo"),
+            # LTX-2 spatial / temporal upsamplers — share the
+            # UpsamplerLoader path with the upsampler/upsampler_2 keys
+            # so the SR pipeline picks up real weights instead of the
+            # generic config-only loader.
+            "spatial_upsampler": (UpsamplerLoader, "diffusers"),
+            "temporal_upsampler": (UpsamplerLoader, "diffusers"),
         }
 
         if module_type in module_loaders:
@@ -576,13 +588,53 @@ class TokenizerLoader(ComponentLoader):
                 # If parsing fails, fall through to AutoTokenizer below.
                 pass
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            resolved_model_path,  # "<path to model>/tokenizer"
-            # in v0, this was same string as encoder_name "ClipTextModel"
-            # TODO(will): pass these tokenizer kwargs from inference args? Maybe
-            # other method of config?
-            local_files_only=os.path.isdir(resolved_model_path),
-        )
+        # Only Flux2 full's Mistral3 (require_processor=True) must load via
+        # AutoProcessor. Gate the processor_config.json shortcut on that flag so
+        # existing encoders (e.g. HunyuanVideo 1.5 / Qwen2.5-VL) stay on the
+        # historical AutoTokenizer path below even if their tokenizer dir happens
+        # to ship a processor_config.json.
+        require_processor = False
+        if hasattr(fastvideo_args.pipeline_config, "text_encoder_configs"):
+            try:
+                require_processor = any(
+                    getattr(getattr(cfg, "arch_config", None), "require_processor", False)
+                    for cfg in fastvideo_args.pipeline_config.text_encoder_configs)
+            except Exception:
+                require_processor = False
+
+        if require_processor and os.path.exists(os.path.join(resolved_model_path, "processor_config.json")):
+            processor = AutoProcessor.from_pretrained(
+                resolved_model_path,
+                local_files_only=os.path.isdir(resolved_model_path),
+                trust_remote_code=fastvideo_args.trust_remote_code,
+            )
+            logger.info(
+                "Loaded tokenizer/processor from %s: %s",
+                resolved_model_path,
+                processor.__class__.__name__,
+            )
+            return processor
+
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                resolved_model_path,  # "<path to model>/tokenizer"
+                # in v0, this was same string as encoder_name "ClipTextModel"
+                # TODO(will): pass these tokenizer kwargs from inference args? Maybe
+                # other method of config?
+                local_files_only=os.path.isdir(resolved_model_path),
+            )
+        except (OSError, ValueError):
+            tokenizer = AutoProcessor.from_pretrained(
+                resolved_model_path,
+                local_files_only=os.path.isdir(resolved_model_path),
+                trust_remote_code=fastvideo_args.trust_remote_code,
+            )
+            logger.info(
+                "Loaded tokenizer/processor from %s: %s",
+                resolved_model_path,
+                tokenizer.__class__.__name__,
+            )
+            return tokenizer
         padding_side = None
         if hasattr(fastvideo_args.pipeline_config, "text_encoder_configs"):
             try:
@@ -795,6 +847,11 @@ class VAELoader(ComponentLoader):
         # strictly so missing/unexpected keys are surfaced early.
         strict_load = class_name == "AutoencoderKL"
         vae.load_state_dict(loaded, strict=strict_load)
+        if (class_name == "AutoencoderKLWan"
+                and getattr(vae.config, "use_light_vae", False)
+                and target_device.type == "cuda"
+                and hasattr(vae, "optimize_memory_format")):
+            vae.optimize_memory_format()
 
         return vae.eval()
 
@@ -862,6 +919,18 @@ class VocoderLoader(ComponentLoader):
         return vocoder.eval()
 
 
+def _collect_safetensors_keys(safetensors_list: list) -> set:
+    """Collect all weight keys from safetensors files."""
+    all_keys: set[str] = set()
+    for path in safetensors_list:
+        try:
+            with safe_open(path, framework="pt") as f:
+                all_keys.update(f.keys())
+        except Exception as e:
+            logger.warning("Could not read keys from %s: %s", path, e)
+    return all_keys
+
+
 class TransformerLoader(ComponentLoader):
     """Loader for transformer."""
 
@@ -888,6 +957,20 @@ class TransformerLoader(ComponentLoader):
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
 
+        # Generator-only QAT for DMD distillation: the teacher (real_score) and
+        # critic (fake_score) transformers load with this flag set and must stay
+        # full precision. Drop the nvfp4_qat quant from their copied config, and
+        # mask the global ATTN_QAT_TRAIN env so their attention falls back to dense
+        # (the backend is read globally at build time). The generator loads without
+        # the flag and keeps both.
+        _qat_generator_only = hasattr(fastvideo_args, "_loading_teacher_critic_model")
+        _qat_prev_attn_env = None
+        if _qat_generator_only:
+            dit_config.quant_config = None
+            from fastvideo.attention.selector import _cached_get_attn_backend
+            _qat_prev_attn_env = os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
+            _cached_get_attn_backend.cache_clear()
+
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files
@@ -896,6 +979,12 @@ class TransformerLoader(ComponentLoader):
         )
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
+
+        # arch_config can infer architecture from weight keys (e.g. Flux2 layer counts)
+        update_fn = getattr(dit_config.arch_config, "update_from_weight_keys", None)
+        if callable(update_fn):
+            weight_keys = _collect_safetensors_keys(safetensors_list)
+            update_fn(weight_keys)
 
         # Check if we should use custom initialization weights
         custom_weights_path = getattr(
@@ -968,6 +1057,12 @@ class TransformerLoader(ComponentLoader):
             torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
         )
 
+        if _qat_generator_only:
+            from fastvideo.attention.selector import _cached_get_attn_backend
+            if _qat_prev_attn_env is not None:
+                os.environ["FASTVIDEO_ATTENTION_BACKEND"] = _qat_prev_attn_env
+            _cached_get_attn_backend.cache_clear()
+
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
@@ -1013,8 +1108,63 @@ class SchedulerLoader(ComponentLoader):
         return scheduler
 
 
+class ConditionerLoader(ComponentLoader):
+    """Loader for multi-conditioner components (e.g. Stable Audio's
+    `StableAudioMultiConditioner`, which bundles T5 + NumberConditioners
+    and is neither a pure text encoder nor a Diffusers-shaped module).
+    Reads `<subfolder>/config.json` to resolve the class via
+    `ModelRegistry`, instantiates with no args (the class pulls its own
+    defaults from its FastVideo config), then loads
+    `diffusion_pytorch_model.safetensors` non-strictly so externally
+    fetched sub-encoders (T5) don't trip the missing-key check.
+    """
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        config = get_diffusers_config(model=model_path)
+        class_name = config.pop("_class_name", None)
+        config.pop("_name_or_path", None)
+        if class_name is None:
+            raise ValueError(
+                f"Conditioner config at {model_path} is missing the "
+                f"`_class_name` attribute required to resolve a model class.")
+        model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+
+        target_device = get_local_torch_device()
+        precision = getattr(fastvideo_args.pipeline_config, "precision", "fp16")
+        target_dtype = PRECISION_TO_TYPE.get(precision, torch.float16)
+
+        # Without this merge the model falls back to its dataclass
+        # defaults (e.g. SA-1.0's 3-conditioner spec — wrong for SA-small).
+        from dataclasses import fields as _fields
+        from fastvideo.configs.models.encoders import (
+            StableAudioConditionerConfig, )
+        if model_cls.__name__ == "StableAudioMultiConditioner":
+            cond_config = StableAudioConditionerConfig()
+            # `update_model_arch` is strict (raises on unknown keys); the
+            # converter writes a few non-arch keys (`_class_name`,
+            # `_diffusers_version`, `_name_or_path`) that must be filtered
+            # out first.
+            valid = {f.name for f in _fields(cond_config.arch_config)}
+            cond_config.update_model_arch({k: v for k, v in config.items() if k in valid})
+            with set_default_torch_dtype(target_dtype):
+                model = model_cls(cond_config)
+        else:
+            with set_default_torch_dtype(target_dtype):
+                model = model_cls()
+
+        weights = os.path.join(str(model_path), "diffusion_pytorch_model.safetensors")
+        if not os.path.isfile(weights):
+            raise FileNotFoundError(
+                f"Conditioner weights not found: {weights}")
+        state = safetensors_load_file(weights)
+        # Non-strict: T5 weights live outside this checkpoint (fetched in
+        # the conditioner's `__init__` from the standard HF repo).
+        model.load_state_dict(state, strict=False)
+        return model.to(device=target_device, dtype=target_dtype).eval()
+
+
 class UpsamplerLoader(ComponentLoader):
-    """Loader for upsamplers."""
+    """Loader for upsamplers (incl. LTX-2 spatial/temporal upsamplers)."""
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the upsampler based on the model path, and inference args."""
@@ -1024,36 +1174,65 @@ class UpsamplerLoader(ComponentLoader):
         if class_name is None:
             raise ValueError(
                 "Model config does not contain a _class_name attribute. "
-                "Only diffusers format is supported."
-            )
+                "Only diffusers format is supported.")
 
-        try:
-            upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[0])
-            upsampler_cfg.update_model_config(config_dict)
-        except Exception as e:
-            upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[1])
-            upsampler_cfg.update_model_config(config_dict)
+        # The base PipelineConfig declares ``upsampler_config`` as a
+        # single ``UpsamplerConfig`` instance, but Hunyuan15 narrows it
+        # to a tuple of two configs (one per SR target). We only treat
+        # the attribute as a multi-config when it actually is one;
+        # otherwise the LTX-2 branch below handles the single-class
+        # path that takes the diffusers config dict directly.
+        upsampler_config_attr = getattr(fastvideo_args.pipeline_config,
+                                        "upsampler_config", None)
+        if isinstance(upsampler_config_attr, list | tuple):
+            try:
+                upsampler_cfg = deepcopy(upsampler_config_attr[0])
+                upsampler_cfg.update_model_config(config_dict)
+            except Exception:
+                upsampler_cfg = deepcopy(upsampler_config_attr[1])
+                upsampler_cfg.update_model_config(config_dict)
+        elif class_name == "LTX2LatentUpsampler":
+            # LTX-2 pipeline_config does not declare upsampler_config; the
+            # `LTX2LatentUpsampler` wrapper takes the raw diffusers config
+            # dict directly via LatentUpsamplerConfigurator.
+            upsampler_cfg = deepcopy(config_dict)
+        else:
+            raise AttributeError(
+                "pipeline_config.upsampler_config is missing; cannot build "
+                f"upsampler config for class {class_name}")
 
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
         model = model_cls(upsampler_cfg)
 
         target_device = get_local_torch_device()
-        model = model.to(target_device, dtype=PRECISION_TO_TYPE[fastvideo_args.pipeline_config.upsampler_precision])
+        upsampler_precision = getattr(fastvideo_args.pipeline_config,
+                                      "upsampler_precision", "bf16")
+        model = model.to(target_device,
+                         dtype=PRECISION_TO_TYPE[upsampler_precision])
 
-        # Find all safetensors files
         safetensors_list = glob.glob(
             os.path.join(str(model_path), "*.safetensors"))
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
-        
+
         if len(safetensors_list) == 1:
             loaded = safetensors_load_file(safetensors_list[0])
         else:
             loaded = {}
             for sf_file in safetensors_list:
                 loaded.update(safetensors_load_file(sf_file))
-        
-        model.load_state_dict(loaded, strict=True)
+
+        # The LTX-2 latent upsampler wrapper exposes the actual conv
+        # stack at ``self.model``; checkpoint state_dicts may be saved
+        # without the ``model.`` prefix when the inner module was
+        # serialised directly. Strip / forward as needed so both layouts
+        # load cleanly.
+        target_module = getattr(model, "model", model)
+        if loaded and all(k.startswith("model.") for k in loaded):
+            stripped = {k[len("model."):]: v for k, v in loaded.items()}
+            target_module.load_state_dict(stripped, strict=True)
+        else:
+            target_module.load_state_dict(loaded, strict=True)
 
         return model.eval()
 

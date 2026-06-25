@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
+from __future__ import annotations
+
 import copy
 from dataclasses import dataclass, field, fields
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastvideo.logger import init_logger
 from fastvideo.utils import StoreBoolean
+
+if TYPE_CHECKING:
+    from fastvideo.api.schema import ContinuationState
 
 logger = init_logger(__name__)
 
@@ -23,6 +28,10 @@ class SamplingParam:
 
     # Video inputs
     video_path: str | None = None
+
+    # Optional pre-generated diffusion latents. Used by parity/debug harnesses
+    # and advanced callers that need deterministic latent reuse.
+    latents: Any | None = None
 
     # Action control inputs (Matrix-Game)
     mouse_cond: Any | None = None  # Shape: (B, T, 2)
@@ -59,6 +68,7 @@ class SamplingParam:
     # Text inputs
     prompt: str | list[str] | None = None
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+    max_sequence_length: int | None = None
     prompt_path: str | None = None
     output_path: str = "outputs/"
     output_video_name: str | None = None
@@ -92,16 +102,70 @@ class SamplingParam:
     movement_distance: float | None = None
     camera_rotation: str | None = None
 
-    # LTX2 multi-modal CFG and STG
-    ltx2_cfg_scale_video: float = 3.0
-    ltx2_cfg_scale_audio: float = 7.0
-    ltx2_modality_scale_video: float = 3.0
-    ltx2_modality_scale_audio: float = 3.0
-    ltx2_rescale_scale: float = 0.7
-    ltx2_stg_scale_video: float = 1.0
-    ltx2_stg_scale_audio: float = 1.0
+    # LTX-2 multi-modal CFG and STG.
+    # Class-level defaults match the *distilled* LTX-2 schedule
+    # (mirrors ``FastVideo-internal/.../LTX2DistilledSamplingParam``):
+    # the distilled model expects neutral guidance scales — modality 1,
+    # rescale 0, STG 0 — and explicit-CFG callers (full LTX-2) opt back
+    # in by selecting the ``LTX2_BASE`` preset, which overrides these
+    # to mod=3.0 / rescale=0.7 / stg=1.0 in its ``defaults`` dict.
+    # cfg_scale defaults stay at 1.0 (CFG off) so
+    # ``ForwardBatch.__post_init__`` doesn't force CFG on non-LTX-2
+    # models that never override these fields.
+    ltx2_cfg_scale_video: float = 1.0
+    ltx2_cfg_scale_audio: float = 1.0
+    ltx2_modality_scale_video: float = 1.0
+    ltx2_modality_scale_audio: float = 1.0
+    ltx2_rescale_scale: float = 0.0
+    ltx2_stg_scale_video: float = 0.0
+    ltx2_stg_scale_audio: float = 0.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
+
+    # LTX-2 image / video / continuation conditioning. These flow from
+    # generate_video(...) kwargs through ``sampling_param.update(kwargs)``
+    # onto the ForwardBatch fields of the same name. ``ltx2_image_crf``
+    # gates the conditioning-image H.264 re-encode; the streaming
+    # session controller passes ``ltx2_image_crf=0.0`` because it
+    # conditions on already-decoded VAE-quality frames.
+    ltx2_images: list[tuple[str, int, float]] | None = None
+    ltx2_image_crf: float = 33.0
+    ltx2_conditioning_latent_stage1: Any | None = None
+    ltx2_conditioning_latent_stage2: Any | None = None
+    ltx2_video_conditions: list[tuple[list[str], int, float]] | None = None
+
+    # Stable Audio (T2A): clip start/end in seconds. Honored by
+    # `StableAudioConditioningStage` + `StableAudioDecodingStage`. Other
+    # families ignore them.
+    audio_start_in_s: float | None = None
+    audio_end_in_s: float | None = None
+
+    # Stable Audio audio-to-audio (variation):
+    #   `init_audio` -- a path or `[B, C, samples]` waveform at the model
+    #                   sample rate; the pipeline encodes it via the VAE
+    #                   and uses it as the starting latent.
+    #   `init_audio_strength` -- 0..1, higher = closer to the reference
+    #                            (matches the convention of Stability's
+    #                            commercial Stable Audio 2.0 UI). 1.0 ~=
+    #                            VAE round-trip, 0.0 ~= plain T2A.
+    #   `init_noise_level` -- legacy raw `sigma_max` override (0.3..500,
+    #                         higher = more freedom). Kept for callers
+    #                         that already use it; prefer `init_audio_strength`.
+    init_audio: Any = None
+    init_audio_strength: float | None = None
+    init_noise_level: float | None = None
+
+    # Stable Audio inpainting (RePaint-style): `inpaint_audio` is the
+    # reference clip, `inpaint_mask` is a [samples] tensor in {0, 1} where
+    # 1 means *keep the reference* and 0 means *regenerate*.
+    inpaint_audio: Any = None
+    inpaint_mask: Any = None
+
+    # Continuation state carried across streaming/multi-segment calls.
+    continuation_state: ContinuationState | None = None
+    # When True, the pipeline returns a ContinuationState on the result so
+    # the caller can resume from the generated segment.
+    return_continuation_state: bool = False
 
     # Misc
     save_video: bool = True
@@ -118,16 +182,20 @@ class SamplingParam:
 
     def update(self, source_dict: dict[str, Any]) -> None:
         valid_fields = {f.name for f in fields(self)}
+        unknown = [key for key in source_dict if key not in valid_fields]
+        if unknown:
+            raise ValueError(f"{type(self).__name__}.update() received unknown field(s): "
+                             f"{sorted(unknown)}. All kwargs must correspond to declared "
+                             f"SamplingParam fields. If a kwarg is meant to flow into "
+                             f"ForwardBatch.extra (e.g. LTX2 audio conditioning), route it "
+                             f"via VideoGenerator._BATCH_EXTRA_PASSTHROUGH_KEYS instead.")
         for key, value in source_dict.items():
-            if key in valid_fields:
-                setattr(self, key, value)
-            else:
-                logger.error("%s has no field %s", type(self).__name__, key)
+            setattr(self, key, value)
 
         self.__post_init__()
 
     @classmethod
-    def from_pretrained(cls, model_path: str) -> "SamplingParam":
+    def from_pretrained(cls, model_path: str) -> SamplingParam:
         sampling_param = cls._from_preset(model_path)
         if sampling_param is not None:
             return sampling_param
@@ -143,7 +211,7 @@ class SamplingParam:
     def _from_preset(
         cls,
         model_path: str,
-    ) -> "SamplingParam | None":
+    ) -> SamplingParam | None:
         """Build a SamplingParam from preset defaults.
 
         Returns ``None`` when no preset is configured for

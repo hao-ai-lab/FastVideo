@@ -5,6 +5,8 @@ from fastvideo.configs.models.vaes.gen3cvae import Gen3CVAEConfig
 from fastvideo.configs.models.vaes.hunyuanvae import HunyuanVAEConfig
 from fastvideo.configs.models.vaes.hunyuan15vae import Hunyuan15VAEConfig
 from fastvideo.configs.models.vaes.ltx2vae import LTX2VAEConfig
+from fastvideo.configs.models.vaes.oobleck import OobleckVAEArchConfig, OobleckVAEConfig
+from fastvideo.configs.models.vaes.flux2vae import Flux2VAEConfig
 from fastvideo.configs.models.vaes.wanvae import WanVAEConfig
 
 __all__ = [
@@ -16,4 +18,7 @@ __all__ = [
     "Gen3CVAEConfig",
     "Hunyuan15VAEConfig",
     "LTX2VAEConfig",
+    "OobleckVAEArchConfig",
+    "OobleckVAEConfig",
+    "Flux2VAEConfig",
 ]

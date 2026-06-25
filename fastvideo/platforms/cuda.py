@@ -140,6 +140,23 @@ class CudaPlatformBase(Platform):
             except ImportError as e:
                 logger.info(e)
                 logger.info("Sage Attention 3 backend is not installed. Fall back to Flash Attention.")
+        elif selected_backend == AttentionBackendEnum.ATTN_QAT_INFER:
+            from fastvideo.attention.backends.attn_qat_infer import (  # noqa: F401
+                AttnQatInferBackend, is_attn_qat_infer_available)
+            if is_attn_qat_infer_available():
+                logger.info("Using Attn-QAT inference (modified SageAttention3 FP4) backend.")
+                return "fastvideo.attention.backends.attn_qat_infer.AttnQatInferBackend"
+            logger.info("Attn-QAT inference kernel is not built. Fall back to Flash Attention.")
+        elif selected_backend == AttentionBackendEnum.ATTN_QAT_TRAIN:
+            from fastvideo.attention.backends.attn_qat_train import (  # noqa: F401
+                AttnQatTrainBackend, is_attn_qat_train_available)
+            if is_attn_qat_train_available():
+                logger.info("Using Attn-QAT training (fake-quantized attention) backend.")
+                return "fastvideo.attention.backends.attn_qat_train.AttnQatTrainBackend"
+            raise ImportError(
+                "ATTN_QAT_TRAIN selected but fastvideo_kernel.triton_kernels.attn_qat_train is not built. "
+                "Silent fallback would produce a non-QAT training run; refusing to proceed. "
+                "Install the training kernel or pick a different FASTVIDEO_ATTENTION_BACKEND.")
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from fastvideo_kernel import video_sparse_attn  # noqa: F401
@@ -195,7 +212,7 @@ class CudaPlatformBase(Platform):
             except ImportError as e:
                 logger.error("Failed to import SageSLA Attention backend: %s", str(e))
                 raise ImportError("SageSLA Attention backend requires spas_sage_attn. "
-                                  "Install with: pip install git+https://github.com/thu-ml/SpargeAttn.git") from e
+                                  "Install with: uv pip install git+https://github.com/thu-ml/SpargeAttn.git") from e
         elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
             return "fastvideo.attention.backends.sdpa.SDPABackend"

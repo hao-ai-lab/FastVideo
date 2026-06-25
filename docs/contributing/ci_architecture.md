@@ -73,6 +73,7 @@ replicate CI results before pushing.
 | Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
 | Kernel Tests | `kernel_tests` | `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
 | Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| DreamVerse App Tests | `dreamverse_app` | `apps/dreamverse/**`, `pyproject.toml` |
 
 A Fastcheck failure means a component-level regression. Check the Buildkite build log for the
 failing test's output.
@@ -99,8 +100,10 @@ failing test's output.
 | LoRA Training Tests | `training_lora` | 15 min |
 | Training Tests VSA | `training_vsa` | 15 min |
 | Inference Tests VMoBA | `inference_vmoba` | 15 min |
-| Performance Tests | `performance` | 30 min |
+| [Performance Tests](performance_benchmarks.md) | `performance` | 30 min |
 | API Server Tests | `api_server` | 30 min |
+| Train Framework Tests | `train_framework` | 30 min |
+| Eval Metrics Tests | `eval` | 90 min |
 
 If a Full Suite test fails, check the Buildkite build log for the failing step's output.
 Fix the regression, push, and comment `/merge` again to re-trigger.
@@ -267,6 +270,7 @@ Triggers a specific Buildkite test or suite on the current PR branch.
 | `/test transformer` | Transformer Tests (Fastcheck) | `transformer` |
 | `/test kernel` | Kernel Tests (Fastcheck) | `kernel_tests` |
 | `/test unit` | Unit Tests (Fastcheck) | `unit_test` |
+| `/test dreamverse` | DreamVerse App Tests (Fastcheck) | `dreamverse_app` |
 | `/test ssim` | SSIM regression tests | `ssim` |
 | `/test training` | Training pipeline tests | `training` |
 | `/test lora-inference` | LoRA inference tests | `inference_lora` |
@@ -277,6 +281,8 @@ Triggers a specific Buildkite test or suite on the current PR branch.
 | `/test vmoba` | VMoBA inference tests | `inference_vmoba` |
 | `/test performance` | Performance benchmarks | `performance` |
 | `/test api` | API server integration tests | `api_server` |
+| `/test train-framework` | `fastvideo.train` GPU model loading + per-method tests | `train_framework` |
+| `/test eval` | Eval metric regression vs upstream reference scores | `eval` |
 | `/test full` | Entire Full Suite | all (with `TEST_SCOPE=full`) |
 | `/test fastcheck` | Entire Fastcheck suite | fastcheck (with `TEST_SCOPE=fastcheck`) |
 | `/test pre-commit` | Pre-commit checks on PR code | — (runs `ci-precommit.yml` via `workflow_call`) |

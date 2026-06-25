@@ -14,30 +14,44 @@
 # of rights and permissions under this agreement.
 # See the License for the specific language governing permissions and limitations under the License.
 
-from einops import rearrange
-from flash_attn.bert_padding import pad_input, unpad_input
-from flash_attn import flash_attn_varlen_qkvpacked_func
+from typing import Any
 
-try:
-    from fastvideo.attention.utils.flash_attn_cute import (
-        flash_attn_varlen_func as flash_attn_varlen_func_impl, )
-except ImportError:
+import torch
+from einops import rearrange
+from flash_attn import flash_attn_varlen_qkvpacked_func
+from flash_attn.bert_padding import pad_input, unpad_input
+
+
+def _resolve_flash_attn_varlen_func() -> Any:
     try:
-        from flash_attn_interface import (
-            flash_attn_varlen_func as flash_attn_varlen_func_impl, )
+        from fastvideo.attention.utils.flash_attn_cute import (
+            flash_attn_varlen_func as flash_attn_varlen_func_cute, )
+
+        return flash_attn_varlen_func_cute
     except ImportError:
-        from flash_attn import (
-            flash_attn_varlen_func as flash_attn_varlen_func_impl, )
+        try:
+            from flash_attn_interface import (
+                flash_attn_varlen_func as flash_attn_varlen_func_interface, )
+
+            return flash_attn_varlen_func_interface
+        except ImportError:
+            from flash_attn import (
+                flash_attn_varlen_func as flash_attn_varlen_func_flash, )
+
+            return flash_attn_varlen_func_flash
+
+
+flash_attn_varlen_func_impl = _resolve_flash_attn_varlen_func()
 
 
 def flash_attn_no_pad(
-    qkv,
-    key_padding_mask,
-    causal=False,
-    dropout_p=0.0,
-    softmax_scale=None,
-    deterministic=False,
-):
+    qkv: torch.Tensor,
+    key_padding_mask: torch.Tensor,
+    causal: bool = False,
+    dropout_p: float = 0.0,
+    softmax_scale: float | None = None,
+    deterministic: bool = False,
+) -> torch.Tensor:
     batch_size = qkv.shape[0]
     seqlen = qkv.shape[1]
     nheads = qkv.shape[-2]
@@ -68,13 +82,13 @@ def flash_attn_no_pad(
 
 
 def flash_attn_no_pad_v3(
-    qkv,
-    key_padding_mask,
-    causal=False,
-    dropout_p=0.0,
-    softmax_scale=None,
-    deterministic=False,
-):
+    qkv: torch.Tensor,
+    key_padding_mask: torch.Tensor,
+    causal: bool = False,
+    dropout_p: float = 0.0,
+    softmax_scale: float | None = None,
+    deterministic: bool = False,
+) -> torch.Tensor:
     from flash_attn_interface import (
         flash_attn_varlen_func as flash_attn_varlen_func_v3, )
 
@@ -120,16 +134,16 @@ def flash_attn_no_pad_v3(
 
 
 def flash_attn_varlen_qk_no_pad(
-    query,
-    key,
-    value,
-    query_padding_mask,
-    key_padding_mask,
-    causal=False,
-    dropout_p=0.0,
-    softmax_scale=None,
-    deterministic=False,
-):
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    query_padding_mask: torch.Tensor,
+    key_padding_mask: torch.Tensor,
+    causal: bool = False,
+    dropout_p: float = 0.0,
+    softmax_scale: float | None = None,
+    deterministic: bool = False,
+) -> torch.Tensor:
     batch_size, q_seqlen, nheads, _ = query.shape
 
     query_unpad, q_indices, cu_seqlens_q, max_seqlen_q, _ = unpad_input(rearrange(query, "b s h d -> b s (h d)"),

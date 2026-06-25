@@ -1,5 +1,7 @@
 # SSIM Directory Guidelines
 
+**Generated:** 2026-05-02
+
 ## Scope
 These instructions apply to everything under `fastvideo/tests/ssim/`.
 

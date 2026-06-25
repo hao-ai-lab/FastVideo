@@ -33,13 +33,11 @@ from fastvideo.logger import init_logger
 try:
     from fastvideo.attention.utils.flash_attn_no_pad import (
         flash_attn_varlen_func_impl, )
+
     FLASH_ATTN_AVAILABLE = True
 except ImportError:
-    try:
-        from flash_attn import flash_attn_varlen_func as flash_attn_varlen_func_impl
-        FLASH_ATTN_AVAILABLE = True
-    except ImportError:
-        FLASH_ATTN_AVAILABLE = False
+    flash_attn_varlen_func_impl = None
+    FLASH_ATTN_AVAILABLE = False
 
 logger = init_logger(__name__)
 
@@ -358,11 +356,13 @@ def _flash_attn_single_mask(
     flat_k = torch.cat(k_list, dim=0)
     flat_v = torch.cat(v_list, dim=0)
 
+    # Compute max_seqlen_k from the Python list before moving to GPU to
+    # avoid a `.item()` round-trip that would force a host/device sync.
+    max_seqlen_q = Sq
+    max_seqlen_k = max(b - a for a, b in zip(cu_seqlens_k[:-1], cu_seqlens_k[1:], strict=False))
+
     cu_seqlens_q_t = torch.tensor(cu_seqlens_q, dtype=torch.int32, device=device)
     cu_seqlens_k_t = torch.tensor(cu_seqlens_k, dtype=torch.int32, device=device)
-
-    max_seqlen_q = Sq
-    max_seqlen_k = int((cu_seqlens_k_t[1:] - cu_seqlens_k_t[:-1]).max().item())
 
     orig_dtype = flat_q.dtype
     compute_dtype = orig_dtype
@@ -445,11 +445,13 @@ def _flash_attn_single_head(
     flat_k = torch.cat(k_list, dim=0)
     flat_v = torch.cat(v_list, dim=0)
 
+    # Compute max_seqlen_k from the Python list before moving to GPU to
+    # avoid a `.item()` round-trip that would force a host/device sync.
+    max_seqlen_q = Sq
+    max_seqlen_k = max(b - a for a, b in zip(cu_seqlens_k[:-1], cu_seqlens_k[1:], strict=False))
+
     cu_seqlens_q_t = torch.tensor(cu_seqlens_q, dtype=torch.int32, device=device)
     cu_seqlens_k_t = torch.tensor(cu_seqlens_k, dtype=torch.int32, device=device)
-
-    max_seqlen_q = Sq
-    max_seqlen_k = int((cu_seqlens_k_t[1:] - cu_seqlens_k_t[:-1]).max().item())
 
     orig_dtype = flat_q.dtype
     compute_dtype = orig_dtype

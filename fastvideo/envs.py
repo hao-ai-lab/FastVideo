@@ -35,8 +35,14 @@ if TYPE_CHECKING:
     FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS: int = 1
     FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS: int = 2
     FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
+    FASTVIDEO_TRACE_ACTIVATIONS: bool = False
+    FASTVIDEO_TRACE_LAYERS: str = ""
+    FASTVIDEO_TRACE_STATS: str = "abs_mean,sum"
+    FASTVIDEO_TRACE_OUTPUT: str = "/tmp/fv_trace_<pid>.jsonl"
+    FASTVIDEO_TRACE_STEPS: str = ""
     FASTVIDEO_SERVER_DEV_MODE: bool = False
     FASTVIDEO_STAGE_LOGGING: bool = False
+    FASTVIDEO_CFG_GATE_STEP: float = 1.0
     FASTVIDEO_HOST_IP: str = ""
     FASTVIDEO_LOOPBACK_IP: str = ""
 
@@ -252,6 +258,22 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "FASTVIDEO_TORCH_PROFILE_REGIONS":
     lambda: os.getenv("FASTVIDEO_TORCH_PROFILE_REGIONS", ""),
 
+    # Enable activation trace hooks if set.
+    "FASTVIDEO_TRACE_ACTIVATIONS":
+    lambda: bool(os.getenv("FASTVIDEO_TRACE_ACTIVATIONS", "0") != "0"),
+    # Regex filter for traced module names. Empty means all modules.
+    "FASTVIDEO_TRACE_LAYERS":
+    lambda: os.getenv("FASTVIDEO_TRACE_LAYERS", ""),
+    # Comma-separated activation stats to dump for each output tensor.
+    "FASTVIDEO_TRACE_STATS":
+    lambda: os.getenv("FASTVIDEO_TRACE_STATS", "abs_mean,sum"),
+    # JSONL sink path. The literal <pid> is replaced at runtime.
+    "FASTVIDEO_TRACE_OUTPUT":
+    lambda: os.getenv("FASTVIDEO_TRACE_OUTPUT", "/tmp/fv_trace_<pid>.jsonl"),
+    # Comma-separated denoise step indices. Empty means all steps.
+    "FASTVIDEO_TRACE_STEPS":
+    lambda: os.getenv("FASTVIDEO_TRACE_STEPS", ""),
+
     # If set, fastvideo will run in development mode, which will enable
     # some additional endpoints for developing and debugging,
     # e.g. `/reset_prefix_cache`
@@ -262,6 +284,32 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # taken for each stage
     "FASTVIDEO_STAGE_LOGGING":
     lambda: bool(int(os.getenv("FASTVIDEO_STAGE_LOGGING", "0"))),
+
+    # CFG gating fraction for stale-uncond reuse (Adaptive Guidance / LinearAG
+    # variant — Castillo et al. 2023, arXiv:2312.12487).  Float in [0, 1].
+    # Interpretation: for step index `i < len(timesteps) * X`, run both
+    # cond and uncond forwards and refresh delta_cached = cond - uncond.
+    # Once `i >= len(timesteps) * X`, skip the uncond forward and reuse
+    # the cached delta:  noise_pred = cond + (guidance_scale - 1) * delta.
+    #
+    # Edge cases:
+    #   1.0 (default) : disables gating; identical to baseline two-pass CFG.
+    #   0.5           : run uncond for the first half of steps, reuse delta
+    #                    for the second half (~25% inference time saved on
+    #                    bandwidth-bound SP setups).
+    #   0.0           : step 0 still computes uncond fresh (cache is empty
+    #                    at start) — all subsequent steps reuse the step-0
+    #                    delta.  This is the most aggressive setting; does
+    #                    NOT mean "no uncond forward ever."
+    #
+    # Caveats:
+    #   - Algorithmically approximate; not bit-exact vs baseline CFG.
+    #     Validate per-pipeline with SSIM / VBench before lowering below 1.0.
+    #   - Interaction with `guidance_rescale > 0` is unvalidated; the
+    #     denoising stage logs a warning when both are active.
+    #   - Wan2.2 high/low-noise expert switch invalidates the cache.
+    "FASTVIDEO_CFG_GATE_STEP":
+    lambda: float(os.getenv("FASTVIDEO_CFG_GATE_STEP", "1.0")),
 }
 
 # end-env-vars-definition

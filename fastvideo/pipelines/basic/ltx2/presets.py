@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """LTX2 model family pipeline presets."""
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
+from fastvideo.pipelines.basic.ltx2.stage_overrides import (
+    refine_stage_override_fields, )
 
 _LTX2_NEGATIVE_PROMPT = ("blurry, out of focus, overexposed, underexposed, low contrast, "
                          "washed out colors, excessive noise, grainy texture, poor lighting, "
@@ -28,6 +30,13 @@ _DENOISE_STAGE = PresetStageSpec(
         "num_inference_steps",
         "guidance_scale",
     }),
+)
+
+_REFINE_STAGE = PresetStageSpec(
+    name="refine",
+    kind="refinement",
+    description="Latent-upsample + second-pass refine",
+    allowed_overrides=refine_stage_override_fields(),
 )
 
 LTX2_BASE = InferencePreset(
@@ -58,6 +67,36 @@ LTX2_BASE = InferencePreset(
     },
 )
 
+LTX2_3_BASE = InferencePreset(
+    name="ltx2_3_base",
+    version=1,
+    model_family="ltx2",
+    description="LTX-2.3 base at 512x768",
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 10,
+        "height": 512,
+        "width": 768,
+        "num_frames": 121,
+        "fps": 24,
+        # LTX-2.3 base: 30 steps (vs 40 for LTX-2.0 base) + CFG 3.0 + negative
+        # prompt; STG perturbs block 28 (vs 29 for LTX-2.0).
+        "guidance_scale": 3.0,
+        "num_inference_steps": 30,
+        "negative_prompt": _LTX2_NEGATIVE_PROMPT,
+        "ltx2_cfg_scale_video": 3.0,
+        "ltx2_cfg_scale_audio": 7.0,
+        "ltx2_modality_scale_video": 3.0,
+        "ltx2_modality_scale_audio": 3.0,
+        "ltx2_rescale_scale": 0.7,
+        "ltx2_stg_scale_video": 1.0,
+        "ltx2_stg_scale_audio": 1.0,
+        "ltx2_stg_blocks_video": [28],
+        "ltx2_stg_blocks_audio": [28],
+    },
+)
+
 LTX2_DISTILLED = InferencePreset(
     name="ltx2_distilled",
     version=1,
@@ -77,4 +116,29 @@ LTX2_DISTILLED = InferencePreset(
     },
 )
 
-ALL_PRESETS = (LTX2_BASE, LTX2_DISTILLED)
+LTX2_TWO_STAGE = InferencePreset(
+    name="ltx2_two_stage",
+    version=1,
+    model_family="ltx2",
+    description="LTX-2 distilled with 2x spatial refine (stage 1 half-res + stage 2 upsample+denoise)",
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, _REFINE_STAGE),
+    defaults={
+        "seed": 10,
+        "height": 1024,
+        "width": 1536,
+        "num_frames": 121,
+        "fps": 24,
+        "guidance_scale": 1.0,
+        "num_inference_steps": 8,
+        "negative_prompt": "",
+    },
+    stage_defaults={
+        "refine": {
+            "num_inference_steps": 2,
+            "guidance_scale": 1.0,
+        },
+    },
+)
+
+ALL_PRESETS = (LTX2_BASE, LTX2_3_BASE, LTX2_DISTILLED, LTX2_TWO_STAGE)

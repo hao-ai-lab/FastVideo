@@ -459,14 +459,15 @@ def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
         )
 
     assert captured["prompt"] == "legacy prompt"
-    assert captured["kwargs"]["num_frames"] == 49
-    assert captured["kwargs"]["output_path"] == "outputs/legacy"
-    assert captured["kwargs"]["save_video"] is False
+    assert captured["sampling_param"].num_frames == 49
+    assert captured["sampling_param"].output_path == "outputs/legacy"
+    assert captured["sampling_param"].save_video is False
     assert result["video_path"] == "outputs/test.mp4"
 
 
-def test_generate_video_legacy_call_preserves_unknown_kwargs(monkeypatch):
+def test_generate_video_legacy_call_routes_compat_kwargs(monkeypatch):
     generator = _new_runtime_video_generator()
+    generator.fastvideo_args.pipeline_config = SimpleNamespace(embedded_cfg_scale=1.0)
     captured = {}
 
     def fake_generate_video_impl(
@@ -492,8 +493,9 @@ def test_generate_video_legacy_call_preserves_unknown_kwargs(monkeypatch):
         )
 
     assert captured["prompt"] == "legacy prompt"
-    assert captured["kwargs"]["neg_prompt"] == "custom negative"
-    assert captured["kwargs"]["embedded_cfg_scale"] == 7.5
+    assert captured["sampling_param"].negative_prompt == "custom negative"
+    assert captured["kwargs"]["fastvideo_args"].pipeline_config.embedded_cfg_scale == 7.5
+    assert not hasattr(captured["sampling_param"], "embedded_cfg_scale")
     assert result["video_path"] == "outputs/test.mp4"
 
 

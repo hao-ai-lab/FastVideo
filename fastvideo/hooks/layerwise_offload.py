@@ -98,12 +98,25 @@ class LayerwiseOffloadHook(ForwardHook):
     def name(cls) -> str:
         return "LayerwiseOffloadHook"
 
+    # These hook entry points only orchestrate host-side parameter
+    # movement (stream waits, pinned H2D/D2H, param swapping) and must
+    # always run eager. Without an explicit boundary, torch.compile
+    # traces *into* the hook, hits the `@torch.compiler.disable`
+    # `LayerwiseOffloadState` methods, and is forced to bail mid-trace
+    # — an implicit graph break at the call site, once per layer every
+    # step, which fragments the per-layer compiled region (and blocks
+    # CUDA-graph capture, which cannot span a break). Marking the entry
+    # points disabled makes the hook a clean opaque eager boundary so
+    # torch.compile keeps one contiguous region around it. Completes
+    # the pattern already applied to the State methods.
+    @torch.compiler.disable
     def pre_forward(self, module: nn.Module, *args, **kwargs):
         self.state.wait_and_replace_params()  # pyright: ignore
         if self.state.next_state is not None:
             self.state.next_state.prefetch_params()  # pyright: ignore
         return args, kwargs
 
+    @torch.compiler.disable
     def post_forward(self, module: torch.nn.Module, output: Any):
         self.state.release_gpu_params()  # pyright: ignore
         return output

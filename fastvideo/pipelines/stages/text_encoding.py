@@ -57,6 +57,10 @@ class TextEncodingStage(PipelineStage):
         assert len(self.tokenizers) == len(self.text_encoders)
         assert len(self.text_encoders) == len(fastvideo_args.pipeline_config.text_encoder_configs)
 
+        # Skip encoding if precomputed prompt_embeds were provided
+        if batch.prompt_embeds is not None and len(batch.prompt_embeds) > 0:
+            return batch
+
         # Encode positive prompt with all available encoders
         assert batch.prompt is not None
         prompt_text: str | list[str] = batch.prompt
@@ -218,6 +222,13 @@ class TextEncodingStage(PipelineStage):
             for prompt_str in texts:
                 processed_text = preprocess_func(prompt_str)
                 if processed_text is not None:
+                    # Guard against empty strings that produce 0 tokens with
+                    # Qwen2-style tokenizers. Scoped via treat_empty_as_dot so
+                    # models that legitimately use "" (e.g. negative_prompt="")
+                    # are not affected.
+                    if isinstance(processed_text, str) and not processed_text.strip() and getattr(
+                            encoder_config, "treat_empty_as_dot", False):
+                        processed_text = "."
                     processed_texts.append(processed_text)
                 else:
                     # Assuming batch_size = 1, special case for hunyuanvideo1.5 where there is no glyph text
@@ -228,10 +239,34 @@ class TextEncodingStage(PipelineStage):
                     attn_masks_list.append(attention_mask)
                     return self.return_embeds(embeds_list, attn_masks_list, return_type, return_attention_mask, indices)
 
+            # If tokenizer is a multimodal processor (e.g. Qwen2_5_VLProcessor),
+            # use its inner tokenizer for text-only encoding.
+            tok = getattr(tokenizer, "tokenizer", tokenizer)
+
             if encoder_config.is_chat_model:
-                text_inputs = tokenizer.apply_chat_template(processed_texts, **tok_kwargs).to(encoder_device)
+                already_chat_formatted = bool(processed_texts) and isinstance(processed_texts[0], list)
+                if already_chat_formatted:
+                    # Existing chat models (e.g. HunyuanVideo 1.5 / Qwen2.5-VL)
+                    # pre-format prompts into message lists upstream and rely on
+                    # the inner tokenizer + full tokenizer_kwargs (which include
+                    # add_generation_prompt). Preserve that original path exactly.
+                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(encoder_device)
+                else:
+                    # Two-step approach matching Diffusers: format with chat
+                    # template first, then tokenize the resulting strings.
+                    formatted_texts = []
+                    for pt in processed_texts:
+                        messages = [{"role": "user", "content": pt}]
+                        formatted = tokenizer.apply_chat_template(
+                            messages,
+                            tokenize=False,
+                            add_generation_prompt=True,
+                            enable_thinking=False,
+                        )
+                        formatted_texts.append(formatted)
+                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(encoder_device)
             else:
-                text_inputs = tokenizer(processed_texts, **tok_kwargs).to(encoder_device)
+                text_inputs = tok(processed_texts, **tok_kwargs).to(encoder_device)
 
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
