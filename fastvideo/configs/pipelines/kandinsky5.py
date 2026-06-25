@@ -77,10 +77,8 @@ class Kandinsky5T2VConfig(PipelineConfig):
 
     def __post_init__(self) -> None:
         if len(self.text_encoder_configs) != 2:
-            raise ValueError(
-                f"Kandinsky5 pipeline requires exactly 2 text encoders (qwen and clip), "
-                f"but got {len(self.text_encoder_configs)} encoder(s)."
-            )
+            raise ValueError(f"Kandinsky5 pipeline requires exactly 2 text encoders (qwen and clip), "
+                             f"but got {len(self.text_encoder_configs)} encoder(s).")
 
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True

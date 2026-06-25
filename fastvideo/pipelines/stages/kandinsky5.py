@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from typing import Any
 
 import PIL
 import torch
@@ -144,9 +145,17 @@ class Kandinsky5DenoisingStage(PipelineStage):
     def _text_rope_pos(mask: torch.Tensor, device: torch.device) -> torch.Tensor:
         seq_len = int(mask.sum(1).max().item())
         return torch.arange(seq_len, device=device)
-    
+
     @staticmethod
-    def fast_sta_nabla(T: int, H: int, W: int, wT: int = 3, wH: int = 3, wW: int = 3, device="cuda") -> torch.Tensor:
+    def fast_sta_nabla(
+        T: int,
+        H: int,
+        W: int,
+        wT: int = 3,
+        wH: int = 3,
+        wW: int = 3,
+        device: torch.device | str = "cuda",
+    ) -> torch.Tensor:
         """
         Create a sparse temporal attention (STA) mask for efficient video generation.
 
@@ -165,8 +174,8 @@ class Kandinsky5DenoisingStage(PipelineStage):
         Returns:
             torch.Tensor: Sparse attention mask of shape (T*H*W, T*H*W)
         """
-        l = torch.Tensor([T, H, W]).amax()
-        r = torch.arange(0, l, 1, dtype=torch.int16, device=device)
+        max_extent = int(torch.tensor([T, H, W], device=device).amax().item())
+        r = torch.arange(0, max_extent, 1, dtype=torch.int16, device=device)
         mat = (r.unsqueeze(1) - r.unsqueeze(0)).abs()
         sta_t, sta_h, sta_w = (
             mat[:T, :T].flatten(),
@@ -179,8 +188,8 @@ class Kandinsky5DenoisingStage(PipelineStage):
         sta_hw = (sta_h.unsqueeze(1) * sta_w.unsqueeze(0)).reshape(H, H, W, W).transpose(1, 2).flatten()
         sta = (sta_t.unsqueeze(1) * sta_hw.unsqueeze(0)).reshape(T, T, H * W, H * W).transpose(1, 2)
         return sta.reshape(T * H * W, T * H * W)
-    
-    def get_sparse_params(self, sample, device):
+
+    def get_sparse_params(self, sample: torch.Tensor, device: torch.device) -> dict[str, Any] | None:
         """
         Generate sparse attention parameters for the transformer based on sample dimensions.
 
@@ -195,7 +204,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
             Dict: Dictionary containing sparse attention parameters
         """
         assert self.transformer.config.patch_size[0] == 1
-        B, T, H, W, _ = sample.shape
+        _, T, H, W, _ = sample.shape
         T, H, W = (
             T // self.transformer.config.patch_size[0],
             H // self.transformer.config.patch_size[1],
