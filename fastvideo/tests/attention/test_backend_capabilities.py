@@ -7,9 +7,7 @@ third-party attention packages installed.
 """
 import torch
 
-from fastvideo.attention.backends.abstract import (AttentionBackend,
-                                                   AttentionImpl,
-                                                   AttentionMetadata,
+from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder)
 
 
@@ -40,8 +38,8 @@ class _RestrictedBackend(_DummyBackend):
     def get_name() -> str:
         return "RESTRICTED"
 
-    @classmethod
-    def get_supported_head_sizes(cls) -> list[int]:
+    @staticmethod
+    def get_supported_head_sizes() -> list[int]:
         return [64, 128]
 
     @classmethod
@@ -81,8 +79,7 @@ def test_supported_head_size_passes():
 
 
 def test_mask_requirement_reports_reason():
-    reason = _RestrictedBackend.validate_compatibility(
-        64, torch.float16, needs_attention_mask=True)
+    reason = _RestrictedBackend.validate_compatibility(64, torch.float16, needs_attention_mask=True)
     assert reason is not None
     assert "mask" in reason
 

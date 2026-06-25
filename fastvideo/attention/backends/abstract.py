@@ -71,8 +71,8 @@ class AttentionBackend(ABC):
         """
         return True
 
-    @classmethod
-    def get_supported_head_sizes(cls) -> list[int] | None:
+    @staticmethod
+    def get_supported_head_sizes() -> list[int] | None:
         """Attention head sizes this backend supports.
 
         Return None for no restriction.
