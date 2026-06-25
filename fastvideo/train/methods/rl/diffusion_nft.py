@@ -521,11 +521,12 @@ class DiffusionNFTMethod(TrainingMethod):
             return
 
         artifacts = []
+        fps = int(self._validation_config.fps)
         for item in sorted(logs, key=lambda x: int(x["index"])):
             artifact = tracker.video(
                 media_to_video_array(item["media"]),
                 caption=validation_caption(str(item["prompt"]), item["rewards"]),
-                fps=1,
+                fps=fps,
             )
             if artifact is not None:
                 artifacts.append(artifact)
