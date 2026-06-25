@@ -90,20 +90,27 @@ PY
 #    matches the published HD-Mixkit-Finetune-Wan shard layout
 #    (worker_0/data_chunk_*.parquet).
 echo "[preprocess] running v1_preprocessing_new on ${NUM_GPUS} GPU(s)"
+# FastVideoArgs / PreprocessConfig register dash-separated CLI flags
+# (--model-path, --preprocess.dataset-type, ...); the underscore spellings are
+# rejected as "unrecognized arguments". preprocess-video-batch-size=1 keeps the
+# text encoder from batch-tokenizing variable-length captions into a ragged
+# tensor (the MixKit captions differ in length), which otherwise raises
+# "expected sequence of length N at dim 1" before any clip is encoded.
 torchrun --nproc_per_node="${NUM_GPUS}" \
     -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
-    --model_path "${MODEL_PATH}" \
+    --model-path "${MODEL_PATH}" \
     --mode preprocess \
-    --workload_type t2v \
-    --preprocess.video_loader_type torchvision \
-    --preprocess.dataset_type merged \
-    --preprocess.dataset_path "${STAGE_DIR}" \
-    --preprocess.dataset_output_dir "${DATA_ROOT}" \
-    --preprocess.max_height 480 \
-    --preprocess.max_width 832 \
-    --preprocess.num_frames 77 \
-    --preprocess.train_fps 16 \
-    --preprocess.samples_per_file 8
+    --workload-type t2v \
+    --preprocess.video-loader-type torchvision \
+    --preprocess.dataset-type merged \
+    --preprocess.preprocess-video-batch-size 1 \
+    --preprocess.dataset-path "${STAGE_DIR}" \
+    --preprocess.dataset-output-dir "${DATA_ROOT}" \
+    --preprocess.max-height 480 \
+    --preprocess.max-width 832 \
+    --preprocess.num-frames 77 \
+    --preprocess.train-fps 16 \
+    --preprocess.samples-per-file 8
 
 echo
 echo "Done."
