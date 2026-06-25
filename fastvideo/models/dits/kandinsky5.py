@@ -15,7 +15,9 @@ try:
     flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
     CAN_USE_FLEX_ATTN = True
 except:
+    print("\n" * 10, "Flex Attention is not present in your version of PyTorch, therefore NABLA can not be used.", "\n" * 10)
     CAN_USE_FLEX_ATTN = False
+    
     
 from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits import Kandinsky5VideoConfig
@@ -385,37 +387,39 @@ class Kandinsky5Attention(nn.Module):
             )
             
             hidden_states = flex_attention(
-                query=query,
-                key=key,
-                value=value,
+                query=query.transpose(1, 2),
+                key=key.transpose(1, 2),
+                value=value.transpose(1, 2),
                 block_mask=attn_mask
-            )
+            ).transpose(1, 2)
+        else:
+            try:
+                hidden_states = self.local_attention(query, key, value)
 
-        try:
-            hidden_states = self.local_attention(query, key, value)
-            
-        except AssertionError as exc:
-            # LocalAttention requires pipeline forward context. Standalone
-            # parity tests call the model directly, so fallback to Torch SDPA.
-            if "Forward context is not set" not in str(exc):
-                raise
-            query_shape = query.shape[:-2]
-            key_shape = key.shape[:-2]
-            query = query.reshape(query_shape[0], -1, self.num_heads,
-                                  query.shape[-1]).transpose(1, 2)
-            key = key.reshape(key_shape[0], -1, self.num_heads,
-                              key.shape[-1]).transpose(1, 2)
-            value = value.reshape(key_shape[0], -1, self.num_heads,
-                                  value.shape[-1]).transpose(1, 2)
-            hidden_states = F.scaled_dot_product_attention(
-                query,
-                key,
-                value,
-                attn_mask=None,
-                is_causal=False,
-            )
-            hidden_states = hidden_states.transpose(1, 2).reshape(
-                *query_shape, self.num_heads, -1)
+            except AssertionError as exc:
+                # LocalAttention requires pipeline forward context. Standalone
+                # parity tests call the model directly, so fallback to Torch SDPA.
+                if "Forward context is not set" not in str(exc):
+                    raise
+
+                query_shape = query.shape[:-2]
+                key_shape = key.shape[:-2]
+                query = query.reshape(query_shape[0], -1, self.num_heads,
+                                      query.shape[-1]).transpose(1, 2)
+                key = key.reshape(key_shape[0], -1, self.num_heads,
+                                  key.shape[-1]).transpose(1, 2)
+                value = value.reshape(key_shape[0], -1, self.num_heads,
+                                      value.shape[-1]).transpose(1, 2)
+                hidden_states = F.scaled_dot_product_attention(
+                    query,
+                    key,
+                    value,
+                    attn_mask=None,
+                    is_causal=False,
+                )
+                hidden_states = hidden_states.transpose(1, 2).reshape(
+                    *query_shape, self.num_heads, -1)
+                
         hidden_states = hidden_states.flatten(-2, -1)
 
         hidden_states, _ = self.out_layer(hidden_states)
