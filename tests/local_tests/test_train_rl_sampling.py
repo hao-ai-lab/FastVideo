@@ -4,6 +4,7 @@ import pytest
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.methods.rl.common import (
     DiffusionSampler,
+    RLValidationConfig,
     SamplingConfig,
     distributed_k_repeat_indices,
     media_to_video_array,
@@ -236,6 +237,7 @@ def test_diffusion_nft_video_config_uses_genrl_rewards_in_clean_layout():
     assert cfg.method["validation"]["num_steps"] == 50
     assert cfg.method["validation"]["num_prompts"] == 16
     assert cfg.method["validation"]["batch_size"] == 4
+    assert cfg.method["validation"]["fps"] == 16
     assert cfg.method["beta"] == 0.1
     assert cfg.method["kl_beta"] == 0.0001
     assert cfg.training.loop.gradient_accumulation_steps == 24
@@ -252,6 +254,12 @@ def test_validation_shard_indices_are_stable_and_padded():
 
     assert rank0 == [(0, True), (2, True), (4, True)]
     assert rank1 == [(1, True), (3, True), (0, False)]
+
+
+def test_rl_validation_config_parses_video_fps():
+    config = RLValidationConfig.from_mapping({"fps": 16})
+
+    assert config.fps == 16
 
 
 def test_distributed_k_repeat_indices_repeats_prompts_globally():
