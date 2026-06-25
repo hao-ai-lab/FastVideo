@@ -1,69 +1,91 @@
-"""NVFP4 + Attn-QAT (modified SageAttention3) inference on Blackwell.
+"""NVFP4 QAD inference example.
 
-Runs Wan2.1-T2V-1.3B fully in 4-bit: NVFP4 linear layers (activations
-quantized on the fly) together with the modified SageAttention3 FP4 attention
-backend (``ATTN_QAT_INFER``). This is the inference half of the
-Quantization-Aware Distillation (QAD) recipe.
+Runs FastWan-QAD-1.3B (a distilled Wan2.1-T2V-1.3B-Diffusers checkpoint) with
+NVFP4QATConfig quantization. Uses ATTN_QAT_INFER attention backend.
 
 Requirements:
-    - RTX 5090 / consumer Blackwell (sm_120a). The attn_qat_infer kernel hard
-      gates on sm_120; on other GPUs it falls back to Flash Attention.
-    - The attn_qat_infer kernel built into fastvideo-kernel (see #1455) and
-      flashinfer for the NVFP4 linear matmuls.
+    - GPU: Blackwell (B200/B300, sm100a+) for the FP4 linear path
+    - TAEHV (optional): Follow install instructions at https://github.com/madebyollin/taehv
 
 Usage:
-    python nvfp4_qat_wan2_1_1_3b.py                 # NVFP4 linear + Attn-QAT attn
-    python nvfp4_qat_wan2_1_1_3b.py --bf16          # BF16 baseline
+    python nvfp4_qat_wan2_1_1_3b.py --taehv-checkpoint /path/to/taehv/taew2_1.pth           # NVFP4 QAD
+    python nvfp4_qat_wan2_1_1_3b.py --taehv-checkpoint /path/to/taehv/taew2_1.pth --bf16    # BF16 baseline
 """
 
 import argparse
 import os
 import time
 
+import torch
+
 OUTPUT_PATH = "video_samples"
 
 
+class TaehvDecoder:
+    def __init__(self, checkpoint_path: str, device: str = "cuda",
+                 dtype: torch.dtype = torch.float16) -> None:
+        from taehv import TAEHV
+        self.device = device
+        self.dtype = dtype
+        print(f"Loading TAEHV from {checkpoint_path} ...")
+        self.model = TAEHV(checkpoint_path=checkpoint_path).to(device, dtype).eval()
+
+    @torch.no_grad()
+    def decode(self, latents: torch.Tensor):
+        latents = latents.permute(0, 2, 1, 3, 4).to(self.device, self.dtype)
+        decoded = self.model.decode_video(latents, parallel=False, show_progress_bar=False)
+        frames = (decoded[0].clamp(0, 1) * 255).to(torch.uint8)
+        return frames.permute(0, 2, 3, 1).cpu().numpy()
+
+
 def main():
-    parser = argparse.ArgumentParser(description="NVFP4 + Attn-QAT video generation")
+    parser = argparse.ArgumentParser(description="NVFP4 QAD video generation benchmark")
     parser.add_argument("--bf16", action="store_true",
-                        help="BF16 baseline (no NVFP4 linear, default attention)")
-    parser.add_argument("--model", default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+                        help="BF16 baseline (no NVFP4 quantization)")
+    parser.add_argument("--taehv-checkpoint", default=None, metavar="PATH",
+                        help="Path to taew2_1.pth; enables TAEHV tiny autoencoder decoding")
+    parser.add_argument("--model", default="FastVideo/FastWan-QAD-1.3B",
                         help="Model path or HuggingFace ID")
-    parser.add_argument("--quant-method", default="nvfp4_qat", choices=["nvfp4_qat", "NVFP4"],
-                        help="Linear quantization config. Wan-2.1 uses nvfp4_qat (matches its "
-                             "to_q/k/v/out + ffn layers); NVFP4 is LTX2-specific and will NOT "
-                             "quantize Wan.")
-    parser.add_argument("--compile", action="store_true", help="Enable torch.compile for the DiT")
+    parser.add_argument("--no-compile", action="store_true", help="Disable torch.compile for the DiT")
     parser.add_argument("--num_gpus", type=int, default=1)
-    parser.add_argument("--infer_steps", type=int, default=50)
+    parser.add_argument("--infer_steps", type=int, default=3)
     args = parser.parse_args()
 
-    # The attention backend is selected via env var before the engine starts.
-    # ATTN_QAT_INFER -> AttnQatInferBackend (modified SageAttention3 FP4).
-    if not args.bf16:
-        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
+    os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "ATTN_QAT_INFER")
+    os.environ["FASTVIDEO_DISABLE_ATTENTION_COMPILE"] = "0"
+    os.environ["FLASHINFER_CUDA_ARCH_LIST"] = "12.0a"
 
-    # Import after the env var so the platform picks up the selection.
     from fastvideo import VideoGenerator
-    from fastvideo.layers.quantization import get_quantization_config
+    from fastvideo.configs.pipelines.base import PipelineConfig
 
-    mode = "bf16" if args.bf16 else args.quant_method
-    if args.compile:
+    mode = "bf16" if args.bf16 else "nvfp4_qad"
+    if not args.no_compile:
         mode += "_compile"
-    print(f"Mode: {mode.upper()}")
+    use_taehv = args.taehv_checkpoint is not None
+    print(f"Mode: {mode.upper()}" + ("  decoder=TAEHV" if use_taehv else "  decoder=VAE"))
 
-    # transformer_quant needs a QuantizationConfig *instance* — the bare string
-    # is not resolved on the from_pretrained kwarg path.
-    extra = {} if args.bf16 else {"transformer_quant": get_quantization_config(args.quant_method)()}
+    taehv = TaehvDecoder(args.taehv_checkpoint) if use_taehv else None
+
+    pipeline_config = PipelineConfig.from_pretrained(args.model)
+    pipeline_config.text_encoder_precisions = ("bf16",)
+    if not args.bf16:
+        from fastvideo.layers.quantization.nvfp4_qat_config import NVFP4QATConfig
+        pipeline_config.dit_config.quant_config = NVFP4QATConfig()
+
     generator = VideoGenerator.from_pretrained(
         args.model,
+        pipeline_config=pipeline_config,
         num_gpus=args.num_gpus,
-        use_fsdp_inference=args.bf16,
+        use_fsdp_inference=False,
         dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        enable_torch_compile=args.compile,
-        **extra,
+        dit_layerwise_offload=False,
+        vae_cpu_offload=use_taehv,
+        text_encoder_cpu_offload=False,
+        pin_cpu_memory=False,
+        enable_torch_compile=not args.no_compile,
+        enable_torch_compile_text_encoder=not args.no_compile,
+        enable_torch_compile_vae=not args.no_compile and not use_taehv,
+        output_type="latent" if use_taehv else "pil",
     )
 
     prompt = (
@@ -72,21 +94,42 @@ def main():
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
 
-    n_warmup = 2 if args.compile else 1
+    n_warmup = 2 if not args.no_compile else 0
     for _ in range(n_warmup):
-        generator.generate(request={"prompt": prompt, "sampling": {"num_inference_steps": 2},
-                                    "output": {"save_video": False}})
+        warmup_result = generator.generate(request={"prompt": prompt, "sampling": {"num_inference_steps": 3, "guidance_scale": 1.0},
+                                                    "output": {"save_video": False}})
+        if use_taehv:
+            taehv.decode(warmup_result.samples)
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
-    start = time.time()
-    generator.generate(request={
-        "prompt": prompt,
-        "sampling": {"num_inference_steps": args.infer_steps},
-        "output": {"save_video": True, "output_path": os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")},
-    })
-    elapsed = time.time() - start
-    print(f"[{mode.upper()}] {args.infer_steps} steps in {elapsed:.2f}s "
-          f"({args.infer_steps / elapsed:.2f} it/s)")
+    video_path = os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")
+    if use_taehv:
+        import imageio
+        result = generator.generate(request={
+            "prompt": prompt,
+            "sampling": {"num_inference_steps": args.infer_steps, "guidance_scale": 1.0},
+            "output": {"save_video": False},
+        })
+        denoise_elapsed = result.generation_time
+        torch.cuda.synchronize()
+        t_decode = time.perf_counter()
+        frames = taehv.decode(result.samples)
+        torch.cuda.synchronize()
+        decode_elapsed = time.perf_counter() - t_decode
+        total = denoise_elapsed + decode_elapsed
+        imageio.mimsave(video_path, frames, fps=16, format="mp4")
+        print(f"Saved TAEHV-decoded video to: {video_path}")
+        print(f"[{mode.upper()}] {args.infer_steps} steps in {total:.3f}s "
+              f"(denoise {denoise_elapsed:.3f}s + decode {decode_elapsed:.3f}s)")
+    else:
+        result = generator.generate(request={
+            "prompt": prompt,
+            "sampling": {"num_inference_steps": args.infer_steps, "guidance_scale": 1.0},
+            "output": {"save_video": True, "output_path": video_path},
+        })
+        elapsed = result.generation_time
+        print(f"[{mode.upper()}] {args.infer_steps} steps in {elapsed:.3f}s "
+              f"({args.infer_steps / elapsed:.2f} it/s)")
 
     generator.shutdown()
 
