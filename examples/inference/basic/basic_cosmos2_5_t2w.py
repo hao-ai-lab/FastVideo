@@ -1,23 +1,28 @@
 from fastvideo import VideoGenerator
-from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api import (
+    EngineConfig, GenerationRequest, GeneratorConfig, OffloadConfig, OutputConfig,
+)
 
 
 def main():
     # Point this to your local diffusers model dir (or replace with a HF model ID).
     model_path = "KyleShao/Cosmos-Predict2.5-2B-Diffusers"
 
-    generator = VideoGenerator.from_pretrained(
-        model_path,
-        num_gpus=1,
-        use_fsdp_inference=False,  # set True if GPU is out of memory
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path=model_path,
+            engine=EngineConfig(
+                num_gpus=1,
+                use_fsdp_inference=False,  # set True if GPU is out of memory
+                offload=OffloadConfig(
+                    dit=False,
+                    vae=False,
+                    text_encoder=True,
+                    pin_cpu_memory=True,
+                ),
+            ),
+        )
     )
-
-    # Load default sampling parameters (negative_prompt, resolution, steps, etc.)
-    sampling_param = SamplingParam.from_pretrained(model_path)
 
     prompt = (
         "A high-definition video captures the precision of robotic welding in an industrial setting. "
@@ -34,11 +39,14 @@ def main():
         "underscoring the ongoing nature of the welding operation."
     )
 
-    generator.generate_video(
-        prompt,
-        sampling_param=sampling_param,
-        output_path="outputs_video/cosmos2_5_t2w.mp4",
-        save_video=True,
+    generator.generate(
+        GenerationRequest(
+            prompt=prompt,
+            output=OutputConfig(
+                output_path="outputs_video/cosmos2_5_t2w.mp4",
+                save_video=True,
+            ),
+        )
     )
 
     generator.shutdown()
@@ -46,6 +54,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-

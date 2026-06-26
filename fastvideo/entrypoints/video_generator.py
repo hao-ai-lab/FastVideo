@@ -26,7 +26,7 @@ import torch
 import torchvision
 from einops import rearrange
 
-from fastvideo.api.compat import (
+from fastvideo.api.translation import (
     expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,

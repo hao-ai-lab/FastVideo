@@ -5,8 +5,14 @@ from copy import deepcopy
 
 import gradio as gr
 
-from fastvideo.configs.sample.base import SamplingParam
-from fastvideo.entrypoints.video_generator import VideoGenerator
+from fastvideo import VideoGenerator
+from fastvideo.api import (
+    GenerationRequest,
+    InputConfig,
+    OutputConfig,
+    SamplingConfig,
+    SamplingParam,
+)
 
 from .config import (
     DEFAULT_FPS,
@@ -69,40 +75,38 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             output_path = str(OUTPUT_DIR / video_filename)
             params.output_path = output_path
             start_time = time.perf_counter()
-            result = generator.generate_video(
-                prompt=prompt,
-                output_path=output_path,
-                fps=DEFAULT_FPS,
-                seed=int(params.seed),
-                save_video=True,
-                return_frames=False,
-                guidance_scale=float(params.guidance_scale),
-                height=int(params.height),
-                width=int(params.width),
-                num_frames=int(params.num_frames),
-                num_inference_steps=DEFAULT_NUM_INFERENCE_STEPS,
-                negative_prompt=params.negative_prompt,
-                image_path=params.image_path,
-                ltx2_image_crf=0.0
+            result = generator.generate(
+                GenerationRequest(
+                    prompt=prompt,
+                    negative_prompt=params.negative_prompt,
+                    inputs=InputConfig(image_path=params.image_path),
+                    sampling=SamplingConfig(
+                        seed=int(params.seed),
+                        fps=DEFAULT_FPS,
+                        guidance_scale=float(params.guidance_scale),
+                        height=int(params.height),
+                        width=int(params.width),
+                        num_frames=int(params.num_frames),
+                        num_inference_steps=DEFAULT_NUM_INFERENCE_STEPS,
+                    ),
+                    output=OutputConfig(
+                        output_path=output_path,
+                        save_video=True,
+                        return_frames=False,
+                    ),
+                    # LTX-2 i2v knob without a first-class typed field yet.
+                    extensions={"ltx2_image_crf": 0.0},
+                )
             )
             wall_time = time.perf_counter() - start_time
-            generation_time = (
-                result.get("generation_time")
-                if isinstance(result, dict) else None
-            )
-            e2e_latency = (
-                result.get("e2e_latency")
-                if isinstance(result, dict) else None
-            )
+            generation_time = result.generation_time
+            e2e_latency = result.extra.get("e2e_latency")
             if generation_time is None:
                 generation_time = wall_time
             if e2e_latency is None:
                 e2e_latency = wall_time
-            resolved_output_path = (
-                result.get("output_path", output_path)
-                if isinstance(result, dict) else output_path
-            )
-            logging_info = result.get("logging_info", None) if isinstance(result, dict) else None
+            resolved_output_path = result.video_path or output_path
+            logging_info = result.logging_info
             if logging_info:
                 stage_names = logging_info.get_execution_order()
                 stage_execution_times = [

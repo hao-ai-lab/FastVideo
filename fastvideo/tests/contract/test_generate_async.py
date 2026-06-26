@@ -199,7 +199,7 @@ class TestHealthCheckRequest:
         assert req.output.return_frames is False
 
     def test_round_trips_through_normalization(self):
-        from fastvideo.api.compat import normalize_generation_request
+        from fastvideo.api.translation import normalize_generation_request
         from fastvideo.entrypoints.video_generator import VideoGenerator
 
         req = VideoGenerator.default_health_check_request()

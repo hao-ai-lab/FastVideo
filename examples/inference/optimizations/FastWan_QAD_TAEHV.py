@@ -37,6 +37,17 @@ import imageio
 import torch
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    CompileConfig,
+    ComponentConfig,
+    EngineConfig,
+    GenerationRequest,
+    GeneratorConfig,
+    OffloadConfig,
+    OutputConfig,
+    PipelineSelection,
+    SamplingConfig,
+)
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.layers.quantization.nvfp4_qat_config import NVFP4QATConfig
 
@@ -148,35 +159,49 @@ def build_generator(args: argparse.Namespace) -> VideoGenerator:
 
     compile_enabled = not args.no_compile
 
-    extra_kwargs = {}
+    # ``pipeline_config`` is a PipelineConfig object (not a string path) and
+    # ``output_type`` has no first-class typed field, so both are routed through
+    # the pipeline experimental escape hatch.
+    experimental = {"pipeline_config": pipeline_config}
+
+    components = ComponentConfig()
     if args.distilled_model:
         weights_path = resolve_distilled_weights(args.distilled_model)
         print(f"Using distilled weights: {args.distilled_model} -> {weights_path}")
-        extra_kwargs["init_weights_from_safetensors"] = weights_path
+        components.transformer_weights = weights_path
 
     if args.taehv:
         # Skip the in-pipeline VAE decode entirely: the pipeline returns raw
         # latents, the Wan VAE is offloaded to CPU (and not compiled) since we
         # decode with TAEHV in this script instead.
-        extra_kwargs["output_type"] = "latent"
+        experimental["output_type"] = "latent"
 
-    generator = VideoGenerator.from_pretrained(
-        model_id,
-        pipeline_config=pipeline_config,
-        num_gpus=args.num_gpus,
-        # Keep everything resident on the GPU -- no offloading, except the
-        # unused Wan VAE when TAEHV handles decoding.
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=args.taehv,
-        text_encoder_cpu_offload=False,
-        pin_cpu_memory=False,
-        enable_torch_compile=compile_enabled,
-        enable_torch_compile_text_encoder=compile_enabled,
-        enable_torch_compile_vae=compile_enabled and not args.taehv,
-        **extra_kwargs,
+    generator_config = GeneratorConfig(
+        model_path=model_id,
+        engine=EngineConfig(
+            num_gpus=args.num_gpus,
+            # Keep everything resident on the GPU -- no offloading, except the
+            # unused Wan VAE when TAEHV handles decoding.
+            use_fsdp_inference=False,
+            offload=OffloadConfig(
+                dit=False,
+                dit_layerwise=False,
+                vae=args.taehv,
+                text_encoder=False,
+                pin_cpu_memory=False,
+            ),
+            compile=CompileConfig(
+                enabled=compile_enabled,
+                text_encoder_enabled=compile_enabled,
+                vae_enabled=compile_enabled and not args.taehv,
+            ),
+        ),
+        pipeline=PipelineSelection(
+            components=components,
+            experimental=experimental,
+        ),
     )
+    generator = VideoGenerator.from_config(generator_config)
     return generator
 
 
@@ -237,11 +262,11 @@ def main() -> None:
     # runs below measure steady-state latency only.
     with silence_request_log():
         for _ in range(args.warmups):
-            warm = generator.generate(request={
-                "prompt": PROMPT,
-                "sampling": {"num_inference_steps": 2, "guidance_scale": args.guidance_scale},
-                "output": {"save_video": False, "return_frames": args.taehv},
-            })
+            warm = generator.generate(GenerationRequest(
+                prompt=PROMPT,
+                sampling=SamplingConfig(num_inference_steps=2, guidance_scale=args.guidance_scale),
+                output=OutputConfig(save_video=False, return_frames=args.taehv),
+            ))
             if args.taehv:
                 taehv.decode(warm.samples)
 
@@ -257,18 +282,18 @@ def main() -> None:
     frames = None
     with silence_request_log():
         for i in range(args.benchmark_runs):
-            result = generator.generate(request={
-                "prompt": PROMPT,
-                "sampling": {
-                    "num_inference_steps": args.infer_steps,
-                    "guidance_scale": args.guidance_scale,
-                },
-                "output": {
-                    "save_video": False,
-                    "return_frames": args.taehv,
-                    "output_path": output_path,
-                },
-            })
+            result = generator.generate(GenerationRequest(
+                prompt=PROMPT,
+                sampling=SamplingConfig(
+                    num_inference_steps=args.infer_steps,
+                    guidance_scale=args.guidance_scale,
+                ),
+                output=OutputConfig(
+                    save_video=False,
+                    return_frames=args.taehv,
+                    output_path=output_path,
+                ),
+            ))
             denoise_elapsed = result.generation_time
             denoise_times.append(denoise_elapsed)
 

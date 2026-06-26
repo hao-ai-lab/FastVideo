@@ -50,23 +50,33 @@ N_DUP = 4  # how many times to duplicate the video for the gen/ref corpora
 def generate_one_ltx2_video() -> str:
     os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN")
     from fastvideo import VideoGenerator
+    from fastvideo.api import (EngineConfig, GenerationRequest, GeneratorConfig,
+                               OutputConfig, SamplingConfig)
 
     Path(OUTPUT_PATH).parent.mkdir(parents=True, exist_ok=True)
     # Davids048/LTX2-Base-Diffusers is the audio-capable LTX-2 checkpoint
     # (the Distilled variant ships without the audio VAE, so its mp4
     # audio track is silence/noise — unusable for audio.* metrics).
-    generator = VideoGenerator.from_pretrained(
-        "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="Davids048/LTX2-Base-Diffusers",
+            engine=EngineConfig(num_gpus=1),
+        )
     )
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-        num_frames=121,  # ~5s @ 24 fps — long enough for audio.desync (Synchformer ≥14 segments)
-        height=480,
-        width=832,
-        fps=24,
+    generator.generate(
+        GenerationRequest(
+            prompt=PROMPT,
+            sampling=SamplingConfig(
+                num_frames=121,  # ~5s @ 24 fps — long enough for audio.desync (Synchformer ≥14 segments)
+                height=480,
+                width=832,
+                fps=24,
+            ),
+            output=OutputConfig(
+                output_path=OUTPUT_PATH,
+                save_video=True,
+            ),
+        )
     )
     generator.shutdown()
     torch.cuda.empty_cache()

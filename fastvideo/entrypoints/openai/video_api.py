@@ -19,7 +19,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 
-from fastvideo.api.compat import explicit_request_updates
+from fastvideo.api.translation import explicit_request_updates
 from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.state import (
     get_default_request,

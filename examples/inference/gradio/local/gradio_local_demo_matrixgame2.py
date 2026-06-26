@@ -9,6 +9,7 @@ import uvicorn
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 
+from fastvideo.api import EngineConfig, GeneratorConfig, OffloadConfig
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
 from fastvideo.models.dits.matrixgame2.utils import expand_action_to_frames
 
@@ -572,14 +573,20 @@ def main():
     
     print(f"Loading model: {model_path}")
     setup_model_environment(model_path)
-    generator = StreamingVideoGenerator.from_pretrained(
-        model_path,
-        num_gpus=1,
-        use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
+    generator = StreamingVideoGenerator.from_config(
+        GeneratorConfig(
+            model_path=model_path,
+            engine=EngineConfig(
+                num_gpus=1,
+                use_fsdp_inference=True,
+                offload=OffloadConfig(
+                    dit=True,
+                    vae=False,
+                    text_encoder=True,
+                    pin_cpu_memory=True,
+                ),
+            ),
+        )
     )
     
     generators = {model_path: generator}

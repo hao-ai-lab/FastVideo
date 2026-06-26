@@ -4,6 +4,9 @@ import os
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SLA_ATTN"
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig, GenerationRequest, GeneratorConfig, OutputConfig, SamplingConfig,
+)
 
 OUTPUT_PATH = "video_samples_turbodiffusion_14B"
 
@@ -11,10 +14,12 @@ OUTPUT_PATH = "video_samples_turbodiffusion_14B"
 def main() -> None:
     # TurboDiffusion 14B: 1-4 step video generation using RCM scheduler + SLA attention
     # FastVideo will automatically use TurboDiffusionPipeline when specified
-    generator = VideoGenerator.from_pretrained(
-        "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
-        # 14B model needs more GPUs
-        num_gpus=2,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="loayrashid/TurboWan2.1-T2V-14B-Diffusers",
+            # 14B model needs more GPUs
+            engine=EngineConfig(num_gpus=2),
+        )
     )
 
     prompt = (
@@ -22,11 +27,12 @@ def main() -> None:
         "wide with interest. The playful yet serene atmosphere is complemented by soft "
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
-    video = generator.generate_video(
-        prompt,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-        seed=42,
+    video = generator.generate(
+        GenerationRequest(
+            prompt=prompt,
+            output=OutputConfig(output_path=OUTPUT_PATH, save_video=True),
+            sampling=SamplingConfig(seed=42),
+        )
     )
 
     # Generate another video with a different prompt, without reloading the model!
@@ -37,11 +43,12 @@ def main() -> None:
         "embodying the raw energy of the wild. Low angle, steady tracking shot, "
         "cinematic."
     )
-    video2 = generator.generate_video(
-        prompt2,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-        seed=42,
+    video2 = generator.generate(
+        GenerationRequest(
+            prompt=prompt2,
+            output=OutputConfig(output_path=OUTPUT_PATH, save_video=True),
+            sampling=SamplingConfig(seed=42),
+        )
     )
 
 

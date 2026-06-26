@@ -269,7 +269,7 @@ class TestNoInternalImports:
         "fastvideo.pipelines.",
         "fastvideo.configs.",
         "fastvideo.fastvideo_args",
-        "fastvideo.api.compat",
+        "fastvideo.api.translation",
         "fastvideo.api.parser",
         "fastvideo.api.overrides",
         "fastvideo.api.errors",

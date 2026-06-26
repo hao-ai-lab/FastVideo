@@ -55,10 +55,11 @@ demo can actually boot:
    `fastvideo/fastvideo_args.py` currently wires only `ltx2_vae_tiling`.
    The backing stages (`ltx2_refine.py`, `ltx2_i2v_conditioning.py`) are
    also missing from `fastvideo/pipelines/stages/`.
-3. **`fastvideo.configs.sample.base.SamplingParam`** — the import path used
-   by this demo. Upstream moved sampling params to
-   `fastvideo.api.sampling_param`. A re-export shim at the old path, or an
-   import update here once the other two prereqs land, will resolve it.
+3. **`SamplingParam`** — now imported from `fastvideo.api` (the public
+   re-export of `fastvideo.api.sampling_param`); the old
+   `fastvideo.configs.sample.base` path was removed upstream. `SamplingParam`
+   here only sources model-default slider values — generation itself runs
+   through the typed `GenerationRequest` / `generator.generate(...)` path.
 
 ## Environment variables
 

@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from fastvideo.api.compat import register_continuation_kind
+from fastvideo.api.translation import register_continuation_kind
 from fastvideo.api.schema import ContinuationState
 
 if TYPE_CHECKING:

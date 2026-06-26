@@ -69,7 +69,7 @@ def _patch_fastvideo_args_from_kwargs(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "fastvideo.api.compat.FastVideoArgs.from_kwargs",
+        "fastvideo.api.translation.FastVideoArgs.from_kwargs",
         classmethod(fake_from_kwargs),
     )
     return captured

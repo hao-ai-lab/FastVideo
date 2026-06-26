@@ -28,24 +28,27 @@ Prerequisites: same as `basic_stable_audio.py`. The converted repo is
 public so no gated-access flow is required.
 """
 from fastvideo import VideoGenerator
+from fastvideo.api import (EngineConfig, GenerationRequest, GeneratorConfig,
+                           OutputConfig)
 
 PROMPT = "Lo-fi hip hop instrumental with vinyl crackle and gentle piano."
 
 
 def main() -> None:
-    generator = VideoGenerator.from_pretrained(
-        "FastVideo/stable-audio-open-small-Diffusers",
-        num_gpus=1,
-    )
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="FastVideo/stable-audio-open-small-Diffusers",
+            engine=EngineConfig(num_gpus=1),
+        ))
     output_path = "outputs_audio/stable_audio_small/output_stable_audio_small.wav"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-        # Small variant trains on a ~11.9s window — keep `audio_end_in_s`
-        # at or below that.
-        audio_end_in_s=6.0,
-    )
+    generator.generate(
+        GenerationRequest(
+            prompt=PROMPT,
+            output=OutputConfig(output_path=output_path, save_video=True),
+            # Small variant trains on a ~11.9s window — keep `audio_end_in_s`
+            # at or below that.
+            extensions={"audio_end_in_s": 6.0},
+        ))
     generator.shutdown()
 
 

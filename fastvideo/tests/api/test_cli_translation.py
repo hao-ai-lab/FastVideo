@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fastvideo.api.compat import request_to_sampling_param
+from fastvideo.api.translation import request_to_sampling_param
 from fastvideo.entrypoints.cli import main as cli_main
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
 from fastvideo.entrypoints.cli.inference_config import (

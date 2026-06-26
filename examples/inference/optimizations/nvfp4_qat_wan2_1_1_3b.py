@@ -45,26 +45,29 @@ def main():
 
     # Import after the env var so the platform picks up the selection.
     from fastvideo import VideoGenerator
-    from fastvideo.layers.quantization import get_quantization_config
+    from fastvideo.api import (
+        CompileConfig, EngineConfig, GenerationRequest, GeneratorConfig,
+        OffloadConfig, OutputConfig, QuantizationConfig, SamplingConfig,
+    )
 
     mode = "bf16" if args.bf16 else args.quant_method
     if args.compile:
         mode += "_compile"
     print(f"Mode: {mode.upper()}")
 
-    # transformer_quant needs a QuantizationConfig *instance* — the bare string
-    # is not resolved on the from_pretrained kwarg path.
-    extra = {} if args.bf16 else {"transformer_quant": get_quantization_config(args.quant_method)()}
-    generator = VideoGenerator.from_pretrained(
-        args.model,
-        num_gpus=args.num_gpus,
-        use_fsdp_inference=args.bf16,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        enable_torch_compile=args.compile,
-        **extra,
-    )
+    # transformer_quant takes the config name (string); the typed path resolves
+    # the QuantizationConfig class.
+    quantization = None if args.bf16 else QuantizationConfig(transformer_quant=args.quant_method)
+    generator = VideoGenerator.from_config(GeneratorConfig(
+        model_path=args.model,
+        engine=EngineConfig(
+            num_gpus=args.num_gpus,
+            use_fsdp_inference=args.bf16,
+            offload=OffloadConfig(dit=False, vae=True, text_encoder=True),
+            compile=CompileConfig(enabled=args.compile),
+            quantization=quantization,
+        ),
+    ))
 
     prompt = (
         "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
@@ -74,16 +77,20 @@ def main():
 
     n_warmup = 2 if args.compile else 1
     for _ in range(n_warmup):
-        generator.generate(request={"prompt": prompt, "sampling": {"num_inference_steps": 2},
-                                    "output": {"save_video": False}})
+        generator.generate(GenerationRequest(
+            prompt=prompt,
+            sampling=SamplingConfig(num_inference_steps=2),
+            output=OutputConfig(save_video=False),
+        ))
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     start = time.time()
-    generator.generate(request={
-        "prompt": prompt,
-        "sampling": {"num_inference_steps": args.infer_steps},
-        "output": {"save_video": True, "output_path": os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")},
-    })
+    generator.generate(GenerationRequest(
+        prompt=prompt,
+        sampling=SamplingConfig(num_inference_steps=args.infer_steps),
+        output=OutputConfig(save_video=True,
+                            output_path=os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")),
+    ))
     elapsed = time.time() - start
     print(f"[{mode.upper()}] {args.infer_steps} steps in {elapsed:.2f}s "
           f"({args.infer_steps / elapsed:.2f} it/s)")

@@ -1,5 +1,6 @@
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
 from fastvideo.models.dits.matrixgame2.utils import get_current_action_async, expand_action_to_frames
+from fastvideo.api import EngineConfig, GeneratorConfig, OffloadConfig
 
 import torch
 import asyncio
@@ -42,17 +43,23 @@ async def main():
     # attempt to identify the optimal arguments.
     config = VARIANT_CONFIG[MODEL_VARIANT]
 
-    generator = StreamingVideoGenerator.from_pretrained(
-        config["model_path"],
-        # FastVideo will automatically handle distributed setup
-        num_gpus=1,
-        use_fsdp_inference=False, # set to True if GPU is out of memory
-        dit_cpu_offload=True, # DiT need to be offloaded for MoE
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
-        # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
-        pin_cpu_memory=True,
-        # image_encoder_cpu_offload=False,
+    generator = StreamingVideoGenerator.from_config(
+        GeneratorConfig(
+            model_path=config["model_path"],
+            # FastVideo will automatically handle distributed setup
+            engine=EngineConfig(
+                num_gpus=1,
+                use_fsdp_inference=False,  # set to True if GPU is out of memory
+                offload=OffloadConfig(
+                    dit=True,  # DiT need to be offloaded for MoE
+                    vae=False,
+                    text_encoder=True,
+                    # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
+                    pin_cpu_memory=True,
+                    # image_encoder=False,
+                ),
+            ),
+        )
     )
 
     max_blocks = 50

@@ -22,6 +22,10 @@ Requirements:
 import argparse
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig, GenerationRequest, GeneratorConfig, InputConfig,
+    OffloadConfig, OutputConfig, SamplingConfig,
+)
 
 
 def main():
@@ -74,33 +78,47 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    generator = VideoGenerator.from_pretrained(
-        args.model_path,
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
-    )
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path=args.model_path,
+            engine=EngineConfig(
+                num_gpus=1,
+                use_fsdp_inference=False,
+                offload=OffloadConfig(
+                    dit=False,
+                    vae=True,
+                    text_encoder=True,
+                    pin_cpu_memory=True,
+                ),
+            ),
+        ))
 
-    video = generator.generate_video(
-        args.prompt,
-        negative_prompt=args.negative_prompt,
-        image_path=args.image_path,
-        trajectory_type=args.trajectory,
-        movement_distance=args.movement_distance,
-        camera_rotation=args.camera_rotation,
-        height=args.height,
-        width=args.width,
-        num_frames=args.num_frames,
-        num_inference_steps=args.num_inference_steps,
-        guidance_scale=args.guidance_scale,
-        fps=24,
-        seed=args.seed,
-        output_path=args.output_path,
-        save_video=True,
-    )
+    video = generator.generate(
+        GenerationRequest(
+            prompt=args.prompt,
+            negative_prompt=args.negative_prompt,
+            inputs=InputConfig(
+                image_path=args.image_path,
+            ),
+            sampling=SamplingConfig(
+                height=args.height,
+                width=args.width,
+                num_frames=args.num_frames,
+                num_inference_steps=args.num_inference_steps,
+                guidance_scale=args.guidance_scale,
+                fps=24,
+                seed=args.seed,
+            ),
+            output=OutputConfig(
+                output_path=args.output_path,
+                save_video=True,
+            ),
+            extensions={
+                "trajectory_type": args.trajectory,
+                "movement_distance": args.movement_distance,
+                "camera_rotation": args.camera_rotation,
+            },
+        ))
 
     generator.shutdown()
 

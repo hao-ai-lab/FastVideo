@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 import torch._inductor.config
 
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api import SamplingParam
 
 LOCAL_DEMO_DIR = Path(__file__).resolve().parent
 CLASSIFIER_DIR = Path(

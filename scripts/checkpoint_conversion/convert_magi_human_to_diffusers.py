@@ -13,7 +13,8 @@ The base DiT uses Wan-AI/Wan2.2-TI2V-5B's VAE and google/t5gemma-9b-9b-ul2's
 encoder at inference time; neither is bundled upstream.
 
 This converter takes the raw MagiHuman base DiT and emits a Diffusers-style
-directory so `VideoGenerator.from_pretrained(...)` can load it standalone:
+directory so `VideoGenerator.from_config(GeneratorConfig(model_path=...))` can
+load it standalone:
 
     <output>/
         model_index.json

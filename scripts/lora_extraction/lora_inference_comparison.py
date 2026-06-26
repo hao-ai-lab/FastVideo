@@ -97,42 +97,53 @@ def generate_with_model(
     flow_shift: Optional[float] = None,
     embedded_guidance_scale: Optional[float] = None,
 ) -> str:
-    """Produce a video with VideoGenerator.from_pretrained; returns video path."""
+    """Produce a video with VideoGenerator.from_config; returns video path."""
     try:
         from fastvideo import VideoGenerator  # lazy import
+        from fastvideo.api import (
+            ComponentConfig, EngineConfig, GenerationRequest, GeneratorConfig,
+            OffloadConfig, OutputConfig, PipelineSelection, SamplingConfig,
+        )
     except Exception as exc:
         raise RuntimeError(f"Failed to import fastvideo.VideoGenerator: {exc}") from exc
 
-    init_kwargs: Dict[str, Any] = {
-        "num_gpus": 1,
-        "dit_cpu_offload": True,
-        "vae_cpu_offload": True,
-        "text_encoder_cpu_offload": True,
-        "pin_cpu_memory": True,
-    }
+    pipeline_kwargs: Dict[str, Any] = {}
     if lora_path:
-        init_kwargs["lora_path"] = lora_path
-        init_kwargs["lora_nickname"] = "extracted"
+        pipeline_kwargs["components"] = ComponentConfig(lora_path=lora_path)
+        pipeline_kwargs["experimental"] = {"lora_nickname": "extracted"}
 
-    generator = VideoGenerator.from_pretrained(model_path, **init_kwargs)
+    generator = VideoGenerator.from_config(GeneratorConfig(
+        model_path=model_path,
+        engine=EngineConfig(
+            num_gpus=1,
+            offload=OffloadConfig(dit=True, vae=True, text_encoder=True, pin_cpu_memory=True),
+        ),
+        pipeline=PipelineSelection(**pipeline_kwargs),
+    ))
 
-    gen_kwargs = {
-        "height": height,
-        "width": width,
-        "num_frames": num_frames,
-        "num_inference_steps": num_inference_steps,
-        "guidance_scale": guidance_scale,
-        "seed": seed,
-        "output_path": output_dir,
-        "output_video_name": output_name,
-        "save_video": True,
-    }
+    extensions: Dict[str, Any] = {}
     if flow_shift is not None:
-        gen_kwargs["flow_shift"] = flow_shift
+        extensions["flow_shift"] = flow_shift
     if embedded_guidance_scale is not None:
-        gen_kwargs["embedded_guidance_scale"] = embedded_guidance_scale
+        extensions["embedded_guidance_scale"] = embedded_guidance_scale
 
-    result = generator.generate_video(prompt, **gen_kwargs)
+    result = generator.generate(GenerationRequest(
+        prompt=prompt,
+        sampling=SamplingConfig(
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            seed=seed,
+        ),
+        output=OutputConfig(
+            output_path=output_dir,
+            output_video_name=output_name,
+            save_video=True,
+        ),
+        extensions=extensions,
+    ))
 
     # best-effort cleanup of internal executors
     try:
@@ -145,9 +156,9 @@ def generate_with_model(
     expected = Path(output_dir) / f"{output_name}.mp4"
     if expected.exists():
         return str(expected)
-    # fallback: check result dict
-    if isinstance(result, dict) and "video_path" in result:
-        return str(result["video_path"])
+    # fallback: check result video path
+    if getattr(result, "video_path", None):
+        return str(result.video_path)
     raise FileNotFoundError(f"Video not found at expected path: {expected}")
 
 

@@ -34,7 +34,7 @@ from fastvideo.api import (
     GeneratorConfig,
     GenerationRequest,
 )
-from fastvideo.api.compat import (
+from fastvideo.api.translation import (
     legacy_from_pretrained_to_config,
     legacy_generate_call_to_request,
     normalize_generation_request,
@@ -205,7 +205,7 @@ class TestDreamverseNoPrivateImports:
         [
             "fastvideo",
             "fastvideo.api",
-            "fastvideo.api.compat",  # public in that it's re-exported
+            "fastvideo.api.translation",  # public in that it's re-exported
         ],
     )
     def test_public_imports_resolve(self, import_path):

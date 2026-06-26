@@ -1,6 +1,8 @@
 from fastvideo import VideoGenerator
-
-# from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api import (
+    EngineConfig, GenerationRequest, GeneratorConfig, OffloadConfig,
+    OutputConfig, SamplingConfig,
+)
 
 OUTPUT_PATH = "video_samples_wan2_2_14B_t2v"
 def main():
@@ -8,30 +10,37 @@ def main():
     # model.
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
-    generator = VideoGenerator.from_pretrained(
-        "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
-        # FastVideo will automatically handle distributed setup
-        num_gpus=2,
-        use_fsdp_inference=False, # set to True if GPU is out of memory 
-        dit_cpu_offload=True, # DiT need to be offloaded for MoE
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
-        # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
-        pin_cpu_memory=True,
-        # image_encoder_cpu_offload=False,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+            engine=EngineConfig(
+                # FastVideo will automatically handle distributed setup
+                num_gpus=2,
+                use_fsdp_inference=False,  # set to True if GPU is out of memory
+                offload=OffloadConfig(
+                    dit=True,  # DiT need to be offloaded for MoE
+                    vae=False,
+                    text_encoder=True,
+                    # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
+                    pin_cpu_memory=True,
+                ),
+            ),
+        )
     )
 
-    # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    # sampling_param.num_frames = 45
-    # sampling_param.image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
     # Generate videos with the same simple API, regardless of GPU count
     prompt = (
         "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
         "wide with interest. The playful yet serene atmosphere is complemented by soft "
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
-    _ = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, height=720, width=1280, num_frames=81)
-    # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
+    _ = generator.generate(
+        GenerationRequest(
+            prompt=prompt,
+            sampling=SamplingConfig(height=720, width=1280, num_frames=81),
+            output=OutputConfig(output_path=OUTPUT_PATH, save_video=True),
+        )
+    )
 
     # Generate another video with a different prompt, without reloading the
     # model!
@@ -41,7 +50,13 @@ def main():
         "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
         "embodying the raw energy of the wild. Low angle, steady tracking shot, "
         "cinematic.")
-    _ = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, height=720, width=1280, num_frames=81)
+    _ = generator.generate(
+        GenerationRequest(
+            prompt=prompt2,
+            sampling=SamplingConfig(height=720, width=1280, num_frames=81),
+            output=OutputConfig(output_path=OUTPUT_PATH, save_video=True),
+        )
+    )
 
 
 if __name__ == "__main__":

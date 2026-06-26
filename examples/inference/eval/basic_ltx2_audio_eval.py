@@ -21,6 +21,10 @@ Install: ``uv pip install -e .[eval-audio]`` covers both metrics here
 import torch
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig, GenerationRequest, GeneratorConfig, OutputConfig,
+    SamplingConfig,
+)
 from fastvideo.eval import create_evaluator
 
 PROMPT = (
@@ -39,20 +43,26 @@ METRICS = [
 
 
 def main() -> None:
-    generator = VideoGenerator.from_pretrained(
-        "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
-    )
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="Davids048/LTX2-Base-Diffusers",
+            engine=EngineConfig(num_gpus=1),
+        ))
 
     output_path = "outputs_video/ltx2_audio_eval/output.mp4"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-        num_frames=121,
-        height=1088,
-        width=1920,
-    )
+    generator.generate(
+        GenerationRequest(
+            prompt=PROMPT,
+            sampling=SamplingConfig(
+                num_frames=121,
+                height=1088,
+                width=1920,
+            ),
+            output=OutputConfig(
+                output_path=output_path,
+                save_video=True,
+            ),
+        ))
     generator.shutdown()
     torch.cuda.empty_cache()
 

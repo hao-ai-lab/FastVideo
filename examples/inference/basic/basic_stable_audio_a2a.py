@@ -48,6 +48,12 @@ Picking `init_audio_strength` (0.0 to 1.0):
 Prerequisites: same as `basic_stable_audio.py`.
 """
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig,
+    GenerationRequest,
+    GeneratorConfig,
+    OutputConfig,
+)
 
 PROMPT = "Change the piano to a cello playing the same notes"
 # Path to any audio-bearing file (wav, mp3, mp4, m4a, flac, ...).
@@ -58,18 +64,24 @@ INIT_AUDIO_STRENGTH = 0.6
 
 
 def main() -> None:
-    generator = VideoGenerator.from_pretrained(
-        "FastVideo/stable-audio-open-1.0-Diffusers",
-        num_gpus=1,
-    )
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path="outputs_audio/stable_audio_a2a/output_a2a.wav",
-        save_video=True,
-        audio_end_in_s=6.0,
-        init_audio=INIT_AUDIO_PATH,
-        init_audio_strength=INIT_AUDIO_STRENGTH,
-    )
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="FastVideo/stable-audio-open-1.0-Diffusers",
+            engine=EngineConfig(num_gpus=1),
+        ))
+    generator.generate(
+        GenerationRequest(
+            prompt=PROMPT,
+            output=OutputConfig(
+                output_path="outputs_audio/stable_audio_a2a/output_a2a.wav",
+                save_video=True,
+            ),
+            extensions={
+                "audio_end_in_s": 6.0,
+                "init_audio": INIT_AUDIO_PATH,
+                "init_audio_strength": INIT_AUDIO_STRENGTH,
+            },
+        ))
     generator.shutdown()
 
 

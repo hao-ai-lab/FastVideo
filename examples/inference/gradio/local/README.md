@@ -33,7 +33,7 @@ This demo initializes a `VideoGenerator` with the minimum required arguments for
 
 The core functionality is in the `generate_video` function, which:
 1. Processes user inputs
-2. Uses the FastVideo VideoGenerator from earlier to run inference (`generator.generate_video()`)
+2. Uses the FastVideo VideoGenerator from earlier to run inference (`generator.generate(GenerationRequest(...))`)
 
 ## Gradio Interface
 

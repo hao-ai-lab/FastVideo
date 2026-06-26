@@ -48,7 +48,7 @@ highest first:
    `request.model_fields_set` (Pydantic v2). Unset fields do not count,
    even if the Pydantic model has a schema default for them.
 2. **`ServeConfig.default_request` (operator-explicit)** — projected via
-   [`explicit_request_updates()`](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/api/compat.py);
+   [`explicit_request_updates()`](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/api/translation.py);
    only fields the operator actually wrote into the YAML count as
    defaults. Every other field inherits the schema default rather than
    being pinned.

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from fastvideo.api.compat import generator_config_to_fastvideo_args
+from fastvideo.api.translation import generator_config_to_fastvideo_args
 from fastvideo.api.schema import (
     EngineConfig,
     GeneratorConfig,

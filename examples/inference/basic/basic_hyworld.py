@@ -1,4 +1,6 @@
 from fastvideo import VideoGenerator
+from fastvideo.api import (EngineConfig, GenerationRequest, GeneratorConfig, InputConfig, OffloadConfig, OutputConfig,
+                           SamplingConfig)
 from fastvideo.models.dits.hyworld.resolution_utils import get_resolution_from_image
 
 # Default prompt from HY-WorldPlay run.sh
@@ -31,33 +33,45 @@ def main():
 
     # Initialize generator
     print("\nInitializing VideoGenerator for HYWorld...")
-    generator = VideoGenerator.from_pretrained(
-        "FastVideo/HY-WorldPlay-Bidirectional-Diffusers",
-        num_gpus=1,
-        use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
-        image_encoder_cpu_offload=True,
-    )
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="FastVideo/HY-WorldPlay-Bidirectional-Diffusers",
+            engine=EngineConfig(
+                num_gpus=1,
+                use_fsdp_inference=True,
+                offload=OffloadConfig(
+                    dit=True,
+                    vae=True,
+                    text_encoder=True,
+                    pin_cpu_memory=True,
+                    image_encoder=True,
+                ),
+            ),
+        ))
 
     # Generate video
     # The pose string is automatically converted to camera matrices by the pipeline
     print("\nGenerating video...")
-    generator.generate_video(
-        prompt=args.prompt,
-        image_path=args.image,
-        pose=args.pose,  # Camera trajectory control
-        output_path=args.output_path,
-        save_video=True,
-        negative_prompt="",
-        num_frames=args.num_frames,
-        fps=24,
-        height=HEIGHT,
-        width=WIDTH,
-        seed=args.seed,
-    )
+    generator.generate(
+        GenerationRequest(
+            prompt=args.prompt,
+            negative_prompt="",
+            inputs=InputConfig(
+                image_path=args.image,
+                pose=args.pose,  # Camera trajectory control
+            ),
+            sampling=SamplingConfig(
+                num_frames=args.num_frames,
+                fps=24,
+                height=HEIGHT,
+                width=WIDTH,
+                seed=args.seed,
+            ),
+            output=OutputConfig(
+                output_path=args.output_path,
+                save_video=True,
+            ),
+        ))
 
     print(f"\nVideo saved to: {args.output_path}")
 

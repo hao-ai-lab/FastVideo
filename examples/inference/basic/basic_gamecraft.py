@@ -26,6 +26,15 @@ import os
 import torch
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig,
+    GenerationRequest,
+    GeneratorConfig,
+    InputConfig,
+    OffloadConfig,
+    OutputConfig,
+    SamplingConfig,
+)
 from fastvideo.models.camera import create_camera_trajectory
 
 # Model configuration (use GAMECRAFT_MODEL_PATH for local weights)
@@ -55,14 +64,20 @@ OUTPUT_PATH = "video_samples_gamecraft"
 def main():
     # Initialize generator
     # FastVideo will automatically download weights from HuggingFace
-    generator = VideoGenerator.from_pretrained(
-        MODEL_PATH,
-        num_gpus=1,
-        use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path=MODEL_PATH,
+            engine=EngineConfig(
+                num_gpus=1,
+                use_fsdp_inference=True,
+                offload=OffloadConfig(
+                    dit=True,
+                    vae=True,
+                    text_encoder=True,
+                    pin_cpu_memory=True,
+                ),
+            ),
+        )
     )
 
     # Video parameters
@@ -96,23 +111,27 @@ def main():
     prompt = DEFAULT_I2V_PROMPT if is_i2v else DEFAULT_PROMPTS["temple"]
     print(f"Mode: {'I2V' if is_i2v else 'T2V'}, prompt: {prompt[:60]}...")
 
-    gen_kw = dict(
+    request = GenerationRequest(
         prompt=prompt,
         negative_prompt="",
-        camera_states=camera_states,
-        height=height,
-        width=width,
-        num_frames=num_frames,
-        num_inference_steps=50,
-        guidance_scale=6.0,
-        seed=42,
-        fps=24,
-        output_path=OUTPUT_PATH,
-        save_video=True,
+        sampling=SamplingConfig(
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            num_inference_steps=50,
+            guidance_scale=6.0,
+            seed=42,
+            fps=24,
+        ),
+        output=OutputConfig(
+            output_path=OUTPUT_PATH,
+            save_video=True,
+        ),
+        extensions={"camera_states": camera_states},
     )
     if is_i2v:
-        gen_kw["image_path"] = image_path
-    generator.generate_video(**gen_kw)
+        request.inputs = InputConfig(image_path=image_path)
+    generator.generate(request)
 
 
 if __name__ == "__main__":

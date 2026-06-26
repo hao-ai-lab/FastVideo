@@ -1,4 +1,11 @@
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig,
+    GenerationRequest,
+    GeneratorConfig,
+    OutputConfig,
+    SamplingConfig,
+)
 
 
 PROMPT = (
@@ -18,19 +25,29 @@ PROMPT = (
 
 def main() -> None:
     # Uses FastVideo default sampling settings for LTX2 base.
-    generator = VideoGenerator.from_pretrained(
-        "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="Davids048/LTX2-Base-Diffusers",
+            engine=EngineConfig(
+                num_gpus=1,
+            ),
+        )
     )
 
     output_path = "outputs_video/ltx2_basic/output_ltx2_base_t2v_1088_1920_1.1.mp4"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-        num_frames=121,
-        height=1088,
-        width=1920,
+    generator.generate(
+        GenerationRequest(
+            prompt=PROMPT,
+            output=OutputConfig(
+                output_path=output_path,
+                save_video=True,
+            ),
+            sampling=SamplingConfig(
+                num_frames=121,
+                height=1088,
+                width=1920,
+            ),
+        )
     )
     generator.shutdown()
 

@@ -330,7 +330,7 @@ at FastVideo's CI — before the Dynamo-side integration even knows.
   internal; presets identify them by name on
   `PipelineSelection.preset`).
 * `fastvideo.fastvideo_args.FastVideoArgs` (legacy compat type).
-* `fastvideo.api.compat.*` private helpers
+* `fastvideo.api.translation.*` private helpers
   (`_validate_continuation_state` etc.) — the public boundary is
   `VideoGenerator` + `fastvideo.api`.
 * Any flat legacy LTX-2 kwarg (`ltx2_refine_upsampler_path`,

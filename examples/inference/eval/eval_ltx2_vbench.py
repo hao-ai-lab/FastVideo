@@ -33,6 +33,13 @@ import json
 from pathlib import Path
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig,
+    GenerationRequest,
+    GeneratorConfig,
+    OutputConfig,
+    SamplingConfig,
+)
 from fastvideo.eval import create_evaluator
 from fastvideo.eval.io import load_video
 
@@ -99,16 +106,27 @@ def generate(args: argparse.Namespace) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"[gen] loading {args.model} ({args.num_gpus} GPU)...")
-    generator = VideoGenerator.from_pretrained(args.model, num_gpus=args.num_gpus)
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path=args.model,
+            engine=EngineConfig(num_gpus=args.num_gpus),
+        )
+    )
     try:
         print(f"[gen] generating to {out}...")
-        generator.generate_video(
-            prompt=args.prompt,
-            output_path=str(out),
-            save_video=True,
-            num_frames=args.num_frames,
-            height=args.height,
-            width=args.width,
+        generator.generate(
+            GenerationRequest(
+                prompt=args.prompt,
+                sampling=SamplingConfig(
+                    num_frames=args.num_frames,
+                    height=args.height,
+                    width=args.width,
+                ),
+                output=OutputConfig(
+                    output_path=str(out),
+                    save_video=True,
+                ),
+            )
         )
     finally:
         generator.shutdown()

@@ -5,7 +5,13 @@ import time
 
 import gradio as gr
 from fastvideo.entrypoints.video_generator import VideoGenerator
-from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api import (
+    GenerationRequest,
+    GeneratorConfig,
+    OutputConfig,
+    SamplingConfig,
+    SamplingParam,
+)
 from copy import deepcopy
 
 
@@ -129,9 +135,22 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             output_dir = "outputs/"
             os.makedirs(output_dir, exist_ok=True)
             start_time = time.time()
-            result = generator.generate_video(prompt=prompt, sampling_param=params, save_video=True, return_frames=False)
+            result = generator.generate(
+                GenerationRequest(
+                    prompt=prompt,
+                    negative_prompt=params.negative_prompt,
+                    sampling=SamplingConfig(
+                        seed=int(params.seed),
+                        guidance_scale=params.guidance_scale,
+                        num_frames=int(params.num_frames),
+                        height=int(params.height),
+                        width=int(params.width),
+                    ),
+                    output=OutputConfig(save_video=True, return_frames=False),
+                )
+            )
             inference_time = time.time() - start_time
-            logging_info = result.get("logging_info", None)
+            logging_info = result.logging_info
             if logging_info:
                 stage_names = logging_info.get_execution_order()
                 stage_execution_times = [
@@ -550,7 +569,7 @@ def main():
     for model_path in model_paths:
         print(f"Loading model: {model_path}")
         setup_model_environment(model_path)
-        generators[model_path] = VideoGenerator.from_pretrained(model_path)
+        generators[model_path] = VideoGenerator.from_config(GeneratorConfig(model_path=model_path))
         default_params[model_path] = SamplingParam.from_pretrained(model_path)
     demo = create_gradio_interface(default_params, generators)
     print(f"Starting Gradio frontend at http://{args.host}:{args.port}")

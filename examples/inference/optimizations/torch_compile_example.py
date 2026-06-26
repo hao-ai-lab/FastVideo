@@ -22,6 +22,14 @@ import os
 import time
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    CompileConfig,
+    EngineConfig,
+    GenerationRequest,
+    GeneratorConfig,
+    OutputConfig,
+    SamplingConfig,
+)
 
 PROMPT = (
     "A high-definition video of a robotic arm welding a metal structure, "
@@ -42,24 +50,27 @@ def main() -> None:
 
     os.makedirs("video_samples", exist_ok=True)
 
-    generator = VideoGenerator.from_pretrained(
-        args.model,
-        num_gpus=args.num_gpus,
-        enable_torch_compile=args.compile,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path=args.model,
+            engine=EngineConfig(
+                num_gpus=args.num_gpus,
+                compile=CompileConfig(enabled=args.compile),
+            ),
+        )
     )
 
     def _run(tag: str) -> float:
         save = tag == "measured"
-        # Modern typed-request API (generate_video is deprecated). Same
-        # prompt/seed/shapes both runs so the compiled graph is reused.
-        request: dict = {
-            "prompt": PROMPT,
-            "sampling": {"seed": 1024},
-            "output": {"save_video": save},
-        }
+        # Same prompt/seed/shapes both runs so the compiled graph is reused.
+        output = OutputConfig(save_video=save)
         if save:
-            request["output"]["output_path"] = (
-                f"video_samples/torch_compile_{tag}.mp4")
+            output.output_path = f"video_samples/torch_compile_{tag}.mp4"
+        request = GenerationRequest(
+            prompt=PROMPT,
+            sampling=SamplingConfig(seed=1024),
+            output=output,
+        )
         t0 = time.perf_counter()
         generator.generate(request)
         return time.perf_counter() - t0

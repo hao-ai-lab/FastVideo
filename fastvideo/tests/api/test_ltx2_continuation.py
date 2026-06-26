@@ -21,7 +21,7 @@ import torch
 # Importing compat first, then the LTX-2 module, exercises the
 # self-registration side effect on import (important for the API
 # test suite where the pipeline package isn't otherwise imported).
-from fastvideo.api import compat as api_compat  # noqa: F401
+from fastvideo.api import translation as api_compat  # noqa: F401
 from fastvideo.api.schema import (
     ContinuationState,
     GenerationRequest,
@@ -217,7 +217,7 @@ class TestCompatLayerWireUp:
         # PR 7 removes the NotImplementedError for request.state; build a
         # minimal GenerationRequest carrying an LTX-2 state and make sure
         # the public boundary accepts it.
-        from fastvideo.api.compat import (
+        from fastvideo.api.translation import (
             normalize_generation_request,
             _validate_continuation_state,
         )
@@ -230,13 +230,13 @@ class TestCompatLayerWireUp:
         _validate_continuation_state(normalized.state)
 
     def test_unknown_kind_rejected_at_boundary(self):
-        from fastvideo.api.compat import _validate_continuation_state
+        from fastvideo.api.translation import _validate_continuation_state
         with pytest.raises(ValueError, match="Unknown ContinuationState kind"):
             _validate_continuation_state(
                 ContinuationState(kind="mystery.v1", payload={}))
 
     def test_empty_kind_rejected_at_boundary(self):
-        from fastvideo.api.compat import _validate_continuation_state
+        from fastvideo.api.translation import _validate_continuation_state
         with pytest.raises(ValueError, match="non-empty string"):
             _validate_continuation_state(
                 ContinuationState(kind="", payload={}))

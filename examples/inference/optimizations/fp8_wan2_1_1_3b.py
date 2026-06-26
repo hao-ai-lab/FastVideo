@@ -69,6 +69,16 @@ def main():
     os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
 
     from fastvideo import VideoGenerator
+    from fastvideo.api import (
+        CompileConfig,
+        EngineConfig,
+        GenerationRequest,
+        GeneratorConfig,
+        OffloadConfig,
+        OutputConfig,
+        PipelineSelection,
+        SamplingConfig,
+    )
     from fastvideo.layers.quantization import get_quantization_config
 
     mode = "bf16" if args.bf16 else f"fp8_{args.granularity}"
@@ -79,25 +89,33 @@ def main():
 
     taehv_model = load_taehv(args.taehv_checkpoint) if use_taehv else None
 
-    # transformer_quant needs a QuantizationConfig *instance* — the bare string
-    # is not resolved on the from_pretrained kwarg path.
-    extra = {} if args.bf16 else {
-        "transformer_quant": get_quantization_config("FP8")(granularity=args.granularity)
-    }
-    generator = VideoGenerator.from_pretrained(
-        args.model,
-        num_gpus=args.num_gpus,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=use_taehv,
-        text_encoder_cpu_offload=False,
-        pin_cpu_memory=False,
-        enable_torch_compile=not args.no_compile,
-        enable_torch_compile_vae=not args.no_compile and not use_taehv,
-        output_type="latent" if use_taehv else "pil",
-        **extra,
-    )
+    # ``output_type`` and ``transformer_quant`` have no first-class typed
+    # fields yet, so they ride the pipeline.experimental escape hatch (same
+    # place the legacy from_pretrained shim routed them). The typed
+    # QuantizationConfig only accepts a quant-name string, so it can't carry
+    # FP8's ``granularity`` arg — pass the resolved config instance instead.
+    experimental = {"output_type": "latent" if use_taehv else "pil"}
+    if not args.bf16:
+        experimental["transformer_quant"] = get_quantization_config("FP8")(granularity=args.granularity)
+    generator = VideoGenerator.from_config(GeneratorConfig(
+        model_path=args.model,
+        engine=EngineConfig(
+            num_gpus=args.num_gpus,
+            use_fsdp_inference=False,
+            offload=OffloadConfig(
+                dit=False,
+                dit_layerwise=False,
+                vae=use_taehv,
+                text_encoder=False,
+                pin_cpu_memory=False,
+            ),
+            compile=CompileConfig(
+                enabled=not args.no_compile,
+                vae_enabled=not args.no_compile and not use_taehv,
+            ),
+        ),
+        pipeline=PipelineSelection(experimental=experimental),
+    ))
 
     prompt = (
         "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
@@ -107,28 +125,34 @@ def main():
 
     n_warmup = 1 if not args.no_compile else 0
     for _ in range(n_warmup):
-        generator.generate(request={"prompt": prompt, "sampling": {"num_inference_steps": 3, "guidance_scale": 1.0},
-                                    "output": {"save_video": False}})
+        generator.generate(GenerationRequest(
+            prompt=prompt,
+            sampling=SamplingConfig(num_inference_steps=3, guidance_scale=1.0),
+            output=OutputConfig(save_video=False),
+        ))
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     start = time.time()
     if use_taehv:
-        result = generator.generate(request={
-            "prompt": prompt,
-            "sampling": {"num_inference_steps": args.infer_steps, "guidance_scale": 1.0},
-            "output": {"save_video": False},
-        })
+        result = generator.generate(GenerationRequest(
+            prompt=prompt,
+            sampling=SamplingConfig(num_inference_steps=args.infer_steps, guidance_scale=1.0),
+            output=OutputConfig(save_video=False),
+        ))
         import imageio
         frames = decode_with_taehv(taehv_model, result.samples)
         video_path = os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")
         imageio.mimsave(video_path, frames, fps=16, format="mp4")
         print(f"Saved TAEHV-decoded video to: {video_path}")
     else:
-        generator.generate(request={
-            "prompt": prompt,
-            "sampling": {"num_inference_steps": args.infer_steps, "guidance_scale": 1.0},
-            "output": {"save_video": True, "output_path": os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")},
-        })
+        generator.generate(GenerationRequest(
+            prompt=prompt,
+            sampling=SamplingConfig(num_inference_steps=args.infer_steps, guidance_scale=1.0),
+            output=OutputConfig(
+                save_video=True,
+                output_path=os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4"),
+            ),
+        ))
     elapsed = time.time() - start
     print(f"[{mode.upper()}] {args.infer_steps} steps in {elapsed:.2f}s "
           f"({args.infer_steps / elapsed:.2f} it/s)")

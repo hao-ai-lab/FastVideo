@@ -45,6 +45,9 @@ def _generate_videos(rows: list[dict], videos_dir: Path,
                      model: str, num_gpus: int,
                      num_frames: int, height: int, width: int) -> None:
     from fastvideo import VideoGenerator
+    from fastvideo.api import (
+        EngineConfig, GenerationRequest, GeneratorConfig, OutputConfig, SamplingConfig,
+    )
 
     videos_dir.mkdir(parents=True, exist_ok=True)
     todo = [(row, videos_dir / _expected_filename(row)) for row in rows]
@@ -55,13 +58,16 @@ def _generate_videos(rows: list[dict], videos_dir: Path,
 
     print(f"[gen] {len(todo)}/{len(rows)} scenarios to render with {model} "
           f"({num_frames}x{height}x{width})...")
-    gen = VideoGenerator.from_pretrained(model, num_gpus=num_gpus)
+    gen = VideoGenerator.from_config(GeneratorConfig(
+        model_path=model, engine=EngineConfig(num_gpus=num_gpus),
+    ))
     try:
         for row, out_path in todo:
-            gen.generate_video(
-                prompt=row["prompt"], output_path=str(out_path), save_video=True,
-                num_frames=num_frames, height=height, width=width,
-            )
+            gen.generate(GenerationRequest(
+                prompt=row["prompt"],
+                sampling=SamplingConfig(num_frames=num_frames, height=height, width=width),
+                output=OutputConfig(output_path=str(out_path), save_video=True),
+            ))
     finally:
         gen.shutdown()
 

@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for ``fastvideo.api.compat`` translation helpers covering the
+"""Tests for ``fastvideo.api.translation`` translation helpers covering the
 typed CompileConfig + PipelineSelection.vae_tiling surfaces promoted in
 PR 6.
 """
 from __future__ import annotations
 
-from fastvideo.api.compat import (
+from fastvideo.api.translation import (
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
 )

@@ -19,7 +19,7 @@ from copy import deepcopy
 
 import pytest
 
-from fastvideo.api.compat import (
+from fastvideo.api.translation import (
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
 )
@@ -208,7 +208,7 @@ class TestRefineFlattenCoversAllTypedFields:
 
     def test_all_fields_reemitted(self, monkeypatch) -> None:
         from fastvideo import fastvideo_args as fva
-        from fastvideo.api.compat import (
+        from fastvideo.api.translation import (
             generator_config_to_fastvideo_args,
         )
         from fastvideo.api.schema import GeneratorConfig, PipelineSelection

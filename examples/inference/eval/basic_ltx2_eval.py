@@ -22,6 +22,10 @@ sharing, or run on a smaller-resolution generation.
 import torch
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig, GenerationRequest, GeneratorConfig, OutputConfig,
+    SamplingConfig,
+)
 from fastvideo.eval import Evaluator
 from fastvideo.eval.io import build_eval_kwargs
 
@@ -58,19 +62,20 @@ METRICS = [
 
 def main() -> None:
     # ----- generation (matches examples/inference/basic/basic_ltx2.py) -----
-    generator = VideoGenerator.from_pretrained(
-        "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="Davids048/LTX2-Base-Diffusers",
+            engine=EngineConfig(num_gpus=1),
+        )
     )
 
     output_path = "outputs_video/ltx2_basic/output_ltx2_base_t2v_1088_1920_1.1.mp4"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-        num_frames=121,
-        height=1088,
-        width=1920,
+    generator.generate(
+        GenerationRequest(
+            prompt=PROMPT,
+            output=OutputConfig(output_path=output_path, save_video=True),
+            sampling=SamplingConfig(num_frames=121, height=1088, width=1920),
+        )
     )
     generator.shutdown()
     # Free residual CUDA memory the generator left behind so the

@@ -48,6 +48,9 @@ Prerequisites: same as `basic_stable_audio.py`.
 import os
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig, GeneratorConfig, GenerationRequest, OutputConfig,
+)
 
 PROMPT = "Steady lo-fi hip hop drum loop with vinyl crackle."
 # Required: path to the reference audio file (wav, mp3, mp4, m4a, flac,
@@ -64,19 +67,25 @@ def main() -> None:
             f"REFERENCE_AUDIO_PATH={REFERENCE_AUDIO_PATH!r} does not exist. "
             "Edit this script to point at a real audio file (wav/mp3/mp4/"
             "m4a/flac) before running.")
-    generator = VideoGenerator.from_pretrained(
-        "FastVideo/stable-audio-open-1.0-Diffusers",
-        num_gpus=1,
-    )
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path="outputs_audio/stable_audio_inpaint/output_inpaint.wav",
-        save_video=True,
-        audio_end_in_s=TOTAL_SECONDS,
-        inpaint_audio=REFERENCE_AUDIO_PATH,
-        # Tuple form: keep first KEEP_SECONDS, regenerate the rest.
-        inpaint_mask=(KEEP_SECONDS, TOTAL_SECONDS),
-    )
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="FastVideo/stable-audio-open-1.0-Diffusers",
+            engine=EngineConfig(num_gpus=1),
+        ))
+    generator.generate(
+        GenerationRequest(
+            prompt=PROMPT,
+            output=OutputConfig(
+                output_path="outputs_audio/stable_audio_inpaint/output_inpaint.wav",
+                save_video=True,
+            ),
+            extensions={
+                "audio_end_in_s": TOTAL_SECONDS,
+                "inpaint_audio": REFERENCE_AUDIO_PATH,
+                # Tuple form: keep first KEEP_SECONDS, regenerate the rest.
+                "inpaint_mask": (KEEP_SECONDS, TOTAL_SECONDS),
+            },
+        ))
     generator.shutdown()
 
 

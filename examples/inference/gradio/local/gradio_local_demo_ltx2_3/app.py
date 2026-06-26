@@ -4,8 +4,16 @@ from pathlib import Path
 
 import gradio as gr
 
+from fastvideo.api import (
+    CompileConfig,
+    ComponentConfig,
+    EngineConfig,
+    GeneratorConfig,
+    OffloadConfig,
+    PipelineSelection,
+    SamplingParam,
+)
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.layers.quantization.fp4_config import FP4Config
 from fastvideo.utils import maybe_download_model
@@ -48,28 +56,44 @@ def main():
         refine_upsampler_path = resolve_refine_upsampler_path(resolved_model_path)
         print(f"Using refine upsampler: {refine_upsampler_path}")
 
-        generators[model_path] = VideoGenerator.from_pretrained(
-            str(resolved_model_path),
-            num_gpus=1,
-            ltx2_refine_enabled=True,
-            ltx2_refine_upsampler_path=str(refine_upsampler_path),
-            ltx2_refine_lora_path="",  # disable refine LoRA for distilled model
-            ltx2_refine_num_inference_steps=2,
-            ltx2_refine_guidance_scale=1.0,
-            ltx2_refine_add_noise=True,
-            pipeline_config=pipeline_config,
-            enable_torch_compile=True,
-            enable_torch_compile_text_encoder=True,
-            torch_compile_kwargs={
-                "backend": "inductor",
-                "fullgraph": True,
-                "mode": "max-autotune-no-cudagraphs",
-                "dynamic": False,
-            },
-            dit_cpu_offload=False,
-            vae_cpu_offload=False,
-            text_encoder_cpu_offload=False,
-            ltx2_vae_tiling=False,
+        generators[model_path] = VideoGenerator.from_config(
+            GeneratorConfig(
+                model_path=str(resolved_model_path),
+                engine=EngineConfig(
+                    num_gpus=1,
+                    offload=OffloadConfig(
+                        dit=False,
+                        vae=False,
+                        text_encoder=False,
+                    ),
+                    compile=CompileConfig(
+                        enabled=True,
+                        text_encoder_enabled=True,
+                        backend="inductor",
+                        fullgraph=True,
+                        mode="max-autotune-no-cudagraphs",
+                        dynamic=False,
+                    ),
+                ),
+                pipeline=PipelineSelection(
+                    components=ComponentConfig(
+                        upsampler_weights=str(refine_upsampler_path),
+                        # Empty refine LoRA path (distilled needs none) -> omit.
+                    ),
+                    vae_tiling=False,
+                    preset_overrides={
+                        "refine": {
+                            "enabled": True,
+                            "num_inference_steps": 2,
+                            "guidance_scale": 1.0,
+                            "add_noise": True,
+                        },
+                    },
+                    # PipelineConfig object (with FP4 quant wired on above) has
+                    # no first-class typed field; route via experimental.
+                    experimental={"pipeline_config": pipeline_config},
+                ),
+            )
         )
         default_params[model_path] = apply_ltx2_defaults(
             SamplingParam.from_pretrained(str(resolved_model_path))

@@ -18,7 +18,8 @@ Example (one-shot per variant):
         --public
 
 After upload, the local directory can be deleted — the HF repo is the
-source of truth. `VideoGenerator.from_pretrained("FastVideo/...")` pulls
+source of truth.
+`VideoGenerator.from_config(GeneratorConfig(model_path="FastVideo/..."))` pulls
 shards on demand.
 """
 from __future__ import annotations

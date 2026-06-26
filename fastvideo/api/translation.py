@@ -1,4 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
+"""Translation layer between the public typed API and the legacy internals.
+
+This module (formerly ``fastvideo/api/compat.py``) is the single bridge that
+converts typed public config objects (:class:`GeneratorConfig`,
+:class:`GenerationRequest`) into the internal :class:`FastVideoArgs` /
+:class:`SamplingParam` the runtime still consumes, plus the inbound
+normalization helpers used by every public entrypoint.
+
+It is *internal* and not part of the stable public surface. The legacy
+forward-translation helpers (``legacy_from_pretrained_to_config``,
+``legacy_generate_call_to_request`` and friends) exist only to support the
+deprecated ``VideoGenerator.from_pretrained(model, **kwargs)`` /
+``generate_video(...)`` entry points. The reverse-translation
+(``generator_config_to_fastvideo_args``, ``request_to_sampling_param``) is
+slated for elimination once ``FastVideoArgs`` becomes a view over
+``GeneratorConfig`` and ``ForwardBatch`` reads ``GenerationRequest`` directly
+(see ``.agents/memory/dreamverse-integration/pr-roadmap.md``, PRs 15-17).
+"""
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -480,7 +498,7 @@ def explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
 
     Precondition: the request must carry ``_fastvideo_explicit_paths`` —
     populated by :func:`fastvideo.api.parser.parse_config` or
-    :func:`fastvideo.api.compat.normalize_generation_request`. Calling on
+    :func:`fastvideo.api.translation.normalize_generation_request`. Calling on
     a raw ``GenerationRequest()`` asserts.
     """
     assert hasattr(request,

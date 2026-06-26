@@ -2,7 +2,9 @@ import os
 import time
 from fastvideo import VideoGenerator
 
-from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api import (EngineConfig, GenerationRequest, GeneratorConfig,
+                           OffloadConfig, OutputConfig, PipelineSelection,
+                           SamplingConfig)
 
 OUTPUT_PATH = "video_samples_dmd2"
 def main():
@@ -10,30 +12,36 @@ def main():
 
     load_start_time = time.perf_counter()
     model_name = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers"
-    generator = VideoGenerator.from_pretrained(
-        model_name,
-        # FastVideo will automatically handle distributed setup
-        num_gpus=1,
-        use_fsdp_inference=False, # set to True if GPU is out of memory
-        # Adjust these offload parameters if you have < 32GB of VRAM
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        VSA_sparsity=0.8,
-    )
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path=model_name,
+            engine=EngineConfig(
+                # FastVideo will automatically handle distributed setup
+                num_gpus=1,
+                use_fsdp_inference=False, # set to True if GPU is out of memory
+                # Adjust these offload parameters if you have < 32GB of VRAM
+                offload=OffloadConfig(
+                    text_encoder=True,
+                    pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
+                    dit=False,
+                    vae=False,
+                ),
+            ),
+            pipeline=PipelineSelection(experimental={"VSA_sparsity": 0.8}),
+        ))
     load_end_time = time.perf_counter()
     load_time = load_end_time - load_start_time
-
-
-    sampling_param = SamplingParam.from_pretrained(model_name)
-    sampling_param.num_frames = 81
 
     prompt = (
         "A neon-lit alley in futuristic Tokyo during a heavy rainstorm at night. The puddles reflect glowing signs in kanji, advertising ramen, karaoke, and VR arcades. A woman in a translucent raincoat walks briskly with an LED umbrella. Steam rises from a street food cart, and a cat darts across the screen. Raindrops are visible on the camera lens, creating a cinematic bokeh effect."
     )
     start_time = time.perf_counter()
-    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
+    video = generator.generate(
+        GenerationRequest(
+            prompt=prompt,
+            sampling=SamplingConfig(num_frames=81),
+            output=OutputConfig(output_path=OUTPUT_PATH, save_video=True),
+        ))
     end_time = time.perf_counter()
     gen_time = end_time - start_time
 
@@ -46,7 +54,12 @@ def main():
         "embodying the raw energy of the wild. Low angle, steady tracking shot, "
         "cinematic.")
     start_time = time.perf_counter()
-    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, num_frames=81)
+    video2 = generator.generate(
+        GenerationRequest(
+            prompt=prompt2,
+            sampling=SamplingConfig(num_frames=81),
+            output=OutputConfig(output_path=OUTPUT_PATH, save_video=True),
+        ))
     end_time = time.perf_counter()
     gen_time2 = end_time - start_time
 

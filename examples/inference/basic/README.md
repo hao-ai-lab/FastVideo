@@ -39,17 +39,20 @@ All you need to generate videos using multi-gpus from state-of-the-art diffusion
 
 ```python
 from fastvideo import VideoGenerator
+from fastvideo.api import EngineConfig, GenerationRequest, GeneratorConfig
 
 def main():
-    generator = VideoGenerator.from_pretrained(
-        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        num_gpus=1,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+            engine=EngineConfig(num_gpus=1),
+        )
     )
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
              "wide with interest. The playful yet serene atmosphere is complemented by soft "
              "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
-    video = generator.generate_video(prompt)
+    result = generator.generate(GenerationRequest(prompt=prompt))
 
 if __name__ == "__main__":
     main()

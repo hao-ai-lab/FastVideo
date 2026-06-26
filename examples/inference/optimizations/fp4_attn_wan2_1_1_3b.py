@@ -18,6 +18,10 @@ import os
 import time
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    CompileConfig, EngineConfig, GenerationRequest, GeneratorConfig,
+    OffloadConfig, OutputConfig, SamplingConfig,
+)
 
 OUTPUT_PATH = "video_samples"
 
@@ -39,17 +43,24 @@ def main():
         mode += "_compile"
     print(f"Mode: {mode.upper()}")
 
-    generator = VideoGenerator.from_pretrained(
-        args.model,
-        num_gpus=args.num_gpus,
-        nvfp4_fa4=args.nvfp4_fa4,
-        use_fsdp_inference=not args.nvfp4_fa4,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        enable_torch_compile=args.compile,
-    )
+    if args.nvfp4_fa4:
+        os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
+        os.environ.setdefault("CUTE_DSL_ENABLE_TVM_FFI", "1")
+
+    generator = VideoGenerator.from_config(GeneratorConfig(
+        model_path=args.model,
+        engine=EngineConfig(
+            num_gpus=args.num_gpus,
+            use_fsdp_inference=not args.nvfp4_fa4,
+            offload=OffloadConfig(
+                dit=False,
+                dit_layerwise=False,
+                vae=True,
+                text_encoder=True,
+            ),
+            compile=CompileConfig(enabled=args.compile),
+        ),
+    ))
 
     prompt = (
         "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
@@ -59,16 +70,22 @@ def main():
 
     n_warmup = 2 if args.compile else 1
     for i in range(n_warmup):
-        generator.generate(request={"prompt": prompt, "sampling": {"num_inference_steps": 2},
-                                    "output": {"save_video": False}})
+        generator.generate(GenerationRequest(
+            prompt=prompt,
+            sampling=SamplingConfig(num_inference_steps=2),
+            output=OutputConfig(save_video=False),
+        ))
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     start = time.time()
-    generator.generate(request={
-        "prompt": prompt,
-        "sampling": {"num_inference_steps": args.infer_steps},
-        "output": {"save_video": True, "output_path": os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")},
-    })
+    generator.generate(GenerationRequest(
+        prompt=prompt,
+        sampling=SamplingConfig(num_inference_steps=args.infer_steps),
+        output=OutputConfig(
+            save_video=True,
+            output_path=os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4"),
+        ),
+    ))
     elapsed = time.time() - start
     print(f"[{mode.upper()}] {args.infer_steps} steps in {elapsed:.2f}s "
           f"({args.infer_steps / elapsed:.2f} it/s)")

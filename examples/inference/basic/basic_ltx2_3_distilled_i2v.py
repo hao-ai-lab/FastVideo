@@ -49,6 +49,11 @@ from pathlib import Path
 import torch._inductor.config as _inductor
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    CompileConfig, ComponentConfig, EngineConfig, GenerationRequest,
+    GeneratorConfig, OffloadConfig, OutputConfig, PipelineSelection,
+    SamplingConfig,
+)
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.utils import maybe_download_model
 
@@ -86,9 +91,9 @@ PROMPT = os.getenv("LTX23_I2V_PROMPT", DEFAULT_PROMPT)
 
 # Per-stage timing helpers --------------------------------------------------
 
-def _print_stage_breakdown(result: dict, label: str) -> float | None:
+def _print_stage_breakdown(result, label: str) -> float | None:
     """Print stage execution times and return the sum, or None if missing."""
-    logging_info = result.get("logging_info")
+    logging_info = result.logging_info
     stages = getattr(logging_info, "stages", None) if logging_info else None
     if not stages:
         print(f"  [{label}] stage breakdown unavailable")
@@ -104,11 +109,11 @@ def _print_stage_breakdown(result: dict, label: str) -> float | None:
 
 
 def _collect_stage_times(
-    result: dict,
+    result,
     stage_times: dict[str, list[float]],
     stage_order: OrderedDict[str, None],
 ) -> None:
-    logging_info = result.get("logging_info")
+    logging_info = result.logging_info
     stages = getattr(logging_info, "stages", None) if logging_info else None
     if not stages:
         return
@@ -169,34 +174,54 @@ def main() -> None:
     pipeline_config = PipelineConfig.from_pretrained(model_root)
     pipeline_config.dit_config.quant_config = None
 
-    generator = VideoGenerator.from_pretrained(
-        model_root,
-        num_gpus=1,
-        # LTX-2.3 distilled uses the two-stage refine pipeline; the refine
-        # LoRA is intentionally empty for the distilled student.
-        ltx2_refine_enabled=True,
-        ltx2_refine_upsampler_path=str(refine_upsampler_path),
-        ltx2_refine_lora_path="",
-        ltx2_refine_num_inference_steps=3,
-        ltx2_refine_guidance_scale=1.0,
-        ltx2_refine_add_noise=True,
-        pipeline_config=pipeline_config,
-        enable_torch_compile=True,
-        enable_torch_compile_text_encoder=True,
-        # Compile the VAE codec submodules (encoder / decoder) too. The
-        # `LTX2CausalVideoAutoencoder` declares `_compile_conditions` so
-        # `_compile_with_conditions` targets just those submodules and
-        # leaves the surrounding tiling control flow eager — needed for
-        # fullgraph + dynamic=False to succeed. VAE eager decode is
-        # ~1.0s; compiling it brings the stage to ~0.3s.
-        enable_torch_compile_vae=True,
-        torch_compile_kwargs=torch_compile_kwargs,
-        torch_compile_kwargs_vae=torch_compile_kwargs,
-        # Keep everything resident — no CPU offload for serving-style runs.
-        dit_cpu_offload=False,
-        text_encoder_cpu_offload=False,
-        vae_cpu_offload=False,
-        ltx2_vae_tiling=False,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path=model_root,
+            engine=EngineConfig(
+                num_gpus=1,
+                compile=CompileConfig(
+                    enabled=True,
+                    text_encoder_enabled=True,
+                    # Compile the VAE codec submodules (encoder / decoder)
+                    # too. The `LTX2CausalVideoAutoencoder` declares
+                    # `_compile_conditions` so `_compile_with_conditions`
+                    # targets just those submodules and leaves the
+                    # surrounding tiling control flow eager — needed for
+                    # fullgraph + dynamic=False to succeed. VAE eager decode
+                    # is ~1.0s; compiling it brings the stage to ~0.3s.
+                    vae_enabled=True,
+                    backend=torch_compile_kwargs["backend"],
+                    fullgraph=torch_compile_kwargs["fullgraph"],
+                    mode=torch_compile_kwargs["mode"],
+                    dynamic=torch_compile_kwargs["dynamic"],
+                    vae_kwargs=torch_compile_kwargs,
+                ),
+                # Keep everything resident — no CPU offload for serving runs.
+                offload=OffloadConfig(
+                    dit=False,
+                    text_encoder=False,
+                    vae=False,
+                ),
+            ),
+            pipeline=PipelineSelection(
+                vae_tiling=False,
+                # LTX-2.3 distilled uses the two-stage refine pipeline; the
+                # refine LoRA is intentionally empty for the distilled
+                # student.
+                components=ComponentConfig(
+                    upsampler_weights=str(refine_upsampler_path),
+                ),
+                preset_overrides={
+                    "refine": {
+                        "enabled": True,
+                        "num_inference_steps": 3,
+                        "guidance_scale": 1.0,
+                        "add_noise": True,
+                    }
+                },
+                experimental={"pipeline_config": pipeline_config},
+            ),
+        )
     )
 
     common_kwargs = dict(
@@ -206,12 +231,15 @@ def main() -> None:
         height=1280, width=832,     # portrait runway aspect
         num_frames=121, fps=24,     # ~5s clip
         num_inference_steps=8,      # distilled denoise steps
-        # i2v: anchor the input image at frame 0 with full strength.
-        # `ltx2_image_crf=0.0` skips an extra JPEG re-encode of an already
-        # JPEG conditioning image.
+    )
+
+    # i2v: anchor the input image at frame 0 with full strength.
+    # `ltx2_image_crf=0.0` skips an extra JPEG re-encode of an already
+    # JPEG conditioning image. These are model-specific knobs routed through
+    # the request extensions escape hatch.
+    common_extensions = dict(
         ltx2_images=[(I2V_IMAGE, 0, 1.0)],
         ltx2_image_crf=0.0,
-        save_video=True,
     )
 
     warmup_runs = 2
@@ -227,10 +255,25 @@ def main() -> None:
         for w in range(warmup_runs):
             t0 = time.perf_counter()
             print(f"\n[warmup {w + 1}/{warmup_runs}] compiling + generating…")
-            generator.generate_video(
-                output_path=str(OUTPUT_DIR / f"_warmup_{w + 1}.mp4"),
-                seed=7,
-                **common_kwargs,
+            generator.generate(
+                GenerationRequest(
+                    prompt=common_kwargs["prompt"],
+                    negative_prompt=common_kwargs["negative_prompt"],
+                    sampling=SamplingConfig(
+                        guidance_scale=common_kwargs["guidance_scale"],
+                        height=common_kwargs["height"],
+                        width=common_kwargs["width"],
+                        num_frames=common_kwargs["num_frames"],
+                        fps=common_kwargs["fps"],
+                        num_inference_steps=common_kwargs["num_inference_steps"],
+                        seed=7,
+                    ),
+                    output=OutputConfig(
+                        output_path=str(OUTPUT_DIR / f"_warmup_{w + 1}.mp4"),
+                        save_video=True,
+                    ),
+                    extensions=common_extensions,
+                )
             )
             dt = time.perf_counter() - t0
             warmup_secs.append(dt)
@@ -245,19 +288,31 @@ def main() -> None:
             out_path = OUTPUT_DIR / f"output_ltx2_3_distilled_i2v_run_{m + 1}.mp4"
             print(f"\n[measured {m + 1}/{measured_runs}] generating: {out_path}")
             t0 = time.perf_counter()
-            result = generator.generate_video(
-                output_path=str(out_path),
-                seed=2002 + m,
-                **common_kwargs,
+            result = generator.generate(
+                GenerationRequest(
+                    prompt=common_kwargs["prompt"],
+                    negative_prompt=common_kwargs["negative_prompt"],
+                    sampling=SamplingConfig(
+                        guidance_scale=common_kwargs["guidance_scale"],
+                        height=common_kwargs["height"],
+                        width=common_kwargs["width"],
+                        num_frames=common_kwargs["num_frames"],
+                        fps=common_kwargs["fps"],
+                        num_inference_steps=common_kwargs["num_inference_steps"],
+                        seed=2002 + m,
+                    ),
+                    output=OutputConfig(
+                        output_path=str(out_path),
+                        save_video=True,
+                    ),
+                    extensions=common_extensions,
+                )
             )
             wall = time.perf_counter() - t0
-            e2e = (
-                result.get("e2e_latency")
-                if isinstance(result, dict) else None
-            ) or wall
+            e2e = (result.extra.get("e2e_latency") if result is not None else None) or wall
             measured_secs.append(e2e)
             print(f"[measured {m + 1}/{measured_runs}] e2e={e2e:.2f}s wall={wall:.2f}s")
-            if isinstance(result, dict):
+            if result is not None:
                 _print_stage_breakdown(result, f"measured {m + 1}")
                 _collect_stage_times(result, stage_times, stage_order)
 

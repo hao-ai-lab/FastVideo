@@ -4,6 +4,10 @@ import os
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SLA_ATTN"
 
 from fastvideo import VideoGenerator
+from fastvideo.api import (
+    EngineConfig, GenerationRequest, GeneratorConfig, InputConfig,
+    OutputConfig, SamplingConfig,
+)
 
 # Use local model path
 MODEL_PATH = "loayrashid/TurboWan2.2-I2V-A14B-Diffusers"
@@ -12,9 +16,11 @@ OUTPUT_PATH = "video_samples_turbodiffusion_i2v"
 
 def main() -> None:
     # TurboDiffusion I2V: 1-4 step image-to-video generation
-    generator = VideoGenerator.from_pretrained(
-        MODEL_PATH,
-        num_gpus=2,
+    generator = VideoGenerator.from_config(
+        GeneratorConfig(
+            model_path=MODEL_PATH,
+            engine=EngineConfig(num_gpus=2),
+        )
     )
 
     # Example prompt and image for I2V
@@ -24,12 +30,13 @@ def main() -> None:
     image_path = "https://huggingface.co/datasets/YiYiXu/testing-images/resolve/main/wan_i2v_input.JPG"
 
 
-    video = generator.generate_video(
-        prompt,
-        image_path=image_path,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-        seed=42,
+    video = generator.generate(
+        GenerationRequest(
+            prompt=prompt,
+            inputs=InputConfig(image_path=image_path),
+            sampling=SamplingConfig(seed=42),
+            output=OutputConfig(output_path=OUTPUT_PATH, save_video=True),
+        )
     )
 
 

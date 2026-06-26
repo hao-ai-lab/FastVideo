@@ -5,7 +5,7 @@ import argparse
 import os
 from typing import cast
 
-from fastvideo.api.compat import generator_config_to_fastvideo_args
+from fastvideo.api.translation import generator_config_to_fastvideo_args
 from fastvideo.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.entrypoints.cli.inference_config import build_serve_config
 from fastvideo.logger import init_logger

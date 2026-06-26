@@ -3,7 +3,6 @@ import os
 import torch
 import base64
 import io
-from copy import deepcopy
 from typing import Dict, Any, Optional, List
 import signal
 import sys
@@ -19,6 +18,17 @@ from slowapi.errors import RateLimitExceeded
 import imageio
 from ray.serve.handle import DeploymentHandle
 from prometheus_client import Counter, Histogram, generate_latest
+
+from fastvideo.api import (
+    EngineConfig,
+    GenerationRequest,
+    GeneratorConfig,
+    InputConfig,
+    OffloadConfig,
+    OutputConfig,
+    PipelineSelection,
+    SamplingConfig,
+)
 
 NUM_GPUS = 16
 DEFAULT_FPS = 16
@@ -136,10 +146,10 @@ def setup_model_environment(model_path: str) -> None:
 
 
 def process_generation_result(result: Any) -> tuple[List[np.ndarray], float, List[str], List[float]]:
-    frames = result if isinstance(result, list) else result.get("frames", [])
-    generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
-    
-    logging_info = result.get("logging_info", None)
+    frames = result.frames or []
+    generation_time = result.generation_time or 0.0
+
+    logging_info = result.logging_info
     if logging_info:
         stage_names = logging_info.get_execution_order()
         stage_execution_times = [
@@ -153,24 +163,27 @@ def process_generation_result(result: Any) -> tuple[List[np.ndarray], float, Lis
     return frames, generation_time, stage_names, stage_execution_times
 
 
-def prepare_sampling_params(video_request: VideoGenerationRequest, default_params: Any) -> Any:
-    params = deepcopy(default_params)
-    params.prompt = video_request.prompt
-    
-    if video_request.use_negative_prompt:
-        params.negative_prompt = video_request.negative_prompt
+def prepare_generation_request(video_request: VideoGenerationRequest, image_path: Optional[str] = None) -> Any:
+    seed = (video_request.seed if not video_request.randomize_seed
+            else torch.randint(0, SEED_RANGE_MAX, (1,)).item())
 
-    params.seed = (video_request.seed if not video_request.randomize_seed 
-                  else torch.randint(0, SEED_RANGE_MAX, (1,)).item())
-    params.randomize_seed = video_request.randomize_seed
-    params.guidance_scale = video_request.guidance_scale
-    params.num_frames = video_request.num_frames
-    params.height = video_request.height
-    params.width = video_request.width
-    params.save_video = False
-    params.return_frames = True
-    
-    return params
+    negative_prompt = video_request.negative_prompt if video_request.use_negative_prompt else None
+
+    request = GenerationRequest(
+        prompt=video_request.prompt,
+        negative_prompt=negative_prompt,
+        inputs=InputConfig(image_path=image_path),
+        sampling=SamplingConfig(
+            seed=seed,
+            guidance_scale=video_request.guidance_scale,
+            num_frames=video_request.num_frames,
+            height=video_request.height,
+            width=video_request.width,
+        ),
+        output=OutputConfig(save_video=False, return_frames=True),
+    )
+
+    return request, seed
 
 
 class BaseModelDeployment:
@@ -185,31 +198,34 @@ class BaseModelDeployment:
 
     def _initialize_generator(self, config: Dict[str, Any]) -> None:
         from fastvideo.entrypoints.video_generator import VideoGenerator
-        from fastvideo.api.sampling_param import SamplingParam
 
         print(f"Initializing model: {self.model_path}")
-        self.generator = VideoGenerator.from_pretrained(
-            model_path=self.model_path,
-            num_gpus=1,
-            use_fsdp_inference=True,
-            text_encoder_cpu_offload=config["text_encoder_cpu_offload"],
-            dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125], # TODO: hardocde for I2V
-            dit_precision="fp32",  # TODO: hardocde for I2V
-            dit_cpu_offload=config["dit_cpu_offload"],
-            vae_cpu_offload=config["vae_cpu_offload"],
-            VSA_sparsity=config["VSA_sparsity"],
-            enable_stage_verification=False,
+        self.generator = VideoGenerator.from_config(
+            GeneratorConfig(
+                model_path=self.model_path,
+                engine=EngineConfig(
+                    num_gpus=1,
+                    use_fsdp_inference=True,
+                    enable_stage_verification=False,
+                    offload=OffloadConfig(
+                        text_encoder=config["text_encoder_cpu_offload"],
+                        dit=config["dit_cpu_offload"],
+                        vae=config["vae_cpu_offload"],
+                    ),
+                ),
+                pipeline=PipelineSelection(
+                    # I2V knobs without first-class typed fields yet.
+                    experimental={
+                        "dmd_denoising_steps": [1000, 850, 700, 550, 350, 275, 200, 125],
+                        "dit_precision": "fp32",
+                        "VSA_sparsity": config["VSA_sparsity"],
+                    },
+                ),
+            )
         )
-        self.default_params = SamplingParam.from_pretrained(self.model_path)
-        self.default_params.seed = 1000
-        self.default_params.num_frames = 73
-        self.default_params.width = 832
-        self.default_params.height = 480
 
     def generate_video(self, video_request: VideoGenerationRequest) -> VideoGenerationResponse:
         total_start_time = time.time()
-        
-        params = prepare_sampling_params(video_request, self.default_params)
 
         # Save image if provided (for I2V)
         image_path = None
@@ -218,19 +234,15 @@ class BaseModelDeployment:
             if image_path is None:
                 return VideoGenerationResponse(
                     video_data=None,
-                    seed=params.seed,
+                    seed=video_request.seed,
                     success=False,
                     error_message="Failed to save input image",
                 )
 
+        request, seed = prepare_generation_request(video_request, image_path)
+
         inference_start_time = time.time()
-        result = self.generator.generate_video(
-            prompt=video_request.prompt,
-            sampling_param=params,
-            image_path=image_path,
-            save_video=False,
-            return_frames=True,
-        )
+        result = self.generator.generate(request)
         inference_time = time.time() - inference_start_time
 
         frames, generation_time, stage_names, stage_execution_times = process_generation_result(result)
@@ -250,7 +262,7 @@ class BaseModelDeployment:
 
         return VideoGenerationResponse(
             video_data=video_data,
-            seed=params.seed,
+            seed=seed,
             success=True,
             generation_time=generation_time,
             inference_time=inference_time,
