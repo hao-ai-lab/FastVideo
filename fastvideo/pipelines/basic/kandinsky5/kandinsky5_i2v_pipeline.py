@@ -8,7 +8,9 @@ from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.kandinsky5 import (
     Kandinsky5DecodingStage,
     Kandinsky5DenoisingStage,
+    Kandinsky5ImageEncodingStage,
     Kandinsky5LatentPreparationStage,
+    Kandinsky5NormalizationStage,
 )
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
 from fastvideo.pipelines.stages.timestep_preparation import TimestepPreparationStage
@@ -28,8 +30,6 @@ class Kandinsky5I2VPipeline(ComposedPipelineBase):
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        raise NotImplementedError("Class to be implemented yet")
-        
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(
@@ -45,10 +45,16 @@ class Kandinsky5I2VPipeline(ComposedPipelineBase):
                 ],
             ),
         )
-        
-        self.add_stage(stage_name="image_encoding_stage",
-                       stage=Kandinsky5ImageEncodingStage(vae=self.get_module("vae")))
 
+        self.add_stage(
+            stage_name="image_encoding_stage",
+            stage=Kandinsky5ImageEncodingStage(vae=self.get_module("vae")),
+        )
+
+        self.add_stage(
+            stage_name="timestep_preparation_stage",
+            stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")),
+        )
 
         self.add_stage(
             stage_name="latent_preparation_stage",
@@ -56,11 +62,6 @@ class Kandinsky5I2VPipeline(ComposedPipelineBase):
                 scheduler=self.get_module("scheduler"),
                 transformer=self.get_module("transformer"),
             ),
-        )
-        
-        self.add_stage(
-            stage_name="decoding_stage",
-            stage=Kandinsky5DecodingStage(vae=self.get_module("vae"), pipeline=self),
         )
 
         self.add_stage(
@@ -72,9 +73,14 @@ class Kandinsky5I2VPipeline(ComposedPipelineBase):
         )
 
         self.add_stage(
+            stage_name="normalization_stage",
+            stage=Kandinsky5NormalizationStage(),
+        )
+
+        self.add_stage(
             stage_name="decoding_stage",
             stage=Kandinsky5DecodingStage(vae=self.get_module("vae"), pipeline=self),
         )
 
 
-EntryClass = Kandinsky5T2VPipeline
+EntryClass = Kandinsky5I2VPipeline
