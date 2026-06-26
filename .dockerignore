@@ -1,0 +1,31 @@
+# Build-context excludes: keep the context small and the `COPY . .` layer cache
+# stable. Docker uploads everything here to the daemon and bakes it into a layer;
+# without this, the 6.5 GB host .venv alone is shipped + cached on every build.
+#
+# IMPORTANT: do NOT ignore .git — fastvideo-kernel's build runs
+# `git submodule update --init --recursive`, which needs the repo metadata.
+
+# Virtualenvs — the image builds its own /opt/venv
+.venv/
+venv/
+env/
+
+# Python caches & build/test/lint artifacts
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Local run outputs / logs (not needed in the image)
+outputs/
+wandb/
+*.log
+
+# Editor / OS cruft
+.DS_Store
+.idea/
+.vscode/

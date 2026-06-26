@@ -47,7 +47,7 @@ conda activate fastvideo
 #### With uv (recommended)
 
 ```bash
-uv pip install fastvideo
+UV_TORCH_BACKEND=auto uv pip install fastvideo
 ```
 
 Also optionally install FlashAttention:
@@ -61,7 +61,7 @@ uv pip install flash-attn --no-build-isolation -v
 `uv` works inside an active conda env too, so prefer `uv pip` for the actual install:
 
 ```bash
-uv pip install fastvideo
+UV_TORCH_BACKEND=auto uv pip install fastvideo
 ```
 
 Also optionally install FlashAttention:
@@ -80,16 +80,20 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 
 #### 2. Install FastVideo
 
+FastVideo doesn't pin the PyTorch CUDA build. Set `UV_TORCH_BACKEND` so uv picks
+it: `auto` matches your GPU driver, or pin one explicitly (e.g. `cu126`/`cu130`).
+torch resolves to 2.12 on `cu126`/`cu130`; `auto` works on a CUDA 12.6+ driver.
+
 Basic installation:
 
 ```bash
-uv pip install -e .
+UV_TORCH_BACKEND=auto uv pip install -e .
 ```
 
 Alternative with Conda environment:
 
 ```bash
-uv pip install -e .
+UV_TORCH_BACKEND=auto uv pip install -e .
 ```
 
 ### Optional Dependencies

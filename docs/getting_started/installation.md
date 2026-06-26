@@ -4,6 +4,7 @@
 FastVideo supports the following hardware platforms:
 
 - [NVIDIA CUDA](installation/gpu.md)
+- [NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)](installation/spark.md)
 - [Apple silicon](installation/mps.md)
 
 ## Quick Installation
@@ -17,7 +18,7 @@ Use uv as the default environment manager for faster and more stable installs.
 uv venv --python 3.12 --seed
 source .venv/bin/activate
 
-uv pip install fastvideo
+UV_TORCH_BACKEND=auto uv pip install fastvideo
 ```
 
 ### Using Conda (alternative)
@@ -27,15 +28,18 @@ uv pip install fastvideo
 conda create -n fastvideo python=3.12 -y
 conda activate fastvideo
 
-uv pip install fastvideo
+UV_TORCH_BACKEND=auto uv pip install fastvideo
 ```
 
 ### From source
 
+FastVideo doesn't pin the PyTorch CUDA build; `UV_TORCH_BACKEND=auto` lets uv
+pick the wheel matching your GPU driver (or pin one, e.g. `cu130`).
+
 ```bash
 git clone https://github.com/hao-ai-lab/FastVideo.git
 cd FastVideo
-uv pip install -e .
+UV_TORCH_BACKEND=auto uv pip install -e .
 
 # optional: install flash-attn
 uv pip install flash-attn --no-build-isolation -v
@@ -44,7 +48,7 @@ uv pip install flash-attn --no-build-isolation -v
 Alternative with Conda environment (still drives installs through `uv`):
 
 ```bash
-uv pip install -e .
+UV_TORCH_BACKEND=auto uv pip install -e .
 uv pip install flash-attn --no-build-isolation -v
 ```
 

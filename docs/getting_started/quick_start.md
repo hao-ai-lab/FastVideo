@@ -12,7 +12,7 @@ uv venv --python 3.12 --seed
 source .venv/bin/activate
 
 # Install FastVideo
-uv pip install fastvideo
+UV_TORCH_BACKEND=auto uv pip install fastvideo
 ```
 
 Also optionally install flash-attn:

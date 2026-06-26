@@ -3,28 +3,13 @@ name: Build and Push Docker Images
 on:
   workflow_dispatch:
     inputs:
-      python_3_10:
-        description: 'Build Python 3.10 image'
+      build_cuda_matrix:
+        description: 'Build the CUDA image matrix (py3.12 x CUDA 12.6.3/13.0.0)'
         required: false
-        default: false
+        default: true
         type: boolean
-      python_3_11:
-        description: 'Build Python 3.11 image'
-        required: false
-        default: false
-        type: boolean
-      python_3_12:
-        description: 'Build Python 3.12 image'
-        required: false
-        default: false
-        type: boolean
-      python_3_12_cuda_12_9:
-        description: 'Build Python 3.12 image Cuda 12.9'
-        required: false
-        default: false
-        type: boolean
-      dreamverse_cuda_12_9:
-        description: 'Build Dreamverse CUDA 12.9 backend-only and UI images'
+      build_dreamverse_matrix:
+        description: 'Build the Dreamverse matrix (backend + UI x CUDA 12.6.3/13.0.0)'
         required: false
         default: false
         type: boolean
@@ -35,62 +20,66 @@ permissions:
   packages: write
 
 jobs:
-  build-python-3-10:
-    if: ${{ github.event.inputs.python_3_10 == 'true' }}
-    uses: ./.github/workflows/_template-build-image.yml
-    with:
-      python_version: '3.10'
-      dockerfile_path: docker/Dockerfile.python3.10
-      tag_suffix: py3.10
-    secrets: inherit
-
-  build-python-3-11:
-    if: ${{ github.event.inputs.python_3_11 == 'true' }}
-    uses: ./.github/workflows/_template-build-image.yml
-    with:
-      python_version: '3.11'
-      dockerfile_path: docker/Dockerfile.python3.11
-      tag_suffix: py3.11
-    secrets: inherit
-
-  build-python-3-12:
-    if: ${{ github.event.inputs.python_3_12 == 'true' }}
-    uses: ./.github/workflows/_template-build-image.yml
-    with:
-      python_version: '3.12'
-      dockerfile_path: docker/Dockerfile.python3.12
-      tag_suffix: py3.12
-    secrets: inherit
-
-  build-python-3-12-cuda-12-9:
-    if: ${{ github.event.inputs.python_3_12_cuda_12_9 == 'true' }}
+  # CUDA matrix: Python 3.12 x {12.6.3, 13.0.0}. Each cell pins the torch backend +
+  # flash-attn wheel to its base CUDA (both on torch 2.12). 13.0.0 is the default
+  # `py3.12`/`latest` (CUDA 13, cu130); 12.6.3 is the broader-driver build. The base
+  # image only changes the nvcc that compiles the kernel.
+  build-cuda-images:
+    if: ${{ github.event.inputs.build_cuda_matrix == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda:
+          - version: '12.6.3'
+            suffix: '-cuda12.6.3'
+            torch_backend: 'cu126'
+            fa_tag: 'cu126torch2.12'
+            fa_release: 'v0.9.17'
+          - version: '13.0.0'
+            suffix: ''
+            torch_backend: 'cu130'
+            fa_tag: 'cu130torch2.12'
+            fa_release: 'v0.9.17'
     uses: ./.github/workflows/_template-build-image.yml
     with:
       python_version: '3.12'
-      dockerfile_path: docker/Dockerfile.python3.12.cuda12.9.1
-      tag_suffix: py3.12-cuda12.9.1
+      dockerfile_path: docker/Dockerfile
+      tag_suffix: py3.12${{ matrix.cuda.suffix }}
+      mark_as_latest: ${{ matrix.cuda.version == '13.0.0' }}
+      build_args: |
+        PYTHON_VERSION=3.12
+        CUDA_VERSION=${{ matrix.cuda.version }}
+        UV_TORCH_BACKEND=${{ matrix.cuda.torch_backend }}
+        FLASH_ATTN_WHEEL_TAG=${{ matrix.cuda.fa_tag }}
+        FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/${{ matrix.cuda.fa_release }}
     secrets: inherit
 
-  build-dreamverse-backend-cuda-12-9:
-    if: ${{ github.event.inputs.dreamverse_cuda_12_9 == 'true' }}
+  # Dreamverse matrix: {backend, UI} x {12.6.3, 13.0.0}, Python 3.12. Torch backend
+  # matches the base CUDA (cu126 / cu130). Tagged dreamverse-<variant>-cuda<version>.
+  build-dreamverse:
+    if: ${{ github.event.inputs.build_dreamverse_matrix == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda:
+          - version: '12.6.3'
+            torch_backend: 'cu126'
+          - version: '13.0.0'
+            torch_backend: 'cu130'
+        variant:
+          - name: backend
+            ui: '0'
+          - name: ui
+            ui: '1'
     uses: ./.github/workflows/_template-build-image.yml
     with:
       python_version: '3.12'
       dockerfile_path: apps/dreamverse/docker/Dockerfile
-      tag_suffix: dreamverse-backend-cuda12.9.1
+      tag_suffix: dreamverse-${{ matrix.variant.name }}-cuda${{ matrix.cuda.version }}
       image_name: dreamverse
-      build_args: BUILD_DREAMVERSE_UI=0
-      include_latest_tags: false
-    secrets: inherit
-
-  build-dreamverse-ui-cuda-12-9:
-    if: ${{ github.event.inputs.dreamverse_cuda_12_9 == 'true' }}
-    uses: ./.github/workflows/_template-build-image.yml
-    with:
-      python_version: '3.12'
-      dockerfile_path: apps/dreamverse/docker/Dockerfile
-      tag_suffix: dreamverse-ui-cuda12.9.1
-      image_name: dreamverse
-      build_args: BUILD_DREAMVERSE_UI=1
+      build_args: |
+        CUDA_VERSION=${{ matrix.cuda.version }}
+        UV_TORCH_BACKEND=${{ matrix.cuda.torch_backend }}
+        BUILD_DREAMVERSE_UI=${{ matrix.variant.ui }}
       include_latest_tags: false
     secrets: inherit
