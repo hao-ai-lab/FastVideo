@@ -740,16 +740,25 @@ struct CollectiveMainloopFwd {
         auto col_limit_causal = [&](int row, int n_block) {
             return row + 1 + seqlen_k - n_block * kBlockN - seqlen_q + m_block * kBlockM;
         };
+        // The Blackwell FP4 MMA accumulator's N-dimension is laid out with bits 1↔3 and 2↔4
+        // swapped within each 32-column block relative to the natural matrix column order.
+        // partition_C of the identity tensor reflects this internal order, so we must undo
+        // the permutation to recover the actual matrix column before applying the causal mask.
+        auto actual_col = [](int c) {
+            int local = c & 31;
+            return (c & ~31) | (local & 1) | ((local & 24) >> 2) | ((local & 6) << 2);
+        };
         {
             Tensor cS = cute::make_identity_tensor(select<0, 1>(TileShape_MNK{}));
             Tensor tScS = thread_mma_qk.partition_C(cS);
             CUTLASS_PRAGMA_UNROLL
             for (int i = 0; i < size(tSrS); ++i) {
+                int col = actual_col(int(get<1>(tScS(i))));
                 if constexpr (!Is_causal) {  // Just masking based on col
-                    if (int(get<1>(tScS(i))) >= int(unpadded_seqlen_k - n_block * kBlockN)) { tSrS(i) = -INFINITY; }
-                } else { 
-                    if (int(get<1>(tScS(i))) >= std::min(seqlen_k - n_block * kBlockN,
-                                                        col_limit_causal(int(get<0>(tScS(i))), n_block))) {
+                    if (col >= int(unpadded_seqlen_k - n_block * kBlockN)) { tSrS(i) = -INFINITY; }
+                } else {
+                    if (col >= std::min(seqlen_k - n_block * kBlockN,
+                                       col_limit_causal(int(get<0>(tScS(i))), n_block))) {
                         tSrS(i) = -INFINITY;
                     }
                 }
@@ -846,7 +855,8 @@ struct CollectiveMainloopFwd {
             Tensor tScS = thread_mma_qk.partition_C(cS);
             #pragma unroll
             for (int i = 0; i < size(tSrS); ++i) {
-                if (int(get<1>(tScS(i))) >= col_limit_causal(int(get<0>(tScS(i))), n_block)) {
+                int col = actual_col(int(get<1>(tScS(i))));
+                if (col >= col_limit_causal(int(get<0>(tScS(i))), n_block)) {
                     tSrS(i) = -INFINITY;
                 }
             }
@@ -868,7 +878,7 @@ struct CollectiveMainloopFwd {
             }
             pipeline_v.consumer_release(smem_pipe_read_v);
             ++smem_pipe_read_v;
-            if (masking_step > 0) { softmax_fused.rescale_o(tOrO_store, tOrO); }
+            softmax_fused.rescale_o(tOrO_store, tOrO);
         }
 
         #pragma unroll 1
