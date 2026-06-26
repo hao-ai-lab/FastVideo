@@ -101,3 +101,13 @@ class Kandinsky5T2VConfig(PipelineConfig):
             "add_special_tokens": True,
             "return_tensors": "pt",
         })
+
+
+@dataclass
+class Kandinsky5I2VConfig(Kandinsky5T2VConfig):
+    """Kandinsky-5.0 image-to-video pipeline configuration."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # I2V needs the VAE encoder to encode the conditioning image.
+        self.vae_config.load_encoder = True

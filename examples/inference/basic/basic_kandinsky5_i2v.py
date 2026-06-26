@@ -1,8 +1,9 @@
 from fastvideo import VideoGenerator
 
-OUTPUT_PATH = "video_samples_kandinsky5_2B_t2v"
+OUTPUT_PATH = "video_samples_kandinsky5_2B_i2v"
 
 IMAGE_PATH = "assets/girl.png"
+
 
 def main():
     generator = VideoGenerator.from_pretrained(
@@ -22,7 +23,15 @@ def main():
         "brings it to her lips to take a sip. After drinking, she places the cup back on "
         "the table and looks out the window, enjoying the peaceful atmosphere."
     )
-    _ = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True,height=512, width=768, num_frames=121)
+    _ = generator.generate_video(
+        prompt,
+        image_path=IMAGE_PATH,
+        output_path=OUTPUT_PATH,
+        save_video=True,
+        height=512,
+        width=768,
+        num_frames=121,
+    )
 
 
 if __name__ == "__main__":
