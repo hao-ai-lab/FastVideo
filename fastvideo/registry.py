@@ -27,7 +27,7 @@ from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyu
                                                    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
                                                    Hunyuan15SR1080PConfig)
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
-from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5T2VConfig
+from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5I2VConfig, Kandinsky5T2VConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
@@ -500,10 +500,28 @@ def _register_configs() -> None:
             "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
         ],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5")),
+            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
+            and "i2v" not in path.lower(),
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_t2v_lite_5s",
+    )
+
+    # Kandinsky5 I2V
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5I2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-5.0-I2V-Lite-sft-5s-Diffusers",
+            "kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
+            and "i2v" in path.lower(),
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_i2v_lite_5s",
     )
 
     # LongCat (T2V, I2V, VC use same config; workload varies by path)
