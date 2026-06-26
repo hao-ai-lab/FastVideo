@@ -107,6 +107,7 @@ class AttentionBackend(ABC):
         dtype: torch.dtype,
         *,
         needs_attention_mask: bool = False,
+        needs_varlen: bool = False,
     ) -> str | None:
         """Return None if this backend is compatible with the given
         requirements, else a human-readable reason for the mismatch.
@@ -125,6 +126,9 @@ class AttentionBackend(ABC):
         if needs_attention_mask and not cls.supports_attention_mask():
             return (f"{cls.get_name()} cannot consume the attention mask this "
                     "layer requires")
+        if needs_varlen and not cls.supports_varlen():
+            return (f"{cls.get_name()} does not support variable-length "
+                    "sequence packing (varlen)")
         return None
 
 

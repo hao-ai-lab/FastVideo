@@ -84,6 +84,13 @@ def test_mask_requirement_reports_reason():
     assert "mask" in reason
 
 
+def test_varlen_requirement_reports_reason():
+    # _DummyBackend uses the default supports_varlen() == False.
+    reason = _DummyBackend.validate_compatibility(64, torch.float16, needs_varlen=True)
+    assert reason is not None
+    assert "varlen" in reason
+
+
 def test_real_backends_declare_capabilities():
     # Backends that ship head-size lists should expose them through the hook.
     from fastvideo.attention.backends.sdpa import SDPABackend
