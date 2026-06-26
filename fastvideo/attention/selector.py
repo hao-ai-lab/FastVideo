@@ -115,8 +115,7 @@ def _cached_get_attn_backend(
     # get device-specific attn_backend
     from fastvideo.platforms import current_platform
 
-    if (selected_backend is not None and
-            selected_backend not in supported_attention_backends):
+    if (selected_backend is not None and selected_backend not in supported_attention_backends):
         logger.warning(
             "Requested attention backend %s is not supported by this "
             "layer; supported backends are %s. Falling back to automatic "
