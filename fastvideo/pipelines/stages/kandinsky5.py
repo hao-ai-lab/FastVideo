@@ -15,6 +15,7 @@ from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.decoding import DecodingStage
+from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import PRECISION_TO_TYPE
@@ -89,6 +90,15 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
                 dtype=latents.dtype,
             )
             latents = torch.cat([latents, visual_cond, visual_cond_mask], dim=-1)
+        
+        if batch.image_latent is not None:
+            try:
+                raise NotImplementedError("Class to be implemented for I2V")
+            except NotImplementedError as e:
+                print(e)
+        else:
+            logger.warning("No image_latent found in batch, proceeding without conditioning")
+
 
         batch.latents = latents
         batch.raw_latent_shape = (
@@ -345,3 +355,12 @@ class Kandinsky5DecodingStage(DecodingStage):
         if fastvideo_args.vae_cpu_offload:
             self.vae.to("cpu")
         return batch
+
+
+class Kandinsky5ImageEncodingStage(EncodingStage):
+
+    def __init__(self, vae: ParallelTiledVAE, pipeline=None) -> None:
+        super().__init__(vae=vae, pipeline=pipeline)
+
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        raise NotImplementedError("Class to be implemented for I2V")
