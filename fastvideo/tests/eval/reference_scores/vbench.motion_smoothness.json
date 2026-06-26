@@ -1,0 +1,16 @@
+{
+  "metric": "vbench.motion_smoothness",
+  "score": 0.9897254431173182,
+  "details": {
+    "video_results": [
+      {
+        "video_path": "/tmp/claude-1039/vbench_gold_kvlismkw/videos/ltx2.mp4",
+        "video_results": 0.9897254431173182
+      }
+    ],
+    "upstream": "Vchitect/VBench",
+    "mode": "custom_input",
+    "text_prompt": "A warm sunny backyard. The camera starts in a tight cinematic close-up of a woman and a man in their 30s, facing each other with serious expressions. The woman, emotional and dramatic, says softly, \"That's it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly annoyed: \"Stop being so dramatic, Jess.\"",
+    "asset_video": "fastvideo/tests/eval/asset/ltx2.mp4"
+  }
+}
