@@ -92,9 +92,14 @@ def warn_if_backend_incompatible(
     so an explicitly requested backend (e.g. VIDEO_SPARSE_ATTN with an
     unsupported head size) would otherwise fail later with an opaque kernel
     error. This is diagnostic only -- it does not change which backend is
-    returned.
+    returned, and never raises: a misbehaving (e.g. custom/third-party)
+    backend must not be able to crash model initialization from this check.
     """
-    reason = backend.validate_compatibility(head_size, dtype)
+    try:
+        reason = backend.validate_compatibility(head_size, dtype)
+    except Exception as exc:  # noqa: BLE001 - diagnostic must never block init
+        logger.debug("Could not validate compatibility for backend %s: %s", backend.get_name(), exc)
+        return
     if reason is not None:
         logger.warning("Selected attention backend %s may be incompatible with this "
                        "layer: %s", backend.get_name(), reason)

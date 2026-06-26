@@ -55,3 +55,18 @@ def test_no_warning_when_compatible():
     with mock.patch.object(selector.logger, "warning") as mock_warn:
         selector.warn_if_backend_incompatible(_Restricted, head_size=128, dtype=torch.float16)
     mock_warn.assert_not_called()
+
+
+def test_validation_error_does_not_crash():
+    """A backend whose validate_compatibility raises must not break init."""
+
+    class _Broken(_Restricted):
+
+        @classmethod
+        def validate_compatibility(cls, *args, **kwargs) -> str | None:
+            raise RuntimeError("boom")
+
+    with mock.patch.object(selector.logger, "warning") as mock_warn:
+        # Should not raise.
+        selector.warn_if_backend_incompatible(_Broken, head_size=64, dtype=torch.float16)
+    mock_warn.assert_not_called()
