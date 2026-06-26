@@ -79,6 +79,27 @@ def get_global_forced_attn_backend() -> AttentionBackendEnum | None:
     return forced_attn_backend
 
 
+def warn_if_backend_incompatible(
+    backend: type[AttentionBackend],
+    head_size: int,
+    dtype: torch.dtype,
+) -> None:
+    """Log a warning if the resolved backend cannot serve this layer's
+    head_size/dtype, using the backend's self-described capabilities
+    (see #1254).
+
+    The platform only validates these for the FlashAttention default path,
+    so an explicitly requested backend (e.g. VIDEO_SPARSE_ATTN with an
+    unsupported head size) would otherwise fail later with an opaque kernel
+    error. This is diagnostic only -- it does not change which backend is
+    returned.
+    """
+    reason = backend.validate_compatibility(head_size, dtype)
+    if reason is not None:
+        logger.warning("Selected attention backend %s may be incompatible with this "
+                       "layer: %s", backend.get_name(), reason)
+
+
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
@@ -120,7 +141,9 @@ def _cached_get_attn_backend(
     attention_cls = current_platform.get_attn_backend_cls(selected_backend, head_size, dtype)
     if not attention_cls:
         raise ValueError(f"Invalid attention backend for {current_platform.device_name}")
-    return cast(type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
+    backend = cast(type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
+    warn_if_backend_incompatible(backend, head_size, dtype)
+    return backend
 
 
 @contextmanager
