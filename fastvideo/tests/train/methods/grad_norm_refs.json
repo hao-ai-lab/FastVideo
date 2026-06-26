@@ -1,6 +1,7 @@
 {
   "test_cosmos_finetune": {
-    "H200": 5.2763
+    "H200": 5.2763,
+    "L40S": 4.1553
   },
   "test_matrixgame2_finetune": {
     "H200": 4.8247
