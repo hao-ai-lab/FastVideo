@@ -392,10 +392,17 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
         image = self._preprocess(batch.pil_image, int(batch.height), int(batch.width))
         image = image.to(device=device, dtype=torch.float32).unsqueeze(2)
 
-        with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if not vae_autocast_enabled:
-                image = image.to(vae_dtype)
-            image_latent = self.vae.encode(image).mode()
+        # Encode the single conditioning frame without tiling (matches diffusers).
+        # The untested causal-VAE spatial_tiled_encode path corrupts the latent.
+        prev_use_tiling = self.vae.use_tiling
+        self.vae.use_tiling = False
+        try:
+            with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
+                if not vae_autocast_enabled:
+                    image = image.to(vae_dtype)
+                image_latent = self.vae.encode(image).mode()
+        finally:
+            self.vae.use_tiling = prev_use_tiling
 
         image_latent = image_latent * self.vae.scaling_factor
         # [B, C, 1, H, W] -> [B, 1, H, W, C] to match channels-last latents
