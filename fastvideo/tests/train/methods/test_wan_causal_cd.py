@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Per-method GPU smoke test: ``WanCausalModel`` + ``CausalConsistencyDistillationMethod``.
 
-Mirrors ``test_wan_causal_dfsft.py``. Causal Consistency Distillation
-(Causal-Forcing++ Stage-2b) bootstraps a consistency MSE between the
-student's ``x0`` at ``t`` and an EMA copy of the student at ``t_next``,
-where ``t_next`` is produced online by a single CFG Euler step of a frozen
-teacher (all under clean-history teacher forcing). This test exercises the
-full step: finite loss, nonzero student gradients, frozen teacher, and a
-post-step EMA update.
+Mirrors ``test_wan_causal_dfsft.py``. Causal consistency distillation
+bootstraps a consistency MSE between the student's ``x0`` at ``t`` and an EMA
+copy of the student at ``t_next``, where ``t_next`` is produced online by a
+single CFG Euler step of a frozen teacher (all under clean-history teacher
+forcing). This test exercises the full step: finite loss, nonzero student
+gradients, frozen teacher, and a post-step EMA update.
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Minimum config to run a single training step of
-# CausalConsistencyDistillationMethod (Causal-Forcing++ Stage-2b) on
-# WanCausalModel for the per-method smoke test. Uses the real Wan 2.1
-# 1.3B checkpoint for both the trainable student and the frozen teacher
-# (AR Euler-step target), with tiny synthetic latents.
+# CausalConsistencyDistillationMethod on WanCausalModel for the
+# per-method smoke test. Uses the real Wan 2.1 1.3B checkpoint for both
+# the trainable student and the frozen teacher (AR Euler-step target),
+# with tiny synthetic latents.
 
 models:
   student:

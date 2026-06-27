@@ -52,12 +52,23 @@ only change to `dfsft.py` is extracting the predict call into an overridable
 Roles: `student` (trainable), `teacher` and `ema` (frozen) — all initialized from the
 same checkpoint, matching the reference's three-network setup.
 
-### 5. Configs, tests, registration
+### 5. Frame-wise DFSFT
+A frame-wise variant of the existing diffusion-forcing SFT: each frame gets its own
+independent noise level (block size 1) instead of sharing one level across a chunk.
+No new method — `DiffusionForcingSFTMethod` with `chunk_size: 1` against a
+`WanCausalModel` constructed with `num_frames_per_block: 1`. The model gained a
+`num_frames_per_block` override kwarg (`fastvideo/train/models/wan/wan_causal.py`)
+that the YAML `models.<role>` block maps to. Example config
+`examples/train/configs/fine_tuning/wan/dfsft_causal_t2v_framewise.yaml`; smoke test
+`fastvideo/tests/train/methods/test_wan_causal_dfsft_framewise.py`.
+
+### 6. Configs, tests, registration
 - Smoke tests (mirror `test_wan_causal_dfsft.py`, real Wan-1.3B + tiny synthetic data):
   `fastvideo/tests/train/methods/test_wan_causal_tfsft.py`,
-  `.../test_wan_causal_cd.py`, with fixtures
-  `fastvideo/tests/train/fixtures/wan_causal_t2v_{tfsft,causal_cd}_min.yaml`.
+  `.../test_wan_causal_cd.py`, `.../test_wan_causal_dfsft_framewise.py`, with fixtures
+  `fastvideo/tests/train/fixtures/wan_causal_t2v_{tfsft,causal_cd,dfsft_framewise}_min.yaml`.
 - Example run configs: `examples/train/configs/fine_tuning/wan/tfsft_causal_t2v.yaml`,
+  `.../fine_tuning/wan/dfsft_causal_t2v_framewise.yaml`,
   `examples/train/configs/consistency_model/wan/causal_cd_t2v.yaml`.
 - Registered in `fastvideo/train/methods/__init__.py`,
   `.../fine_tuning/__init__.py`, `.../consistency_model/__init__.py`.
@@ -68,11 +79,13 @@ conda activate FastVideo_kaiqin
 export PYTHONPATH=$PWD   # from the FastVideo_cf clone
 pytest fastvideo/tests/train/methods/test_wan_causal_tfsft.py -q
 pytest fastvideo/tests/train/methods/test_wan_causal_cd.py -q
+pytest fastvideo/tests/train/methods/test_wan_causal_dfsft_framewise.py -q
 ```
-Both require CUDA and the cached `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` weights. Each runs
+All require CUDA and the cached `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` weights. Each runs
 one real train step and asserts finite loss + nonzero student gradients reaching the
 first transformer block (CD additionally asserts a frozen teacher and a working EMA
-update). **Status: both pass on GB200.**
+update; the frame-wise test asserts the block-size override reached the transformer).
+**Status: all pass on GB200.**
 
 For W&B logging on a real run, set `WANDB_API_KEY` in the environment (do not commit
 keys) and add a `training.tracker` block (see the example configs).
@@ -98,9 +111,11 @@ keys) and add a `training.tracker` block (see the example configs).
   `noise_augmentation_max_timestep`) is plumbed through the DiT (`aug_t`) but the TF
   method passes `aug_t=None` (clean context at timestep 0), matching the reference's
   default. CD also uses clean (un-augmented) context.
-- **Chunk vs frame granularity** is the existing `num_frame_per_block` knob (1 = frame,
-  3 = chunk); both TF and CD honor it. There is still no shipped Wan *framewise*
-  checkpoint/recipe (orthogonal to this change).
+- **Chunk vs frame granularity** is the `num_frames_per_block` knob (1 = frame,
+  3 = chunk); TF, CD and DFSFT all honor it. `WanCausalModel` accepts a
+  `num_frames_per_block` override (set from the `models.<role>` YAML block) so a run
+  can pick the block size without a separate checkpoint; the frame-wise DFSFT recipe
+  uses it. There is still no shipped Wan framewise *checkpoint*, only the recipe.
 - **CFG uncond text** for the teacher comes from the student's negative-prompt
   conditioning (`unconditional_dict`), as in the reference.
 

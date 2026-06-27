@@ -1,13 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Teacher-forcing SFT method (TFSFT; algorithm layer).
-
-Stage-1 AR-diffusion training from Causal-Forcing. Identical to
-:class:`DiffusionForcingSFTMethod` (inhomogeneous per-chunk timesteps,
-flow loss, bsmntw weighting) except the causal transformer denoises the
-current block while attending to *clean* history (``clean_x``) instead of
-its own noisy rollout. This is the "Causal Forcing" namesake mechanism and
-the recommended initialization for the downstream ODE / consistency stages.
-"""
+"""Teacher-forcing SFT method (TFSFT; algorithm layer)."""
 
 from __future__ import annotations
 
@@ -20,7 +12,6 @@ from fastvideo.train.methods.fine_tuning.dfsft import (
 
 
 class TeacherForcingSFTMethod(DiffusionForcingSFTMethod):
-    """AR-diffusion SFT with clean-history teacher forcing."""
 
     def _predict_noise(
         self,
