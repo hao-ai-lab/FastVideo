@@ -14,6 +14,7 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (PreprocessP
 from fastvideo.pipelines.preprocess.matrixgame2.matrixgame2_preprocess_pipeline import (PreprocessPipeline_MatrixGame2)
 from fastvideo.pipelines.preprocess.matrixgame2.matrixgame2_preprocess_pipeline_ode_trajectory import (
     PreprocessPipeline_MatrixGame2_ODE_Trajectory)
+from fastvideo.pipelines.preprocess.track.track_i2v_preprocess_pipeline import (PreprocessPipeline_I2V_Track)
 from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
@@ -70,9 +71,12 @@ def main(args) -> None:
                           DeprecationWarning,
                           stacklevel=2)
         PreprocessPipeline = PreprocessPipeline_MatrixGame2_ODE_Trajectory
+    elif args.preprocess_task == "i2v_track":
+        PreprocessPipeline = PreprocessPipeline_I2V_Track
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
-                         f"Valid options: t2v, i2v, ode_trajectory, text_only, matrixgame2, matrixgame2_ode_trajectory")
+                         f"Valid options: t2v, i2v, i2v_track, ode_trajectory, text_only, "
+                         f"matrixgame2, matrixgame2_ode_trajectory")
 
     logger.info("Preprocess task: %s using %s", args.preprocess_task, PreprocessPipeline.__name__)
 
@@ -115,6 +119,7 @@ if __name__ == "__main__":
         choices=[
             "t2v",
             "i2v",
+            "i2v_track",
             "text_only",
             "ode_trajectory",
             "matrixgame2",

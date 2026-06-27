@@ -51,6 +51,39 @@ pyarrow_schema_i2v = pa.schema([
 ])
 
 
+pyarrow_schema_i2v_track = pa.schema([
+    pa.field("id", pa.string()),
+    # --- Video VAE latents [C, T, H, W] ---
+    pa.field("vae_latent_bytes", pa.binary()),
+    pa.field("vae_latent_shape", pa.list_(pa.int64())),
+    pa.field("vae_latent_dtype", pa.string()),
+    # --- T5 text-encoder output [SeqLen, Dim] (kept: WanTrack uses the prompt) ---
+    pa.field("text_embedding_bytes", pa.binary()),
+    pa.field("text_embedding_shape", pa.list_(pa.int64())),
+    pa.field("text_embedding_dtype", pa.string()),
+    # --- I2V first-frame conditioning latent [C, 1, H, W] (concatenated, no CLIP) ---
+    pa.field("first_frame_latent_bytes", pa.binary()),
+    pa.field("first_frame_latent_shape", pa.list_(pa.int64())),
+    pa.field("first_frame_latent_dtype", pa.string()),
+    # --- MotionStream point tracks (normalized coords in [0,1]) ---
+    pa.field("track_points_bytes", pa.binary()),
+    pa.field("track_points_shape", pa.list_(pa.int64())),  # [T, N, 2]
+    pa.field("track_points_dtype", pa.string()),
+    pa.field("track_visibility_bytes", pa.binary()),
+    pa.field("track_visibility_shape", pa.list_(pa.int64())),  # [T, N]
+    pa.field("track_visibility_dtype", pa.string()),
+    # --- Metadata ---
+    pa.field("file_name", pa.string()),
+    pa.field("caption", pa.string()),
+    pa.field("media_type", pa.string()),
+    pa.field("width", pa.int64()),
+    pa.field("height", pa.int64()),
+    pa.field("num_frames", pa.int64()),
+    pa.field("duration_sec", pa.float64()),
+    pa.field("fps", pa.float64()),
+])
+
+
 pyarrow_schema_t2v = pa.schema([
     pa.field("id", pa.string()),
     # --- Image/Video VAE latents ---

@@ -286,6 +286,8 @@ class BasePreprocessPipeline(ComposedPipelineBase):
 
                 if "action_path" in data:
                     valid_data["action_path"] = [data["action_path"][i] for i in valid_indices]
+                if "points_path" in data:
+                    valid_data["points_path"] = [data["points_path"][i] for i in valid_indices]
 
                 # VAE
                 with torch.autocast("cuda", dtype=torch.float32):
@@ -379,3 +381,11 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 written = self.dataset_writer.flush()
                 logger.info("Flushed %s samples to parquet", written)
                 num_processed_samples = 0
+
+        # Final flush: the loop only writes complete ``samples_per_file`` chunks on
+        # the flush cadence, so the trailing < flush_frequency samples would be
+        # dropped without writing the remainder here.
+        if hasattr(self, "dataset_writer"):
+            written = self.dataset_writer.flush(write_remainder=True)
+            if written:
+                logger.info("Final flush: wrote %s remaining samples to parquet", written)

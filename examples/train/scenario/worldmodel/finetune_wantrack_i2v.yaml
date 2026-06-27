@@ -1,0 +1,79 @@
+# WanTrack (Wan2.2 + MotionStream point-track) bidirectional I2V finetune.
+# Overfit config: 1.3B base, 480x832, all 121 frames (tracks align 1:1).
+# Goal: drive flow-matching loss down on the 10-clip dataset to prove the
+# track-conditioned path learns. MotionStream augments are env-gated and left
+# OFF here (WANTRACK_AUG=0 in the launch env) for a clean loss-down signal.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
+    init_from: /mnt/weka/home/hao.zhang/shao/data/models/trackwan_1.3b_init
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  model_path: /mnt/weka/home/hao.zhang/shao/data/models/trackwan_1.3b_init
+
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: /mnt/weka/home/hao.zhang/shao/data/motion_pipeline/wan22_a14b_720p_24fps/preprocessed_i2v_track/combined_parquet_dataset
+    dataloader_num_workers: 2
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 480
+    num_width: 832
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 1.0e-4
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 4000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: /mnt/weka/home/hao.zhang/shao/data/motion_pipeline/wantrack_overfit_out
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: latest
+
+  tracker:
+    trackers: [wandb]
+    project_name: wantrack-bidir
+    run_name: overfit-1p3b-4k
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  track_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    every_steps: 500
+    num_val_samples: 2
+    num_inference_steps: 30
+    guidance_scale: 1.0
+    fps: 24
+    grid_stride: 3
+    tail: 12
+    validate_at_start: true
+    seed: 1000
+
+pipeline:
+  flow_shift: 3

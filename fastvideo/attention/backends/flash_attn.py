@@ -57,7 +57,10 @@ if fa_version in ("2", "3"):
         softmax_scale: float | None,
         causal: bool,
     ) -> torch.Tensor:
-        return _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal)
+        out = _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal)
+        # FA3 (flash_attn_interface) returns (out, softmax_lse); FA2 returns a
+        # bare tensor. Unwrap so the op honours its declared Tensor return type.
+        return out[0] if isinstance(out, tuple) else out
 
     @torch.library.register_fake("fastvideo::_flash_attn_default_forward")
     def _flash_attn_default_forward_fake(
@@ -84,7 +87,8 @@ if fa_version in ("2", "3"):
         # regression. Full autograd parity for the custom op (mirroring the FP4
         # cute template) is a tracked follow-up.
         if torch.is_grad_enabled() and (q.requires_grad or k.requires_grad or v.requires_grad):
-            return _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal)
+            out = _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal)
+            return out[0] if isinstance(out, tuple) else out
         return torch.ops.fastvideo._flash_attn_default_forward(q, k, v, softmax_scale, causal)
 elif fa_version == "4":
     # FA4 path: `flash_attn_func` is already a torch.library custom op

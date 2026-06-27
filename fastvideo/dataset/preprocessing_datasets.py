@@ -41,6 +41,7 @@ class PreprocessBatch:
     sample_frame_index: list[int] | None = None
     sample_num_frames: int | None = None
     action_path: str | None = None
+    points_path: str | None = None
 
     # Processed data
     pixel_values: torch.Tensor | None = None
@@ -264,8 +265,18 @@ class VideoTransformStage(DatasetStage):
         assert os.path.exists(batch.path), f"file {batch.path} do not exist!"
         assert batch.sample_frame_index is not None, "Frame indices must be set before transformation"
 
-        torchvision_video, _, metadata = torchvision.io.read_video(
-            batch.path, output_format="TCHW")
+        # Recent torchvision dropped ``torchvision.io.read_video``; decode with
+        # decord (ffmpeg fallback) and return the same [T, C, H, W] uint8 layout.
+        try:
+            from decord import VideoReader, cpu
+            vr = VideoReader(batch.path, ctx=cpu(0))
+            frames = vr.get_batch(list(range(len(vr)))).asnumpy()  # (T, H, W, C)
+        except Exception:  # noqa: BLE001 - fall back to ffmpeg
+            import imageio
+            reader = imageio.get_reader(batch.path, format="ffmpeg")
+            frames = np.stack([np.asarray(f) for f in reader], axis=0)
+            reader.close()
+        torchvision_video = torch.from_numpy(np.ascontiguousarray(frames)).permute(0, 3, 1, 2)  # TCHW
         video = torchvision_video[batch.sample_frame_index]
         if self.transform is not None:
             video = self.transform(video)
@@ -471,6 +482,10 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
             item["path"] = opj(folder, item["path"])
             if "action_path" in item and item["action_path"]:
                 item["action_path"] = opj(folder, item["action_path"])
+            if "points_path" in item and item["points_path"]:
+                # opj returns the second arg unchanged if it's already absolute
+                # (extract_tracks.py writes an absolute points_path).
+                item["points_path"] = opj(folder, item["points_path"])
 
         return data_items
 
@@ -492,7 +507,8 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
                                     resolution=item.get("resolution"),
                                     fps=item.get("fps"),
                                     duration=item.get("duration"),
-                                    action_path=item.get("action_path"))
+                                    action_path=item.get("action_path"),
+                                    points_path=item.get("points_path"))
 
             # Apply filtering stages
             if not self._apply_filter_stages(batch, filter_counts):
@@ -570,6 +586,9 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Add action_path
         if batch.action_path:
             result["action_path"] = batch.action_path
+        # Add points_path (CoTracker tracks sidecar for WanTrack)
+        if batch.points_path:
+            result["points_path"] = batch.points_path
 
         return result
 
