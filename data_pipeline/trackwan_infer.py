@@ -19,8 +19,8 @@ import torch
 
 
 def _ensure_dist_env() -> None:
-    for k, v in [("RANK", "0"), ("LOCAL_RANK", "0"), ("WORLD_SIZE", "1"),
-                 ("MASTER_ADDR", "127.0.0.1"), ("MASTER_PORT", "29600")]:
+    for k, v in [("RANK", "0"), ("LOCAL_RANK", "0"), ("WORLD_SIZE", "1"), ("MASTER_ADDR", "127.0.0.1"),
+                 ("MASTER_PORT", "29600")]:
         os.environ.setdefault(k, v)
 
 
@@ -55,8 +55,7 @@ def load_trackwan(export_dir: str, yaml_path: str) -> tuple[Any, Any]:
     return model, tc
 
 
-def load_conditioning_from_parquet(data_path: str, indices: list[int], text_len: int
-                                   ) -> list[dict[str, Any]]:
+def load_conditioning_from_parquet(data_path: str, indices: list[int], text_len: int) -> list[dict[str, Any]]:
     """Pull (first_frame_latent, text, vae_latent, GT tracks, caption) for clips."""
     import glob
 
@@ -70,8 +69,10 @@ def load_conditioning_from_parquet(data_path: str, indices: list[int], text_len:
     for f in files:
         rows.extend(pq.read_table(f).to_pylist())
     sel = [rows[i] for i in indices]
-    batch = collate_rows_from_parquet_schema(
-        sel, pyarrow_schema_i2v_track, text_padding_length=int(text_len), cfg_rate=0.0)
+    batch = collate_rows_from_parquet_schema(sel,
+                                             pyarrow_schema_i2v_track,
+                                             text_padding_length=int(text_len),
+                                             cfg_rate=0.0)
     infos = batch.get("info_list") or [{} for _ in sel]
     out = []
     for i in range(len(sel)):
@@ -80,7 +81,8 @@ def load_conditioning_from_parquet(data_path: str, indices: list[int], text_len:
             "text_attention_mask": batch["text_attention_mask"][i:i + 1].clone(),
             "vae_latent": batch["vae_latent"][i:i + 1].clone(),
             "first_frame_latent": batch["first_frame_latent"][i:i + 1].clone(),
-            "track_points": batch["track_points"][i:i + 1].clone(),         # [1,T,N,2] normalized
+            "clip_feature": batch["clip_feature"][i:i + 1].clone(),  # [1,SeqLen,Dim] CLIP frame-0
+            "track_points": batch["track_points"][i:i + 1].clone(),  # [1,T,N,2] normalized
             "track_visibility": batch["track_visibility"][i:i + 1].clone(),  # [1,T,N]
             "caption": str(infos[i].get("caption", "")),
         })
@@ -88,10 +90,16 @@ def load_conditioning_from_parquet(data_path: str, indices: list[int], text_len:
 
 
 @torch.no_grad()
-def generate(model: Any, *, first_frame_latent: torch.Tensor,
-             text_embedding: torch.Tensor, text_attention_mask: torch.Tensor,
-             track_points: torch.Tensor | None, track_visibility: torch.Tensor | None,
-             num_steps: int = 30, seed: int = 0) -> torch.Tensor:
+def generate(model: Any,
+             *,
+             first_frame_latent: torch.Tensor,
+             text_embedding: torch.Tensor,
+             text_attention_mask: torch.Tensor,
+             track_points: torch.Tensor | None,
+             track_visibility: torch.Tensor | None,
+             clip_feature: torch.Tensor | None = None,
+             num_steps: int = 30,
+             seed: int = 0) -> torch.Tensor:
     """Denoise from noise -> normalized latents [1,16,T,H,W]. Tracks may be None."""
     from fastvideo.forward_context import set_forward_context
     from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
@@ -99,12 +107,13 @@ def generate(model: Any, *, first_frame_latent: torch.Tensor,
 
     device = model.device
     dtype = torch.bfloat16
-    ff = first_frame_latent.to(device, dtype)                       # [1,16,T,H,W] (already normalized)
-    cond20 = model._build_i2v_cond_concat(ff)                       # [1,20,T,H,W]
+    ff = first_frame_latent.to(device, dtype)  # [1,16,T,H,W] (already normalized)
+    cond20 = model._build_i2v_cond_concat(ff)  # [1,20,T,H,W]
     txt = text_embedding.to(device, dtype)
     mask = text_attention_mask.to(device, dtype)
     tp = track_points.to(device, dtype) if track_points is not None else None
     tv = track_visibility.to(device, dtype) if track_visibility is not None else None
+    img = clip_feature.to(device, dtype) if clip_feature is not None else None
 
     _, _, T, H, W = ff.shape
     gen = torch.Generator(device="cpu").manual_seed(int(seed))
@@ -113,15 +122,15 @@ def generate(model: Any, *, first_frame_latent: torch.Tensor,
     sched = FlowMatchEulerDiscreteScheduler(shift=float(model.timestep_shift))
     sched.set_timesteps(int(num_steps), device=device)
     for t in sched.timesteps:
-        model_in = torch.cat([latents.to(dtype), cond20], dim=1)    # [1,36,T,H,W]
+        model_in = torch.cat([latents.to(dtype), cond20], dim=1)  # [1,36,T,H,W]
         ts = t.reshape(1).to(device, dtype)
-        with torch.autocast(device.type, dtype=dtype), set_forward_context(
-                current_timestep=ts, attn_metadata=None):
+        with torch.autocast(device.type, dtype=dtype), set_forward_context(current_timestep=ts, attn_metadata=None):
             v = model.transformer(
                 hidden_states=model_in,
                 encoder_hidden_states=txt,
                 encoder_attention_mask=mask,
                 timestep=ts,
+                encoder_hidden_states_image=img,
                 track_points=tp,
                 track_visibility=tv,
                 return_dict=False,
@@ -133,9 +142,9 @@ def generate(model: Any, *, first_frame_latent: torch.Tensor,
 @torch.no_grad()
 def decode_to_pixels(model: Any, latents: torch.Tensor) -> np.ndarray:
     """Normalized latents [1,16,T,H,W] -> uint8 frames [T,H,W,3]."""
-    px = model.decode_latents(latents.permute(0, 2, 1, 3, 4))[0]    # [3,T,H,W] in [0,1]
+    px = model.decode_latents(latents.permute(0, 2, 1, 3, 4))[0]  # [3,T,H,W] in [0,1]
     video = (px.clamp(0, 1).float().cpu().numpy() * 255.0).astype(np.uint8)
-    return np.transpose(video, (1, 2, 3, 0))                        # [T,H,W,3]
+    return np.transpose(video, (1, 2, 3, 0))  # [T,H,W,3]
 
 
 @torch.no_grad()

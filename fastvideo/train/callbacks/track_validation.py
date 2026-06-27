@@ -186,8 +186,11 @@ class TrackValidationCallback(Callback):
         rows = rows[:self.num_val_samples]
 
         text_len = int(tc.pipeline_config.text_encoder_configs[0].arch_config.text_len)
-        batch = collate_rows_from_parquet_schema(
-            rows, pyarrow_schema_i2v_track, text_padding_length=text_len, cfg_rate=0.0, seed=self.seed)
+        batch = collate_rows_from_parquet_schema(rows,
+                                                 pyarrow_schema_i2v_track,
+                                                 text_padding_length=text_len,
+                                                 cfg_rate=0.0,
+                                                 seed=self.seed)
 
         n = batch["text_embedding"].shape[0]
         infos = batch.get("info_list") or [{} for _ in range(n)]
@@ -197,6 +200,7 @@ class TrackValidationCallback(Callback):
                 "text_attention_mask": batch["text_attention_mask"][i:i + 1].clone(),
                 "vae_latent": batch["vae_latent"][i:i + 1].clone(),
                 "first_frame_latent": batch["first_frame_latent"][i:i + 1].clone(),
+                "clip_feature": batch["clip_feature"][i:i + 1].clone(),
                 "track_points": batch["track_points"][i:i + 1].clone(),
                 "track_visibility": batch["track_visibility"][i:i + 1].clone(),
                 "caption": str(infos[i].get("caption", "") if i < len(infos) else ""),
@@ -218,7 +222,7 @@ class TrackValidationCallback(Callback):
             gen_logs: list[Any] = []
             ref_logs: list[Any] = []
             for i, s in enumerate(self._samples):
-                gen_latents = self._sample(student, transformer, s)          # [1,16,T,H,W] normalized
+                gen_latents = self._sample(student, transformer, s)  # [1,16,T,H,W] normalized
                 gen_px = student.decode_latents(gen_latents.permute(0, 2, 1, 3, 4))[0]  # [3,T,H,W] in [0,1]
                 gen_frames = self._overlay_tracks(gen_px, s)
                 if self._is_main:
@@ -254,12 +258,13 @@ class TrackValidationCallback(Callback):
         dtype = torch.bfloat16
         flow_shift = float(student.timestep_shift)
 
-        ff = s["first_frame_latent"].to(device, dtype)                 # [1,16,T,H,W] (raw, matches training)
-        cond20 = student._build_i2v_cond_concat(ff)                    # [1,20,T,H,W]
+        ff = s["first_frame_latent"].to(device, dtype)  # [1,16,T,H,W] (raw, matches training)
+        cond20 = student._build_i2v_cond_concat(ff)  # [1,20,T,H,W]
         txt = s["text_embedding"].to(device, dtype)
         mask = s["text_attention_mask"].to(device, dtype)
-        tp = s["track_points"].to(device, dtype)                       # [1,T,N,2] normalized
-        tv = s["track_visibility"].to(device, dtype)                   # [1,T,N]
+        tp = s["track_points"].to(device, dtype)  # [1,T,N,2] normalized
+        tv = s["track_visibility"].to(device, dtype)  # [1,T,N]
+        img = s["clip_feature"].to(device, dtype)  # [1,SeqLen,Dim] CLIP frame-0
 
         _, _, T, H, W = ff.shape
         gen = torch.Generator(device="cpu").manual_seed(self.seed)
@@ -268,16 +273,16 @@ class TrackValidationCallback(Callback):
         sched = FlowMatchEulerDiscreteScheduler(shift=flow_shift)
         sched.set_timesteps(self.num_inference_steps, device=device)
         for t in sched.timesteps:
-            model_in = torch.cat([latents.to(dtype), cond20], dim=1)   # [1,36,T,H,W]
+            model_in = torch.cat([latents.to(dtype), cond20], dim=1)  # [1,36,T,H,W]
             ts = t.reshape(1).to(device, dtype)
-            with torch.autocast(device.type, dtype=dtype), set_forward_context(
-                    current_timestep=ts, attn_metadata=None):
+            with torch.autocast(device.type, dtype=dtype), set_forward_context(current_timestep=ts, attn_metadata=None):
                 # WanTransformer3DModel.forward returns a bare [B,C,T,H,W] tensor.
                 v = transformer(
                     hidden_states=model_in,
                     encoder_hidden_states=txt,
                     encoder_attention_mask=mask,
                     timestep=ts,
+                    encoder_hidden_states_image=img,
                     track_points=tp,
                     track_visibility=tv,
                     return_dict=False,
@@ -289,26 +294,26 @@ class TrackValidationCallback(Callback):
         from fastvideo.training.training_utils import normalize_dit_input
         device = student.device
         dtype = torch.bfloat16
-        raw = s["vae_latent"].to(device, dtype)                        # [1,16,T,H,W] raw VAE latent
+        raw = s["vae_latent"].to(device, dtype)  # [1,16,T,H,W] raw VAE latent
         norm = normalize_dit_input("wan", raw, student.vae)
         return student.decode_latents(norm.permute(0, 2, 1, 3, 4))[0]  # [3,T,H,W]
 
     def _overlay_tracks(self, px: torch.Tensor, s: dict[str, Any]) -> list[np.ndarray]:
         # px: [3,T,H,W] in [0,1]
         video = (px.clamp(0, 1).float().cpu().numpy() * 255.0).astype(np.uint8)
-        frames = np.transpose(video, (1, 2, 3, 0))                    # [T,H,W,3]
+        frames = np.transpose(video, (1, 2, 3, 0))  # [T,H,W,3]
         T, H, W, _ = frames.shape
 
-        tp = s["track_points"][0].float().cpu().numpy()               # [Tt,N,2] normalized
-        tv = s["track_visibility"][0].float().cpu().numpy()           # [Tt,N]
+        tp = s["track_points"][0].float().cpu().numpy()  # [Tt,N,2] normalized
+        tv = s["track_visibility"][0].float().cpu().numpy()  # [Tt,N]
         tt = min(T, tp.shape[0])
         frames, tp, tv = frames[:tt], tp[:tt], tv[:tt]
 
-        grid = int(round(tp.shape[1] ** 0.5))
+        grid = int(round(tp.shape[1]**0.5))
         tp, tv = _subsample(tp, tv, grid, self.grid_stride)
         colors = _grid_colors(grid, self.grid_stride)
         if colors.shape[0] != tp.shape[1]:
-            colors = _grid_colors(int(round(tp.shape[1] ** 0.5)) or 1, 1)[:tp.shape[1]]
+            colors = _grid_colors(int(round(tp.shape[1]**0.5)) or 1, 1)[:tp.shape[1]]
 
         # Normalized [0,1] -> pixel coords of the generated frame.
         tp_px = tp.copy()

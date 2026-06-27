@@ -95,7 +95,7 @@ class WanTrackModel(WanModel):
             for b in range(B):
                 hi = min(self._aug_max_points, N)
                 lo = min(self._aug_min_points, hi)
-                k = int(torch.randint(lo, hi + 1, (1,), generator=generator, device=gdev).item())
+                k = int(torch.randint(lo, hi + 1, (1, ), generator=generator, device=gdev).item())
                 keep_idx = torch.randperm(N, generator=generator, device=gdev)[:k]
                 keep = torch.zeros(N, device=device, dtype=vis.dtype)
                 keep[keep_idx.to(device)] = 1.0
@@ -107,9 +107,9 @@ class WanTrackModel(WanModel):
             vis = vis * frame_keep.to(device=device, dtype=vis.dtype).unsqueeze(-1)
 
         # 3) Motion CFG dropout: drop ALL motion for this step (-> cm = zeros).
-        if self._aug_motion_drop > 0.0:
-            if float(torch.rand(1, generator=generator, device=gdev).item()) < self._aug_motion_drop:
-                return None, None
+        if (self._aug_motion_drop > 0.0
+                and float(torch.rand(1, generator=generator, device=gdev).item()) < self._aug_motion_drop):
+            return None, None
 
         return track_points, vis
 
@@ -141,6 +141,13 @@ class WanTrackModel(WanModel):
 
         first_frame_latent = raw_batch["first_frame_latent"][:, :, :tc.data.num_latent_t].to(device, dtype=dtype)
 
+        # CLIP image embedding of frame 0 (Wan2.1 I2V semantic cross-attention pathway).
+        image_embeds = raw_batch.get("clip_feature")
+        if image_embeds is None or (torch.is_tensor(image_embeds) and image_embeds.numel() == 0):
+            raise ValueError("WanTrack (I2V) requires 'clip_feature'; re-run the i2v_track preprocess with an "
+                             "image_encoder (e.g. the Wan2.1-Fun-1.3B-InP base).")
+        image_embeds = image_embeds.to(device, dtype=dtype)
+
         expected_frames = (tc.data.num_latent_t - 1) * self._temporal_compression_ratio() + 1
         track_points = raw_batch.get("track_points")
         track_visibility = raw_batch.get("track_visibility")
@@ -164,7 +171,8 @@ class WanTrackModel(WanModel):
         training_batch.encoder_hidden_states = encoder_hidden_states
         training_batch.encoder_attention_mask = encoder_attention_mask.to(device, dtype=dtype)
         training_batch.image_latents = first_frame_latent
-        training_batch.track_points = track_points          # stashed (extra attr)
+        training_batch.image_embeds = image_embeds  # CLIP frame-0 features (cross-attn)
+        training_batch.track_points = track_points  # stashed (extra attr)
         training_batch.track_visibility = track_visibility
 
         training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
@@ -189,11 +197,12 @@ class WanTrackModel(WanModel):
             raise RuntimeError("WanTrack requires first_frame_latent (image_latents)")
         cond_latents = self._build_i2v_cond_concat(image_latents)  # [B, 20, T, H, W]
         training_batch.image_latents = cond_latents
-        training_batch.noisy_model_input = torch.cat(
-            [training_batch.noisy_model_input, cond_latents], dim=1)  # [B, 36, T, H, W]
+        training_batch.noisy_model_input = torch.cat([training_batch.noisy_model_input, cond_latents],
+                                                     dim=1)  # [B, 36, T, H, W]
 
         assert training_batch.conditional_dict is not None
         training_batch.conditional_dict["image_latents"] = cond_latents
+        training_batch.conditional_dict["encoder_hidden_states_image"] = getattr(training_batch, "image_embeds", None)
         training_batch.conditional_dict["track_points"] = getattr(training_batch, "track_points", None)
         training_batch.conditional_dict["track_visibility"] = getattr(training_batch, "track_visibility", None)
         # No CFG dropout during finetuning: uncond mirrors cond (keeps text + tracks).
@@ -215,10 +224,11 @@ class WanTrackModel(WanModel):
                 raise RuntimeError("WanTrack needs image_latents in conditional_dict for a 16ch input")
             hidden_states = torch.cat([hidden_states, cond_latents[:, :, :hidden_states.shape[2]]], dim=1)
         return {
-            "hidden_states": hidden_states,                                   # [B, 36, T, H, W]
-            "encoder_hidden_states": text_dict["encoder_hidden_states"],      # T5 text (kept)
+            "hidden_states": hidden_states,  # [B, 36, T, H, W]
+            "encoder_hidden_states": text_dict["encoder_hidden_states"],  # T5 text (kept)
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
             "timestep": timestep.to(device=self.device, dtype=torch.bfloat16),
+            "encoder_hidden_states_image": text_dict.get("encoder_hidden_states_image"),
             "track_points": text_dict.get("track_points"),
             "track_visibility": text_dict.get("track_visibility"),
             "return_dict": False,
@@ -244,7 +254,8 @@ class WanTrackModel(WanModel):
         if image_latents.shape[1] == 20:
             return image_latents
         if image_latents.shape[1] != 16:
-            raise ValueError(f"WanTrack expects first_frame_latent with 16 or 20 channels, got {image_latents.shape[1]}")
+            raise ValueError(
+                f"WanTrack expects first_frame_latent with 16 or 20 channels, got {image_latents.shape[1]}")
 
         ratio = self._temporal_compression_ratio()
         b, _, num_latent_t, h, w = image_latents.shape

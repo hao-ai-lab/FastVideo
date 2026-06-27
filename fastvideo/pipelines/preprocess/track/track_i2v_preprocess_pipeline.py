@@ -4,7 +4,8 @@
 Turns (video.mp4 + CoTracker tracks.npz + text prompt) into a FastVideo training
 parquet for the WanTrack model. Compared to the plain I2V pipeline this:
   - keeps the T5 text embedding (WanTrack conditions on the prompt),
-  - computes the first-frame conditioning latent (concatenated I2V, no CLIP),
+  - computes the first-frame conditioning latent (concatenated I2V) AND the CLIP
+    image embedding of frame 0 (Wan2.1 I2V semantic cross-attention pathway),
   - adds the dense CoTracker tracks (normalized coords) + visibility.
 
 The track embedding itself (MotionStream scatter / track head) runs *inside the
@@ -14,10 +15,12 @@ from typing import Any
 
 import numpy as np
 import torch
+from PIL import Image
 
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v_track
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (BasePreprocessPipeline)
 from fastvideo.pipelines.stages import TextEncodingStage
@@ -26,9 +29,9 @@ logger = init_logger(__name__)
 
 
 class PreprocessPipeline_I2V_Track(BasePreprocessPipeline):
-    """I2V + point-track preprocessing (first-frame latent concat, no CLIP)."""
+    """I2V + point-track preprocessing (first-frame latent concat + CLIP image cross-attn)."""
 
-    _required_config_modules = ["text_encoder", "tokenizer", "vae"]
+    _required_config_modules = ["text_encoder", "tokenizer", "vae", "image_encoder", "image_processor"]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         self.add_stage(stage_name="prompt_encoding_stage",
@@ -53,7 +56,8 @@ class PreprocessPipeline_I2V_Track(BasePreprocessPipeline):
             video_condition = torch.cat([
                 processed_img,
                 processed_img.new_zeros(processed_img.shape[0], processed_img.shape[1], num_frames - 1, height, width),
-            ], dim=2)
+            ],
+                                        dim=2)
             video_conditions.append(video_condition.to(device=get_local_torch_device(), dtype=torch.float32))
         video_conditions = torch.cat(video_conditions, dim=0)
 
@@ -69,16 +73,40 @@ class PreprocessPipeline_I2V_Track(BasePreprocessPipeline):
         vae = self.get_module("vae")
         if getattr(vae, "shift_factor", None) is not None:
             shift = vae.shift_factor
-            shift = shift.to(latent_condition.device, latent_condition.dtype) if isinstance(shift, torch.Tensor) else shift
+            shift = shift.to(latent_condition.device, latent_condition.dtype) if isinstance(shift,
+                                                                                            torch.Tensor) else shift
             latent_condition = latent_condition - shift
         scale = getattr(vae, "scaling_factor", 1.0)
         scale = scale.to(latent_condition.device, latent_condition.dtype) if isinstance(scale, torch.Tensor) else scale
         latent_condition = latent_condition * scale
         return latent_condition
 
+    def _encode_clip_feature(self, valid_data: dict[str, Any]) -> torch.Tensor:
+        """CLIP image embedding of frame 0 (Wan2.1 I2V semantic cross-attention pathway).
+
+        Mirrors ``preprocess_pipeline_i2v``: each first frame (pixel values in [-1, 1]) is
+        rescaled to [0, 255], run through the model's CLIPImageProcessor, and encoded by the
+        CLIPVisionModelWithProjection; the last hidden state is the per-token image embedding
+        that the DiT consumes as ``encoder_hidden_states_image``.
+        """
+        image_encoder = self.get_module("image_encoder").to(get_local_torch_device())
+        image_processor = self.get_module("image_processor")
+        first_frame = valid_data["pixel_values"][:, :, 0, :, :].permute(0, 2, 3, 1)  # (B, H, W, C) in [-1, 1]
+
+        processed_images = []
+        for frame in first_frame:
+            frame = (frame + 1) * 127.5
+            frame_pil = Image.fromarray(frame.cpu().numpy().astype(np.uint8))
+            processed_images.append(image_processor(images=frame_pil, return_tensors="pt"))
+        pixel_values = torch.cat([img["pixel_values"] for img in processed_images], dim=0).to(get_local_torch_device())
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+            clip_features = image_encoder(pixel_values=pixel_values).last_hidden_state
+        return clip_features  # (B, SeqLen, Dim); base converts per-sample to cpu().numpy()
+
     def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         features: dict[str, Any] = {}
         features["first_frame_latent"] = self._encode_first_frame_latent(valid_data)
+        features["clip_feature"] = self._encode_clip_feature(valid_data)
 
         num_frames = valid_data["pixel_values"].shape[2]
         points_paths = valid_data.get("points_path")
@@ -90,7 +118,7 @@ class PreprocessPipeline_I2V_Track(BasePreprocessPipeline):
         track_visibility_list: list[np.ndarray] = []
         for points_path in points_paths:
             d = np.load(points_path)
-            tracks = d["tracks"].astype(np.float32)          # [T, N, 2] in pixel coords
+            tracks = d["tracks"].astype(np.float32)  # [T, N, 2] in pixel coords
             visibility = d["visibility"].astype(np.float32)  # [T, N]
             width = float(d["width"]) if "width" in d else float(valid_data["pixel_values"].shape[-1])
             height = float(d["height"]) if "height" in d else float(valid_data["pixel_values"].shape[-2])
@@ -134,6 +162,7 @@ class PreprocessPipeline_I2V_Track(BasePreprocessPipeline):
                 record[f"{name}_dtype"] = ""
 
         _put("first_frame_latent", None)
+        _put("clip_feature", None)
         _put("track_points", None)
         _put("track_visibility", None)
         return record

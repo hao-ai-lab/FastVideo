@@ -24,16 +24,22 @@ class TrackWanVideoArchConfig(WanVideoArchConfig):
     in_channels: int = 52
     out_channels: int = 16
 
+    # CLIP image cross-attention (Wan2.1 I2V "semantic" pathway). The Fun-InP base ships a
+    # CLIPVisionModelWithProjection (1280-dim); setting image_dim builds the DiT's
+    # ``condition_embedder.image_embedder`` so ``encoder_hidden_states_image`` is consumed.
+    # None disables CLIP (concat-only I2V). Inherited from the Fun-InP config.json at load.
+    image_dim: int = 1280
+
     # MotionStream-style track conditioning. FastVideo-specific; carried in the checkpoint
     # config.json so it survives load (update_model_arch copies matching fields).
     track_config: dict = field(
         default_factory=lambda: {
-            "id_dim": 128,                  # sinusoidal track-ID embedding dim (the "d" in c_m)
-            "track_channels": 16,           # track head output channels concatenated at patch embed
-            "vae_spatial_compression": 8,   # Wan VAE spatial downsample (latent grid = H/8 x W/8)
+            "id_dim": 128,  # sinusoidal track-ID embedding dim (the "d" in c_m)
+            "track_channels": 16,  # track head output channels concatenated at patch embed
+            "vae_spatial_compression": 8,  # Wan VAE spatial downsample (latent grid = H/8 x W/8)
             "vae_temporal_compression": 4,  # Wan VAE temporal downsample
-            "max_track_id": 100_000,        # range of random per-track IDs
-            "zero_init_head": True,         # zero-init final conv so step-0 == teacher
+            "max_track_id": 100_000,  # range of random per-track IDs
+            "zero_init_head": True,  # zero-init final conv so step-0 == teacher
         })
 
 

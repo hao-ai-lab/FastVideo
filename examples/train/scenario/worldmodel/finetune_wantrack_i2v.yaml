@@ -7,14 +7,14 @@
 models:
   student:
     _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
-    init_from: /mnt/weka/home/hao.zhang/shao/data/models/trackwan_1.3b_init
+    init_from: /mnt/weka/home/hao.zhang/shao/data/models/trackwan_1.3b_i2v_init
     trainable: true
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
 
 training:
-  model_path: /mnt/weka/home/hao.zhang/shao/data/models/trackwan_1.3b_init
+  model_path: /mnt/weka/home/hao.zhang/shao/data/models/trackwan_1.3b_i2v_init
 
   distributed:
     num_gpus: 1
@@ -24,7 +24,7 @@ training:
     hsdp_shard_dim: 1
 
   data:
-    data_path: /mnt/weka/home/hao.zhang/shao/data/motion_pipeline/wan22_a14b_720p_24fps/preprocessed_i2v_track/combined_parquet_dataset
+    data_path: /mnt/weka/home/hao.zhang/shao/data/motion_pipeline/wan22_a14b_720p_24fps/preprocessed_i2v_track_funinp/combined_parquet_dataset
     dataloader_num_workers: 2
     train_batch_size: 1
     training_cfg_rate: 0.0
@@ -46,7 +46,7 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: /mnt/weka/home/hao.zhang/shao/data/motion_pipeline/wantrack_overfit_out
+    output_dir: /mnt/weka/home/hao.zhang/shao/data/motion_pipeline/wantrack_overfit_i2v_out
     training_state_checkpointing_steps: 500
     checkpoints_total_limit: 2
     resume_from_checkpoint: latest
@@ -54,7 +54,7 @@ training:
   tracker:
     trackers: [wandb]
     project_name: wantrack-bidir
-    run_name: overfit-1p3b-4k
+    run_name: overfit-funinp-i2v
 
   model:
     enable_gradient_checkpointing_type: full

@@ -1,15 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Build a WanTrack init checkpoint from a base Wan T2V diffusers model.
+"""Build a WanTrack init checkpoint from a base Wan diffusers model.
 
-The WanTrack DiT widens the patch-embed input to 52 channels
-(16 noisy latent + 20 I2V cond + 16 track) and adds a ``track_encoder``. This
-script produces a diffusers transformer dir whose weights load *strictly* into
+The WanTrack DiT widens the patch-embed input to 52 channels and adds a
+``track_encoder``. Works from either base:
+  - a Wan **I2V** model (e.g. Wan2.1-Fun-1.3B-InP: in_channels=36 = 16 noisy +
+    4 mask + 16 first-frame, with CLIP image cross-attention): the 36 pretrained
+    image-conditioning channels are kept and only the 16 track channels are
+    zero-init, so first-frame conditioning works from step 0.  **Recommended.**
+  - a Wan **T2V** model (in_channels=16): the 20 I2V + 16 track channels are all
+    zero-init, so I2V must be learned from scratch (slower, weaker).
+
+It produces a diffusers transformer dir whose weights load *strictly* into
 ``TrackWanTransformer3DModel``:
-  - ``patch_embedding.weight`` zero-padded 16 -> 52 input channels (pretrained
-    weights occupy the first 16; the new I2V + track channels start at zero, so a
-    freshly converted model reproduces the teacher at step 0),
+  - ``patch_embedding.weight`` zero-padded base_in -> 52 input channels (pretrained
+    weights occupy the first base_in channels; the new track channels start at
+    zero, so a freshly converted model reproduces the base at step 0),
   - ``track_encoder.*`` added (proj zero-init -> zero track contribution at step 0),
-  - ``config.json`` gets ``in_channels=52`` + ``track_config``.
+  - ``config.json`` gets ``in_channels=52`` + ``track_config`` (CLIP ``image_dim``
+    is inherited from the base config when present).
 
 Other pipeline components (vae / text_encoder / tokenizer / scheduler /
 model_index.json) are symlinked so the output is a complete, loadable model dir.
@@ -60,7 +68,9 @@ def build_track_encoder_state() -> dict[str, torch.Tensor]:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--base", required=True, help="Base Wan T2V diffusers model dir (with transformer/).")
+    p.add_argument("--base",
+                   required=True,
+                   help="Base Wan I2V (e.g. Wan2.1-Fun-1.3B-InP) or T2V diffusers model dir (with transformer/).")
     p.add_argument("--out", required=True, help="Output model dir for the WanTrack init.")
     args = p.parse_args()
 
@@ -93,9 +103,11 @@ def main() -> None:
     (tdir / "config.json").write_text(json.dumps(cfg, indent=2))
 
     sf_files = sorted((base / "transformer").glob("*.safetensors"))
-    if len(sf_files) != 1:
-        raise NotImplementedError(f"Expected exactly 1 transformer safetensors, found {len(sf_files)}")
-    state = load_file(str(sf_files[0]))
+    if not sf_files:
+        raise FileNotFoundError(f"No transformer safetensors under {base}/transformer")
+    state: dict[str, torch.Tensor] = {}
+    for sf in sf_files:
+        state.update(load_file(str(sf)))  # merge shards if the base is sharded
 
     pe_key = "patch_embedding.weight"
     if pe_key not in state:

@@ -61,10 +61,14 @@ pyarrow_schema_i2v_track = pa.schema([
     pa.field("text_embedding_bytes", pa.binary()),
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     pa.field("text_embedding_dtype", pa.string()),
-    # --- I2V first-frame conditioning latent [C, 1, H, W] (concatenated, no CLIP) ---
+    # --- I2V first-frame conditioning latent [C, T, H, W] (concatenated at patch embed) ---
     pa.field("first_frame_latent_bytes", pa.binary()),
     pa.field("first_frame_latent_shape", pa.list_(pa.int64())),
     pa.field("first_frame_latent_dtype", pa.string()),
+    # --- CLIP image embedding of frame 0 [SeqLen, Dim] (Wan2.1 I2V semantic cross-attention) ---
+    pa.field("clip_feature_bytes", pa.binary()),
+    pa.field("clip_feature_shape", pa.list_(pa.int64())),
+    pa.field("clip_feature_dtype", pa.string()),
     # --- MotionStream point tracks (normalized coords in [0,1]) ---
     pa.field("track_points_bytes", pa.binary()),
     pa.field("track_points_shape", pa.list_(pa.int64())),  # [T, N, 2]
