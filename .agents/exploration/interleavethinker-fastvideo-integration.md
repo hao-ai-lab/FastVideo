@@ -8,7 +8,7 @@ official InterleaveThinker parity validation.
 Current working location:
 
 - Directory: `/home/toolbox/FastVideo`
-- Branch: `interleavethinker-fastvideo`
+- Branch: `interleavethinker`
 - Latest completed integration checkpoint:
   `7219b3b7` (`[refactor]: add non-diffusion role model base`)
 - Latest observed branch head before the official parity patch:
@@ -383,7 +383,7 @@ Broad-suite status:
 ## Recommended Next Steps
 
 1. For code work, continue from `/home/toolbox/FastVideo` on
-   `interleavethinker-fastvideo` and inspect `git status --short --branch`
+   `interleavethinker` and inspect `git status --short --branch`
    before editing.
 2. Read the relevant per-directory `AGENTS.md` before touching files under
    `fastvideo/`, `examples/`, `docs/`, `scripts/`, or tests.
