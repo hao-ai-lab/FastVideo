@@ -10,7 +10,7 @@ Current working location:
 - Directory: `/home/toolbox/FastVideo`
 - Branch: `interleavethinker-fastvideo`
 - Latest completed integration checkpoint:
-  `f04e6750` (`[test] add InterleaveThinker official parity checks`)
+  `7219b3b7` (`[refactor]: add non-diffusion role model base`)
 - Latest observed branch head before the official parity patch:
   `9363caf6` (`[docs] record InterleaveThinker workflow namespace correction`)
 
@@ -189,7 +189,7 @@ Namespace integration status:
   `Qwen3VLActorBase` off the diffusion contract, removed the actor dummy
   scheduler and diffusion stubs, and added explicit Interleave SFT/RL actor
   protocols. This preserves existing diffusion method contracts while making
-  planner/critic actors honest non-diffusion role models.
+  planner/critic actors honest non-diffusion role models. Commit: `7219b3b7`.
 
 ## Validation Evidence
 
