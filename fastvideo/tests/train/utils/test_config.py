@@ -155,6 +155,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.distributed.pin_cpu_memory is True
 
     assert t.data.train_batch_size == 2
+    assert t.data.data_path == "/some/path"
     assert t.data.num_frames == 33
     assert t.data.seed == 42
 
@@ -242,6 +243,27 @@ def test_betas_parses_list_and_string_forms(
     data["training"] = {"optimizer": {"betas": betas_value}}
     cfg = load_run_config(_write_yaml(tmp_path, data))
     assert cfg.training.optimizer.betas == expected
+
+
+def test_data_path_mapping_parses_repeat_counts(tmp_path: Path) -> None:
+    # Config loading should preserve structured multi-dataset paths so the
+    # dataset layer can interpret repeat counts later.
+    data = _minimal_yaml()
+    data["training"] = {
+        "data": {
+            "data_path": {
+                "data/path1": 1,
+                "data/path2": 2,
+            }
+        }
+    }
+
+    cfg = load_run_config(_write_yaml(tmp_path, data))
+
+    assert cfg.training.data.data_path == {
+        "data/path1": 1,
+        "data/path2": 2,
+    }
 
 
 def test_dotted_overrides_apply_with_type_coercion(tmp_path: Path) -> None:

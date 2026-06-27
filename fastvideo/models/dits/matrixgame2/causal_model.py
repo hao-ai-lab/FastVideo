@@ -49,6 +49,27 @@ from .model import MatrixGame2CrossAttention
 logger = init_logger(__name__)
 
 
+def _retain_kv_with_sink(
+    k: torch.Tensor,
+    v: torch.Tensor,
+    target_len: int,
+    sink_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if k.shape[1] <= target_len or sink_size <= 0:
+        return k[:, -target_len:], v[:, -target_len:]
+
+    sink_len = min(int(sink_size), target_len, k.shape[1])
+    tail_len = target_len - sink_len
+    sink_k = k[:, :sink_len]
+    sink_v = v[:, :sink_len]
+    if tail_len <= 0:
+        return sink_k, sink_v
+
+    tail_k = k[:, sink_len:][:, -tail_len:]
+    tail_v = v[:, sink_len:][:, -tail_len:]
+    return torch.cat([sink_k, tail_k], dim=1), torch.cat([sink_v, tail_v], dim=1)
+
+
 def causal_rope_apply(
     x: torch.Tensor, grid_sizes: tuple[int, int, int], freqs: torch.Tensor, start_frame: int = 0
 ):
@@ -338,9 +359,12 @@ class CausalMatrixGame2SelfAttention(nn.Module):
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
 
-            kv_start = max(0, local_end_index - max_attention_size)
-            k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
-            v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
+            k_for_attn, v_for_attn = _retain_kv_with_sink(
+                kv_cache["k"][:, :local_end_index],
+                kv_cache["v"][:, :local_end_index],
+                min(local_end_index, max_attention_size),
+                sink_tokens,
+            )
 
             x = torch.nn.functional.scaled_dot_product_attention(
                 roped_query.transpose(1, 2),
@@ -398,6 +422,7 @@ class CausalMatrixGame2TransformerBlock(nn.Module):
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
         self.local_attn_size = local_attn_size
+        self.sink_size = sink_size
         dim_head = dim // num_heads
         if qk_norm == "rms_norm":
             self.norm_q = RMSNorm(dim_head, eps=eps)
@@ -454,6 +479,7 @@ class CausalMatrixGame2TransformerBlock(nn.Module):
                 ),
                 patch_size=action_config["patch_size"],
                 local_attn_size=local_attn_size,
+                sink_size=sink_size,
                 qk_norm=action_config["qk_norm"],
                 qkv_bias=action_config["qkv_bias"],
                 vae_time_compression_ratio=action_config[
@@ -627,6 +653,8 @@ class CausalMatrixGame2WanModel(BaseDiT):
         self.num_channels_latents = config.num_channels_latents
         self.patch_size = config.patch_size
 
+        # Long tuning controls the causal window from YAML; consume it here
+        # like Wan so train wrappers do not need runtime patching.
         arch_cfg = getattr(config, "arch_config", None)
         self.local_attn_size = (
             getattr(
@@ -642,6 +670,12 @@ class CausalMatrixGame2WanModel(BaseDiT):
             if arch_cfg
             else getattr(config, "sink_size", 0)
         )
+        if self.sink_size < 0:
+            raise ValueError("sink_size must be non-negative")
+        if self.local_attn_size != -1 and self.sink_size >= self.local_attn_size:
+            raise ValueError(
+                "sink_size must be smaller than local_attn_size for "
+                "MatrixGame2 causal attention")
 
         # 1. Patch & position embedding
         self.patch_embedding = PatchEmbed(
@@ -722,6 +756,52 @@ class CausalMatrixGame2WanModel(BaseDiT):
 
         self.__post_init__()
 
+    def set_causal_attention_window(
+        self,
+        *,
+        local_attn_size: int | None = None,
+        sink_size: int | None = None,
+    ) -> None:
+        local_attn_size = (
+            self.local_attn_size if local_attn_size is None else int(local_attn_size)
+        )
+        sink_size = self.sink_size if sink_size is None else int(sink_size)
+        if sink_size < 0:
+            raise ValueError("sink_size must be non-negative")
+        if local_attn_size != -1 and sink_size >= local_attn_size:
+            raise ValueError(
+                "sink_size must be smaller than local_attn_size for "
+                "MatrixGame2 causal attention")
+
+        self.local_attn_size = local_attn_size
+        self.sink_size = sink_size
+        self.block_mask = None
+        self.block_mask_keyboard = None
+        self.block_mask_mouse = None
+
+        for block in self.blocks:
+            if hasattr(block, "local_attn_size"):
+                block.local_attn_size = local_attn_size
+            if hasattr(block, "sink_size"):
+                block.sink_size = sink_size
+
+            attn1 = getattr(block, "attn1", None)
+            if attn1 is not None:
+                if hasattr(attn1, "local_attn_size"):
+                    attn1.local_attn_size = local_attn_size
+                if hasattr(attn1, "sink_size"):
+                    attn1.sink_size = sink_size
+
+            action_model = getattr(block, "action_model", None)
+            if action_model is not None:
+                if hasattr(action_model, "local_attn_size"):
+                    action_model.local_attn_size = local_attn_size
+                if hasattr(action_model, "sink_size"):
+                    action_model.sink_size = sink_size
+
+    def set_sink_size(self, sink_size: int) -> None:
+        self.set_causal_attention_window(sink_size=sink_size)
+
     @staticmethod
     def _prepare_blockwise_causal_attn_mask(
         device: torch.device | str,
@@ -729,6 +809,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
         frame_seqlen: int = 880,
         num_frame_per_block: int = 1,
         local_attn_size: int = -1,
+        sink_size: int = 0,
     ) -> BlockMask:
         total_length = num_frames * frame_seqlen
         padded_length = math.ceil(total_length / 128) * 128 - total_length
@@ -755,7 +836,10 @@ class CausalMatrixGame2WanModel(BaseDiT):
             else:
                 return (
                     (kv_idx < ends[q_idx])
-                    & (kv_idx >= (ends[q_idx] - local_attn_size * frame_seqlen))
+                    & (
+                        (kv_idx < sink_size * frame_seqlen)
+                        | (kv_idx >= (ends[q_idx] - local_attn_size * frame_seqlen))
+                    )
                 ) | (q_idx == kv_idx)
 
         block_mask = create_block_mask(
@@ -769,8 +853,9 @@ class CausalMatrixGame2WanModel(BaseDiT):
         )
 
         if not dist.is_initialized() or dist.get_rank() == 0:
-            print(
-                f" cache a block wise causal mask with block size of {num_frame_per_block} frames"
+            logger.info(
+                "cache a block wise causal mask with block size of %s frames",
+                num_frame_per_block,
             )
 
         return block_mask
@@ -782,6 +867,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
         frame_seqlen: int = 880,
         num_frame_per_block: int = 1,
         local_attn_size: int = -1,
+        sink_size: int = 0,
     ) -> BlockMask:
         total_length2 = num_frames * frame_seqlen
         padded_length2 = math.ceil(total_length2 / 32) * 32 - total_length2
@@ -807,7 +893,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
             else:
                 return (
                     (kv_idx < ends2[q_idx])
-                    & (kv_idx >= (ends2[q_idx] - local_attn_size))
+                    & ((kv_idx < sink_size) | (kv_idx >= (ends2[q_idx] - local_attn_size)))
                 ) | (q_idx == kv_idx)
 
         block_mask2 = create_block_mask(
@@ -821,8 +907,9 @@ class CausalMatrixGame2WanModel(BaseDiT):
         )
 
         if not dist.is_initialized() or dist.get_rank() == 0:
-            print(
-                f" cache a block wise causal mask for keyboard with block size of {num_frame_per_block} frames"
+            logger.info(
+                "cache a block wise causal mask for keyboard with block size of %s frames",
+                num_frame_per_block,
             )
 
         return block_mask2
@@ -834,6 +921,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
         frame_seqlen: int = 1,
         num_frame_per_block: int = 1,
         local_attn_size: int = -1,
+        sink_size: int = 0,
     ) -> BlockMask:
         total_length2 = num_frames * frame_seqlen
         padded_length2 = math.ceil(total_length2 / 32) * 32 - total_length2
@@ -859,7 +947,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
             else:
                 return (
                     (kv_idx < ends2[q_idx])
-                    & (kv_idx >= (ends2[q_idx] - local_attn_size))
+                    & ((kv_idx < sink_size) | (kv_idx >= (ends2[q_idx] - local_attn_size)))
                 ) | (q_idx == kv_idx)
 
         block_mask2 = create_block_mask(
@@ -873,8 +961,9 @@ class CausalMatrixGame2WanModel(BaseDiT):
         )
 
         if not dist.is_initialized() or dist.get_rank() == 0:
-            print(
-                f" cache a block wise causal mask for action with block size of {num_frame_per_block} frames"
+            logger.info(
+                "cache a block wise causal mask for action with block size of %s frames",
+                num_frame_per_block,
             )
 
         return block_mask2
@@ -1036,6 +1125,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
             frame_seqlen=post_patch_height * post_patch_width,
             num_frame_per_block=self.num_frame_per_block,
             local_attn_size=self.local_attn_size,
+            sink_size=self.sink_size,
         )
         if self.use_rope_keyboard:
             block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_action(
@@ -1044,6 +1134,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
                 frame_seqlen=1,
                 num_frame_per_block=self.num_frame_per_block,
                 local_attn_size=self.local_attn_size,
+                sink_size=self.sink_size,
             )
         else:
             block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_keyboard(
@@ -1052,6 +1143,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
                 frame_seqlen=post_patch_height * post_patch_width,
                 num_frame_per_block=self.num_frame_per_block,
                 local_attn_size=self.local_attn_size,
+                sink_size=self.sink_size,
             )
         block_mask_mouse = self._prepare_blockwise_causal_attn_mask_action(
             device=hidden_states.device,
@@ -1059,6 +1151,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
             frame_seqlen=1,
             num_frame_per_block=self.num_frame_per_block,
             local_attn_size=self.local_attn_size,
+            sink_size=self.sink_size,
         )
         if kv_cache is None:
             kv_cache = [None] * len(self.blocks)
@@ -1212,6 +1305,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
                 frame_seqlen=post_patch_height * post_patch_width,
                 num_frame_per_block=self.num_frame_per_block,
                 local_attn_size=self.local_attn_size,
+                sink_size=self.sink_size,
             )
         if self.block_mask_keyboard is None:
             if self.use_rope_keyboard:
@@ -1221,6 +1315,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
                     frame_seqlen=1,
                     num_frame_per_block=self.num_frame_per_block,
                     local_attn_size=self.local_attn_size,
+                    sink_size=self.sink_size,
                 )
             else:
                 self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_keyboard(
@@ -1229,6 +1324,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
                     frame_seqlen=post_patch_height * post_patch_width,
                     num_frame_per_block=self.num_frame_per_block,
                     local_attn_size=self.local_attn_size,
+                    sink_size=self.sink_size,
                 )
         if self.block_mask_mouse is None:
             self.block_mask_mouse = self._prepare_blockwise_causal_attn_mask_action(
@@ -1237,6 +1333,7 @@ class CausalMatrixGame2WanModel(BaseDiT):
                 frame_seqlen=1,
                 num_frame_per_block=self.num_frame_per_block,
                 local_attn_size=self.local_attn_size,
+                sink_size=self.sink_size,
             )
 
         hidden_states = self.patch_embedding(hidden_states)

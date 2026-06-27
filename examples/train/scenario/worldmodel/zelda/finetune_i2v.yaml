@@ -1,0 +1,88 @@
+# Matrix-Game 2.0 Zelda + multi-game I2V finetune.
+
+models:
+  student:
+    _target_: fastvideo.train.models.matrixgame2.matrixgame2.MatrixGame2Model
+    init_from: FastVideo/Matrix-Game-2.0-Base-Diffusers
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path:
+      data/zeldam2-clean: 1
+      # data/multi3d_games: 10
+    dataloader_num_workers: 1
+    train_batch_size: 1
+    training_cfg_rate: 0.0  # unused for MatrixGame2 I2V; no text_embedding CFG dropout
+    seed: 42
+    num_latent_t: 9
+    num_height: 480
+    num_width: 832
+    num_frames: 33
+
+  optimizer:
+    learning_rate: 2.0e-5
+    betas: [0.9, 0.95]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 60000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/matrixgame_finetune/checkpoints/zelda_with_mg_init
+    training_state_checkpointing_steps: 5000
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: mg_1.3b_zelda
+    run_name: zelda_with_mg_init
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+  dit_precision: fp32
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.matrixgame2.matrixgame2_i2v_pipeline.MatrixGame2I2VPipeline
+    dataset_file: data/worldmodel_validation_data/validation_zelda.json
+    every_steps: 200
+    sampling_steps: [40]
+    num_frames: 33
+    overlay_actions: true
+    guidance_scale: 6.0
+    metrics:
+      enabled: true
+      names:
+        - vbench.imaging_quality
+        - vbench.aesthetic_quality
+        - vbench.temporal_flickering
+        - vbench.motion_smoothness
+        - vbench.subject_consistency
+        - vbench.background_consistency
+        - vbench.dynamic_degree
+        - optical_flow.synthetic_optical_flow
+      calibration_path: assets/eval/worldmodel_synthetic_flow_calibration.json
+      skip_missing_deps: true
+      strict: false
+      unload_after_validation: true
+
+pipeline:
+  flow_shift: 5

@@ -63,7 +63,7 @@ class ThirdPersonCalibration:
     beta_fwd: float
     beta_strafe: float
     focal_length: float
-    r_z: float
+    r_z: float = 0.0
     r_y: float = 0.0
     init_pitch: float = 0.0
     notes: str = ""

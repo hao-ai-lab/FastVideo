@@ -14,11 +14,21 @@ distributed init and is exercised by Phase 2/3 tests.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
 import torch
 
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.callbacks.ema import EMACallback
-from fastvideo.train.callbacks.validation import ValidationCallback
+from fastvideo.train.callbacks.validation import (
+    DEFAULT_VALIDATION_VBENCH_METRICS,
+    SYNTHETIC_OPTICAL_FLOW_LOG_KEYS,
+    SYNTHETIC_OPTICAL_FLOW_METRIC,
+    ValidationCallback,
+    _ValidationMetricStats,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +47,7 @@ def _make_callback(
     num_frames: int | None = None,
     sampling_timesteps: list[int] | None = None,
     output_dir: str | None = None,
+    overlay_actions: bool = False,
 ) -> ValidationCallback:
     return ValidationCallback(
         pipeline_target=_PIPE_TARGET,
@@ -47,6 +58,7 @@ def _make_callback(
         num_frames=num_frames,
         sampling_timesteps=sampling_timesteps,
         output_dir=output_dir,
+        overlay_actions=overlay_actions,
     )
 
 
@@ -67,12 +79,14 @@ class TestConstructor:
         assert cb.num_frames is None
         assert cb.sampling_timesteps is None
         assert cb.output_dir is None
+        assert cb.overlay_actions is False
         assert cb.offload_training_state is False
         assert cb.unload_pipeline_after_validation is False
         # Lazy fields not yet populated.
         assert cb._pipeline is None
         assert cb._sampling_param is None
         assert cb.validation_random_generator is None
+        assert cb.metrics_config.enabled is False
 
     def test_string_inputs_are_coerced(self) -> None:
         # YAML often produces strings for numeric fields; the
@@ -85,6 +99,7 @@ class TestConstructor:
             guidance_scale="4.5",  # type: ignore[arg-type]
             num_frames="77",  # type: ignore[arg-type]
             sampling_timesteps=["1000", "500"],
+            overlay_actions=1,  # type: ignore[arg-type]
             offload_training_state="1",  # type: ignore[arg-type]
             unload_pipeline_after_validation="false",  # type: ignore[arg-type]
         )
@@ -93,6 +108,7 @@ class TestConstructor:
         assert cb.guidance_scale == 4.5
         assert cb.num_frames == 77
         assert cb.sampling_timesteps == [1000, 500]
+        assert cb.overlay_actions is True
         assert cb.offload_training_state is True
         assert cb.unload_pipeline_after_validation is False
 
@@ -108,6 +124,45 @@ class TestConstructor:
             "extra_arg": 123,
             "another": "value",
         }
+
+    def test_metrics_true_uses_default_vbench_subset(self) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics=True,
+        )
+        assert cb.metrics_config.enabled is True
+        assert cb.metrics_config.names == DEFAULT_VALIDATION_VBENCH_METRICS
+        assert "metrics" not in cb.pipeline_kwargs
+
+    def test_metrics_mapping_is_coerced(self) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics={
+                "names": "vbench.aesthetic_quality",
+                "device": "cpu",
+                "calibration_path": "/tmp/calibration.json",
+                "mouse_pitch_sign": "-1",
+                "skip_missing_deps": False,
+                "strict": True,
+                "unload_after_validation": False,
+                "loader_threads": "2",
+                "prefetch_factor": "3",
+                "log_prefix": "custom/validation",
+            },
+        )
+        assert cb.metrics_config.enabled is True
+        assert cb.metrics_config.names == ["vbench.aesthetic_quality"]
+        assert cb.metrics_config.device == "cpu"
+        assert cb.metrics_config.calibration_path == "/tmp/calibration.json"
+        assert cb.metrics_config.mouse_pitch_sign == -1
+        assert cb.metrics_config.skip_missing_deps is False
+        assert cb.metrics_config.strict is True
+        assert cb.metrics_config.unload_after_validation is False
+        assert cb.metrics_config.loader_threads == 2
+        assert cb.metrics_config.prefetch_factor == 3
+        assert cb.metrics_config.log_prefix == "custom/validation"
 
 
 # ---------------------------------------------------------------------------
@@ -238,3 +293,294 @@ class TestStateDict:
             {"validation_rng": torch.tensor([1, 2, 3], dtype=torch.uint8)}
         )
         assert cb.validation_random_generator is None
+
+
+# ---------------------------------------------------------------------------
+# E. metric result aggregation
+# ---------------------------------------------------------------------------
+
+
+class TestMetricAggregation:
+
+    def test_accumulates_scores_and_scalar_details(self) -> None:
+        stats = _ValidationMetricStats()
+        row: dict = {"path": "sample.mp4"}
+        ValidationCallback._accumulate_metric_results(
+            stats,
+            row,
+            {
+                "vbench.aesthetic_quality": SimpleNamespace(
+                    name="vbench.aesthetic_quality",
+                    score=0.5,
+                    details={"ignored": [1, 2, 3]},
+                ),
+                SYNTHETIC_OPTICAL_FLOW_METRIC: SimpleNamespace(
+                    name=SYNTHETIC_OPTICAL_FLOW_METRIC,
+                    score=1.5,
+                    details={
+                        **{key: float(i) for i, key in enumerate(SYNTHETIC_OPTICAL_FLOW_LOG_KEYS)},
+                        "pixel_epe_mean_std": 99.0,
+                        "pixel_epe_mean_max": 100.0,
+                        "pixel_epe_mean_auc": 101.0,
+                    },
+                ),
+            },
+        )
+
+        assert stats.sums["vbench.aesthetic_quality"] == 0.5
+        assert stats.counts["vbench.aesthetic_quality"] == 1.0
+        for i, key in enumerate(SYNTHETIC_OPTICAL_FLOW_LOG_KEYS):
+            metric_key = f"{SYNTHETIC_OPTICAL_FLOW_METRIC}.{key}"
+            assert stats.sums[metric_key] == float(i)
+            assert stats.counts[metric_key] == 1.0
+        assert SYNTHETIC_OPTICAL_FLOW_METRIC not in stats.sums
+        assert f"{SYNTHETIC_OPTICAL_FLOW_METRIC}.pixel_epe_mean_std" not in stats.sums
+        assert f"{SYNTHETIC_OPTICAL_FLOW_METRIC}.pixel_epe_mean_max" not in stats.sums
+        assert f"{SYNTHETIC_OPTICAL_FLOW_METRIC}.pixel_epe_mean_auc" not in stats.sums
+        assert "vbench.aesthetic_quality.ignored" not in stats.sums
+        assert row["vbench.aesthetic_quality"] == 0.5
+
+    def test_merges_metric_stats(self) -> None:
+        dst = _ValidationMetricStats(
+            sums={"a": 1.0},
+            counts={"a": 1.0},
+            per_video=[{"path": "a.mp4"}],
+            errors=["first"],
+        )
+        src = _ValidationMetricStats(
+            sums={"a": 2.0, "b": 3.0},
+            counts={"a": 2.0, "b": 1.0},
+            per_video=[{"path": "b.mp4"}],
+            errors=["second"],
+        )
+
+        ValidationCallback._merge_metric_stats(dst, src)
+
+        assert dst.sums == {"a": 3.0, "b": 3.0}
+        assert dst.counts == {"a": 3.0, "b": 1.0}
+        assert dst.per_video == [{"path": "a.mp4"}, {"path": "b.mp4"}]
+        assert dst.errors == ["first", "second"]
+
+    def test_metric_log_name_replaces_dots(self) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics={"names": ["vbench.aesthetic_quality"]},
+        )
+
+        assert (
+            cb._metric_log_name("vbench.aesthetic_quality")
+            == "metrics/validation/vbench/aesthetic_quality"
+        )
+
+    def test_metric_device_uses_local_rank(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics={"names": ["vbench.aesthetic_quality"]},
+        )
+        cb.world_group = SimpleNamespace(local_rank=5)
+        monkeypatch.setattr(
+            torch.cuda,
+            "is_available",
+            lambda: True,
+        )
+
+        assert cb._metric_device() == "cuda:5"
+
+    def test_metric_extras_include_actions_and_calibration(self) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics={
+                "names": ["optical_flow.synthetic_optical_flow"],
+                "calibration_path": "/tmp/calibration.json",
+                "mouse_pitch_sign": -1,
+            },
+        )
+        actions = {
+            "keyboard": np.zeros((3, 6)),
+            "mouse": np.zeros((3, 2)),
+        }
+
+        extras = cb._validation_metric_extras(
+            video_filenames=["a.mp4", "b.mp4"],
+            actions=[actions, None],
+            mouse_pitch_signs=[None, 1],
+        )
+
+        assert extras[0]["actions"] is actions
+        assert extras[0]["calibration"] == "/tmp/calibration.json"
+        assert extras[0]["mouse_pitch_sign"] == -1
+        assert "actions" not in extras[1]
+        assert extras[1]["mouse_pitch_sign"] == 1
+
+    def test_validation_actions_prefers_loaded_conditions(self) -> None:
+        keyboard = np.zeros((4, 6))
+        mouse = np.zeros((4, 2))
+
+        actions = ValidationCallback._validation_actions(
+            {
+                "keyboard_cond": keyboard,
+                "mouse_cond": mouse,
+            }
+        )
+
+        assert actions is not None
+        assert np.array_equal(actions["keyboard"], keyboard)
+        assert np.array_equal(actions["mouse"], mouse)
+
+    def test_validation_actions_loads_action_path(
+        self,
+        tmp_path,
+    ) -> None:
+        path = tmp_path / "actions.npy"
+        np.save(
+            path,
+            {
+                "keyboard": np.ones((4, 6)),
+                "mouse": np.ones((4, 2)),
+            },
+            allow_pickle=True,
+        )
+
+        actions = ValidationCallback._validation_actions({"action_path": str(path)})
+
+        assert actions is not None
+        assert actions["keyboard"].shape == (4, 6)
+        assert actions["mouse"].shape == (4, 2)
+
+    def test_available_paths_requires_all_paths(self) -> None:
+        assert ValidationCallback._available_paths(["a.mp4", "b.mp4"]) == ["a.mp4", "b.mp4"]
+        assert ValidationCallback._available_paths(["a.mp4", None]) is None
+
+
+# ---------------------------------------------------------------------------
+# F. action overlay plumbing
+# ---------------------------------------------------------------------------
+
+
+class TestActionOverlay:
+
+    def test_save_validation_videos_supports_overlay_suffix(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cb = _make_callback()
+        cb.global_rank = 3
+        calls: list[tuple[str, int]] = []
+
+        def fake_mimsave(
+            fname: str,
+            video: list[np.ndarray],
+            *,
+            fps: int,
+        ) -> None:
+            calls.append((fname, fps))
+
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.validation.imageio.mimsave",
+            fake_mimsave,
+        )
+
+        saved = cb._save_validation_videos(
+            [[np.zeros((2, 2, 3), dtype=np.uint8)]],
+            output_dir=str(tmp_path),
+            step=7,
+            num_inference_steps=4,
+            fps=25,
+            suffix="_overlay",
+        )
+
+        assert saved.filenames == [
+            str(tmp_path / "validation_step_7_inference_steps_4_rank_3_video_0_overlay.mp4")
+        ]
+        assert saved.indices == [0]
+        assert calls == [(saved.filenames[0], 25)]
+
+    def test_save_validation_videos_skips_failed_artifact(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cb = _make_callback()
+        cb.global_rank = 0
+        calls: list[str] = []
+
+        def fake_mimsave(
+            fname: str,
+            video: list[np.ndarray],
+            *,
+            fps: int,
+        ) -> None:
+            del video, fps
+            calls.append(fname)
+            if len(calls) == 1:
+                raise OSError("ffmpeg failed")
+
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.validation.imageio.mimsave",
+            fake_mimsave,
+        )
+
+        saved = cb._save_validation_videos(
+            [
+                [np.zeros((2, 2, 3), dtype=np.uint8)],
+                [np.ones((2, 2, 3), dtype=np.uint8)],
+            ],
+            output_dir=str(tmp_path),
+            step=8,
+            num_inference_steps=5,
+            fps=24,
+        )
+
+        assert saved.indices == [1]
+        assert saved.filenames == [
+            str(tmp_path / "validation_step_8_inference_steps_5_rank_0_video_1.mp4")
+        ]
+        assert len(calls) == 2
+
+    def test_post_process_validation_frames_uses_student_hook(self) -> None:
+        cb = _make_callback(overlay_actions=True)
+        frames = [np.zeros((2, 2, 3), dtype=np.uint8)]
+        action = {
+            "keyboard": np.ones((1, 4), dtype=np.float32),
+            "mouse": np.zeros((1, 2), dtype=np.float32),
+        }
+
+        class Student:
+
+            def post_process_validation_frames(
+                self,
+                received_frames: list[np.ndarray],
+                *,
+                action: dict,
+            ) -> list[np.ndarray]:
+                assert received_frames is frames
+                assert action["keyboard"].shape == (1, 4)
+                return [np.full((2, 2, 3), 255, dtype=np.uint8)]
+
+        cb.method = SimpleNamespace(student=Student())
+
+        overlay = cb._post_process_validation_frames(
+            frames,
+            action=action,
+        )
+
+        assert overlay is not None
+        assert int(overlay[0][0, 0, 0]) == 255
+
+    def test_post_process_validation_frames_without_hook_is_noop(self) -> None:
+        cb = _make_callback(overlay_actions=True)
+        cb.method = SimpleNamespace(student=object())
+
+        overlay = cb._post_process_validation_frames(
+            [np.zeros((2, 2, 3), dtype=np.uint8)],
+            action=None,
+        )
+
+        assert overlay is None
