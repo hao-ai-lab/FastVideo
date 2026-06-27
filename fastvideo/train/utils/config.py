@@ -396,6 +396,7 @@ def _build_training_config(
             run_name=str(tr.get("run_name", "") or ""),
         ),
         vsa_sparsity=float(vs.get("sparsity", 0.0) or 0.0),
+        vsa_cache_tile_buf=bool(vs.get("cache_tile_buf", False) or False),
         model=ModelTrainingConfig(
             weighting_scheme=str(m.get("weighting_scheme", "uniform") or "uniform"),
             logit_mean=float(m.get("logit_mean", 0.0) or 0.0),
