@@ -5,15 +5,21 @@ on:
     branches: [ main ]
     paths:
       - 'docs/**'
+      - 'examples/**'
       - 'mkdocs.yml'
+      - 'requirements-mkdocs.in'
       - 'requirements-mkdocs.txt'
+      - 'scripts/check_docs_links.py'
       - '.github/workflows/infra-docs.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'docs/**'
+      - 'examples/**'
       - 'mkdocs.yml'
+      - 'requirements-mkdocs.in'
       - 'requirements-mkdocs.txt'
+      - 'scripts/check_docs_links.py'
       - '.github/workflows/infra-docs.yml'
 
 permissions:
@@ -31,6 +37,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -46,14 +54,11 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      - name: Generate docs examples
-        run: python docs/generate_examples.py
+      - name: Build documentation
+        run: mkdocs build --strict
 
       - name: Check docs links
         run: python scripts/check_docs_links.py
-
-      - name: Build documentation
-        run: mkdocs build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

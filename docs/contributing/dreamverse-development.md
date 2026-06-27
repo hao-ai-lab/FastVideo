@@ -96,5 +96,5 @@ export NVCC_PREPEND_FLAGS="-ccbin /usr/bin/gcc-13 -allow-unsupported-compiler"
 
 `dreamverse-server` does NOT set these — they need to come from the launching
 shell. The `dreamverse-deploy` skill
-([`.agents/skills/dreamverse-deploy/`](../../.agents/skills/dreamverse-deploy/SKILL.md))
+([`.agents/skills/dreamverse-deploy/`](https://github.com/hao-ai-lab/FastVideo/blob/main/.agents/skills/dreamverse-deploy/SKILL.md))
 sets them for you and is the recommended local-deploy path.

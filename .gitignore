@@ -53,6 +53,7 @@ eggs/
 # MkDocs documentation
 site/
 docs/getting_started/examples/
+docs/examples/
 docs/inference/examples/
 docs/training/examples/
 docs/distillation/examples/

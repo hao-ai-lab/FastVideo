@@ -524,10 +524,10 @@ def generate_examples(generate_main_index: bool = False) -> None:
             f.write(examples_index.generate())
 
 
-def on_pre_build_hook(config, **kwargs):
+def on_pre_build(config, **kwargs):
     """
     MkDocs hook to generate examples before building the documentation.
-    This function is called automatically by the mkdocs-simple-hooks plugin.
+    This function is called automatically by MkDocs' native hook system.
     """
     print("Generating example documentation...")
     generate_examples(generate_main_index=True)
