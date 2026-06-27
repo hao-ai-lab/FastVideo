@@ -332,6 +332,25 @@ Latest cleanup validation:
     yapf, ruff, codespell, PyMarkdown, mypy, filename check, and suggestion
     passed or were correctly skipped when no files applied.
   - No local pytest was run.
+- Training pipeline dry-run validation, completed 2026-06-27:
+  - Goal: exercise the modular training entrypoint
+    `fastvideo.train.entrypoint.train --dry-run` with the public
+    InterleaveThinker YAML configs, temporary in-job fixtures, single-GPU
+    distributed overrides, and SDPA attention overrides.
+  - Planner and critic SFT dry-runs passed on Modal L40S:
+    app URL `https://modal.com/apps/hao-ai-lab/main/ap-BFk8R8SB47o1CL7l2SbZHk`.
+    Both commands loaded the real Qwen3-VL checkpoint, enabled PEFT LoRA, built
+    the dataloader/method via `build_from_config()`, and printed
+    `Dry-run: config parsed and build_from_config succeeded.`
+  - Planner and critic GRPO dry-runs passed on Modal H100:
+    app URL `https://modal.com/apps/hao-ai-lab/main/ap-UZ80OpsMVwwj2guheCf4pN`.
+    These commands loaded the real trainable student plus frozen reference
+    Qwen3-VL checkpoints, enabled PEFT LoRA on the student, built temporary
+    planner/critic RL dataloaders and `InterleaveThinkerRLMethod`, and printed
+    the same dry-run success line. H100 was used for this slice because each RL
+    config instantiates both student and reference checkpoints in one process.
+  - No training steps were executed in these dry-runs; the entrypoint returns
+    immediately after `build_from_config()` succeeds. No local pytest was run.
 
 Broad-suite status:
 
