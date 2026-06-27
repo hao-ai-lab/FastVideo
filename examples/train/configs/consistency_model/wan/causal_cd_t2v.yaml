@@ -1,0 +1,78 @@
+# Causal Consistency Distillation (Causal-Forcing++ Stage-2b): Wan 2.1 T2V 1.3B Causal
+#
+# ODE-data-free initialization for asymmetric DMD. A frozen teacher takes a
+# single CFG Euler step; the student matches an EMA copy of itself at the next
+# timestep, all under clean-history teacher forcing.
+#
+# All three roles initialize from the SAME checkpoint (the Stage-1 AR-diffusion
+# / teacher-forcing model, e.g. checkpoints/{chunkwise,framewise}/ar_diffusion).
+# Point init_from at that checkpoint for a real run.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanCausalModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+  teacher:
+    _target_: fastvideo.train.models.wan.WanCausalModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+  ema:
+    _target_: fastvideo.train.models.wan.WanCausalModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+
+method:
+  _target_: fastvideo.train.methods.consistency_model.causal_cd.CausalConsistencyDistillationMethod
+  discrete_cd_N: 48
+  guidance_scale: 3.0
+  ema_decay: 0.95
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: data/Wan-Syn_77x448x832_600k
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 18
+    num_height: 448
+    num_width: 832
+    num_frames: 69
+
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 3000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wan2.1_causal_cd
+    training_state_checkpointing_steps: 1000
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: distillation_wan_r
+    run_name: wan2.1_causal_cd_shift5
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    max_grad_norm: 1.0
+
+pipeline:
+  flow_shift: 5
