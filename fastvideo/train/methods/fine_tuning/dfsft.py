@@ -184,12 +184,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         training_batch: Any,
         clean_latents: torch.Tensor,
     ) -> torch.Tensor:
-        """Predict flow for the noisy latents.
-
-        Diffusion forcing conditions on the *noisy* rollout only, so
-        ``clean_latents`` is unused here. The teacher-forcing variant
-        overrides this to feed clean context via ``clean_x``.
-        """
+        # Unused here; the teacher-forcing subclass overrides this to pass clean_x.
         del clean_latents
         return self.student.predict_noise(
             noisy_latents,

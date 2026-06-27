@@ -1,19 +1,20 @@
-# TFSFT (Teacher-Forcing SFT): Wan 2.1 T2V 1.3B Causal
+# DFSFT (Diffusion-Forcing SFT), frame-wise: Wan 2.1 T2V 1.3B Causal
 #
-# - Student: trainable causal Wan model
-# - Training: inhomogeneous timesteps per chunk, but the causal transformer
-#   denoises the current block while attending to *clean* history (clean_x),
-#   not its own noisy rollout.
+# - Student: trainable causal Wan model with a block size of 1 frame
+# - Training: each frame gets its own independent noise level (frame-wise
+#   diffusion forcing), versus the chunk-wise variant that shares one noise
+#   level across num_frames_per_block frames.
 
 models:
   student:
     _target_: fastvideo.train.models.wan.WanCausalModel
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
+    num_frames_per_block: 1
 
 method:
-  _target_: fastvideo.train.methods.fine_tuning.tfsft.TeacherForcingSFTMethod
-  chunk_size: 3
+  _target_: fastvideo.train.methods.fine_tuning.dfsft.DiffusionForcingSFTMethod
+  chunk_size: 1
 
 training:
   distributed:
@@ -46,13 +47,13 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/wan2.1_causal_tfsft
+    output_dir: outputs/wan2.1_causal_dfsft_framewise
     training_state_checkpointing_steps: 1000
     checkpoints_total_limit: 3
 
   tracker:
     project_name: distillation_wan_r
-    run_name: wan2.1_causal_tfsft_shift5_gauss_weight
+    run_name: wan2.1_causal_dfsft_framewise_shift5_gauss_weight
 
   model:
     enable_gradient_checkpointing_type: full

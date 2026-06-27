@@ -1,12 +1,11 @@
-# Causal Consistency Distillation (Causal-Forcing++ Stage-2b): Wan 2.1 T2V 1.3B Causal
+# Causal Consistency Distillation: Wan 2.1 T2V 1.3B Causal
 #
-# ODE-data-free initialization for asymmetric DMD. A frozen teacher takes a
-# single CFG Euler step; the student matches an EMA copy of itself at the next
-# timestep, all under clean-history teacher forcing.
+# ODE-data-free distillation. A frozen teacher takes a single CFG Euler step;
+# the student matches an EMA copy of itself at the next timestep, all under
+# clean-history teacher forcing.
 #
-# All three roles initialize from the SAME checkpoint (the Stage-1 AR-diffusion
-# / teacher-forcing model, e.g. checkpoints/{chunkwise,framewise}/ar_diffusion).
-# Point init_from at that checkpoint for a real run.
+# All three roles initialize from the SAME checkpoint (the teacher-forcing
+# AR-diffusion model). Point init_from at that checkpoint for a real run.
 
 models:
   student:
