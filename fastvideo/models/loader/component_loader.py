@@ -13,7 +13,7 @@ from typing import cast
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from safetensors.torch import load_file as safetensors_load_file
+from safetensors.torch import load_file as safetensors_load_file, safe_open
 from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
@@ -573,13 +573,53 @@ class TokenizerLoader(ComponentLoader):
                 # If parsing fails, fall through to AutoTokenizer below.
                 pass
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            resolved_model_path,  # "<path to model>/tokenizer"
-            # in v0, this was same string as encoder_name "ClipTextModel"
-            # TODO(will): pass these tokenizer kwargs from inference args? Maybe
-            # other method of config?
-            local_files_only=os.path.isdir(resolved_model_path),
-        )
+        # Only Flux2 full's Mistral3 (require_processor=True) must load via
+        # AutoProcessor. Gate the processor_config.json shortcut on that flag so
+        # existing encoders (e.g. HunyuanVideo 1.5 / Qwen2.5-VL) stay on the
+        # historical AutoTokenizer path below even if their tokenizer dir happens
+        # to ship a processor_config.json.
+        require_processor = False
+        if hasattr(fastvideo_args.pipeline_config, "text_encoder_configs"):
+            try:
+                require_processor = any(
+                    getattr(getattr(cfg, "arch_config", None), "require_processor", False)
+                    for cfg in fastvideo_args.pipeline_config.text_encoder_configs)
+            except Exception:
+                require_processor = False
+
+        if require_processor and os.path.exists(os.path.join(resolved_model_path, "processor_config.json")):
+            processor = AutoProcessor.from_pretrained(
+                resolved_model_path,
+                local_files_only=os.path.isdir(resolved_model_path),
+                trust_remote_code=fastvideo_args.trust_remote_code,
+            )
+            logger.info(
+                "Loaded tokenizer/processor from %s: %s",
+                resolved_model_path,
+                processor.__class__.__name__,
+            )
+            return processor
+
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                resolved_model_path,  # "<path to model>/tokenizer"
+                # in v0, this was same string as encoder_name "ClipTextModel"
+                # TODO(will): pass these tokenizer kwargs from inference args? Maybe
+                # other method of config?
+                local_files_only=os.path.isdir(resolved_model_path),
+            )
+        except (OSError, ValueError):
+            tokenizer = AutoProcessor.from_pretrained(
+                resolved_model_path,
+                local_files_only=os.path.isdir(resolved_model_path),
+                trust_remote_code=fastvideo_args.trust_remote_code,
+            )
+            logger.info(
+                "Loaded tokenizer/processor from %s: %s",
+                resolved_model_path,
+                tokenizer.__class__.__name__,
+            )
+            return tokenizer
         padding_side = None
         if hasattr(fastvideo_args.pipeline_config, "text_encoder_configs"):
             try:
@@ -864,6 +904,18 @@ class VocoderLoader(ComponentLoader):
         return vocoder.eval()
 
 
+def _collect_safetensors_keys(safetensors_list: list) -> set:
+    """Collect all weight keys from safetensors files."""
+    all_keys: set[str] = set()
+    for path in safetensors_list:
+        try:
+            with safe_open(path, framework="pt") as f:
+                all_keys.update(f.keys())
+        except Exception as e:
+            logger.warning("Could not read keys from %s: %s", path, e)
+    return all_keys
+
+
 class TransformerLoader(ComponentLoader):
     """Loader for transformer."""
 
@@ -890,6 +942,20 @@ class TransformerLoader(ComponentLoader):
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
 
+        # Generator-only QAT for DMD distillation: the teacher (real_score) and
+        # critic (fake_score) transformers load with this flag set and must stay
+        # full precision. Drop the nvfp4_qat quant from their copied config, and
+        # mask the global ATTN_QAT_TRAIN env so their attention falls back to dense
+        # (the backend is read globally at build time). The generator loads without
+        # the flag and keeps both.
+        _qat_generator_only = hasattr(fastvideo_args, "_loading_teacher_critic_model")
+        _qat_prev_attn_env = None
+        if _qat_generator_only:
+            dit_config.quant_config = None
+            from fastvideo.attention.selector import _cached_get_attn_backend
+            _qat_prev_attn_env = os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
+            _cached_get_attn_backend.cache_clear()
+
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files
@@ -898,6 +964,12 @@ class TransformerLoader(ComponentLoader):
         )
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
+
+        # arch_config can infer architecture from weight keys (e.g. Flux2 layer counts)
+        update_fn = getattr(dit_config.arch_config, "update_from_weight_keys", None)
+        if callable(update_fn):
+            weight_keys = _collect_safetensors_keys(safetensors_list)
+            update_fn(weight_keys)
 
         # Check if we should use custom initialization weights
         custom_weights_path = getattr(
@@ -969,6 +1041,12 @@ class TransformerLoader(ComponentLoader):
             enable_torch_compile=fastvideo_args.enable_torch_compile,
             torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
         )
+
+        if _qat_generator_only:
+            from fastvideo.attention.selector import _cached_get_attn_backend
+            if _qat_prev_attn_env is not None:
+                os.environ["FASTVIDEO_ATTENTION_BACKEND"] = _qat_prev_attn_env
+            _cached_get_attn_backend.cache_clear()
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)

@@ -34,6 +34,8 @@ env
 *.log
 weights/
 logs/
+official_weights/
+converted_weights/
 
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/
@@ -128,3 +130,8 @@ apps/dreamverse/web/.env.production.local
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
+
+# Editor logs and local Python version pins (accidentally committed)
+*.nvimlog
+.nvimlog
+.python-version

@@ -78,21 +78,36 @@ print(f'{mj}.{mn}')"
 }
 
 if [ "${GPU_BACKEND}" = "CUDA" ]; then
-    detected_cc="$(detect_with_torch)" || {
-        echo "ERROR: torch-based CUDA arch detection failed in uv environment." >&2
-        echo "       Ensure torch is installed and CUDA is available in the uv-selected Python." >&2
-        exit 1
-    }
-
-    cc_major="${detected_cc%%.*}"
-    cc_minor="${detected_cc##*.}"
+    # Compute capability drives the arch/TK defaults below. Prefer an explicit
+    # TORCH_CUDA_ARCH_LIST (works on GPU-less build machines such as CI/Docker);
+    # only probe a live GPU via torch when no arch was provided.
+    if [ -n "${TORCH_CUDA_ARCH_LIST:-}" ]; then
+        echo "Using TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} (skipping torch GPU probe)"
+        first_arch="${TORCH_CUDA_ARCH_LIST%%[;, ]*}"   # first entry, e.g. 9.0a
+        first_arch="${first_arch%[af]}"                # strip trailing a/f suffix
+        cc_major="${first_arch%%.*}"
+        cc_minor="${first_arch##*.}"
+    else
+        detected_cc="$(detect_with_torch)" || {
+            echo "ERROR: torch-based CUDA arch detection failed and TORCH_CUDA_ARCH_LIST is unset." >&2
+            echo "       Set TORCH_CUDA_ARCH_LIST (e.g. 9.0a) for GPU-less builds, or build where CUDA is available." >&2
+            exit 1
+        }
+        cc_major="${detected_cc%%.*}"
+        cc_minor="${detected_cc##*.}"
+        echo "Detected compute capability via torch: ${detected_cc}"
+    fi
     cmake_arch="${cc_major}${cc_minor}"
-    echo "Detected compute capability via torch: ${detected_cc} (sm_${cmake_arch})"
 
     # Respect explicit overrides.
     if [ -z "${TORCH_CUDA_ARCH_LIST:-}" ]; then
         if [ "${cc_major}" = "9" ] && [ "${cc_minor}" = "0" ]; then
             export TORCH_CUDA_ARCH_LIST="9.0a"
+        elif [ "${cc_major}" = "12" ] && [ "${cc_minor}" = "0" ]; then
+            # Blackwell sm_120 needs the arch-conditional 'a' suffix so CMake's
+            # AUTO gate (matches 12.0a/120a/sm_120a) builds the attn_qat_infer
+            # (modified SageAttention3 FP4) kernels instead of silently skipping.
+            export TORCH_CUDA_ARCH_LIST="12.0a"
         else
             export TORCH_CUDA_ARCH_LIST="${cc_major}.${cc_minor}"
         fi

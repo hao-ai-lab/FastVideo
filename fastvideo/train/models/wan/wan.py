@@ -101,6 +101,7 @@ class WanModel(ModelBase):
 
         self.negative_prompt_embeds: (torch.Tensor | None) = None
         self.negative_prompt_attention_mask: (torch.Tensor | None) = None
+        self._requires_negative_conditioning = True
 
         # Timestep mechanics.
         self.timestep_shift: float = float(flow_shift)
@@ -160,9 +161,23 @@ class WanModel(ModelBase):
         self._init_timestep_mechanics()
 
         from fastvideo.dataset.dataloader.schema import (
-            pyarrow_schema_t2v, )
+            pyarrow_schema_t2v,
+            pyarrow_schema_text_only,
+        )
         from fastvideo.train.utils.dataloader import (
             build_parquet_t2v_train_dataloader, )
+
+        preprocessed_data_type = str(getattr(
+            training_config.data,
+            "preprocessed_data_type",
+            "t2v",
+        )).strip().lower()
+        parquet_schema = pyarrow_schema_t2v
+        if preprocessed_data_type == "text_only":
+            parquet_schema = pyarrow_schema_text_only
+        elif preprocessed_data_type != "t2v":
+            raise ValueError("Unsupported Wan preprocessed_data_type: "
+                             f"{preprocessed_data_type!r}")
 
         text_len = (
             training_config.pipeline_config.text_encoder_configs[  # type: ignore[union-attr]
@@ -170,13 +185,16 @@ class WanModel(ModelBase):
         self.dataloader = build_parquet_t2v_train_dataloader(
             training_config.data,
             text_len=int(text_len),
-            parquet_schema=pyarrow_schema_t2v,
+            parquet_schema=parquet_schema,
         )
         self.start_step = 0
 
     @property
     def num_train_timesteps(self) -> int:
         return int(self.num_train_timestep)
+
+    def set_requires_negative_conditioning(self, requires: bool) -> None:
+        self._requires_negative_conditioning = bool(requires)
 
     def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
         timestep = shift_timestep(
@@ -187,7 +205,25 @@ class WanModel(ModelBase):
         return timestep.clamp(self.min_timestep, self.max_timestep)
 
     def on_train_start(self) -> None:
-        self.ensure_negative_conditioning()
+        if self._requires_negative_conditioning:
+            self.ensure_negative_conditioning()
+
+    @torch.no_grad()
+    def decode_latents(
+        self,
+        latents_b_t_c_h_w: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.vae is None:
+            raise RuntimeError("Wan VAE is not initialized")
+        latents = latents_b_t_c_h_w.permute(0, 2, 1, 3, 4).float()
+        if bool(getattr(self.vae, "handles_latent_denorm", False)):
+            denorm = latents
+        else:
+            mean = torch.tensor(self.vae.latents_mean, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            std = torch.tensor(self.vae.latents_std, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            denorm = latents * std + mean
+        media = self.vae.to(latents.device).decode(denorm)
+        return (media / 2 + 0.5).clamp(0, 1)
 
     # ------------------------------------------------------------------
     # Runtime primitives
@@ -200,7 +236,8 @@ class WanModel(ModelBase):
         generator: torch.Generator,
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
-        self.ensure_negative_conditioning()
+        if self._requires_negative_conditioning:
+            self.ensure_negative_conditioning()
         assert self.training_config is not None
         tc = self.training_config
 
@@ -287,7 +324,7 @@ class WanModel(ModelBase):
         aug_t: torch.Tensor | None = None,
     ) -> torch.Tensor:
         device_type = self.device.type
-        dtype = noisy_latents.dtype
+        dtype = self._get_training_dtype()
         if conditional:
             text_dict = batch.conditional_dict
             if text_dict is None:
@@ -303,6 +340,11 @@ class WanModel(ModelBase):
         else:
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
 
+        if noisy_latents.is_floating_point():
+            noisy_latents = noisy_latents.to(dtype=dtype)
+
+        # Keep Wan training autocast tied to the model's training dtype, not
+        # to caller-created intermediates that may accidentally be fp32.
         with torch.autocast(device_type, dtype=dtype), set_forward_context(
                 current_timestep=batch.timesteps,
                 attn_metadata=attn_metadata,
@@ -407,6 +449,7 @@ class WanModel(ModelBase):
                 patch_size=patch_size,
                 VSA_sparsity=tc.vsa_sparsity,
                 device=self.device,
+                cache_tile_buf=False,
             )
         elif (envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN"):
             if (not is_vmoba_available() or VideoMobaAttentionMetadataBuilder is None):

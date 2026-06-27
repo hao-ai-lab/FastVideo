@@ -128,7 +128,9 @@ class WanCausalModel(WanModel, CausalModelBase):
         }
 
         device_type = self.device.type
-        dtype = noisy_latents.dtype
+        dtype = self._get_training_dtype()
+        if noisy_latents.is_floating_point():
+            noisy_latents = noisy_latents.to(dtype=dtype)
 
         if conditional:
             text_dict = batch.conditional_dict

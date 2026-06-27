@@ -36,6 +36,11 @@ class TextEncoderArchConfig(EncoderArchConfig):
         default_factory=list)  # mapping from huggingface weight names to custom names
     tokenizer_kwargs: dict[str, Any] = field(default_factory=dict)
     _fsdp_shard_conditions: list = field(default_factory=lambda: [])
+    # When True, the tokenizer loader prefers AutoProcessor over AutoTokenizer
+    # for encoders whose tokenizer dir ships a processor_config.json (e.g. Flux2
+    # full's Mistral3 multimodal processor). Default False keeps every existing
+    # encoder on the historical AutoTokenizer path.
+    require_processor: bool = False
 
     def __post_init__(self) -> None:
         self.tokenizer_kwargs = {
