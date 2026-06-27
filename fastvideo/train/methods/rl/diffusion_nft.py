@@ -27,7 +27,11 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.models.base import ModelBase
-from fastvideo.train.methods.rl.rewards import build_multi_reward_scorer
+from fastvideo.train.methods.rl.rewards import (
+    GENRL_REWARD_NAMES,
+    build_multi_reward_scorer,
+    normalize_reward_weights,
+)
 from fastvideo.train.methods.rl.common import (
     DiffusionSampler,
     RLValidationConfig,
@@ -164,14 +168,18 @@ class DiffusionNFTMethod(TrainingMethod):
                              "{all, positive_only, negative_only, one_only, binary}")
 
         reward_fn = self.method_config.get("reward_fn", None)
-        if not isinstance(reward_fn, dict) or not reward_fn:
-            raise ValueError("method.reward_fn must be a non-empty mapping, "
-                             "for example {pickscore: 1.0, clipscore: 1.0}")
-        self._reward_fn_config = {str(k): float(v) for k, v in reward_fn.items()}
-        unsupported = sorted(set(self._reward_fn_config) - {"pickscore", "clipscore"})
-        if unsupported:
-            raise ValueError(f"Unsupported DiffusionNFT reward(s): {unsupported}. "
-                             "Only pickscore and clipscore are currently ported.")
+        self._reward_fn_config, reward_backend = normalize_reward_weights(reward_fn)
+        self._reward_backend = str(
+            self.method_config.get(
+                "reward_backend",
+                reward_backend or "auto",
+            ) or "auto").strip().lower()
+        if self._reward_backend not in {"auto", "diffusion_nft", "genrl"}:
+            raise ValueError("method.reward_backend must be one of auto, diffusion_nft, "
+                             f"or genrl, got {self._reward_backend!r}")
+        if self._reward_backend == "genrl" and not any(name in GENRL_REWARD_NAMES for name in self._reward_fn_config):
+            raise ValueError("method.reward_backend='genrl' requires at least one GenRL reward "
+                             f"from {sorted(GENRL_REWARD_NAMES)}")
 
         self._reward_scorer: Any | None = None
         self._init_optimizer_and_scheduler()
@@ -255,6 +263,7 @@ class DiffusionNFTMethod(TrainingMethod):
         self._reward_scorer = build_multi_reward_scorer(
             self._reward_fn_config,
             device=self.student.device,
+            backend=self._reward_backend,
         )
 
     def _init_optimizer_and_scheduler(self) -> None:
@@ -512,11 +521,12 @@ class DiffusionNFTMethod(TrainingMethod):
             return
 
         artifacts = []
+        fps = int(self._validation_config.fps)
         for item in sorted(logs, key=lambda x: int(x["index"])):
             artifact = tracker.video(
                 media_to_video_array(item["media"]),
                 caption=validation_caption(str(item["prompt"]), item["rewards"]),
-                fps=1,
+                fps=fps,
             )
             if artifact is not None:
                 artifacts.append(artifact)
@@ -574,6 +584,7 @@ class DiffusionNFTMethod(TrainingMethod):
         effective_grad_accum *= max(1, num_train_timesteps)
         current_accum = 0
         optimizer_steps = 0
+        partial_step_micro_steps = 0
         loss_terms: dict[str, list[torch.Tensor]] = defaultdict(list)
         num_batches = max(1, total_samples // max(1, self._train_batch_size))
         training_batch_size = max(1, total_samples // num_batches)
@@ -637,6 +648,11 @@ class DiffusionNFTMethod(TrainingMethod):
                     progress.update(1)
 
         if current_accum % effective_grad_accum != 0:
+            partial_step_micro_steps = current_accum % effective_grad_accum
+            self._log_progress("[DiffusionNFT] final optimizer step uses a partial "
+                               f"gradient accumulation window "
+                               f"({partial_step_micro_steps}/{effective_grad_accum} "
+                               "timestep micro-steps)")
             self._clip_student_grads()
             self._student_optimizer.step()
             self._student_lr_scheduler.step()
@@ -657,6 +673,9 @@ class DiffusionNFTMethod(TrainingMethod):
             "nft/iteration": float(iteration),
             "nft/num_inner_epochs": float(self._num_inner_epochs),
             "nft/inner_micro_steps": float(current_accum),
+            "nft/effective_grad_accum_micro_steps": float(effective_grad_accum),
+            "nft/partial_optimizer_step_micro_steps": float(partial_step_micro_steps),
+            "nft/partial_optimizer_step_ratio": float(partial_step_micro_steps) / float(effective_grad_accum),
             "nft/optimizer_steps": float(optimizer_steps),
             "ema/update_count": float(self._ema_update_count),
         }

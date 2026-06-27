@@ -11,10 +11,12 @@ import torch
 
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
+from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
+    FlowUniPCMultistepScheduler, )
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.base import ModelBase
 
-SchedulerName = Literal["flow_match_euler", "model_default"]
+SchedulerName = Literal["flow_match_euler", "flow_unipc", "model_default"]
 TrajectoryName = Literal["ode", "sde_reflow"]
 
 
@@ -26,6 +28,7 @@ class SamplingConfig:
     scheduler: SchedulerName = "model_default"
     trajectory: TrajectoryName = "ode"
     flow_shift: float | None = None
+    guidance_scale: float = 1.0
     timesteps: list[float] | None = None
     sigmas: list[float] | None = None
 
@@ -37,6 +40,7 @@ class SamplingConfig:
             raise ValueError(f"method.sampling must be a mapping, got {type(raw).__name__}")
         supported_keys = {
             "flow_shift",
+            "guidance_scale",
             "num_steps",
             "scheduler",
             "sigmas",
@@ -48,9 +52,9 @@ class SamplingConfig:
             raise ValueError(f"Unsupported method.sampling key(s): {unsupported_keys}. "
                              f"Supported keys: {sorted(supported_keys)}")
         scheduler = str(raw.get("scheduler", "model_default") or "model_default").strip().lower()
-        if scheduler not in {"flow_match_euler", "model_default"}:
+        if scheduler not in {"flow_match_euler", "flow_unipc", "model_default"}:
             raise ValueError("method.sampling.scheduler must be one of "
-                             "{flow_match_euler, model_default}, got "
+                             "{flow_match_euler, flow_unipc, model_default}, got "
                              f"{raw.get('scheduler')!r}")
         trajectory = str(raw.get("trajectory", "ode") or "ode").strip().lower()
         if trajectory not in {"ode", "sde_reflow"}:
@@ -69,14 +73,21 @@ class SamplingConfig:
             sigmas = [float(s) for s in sigmas]
         if timesteps is not None and sigmas is not None and len(timesteps) != len(sigmas):
             raise ValueError("method.sampling.timesteps and method.sampling.sigmas must have the same length")
+        if scheduler == "flow_unipc" and timesteps is not None:
+            raise ValueError("method.sampling.timesteps is not supported with flow_unipc; "
+                             "use num_steps or sigmas instead")
         num_steps = int(raw.get("num_steps", 25) or 25)
         if num_steps <= 0:
             raise ValueError("method.sampling.num_steps must be positive")
+        guidance_scale = float(raw.get("guidance_scale", 1.0) or 1.0)
+        if guidance_scale < 0.0:
+            raise ValueError("method.sampling.guidance_scale must be non-negative")
         return cls(
             num_steps=num_steps,
             scheduler=scheduler,  # type: ignore[arg-type]
             trajectory=trajectory,  # type: ignore[arg-type]
             flow_shift=(None if raw.get("flow_shift", None) in (None, "inherit") else float(raw["flow_shift"])),
+            guidance_scale=guidance_scale,
             timesteps=timesteps,
             sigmas=sigmas,
         )
@@ -130,13 +141,7 @@ class DiffusionSampler:
                 for timestep in timesteps:
                     model_timestep = self._model_timestep(timestep, current)
                     batch.timesteps = model_timestep
-                    pred_noise = model.predict_noise(
-                        current,
-                        model_timestep,
-                        batch,
-                        conditional=True,
-                        attn_kind="dense",
-                    )
+                    pred_noise = self._predict_with_cfg(model, current, model_timestep, batch)
                     current = scheduler.step(
                         pred_noise.flatten(0, 1),
                         timestep,
@@ -170,6 +175,11 @@ class DiffusionSampler:
             if shift is None:
                 shift = float(getattr(model.noise_scheduler, "shift", 1.0))
             scheduler = FlowMatchEulerDiscreteScheduler(shift=float(shift))
+        elif self.config.scheduler == "flow_unipc":
+            shift = self.config.flow_shift
+            if shift is None:
+                shift = float(getattr(model.noise_scheduler, "shift", 1.0))
+            scheduler = FlowUniPCMultistepScheduler(shift=float(shift))
         else:
             scheduler = copy.deepcopy(model.noise_scheduler)
         kwargs: dict[str, Any] = {"device": device}
@@ -182,6 +192,8 @@ class DiffusionSampler:
         if "num_inference_steps" not in kwargs:
             kwargs["num_inference_steps"] = self.config.num_steps
         scheduler.set_timesteps(**kwargs)
+        if hasattr(scheduler, "set_begin_index"):
+            scheduler.set_begin_index(0)
         return scheduler
 
     def _sample_sde_reflow(
@@ -197,13 +209,7 @@ class DiffusionSampler:
         for step_idx, timestep in enumerate(timesteps):
             timestep_tensor = self._model_timestep(timestep, current)
             batch.timesteps = timestep_tensor
-            pred_clean = model.predict_x0(
-                current,
-                timestep_tensor,
-                batch,
-                conditional=True,
-                attn_kind="dense",
-            )
+            pred_clean = self._predict_x0_with_cfg(model, current, timestep_tensor, batch)
             if step_idx < len(timesteps) - 1:
                 next_timestep = timesteps[step_idx + 1].reshape(1).to(device=current.device)
                 noise = torch.randn(
@@ -214,6 +220,58 @@ class DiffusionSampler:
                 )
                 current = model.add_noise(pred_clean, noise, next_timestep)
         return pred_clean
+
+    def _predict_with_cfg(
+        self,
+        model: ModelBase,
+        current: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+    ) -> torch.Tensor:
+        cond = model.predict_noise(
+            current,
+            timestep,
+            batch,
+            conditional=True,
+            attn_kind="dense",
+        )
+        guidance_scale = float(self.config.guidance_scale)
+        if guidance_scale == 1.0:
+            return cond
+        uncond = model.predict_noise(
+            current,
+            timestep,
+            batch,
+            conditional=False,
+            attn_kind="dense",
+        )
+        return uncond + guidance_scale * (cond - uncond)
+
+    def _predict_x0_with_cfg(
+        self,
+        model: ModelBase,
+        current: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+    ) -> torch.Tensor:
+        cond = model.predict_x0(
+            current,
+            timestep,
+            batch,
+            conditional=True,
+            attn_kind="dense",
+        )
+        guidance_scale = float(self.config.guidance_scale)
+        if guidance_scale == 1.0:
+            return cond
+        uncond = model.predict_x0(
+            current,
+            timestep,
+            batch,
+            conditional=False,
+            attn_kind="dense",
+        )
+        return uncond + guidance_scale * (cond - uncond)
 
     @staticmethod
     def _model_timestep(
