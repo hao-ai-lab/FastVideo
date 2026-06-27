@@ -118,6 +118,10 @@ class ConfigInfo:
     workload_types: tuple[WorkloadType, ...]
     model_family: str | None = None
     default_preset: str | None = None
+    # When set, overrides the model_index `_class_name` for pipeline resolution.
+    # Lets a model family map to a specific pipeline class by path/detector
+    # (e.g. a T2V and I2V checkpoint that share a `_class_name`).
+    pipeline_cls_name: str | None = None
 
 
 # The central registry mapping a model name to its configuration information
@@ -138,6 +142,7 @@ def register_configs(
     model_detectors: list[Callable[[str], bool]] | None = None,
     model_family: str | None = None,
     default_preset: str | None = None,
+    pipeline_cls_name: str | None = None,
 ) -> None:
     """Register config classes for a model family.
 
@@ -152,6 +157,7 @@ def register_configs(
         workload_types=workload_types,
         model_family=model_family,
         default_preset=default_preset,
+        pipeline_cls_name=pipeline_cls_name,
     )
 
     if hf_model_paths:
@@ -505,6 +511,7 @@ def _register_configs() -> None:
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_t2v_lite_5s",
+        pipeline_cls_name="Kandinsky5T2VPipeline",
     )
 
     # Kandinsky5 I2V
@@ -522,6 +529,7 @@ def _register_configs() -> None:
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_i2v_lite_5s",
+        pipeline_cls_name="Kandinsky5I2VPipeline",
     )
 
     # LongCat (T2V, I2V, VC use same config; workload varies by path)
@@ -921,16 +929,21 @@ def get_model_info(
     config_info = _get_config_info(model_path, raise_on_missing=True)
     assert config_info is not None, "config_info must be resolved"
 
+    if os.path.exists(model_path):
+        config = verify_model_config_and_directory(model_path)
+    else:
+        config = maybe_download_model_index(model_path)
+
+    pipeline_name = config.get("_class_name")
     if override_pipeline_cls_name:
         pipeline_name = override_pipeline_cls_name
-        logger.info("Using override pipeline class name %s", pipeline_name)
-    else:
-        if os.path.exists(model_path):
-            config = verify_model_config_and_directory(model_path)
-        else:
-            config = maybe_download_model_index(model_path)
-
-        pipeline_name = config.get("_class_name")
+        logger.info("Overriding pipeline class name from %s to %s", config.get("_class_name"), pipeline_name)
+    elif config_info.pipeline_cls_name is not None:
+        # The resolved (path/detector-based) config pins the pipeline class,
+        # e.g. an I2V checkpoint whose `_class_name` would otherwise resolve to
+        # the T2V pipeline.
+        logger.info("Pinning pipeline class name from %s to %s", pipeline_name, config_info.pipeline_cls_name)
+        pipeline_name = config_info.pipeline_cls_name
 
     if pipeline_name is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
