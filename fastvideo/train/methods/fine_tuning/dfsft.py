@@ -135,12 +135,11 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             t_inhom.flatten(),
         )
 
-        pred = self.student.predict_noise(
+        pred = self._predict_noise(
             noisy_latents,
             t_inhom,
             training_batch,
-            conditional=True,
-            attn_kind=self._attn_kind,
+            clean_latents,
         )
 
         if bool(self.training_config.model.precondition_outputs):
@@ -177,6 +176,28 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         }
         metrics: dict[str, LogScalar] = {}
         return loss_map, outputs, metrics
+
+    def _predict_noise(
+        self,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        training_batch: Any,
+        clean_latents: torch.Tensor,
+    ) -> torch.Tensor:
+        """Predict flow for the noisy latents.
+
+        Diffusion forcing conditions on the *noisy* rollout only, so
+        ``clean_latents`` is unused here. The teacher-forcing variant
+        overrides this to feed clean context via ``clean_x``.
+        """
+        del clean_latents
+        return self.student.predict_noise(
+            noisy_latents,
+            timestep,
+            training_batch,
+            conditional=True,
+            attn_kind=self._attn_kind,
+        )
 
     # TrainingMethod override: backward
     def backward(
