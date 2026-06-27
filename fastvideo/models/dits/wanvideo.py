@@ -9,6 +9,7 @@ import torch.nn as nn
 import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
                                  LocalAttention)
+from fastvideo.attention.selector import check_attn_backend_requirement
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
@@ -598,8 +599,16 @@ class WanTransformer3DModel(BaseDiT):
         )
 
         # 3. Transformer blocks
-        attn_backend = envs.FASTVIDEO_ATTENTION_BACKEND
-        transformer_block = WanTransformerBlock_VSA if attn_backend == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
+        # Some model families (e.g. FastWan) are only correct with a specific
+        # attention backend. Fail loudly if the required backend is not the one
+        # the user selected, rather than silently forcing it -- a force would
+        # only reach block construction here and leave the denoising stage
+        # resolving a different backend. Returns the selected backend
+        # (global force > FASTVIDEO_ATTENTION_BACKEND).
+        attn_backend = check_attn_backend_requirement(config.required_attention_backend,
+                                                      model_name=type(self).__name__)
+        transformer_block = (WanTransformerBlock_VSA
+                             if attn_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN else WanTransformerBlock)
         self.blocks = nn.ModuleList([
             transformer_block(inner_dim,
                               config.ffn_dim,

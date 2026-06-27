@@ -12,6 +12,9 @@ from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConf
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.models.vaes.wanvae import WanVAEArchConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.platforms import AttentionBackendEnum
+
+FASTWAN_REQUIRED_ATTENTION_BACKEND = AttentionBackendEnum.VIDEO_SPARSE_ATTN
 
 
 def t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
@@ -64,7 +67,7 @@ class WanT2V480PConfig(PipelineConfig):
 
     # WanConfig-specific added parameters
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
 
@@ -122,6 +125,10 @@ class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
     # Denoising stage
     flow_shift: float | None = 8.0
     dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.dit_config.required_attention_backend = FASTWAN_REQUIRED_ATTENTION_BACKEND
 
 
 @dataclass
@@ -276,6 +283,24 @@ class LucyEditDevConfig(Wan2_2_TI2V_5B_Config):
 class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
     flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.dit_config.required_attention_backend = FASTWAN_REQUIRED_ATTENTION_BACKEND
+
+
+@dataclass
+class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
+    """FullAttn (dense-attention) DMD variant of FastWan 2.2 TI2V 5B.
+
+    Shares FastWan's DMD denoising schedule but runs dense attention, so -- unlike
+    the sparse-distilled FastWan2.2-TI2V-5B-Diffusers -- it does NOT require VSA.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # This checkpoint is dense; clear the VSA requirement inherited from FastWan.
+        self.dit_config.required_attention_backend = None
 
 
 @dataclass

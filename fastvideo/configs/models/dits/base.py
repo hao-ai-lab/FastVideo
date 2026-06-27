@@ -48,6 +48,11 @@ class DiTConfig(ModelConfig):
     # FastVideoDiT-specific parameters
     prefix: str = ""
     quant_config: QuantizationConfig | None = None
+    # Some model families are only numerically correct with a specific attention
+    # backend (e.g. FastWan is sparse-distilled with VSA). When set, the model
+    # fails loudly if the selected FASTVIDEO_ATTENTION_BACKEND does not match it.
+    # None = no requirement (the common case).
+    required_attention_backend: AttentionBackendEnum | None = None
 
     @staticmethod
     def add_cli_args(parser: Any, prefix: str = "dit-config") -> Any:

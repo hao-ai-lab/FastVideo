@@ -44,6 +44,7 @@ from fastvideo.configs.pipelines.turbodiffusion import (
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
     FastWan2_2_TI2V_5B_Config,
+    FastWan2_2_TI2V_5B_FullAttn_Config,
     LucyEditDevConfig,
     SelfForcingWan2_2_T2V480PConfig,
     SelfForcingWanT2V480PConfig,
@@ -778,8 +779,19 @@ def _register_configs() -> None:
         pipeline_config_cls=FastWan2_2_TI2V_5B_Config,
         workload_types=(WorkloadType.T2V, WorkloadType.I2V),
         hf_model_paths=[
-            "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
             "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
+        ],
+        model_family="wan",
+        default_preset="fast_wan_2_2_ti2v_5b",
+    )
+    # FullAttn (dense) checkpoint: same DMD schedule but does NOT require VSA, so
+    # it maps to a config without the VSA requirement.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=FastWan2_2_TI2V_5B_FullAttn_Config,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=[
+            "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
         ],
         model_family="wan",
         default_preset="fast_wan_2_2_ti2v_5b",
