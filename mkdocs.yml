@@ -174,7 +174,7 @@ nav:
       - Docker: contributing/developer_env/docker.md
       - RunPod: contributing/developer_env/runpod.md
     - Pull Requests: contributing/pull_requests.md
-    - CI Architecture: contributing/ci_architecture.md
+    - CI/CD Architecture: contributing/ci_architecture.md
     - Testing: contributing/testing.md
     - Performance Benchmarks: contributing/performance_benchmarks.md
     - Profiling: contributing/profiling.md
