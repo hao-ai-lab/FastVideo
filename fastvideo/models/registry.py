@@ -69,6 +69,9 @@ _TEXT_ENCODER_MODELS = {
     "Reason1TextEncoder": ("encoders", "reason1", "Reason1TextEncoder"),
     "Qwen2_5_VLForConditionalGeneration":
     ("encoders", "reason1", "Reason1TextEncoder"),
+    # Z-Image-Turbo's text_encoder/config.json declares architecture
+    # "Qwen3Model"; route it to the shared Qwen3 encoder (added for Flux2 Klein).
+    "Qwen3Model": ("encoders", "qwen3", "Qwen3ForCausalLM"),
     "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
     "Qwen3ForCausalLM": ("encoders", "qwen3", "Qwen3ForCausalLM"),
     "Mistral3ForConditionalGeneration":
