@@ -120,6 +120,28 @@ WAN_I2V_14B_720P = InferencePreset(
     },
 )
 
+WAN_SVI_I2V_14B_480P = InferencePreset(
+    name="wan_svi_i2v_14b_480p",
+    version=1,
+    model_family="wan",
+    description="Stable-Video-Infinity multi-clip I2V on Wan 2.1 14B at 480p",
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "height": 448,
+        "width": 832,
+        "num_frames": 81,
+        "fps": 16,
+        "guidance_scale": 5.0,
+        "num_inference_steps": 20,
+        "negative_prompt": _NEGATIVE_PROMPT_EN,
+        # SVI-Shot defaults; override per variant in user kwargs.
+        "svi_num_clips": 1,
+        "svi_num_motion_frames": 1,
+        "svi_ref_pad_num": -1,
+    },
+)
+
 # -------------------------------------------------------------------
 # Wan 2.2 presets
 # -------------------------------------------------------------------
@@ -352,6 +374,7 @@ ALL_PRESETS = (
     WAN_T2V_14B,
     WAN_I2V_14B_480P,
     WAN_I2V_14B_720P,
+    WAN_SVI_I2V_14B_480P,
     WAN_2_2_T2V_A14B,
     WAN_2_2_I2V_A14B,
     WAN_FUN_1_3B_INP,
