@@ -21,6 +21,8 @@ samples/
 Miniconda3-latest-Linux-x86_64.sh
 *validation/
 data/
+!consumer-guide/data/
+!consumer-guide/data/**/*.json
 outputs/
 outputs_video
 checkpoints/
