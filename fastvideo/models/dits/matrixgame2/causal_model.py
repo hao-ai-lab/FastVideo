@@ -975,24 +975,13 @@ class CausalMatrixGame2WanModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        d = self.hidden_size // self.num_attention_heads
-        rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-        freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (
-                post_patch_num_frames * get_sp_world_size(),
-                post_patch_height,
-                post_patch_width,
-            ),
-            self.hidden_size,
-            self.num_attention_heads,
-            rope_dim_list,
-            dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-            rope_theta=10000,
-            start_frame=start_frame,
-        )
-        freqs_cos = freqs_cos.to(hidden_states.device)
-        freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
+        # freqs_cis is unused by CausalMatrixGame2SelfAttention.forward — the
+        # attention computes its own RoPE via self._freqs_cache + causal_rope_apply
+        # and ignores the freqs_cis argument. So skip get_rotary_pos_embed
+        # entirely: it was running a float64 CPU compute + H2D copy on every
+        # forward (also illegal during CUDA-graph capture) for a result nothing
+        # reads.
+        freqs_cis = None
 
         hidden_states = self.patch_embedding(hidden_states)
         grid_sizes = (post_patch_num_frames, post_patch_height, post_patch_width)
@@ -1030,36 +1019,49 @@ class CausalMatrixGame2WanModel(BaseDiT):
             else:
                 encoder_hidden_states = encoder_hidden_states_image
 
-        block_mask = self._prepare_blockwise_causal_attn_mask(
-            device=hidden_states.device,
-            num_frames=num_frames,
-            frame_seqlen=post_patch_height * post_patch_width,
-            num_frame_per_block=self.num_frame_per_block,
-            local_attn_size=self.local_attn_size,
-        )
+        # BlockMasks depend only on (num_frames, frame_seqlen, block size,
+        # local_attn_size) — all constant across forwards. Building them every
+        # forward via create_block_mask is expensive (compile + GPU-tensor
+        # python loop) AND breaks CUDA-graph capture. Cache per param-tuple.
+        bm_cache = getattr(self, "_block_mask_cache", None)
+        if bm_cache is None:
+            bm_cache = {}
+            self._block_mask_cache = bm_cache
+        _dev = hidden_states.device
+        _fsl = post_patch_height * post_patch_width
+        # Use the block size the blocks actually run with (the per-call override),
+        # not the model default, so the mask matches. _nfb is in the cache key.
+        _nfb = effective_num_frame_per_block
+        _las = self.local_attn_size
+
+        _k = ("main", num_frames, _fsl, _nfb, _las, _dev)
+        if _k not in bm_cache:
+            bm_cache[_k] = self._prepare_blockwise_causal_attn_mask(
+                device=_dev, num_frames=num_frames, frame_seqlen=_fsl,
+                num_frame_per_block=_nfb, local_attn_size=_las)
+        block_mask = bm_cache[_k]
+
         if self.use_rope_keyboard:
-            block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_action(
-                device=hidden_states.device,
-                num_frames=num_frames,
-                frame_seqlen=1,
-                num_frame_per_block=self.num_frame_per_block,
-                local_attn_size=self.local_attn_size,
-            )
+            _k = ("act_kb", num_frames, 1, _nfb, _las, _dev)
+            if _k not in bm_cache:
+                bm_cache[_k] = self._prepare_blockwise_causal_attn_mask_action(
+                    device=_dev, num_frames=num_frames, frame_seqlen=1,
+                    num_frame_per_block=_nfb, local_attn_size=_las)
+            block_mask_keyboard = bm_cache[_k]
         else:
-            block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_keyboard(
-                device=hidden_states.device,
-                num_frames=num_frames,
-                frame_seqlen=post_patch_height * post_patch_width,
-                num_frame_per_block=self.num_frame_per_block,
-                local_attn_size=self.local_attn_size,
-            )
-        block_mask_mouse = self._prepare_blockwise_causal_attn_mask_action(
-            device=hidden_states.device,
-            num_frames=num_frames,
-            frame_seqlen=1,
-            num_frame_per_block=self.num_frame_per_block,
-            local_attn_size=self.local_attn_size,
-        )
+            _k = ("kb", num_frames, _fsl, _nfb, _las, _dev)
+            if _k not in bm_cache:
+                bm_cache[_k] = self._prepare_blockwise_causal_attn_mask_keyboard(
+                    device=_dev, num_frames=num_frames, frame_seqlen=_fsl,
+                    num_frame_per_block=_nfb, local_attn_size=_las)
+            block_mask_keyboard = bm_cache[_k]
+
+        _k = ("act_ms", num_frames, 1, _nfb, _las, _dev)
+        if _k not in bm_cache:
+            bm_cache[_k] = self._prepare_blockwise_causal_attn_mask_action(
+                device=_dev, num_frames=num_frames, frame_seqlen=1,
+                num_frame_per_block=_nfb, local_attn_size=_las)
+        block_mask_mouse = bm_cache[_k]
         if kv_cache is None:
             kv_cache = [None] * len(self.blocks)
         if kv_cache_mouse is None:
