@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal, TypeAlias
 
 import torch
 
 from fastvideo import envs
 from fastvideo.logger import init_logger
-from fastvideo.train.models.base import ModelBase
+from fastvideo.train.models.base import RoleModelBase
 from fastvideo.train.utils.checkpoint import _RoleModuleContainer
 from fastvideo.training.checkpointing_utils import (
     ModelWrapper,
@@ -30,7 +30,7 @@ class TrainingMethod(torch.nn.Module, ABC):
     plain attributes and manage optimizers directly — no ``RoleManager``
     or ``RoleHandle``.
 
-    The constructor receives *role_models* (a ``dict[str, ModelBase]``)
+    The constructor receives *role_models* (a ``Mapping[str, RoleModelBase]``)
     and a *cfg* object.  It calls ``init_preprocessors`` on the student
     and builds ``self.role_modules`` for FSDP wrapping.
 
@@ -47,11 +47,11 @@ class TrainingMethod(torch.nn.Module, ABC):
         self,
         *,
         cfg: Any,
-        role_models: dict[str, ModelBase],
+        role_models: Mapping[str, RoleModelBase],
     ) -> None:
         super().__init__()
         self.tracker: Any | None = None
-        self._role_models: dict[str, ModelBase] = dict(role_models)
+        self._role_models: dict[str, RoleModelBase] = dict(role_models)
 
         self.student = role_models["student"]
         self.training_config = cfg.training

@@ -18,7 +18,7 @@ train/
 │   ├── knowledge_distillation/  #   KDMethod, KDCausalMethod
 │   └── consistency_model/       #   Consistency-model training methods
 ├── models/
-│   ├── base.py             #   ModelBase / CausalModelBase wrappers
+│   ├── base.py             #   RoleModelBase / ModelBase / CausalModelBase wrappers
 │   ├── wan/, hunyuan/, cosmos/  # Per-family training wrappers
 ├── callbacks/              # callback.py base + ema, grad_clip, validation
 └── utils/
@@ -47,7 +47,7 @@ Trainer = Method × Model × [Callback...] × Config
 
 ## Adding a New Model Plugin
 
-1. Subclass `ModelBase` (or `CausalModelBase`) in `models/<family>/`.
+1. Subclass `ModelBase` (or `CausalModelBase`) in `models/<family>/` for diffusion models. Use `RoleModelBase` only for non-diffusion role actors.
 2. Wrap the existing inference DiT from `fastvideo/models/dits/`. Do not
    reimplement.
 3. Expose `trainable_parameters()` so the optimizer factory can group them.

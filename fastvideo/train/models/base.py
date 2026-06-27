@@ -17,18 +17,17 @@ if TYPE_CHECKING:
     from fastvideo.pipelines import TrainingBatch
 
 
-class ModelBase(ABC):
-    """Per-role model instance.
+class RoleModelBase(ABC):
+    """Minimal per-role model instance.
 
-    Every role (student, teacher, critic, …) gets its own ``ModelBase``
-    instance.  Each instance owns its own ``transformer`` and
-    ``noise_scheduler``.  Heavyweight resources (VAE, dataloader, RNG
-    seeds) are loaded lazily via :meth:`init_preprocessors`, which the
-    method calls **only on the student**.
+    Every training role (student, teacher, critic, reference, …) gets its own
+    role-model instance.  Each instance owns its role-local ``transformer`` and
+    trainability policy. Heavyweight resources such as dataloaders are loaded
+    lazily via :meth:`init_preprocessors`, which methods usually call only on
+    the student.
     """
 
     transformer: torch.nn.Module
-    noise_scheduler: Any
     _trainable: bool
 
     def __init__(
@@ -90,6 +89,18 @@ class ModelBase(ABC):
 
     def on_train_start(self) -> None:  # noqa: B027
         """Called once before the training loop begins."""
+
+
+class ModelBase(RoleModelBase):
+    """Diffusion per-role model instance.
+
+    Diffusion models additionally own a ``noise_scheduler`` and implement the
+    latent/noise runtime primitives used by standard FastVideo training
+    methods. Non-diffusion actor models should inherit from
+    :class:`RoleModelBase` directly.
+    """
+
+    noise_scheduler: Any
 
     def decode_latents(
         self,

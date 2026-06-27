@@ -4,13 +4,26 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Protocol, TypeGuard
 
 import torch
 
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
-from fastvideo.train.models.base import ModelBase
+from fastvideo.train.models.base import RoleModelBase
 from fastvideo.train.utils.optimizer import build_optimizer_and_scheduler
+
+
+class InterleaveSFTActor(Protocol):
+    """Role model contract required by ``InterleaveThinkerSFTMethod``."""
+
+    transformer: torch.nn.Module
+    _trainable: bool
+
+    def init_preprocessors(self, training_config: Any) -> None:
+        ...
+
+    def compute_interleave_sft_loss(self, batch: Mapping[str, Any]) -> Any:
+        ...
 
 
 class InterleaveThinkerSFTMethod(TrainingMethod):
@@ -20,17 +33,20 @@ class InterleaveThinkerSFTMethod(TrainingMethod):
         self,
         *,
         cfg: Any,
-        role_models: dict[str, ModelBase],
+        role_models: Mapping[str, RoleModelBase],
     ) -> None:
         super().__init__(cfg=cfg, role_models=role_models)
         if "student" not in role_models:
             raise ValueError("InterleaveThinkerSFTMethod requires role 'student'")
-        if not self.student._trainable:
+        student = self.student
+        if not student._trainable:
             raise ValueError("InterleaveThinkerSFTMethod requires student to be trainable")
-        if not callable(getattr(self.student, "compute_interleave_sft_loss", None)):
-            raise TypeError("InterleaveThinkerSFTMethod requires student.compute_interleave_sft_loss()")
+        if not _is_interleave_sft_actor(student):
+            raise TypeError("InterleaveThinkerSFTMethod requires an Interleave SFT actor implementing "
+                            "compute_interleave_sft_loss()")
 
-        self.student.init_preprocessors(self.training_config)
+        self._interleave_student = student
+        self._interleave_student.init_preprocessors(self.training_config)
         self._init_optimizer_and_scheduler()
 
     @property
@@ -51,7 +67,7 @@ class InterleaveThinkerSFTMethod(TrainingMethod):
             dict[str, LogScalar],
     ]:
         del iteration
-        compute_loss = self.student.compute_interleave_sft_loss
+        compute_loss = self._interleave_student.compute_interleave_sft_loss
         result = compute_loss(batch)
         loss_map, metrics = _coerce_sft_result(result)
         return loss_map, {}, metrics
@@ -75,7 +91,7 @@ class InterleaveThinkerSFTMethod(TrainingMethod):
         lr = float(tc.optimizer.learning_rate)
         if lr <= 0.0:
             raise ValueError("training.optimizer.learning_rate must be > 0 for InterleaveThinker SFT")
-        params = [p for p in self.student.transformer.parameters() if p.requires_grad]
+        params = [p for p in self._interleave_student.transformer.parameters() if p.requires_grad]
         if not params:
             raise ValueError("InterleaveThinkerSFTMethod found no trainable student parameters")
         self._student_optimizer, self._student_lr_scheduler = build_optimizer_and_scheduler(
@@ -120,4 +136,10 @@ def _coerce_tensor(value: Any) -> torch.Tensor:
     return torch.as_tensor(float(value), dtype=torch.float32)
 
 
-__all__ = ["InterleaveThinkerSFTMethod"]
+def _is_interleave_sft_actor(model: Any) -> TypeGuard[InterleaveSFTActor]:
+    return (isinstance(getattr(model, "transformer", None), torch.nn.Module)
+            and callable(getattr(model, "init_preprocessors", None))
+            and callable(getattr(model, "compute_interleave_sft_loss", None)))
+
+
+__all__ = ["InterleaveSFTActor", "InterleaveThinkerSFTMethod"]

@@ -12,6 +12,7 @@ from fastvideo.train.models.interleave_thinker import (
 from fastvideo.train.models.interleave_thinker.qwen_actor import (
     _PlaceholderActorModule,
 )
+from fastvideo.train.models.base import ModelBase, RoleModelBase
 from fastvideo.train.utils.config import load_run_config
 
 
@@ -126,6 +127,9 @@ def test_extract_interleave_plan_accepts_upstream_python_literal_answer_block():
 
 def test_interleave_thinker_planner_builds_text_only_messages_without_backend():
     model = InterleaveThinkerPlannerModel(load_backend=False)
+
+    assert isinstance(model, RoleModelBase)
+    assert not isinstance(model, ModelBase)
 
     messages = model.build_messages({"instruction": "Show how to draw a cat step by step."})
 

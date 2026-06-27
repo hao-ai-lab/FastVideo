@@ -112,9 +112,17 @@ teacher/critic — no code changes needed.
 
 ## Model Abstraction
 
-### `ModelBase` — Standard (Bidirectional) Models
+### `RoleModelBase` — Minimal Role Models
 
-Every role gets its own `ModelBase` instance owning a `transformer` and
+Every training role gets a role-model instance with role-local trainability,
+LoRA setup, a `transformer`, and lifecycle hooks such as
+`init_preprocessors()` and `on_train_start()`. Non-diffusion actors can inherit
+from this base directly when they do not own a scheduler or diffusion runtime
+primitives.
+
+### `ModelBase` — Standard (Bidirectional) Diffusion Models
+
+Diffusion roles inherit `ModelBase`, which extends `RoleModelBase` with a
 `noise_scheduler`. The base class defines:
 
 - **`prepare_batch()`** — Convert raw dataloader output into forward-ready

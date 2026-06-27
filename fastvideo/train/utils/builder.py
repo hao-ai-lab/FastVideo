@@ -25,15 +25,15 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod,
        and construct it with ``(cfg=cfg, role_models=...)``.
     3. Return ``(training_args, method, dataloader, start_step)``.
     """
-    from fastvideo.train.models.base import ModelBase
+    from fastvideo.train.models.base import RoleModelBase
 
     # --- 1. Build role model instances ---
-    role_models: dict[str, ModelBase] = {}
+    role_models: dict[str, RoleModelBase] = {}
     for role, model_cfg in cfg.models.items():
         model = instantiate(model_cfg, training_config=cfg.training)
-        if not isinstance(model, ModelBase):
+        if not isinstance(model, RoleModelBase):
             raise TypeError(f"models.{role}._target_ must resolve to a "
-                            f"ModelBase subclass, got {type(model).__name__}")
+                            f"RoleModelBase subclass, got {type(model).__name__}")
         role_models[role] = model
 
     # --- 2. Build method ---

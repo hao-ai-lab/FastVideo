@@ -26,8 +26,8 @@ framework internals from those projects.
 | Surface | Purpose |
 |---------|---------|
 | `fastvideo.train.models.interleave_thinker.Qwen3VLActorBase` | Shared Transformers Qwen3-VL runtime for planner and critic actors. |
-| `InterleaveThinkerPlannerModel` | FastVideo `ModelBase` wrapper for `InterleaveThinker/InterleaveThinker-Planner-8B`. |
-| `InterleaveThinkerCriticModel` | FastVideo `ModelBase` wrapper for `InterleaveThinker/Critic-SFT-8B` and `InterleaveThinker/InterleaveThinker-Critic-8B`. |
+| `InterleaveThinkerPlannerModel` | FastVideo `RoleModelBase` actor wrapper for `InterleaveThinker/InterleaveThinker-Planner-8B`. |
+| `InterleaveThinkerCriticModel` | FastVideo `RoleModelBase` actor wrapper for `InterleaveThinker/Critic-SFT-8B` and `InterleaveThinker/InterleaveThinker-Critic-8B`. |
 | `InterleaveThinkerSFTMethod` | Response-token supervised fine-tuning method for planner and critic actors. |
 | `InterleaveThinkerRLMethod` | Managed GRPO-style loop for planner and critic actors. |
 | `fastvideo.train.methods.rl.common.grpo` | Shared GRPO math helpers. |

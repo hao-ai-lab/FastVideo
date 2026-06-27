@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Any
+from typing import Any, Protocol, TypeGuard
 
 import torch
 import torch.distributed as dist
@@ -14,7 +14,7 @@ from fastvideo.logger import init_logger
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.methods.rl.rewards import (
     InterleaveThinkerRewardScorer, )
-from fastvideo.train.models.base import ModelBase
+from fastvideo.train.models.base import RoleModelBase
 from fastvideo.train.utils.config import (
     get_optional_float,
     get_optional_int,
@@ -26,6 +26,40 @@ from fastvideo.train.utils.optimizer import (
     build_optimizer_and_scheduler, )
 
 logger = init_logger(__name__)
+
+
+class InterleaveTrainActor(Protocol):
+    """Role model contract required for Interleave actor policy updates."""
+
+    transformer: torch.nn.Module
+    _trainable: bool
+
+    @property
+    def device(self) -> torch.device:
+        ...
+
+    def init_preprocessors(self, training_config: Any) -> None:
+        ...
+
+    def train_interleave_rollouts(self, **kwargs: Any) -> Any:
+        ...
+
+
+class InterleaveGenerationActor(Protocol):
+    """Optional online rollout-generation hook for Interleave actors."""
+
+    def generate_interleave_responses(self, batch: dict[str, Any], **kwargs: Any) -> Any:
+        ...
+
+
+class InterleaveReferenceActor(Protocol):
+    """Optional frozen reference-policy logprob hook for Interleave actors."""
+
+    def reference_logprobs_for_interleave_rollouts(
+        self,
+        rollouts: Sequence[Mapping[str, Any]],
+    ) -> Sequence[Any]:
+        ...
 
 
 class InterleaveThinkerRLMethod(TrainingMethod):
@@ -46,19 +80,27 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         self,
         *,
         cfg: Any,
-        role_models: dict[str, ModelBase],
+        role_models: Mapping[str, RoleModelBase],
     ) -> None:
         super().__init__(cfg=cfg, role_models=role_models)
-        if not self.student._trainable:
+        student = self.student
+        if not student._trainable:
             raise ValueError("InterleaveThinkerRLMethod requires a trainable student")
+        if not _is_interleave_train_actor(student):
+            raise TypeError("InterleaveThinkerRLMethod requires an Interleave train actor implementing "
+                            "train_interleave_rollouts()")
+        self._interleave_student = student
 
         self.reference = role_models.get("reference")
+        self._interleave_reference: InterleaveReferenceActor | None = None
         if self.reference is not None:
             if self.reference._trainable:
                 raise ValueError("InterleaveThinkerRLMethod requires models.reference.trainable=false")
+            if _is_interleave_reference_actor(self.reference):
+                self._interleave_reference = self.reference
             self._freeze_reference_model()
 
-        self.student.init_preprocessors(self.training_config)
+        self._interleave_student.init_preprocessors(self.training_config)
         self._num_generations = self._read_int("num_generations", 8)
         self._num_batches_per_step = self._read_int("num_batches_per_step", 1)
         self._max_new_tokens = get_optional_int(
@@ -127,7 +169,7 @@ class InterleaveThinkerRLMethod(TrainingMethod):
 
         self._log_progress(f"[InterleaveThinkerRL] step {iteration}: scoring {len(rollouts)} rollouts")
         reward_inputs = self._make_reward_inputs(rollouts)
-        reward_tensors = self._reward_scorer.as_tensors(reward_inputs, device=self.student.device)
+        reward_tensors = self._reward_scorer.as_tensors(reward_inputs, device=self._interleave_student.device)
 
         self._log_progress(f"[InterleaveThinkerRL] step {iteration}: computing advantages")
         group_keys = [self._rollout_group_key(rollout, idx) for idx, rollout in enumerate(rollouts)]
@@ -174,7 +216,7 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         iteration: int,
     ) -> dict[str, torch.nn.Module]:
         del iteration
-        transformer = getattr(self.student, "transformer", None)
+        transformer = self._interleave_student.transformer
         if isinstance(transformer, torch.nn.Module):
             return {"student": transformer}
         return {}
@@ -184,7 +226,7 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         self._freeze_reference_model()
 
     def _init_optimizer_and_scheduler(self) -> None:
-        transformer = getattr(self.student, "transformer", None)
+        transformer = self._interleave_student.transformer
         if not isinstance(transformer, torch.nn.Module):
             return
         params = [p for p in transformer.parameters() if p.requires_grad]
@@ -256,14 +298,13 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         if not pending:
             return 0
 
-        hook = getattr(self.reference, "reference_logprobs_for_interleave_rollouts", None)
-        if not callable(hook):
+        if self._interleave_reference is None:
             raise RuntimeError("models.reference must implement reference_logprobs_for_interleave_rollouts()")
 
         self._log_progress(f"[InterleaveThinkerRL] computing reference logprobs for {len(pending)} rollouts")
         self._freeze_reference_model()
         with torch.no_grad():
-            rows = hook(pending)
+            rows = self._interleave_reference.reference_logprobs_for_interleave_rollouts(pending)
         if not isinstance(rows, Sequence) or isinstance(rows, str | bytes):
             raise TypeError("reference_logprobs_for_interleave_rollouts() must return a sequence")
         reference_rows = list(rows)
@@ -296,9 +337,8 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         iteration: int,
         batch_idx: int,
     ) -> list[dict[str, Any]]:
-        generate = getattr(self.student, "generate_interleave_responses", None)
-        if callable(generate):
-            generated = generate(
+        if _is_interleave_generation_actor(self._interleave_student):
+            generated = self._interleave_student.generate_interleave_responses(
                 batch,
                 num_generations=self._num_generations,
                 temperature=self._temperature,
@@ -399,11 +439,7 @@ class InterleaveThinkerRLMethod(TrainingMethod):
         rewards: Mapping[str, torch.Tensor],
         iteration: int,
     ) -> tuple[dict[str, torch.Tensor], dict[str, LogScalar]]:
-        train = getattr(self.student, "train_interleave_rollouts", None)
-        if not callable(train):
-            raise RuntimeError("InterleaveThinkerRLMethod requires student.train_interleave_rollouts() "
-                               "to perform the actor policy update")
-        result = train(
+        result = self._interleave_student.train_interleave_rollouts(
             rollouts=rollouts,
             advantages=advantages,
             rewards=rewards,
@@ -447,7 +483,7 @@ class InterleaveThinkerRLMethod(TrainingMethod):
     def _coerce_tensor(self, value: Any) -> torch.Tensor:
         if torch.is_tensor(value):
             return value
-        return torch.tensor(float(value), device=self.student.device, dtype=torch.float32)
+        return torch.tensor(float(value), device=self._interleave_student.device, dtype=torch.float32)
 
     def _coerce_log_scalar(self, value: Any) -> LogScalar:
         if torch.is_tensor(value):
@@ -588,4 +624,23 @@ class InterleaveThinkerRLMethod(TrainingMethod):
             logger.info(message)
 
 
-__all__ = ["InterleaveThinkerRLMethod"]
+def _is_interleave_train_actor(model: Any) -> TypeGuard[InterleaveTrainActor]:
+    return (isinstance(getattr(model, "transformer", None), torch.nn.Module)
+            and callable(getattr(model, "init_preprocessors", None))
+            and callable(getattr(model, "train_interleave_rollouts", None)))
+
+
+def _is_interleave_generation_actor(model: Any) -> TypeGuard[InterleaveGenerationActor]:
+    return callable(getattr(model, "generate_interleave_responses", None))
+
+
+def _is_interleave_reference_actor(model: Any) -> TypeGuard[InterleaveReferenceActor]:
+    return callable(getattr(model, "reference_logprobs_for_interleave_rollouts", None))
+
+
+__all__ = [
+    "InterleaveGenerationActor",
+    "InterleaveReferenceActor",
+    "InterleaveThinkerRLMethod",
+    "InterleaveTrainActor",
+]

@@ -1,13 +1,11 @@
 from types import SimpleNamespace
-from typing import Any, Literal
 
 import pytest
 import torch
 
-from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.methods.fine_tuning.finetune import FineTuneMethod
 from fastvideo.train.methods.rl.interleave_thinker import InterleaveThinkerRLMethod
-from fastvideo.train.models.base import ModelBase
+from fastvideo.train.models.base import RoleModelBase
 from fastvideo.train.utils.config import load_run_config
 from fastvideo.train.utils.training_config import (
     CheckpointConfig,
@@ -29,12 +27,11 @@ def _response(success=True):
     """
 
 
-class _FakeInterleaveActor(ModelBase):
+class _FakeInterleaveActor(RoleModelBase):
 
     def __init__(self, *, trainable=True):
         super().__init__(trainable=trainable)
         self.transformer = torch.nn.Linear(1, 1)
-        self.noise_scheduler = SimpleNamespace(num_train_timesteps=0)
         self.generate_calls = []
         self.train_calls = []
 
@@ -83,28 +80,6 @@ class _FakeInterleaveActor(ModelBase):
                 "actor/updates": 1.0
             },
         )
-
-    def prepare_batch(
-        self,
-        raw_batch: dict[str, Any],
-        *,
-        generator: torch.Generator,
-        latents_source: Literal["data", "zeros"] = "data",
-    ) -> TrainingBatch:
-        del raw_batch, generator, latents_source
-        raise NotImplementedError
-
-    def add_noise(self, clean_latents, noise, timestep):
-        del clean_latents, noise, timestep
-        raise NotImplementedError
-
-    def predict_noise(self, noisy_latents, timestep, batch, *, conditional, cfg_uncond=None, attn_kind="dense"):
-        del noisy_latents, timestep, batch, conditional, cfg_uncond, attn_kind
-        raise NotImplementedError
-
-    def backward(self, loss, ctx, *, grad_accum_rounds):
-        del loss, ctx, grad_accum_rounds
-        raise NotImplementedError
 
 
 class _FakeReferenceActor(_FakeInterleaveActor):

@@ -44,7 +44,7 @@ append-only detail if needed.
   Do not migrate legacy `fastvideo/training` pipelines unless explicitly asked.
 - Do not vendor InterleaveThinker, EasyR1, LLaMA-Factory, or their full training
   stacks into FastVideo.
-- Planner and critic are Transformers Qwen3-VL `ModelBase` wrappers, not native
+- Planner and critic are Transformers Qwen3-VL `RoleModelBase` wrappers, not native
   FastVideo DiT components. A native Qwen3-VL port should happen only if
   checkpoint conversion, distribution, or performance requirements justify it.
 - Boundaries:
@@ -184,6 +184,12 @@ Namespace integration status:
   official-style single-output inference preserves checkpoint generation config
   while multi-output/custom-sampling RL paths still pass sampling controls.
   Commit: `f04e6750`.
+- Abstraction cleanup introduced `RoleModelBase` as the minimal non-diffusion
+  training role base, made diffusion `ModelBase` inherit from it, moved
+  `Qwen3VLActorBase` off the diffusion contract, removed the actor dummy
+  scheduler and diffusion stubs, and added explicit Interleave SFT/RL actor
+  protocols. This preserves existing diffusion method contracts while making
+  planner/critic actors honest non-diffusion role models.
 
 ## Validation Evidence
 
@@ -298,6 +304,34 @@ Latest cleanup validation:
     Python files.
   - `git diff --check` passed.
   - No local pytest was run.
+- Abstraction cleanup validation:
+  - Local syntax/diff hygiene only:
+    `PYTHONDONTWRITEBYTECODE=1 python -m py_compile ...` passed for touched
+    Python files, and `git diff --check` passed.
+  - Focused InterleaveThinker regression validation passed on Modal L40S:
+    app URL `https://modal.com/apps/hao-ai-lab/main/ap-75XUQvgThU5DvYENqoJTek`;
+    result `62 passed, 14 warnings`.
+  - Existing modular train/config regression subset passed on Modal L40S:
+    app URL `https://modal.com/apps/hao-ai-lab/main/ap-k1Dtgm9E4gAOKvkHQCVgjM`;
+    result `69 passed, 14 warnings`.
+  - A broader train-method Modal run including Wan single-step tests produced
+    `69 passed, 2 failed, 15 warnings`; the two failing Wan test targets also
+    failed on an unpatched branch-head comparison job. Treat those failures as
+    current Modal image / upstream test-environment issues, not regressions from
+    the role-model abstraction slice.
+    - Patched broader run:
+      `https://modal.com/apps/hao-ai-lab/main/ap-X0UxJwUHohtnEU1RQ8lho6`.
+    - Unpatched comparison:
+      `https://modal.com/apps/hao-ai-lab/main/ap-ZdMTgR8UP9KhYPHEXR1PAi`.
+  - Official InterleaveThinker parity passed on Modal L40S with upstream cloned
+    in-job and `INTERLEAVETHINKER_REAL_PARITY=1`:
+    app URL `https://modal.com/apps/hao-ai-lab/main/ap-h2OM9Yst0VuoYDAded9Qll`;
+    result `5 passed, 14 warnings`.
+  - Modal pre-commit on touched files passed:
+    app URL `https://modal.com/apps/hao-ai-lab/main/ap-blSbeLVjX6lkE4MZp9TTmq`;
+    yapf, ruff, codespell, PyMarkdown, mypy, filename check, and suggestion
+    passed or were correctly skipped when no files applied.
+  - No local pytest was run.
 
 Broad-suite status:
 
@@ -334,16 +368,15 @@ Broad-suite status:
    before editing.
 2. Read the relevant per-directory `AGENTS.md` before touching files under
    `fastvideo/`, `examples/`, `docs/`, `scripts/`, or tests.
-3. The API cleanup and namespace correction are complete. Continue with review
-   preparation, PR decomposition, reward-backend hardening, or broad-suite
-   environment repair.
+3. The API cleanup, namespace correction, official parity hardening, and
+   abstraction cleanup are complete. No further implementation step from the
+   current structural-divergence plan is pending.
 4. Validate only on Modal. Local syntax-only commands such as `git diff --check`
    are acceptable, but no local pytest or other local test execution should be
    used.
-5. For the next implementation slice, either decompose the branch into
-   reviewable PRs using `docs/design/interleave_thinker.md` as the reviewer
-   entrypoint, or harden reward backends/cache/concurrency and the broad-suite
-   validation environment.
+5. Good next work items are PR decomposition/review packaging, broad-suite Modal
+   image repair for the known Wan/DTensor and memory failures, or reward/backend
+   hardening if product requirements call for it.
 
 ## Useful Commands
 

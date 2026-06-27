@@ -8,16 +8,14 @@ import json
 import os
 from pathlib import Path
 import re
-from types import SimpleNamespace
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.utils.data import DataLoader, Dataset
 
 from fastvideo.logger import init_logger
-from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.methods.rl.common.grpo import compute_grpo_loss
-from fastvideo.train.models.base import ModelBase
+from fastvideo.train.models.base import RoleModelBase
 from fastvideo.train.models.interleave_thinker.data import (
     InterleaveDatasetKind,
     load_interleave_dataset,
@@ -70,7 +68,7 @@ class _PlaceholderActorModule(torch.nn.Module):
     """Checkpoint-visible placeholder used when backend loading is disabled."""
 
 
-class Qwen3VLActorBase(ModelBase):
+class Qwen3VLActorBase(RoleModelBase):
     """Shared Transformers Qwen3-VL wrapper for planner and critic actors."""
 
     def __init__(
@@ -108,7 +106,6 @@ class Qwen3VLActorBase(ModelBase):
         self.processor: Any | None = None
         self.dataloader: Any = None
         self.start_step = 0
-        self.noise_scheduler = SimpleNamespace(num_train_timesteps=0)
 
         if not load_backend:
             self.transformer = _PlaceholderActorModule()
@@ -609,48 +606,6 @@ class Qwen3VLActorBase(ModelBase):
         if self.processor is None or isinstance(self.transformer, _PlaceholderActorModule):
             raise RuntimeError(f"{type(self).__name__} was created with load_backend=false; "
                                "enable backend loading for generation or training updates.")
-
-    def prepare_batch(
-        self,
-        raw_batch: dict[str, Any],
-        *,
-        generator: torch.Generator,
-        latents_source: Literal["data", "zeros"] = "data",
-    ) -> TrainingBatch:
-        del raw_batch, generator, latents_source
-        raise NotImplementedError(f"{type(self).__name__} is not a diffusion ModelBase.")
-
-    def add_noise(
-        self,
-        clean_latents: torch.Tensor,
-        noise: torch.Tensor,
-        timestep: torch.Tensor,
-    ) -> torch.Tensor:
-        del clean_latents, noise, timestep
-        raise NotImplementedError(f"{type(self).__name__} is not a diffusion ModelBase.")
-
-    def predict_noise(
-        self,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: TrainingBatch,
-        *,
-        conditional: bool,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        del noisy_latents, timestep, batch, conditional, cfg_uncond, attn_kind
-        raise NotImplementedError(f"{type(self).__name__} is not a diffusion ModelBase.")
-
-    def backward(
-        self,
-        loss: torch.Tensor,
-        ctx: Any,
-        *,
-        grad_accum_rounds: int,
-    ) -> None:
-        del loss, ctx, grad_accum_rounds
-        raise NotImplementedError(f"{type(self).__name__} uses role-specific training hooks.")
 
 
 def load_interleave_records(

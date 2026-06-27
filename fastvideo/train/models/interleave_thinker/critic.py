@@ -216,16 +216,6 @@ class InterleaveThinkerCriticModel(Qwen3VLActorBase):
         )
         return self.build_text_image_messages(prompt, _item_image_paths(item))
 
-    def backward(
-        self,
-        loss: torch.Tensor,
-        ctx: Any,
-        *,
-        grad_accum_rounds: int,
-    ) -> None:
-        del loss, ctx, grad_accum_rounds
-        raise NotImplementedError("InterleaveThinkerCriticModel uses train_interleave_rollouts().")
-
 
 def _item_image_paths(item: Mapping[str, Any], ) -> list[str]:
     before = first_string(item, "previous_image_path", "origin_image_path", "input_image_path")
