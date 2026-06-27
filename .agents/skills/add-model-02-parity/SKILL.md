@@ -191,6 +191,7 @@ Tolerance guide:
 | Single block, same kernel | `1e-4` / `1e-4` | Tight default. |
 | Full DiT, aligned kernels | `1e-2` / `1e-2` | Cross-layer accumulation. |
 | Full DiT, cross-kernel bf16 | `0.1` / `0.1` | Also require abs-mean drift below 5% and per-modality diagnostics. |
+| Very deep DiT (50+ layers), bf16 | `0.5` / `0.0` | Tail errors from per-GEMM bf16 epsilon (~7.8e-3) accumulated across all layers. Must justify via diagnostic prints — see below. |
 | VAE decode fp32 | `5e-2` / `5e-2` | After normalization alignment. |
 | Encoder wrapper around same HF class | `1e-3` / `1e-3` | Should be near-zero. |
 
@@ -202,6 +203,39 @@ checks, invoke `../add-model-08-trace/SKILL.md` before adding bespoke forward
 hooks. Use `docs/contributing/activation_trace.md` to keep
 `FASTVIDEO_TRACE_LAYERS`, `FASTVIDEO_TRACE_STATS`, and `FASTVIDEO_TRACE_STEPS`
 identical across FastVideo and upstream traces.
+
+### Calibrating atol > 0.1
+
+When a deep DiT (e.g. FLUX with 57 transformer blocks) produces `max_diff > 0.1`
+under bf16, do not silently bump `atol` to make the test pass. Print four metrics
+and assert that the *distribution* — not just the max — looks healthy:
+
+```python
+abs_diff = (hf_out.float().cpu() - fv_out.float().cpu()).abs()
+max_diff = abs_diff.max().item()
+mean_diff = abs_diff.mean().item()
+median_diff = abs_diff.median().item()
+p99_diff = torch.quantile(abs_diff.flatten(), 0.99).item()
+print(
+    f"max_diff={max_diff:.4f}  mean_diff={mean_diff:.4f}  "
+    f"median_diff={median_diff:.4f}  p99_diff={p99_diff:.4f}"
+)
+```
+
+Call `.item()` before formatting (older PyTorch versions do not implement
+`__format__` on 0-dim tensors), and prefer `torch.quantile` over
+`kthvalue(int(0.99 * N))` — `kthvalue` is 1-indexed and degenerates for
+very small `N`, while `quantile` handles the distribution boundary
+cleanly.
+
+Healthy bf16-tail signature (FLUX, 57 layers, observed on A40):
+`max=0.5, mean=0.04, median=0, p99=0.25`. Median near zero and mean ≪ atol
+prove the bulk of elements match — only the tail diverges due to accumulation.
+
+Real bug signature: `mean_diff >> 0.1` or `median_diff > 0.01`. Wrong weights,
+swapped layers, or missing residuals push the mean up, not just the max. Keep
+the diagnostic print in the committed test so reviewers can verify the
+calibration without rerunning.
 
 Useful local commands:
 
