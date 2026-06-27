@@ -25,7 +25,8 @@ method:
   _target_: fastvideo.train.methods.consistency_model.causal_cd.CausalConsistencyDistillationMethod
   discrete_cd_N: 48
   guidance_scale: 3.0
-  ema_decay: 0.95
+  ema_decay: 0.99
+  ema_start_step: 200
 
 training:
   distributed:
