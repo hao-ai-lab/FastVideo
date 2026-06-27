@@ -4,12 +4,13 @@ from dataclasses import dataclass, field
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
 
+def _is_kandinsky5_transformer_block(n: str, m) -> bool:
+    return ("text_transformer_blocks" in n or "visual_transformer_blocks" in n) and n.split(".")[-1].isdigit()
+
+
 @dataclass
 class Kandinsky5ArchConfig(DiTArchConfig):
-    _fsdp_shard_conditions: list = field(default_factory=lambda: [
-        lambda n, m:
-        ("text_transformer_blocks" in n or "visual_transformer_blocks" in n) and n.split(".")[-1].isdigit()
-    ])
+    _fsdp_shard_conditions: list = field(default_factory=lambda: [_is_kandinsky5_transformer_block])
 
     # Native FastVideo implementation uses the same parameter names as diffusers
     # except FFN internals: Diffusers FFN uses `in_layer/out_layer`, while
