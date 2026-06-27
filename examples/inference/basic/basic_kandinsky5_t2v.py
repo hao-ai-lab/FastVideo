@@ -1,10 +1,13 @@
 from fastvideo import VideoGenerator
 
-OUTPUT_PATH = "video_samples_kandinsky5_2B_t2v"
+OUTPUT_PATH = "video_samples_kandinsky5_t2v"
 
 def main():
     generator = VideoGenerator.from_pretrained(
-        "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
+        "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers", 
+        # "kandinskylab/Kandinsky-5.0-T2V-Pro-sft-5s-Diffusers"
+        # "kandinskylab/Kandinsky-5.0-T2V-Lite-Distilled-5s-Diffusers"
+        # "kandinskylab/Kandinsky-5.0-T2V-Pro-Distilled-5s-Diffusers"
         num_gpus=1,
         use_fsdp_inference=False,
         dit_cpu_offload=False,

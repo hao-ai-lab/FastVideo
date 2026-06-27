@@ -504,6 +504,7 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
+            
         ],
         model_detectors=[
             lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
@@ -514,14 +515,65 @@ def _register_configs() -> None:
         pipeline_cls_name="Kandinsky5T2VPipeline",
     )
 
-    # Kandinsky5 I2V
+    # Kandinsky5 Pro T2V
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5T2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-5.0-T2V-Pro-sft-5s-Diffusers",
+            
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
+            and "i2v" not in path.lower(),
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_t2v_pro_5s",
+    )
+
+    # Kandinsky5 Lite T2V Distilled
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5T2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-5.0-T2V-Lite-distilled-5s-Diffusers",
+            
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
+            and "i2v" not in path.lower(),
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_t2v_lite_distilled_5s",
+    )
+
+    # Kandinsky5 Pro T2V Distilled
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5T2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-5.0-T2V-Pro-distilled-5s-Diffusers",
+            
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
+            and "i2v" not in path.lower(),
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_t2v_pro_distilled_5s",
+    )
+
+
+    # Kandinsky5 Lite I2V 
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=Kandinsky5I2VConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
-            "kandinskylab/Kandinsky-5.0-I2V-Lite-sft-5s-Diffusers",
-            "kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers",
+            "kandinskylab/Kandinsky-5.0-I2V-Lite-5s-Diffusers"
         ],
         model_detectors=[
             lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
@@ -530,6 +582,38 @@ def _register_configs() -> None:
         model_family="kandinsky5",
         default_preset="kandinsky5_i2v_lite_5s",
         pipeline_cls_name="Kandinsky5I2VPipeline",
+    )
+
+    # Kandinsky5 Pro I2V
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5I2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers"
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
+            and "i2v" in path.lower(),
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_i2v_pro_5s",
+    )
+
+    # Kandinsky5 Pro I2V Distilled
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5I2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers"
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
+            and "i2v" in path.lower(),
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_i2v_pro_distilled_5s",
     )
 
     # LongCat (T2V, I2V, VC use same config; workload varies by path)
