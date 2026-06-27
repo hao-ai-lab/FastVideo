@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastvideo.api.schema import GenerationRequest
+    from fastvideo.entrypoints.openai.batching import VideoBatchScheduler
     from fastvideo.entrypoints.video_generator import VideoGenerator
     from fastvideo.fastvideo_args import FastVideoArgs
 
@@ -20,6 +21,7 @@ _generator: VideoGenerator | None = None
 _fastvideo_args: FastVideoArgs | None = None
 _output_dir: str = DEFAULT_OUTPUT_DIR
 _default_request: GenerationRequest | None = None
+_video_batch_scheduler: VideoBatchScheduler | None = None
 
 
 def get_generator() -> VideoGenerator:
@@ -44,23 +46,31 @@ def get_default_request() -> GenerationRequest | None:
     return _default_request
 
 
+def get_video_batch_scheduler() -> VideoBatchScheduler | None:
+    """Return the video batch scheduler when dynamic batching is enabled."""
+    return _video_batch_scheduler
+
+
 def set_state(
     generator: VideoGenerator,
     fastvideo_args: FastVideoArgs,
     output_dir: str,
     default_request: GenerationRequest | None = None,
+    video_batch_scheduler: VideoBatchScheduler | None = None,
 ) -> None:
     """Set all server state at once (called from lifespan)."""
-    global _generator, _fastvideo_args, _output_dir, _default_request
+    global _generator, _fastvideo_args, _output_dir, _default_request, _video_batch_scheduler
     _generator = generator
     _fastvideo_args = fastvideo_args
     _output_dir = output_dir
     _default_request = default_request
+    _video_batch_scheduler = video_batch_scheduler
 
 
 def clear_state() -> None:
     """Clear server state on shutdown."""
-    global _generator, _fastvideo_args, _default_request
+    global _generator, _fastvideo_args, _default_request, _video_batch_scheduler
     _generator = None
     _fastvideo_args = None
     _default_request = None
+    _video_batch_scheduler = None
