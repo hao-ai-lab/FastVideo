@@ -54,7 +54,7 @@ torchrun --nproc_per_node=$GPU_NUM \
 
 The raw videos are full-HD MixKit clips (≈1080p/30fps); preprocessing resizes to
 480×832, resamples to 16 fps, and extracts 77 frames per clip. See
-[`docs/training/data_preprocess.md`](../../../../../docs/training/data_preprocess.md)
+[`docs/training/data_preprocess.md`](https://hao-ai-lab.github.io/FastVideo/training/data_preprocess)
 for the full parameter reference.
 
 ## Train (QAT finetune)
