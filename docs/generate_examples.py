@@ -6,18 +6,21 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../..'
 EXAMPLE_DIR = ROOT_DIR / "examples"
 EXAMPLE_DOC_DIR = ROOT_DIR / "docs/getting_started/examples"
 GITHUB_REPO = "hao-ai-lab/FastVideo"  # Update this to your repo
-MARKDOWN_LINK_PATTERN = re.compile(r"(?P<prefix>!?\[[^\]\n]*\]\()(?P<target><[^>\n]+>|[^)\s\n]+)(?P<suffix>\))")
+MARKDOWN_LINK_PATTERN = re.compile(
+    r"(?P<prefix>!?\[[^\]\n]*\]\()"
+    r"(?P<target><[^>\n]+>|[^)\s\n]+)"
+    r'''(?P<suffix>(?:[ \t]+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\((?:\\.|[^)\\\n])*\)))?\))''')
 MARKDOWN_FENCE_PATTERN = re.compile(r"^[ ]{0,3}(?P<marker>`{3,}|~{3,})")
 
 
-def _rebase_markdown_link_target(target: str, source_path: Path, destination_path: Path) -> str:
+def _rebase_markdown_link_target(target: str, source_path: Path, destination_path: Path, *, is_image: bool) -> str:
     """Rebase one relative link target after moving Markdown to a new file."""
     wrapped_in_brackets = target.startswith("<") and target.endswith(">")
     raw_target = target[1:-1] if wrapped_in_brackets else target
@@ -25,6 +28,21 @@ def _rebase_markdown_link_target(target: str, source_path: Path, destination_pat
 
     if (not parsed_target.path or parsed_target.scheme or parsed_target.netloc or parsed_target.path.startswith("/")):
         return target
+
+    if is_image:
+        repository_root = ROOT_DIR.resolve()
+        resolved_source_target = (source_path.parent / unquote(parsed_target.path)).resolve()
+        if (resolved_source_target.is_file() and resolved_source_target.is_relative_to(repository_root)
+                and not resolved_source_target.is_relative_to(repository_root / "docs")):
+            repository_path = quote(resolved_source_target.relative_to(repository_root).as_posix(), safe="/")
+            hosted_target = urlunsplit((
+                "https",
+                "raw.githubusercontent.com",
+                f"/{GITHUB_REPO}/main/{repository_path}",
+                parsed_target.query,
+                parsed_target.fragment,
+            ))
+            return f"<{hosted_target}>" if wrapped_in_brackets else hosted_target
 
     source_target = source_path.parent / parsed_target.path
     rebased_path = os.path.relpath(source_target, start=destination_path.parent).replace(os.sep, "/")
@@ -53,7 +71,10 @@ def rebase_relative_markdown_links(content: str, source_path: Path, destination_
             line = MARKDOWN_LINK_PATTERN.sub(
                 lambda match: "".join((
                     match.group("prefix"),
-                    _rebase_markdown_link_target(match.group("target"), source_path, destination_path),
+                    _rebase_markdown_link_target(match.group("target"),
+                                                 source_path,
+                                                 destination_path,
+                                                 is_image=match.group("prefix").startswith("!")),
                     match.group("suffix"),
                 )), line)
         rebased_lines.append(line)

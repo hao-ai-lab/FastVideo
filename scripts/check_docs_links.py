@@ -8,7 +8,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-LINK_PATTERN = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+LINK_PATTERN = re.compile(
+    r"!?\[[^\]\n]*\]\("
+    r"(?P<target><[^>\n]+>|[^)\s\n]+)"
+    r'''(?:[ \t]+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\((?:\\.|[^)\\\n])*\)))?\)''')
 
 
 def is_external(target: str) -> bool:
