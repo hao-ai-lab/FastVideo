@@ -286,8 +286,7 @@ fi
 
 # ─── Step 5: emit env file ─────────────────────────────────────────────────
 # FASTVIDEO_VIDEO_CODEC stays at libx264 by default to preserve runtime
-# behavior; NVENC is selected at deploy time via dreamverse-deploy.sh
-# --nvenc, which exports FASTVIDEO_VIDEO_CODEC=h264_nvenc.
+# behavior. Select NVENC at launch time with FASTVIDEO_VIDEO_CODEC=h264_nvenc.
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 env_file="$script_dir/ffmpeg-env.sh"
 {
@@ -301,5 +300,6 @@ echo
 echo "[install_native_ffmpeg] ✓ done."
 echo "[install_native_ffmpeg]   binary:  $ffmpeg_bin"
 echo "[install_native_ffmpeg]   env:     $env_file"
-echo "[install_native_ffmpeg]   source it before running the demo:"
-echo "[install_native_ffmpeg]     source scripts/ffmpeg-env.sh"
+echo "[install_native_ffmpeg]   Dreamverse launch helpers load this file automatically."
+echo "[install_native_ffmpeg]   For a manual launch, run:"
+echo "[install_native_ffmpeg]     source apps/dreamverse/scripts/ffmpeg-env.sh"

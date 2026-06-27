@@ -1,6 +1,6 @@
 """Benchmark the LTX-2 generation pipeline driven by the dreamverse Python SDK path.
 
-Mirrors how ``apps/dreamverse/server/video_generation.py`` constructs
+Mirrors how ``apps/dreamverse/dreamverse/video_generation.py`` constructs
 ``GeneratorConfig`` and calls ``VideoGenerator.generate()``, then
 captures per-stage timings via the ``FASTVIDEO_STAGE_LOGGING=1`` log
 hooks (same mechanism as ``FastVideo-internal/examples/inference/basic/
@@ -25,12 +25,12 @@ AV streaming path (use ``benchmark_av_streaming.py`` for that).
 
 Usage::
 
-    python -m apps.dreamverse.server.benchmarks.benchmark_pipeline
-    python -m apps.dreamverse.server.benchmarks.benchmark_pipeline \\
+    python -m dreamverse.benchmarks.benchmark_pipeline
+    python -m dreamverse.benchmarks.benchmark_pipeline \\
         --runs 3 --scenarios compile_warm cold --gpu 4
 
-Cross-references D-21 / D-22 in
-``.agents/memory/dreamverse-integration/decisions-log.md``.
+This benchmark is the source of truth for the pipeline timing breakdown used
+when investigating inter-segment buffer drain.
 """
 from __future__ import annotations
 

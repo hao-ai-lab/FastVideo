@@ -6,13 +6,13 @@
 #
 # Defaults match internal/ui:
 #   * BE = dreamverse-server (8009) — full FE compatibility
-#   * FE = Next.js dev:devtools (5274)
+#   * FE = Next.js devtools mode (5299)
 #
 # Switch BE to fastvideo serve --config (typed-only path):
 #   BE_FLAVOR=fastvideo bash launch_demo.sh
 #
 # Other env knobs:
-#   BE_PORT=8010 FE_PORT=5274 bash launch_demo.sh
+#   BE_PORT=8010 FE_PORT=5300 bash launch_demo.sh
 #   NO_FRONTEND=1 bash launch_demo.sh        # backend only
 #   NO_BROWSER=1 bash launch_demo.sh         # skip xdg-open
 
@@ -20,12 +20,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DREAMVERSE_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
-LOG_DIR="${DREAMVERSE_ROOT}/logs"
+LOG_DIR="${DREAMVERSE_LOG_DIR:-${DREAMVERSE_ROOT}/logs}"
 mkdir -p "${LOG_DIR}"
 
 BE_FLAVOR="${BE_FLAVOR:-dreamverse}"
 BE_PORT="${BE_PORT:-8009}"
-FE_PORT="${FE_PORT:-5274}"
+FE_PORT="${FE_PORT:-5299}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-300}"
 READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-2400}"
 
@@ -119,7 +119,8 @@ fi
 # --- frontend ---
 if [[ "${NO_FRONTEND:-0}" != "1" ]]; then
   echo "[launch-demo] frontend logs: ${FE_LOG}"
-  ( "${SCRIPT_DIR}/launch_frontend.sh" >"${FE_LOG}" 2>&1 ) &
+  ( FE_PORT="${FE_PORT}" BACKEND_HOST=127.0.0.1 BACKEND_PORT="${BE_PORT}" \
+      "${SCRIPT_DIR}/launch_frontend.sh" >"${FE_LOG}" 2>&1 ) &
   FE_PID=$!
   echo "[launch-demo] frontend PID ${FE_PID} (port ${FE_PORT})"
 

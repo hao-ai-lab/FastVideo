@@ -4,18 +4,21 @@ import { test, expect, type WebSocket as PWWebSocket } from '@playwright/test';
  * Long-running e2e: drive a real two-segment session end-to-end with
  * torch.compile + warmup ENABLED on the backend, and assert audio
  * conditioning carries from segment 1 → segment 2 without the
- * BrokenPipe regression documented in
- * `.agents/memory/dreamverse-integration/decisions-log.md` D-20.
+ * BrokenPipe regression previously caused by dropped LTX-2 audio continuation
+ * kwargs.
  *
  * Skipped by default. Opt in with PLAYWRIGHT_LONG_RUNNING=1, and
  * boot the backend with both knobs on:
  *
+ *     # Terminal 1: backend + frontend
  *     ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh \
  *         --warmup --torch-compile 4
+ *     # Terminal 2: test
+ *     cd apps/dreamverse/web
  *     PLAYWRIGHT_SKIP_WEBSERVER=1 \
  *         BACKEND_HOST=127.0.0.1 \
  *         BACKEND_PORT=8009 \
- *         PLAYWRIGHT_BASE_URL=http://127.0.0.1:5274 \
+ *         PLAYWRIGHT_BASE_URL=http://127.0.0.1:5299 \
  *         NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \
  *         PLAYWRIGHT_LONG_RUNNING=1 \
  *         npm exec -- playwright test e2e/long-running-segments.spec.ts

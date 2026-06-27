@@ -9,7 +9,7 @@ frontend tooling remains standalone under `apps/dreamverse/web/`.
 Run CPU-safe backend tests from the FastVideo repository root:
 
 ```bash
-uv run --locked --package dreamverse --extra test pytest apps/dreamverse/server/tests/ -m 'not gpu' -q
+uv run --locked --package dreamverse --extra test pytest apps/dreamverse/dreamverse/tests/ -m 'not gpu' -q
 ```
 
 ## Backend launch
@@ -42,11 +42,22 @@ npm test
 Playwright is intentionally run against a live backend as part of the GPU4
 manual verification flow, not in the Phase 3 migration gate.
 
-## Local GPU4 verification hook
+## Local GPU verification
 
-Use physical GPU 4 for migration smoke tests. `CUDA_VISIBLE_DEVICES=4` makes
-that GPU appear as logical GPU 0 inside the process, preserving the previous
-Dreamverse deployment behavior.
+Choose an available physical GPU for full-stack smoke tests. For example,
+`CUDA_VISIBLE_DEVICES=4` makes physical GPU 4 appear as logical GPU 0 inside
+the process.
+
+For a managed backend-and-frontend redeploy with readiness checks and logs,
+use the repo-local skill helper:
+
+```bash
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4
+```
+
+The helper uses backend port `8009`, frontend port `5299`, and stores its
+transient state under the gitignored `.agents/tmp/` directory. The equivalent
+manual backend launch is:
 
 ```bash
 CUDA_VISIBLE_DEVICES=4 dreamverse-server --host 0.0.0.0 --port 8009
@@ -58,11 +69,10 @@ In another shell, verify the service:
 curl -s http://localhost:8009/healthz
 ```
 
-Phase 4 adds the public `/healthz`, `/readyz`, `/status`,
-`/prompt-system-config`, and `/curated-presets` route coverage needed for the
-full Playwright suite.
+The full Playwright suite expects `/healthz`, `/readyz`, `/status`,
+`/prompt-system-config`, and `/curated-presets` from the Dreamverse backend.
 
-## Phase 0 production-equivalent prerequisites
+## Production-equivalent GPU prerequisites
 
 For the production-equivalent NVFP4 path, install these dependencies
 in the FastVideo `.venv` before GPU smoke tests:
@@ -94,7 +104,5 @@ export CUDAHOSTCXX=/usr/bin/g++-13
 export NVCC_PREPEND_FLAGS="-ccbin /usr/bin/gcc-13 -allow-unsupported-compiler"
 ```
 
-`dreamverse-server` does NOT set these — they need to come from the launching
-shell. The `dreamverse-deploy` skill
-([`.agents/skills/dreamverse-deploy/`](../../.agents/skills/dreamverse-deploy/SKILL.md))
-sets them for you and is the recommended local-deploy path.
+`dreamverse-server` does not set these; keep them in the launching shell or
+an environment wrapper when the host needs the gcc-13 workaround.

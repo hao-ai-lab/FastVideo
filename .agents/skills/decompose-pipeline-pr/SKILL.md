@@ -44,7 +44,7 @@ pipeline PR.
 |-----------|----------|-------------|
 | PR number or URL | Yes | E.g. `1280` or `https://github.com/hao-ai-lab/FastVideo/pull/1280` |
 | Max desired PR size | No | Defaults to ~2,500 LOC of code per stack PR (excluding generated/journal files) |
-| Output dir | No | Defaults to `.agents/exploration/decompose-<pr-number>.md` |
+| Output directory | No | Defaults to `.agents/tmp/decompose-<pr-number>/` (gitignored) |
 
 ## Steps
 
@@ -54,8 +54,10 @@ pipeline PR.
 Always cross-check against the authoritative `git diff`:
 
 ```bash
+mkdir -p .agents/tmp/decompose-<N>
 git fetch origin pull/<N>/head:<feature-branch>
-git diff origin/main..origin/<feature-branch> --name-status > /tmp/pr-<N>-files.txt
+git diff origin/main..origin/<feature-branch> --name-status \
+  > .agents/tmp/decompose-<N>/files.txt
 git diff origin/main..origin/<feature-branch> --stat
 ```
 
@@ -68,7 +70,7 @@ Classify every changed file into one of four tiers:
 
 | Tier | Description | Examples |
 |---|---|---|
-| **Tier 0 — Invisible** | Lint/style/CI configs that don't affect runtime | `.gitignore`, `pyproject.toml` (codespell only), `.agents/skills/index.jsonl` stubs |
+| **Tier 0 — Invisible** | Lint/style/CI configs that don't affect runtime | `.gitignore`, `pyproject.toml` (codespell only), agent documentation |
 | **Tier 1 — Dead code** | New files in their own dirs; aggregator one-liners | `fastvideo/models/dits/<new>/`, `fastvideo/pipelines/basic/<new>/`, `examples/inference/basic/basic_<new>*.py`, `tests/local_tests/<new>/`, `__init__.py` exports |
 | **Tier 2 — Cross-cutting infra** | Modifications to files used by every pipeline | See protected-paths list below |
 | **Tier 3 — Activation switch** | `register_configs(...)` calls + the example scripts that demo them | `fastvideo/registry.py` |
@@ -235,9 +237,11 @@ git -C "$REPO" fetch origin main:main
 git -C "$REPO" fetch "origin/$SOURCE_BRANCH"
 git -C "$REPO" worktree add "$WORKTREE" origin/main
 
-# Capture baseline for provenance
-mkdir -p "$REPO/.agents/exploration"
-cat > "$REPO/.agents/exploration/<feature>-baseline-${SOURCE_SHA:0:8}.txt" <<EOF
+# Capture baseline for provenance. Everything under .agents/tmp is transient
+# and ignored by git.
+OUTPUT_DIR="$REPO/.agents/tmp/decompose-$SOURCE_PR"
+mkdir -p "$OUTPUT_DIR"
+cat > "$OUTPUT_DIR/<feature>-baseline-${SOURCE_SHA:0:8}.txt" <<EOF
 Source PR: <repo>#$SOURCE_PR
 Source SHA: $SOURCE_SHA
 Authoritative file count: $(git -C "$REPO" diff origin/main..origin/$SOURCE_BRANCH --name-only | wc -l)
@@ -272,12 +276,13 @@ Notes:
 
 ## Outputs
 
-The skill produces:
+The skill produces all transient planning artifacts under
+`.agents/tmp/decompose-<pr>/`:
 
-1. A markdown decomposition plan (`.agents/exploration/decompose-<pr>.md`)
+1. A markdown decomposition plan (`plan.md`)
 2. A proposed branch graph
-3. A worktree-bootstrap script
-4. Per-PR file allocation lists (under `/tmp/<feature>-stack/`)
+3. A worktree-bootstrap script (`bootstrap.sh`)
+4. Per-PR file allocation lists (under `stack/`)
 5. AGENTS.md scaffolds for any new pipeline packages
 6. Draft lesson files (placed alongside the PR that owns the code they concern)
 7. A finalized provenance table for the package AGENTS.md
@@ -312,7 +317,7 @@ The skill should warn against:
 ```
 User: split PR 1280
 Agent: [invokes decompose-pipeline-pr]
-       → produces .agents/exploration/decompose-1280.md with:
+       → produces .agents/tmp/decompose-1280/plan.md with:
          - tiered file table (56 files: 3 tier-0, 35 tier-1, 9 tier-2,
            9 tier-3)
          - branch graph (PR-A + PR-B + 8-PR stack)

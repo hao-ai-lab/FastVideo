@@ -9,17 +9,17 @@ ratio (5.04s of generated video produced in <=5.04s wall-time).
 
 Usage::
 
-    python -m apps.dreamverse.server.benchmarks.benchmark_av_streaming
-    python -m apps.dreamverse.server.benchmarks.benchmark_av_streaming \\
+    python -m dreamverse.benchmarks.benchmark_av_streaming
+    python -m dreamverse.benchmarks.benchmark_av_streaming \\
         --frames 121 --width 1920 --height 1088 --runs 3 \\
         --codecs libx264 h264_nvenc --x264-preset ultrafast \\
         --nvenc-preset p1
     FASTVIDEO_FFMPEG_BIN=$HOME/opt/ffmpeg-native/bin/ffmpeg \\
-        python -m apps.dreamverse.server.benchmarks.benchmark_av_streaming
+        python -m dreamverse.benchmarks.benchmark_av_streaming
 
-Skips ``h264_nvenc`` automatically if the binary lacks the encoder.
-This is the regression guard documented in
-`.agents/memory/dreamverse-integration/decisions-log.md` D-21.
+Skips ``h264_nvenc`` automatically if the binary lacks the encoder. This is
+the regression guard for software-encoding overhead that can drain the
+inter-segment playback buffer.
 """
 from __future__ import annotations
 
