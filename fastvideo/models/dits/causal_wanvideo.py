@@ -488,15 +488,10 @@ class CausalWanTransformer3DModel(BaseDiT):
         device: torch.device | str, num_frames: int = 21,
         frame_seqlen: int = 1560, num_frame_per_block=1
     ) -> BlockMask:
-        """Teacher-forcing attention mask (ported from Causal-Forcing).
+        """Attention mask for the teacher-forcing ``[clean | noisy]`` sequence.
 
-        The token sequence is the concatenation ``[clean | noisy]`` (length
-        ``2 * num_frames * frame_seqlen``).  A clean token attends block-wise
-        causally to the clean context; a noisy token attends to the noisy
-        tokens of its own block plus the clean context of all strictly
-        previous blocks (and itself).  This lets the model denoise the current
-        block while conditioning on *clean* history rather than its own noisy
-        rollout.
+        A noisy token attends to its own block plus the clean context of all
+        strictly previous blocks; clean tokens are block-wise causal.
         """
         total_length = num_frames * frame_seqlen * 2
         padded_length = math.ceil(total_length / 128) * 128 - total_length
@@ -702,8 +697,6 @@ class CausalWanTransformer3DModel(BaseDiT):
         freqs_cis = (freqs_cos,
                      freqs_sin) if freqs_cos is not None else None
 
-        # Construct attention mask. Teacher forcing concatenates a clean
-        # context copy of every frame, so it needs its own mask.
         if teacher_forcing:
             if self.teacher_forcing_block_mask is None:
                 self.teacher_forcing_block_mask = self._prepare_teacher_forcing_mask(
@@ -747,9 +740,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         assert encoder_hidden_states.dtype == orig_dtype
 
         if teacher_forcing:
-            # Prepend clean-context tokens; time-embed them at aug_t (default 0).
-            # RoPE and the per-frame modulation are tiled so clean frame i and
-            # noisy frame i share the same position / timestep embedding.
+            # Tile RoPE/modulation so clean frame i and noisy frame i share a position.
             clean_tokens = self.patch_embedding(clean_x).flatten(2).transpose(1, 2)
             hidden_states = torch.cat([clean_tokens, hidden_states], dim=1)
             if aug_t is None:
@@ -776,7 +767,6 @@ class CausalWanTransformer3DModel(BaseDiT):
                                         block_mask=block_mask)
 
         if teacher_forcing:
-            # Drop the clean half; keep the denoised (noisy) tokens.
             hidden_states = hidden_states[:, hidden_states.shape[1] // 2:]
 
         # 5. Output norm, projection & unpatchify

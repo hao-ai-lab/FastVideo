@@ -1,22 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Causal Consistency Distillation (Causal-Forcing++ Stage-2b).
-
-ODE-data-free initialization for asymmetric DMD. Ported from
-Causal-Forcing ``model/naive_consistency.py``.
-
-For a clean latent and a discrete flow-match schedule of ``discrete_cd_N``
-steps, sample an index ``i`` and form ``(t, t_next)``. A frozen *teacher*
-takes a single CFG Euler step from ``latent_t`` to ``latent_t_next``. The
-trainable *student* predicts ``x0`` at ``t`` and an EMA copy of the student
-predicts ``x0`` at ``t_next``; the loss is their MSE. All three forwards run
-under clean-history teacher forcing (``clean_x``), so the target is produced
-online from ground-truth latents only -- no precomputed ODE pairs.
-
-Roles (all initialized from the same checkpoint, as in the reference):
-  * ``student`` -- trainable generator.
-  * ``teacher`` -- frozen; the single-step Euler ODE target.
-  * ``ema``     -- frozen; EMA of the student, the consistency target.
-"""
+"""Causal consistency distillation method (algorithm layer)."""
 
 from __future__ import annotations
 
@@ -32,7 +15,6 @@ from fastvideo.train.utils.optimizer import build_optimizer_and_scheduler
 
 
 class CausalConsistencyDistillationMethod(TrainingMethod):
-    """Causal consistency distillation (Causal-Forcing++)."""
 
     def __init__(
         self,
@@ -116,7 +98,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         )
         latent_t = self.student.add_noise(clean_latents, noise, t_pf.flatten())
 
-        # Teacher: single CFG Euler step latent_t -> latent_t_next (no grad).
         with torch.no_grad():
             v_cond = self._predict_flow(self.teacher,
                                         latent_t,
@@ -134,7 +115,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
             dt = ((t - t_next) / float(self.student.num_train_timesteps))
             latent_t_next = latent_t - dt * v_pred
 
-        # Student x0 at t (with grad).
         training_batch.timesteps = t_pf
         flow_student = self._predict_flow(self.student,
                                           latent_t,
@@ -144,7 +124,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
                                           clean_x=clean_latents)
         x0_t = self._to_x0(flow_student, latent_t, t_pf)
 
-        # EMA-student x0 at t_next (no grad) -- the consistency target.
         with torch.no_grad():
             flow_ema = self._predict_flow(self.ema_model,
                                           latent_t_next,
@@ -195,7 +174,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         conditional: bool,
         clean_x: torch.Tensor,
     ) -> torch.Tensor:
-        """Run a (teacher-forced) flow prediction on ``model``."""
         return model.predict_noise(latents,
                                    timestep,
                                    batch,
