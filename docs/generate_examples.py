@@ -6,12 +6,59 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../..'
 EXAMPLE_DIR = ROOT_DIR / "examples"
 EXAMPLE_DOC_DIR = ROOT_DIR / "docs/getting_started/examples"
 GITHUB_REPO = "hao-ai-lab/FastVideo"  # Update this to your repo
+MARKDOWN_LINK_PATTERN = re.compile(r"(?P<prefix>!?\[[^\]\n]*\]\()(?P<target><[^>\n]+>|[^)\s\n]+)(?P<suffix>\))")
+MARKDOWN_FENCE_PATTERN = re.compile(r"^[ ]{0,3}(?P<marker>`{3,}|~{3,})")
+
+
+def _rebase_markdown_link_target(target: str, source_path: Path, destination_path: Path) -> str:
+    """Rebase one relative link target after moving Markdown to a new file."""
+    wrapped_in_brackets = target.startswith("<") and target.endswith(">")
+    raw_target = target[1:-1] if wrapped_in_brackets else target
+    parsed_target = urlsplit(raw_target)
+
+    if (not parsed_target.path or parsed_target.scheme or parsed_target.netloc or parsed_target.path.startswith("/")):
+        return target
+
+    source_target = source_path.parent / parsed_target.path
+    rebased_path = os.path.relpath(source_target, start=destination_path.parent).replace(os.sep, "/")
+    rebased_target = urlunsplit(("", "", rebased_path, parsed_target.query, parsed_target.fragment))
+    return f"<{rebased_target}>" if wrapped_in_brackets else rebased_target
+
+
+def rebase_relative_markdown_links(content: str, source_path: Path, destination_path: Path) -> str:
+    """Keep relative inline links valid when source Markdown is copied elsewhere."""
+    active_fence: tuple[str, int] | None = None
+    rebased_lines = []
+
+    for line in content.splitlines(keepends=True):
+        fence_match = MARKDOWN_FENCE_PATTERN.match(line)
+        if fence_match:
+            marker = fence_match.group("marker")
+            if active_fence is None:
+                active_fence = (marker[0], len(marker))
+            elif (marker[0] == active_fence[0] and len(marker) >= active_fence[1]
+                  and not line[fence_match.end():].strip()):
+                active_fence = None
+            rebased_lines.append(line)
+            continue
+
+        if active_fence is None:
+            line = MARKDOWN_LINK_PATTERN.sub(
+                lambda match: "".join((
+                    match.group("prefix"),
+                    _rebase_markdown_link_target(match.group("target"), source_path, destination_path),
+                    match.group("suffix"),
+                )), line)
+        rebased_lines.append(line)
+
+    return "".join(rebased_lines)
 
 
 def fix_case(text: str) -> str:
@@ -158,7 +205,7 @@ class Example:
     def determine_title(self) -> str:
         return fix_case(self.path.stem.replace("_", " ").title())
 
-    def generate(self) -> str:
+    def generate(self, destination_path: Path) -> str:
         # Create GitHub link to source
         github_path = str(self.path.relative_to(ROOT_DIR)).replace("\\", "/")
         github_url = f"https://github.com/{GITHUB_REPO}/blob/main/{github_path}"
@@ -172,7 +219,8 @@ class Example:
         if self.main_file.suffix == ".md":
             # For markdown files, include the content directly
             with open(self.main_file, encoding='utf-8') as f:
-                content += f.read() + "\n\n"
+                markdown_content = rebase_relative_markdown_links(f.read(), self.main_file, destination_path)
+            content += markdown_content + "\n\n"
         else:
             # For code files, use code blocks
             language = self.main_file.suffix[1:] if self.main_file.suffix else ""
@@ -203,7 +251,8 @@ class Example:
                 if file.suffix == ".md":
                     # Include markdown content with indentation
                     with open(file, encoding='utf-8') as f:
-                        for line in f:
+                        markdown_content = rebase_relative_markdown_links(f.read(), file, destination_path)
+                        for line in markdown_content.splitlines(keepends=True):
                             content += f"    {line}"
                 else:
                     # Include code with proper formatting
@@ -414,7 +463,7 @@ def generate_flat_examples(examples: list[Example], category_indices: dict[str, 
         # Generate the example documentation
         doc_path = index.path.parent / f"{example.path.stem}.md"
         with open(doc_path, "w+") as f:
-            f.write(example.generate())
+            f.write(example.generate(doc_path))
         index.documents.append(example.path.stem)
 
 
@@ -441,7 +490,7 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[str, di
                 for dataset, nested_struct in datasets.items():
                     doc_path = category_base_dir / f"{nested_struct.filename}.md"
                     with open(doc_path, "w+") as f:
-                        f.write(nested_struct.example.generate())
+                        f.write(nested_struct.example.generate(doc_path))
 
                 # Create model-level index
                 model_index = Index(path=category_base_dir / f"{model}.md",
