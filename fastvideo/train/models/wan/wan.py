@@ -283,6 +283,8 @@ class WanModel(ModelBase):
         conditional: bool,
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
+        clean_x: torch.Tensor | None = None,
+        aug_t: torch.Tensor | None = None,
     ) -> torch.Tensor:
         device_type = self.device.type
         dtype = noisy_latents.dtype
@@ -305,7 +307,11 @@ class WanModel(ModelBase):
                 current_timestep=batch.timesteps,
                 attn_metadata=attn_metadata,
         ):
-            input_kwargs = (self._build_distill_input_kwargs(noisy_latents, timestep, text_dict))
+            input_kwargs = (self._build_distill_input_kwargs(noisy_latents,
+                                                             timestep,
+                                                             text_dict,
+                                                             clean_x=clean_x,
+                                                             aug_t=aug_t))
             transformer = self._get_transformer(timestep)
             pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
         return pred_noise
@@ -487,17 +493,24 @@ class WanModel(ModelBase):
         noise_input: torch.Tensor,
         timestep: torch.Tensor,
         text_dict: dict[str, torch.Tensor] | None,
+        clean_x: torch.Tensor | None = None,
+        aug_t: torch.Tensor | None = None,
     ) -> dict[str, Any]:
         if text_dict is None:
             raise ValueError("text_dict cannot be None for "
                              "Wan distillation")
-        return {
+        kwargs: dict[str, Any] = {
             "hidden_states": noise_input.permute(0, 2, 1, 3, 4),
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
             "timestep": timestep,
             "return_dict": False,
         }
+        if clean_x is not None:
+            # Teacher forcing: clean context latents (+ optional aug timestep).
+            kwargs["clean_x"] = clean_x.permute(0, 2, 1, 3, 4)
+            kwargs["aug_t"] = aug_t
+        return kwargs
 
     def _get_transformer(self, timestep: torch.Tensor) -> torch.nn.Module:
         return self.transformer
