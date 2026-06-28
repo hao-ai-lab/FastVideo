@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'docs/**'
+      - 'consumer-guide/**'
       - 'mkdocs.yml'
       - 'requirements-mkdocs.txt'
       - '.github/workflows/infra-docs.yml'
@@ -12,6 +13,7 @@ on:
     branches: [ main ]
     paths:
       - 'docs/**'
+      - 'consumer-guide/**'
       - 'mkdocs.yml'
       - 'requirements-mkdocs.txt'
       - '.github/workflows/infra-docs.yml'
@@ -54,6 +56,27 @@ jobs:
 
       - name: Build documentation
         run: mkdocs build
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install config generator dependencies
+        working-directory: consumer-guide
+        run: pnpm install --frozen-lockfile
+
+      - name: Build config generator
+        working-directory: consumer-guide
+        run: NEXT_BASE_PATH=/config-generator pnpm build
+
+      - name: Copy config generator into docs site
+        run: |
+          mkdir -p site/config-generator
+          cp -R consumer-guide/out/. site/config-generator/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
