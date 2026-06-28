@@ -69,7 +69,7 @@ def bench(B, H, L, D, is_causal, warmup=20, iters=100):
     torch.cuda.synchronize()
 
     ms = start.elapsed_time(end) / iters
-    flops = 4 * B * H * L * L * D / 1e12
+    flops = (2 if is_causal else 4) * B * H * L * L * D / 1e12
     tflops = flops / (ms / 1e3)
     return ms, tflops
 
