@@ -48,7 +48,7 @@ highest first:
    `request.model_fields_set` (Pydantic v2). Unset fields do not count,
    even if the Pydantic model has a schema default for them.
 2. **`ServeConfig.default_request` (operator-explicit)** — projected via
-   [`explicit_request_updates()`](../../../fastvideo/api/compat.py);
+   [`explicit_request_updates()`](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/api/compat.py);
    only fields the operator actually wrote into the YAML count as
    defaults. Every other field inherits the schema default rather than
    being pinned.
@@ -58,7 +58,7 @@ The gate matters: both surfaces carry schema defaults. Without
 `model_fields_set` / explicit-path tracking, schema defaults would
 masquerade as intent and silently shadow the other side.
 
-See [`video_api.py::_build_generation_kwargs`](../../../fastvideo/entrypoints/openai/video_api.py)
+See [`video_api.py::_build_generation_kwargs`](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/entrypoints/openai/video_api.py)
 for the canonical implementation; the per-request assembly lives there,
 not in pipeline code.
 
@@ -82,7 +82,7 @@ Shape:
 
 Payload is always JSON-serializable. Large tensors may live in an
 opaque blob-store reference the client simply round-trips; see
-[`LTX2ContinuationState`](../../../fastvideo/pipelines/basic/ltx2/continuation.py).
+[`LTX2ContinuationState`](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/pipelines/basic/ltx2/continuation.py).
 
 Continuation is not yet wired all the way through to
 `generator.generate_video(...)` — PR 7.6 (GPU pool upstream) is the

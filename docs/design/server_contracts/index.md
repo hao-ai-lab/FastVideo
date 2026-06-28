@@ -36,6 +36,6 @@ the contract tests that guard it.
 
 - [API refactor design](../overview.md)
 - Parity inventory: [`inference_schema_parity_inventory.yaml`](../inference_schema_parity_inventory.yaml)
-- [Streaming server upstream plan](../../../.agents/memory/dreamverse-integration/source-archive/streaming-server-upstream-plan.md)
+- [Streaming server upstream plan](https://github.com/hao-ai-lab/FastVideo/blob/main/.agents/memory/dreamverse-integration/source-archive/streaming-server-upstream-plan.md)
 - Draft PR (closed) that establishes the Dynamo shape:
   https://github.com/ai-dynamo/dynamo/pull/7544
