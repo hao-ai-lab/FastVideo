@@ -1,0 +1,23 @@
+# Minimum config to instantiate LongCatModel for the loading + forward
+# smoke test. Real LongCat-Video-T2V checkpoint (~13.6B at bf16) loaded
+# via load_module_from_path. flow_shift=12.0 matches the released
+# LongCat scheduler config (0.0 would collapse FlowMatch timesteps).
+#
+# Forward-only: a single-GPU backward of the 13.6B transformer exceeds
+# the L40S CI runner, so LongCat is covered by this loading smoke only
+# (no per-method grad-norm test).
+
+models:
+  student:
+    _target_: fastvideo.train.models.longcat.LongCatModel
+    init_from: FastVideo/LongCat-Video-T2V-Diffusers
+    trainable: false
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  dit_precision: bf16
+
+pipeline:
+  flow_shift: 12.0

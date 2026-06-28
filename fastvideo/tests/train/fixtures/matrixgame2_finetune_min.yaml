@@ -1,0 +1,50 @@
+# Minimum config to run a single training step of FineTuneMethod on
+# MatrixGame2Model for the per-method smoke test. Matrix-Game 2.0 is an
+# action-conditioned I2V world model (no text): the synthetic batch
+# supplies vae_latent + clip_feature + first_frame_latent + all-ones
+# keyboard/mouse actions.
+#
+# NOTE: Matrix-Game-2.0-Base is ~14B at bf16, so a single-GPU backward
+# (params + grads) exceeds the L40S CI runner. This test validates the
+# grad path on larger dev GPUs (H200/GB200); see the per-device skip in
+# the test body.
+
+models:
+  student:
+    _target_: fastvideo.train.models.matrixgame2.matrixgame2.MatrixGame2Model
+    init_from: FastVideo/Matrix-Game-2.0-Base-Diffusers
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  dit_precision: bf16
+
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+
+  data:
+    seed: 42
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    num_latent_t: 4
+    num_height: 64
+    num_width: 64
+    num_frames: 13
+
+  optimizer:
+    learning_rate: 1.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1
+    gradient_accumulation_steps: 1
+
+pipeline:
+  flow_shift: 3
