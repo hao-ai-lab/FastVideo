@@ -97,7 +97,7 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
 
         sigmas = self._sf_scheduler.sigmas.to(device)
         timesteps = self._sf_scheduler.timesteps.to(device)
-        idx = int(torch.randint(0, self._discrete_cd_n - 1, (1, ), generator=self.cuda_generator, device=device).item())
+        idx = torch.randint(0, self._discrete_cd_n - 1, (1, ), generator=self.cuda_generator, device=device).squeeze(0)
         t, t_next = timesteps[idx], timesteps[idx + 1]
         sigma_t, sigma_t_next = sigmas[idx], sigmas[idx + 1]
         t_pf = t * torch.ones(batch_size, num_latents, device=device)
@@ -149,7 +149,8 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         loss = F.mse_loss(x0_t.float(), x0_t_next.float())
 
         loss_map = {"total_loss": loss, "causal_cd_loss": loss}
-        outputs: dict[str, Any] = {"_fv_backward": (t_pf, training_batch.attn_metadata)}
+        attn_metadata = (training_batch.attn_metadata_vsa if self._attn_kind == "vsa" else training_batch.attn_metadata)
+        outputs: dict[str, Any] = {"_fv_backward": (t_pf, attn_metadata)}
         metrics: dict[str, LogScalar] = {}
         return loss_map, outputs, metrics
 
