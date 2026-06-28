@@ -1,7 +1,5 @@
 # `fastvideo/train/` — Modular Training Framework
 
-**Generated:** 2026-05-02
-
 YAML-driven trainer composed from interchangeable **methods × models × callbacks**. Preferred location for new training code. (See sibling `fastvideo/training/AGENTS.md` for the legacy stack.)
 
 ## Layout
@@ -16,7 +14,8 @@ train/
 │   ├── fine_tuning/             #   FineTuneMethod, DiffusionForcingSFTMethod
 │   ├── distribution_matching/   #   DMD2Method, SelfForcingMethod
 │   ├── knowledge_distillation/  #   KDMethod, KDCausalMethod
-│   └── consistency_model/       #   Consistency-model training methods
+│   ├── consistency_model/       #   Consistency-model training methods
+│   └── rl/                      #   RL methods, sampling helpers, rewards
 ├── models/
 │   ├── base.py             #   ModelBase / CausalModelBase wrappers
 │   ├── wan/, hunyuan/, cosmos/  # Per-family training wrappers
@@ -60,6 +59,53 @@ Trainer = Method × Model × [Callback...] × Config
 3. If the method needs a teacher / second model, expose a `build_extras(cfg)`
    classmethod — never instantiate inside `__init__`.
 
+## RL/RLHF Boundaries
+
+- RL methods live under `methods/rl/`, subclass `TrainingMethod`, and own
+  reward collection, advantage computation, policy loss, KL/reference terms,
+  and optimizer cadence.
+- Keep model-family forward logic and latent decoding in `ModelBase`
+  wrappers. RL methods must use `ModelBase.decode_latents` rather than reach
+  into VAE normalization internals or inference pipelines.
+- Shared generation, grouped prompt sampling, validation helpers, and scheduler
+  math belong under `methods/rl/common/`.
+- Use `common/sampling.py` for generation and `common/prompt_sampling.py`
+  for reusable patterns such as DiffusionNFT K-repeat.
+- Return `manages_optimization() == True` only for a genuinely nonstandard
+  outer/inner loop, implemented through
+  `managed_train_step(data_stream, iteration)`. Existing callbacks,
+  checkpointing, tracking, and validation must continue to work.
+
+### Sampling and configuration
+
+- Put method knobs under `method` and sampler knobs under
+  `method.sampling`.
+- A diffusers-style scheduler owns both its schedule and `step()` solver.
+  Use `trajectory` only for higher-level ODE versus explicit re-noise
+  behavior; missing timesteps means to ask the scheduler for its defaults.
+- Avoid fixed timestep lists in examples unless reproducing a known baseline.
+- Do not put scheduler or trajectory policy in model configs.
+
+### Reward models
+
+- Put reusable rewards under `methods/rl/rewards/` and export their builders
+  from that package's `__init__.py`. Keep method-specific aggregation and
+  advantage logic out of reward classes.
+- Rewards receive decoded media and return one scalar per prompt/sample.
+  Support `[B, C, H, W]` images and `[B, C, T, H, W]` videos when practical.
+  Each reward must explicitly choose whether it evaluates the first frame,
+  sampled frames, or the full video.
+- Preserve upstream attribution and SPDX headers for ported reward code.
+
+### RL tests
+
+- Add fake-model tests for sampler/method behavior and fake-scorer injection
+  for reward aggregation.
+- Test config parsing, tensor layouts, weighted reward metrics, prompt grouping,
+  and managed-optimization opt-in without loading heavyweight checkpoints.
+- Confirm existing non-RL methods remain on the default Trainer path with
+  `manages_optimization() == False`.
+
 ## Configs
 
 YAML lives under `examples/train/`. Schemas in `utils/training_config.py`. Add
@@ -74,3 +120,6 @@ to discover knobs.
 - Logging via stdlib `logging` — use `init_logger(__name__)`.
 - Mutating the global state of a model in a callback. Callbacks operate on the
   trainer state object passed in.
+- Binding RL methods to inference pipeline classes.
+- Hardcoding scheduler timesteps or embedding reward-model code inside one RL
+  method.
