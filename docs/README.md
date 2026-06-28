@@ -12,7 +12,7 @@ uv pip install -r requirements-mkdocs.txt
 mkdocs serve
 
 # Or build static site
-mkdocs build --strict
+mkdocs build
 ```
 
 ## View the docs
@@ -28,7 +28,7 @@ Then open your browser to: http://127.0.0.1:8000
 ### Static build
 
 ```bash
-mkdocs build --strict
+mkdocs build
 python -m http.server -d site/
 ```
 

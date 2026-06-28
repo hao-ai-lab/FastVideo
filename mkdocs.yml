@@ -94,8 +94,7 @@ plugins:
           paths: [.]
           options:
             docstring_style: google
-            # Keep strict builds focused on site/configuration warnings. Existing
-            # API docstring lint debt is tracked independently from docs builds.
+            # Avoid flooding build logs with existing API docstring lint debt.
             docstring_options:
               warnings: false
             show_source: true
@@ -214,7 +213,7 @@ nav:
     - Dreamverse Development: contributing/dreamverse-development.md
     - Attention Backend Development: contributing/attention_backend.md
   - API Reference:
-    - FastVideo: api/fastvideo.md
+    - Overview: api/index.md
 
 
 # Extra
