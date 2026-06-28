@@ -2,8 +2,8 @@
 
 ## Repo-local workflows
 
-- Use `.agents/skills/dreamverse-deploy/` to start, redeploy, inspect, or stop
-  the local backend/frontend stack on a chosen physical GPU.
+- Use `.agents/skills/dreamverse-deploy/` to redeploy or stop the local
+  backend/frontend stack on a chosen physical GPU.
 - Use `apps/dreamverse/scripts/modal/README.md` for Modal deployments and
   `apps/dreamverse/docker/README.md` for image builds. The local deploy skill
   intentionally does not manage remote deployments.

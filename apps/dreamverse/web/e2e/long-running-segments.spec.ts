@@ -12,7 +12,7 @@ import { test, expect, type WebSocket as PWWebSocket } from '@playwright/test';
  *
  *     # Terminal 1: backend + frontend
  *     ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh \
- *         --warmup --torch-compile 4
+ *         --warmup --torch-compile 4 8009 5299
  *     # Terminal 2: test
  *     cd apps/dreamverse/web
  *     PLAYWRIGHT_SKIP_WEBSERVER=1 \

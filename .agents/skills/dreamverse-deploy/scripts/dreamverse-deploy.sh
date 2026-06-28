@@ -1,331 +1,460 @@
 #!/usr/bin/env bash
-# See ../SKILL.md for usage and safety notes.
+# See ../SKILL.md for full usage.
 
 set -euo pipefail
-
-usage() {
-  cat <<'USAGE'
-Usage:
-  dreamverse-deploy.sh [FLAGS] <GPU> [BACKEND_PORT] [FRONTEND_PORT]
-  dreamverse-deploy.sh --stop [BACKEND_PORT] [FRONTEND_PORT]
-
-Defaults: backend 8009, frontend 5299, warmup off, torch.compile off.
-
-Flags:
-  --warmup / --no-warmup
-  --torch-compile / --no-torch-compile
-  --nvenc / --no-nvenc
-  --force-gpu-kill   Kill every compute process on the selected GPU.
-  --dry-run          Print the resolved plan without changing processes.
-  --stop             Stop the managed stack and listeners on selected ports.
-  -h, --help
-
-Environment:
-  DREAMVERSE_WARMUP, DREAMVERSE_TORCH_COMPILE, DREAMVERSE_NVENC
-  DREAMVERSE_BACKEND_PORT, DREAMVERSE_FRONTEND_PORT
-  DREAMVERSE_REPO_ROOT, DREAMVERSE_DEPLOY_DIR
-  NPM                       npm executable override
-  DREAMVERSE_DEPLOY_READY_TIMEOUT_SECONDS (default 2400)
-  DREAMVERSE_DEPLOY_FRONTEND_TIMEOUT_SECONDS (default 120)
-USAGE
-}
-
-fail() {
-  echo "error: $*" >&2
-  exit 1
-}
-
-normalize_bool() {
-  local value
-  value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "${value}" in
-    1|true|yes|on) echo 1 ;;
-    0|false|no|off) echo 0 ;;
-    *) fail "expected a boolean value, got '$1'" ;;
-  esac
-}
-
-validate_port() {
-  local name="$1" value="$2"
-  [[ "${value}" =~ ^[0-9]+$ ]] \
-    || fail "${name} must be an integer from 1 to 65535 (got '${value}')"
-  (( value >= 1 && value <= 65535 )) \
-    || fail "${name} must be an integer from 1 to 65535 (got '${value}')"
-}
-
-MODE=deploy
-DRY_RUN=0
-FORCE_GPU_KILL=0
-WARMUP_OVERRIDE=""
-TORCH_COMPILE_OVERRIDE=""
-NVENC_OVERRIDE=""
-POSITIONAL=()
-
-while (( $# > 0 )); do
-  case "$1" in
-    --warmup) WARMUP_OVERRIDE=1 ;;
-    --no-warmup) WARMUP_OVERRIDE=0 ;;
-    --torch-compile) TORCH_COMPILE_OVERRIDE=1 ;;
-    --no-torch-compile) TORCH_COMPILE_OVERRIDE=0 ;;
-    --nvenc) NVENC_OVERRIDE=1 ;;
-    --no-nvenc) NVENC_OVERRIDE=0 ;;
-    --force-gpu-kill) FORCE_GPU_KILL=1 ;;
-    --dry-run) DRY_RUN=1 ;;
-    --stop) MODE=stop ;;
-    -h|--help) usage; exit 0 ;;
-    --) shift; POSITIONAL+=("$@"); break ;;
-    -*) fail "unknown flag '$1'" ;;
-    *) POSITIONAL+=("$1") ;;
-  esac
-  shift
-done
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../../.." && pwd)"
-REPO_ROOT="${DREAMVERSE_REPO_ROOT:-${DEFAULT_REPO_ROOT}}"
-BACKEND_PORT_DEFAULT="${DREAMVERSE_BACKEND_PORT:-8009}"
-FRONTEND_PORT_DEFAULT="${DREAMVERSE_FRONTEND_PORT:-5299}"
-
-if [[ "${MODE}" == stop ]]; then
-  (( ${#POSITIONAL[@]} <= 2 )) || fail "--stop accepts only [BACKEND_PORT] [FRONTEND_PORT]"
-  BACKEND_PORT="${POSITIONAL[0]:-${BACKEND_PORT_DEFAULT}}"
-  FRONTEND_PORT="${POSITIONAL[1]:-${FRONTEND_PORT_DEFAULT}}"
-  GPU=""
-  (( FORCE_GPU_KILL == 0 )) || fail "--force-gpu-kill requires deploy mode and a GPU"
-else
-  (( ${#POSITIONAL[@]} >= 1 && ${#POSITIONAL[@]} <= 3 )) || {
-    usage >&2
-    exit 2
-  }
-  GPU="${POSITIONAL[0]}"
-  BACKEND_PORT="${POSITIONAL[1]:-${BACKEND_PORT_DEFAULT}}"
-  FRONTEND_PORT="${POSITIONAL[2]:-${FRONTEND_PORT_DEFAULT}}"
-  [[ "${GPU}" =~ ^[0-9]+$ ]] || fail "GPU must be a non-negative integer (got '${GPU}')"
-fi
-
-validate_port BACKEND_PORT "${BACKEND_PORT}"
-validate_port FRONTEND_PORT "${FRONTEND_PORT}"
-[[ "${BACKEND_PORT}" != "${FRONTEND_PORT}" ]] || fail "backend and frontend ports must differ"
-
-WARMUP="${WARMUP_OVERRIDE:-$(normalize_bool "${DREAMVERSE_WARMUP:-false}")}"
-TORCH_COMPILE="${TORCH_COMPILE_OVERRIDE:-$(normalize_bool "${DREAMVERSE_TORCH_COMPILE:-false}")}"
-NVENC="${NVENC_OVERRIDE:-$(normalize_bool "${DREAMVERSE_NVENC:-false}")}"
-
-DEPLOY_ROOT="${DREAMVERSE_DEPLOY_DIR:-${REPO_ROOT}/.agents/tmp/dreamverse-deploy}"
-INSTANCE_DIR="${DEPLOY_ROOT}/be${BACKEND_PORT}-fe${FRONTEND_PORT}"
-PID_FILE="${INSTANCE_DIR}/launcher.pid"
-STACK_LOG="${INSTANCE_DIR}/stack.log"
-LAUNCHER="${REPO_ROOT}/apps/dreamverse/scripts/launch/launch_demo.sh"
-NPM="${NPM:-npm}"
-
-print_plan() {
-  cat <<PLAN
-Dreamverse ${MODE} plan
-  repo:         ${REPO_ROOT}
-  gpu:          ${GPU:-<not used>}
-  backend:      http://127.0.0.1:${BACKEND_PORT}
-  frontend:     http://127.0.0.1:${FRONTEND_PORT}
-  warmup:       ${WARMUP}
-  compile:      ${TORCH_COMPILE}
-  nvenc:        ${NVENC}
-  force GPU kill: ${FORCE_GPU_KILL}
-  artifacts:    ${INSTANCE_DIR}
-PLAN
-}
-
-if (( DRY_RUN == 1 )); then
-  print_plan
-  exit 0
-fi
-
-command -v curl >/dev/null 2>&1 || fail "curl is required"
-if ! command -v lsof >/dev/null 2>&1 && ! command -v fuser >/dev/null 2>&1; then
-  fail "lsof or fuser is required to identify port listeners"
-fi
 
 is_pid_alive() {
   kill -0 "$1" 2>/dev/null
 }
 
 terminate_pid() {
-  local pid="$1" label="$2"
-  [[ -n "${pid}" && "${pid}" != "$$" ]] || return 0
+  local pid="$1"
+  local label="${2:-pid=${pid}}"
+
+  [[ -n "${pid}" ]] && [[ "${pid}" != "$$" ]] || return 0
   is_pid_alive "${pid}" || return 0
-  echo "stopping ${label}"
-  kill -TERM "${pid}" 2>/dev/null || true
-  for _ in {1..20}; do
+
+  kill "${pid}" 2>/dev/null || true
+  for _ in $(seq 1 10); do
     is_pid_alive "${pid}" || return 0
-    sleep 0.25
+    sleep 0.5
   done
-  kill -KILL "${pid}" 2>/dev/null || true
+
+  if is_pid_alive "${pid}"; then
+    kill -9 "${pid}" 2>/dev/null && echo "        force-killed ${label}" || true
+  fi
 }
 
-terminate_managed_group() {
-  local pid args
-  [[ -f "${PID_FILE}" ]] || return 0
-  read -r pid < "${PID_FILE}" || true
-  [[ "${pid:-}" =~ ^[0-9]+$ ]] || return 0
-  if ! is_pid_alive "${pid}"; then
+terminate_pattern() {
+  local pattern="$1"
+  local pid
+
+  if ! command -v pgrep >/dev/null 2>&1; then
+    pkill -TERM -f "${pattern}" 2>/dev/null || true
+    sleep 2
+    pkill -KILL -f "${pattern}" 2>/dev/null || true
     return 0
   fi
-  args="$(ps -p "${pid}" -o args= 2>/dev/null || true)"
-  if [[ "${args}" != *"${LAUNCHER}"* ]]; then
-    echo "warn: refusing to stop stale PID ${pid}; it is not the Dreamverse launcher" >&2
-    return 0
-  fi
-  echo "stopping managed Dreamverse process group ${pid}"
-  kill -TERM "-${pid}" 2>/dev/null || kill -TERM "${pid}" 2>/dev/null || true
-  for _ in {1..40}; do
-    is_pid_alive "${pid}" || return 0
-    sleep 0.25
+
+  for pid in $(pgrep -f -- "${pattern}" 2>/dev/null || true); do
+    terminate_pid "${pid}" "pattern='${pattern}' pid=${pid}"
   done
-  kill -KILL "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null || true
 }
 
 list_port_pids() {
   local port="$1"
+
   if command -v lsof >/dev/null 2>&1; then
     lsof -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true
-  else
-    fuser -n tcp "${port}" 2>/dev/null | tr ' ' '\n' | sed '/^$/d' || true
+    return 0
   fi
+
+  ss -tlnp 2>/dev/null | awk -v port=":${port}" '
+    $0 ~ port {
+      while (match($0, /pid=[0-9]+/)) {
+        print substr($0, RSTART + 4, RLENGTH - 4)
+        $0 = substr($0, RSTART + RLENGTH)
+      }
+    }
+  ' || true
 }
 
-stop_port_listeners() {
-  local port="$1" pid
-  while read -r pid; do
-    [[ "${pid}" =~ ^[0-9]+$ ]] || continue
-    terminate_pid "${pid}" "listener on port ${port} (PID ${pid})"
-  done < <(list_port_pids "${port}")
-}
-
-mkdir -p "${INSTANCE_DIR}"
-terminate_managed_group
-stop_port_listeners "${BACKEND_PORT}"
-stop_port_listeners "${FRONTEND_PORT}"
-
-if [[ "${MODE}" == stop ]]; then
-  rm -f "${PID_FILE}"
-  echo "Dreamverse stopped on ports ${BACKEND_PORT}/${FRONTEND_PORT}."
+if [[ "${1:-}" == "--stop" ]]; then
+  for pat in 'apps/dreamverse/dreamverse/main.py' 'dreamverse-server --host 0.0.0.0 --port' 'next dev --port' 'next-server (v'; do
+    terminate_pattern "${pat}"
+  done
+  if [[ -n "${2:-}" ]] && [[ "${2}" =~ ^[0-9]+$ ]]; then
+    gpu_uuid="$(nvidia-smi --query-gpu=index,uuid --format=csv,noheader 2>/dev/null | awk -F', ' -v g="${2}" '$1==g {print $2}')"
+    if [[ -n "${gpu_uuid}" ]]; then
+      for pid in $(nvidia-smi --query-compute-apps=pid,gpu_uuid --format=csv,noheader 2>/dev/null \
+                    | awk -F', ' -v u="${gpu_uuid}" '$2==u {print $1}'); do
+        terminate_pid "${pid}" "GPU${2} pid=${pid}"
+      done
+    fi
+  fi
+  sleep 2
+  echo "stopped: ports may take a few seconds to free"
   exit 0
 fi
 
-[[ -x "${LAUNCHER}" ]] || fail "launcher is missing or not executable: ${LAUNCHER}"
-for command_name in dreamverse-server nvidia-smi setsid; do
-  command -v "${command_name}" >/dev/null 2>&1 || fail "${command_name} is required"
-done
-command -v "${NPM}" >/dev/null 2>&1 || fail "npm command not found: ${NPM}"
+# ---------------------------------------------------------------------------
+# Args
+# ---------------------------------------------------------------------------
 
-GPU_UUID="$(nvidia-smi --query-gpu=index,uuid --format=csv,noheader 2>/dev/null \
-  | awk -F', ' -v gpu="${GPU}" '$1 == gpu {print $2}')"
-[[ -n "${GPU_UUID}" ]] || fail "GPU ${GPU} was not reported by nvidia-smi"
+usage() {
+  cat <<USAGE
+Usage: $(basename "$0") [FLAGS] <GPU> [BACKEND_PORT] [FRONTEND_PORT]
+       $(basename "$0") --stop [GPU]
 
-gpu_compute_pids() {
-  nvidia-smi --query-compute-apps=pid,gpu_uuid --format=csv,noheader 2>/dev/null \
-    | awk -F', ' -v uuid="${GPU_UUID}" '$2 == uuid {print $1}'
+Positional:
+  GPU            Physical GPU index (required), e.g. 4
+  BACKEND_PORT   default 8009
+  FRONTEND_PORT  default 5274
+
+Flags (override env vars when both set):
+  --warmup / --no-warmup            run GPU warmup at boot (default off)
+  --torch-compile / --no-torch-compile
+                                     enable max-autotune torch.compile
+                                     (default off — first segment ~3-4min
+                                     when on, ~45s when off)
+  --nvenc / --no-nvenc              use h264_nvenc hardware encoder (default
+                                     off — uses libx264 software encoder).
+                                     Requires native ffmpeg built with NVENC.
+  -h, --help                        show this help
+
+Env overrides:
+  DREAMVERSE_WARMUP                 'true'|'false' (default false)
+  DREAMVERSE_TORCH_COMPILE          'true'|'false' (default false)
+  DREAMVERSE_NVENC                  'true'|'false' (default false)
+  DREAMVERSE_REPO_ROOT              default: \$(git rev-parse --show-toplevel)
+  DREAMVERSE_LOG_DIR                default: /tmp/opencode/dreamverse-deploy
+  DREAMVERSE_REQUIRE_NATIVE_FFMPEG  'true'|'false' (default false)
+USAGE
 }
 
-GPU_PIDS=""
-for _ in {1..5}; do
-  GPU_PIDS="$(gpu_compute_pids)"
-  [[ -n "${GPU_PIDS}" ]] || break
+WARMUP_OVERRIDE=""
+TORCH_COMPILE_OVERRIDE=""
+NVENC_OVERRIDE=""
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)              usage; exit 0 ;;
+    --warmup)               WARMUP_OVERRIDE=true; shift ;;
+    --no-warmup)            WARMUP_OVERRIDE=false; shift ;;
+    --torch-compile)        TORCH_COMPILE_OVERRIDE=true; shift ;;
+    --no-torch-compile)     TORCH_COMPILE_OVERRIDE=false; shift ;;
+    --nvenc)                NVENC_OVERRIDE=true; shift ;;
+    --no-nvenc)             NVENC_OVERRIDE=false; shift ;;
+    --)                     shift; while [[ $# -gt 0 ]]; do POSITIONAL+=("$1"); shift; done ;;
+    -*)                     echo "error: unknown flag '$1'" >&2; usage >&2; exit 2 ;;
+    *)                      POSITIONAL+=("$1"); shift ;;
+  esac
+done
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
+
+if [[ $# -lt 1 ]]; then
+  usage >&2
+  exit 2
+fi
+
+GPU="${1}"
+BACKEND_PORT="${2:-8009}"
+FRONTEND_PORT="${3:-5274}"
+
+if ! [[ "${GPU}" =~ ^[0-9]+$ ]]; then
+  echo "error: GPU must be a non-negative integer (got '${GPU}')" >&2
+  exit 2
+fi
+
+WARMUP="${WARMUP_OVERRIDE:-${DREAMVERSE_WARMUP:-false}}"
+case "${WARMUP}" in
+  true|false) ;;
+  *) echo "error: warmup must be 'true' or 'false' (got '${WARMUP}')" >&2; exit 2 ;;
+esac
+
+TORCH_COMPILE="${TORCH_COMPILE_OVERRIDE:-${DREAMVERSE_TORCH_COMPILE:-false}}"
+case "${TORCH_COMPILE}" in
+  true|false) ;;
+  *) echo "error: torch-compile must be 'true' or 'false' (got '${TORCH_COMPILE}')" >&2; exit 2 ;;
+esac
+TORCH_COMPILE_FLAG=$([[ "${TORCH_COMPILE}" == "true" ]] && echo 1 || echo 0)
+
+NVENC="${NVENC_OVERRIDE:-${DREAMVERSE_NVENC:-false}}"
+case "${NVENC}" in
+  true|false) ;;
+  *) echo "error: nvenc must be 'true' or 'false' (got '${NVENC}')" >&2; exit 2 ;;
+esac
+
+REPO_ROOT="${DREAMVERSE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+LOG_DIR="${DREAMVERSE_LOG_DIR:-/tmp/opencode/dreamverse-deploy}"
+
+# ---------------------------------------------------------------------------
+# Prereq checks
+# ---------------------------------------------------------------------------
+
+bail() { echo "error: $*" >&2; exit 3; }
+
+[[ -d "${REPO_ROOT}/apps/dreamverse" ]] \
+  || bail "REPO_ROOT '${REPO_ROOT}' does not contain apps/dreamverse/. Are you on a migration branch?"
+DREAMVERSE_SERVER="$(command -v dreamverse-server 2>/dev/null || true)"
+[[ -n "${DREAMVERSE_SERVER}" ]] && [[ -x "${DREAMVERSE_SERVER}" ]] \
+  || bail "dreamverse-server not executable or not in PATH (run: uv pip install -e \".[dreamverse]\")"
+
+CONDA_ENV_PYTHON="${DREAMVERSE_PYTHON:-${HOME}/miniconda3/envs/fv-main/bin/python}"
+[[ -x "${CONDA_ENV_PYTHON}" ]] \
+  || bail "conda env python missing at ${CONDA_ENV_PYTHON} (set DREAMVERSE_PYTHON to override)"
+"${CONDA_ENV_PYTHON}" -c 'import flashinfer' 2>/dev/null \
+  || bail "flashinfer-python not installed in ${CONDA_ENV_PYTHON} (run: ${CONDA_ENV_PYTHON} -m pip install flashinfer-python --no-build-isolation)"
+
+NPM="${NPM:-npm}"
+NPM_REQUESTED="${NPM}"
+NPM="$(command -v "${NPM}" 2>/dev/null || true)"
+[[ -n "${NPM}" ]] && [[ -x "${NPM}" ]] || bail "npm not executable or not in PATH: ${NPM_REQUESTED} (set NPM to override)"
+
+GCC13="$(command -v "${GCC13:-gcc-13}" 2>/dev/null || true)"
+GPP13="$(command -v "${GPP13:-g++-13}" 2>/dev/null || true)"
+[[ -n "${GCC13}" ]] && command -v "${GCC13}" >/dev/null 2>&1 \
+  || bail "gcc-13 not found or not executable (needed for nvcc workaround). Set GCC13 or install gcc-13 in PATH"
+[[ -n "${GPP13}" ]] && command -v "${GPP13}" >/dev/null 2>&1 \
+  || bail "g++-13 not found or not executable (needed for nvcc workaround). Set GPP13 or install g++-13 in PATH"
+
+[[ -f "${HOME}/.env" ]] || echo "warn: ${HOME}/.env missing — provider API keys may be unset" >&2
+
+NATIVE_FFMPEG_BIN="${HOME}/opt/ffmpeg-native/bin/ffmpeg"
+if [[ "${NVENC}" == "true" ]]; then
+  NATIVE_VIDEO_CODEC=h264_nvenc
+else
+  NATIVE_VIDEO_CODEC=libx264
+fi
+REQUIRE_NATIVE_FFMPEG="${DREAMVERSE_REQUIRE_NATIVE_FFMPEG:-false}"
+case "${REQUIRE_NATIVE_FFMPEG}" in
+  true|false) ;;
+  *) bail "DREAMVERSE_REQUIRE_NATIVE_FFMPEG must be 'true' or 'false' (got '${REQUIRE_NATIVE_FFMPEG}')" ;;
+esac
+if [[ -x "${NATIVE_FFMPEG_BIN}" ]]; then
+  if [[ "${NVENC}" == "true" ]]; then
+    encoder_list="$("${NATIVE_FFMPEG_BIN}" -hide_banner -encoders 2>/dev/null || true)"
+    if [[ "${encoder_list}" != *h264_nvenc* ]]; then
+      bail "--nvenc requested but ${NATIVE_FFMPEG_BIN} was not built with NVENC. Rebuild: bash apps/dreamverse/scripts/install_native_ffmpeg.sh (with ENABLE_NVENC=1, the default)"
+    fi
+    if ! "${NATIVE_FFMPEG_BIN}" -hide_banner -loglevel error -y \
+            -f lavfi -i 'color=red:size=64x64:rate=24:duration=0.2' \
+            -c:v h264_nvenc -f null - >/dev/null 2>&1; then
+      bail "--nvenc requested but the GPU on this host has no NVENC silicon (probe failed: 'OpenEncodeSessionEx unsupported device'). Datacenter Blackwell (B200) and some H100 SKUs ship without NVENC; --nvenc only works on hosts with NVENC-capable GPUs (RTX 50-series, T4, A10, etc.)."
+    fi
+  fi
+  echo "        native ffmpeg: ${NATIVE_FFMPEG_BIN} (codec=${NATIVE_VIDEO_CODEC})"
+elif [[ "${REQUIRE_NATIVE_FFMPEG}" == "true" ]] || [[ "${NVENC}" == "true" ]]; then
+  bail "${NATIVE_FFMPEG_BIN} missing (required by --nvenc or DREAMVERSE_REQUIRE_NATIVE_FFMPEG=true). Run: bash apps/dreamverse/scripts/install_native_ffmpeg.sh"
+else
+  echo "warn: ${NATIVE_FFMPEG_BIN} missing — backend will fall back to system ffmpeg (\$(command -v ffmpeg))." >&2
+  echo "      Build native ffmpeg with: bash apps/dreamverse/scripts/install_native_ffmpeg.sh" >&2
+fi
+echo "        python:        ${CONDA_ENV_PYTHON}"
+
+mkdir -p "${LOG_DIR}"
+
+# ---------------------------------------------------------------------------
+# Teardown anything on target ports
+# ---------------------------------------------------------------------------
+
+echo "[1/8] killing any existing deploy on ports ${BACKEND_PORT}/${FRONTEND_PORT} and GPU ${GPU}..."
+
+kill_port_pid() {
+  local port="$1"
+  local pid
+
+  for pid in $(list_port_pids "${port}"); do
+    terminate_pid "${pid}" "port=${port} pid=${pid}"
+  done
+}
+
+for pat in "dreamverse-server --host 0.0.0.0 --port ${BACKEND_PORT}" "next dev --port ${FRONTEND_PORT}" "NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 next dev --port ${FRONTEND_PORT}"; do
+  terminate_pattern "${pat}"
+done
+kill_port_pid "${BACKEND_PORT}"
+kill_port_pid "${FRONTEND_PORT}"
+
+gpu_uuid="$(nvidia-smi --query-gpu=index,uuid --format=csv,noheader 2>/dev/null | awk -F', ' -v g="${GPU}" '$1==g {print $2}')"
+if [[ -n "${gpu_uuid}" ]]; then
+  for pid in $(nvidia-smi --query-compute-apps=pid,gpu_uuid --format=csv,noheader 2>/dev/null \
+                | awk -F', ' -v u="${gpu_uuid}" '$2==u {print $1}'); do
+    if [[ -n "${pid}" ]] && [[ "${pid}" != "$$" ]]; then
+      cmd="$(ps -p "${pid}" -o comm= 2>/dev/null || true)"
+      terminate_pid "${pid}" "GPU${GPU} pid=${pid} (${cmd:-?})"
+    fi
+  done
+fi
+
+for i in $(seq 1 30); do
+  free_be=true
+  free_fe=true
+  ss -tln 2>/dev/null | grep -qE ":${BACKEND_PORT}\b" && free_be=false
+  ss -tln 2>/dev/null | grep -qE ":${FRONTEND_PORT}\b" && free_fe=false
+  gpu_mem="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sed -n "$((GPU + 1))p" || echo 99999)"
+  if "${free_be}" && "${free_fe}" && [[ "${gpu_mem}" -lt 1000 ]]; then
+    break
+  fi
   sleep 1
 done
-if [[ -n "${GPU_PIDS}" ]]; then
-  if (( FORCE_GPU_KILL == 0 )); then
-    printf 'error: GPU %s is still used by compute PID(s): %s\n' \
-      "${GPU}" "$(echo "${GPU_PIDS}" | tr '\n' ' ')" >&2
-    echo "Inspect them with nvidia-smi; rerun with --force-gpu-kill only if they are disposable." >&2
-    exit 1
+
+gpu_mem="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sed -n "$((GPU + 1))p" || echo 0)"
+echo "        ports cleared; GPU${GPU} at ${gpu_mem} MiB"
+
+# ---------------------------------------------------------------------------
+# Launch backend
+# ---------------------------------------------------------------------------
+
+echo "[2/8] launching backend on GPU ${GPU} port ${BACKEND_PORT} (warmup=${WARMUP} torch_compile=${TORCH_COMPILE} nvenc=${NVENC})..."
+
+backend_log="${LOG_DIR}/backend-gpu${GPU}.log"
+: > "${backend_log}"
+
+setsid bash -c "
+  set -a
+  if [[ -f \"${HOME}/.env\" ]]; then
+    source \"${HOME}/.env\"
   fi
-  for pid in ${GPU_PIDS}; do
-    terminate_pid "${pid}" "GPU ${GPU} compute process (PID ${pid})"
-  done
-  for _ in {1..30}; do
-    [[ -z "$(gpu_compute_pids)" ]] && break
-    sleep 1
-  done
-  GPU_PIDS="$(gpu_compute_pids)"
-  [[ -z "${GPU_PIDS}" ]] \
-    || fail "GPU ${GPU} did not release compute PID(s): $(echo "${GPU_PIDS}" | tr '\n' ' ')"
+  set +a
+  if [[ -x \"${NATIVE_FFMPEG_BIN}\" ]]; then
+    export FASTVIDEO_FFMPEG_BIN=\"${NATIVE_FFMPEG_BIN}\"
+    export FASTVIDEO_VIDEO_CODEC=\"${NATIVE_VIDEO_CODEC}\"
+  fi
+  export DREAMVERSE_PYTHON=\"${CONDA_ENV_PYTHON}\"
+  export CUDA_VISIBLE_DEVICES=${GPU}
+  export FASTVIDEO_ENABLE_DEVTOOLS=1
+  export FASTVIDEO_ENABLE_STARTUP_WARMUP=${WARMUP}
+  export FASTVIDEO_GPU_COUNT=1
+  export ENABLE_TORCH_COMPILE=${TORCH_COMPILE_FLAG}
+  export CC=${GCC13}
+  export CXX=${GPP13}
+  export CUDAHOSTCXX=${GPP13}
+  export NVCC_PREPEND_FLAGS=\"-ccbin ${GCC13} -allow-unsupported-compiler\"
+  cd \"${REPO_ROOT}\"
+  exec \"${DREAMVERSE_SERVER}\" --host 0.0.0.0 --port ${BACKEND_PORT}
+" > "${backend_log}" 2>&1 < /dev/null &
+disown
+
+# Wait briefly, then resolve actual python PID (the inner process, not the
+# wrapper bash).
+sleep 4
+backend_pid="$(pgrep -f "dreamverse-server --host 0.0.0.0 --port ${BACKEND_PORT}" | head -1 || true)"
+
+if [[ -z "${backend_pid}" ]]; then
+  echo "error: backend failed to spawn. Last 30 lines of log:" >&2
+  tail -30 "${backend_log}" >&2
+  exit 4
 fi
 
-FFMPEG_ENV="${REPO_ROOT}/apps/dreamverse/scripts/ffmpeg-env.sh"
-if [[ -z "${FASTVIDEO_FFMPEG_BIN:-}" && -f "${FFMPEG_ENV}" ]]; then
-  # shellcheck disable=SC1090
-  source "${FFMPEG_ENV}"
-fi
+echo "        backend pid=${backend_pid} log=${backend_log}"
 
-if (( NVENC == 1 )); then
-  FFMPEG_BIN="$(command -v "${FASTVIDEO_FFMPEG_BIN:-ffmpeg}" 2>/dev/null || true)"
-  [[ -n "${FFMPEG_BIN}" ]] || fail "--nvenc requires ffmpeg"
-  "${FFMPEG_BIN}" -hide_banner -encoders 2>/dev/null | grep -q h264_nvenc \
-    || fail "${FFMPEG_BIN} was not built with h264_nvenc"
-  if ! CUDA_VISIBLE_DEVICES="${GPU}" "${FFMPEG_BIN}" -hide_banner -loglevel error -y \
-      -f lavfi -i 'color=red:size=64x64:rate=24:duration=0.2' \
-      -c:v h264_nvenc -f null - >/dev/null 2>&1; then
-    fail "GPU ${GPU} could not open an NVENC session"
-  fi
-  export FASTVIDEO_FFMPEG_BIN="${FFMPEG_BIN}"
-  export FASTVIDEO_VIDEO_CODEC=h264_nvenc
+# Poll /readyz. Deadline scales with warmup + torch.compile flags
+# because warmup runs two synthetic segments before /readyz=200, and
+# torch.compile max-autotune adds ~3-4min cold start to the first
+# segment. Empirical worst case (warmup=true, torch_compile=true):
+# ~7 min on B200; we budget 15 min for safety.
+if [[ "${WARMUP}" == "true" ]] && [[ "${TORCH_COMPILE}" == "true" ]]; then
+  READYZ_BUDGET_SECONDS=900
+elif [[ "${WARMUP}" == "true" ]] || [[ "${TORCH_COMPILE}" == "true" ]]; then
+  READYZ_BUDGET_SECONDS=480
 else
-  export FASTVIDEO_VIDEO_CODEC="${FASTVIDEO_VIDEO_CODEC:-libx264}"
+  READYZ_BUDGET_SECONDS=300
+fi
+READYZ_POLL_INTERVAL=6
+READYZ_MAX_ITERS=$(( READYZ_BUDGET_SECONDS / READYZ_POLL_INTERVAL ))
+
+echo "[3/8] polling http://127.0.0.1:${BACKEND_PORT}/readyz (budget=${READYZ_BUDGET_SECONDS}s) ..."
+ready=0
+for i in $(seq 1 ${READYZ_MAX_ITERS}); do
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${BACKEND_PORT}/readyz" 2>/dev/null || echo 000)"
+  if [[ "${code}" == "200" ]]; then
+    ready=1
+    break
+  fi
+  if ! kill -0 "${backend_pid}" 2>/dev/null; then
+    echo "error: backend pid ${backend_pid} died. Last 50 lines:" >&2
+    tail -50 "${backend_log}" >&2
+    exit 5
+  fi
+  sleep ${READYZ_POLL_INTERVAL}
+done
+
+if [[ "${ready}" != "1" ]]; then
+  echo "error: backend did not become /readyz=200 within ${READYZ_BUDGET_SECONDS}s. Last 50 lines:" >&2
+  tail -50 "${backend_log}" >&2
+  exit 5
 fi
 
-: > "${STACK_LOG}"
-setsid env \
-  CUDA_VISIBLE_DEVICES="${GPU}" \
-  FASTVIDEO_ENABLE_DEVTOOLS=1 \
-  FASTVIDEO_ENABLE_STARTUP_WARMUP="${WARMUP}" \
-  FASTVIDEO_GPU_COUNT=1 \
-  ENABLE_TORCH_COMPILE="${TORCH_COMPILE}" \
-  BE_PORT="${BACKEND_PORT}" \
-  FE_PORT="${FRONTEND_PORT}" \
-  NO_BROWSER=1 \
-  NPM="${NPM}" \
-  DREAMVERSE_LOG_DIR="${INSTANCE_DIR}" \
-  "${LAUNCHER}" > "${STACK_LOG}" 2>&1 < /dev/null &
-LAUNCHER_PID=$!
-printf '%s\n' "${LAUNCHER_PID}" > "${PID_FILE}"
+echo "[4/8] backend /readyz OK"
 
-wait_for_url() {
-  local url="$1" label="$2" timeout="$3"
-  local deadline=$((SECONDS + timeout))
-  while (( SECONDS < deadline )); do
-    if curl -fsS --max-time 2 -o /dev/null "${url}" 2>/dev/null; then
-      echo "${label} ready: ${url}"
-      return 0
-    fi
-    if ! is_pid_alive "${LAUNCHER_PID}"; then
-      echo "error: Dreamverse launcher exited while waiting for ${label}" >&2
-      return 1
-    fi
-    sleep 2
-  done
-  echo "error: timed out after ${timeout}s waiting for ${label}: ${url}" >&2
-  return 1
-}
+# ---------------------------------------------------------------------------
+# Launch frontend
+# ---------------------------------------------------------------------------
 
-READY_TIMEOUT="${DREAMVERSE_DEPLOY_READY_TIMEOUT_SECONDS:-2400}"
-FRONTEND_TIMEOUT="${DREAMVERSE_DEPLOY_FRONTEND_TIMEOUT_SECONDS:-120}"
-validate_port DREAMVERSE_DEPLOY_READY_TIMEOUT_SECONDS "${READY_TIMEOUT}"
-validate_port DREAMVERSE_DEPLOY_FRONTEND_TIMEOUT_SECONDS "${FRONTEND_TIMEOUT}"
+echo "[5/8] launching frontend on port ${FRONTEND_PORT}..."
 
-if ! wait_for_url "http://127.0.0.1:${BACKEND_PORT}/readyz" backend "${READY_TIMEOUT}" \
-    || ! wait_for_url "http://127.0.0.1:${FRONTEND_PORT}/" frontend "${FRONTEND_TIMEOUT}"; then
-  tail -n 100 "${STACK_LOG}" >&2 || true
-  [[ ! -f "${INSTANCE_DIR}/demo-be.log" ]] || tail -n 100 "${INSTANCE_DIR}/demo-be.log" >&2
-  [[ ! -f "${INSTANCE_DIR}/demo-fe.log" ]] || tail -n 100 "${INSTANCE_DIR}/demo-fe.log" >&2
-  terminate_managed_group
-  exit 1
+frontend_log="${LOG_DIR}/frontend-port${FRONTEND_PORT}.log"
+: > "${frontend_log}"
+
+# Resolve dev script: dev:devtools forces port 5274 + devtools env. If the
+# requested port differs, run `next dev --port` directly with devtools env.
+fe_cmd="run dev:devtools"
+if [[ "${FRONTEND_PORT}" != "5274" ]]; then
+  fe_cmd="exec -- next dev --port ${FRONTEND_PORT}"
 fi
+
+setsid bash -c "
+  cd \"${REPO_ROOT}/apps/dreamverse/web\"
+  export NEXT_PUBLIC_INCLUDE_DEVTOOLS=1
+  export BACKEND_URL=http://127.0.0.1:${BACKEND_PORT}
+  export BACKEND_HOST=127.0.0.1
+  export BACKEND_PORT=${BACKEND_PORT}
+  exec '${NPM}' ${fe_cmd}
+" > "${frontend_log}" 2>&1 < /dev/null &
+disown
+
+sleep 4
+frontend_pid="$(pgrep -f "next dev --port ${FRONTEND_PORT}" | head -1 || true)"
+if [[ -z "${frontend_pid}" ]]; then
+  echo "error: frontend failed to spawn. Last 30 lines:" >&2
+  tail -30 "${frontend_log}" >&2
+  exit 6
+fi
+
+echo "        frontend pid=${frontend_pid} log=${frontend_log}"
+
+# Poll FE root
+echo "[6/8] polling http://127.0.0.1:${FRONTEND_PORT}/ ..."
+fe_ready=0
+for i in $(seq 1 30); do
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${FRONTEND_PORT}/" 2>/dev/null || echo 000)"
+  if [[ "${code}" == "200" ]]; then
+    fe_ready=1
+    break
+  fi
+  if ! kill -0 "${frontend_pid}" 2>/dev/null; then
+    echo "error: frontend pid ${frontend_pid} died. Last 30 lines:" >&2
+    tail -30 "${frontend_log}" >&2
+    exit 7
+  fi
+  sleep 2
+done
+
+if [[ "${fe_ready}" != "1" ]]; then
+  echo "error: frontend did not respond 200 within 60s. Last 30 lines:" >&2
+  tail -30 "${frontend_log}" >&2
+  exit 7
+fi
+
+echo "[7/8] frontend / OK"
+
+# ---------------------------------------------------------------------------
+# Print summary
+# ---------------------------------------------------------------------------
+
+cwd="$(readlink "/proc/${backend_pid}/cwd" 2>/dev/null || echo unknown)"
+gpu_mem_now="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sed -n "$((GPU + 1))p" || echo 0)"
+ffmpeg_in_use="$(tr '\0' '\n' < "/proc/${backend_pid}/environ" 2>/dev/null | sed -n 's/^FASTVIDEO_FFMPEG_BIN=//p' | head -1)"
+[[ -z "${ffmpeg_in_use}" ]] && ffmpeg_in_use="$(command -v ffmpeg 2>/dev/null || echo '<not found>') (system fallback)"
 
 cat <<SUMMARY
-Dreamverse deploy ready
-  backend:  http://127.0.0.1:${BACKEND_PORT}
-  frontend: http://127.0.0.1:${FRONTEND_PORT}
-  GPU:      ${GPU}
-  PID:      ${LAUNCHER_PID}
-  logs:     ${INSTANCE_DIR}
-  stop:     $0 --stop ${BACKEND_PORT} ${FRONTEND_PORT}
+[8/8] redeploy OK
+
+  Frontend  : http://localhost:${FRONTEND_PORT}    (PID ${frontend_pid})
+  Backend   : http://localhost:${BACKEND_PORT}     (PID ${backend_pid})
+              cwd=${cwd}
+              gpu=${GPU} mem=${gpu_mem_now} MiB
+              ffmpeg=${ffmpeg_in_use}
+
+  Logs      : ${backend_log}
+              ${frontend_log}
+
+  Stop      : ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh --stop
+
+  E2E       : cd apps/dreamverse/web && \\
+                PLAYWRIGHT_SKIP_WEBSERVER=1 \\
+                BACKEND_URL=http://127.0.0.1:${BACKEND_PORT} \\
+                PLAYWRIGHT_BASE_URL=http://127.0.0.1:${FRONTEND_PORT} \\
+                NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \\
+                npm exec -- playwright test
 SUMMARY

@@ -27,12 +27,6 @@ if [[ -f "${HOME}/.env" ]]; then
   set +o allexport
 fi
 
-FFMPEG_ENV="${DREAMVERSE_ROOT}/scripts/ffmpeg-env.sh"
-if [[ -z "${FASTVIDEO_FFMPEG_BIN:-}" && -f "${FFMPEG_ENV}" ]]; then
-  # shellcheck disable=SC1090
-  source "${FFMPEG_ENV}"
-fi
-
 # Internal/ui parity defaults — only set if the caller hasn't already
 # pinned them in ~/.env or the surrounding environment. Each value
 # matches FastVideo-internal/ui/ltx2-streaming/server/config.py.

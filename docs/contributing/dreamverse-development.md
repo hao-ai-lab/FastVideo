@@ -6,11 +6,16 @@ frontend tooling remains standalone under `apps/dreamverse/web/`.
 
 ## Backend tests
 
-Run CPU-safe backend tests from the FastVideo repository root:
+Run backend tests excluding GPU-marked cases from the FastVideo repository
+root:
 
 ```bash
 uv run --locked --package dreamverse --extra test pytest apps/dreamverse/dreamverse/tests/ -m 'not gpu' -q
 ```
+
+Collection can still touch FastVideo streaming imports that probe for an active
+GPU driver, so the corresponding CI job runs on a GPU even with GPU-marked tests
+excluded.
 
 ## Backend launch
 
@@ -39,7 +44,7 @@ npm run build
 npm test
 ```
 
-Playwright is intentionally run against a live backend as part of the GPU4
+Playwright is intentionally run against a live backend as part of the local GPU
 manual verification flow, not in the Phase 3 migration gate.
 
 ## Local GPU verification
@@ -52,12 +57,12 @@ For a managed backend-and-frontend redeploy with readiness checks and logs,
 use the repo-local skill helper:
 
 ```bash
-./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4 8009 5299
 ```
 
-The helper uses backend port `8009`, frontend port `5299`, and stores its
-transient state under the gitignored `.agents/tmp/` directory. The equivalent
-manual backend launch is:
+The helper's legacy frontend default is `5274`, so the example passes the web
+app's current port, `5299`, explicitly. It writes logs under
+`/tmp/opencode/dreamverse-deploy`. The equivalent manual backend launch is:
 
 ```bash
 CUDA_VISIBLE_DEVICES=4 dreamverse-server --host 0.0.0.0 --port 8009
@@ -104,5 +109,6 @@ export CUDAHOSTCXX=/usr/bin/g++-13
 export NVCC_PREPEND_FLAGS="-ccbin /usr/bin/gcc-13 -allow-unsupported-compiler"
 ```
 
-`dreamverse-server` does not set these; keep them in the launching shell or
-an environment wrapper when the host needs the gcc-13 workaround.
+`dreamverse-server` does not set these; keep them in the launching shell when
+starting it directly. The repo-local `dreamverse-deploy` skill exports them for
+managed local launches.
