@@ -23,9 +23,6 @@ import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from attn_qat_infer.api import sageattn_blackwell
-# sys.path.insert(0, "/home/kevin/workspace/SageAttention/sageattention3_blackwell")
-# sys.path.insert(0, "/home/kevin/workspace/SageAttentionE/sageattention3_blackwell")
-# from sageattn3.api import sageattn3_blackwell as sageattn_blackwell
 
 DEVICE = torch.device("cuda")
 
