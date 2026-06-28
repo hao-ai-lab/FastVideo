@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from fastvideo.attention.selector import (
@@ -5,6 +7,8 @@ from fastvideo.attention.selector import (
     get_global_forced_attn_backend,
     global_force_attn_backend,
 )
+from fastvideo.configs.models.dits.base import DiTConfig
+from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
     FastWan2_2_TI2V_5B_Config,
@@ -59,6 +63,32 @@ def test_fastwan_2_2_fullattn_config_does_not_require_vsa():
     # The dense FullAttn checkpoint shares FastWan's DMD schedule but must NOT be
     # forced onto VSA -- it runs dense attention.
     assert FastWan2_2_TI2V_5B_FullAttn_Config().dit_config.required_attention_backend is None
+
+
+@pytest.mark.parametrize("config_cls", [FastWan2_1_T2V_480P_Config, FastWan2_2_TI2V_5B_Config])
+def test_sparse_fastwan_pipeline_config_json_roundtrip(tmp_path, config_cls):
+    config_path = tmp_path / "pipeline_config.json"
+    config = config_cls()
+
+    config.dump_to_json(str(config_path))
+
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert payload["dit_config"]["required_attention_backend"] == VSA.name
+
+    restored = config_cls()
+    restored.load_from_json(str(config_path))
+    assert restored.dit_config.required_attention_backend is VSA
+
+
+def test_pipeline_config_load_restores_required_backend_enum(tmp_path):
+    config_path = tmp_path / "pipeline_config.json"
+    config = PipelineConfig(dit_config=DiTConfig(required_attention_backend=VSA))
+    config.dump_to_json(str(config_path))
+
+    restored = PipelineConfig()
+    restored.load_from_json(str(config_path))
+
+    assert restored.dit_config.required_attention_backend is VSA
 
 
 def test_check_requirement_returns_none_when_unrequired_and_unset(monkeypatch):
