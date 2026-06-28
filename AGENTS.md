@@ -44,17 +44,18 @@
 
 ## Agent Infrastructure
 
-This repository is agent-friendly. Before doing any work, read:
+This repository is agent-friendly. Before doing any work:
 
-1. `.agents/onboarding/README.md` — full onboarding guide with step-by-step instructions.
-2. `.agents/memory/codebase-map/README.md` — structural index of the entire repository.
-3. `.agents/skills/` — available agent skills (check if one exists before writing code).
-4. `.agents/workflows/` — SOPs for common procedures (experiment lifecycle, evaluation, etc.).
-5. `.agents/lessons/` — known pitfalls and their documented fixes.
+1. Read the nearest in-scope `AGENTS.md` for every directory you may edit.
+2. Read the relevant user-facing design or contributor guide.
+3. Check `.agents/skills/*/SKILL.md` for a task-specific workflow.
+4. Search `.agents/lessons/` for relevant pitfalls.
 
-If you are exploring a new procedure that has no existing SOP, document your
-progress in `.agents/exploration/` and flag it for review at the end of your
-session.
+Architecture, commands, and operational guidance belong beside the code or
+under `docs/`. Do not maintain static codebase maps, experiment journals,
+branch-state snapshots, or duplicate user-facing documentation under
+`.agents/`. Put a reusable procedure directly in a skill or contributor guide
+and capture durable failures in `.agents/lessons/`.
 
 ## Per-Directory AGENTS.md
 
