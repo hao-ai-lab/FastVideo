@@ -359,16 +359,17 @@ def _planner_instruction(item: Mapping[str, Any]) -> str:
 
 
 def _planner_image_paths(item: Mapping[str, Any]) -> list[str]:
-    paths: list[str] = []
     for key in ("input_image_paths", "image_paths", "images"):
         value = item.get(key)
         if isinstance(value, Sequence) and not isinstance(value, str | bytes):
-            paths.extend(str(path) for path in value if path)
+            paths = [str(path) for path in value if path]
+            if paths:
+                return paths
     for key in ("input_image_path", "image_path", "origin_image_path"):
         value = item.get(key)
         if isinstance(value, str) and value:
-            paths.append(value)
-    return paths
+            return [value]
+    return []
 
 
 def _planner_group_key(

@@ -69,7 +69,8 @@ training:
   distributed:
     num_gpus: 8
     sp_size: 1
-    tp_size: 4
+    # Qwen actors use FSDP2/HSDP; tensor parallelism is not implemented.
+    tp_size: 1
     hsdp_replicate_dim: 1
     hsdp_shard_dim: 8
 

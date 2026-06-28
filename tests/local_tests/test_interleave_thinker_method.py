@@ -5,6 +5,7 @@ import torch
 
 from fastvideo.train.methods.fine_tuning.finetune import FineTuneMethod
 from fastvideo.train.methods.rl.interleave_thinker import InterleaveThinkerRLMethod
+from fastvideo.train.methods.rl.rewards import score_interleave_thinker_rewards
 from fastvideo.train.models.base import RoleModelBase
 from fastvideo.train.utils.config import load_run_config
 from fastvideo.train.utils.training_config import (
@@ -157,6 +158,54 @@ def test_interleave_thinker_managed_step_scores_advantages_and_calls_actor_updat
     assert train_kwargs["kl_coef"] == 0.05
     assert train_kwargs["update_micro_batch_size"] == 2
     assert train_kwargs["rollouts"][0].get("reference_logprobs") is None
+
+
+def test_interleave_thinker_namespaces_groups_and_samples_across_input_batches():
+    actor = _FakeInterleaveActor()
+    method = InterleaveThinkerRLMethod(
+        cfg=_cfg({
+            "num_batches_per_step": 2,
+        }),
+        role_models={"student": actor},
+    )
+    batch = {"origin_prompt": ["prompt-a", "prompt-b"]}
+
+    _, _, metrics = method.managed_train_step(iter([batch, batch]), iteration=4)
+
+    assert metrics["interleave/num_rollouts"] == 8.0
+    assert metrics["interleave/num_groups"] == 4.0
+    train_rollouts = actor.train_calls[0]["rollouts"]
+    assert [rollout["sample_index"] for rollout in train_rollouts] == [0, 0, 1, 1, 2, 2, 3, 3]
+    assert [rollout["group_key"] for rollout in train_rollouts] == [
+        "batch:0:prompt-a",
+        "batch:0:prompt-a",
+        "batch:0:prompt-b",
+        "batch:0:prompt-b",
+        "batch:1:prompt-a",
+        "batch:1:prompt-a",
+        "batch:1:prompt-b",
+        "batch:1:prompt-b",
+    ]
+
+
+def test_interleave_thinker_adapts_exported_callable_reward_rows_to_tensors():
+    actor = _FakeInterleaveActor()
+    method = InterleaveThinkerRLMethod(
+        cfg=_cfg({
+            "reward_scorer": score_interleave_thinker_rewards,
+        }),
+        role_models={"student": actor},
+    )
+
+    _, _, metrics = method.managed_train_step(
+        iter([{
+            "origin_prompt": ["prompt-a", "prompt-b"]
+        }]),
+        iteration=5,
+    )
+
+    assert torch.isclose(metrics["interleave/reward/overall"], torch.tensor(0.75))
+    assert torch.isclose(metrics["interleave/reward/format_reward"], torch.tensor(1.0))
 
 
 def test_interleave_thinker_method_attaches_reference_logprobs_to_rollouts():

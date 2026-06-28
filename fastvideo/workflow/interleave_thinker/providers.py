@@ -57,7 +57,11 @@ class InterleaveThinkerPlannerProvider:
         for idx, step in enumerate(steps):
             if not isinstance(step, InterleavePlannerStep):
                 continue
-            prompt = step.prompt or step.instruction or step.auxiliary_text or ""
+            # ``auxiliary_text`` is a text response channel, not an image prompt.
+            # Guidance-planner Task A intentionally leaves both image fields
+            # unset, so skip those unsupported text-only steps instead of
+            # sending their answer to the image generator.
+            prompt = step.prompt or step.instruction or ""
             if not prompt:
                 continue
             planned_steps.append(
@@ -140,7 +144,7 @@ def _critic_item_from_request(request: CriticInput) -> dict[str, Any]:
     )
     return {
         "origin_prompt": instruction,
-        "previous_prompt": request.step.prompt,
+        "previous_prompt": request.generated.prompt,
         "previous_image_path": request.previous_image_path,
         "edited_image_path": request.generated.file_path,
         "generated_image_path": request.generated.file_path,

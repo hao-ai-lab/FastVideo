@@ -127,7 +127,8 @@ def test_load_critic_rl_records_normalizes_reward_fields_and_aliases(tmp_path: P
     assert records[0]["rewritten_prompt"] == "a wooden chair by a window"
     assert records[0]["origin_image_path"] == str(image_dir / "chairs/original.jpg")
     assert records[0]["edited_image_path"] == str(image_dir / "chairs/edited.png")
-    assert records[0]["previous_image_path"] == str(image_dir / "chairs/edited.png")
+    assert records[0]["previous_image_path"] == str(image_dir / "chairs/original.jpg")
+    assert records[0]["generated_image_path"] == str(image_dir / "chairs/edited.png")
     assert records[0]["ground_truth"] == {
         "success": False,
         "semantics": 6.5,

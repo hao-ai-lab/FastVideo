@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import torch
 
+from fastvideo.train.methods.fine_tuning import InterleaveThinkerSFTMethod
 from fastvideo.train.models.interleave_thinker import (
     INTERLEAVE_GUIDANCE_PLANNER_PROMPT,
     INTERLEAVE_PLANNER_PROMPT,
@@ -13,6 +14,7 @@ from fastvideo.train.models.interleave_thinker.qwen_actor import (
     _PlaceholderActorModule,
 )
 from fastvideo.train.models.base import ModelBase, RoleModelBase
+from fastvideo.train.utils.builder import build_from_config
 from fastvideo.train.utils.config import load_run_config
 
 
@@ -165,6 +167,20 @@ def test_interleave_thinker_planner_builds_image_conditioned_messages_without_ba
     assert "{text_input}" in INTERLEAVE_GUIDANCE_PLANNER_PROMPT
 
 
+def test_interleave_thinker_planner_does_not_concatenate_image_aliases():
+    model = InterleaveThinkerPlannerModel(load_backend=False)
+
+    messages = model.build_messages({
+        "instruction": "Continue this process in two steps.",
+        "input_image_paths": ["step1.png", "step2.png"],
+        "image_paths": ["step1.png", "step2.png"],
+        "images": ["step1.png", "step2.png"],
+    })
+
+    images = [part["image"] for part in messages[0]["content"] if part["type"] == "image"]
+    assert images == ["step1.png", "step2.png"]
+
+
 def test_interleave_thinker_planner_fake_backend_generates_parseable_plan():
     model = _FakeBackendPlanner(load_backend=False)
     assert isinstance(model.transformer, _PlaceholderActorModule)
@@ -223,7 +239,25 @@ def test_interleave_thinker_planner_config_parses_public_yaml():
         "fastvideo.train.models.interleave_thinker.InterleaveThinkerPlannerModel")
     assert cfg.models["student"]["init_from"] == "InterleaveThinker/InterleaveThinker-Planner-8B"
     assert cfg.models["student"]["processor_from"] == "Qwen/Qwen3-VL-8B-Instruct"
-    assert cfg.models["student"]["trainable"] is False
+    assert cfg.models["student"]["trainable"] is True
+    assert cfg.method["_target_"] == "fastvideo.train.methods.fine_tuning.InterleaveThinkerSFTMethod"
+    assert cfg.training.optimizer.learning_rate == 1.0e-5
+
+
+def test_interleave_thinker_planner_smoke_config_builds_actor_method(monkeypatch):
+
+    def fake_load_backend(self, **kwargs):
+        del self, kwargs
+        return _FakeProcessor(), torch.nn.Linear(1, 1)
+
+    monkeypatch.setattr(InterleaveThinkerPlannerModel, "_load_backend", fake_load_backend)
+    cfg = load_run_config("examples/train/configs/interleave_thinker/planner_smoke.yaml")
+
+    _, method, dataloader, start_step = build_from_config(cfg)
+
+    assert isinstance(method, InterleaveThinkerSFTMethod)
+    assert dataloader is None
+    assert start_step == 0
 
 
 def test_interleave_thinker_planner_grpo_config_parses_public_yaml():

@@ -20,7 +20,7 @@ from typing import Any
 import torch
 
 _ANSWER_PATTERN = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.DOTALL | re.IGNORECASE)
-_THINK_PATTERN = re.compile(r"<think\b[^>]*>", re.IGNORECASE)
+_THINK_PATTERN = re.compile(r"<think\b[^>]*>.*?</think>", re.DOTALL | re.IGNORECASE)
 _TAG_SPACE_PATTERN = re.compile(r"\s*(<|>|/)\s*")
 
 
@@ -154,7 +154,7 @@ def interleave_format_reward(response: str) -> float:
     answer_match = _ANSWER_PATTERN.search(normalized)
     if think_match is None or answer_match is None:
         return 0.0
-    if think_match.start() >= answer_match.start():
+    if think_match.end() > answer_match.start():
         return 0.0
     return 1.0 if extract_interleave_answer(normalized) is not None else 0.0
 
@@ -188,7 +188,7 @@ def interleave_planner_format_reward(response: str) -> float:
     answer_match = _ANSWER_PATTERN.search(normalized)
     if think_match is None or answer_match is None:
         return 0.0
-    if think_match.start() >= answer_match.start():
+    if think_match.end() > answer_match.start():
         return 0.0
     return 1.0 if extract_interleave_plan_payload(normalized) is not None else 0.0
 

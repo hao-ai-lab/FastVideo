@@ -48,6 +48,25 @@ class _FakePlannerModel:
         }
 
 
+class _FakeAuxiliaryOnlyPlannerModel:
+
+    def generate_interleave_plan(self, instruction, *, input_image_paths=None, **kwargs):
+        del instruction, input_image_paths, kwargs
+        return {
+            "generation_index": 0,
+            "response": "raw auxiliary-only planner response",
+            "steps": [
+                InterleavePlannerStep(
+                    step_number=1,
+                    step_name="Answer",
+                    instruction=None,
+                    prompt=None,
+                    auxiliary_text="The requested textual answer.",
+                ),
+            ],
+        }
+
+
 class _FakeCriticModel:
 
     def __init__(self, responses):
@@ -100,6 +119,22 @@ def test_interleave_thinker_planner_provider_converts_model_steps():
     assert model.calls[0][1] == ["/tmp/input.png"]
 
 
+def test_interleave_thinker_planner_provider_does_not_generate_from_auxiliary_text():
+    provider = InterleaveThinkerPlannerProvider(_FakeAuxiliaryOnlyPlannerModel())
+    generator = _FakeGenerator()
+
+    steps = provider.plan(PlannerInput(instruction="answer this question"))
+    trace = InterleaveOrchestrator(
+        planner=provider,
+        generator=generator,
+    ).run("answer this question")
+
+    assert steps == []
+    assert trace.success is False
+    assert trace.metadata["error"] == "planner returned no steps"
+    assert generator.prompts == []
+
+
 def test_interleave_thinker_critic_provider_converts_answer_to_decision():
     model = _FakeCriticModel([_critic_response(False, "make it clearer")])
     provider = InterleaveThinkerCriticProvider(model, max_new_tokens=64)
@@ -112,7 +147,7 @@ def test_interleave_thinker_critic_provider_converts_answer_to_decision():
                 metadata={"planner_instruction": "Draw the base cat shapes"},
             ),
             attempt_index=0,
-            generated=GeneratedImage(prompt="simple cat base shapes", file_path="/tmp/after.png"),
+            generated=GeneratedImage(prompt="refined cat base shapes", file_path="/tmp/after.png"),
             previous_image_path="/tmp/before.png",
         ))
 
@@ -121,7 +156,7 @@ def test_interleave_thinker_critic_provider_converts_answer_to_decision():
     batch, kwargs = model.calls[0]
     item = batch["items"][0]
     assert item["origin_prompt"] == "Draw the base cat shapes"
-    assert item["previous_prompt"] == "simple cat base shapes"
+    assert item["previous_prompt"] == "refined cat base shapes"
     assert item["previous_image_path"] == "/tmp/before.png"
     assert item["edited_image_path"] == "/tmp/after.png"
     assert kwargs["max_new_tokens"] == 64
@@ -144,12 +179,12 @@ def test_interleave_thinker_critic_provider_handles_unparseable_response():
 
 def test_interleave_orchestrator_runs_through_model_providers():
     planner = InterleaveThinkerPlannerProvider(_FakePlannerModel(), max_attempts_per_step=2)
-    critic = InterleaveThinkerCriticProvider(
-        _FakeCriticModel([
-            _critic_response(False, "better cat base"),
-            _critic_response(True, "better cat base"),
-            _critic_response(True, "color the cat orange"),
-        ]))
+    critic_model = _FakeCriticModel([
+        _critic_response(False, "better cat base"),
+        _critic_response(True, "better cat base"),
+        _critic_response(True, "color the cat orange"),
+    ])
+    critic = InterleaveThinkerCriticProvider(critic_model)
     generator = _FakeGenerator()
     orchestrator = InterleaveOrchestrator(
         planner=planner,
@@ -166,3 +201,5 @@ def test_interleave_orchestrator_runs_through_model_providers():
     assert trace.attempts[0].decision.success is False
     assert trace.final_image is not None
     assert trace.final_image.prompt == "color the cat orange"
+    critic_prompts = [call[0]["items"][0]["previous_prompt"] for call in critic_model.calls]
+    assert critic_prompts == ["simple cat base shapes", "better cat base", "color the cat orange"]

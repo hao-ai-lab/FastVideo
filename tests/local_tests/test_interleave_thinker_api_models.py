@@ -11,11 +11,13 @@ from fastvideo.workflow.interleave_thinker.generator import (
 )
 from fastvideo.workflow.interleave_thinker.schema import InterleaveEditRequest
 from fastvideo.train.methods.rl.rewards.interleave_api import (
+    GeminiInterleaveImageScorer,
     GeminiNanoBananaEditScorer,
 )
 from fastvideo.train.methods.rl.rewards.interleave_thinker import (
     InterleaveThinkerEditRequest,
 )
+from fastvideo.train.models.interleave_thinker.data import IMAGE_EXTENSIONS
 
 
 def _png_base64(color="red"):
@@ -151,3 +153,27 @@ def test_gemini_nano_banana_edit_scorer_generates_and_scores(monkeypatch, tmp_pa
     assert captured["calls"][0]["model"] == "gemini-2.5-flash-image"
     assert captured["calls"][1]["model"] == "gemini-2.5-pro"
     assert len(captured["parts"]) == 2
+
+
+def test_gemini_image_scorer_uses_dataset_supported_mime_types(monkeypatch, tmp_path):
+    captured = _install_fake_google_genai(monkeypatch)
+    expected_mime_types = {
+        ".bmp": "image/bmp",
+        ".gif": "image/gif",
+        ".jpeg": "image/jpeg",
+        ".jpg": "image/jpeg",
+        ".png": "image/png",
+        ".tif": "image/tiff",
+        ".tiff": "image/tiff",
+        ".webp": "image/webp",
+    }
+    assert set(expected_mime_types) == IMAGE_EXTENSIONS
+    scorer = GeminiInterleaveImageScorer(max_attempts=1)
+
+    for suffix, expected_mime_type in expected_mime_types.items():
+        image_path = tmp_path / f"image{suffix}"
+        image_path.write_bytes(b"image-bytes")
+        part = scorer._image_part(str(image_path))
+        assert part["mime_type"] == expected_mime_type
+
+    assert [mime_type for _, mime_type in captured["parts"]] == list(expected_mime_types.values())

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, Protocol, TypeGuard
 
 import torch
@@ -60,6 +60,40 @@ class InterleaveReferenceActor(Protocol):
         rollouts: Sequence[Mapping[str, Any]],
     ) -> Sequence[Any]:
         ...
+
+
+class InterleaveRewardScorer(Protocol):
+    """Reward scorer contract consumed by the managed Interleave step."""
+
+    def as_tensors(
+        self,
+        reward_inputs: Sequence[Mapping[str, Any]],
+        *,
+        device: torch.device | str = "cpu",
+    ) -> Mapping[str, Any]:
+        ...
+
+
+class _CallableRewardScorer:
+    """Adapt list-returning reward helpers to the tensor scorer protocol."""
+
+    def __init__(
+        self,
+        scorer: Callable[[Sequence[Mapping[str, Any]]], Any],
+    ) -> None:
+        self._scorer = scorer
+
+    def as_tensors(
+        self,
+        reward_inputs: Sequence[Mapping[str, Any]],
+        *,
+        device: torch.device | str = "cpu",
+    ) -> Mapping[str, torch.Tensor]:
+        return _coerce_reward_output(
+            self._scorer(reward_inputs),
+            expected_count=len(reward_inputs),
+            device=device,
+        )
 
 
 class InterleaveThinkerRLMethod(TrainingMethod):
@@ -159,9 +193,16 @@ class InterleaveThinkerRLMethod(TrainingMethod):
     ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
         self._log_progress(f"[InterleaveThinkerRL] step {iteration}: generating rollouts")
         rollouts: list[dict[str, Any]] = []
+        sample_offset = 0
         for batch_idx in range(self._num_batches_per_step):
             batch = next(data_stream)
-            rollouts.extend(self._generate_rollouts(batch, iteration=iteration, batch_idx=batch_idx))
+            batch_rollouts = self._generate_rollouts(batch, iteration=iteration, batch_idx=batch_idx)
+            sample_offset = self._namespace_rollout_keys(
+                batch_rollouts,
+                batch_idx=batch_idx,
+                sample_offset=sample_offset,
+            )
+            rollouts.extend(batch_rollouts)
         if not rollouts:
             raise RuntimeError("InterleaveThinkerRLMethod generated no rollouts")
 
@@ -169,7 +210,11 @@ class InterleaveThinkerRLMethod(TrainingMethod):
 
         self._log_progress(f"[InterleaveThinkerRL] step {iteration}: scoring {len(rollouts)} rollouts")
         reward_inputs = self._make_reward_inputs(rollouts)
-        reward_tensors = self._reward_scorer.as_tensors(reward_inputs, device=self._interleave_student.device)
+        reward_tensors = _coerce_reward_output(
+            self._reward_scorer.as_tensors(reward_inputs, device=self._interleave_student.device),
+            expected_count=len(reward_inputs),
+            device=self._interleave_student.device,
+        )
 
         self._log_progress(f"[InterleaveThinkerRL] step {iteration}: computing advantages")
         group_keys = [self._rollout_group_key(rollout, idx) for idx, rollout in enumerate(rollouts)]
@@ -257,22 +302,28 @@ class InterleaveThinkerRLMethod(TrainingMethod):
             return instantiate(dict(raw))
         raise TypeError("method.edit_scorer must be a callable or a mapping with _target_")
 
-    def _build_reward_scorer(self) -> Any:
+    def _build_reward_scorer(self) -> InterleaveRewardScorer:
         raw = self.method_config.get("reward_scorer")
-        if raw is not None:
-            if callable(raw):
-                return raw
-            if isinstance(raw, Mapping):
-                return instantiate(dict(raw))
-            raise TypeError("method.reward_scorer must be a callable or a mapping with _target_")
-        return InterleaveThinkerRewardScorer(
-            format_weight=self._read_float("format_weight", 0.5),
-            judge_accuracy_weight=self._read_float("judge_accuracy_weight", 0.2),
-            semantic_weight=self._read_float("semantic_weight", 0.6),
-            quality_weight=self._read_float("quality_weight", 0.2),
-            fallback_edit_reward=self._read_float("fallback_edit_reward", 0.5),
-            edit_scorer=self._build_edit_scorer(self.method_config.get("edit_scorer")),
-        )
+        if raw is None:
+            scorer: Any = InterleaveThinkerRewardScorer(
+                format_weight=self._read_float("format_weight", 0.5),
+                judge_accuracy_weight=self._read_float("judge_accuracy_weight", 0.2),
+                semantic_weight=self._read_float("semantic_weight", 0.6),
+                quality_weight=self._read_float("quality_weight", 0.2),
+                fallback_edit_reward=self._read_float("fallback_edit_reward", 0.5),
+                edit_scorer=self._build_edit_scorer(self.method_config.get("edit_scorer")),
+            )
+        elif isinstance(raw, Mapping):
+            scorer = instantiate(dict(raw))
+        else:
+            scorer = raw
+
+        if _is_interleave_reward_scorer(scorer):
+            return scorer
+        if callable(scorer):
+            return _CallableRewardScorer(scorer)
+        raise TypeError("method.reward_scorer must implement as_tensors(), be a callable returning per-rollout "
+                        "rewards, or be a mapping with _target_ that constructs one")
 
     def _freeze_reference_model(self) -> None:
         if self.reference is None:
@@ -520,6 +571,32 @@ class InterleaveThinkerRLMethod(TrainingMethod):
             items.append(item)
         return items
 
+    def _namespace_rollout_keys(
+        self,
+        rollouts: Sequence[dict[str, Any]],
+        *,
+        batch_idx: int,
+        sample_offset: int,
+    ) -> int:
+        """Keep separately sampled input batches out of the same GRPO group."""
+        if self._num_batches_per_step <= 1:
+            return sample_offset
+
+        local_samples: dict[str, int] = {}
+        for rollout_idx, rollout in enumerate(rollouts):
+            local_group_key = self._rollout_group_key(rollout, rollout_idx)
+            local_sample_index = rollout.get("sample_index", rollout_idx)
+            local_sample_key = f"{type(local_sample_index).__name__}:{local_sample_index!r}"
+            if local_sample_key not in local_samples:
+                local_samples[local_sample_key] = sample_offset + len(local_samples)
+
+            rollout.setdefault("local_group_key", local_group_key)
+            rollout.setdefault("local_sample_index", local_sample_index)
+            rollout["outer_batch_index"] = batch_idx
+            rollout["sample_index"] = local_samples[local_sample_key]
+            rollout["group_key"] = f"batch:{batch_idx}:{local_group_key}"
+        return sample_offset + len(local_samples)
+
     @staticmethod
     def _rollout_group_key(
         rollout: Mapping[str, Any],
@@ -624,6 +701,74 @@ class InterleaveThinkerRLMethod(TrainingMethod):
             logger.info(message)
 
 
+def _coerce_reward_output(
+    raw: Any,
+    *,
+    expected_count: int,
+    device: torch.device | str,
+) -> dict[str, torch.Tensor]:
+    """Normalize supported reward return shapes to one tensor per metric."""
+    if isinstance(raw, Mapping):
+        columns: Mapping[Any, Any] = raw
+    elif torch.is_tensor(raw):
+        columns = {"overall": raw}
+    elif isinstance(raw, Sequence) and not isinstance(raw, str | bytes):
+        rows = list(raw)
+        row_mappings = [_reward_row_mapping(row) for row in rows]
+        if any(row is not None for row in row_mappings):
+            if not all(row is not None for row in row_mappings):
+                raise TypeError("reward scorer returned a mixture of mapping and scalar rows")
+            normalized_rows = [row for row in row_mappings if row is not None]
+            if not normalized_rows:
+                columns = {"overall": []}
+            else:
+                metric_keys = tuple(normalized_rows[0].keys())
+                expected_keys = set(metric_keys)
+                for row in normalized_rows[1:]:
+                    if set(row.keys()) != expected_keys:
+                        raise ValueError("reward scorer mapping rows must contain the same metric keys")
+                columns = {key: [row[key] for row in normalized_rows] for key in metric_keys}
+        else:
+            columns = {"overall": rows}
+    else:
+        raise TypeError("reward scorer must return a metric mapping, a reward tensor, or one result per rollout")
+
+    tensors: dict[str, torch.Tensor] = {}
+    for raw_key, value in columns.items():
+        key = str(raw_key)
+        try:
+            if torch.is_tensor(value):
+                tensor = value.detach().to(device=device, dtype=torch.float32)
+            else:
+                tensor = torch.as_tensor(value, device=device, dtype=torch.float32)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise TypeError(f"reward metric {key!r} must contain numeric values") from exc
+        if tensor.ndim == 0:
+            tensor = tensor.reshape(1)
+        if tensor.ndim != 1:
+            raise ValueError(f"reward metric {key!r} must have shape [N], got {tuple(tensor.shape)}")
+        if tensor.numel() != expected_count:
+            raise ValueError(f"reward metric {key!r} has {tensor.numel()} values for {expected_count} rollouts")
+        tensors[key] = tensor
+
+    if "overall" not in tensors:
+        raise ValueError("reward scorer output must include an 'overall' metric")
+    tensors.setdefault("avg", tensors["overall"])
+    return tensors
+
+
+def _reward_row_mapping(row: Any) -> Mapping[Any, Any] | None:
+    if isinstance(row, Mapping):
+        return row
+    as_dict = getattr(row, "as_dict", None)
+    if not callable(as_dict):
+        return None
+    result = as_dict()
+    if not isinstance(result, Mapping):
+        raise TypeError("reward result as_dict() must return a mapping")
+    return result
+
+
 def _is_interleave_train_actor(model: Any) -> TypeGuard[InterleaveTrainActor]:
     return (isinstance(getattr(model, "transformer", None), torch.nn.Module)
             and callable(getattr(model, "init_preprocessors", None))
@@ -638,9 +783,14 @@ def _is_interleave_reference_actor(model: Any) -> TypeGuard[InterleaveReferenceA
     return callable(getattr(model, "reference_logprobs_for_interleave_rollouts", None))
 
 
+def _is_interleave_reward_scorer(scorer: Any) -> TypeGuard[InterleaveRewardScorer]:
+    return callable(getattr(scorer, "as_tensors", None))
+
+
 __all__ = [
     "InterleaveGenerationActor",
     "InterleaveReferenceActor",
+    "InterleaveRewardScorer",
     "InterleaveThinkerRLMethod",
     "InterleaveTrainActor",
 ]

@@ -3,9 +3,15 @@
 
 from __future__ import annotations
 
+import atexit
 from collections.abc import Mapping
+from contextlib import suppress
+from functools import lru_cache
+import os
+import tempfile
 from typing import Any, TYPE_CHECKING
 
+from PIL import Image
 import torch
 
 from fastvideo.train.models.interleave_thinker.qwen_actor import (
@@ -15,7 +21,7 @@ from fastvideo.train.models.interleave_thinker.qwen_actor import (
     first_string,
     rollout_group_key,
 )
-from fastvideo.train.models.interleave_thinker.data import InterleaveDatasetKind
+from fastvideo.train.models.interleave_thinker.data import InterleaveDatasetKind, looks_like_uri
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.lora import LoraConfig
@@ -117,6 +123,9 @@ Detailed explanation of evaluation and new rewritten prompt. If edited image is 
 }}
 </answer>
 """
+
+_DEFAULT_BLANK_CANVAS_SIZE = (1024, 1024)
+_BLANK_CANVAS_PATHS: set[str] = set()
 
 
 class InterleaveThinkerCriticModel(Qwen3VLActorBase):
@@ -220,10 +229,44 @@ class InterleaveThinkerCriticModel(Qwen3VLActorBase):
 def _item_image_paths(item: Mapping[str, Any], ) -> list[str]:
     before = first_string(item, "previous_image_path", "origin_image_path", "input_image_path")
     after = first_string(item, "edited_image_path", "generated_image_path", "output_image_path")
-    image_paths = [value for value in (before, after) if value]
-    if len(image_paths) == 1:
-        image_paths.append(image_paths[0])
-    return image_paths[:2]
+    if not before and after:
+        before = _materialize_blank_canvas(_image_size(after))
+    return [value for value in (before, after) if value]
 
+
+def _image_size(image_path: str) -> tuple[int, int]:
+    if looks_like_uri(image_path):
+        return _DEFAULT_BLANK_CANVAS_SIZE
+    try:
+        with Image.open(image_path) as image:
+            return image.size
+    except (OSError, ValueError):
+        return _DEFAULT_BLANK_CANVAS_SIZE
+
+
+@lru_cache(maxsize=16)
+def _materialize_blank_canvas(size: tuple[int, int]) -> str:
+    width, height = size
+    fd, path = tempfile.mkstemp(
+        prefix=f"fastvideo-interleave-blank-{width}x{height}-",
+        suffix=".png",
+    )
+    os.close(fd)
+    try:
+        Image.new("RGB", size, color="white").save(path, format="PNG")
+    except Exception:
+        os.unlink(path)
+        raise
+    _BLANK_CANVAS_PATHS.add(path)
+    return path
+
+
+def _cleanup_blank_canvases() -> None:
+    for path in _BLANK_CANVAS_PATHS:
+        with suppress(FileNotFoundError):
+            os.unlink(path)
+
+
+atexit.register(_cleanup_blank_canvases)
 
 __all__ = ["INTERLEAVE_CRITIC_PROMPT", "InterleaveThinkerCriticModel", "_PlaceholderActorModule"]

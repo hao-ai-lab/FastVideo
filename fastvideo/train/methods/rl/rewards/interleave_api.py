@@ -68,6 +68,17 @@ Return:
 Use the full 0-10 range. Do not reward unrelated changes.
 """
 
+_IMAGE_MIME_TYPES = {
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".webp": "image/webp",
+}
+
 
 class GeminiInterleaveImageScorer:
     """Gemini VLM scorer returning InterleaveThinker semantic/quality scores."""
@@ -144,10 +155,9 @@ class GeminiInterleaveImageScorer:
     def _image_part(self, path: str) -> Any:
         _, types = _import_google_genai()
         image_path = Path(path)
-        mime_type = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
         return types.Part.from_bytes(
             data=image_path.read_bytes(),
-            mime_type=mime_type,
+            mime_type=_image_mime_type(image_path),
         )
 
 
@@ -274,6 +284,15 @@ def _resolve_google_api_key(explicit: str | None = None) -> str:
         return token_path.read_text().strip()
     raise ValueError("Gemini API wrappers require GEMINI_API_KEY, GOOGLE_API_KEY, "
                      "an explicit api_key, or ~/.gemini_token.")
+
+
+def _image_mime_type(path: str | Path) -> str:
+    suffix = Path(path).suffix.lower()
+    mime_type = _IMAGE_MIME_TYPES.get(suffix)
+    if mime_type is None:
+        supported = ", ".join(sorted(_IMAGE_MIME_TYPES))
+        raise ValueError(f"Unsupported InterleaveThinker image extension {suffix!r}; expected one of {supported}")
+    return mime_type
 
 
 def _import_google_genai() -> tuple[Any, Any]:

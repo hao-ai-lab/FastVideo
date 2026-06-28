@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,10 @@ import re
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.utils.data import DataLoader, Dataset
+import torch.distributed as dist
+from torch.utils.data import Dataset
+from torch.utils.data.distributed import DistributedSampler
+from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.logger import init_logger
 from fastvideo.train.methods.rl.common.grpo import compute_grpo_loss
@@ -28,6 +32,42 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 DEFAULT_QWEN_LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+
+class _EpochAwareDistributedSampler(DistributedSampler):
+    """Advance the deterministic distributed shuffle after each full epoch."""
+
+    _indices: list[int] | None = None
+    _cursor: int = 0
+
+    def __iter__(self):
+        if self._indices is None:
+            self._indices = list(super().__iter__())
+        return self
+
+    def __next__(self) -> int:
+        assert self._indices is not None
+        if self._cursor >= len(self._indices):
+            self.epoch += 1
+            self._cursor = 0
+            self._indices = None
+            raise StopIteration
+        index = self._indices[self._cursor]
+        self._cursor += 1
+        return index
+
+    def state_dict(self) -> dict[str, int]:
+        return {
+            "epoch": int(self.epoch),
+            "cursor": int(self._cursor),
+        }
+
+    def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
+        self.epoch = int(state_dict.get("epoch", 0))
+        self._cursor = int(state_dict.get("cursor", 0))
+        self._indices = list(super().__iter__())
+        if self._cursor < 0 or self._cursor > len(self._indices):
+            raise ValueError(f"Invalid distributed sampler cursor {self._cursor} for {len(self._indices)} indices")
 
 
 class InterleaveJSONLDataset(Dataset):
@@ -103,13 +143,24 @@ class Qwen3VLActorBase(RoleModelBase):
         self.dataset_kind = dataset_kind
         self.max_prompt_length = int(max_prompt_length)
         self.max_response_length = int(max_response_length)
+        if self.max_prompt_length <= 0:
+            raise ValueError("max_prompt_length must be > 0")
+        if self.max_response_length <= 0:
+            raise ValueError("max_response_length must be > 0")
         self.processor: Any | None = None
+        self._assistant_template_overhead: int | None = None
         self.dataloader: Any = None
         self.start_step = 0
 
         if not load_backend:
             self.transformer = _PlaceholderActorModule()
             return
+
+        self._validate_distributed_config(
+            device_map=device_map,
+            freeze_vision_tower=freeze_vision_tower,
+            freeze_multi_modal_projector=freeze_multi_modal_projector,
+        )
 
         self.processor, self.transformer = self._load_backend(
             init_from=self.init_from,
@@ -128,6 +179,7 @@ class Qwen3VLActorBase(RoleModelBase):
         if trainable and enable_gradient_checkpointing and hasattr(self.transformer, "gradient_checkpointing_enable"):
             self.transformer.gradient_checkpointing_enable()
         self._enable_peft_lora_if_configured()
+        self.transformer = self._apply_distributed_sharding(self.transformer)
 
     def _load_backend(
         self,
@@ -151,6 +203,7 @@ class Qwen3VLActorBase(RoleModelBase):
         load_kwargs: dict[str, Any] = {
             "trust_remote_code": trust_remote_code,
             "use_cache": use_cache,
+            "low_cpu_mem_usage": True,
         }
         dtype_arg = resolve_transformers_dtype(torch_dtype)
         if dtype_arg is not None:
@@ -160,9 +213,108 @@ class Qwen3VLActorBase(RoleModelBase):
         if attn_implementation:
             load_kwargs["attn_implementation"] = attn_implementation
         model = model_cls.from_pretrained(init_from, **load_kwargs)
-        if device_map is None:
+        distributed_config = getattr(self.training_config, "distributed", None)
+        configured_world_size = max(1, int(getattr(distributed_config, "num_gpus", 1) or 1))
+        if device_map is None and configured_world_size == 1:
             model = model.to(self.device)
         return processor, model
+
+    def _validate_distributed_config(
+        self,
+        *,
+        device_map: str | dict[str, Any] | None,
+        freeze_vision_tower: bool = True,
+        freeze_multi_modal_projector: bool = True,
+    ) -> None:
+        distributed_config = getattr(self.training_config, "distributed", None)
+        if distributed_config is None:
+            return
+        num_gpus = max(1, int(getattr(distributed_config, "num_gpus", 1) or 1))
+        if num_gpus == 1:
+            return
+
+        tp_size = max(1, int(getattr(distributed_config, "tp_size", 1) or 1))
+        if tp_size != 1:
+            raise ValueError("InterleaveThinker Qwen actors do not implement tensor parallelism; "
+                             "set training.distributed.tp_size=1 and use HSDP sharding instead")
+        sp_size = max(1, int(getattr(distributed_config, "sp_size", 1) or 1))
+        if sp_size != 1:
+            raise ValueError("InterleaveThinker Qwen actors do not implement sequence parallelism; "
+                             "set training.distributed.sp_size=1 and use HSDP sharding instead")
+        if device_map is not None:
+            raise ValueError("InterleaveThinker distributed actor training is incompatible with models.*.device_map")
+        if not freeze_vision_tower or not freeze_multi_modal_projector:
+            raise ValueError("InterleaveThinker distributed actor training requires the conditionally executed vision "
+                             "tower and multimodal projector to remain frozen")
+
+        replicate_dim, shard_dim = _resolve_hsdp_dimensions(distributed_config, num_gpus=num_gpus)
+        if replicate_dim * shard_dim != num_gpus:
+            raise ValueError("InterleaveThinker HSDP dimensions must multiply to training.distributed.num_gpus; "
+                             f"got {replicate_dim} * {shard_dim} != {num_gpus}")
+        if not dist.is_available() or not dist.is_initialized():
+            raise RuntimeError(
+                "InterleaveThinker multi-GPU actor loading requires an initialized distributed process group; "
+                "launch through torchrun and fastvideo.train.entrypoint.train")
+        if dist.get_world_size() != num_gpus:
+            raise ValueError(
+                "training.distributed.num_gpus must match the torchrun world size for InterleaveThinker actors; "
+                f"got num_gpus={num_gpus}, world_size={dist.get_world_size()}")
+
+    def _apply_distributed_sharding(
+        self,
+        model: torch.nn.Module,
+    ) -> torch.nn.Module:
+        distributed_config = getattr(self.training_config, "distributed", None)
+        num_gpus = max(1, int(getattr(distributed_config, "num_gpus", 1) or 1))
+        if num_gpus == 1:
+            return model
+
+        from torch.distributed import init_device_mesh
+        from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+
+        replicate_dim, shard_dim = _resolve_hsdp_dimensions(distributed_config, num_gpus=num_gpus)
+        device_mesh = init_device_mesh(
+            self.device.type,
+            mesh_shape=(replicate_dim, shard_dim),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        sharding_root = _qwen_sharding_root(model)
+        param_dtype = _first_floating_parameter_dtype(sharding_root)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype,
+            reduce_dtype=torch.float32,
+            output_dtype=None,
+            cast_forward_inputs=False,
+        )
+        shard_condition = _qwen_transformer_block_condition(sharding_root)
+        sharded_blocks = 0
+        # Hugging Face loads the checkpoint on CPU. FSDP moves and shards each
+        # group bottom-up, avoiding a full unsharded 8B accelerator copy.
+        for name, module in reversed(list(sharding_root.named_modules())):
+            if shard_condition(name, module):
+                fully_shard(
+                    module,
+                    reshard_after_forward=True,
+                    mesh=device_mesh,
+                    mp_policy=mp_policy,
+                )
+                sharded_blocks += 1
+        if sharded_blocks == 0:
+            raise ValueError("No Qwen transformer blocks matched the HSDP sharding policy")
+        fully_shard(
+            sharding_root,
+            reshard_after_forward=True,
+            mesh=device_mesh,
+            mp_policy=mp_policy,
+        )
+        logger.info(
+            "Applied progressive FSDP2/HSDP to %s with %d blocks, replicate_dim=%d shard_dim=%d",
+            type(self).__name__,
+            sharded_blocks,
+            replicate_dim,
+            shard_dim,
+        )
+        return model
 
     def _apply_trainable_policy(
         self,
@@ -201,7 +353,9 @@ class Qwen3VLActorBase(RoleModelBase):
             bias="none",
             task_type=TaskType.CAUSAL_LM,
         )
-        self.transformer = get_peft_model(self.transformer, peft_config)
+        seed = int(getattr(getattr(self.training_config, "data", None), "seed", 0) or 0)
+        with _rank_independent_rng(seed, device=self.device):
+            self.transformer = get_peft_model(self.transformer, peft_config)
         self._num_lora_layers = sum(1 for module in self.transformer.modules() if hasattr(module, "lora_A"))
         trainable_params = sum(param.numel() for param in self.transformer.parameters() if param.requires_grad)
         total_params = sum(param.numel() for param in self.transformer.parameters())
@@ -231,12 +385,17 @@ class Qwen3VLActorBase(RoleModelBase):
             image_dir=self.image_dir,
             dataset_kind=self.dataset_kind,
         )
-        self.dataloader = DataLoader(
+        seed = int(training_config.data.seed or 0)
+        generator = torch.Generator().manual_seed(seed)
+        sampler = _distributed_actor_sampler(dataset, seed=seed)
+        self.dataloader = StatefulDataLoader(
             dataset,
             batch_size=max(1, int(training_config.data.train_batch_size or 1)),
-            shuffle=True,
+            shuffle=sampler is None,
+            sampler=sampler,
             num_workers=max(0, int(training_config.data.dataloader_num_workers or 0)),
             collate_fn=collate_interleave_records,
+            generator=generator,
         )
 
     def generate_qwen_responses(
@@ -251,15 +410,20 @@ class Qwen3VLActorBase(RoleModelBase):
         self._require_backend()
         self.transformer.eval()
         num_return_sequences = max(1, int(num_generations or 1))
-        max_tokens = int(max_new_tokens or self.max_response_length)
+        requested_max_tokens = int(max_new_tokens or self.max_response_length)
+        max_tokens = min(requested_max_tokens, self.max_response_length)
         inputs = self._apply_chat_template(
             messages,
             add_generation_prompt=True,
+            max_length=self.max_prompt_length,
+            limit_name="max_prompt_length",
         )
         input_ids = inputs["input_ids"]
         temperature = float(temperature)
         top_p = float(top_p)
         generate_kwargs: dict[str, Any] = {"max_new_tokens": max_tokens}
+        if _distributed_actor_world_size() > 1:
+            generate_kwargs["synced_gpus"] = True
         uses_custom_sampling = num_return_sequences > 1 or temperature > 0.0 or top_p < 1.0
         if uses_custom_sampling:
             generate_kwargs["do_sample"] = True
@@ -299,13 +463,23 @@ class Qwen3VLActorBase(RoleModelBase):
         prompt_inputs = self._apply_chat_template(
             prompt_messages,
             add_generation_prompt=True,
+            max_length=self.max_prompt_length,
+            limit_name="max_prompt_length",
         )
+        template_overhead = self._assistant_response_template_overhead()
         full_inputs = self._apply_chat_template(
             full_messages,
             add_generation_prompt=False,
+            max_length=self.max_prompt_length + self.max_response_length + template_overhead,
+            limit_name="max_prompt_length + max_response_length + assistant template overhead",
         )
         labels = full_inputs["input_ids"].clone()
         prompt_len = int(prompt_inputs["input_ids"].shape[-1])
+        self._validate_response_length(
+            full_inputs["input_ids"],
+            prompt_len=prompt_len,
+            template_overhead=template_overhead,
+        )
         labels[:, :prompt_len] = -100
         token_count = int((labels != -100).sum().detach().cpu())
         if token_count == 0:
@@ -326,13 +500,23 @@ class Qwen3VLActorBase(RoleModelBase):
         prompt_inputs = self._apply_chat_template(
             prompt_messages,
             add_generation_prompt=True,
+            max_length=self.max_prompt_length,
+            limit_name="max_prompt_length",
         )
+        template_overhead = self._assistant_response_template_overhead()
         full_inputs = self._apply_chat_template(
             full_messages,
             add_generation_prompt=False,
+            max_length=self.max_prompt_length + self.max_response_length + template_overhead,
+            limit_name="max_prompt_length + max_response_length + assistant template overhead",
         )
         input_ids = full_inputs["input_ids"]
         prompt_len = int(prompt_inputs["input_ids"].shape[-1])
+        self._validate_response_length(
+            input_ids,
+            prompt_len=prompt_len,
+            template_overhead=template_overhead,
+        )
         response_ids = input_ids[:, prompt_len:]
         if int(response_ids.shape[-1]) == 0:
             raise ValueError("InterleaveThinker rollout has no response tokens")
@@ -394,7 +578,6 @@ class Qwen3VLActorBase(RoleModelBase):
             update_micro_batch_size = len(rollouts)
         update_micro_batch_size = max(1, int(update_micro_batch_size or 1))
         max_grad_norm = float(kwargs.get("max_grad_norm", 0.0) or 0.0)
-        grad_accum = max(1, int(kwargs.get("gradient_accumulation_steps", 1) or 1))
 
         if optimizer is None:
             raise RuntimeError(f"{type(self).__name__}.train_interleave_rollouts() requires an optimizer")
@@ -406,7 +589,6 @@ class Qwen3VLActorBase(RoleModelBase):
 
         loss_results = []
         token_counts: list[float] = []
-        loss_scale = max(1, grad_accum)
         for start in range(0, len(rollouts), update_micro_batch_size):
             end = min(start + update_micro_batch_size, len(rollouts))
             current_logprobs, old_logprobs, response_masks, reference_logprobs = self._grpo_logprob_batch(
@@ -420,20 +602,26 @@ class Qwen3VLActorBase(RoleModelBase):
                 reference_logprobs=reference_logprobs,
                 kl_coef=kl_coef,
             )
-            (result.total_loss / loss_scale).backward()
+            # ``compute_grpo_loss`` returns a token mean. Accumulate token sums
+            # so differently sized microbatches produce the same global mean.
+            (result.total_loss * result.token_count.detach()).backward()
             loss_results.append(result)
             token_counts.append(float(result.token_count.detach().cpu()))
 
+        total_tokens = max(1.0, sum(token_counts))
+        gradient_scale = _distributed_token_gradient_scale(total_tokens, device=self.device)
+        for parameter in self.transformer.parameters():
+            if parameter.grad is not None:
+                parameter.grad.mul_(gradient_scale)
+
         if max_grad_norm > 0.0:
-            torch.nn.utils.clip_grad_norm_(
-                [p for p in self.transformer.parameters() if p.requires_grad],
-                max_grad_norm,
-            )
+            from fastvideo.train.utils.optimizer import clip_grad_norm_if_needed
+
+            clip_grad_norm_if_needed(self.transformer, max_grad_norm)
         optimizer.step()
         if lr_scheduler is not None:
             lr_scheduler.step()
 
-        total_tokens = max(1.0, sum(token_counts))
         total_loss = _weighted_result_mean(loss_results, "total_loss", token_counts, self.device, total_tokens)
         policy_loss = _weighted_result_mean(loss_results, "policy_loss", token_counts, self.device, total_tokens)
         kl_loss = _weighted_result_mean(loss_results, "kl_loss", token_counts, self.device, total_tokens)
@@ -591,6 +779,8 @@ class Qwen3VLActorBase(RoleModelBase):
         messages: list[dict[str, Any]],
         *,
         add_generation_prompt: bool,
+        max_length: int,
+        limit_name: str,
     ) -> Mapping[str, torch.Tensor]:
         assert self.processor is not None
         inputs = self.processor.apply_chat_template(
@@ -600,7 +790,58 @@ class Qwen3VLActorBase(RoleModelBase):
             return_dict=True,
             return_tensors="pt",
         )
+        input_ids = inputs.get("input_ids")
+        if not torch.is_tensor(input_ids):
+            raise TypeError("Qwen processor chat template must return tensor input_ids")
+        token_length = int(input_ids.shape[-1])
+        if token_length > max_length:
+            raise ValueError(f"InterleaveThinker tokenized input length {token_length} exceeds configured "
+                             f"{limit_name}={max_length}")
         return move_to_device(inputs, self.device)
+
+    def _validate_response_length(
+        self,
+        input_ids: torch.Tensor,
+        *,
+        prompt_len: int,
+        template_overhead: int,
+    ) -> None:
+        response_len = max(0, int(input_ids.shape[-1]) - int(prompt_len) - int(template_overhead))
+        if response_len > self.max_response_length:
+            raise ValueError(f"InterleaveThinker response length {response_len} exceeds configured "
+                             f"max_response_length={self.max_response_length}")
+
+    def _assistant_response_template_overhead(self) -> int:
+        if self._assistant_template_overhead is not None:
+            return self._assistant_template_overhead
+        assert self.processor is not None
+        prompt_messages = [{
+            "role": "user",
+            "content": [{
+                "type": "text",
+                "text": "x",
+            }],
+        }]
+        prompt_inputs = self.processor.apply_chat_template(
+            prompt_messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+        empty_response_inputs = self.processor.apply_chat_template(
+            [*prompt_messages, make_assistant_text_message("")],
+            tokenize=True,
+            add_generation_prompt=False,
+            return_dict=True,
+            return_tensors="pt",
+        )
+        prompt_ids = prompt_inputs.get("input_ids")
+        empty_response_ids = empty_response_inputs.get("input_ids")
+        if not torch.is_tensor(prompt_ids) or not torch.is_tensor(empty_response_ids):
+            raise TypeError("Qwen processor chat template must return tensor input_ids")
+        self._assistant_template_overhead = max(0, int(empty_response_ids.shape[-1]) - int(prompt_ids.shape[-1]))
+        return self._assistant_template_overhead
 
     def _require_backend(self) -> None:
         if self.processor is None or isinstance(self.transformer, _PlaceholderActorModule):
@@ -829,6 +1070,74 @@ def move_to_device(
     return value
 
 
+def _distributed_actor_world_size() -> int:
+    if not dist.is_available() or not dist.is_initialized():
+        return 1
+    return int(dist.get_world_size())
+
+
+def _distributed_actor_sampler(
+    dataset: Dataset,
+    *,
+    seed: int,
+) -> _EpochAwareDistributedSampler | None:
+    world_size = _distributed_actor_world_size()
+    if world_size <= 1:
+        return None
+    return _EpochAwareDistributedSampler(
+        dataset,
+        num_replicas=world_size,
+        rank=int(dist.get_rank()),
+        shuffle=True,
+        seed=int(seed),
+        drop_last=False,
+    )
+
+
+def _distributed_token_gradient_scale(
+    local_token_count: float,
+    *,
+    device: torch.device,
+) -> float:
+    """Scale FSDP-averaged token-sum gradients into one global token mean."""
+    world_size = _distributed_actor_world_size()
+    if world_size <= 1:
+        return 1.0 / max(1.0, float(local_token_count))
+
+    global_token_count = torch.tensor(float(local_token_count), device=device, dtype=torch.float64)
+    dist.all_reduce(global_token_count, op=dist.ReduceOp.SUM)
+    # FSDP averages gradients across its data-parallel ranks. Restore the
+    # summed numerator before dividing by the global token denominator.
+    return float(world_size) / max(1.0, float(global_token_count.detach().cpu()))
+
+
+def _resolve_hsdp_dimensions(
+    distributed_config: Any,
+    *,
+    num_gpus: int,
+) -> tuple[int, int]:
+    replicate_dim = int(getattr(distributed_config, "hsdp_replicate_dim", 1) or 1)
+    raw_shard_dim = getattr(distributed_config, "hsdp_shard_dim", -1)
+    shard_dim = num_gpus if raw_shard_dim is None or int(raw_shard_dim) == -1 else int(raw_shard_dim)
+    if replicate_dim <= 0 or shard_dim <= 0:
+        raise ValueError("InterleaveThinker HSDP dimensions must be positive (hsdp_shard_dim may be -1 for auto)")
+    return replicate_dim, shard_dim
+
+
+@contextmanager
+def _rank_independent_rng(
+    seed: int,
+    *,
+    device: torch.device,
+) -> Generator[None, None, None]:
+    cuda_devices: list[int] = []
+    if device.type == "cuda" and torch.cuda.is_available():
+        cuda_devices = [device.index if device.index is not None else torch.cuda.current_device()]
+    with torch.random.fork_rng(devices=cuda_devices):
+        torch.manual_seed(int(seed))
+        yield
+
+
 def resolve_transformers_dtype(raw: str, ) -> Any:
     value = str(raw or "auto").lower()
     if value == "auto":
@@ -840,6 +1149,50 @@ def resolve_transformers_dtype(raw: str, ) -> Any:
     if value in {"fp32", "float32"}:
         return torch.float32
     raise ValueError(f"Unsupported torch_dtype for InterleaveThinker actor: {raw!r}")
+
+
+def _first_floating_parameter_dtype(model: torch.nn.Module, ) -> torch.dtype:
+    for parameter in model.parameters():
+        if parameter.is_floating_point():
+            return parameter.dtype
+    return torch.float32
+
+
+def _qwen_sharding_root(model: torch.nn.Module, ) -> torch.nn.Module:
+    """Return the module invoked by both PEFT ``forward`` and ``generate``."""
+    get_base_model = getattr(model, "get_base_model", None)
+    if callable(get_base_model):
+        base_model = get_base_model()
+        if isinstance(base_model, torch.nn.Module):
+            return base_model
+    return model
+
+
+def _qwen_transformer_block_condition(model: torch.nn.Module, ) -> Any:
+    """Return an FSDP condition covering Hugging Face Qwen block modules."""
+    no_split_class_names: set[str] = set()
+    module_list_children: set[int] = set()
+    for module in model.modules():
+        raw_no_split = getattr(module, "_no_split_modules", None)
+        if isinstance(raw_no_split, Sequence) and not isinstance(raw_no_split, str | bytes):
+            no_split_class_names.update(str(name) for name in raw_no_split)
+        if isinstance(module, torch.nn.ModuleList):
+            module_list_children.update(id(child) for child in module)
+
+    if not no_split_class_names and not module_list_children:
+        raise ValueError("Could not identify transformer blocks for InterleaveThinker HSDP sharding")
+
+    def is_transformer_block(_name: str, module: torch.nn.Module) -> bool:
+        lower_name = _name.lower()
+        lower_type = type(module).__name__.lower()
+        if "vision" in lower_name or "visual" in lower_name or "vision" in lower_type or "visual" in lower_type:
+            # Image-conditioned ranks may execute the vision tower while
+            # text-only ranks skip it. Keep those frozen parameters in the root
+            # FSDP group so every rank runs collectives in the same order.
+            return False
+        return id(module) in module_list_children or type(module).__name__ in no_split_class_names
+
+    return is_transformer_block
 
 
 def is_vision_parameter(lower_name: str, ) -> bool:

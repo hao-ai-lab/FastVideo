@@ -35,6 +35,19 @@ def test_extract_answer_accepts_upstream_single_quote_jsonish_payload():
 def test_format_reward_requires_think_before_valid_answer():
     assert interleave_format_reward(_response(True)) == 1.0
 
+    missing_think_close = """
+    <think>unfinished reasoning
+    <answer>{"previous_step_success": true, "refine_prompt": "ok"}</answer>
+    """
+    assert interleave_format_reward(missing_think_close) == 0.0
+
+    answer_inside_think = """
+    <think>reasoning
+    <answer>{"previous_step_success": true, "refine_prompt": "ok"}</answer>
+    </think>
+    """
+    assert interleave_format_reward(answer_inside_think) == 0.0
+
     answer_first = """
     <answer>{"previous_step_success": true, "refine_prompt": "ok"}</answer>
     <think>late reasoning</think>
@@ -120,6 +133,7 @@ def test_planner_reward_accepts_execution_plan_answer_block():
     assert payload is not None
     assert interleave_planner_format_reward(_planner_response()) == 1.0
     assert interleave_planner_format_reward("<answer>{}</answer>") == 0.0
+    assert interleave_planner_format_reward(_planner_response().replace("</think>", "")) == 0.0
 
 
 def test_planner_reward_scorer_blends_format_and_scalar_plan_score():

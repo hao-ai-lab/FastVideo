@@ -223,7 +223,7 @@ def normalize_critic_rl_record(record: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("critic_rl record requires previous_prompt or rewritten_prompt")
     normalized["previous_prompt"] = previous_prompt
     normalized.setdefault("rewritten_prompt", previous_prompt)
-    normalized.setdefault("previous_image_path", normalized["edited_image_path"])
+    normalized.setdefault("previous_image_path", normalized["origin_image_path"])
     normalized.setdefault("generated_image_path", normalized["edited_image_path"])
     normalized["ground_truth"] = normalize_ground_truth(normalized)
     return normalized

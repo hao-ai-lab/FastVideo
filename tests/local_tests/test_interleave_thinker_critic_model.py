@@ -1,6 +1,8 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
+from PIL import Image
 import torch
 
 from fastvideo.train.models.interleave_thinker.critic import (
@@ -135,6 +137,29 @@ def test_interleave_thinker_critic_prefers_previous_image_as_before_image():
         "type": "image",
         "image": "after.png",
     }]
+
+
+def test_interleave_thinker_critic_materializes_blank_canvas_for_initial_generation(tmp_path):
+    generated_path = tmp_path / "generated.png"
+    Image.new("RGB", (12, 8), color="blue").save(generated_path)
+    model = InterleaveThinkerCriticModel(load_backend=False)
+
+    messages = model.build_messages({
+        "origin_prompt": "draw a vase",
+        "previous_prompt": "a vase on a table",
+        "edited_image_path": str(generated_path),
+    })
+
+    images = [part["image"] for part in messages[0]["content"] if part["type"] == "image"]
+    assert len(images) == 2
+    assert images[1] == str(generated_path)
+    assert images[0] != images[1]
+    blank_canvas_path = Path(images[0])
+    assert blank_canvas_path.is_file()
+    with Image.open(blank_canvas_path) as blank_canvas:
+        assert blank_canvas.mode == "RGB"
+        assert blank_canvas.size == (12, 8)
+        assert blank_canvas.getextrema() == ((255, 255), (255, 255), (255, 255))
 
 
 def test_interleave_thinker_critic_initializes_jsonl_dataloader(tmp_path):
