@@ -1,0 +1,20 @@
+# Minimum config to instantiate CosmosModel for the loading + forward
+# smoke test. Real Cosmos-Predict2.5-2B checkpoint (~2B) loaded via
+# load_module_from_path. Cosmos uses a single Reason1 text encoder
+# (crossattn_proj_in_channels=100352) and the Wan-family VAE (z_dim=16).
+
+models:
+  student:
+    _target_: fastvideo.train.models.cosmos.CosmosModel
+    init_from: KyleShao/Cosmos-Predict2.5-2B-Diffusers
+    trainable: false
+    flow_shift: 1.0
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  dit_precision: bf16
+
+pipeline:
+  flow_shift: 1.0

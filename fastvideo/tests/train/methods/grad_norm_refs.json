@@ -1,4 +1,11 @@
 {
+  "test_cosmos_finetune": {
+    "H200": 5.2763,
+    "L40S": 4.1553
+  },
+  "test_matrixgame2_finetune": {
+    "H200": 4.8247
+  },
   "test_wan_causal_dfsft": {
     "GB200": 2.9781,
     "L40S": 3.2562

@@ -116,6 +116,7 @@ surfaces:
       dit_precision: "Precision override pending dedicated typed component precision design."
       upsampler_precision: "Precision override pending dedicated typed component precision design."
       vae_precision: "Precision override pending dedicated typed component precision design."
+      vae_decode_precision: "Decode-only precision override pending dedicated typed component precision design."
       image_encoder_precision: "Precision override pending dedicated typed component precision design."
       text_encoder_precisions: "Precision override pending dedicated typed component precision design."
     internal_only:

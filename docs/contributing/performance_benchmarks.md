@@ -255,7 +255,7 @@ successful main/full-suite uploads and remain eligible for rolling baselines.
 ## CI integration
 
 The performance step can run on demand with `/test performance` and as part of
-the Full Suite (see [CI Architecture](ci_architecture.md)). The Modal entry
+the Full Suite (see [CI/CD Architecture](ci_architecture.md)). The Modal entry
 point is `fastvideo/tests/modal/pr_test.py:run_performance_tests` and the
 Buildkite artifact upload is in
 `.buildkite/scripts/pr_test.sh:upload_performance_artifacts`.
