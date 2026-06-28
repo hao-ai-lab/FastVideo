@@ -54,6 +54,20 @@ class DiTConfig(ModelConfig):
     # None = no requirement (the common case).
     required_attention_backend: AttentionBackendEnum | None = None
 
+    def update_model_config(self, source_model_dict: dict[str, Any]) -> None:
+        source_model_dict = source_model_dict.copy()
+        required_backend = source_model_dict.get("required_attention_backend")
+        if isinstance(required_backend, str):
+            try:
+                source_model_dict["required_attention_backend"] = AttentionBackendEnum[required_backend]
+            except KeyError as exc:
+                valid_backends = ", ".join(AttentionBackendEnum.__members__)
+                raise ValueError(
+                    f"Unknown required attention backend {required_backend!r}; expected one of: {valid_backends}"
+                ) from exc
+
+        super().update_model_config(source_model_dict)
+
     @staticmethod
     def add_cli_args(parser: Any, prefix: str = "dit-config") -> Any:
         """Add CLI arguments for DiTConfig fields"""
