@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,7 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V480PConfig,
 )
 from fastvideo.platforms.interface import AttentionBackendEnum
+from fastvideo.registry import get_pipeline_config_cls_from_name
 
 VSA = AttentionBackendEnum.VIDEO_SPARSE_ATTN
 
@@ -63,6 +65,36 @@ def test_fastwan_2_2_fullattn_config_does_not_require_vsa():
     # The dense FullAttn checkpoint shares FastWan's DMD schedule but must NOT be
     # forced onto VSA -- it runs dense attention.
     assert FastWan2_2_TI2V_5B_FullAttn_Config().dit_config.required_attention_backend is None
+
+
+def _write_minimal_wan_dmd_repo(model_dir: Path) -> None:
+    model_dir.mkdir(parents=True)
+    (model_dir / "transformer").mkdir()
+    (model_dir / "model_index.json").write_text(
+        json.dumps({
+            "_class_name": "WanDMDPipeline",
+            "_diffusers_version": "0.35.0.dev0",
+            "transformer": ["diffusers", "WanTransformer3DModel"],
+        }),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize(
+    "relative_model_path",
+    [
+        Path("models--FastVideo--FastWan2.2-TI2V-5B-FullAttn-Diffusers") / "snapshots" / "deadbeef",
+        Path("renamed-FastWan2.2-TI2V-5B-FullAttn-Diffusers-copy"),
+    ],
+)
+def test_fastwan_2_2_fullattn_local_path_resolves_dense_config(tmp_path: Path,
+                                                               relative_model_path: Path) -> None:
+    model_dir = tmp_path / relative_model_path
+    _write_minimal_wan_dmd_repo(model_dir)
+
+    resolved_cls = get_pipeline_config_cls_from_name(str(model_dir))
+
+    assert resolved_cls is FastWan2_2_TI2V_5B_FullAttn_Config
 
 
 @pytest.mark.parametrize("config_cls", [FastWan2_1_T2V_480P_Config, FastWan2_2_TI2V_5B_Config])
