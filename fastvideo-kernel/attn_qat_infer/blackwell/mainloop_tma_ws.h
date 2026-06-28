@@ -740,10 +740,6 @@ struct CollectiveMainloopFwd {
         auto col_limit_causal = [&](int row, int n_block) {
             return row + 1 + seqlen_k - n_block * kBlockN - seqlen_q + m_block * kBlockM;
         };
-        // The Blackwell FP4 MMA accumulator's N-dimension is laid out with bits 1↔3 and 2↔4
-        // swapped within each 32-column block relative to the natural matrix column order.
-        // partition_C of the identity tensor reflects this internal order, so we must undo
-        // the permutation to recover the actual matrix column before applying the causal mask.
         auto actual_col = [](int c) {
             int local = c & 31;
             return (c & ~31) | (local & 1) | ((local & 24) >> 2) | ((local & 6) << 2);
