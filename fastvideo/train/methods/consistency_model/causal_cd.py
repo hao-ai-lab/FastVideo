@@ -8,6 +8,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
+from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import build_optimizer_and_scheduler
@@ -41,11 +42,19 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
             raise ValueError("method.discrete_cd_N must be >= 2")
         self._ema_decay = float(self.method_config.get("ema_decay", 0.99))
         self._ema_start_step = int(self.method_config.get("ema_start_step", 200))
-        self._flow_shift = float(self.method_config.get("flow_shift", 5.0))
-        self._cd_sigmas: torch.Tensor | None = None
-        self._cd_timesteps_t: torch.Tensor | None = None
+        shift = getattr(self.training_config.pipeline_config, "flow_shift", None)
+        self._flow_shift = float(shift) if shift else 5.0
 
         self.student.init_preprocessors(self.training_config)
+        self._sf_scheduler = SelfForcingFlowMatchScheduler(
+            num_inference_steps=self._discrete_cd_n,
+            num_train_timesteps=int(self.student.num_train_timesteps),
+            shift=self._flow_shift,
+            sigma_min=0.0,
+            sigma_max=1.0,
+            extra_one_step=True,
+            training=False,
+        )
         self._init_optimizers_and_schedulers()
 
     # ------------------------------------------------------------------
@@ -86,7 +95,8 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         batch_size, num_latents = int(clean_latents.shape[0]), int(clean_latents.shape[1])
         device = clean_latents.device
 
-        sigmas, timesteps = self._cd_schedule(device)
+        sigmas = self._sf_scheduler.sigmas.to(device)
+        timesteps = self._sf_scheduler.timesteps.to(device)
         idx = int(torch.randint(0, self._discrete_cd_n - 1, (1, ), generator=self.cuda_generator, device=device).item())
         t, t_next = timesteps[idx], timesteps[idx + 1]
         sigma_t, sigma_t_next = sigmas[idx], sigmas[idx + 1]
@@ -185,24 +195,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
                                    cfg_uncond=None,
                                    attn_kind=self._attn_kind,
                                    clean_x=clean_x)
-
-    def _cd_schedule(self, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
-        if self._cd_sigmas is None:
-            sigmas, timesteps = self.build_cd_schedule(self._discrete_cd_n, self._flow_shift,
-                                                       int(self.student.num_train_timesteps))
-            self._cd_sigmas = sigmas
-            self._cd_timesteps_t = timesteps
-        return (self._cd_sigmas.to(device=device), self._cd_timesteps_t.to(device=device))
-
-    @staticmethod
-    def build_cd_schedule(num_steps: int,
-                          flow_shift: float,
-                          num_train_timesteps: int = 1000) -> tuple[torch.Tensor, torch.Tensor]:
-        # FlowMatchScheduler(shift, sigma_min=0, sigma_max=1, extra_one_step=True).
-        sigmas = torch.linspace(1.0, 0.0, num_steps + 1)[:-1]
-        sigmas = flow_shift * sigmas / (1.0 + (flow_shift - 1.0) * sigmas)
-        timesteps = sigmas * float(num_train_timesteps)
-        return sigmas, timesteps
 
     @torch.no_grad()
     def _update_ema(self) -> None:
