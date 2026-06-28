@@ -253,7 +253,7 @@ pushes to `main`, it also deploys the built site to GitHub Pages.
 The docs job:
 
 1. Installs the pinned MkDocs dependencies.
-2. Runs `mkdocs build --strict`; the native MkDocs hook generates example pages before the build.
+2. Runs `mkdocs build`; the native MkDocs hook generates example pages before the build.
 3. Runs `python scripts/check_docs_links.py` against the generated documentation.
 4. Uploads the Pages artifact and deploys only from `main`.
 

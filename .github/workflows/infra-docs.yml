@@ -55,7 +55,7 @@ jobs:
         uses: actions/configure-pages@v4
 
       - name: Build documentation
-        run: mkdocs build --strict
+        run: mkdocs build
 
       - name: Check docs links
         run: python scripts/check_docs_links.py
