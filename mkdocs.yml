@@ -138,6 +138,7 @@ nav:
   - Training:
     - Overview: training/overview.md
     - Training Infrastructure: training/train_infra.md
+    - Experiment Tracking: training/trackers.md
     - Data Preprocessing: training/data_preprocess.md
     - Fine-tuning: training/finetune.md
     - Examples:
