@@ -133,9 +133,9 @@ class CudaPlatformBase(Platform):
 
                 return "fastvideo.attention.backends.sage_attn.SageAttentionBackend"
             except ImportError as e:
-                raise _backend_not_installed_error(
-                    "SageAttention", "SAGE_ATTN", "the `sageattention` package is not installed",
-                    "Install it with: uv pip install sageattention") from e
+                raise _backend_not_installed_error("SageAttention", "SAGE_ATTN",
+                                                   "the `sageattention` package is not installed",
+                                                   "Install it with: uv pip install sageattention") from e
         elif selected_backend == AttentionBackendEnum.SAGE_ATTN_THREE:
             try:
                 from sageattn3 import sageattn3_blackwell  # noqa: F401
@@ -146,9 +146,9 @@ class CudaPlatformBase(Platform):
 
                 return "fastvideo.attention.backends.sage_attn3.SageAttention3Backend"
             except ImportError as e:
-                raise _backend_not_installed_error(
-                    "SageAttention 3", "SAGE_ATTN_THREE", "the `sageattn3` package is not installed",
-                    "Install it with: uv pip install sageattn3") from e
+                raise _backend_not_installed_error("SageAttention 3", "SAGE_ATTN_THREE",
+                                                   "the `sageattn3` package is not installed",
+                                                   "Install it with: uv pip install sageattn3") from e
         elif selected_backend == AttentionBackendEnum.ATTN_QAT_INFER:
             try:
                 from fastvideo.attention.backends.attn_qat_infer import (  # noqa: F401
