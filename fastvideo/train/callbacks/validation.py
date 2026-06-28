@@ -404,6 +404,7 @@ class ValidationCallback(Callback):
                         art = self.tracker.video(
                             fname,
                             caption=cap,
+                            fps=sp.fps,
                         )
                         if art is not None:
                             video_logs.append(art)
