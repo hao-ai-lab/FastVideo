@@ -537,9 +537,9 @@ class CausalMatrixGame2TransformerBlock(nn.Module):
         value, _ = self.to_v(norm_hidden_states)
 
         if self.norm_q is not None:
-            query = self.norm_q.forward_native(query)
+            query = self.norm_q(query)
         if self.norm_k is not None:
-            key = self.norm_k.forward_native(key)
+            key = self.norm_k(key)
 
         query = query.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
