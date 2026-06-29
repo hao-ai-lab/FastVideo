@@ -49,6 +49,10 @@ ARG PYTHON_VERSION=3.12
 # for GB10/Blackwell (DGX Spark).
 ARG TORCH_CUDA_ARCH_LIST=9.0a
 
+# Cap CMake/Ninja concurrency to fit standard 16 GB build runners. This default
+# matches the CUDA 13 kernel-release build; the CUDA 12.6 image workflow uses 4.
+ARG CMAKE_BUILD_PARALLEL_LEVEL=1
+
 # flash-attn: when FLASH_ATTN_WHEEL_TAG is set, install the matching prebuilt wheel
 # for TARGETARCH. The prebuilt-wheel project publishes x86_64 and arm64 wheels in
 # different releases, so each architecture has its own release URL. Set the wheel
@@ -187,6 +191,7 @@ RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
     cd fastvideo-kernel && \
+    CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL} \
     TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} ./build.sh
 
 # Install FastVideo itself (editable) now that the source is present, and set up
