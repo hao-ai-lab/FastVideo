@@ -158,6 +158,29 @@ endif()
 # Always try to build the extension if CUDA is available, but conditionally add sources/flags
 set(BUILD_CXX_KERNELS ON)
 
+# ---------------------------------------------------------------------------
+# Per-arch split for the Blackwell FP4 (attn_qat_infer) build
+# ---------------------------------------------------------------------------
+# The FP4 kernels are sm_120a-only (they emit `cvt.e2m1x2` etc.), while the main
+# extension (Hopper-only TK + generic turbodiffusion) targets the full arch list.
+# find_package(Torch) injects ONE global -gencode list into CMAKE_CUDA_FLAGS that
+# forces every target onto every arch, so the FP4 sources also get the sm_90a pass
+# and ptxas rejects their Blackwell instructions. Strip that global list and drive
+# arch per target via CUDA_ARCHITECTURES instead (the fp4* targets pin 120a below;
+# the main extension gets the full list). Only do this for the FP4 build with an
+# explicit arch list, so the cu126 / local autodetect paths stay untouched.
+if(ENABLE_ATTN_QAT_INFER AND TORCH_CUDA_ARCH_LIST)
+    message(STATUS "[per-arch] CMAKE_CUDA_FLAGS before strip: ${CMAKE_CUDA_FLAGS}")
+    string(REGEX REPLACE "-gencode[ =]+arch=[^ ]+" "" CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}")
+    string(REGEX REPLACE " +" " " CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}")
+    message(STATUS "[per-arch] CMAKE_CUDA_FLAGS after strip:  ${CMAKE_CUDA_FLAGS}")
+    # Convert TORCH_CUDA_ARCH_LIST ("9.0a;12.0a") to CMake form ("90a;120a").
+    set(FASTVIDEO_MAIN_CUDA_ARCHS "${TORCH_CUDA_ARCH_LIST}")
+    string(REPLACE "sm_" "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
+    string(REPLACE "." "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
+    message(STATUS "[per-arch] main extension archs=${FASTVIDEO_MAIN_CUDA_ARCHS}, fp4* archs=120a")
+endif()
+
 # Compiler flags
 set(CUDA_FLAGS
     "-DNDEBUG"
@@ -206,6 +229,15 @@ if(BUILD_CXX_KERNELS)
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
         ${EXTENSION_SOURCES}
     )
+
+    # When the per-arch split is active (FP4 build), torch's global gencode was
+    # stripped above, so set this target's arch explicitly. TK is guarded down to
+    # sm_90a in source; the turbodiffusion kernels are generic, so the main
+    # extension targets the full list. (No-FP4 builds keep torch's global gencode.)
+    if(ENABLE_ATTN_QAT_INFER AND FASTVIDEO_MAIN_CUDA_ARCHS)
+        set_target_properties(fastvideo_kernel_ops PROPERTIES
+            CUDA_ARCHITECTURES "${FASTVIDEO_MAIN_CUDA_ARCHS}")
+    endif()
 
     # Build compile definitions list
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
