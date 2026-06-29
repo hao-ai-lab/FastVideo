@@ -69,6 +69,10 @@ If you're setting up a pod from scratch instead of the FastVideo template, use t
 ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-latest
 ```
 
+This default tag uses CUDA 12.6.3 with the `cu126` PyTorch backend. Use
+`py3.12-cuda13.0.0-latest` instead when the pod specifically needs the CUDA 13
+and `cu130` image.
+
 And paste this as the Container Start Command to enable SSH ([RunPod docs](https://docs.runpod.io/pods/configuration/use-ssh)):
 
 ```bash

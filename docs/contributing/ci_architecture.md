@@ -263,7 +263,11 @@ The docs job:
 workflow. Maintainers choose which image families to build. The
 `fastvideo-dev` matrix builds Python 3.12 images for CUDA 12.6 and CUDA 13 on
 native `amd64` and `arm64` runners, then publishes one multi-platform manifest
-per CUDA version. CUDA 13 owns the `py3.12-latest` and global `latest` tags.
+per CUDA version. CUDA 12.6 owns the `py3.12-latest` and global `latest` tags,
+as well as the explicit `py3.12-cuda12.6.3-latest` alias. CUDA 13 is published
+under the explicit `py3.12-cuda13.0.0-latest` tag. This publication policy does
+not change the unparameterized `docker/Dockerfile` build defaults, which remain
+CUDA 13 and `cu130`.
 
 The optional Dreamverse matrix builds backend and UI images for CUDA 12.6 and
 CUDA 13 on `amd64`. Dreamverse remains `amd64`-only because its FA4 dependency

@@ -150,12 +150,12 @@ modal run fastvideo/tests/modal/ssim_test.py \
 Env prefix rationale (parity with CI; see `.buildkite/pipeline.yml:1-3` and
 `.buildkite/scripts/pr_test.sh:62-83`):
 - `IMAGE_VERSION=py3.12-latest`: pins the Modal image tag to the same one CI
-  uses. With the unified `docker/Dockerfile`, the default `py3.12`, `py3.12-latest`,
-  and `latest` tags all point at the same image — `PYTHON_VERSION=3.12` / CUDA
-  13.0.0 / cu130 (the `build-cuda-images` matrix sets `mark_as_latest` on the 13.0.0
-  cell). `IMAGE_VERSION=py3.12-latest` keeps CI on that image; the cu126 (12.6) build
-  is a `-cudaX.Y.Z`-suffixed alternate (`infra-build-image.yml`,
-  `_template-build-image.yml`).
+  uses. The published `py3.12-latest` and `latest` tags point at Python 3.12 /
+  CUDA 12.6.3 / cu126; `py3.12-cuda12.6.3-latest` is the explicit alias for the
+  same image. CUDA 13 / cu130 is available under the explicit
+  `py3.12-cuda13.0.0-latest` tag. This tag policy comes from
+  `infra-build-image.yml`; the unparameterized `docker/Dockerfile` build itself
+  still defaults to CUDA 13 / cu130.
 - `BUILDKITE_REPO`/`BUILDKITE_COMMIT`/`BUILDKITE_PULL_REQUEST`: mirror what
   Buildkite exports. `ssim_test.py:38-46` bakes these into the image's
   `.env(...)` block; mismatched values can perturb in-container code paths
