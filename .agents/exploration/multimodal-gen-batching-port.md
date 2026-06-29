@@ -81,6 +81,11 @@ FastVideo files inspected:
       `2304837e` (`[docs]: record multimodal batching validation report`).
 - [x] Push branch to origin after final report commit.
 - [x] Final changed-file validation passed on Modal L40S.
+- [x] Full `pre-commit run --all-files` passed on Modal L40S at `71fe451b`
+      using `fastvideo/tests/modal/launch_l40s_job.py` from `interleavethinker`
+      (`ap-XLXARFbxkJa40Yom5VxxfX`).
+- [x] Reviewed `docs/inference/support_matrix.md`; no update is required because
+      this branch does not add a model ID or registry entry.
 
 ## Findings
 Upstream SGLang batching is not just a larger prompt list. It has four pieces:
