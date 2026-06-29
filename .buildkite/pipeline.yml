@@ -498,7 +498,7 @@ steps:
                 - "fastvideo/eval/**"
                 - "fastvideo/tests/eval/**"
                 - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
+                - "docker/Dockerfile"
               config:
                 command: "timeout 90m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Eval Metrics Tests"

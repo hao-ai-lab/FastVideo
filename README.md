@@ -73,7 +73,7 @@ Install FastVideo (https://github.com/hao-ai-lab/FastVideo) into a fresh uv virt
 1. Detect the platform: run `uname -m`, `nvidia-smi`, and `nvcc --version`.
 2. Read and follow the matching install guide exactly (in this repo, or at
    https://hao-ai-lab.github.io/FastVideo/getting_started/installation/):
-     - NVIDIA GPU, x86_64, CUDA 12.8             -> docs/getting_started/installation/gpu.md
+     - NVIDIA GPU, x86_64                         -> docs/getting_started/installation/gpu.md
      - NVIDIA DGX Spark / GB10, aarch64, CUDA 13  -> docs/getting_started/installation/spark.md
      - Apple Silicon, macOS                       -> docs/getting_started/installation/mps.md
 3. Use uv for every step. If a command fails, debug it and tell me what you changed.

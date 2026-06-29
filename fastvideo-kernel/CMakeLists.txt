@@ -50,10 +50,12 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
         if(_FASTVIDEO_USER_CUDA_ARCH)
             # Caller pinned -DCMAKE_CUDA_ARCHITECTURES (which torch ignores); translate it
             # to the TORCH_CUDA_ARCH_LIST spelling: "121" -> "12.1", "90a" -> "9.0a".
-            string(REGEX MATCH "[af]$" _fv_suffix "${_FASTVIDEO_USER_CUDA_ARCH}")
-            string(REGEX REPLACE "[af]$" "" _fv_num "${_FASTVIDEO_USER_CUDA_ARCH}")
-            string(REGEX REPLACE "(.)$" ".\\1" _fv_num "${_fv_num}")    # dot before the last digit
-            set(_FV_ARCH_LIST "${_fv_num}${_fv_suffix}")
+            foreach(_fv_arch IN LISTS _FASTVIDEO_USER_CUDA_ARCH)
+                string(REGEX MATCH "[af]$" _fv_suffix "${_fv_arch}")
+                string(REGEX REPLACE "[af]$" "" _fv_num "${_fv_arch}")
+                string(REGEX REPLACE "(.)$" ".\\1" _fv_num "${_fv_num}")    # dot before the last digit
+                list(APPEND _FV_ARCH_LIST "${_fv_num}${_fv_suffix}")
+            endforeach()
             message(STATUS "CUDA arch: TORCH_CUDA_ARCH_LIST=${_FV_ARCH_LIST} (from -DCMAKE_CUDA_ARCHITECTURES=${_FASTVIDEO_USER_CUDA_ARCH})")
         else()
             # Best-effort probe of the visible GPU (mirrors build.sh detect_with_torch).
@@ -419,4 +421,3 @@ if(ENABLE_ATTN_QAT_INFER)
     install(TARGETS fp4attn_cuda LIBRARY DESTINATION .)
     install(TARGETS fp4quant_cuda LIBRARY DESTINATION .)
 endif()
-

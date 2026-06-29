@@ -114,8 +114,11 @@ ENV UV_TORCH_BACKEND=${UV_TORCH_BACKEND}
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     echo 'source $HOME/.local/bin/env' >> /root/.bashrc
 
-# Copy just the pyproject.toml first to leverage Docker cache
+# Copy dependency metadata and the local ARM kernel package first to leverage
+# Docker cache. The aarch64 source override in pyproject.toml resolves this path
+# in the dependency layer; unrelated FastVideo source remains in the later COPY.
 COPY pyproject.toml ./
+COPY fastvideo-kernel ./fastvideo-kernel
 
 # Create a dummy README to satisfy the installation
 RUN echo "# Placeholder" > README.md
