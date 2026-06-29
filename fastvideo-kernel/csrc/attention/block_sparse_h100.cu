@@ -8,6 +8,19 @@
 
 using namespace kittens;
 namespace cg = cooperative_groups;
+
+// ThunderKittens kernels below use Hopper `wgmma`/TMA (sm_90a). In the multi-arch
+// cu130 wheel they are also fed the sm_120a device pass, where ptxas rejects those
+// instructions, so compile the kernel bodies only on sm_90a and emit empty stubs
+// for every other device pass. __CUDA_ARCH_FEAT_SM90_ALL is defined only when the
+// device pass targets sm_90a (same flag CUTLASS uses); non-Hopper GPUs pick a
+// non-TK attention backend at runtime.
+#if !defined(__CUDA_ARCH__) || defined(__CUDA_ARCH_FEAT_SM90_ALL)
+#define FASTVIDEO_TK_HOPPER 1  // host pass or sm_90a device pass -> real body
+#else
+#define FASTVIDEO_TK_HOPPER 0  // any non-sm_90a device pass -> empty stub
+#endif
+
 constexpr int BLOCK_M             = 64;
 constexpr int BLOCK_N             = 64;
 template<int D> struct fwd_attend_ker_tile_dims {};
@@ -53,7 +66,8 @@ template<int D> struct fwd_globals {
 template<int D>
 __global__  __launch_bounds__(128, 4)
 void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) { // use block size of 64
-    extern __shared__ int __shm[]; 
+#if FASTVIDEO_TK_HOPPER
+    extern __shared__ int __shm[];
     tma_swizzle_allocator al((int*)&__shm[0]);
 
     using K = fwd_attend_ker_tile_dims<D>;
@@ -250,6 +264,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) { // use block siz
         tma::store_async(g.l, l_smem[0], tile_idx);
     }
     tma::store_async_wait();
+#endif  // FASTVIDEO_TK_HOPPER
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -275,7 +290,8 @@ constexpr int PREP_NUM_WARPS = (1);
 template<int D>
 __global__  __launch_bounds__(PREP_NUM_WARPS*kittens::WARP_THREADS, (D == 64) ? 6 / PREP_NUM_WARPS : 3 / PREP_NUM_WARPS)
 void bwd_attend_prep_ker(const __grid_constant__ bwd_prep_globals<D> g) {
-    extern __shared__ int __shm[]; 
+#if FASTVIDEO_TK_HOPPER
+    extern __shared__ int __shm[];
     tma_swizzle_allocator al((int*)&__shm[0]);
 
     int warpid = kittens::warpid();
@@ -322,6 +338,7 @@ void bwd_attend_prep_ker(const __grid_constant__ bwd_prep_globals<D> g) {
         }
     }
     tma::store_async_wait();
+#endif  // FASTVIDEO_TK_HOPPER
 }
 
 template<int D> struct bwd_attend_ker_tile_dims {};
@@ -409,6 +426,7 @@ stream_sub_tile(auto &reg_tile, auto &smem_vec, int tic) {
 template<int D>
 __global__ __launch_bounds__(128, (D == 64)? 3 : 2)
 void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
+#if FASTVIDEO_TK_HOPPER
     extern __shared__ int __shm[];
     tma_swizzle_allocator al((int*)&__shm[0]);
 
@@ -658,7 +676,8 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         tma::store_add_async(g.vg, vg_smem[0], tile_idx);
         tma::store_commit_group();
     }
-    tma::store_async_wait(); 
+    tma::store_async_wait();
+#endif  // FASTVIDEO_TK_HOPPER
 }
 
 #include "pyutils/torch_helpers.cuh"
