@@ -16,6 +16,11 @@ from fastvideo.configs.pipelines.wan import (
     FastWan2_2_TI2V_5B_FullAttn_Config,
     WanT2V480PConfig,
 )
+from fastvideo.models.dits.wanvideo import (
+    WanTransformerBlock,
+    WanTransformerBlock_VSA,
+    _select_wan_transformer_block,
+)
 from fastvideo.platforms.interface import AttentionBackendEnum
 from fastvideo.registry import get_pipeline_config_cls_from_name
 
@@ -62,9 +67,21 @@ def test_fastwan_2_2_required_vsa_does_not_mutate_global_backend():
 
 
 def test_fastwan_2_2_fullattn_config_does_not_require_vsa():
-    # The dense FullAttn checkpoint shares FastWan's DMD schedule but must NOT be
-    # forced onto VSA -- it runs dense attention.
-    assert FastWan2_2_TI2V_5B_FullAttn_Config().dit_config.required_attention_backend is None
+    config = FastWan2_2_TI2V_5B_FullAttn_Config()
+
+    assert config.dit_config.required_attention_backend is None
+    assert config.dit_config.incompatible_attention_backends == (VSA, )
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
+        "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
+    ],
+)
+def test_fastwan_2_2_fullattn_hf_ids_resolve_dense_config(model_id: str) -> None:
+    assert get_pipeline_config_cls_from_name(model_id) is FastWan2_2_TI2V_5B_FullAttn_Config
 
 
 def _write_minimal_wan_dmd_repo(model_dir: Path) -> None:
@@ -84,7 +101,7 @@ def _write_minimal_wan_dmd_repo(model_dir: Path) -> None:
     "relative_model_path",
     [
         Path("models--FastVideo--FastWan2.2-TI2V-5B-FullAttn-Diffusers") / "snapshots" / "deadbeef",
-        Path("renamed-FastWan2.2-TI2V-5B-FullAttn-Diffusers-copy"),
+        Path("models--FastVideo--FastWan2.2-TI2V-5B-Diffusers") / "snapshots" / "deadbeef",
     ],
 )
 def test_fastwan_2_2_fullattn_local_path_resolves_dense_config(tmp_path: Path,
@@ -95,6 +112,29 @@ def test_fastwan_2_2_fullattn_local_path_resolves_dense_config(tmp_path: Path,
     resolved_cls = get_pipeline_config_cls_from_name(str(model_dir))
 
     assert resolved_cls is FastWan2_2_TI2V_5B_FullAttn_Config
+
+
+def test_fastwan_2_2_fullattn_rejects_vsa_before_block_construction():
+    config = FastWan2_2_TI2V_5B_FullAttn_Config().dit_config
+    global_force_attn_backend(VSA)
+
+    with pytest.raises(ValueError, match=r"incompatible with the VIDEO_SPARSE_ATTN attention backend"):
+        _select_wan_transformer_block(config, model_name="FullAttn")
+
+
+@pytest.mark.parametrize("backend", [AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA])
+def test_fastwan_2_2_fullattn_accepts_dense_backends(backend):
+    config = FastWan2_2_TI2V_5B_FullAttn_Config().dit_config
+    global_force_attn_backend(backend)
+
+    assert _select_wan_transformer_block(config, model_name="FullAttn") is WanTransformerBlock
+
+
+def test_sparse_fastwan_selects_vsa_block():
+    config = FastWan2_2_TI2V_5B_Config().dit_config
+    global_force_attn_backend(VSA)
+
+    assert _select_wan_transformer_block(config, model_name="FastWan") is WanTransformerBlock_VSA
 
 
 @pytest.mark.parametrize("config_cls", [FastWan2_1_T2V_480P_Config, FastWan2_2_TI2V_5B_Config])
@@ -112,15 +152,45 @@ def test_sparse_fastwan_pipeline_config_json_roundtrip(tmp_path, config_cls):
     assert restored.dit_config.required_attention_backend is VSA
 
 
-def test_pipeline_config_load_restores_required_backend_enum(tmp_path):
+def test_fullattn_pipeline_config_json_roundtrip(tmp_path):
     config_path = tmp_path / "pipeline_config.json"
-    config = PipelineConfig(dit_config=DiTConfig(required_attention_backend=VSA))
+    config = FastWan2_2_TI2V_5B_FullAttn_Config()
+
+    config.dump_to_json(str(config_path))
+
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert payload["dit_config"]["required_attention_backend"] is None
+    assert payload["dit_config"]["incompatible_attention_backends"] == [VSA.name]
+
+    restored = FastWan2_2_TI2V_5B_FullAttn_Config()
+    restored.load_from_json(str(config_path))
+    assert restored.dit_config.required_attention_backend is None
+    assert restored.dit_config.incompatible_attention_backends == (VSA, )
+
+
+def test_fullattn_config_cannot_be_overridden_to_require_vsa():
+    config = FastWan2_2_TI2V_5B_FullAttn_Config()
+
+    config.update_pipeline_config({"dit_config": {"required_attention_backend": VSA.name}})
+
+    assert config.dit_config.required_attention_backend is None
+    assert config.dit_config.incompatible_attention_backends == (VSA, )
+
+
+def test_pipeline_config_load_restores_attention_backend_constraints(tmp_path):
+    config_path = tmp_path / "pipeline_config.json"
+    config = PipelineConfig(
+        dit_config=DiTConfig(
+            required_attention_backend=VSA,
+            incompatible_attention_backends=(AttentionBackendEnum.FLASH_ATTN, ),
+        ))
     config.dump_to_json(str(config_path))
 
     restored = PipelineConfig()
     restored.load_from_json(str(config_path))
 
     assert restored.dit_config.required_attention_backend is VSA
+    assert restored.dit_config.incompatible_attention_backends == (AttentionBackendEnum.FLASH_ATTN, )
 
 
 def test_check_requirement_returns_none_when_unrequired_and_unset(monkeypatch):

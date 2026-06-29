@@ -144,21 +144,23 @@ def get_attn_backend(
     | None = None,
     default_backend: AttentionBackendEnum | None = None,
 ) -> type[AttentionBackend]:
-    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends, default_backend)
+    # Resolve the global force / environment override before entering the
+    # cached function so backend changes participate in the cache key. This
+    # also validates the environment on every lookup, including cache hits.
+    selected_backend = get_selected_attn_backend()
+    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends, selected_backend, default_backend)
 
 
 @cache
 def _cached_get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: tuple[AttentionBackendEnum, ...]
-    | None = None,
+    supported_attention_backends: tuple[AttentionBackendEnum, ...] | None,
+    selected_backend: AttentionBackendEnum | None,
     default_backend: AttentionBackendEnum | None = None,
 ) -> type[AttentionBackend]:
     if not supported_attention_backends:
         raise ValueError("supported_attention_backends is empty")
-    # A global force overrides the FASTVIDEO_ATTENTION_BACKEND env var.
-    selected_backend = get_selected_attn_backend()
 
     # Layer-level default (e.g. a checkpoint that requires a specific sparse
     # backend). Lower precedence than the global force and the env var, so

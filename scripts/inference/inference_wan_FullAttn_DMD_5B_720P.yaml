@@ -1,5 +1,5 @@
 # Run with:
-#   FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN fastvideo generate --config scripts/inference/inference_wan_VSA_DMD_5B_720P.yaml
+#   FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN fastvideo generate --config scripts/inference/inference_wan_FullAttn_DMD_5B_720P.yaml
 generator:
   model_path: FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers
   engine:
