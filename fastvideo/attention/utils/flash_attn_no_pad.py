@@ -334,7 +334,7 @@ if _FA_VARLEN_VERSION == "2":
         )
 
         # Re-pad each grad and stack into dqkv.
-        def _repad(dt_unpad):
+        def _repad(dt_unpad: torch.Tensor) -> torch.Tensor:
             padded = pad_input(rearrange(dt_unpad, "nnz h d -> nnz (h d)"), indices, b, s)
             return rearrange(padded, "b s (h d) -> b s h d", h=h)
 
@@ -407,10 +407,12 @@ if _FA_VARLEN_VERSION == "2":
         softmax_scale: float | None,
         deterministic: bool,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        del key, value, query_padding_mask, key_padding_mask
+        del key, query_padding_mask, key_padding_mask
         del causal, dropout_p, softmax_scale, deterministic
         b, sq, h, _ = query.shape
-        out = query.new_empty(query.shape)
+        # `out`'s head_dim comes from value (d_v), matching the real forward's
+        # out_padded ([b, sq, h, d_v]); it can differ from query's d_q.
+        out = query.new_empty(b, sq, h, value.shape[-1])
         lse = query.new_empty(b, h, sq, dtype=torch.float32)
         return out, lse
 
@@ -483,7 +485,7 @@ if _FA_VARLEN_VERSION == "2":
 
         # k_indices is already available from the unpad_input above —
         # no need to recompute it for the dk/dv repad.
-        def _repad(dt_unpad, indices, batch, seqlen):
+        def _repad(dt_unpad: torch.Tensor, indices: torch.Tensor, batch: int, seqlen: int) -> torch.Tensor:
             padded = pad_input(rearrange(dt_unpad, "nnz h d -> nnz (h d)"), indices, batch, seqlen)
             return rearrange(padded, "b s (h d) -> b s h d", h=h)
 
@@ -611,9 +613,12 @@ else:
         softmax_scale: float | None,
         deterministic: bool,
     ) -> torch.Tensor:
-        del key, value, query_padding_mask, key_padding_mask
+        del key, query_padding_mask, key_padding_mask
         del causal, dropout_p, softmax_scale, deterministic
-        return query.new_empty(query.shape)
+        b, sq, h, _ = query.shape
+        # `out`'s head_dim comes from value (d_v), matching the real forward's
+        # output ([b, sq, h, d_v]); it can differ from query's d_q.
+        return query.new_empty(b, sq, h, value.shape[-1])
 
     def flash_attn_no_pad_compilable(qkv,
                                      key_padding_mask,
