@@ -497,6 +497,46 @@ def _register_configs() -> None:
         default_preset="lingbotworld_i2v",
     )
 
+    def _is_kandinsky5(path: str) -> bool:
+        path_lower = path.lower()
+        return "kandinsky5" in path_lower or "kandinsky-5" in path_lower
+
+    def _is_kandinsky5_t2v(path: str) -> bool:
+        path_lower = path.lower()
+        return _is_kandinsky5(path_lower) and "t2v" in path_lower and "i2v" not in path_lower
+
+    def _is_kandinsky5_i2v(path: str) -> bool:
+        path_lower = path.lower()
+        return _is_kandinsky5(path_lower) and "i2v" in path_lower
+
+    def _is_kandinsky5_t2v_lite(path: str) -> bool:
+        path_lower = path.lower()
+        return _is_kandinsky5_t2v(path_lower) and "lite" in path_lower and "distilled" not in path_lower
+
+    def _is_kandinsky5_t2v_pro(path: str) -> bool:
+        path_lower = path.lower()
+        return _is_kandinsky5_t2v(path_lower) and "pro" in path_lower and "distilled" not in path_lower
+
+    def _is_kandinsky5_t2v_lite_distilled(path: str) -> bool:
+        path_lower = path.lower()
+        return _is_kandinsky5_t2v(path_lower) and "lite" in path_lower and "distilled" in path_lower
+
+    def _is_kandinsky5_t2v_pro_distilled(path: str) -> bool:
+        path_lower = path.lower()
+        return _is_kandinsky5_t2v(path_lower) and "pro" in path_lower and "distilled" in path_lower
+
+    def _is_kandinsky5_i2v_lite(path: str) -> bool:
+        path_lower = path.lower()
+        return _is_kandinsky5_i2v(path_lower) and "lite" in path_lower and "distilled" not in path_lower
+
+    def _is_kandinsky5_i2v_pro(path: str) -> bool:
+        path_lower = path.lower()
+        return _is_kandinsky5_i2v(path_lower) and "pro" in path_lower and "distilled" not in path_lower
+
+    def _is_kandinsky5_i2v_pro_distilled(path: str) -> bool:
+        path_lower = path.lower()
+        return _is_kandinsky5_i2v(path_lower) and "pro" in path_lower and "distilled" in path_lower
+
     # Kandinsky5 Lite T2V
     register_configs(
         sampling_param_cls=None,
@@ -504,11 +544,9 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
-            
         ],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
-            and "i2v" not in path.lower(),
+            _is_kandinsky5_t2v_lite,
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_t2v_lite_5s",
@@ -522,11 +560,9 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "kandinskylab/Kandinsky-5.0-T2V-Pro-sft-5s-Diffusers",
-            
         ],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
-            and "i2v" not in path.lower(),
+            _is_kandinsky5_t2v_pro,
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_t2v_pro_5s",
@@ -539,11 +575,9 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "kandinskylab/Kandinsky-5.0-T2V-Lite-distilled-5s-Diffusers",
-            
         ],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
-            and "i2v" not in path.lower(),
+            _is_kandinsky5_t2v_lite_distilled,
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_t2v_lite_distilled_5s",
@@ -556,28 +590,22 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "kandinskylab/Kandinsky-5.0-T2V-Pro-distilled-5s-Diffusers",
-            
         ],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
-            and "i2v" not in path.lower(),
+            _is_kandinsky5_t2v_pro_distilled,
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_t2v_pro_distilled_5s",
     )
 
-
-    # Kandinsky5 Lite I2V 
+    # Kandinsky5 Lite I2V
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=Kandinsky5I2VConfig,
         workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "kandinskylab/Kandinsky-5.0-I2V-Lite-5s-Diffusers"
-        ],
+        hf_model_paths=["kandinskylab/Kandinsky-5.0-I2V-Lite-5s-Diffusers"],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
-            and "i2v" in path.lower(),
+            _is_kandinsky5_i2v_lite,
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_i2v_lite_5s",
@@ -589,12 +617,9 @@ def _register_configs() -> None:
         sampling_param_cls=None,
         pipeline_config_cls=Kandinsky5I2VConfig,
         workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers"
-        ],
+        hf_model_paths=["kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers"],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
-            and "i2v" in path.lower(),
+            _is_kandinsky5_i2v_pro,
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_i2v_pro_5s",
@@ -605,12 +630,9 @@ def _register_configs() -> None:
         sampling_param_cls=None,
         pipeline_config_cls=Kandinsky5I2VConfig,
         workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "kandinskylab/Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers"
-        ],
+        hf_model_paths=["kandinskylab/Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers"],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5"))
-            and "i2v" in path.lower(),
+            _is_kandinsky5_i2v_pro_distilled,
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_i2v_pro_distilled_5s",
@@ -662,7 +684,7 @@ def _register_configs() -> None:
             "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
             "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
-            # Legacy HF paths (kept for backward compat — pre-rename names):
+            # Legacy HF paths (kept for backward compat - pre-rename names):
             "FastVideo/Matrix-Game-2.0-Base-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
