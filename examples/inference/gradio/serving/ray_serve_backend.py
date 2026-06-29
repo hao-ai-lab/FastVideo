@@ -127,11 +127,12 @@ def save_image_from_base64(image_data: str, output_dir: str) -> Optional[str]:
 
 
 def setup_model_environment(model_path: str) -> None:
-    # if "fullattn" in model_path.lower():
-    #     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
-    # else:
-    #     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
+    from fastvideo.platforms import AttentionBackendEnum
+    from fastvideo.registry import get_pipeline_config_cls_from_name
+
+    pipeline_config = get_pipeline_config_cls_from_name(model_path)()
+    attention_backend = pipeline_config.dit_config.required_attention_backend or AttentionBackendEnum.FLASH_ATTN
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = attention_backend.name
     os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
 

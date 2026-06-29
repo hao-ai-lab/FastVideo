@@ -53,20 +53,53 @@ class DiTConfig(ModelConfig):
     # fails loudly if the selected FASTVIDEO_ATTENTION_BACKEND does not match it.
     # None = no requirement (the common case).
     required_attention_backend: AttentionBackendEnum | None = None
+    # A checkpoint can support the model's ordinary attention implementation
+    # while still being incompatible with a particular backend-specific block
+    # layout. Keep those checkpoint constraints separate from the architecture's
+    # general _supported_attention_backends list.
+    incompatible_attention_backends: tuple[AttentionBackendEnum, ...] = ()
+
+    @staticmethod
+    def _parse_attention_backend(backend: AttentionBackendEnum | str, field_name: str) -> AttentionBackendEnum:
+        if isinstance(backend, AttentionBackendEnum):
+            return backend
+        if isinstance(backend, str):
+            try:
+                return AttentionBackendEnum[backend]
+            except KeyError as exc:
+                valid_backends = ", ".join(AttentionBackendEnum.__members__)
+                raise ValueError(
+                    f"Unknown attention backend {backend!r} in {field_name}; expected one of: {valid_backends}"
+                ) from exc
+        raise TypeError(f"{field_name} must contain AttentionBackendEnum values or names, got {type(backend).__name__}")
 
     def update_model_config(self, source_model_dict: dict[str, Any]) -> None:
         source_model_dict = source_model_dict.copy()
         required_backend = source_model_dict.get("required_attention_backend")
         if isinstance(required_backend, str):
-            try:
-                source_model_dict["required_attention_backend"] = AttentionBackendEnum[required_backend]
-            except KeyError as exc:
-                valid_backends = ", ".join(AttentionBackendEnum.__members__)
-                raise ValueError(
-                    f"Unknown required attention backend {required_backend!r}; expected one of: {valid_backends}"
-                ) from exc
+            source_model_dict["required_attention_backend"] = self._parse_attention_backend(
+                required_backend, "required_attention_backend")
+
+        incompatible_backends = source_model_dict.get("incompatible_attention_backends")
+        if incompatible_backends is not None:
+            if not isinstance(incompatible_backends, list | tuple):
+                raise TypeError("incompatible_attention_backends must be a list or tuple")
+            source_model_dict["incompatible_attention_backends"] = tuple(
+                self._parse_attention_backend(backend, "incompatible_attention_backends")
+                for backend in incompatible_backends)
 
         super().update_model_config(source_model_dict)
+
+    def validate_attention_backend_compatibility(
+        self,
+        selected_backend: AttentionBackendEnum | None,
+        *,
+        model_name: str = "This model",
+    ) -> None:
+        if selected_backend in self.incompatible_attention_backends:
+            assert selected_backend is not None
+            raise ValueError(f"{model_name} is incompatible with the {selected_backend.name} attention backend. "
+                             "Select a compatible attention backend before loading the model.")
 
     @staticmethod
     def add_cli_args(parser: Any, prefix: str = "dit-config") -> Any:

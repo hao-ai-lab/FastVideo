@@ -281,17 +281,20 @@ class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
 
 
 @dataclass
-class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
+class FastWan2_2_TI2V_5B_FullAttn_Config(Wan2_2_TI2V_5B_Config):
     """FullAttn (dense-attention) DMD variant of FastWan 2.2 TI2V 5B.
 
-    Shares FastWan's DMD denoising schedule but runs dense attention, so -- unlike
-    the sparse-distilled FastWan2.2-TI2V-5B-Diffusers -- it does NOT require VSA.
+    Shares FastWan's DMD denoising schedule but uses the published dense
+    checkpoint layout, which has no VSA gate-compression weights.
     """
+
+    flow_shift: float | None = 5.0
+    dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        # This checkpoint is dense; clear the VSA requirement inherited from FastWan.
         self.dit_config.required_attention_backend = None
+        self.dit_config.incompatible_attention_backends = (FASTWAN_REQUIRED_ATTENTION_BACKEND, )
 
 
 @dataclass
