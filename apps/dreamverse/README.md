@@ -15,7 +15,7 @@ pip install --upgrade pip
 pip install uv
 uv venv .venv --python 3.12
 source .venv/bin/activate
-UV_TORCH_BACKEND=auto uv pip install "fastvideo[dreamverse]"
+UV_TORCH_BACKEND=cu126 uv pip install "fastvideo[dreamverse]"
 ```
 
 ### Method 2: From source
@@ -28,8 +28,10 @@ pip install --upgrade pip
 pip install uv
 uv venv .venv --python 3.12
 source .venv/bin/activate
-UV_TORCH_BACKEND=auto uv pip install -e ".[dreamverse]"
+UV_TORCH_BACKEND=cu126 uv pip install -e ".[dreamverse]"
 ```
+
+Use `UV_TORCH_BACKEND=cu130` instead on CUDA 13.
 
 ### Method 3: Using Docker
 
@@ -244,8 +246,9 @@ npm run e2e
 
 `dreamverse-server` exits with an install hint
 
-- install the Dreamverse extra with `UV_TORCH_BACKEND=auto uv pip install -e ".[dreamverse]"` from a
-  source checkout, or `UV_TORCH_BACKEND=auto uv pip install "fastvideo[dreamverse]"` from PyPI.
+- install the Dreamverse extra with `UV_TORCH_BACKEND=cu126 uv pip install -e ".[dreamverse]"` from a
+  source checkout, or `UV_TORCH_BACKEND=cu126 uv pip install "fastvideo[dreamverse]"` from PyPI
+  (`cu130` on CUDA 13).
 
 Prompt-provider environment variable errors
 
