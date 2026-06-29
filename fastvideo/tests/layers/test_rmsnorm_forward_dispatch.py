@@ -54,7 +54,20 @@ def _run_torchrun(script_path: Path, mode: str, output_path: Path) -> None:
     ]
     env = os.environ.copy()
     env.setdefault("TORCHDYNAMO_DISABLE", "1")
-    process = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    try:
+        process = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(
+            f"{mode} worker timed out after 120 seconds\n"
+            f"STDOUT:\n{error.stdout}\n"
+            f"STDERR:\n{error.stderr}"
+        ) from error
     if process.returncode != 0:
         raise RuntimeError(
             f"{mode} worker failed with code {process.returncode}\n"
