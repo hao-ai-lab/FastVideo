@@ -44,12 +44,11 @@ git submodule update --init --recursive \
   fastvideo-kernel/include/cutlass fastvideo-kernel/include/tk
 
 # 3. Install FastVideo (editable; compiles the in-tree kernel for the GB10).
-#    UV_TORCH_BACKEND=auto selects the CUDA-13 (cu130) torch for this box.
-UV_TORCH_BACKEND=auto uv pip install -e .
+UV_TORCH_BACKEND=cu130 uv pip install -e .
 ```
 
 Contributors who want the lint/test tooling:
-`UV_TORCH_BACKEND=auto uv pip install -e ".[dev]"`.
+`UV_TORCH_BACKEND=cu130 uv pip install -e ".[dev]"`.
 
 Then jump to [Verify the install](#verify-the-install).
 
@@ -101,7 +100,7 @@ are iterating on the CUDA source or the auto-build fails:
 
 ```bash
 # install torch + the kernel's build deps into the active venv first
-UV_TORCH_BACKEND=auto uv pip install torch torchvision torchaudio scikit-build-core cmake ninja setuptools wheel
+UV_TORCH_BACKEND=cu130 uv pip install torch torchvision torchaudio scikit-build-core cmake ninja setuptools wheel
 # build just the kernel against that torch (auto-detects sm_121)
 uv pip install ./fastvideo-kernel --no-build-isolation
 # then the rest of FastVideo

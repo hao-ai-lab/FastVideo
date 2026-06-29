@@ -4,7 +4,7 @@ Instructions to install FastVideo for Apple Silicon.
 
 ## Requirements
 
-- **OS: MacOS**
+- **OS: macOS 14 or newer**
 - **Python: 3.12.4**
 
 ## Set up using Python
@@ -52,7 +52,7 @@ brew install ffmpeg
 #### With uv (recommended)
 
 ```bash
-UV_TORCH_BACKEND=auto uv pip install fastvideo
+uv pip install fastvideo
 ```
 
 #### With Conda environment (alternative)
@@ -60,7 +60,7 @@ UV_TORCH_BACKEND=auto uv pip install fastvideo
 `uv` works inside an active conda env too, so prefer `uv pip` for the actual install:
 
 ```bash
-UV_TORCH_BACKEND=auto uv pip install fastvideo
+uv pip install fastvideo
 ```
 
 ### Installation from Source
@@ -76,13 +76,13 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 Basic installation:
 
 ```bash
-UV_TORCH_BACKEND=auto uv pip install -e .
+uv pip install -e .
 ```
 
 Alternative with Conda environment:
 
 ```bash
-UV_TORCH_BACKEND=auto uv pip install -e .
+uv pip install -e .
 ```
 
 ## Development Environment Setup

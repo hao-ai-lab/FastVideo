@@ -100,7 +100,7 @@ pip install "nvidia-cutlass-dsl>=4.5.2" apache-tvm-ffi flashinfer-python
 ```
 
 The `--no-deps` flag prevents upgrading torch/torchvision. Use the supported
-PyTorch 2.12 and CUDA 13 environment for this kernel.
+PyTorch 2.12.0 and CUDA 13 environment for this kernel.
 
 #### Usage
 

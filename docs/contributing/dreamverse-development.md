@@ -30,7 +30,7 @@ If `dreamverse-server` is missing, install FastVideo with the `dreamverse`
 extra from the checkout:
 
 ```bash
-UV_TORCH_BACKEND=auto uv pip install -e ".[dreamverse]"
+UV_TORCH_BACKEND=cu126 uv pip install -e ".[dreamverse]"  # use cu130 on CUDA 13
 ```
 
 ## Frontend build and tests

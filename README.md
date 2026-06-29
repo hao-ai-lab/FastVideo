@@ -55,13 +55,16 @@ We recommend using [uv](https://docs.astral.sh/uv/) to create a clean environmen
 uv venv --python 3.12 --seed
 source .venv/bin/activate
 
-# Install FastVideo
-UV_TORCH_BACKEND=auto uv pip install fastvideo
+# Install FastVideo on NVIDIA CUDA 12
+UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 ```
+
+Use `UV_TORCH_BACKEND=cu130` on CUDA 13. Apple silicon users should follow the
+[MPS installation guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
 
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.
 
-> **On an NVIDIA DGX Spark (GB10 / ARM64 + CUDA 13)?** There's no prebuilt ARM wheel for the CUDA kernel, so it's an editable from-source install (`UV_TORCH_BACKEND=auto uv pip install -e .`, which compiles the kernel for you) rather than `UV_TORCH_BACKEND=auto uv pip install fastvideo`. Follow the [DGX Spark install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/spark/).
+> **On an NVIDIA DGX Spark (GB10 / ARM64 + CUDA 13)?** There's no prebuilt ARM wheel for the CUDA kernel, so it's an editable from-source install (`UV_TORCH_BACKEND=cu130 uv pip install -e .`, which compiles the kernel for you) rather than `UV_TORCH_BACKEND=cu130 uv pip install fastvideo`. Follow the [DGX Spark install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/spark/).
 
 ### Install with an AI coding agent
 

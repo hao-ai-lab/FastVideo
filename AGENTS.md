@@ -11,7 +11,7 @@
 - Static assets: `assets/` (including `assets/images/`, `assets/videos/`, and `assets/prompts/`) and `comfyui/assets/`.
 
 ## Build, Test, and Development Commands
-- `UV_TORCH_BACKEND=auto uv pip install -e ".[dev]"`: editable install with lint/test extras.
+- `UV_TORCH_BACKEND=cu126 uv pip install -e ".[dev]"`: editable CUDA 12 install with lint/test extras (`cu130` on CUDA 13).
 - `pre-commit install --hook-type pre-commit --hook-type commit-msg`: enable local hooks.
 - `pre-commit run --all-files`: run formatter/lint/type/spelling checks.
 - `pytest tests/`: run top-level test suite.

@@ -80,7 +80,7 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 
 #### 2. Install FastVideo
 
-FastVideo requires PyTorch 2.12. Use `UV_TORCH_BACKEND=cu126` for CUDA 12 or
+FastVideo requires PyTorch 2.12.0. Use `UV_TORCH_BACKEND=cu126` for CUDA 12 or
 `UV_TORCH_BACKEND=cu130` for CUDA 13.
 
 Basic installation:
