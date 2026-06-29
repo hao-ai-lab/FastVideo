@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_cuda_matrix:
-        description: 'Build the CUDA image matrix (py3.12 x CUDA 12.6.3/13.0.0 x amd64/arm64)'
+        description: 'Build multi-arch CUDA images (12.6.3 default; 13.0.0 explicitly tagged)'
         required: false
         default: true
         type: boolean
@@ -24,8 +24,9 @@ jobs:
   # builds natively and pushes only by digest; publish-cuda-manifests is the sole
   # owner of the shared tags. CUDA 12.6 arm64 targets Hopper (sm_90a / GH200 class),
   # because CUDA 12.6 cannot compile sm_121. CUDA 13 arm64 targets GB10 (sm_121).
-  # 13.0.0 remains the default `py3.12`/`latest` image; 12.6.3 is the broader-driver
-  # build. Flash-attn 2.8.3 comes from the architecture-specific prebuilt releases.
+  # 12.6.3/cu126 owns the default `py3.12`/`latest` tags and keeps its versioned
+  # aliases; 13.0.0/cu130 is published under explicit versioned tags. Flash-attn
+  # 2.8.3 comes from the architecture-specific prebuilt releases.
   build-cuda-images:
     if: ${{ github.event.inputs.build_cuda_matrix == 'true' }}
     strategy:
@@ -37,7 +38,7 @@ jobs:
             torch_backend: 'cu126'
             fa_tag: 'cu126torch2.12'
           - version: '13.0.0'
-            suffix: ''
+            suffix: '-cuda13.0.0'
             torch_backend: 'cu130'
             fa_tag: 'cu130torch2.12'
         architecture:
@@ -77,8 +78,10 @@ jobs:
         cuda:
           - version: '12.6.3'
             suffix: '-cuda12.6.3'
+            is_default: true
           - version: '13.0.0'
-            suffix: ''
+            suffix: '-cuda13.0.0'
+            is_default: false
     steps:
       - name: Download architecture digests
         uses: actions/download-artifact@v4
@@ -106,13 +109,13 @@ jobs:
       - name: Prepare tags
         id: prepare-tags
         env:
-          TAG_SUFFIX: py3.12${{ matrix.cuda.suffix }}
-          MARK_AS_LATEST: ${{ matrix.cuda.version == '13.0.0' }}
+          VERSIONED_TAG_PREFIX: py3.12${{ matrix.cuda.suffix }}
+          PUBLISH_DEFAULT_TAGS: ${{ matrix.cuda.is_default }}
         run: |
           SHORT_SHA="${GITHUB_SHA::7}"
-          TAGS="type=raw,value=${TAG_SUFFIX}-latest\ntype=raw,value=${TAG_SUFFIX}-sha-${SHORT_SHA}"
-          if [[ "${MARK_AS_LATEST}" == "true" ]]; then
-            TAGS="${TAGS}\ntype=raw,value=latest"
+          TAGS="type=raw,value=${VERSIONED_TAG_PREFIX}-latest\ntype=raw,value=${VERSIONED_TAG_PREFIX}-sha-${SHORT_SHA}"
+          if [[ "${PUBLISH_DEFAULT_TAGS}" == "true" ]]; then
+            TAGS="type=raw,value=latest\ntype=raw,value=py3.12-latest\ntype=raw,value=py3.12-sha-${SHORT_SHA}\n${TAGS}"
           fi
           {
             echo "tags<<EOF"
