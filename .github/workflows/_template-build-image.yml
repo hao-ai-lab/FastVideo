@@ -55,6 +55,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        # The Docker context intentionally includes .git so the kernel build can
+        # initialize its pinned submodules. Do not copy the checkout token with it.
+        with:
+          persist-credentials: false
       
       - name: Free up disk space
         run: |

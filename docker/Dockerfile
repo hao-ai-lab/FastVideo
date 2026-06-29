@@ -116,11 +116,11 @@ ENV UV_TORCH_BACKEND=${UV_TORCH_BACKEND}
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     echo 'source $HOME/.local/bin/env' >> /root/.bashrc
 
-# Copy dependency metadata and the local ARM kernel package first to leverage
-# Docker cache. The aarch64 source override in pyproject.toml resolves this path
-# in the dependency layer; unrelated FastVideo source remains in the later COPY.
+# Copy only dependency metadata first to leverage Docker cache. The kernel is
+# deliberately excluded from this layer: arm64 resolves it to the in-tree source,
+# which needs the complete checkout and CUDA architecture settings below.
 COPY pyproject.toml ./
-COPY fastvideo-kernel ./fastvideo-kernel
+COPY docker/uv-excludes ./docker/uv-excludes
 
 # Create a dummy README to satisfy the installation
 RUN echo "# Placeholder" > README.md
@@ -133,7 +133,7 @@ RUN --mount=type=cache,target=/opt/uv/cache \
     uv venv --python ${PYTHON_VERSION} --seed /opt/venv && \
     source /opt/venv/bin/activate && \
     uv pip install --upgrade pip && \
-    uv pip install ".[dev]" && \
+    uv pip install --excludes docker/uv-excludes ".[dev]" && \
     PYTAG=cp$(echo "${PYTHON_VERSION}" | tr -d .) && \
     case "${TARGETARCH:-amd64}" in \
         amd64) \
@@ -180,23 +180,24 @@ RUN --mount=type=cache,target=/opt/uv/cache \
 
 COPY . .
 
-# Install FastVideo itself (editable) now that the source is present, and set up
-# shell configuration. Most dependencies are already satisfied by the layer above.
-RUN --mount=type=cache,target=/opt/uv/cache \
-    source $HOME/.local/bin/env && \
-    source /opt/venv/bin/activate && \
-    uv pip install -e ".[dev]" && \
-    git config --unset-all http.https://github.com/.extraheader || true && \
-    echo 'source /opt/venv/bin/activate' >> /root/.bashrc && \
-    echo 'if [ -n "$ZSH_VERSION" ] && [ -f ~/.zshrc ]; then . ~/.zshrc; elif [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
-
-# Install FastVideo Unified Kernel. The arch comes from TORCH_CUDA_ARCH_LIST
-# (default Hopper sm_90a) so build.sh does not need a live GPU to probe.
+# Install FastVideo Unified Kernel exactly once. build.sh initializes only its
+# CUTLASS/ThunderKittens submodules, then compiles for TORCH_CUDA_ARCH_LIST
+# (default Hopper sm_90a) without requiring a live GPU.
 RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
     cd fastvideo-kernel && \
-    git submodule update --init --recursive && \
     TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} ./build.sh
+
+# Install FastVideo itself (editable) now that the source is present, and set up
+# shell configuration. Dependencies and the local kernel are already installed,
+# so --no-deps prevents uv from resolving/building the ARM source override again.
+RUN --mount=type=cache,target=/opt/uv/cache \
+    source $HOME/.local/bin/env && \
+    source /opt/venv/bin/activate && \
+    uv pip install -e ".[dev]" --no-deps && \
+    (git config --unset-all http.https://github.com/.extraheader || true) && \
+    echo 'source /opt/venv/bin/activate' >> /root/.bashrc && \
+    echo 'if [ -n "$ZSH_VERSION" ] && [ -f ~/.zshrc ]; then . ~/.zshrc; elif [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
 
 EXPOSE 22
