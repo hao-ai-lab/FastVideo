@@ -273,11 +273,17 @@ class FastVideoArgs:
         dit_config = getattr(self.pipeline_config, "dit_config", None)
         if dit_config is None:
             return
+        # Resolve a registry name (e.g. "nvfp4_qat_train" from the CLI) to a
+        # QuantizationConfig instance; a bare string has no get_quant_method.
+        tq = self.transformer_quant
+        if isinstance(tq, str):
+            from fastvideo.layers.quantization import get_quantization_config
+            tq = get_quantization_config(tq)()
         # Don't overwrite if the caller already set it explicitly on
         # dit_config (e.g. via ``pipeline_config.dit_config.quant_config = NVFP4Config()``);
         # the explicit setter wins.
         if getattr(dit_config, "quant_config", None) is None:
-            dit_config.quant_config = self.transformer_quant
+            dit_config.quant_config = tq
 
     def _resolve_refine_args(self) -> None:
         """Map generic refine_* args to LTX-2-specific refine fields."""
@@ -931,6 +937,12 @@ class TrainingArgs(FastVideoArgs):
     # VSA training decay parameters
     VSA_decay_rate: float = 0.01  # decay rate -> 0.02
     VSA_decay_interval_steps: int = 1  # decay interval steps -> 50
+    # Reuse the per-step padded VSA tile buffer across attention layers during
+    # training. Defaults to False: under full activation checkpointing the
+    # cached buffer survives into the backward recompute and inflates peak
+    # memory (see #1423). Enable on memory-rich setups to keep the per-step
+    # buffer-reuse speedup.
+    VSA_cache_tile_buf: bool = False
 
     # LoRA training parameters
     lora_rank: int | None = None
@@ -1018,6 +1030,12 @@ class TrainingArgs(FastVideoArgs):
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         parser.add_argument("--data-path", type=str, required=True, help="Path to parquet files")
+        parser.add_argument("--transformer-quant",
+                            type=str,
+                            default=None,
+                            help="Quantization config name for the DiT (e.g. nvfp4_qat_train for "
+                            "QAT-finetune FP4 linear with a straight-through estimator). "
+                            "Resolved to a QuantizationConfig and pinned on dit_config.quant_config.")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,
@@ -1171,6 +1189,13 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             default=TrainingArgs.VSA_decay_interval_steps,
             help="VSA decay interval steps")
+        parser.add_argument("--VSA-cache-tile-buf",
+                            action=StoreBoolean,
+                            default=TrainingArgs.VSA_cache_tile_buf,
+                            help="Reuse the per-step padded VSA tile buffer across attention "
+                            "layers during training. Off by default to avoid the activation-"
+                            "checkpointing OOM (#1423); enable on memory-rich setups for the "
+                            "per-step buffer-reuse speedup.")
         parser.add_argument("--lora-training", action=StoreBoolean, help="Whether to use LoRA training")
         parser.add_argument("--lora-rank", type=int, help="LoRA rank")
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")

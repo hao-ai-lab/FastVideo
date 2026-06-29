@@ -31,6 +31,7 @@ from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
                                                get_rotary_pos_embed)
 from fastvideo.layers.visual_embedding import (PatchEmbed)
 from fastvideo.logger import init_logger
+from fastvideo.models.dits._relative_rope import relativistic_window_offsets
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.wanvideo import WanT2VCrossAttention, WanTimeTextImageEmbedding
 from fastvideo.platforms import AttentionBackendEnum, current_platform
@@ -49,7 +50,8 @@ class CausalWanSelfAttention(nn.Module):
                  sink_size: int = 0,
                  qk_norm=True,
                  eps=1e-6,
-                 parallel_attention=False) -> None:
+                 parallel_attention=False,
+                 rope_cache_policy: str = "absolute") -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -60,6 +62,7 @@ class CausalWanSelfAttention(nn.Module):
         self.qk_norm = qk_norm
         self.eps = eps
         self.parallel_attention = parallel_attention
+        self.rope_cache_policy = rope_cache_policy
 
         # Scaled dot product attention
         self.attn = LocalAttention(
@@ -94,8 +97,11 @@ class CausalWanSelfAttention(nn.Module):
             cache_start = current_start
 
         cos, sin = freqs_cis
-        roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
-        roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
+        # relativistic defers roping until the cache window is known (and caches raw k)
+        relativistic = self.rope_cache_policy == "relativistic" and kv_cache is not None
+        if not relativistic:
+            roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
+            roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
 
         if kv_cache is None:
             # Padding for flex attention
@@ -126,7 +132,7 @@ class CausalWanSelfAttention(nn.Module):
                 block_mask=block_mask
             )[:, :, :-padded_length].transpose(2, 1)
         else:
-            current_end = current_start + roped_query.shape[1]
+            current_end = current_start + q.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
             if self.local_attn_size == -1:
                 max_attention_size = (GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES * frame_seqlen)
@@ -141,7 +147,8 @@ class CausalWanSelfAttention(nn.Module):
                     f"with frame_seqlen={frame_seqlen}.")
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
-            num_new_tokens = roped_query.shape[1]
+            num_new_tokens = q.shape[1]
+            stored_key = k if relativistic else roped_key  # raw vs roped in cache
             global_end_index = (
                 int(kv_cache["global_end_index"].item())
                 if isinstance(kv_cache["global_end_index"], torch.Tensor)
@@ -167,7 +174,7 @@ class CausalWanSelfAttention(nn.Module):
                 local_end_index = local_end_index_prev + current_end - \
                     global_end_index - num_evicted_tokens
                 local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+                kv_cache["k"][:, local_start_index:local_end_index] = stored_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
                 # Assign new keys/values directly up to current_end
@@ -176,13 +183,20 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache["k"] = kv_cache["k"].detach()
                 kv_cache["v"] = kv_cache["v"].detach()
                 # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+                kv_cache["k"][:, local_start_index:local_end_index] = stored_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
-            x = self.attn(
-                roped_query,
-                kv_cache["k"][:, max(0, local_end_index - max_attention_size):local_end_index],
-                kv_cache["v"][:, max(0, local_end_index - max_attention_size):local_end_index]
-            )
+            key_window = kv_cache["k"][:, max(0, local_end_index - max_attention_size):local_end_index]
+            value_window = kv_cache["v"][:, max(0, local_end_index - max_attention_size):local_end_index]
+            if relativistic:
+                window_len, query_lo, query_hi = relativistic_window_offsets(
+                    local_end_index, num_new_tokens, max_attention_size)
+                roped_query = _apply_rotary_emb(
+                    q, cos[query_lo:query_hi], sin[query_lo:query_hi],
+                    is_neox_style=False).type_as(v)
+                key_window = _apply_rotary_emb(
+                    key_window, cos[:window_len], sin[:window_len],
+                    is_neox_style=False).type_as(v)
+            x = self.attn(roped_query, key_window, value_window)
             if isinstance(kv_cache["global_end_index"], torch.Tensor):
                 kv_cache["global_end_index"].fill_(current_end)
             else:
@@ -207,7 +221,8 @@ class CausalWanTransformerBlock(nn.Module):
                  eps: float = 1e-6,
                  added_kv_proj_dim: int | None = None,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
-                 prefix: str = ""):
+                 prefix: str = "",
+                 rope_cache_policy: str = "absolute"):
         super().__init__()
 
         # 1. Self-attention
@@ -223,7 +238,8 @@ class CausalWanTransformerBlock(nn.Module):
             local_attn_size=local_attn_size,
             sink_size=sink_size,
             qk_norm=qk_norm,
-            eps=eps)
+            eps=eps,
+            rope_cache_policy=rope_cache_policy)
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
         self.local_attn_size = local_attn_size
@@ -373,6 +389,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         self.patch_size = config.patch_size
         self.text_len = config.text_len
         self.local_attn_size = config.local_attn_size
+        self.rope_cache_policy = config.arch_config.rope_cache_policy
 
         # 1. Patch & position embedding
         self.patch_embedding = PatchEmbed(in_chans=config.in_channels,
@@ -400,7 +417,8 @@ class CausalWanTransformer3DModel(BaseDiT):
                               config.eps,
                               config.added_kv_proj_dim,
                               self._supported_attention_backends,
-                              prefix=f"{config.prefix}.blocks.{i}")
+                              prefix=f"{config.prefix}.blocks.{i}",
+                              rope_cache_policy=config.arch_config.rope_cache_policy)
             for i in range(config.num_layers)
         ])
 
@@ -520,15 +538,24 @@ class CausalWanTransformer3DModel(BaseDiT):
         # Get rotary embeddings
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
+        if self.rope_cache_policy == "relativistic":
+            # fixed table over [0, max_attention_frames); attention slices it per step
+            max_attention_frames = (
+                GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES
+                if self.local_attn_size == -1 else self.local_attn_size)
+            rope_num_frames = max_attention_frames * get_sp_world_size()
+            rope_start_frame = 0
+        else:
+            rope_num_frames = post_patch_num_frames * get_sp_world_size()
+            rope_start_frame = start_frame  # 0 when kv_cache is None
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sp_world_size(), post_patch_height,
-             post_patch_width),
+            (rope_num_frames, post_patch_height, post_patch_width),
             self.hidden_size,
             self.num_attention_heads,
             rope_dim_list,
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
             rope_theta=10000,
-            start_frame=start_frame # Assume that start_frame is 0 when kv_cache is None
+            start_frame=rope_start_frame
         )
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)

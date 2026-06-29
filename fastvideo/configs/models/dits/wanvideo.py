@@ -82,6 +82,9 @@ class WanVideoArchConfig(DiTArchConfig):
     sink_size: int = 0  # Size of the attention sink, we keep the first `sink_size` frames unchanged when rolling the KV cache
     num_frames_per_block: int = 3
     sliding_window_num_frames: int = 21
+    # RoPE policy for the causal-rollout paths (causal Wan / MatrixGame2).
+    # "relativistic" keeps long rollouts in-distribution; a no-op unless sink_size > 0 and local_attn_size > 0.
+    rope_cache_policy: str = "absolute"
 
     def __post_init__(self):
         super().__post_init__()

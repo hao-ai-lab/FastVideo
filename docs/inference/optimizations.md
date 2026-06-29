@@ -11,6 +11,9 @@ This page describes the various options for speeding up generation times in Fast
   - [Sliding Tile Attention (Archived)](#sliding-tile-attention-archived)
   - [Sage Attention](#sage-attention)
   - [Sage Attention 3](#sage-attention-3)
+
+- [FP8 Weight Quantization](#fp8-weight-quantization)
+
 - [Adaptive Guidance (CFG gating)](#adaptive-guidance-cfg-gating)
 
 - [torch.compile](#torch-compile)
@@ -24,6 +27,7 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
+- Attn-QAT inference (modified SageAttention3 FP4, sm_120/RTX 5090): `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
@@ -122,6 +126,45 @@ gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
 - Per-call cosine similarity vs BF16: ~0.99 (slight quantization error accumulates over denoising steps)
 - Only supports `headdim >= 128`
 
+### NVFP4 + Attn-QAT (modified SageAttention3, Blackwell sm_120)
+
+**`ATTN_QAT_INFER`** with **`transformer_quant=nvfp4_qat`**
+
+Runs the DiT fully in 4-bit: NVFP4 linear layers (activations quantized on the
+fly) plus the modified SageAttention3 FP4 attention backend. This is the
+inference half of the Quantization-Aware Distillation (QAD) recipe and the path
+used for the RTX 5090 release.
+
+The `attn_qat_infer` kernel hard-gates on **sm_120 (consumer Blackwell / RTX
+5090)**; on other GPUs the backend logs a notice and falls back to Flash
+Attention. See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040).
+
+Enable both halves — attention via the env var, linear via `transformer_quant`:
+
+```python
+import os
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
+
+from fastvideo import VideoGenerator
+from fastvideo.layers.quantization import get_quantization_config
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    num_gpus=1,
+    # Wan-2.1 uses the nvfp4_qat config (NVFP4 is LTX2-specific). Pass an
+    # instance — the bare string is not resolved on the from_pretrained path.
+    transformer_quant=get_quantization_config("nvfp4_qat")(),
+    use_fsdp_inference=False,     # FSDP shards invalidate the FP4 tensor pointers
+)
+gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
+```
+
+Or run the example script:
+
+```bash
+python examples/inference/optimizations/nvfp4_qat_wan2_1_1_3b.py
+python examples/inference/optimizations/nvfp4_qat_wan2_1_1_3b.py --bf16  # baseline
+```
+
 ### Sliding Tile Attention (Archived)
 
 **`SLIDING_TILE_ATTN`**
@@ -177,6 +220,50 @@ To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repos
 These backends are model-specific and require the corresponding kernels and
 dependencies. Use the support matrix and model examples to confirm compatibility
 before enabling them.
+
+## FP8 Weight Quantization
+
+**`transformer_quant="FP8"`**
+
+Quantizes DiT linear layers (attention projections and FFN) to FP8 e4m3.
+
+On GPUs older than sm89, the FP8 matmul falls back to a bf16 dequant path
+automatically.
+
+### Requirements
+
+- **GPU**: sm89+ (H100, L40S, RTX 4090, or newer) for hardware FP8 compute
+- No additional packages required beyond the base FastVideo install
+
+### Usage
+
+```python
+from fastvideo import VideoGenerator
+from fastvideo.layers.quantization import get_quantization_config
+
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    # Pass an instance — the bare string is not resolved on the from_pretrained path.
+    transformer_quant=get_quantization_config("FP8")(),          # per-tensor (default)
+    # transformer_quant=get_quantization_config("FP8")(granularity="channel"),  # slower, higher accuracy
+)
+gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
+```
+
+Or run the example script:
+
+```bash
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py --granularity channel
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py --bf16  # baseline
+```
+
+### Granularity
+
+| Mode | Weight scales | Activation scales | Speed | Accuracy |
+|------|--------------|-------------------|-------|----------|
+| `tensor` (default) | per-tensor | per-tensor | faster | lower |
+| `channel` | per-output-channel | per-token (rowwise) | slower | higher |
 
 <a id="torch-compile"></a>
 

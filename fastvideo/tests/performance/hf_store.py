@@ -24,7 +24,7 @@ from huggingface_hub import HfApi, snapshot_download
 # ---------------------------------------------------------------------------
 
 HF_REPO_ID: str = os.environ.get("HF_REPO_ID", "FastVideo/performance-tracking")
-HF_TOKEN: str | None = os.environ.get("HF_API_KEY")
+HF_TOKEN_ENV_VARS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
 SYNC_MARKER = ".hf_sync_complete"
 SYNC_REUSE_TTL_SECONDS = int(os.environ.get("PERFORMANCE_TRACKING_SYNC_REUSE_TTL_SECONDS", "3600"))
 
@@ -46,6 +46,29 @@ def safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def is_baseline_eligible_record(record: dict[str, Any]) -> bool:
+    """Return whether *record* may contribute to rolling baselines.
+
+    Legacy records predate ``baseline_eligible`` and ``run_source``. They were
+    uploaded only by the old successful main/full-suite path, so keep them
+    eligible until the HF history naturally rolls forward.
+    """
+    if record.get("baseline_eligible") is True:
+        return True
+    if "baseline_eligible" not in record and "run_source" not in record:
+        return True
+    return False
+
+
+def resolve_hf_token() -> str | None:
+    """Return the first configured Hugging Face token env var."""
+    for env_var in HF_TOKEN_ENV_VARS:
+        token = os.environ.get(env_var)
+        if token:
+            return token
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +143,7 @@ def sync_from_hf(
             repo_id=HF_REPO_ID,
             repo_type="dataset",
             local_dir=local_dir,
-            token=HF_TOKEN,
+            token=resolve_hf_token(),
             allow_patterns="*.json",
         )
         os.makedirs(local_dir, exist_ok=True)
@@ -150,8 +173,9 @@ def upload_record(
     that must not silently lose records — otherwise the rolling baseline can
     stop advancing without any signal in the build log.
     """
-    if not HF_TOKEN:
-        msg = "hf_store: HF_API_KEY not set"
+    token = resolve_hf_token()
+    if not token:
+        msg = f"hf_store: none of {', '.join(HF_TOKEN_ENV_VARS)} set"
         if strict:
             raise RuntimeError(f"{msg}; cannot upload.")
         print(f"{msg}, skipping upload.")
@@ -161,7 +185,7 @@ def upload_record(
     path_in_repo = f"{sanitize(model_id)}/{os.path.basename(local_path)}"
     commit_sha = (record.get("commit_sha") or "unknown")[:7]
 
-    api = HfApi(token=HF_TOKEN)
+    api = HfApi(token=token)
     try:
         api.upload_file(
             path_or_fileobj=local_path,
@@ -187,6 +211,7 @@ def load_records(
     *,
     days: int | None = None,
     successful_only: bool = False,
+    baseline_eligible_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Return raw JSON dicts from *local_dir*.
 
@@ -196,6 +221,9 @@ def load_records(
             many days. Records with a missing/unparsable timestamp are kept.
         successful_only: When True, only records with ``success=True`` are
             returned. Useful when building a regression baseline.
+        baseline_eligible_only: When True, only baseline-eligible records are
+            returned. Legacy records missing both ``baseline_eligible`` and
+            ``run_source`` are treated as eligible.
 
     Returns:
         List of raw dicts sorted by ``timestamp`` ascending (records that could
@@ -215,6 +243,9 @@ def load_records(
             continue
 
         if successful_only and not data.get("success", True):
+            continue
+
+        if baseline_eligible_only and not is_baseline_eligible_record(data):
             continue
 
         if cutoff is not None:
@@ -241,6 +272,7 @@ def load_records_for_model(
     *,
     last_n: int | None = None,
     successful_only: bool = True,
+    baseline_eligible_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Return records for a specific *model_id*, optionally filtered by GPU.
 
@@ -251,6 +283,7 @@ def load_records_for_model(
         last_n: When set, return only the most recent *n* records (after all
             other filters). Useful for sliding-window baseline calculations.
         successful_only: Passed through to :func:`load_records`.
+        baseline_eligible_only: Passed through to :func:`load_records`.
 
     Returns:
         List of matching dicts sorted by timestamp ascending.
@@ -259,7 +292,11 @@ def load_records_for_model(
     if not os.path.isdir(model_dir):
         return []
 
-    records = load_records(model_dir, successful_only=successful_only)
+    records = load_records(
+        model_dir,
+        successful_only=successful_only,
+        baseline_eligible_only=baseline_eligible_only,
+    )
 
     if gpu_type is not None:
         records = [r for r in records if r.get("gpu_type") == gpu_type]

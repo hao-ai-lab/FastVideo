@@ -26,6 +26,12 @@ image = (modal.Image.from_registry(
     os.environ.get("BUILDKITE_PULL_REQUEST", ""),
     "BUILDKITE_BRANCH":
     os.environ.get("BUILDKITE_BRANCH", ""),
+    "BUILDKITE_BUILD_URL":
+    os.environ.get("BUILDKITE_BUILD_URL", ""),
+    "BUILDKITE_BUILD_ID":
+    os.environ.get("BUILDKITE_BUILD_ID", ""),
+    "BUILDKITE_JOB_ID":
+    os.environ.get("BUILDKITE_JOB_ID", ""),
     "TEST_SCOPE":
     os.environ.get("TEST_SCOPE", ""),
     "IMAGE_VERSION":
@@ -381,6 +387,32 @@ def seed_grad_norm_references():
               secrets=[
                   modal.Secret.from_dict(
                       {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
+              ],
+              volumes={"/root/data": model_vol})
+def run_eval_tests():
+    # Eval metric regression: drives the high-level fastvideo.eval API on a
+    # fixed asset and asserts each score matches the upstream reference number
+    # checked into fastvideo/tests/eval/reference_scores/. Pulls several scorer
+    # checkpoints (VideoScore2 VLM, VBench nets, audio models) on first run;
+    # they cache on the hf-model-weights volume thereafter.
+    #
+    # Installs [eval-full] (eval + vbench + audio extras) on top of [test]:
+    # the dev image only ships [dev], and without the extras skip_missing_deps
+    # in conftest would silently drop nearly every metric and the lane would
+    # pass vacuously. detectron2-backed vbench metrics remain skipped by
+    # design (not pip-installable; see fastvideo/eval/README.md).
+    run_test_command(
+        'uv pip install -e ".[test,eval-full]" && '
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/eval -vs",
+        build_kernel=True)
+
+
+@app.function(gpu="L40S:1",
+              image=image,
+              timeout=3600,
+              secrets=[
+                  modal.Secret.from_dict(
+                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
               ])
 def run_lora_extraction_tests():
     run_test(
@@ -397,9 +429,8 @@ def run_lora_extraction_tests():
               ],
               volumes={"/root/data": model_vol})
 def run_performance_tests():
-    # compare_baseline.py runs only after pytest passes, so normalized_perf_*.json
-    # artifacts are emitted for rolling-baseline failures, not fixed-threshold
-    # pytest failures. dashboard.py still runs on red CI for observability.
+    # PR/direct records are uploaded only on pass; scheduled main uploads pass
+    # and fail so the dashboard records every canonical baseline attempt.
     run_test(
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
@@ -407,8 +438,8 @@ def run_performance_tests():
         "pytest ./fastvideo/tests/performance -vs; "
         "PYTEST_RC=$?; "
         "PERF_RC=0; "
-        "if [ $PYTEST_RC -eq 0 ]; then "
-        "python ./fastvideo/tests/performance/compare_baseline.py; "
+        "if [ $PYTEST_RC -eq 0 ] || [ \"$PERF_UPLOAD_POLICY\" = 'always' ]; then "
+        "PERF_PYTEST_RC=$PYTEST_RC python ./fastvideo/tests/performance/compare_baseline.py; "
         "PERF_RC=$?; "
         "fi; "
         "python ./fastvideo/tests/performance/dashboard.py || true; "

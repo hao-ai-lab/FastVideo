@@ -53,6 +53,7 @@ eggs/
 # MkDocs documentation
 site/
 docs/getting_started/examples/
+docs/examples/
 docs/inference/examples/
 docs/training/examples/
 docs/distillation/examples/
@@ -117,16 +118,17 @@ apps/dreamverse/web/.env.production.local
 !apps/dreamverse/web/prompts/**/*.jpeg
 !apps/dreamverse/web/prompts/**/*.mp4
 !apps/dreamverse/web/prompts/**/*.gif
-!apps/dreamverse/server/prompts/**/*.png
-!apps/dreamverse/server/prompts/**/*.jpg
-!apps/dreamverse/server/prompts/**/*.jpeg
-!apps/dreamverse/server/prompts/**/*.mp4
-!apps/dreamverse/server/prompts/**/*.gif
 !apps/dreamverse/gpu-pool.svg
 !apps/dreamverse/gpu-pool.drawio
 
 .claude/
 .codex/
+.agents/tmp/
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
+
+# Editor logs and local Python version pins (accidentally committed)
+*.nvimlog
+.nvimlog
+.python-version

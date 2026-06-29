@@ -103,6 +103,11 @@ if [ "${GPU_BACKEND}" = "CUDA" ]; then
     if [ -z "${TORCH_CUDA_ARCH_LIST:-}" ]; then
         if [ "${cc_major}" = "9" ] && [ "${cc_minor}" = "0" ]; then
             export TORCH_CUDA_ARCH_LIST="9.0a"
+        elif [ "${cc_major}" = "12" ] && [ "${cc_minor}" = "0" ]; then
+            # Blackwell sm_120 needs the arch-conditional 'a' suffix so CMake's
+            # AUTO gate (matches 12.0a/120a/sm_120a) builds the attn_qat_infer
+            # (modified SageAttention3 FP4) kernels instead of silently skipping.
+            export TORCH_CUDA_ARCH_LIST="12.0a"
         else
             export TORCH_CUDA_ARCH_LIST="${cc_major}.${cc_minor}"
         fi

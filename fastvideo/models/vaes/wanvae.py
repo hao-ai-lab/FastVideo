@@ -1087,6 +1087,19 @@ def unpatchify(x, patch_size):
 
     return x
 
+
+def _is_wan_vae_codec(name: str, submodule: nn.Module) -> bool:
+    """Match the Wan VAE's encoder/decoder for in-place torch.compile.
+
+    Compiling the codec submodules' ``forward`` in place (rather than replacing
+    the whole VAE module) ensures the compiled version is the one held by the
+    already-constructed DecodingStage. Without this, ``enable_torch_compile_vae``
+    falls back to replacing ``self.modules["vae"]`` and is a no-op for Wan.
+    """
+    return (name == "encoder" and isinstance(submodule, WanEncoder3d)) or (
+        name == "decoder" and isinstance(submodule, WanDecoder3d))
+
+
 class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
     r"""
     A VAE model with KL loss for encoding videos into latents and decoding latent representations into videos.
@@ -1094,6 +1107,7 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
     """
 
     _supports_gradient_checkpointing = False
+    _compile_conditions = [_is_wan_vae_codec]
 
     def __init__(
         self,

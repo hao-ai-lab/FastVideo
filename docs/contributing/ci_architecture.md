@@ -1,73 +1,85 @@
-# CI Architecture
+# CI/CD Architecture
+
+This is the canonical reference for FastVideo's CI/CD system. Contributor-facing
+PR steps live in [Pull Requests](pull_requests.md), and test-authoring guidance
+lives in [Testing](testing.md).
 
 ## Overview
 
-FastVideo uses a three-tier CI pipeline designed to keep feedback fast on every push while
-protecting `main` through a full GPU regression suite before any merge.
+FastVideo splits validation across GitHub Actions, Buildkite, and Modal:
 
-```
-PR push
-  │
-  ├─► Tier 1: Pre-commit (~2 min)
-  │     GitHub Actions / ubuntu-latest
-  │     yapf, ruff, mypy, codespell, pymarkdown, actionlint, check-filenames
-  │
-  └─► Tier 2: Fastcheck (~10-20 min, path-filtered)
-        Buildkite / Modal GPU instances
-        Only runs tests for paths you changed
-
-              │ (developer comments /merge or maintainer adds 'ready' label)
-              ▼
-        Tier 3: Full Suite (~60-90 min)
-          Buildkite / Modal GPU instances
-          All integration, SSIM, training, and performance tests
-          Runs on the PR branch directly
-              │
-          pass ──► Mergify auto-squash-merges to main, branch deleted
-          fail ──► fix the regression, push, and /merge again
+```text
+PR opened or updated
+  |
+  |-- Tier 1: pre-commit
+  |     GitHub Actions on ubuntu-latest
+  |     style, lint, type, spelling, Markdown, workflow syntax, filenames
+  |
+  |-- Tier 2: Fastcheck
+  |     Buildkite orchestrates Modal GPU jobs
+  |     path-filtered component and unit checks
+  |
+  |-- /merge, /test full, or ready label
+        |
+        `-- Tier 3: Full Suite
+              Buildkite orchestrates Modal GPU jobs
+              path-filtered integration, SSIM, training, eval, and performance checks
+              |
+              pass -> Mergify squash-merges when all merge conditions pass
+              fail -> fix, push, and re-run
 ```
 
----
+CI is not one monolithic job:
+
+- GitHub Actions owns pre-commit, slash-command handling, aggregate status
+  updates, docs deployment, image builds, package publishing, and community
+  automations.
+- Buildkite owns the GPU test pipeline and path filtering.
+- Modal owns the actual GPU execution environment for test jobs.
+- Mergify owns merge protection, labeling, and the final squash merge.
 
 ## CI Tiers
 
-### Tier 1: Pre-commit (every PR push)
+### Tier 1: Pre-commit
 
 | Attribute | Value |
-|-----------|-------|
-| Triggered by | Every push to any PR branch, plus pushes to `main` |
-| Runs on | GitHub Actions, `ubuntu-latest` |
-| Duration | ~2 minutes |
+|---|---|
+| Triggered by | Pull requests targeting `main`, plus `/test pre-commit` through `workflow_call` |
+| Runner | GitHub Actions, `ubuntu-latest` |
+| Workflow | `.github/workflows/ci-precommit.yml` |
+| Local command | `pre-commit run --all-files` |
 
-**Checks run** (from `.pre-commit-config.yaml`, stage: `manual`):
+The workflow runs `.pre-commit-config.yaml` with `--hook-stage manual`.
 
-| Hook | What it checks |
-|------|---------------|
-| `yapf` | Python code formatting |
-| `ruff` | Python linting and auto-fixable style issues |
-| `codespell` | Spelling errors in code and docs |
+| Hook | Checks |
+|---|---|
+| `yapf` | Python formatting |
+| `ruff` | Python linting and auto-fixes |
+| `codespell` | Spelling in code and docs |
 | `pymarkdown` | Markdown formatting |
 | `actionlint` | GitHub Actions workflow syntax |
-| `mypy` | Static type checking (Python 3.10 target) |
-| `check-filenames` | No spaces in tracked filenames |
+| `mypy` | Static typing |
+| `check-filenames` | Spaces in tracked filenames |
 
-A failure here means code style or type issues. Run `pre-commit run --all-files` locally to
-replicate CI results before pushing.
+Run the pre-commit command above to reproduce failures locally. Do not bypass
+the project hook chain by calling individual tools directly unless you are
+debugging a hook implementation.
 
----
-
-### Tier 2: Fastcheck (path-filtered, every PR push)
+### Tier 2: Fastcheck
 
 | Attribute | Value |
-|-----------|-------|
-| Triggered by | Every push; the monorepo-diff plugin skips tests for unchanged paths |
-| Runs on | Buildkite, Modal GPU instances |
-| Duration | ~10-20 minutes per test (run in parallel) |
+|---|---|
+| Triggered by | Buildkite PR builds with `TEST_SCOPE=fastcheck` or unset |
+| Runner | Buildkite agent that launches Modal GPU jobs |
+| Definition | `.buildkite/pipeline.yml` |
+| Entrypoint | `.buildkite/scripts/pr_test.sh` -> `fastvideo/tests/modal/pr_test.py` |
 
-**Tests and their path triggers:**
+Fastcheck uses Buildkite's `monorepo-diff` plugin. Jobs whose watched paths did
+not change are skipped and do not block the aggregate `fastcheck-passed`
+status.
 
-| Buildkite label | `TEST_TYPE` | Triggers when you change |
-|-----------------|-------------|--------------------------|
+| Buildkite label | `TEST_TYPE` | Main watched paths |
+|---|---|---|
 | Encoder Tests | `encoder` | `fastvideo/models/encoders/**`, `fastvideo/models/loader/**`, `fastvideo/tests/encoders/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
 | VAE Tests | `vae` | `fastvideo/models/vaes/**`, `fastvideo/models/loader/**`, `fastvideo/tests/vaes/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
 | Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
@@ -75,105 +87,121 @@ replicate CI results before pushing.
 | Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
 | DreamVerse App Tests | `dreamverse_app` | `apps/dreamverse/**`, `pyproject.toml` |
 
-A Fastcheck failure means a component-level regression. Check the Buildkite build log for the
-failing test's output.
-
----
-
-### Tier 3: Full Test Suite (triggered by `ready` label)
+### Tier 3: Full Suite
 
 | Attribute | Value |
-|-----------|-------|
-| Triggered by | Adding the `ready` label to the PR (via `/merge` command), or a `/test full` command |
-| Runs on | Buildkite, Modal GPU instances |
-| Duration | 60-90 minutes total (tests run in parallel, path-filtered) |
+|---|---|
+| Triggered by | `/merge`, adding `ready`, `/test full`, or a new push to a PR that already has `ready` |
+| Runner | Buildkite agent that launches Modal GPU jobs |
+| Definition | `.buildkite/pipeline.yml` |
+| Entrypoint | `.buildkite/scripts/pr_test.sh` -> `fastvideo/tests/modal/pr_test.py` |
 
-**Tests:**
+Full Suite is also path-filtered. It validates broader behavior before Mergify
+can merge a PR.
 
-| Buildkite label | `TEST_TYPE` | Timeout |
-|-----------------|-------------|---------|
-| SSIM Tests | `ssim` | 90 min |
-| LoRA Inference Tests | `inference_lora` | 20 min |
-| Training Tests | `training` | 15 min |
-| Distillation DMD Tests | `distillation_dmd` | 15 min |
-| Self-Forcing Tests | `self_forcing` | 15 min |
-| LoRA Training Tests | `training_lora` | 15 min |
-| Training Tests VSA | `training_vsa` | 15 min |
-| Inference Tests VMoBA | `inference_vmoba` | 15 min |
-| [Performance Tests](performance_benchmarks.md) | `performance` | 30 min |
-| API Server Tests | `api_server` | 30 min |
-| Train Framework Tests | `train_framework` | 30 min |
+| Buildkite label | `TEST_TYPE` | Main watched paths |
+|---|---|---|
+| SSIM Tests | `ssim` | `fastvideo/**/*.py`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| LoRA Inference Tests | `inference_lora` | LoRA tests, loader, transformer tests, pipelines, LoRA layers |
+| Training Tests | `training` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| Distillation DMD Tests | `distillation_dmd` | `fastvideo/training/*distillation_pipeline.py` |
+| Self-Forcing Tests | `self_forcing` | self-forcing distillation pipeline and tests |
+| LoRA Training Tests | `training_lora` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| Training Tests VSA | `training_vsa` | `fastvideo/**`, `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| Inference Tests VMoBA | `inference_vmoba` | `fastvideo-kernel/**`, `fastvideo/attention/backends/vmoba.py` |
+| Performance Tests | `performance` | DiTs, pipelines, attention, layers, worker, entrypoints, performance tests/configs |
+| API Server Tests | `api_server` | OpenAI entrypoints, serve CLI, OpenAI API integration test |
+| Train Framework Tests | `train_framework` | `fastvideo/train/**`, train model/method tests, model loader, DiTs |
+| Eval Metrics Tests | `eval` | `fastvideo/eval/**`, `fastvideo/tests/eval/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
 
-If a Full Suite test fails, check the Buildkite build log for the failing step's output.
-Fix the regression, push, and comment `/merge` again to re-trigger.
+See [Performance Benchmarks](performance_benchmarks.md) for the performance
+lane's thresholds, rolling baseline, artifacts, and reseeding process.
 
----
+## Slash Commands
 
-## Auto-merge Flow
+Slash commands are handled by `.github/workflows/ci-slash-commands.yml`.
+Repository write permission is required.
 
-Mergify prevents untested code from landing on `main` by gating squash-merge on the Full
-Suite passing directly on the PR branch.
+| Command | Effect |
+|---|---|
+| `/merge` | Adds `ready` and triggers Full Suite for the PR head branch. |
+| `/test full` | Runs the whole Full Suite with `TEST_SCOPE=full`. |
+| `/test fastcheck` | Runs the whole Fastcheck suite with `TEST_SCOPE=fastcheck`. |
+| `/test pre-commit` | Re-runs the pre-commit workflow on the PR merge ref. |
+| `/test <name>` | Runs one Buildkite test with `TEST_SCOPE=direct`. |
 
-**How it works:**
+Valid direct test names:
 
-1. A developer comments `/merge` on an approved PR (or a maintainer adds the `ready` label).
-2. The `ready` label triggers `ci-trigger-full-suite.yml`, which calls the Buildkite API to
-   run the Full Suite on the PR branch itself.
-3. While the Full Suite runs, Mergify also auto-rebases the PR branch against `main` if it
-   is behind and has no conflicts.
-4. Once the Full Suite posts `full-suite-passed`, Mergify checks all **merge conditions**:
-   - `pre-commit` check is green
-   - `fastcheck-passed` check is green
-   - `full-suite-passed` check is green
-   - At least 1 approved review (`#approved-reviews-by>=1`)
-   - PR title starts with a valid `[type]` tag
-   - PR is not a draft
-   - No merge conflicts
-5. If all conditions pass, Mergify squash-merges to `main` automatically. The branch is
-   deleted after merge.
-6. If the Full Suite fails, the developer fixes the issue, pushes, and comments `/merge`
-   again to re-trigger.
+| Command | `TEST_TYPE` |
+|---|---|
+| `/test encoder` | `encoder` |
+| `/test vae` | `vae` |
+| `/test transformer` | `transformer` |
+| `/test kernel` | `kernel_tests` |
+| `/test unit` | `unit_test` |
+| `/test dreamverse` | `dreamverse_app` |
+| `/test ssim` | `ssim` |
+| `/test training` | `training` |
+| `/test lora-inference` | `inference_lora` |
+| `/test lora-training` | `training_lora` |
+| `/test distillation` | `distillation_dmd` |
+| `/test self-forcing` | `self_forcing` |
+| `/test vsa` | `training_vsa` |
+| `/test vmoba` | `inference_vmoba` |
+| `/test performance` | `performance` |
+| `/test api` | `api_server` |
+| `/test train-framework` | `train_framework` |
+| `/test eval` | `eval` |
 
-**Merge conditions summary:**
+When a direct test completes successfully, Buildkite posts
+`direct-test-completed`. `.github/workflows/ci-aggregate-status.yml` then reads
+the latest Buildkite statuses for the commit and updates `fastcheck-passed` or
+`full-suite-passed` if all jobs in that group are green.
+
+Skipped path-filtered jobs have no status entry and do not block the aggregate.
+
+## Merge Protection
+
+Mergify enforces these conditions before it squash-merges to `main`:
 
 | Condition | Meaning |
-|-----------|---------|
-| `check-success~=pre-commit` | Tier 1 pre-commit must be green |
-| `check-success=fastcheck-passed` | Tier 2 Fastcheck must be green |
-| `check-success=full-suite-passed` | Tier 3 Full Suite must be green |
-| `#approved-reviews-by>=1` | At least one approved review |
-| `title~=(?i)^\[(feat|bugfix|...)` | PR title has a valid type tag |
-| `-draft` | PR is not in draft state |
-| `-conflict` | No merge conflicts with base branch |
-| `-closed` | PR is still open |
+|---|---|
+| `check-success~=pre-commit` | Tier 1 passed. |
+| `check-success=fastcheck-passed` | All triggered Fastcheck jobs passed. |
+| `check-success=full-suite-passed` | All triggered Full Suite jobs passed. |
+| `#approved-reviews-by>=1` | At least one approving review. |
+| Valid title regex | PR title starts with an accepted `[type]` tag. |
+| `label=ready` | The PR has entered the merge flow. |
+| `-draft` | PR is not a draft. |
+| `-conflict` | PR has no merge conflicts. |
+| `-closed` | PR is still open. |
 
----
+The final merge action is a squash merge. Mergify also labels conflicting PRs
+with `needs-rebase` and removes that label after conflicts are resolved.
 
-## Label System
+## Title Tags And Labels
 
-Labels are applied automatically. You don't need to set them manually.
+PR title tags are the source for `type:*` labels and are required by merge
+protection.
 
-### Type Labels (from PR title prefix)
+| Tag | Label | Use for |
+|---|---|---|
+| `[feat]`, `[feature]` | `type: feat` | New feature or capability |
+| `[bugfix]`, `[fix]` | `type: bugfix` | Bug fix |
+| `[refactor]` | `type: refactor` | Code restructuring without behavior change |
+| `[perf]` | `type: perf` | Performance improvement |
+| `[ci]` | `type: ci` | CI/CD or build tooling changes |
+| `[infra]` | `type: infra` | Repo infrastructure, agent tooling, debug hooks, conversion scripts, dev infra |
+| `[doc]`, `[docs]` | `type: docs` | Documentation only |
+| `[misc]`, `[chore]` | `type: misc` | Housekeeping, dependency bumps, cleanup |
+| `[kernel]` | No dedicated type label currently | CUDA kernel changes in `fastvideo-kernel/` |
+| `[new-model]` | `type: new-model` | Adding a new model or pipeline |
+| `[skill]`, `[skills]` | `type: skill` | Agent skills under `.agents/skills/` or `.claude/skills/` |
 
-Applied by Mergify based on the `[tag]` at the start of the PR title.
-
-| Label | Matched title prefix | Meaning |
-|-------|---------------------|---------|
-| `type: feat` | `[feat]` or `[feature]` | New feature or capability |
-| `type: bugfix` | `[bugfix]` or `[fix]` | Bug fix |
-| `type: refactor` | `[refactor]` | Code restructuring, no behavior change |
-| `type: perf` | `[perf]` | Performance improvement |
-| `type: ci` | `[ci]` | CI/CD or tooling changes |
-| `type: docs` | `[doc]` or `[docs]` | Documentation only |
-| `type: misc` | `[misc]` or `[chore]` | Housekeeping, dependency bumps |
-| `type: new-model` | `[new-model]` | Adding a new model |
-
-### Scope Labels (from changed files)
-
-Applied by Mergify based on which paths you modified. Multiple scope labels can be added.
+Scope labels are inferred from changed files.
 
 | Label | File paths that trigger it |
-|-------|---------------------------|
+|---|---|
 | `scope: training` | `fastvideo/train/`, `fastvideo/training/`, `fastvideo/distillation/`, `examples/train/`, `examples/training/`, `examples/distill/` |
 | `scope: inference` | `fastvideo/pipelines/basic/`, `fastvideo/pipelines/stages/`, `fastvideo/pipelines/samplers/`, `fastvideo/entrypoints/`, `fastvideo/worker/`, `fastvideo/api/sampling_param.py`, `fastvideo/configs/pipelines/`, `examples/inference/` |
 | `scope: attention` | `fastvideo/attention/` |
@@ -185,151 +213,91 @@ Applied by Mergify based on which paths you modified. Multiple scope labels can 
 | `scope: ui` | `ui/` |
 | `scope: model` | `fastvideo/models/`, `fastvideo/layers/`, `fastvideo/configs/models/` |
 
-### Process Labels
+Process labels:
 
 | Label | Who sets it | Meaning |
-|-------|-------------|---------|
-| `ready` | Developer (`/merge` command) or maintainer | Triggers Full Suite and enables auto-merge |
-| `needs-rebase` | Mergify (automatic) | PR has merge conflicts; rebase needed |
-| `do-not-merge` | Maintainer | Blocks queue entry regardless of other conditions |
+|---|---|---|
+| `ready` | `/merge` or maintainer action | Triggers/keeps Full Suite active and enables auto-merge. |
+| `needs-rebase` | Mergify | PR has merge conflicts. |
+| `do-not-merge` | Maintainer | Blocks merge regardless of CI status. |
 
----
+## Modal Test Entrypoints
 
-## PR Title Format
+All Buildkite test jobs go through `.buildkite/scripts/pr_test.sh`, which:
 
-All PR titles targeting `main` must start with a bracketed type tag. This is enforced by a
-Mergify merge protection rule and is required before a PR can be squash-merged.
+1. Reads Buildkite secrets for Modal, Hugging Face, and W&B when needed.
+2. Selects a Modal function based on `TEST_TYPE`.
+3. Passes Buildkite metadata into the Modal container.
+4. Runs the selected test command from `fastvideo/tests/modal/pr_test.py` or
+   `fastvideo/tests/modal/ssim_test.py`.
+5. Uploads performance artifacts for `TEST_TYPE=performance`.
 
-**Format:**
+If you add a new CI test category:
 
-```
-[type] Short description
-```
+1. Add the Modal function in `fastvideo/tests/modal/pr_test.py` or a focused
+   companion module.
+2. Add the `TEST_TYPE` case in `.buildkite/scripts/pr_test.sh`.
+3. Add the Buildkite direct-test step and any Fastcheck/Full Suite path filters
+   in `.buildkite/pipeline.yml`.
+4. Add or update the `/test` mapping in `.github/workflows/ci-slash-commands.yml`.
+5. Document the lane here and link any domain-specific authoring guide.
 
-**Valid type tags:**
+## CD And Release Workflows
 
-`feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `doc`, `docs`, `misc`, `chore`,
-`kernel`, `new-model`
+### Documentation
 
-**Valid examples:**
+`.github/workflows/infra-docs.yml` builds documentation for PRs that touch
+`docs/**`, `mkdocs.yml`, `requirements-mkdocs.txt`, or the workflow itself. On
+pushes to `main`, it also deploys the built site to GitHub Pages.
 
-```
-[feat] Add causal Wan pipeline
-[bugfix] Fix VAE temporal tiling corruption
-[refactor] Restructure training framework
-[perf] Optimize FlashAttention kernel dispatch
-[docs] Add inference guide for LoRA
-[new-model] Port HunyuanVideo 1.5 to FastVideo
-```
+The docs job:
 
-**Invalid examples (will block merge):**
+1. Installs the pinned MkDocs dependencies.
+2. Runs `mkdocs build`; the native MkDocs hook generates example pages before the build.
+3. Runs `python scripts/check_docs_links.py` against the generated documentation.
+4. Uploads the Pages artifact and deploys only from `main`.
 
-```
-Add causal Wan pipeline          ← missing type tag
-FEAT: Add pipeline               ← wrong format
-feat: Add pipeline               ← square brackets required
-```
+### Docker Images
 
-If your title is invalid, Mergify posts a comment explaining the required format and the
-merge protection check will remain failed until you update the title.
+`.github/workflows/infra-build-image.yml` is a manual `workflow_dispatch`
+workflow. Maintainers choose which image families to build, including Python
+development images and DreamVerse CUDA 12.9 images.
 
----
+The reusable implementation lives in
+`.github/workflows/_template-build-image.yml`.
 
-## Slash Commands
+### Package Publishing
 
-Slash commands let contributors and maintainers trigger CI actions directly from PR comments.
-**Write permission to the repository is required.**
+| Workflow | Trigger | Publishes |
+|---|---|---|
+| `publish-fastvideo.yml` | `pyproject.toml` changes on `main`, or manual dispatch | `fastvideo` package to PyPI when the version changes |
+| `publish-kernel.yml` | `fastvideo-kernel/pyproject.toml` changes on `main`, or manual dispatch | `fastvideo-kernel` wheels to PyPI when the version changes |
+| `publish-comfyui.yml` | `pyproject.toml` changes on `main`/`master`, or manual dispatch | ComfyUI custom node to the Comfy registry |
 
-The command is recognized within a few seconds. The workflow reacts with a 🚀 emoji to confirm.
+## Community Automations
 
-### `/merge`
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `community-issue-labeler.yml` | Issue opened or edited | Adds scope/platform labels from issue keywords. |
+| `community-welcome.yml` | First contribution | Posts a welcome comment for first-time contributors. |
+| `community-stale.yml` | Daily schedule | Marks and closes stale issues and PRs, with exemption labels. |
 
-```
-/merge
-```
+## File Reference
 
-Adds the `ready` label to the PR, which triggers the Full Suite on your PR branch and
-enables Mergify to auto-squash-merge once all conditions pass.
-
-The command first removes the `ready` label if it is already present, then re-adds it. This
-ensures the `labeled` event fires and a fresh Full Suite build is started even on a re-try.
-
-### `/test <name>`
-
-```
-/test <name>
-```
-
-Triggers a specific Buildkite test or suite on the current PR branch.
-
-| Command | Runs | Maps to `TEST_TYPE` |
-|---------|------|---------------------|
-| `/test encoder` | Encoder Tests (Fastcheck) | `encoder` |
-| `/test vae` | VAE Tests (Fastcheck) | `vae` |
-| `/test transformer` | Transformer Tests (Fastcheck) | `transformer` |
-| `/test kernel` | Kernel Tests (Fastcheck) | `kernel_tests` |
-| `/test unit` | Unit Tests (Fastcheck) | `unit_test` |
-| `/test dreamverse` | DreamVerse App Tests (Fastcheck) | `dreamverse_app` |
-| `/test ssim` | SSIM regression tests | `ssim` |
-| `/test training` | Training pipeline tests | `training` |
-| `/test lora-inference` | LoRA inference tests | `inference_lora` |
-| `/test lora-training` | LoRA training tests | `training_lora` |
-| `/test distillation` | DMD distillation tests | `distillation_dmd` |
-| `/test self-forcing` | Self-Forcing tests | `self_forcing` |
-| `/test vsa` | VSA training tests | `training_vsa` |
-| `/test vmoba` | VMoBA inference tests | `inference_vmoba` |
-| `/test performance` | Performance benchmarks | `performance` |
-| `/test api` | API server integration tests | `api_server` |
-| `/test train-framework` | `fastvideo.train` GPU model loading + per-method tests | `train_framework` |
-| `/test full` | Entire Full Suite | all (with `TEST_SCOPE=full`) |
-| `/test fastcheck` | Entire Fastcheck suite | fastcheck (with `TEST_SCOPE=fastcheck`) |
-| `/test pre-commit` | Pre-commit checks on PR code | — (runs `ci-precommit.yml` via `workflow_call`) |
-
-**Re-running failed tests:** When you use `/test <name>` to re-run a specific failed test,
-the resulting Buildkite check uses the same name as the original (e.g., `/test encoder`
-creates `buildkite/ci/microscope-encoder-tests`). This overwrites the failed check status.
-Once all tests in a tier pass, the aggregate status (`fastcheck-passed` or
-`full-suite-passed`) is automatically updated to `success` by the `ci-aggregate-status.yml`
-workflow.
-
-**How aggregate status refresh works:**
-
-1. `/test <name>` triggers a Buildkite build with `TEST_SCOPE=direct`. The test step uses
-   the same label as its fastcheck/full-suite counterpart, so the resulting GitHub check
-   overwrites the original.
-2. When the build completes, Buildkite's `notify` posts a `direct-test-completed` commit
-   status. This is the only signal that triggers the aggregate workflow — intermediate step
-   status updates do not trigger it.
-3. `ci-aggregate-status.yml` fires, calls `getCombinedStatusForRef` to fetch the latest
-   status for every context on that commit (each context returns only its most recent
-   state), groups them by prefix (`microscope-*` → fastcheck, `test-tube-*`/`bar-chart-*`
-   → full suite), and posts `fastcheck-passed: success` or `full-suite-passed: success` if
-   all entries in the group are `success`.
-4. Tests that were never triggered (skipped by monorepo-diff) have no status entry and do
-   not block the aggregate.
-
----
-
-## Auto Branch Cleanup
-
-After a PR is squash-merged to `main`, Mergify automatically deletes the head branch.
-Protected branches (`main`, `master`, `release/*`) are never deleted.
-
----
-
-## Workflow File Reference
-
-| Filename | Trigger | What it does |
-|----------|---------|-------------|
-| `ci-precommit.yml` | Every push / PR against `main` | Runs pre-commit hooks (yapf, ruff, mypy, codespell, pymarkdown, actionlint, check-filenames) |
-| `ci-trigger-full-suite.yml` | `ready` label added to a PR | Calls Buildkite API to run Full Suite on the PR branch |
-| `ci-slash-commands.yml` | PR comment starting with `/merge` or `/test` | Handles slash commands; adds `ready` label or triggers Buildkite |
-| `ci-aggregate-status.yml` | Any Buildkite commit status update | Checks if all tests in a tier passed; updates `fastcheck-passed` or `full-suite-passed` |
-| `community-issue-labeler.yml` | Issue opened or edited | Auto-labels issues by keyword matching against title and body |
-| `community-welcome.yml` | First contribution | Posts a welcome comment for first-time contributors |
-| `community-stale.yml` | Scheduled | Marks and closes stale issues and PRs |
-| `infra-build-image.yml` | Manual (`workflow_dispatch`) | Builds Docker images for CI |
-| `infra-docs.yml` | Changes to `docs/` merged to `main` | Builds and deploys documentation to GitHub Pages |
-| `publish-fastvideo.yml` | Version bump | Publishes `fastvideo` package to PyPI |
-| `publish-kernel.yml` | Version bump | Publishes `fastvideo-kernel` package to PyPI |
-| `publish-comfyui.yml` | Version bump | Publishes ComfyUI node package to PyPI |
+| File | Owner area |
+|---|---|
+| `.github/mergify.yml` | Merge protection, PR title validation, PR labels, conflict labels, auto-merge |
+| `.github/workflows/ci-precommit.yml` | Tier 1 pre-commit |
+| `.github/workflows/ci-slash-commands.yml` | `/merge` and `/test` handling |
+| `.github/workflows/ci-trigger-full-suite.yml` | Full Suite trigger for `ready` PRs and new pushes to ready PRs |
+| `.github/workflows/ci-aggregate-status.yml` | Aggregate Fastcheck/Full Suite commit statuses |
+| `.buildkite/pipeline.yml` | Buildkite test graph and path filters |
+| `.buildkite/scripts/pr_test.sh` | Buildkite-to-Modal test dispatcher |
+| `fastvideo/tests/modal/pr_test.py` | Modal functions for most GPU CI lanes |
+| `fastvideo/tests/modal/ssim_test.py` | Modal functions and partitioning for SSIM |
+| `.buildkite/performance-benchmarks/tests/*.json` | Performance benchmark configs and thresholds |
+| `.github/workflows/infra-docs.yml` | Docs build and GitHub Pages deploy |
+| `.github/workflows/infra-build-image.yml` | Manual Docker image builds |
+| `.github/workflows/publish-fastvideo.yml` | FastVideo PyPI publishing |
+| `.github/workflows/publish-kernel.yml` | FastVideo kernel PyPI publishing |
+| `.github/workflows/publish-comfyui.yml` | ComfyUI registry publishing |

@@ -21,9 +21,16 @@ It serves three audiences:
 # fastvideo/tests/performance/results/
 pytest fastvideo/tests/performance/ -vs
 
-# Optional: compare against the rolling HF baseline (read-only outside CI).
+# Optional: compare against the rolling HF baseline.
 # PERF_REPORTS_DIR defaults to /root/data/perf_reports for Modal/CI, so
 # override it when running outside the container.
+PERF_REPORTS_DIR=/tmp/fastvideo_perf_reports \
+python fastvideo/tests/performance/compare_baseline.py
+
+# Optional: explicitly upload a passing local/manual run.
+HF_TOKEN=hf_... \
+PERF_RUN_SOURCE=local \
+PERF_UPLOAD_POLICY=pass \
 PERF_REPORTS_DIR=/tmp/fastvideo_perf_reports \
 python fastvideo/tests/performance/compare_baseline.py
 
@@ -32,14 +39,23 @@ PERF_REPORTS_DIR=/tmp/fastvideo_perf_reports \
 python fastvideo/tests/performance/dashboard.py
 ```
 
-The pytest run never uploads anything. `compare_baseline.py` only writes to
-the HF dataset when `TEST_SCOPE=full` *and* `BUILDKITE_BRANCH=main`, so local
-runs are always read-only. The report directory default is container-oriented;
-set `PERF_REPORTS_DIR` to a writable local path when generating dashboards or
-when you want local Markdown/normalized-result artifacts from the comparator.
+The pytest run never uploads anything. `compare_baseline.py` uploads only when
+`PERF_UPLOAD_POLICY` is set. Local uploads are explicit opt-in and require HF
+credentials. PR/direct performance runs upload passing records for dashboard
+visibility, while scheduled-main runs upload both pass and fail records. The
+report directory default is container-oriented; set `PERF_REPORTS_DIR` to a
+writable local path when generating dashboards or when you want local
+Markdown/normalized-result artifacts from the comparator.
 `compare_baseline.py` reads every `perf_*.json` currently present in
 `fastvideo/tests/performance/results/`; remove stale result files if you only
 want to compare the latest local run.
+
+## Local live dashboard
+
+For an app-style local dashboard backed by the same HF performance-tracking
+records, see `performance_dashboard/README.md`. The dashboard provides a
+FastAPI API plus a React UI and can be exposed with `ngrok` after building the
+frontend.
 
 ## Architecture
 
@@ -61,7 +77,9 @@ fastvideo/tests/performance/
 
 The HF dataset (`FastVideo/performance-tracking` by default) holds one
 normalized JSON per `(model_id, gpu_type, run)` tuple. The rolling baseline is
-the median of the last 5 successful records for that model+GPU.
+the median of the last 5 successful, baseline-eligible records for that
+model+GPU. PR and local records are visible in the dashboard but are not
+baseline eligible.
 
 ## Planned Coverage
 
@@ -87,11 +105,16 @@ Each benchmark records six metrics:
 
 `test_inference_performance.py` temporarily sets `FASTVIDEO_STAGE_LOGGING=1`
 while it runs so pipeline stage execution times are available in
-`generate_video(...).logging_info`. It maps `TextEncodingStage` to
-`text_encoder_time_s`, `DenoisingStage` and `DmdDenoisingStage` to
-`dit_time_s`, and `DecodingStage` to `vae_decode_time_s`. If a pipeline does
-not report one of those stages, that component metric is stored as `null` and
-is skipped by the static threshold and rolling baseline checks.
+`generate_video(...).logging_info`. Stage logs use pipeline-unique keys such as
+`prompt_encoding_stage` so duplicate stage classes do not collide. For
+`PipelineStage` entries, the extractor maps the `stage_class` field:
+`TextEncodingStage` maps to `text_encoder_time_s`, `DenoisingStage` and
+`DmdDenoisingStage` map to `dit_time_s`, and `DecodingStage` maps to
+`vae_decode_time_s`, with a fallback for older logs that used the class name as
+the stage key. Generator-side timings such as `PostDecodeFrameProcessStage`,
+`VideoSaveStage`, and `AudioMuxStage` are intentionally ignored. If a pipeline
+does not report one of the mapped stages, that component metric is stored as
+`null` and is skipped by the static threshold and rolling baseline checks.
 
 ## The two gates
 
@@ -131,16 +154,16 @@ headroom and almost never need touching.
 
 ### Rolling baseline (per `(model_id, gpu_type)`)
 
-`compare_baseline.py` loads the last 5 successful records for the same
-`(model_id, gpu_type)` from the HF dataset, computes the median for each
-available metric, and fails if the current run regresses by more than
+`compare_baseline.py` loads the last 5 successful, baseline-eligible records
+for the same `(model_id, gpu_type)` from the HF dataset, computes the median
+for each available metric, and fails if the current run regresses by more than
 `PERF_MAX_REGRESSION` (default 5%). For latency, memory, and component times,
 higher values are regressions. For throughput, lower values are regressions.
 
 This is the **drift detector** — it catches sub-threshold regressions that
-slowly add up. It only persists new records when running the full suite on
-`main`. Local and pull-request runs can compare against the HF baseline, but
-they do not update it.
+slowly add up. Only scheduled-main successful records are baseline eligible.
+Local and pull-request runs can upload dashboard-visible records, but they do
+not update future gating baselines.
 
 When the baseline shifts for a legitimate reason (torch upgrade, kernel
 change, etc.) and CI starts failing, use the
@@ -208,6 +231,8 @@ result, used as the rolling-baseline source of truth.
 Older records in the HF dataset may not have component timing fields. The
 comparator ignores missing or `null` metrics when computing a median, and the
 dashboard lists skipped plots for metric series that have no non-null values.
+Records missing both `run_source` and `baseline_eligible` are treated as legacy
+successful main/full-suite uploads and remain eligible for rolling baselines.
 
 ## Environment variable reference
 
@@ -217,8 +242,11 @@ dashboard lists skipped plots for metric series that have no non-null values.
 | `PERFORMANCE_TRACKING_ROOT` | `/tmp/perf-tracking` | `compare_baseline.py`, `dashboard.py` | Local directory the HF dataset is synced to. |
 | `PERF_REPORTS_DIR` | `/root/data/perf_reports` | `compare_baseline.py`, `dashboard.py` | Where the Markdown summary and Plotly HTML get written for Buildkite to pick up. |
 | `HF_REPO_ID` | `FastVideo/performance-tracking` | `hf_store.py` | HF dataset repo holding rolling-baseline records. |
-| `HF_API_KEY` | unset | `hf_store.py` | Required for upload (main-branch full-suite only); reads work without it. |
-| `TEST_SCOPE` | unset | `compare_baseline.py` | Set to `full` together with `BUILDKITE_BRANCH=main` to enable HF persistence. |
+| `HF_API_KEY`, `HUGGINGFACE_HUB_TOKEN`, `HF_TOKEN` | unset | `hf_store.py` | Required for upload or private dataset reads. |
+| `PERF_RUN_SOURCE` | inferred | `compare_baseline.py` | Source metadata for uploaded records: `pr`, `local`, `scheduled_main`, or `unknown`. |
+| `PERF_UPLOAD_POLICY` | `never` | `compare_baseline.py` | Upload policy: `never`, `pass`, or `always`. |
+| `PERF_PYTEST_RC` | unset | `compare_baseline.py` | Static-threshold pytest exit code, used so scheduled-main failures can be uploaded with `success=false`. |
+| `TEST_SCOPE` | unset | `compare_baseline.py` | CI context used to infer scheduled-main runs together with `BUILDKITE_BRANCH=main`. |
 | `BUILDKITE_BRANCH`, `BUILDKITE_COMMIT`, `BUILDKITE_PULL_REQUEST` | unset | `compare_baseline.py`, `test_inference_performance.py` | CI metadata stamped into records. |
 | `DASHBOARD_DAYS` | `30` | `dashboard.py` | Lookback window for the Plotly trend pages. |
 | `PERFORMANCE_TRACKING_SYNC_REUSE_TTL_SECONDS` | `3600` | `hf_store.py` | Freshness window for reusing an existing HF sync when requested by dashboard consumers. |
@@ -227,7 +255,7 @@ dashboard lists skipped plots for metric series that have no non-null values.
 ## CI integration
 
 The performance step can run on demand with `/test performance` and as part of
-the Full Suite (see [CI Architecture](ci_architecture.md)). The Modal entry
+the Full Suite (see [CI/CD Architecture](ci_architecture.md)). The Modal entry
 point is `fastvideo/tests/modal/pr_test.py:run_performance_tests` and the
 Buildkite artifact upload is in
 `.buildkite/scripts/pr_test.sh:upload_performance_artifacts`.
