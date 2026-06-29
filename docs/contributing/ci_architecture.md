@@ -260,8 +260,14 @@ The docs job:
 ### Docker Images
 
 `.github/workflows/infra-build-image.yml` is a manual `workflow_dispatch`
-workflow. Maintainers choose which image families to build, including Python
-development images and DreamVerse CUDA 12.9 images.
+workflow. Maintainers choose which image families to build. The
+`fastvideo-dev` matrix builds Python 3.12 images for CUDA 12.6 and CUDA 13 on
+native `amd64` and `arm64` runners, then publishes one multi-platform manifest
+per CUDA version. CUDA 13 owns the `py3.12-latest` and global `latest` tags.
+
+The optional Dreamverse matrix builds backend and UI images for CUDA 12.6 and
+CUDA 13 on `amd64`. Dreamverse remains `amd64`-only because its FA4 dependency
+stack is not yet validated on ARM64.
 
 The reusable implementation lives in
 `.github/workflows/_template-build-image.yml`.
