@@ -179,6 +179,38 @@ else()
     message(STATUS "ThunderKittens kernels: DISABLED (will use Triton fallbacks at runtime)")
 endif()
 
+# The pinned ThunderKittens revision predates its ARM compatibility fix. On
+# AArch64, CUDA's device frontend treats plain `char` as unsigned, so the two
+# `char2{i, i}` initializers in base_types.cuh are rejected as narrowing to the
+# signed-char fields of CUDA's char2. Backport the two explicit casts proposed in
+# https://github.com/HazyResearch/ThunderKittens/pull/179 into a build-tree copy
+# so the pinned submodule remains pristine. Keeping this in CMake also covers
+# direct pip/uv builds that do not go through build.sh.
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _FASTVIDEO_SYSTEM_PROCESSOR)
+if(ENABLE_TK_KERNELS AND _FASTVIDEO_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    set(_TK_ARM_COMPAT_DIR "${CMAKE_CURRENT_BINARY_DIR}/tk-arm-compat")
+    set(_TK_ARM_INCLUDE_DIR "${_TK_ARM_COMPAT_DIR}/include")
+    file(REMOVE_RECURSE "${_TK_ARM_COMPAT_DIR}")
+    file(COPY "${CMAKE_SOURCE_DIR}/include/tk/include" DESTINATION "${_TK_ARM_COMPAT_DIR}")
+
+    set(_TK_ARM_BASE_TYPES "${_TK_ARM_INCLUDE_DIR}/common/base_types.cuh")
+    file(READ "${_TK_ARM_BASE_TYPES}" _TK_ARM_BASE_TYPES_CONTENT)
+    string(REGEX MATCHALL "return char2[{]i, i[}]" _TK_ARM_CHAR_PACKS "${_TK_ARM_BASE_TYPES_CONTENT}")
+    list(LENGTH _TK_ARM_CHAR_PACKS _TK_ARM_CHAR_PACK_COUNT)
+    if(NOT _TK_ARM_CHAR_PACK_COUNT EQUAL 2)
+        message(FATAL_ERROR
+            "ThunderKittens ARM compatibility patch expected two char2{i, i} initializers; "
+            "found ${_TK_ARM_CHAR_PACK_COUNT}. Update or remove the backport for the pinned revision.")
+    endif()
+    string(REPLACE
+        "return char2{i, i}"
+        "return char2{static_cast<signed char>(i), static_cast<signed char>(i)}"
+        _TK_ARM_BASE_TYPES_CONTENT
+        "${_TK_ARM_BASE_TYPES_CONTENT}")
+    file(WRITE "${_TK_ARM_BASE_TYPES}" "${_TK_ARM_BASE_TYPES_CONTENT}")
+    message(STATUS "Applied ThunderKittens ARM signed-char compatibility backport")
+endif()
+
 set(ENABLE_ATTN_QAT_INFER OFF)
 if(GPU_BACKEND STREQUAL "ROCM")
     message(STATUS "attn_qat_infer kernels: DISABLED (ROCm build)")
@@ -301,6 +333,10 @@ if(BUILD_CXX_KERNELS)
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
         ${EXTENSION_SOURCES}
     )
+
+    if(_TK_ARM_INCLUDE_DIR)
+        target_include_directories(fastvideo_kernel_ops BEFORE PRIVATE "${_TK_ARM_INCLUDE_DIR}")
+    endif()
 
     # When the per-arch split is active (FP4 build), torch's global gencode was
     # stripped above, so set this target's arch explicitly. TK is guarded down to
