@@ -130,6 +130,13 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "use_fsdp_inference": False,
                 "disable_autocast": False,
                 "quantization": None,
+                "batching": {
+                    "mode": "disabled",
+                    "max_size": 1,
+                    "delay_ms": 0.0,
+                    "config_path": None,
+                    "enable_metrics": False,
+                },
             },
             "pipeline": {
                 "workload_type": None,
