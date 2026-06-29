@@ -20,9 +20,9 @@
 #       --build-arg FLASH_ATTN_WHEEL_TAG=cu130torch2.12 \
 #       -t fastvideo-dev:py3.12-cuda13.0.0 .
 #
-#   # DGX Spark / GB10 (aarch64, Blackwell sm_121): build on an arm64 host;
-#   # the x86-only prebuilt flash-attn wheel is skipped automatically.
-#   docker build -f docker/Dockerfile \
+#   # DGX Spark / GB10 (aarch64, Blackwell sm_121): the matching arm64
+#   # prebuilt flash-attn wheel is selected automatically from TARGETARCH.
+#   docker build --platform linux/arm64 -f docker/Dockerfile \
 #       --build-arg TORCH_CUDA_ARCH_LIST=12.1 -t fastvideo-dev:spark .
 #
 # The ARG defaults below are the source of truth for the default image.
@@ -49,14 +49,16 @@ ARG PYTHON_VERSION=3.12
 # for GB10/Blackwell (DGX Spark).
 ARG TORCH_CUDA_ARCH_LIST=9.0a
 
-# flash-attn: when FLASH_ATTN_WHEEL_TAG is set (and the target is x86_64), install
-# the matching prebuilt wheel; otherwise -- empty tag, or an arm64 target where no
-# prebuilt wheel exists -- build it from source. The wheel's cuXXXtorchY.Y tag must
-# match UV_TORCH_BACKEND (below): cu130torch2.12 for the default 13.0 base,
-# cu126torch2.12 for 12.6 (both backends are on torch 2.12).
+# flash-attn: when FLASH_ATTN_WHEEL_TAG is set, install the matching prebuilt wheel
+# for TARGETARCH. The prebuilt-wheel project publishes x86_64 and arm64 wheels in
+# different releases, so each architecture has its own release URL. Set the wheel
+# tag to empty only when an explicit source build is desired. The wheel's
+# cuXXXtorchY.Y tag must match UV_TORCH_BACKEND (below): cu130torch2.12 for the
+# default 13.0 base, cu126torch2.12 for 12.6 (both backends are on torch 2.12).
 ARG FLASH_ATTN_VERSION=2.8.3
 ARG FLASH_ATTN_WHEEL_TAG=cu130torch2.12
 ARG FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17
+ARG FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22
 
 # The prebuilt flash-attn wheel ships an FA4 `flash_attn.cute` built against the
 # cutlass-4.4 `cute.core.ThrMma` API, which crashes on the cutlass-dsl 4.5 that
@@ -64,9 +66,9 @@ ARG FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuil
 # upstream cute (flash-attn-4) so the image runs FA4 instead of the FA2 fallback.
 ARG FA4_CUTE_REF=940cd9680f3315f2f06b43ab5bea2c2cf2d96806
 
-# Provided automatically by buildx (e.g. "amd64" / "arm64"); used to skip the
-# x86-only prebuilt flash-attn wheel on arm64. Empty under a plain `docker build`
-# without buildx, which we treat as x86_64 (the historical default).
+# Provided automatically by BuildKit/buildx (e.g. "amd64" / "arm64") and used to
+# select the prebuilt flash-attn wheel. Empty under a plain `docker build` without
+# BuildKit, which we treat as x86_64 for compatibility with the historical build.
 ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -133,9 +135,23 @@ RUN --mount=type=cache,target=/opt/uv/cache \
     uv pip install --upgrade pip && \
     uv pip install ".[dev]" && \
     PYTAG=cp$(echo "${PYTHON_VERSION}" | tr -d .) && \
-    if [ -n "${FLASH_ATTN_WHEEL_TAG}" ] && [ "${TARGETARCH}" != "arm64" ]; then \
-        echo "Installing prebuilt flash-attn wheel (${FLASH_ATTN_WHEEL_TAG}, ${PYTAG})" && \
-        uv pip install "${FLASH_ATTN_WHEEL_RELEASE}/flash_attn-${FLASH_ATTN_VERSION}+${FLASH_ATTN_WHEEL_TAG}-${PYTAG}-${PYTAG}-linux_x86_64.whl"; \
+    case "${TARGETARCH:-amd64}" in \
+        amd64) \
+            FLASH_ATTN_WHEEL_PLATFORM=linux_x86_64; \
+            FLASH_ATTN_TARGET_RELEASE=${FLASH_ATTN_WHEEL_RELEASE} \
+            ;; \
+        arm64) \
+            FLASH_ATTN_WHEEL_PLATFORM=linux_aarch64; \
+            FLASH_ATTN_TARGET_RELEASE=${FLASH_ATTN_WHEEL_RELEASE_ARM64} \
+            ;; \
+        *) \
+            echo "Unsupported TARGETARCH for flash-attn: ${TARGETARCH}" >&2; \
+            exit 1 \
+            ;; \
+    esac && \
+    if [ -n "${FLASH_ATTN_WHEEL_TAG}" ]; then \
+        echo "Installing prebuilt flash-attn wheel (${FLASH_ATTN_WHEEL_TAG}, ${PYTAG}, ${FLASH_ATTN_WHEEL_PLATFORM})" && \
+        uv pip install "${FLASH_ATTN_TARGET_RELEASE}/flash_attn-${FLASH_ATTN_VERSION}+${FLASH_ATTN_WHEEL_TAG}-${PYTAG}-${PYTAG}-${FLASH_ATTN_WHEEL_PLATFORM}.whl"; \
     else \
         echo "Building flash-attn ${FLASH_ATTN_VERSION} from source" && \
         uv pip install flash-attn==${FLASH_ATTN_VERSION} --no-build-isolation; \

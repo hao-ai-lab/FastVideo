@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       build_cuda_matrix:
-        description: 'Build the CUDA image matrix (py3.12 x CUDA 12.6.3/13.0.0)'
+        description: 'Build the CUDA image matrix (py3.12 x CUDA 12.6.3/13.0.0 x amd64/arm64)'
         required: false
         default: true
         type: boolean
       build_dreamverse_matrix:
-        description: 'Build the Dreamverse matrix (backend + UI x CUDA 12.6.3/13.0.0)'
+        description: 'Build the amd64 Dreamverse matrix (backend + UI x CUDA 12.6.3/13.0.0)'
         required: false
         default: false
         type: boolean
@@ -20,10 +20,12 @@ permissions:
   packages: write
 
 jobs:
-  # CUDA matrix: Python 3.12 x {12.6.3, 13.0.0}. Each cell pins the torch backend +
-  # flash-attn wheel to its base CUDA (both on torch 2.12). 13.0.0 is the default
-  # `py3.12`/`latest` (CUDA 13, cu130); 12.6.3 is the broader-driver build. The base
-  # image only changes the nvcc that compiles the kernel.
+  # CUDA matrix: Python 3.12 x {12.6.3, 13.0.0} x {amd64, arm64}. Each architecture
+  # builds natively and pushes only by digest; publish-cuda-manifests is the sole
+  # owner of the shared tags. CUDA 12.6 arm64 targets Hopper (sm_90a / GH200 class),
+  # because CUDA 12.6 cannot compile sm_121. CUDA 13 arm64 targets GB10 (sm_121).
+  # 13.0.0 remains the default `py3.12`/`latest` image; 12.6.3 is the broader-driver
+  # build. Flash-attn 2.8.3 comes from the architecture-specific prebuilt releases.
   build-cuda-images:
     if: ${{ github.event.inputs.build_cuda_matrix == 'true' }}
     strategy:
@@ -34,28 +36,124 @@ jobs:
             suffix: '-cuda12.6.3'
             torch_backend: 'cu126'
             fa_tag: 'cu126torch2.12'
-            fa_release: 'v0.9.17'
           - version: '13.0.0'
             suffix: ''
             torch_backend: 'cu130'
             fa_tag: 'cu130torch2.12'
-            fa_release: 'v0.9.17'
+        architecture:
+          - name: amd64
+            runner: ubuntu-latest
+          - name: arm64
+            runner: ubuntu-24.04-arm
     uses: ./.github/workflows/_template-build-image.yml
     with:
       python_version: '3.12'
       dockerfile_path: docker/Dockerfile
       tag_suffix: py3.12${{ matrix.cuda.suffix }}
-      mark_as_latest: ${{ matrix.cuda.version == '13.0.0' }}
+      runner: ${{ matrix.architecture.runner }}
+      architecture: ${{ matrix.architecture.name }}
+      push_by_digest: true
+      digest_artifact_name: fastvideo-dev-cuda${{ matrix.cuda.version }}-${{ matrix.architecture.name }}
       build_args: |
         PYTHON_VERSION=3.12
         CUDA_VERSION=${{ matrix.cuda.version }}
         UV_TORCH_BACKEND=${{ matrix.cuda.torch_backend }}
+        TORCH_CUDA_ARCH_LIST=${{ matrix.architecture.name == 'arm64' && matrix.cuda.version == '13.0.0' && '12.1' || '9.0a' }}
         FLASH_ATTN_WHEEL_TAG=${{ matrix.cuda.fa_tag }}
-        FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/${{ matrix.cuda.fa_release }}
+        FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17
+        FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22
     secrets: inherit
 
+  publish-cuda-manifests:
+    if: ${{ github.event.inputs.build_cuda_matrix == 'true' }}
+    needs: build-cuda-images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda:
+          - version: '12.6.3'
+            suffix: '-cuda12.6.3'
+          - version: '13.0.0'
+            suffix: ''
+    steps:
+      - name: Download architecture digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: fastvideo-dev-cuda${{ matrix.cuda.version }}-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Normalize image reference
+        id: image
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}/fastvideo-dev
+        run: echo "name=${IMAGE,,}" >> "${GITHUB_OUTPUT}"
+
+      - name: Prepare tags
+        id: prepare-tags
+        env:
+          TAG_SUFFIX: py3.12${{ matrix.cuda.suffix }}
+          MARK_AS_LATEST: ${{ matrix.cuda.version == '13.0.0' }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          TAGS="type=raw,value=${TAG_SUFFIX}-latest\ntype=raw,value=${TAG_SUFFIX}-sha-${SHORT_SHA}"
+          if [[ "${MARK_AS_LATEST}" == "true" ]]; then
+            TAGS="${TAGS}\ntype=raw,value=latest"
+          fi
+          {
+            echo "tags<<EOF"
+            echo -e "${TAGS}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: ${{ steps.prepare-tags.outputs.tags }}
+
+      - name: Create multi-architecture manifests
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: |
+          mapfile -t DIGESTS < <(find /tmp/digests -maxdepth 1 -type f -printf '%f\n' | sort)
+          if [[ "${#DIGESTS[@]}" -ne 2 ]]; then
+            echo "Expected exactly two architecture digests, found ${#DIGESTS[@]}" >&2
+            exit 1
+          fi
+
+          mapfile -t TAGS < <(jq -r '.tags[]' <<< "${DOCKER_METADATA_OUTPUT_JSON}")
+          TAG_ARGS=()
+          for TAG in "${TAGS[@]}"; do
+            TAG_ARGS+=(--tag "${TAG}")
+          done
+
+          IMAGE_REFS=()
+          for DIGEST in "${DIGESTS[@]}"; do
+            IMAGE_REFS+=("${IMAGE}@sha256:${DIGEST}")
+          done
+
+          docker buildx imagetools create "${TAG_ARGS[@]}" "${IMAGE_REFS[@]}"
+          docker buildx imagetools inspect "${TAGS[0]}"
+
   # Dreamverse matrix: {backend, UI} x {12.6.3, 13.0.0}, Python 3.12. Torch backend
-  # matches the base CUDA (cu126 / cu130). Tagged dreamverse-<variant>-cuda<version>.
+  # matches the base CUDA (cu126 / cu130). Keep these images amd64-only until the
+  # required FA4 dependency stack is available and validated on arm64.
   build-dreamverse:
     if: ${{ github.event.inputs.build_dreamverse_matrix == 'true' }}
     strategy:

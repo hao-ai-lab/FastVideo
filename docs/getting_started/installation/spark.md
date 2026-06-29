@@ -113,14 +113,13 @@ also clones `vbench`).
 
 ## Optional: flash-attn
 
-Not installed by default — there is no prebuilt `aarch64` wheel, so it is a heavy
-from-source build, and FastVideo falls back to other attention backends without
-it. If you want it:
+Not installed by default. FastVideo falls back to other attention backends
+without it. For the guide's Python 3.12, PyTorch 2.12, and CUDA 13 environment,
+install the matching prebuilt Linux ARM64 wheel from the
+[FlashAttention prebuilt wheel index](https://mjunya.com/flash-attention-prebuild-wheels/?python=3.12&torch=2.12&cuda=13.0&platform=Linux+arm64):
 
 ```bash
-export CUDA_HOME=/usr/local/cuda
-export CUDACXX=/usr/local/cuda/bin/nvcc
-uv pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation -v
+uv pip install "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22/flash_attn-2.8.3%2Bcu130torch2.12-cp312-cp312-linux_aarch64.whl"
 ```
 
 ## Troubleshooting
