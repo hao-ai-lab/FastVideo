@@ -392,8 +392,17 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
         if batch.pil_image is None:
             raise ValueError("Kandinsky5 I2V requires an input image.")
 
+        if not fastvideo_args.model_loaded["vae"]:
+            vae = getattr(self, "vae", None)
+            if vae is None:
+                loader = VAELoader()
+                vae = loader.load(fastvideo_args.model_paths["vae"], fastvideo_args)
+                self.vae = vae
+            fastvideo_args.model_loaded["vae"] = True
+
         device = get_local_torch_device()
-        self.vae = self.vae.to(device)
+        vae = self.vae.to(device)
+        self.vae = vae
         vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
         vae_autocast_enabled = vae_dtype != torch.float32 and not fastvideo_args.disable_autocast
 
@@ -403,22 +412,22 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
 
         # Encode the single conditioning frame without tiling (matches diffusers).
         # The untested causal-VAE spatial_tiled_encode path corrupts the latent.
-        prev_use_tiling = self.vae.use_tiling
-        self.vae.use_tiling = False
+        prev_use_tiling = vae.use_tiling
+        vae.use_tiling = False
         try:
             with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
                 if not vae_autocast_enabled:
                     image = image.to(vae_dtype)
-                image_latent = self.vae.encode(image).mode()
+                image_latent = vae.encode(image).mode()
         finally:
-            self.vae.use_tiling = prev_use_tiling
+            vae.use_tiling = prev_use_tiling
 
-        image_latent = image_latent * self.vae.scaling_factor
+        image_latent = image_latent * vae.scaling_factor
         # [B, C, 1, H, W] -> [B, 1, H, W, C] to match channels-last latents
         batch.image_latent = image_latent.permute(0, 2, 3, 4, 1).contiguous()
 
         if fastvideo_args.vae_cpu_offload:
-            self.vae.to("cpu")
+            vae.to("cpu")
         return batch
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -445,8 +454,8 @@ class Kandinsky5NormalizationStage(PipelineStage):
         source_mean = source.mean(dim=(1, 2, 3, 4), keepdim=True)
         source_std = source.std(dim=(1, 2, 3, 4), keepdim=True)
         # Magic constants limit how far the first frames may drift.
-        ref_mean = torch.clamp(reference.mean(), source_mean - 0.05, source_mean + 0.1)
-        ref_std = torch.clamp(reference.std(), source_std - 0.1, source_std + 0.25)
+        ref_mean = torch.clamp(reference.mean(dim=(1, 2, 3, 4), keepdim=True), source_mean - 0.05, source_mean + 0.1)
+        ref_std = torch.clamp(reference.std(dim=(1, 2, 3, 4), keepdim=True), source_std - 0.1, source_std + 0.25)
         normalized = (source - source_mean) / source_std
         return normalized * ref_std + ref_mean
 
