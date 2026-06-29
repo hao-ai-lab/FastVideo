@@ -41,7 +41,7 @@ dreamverse_image = (image.run_commands(
 
 def run_test(pytest_command: str):
     """Helper function to run a test suite with custom pytest command"""
-    run_test_command(f'uv pip install -e ".[test]" && {pytest_command}',
+    run_test_command(f'retry_command uv pip install -e ".[test]" && {pytest_command}',
                      build_kernel=True)
 
 
@@ -52,13 +52,17 @@ def run_test_command(test_command: str, build_kernel: bool):
     DreamVerse's mock-backend UI checks do not, so keep the kernel build
     optional to avoid unrelated CUDA/kernel setup in that CI path.
     """
+    import os
+    import shlex
     import subprocess
     import sys
-    import os
 
     git_repo = os.environ.get("BUILDKITE_REPO")
     git_commit = os.environ.get("BUILDKITE_COMMIT")
     pr_number = os.environ.get("BUILDKITE_PULL_REQUEST")
+
+    if not git_repo:
+        raise RuntimeError("BUILDKITE_REPO is required")
 
     print(f"Cloning repository: {git_repo}")
     print(f"Target commit: {git_commit}")
@@ -67,10 +71,17 @@ def run_test_command(test_command: str, build_kernel: bool):
 
     # For PRs (including forks), use GitHub's PR refs to get the correct commit
     if pr_number and pr_number != "false":
-        checkout_command = f"git fetch --prune origin refs/pull/{pr_number}/head && git checkout FETCH_HEAD"
+        try:
+            pr_id = int(pr_number)
+        except ValueError as error:
+            raise RuntimeError(f"Invalid BUILDKITE_PULL_REQUEST value: {pr_number}") from error
+        checkout_command = (
+            "retry_command git -c http.version=HTTP/1.1 fetch --prune "
+            f"origin refs/pull/{pr_id}/head && git checkout FETCH_HEAD"
+        )
         print(f"Using PR ref for checkout: {checkout_command}")
     else:
-        checkout_command = f"git checkout {git_commit}"
+        checkout_command = f"git checkout {shlex.quote(git_commit or '')}"
         print(f"Using direct commit checkout: {checkout_command}")
 
     build_kernel_command = """
@@ -80,12 +91,61 @@ def run_test_command(test_command: str, build_kernel: bool):
     """ if build_kernel else ""
 
     command = f"""
+    set -o pipefail
+
+    retry_command() {{
+        local attempt=1
+        local max_attempts=3
+        local status=0
+        while true; do
+            if "$@"; then
+                return 0
+            fi
+            status=$?
+            if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "command failed after $max_attempts attempts: $*" >&2
+                return "$status"
+            fi
+            local sleep_seconds=$((attempt * 5))
+            echo "command failed (attempt $attempt/$max_attempts): $*; retrying in ${{sleep_seconds}}s..." >&2
+            sleep "$sleep_seconds"
+            attempt=$((attempt + 1))
+        done
+    }}
+
+    git_clone_retry() {{
+        local repo="$1"
+        local dst="$2"
+        local attempt=1
+        local max_attempts=3
+        local status=0
+        while true; do
+            rm -rf "$dst"
+            if git -c http.version=HTTP/1.1 clone "$repo" "$dst"; then
+                return 0
+            fi
+            status=$?
+            if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "git clone failed after $max_attempts attempts" >&2
+                return "$status"
+            fi
+            local sleep_seconds=$((attempt * 5))
+            echo "git clone failed (attempt $attempt/$max_attempts), retrying in ${{sleep_seconds}}s..." >&2
+            sleep "$sleep_seconds"
+            attempt=$((attempt + 1))
+        done
+    }}
+
+    hf_auth_login() {{
+        retry_command hf auth login --token "$HF_API_KEY"
+    }}
+
     source $HOME/.local/bin/env &&
     source /opt/venv/bin/activate &&
-    git clone {git_repo} /FastVideo &&
+    git_clone_retry {shlex.quote(git_repo)} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
-    git submodule update --init --recursive &&
+    retry_command git -c http.version=HTTP/1.1 submodule update --init --recursive &&
     {build_kernel_command}
     {test_command}
     """
@@ -110,7 +170,7 @@ def run_test_command(test_command: str, build_kernel: bool):
               volumes={"/root/data": model_vol})
 def run_encoder_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/encoders -vs"
+        "export HF_HOME='/root/data/.cache' && hf_auth_login && pytest ./fastvideo/tests/encoders -vs"
     )
 
 
@@ -124,7 +184,7 @@ def run_encoder_tests():
               volumes={"/root/data": model_vol})
 def run_vae_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/vaes -vs"
+        "export HF_HOME='/root/data/.cache' && hf_auth_login && pytest ./fastvideo/tests/vaes -vs"
     )
 
 
@@ -138,7 +198,7 @@ def run_vae_tests():
               volumes={"/root/data": model_vol})
 def run_transformer_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/transformers -vs"
+        "export HF_HOME='/root/data/.cache' && hf_auth_login && pytest ./fastvideo/tests/transformers -vs"
     )
 
 
@@ -282,7 +342,7 @@ def run_dreamverse_app_tests():
               volumes={"/root/data": model_vol})
 def run_train_framework_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs"
+        "export HF_HOME='/root/data/.cache' && hf_auth_login && pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs"
     )
 
 
@@ -311,7 +371,7 @@ def seed_grad_norm_references():
     the local command and the ``_DEVICE_MAPPINGS`` table.
     """
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && FASTVIDEO_GRADNORM_UPDATE=1 pytest ./fastvideo/tests/train/methods -vs -rs"
+        "export HF_HOME='/root/data/.cache' && hf_auth_login && FASTVIDEO_GRADNORM_UPDATE=1 pytest ./fastvideo/tests/train/methods -vs -rs"
     )
 
 
@@ -324,7 +384,7 @@ def seed_grad_norm_references():
               ])
 def run_lora_extraction_tests():
     run_test(
-        "hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/lora_extraction/test_lora_extraction.py"
+        "hf_auth_login && pytest ./fastvideo/tests/lora_extraction/test_lora_extraction.py"
     )
 
 
@@ -343,7 +403,7 @@ def run_performance_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
-        "hf auth login --token $HF_API_KEY && "
+        "hf_auth_login && "
         "pytest ./fastvideo/tests/performance -vs; "
         "PYTEST_RC=$?; "
         "PERF_RC=0; "
@@ -367,5 +427,5 @@ def run_performance_tests():
               volumes={"/root/data": model_vol})
 def run_api_server_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/entrypoints/test_openai_api_integration.py -vs"
+        "export HF_HOME='/root/data/.cache' && hf_auth_login && pytest ./fastvideo/tests/entrypoints/test_openai_api_integration.py -vs"
     )
