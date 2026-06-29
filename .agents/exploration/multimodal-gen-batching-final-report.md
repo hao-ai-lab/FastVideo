@@ -25,6 +25,7 @@ the sequential path.
 - `1bea1dee` - `[misc]: record batching stage 5 state`
 - `9c6eb355` - `[fix]: harden dynamic generation batching`
 - `2304837e` - `[docs]: record multimodal batching validation report`
+- `71fe451b` - `[misc]: satisfy all-files pre-commit formatting`
 
 ## Implementation
 
@@ -87,8 +88,10 @@ Added validation helper:
 
 ## Remote Validation
 
-All validation was run through
-`fastvideo/tests/modal/launch_l40s_job.py` on Modal L40S.
+All validation was run remotely through
+`fastvideo/tests/modal/launch_l40s_job.py` from the `interleavethinker` branch.
+Required PR validation used Modal L40S unless a row explicitly notes a different
+GPU type.
 
 Focused tests and hooks:
 
@@ -109,6 +112,14 @@ Post-report validation:
 | Wan T2V SSIM on H100 | `ap-KaJr2loSTefvmj8ijYwWOK` | `FASTVIDEO_SSIM_MODEL_ID=Wan2.1-T2V-1.3B-Diffusers pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs` on `H100:2` | Generated both videos, but failed before SSIM comparison because `H100_reference_videos` are missing for both `FLASH_ATTN` and `TORCH_SDPA` |
 | Wan T2V SSIM on L40S | `ap-iWP6PA1IyZbXHDKtIE1LQH` | same targeted Wan T2V SSIM command on `L40S:2`, `--install-extra none` | `2 passed`, `6 warnings`; mean SSIM `0.9786614696` for `FLASH_ATTN`, `0.9743387236` for `TORCH_SDPA` |
 | Full pre-commit attempt | `ap-r20n8jCBwqQnh8I5Us1yTN` | `pre-commit run --all-files` on `L40S:1` | Failed because yapf/ruff rewrote a large set of pre-existing repository files; not taken as PR-local evidence |
+| Final full pre-commit | `ap-XLXARFbxkJa40Yom5VxxfX` | `pre-commit run --all-files` on `L40S:1` at `71fe451b` | Passed: yapf, ruff, codespell, PyMarkdown, actionlint, mypy, filename spaces, and suggestion hooks |
+
+Checklist closure:
+
+- Full all-files pre-commit passed on Modal L40S at `71fe451b`.
+- Support matrix reviewed at `docs/inference/support_matrix.md`. No update is
+  required because this PR adds opt-in batching behavior and does not add a new
+  model ID or registry entry.
 
 ## Parity
 
