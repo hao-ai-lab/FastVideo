@@ -18,7 +18,8 @@ Make sure you're logged into the right RunPod account before spending credits.
 
 **2. Filter by CUDA version**
 
-Use "Additional Filters" to select CUDA 12.8.
+Use "Additional Filters" to select a CUDA version supported by the FastVideo
+template.
 
 ![RunPod CUDA selection](../../assets/images/runpod_cuda.png)
 
@@ -99,10 +100,11 @@ cd /FastVideo
 **Install the package**
 
 ```bash
-UV_TORCH_BACKEND=auto uv pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 ```
 
-The Docker image already includes Flash Attention and most heavy dependencies, so this is fast.
+This preserves the PyTorch backend selected by the Docker image. The image also
+includes Flash Attention and most heavy dependencies, so this is fast.
 
 **Build the custom kernels (optional)**
 

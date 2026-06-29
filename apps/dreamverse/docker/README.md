@@ -27,10 +27,26 @@ BUILD_DREAMVERSE_UI=1 DREAMVERSE_IMAGE=<image-tag> apps/dreamverse/docker/docker
 
 Prefer SHA-specific tags for deployable images; avoid `latest`.
 
-The Dockerfile builds a CUDA 12.9.1 image, installs FastVideo from this
-checkout with the `dreamverse` extra, installs the FA4
-flash-attention fork, builds native FFmpeg, and installs FlashInfer for NVFP4
-quantization.
+The Dockerfile defaults to CUDA 13.0.0 with the cu130 PyTorch backend. CI also
+builds a CUDA 12.6.3 / cu126 image. Select that local build explicitly with:
+
+```bash
+CUDA_VERSION=12.6.3 apps/dreamverse/docker/docker_build.sh
+```
+
+The helper derives `UV_TORCH_BACKEND=cu126` for CUDA 12.x and `cu130` for CUDA
+13.x. Set `UV_TORCH_BACKEND` explicitly for a custom CUDA version. The legacy
+complete-image-tag override remains supported and selects the same matching
+backend:
+
+```bash
+CUDA_TAG=12.6.3-cudnn-devel-ubuntu22.04 apps/dreamverse/docker/docker_build.sh
+```
+
+Do not set `CUDA_TAG` and `CUDA_VERSION` together. The image installs FastVideo
+from this checkout with the `dreamverse` extra, including the FA4
+flash-attention fork and FlashInfer for NVFP4 quantization, and builds native
+FFmpeg.
 
 FastVideo's pinned `fastvideo-kernel==0.3.0` package is installed by default.
 To rebuild `fastvideo-kernel` from this checkout during the image build, set:

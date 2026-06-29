@@ -6,7 +6,7 @@ Instructions to install FastVideo for NVIDIA CUDA GPUs.
 
 - **OS: Linux or Windows WSL**
 - **Python: 3.10-3.12**
-- **CUDA 12.8**
+- **CUDA: 12.6 or 13.0**
 - **At least 1 NVIDIA GPU**
 
 ## Set up using Python
@@ -47,7 +47,7 @@ conda activate fastvideo
 #### With uv (recommended)
 
 ```bash
-UV_TORCH_BACKEND=auto uv pip install fastvideo
+UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 ```
 
 Also optionally install FlashAttention:
@@ -61,7 +61,7 @@ uv pip install flash-attn --no-build-isolation -v
 `uv` works inside an active conda env too, so prefer `uv pip` for the actual install:
 
 ```bash
-UV_TORCH_BACKEND=auto uv pip install fastvideo
+UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 ```
 
 Also optionally install FlashAttention:
@@ -80,20 +80,19 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 
 #### 2. Install FastVideo
 
-FastVideo doesn't pin the PyTorch CUDA build. Set `UV_TORCH_BACKEND` so uv picks
-it: `auto` matches your GPU driver, or pin one explicitly (e.g. `cu126`/`cu130`).
-torch resolves to 2.12 on `cu126`/`cu130`; `auto` works on a CUDA 12.6+ driver.
+FastVideo requires PyTorch 2.12. Use `UV_TORCH_BACKEND=cu126` for CUDA 12 or
+`UV_TORCH_BACKEND=cu130` for CUDA 13.
 
 Basic installation:
 
 ```bash
-UV_TORCH_BACKEND=auto uv pip install -e .
+UV_TORCH_BACKEND=cu126 uv pip install -e .
 ```
 
 Alternative with Conda environment:
 
 ```bash
-UV_TORCH_BACKEND=auto uv pip install -e .
+UV_TORCH_BACKEND=cu126 uv pip install -e .
 ```
 
 ### Optional Dependencies
@@ -122,7 +121,7 @@ If you're planning to contribute to FastVideo please see the following page:
 ## Hardware Requirements
 
 ### For Basic Inference
-- NVIDIA GPU with CUDA 12.8 support
+- NVIDIA GPU compatible with CUDA 12.6 or newer
 
 ### For Lora Finetuning
 - 40GB GPU memory each for 2 GPUs with lora

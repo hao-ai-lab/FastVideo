@@ -19,10 +19,7 @@ absolute VLM scorer (`videoscore2`), and a pairwise VLM judge
 
 `[eval-audio]` covers every `audio.*` metric. ImageBind
 (`facebookresearch/ImageBind`, CC BY-NC-SA 4.0) is git-sourced via
-`[tool.uv.sources]` rather than vendored. `torchaudio` at the cu128
-wheel is pulled transitively by `audiobox_aesthetics`; on cu128 hosts
-using raw `pip`, install `torchaudio` from
-`https://download.pytorch.org/whl/cu128` first.
+`[tool.uv.sources]` rather than vendored.
 
 `[eval-fast-decode]` is opt-in. It pulls `decord`, which is faster than
 the default PyAV decoder but has no aarch64 wheels and is effectively

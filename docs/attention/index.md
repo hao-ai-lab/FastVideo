@@ -19,7 +19,7 @@ source, which includes both STA and VSA kernels.
 ### Prerequisites
 
 * **PyTorch**: 2.5.0+
-* **CUDA**: 12.4+ (12.8 recommended for best performance)
+* **CUDA**: 12.6+ (CUDA 13 recommended for Blackwell GPUs)
 * **C++ Compiler**: GCC 11+ (C++20 support required for ThunderKittens)
 
 Install system dependencies:
