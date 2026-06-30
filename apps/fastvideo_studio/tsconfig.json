@@ -35,7 +35,6 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    "src/lib/stores"
+    "node_modules"
   ]
 }
