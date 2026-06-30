@@ -140,7 +140,7 @@ class TextEncodingStage(PipelineStage):
             per_prompt_audio_embeds.append(self._last_audio_embeds)
 
         merged_embeds = [
-            torch.cat([prompt_embeds[encoder_pos] for prompt_embeds in per_prompt_embeds], dim=0)
+            self._cat_tensors([prompt_embeds[encoder_pos] for prompt_embeds in per_prompt_embeds])
             for encoder_pos in range(len(per_prompt_embeds[0]))
         ]
         merged_masks = [
@@ -150,12 +150,30 @@ class TextEncodingStage(PipelineStage):
         if per_prompt_audio_embeds and all(audio_embeds is not None for audio_embeds in per_prompt_audio_embeds):
             audio_embed_lists = [audio_embeds for audio_embeds in per_prompt_audio_embeds if audio_embeds is not None]
             self._last_audio_embeds = [
-                torch.cat([audio_embeds[encoder_pos] for audio_embeds in audio_embed_lists], dim=0)
+                self._cat_tensors([audio_embeds[encoder_pos] for audio_embeds in audio_embed_lists])
                 for encoder_pos in range(len(audio_embed_lists[0]))
             ]
         else:
             self._last_audio_embeds = None
         return merged_embeds, merged_masks
+
+    @staticmethod
+    def _cat_tensors(tensors: list[torch.Tensor]) -> torch.Tensor:
+        base_shape = tensors[0].shape[1:]
+        if all(tensor.shape[1:] == base_shape for tensor in tensors):
+            return torch.cat(tensors, dim=0)
+        if all(tensor.ndim == 3 for tensor in tensors):
+            base_trailing_shape = tensors[0].shape[2:]
+            if all(tensor.shape[2:] == base_trailing_shape for tensor in tensors):
+                max_length = max(tensor.shape[1] for tensor in tensors)
+                padded_tensors = []
+                for tensor in tensors:
+                    pad_width = max_length - tensor.shape[1]
+                    if pad_width > 0:
+                        tensor = torch.nn.functional.pad(tensor, (0, 0, 0, pad_width), value=0.0)
+                    padded_tensors.append(tensor)
+                return torch.cat(padded_tensors, dim=0)
+        raise ValueError(f"Cannot concatenate tensors with shapes: {[list(tensor.shape) for tensor in tensors]}")
 
     @staticmethod
     def _cat_attention_masks(masks: list[torch.Tensor]) -> torch.Tensor:
