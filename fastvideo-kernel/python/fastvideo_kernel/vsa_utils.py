@@ -17,6 +17,14 @@ VSA_TILE_SIZE = (4, 4, 4)
 _SUPPORTED_VSA_BLOCK_VOLUMES = (64, 256)
 
 
+def _canonicalize_device(device: torch.device | str) -> torch.device:
+    """Resolve an indexless CUDA device before it is used as a cache key."""
+    device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda", torch.cuda.current_device())
+    return device
+
+
 @functools.lru_cache(maxsize=10)
 def get_tile_partition_indices(
     dit_seq_shape: tuple[int, int, int],
@@ -120,8 +128,7 @@ def build_vsa_metadata(
         Dict with keys: tile_partition_indices, reverse_tile_partition_indices,
         variable_block_sizes, non_pad_index, num_tiles, max_block_size.
     """
-    if isinstance(device, str):
-        device = torch.device(device)
+    device = _canonicalize_device(device)
 
     T, H, W = dit_seq_shape
     ts_t, ts_h, ts_w = tile_size

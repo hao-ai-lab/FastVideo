@@ -1,7 +1,7 @@
 """Tests for vsa_utils — standalone VSA metadata utilities.
 
-These tests are CPU-only (no GPU/kernel required) since vsa_utils
-only does index computation with pure PyTorch.
+These tests use CPU index computation except for an optional multi-GPU
+regression covering cache isolation between CUDA devices.
 """
 
 import math
@@ -10,12 +10,40 @@ import torch
 
 from fastvideo_kernel.vsa_utils import (
     VSA_TILE_SIZE,
+    _canonicalize_device,
     get_tile_partition_indices,
     get_reverse_tile_partition_indices,
     construct_variable_block_sizes,
     get_non_pad_index,
     build_vsa_metadata,
 )
+
+
+class TestDeviceCanonicalization:
+
+    def test_unindexed_cuda_resolves_current_device(self, monkeypatch):
+        monkeypatch.setattr(torch.cuda, "current_device", lambda: 3)
+        assert _canonicalize_device("cuda") == torch.device("cuda:3")
+        assert _canonicalize_device(torch.device("cuda")) == torch.device("cuda:3")
+
+    @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="requires two CUDA devices")
+    def test_metadata_cache_isolated_between_cuda_devices(self):
+        shape = (7, 8, 8)
+        tensor_keys = (
+            "tile_partition_indices",
+            "reverse_tile_partition_indices",
+            "variable_block_sizes",
+            "non_pad_index",
+        )
+
+        with torch.cuda.device(0):
+            metadata_0 = build_vsa_metadata(shape, device="cuda")
+        with torch.cuda.device(1):
+            metadata_1 = build_vsa_metadata(shape, device="cuda")
+
+        for key in tensor_keys:
+            assert metadata_0[key].device == torch.device("cuda:0")
+            assert metadata_1[key].device == torch.device("cuda:1")
 
 
 class TestGetTilePartitionIndices:
