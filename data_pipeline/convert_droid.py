@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -49,7 +48,9 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--out-dir", type=Path, required=True)
     p.add_argument("--num-clips", type=int, default=200, help="How many episodes to keep (the cluster size).")
-    p.add_argument("--candidate-scan", type=int, default=1500,
+    p.add_argument("--candidate-scan",
+                   type=int,
+                   default=1500,
                    help="How many episodes to download+embed before clustering. Larger => tighter cluster.")
     p.add_argument("--video-key", type=str, default=DEFAULT_VIDEO_KEY)
     p.add_argument("--num-frames", type=int, default=121)
@@ -88,8 +89,8 @@ def download_one(ep_idx: int, video_key: str) -> tuple[int, str | None]:
     try:
         p = hf_hub_download(REPO, episode_video_path(ep_idx, video_key), repo_type="dataset")
         return ep_idx, p
-    except Exception as e:  # noqa: BLE001
-        return ep_idx, None if True else str(e)
+    except Exception:  # noqa: BLE001
+        return ep_idx, None
 
 
 def decode_frames(path: str, start: int, count: int) -> np.ndarray | None:
@@ -98,13 +99,11 @@ def decode_frames(path: str, start: int, count: int) -> np.ndarray | None:
     try:
         container = av.open(path)
         frames = []
-        idx = 0
-        for frame in container.decode(video=0):
+        for idx, frame in enumerate(container.decode(video=0)):
             if idx >= start:
                 frames.append(frame.to_ndarray(format="rgb24"))
                 if len(frames) >= count:
                     break
-            idx += 1
         container.close()
     except Exception:  # noqa: BLE001
         return None
@@ -188,7 +187,8 @@ def main() -> None:
         c = sub.mean(0, keepdims=True)
         c /= np.linalg.norm(c) + 1e-8
         mean_sim = float((sub @ c.T).mean())
-        print(f"[droid] tightest-cluster of {len(sel_local)} clips; mean cos-sim to centroid={mean_sim:.3f}", flush=True)
+        print(f"[droid] tightest-cluster of {len(sel_local)} clips; mean cos-sim to centroid={mean_sim:.3f}",
+              flush=True)
 
     selected_eps = [eps_ok[i] for i in sel_local]
 
@@ -203,8 +203,12 @@ def main() -> None:
             continue
         H, W = int(frames.shape[1]), int(frames.shape[2])
         name = f"vid_{seq:06d}.mp4"
-        imageio.mimsave(str(videos_dir / name), list(frames), fps=args.fps,
-                        codec="libx264", macro_block_size=1, output_params=["-pix_fmt", "yuv420p"])
+        imageio.mimsave(str(videos_dir / name),
+                        list(frames),
+                        fps=args.fps,
+                        codec="libx264",
+                        macro_block_size=1,
+                        output_params=["-pix_fmt", "yuv420p"])
         records.append({
             "idx": seq,
             "path": name,
@@ -212,7 +216,10 @@ def main() -> None:
             "fps": float(args.fps),
             "duration": float(args.num_frames) / float(args.fps),
             "num_frames": int(args.num_frames),
-            "resolution": {"width": W, "height": H},
+            "resolution": {
+                "width": W,
+                "height": H
+            },
             "source_episode": int(ep),
         })
         seq += 1

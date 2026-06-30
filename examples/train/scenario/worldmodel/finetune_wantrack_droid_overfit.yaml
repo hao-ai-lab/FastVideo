@@ -1,0 +1,88 @@
+# WanTrack (Wan2.1 Fun-Control + MotionStream point-track) DROID overfit.
+#
+# Goal: prove the data design forces TRACE reliance. The 200 DROID clips share a
+# similar first frame (tight frame-0 cluster) and ONE generic caption, so neither
+# the first frame nor the text can determine the (diverse) motion -- the model must
+# read the point tracks to reduce loss. This is the step-by-step "overfit on the
+# traces first" experiment, so MotionStream augments are left OFF (launch env
+# WANTRACK_AUG=0) for a clean loss-down signal.
+#
+# Init from the Fun-Control variant (trackwan_1.3b_i2v_control_init): its track-slot
+# patch-embed channels are Fun-Control's pretrained control channels (non-zero), so
+# gradient reaches the track encoder from step 0 -- no double-zero-init deadlock.
+#
+# Self-contained: a fresh output_dir + run_name, so it does not touch any prior run.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
+    init_from: /mnt/weka/home/hao.zhang/shao/data/models/trackwan_1.3b_i2v_control_init
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  model_path: /mnt/weka/home/hao.zhang/shao/data/models/trackwan_1.3b_i2v_control_init
+
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: /mnt/weka/home/hao.zhang/shao/data/motion_pipeline/droid_track_200/preprocessed_i2v_track/combined_parquet_dataset
+    dataloader_num_workers: 2
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 480
+    num_width: 832
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 1.0e-4
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 6000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: /mnt/weka/home/hao.zhang/shao/data/motion_pipeline/wantrack_droid_overfit_out
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: latest
+
+  tracker:
+    trackers: [wandb]
+    project_name: wantrack-bidir
+    run_name: droid-overfit-clean
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  track_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    every_steps: 500
+    num_val_samples: 2
+    num_inference_steps: 30
+    guidance_scale: 1.0
+    fps: 24
+    grid_stride: 3
+    tail: 12
+    validate_at_start: true
+    seed: 1000
+
+pipeline:
+  flow_shift: 3

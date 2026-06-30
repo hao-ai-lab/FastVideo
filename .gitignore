@@ -135,3 +135,6 @@ fastvideo/tests/ssim/reference_videos/**
 *.nvimlog
 .nvimlog
 .python-version
+
+# Gradio runtime/flagging artifacts
+.gradio/
