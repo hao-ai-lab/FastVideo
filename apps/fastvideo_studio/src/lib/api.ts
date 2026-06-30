@@ -62,6 +62,17 @@ export interface CreateJobRequest {
 	vsa_sparsity?: number;
 	tp_size?: number;
 	sp_size?: number;
+	// LoRA / LTX2 finetuning + DMD distillation extras (sent by CreateJobModal)
+	ltx2_first_frame_conditioning_p?: number;
+	dmd_use_vsa?: boolean;
+	dmd_vsa_sparsity?: number;
+	dmd_denoising_steps?: string;
+	min_timestep_ratio?: number;
+	max_timestep_ratio?: number;
+	real_score_guidance_scale?: number;
+	generator_update_interval?: number;
+	real_score_model_path?: string;
+	fake_score_model_path?: string;
 }
 
 export interface Model {
