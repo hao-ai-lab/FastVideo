@@ -186,13 +186,13 @@ pull_request_rules:
       label:
         add: ["scope: docs"]
 
-  - name: "label scope: ui"
+  - name: "label scope: studio"
     conditions:
-      - files~=^ui/
+      - files~=^apps/fastvideo_studio/
       - -closed
     actions:
       label:
-        add: ["scope: ui"]
+        add: ["scope: studio"]
 
   - name: "label scope: model"
     conditions:

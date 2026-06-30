@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from collections.abc import Callable
 
-logger = logging.getLogger("fastvideo.ui.preprocess_runner")
+logger = logging.getLogger("fastvideo.studio.preprocess_runner")
 
 
 def build_preprocess_args(
