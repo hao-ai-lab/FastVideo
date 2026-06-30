@@ -67,11 +67,12 @@ void int8_gemm(
 
 }
 
+#ifndef FASTVIDEO_KERNEL_DISABLE_PYBIND_REGISTRATION
 void register_gemm(pybind11::module_ &m) {
     m.def("gemm_cuda", &int8_gemm);
 }
+#endif
 
 
   
-
 

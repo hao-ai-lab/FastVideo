@@ -4,6 +4,25 @@ CUDA kernels for FastVideo video generation.
 
 ## Installation
 
+### Hugging Face Kernel Hub
+
+FastVideo kernels are built and published with the Hugging Face
+[`kernels`](https://huggingface.co/docs/kernels/index) project. Downstream code
+loads the precompiled kernels from
+[`hao-ai-lab/fastvideo-kernel`](https://huggingface.co/hao-ai-lab/fastvideo-kernel)
+without building locally:
+
+```python
+from kernels import get_kernel
+
+fastvideo_kernel = get_kernel("hao-ai-lab/fastvideo-kernel", version=1)
+```
+
+The Hub package exposes the native CUDA entrypoints (`sta_fwd`,
+`block_sparse_fwd`, `block_sparse_bwd`, `rms_norm`, `layer_norm`, `int8_quant`,
+and `int8_gemm`). The full FastVideo Python package still provides the
+high-level fallback logic used during local development.
+
 ### Standard Installation (Local Development)
 This will automatically detect your GPU architecture. If an NVIDIA Hopper (H100/sm_90a) GPU is detected, ThunderKittens kernels will be enabled. Otherwise, they will be skipped, and the package will use Triton fallbacks at runtime.
 

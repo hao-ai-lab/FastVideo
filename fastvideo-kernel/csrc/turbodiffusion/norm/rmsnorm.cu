@@ -75,6 +75,8 @@ auto rms_norm(
   return Output;
 }
 
+#ifndef FASTVIDEO_KERNEL_DISABLE_PYBIND_REGISTRATION
 void register_rms_norm(pybind11::module_ &m) {
     m.def("rms_norm_cuda", &rms_norm);
 }
+#endif
