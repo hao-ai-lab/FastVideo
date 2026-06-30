@@ -2,7 +2,13 @@
 
 The generation block is the same as
 ``examples/inference/basic/basic_ltx2.py`` — same prompt, same model,
-same shape, same num_frames. After ``shutdown()`` the script loads the
+same shape, same num_frames. This script can also be used as a template for other text-to-video
+models, such as Wan. To evaluate another model, replace the
+``VideoGenerator.from_pretrained(...)`` model name and adjust the
+generation parameters such as ``num_frames``, ``height``, ``width``,
+and ``fps`` to match that model's output.
+
+After ``shutdown()`` the script loads the
 mp4 back, builds a single :class:`fastvideo.eval.Evaluator`, and runs
 the prompt-aware VBench subset that's meaningful for an arbitrary
 text→video sample.
@@ -24,6 +30,7 @@ import torch
 from fastvideo import VideoGenerator
 from fastvideo.eval import Evaluator
 from fastvideo.eval.io import build_eval_kwargs
+from pathlib import Path
 
 PROMPT = (
     "A warm sunny backyard. The camera starts in a tight cinematic close-up "
@@ -57,25 +64,32 @@ METRICS = [
 
 
 def main() -> None:
-    # ----- generation (matches examples/inference/basic/basic_ltx2.py) -----
-    generator = VideoGenerator.from_pretrained(
-        "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
-    )
-
     output_path = "outputs_video/ltx2_basic/output_ltx2_base_t2v_1088_1920_1.1.mp4"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-        num_frames=121,
-        height=1088,
-        width=1920,
-    )
-    generator.shutdown()
-    # Free residual CUDA memory the generator left behind so the
-    # evaluator can grab the largest possible workspace for AMT/RAFT.
-    torch.cuda.empty_cache()
+    output_file = Path(output_path)
+
+    # ----- generation (matches examples/inference/basic/basic_ltx2.py) -----
+    if output_file.exists() and output_file.suffix.lower() == ".mp4":
+        print(f"[eval] found existing video: {output_file}")
+        print("[eval] skipping generation")
+    else:
+        generator = VideoGenerator.from_pretrained(
+            "Davids048/LTX2-Base-Diffusers",
+            num_gpus=1,
+        )
+
+        generator.generate_video(
+            prompt=PROMPT,
+            output_path=output_path,
+            save_video=True,
+            num_frames=121,
+            height=1088,
+            width=1920,
+        )
+        generator.shutdown()
+
+        # Free residual CUDA memory the generator left behind so the
+        # evaluator can grab the largest possible workspace for AMT/RAFT.
+        torch.cuda.empty_cache()
 
     # ----- scoring -----
     print(f"\n[eval] building evaluator: {METRICS}")
@@ -83,7 +97,9 @@ def main() -> None:
 
     # LTX2 outputs at 24 fps by default.
     sample = build_eval_kwargs({"prompt": PROMPT}, output_path, fps=24.0)
-    print(f"[eval] running ({sample['video'].shape[1]} frames @ 24 fps)...")
+
+    print(f"[eval] running ({sample['video'].shape[0]} frames @ 24 fps)...")
+
     results = evaluator.evaluate(**sample)
 
     print("\n=== VBench scores ===")

@@ -22,6 +22,7 @@ import torch
 
 from fastvideo import VideoGenerator
 from fastvideo.eval import create_evaluator
+from pathlib import Path
 
 PROMPT = (
     "A warm sunny backyard. The camera starts in a tight cinematic close-up "
@@ -39,22 +40,29 @@ METRICS = [
 
 
 def main() -> None:
-    generator = VideoGenerator.from_pretrained(
-        "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
-    )
-
     output_path = "outputs_video/ltx2_audio_eval/output.mp4"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-        num_frames=121,
-        height=1088,
-        width=1920,
-    )
-    generator.shutdown()
-    torch.cuda.empty_cache()
+
+    if Path(output_path).exists():
+        print(f"[eval] using existing video: {output_path}")
+    else:
+        print("[eval] generating LTX2 video...")
+
+        generator = VideoGenerator.from_pretrained(
+            "Davids048/LTX2-Base-Diffusers",
+            num_gpus=1,
+        )
+
+        generator.generate_video(
+            prompt=PROMPT,
+            output_path=output_path,
+            save_video=True,
+            num_frames=121,
+            height=1088,
+            width=1920,
+        )
+
+        generator.shutdown()
+        torch.cuda.empty_cache()
 
     print(f"\n[eval] building evaluator: {METRICS}")
     evaluator = create_evaluator(metrics=METRICS)
@@ -62,14 +70,33 @@ def main() -> None:
 
     print("\n=== Audio scores ===")
     for name in METRICS:
-        r = results[name]
+        r = None
+
+        # per-sample metric
+        if hasattr(results, "__contains__") and name in results:
+            r = results[name]
+
+        # corpus-level metric (e.g. audio.frechet_distance)
+        elif hasattr(results, "corpus") and name in results.corpus:
+            r = results.corpus[name]
+
+        if r is None:
+            print(f"  {name}: MISSING")
+            continue
+
         if r.score is None:
-            print(f"  {name}: SKIPPED ({r.details.get('skipped', 'no score')})")
+            skipped = (
+                r.details.get("skipped", "no score")
+                if isinstance(r.details, dict)
+                else "no score"
+            )
+            print(f"  {name}: SKIPPED ({skipped})")
         else:
             print(f"  {name}: {r.score:.4f}")
-            if r.details:
-                for k, v in r.details.items():
-                    print(f"      {k}: {v}")
+
+        if r.details:
+            for k, v in r.details.items():
+                print(f"      {k}: {v}")
 
 
 if __name__ == "__main__":
