@@ -284,6 +284,12 @@ class PipelineConfig:
                 model_dict = asdict(value)
                 # Model Arch Config should be hidden away from the users
                 model_dict.pop("arch_config")
+                if isinstance(value, DiTConfig):
+                    if value.required_attention_backend is not None:
+                        model_dict["required_attention_backend"] = value.required_attention_backend.name
+                    model_dict["incompatible_attention_backends"] = [
+                        backend.name for backend in value.incompatible_attention_backends
+                    ]
                 output_dict[key] = model_dict
             elif isinstance(value, tuple) and all(isinstance(v, ModelConfig) for v in value):
                 model_dicts = []

@@ -6,9 +6,9 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
                                  LocalAttention)
+from fastvideo.attention.selector import check_attn_backend_requirement
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
@@ -558,6 +558,21 @@ class WanTransformerBlock_VSA(nn.Module):
         return hidden_states
 
 
+def _select_wan_transformer_block(
+    config: WanVideoConfig,
+    *,
+    model_name: str,
+) -> type[WanTransformerBlock] | type[WanTransformerBlock_VSA]:
+    # Resolve checkpoint-level requirements before choosing a block layout.
+    # Sparse FastWan checkpoints require VSA's extra gate-compression weights;
+    # dense checkpoints explicitly reject that layout.
+    attn_backend = check_attn_backend_requirement(config.required_attention_backend, model_name=model_name)
+    config.validate_attention_backend_compatibility(attn_backend, model_name=model_name)
+    if attn_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+        return WanTransformerBlock_VSA
+    return WanTransformerBlock
+
+
 class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = WanVideoConfig()._compile_conditions
@@ -570,6 +585,7 @@ class WanTransformer3DModel(BaseDiT):
     def __init__(self, config: WanVideoConfig, hf_config: dict[str,
                                                                Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
+        transformer_block = _select_wan_transformer_block(config, model_name=type(self).__name__)
         self.quant_config = config.quant_config
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
@@ -598,8 +614,6 @@ class WanTransformer3DModel(BaseDiT):
         )
 
         # 3. Transformer blocks
-        attn_backend = envs.FASTVIDEO_ATTENTION_BACKEND
-        transformer_block = WanTransformerBlock_VSA if attn_backend == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
         self.blocks = nn.ModuleList([
             transformer_block(inner_dim,
                               config.ffn_dim,

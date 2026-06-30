@@ -67,6 +67,24 @@ def maybe_convert_int(value: str | None) -> int | None:
     return int(value)
 
 
+def get_attention_backend() -> str | None:
+    """Read FASTVIDEO_ATTENTION_BACKEND, failing loudly on an unknown value.
+
+    Returns None when unset. A typo'd / invalid backend name raises immediately
+    with the list of valid backends, rather than silently falling back to
+    auto-selection.
+    """
+    backend = os.getenv("FASTVIDEO_ATTENTION_BACKEND", None)
+    if backend is None:
+        return None
+    # Imported lazily to avoid a circular import at module load time.
+    from fastvideo.platforms.interface import AttentionBackendEnum
+    if backend not in AttentionBackendEnum.__members__:
+        valid = ", ".join(AttentionBackendEnum.__members__)
+        raise ValueError(f"Invalid FASTVIDEO_ATTENTION_BACKEND={backend!r}. Valid backends are: {valid}")
+    return backend
+
+
 # The begin-* and end* here are used by the documentation generator
 # to extract the used env vars.
 
@@ -208,7 +226,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # - "SAGE_ATTN": use Sage Attention
     # - "SAGE_ATTN_THREE": use Sage Attention 3
     "FASTVIDEO_ATTENTION_BACKEND":
-    lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
+    get_attention_backend,
 
     # Use dedicated multiprocess context for workers.
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":
