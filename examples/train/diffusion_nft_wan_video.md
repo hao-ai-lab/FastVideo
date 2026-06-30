@@ -65,6 +65,11 @@ The video config intentionally uses the Wan/MAY-30 rollout sampler profile:
 same 50-step sampler so W&B qualitative videos are comparable to rollout
 quality.
 
+Validation reward metrics are logged under `validation/reward/*` every
+`method.validation.every_steps`. Qualitative W&B videos are only a sanity check:
+`--log-sample-max-videos 0` disables them, while a positive value caps how many
+validation samples are logged per eval.
+
 For short 17-frame H100 runs, keep gradient accumulation matched to the number
 of rollout train batches. For example, if you use `--num-batches-per-epoch 4`,
 `--collection-batch-size 4`, `--train-batch-size 4`, and 50 sample steps, use
