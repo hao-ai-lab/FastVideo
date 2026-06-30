@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+/*
+ * FastVideo Studio is DARK-ONLY. The studio palette from the legacy
+ * `app.css` is mapped onto shadcn token names below so the new-york
+ * primitives resolve against it. The dark palette is the default `:root`.
+ */
+:root {
+	color-scheme: dark;
+
+	--header-height: 74px;
+
+	/* Studio raw palette (carried over from app.css for parity). */
+	--surface: #1a1d27;
+	--text-dim: #9ca3af;
+	--accent-h: #818cf8;
+	--green: #22c55e;
+	--red: #ef4444;
+	--yellow: #eab308;
+	--blue: #3b82f6;
+	--shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+
+	/* shadcn tokens (dark). */
+	--background: #0f1117;
+	--foreground: #e4e4e7;
+
+	--card: #1a1d27;
+	--card-foreground: #e4e4e7;
+
+	--popover: #1a1d27;
+	--popover-foreground: #e4e4e7;
+
+	--primary: #356cff;
+	--primary-foreground: #ffffff;
+
+	--secondary: #232733;
+	--secondary-foreground: #e4e4e7;
+
+	--muted: #232733;
+	--muted-foreground: #9ca3af;
+
+	--accent: #356cff;
+	--accent-foreground: #ffffff;
+
+	--destructive: #ef4444;
+	--destructive-foreground: #ffffff;
+
+	--border: #2a2d3a;
+	--input: #2a2d3a;
+	--ring: #356cff;
+
+	--radius: 0.5rem;
+}
+
+@theme inline {
+	--font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+
+	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
+
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+
+	--radius-sm: calc(var(--radius) - 4px);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ——— Resets ——— */
+
+html {
+	background: var(--background);
+}
+
+body {
+	margin: 0;
+	min-height: 100vh;
+	line-height: 1.6;
+	font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+	-webkit-font-smoothing: antialiased;
+}
+
+a {
+	color: inherit;
+}
+
+@layer base {
+	button,
+	input,
+	textarea,
+	select {
+		font: inherit;
+	}
+}
+
+/* ——— Base layer ——— */
+
+@layer base {
+	* {
+		@apply border-border;
+	}
+	body {
+		@apply bg-background text-foreground;
+	}
+}
