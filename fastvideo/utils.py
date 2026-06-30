@@ -583,7 +583,7 @@ def maybe_download_lora(model_name_or_path: str, local_dir: str | None = None, d
         model_name_or_path: Local path or Hugging Face Hub model ID
         local_dir: Local directory to save the model
         download: Whether to download the model from Hugging Face Hub
-        
+
     Returns:
         Local path to the model
     """
@@ -591,6 +591,16 @@ def maybe_download_lora(model_name_or_path: str, local_dir: str | None = None, d
     # If it's already a file path, return it directly
     if os.path.isfile(model_name_or_path):
         return model_name_or_path
+
+    # Handle "org/repo/<subdir>/<file>.safetensors" by downloading the single
+    # specified file, for HF repos that ship several LoRA variants side by side.
+    parts = model_name_or_path.split("/")
+    if (len(parts) >= 3 and not model_name_or_path.startswith(("/", "."))
+            and model_name_or_path.endswith(".safetensors")):
+        from huggingface_hub import hf_hub_download
+        repo_id = "/".join(parts[:2])
+        filename = "/".join(parts[2:])
+        return hf_hub_download(repo_id=repo_id, filename=filename, local_dir=local_dir)
 
     local_path = maybe_download_model(model_name_or_path, local_dir, download)
     weight_name = _best_guess_weight_name(model_name_or_path, file_extension=".safetensors")
