@@ -77,9 +77,38 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
         self._causal_block_size = int(causal_block_size)
         if self._causal_block_size <= 0:
             raise ValueError("causal_block_size must be > 0")
+        # DFSFT's chunk-size guard reads ``transformer.num_frame_per_block``;
+        # expose it so a mismatched method ``chunk_size`` errors loudly instead
+        # of silently training with the wrong block size. Harmless if FSDP
+        # later hides it (the guard just falls back to ``None``).
+        try:
+            self.transformer.num_frame_per_block = self._causal_block_size
+        except AttributeError:
+            pass
 
     def clear_caches(self, *, cache_tag: str = "pos") -> None:
         self._streaming_caches.pop(str(cache_tag), None)
+
+    def _build_distill_input_kwargs(
+        self,
+        noise_input: torch.Tensor,
+        timestep: torch.Tensor,
+        text_dict: dict[str, torch.Tensor] | None,
+    ) -> dict[str, Any]:
+        """Route the non-streaming training forward through the block-causal mask.
+
+        ``LongCatModel._build_distill_input_kwargs`` leaves ``causal_block_size``
+        unset, so the inherited ``predict_noise`` (used by ``FineTuneMethod`` and
+        ``DiffusionForcingSFTMethod``) runs the LongCat DiT with *full
+        bidirectional* attention. Causal training (DFSFT) needs the same
+        block-causal mask the streaming rollout and self-forcing paths apply.
+        Inject ``causal_block_size`` here so ``predict_noise`` -> transformer
+        builds and applies the mask during the training forward.
+        """
+        kwargs = super()._build_distill_input_kwargs(
+            noise_input, timestep, text_dict)
+        kwargs["causal_block_size"] = self._causal_block_size
+        return kwargs
 
     def predict_noise_streaming(
         self,
