@@ -19,6 +19,15 @@ side-by-side per `(model_id, backend, prompt)`:
   metadata + `slice_spec` + `format_version`) for tests that call
   `run_text_to_latent_similarity_test` in `latent_similarity_utils.py`.
   Compared via cosine distance on the slice and the full tensor.
+- **`.png`** — pixel ground-truth for **T2I / I2I** tests. `VideoGenerator`
+  emits a `.png` (not a `.mp4`) whenever `workload_type.value.endswith("2i")`
+  is true (`fastvideo/entrypoints/video_generator.py::_is_image_workload`).
+  **The SSIM helpers in `inference_similarity_utils.py` on current main
+  hardcode `.mp4`** (`_find_reference_video` filter, `output_video_name`
+  format). To consume `.png` references through the SSIM path, the test
+  must call a helper variant that accepts a `media_extension` parameter
+  (added in PR #1321). Until that lands on main, T2I SSIM coverage is
+  blocked at the helper layer.
 
 This skill:
 
@@ -110,6 +119,32 @@ Record `ARTEFACT_TYPE ∈ {pixel, latent}` for use in step 4. Steps 2, 3, 5,
 and 6 are artefact-type-agnostic — `_iter_reference_files`,
 `copy_generated_to_reference`, and `upload_reference_videos` already walk
 both `.mp4` and `.pt` (see `reference_videos_cli.py`).
+
+**T2I / I2I gotcha:** when the helper produces a `.png` (any workload
+whose `workload_type.value` ends in `2i`), `reference_videos_cli.py copy-local`
+currently walks `.mp4` / `.pt` only and reports `0 copied files` without
+erroring. After step 5, verify the destination contains the seeded file;
+if it's empty, copy the PNG manually:
+
+```bash
+mkdir -p fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos/<model_id>/<backend>/
+cp ./generated_videos_modal/default/generated_videos/L40S_reference_videos/<model_id>/<backend>/*.png \
+   fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos/<model_id>/<backend>/
+```
+
+`git add -f` is **not required for the HF upload path**:
+`reference_videos_cli.py upload` calls `huggingface_hub.upload_folder` on
+the filesystem directly (`reference_videos_cli.py:311`) — git tracking
+status is irrelevant for `pytest fastvideo/tests/ssim/` reference sync.
+
+If you *also* want to commit the PNG locally, note that
+`fastvideo/tests/ssim/reference_videos/**` (catch-all near `.gitignore:94`)
+overrides the earlier `!fastvideo/tests/ssim/reference_videos/**/*.mp4`
+negation at `.gitignore:73`. Every reference file in this dir currently
+requires `git add -f`, regardless of extension. Fixing this properly
+means moving the `!...reference_videos/**/*.{mp4,pt,png}` negations
+*after* the catch-all (or removing the catch-all). Until then, `git add -f`
+is the standing workaround for committing references locally.
 
 If either check fails, stop and tell the user what's wrong.
 
