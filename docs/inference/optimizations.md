@@ -85,7 +85,7 @@ See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040) and [flash-attention-
 #### Requirements
 
 - **GPU**: NVIDIA Blackwell (sm100a or sm103a) — B200, B300, GB200, GB300
-- **CUDA**: 12.8+
+- **CUDA**: 13.0+
 - **Python**: 3.10 or 3.11
 
 #### Installation
@@ -93,11 +93,14 @@ See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040) and [flash-attention-
 Install the FP4 flash attention kernel (without upgrading your existing torch):
 
 ```bash
-pip install --no-deps "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fp4#subdirectory=flash_attn/cute"
-pip install "nvidia-cutlass-dsl>=4.4.2" apache-tvm-ffi flashinfer-python
+# branch fix/cutlass-dsl-4.5 carries the cutlass-dsl 4.5 fix (cute.core.ThrMma
+# -> cute.ThrMma); switch back to @fp4 once hao-ai-lab/flash-attention-fp4#2 merges.
+pip install --no-deps "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fix/cutlass-dsl-4.5#subdirectory=flash_attn/cute"
+pip install "nvidia-cutlass-dsl>=4.5.2" apache-tvm-ffi flashinfer-python
 ```
 
-The `--no-deps` flag prevents upgrading torch/torchvision. The kernel requires torch >= 2.4 with CUDA 12.8+ support (already present in FastVideo's environment).
+The `--no-deps` flag prevents upgrading torch/torchvision. Use the supported
+PyTorch 2.12.0 and CUDA 13 environment for this kernel.
 
 #### Usage
 
@@ -211,7 +214,9 @@ python setup.py install  # or uv pip install -e .
 
 #### Installation
 
-Note that Sage Attention 3 requires `python>=3.13`, `torch>=2.8.0`, `CUDA >=12.8`. If you are using `uv` and using `torch==2.8.0` make sure that `sentencepiece==0.2.1` in the pyproject.toml file.
+Note that Sage Attention 3 requires `python>=3.13`, `torch>=2.8.0`, and CUDA 13.
+If you are using `uv` and `torch==2.8.0`, make sure that
+`sentencepiece==0.2.1` in the `pyproject.toml` file.
 
 To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repository to install the package from source.
 

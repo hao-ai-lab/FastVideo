@@ -5,9 +5,19 @@ import modal
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
-image_version = os.getenv("IMAGE_VERSION")
+image_version = os.getenv("IMAGE_VERSION", "latest")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
+
+# Mutable tags inherit the registry image's baked backend, keeping a latest-tag
+# transition safe. Explicit CUDA tags also work with older images that predate
+# the baked setting, and a caller override always wins.
+uv_torch_backend_override = os.environ.get("UV_TORCH_BACKEND")
+if not uv_torch_backend_override:
+    if "cuda13" in image_tag.lower():
+        uv_torch_backend_override = "cu130"
+    elif "cuda12.6" in image_tag.lower():
+        uv_torch_backend_override = "cu126"
 
 image = (modal.Image.from_registry(
     image_tag, add_python="3.12"
@@ -35,7 +45,10 @@ image = (modal.Image.from_registry(
     "TEST_SCOPE":
     os.environ.get("TEST_SCOPE", ""),
     "IMAGE_VERSION":
-    os.environ.get("IMAGE_VERSION", ""),
+    image_version,
+    **({
+        "UV_TORCH_BACKEND": uv_torch_backend_override
+    } if uv_torch_backend_override else {}),
     "HF_REPO_ID":
     "FastVideo/performance-tracking",
 }))

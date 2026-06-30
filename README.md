@@ -55,11 +55,36 @@ We recommend using [uv](https://docs.astral.sh/uv/) to create a clean environmen
 uv venv --python 3.12 --seed
 source .venv/bin/activate
 
-# Install FastVideo
-uv pip install fastvideo
+# Install FastVideo on NVIDIA CUDA 12
+UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 ```
 
+Use `UV_TORCH_BACKEND=cu130` on CUDA 13. Apple silicon users should follow the
+[MPS installation guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
+
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.
+
+> **On an NVIDIA DGX Spark (GB10 / ARM64 + CUDA 13)?** There's no prebuilt ARM wheel for the FastVideo CUDA kernel, so it's an editable from-source install (`UV_TORCH_BACKEND=cu130 uv pip install -e .`, which compiles that kernel for you) rather than `UV_TORCH_BACKEND=cu130 uv pip install fastvideo`. A compatible prebuilt ARM64 FlashAttention wheel is available separately. Follow the [DGX Spark install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/spark/).
+
+### Install with an AI coding agent
+
+FastVideo is a monorepo with rich agent guidance (see [`AGENTS.md`](AGENTS.md)). If you use Claude Code, Cursor, or another coding agent, paste the prompt below — it detects your platform and follows the matching guide:
+
+```text
+Install FastVideo (https://github.com/hao-ai-lab/FastVideo) into a fresh uv virtual environment.
+
+1. Detect the platform: run `uname -m`, `nvidia-smi`, and `nvcc --version`.
+2. Read and follow the matching install guide exactly (in this repo, or at
+   https://hao-ai-lab.github.io/FastVideo/getting_started/installation/):
+     - NVIDIA GPU, x86_64                         -> docs/getting_started/installation/gpu.md
+     - NVIDIA DGX Spark / GB10, aarch64, CUDA 13  -> docs/getting_started/installation/spark.md
+     - Apple Silicon, macOS                       -> docs/getting_started/installation/mps.md
+3. Use uv for every step. If a command fails, debug it and tell me what you changed.
+4. Verify the result:
+     python -c "import fastvideo, torch; print('cuda', torch.cuda.is_available())"
+     fastvideo --help
+5. Report which platform you detected and any deviations you had to make.
+```
 
 ## Sparse Distillation
 

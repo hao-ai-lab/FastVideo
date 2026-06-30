@@ -58,6 +58,16 @@ local_secrets = modal.Secret.from_dict({
     if os.environ.get(key)
 })
 
+# Mutable tags inherit the registry image's baked backend, including custom
+# FASTVIDEO_MODAL_IMAGE overrides. Explicit CUDA tags also work with older
+# images that predate the baked setting, and a caller override always wins.
+uv_torch_backend_override = os.environ.get("UV_TORCH_BACKEND")
+if not uv_torch_backend_override:
+    if "cuda13" in IMAGE_TAG.lower():
+        uv_torch_backend_override = "cu130"
+    elif "cuda12.6" in IMAGE_TAG.lower():
+        uv_torch_backend_override = "cu126"
+
 image = (
     modal.Image.from_registry(IMAGE_TAG, add_python="3.12")
     .apt_install(
@@ -75,6 +85,7 @@ image = (
         "PATH": "/root/.cargo/bin:$PATH",
         "HF_HOME": "/root/data/.cache",
         "TOKENIZERS_PARALLELISM": "false",
+        **({"UV_TORCH_BACKEND": uv_torch_backend_override} if uv_torch_backend_override else {}),
         "FASTVIDEO_ATTENTION_BACKEND": os.environ.get("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN"),
     })
 )

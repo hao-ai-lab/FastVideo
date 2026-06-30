@@ -4,7 +4,7 @@ Instructions to install FastVideo for Apple Silicon.
 
 ## Requirements
 
-- **OS: MacOS**
+- **OS: macOS 14 or newer**
 - **Python: 3.12.4**
 
 ## Set up using Python

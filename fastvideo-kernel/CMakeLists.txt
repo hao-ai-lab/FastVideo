@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.26 FATAL_ERROR)
 project(fastvideo-kernel LANGUAGES CXX)
 
+# Capture any caller-provided -DCMAKE_CUDA_ARCHITECTURES *before* enable_language(CUDA)
+# auto-populates it with CMake's built-in default (an old arch, e.g. sm_75 on CUDA 13).
+# torch's cmake actually ignores CMAKE_CUDA_ARCHITECTURES (it drives arch selection via
+# TORCH_CUDA_ARCH_LIST), so we only use this captured value to honor an explicit pin by
+# translating it into TORCH_CUDA_ARCH_LIST below.
+set(_FASTVIDEO_USER_CUDA_ARCH "${CMAKE_CUDA_ARCHITECTURES}")
+
 # Prefer environment variable (used by CI or uv pip install git+repo_addr) if CMake var is not explicitly set.
 if(NOT DEFINED GPU_BACKEND AND DEFINED ENV{GPU_BACKEND})
     set(GPU_BACKEND "$ENV{GPU_BACKEND}")
@@ -18,6 +25,71 @@ endif()
 
 # Find Python and Torch
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+
+# ---------------------------------------------------------------------------
+# Resolve the target CUDA architecture, BEFORE find_package(Torch) below.
+#
+# torch's cmake (Caffe2 public/cuda.cmake) takes over arch selection: it emits
+# the real -gencode flags from TORCH_CUDA_ARCH_LIST and forces
+# CMAKE_CUDA_ARCHITECTURES to OFF. So the *effective* arch is whatever
+# TORCH_CUDA_ARCH_LIST is when find_package(Torch) runs. build.sh exports it;
+# standards-based builds (pip / uv pip install, sdist) don't, and torch then
+# auto-detects an arch that does not match the GPU -- the kernels build but fail
+# at runtime ("no kernel image is available for execution on the device").
+# Resolve it here when absent (mirrors build.sh): honor a pinned
+# CMAKE_CUDA_ARCHITECTURES if given, else probe the visible GPU with torch.
+# ---------------------------------------------------------------------------
+if(NOT GPU_BACKEND STREQUAL "ROCM")
+    if(DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+        message(STATUS "CUDA arch: TORCH_CUDA_ARCH_LIST=$ENV{TORCH_CUDA_ARCH_LIST} (from environment)")
+    elseif(TORCH_CUDA_ARCH_LIST)
+        set(ENV{TORCH_CUDA_ARCH_LIST} "${TORCH_CUDA_ARCH_LIST}")
+        message(STATUS "CUDA arch: TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} (from cmake)")
+    else()
+        set(_FV_ARCH_LIST "")
+        if(_FASTVIDEO_USER_CUDA_ARCH)
+            # Caller pinned -DCMAKE_CUDA_ARCHITECTURES (which torch ignores); translate it
+            # to the TORCH_CUDA_ARCH_LIST spelling: "121" -> "12.1", "90a" -> "9.0a".
+            foreach(_fv_arch IN LISTS _FASTVIDEO_USER_CUDA_ARCH)
+                string(REGEX MATCH "[af]$" _fv_suffix "${_fv_arch}")
+                string(REGEX REPLACE "[af]$" "" _fv_num "${_fv_arch}")
+                string(REGEX REPLACE "(.)$" ".\\1" _fv_num "${_fv_num}")    # dot before the last digit
+                list(APPEND _FV_ARCH_LIST "${_fv_num}${_fv_suffix}")
+            endforeach()
+            message(STATUS "CUDA arch: TORCH_CUDA_ARCH_LIST=${_FV_ARCH_LIST} (from -DCMAKE_CUDA_ARCHITECTURES=${_FASTVIDEO_USER_CUDA_ARCH})")
+        else()
+            # Best-effort probe of the visible GPU (mirrors build.sh detect_with_torch).
+            execute_process(
+                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) == (9, 0) else f'{mj}.{mn}')"
+                OUTPUT_VARIABLE _FV_ARCH_LIST
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                RESULT_VARIABLE _fv_detect_rc
+                ERROR_QUIET
+            )
+            if(_fv_detect_rc EQUAL 0 AND _FV_ARCH_LIST)
+                message(STATUS "CUDA arch: TORCH_CUDA_ARCH_LIST=${_FV_ARCH_LIST} (detected via torch, live GPU)")
+            else()
+                set(_FV_ARCH_LIST "")
+            endif()
+        endif()
+
+        if(_FV_ARCH_LIST)
+            set(TORCH_CUDA_ARCH_LIST "${_FV_ARCH_LIST}")
+            set(ENV{TORCH_CUDA_ARCH_LIST} "${_FV_ARCH_LIST}")
+        else()
+            message(FATAL_ERROR
+                "fastvideo-kernel: could not determine the target CUDA architecture.\n"
+                "Refusing to let torch auto-detect an arch that may not run on this GPU. "
+                "Fix with one of:\n"
+                "  - set TORCH_CUDA_ARCH_LIST (e.g. 12.1, or 9.0a for Hopper), or\n"
+                "  - pass -DCMAKE_CUDA_ARCHITECTURES=<arch> (e.g. 121), or\n"
+                "  - build where the target GPU is visible to torch.\n"
+                "Note: 'pip/uv pip install' builds under build isolation, which hides the "
+                "GPU; set TORCH_CUDA_ARCH_LIST or add --no-build-isolation. "
+                "fastvideo-kernel/build.sh sets all of this for you.")
+        endif()
+    endif()
+endif()
 
 # Robustly find Torch include paths using Python
 execute_process(
@@ -105,6 +177,38 @@ if(ENABLE_TK_KERNELS)
     message(STATUS "ThunderKittens kernels: ENABLED")
 else()
     message(STATUS "ThunderKittens kernels: DISABLED (will use Triton fallbacks at runtime)")
+endif()
+
+# The pinned ThunderKittens revision predates its ARM compatibility fix. On
+# AArch64, CUDA's device frontend treats plain `char` as unsigned, so the two
+# `char2{i, i}` initializers in base_types.cuh are rejected as narrowing to the
+# signed-char fields of CUDA's char2. Backport the two explicit casts proposed in
+# https://github.com/HazyResearch/ThunderKittens/pull/179 into a build-tree copy
+# so the pinned submodule remains pristine. Keeping this in CMake also covers
+# direct pip/uv builds that do not go through build.sh.
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _FASTVIDEO_SYSTEM_PROCESSOR)
+if(ENABLE_TK_KERNELS AND _FASTVIDEO_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    set(_TK_ARM_COMPAT_DIR "${CMAKE_CURRENT_BINARY_DIR}/tk-arm-compat")
+    set(_TK_ARM_INCLUDE_DIR "${_TK_ARM_COMPAT_DIR}/include")
+    file(REMOVE_RECURSE "${_TK_ARM_COMPAT_DIR}")
+    file(COPY "${CMAKE_SOURCE_DIR}/include/tk/include" DESTINATION "${_TK_ARM_COMPAT_DIR}")
+
+    set(_TK_ARM_BASE_TYPES "${_TK_ARM_INCLUDE_DIR}/common/base_types.cuh")
+    file(READ "${_TK_ARM_BASE_TYPES}" _TK_ARM_BASE_TYPES_CONTENT)
+    string(REGEX MATCHALL "return char2[{]i, i[}]" _TK_ARM_CHAR_PACKS "${_TK_ARM_BASE_TYPES_CONTENT}")
+    list(LENGTH _TK_ARM_CHAR_PACKS _TK_ARM_CHAR_PACK_COUNT)
+    if(NOT _TK_ARM_CHAR_PACK_COUNT EQUAL 2)
+        message(FATAL_ERROR
+            "ThunderKittens ARM compatibility patch expected two char2{i, i} initializers; "
+            "found ${_TK_ARM_CHAR_PACK_COUNT}. Update or remove the backport for the pinned revision.")
+    endif()
+    string(REPLACE
+        "return char2{i, i}"
+        "return char2{static_cast<signed char>(i), static_cast<signed char>(i)}"
+        _TK_ARM_BASE_TYPES_CONTENT
+        "${_TK_ARM_BASE_TYPES_CONTENT}")
+    file(WRITE "${_TK_ARM_BASE_TYPES}" "${_TK_ARM_BASE_TYPES_CONTENT}")
+    message(STATUS "Applied ThunderKittens ARM signed-char compatibility backport")
 endif()
 
 set(ENABLE_ATTN_QAT_INFER OFF)
@@ -235,6 +339,10 @@ if(BUILD_CXX_KERNELS)
         ${EXTENSION_SOURCES}
     )
 
+    if(_TK_ARM_INCLUDE_DIR)
+        target_include_directories(fastvideo_kernel_ops BEFORE PRIVATE "${_TK_ARM_INCLUDE_DIR}")
+    endif()
+
     # When the per-arch split is active (FP4 build), torch's global gencode was
     # stripped above, so set this target's arch explicitly. TK is guarded down to
     # sm_90a in source; the turbodiffusion kernels are generic, so the main
@@ -354,4 +462,3 @@ if(ENABLE_ATTN_QAT_INFER)
     install(TARGETS fp4attn_cuda LIBRARY DESTINATION .)
     install(TARGETS fp4quant_cuda LIBRARY DESTINATION .)
 endif()
-

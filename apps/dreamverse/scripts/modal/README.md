@@ -36,9 +36,17 @@ DREAMVERSE_IMAGE=ghcr.io/<org>/<repo>/dreamverse:<tag> \
   modal deploy apps/dreamverse/scripts/modal/modal_app.py
 ```
 
-Use a SHA-specific tag, not `latest`. Use a `dreamverse-backend-cuda12.9.1-sha-*`
-tag for backend-only deploys, or a `dreamverse-ui-cuda12.9.1-sha-*` tag for an
-image that includes the static UI served by the backend.
+Use a SHA-specific tag, not `latest`. The image workflow publishes backend and
+UI variants for CUDA 12.6.3 and CUDA 13.0.0:
+
+- `dreamverse-backend-cuda13.0.0-sha-*` or
+  `dreamverse-ui-cuda13.0.0-sha-*` for the CUDA 13 / cu130 images
+- `dreamverse-backend-cuda12.6.3-sha-*` or
+  `dreamverse-ui-cuda12.6.3-sha-*` for the CUDA 12 / cu126 images
+
+The Dockerfile defaults to the CUDA 13 / cu130 lane, which is the recommended
+image for this B200 deployment. Choose the `ui` variant only when the backend
+should serve the static UI.
 
 For local image build details, see
 `apps/dreamverse/docker/README.md` and `apps/dreamverse/docker/docker_build.sh`.
