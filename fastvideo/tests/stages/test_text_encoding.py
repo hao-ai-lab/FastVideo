@@ -195,6 +195,37 @@ def test_forward_prompt_list_preserves_single_prompt_text_encoding_path():
     assert out.prompt_attention_mask[0].shape == (2, 4)
 
 
+def test_encode_prompt_list_individually_pads_variable_length_embeds_and_audio():
+    fastvideo_args, _hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    stage = TextEncodingStage(text_encoders=[], tokenizers=[])
+    lengths = {"short": 2, "a longer prompt": 4}
+
+    def fake_encode_text(text, *_args, **_kwargs):
+        length = lengths[text]
+        embeds = [torch.full((1, length, 3), fill_value=float(length))]
+        masks = [torch.ones((1, length), dtype=torch.long)]
+        stage._last_audio_embeds = [torch.full((1, length, 5), fill_value=float(length))]
+        return embeds, masks
+
+    stage.encode_text = fake_encode_text
+
+    embeds, masks = stage._encode_prompt_list_individually(
+        ["short", "a longer prompt"],
+        fastvideo_args,
+        encoder_index=[0],
+        return_attention_mask=True,
+    )
+
+    assert embeds[0].shape == (2, 4, 3)
+    assert masks[0].shape == (2, 4)
+    assert stage._last_audio_embeds is not None
+    assert stage._last_audio_embeds[0].shape == (2, 4, 5)
+    assert torch.equal(embeds[0][0, :2], torch.full((2, 3), 2.0))
+    assert torch.equal(embeds[0][0, 2:], torch.zeros((2, 3)))
+    assert torch.equal(stage._last_audio_embeds[0][0, :2], torch.full((2, 5), 2.0))
+    assert torch.equal(stage._last_audio_embeds[0][0, 2:], torch.zeros((2, 5)))
+
+
 def test_encode_text_hidden_state_flag_follows_encoder_config():
     fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
     stage = make_stage(num_encoders=1, hidden_size=hidden)
