@@ -181,6 +181,7 @@ nav:
   - Distillation:
     - Data Preprocessing: distillation/data_preprocess.md
     - DMD: distillation/dmd.md
+    - AnyFlow: distillation/anyflow.md
   - Attention:
     - Overview: attention/index.md
     - Video Sparse Attention: attention/vsa/index.md
