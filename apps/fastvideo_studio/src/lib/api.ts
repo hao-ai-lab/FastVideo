@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { env } from "$env/dynamic/public";
-import type { Job, JobType } from "$lib/types";
+import type { Job, JobType } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8189/api";
 
@@ -20,10 +19,9 @@ export function getApiBaseUrl(): string {
 	}
 
 	// 2) Fall back to env var if set, then hardcoded default
+	const fromEnv = process.env.NEXT_PUBLIC_API_BASE_URL;
 	const apiUrl =
-		typeof env.PUBLIC_API_BASE_URL === "string" && env.PUBLIC_API_BASE_URL
-			? env.PUBLIC_API_BASE_URL
-			: DEFAULT_API_BASE_URL;
+		typeof fromEnv === "string" && fromEnv ? fromEnv : DEFAULT_API_BASE_URL;
 	return apiUrl;
 }
 
@@ -204,15 +202,6 @@ export async function createJob(job: CreateJobRequest): Promise<Job> {
 	return response.json();
 }
 
-export async function getJobDetails(id: string): Promise<Job> {
-	const baseApiUrl = getApiBaseUrl();
-	const response = await fetch(`${baseApiUrl}/jobs/${id}`);
-	if (!response.ok) {
-		throw new Error("Failed to fetch job");
-	}
-	return response.json();
-}
-
 export async function startJob(id: string): Promise<Job> {
 	const baseApiUrl = getApiBaseUrl();
 	const response = await fetch(`${baseApiUrl}/jobs/${id}/start`, {
@@ -322,15 +311,6 @@ export async function getDatasets(): Promise<Dataset[]> {
 	const response = await fetch(`${baseApiUrl}/datasets`);
 	if (!response.ok) {
 		throw new Error("Failed to fetch datasets");
-	}
-	return response.json();
-}
-
-export async function getDataset(id: string): Promise<Dataset> {
-	const baseApiUrl = getApiBaseUrl();
-	const response = await fetch(`${baseApiUrl}/datasets/${id}`);
-	if (!response.ok) {
-		throw new Error("Failed to fetch dataset");
 	}
 	return response.json();
 }
