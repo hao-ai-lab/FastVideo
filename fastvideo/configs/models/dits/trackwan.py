@@ -39,7 +39,8 @@ class TrackWanVideoArchConfig(WanVideoArchConfig):
             "vae_spatial_compression": 8,  # Wan VAE spatial downsample (latent grid = H/8 x W/8)
             "vae_temporal_compression": 4,  # Wan VAE temporal downsample
             "max_track_id": 100_000,  # range of random per-track IDs
-            "zero_init_head": True,  # zero-init final conv so step-0 == teacher
+            "zero_init_head":
+            False,  # patch-embed track channels are the zero-conv; proj must stay non-zero (deadlock fix)
         })
 
 

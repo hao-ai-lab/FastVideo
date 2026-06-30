@@ -15,7 +15,9 @@ It produces a diffusers transformer dir whose weights load *strictly* into
   - ``patch_embedding.weight`` zero-padded base_in -> 52 input channels (pretrained
     weights occupy the first base_in channels; the new track channels start at
     zero, so a freshly converted model reproduces the base at step 0),
-  - ``track_encoder.*`` added (proj zero-init -> zero track contribution at step 0),
+  - ``track_encoder.*`` added (proj normal-init; the patch-embed track channels are the
+    single zero-conv -> zero track contribution at step 0, but gradient still flows so the
+    track pathway can learn -- see build_track_encoder_state for the deadlock rationale),
   - ``config.json`` gets ``in_channels=52`` + ``track_config`` (CLIP ``image_dim``
     is inherited from the base config when present).
 
@@ -48,16 +50,26 @@ TRACK_CONFIG = {
     "vae_spatial_compression": 8,
     "vae_temporal_compression": VAE_T_COMP,
     "max_track_id": 100_000,
-    "zero_init_head": True,
+    # The single zero-conv is the patch-embed track channels (zero-padded below), NOT the
+    # track head -> proj is normal-init so the track pathway actually receives gradient.
+    "zero_init_head": False,
 }
 
 
 def build_track_encoder_state() -> dict[str, torch.Tensor]:
-    """Match TrackEncoder's params: temporal_conv (default init) + proj (zero)."""
+    """Match TrackEncoder's params: temporal_conv + proj, BOTH normal-initialized.
+
+    IMPORTANT (deadlock fix): the track signal passes through two layers in series --
+    ``track_encoder.proj`` then the patch-embed track channels [36:52]. The single
+    ControlNet-style zero-conv is the *patch-embed track channels* (kept at 0 by the
+    zero-pad in main()), which already guarantees zero track contribution at step 0
+    (teacher behavior). ``proj`` must therefore be NON-zero so gradient can reach the
+    patch-embed track channels (grad ∝ proj output): if BOTH were zero, each layer's
+    gradient is gated by the other being nonzero -> both stay exactly 0 forever and the
+    track pathway never learns (observed: proj & patch-embed[36:52] frozen at 0.0 after
+    4000 steps). So leave proj at its default Conv init here."""
     temporal_conv = nn.Conv3d(ID_DIM, TRACK_CHANNELS, kernel_size=(VAE_T_COMP, 1, 1), stride=(VAE_T_COMP, 1, 1))
-    proj = nn.Conv3d(TRACK_CHANNELS, TRACK_CHANNELS, kernel_size=1)
-    nn.init.zeros_(proj.weight)
-    nn.init.zeros_(proj.bias)
+    proj = nn.Conv3d(TRACK_CHANNELS, TRACK_CHANNELS, kernel_size=1)  # default init (NOT zero) -> breaks the deadlock
     return {
         "track_encoder.temporal_conv.weight": temporal_conv.weight.detach().clone(),
         "track_encoder.temporal_conv.bias": temporal_conv.bias.detach().clone(),
