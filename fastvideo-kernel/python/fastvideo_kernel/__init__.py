@@ -29,6 +29,15 @@ from fastvideo_kernel.block_sparse_attn_varlen import (
     block_sparse_attn_varlen,
 )
 
+from fastvideo_kernel.vsa_utils import (
+    VSA_TILE_SIZE,
+    get_tile_partition_indices,
+    get_reverse_tile_partition_indices,
+    construct_variable_block_sizes,
+    get_non_pad_index,
+    build_vsa_metadata,
+)
+
 __all__ = [
     "sliding_tile_attention",
     "video_sparse_attn",
@@ -44,5 +53,11 @@ __all__ = [
     "FastLayerNorm",
     "int8_linear",
     "int8_quant",
+    "VSA_TILE_SIZE",
+    "get_tile_partition_indices",
+    "get_reverse_tile_partition_indices",
+    "construct_variable_block_sizes",
+    "get_non_pad_index",
+    "build_vsa_metadata",
     "__version__",
 ]
