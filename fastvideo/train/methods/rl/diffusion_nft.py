@@ -522,7 +522,10 @@ class DiffusionNFTMethod(TrainingMethod):
 
         artifacts = []
         fps = int(self._validation_config.fps)
-        for item in sorted(logs, key=lambda x: int(x["index"])):
+        sorted_logs = sorted(logs, key=lambda x: int(x["index"]))
+        if self._validation_config.max_samples is not None:
+            sorted_logs = sorted_logs[:self._validation_config.max_samples]
+        for item in sorted_logs:
             artifact = tracker.video(
                 media_to_video_array(item["media"]),
                 caption=validation_caption(str(item["prompt"]), item["rewards"]),

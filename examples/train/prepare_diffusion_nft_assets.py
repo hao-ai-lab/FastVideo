@@ -295,6 +295,10 @@ def write_run_config(
     method_config["train_batch_size"] = int(args.train_batch_size)
     validation_config = method_config.setdefault("validation", {})
     validation_config["log_samples"] = bool(args.log_sample_max_videos > 0)
+    if args.log_sample_max_videos > 0:
+        validation_config["max_samples"] = int(args.log_sample_max_videos)
+    else:
+        validation_config.pop("max_samples", None)
     if args.sample_num_steps is not None:
         sampling_config["num_steps"] = int(args.sample_num_steps)
     if args.sample_flow_shift is not None:

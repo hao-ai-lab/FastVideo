@@ -15,6 +15,24 @@ class _FakeEMA:
         self.updates += 1
 
 
+class _FakeTracker:
+
+    def __init__(self):
+        self.videos = []
+        self.artifacts = []
+
+    def video(self, data, *, caption=None, fps=None):
+        self.videos.append({
+            "data": data,
+            "caption": caption,
+            "fps": fps,
+        })
+        return f"video-{len(self.videos)}"
+
+    def log_artifacts(self, artifacts, step):
+        self.artifacts.append((artifacts, step))
+
+
 def test_reward_diagnostic_metrics_match_per_prompt_groups():
     method = object.__new__(DiffusionNFTMethod)
     method._trained_prompt_hashes = set()
@@ -54,6 +72,40 @@ def test_update_ema_honors_update_after_step():
     method._update_ema()
     assert method._student_ema.updates == 1
     assert method._ema_update_count == 2
+
+
+def test_log_validation_samples_caps_video_count_and_uses_configured_fps():
+    method = object.__new__(DiffusionNFTMethod)
+    method._validation_config = SimpleNamespace(fps=16, max_samples=1)
+    tracker = _FakeTracker()
+    method.tracker = tracker
+
+    method._log_validation_samples(
+        [
+            {
+                "index": 1,
+                "prompt": "second",
+                "media": torch.ones(3, 2, 4, 5),
+                "rewards": {
+                    "avg": 0.2,
+                },
+            },
+            {
+                "index": 0,
+                "prompt": "first",
+                "media": torch.ones(3, 2, 4, 5),
+                "rewards": {
+                    "avg": 0.1,
+                },
+            },
+        ],
+        iteration=10,
+    )
+
+    assert len(tracker.videos) == 1
+    assert tracker.videos[0]["fps"] == 16
+    assert "first" in tracker.videos[0]["caption"]
+    assert tracker.artifacts == [({"validation/videos": ["video-1"]}, 10)]
 
 
 def test_num_train_timesteps_uses_explicit_schedule_length():

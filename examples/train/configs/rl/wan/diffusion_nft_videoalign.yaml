@@ -41,6 +41,7 @@ method:
     num_prompts: 16
     batch_size: 4
     log_samples: true
+    max_samples: 4
     fps: 16
     seed: 42
     data_path:
