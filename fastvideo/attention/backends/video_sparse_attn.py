@@ -157,6 +157,11 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     cache_tile_buf: bool = True
 
 
+def _compute_cur_topk(attn_metadata: VideoSparseAttentionMetadata) -> int:
+    num_kv_blocks = attn_metadata.variable_block_sizes.numel()
+    return math.ceil((1 - attn_metadata.VSA_sparsity) * num_kv_blocks)
+
+
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
 
     def __init__(self) -> None:
@@ -286,9 +291,8 @@ class VideoSparseAttentionImpl(AttentionImpl):
         gate_compress: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
-        VSA_sparsity = attn_metadata.VSA_sparsity
         block_elements = math.prod(VSA_TILE_SIZE)
-        cur_topk = math.ceil((1 - VSA_sparsity) * (attn_metadata.total_seq_length / block_elements))
+        cur_topk = _compute_cur_topk(attn_metadata)
 
         # 256-element tiles auto-route to the FA4 CuTe BSHD fastpath, which
         # consumes [B, S, H, D] directly -- skip the transpose round-trip.
