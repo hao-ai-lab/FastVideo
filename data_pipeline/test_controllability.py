@@ -29,17 +29,16 @@ import synthetic_tracks as st  # noqa: E402
 import trackwan_infer as twi  # noqa: E402
 
 
-def _overlay(frames_thwc: np.ndarray, tracks_norm: np.ndarray, vis: np.ndarray,
-             stride: int = 3) -> list[np.ndarray]:
+def _overlay(frames_thwc: np.ndarray, tracks_norm: np.ndarray, vis: np.ndarray, stride: int = 3) -> list[np.ndarray]:
     from fastvideo.train.callbacks.track_validation import (_draw_overlay, _grid_colors, _subsample)
     T, H, W, _ = frames_thwc.shape
     tt = min(T, tracks_norm.shape[0])
     fr, tr, vs = frames_thwc[:tt], tracks_norm[:tt], vis[:tt]
-    grid = int(round(tr.shape[1] ** 0.5))
+    grid = int(round(tr.shape[1]**0.5))
     tr, vs = _subsample(tr, vs, grid, stride)
     colors = _grid_colors(grid, stride)
     if colors.shape[0] != tr.shape[1]:
-        colors = _grid_colors(int(round(tr.shape[1] ** 0.5)) or 1, 1)[:tr.shape[1]]
+        colors = _grid_colors(int(round(tr.shape[1]**0.5)) or 1, 1)[:tr.shape[1]]
     trpx = tr.copy()
     trpx[..., 0] *= W
     trpx[..., 1] *= H
@@ -50,8 +49,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--export", required=True, help="dcp_to_diffusers export dir")
     p.add_argument("--yaml", default="examples/train/scenario/worldmodel/finetune_wantrack_i2v.yaml")
-    p.add_argument("--data", default="/mnt/weka/home/hao.zhang/shao/data/motion_pipeline/"
-                   "wan22_a14b_720p_24fps/preprocessed_i2v_track/combined_parquet_dataset")
+    p.add_argument("--data",
+                   default="/mnt/weka/home/hao.zhang/shao/data/motion_pipeline/"
+                   "wan22_a14b_720p_24fps/preprocessed_i2v_track_funinp/combined_parquet_dataset")
     p.add_argument("--out", required=True)
     p.add_argument("--clips", type=int, nargs="+", default=[0, 1])
     p.add_argument("--steps", type=int, default=30)
@@ -73,8 +73,8 @@ def main() -> None:
     Tpx = (num_lat_t - 1) * ratio + 1
 
     results = []
-    for ci, s in zip(args.clips, samples):
-        gt_tracks = s["track_points"][0].numpy()[:Tpx]       # [T,N,2] normalized
+    for ci, s in zip(args.clips, samples, strict=False):
+        gt_tracks = s["track_points"][0].numpy()[:Tpx]  # [T,N,2] normalized
         gt_vis = s["track_visibility"][0].numpy()[:Tpx]
         swap = samples[(args.clips.index(ci) + 1) % len(samples)]
         swap_tracks = swap["track_points"][0].numpy()[:Tpx]
@@ -99,21 +99,29 @@ def main() -> None:
         # GT reference (decode the real clip)
         ref = twi.decode_reference(model, s["vae_latent"])
         imageio.mimsave(os.path.join(args.out, f"clip{ci}_reference.mp4"),
-                        _overlay(ref, gt_tracks, gt_vis), fps=args.fps, macro_block_size=1)
+                        _overlay(ref, gt_tracks, gt_vis),
+                        fps=args.fps,
+                        macro_block_size=1)
 
         for name, (tr, vs) in controls.items():
             tp = torch.from_numpy(tr)[None].float() if tr is not None else None
             tv = torch.from_numpy(vs)[None].float() if vs is not None else None
-            lat = twi.generate(model, first_frame_latent=s["first_frame_latent"],
+            lat = twi.generate(model,
+                               first_frame_latent=s["first_frame_latent"],
                                text_embedding=s["text_embedding"],
                                text_attention_mask=s["text_attention_mask"],
-                               track_points=tp, track_visibility=tv,
-                               num_steps=args.steps, seed=args.seed)
+                               track_points=tp,
+                               track_visibility=tv,
+                               clip_feature=s["clip_feature"],
+                               num_steps=args.steps,
+                               seed=args.seed)
             frames = twi.decode_to_pixels(model, lat)
             ov_tr = tr if tr is not None else np.zeros((Tpx, 1, 2), np.float32)
             ov_vs = vs if vs is not None else np.zeros((Tpx, 1), np.float32)
             imageio.mimsave(os.path.join(args.out, f"clip{ci}_{name}.mp4"),
-                            _overlay(frames, ov_tr, ov_vs), fps=args.fps, macro_block_size=1)
+                            _overlay(frames, ov_tr, ov_vs),
+                            fps=args.fps,
+                            macro_block_size=1)
 
             epe = None
             if tr is not None:

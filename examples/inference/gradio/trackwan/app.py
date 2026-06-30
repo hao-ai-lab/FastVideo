@@ -132,7 +132,8 @@ def on_generate(clip_idx, mode, preset_name, strength, cx, cy, radius, sparsity,
     tv = torch.from_numpy(vs)[None].float() if vs is not None else None
     lat = twi.generate(STATE["model"], first_frame_latent=s["first_frame_latent"],
                        text_embedding=s["text_embedding"], text_attention_mask=s["text_attention_mask"],
-                       track_points=tp, track_visibility=tv, num_steps=int(steps), seed=int(seed))
+                       track_points=tp, track_visibility=tv, clip_feature=s["clip_feature"],
+                       num_steps=int(steps), seed=int(seed))
     frames = twi.decode_to_pixels(STATE["model"], lat)
     ov_tr = tr if tr is not None else np.zeros((frames.shape[0], 1, 2), np.float32)
     ov_vs = vs if vs is not None else np.zeros((frames.shape[0], 1), np.float32)
@@ -202,11 +203,12 @@ def main():
     p.add_argument("--export", required=True, help="dcp_to_diffusers export dir")
     p.add_argument("--yaml", default="examples/train/scenario/worldmodel/finetune_wantrack_i2v.yaml")
     p.add_argument("--data", default="/mnt/weka/home/hao.zhang/shao/data/motion_pipeline/"
-                   "wan22_a14b_720p_24fps/preprocessed_i2v_track/combined_parquet_dataset")
+                   "wan22_a14b_720p_24fps/preprocessed_i2v_track_funinp/combined_parquet_dataset")
     p.add_argument("--num-clips", type=int, default=10)
     p.add_argument("--out-dir", default="/mnt/weka/home/hao.zhang/shao/data/motion_pipeline/gradio_out")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=7860)
+    p.add_argument("--share", action="store_true", help="Create a public gradio.live link (no SSH forward needed).")
     args = p.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -220,7 +222,8 @@ def main():
                  out_dir=args.out_dir, ct=load_cotracker(model.device))
 
     demo = build_ui(len(samples))
-    demo.queue().launch(server_name=args.host, server_port=args.port, allowed_paths=[args.out_dir])
+    demo.queue().launch(server_name=args.host, server_port=args.port, share=args.share,
+                        allowed_paths=[args.out_dir])
 
 
 if __name__ == "__main__":

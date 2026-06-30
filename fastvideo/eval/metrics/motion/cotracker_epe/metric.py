@@ -51,21 +51,32 @@ def _retrack(model, frames_thwc: np.ndarray, queries_txy: np.ndarray, device):
     Returns (tracks [T,M,2] pixels, vis [T,M]).
     """
     video = torch.from_numpy(frames_thwc).float().permute(0, 3, 1, 2)[None]  # [1,T,3,H,W]
-    q = torch.from_numpy(queries_txy.astype(np.float32))[None]               # [1,M,3]
+    q = torch.from_numpy(queries_txy.astype(np.float32))[None]  # [1,M,3]
     tracks, vis = model(video.to(device), queries=q.to(device))
     return tracks[0].cpu().numpy(), vis[0].cpu().numpy()
 
 
-def compute_epe(frames_thwc: np.ndarray, input_tracks_px: np.ndarray,
-                input_vis: np.ndarray, model, device, *, vis_thresh: float = 0.5,
-                query_frame: int = 0, max_points: int = 600, seed: int = 0) -> dict:
+def compute_epe(frames_thwc: np.ndarray,
+                input_tracks_px: np.ndarray,
+                input_vis: np.ndarray,
+                model,
+                device,
+                *,
+                vis_thresh: float = 0.5,
+                query_frame: int = 0,
+                max_points: int = 600,
+                seed: int = 0,
+                move_thresh: float = 8.0) -> dict:
     """EPE between input control tracks and tracks re-extracted from generated frames.
 
     ``frames_thwc``: generated video (T,H,W,3) uint8.
     ``input_tracks_px``: (T,N,2) control tracks in PIXEL coords of that video.
     ``input_vis``: (T,N) control visibility.
     ``max_points``: cap re-tracked points for speed (random subsample of active).
-    Returns dict(epe, per_frame, n_points, coverage).
+    ``move_thresh``: a point "moves" if its input track travels > this many px from
+        its query-frame position; ``epe_moving`` averages EPE over only those points
+        (so a static background can't dilute the score).
+    Returns dict(epe, epe_moving, per_frame, n_points, n_moving, coverage).
     """
     T = min(frames_thwc.shape[0], input_tracks_px.shape[0])
     frames_thwc = frames_thwc[:T]
@@ -80,22 +91,35 @@ def compute_epe(frames_thwc: np.ndarray, input_tracks_px: np.ndarray,
     if max_points and idx.size > max_points:
         rng = np.random.default_rng(seed)
         idx = np.sort(rng.choice(idx, size=max_points, replace=False))
-    q_xy = tracks_in[query_frame, idx]                                   # [M,2]
+    q_xy = tracks_in[query_frame, idx]  # [M,2]
     queries = np.concatenate([np.full((idx.size, 1), query_frame, np.float32), q_xy], axis=1)
 
-    rt_tracks, _rt_vis = _retrack(model, frames_thwc, queries, device)   # [T,M,2]
+    rt_tracks, _rt_vis = _retrack(model, frames_thwc, queries, device)  # [T,M,2]
     Tr = min(T, rt_tracks.shape[0])
 
-    tgt = tracks_in[:Tr][:, idx]                                         # [Tr,M,2]
-    pred = rt_tracks[:Tr]                                                # [Tr,M,2]
-    mask = vis_in[:Tr][:, idx] > vis_thresh                             # [Tr,M] follow input visibility
-    d = np.sqrt(((pred - tgt) ** 2).sum(-1))                            # [Tr,M]
+    tgt = tracks_in[:Tr][:, idx]  # [Tr,M,2]
+    pred = rt_tracks[:Tr]  # [Tr,M,2]
+    mask = vis_in[:Tr][:, idx] > vis_thresh  # [Tr,M] follow input visibility
+    d = np.sqrt(((pred - tgt)**2).sum(-1))  # [Tr,M]
 
     per_frame = [float(d[t][mask[t]].mean()) if mask[t].any() else float("nan") for t in range(Tr)]
     valid = d[mask]
     epe = float(valid.mean()) if valid.size else None
-    return {"epe": epe, "per_frame": per_frame, "n_points": int(idx.size),
-            "coverage": float(mask.mean())}
+
+    # Points whose INPUT track actually moves (vs the static-background majority).
+    disp = np.sqrt(((tgt - tgt[0:1])**2).sum(-1))  # [Tr,M] travel from query-frame pos
+    moving = disp.max(0) > move_thresh  # [M]
+    mm = mask & moving[None, :]
+    valid_mv = d[mm]
+    epe_moving = float(valid_mv.mean()) if valid_mv.size else None
+    return {
+        "epe": epe,
+        "epe_moving": epe_moving,
+        "per_frame": per_frame,
+        "n_points": int(idx.size),
+        "n_moving": int(moving.sum()),
+        "coverage": float(mask.mean())
+    }
 
 
 @register("motion.cotracker_epe")
@@ -104,7 +128,7 @@ class CoTrackerEPEMetric(BaseMetric):
 
     name = "motion.cotracker_epe"
     requires_reference = False  # needs control tracks in the sample, not a ref video
-    higher_is_better = False    # EPE is a distance
+    higher_is_better = False  # EPE is a distance
     needs_gpu = True
     dependencies: list[str] = []
 
@@ -139,11 +163,19 @@ class CoTrackerEPEMetric(BaseMetric):
             tr[..., 0] *= W
             tr[..., 1] *= H
 
-        res = compute_epe(frames, tr, vs, self._model, self.device,
-                          vis_thresh=self.vis_thresh, query_frame=self.query_frame)
+        res = compute_epe(frames,
+                          tr,
+                          vs,
+                          self._model,
+                          self.device,
+                          vis_thresh=self.vis_thresh,
+                          query_frame=self.query_frame)
         if res["epe"] is None:
             return self._skip(sample, "no visible control points at query frame")
-        return MetricResult(name=self.name, score=res["epe"],
-                            details={"per_frame": res["per_frame"],
-                                     "n_points": res["n_points"],
-                                     "coverage": res["coverage"]})
+        return MetricResult(name=self.name,
+                            score=res["epe"],
+                            details={
+                                "per_frame": res["per_frame"],
+                                "n_points": res["n_points"],
+                                "coverage": res["coverage"]
+                            })
