@@ -159,7 +159,8 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
 
 def _compute_cur_topk(attn_metadata: VideoSparseAttentionMetadata) -> int:
     num_kv_blocks = attn_metadata.variable_block_sizes.numel()
-    return math.ceil((1 - attn_metadata.VSA_sparsity) * num_kv_blocks)
+    cur_topk = math.ceil((1 - attn_metadata.VSA_sparsity) * num_kv_blocks)
+    return max(1, min(cur_topk, num_kv_blocks))
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):

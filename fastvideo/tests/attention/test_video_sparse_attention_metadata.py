@@ -7,6 +7,7 @@ from fastvideo.attention.backends.video_sparse_attn import (
     VSA_TILE_SIZE,
     VideoSparseAttentionImpl,
     VideoSparseAttentionMetadataBuilder,
+    _compute_cur_topk,
 )
 
 
@@ -98,3 +99,13 @@ def test_vsa_forward_cur_topk_uses_padded_kv_block_count(monkeypatch):
     assert captured["topk"] == expected_topk
     assert captured["block_size"] == VSA_TILE_SIZE
     assert output.shape == query.shape
+
+
+def test_vsa_cur_topk_clamps_to_valid_block_range():
+    metadata = _build_metadata(cache_tile_buf=True, raw_latent_shape=(5, 32, 32), VSA_sparsity=1.0)
+    num_kv_blocks = metadata.variable_block_sizes.numel()
+
+    assert _compute_cur_topk(metadata) == 1
+
+    metadata.VSA_sparsity = -0.01
+    assert _compute_cur_topk(metadata) == num_kv_blocks
