@@ -100,7 +100,7 @@ class VideoBatchScheduler:
             if self._jobs_are_compatible(batch[0], candidate):
                 batch.append(candidate)
                 continue
-            self._pending.append(candidate)
+            self._pending.appendleft(candidate)
             break
         return batch
 

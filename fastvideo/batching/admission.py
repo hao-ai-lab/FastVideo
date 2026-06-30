@@ -283,6 +283,11 @@ def _optional_bool(value: Any) -> bool | None:
         return None
     if isinstance(value, bool):
         return value
+    if isinstance(value, int | float):
+        if value == 1.0:
+            return True
+        if value == 0.0:
+            return False
     if isinstance(value, str):
         lowered = value.strip().lower()
         if lowered in ("1", "true", "yes", "y", "on"):

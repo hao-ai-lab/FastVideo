@@ -33,6 +33,20 @@ def test_batching_rule_validates_unknown_keys() -> None:
         )
 
 
+@pytest.mark.parametrize(("value", "expected"), [(1, True), (0, False), (1.0, True), (0.0, False)])
+def test_batching_rule_parses_numeric_bool_values(value, expected) -> None:
+    rule = BatchingRule.from_dict(
+        {
+            "model_contains": "wan",
+            "offload": value,
+            "max_batch_size": 2,
+        },
+        source="unit",
+    )
+
+    assert rule.offload is expected
+
+
 def test_load_batching_config_supports_mapping_form(tmp_path) -> None:
     path = tmp_path / "batching.json"
     path.write_text(
