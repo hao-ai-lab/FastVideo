@@ -266,6 +266,7 @@ class DiffusionNFTMethod(TrainingMethod):
         params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         self._student_optimizer, self._student_lr_scheduler = build_optimizer_and_scheduler(
             params=params,
+            module=self.student.transformer,
             optimizer_config=self.training_config.optimizer,
             loop_config=self.training_config.loop,
             learning_rate=lr,

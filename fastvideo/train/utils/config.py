@@ -379,6 +379,11 @@ def _build_training_config(
             lr_num_cycles=int(o.get("lr_num_cycles", 0) or 0),
             lr_power=float(o.get("lr_power", 0.0) or 0.0),
             min_lr_ratio=float(o.get("min_lr_ratio", 0.5) or 0.5),
+            optimizer_type=str(o.get("optimizer_type", "adamw") or "adamw").strip().lower(),
+            muon_lr=float(o.get("muon_lr", 0.0) or 0.0),
+            muon_momentum=float(o.get("muon_momentum", 0.95) or 0.95),
+            muon_weight_decay=float(o.get("muon_weight_decay", 0.0) or 0.0),
+            muon_ns_steps=int(o.get("muon_ns_steps", 5) or 5),
         ),
         loop=TrainingLoopConfig(
             max_train_steps=int(lo.get("max_train_steps", 0) or 0),
