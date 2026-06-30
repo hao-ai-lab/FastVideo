@@ -1,15 +1,16 @@
-"""NVFP4 QAD inference example.
+"""NVFP4 QAD inference example with SageAttention 2 backend.
 
-Runs FastWan-QAD-1.3B (a distilled Wan2.1-T2V-1.3B-Diffusers checkpoint) with
-NVFP4QATConfig quantization. Uses ATTN_QAT_INFER attention backend.
+Runs FastWan-QAD-1.3B-SA2 (a distilled Wan2.1-T2V-1.3B-Diffusers checkpoint) with
+NVFP4QATConfig quantization. Uses the SAGE_ATTN attention backend.
 
 Requirements:
-    - GPU: Blackwell (B200/B300, sm100a+) for the FP4 linear path
+    - GPU: sm89+ (H100, L40S, RTX 4090, Ada Lovelace, or newer)
+    - sageattention: pip install sageattention
     - TAEHV (optional): Follow install instructions at https://github.com/madebyollin/taehv
 
 Usage:
-    python nvfp4_qat_wan2_1_1_3b.py --taehv-checkpoint /path/to/taehv/taew2_1.pth           # NVFP4 QAD
-    python nvfp4_qat_wan2_1_1_3b.py --taehv-checkpoint /path/to/taehv/taew2_1.pth --bf16    # BF16 baseline
+    python nvfp4_sa2_wan2_1_1_3b.py --taehv-checkpoint /path/to/taehv/taew2_1.pth           # NVFP4 + SageAttn2
+    python nvfp4_sa2_wan2_1_1_3b.py --taehv-checkpoint /path/to/taehv/taew2_1.pth --bf16    # BF16 baseline
 """
 
 import argparse
@@ -39,26 +40,26 @@ class TaehvDecoder:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NVFP4 QAD video generation benchmark")
+    parser = argparse.ArgumentParser(description="NVFP4 QAD + SageAttention2 video generation benchmark")
     parser.add_argument("--bf16", action="store_true",
                         help="BF16 baseline (no NVFP4 quantization)")
     parser.add_argument("--taehv-checkpoint", default=None, metavar="PATH",
                         help="Path to taew2_1.pth; enables TAEHV tiny autoencoder decoding")
-    parser.add_argument("--model", default="FastVideo/FastWan-QAD-1.3B",
+    parser.add_argument("--model", default="FastVideo/FastWan-QAD-1.3B-SA2",
                         help="Model path or HuggingFace ID")
     parser.add_argument("--no-compile", action="store_true", help="Disable torch.compile for the DiT")
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--infer_steps", type=int, default=3)
     args = parser.parse_args()
 
-    os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "ATTN_QAT_INFER")
+    os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
     os.environ["FASTVIDEO_DISABLE_ATTENTION_COMPILE"] = "0"
     os.environ["FLASHINFER_CUDA_ARCH_LIST"] = "12.0a"
 
     from fastvideo import VideoGenerator
     from fastvideo.configs.pipelines.base import PipelineConfig
 
-    mode = "bf16" if args.bf16 else "nvfp4_qad"
+    mode = "bf16" if args.bf16 else "nvfp4_sa2"
     if not args.no_compile:
         mode += "_compile"
     use_taehv = args.taehv_checkpoint is not None
