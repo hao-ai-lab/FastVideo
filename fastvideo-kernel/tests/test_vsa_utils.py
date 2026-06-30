@@ -117,12 +117,12 @@ class TestConstructVariableBlockSizes:
     def test_custom_tile_size(self):
         """tile_size parameter overrides default VSA_TILE_SIZE."""
         device = torch.device("cpu")
-        shape = (6, 6, 6)
-        tile_size = (3, 3, 3)
-        num_tiles = (2, 2, 2)
+        shape = (6, 8, 16)
+        tile_size = (2, 4, 8)
+        num_tiles = (3, 2, 2)
         vbs = construct_variable_block_sizes(shape, num_tiles, device, tile_size)
-        assert vbs.sum().item() == 6 * 6 * 6
-        assert (vbs == 27).all()
+        assert vbs.sum().item() == math.prod(shape)
+        assert (vbs == 64).all()
 
 
 class TestGetNonPadIndex:
@@ -181,10 +181,18 @@ class TestBuildVsaMetadata:
         assert meta["num_tiles"] == (3, 3, 2)
         assert meta["max_block_size"] == 64
 
-    def test_custom_tile_size(self):
-        meta = build_vsa_metadata((6, 6, 6), tile_size=(3, 3, 3), device="cpu")
-        assert meta["num_tiles"] == (2, 2, 2)
-        assert meta["max_block_size"] == 27
+    @pytest.mark.parametrize("tile_size,expected_num_tiles,expected_block_size", [
+        ((2, 4, 8), (3, 2, 2), 64),
+        ((4, 8, 8), (2, 1, 2), 256),
+    ])
+    def test_supported_custom_tile_size(self, tile_size, expected_num_tiles, expected_block_size):
+        meta = build_vsa_metadata((6, 8, 16), tile_size=tile_size, device="cpu")
+        assert meta["num_tiles"] == expected_num_tiles
+        assert meta["max_block_size"] == expected_block_size
+
+    def test_unsupported_tile_volume(self):
+        with pytest.raises(ValueError, match="Unsupported VSA tile volume 27"):
+            build_vsa_metadata((6, 6, 6), tile_size=(3, 3, 3), device="cpu")
 
     def test_consistency(self):
         """All components are internally consistent."""

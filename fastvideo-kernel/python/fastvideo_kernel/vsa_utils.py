@@ -14,6 +14,7 @@ import math
 import torch
 
 VSA_TILE_SIZE = (4, 4, 4)
+_SUPPORTED_VSA_BLOCK_VOLUMES = (64, 256)
 
 
 @functools.lru_cache(maxsize=10)
@@ -112,6 +113,7 @@ def build_vsa_metadata(
     Args:
         dit_seq_shape: (T, H, W) — temporal frames, spatial height, width.
         tile_size: (ts_t, ts_h, ts_w) — tokens per tile in each dimension.
+            The resulting tile volume must be supported by the VSA kernels.
         device: Target device for index tensors.
 
     Returns:
@@ -123,12 +125,18 @@ def build_vsa_metadata(
 
     T, H, W = dit_seq_shape
     ts_t, ts_h, ts_w = tile_size
+    max_block_size = math.prod(tile_size)
+    if max_block_size not in _SUPPORTED_VSA_BLOCK_VOLUMES:
+        raise ValueError(
+            f"Unsupported VSA tile volume {max_block_size} for tile_size={tile_size}; "
+            f"supported volumes are {_SUPPORTED_VSA_BLOCK_VOLUMES}."
+        )
+
     num_tiles = (
         math.ceil(T / ts_t),
         math.ceil(H / ts_h),
         math.ceil(W / ts_w),
     )
-    max_block_size = math.prod(tile_size)
 
     tile_indices = get_tile_partition_indices(dit_seq_shape, tile_size, device)
     reverse_tile_indices = get_reverse_tile_partition_indices(dit_seq_shape, tile_size, device)
