@@ -456,11 +456,16 @@ class ValidationCallback(Callback):
             None,
         )
 
+        loaded_modules: dict[str, Any] = {"transformer": transformer}
+        # Distillation methods build the flow-match scheduler their few-step DMD
+        # sampler needs; inject it so the pipeline doesn't fall back to UniPC.
+        method_scheduler = getattr(self.method, "_sf_scheduler", None)
+        if method_scheduler is not None:
+            loaded_modules["scheduler"] = method_scheduler
+
         kwargs: dict[str, Any] = {
             "inference_mode": True,
-            "loaded_modules": {
-                "transformer": transformer,
-            },
+            "loaded_modules": loaded_modules,
             "tp_size": tc.distributed.tp_size,
             "sp_size": tc.distributed.sp_size,
             "num_gpus": tc.distributed.num_gpus,
@@ -476,12 +481,6 @@ class ValidationCallback(Callback):
             tc.model_path,
             **kwargs,
         )
-
-        scheduler = self._pipeline.get_module("scheduler")
-        if (scheduler is not None and type(scheduler).__name__ == "SelfForcingFlowMatchScheduler"):
-            scheduler.sigma_min = 0.0
-            scheduler.extra_one_step = True
-            scheduler.set_timesteps(num_inference_steps=1000, training=True)
 
         self._pipeline_key = key
         return self._pipeline

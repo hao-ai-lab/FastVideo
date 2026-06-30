@@ -49,6 +49,7 @@ class WanCausalModel(WanModel, CausalModelBase):
         transformer_override_safetensor: str
         | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
+        num_frames_per_block: int | None = None,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -61,6 +62,11 @@ class WanCausalModel(WanModel, CausalModelBase):
             lora=lora,
         )
         self._streaming_caches: (dict[tuple[int, str], _StreamingCaches]) = {}
+
+        if num_frames_per_block is not None:
+            if int(num_frames_per_block) < 1:
+                raise ValueError("num_frames_per_block must be >= 1")
+            self.transformer.num_frame_per_block = int(num_frames_per_block)
 
     # --- CausalModelBase override: clear_caches ---
     def clear_caches(
