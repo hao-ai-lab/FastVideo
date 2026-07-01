@@ -82,17 +82,29 @@ def swap_checkpoint(name: str) -> str:
     if STATE.get("cur_ckpt") == name:
         return f"checkpoint: {name} (loaded)"
     from safetensors.torch import load_file
+    try:
+        from torch.distributed.tensor import DTensor
+    except Exception:  # older torch
+        from torch.distributed._tensor import DTensor
     path = STATE["exports"][name]
     sd = load_file(os.path.join(path, "transformer", "model.safetensors"))
     tgt = STATE["model"].transformer
-    p0 = next(tgt.parameters())
-    sd = {k: v.to(p0.device, p0.dtype) for k, v in sd.items()}
-    missing, unexpected = tgt.load_state_dict(sd, strict=False)
+    # Params are FSDP DTensors (even on 1 GPU); copy into each param's local shard
+    # instead of load_state_dict (which errors mixing Tensor and DTensor).
+    params = dict(tgt.named_parameters())
+    n_ok = 0
+    with torch.no_grad():
+        for k, p in params.items():
+            if k not in sd:
+                continue
+            loc = p.to_local() if isinstance(p, DTensor) else p.data
+            src = sd[k].to(dtype=loc.dtype, device=loc.device)
+            if tuple(loc.shape) == tuple(src.shape):
+                loc.copy_(src)
+                n_ok += 1
     tgt.eval()
     STATE["cur_ckpt"] = name
-    warn = ""
-    if len(missing) > 4 or len(unexpected) > 4:  # a few buffers (rope/norm) are expected
-        warn = f"  [WARN missing={len(missing)} unexpected={len(unexpected)}]"
+    warn = "" if n_ok == len(params) else f"  [WARN copied {n_ok}/{len(params)} params]"
     return f"checkpoint: {name} (swapped){warn}"
 
 
@@ -139,21 +151,19 @@ def on_ckpt(name):
     return swap_checkpoint(name)
 
 
-def on_generate(clip_idx, ckpt_name, traj_json, grid_n, extent, background, steps, seed):
+def _build_tracks(traj_json, grid_n, extent, background):
+    """Parse the drawn trajectory -> (patch, pvis, full_tr, full_vs) or (None, msg)."""
     import json
-    clip_idx = int(clip_idx)
     if not traj_json or traj_json.strip() in ("", "[]"):
-        return None, None, "Record an action first: move the mouse over the frame and press Space (5 s)."
+        return None, "Record an action first: move the mouse over the frame and press Space (5 s)."
     try:
         traj = json.loads(traj_json)
     except Exception as e:  # noqa: BLE001
-        return None, None, f"bad trajectory json: {e}"
-    swap_checkpoint(ckpt_name)
+        return None, f"bad trajectory json: {e}"
     Tpx = STATE["Tpx"]
     patch, pvis = _patch_tracks(traj, Tpx, int(grid_n), float(extent))
     if patch is None:
-        return None, None, "trajectory too short — hold Space and move the mouse for the full 5 s."
-
+        return None, "trajectory too short — hold Space and move the mouse for the full 5 s."
     if background == "static (dense)":
         g = st.make_grid(50)
         bt, bv = st.static(g, Tpx)
@@ -161,31 +171,97 @@ def on_generate(clip_idx, ckpt_name, traj_json, grid_n, extent, background, step
         full_vs = np.concatenate([bv, pvis], axis=1)
     else:
         full_tr, full_vs = patch, pvis
+    return (patch, pvis, full_tr, full_vs), None
 
+
+def _first_frame_cached(clip_idx):
+    cache = STATE.setdefault("_ff_cache", {})
+    if clip_idx not in cache:
+        cache[clip_idx] = _first_frame_rgb(clip_idx)
+    return cache[clip_idx]
+
+
+def on_preview(clip_idx, traj_json, grid_n, extent, background):
+    """Show the synthetic control tracks overlaid on the (frozen) first frame -- BEFORE generating."""
+    clip_idx = int(clip_idx)
+    built, err = _build_tracks(traj_json, grid_n, extent, background)
+    if built is None:
+        return None, err
+    patch, pvis, full_tr, full_vs = built
+    ff = _first_frame_cached(clip_idx)  # [H,W,3]
+    frames = np.repeat(ff[None], patch.shape[0], axis=0)  # freeze frame 0, T copies
+    out = _overlay_patch(frames, patch, pvis)
+    path = os.path.join(STATE["out_dir"], f"preview_clip{clip_idx}.mp4")
+    imageio.mimsave(path, out, fps=24, macro_block_size=1)
+    nbg = (full_tr.shape[1] - patch.shape[1])
+    return path, (f"PREVIEW of the traces to be fed (green = your {int(grid_n)}x{int(grid_n)} arm patch, "
+                  f"{patch.shape[1]} pts + {nbg} static background pts). Press Generate when it looks right.")
+
+
+def on_generate(clip_idx, ckpt_name, traj_json, grid_n, extent, background, steps, seed):
+    """Generator: streams per-step denoise progress to the log, yields the video at the end."""
+    import time
+    from fastvideo.forward_context import set_forward_context
+    from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
+        FlowMatchEulerDiscreteScheduler, )
+    clip_idx = int(clip_idx)
+    built, err = _build_tracks(traj_json, grid_n, extent, background)
+    if built is None:
+        yield gr.update(), f"[error] {err}", gr.update()
+        return
+    patch, pvis, full_tr, full_vs = built
+    steps = int(steps)
+    t0 = time.time()
+
+    yield gr.update(), f"[1/4] swapping to {ckpt_name} ...", gr.update()
+    swap_checkpoint(ckpt_name)
+
+    model = STATE["model"]
+    device = model.device
+    dtype = torch.bfloat16
     s = STATE["samples"][clip_idx]
-    tp = torch.from_numpy(full_tr)[None].float()
-    tv = torch.from_numpy(full_vs)[None].float()
-    lat = twi.generate(STATE["model"], first_frame_latent=s["first_frame_latent"],
-                       text_embedding=s["text_embedding"], text_attention_mask=s["text_attention_mask"],
-                       track_points=tp, track_visibility=tv, clip_feature=s["clip_feature"],
-                       num_steps=int(steps), seed=int(seed))
-    frames = twi.decode_to_pixels(STATE["model"], lat)
+    ff = s["first_frame_latent"].to(device, dtype)
+    cond20 = model._build_i2v_cond_concat(ff)
+    txt = s["text_embedding"].to(device, dtype)
+    mask = s["text_attention_mask"].to(device, dtype)
+    img = s["clip_feature"].to(device, dtype)
+    tp = torch.from_numpy(full_tr)[None].to(device, dtype)
+    tv = torch.from_numpy(full_vs)[None].to(device, dtype)
+    _, _, T, H, W = ff.shape
+    gen = torch.Generator(device="cpu").manual_seed(int(seed))
+    latents = torch.randn((1, 16, T, H, W), generator=gen, dtype=torch.float32).to(device)
+    sched = FlowMatchEulerDiscreteScheduler(shift=float(model.timestep_shift))
+    sched.set_timesteps(steps, device=device)
+
+    for i, t in enumerate(sched.timesteps):
+        model_in = torch.cat([latents.to(dtype), cond20], dim=1)
+        ts = t.reshape(1).to(device, dtype)
+        with torch.no_grad(), torch.autocast(device.type, dtype=dtype), \
+                set_forward_context(current_timestep=ts, attn_metadata=None):
+            v = model.transformer(hidden_states=model_in, encoder_hidden_states=txt,
+                                  encoder_attention_mask=mask, timestep=ts,
+                                  encoder_hidden_states_image=img, track_points=tp,
+                                  track_visibility=tv, return_dict=False)
+        latents = sched.step(v.float(), t, latents.float(), return_dict=False)[0]
+        yield gr.update(), f"[2/4] denoising {i + 1}/{steps}  ({time.time() - t0:.1f}s)", gr.update()
+
+    yield gr.update(), f"[3/4] decoding latents ...  ({time.time() - t0:.1f}s)", gr.update()
+    frames = twi.decode_to_pixels(model, latents)
     out = _overlay_patch(frames, patch, pvis)
     tag = ckpt_name.replace(" ", "")
     path = os.path.join(STATE["out_dir"], f"action_clip{clip_idx}_{tag}_g{int(grid_n)}.mp4")
     imageio.mimsave(path, out, fps=24, macro_block_size=1)
 
+    yield gr.update(), f"[4/4] computing CoTracker EPE ...  ({time.time() - t0:.1f}s)", gr.update()
     from fastvideo.eval.metrics.motion.cotracker_epe.metric import compute_epe
-    H, W = frames.shape[1], frames.shape[2]
     ppx = patch.copy()
     ppx[..., 0] *= W
     ppx[..., 1] *= H
-    res = compute_epe(frames, ppx, pvis, STATE["ct"], STATE["model"].device)
+    res = compute_epe(frames, ppx, pvis, STATE["ct"], device)
     epe = res["epe"]
-    msg = (f"{ckpt_name}: patch EPE = {epe:.2f}px ({res['n_points']} pts followed) — "
-           f"lower = the {int(grid_n)}x{int(grid_n)} patch tracked your drawn action."
-           if epe is not None else f"{ckpt_name}: EPE n/a (no points re-tracked)")
-    return _original_video(clip_idx), path, msg
+    epe_msg = (f"patch EPE = {epe:.2f}px ({res['n_points']} pts) — lower = the arm patch followed your path."
+               if epe is not None else "EPE n/a (no points re-tracked)")
+    yield path, f"[done] generated in {time.time() - t0:.1f}s", epe_msg
 
 
 # ----------------------------------------------------------------------------- ui
@@ -241,11 +317,13 @@ def build_ui(num_clips: int, ckpt_names: list[str], Tpx: int):
                 with gr.Row():
                     steps = gr.Slider(10, 60, value=30, step=5, label="Denoise steps")
                     seed = gr.Number(value=1000, label="Seed")
-                gen_btn = gr.Button("Generate", variant="primary")
-                status = gr.Textbox(label="Status", interactive=False)
+                with gr.Row():
+                    preview_btn = gr.Button("Preview traces")
+                    gen_btn = gr.Button("Generate", variant="primary")
+                status = gr.Textbox(label="Status / generation log", interactive=False, lines=2)
             with gr.Column(scale=1):
                 orig_vid = gr.Video(label="Original clip")
-                gen_vid = gr.Video(label="Generated (your action overlaid)")
+                gen_vid = gr.Video(label="Preview traces / Generated (your action overlaid)")
                 epe_box = gr.Textbox(label="Action-following (CoTracker EPE on the patch)", interactive=False)
 
         ff_b64 = gr.Textbox(elem_id="ff_b64", visible=False)
@@ -256,8 +334,9 @@ def build_ui(num_clips: int, ckpt_names: list[str], Tpx: int):
         ff_b64.change(None, [ff_b64], None, js="(b64)=>{ window._setbg(b64); }")
         rec_btn.click(None, None, None, js="()=>{ window._startRec(); }")
         clr_btn.click(None, None, None, js="()=>{ window._clear(); }")
+        preview_btn.click(on_preview, [clip, traj_json, grid_n, extent, background], [gen_vid, status])
         gen_btn.click(on_generate, [clip, ckpt, traj_json, grid_n, extent, background, steps, seed],
-                      [orig_vid, gen_vid, epe_box])
+                      [gen_vid, status, epe_box])
         demo.load(on_clip, [clip], [caption, ff_b64, orig_vid])
         demo.load(None, None, None, js=_canvas_js(Tpx))
     return demo
