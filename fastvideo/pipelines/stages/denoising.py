@@ -191,6 +191,19 @@ class DenoisingStage(PipelineStage):
             },
         )
 
+        dreamx_y_camera = batch.extra.get("dreamx_y_camera", batch.extra.get("y_camera"))
+        if isinstance(dreamx_y_camera, dict):
+            dreamx_y_camera = {
+                key: value.to(device=local_device) if torch.is_tensor(value) else value
+                for key, value in dreamx_y_camera.items()
+            }
+        dreamx_camera_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "y_camera": dreamx_y_camera,
+            },
+        )
+
         for key in ("flux2_txt_ids", "flux2_img_ids"):
             value = batch.extra.get(key)
             if torch.is_tensor(value):
@@ -242,6 +255,7 @@ class DenoisingStage(PipelineStage):
             # the image latent instead of appending along the channel dim
             assert batch.image_latent is None, "TI2V task should not have image latents"
             assert self.vae is not None, "VAE is not provided for TI2V task"
+            self.vae = self.vae.to(local_device)
             z = self.vae.encode(batch.pil_image).mean.float()
             if (hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None):
                 if isinstance(self.vae.shift_factor, torch.Tensor):
@@ -495,6 +509,7 @@ class DenoisingStage(PipelineStage):
                             **pos_cond_kwargs,
                             **action_kwargs,
                             **camera_kwargs,
+                            **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
                         )
@@ -537,6 +552,7 @@ class DenoisingStage(PipelineStage):
                                     **neg_cond_kwargs,
                                     **action_kwargs,
                                     **camera_kwargs,
+                                    **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
                                 )

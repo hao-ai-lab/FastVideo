@@ -20,6 +20,7 @@ from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
     Cosmos25_14BConfig,
 )
+from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BCamPipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.gen3c import Gen3CConfig
@@ -773,6 +774,18 @@ def _register_configs() -> None:
         model_family="wan",
         default_preset="wan_2_2_ti2v_5b",
     )
+
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=DreamXWorld5BCamPipelineConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "GD-ML/DreamX-World-5B-Cam",
+        ],
+        model_detectors=[lambda path: "dreamx-world" in path.lower() or "dreamxworldpipeline" in path.lower()],
+        model_family="dreamx_world",
+        default_preset="dreamx_world_5b_cam",
+    )
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=FastWan2_2_TI2V_5B_Config,
@@ -951,6 +964,8 @@ def _register_presets() -> None:
     from fastvideo.api.presets import register_preset
     from fastvideo.pipelines.basic.cosmos.presets import (
         ALL_PRESETS as COSMOS_PRESETS, )
+    from fastvideo.pipelines.basic.dreamx_world.presets import (
+        ALL_PRESETS as DREAMX_WORLD_PRESETS, )
     from fastvideo.pipelines.basic.gamecraft.presets import (
         ALL_PRESETS as GAMECRAFT_PRESETS, )
     from fastvideo.pipelines.basic.gen3c.presets import (
@@ -984,6 +999,7 @@ def _register_presets() -> None:
 
     all_preset_groups = (
         COSMOS_PRESETS,
+        DREAMX_WORLD_PRESETS,
         FLUX2_PRESETS,
         GAMECRAFT_PRESETS,
         GEN3C_PRESETS,
