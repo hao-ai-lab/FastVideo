@@ -37,18 +37,25 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         special_token_ids=None,
         rm_head_type="default",
         rm_head_kwargs=None,
+        **kwargs,
     ):
+        del kwargs
         super().__init__(config)
         # pdb.set_trace()
         self.output_dim = output_dim
+        hidden_size = getattr(config, "hidden_size", None)
+        if hidden_size is None and hasattr(config, "text_config"):
+            hidden_size = getattr(config.text_config, "hidden_size", None)
+        if hidden_size is None:
+            raise AttributeError("Qwen2VL reward model config must define hidden_size or text_config.hidden_size")
         if rm_head_type == "default":
-            self.rm_head = nn.Linear(config.hidden_size, output_dim, bias=False)
+            self.rm_head = nn.Linear(hidden_size, output_dim, bias=False)
         elif rm_head_type == "ranknet":
             if rm_head_kwargs is not None:
                 for layer in range(rm_head_kwargs.get("num_layers", 3)):
                     if layer == 0:
                         self.rm_head = nn.Sequential(
-                            nn.Linear(config.hidden_size, rm_head_kwargs["hidden_size"]),
+                            nn.Linear(hidden_size, rm_head_kwargs["hidden_size"]),
                             nn.ReLU(),
                             nn.Dropout(rm_head_kwargs.get("dropout", 0.1)),
                         )
@@ -76,13 +83,15 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
 
             else:
                 self.rm_head = nn.Sequential(
-                    nn.Linear(config.hidden_size, 1024),
+                    nn.Linear(hidden_size, 1024),
                     nn.ReLU(),
                     nn.Dropout(0.05),
                     nn.Linear(1024, 16),
                     nn.ReLU(),
                     nn.Linear(16, output_dim),
                 )
+        else:
+            raise ValueError(f"Unsupported rm_head_type: {rm_head_type}")
 
         self.rm_head.to(torch.float32)
         self.reward_token = reward_token
@@ -108,7 +117,9 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         image_grid_thw: torch.LongTensor | None = None,
         video_grid_thw: torch.LongTensor | None = None,
         rope_deltas: torch.LongTensor | None = None,
+        **kwargs,
     ):
+        del kwargs
         ## modified from the origin class Qwen2VLForConditionalGeneration
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
