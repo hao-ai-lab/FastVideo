@@ -19,6 +19,8 @@ from fastvideo.utils import import_pynvml
 
 logger = init_logger(__name__)
 
+_ALLOW_FA4_SM120_ENV = "FASTVIDEO_ALLOW_FA4_SM120"
+
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -230,6 +232,21 @@ class CudaPlatformBase(Platform):
             logger.info("Cannot use FlashAttention-2 backend for dtype other than "
                         "torch.float16 or torch.bfloat16.")
             target_backend = AttentionBackendEnum.TORCH_SDPA
+
+        # flash-attn.cute / FA4 currently supports SM 9/10/11. On SM 120,
+        # it can import successfully but fail later during CUTLASS DSL runtime
+        # compilation with a low-level cpasync ``NoneType._trait`` error.
+        # Prefer a correct SDPA fallback unless explicitly overridden for
+        # upstream validation.
+        if target_backend == AttentionBackendEnum.FLASH_ATTN and cls.has_device_capability((12, 0)):
+            if os.getenv(_ALLOW_FA4_SM120_ENV, "0") != "1":
+                logger.warning(
+                    "FlashAttention-4 CuTe is not enabled by default on SM 120+ "
+                    "because CUTLASS DSL runtime compilation is currently unstable. "
+                    "Falling back to Torch SDPA. Set %s=1 to force FlashAttention.",
+                    _ALLOW_FA4_SM120_ENV,
+                )
+                target_backend = AttentionBackendEnum.TORCH_SDPA
 
         # FlashAttn is valid for the model, checking if the package is
         # installed.
