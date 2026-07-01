@@ -130,6 +130,36 @@ def test_nano_banana_client_setup_failure_is_not_retried(tmp_path: Path) -> None
     assert backend.client_calls == 1
 
 
+def test_nano_banana_generate_config_failure_is_not_retried(tmp_path: Path) -> None:
+    class FailingConfigBackend(NanoBananaImageGeneratorBackend):
+
+        def __init__(self) -> None:
+            super().__init__(
+                api_key="fake-key",
+                output_dir=str(tmp_path),
+                max_attempts=3,
+                retry_delay_s=999.0,
+            )
+            self.client_calls = 0
+            self.config_calls = 0
+
+        def _client_instance(self):
+            self.client_calls += 1
+            return object()
+
+        def _make_generate_config(self):
+            self.config_calls += 1
+            raise ValueError("invalid Gemini config")
+
+    backend = FailingConfigBackend()
+
+    with pytest.raises(ValueError, match="invalid Gemini config"):
+        backend.generate(InterleaveEditRequest(prompt="draw a red mug"), request_id="config-error")
+
+    assert backend.client_calls == 1
+    assert backend.config_calls == 1
+
+
 def test_interleave_orchestrator_retries_with_refined_prompt() -> None:
     class FakePlanner:
         def plan(self, request):
