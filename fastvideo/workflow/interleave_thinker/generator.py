@@ -197,12 +197,13 @@ class NanoBananaImageGeneratorBackend:
         last_exc: Exception | None = None
         start = time.perf_counter()
         client = self._client_instance()
+        generate_config = self._make_generate_config()
         for attempt in range(self.max_attempts):
             try:
                 response = client.models.generate_content(
                     model=self.model,
                     contents=contents,
-                    config=self._make_generate_config(),
+                    config=generate_config,
                 )
                 image = _extract_first_response_image(response)
                 image.save(output_path)
