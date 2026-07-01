@@ -73,6 +73,12 @@ class StreamingResult:
     error: Exception | None = None
 
 
+def _prepare_worker_output_for_parent(result: Any, fastvideo_args: FastVideoArgs) -> Any:
+    if (fastvideo_args.output_type == "latent" and isinstance(result, torch.Tensor) and result.is_cuda):
+        return result.detach().cpu()
+    return result
+
+
 class MultiprocExecutor(Executor):
 
     def _init_executor(self) -> None:
@@ -693,8 +699,13 @@ class WorkerMultiprocProc:
                         logging_info = None
                         if envs.FASTVIDEO_STAGE_LOGGING:
                             logging_info = output_batch.logging_info
-                        # result tensor shared by CUDA IPC to avoid serialization overhead
                         result = output_batch.output
+                        # Latent outputs are small and are commonly consumed by
+                        # the parent process (for example, external TAEHV
+                        # decoding). Keep them off CUDA IPC so consumer/WSL2
+                        # drivers do not need to import a worker-owned CUDA
+                        # memory handle.
+                        result = _prepare_worker_output_for_parent(result, fastvideo_args)
                         extra = output_batch.extra or {}
                         extra["peak_memory_mb"] = (torch.cuda.max_memory_allocated() / (1024 * 1024))
                         self.pipe.send({
