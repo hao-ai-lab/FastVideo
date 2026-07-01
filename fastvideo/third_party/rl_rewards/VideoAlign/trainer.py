@@ -36,11 +36,17 @@ else:
 
 
 class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
-    def __init__(self, config, output_dim=4, reward_token="last", special_token_ids=None):
+    def __init__(self, config, output_dim=4, reward_token="last", special_token_ids=None, **kwargs):
+        del kwargs
         super().__init__(config)
         # pdb.set_trace()
         self.output_dim = output_dim
-        self.rm_head = nn.Linear(config.hidden_size, output_dim, bias=False)
+        hidden_size = getattr(config, "hidden_size", None)
+        if hidden_size is None and hasattr(config, "text_config"):
+            hidden_size = getattr(config.text_config, "hidden_size", None)
+        if hidden_size is None:
+            raise AttributeError("Qwen2VL reward model config must define hidden_size or text_config.hidden_size")
+        self.rm_head = nn.Linear(hidden_size, output_dim, bias=False)
         self.reward_token = reward_token
 
         self.special_token_ids = special_token_ids
@@ -64,7 +70,9 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         image_grid_thw: torch.LongTensor | None = None,
         video_grid_thw: torch.LongTensor | None = None,
         rope_deltas: torch.LongTensor | None = None,
+        **kwargs,
     ):
+        del kwargs
         ## modified from the origin class Qwen2VLForConditionalGeneration
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
