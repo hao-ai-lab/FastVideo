@@ -1,0 +1,113 @@
+# DiffusionNFT video RL: Wan 2.1 T2V 1.3B on text-only prompts with VideoAlign rewards.
+#
+# This follows the modular RL layout from diffusion_nft_pick_clip.yaml and only
+# swaps the reward suite plus video-sized latent/media settings.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+  old:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+  reference:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+
+method:
+  _target_: fastvideo.train.methods.rl.diffusion_nft.DiffusionNFTMethod
+  reward_backend: genrl
+  reward_fn:
+    rewards:
+      videoalign_vq: 1.0
+      videoalign_mq: 1.0
+      videoalign_ta: 1.0
+
+  sampling:
+    num_steps: 50
+    scheduler: flow_unipc
+    trajectory: ode
+    flow_shift: 8.0
+    guidance_scale: 6.0
+
+  validation:
+    every_steps: 10
+    num_steps: 50
+    num_prompts: 16
+    batch_size: 4
+    log_samples: true
+    max_samples: 4
+    fps: 16
+    seed: 42
+    data_path:
+
+  sample_train_batch_size: 1
+  train_batch_size: 1
+  num_batches_per_epoch: 24
+  num_video_per_prompt: 8
+  num_inner_epochs: 1
+  timestep_fraction: 0.99
+
+  beta: 0.1
+  kl_beta: 0.0001
+  decay_type: 1
+  adv_mode: all
+  adv_clip_max: 5
+  max_grad_norm: 1.0
+  ema:
+    enabled: true
+    decay: 0.9
+    update_after_step: 0
+    validation: true
+  terminal_progress: true
+
+training:
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: data/train_text_only_diffusion_nft_preprocessed
+    preprocessed_data_type: text_only
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 20
+    num_height: 448
+    num_width: 832
+    num_frames: 77
+
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.0001
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 100000
+    gradient_accumulation_steps: 24
+
+  checkpoint:
+    output_dir: outputs/wan2.1_diffusion_nft_videoalign
+    training_state_checkpointing_steps: 30
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: diffusion_nft_wan
+    run_name: wan2.1_diffusion_nft_videoalign
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+pipeline:
+  flow_shift: 8

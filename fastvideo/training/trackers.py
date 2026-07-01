@@ -11,6 +11,7 @@ import contextlib
 import copy
 import os
 import pathlib
+import subprocess
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -22,6 +23,61 @@ import torch
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+_WANDB_CODE_EXCLUDE_DIRS = {
+    ".cache",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "logs",
+    "outputs",
+    "wandb",
+}
+_WANDB_CODE_EXCLUDE_SUFFIXES = {
+    ".ckpt",
+    ".mp4",
+    ".npy",
+    ".npz",
+    ".parquet",
+    ".pt",
+    ".pth",
+    ".pyc",
+    ".safetensors",
+}
+
+
+def _git_root_or_cwd() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        root = result.stdout.strip()
+        if root:
+            return root
+    except Exception:
+        pass
+    return os.getcwd()
+
+
+def _should_log_code_file(
+    path: str,
+    *,
+    root: str,
+) -> bool:
+    rel_path = os.path.relpath(path, root) if os.path.isabs(path) else path
+    if rel_path.startswith(".."):
+        rel_path = path
+    parts = pathlib.Path(rel_path).parts
+    if any(part in _WANDB_CODE_EXCLUDE_DIRS for part in parts):
+        return False
+    if rel_path.endswith(tuple(_WANDB_CODE_EXCLUDE_SUFFIXES)):
+        return False
+    return True
 
 
 def _sanitize_wandb_config(value: Any) -> Any:
@@ -180,7 +236,20 @@ class WandbTracker(BaseTracker):
             config=(_sanitize_wandb_config(config) if config is not None else None),
             name=run_name,
         )
+        self._log_code_snapshot()
         logger.info("Initialized Weights & Biases tracker")
+
+    def _log_code_snapshot(self) -> None:
+        if os.environ.get("FASTVIDEO_WANDB_LOG_CODE", "1").strip().lower() in {"0", "false", "no"}:
+            return
+        try:
+            root = _git_root_or_cwd()
+            self._run.log_code(
+                root=root,
+                include_fn=lambda path: _should_log_code_file(path, root=root),
+            )
+        except Exception as exc:
+            logger.warning("Failed to log W&B code snapshot: %s", exc)
 
     def log(self, metrics: dict[str, Any], step: int) -> None:
         metrics = {**self._timed_metrics, **metrics}

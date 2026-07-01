@@ -17,6 +17,8 @@ class RLValidationConfig:
     num_prompts: int = 16
     batch_size: int = 16
     log_samples: bool = True
+    max_samples: int | None = None
+    fps: int = 1
     seed: int = 42
     data_path: str | None = None
     sampling: dict[str, Any] | None = None
@@ -31,12 +33,17 @@ class RLValidationConfig:
         sampling = raw.get("sampling", None)
         if sampling is not None and not isinstance(sampling, dict):
             raise ValueError(f"method.validation.sampling must be a mapping, got {type(sampling).__name__}")
+        max_samples = raw.get("max_samples", None)
+        if max_samples is not None:
+            max_samples = max(0, int(max_samples))
         return cls(
             every_steps=max(0, int(raw.get("every_steps", 0) or 0)),
             num_steps=max(1, int(raw.get("num_steps", 40) or 40)),
             num_prompts=max(1, int(raw.get("num_prompts", 16) or 16)),
             batch_size=max(1, int(raw.get("batch_size", 16) or 16)),
             log_samples=bool(raw.get("log_samples", True)),
+            max_samples=max_samples,
+            fps=max(1, int(raw.get("fps", 1) or 1)),
             seed=int(raw.get("seed", 42) or 42),
             data_path=(None if data_path in (None, "") else str(data_path)),
             sampling=(dict(sampling) if sampling is not None else None),
