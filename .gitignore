@@ -39,6 +39,7 @@ converted_weights/
 
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/
+fastvideo/tests/ssim/.reference_videos_download.lock
 **/.cache/**
 
 
@@ -132,3 +133,4 @@ fastvideo/tests/ssim/reference_videos/**
 *.nvimlog
 .nvimlog
 .python-version
+/DreamX-World/
