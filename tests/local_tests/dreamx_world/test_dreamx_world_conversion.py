@@ -10,6 +10,7 @@ from scripts.checkpoint_conversion.dreamx_world_to_diffusers import (
     MODEL_INDEX,
     REUSED_COMPONENTS,
     TRANSFORMER_CONFIG,
+    _copy_or_link_component,
     write_model_index,
 )
 
@@ -62,3 +63,17 @@ def test_dreamx_world_model_index_component_classes_are_registered():
     for component in ("scheduler", "text_encoder", "transformer", "vae"):
         class_name = MODEL_INDEX[component][1]
         assert class_name in _LEGACY_FAST_VIDEO_MODELS
+
+
+def test_dreamx_world_copy_or_link_component_keeps_broken_symlink(tmp_path):
+    component_source = tmp_path / "wan22"
+    src = component_source / "scheduler"
+    src.mkdir(parents=True)
+    output = tmp_path / "dreamx"
+    output.mkdir()
+    dst = output / "scheduler"
+    dst.symlink_to(tmp_path / "missing_scheduler", target_is_directory=True)
+
+    _copy_or_link_component("scheduler", component_source, output, symlink=True)
+
+    assert dst.is_symlink()
