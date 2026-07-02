@@ -70,11 +70,21 @@ class WanTrackModel(WanModel):
     #   WANTRACK_TEXT_DROP      prob of zeroing the text embedding (CFG ∅_text)
     # ------------------------------------------------------------------
     def _init_track_aug(self) -> None:
+        # Track sampling is ON by default, MotionStream-style: a random 1000-2500 subset
+        # of the 2500-grid tracks each step (their range; also matches inference where you
+        # never have a perfect full grid).
         self._aug_enabled = os.getenv("WANTRACK_AUG", "1") not in ("0", "false", "False")
-        self._aug_min_points = int(os.getenv("WANTRACK_MIN_POINTS", "1"))
-        self._aug_max_points = int(os.getenv("WANTRACK_MAX_POINTS", "200"))
+        self._aug_min_points = int(os.getenv("WANTRACK_MIN_POINTS", "1000"))
+        self._aug_max_points = int(os.getenv("WANTRACK_MAX_POINTS", "2500"))
+        # MotionStream stochastic mid-frame masking: zero CONTIGUOUS frame chunks (not
+        # independent frames) with prob pmask; WANTRACK_MASK_CHUNK = chunk length (frames).
         self._aug_pmask = float(os.getenv("WANTRACK_PMASK", "0.2"))
-        self._aug_motion_drop = float(os.getenv("WANTRACK_MOTION_DROP", "0.1"))
+        self._aug_mask_chunk = int(os.getenv("WANTRACK_MASK_CHUNK", "8"))
+        # Diversity: 0 = uniform (MotionStream). >0 up-weights moving/diverse tracks over
+        # static/redundant ones (base weight 1 keeps SOME static tracks -- don't overdo it).
+        self._aug_diversity = float(os.getenv("WANTRACK_DIVERSITY", "1.0"))
+        # CFG dropout (ours, not MotionStream) -> default OFF; enables motion/text CFG when >0.
+        self._aug_motion_drop = float(os.getenv("WANTRACK_MOTION_DROP", "0.0"))
         self._aug_text_drop = float(os.getenv("WANTRACK_TEXT_DROP", "0.0"))
 
     def _augment_tracks(
@@ -82,7 +92,16 @@ class WanTrackModel(WanModel):
         track_points: torch.Tensor | None,
         track_visibility: torch.Tensor | None,
         generator: torch.Generator,
+        object_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """MotionStream-style track augmentation.
+
+        Sampling keeps K~U[min,max] tracks per step by zeroing the visibility of the rest,
+        with two twists over uniform random: (a) OBJECT COVERAGE -- if ``object_ids``
+        ([B,N] or [N] SAM segment labels, -1 = none) is given, guarantee >=1 track per
+        segment; (b) DIVERSITY -- weight sampling by per-track motion so moving/unique
+        tracks are favored while some static ones survive (base weight 1).
+        """
         if track_points is None or track_visibility is None or not self._aug_enabled:
             return track_points, track_visibility
         B, T, N, _ = track_points.shape
@@ -90,23 +109,58 @@ class WanTrackModel(WanModel):
         gdev = generator.device if generator is not None else device
         vis = track_visibility.clone()
 
-        # 1) Point subsampling: keep K in [min, max] points per sample (others -> vis 0).
+        # per-track motion magnitude (max displacement from frame 0, visible frames) -> diversity weight
+        tp = track_points.float()
+        disp = ((tp - tp[:, :1])**2).sum(-1).sqrt()  # [B,T,N]
+        motion = (disp * (track_visibility > 0.5).float()).amax(dim=1)  # [B,N]
+
         if 0 < self._aug_max_points < N:
+            oids = object_ids
+            if oids is not None and oids.dim() == 1:
+                oids = oids.unsqueeze(0).expand(B, -1)
             for b in range(B):
                 hi = min(self._aug_max_points, N)
                 lo = min(self._aug_min_points, hi)
                 k = int(torch.randint(lo, hi + 1, (1, ), generator=generator, device=gdev).item())
-                keep_idx = torch.randperm(N, generator=generator, device=gdev)[:k]
-                keep = torch.zeros(N, device=device, dtype=vis.dtype)
-                keep[keep_idx.to(device)] = 1.0
-                vis[b] = vis[b] * keep.unsqueeze(0)
+                m = motion[b].to(gdev)
+                w = 1.0 + self._aug_diversity * (m / (m.mean() + 1e-6))
+                w = w * (track_visibility[b, 0].to(gdev) > 0.5).float()  # only frame-0-visible are valid queries
+                if float(w.sum()) <= 0.0:
+                    w = torch.ones(N, device=gdev)
+                keep = torch.zeros(N, device=gdev)
+                # (a) object coverage: one weighted pick per present segment
+                if oids is not None:
+                    ob = oids[b].to(gdev)
+                    for oid in torch.unique(ob):
+                        if int(oid) < 0:
+                            continue
+                        idxs = (ob == oid).nonzero(as_tuple=True)[0]
+                        ww = w[idxs]
+                        if float(ww.sum()) <= 0.0:
+                            ww = torch.ones_like(ww)
+                        keep[idxs[torch.multinomial(ww, 1, generator=generator)]] = 1.0
+                # (b) fill remaining budget with weighted sampling over not-yet-kept points
+                n_cov = int(keep.sum().item())
+                wa = w * (keep < 0.5).float()
+                rem = min(max(0, k - n_cov), int((wa > 0).sum().item()))
+                if rem > 0:
+                    keep[torch.multinomial(wa, rem, replacement=False, generator=generator)] = 1.0
+                vis[b] = vis[b] * keep.to(device=device, dtype=vis.dtype).unsqueeze(0)
 
-        # 2) Stochastic temporal masking: zero whole frames with prob pmask.
-        if self._aug_pmask > 0.0:
-            frame_keep = (torch.rand(B, T, generator=generator, device=gdev) >= self._aug_pmask)
+        # Stochastic CONTIGUOUS-chunk masking (MotionStream mid-frame chunks): zero L-frame
+        # blocks with prob pmask -- simulates the user releasing control for a stretch.
+        if self._aug_pmask > 0.0 and self._aug_mask_chunk > 0:
+            L = max(1, self._aug_mask_chunk)
+            n_chunks = (T + L - 1) // L
+            drop = (torch.rand(B, n_chunks, generator=generator, device=gdev) < self._aug_pmask)
+            frame_keep = torch.ones(B, T, device=gdev)
+            for b in range(B):
+                for c in range(n_chunks):
+                    if bool(drop[b, c]):
+                        frame_keep[b, c * L:(c + 1) * L] = 0.0
             vis = vis * frame_keep.to(device=device, dtype=vis.dtype).unsqueeze(-1)
 
-        # 3) Motion CFG dropout: drop ALL motion for this step (-> cm = zeros).
+        # Motion CFG dropout (ours; default off): drop ALL motion for this step (-> cm = zeros).
         if (self._aug_motion_drop > 0.0
                 and float(torch.rand(1, generator=generator, device=gdev).item()) < self._aug_motion_drop):
             return None, None
@@ -156,9 +210,18 @@ class WanTrackModel(WanModel):
         if track_visibility is not None:
             track_visibility = track_visibility[:, :expected_frames].to(device, dtype=dtype)
 
-        # MotionStream train-time augments (subsample points / temporal mask /
-        # motion-CFG drop). Env-gated; a no-op when WANTRACK_AUG=0.
-        track_points, track_visibility = self._augment_tracks(track_points, track_visibility, generator)
+        # Optional SAM object labels per track ([B,N] or [N]); enables object-coverage
+        # sampling in _augment_tracks. Absent until the segmentation preprocess adds it.
+        object_ids = raw_batch.get("object_ids")
+        if object_ids is not None and torch.is_tensor(object_ids):
+            object_ids = object_ids.to(device)
+
+        # MotionStream train-time augments (1000-2500 track sampling w/ object coverage +
+        # diversity, contiguous-chunk masking). Env-gated; a no-op when WANTRACK_AUG=0.
+        track_points, track_visibility = self._augment_tracks(track_points,
+                                                              track_visibility,
+                                                              generator,
+                                                              object_ids=object_ids)
 
         encoder_hidden_states = encoder_hidden_states.to(device, dtype=dtype)
         # Text CFG dropout: zero the text embedding for this step with prob.

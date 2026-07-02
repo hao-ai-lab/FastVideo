@@ -9,18 +9,18 @@ Interaction (the part the old demo lacked):
   2. Move the mouse over the first frame and press **Space** -> records your cursor
      path for 5 seconds (121 frames). The green dot is where the action starts,
      the red dot where it ends.
-  3. An ``N x N`` patch of CoTracker points is placed around the start and rigidly
-     dragged along your recorded path. Tune the grid size and patch extent.
-  4. Generate -> see the original clip and the generation side by side, with the
-     controlled patch overlaid, plus the CoTracker-EPE of how well the patch
-     followed your drawn action.
+  3. The 50x50 CoTracker training grid is used directly: the grid points within the
+     action radius of your start are dragged along your recorded path, the rest stay
+     static. This is grid-snapped / in-distribution (NOT an off-grid patch added on
+     top of a static grid). Preview shows the full field (moving=green, static=gray).
+  4. Generate -> original + generation side by side, with the full field overlaid,
+     plus the moving-point CoTracker-EPE of how well the arm followed your path.
 
 Checkpoints hot-swap (only the transformer weights reload, ~3 s) so you can flip
 between e.g. step-2000 / 3000 / 4000 on the same clip and action.
 
-Background = "static (dense)" fills the rest of the frame with held-still tracks
-so the model gets the dense coverage it was trained on (recommended for aug-off
-checkpoints); "none" sends only the sparse patch.
+Visibility = "dense field" keeps the whole 50x50 grid visible (the trained coverage;
+recommended for aug-off checkpoints); "sparse" makes only the moved points visible.
 
 Launch (single GPU on the cluster)::
 
@@ -108,35 +108,58 @@ def swap_checkpoint(name: str) -> str:
     return f"checkpoint: {name} (swapped){warn}"
 
 
-def _patch_tracks(traj: np.ndarray, Tpx: int, grid_n: int, extent: float):
-    """N x N grid around the start point, rigidly translated along the recorded path."""
+def _grid_action_tracks(traj, Tpx: int, radius: float, falloff: str, sparse: bool):
+    """Snap the drawn action to the TRAINING 50x50 grid.
+
+    The grid points within ``radius`` of the drawn start follow the recorded path;
+    the rest stay static. This matches the CoTracker training format exactly (2500
+    grid points, a local region moves) -- unlike an off-grid patch added on top of a
+    static grid, which is out-of-distribution. Returns
+    (tracks[Tpx,2500,2], vis[Tpx,2500], moving[2500]) or (None, None, None).
+    """
     traj = np.asarray(traj, np.float32)
     if traj.ndim != 2 or len(traj) < 2:
-        return None, None
+        return None, None, None
     idx = np.linspace(0, len(traj) - 1, Tpx)
-    px = np.interp(idx, np.arange(len(traj)), traj[:, 0])
-    py = np.interp(idx, np.arange(len(traj)), traj[:, 1])
-    path = np.stack([px, py], 1)  # [Tpx,2]
+    path = np.stack([
+        np.interp(idx, np.arange(len(traj)), traj[:, 0]),
+        np.interp(idx, np.arange(len(traj)), traj[:, 1]),
+    ], 1).astype(np.float32)  # [Tpx,2]
+    g = st.make_grid(50)  # [2500,2] frame-0 grid (x,y) in [0,1]
     start = path[0]
-    offs = np.linspace(-extent / 2, extent / 2, grid_n) if grid_n > 1 else np.array([0.0], np.float32)
-    gx, gy = np.meshgrid(offs, offs)
-    base = np.stack([start[0] + gx.ravel(), start[1] + gy.ravel()], 1)  # [N^2,2]
-    disp = path - start  # [Tpx,2]
-    pts = (base[None] + disp[:, None, :]).astype(np.float32)  # [Tpx,N^2,2]
-    pts = np.clip(pts, 0.0, 1.0)
-    vis = np.ones(pts.shape[:2], np.float32)
-    return pts, vis
+    d = np.linalg.norm(g - start[None], axis=-1)  # [2500]
+    if falloff == "smooth":
+        w = np.clip(1.0 - d / max(radius, 1e-6), 0.0, 1.0)
+        w = (0.5 - 0.5 * np.cos(np.pi * w)).astype(np.float32)  # handle-like weighting
+    else:  # hard
+        w = (d <= radius).astype(np.float32)
+    disp = path - start[None]  # [Tpx,2] displacement from start each frame
+    tracks = (g[None] + w[None, :, None] * disp[:, None, :]).astype(np.float32)  # [Tpx,2500,2]
+    tracks = np.clip(tracks, 0.0, 1.0)
+    moving = w > 1e-3
+    if sparse:  # only the moved handle is visible (rest occluded)
+        vis = np.tile(moving[None].astype(np.float32), (Tpx, 1))
+    else:  # dense field: whole grid visible (a few static + the moving region)
+        vis = np.ones(tracks.shape[:2], np.float32)
+    return tracks, vis, moving
 
 
-def _overlay_patch(frames: np.ndarray, patch_norm: np.ndarray, patch_vis: np.ndarray) -> np.ndarray:
-    from fastvideo.train.callbacks.track_validation import _draw_overlay
+def _overlay_grid(frames: np.ndarray, tracks: np.ndarray, vis: np.ndarray, moving, stride: int = 3) -> np.ndarray:
+    """Draw the WHOLE (subsampled) 50x50 field: static background points (gray dots) +
+    the moving region (green, with motion tails) -- so what's fed is what you see."""
+    from fastvideo.train.callbacks.track_validation import _draw_overlay, _subsample
     T, H, W, _ = frames.shape
-    tt = min(T, patch_norm.shape[0])
-    trpx = patch_norm[:tt].copy()
+    tt = min(T, tracks.shape[0])
+    tr, vs = _subsample(tracks[:tt], vis[:tt], 50, stride)
+    mv, _ = _subsample(np.broadcast_to(moving[None, :, None].astype(np.float32),
+                                       (tt, moving.shape[0], 2)).copy(), vis[:tt], 50, stride)
+    is_mv = mv[0, :, 0] > 0.5  # [Nsub]
+    colors = np.where(is_mv[:, None], np.array([0, 255, 100], np.uint8),
+                      np.array([120, 120, 120], np.uint8)).astype(np.uint8)
+    trpx = tr.copy()
     trpx[..., 0] *= W
     trpx[..., 1] *= H
-    colors = np.tile(np.array([[0, 255, 100]], np.uint8), (patch_norm.shape[1], 1))
-    return _draw_overlay(frames[:tt], trpx, patch_vis[:tt], colors, 6, 2, 0.6)
+    return _draw_overlay(frames[:tt], trpx, vs, colors, 12, 2, 0.5)
 
 
 # ----------------------------------------------------------------------------- handlers
@@ -151,8 +174,12 @@ def on_ckpt(name):
     return swap_checkpoint(name)
 
 
-def _build_tracks(traj_json, grid_n, extent, background):
-    """Parse the drawn trajectory -> (patch, pvis, full_tr, full_vs) or (None, msg)."""
+def _build_tracks(traj_json, radius, falloff, sparse):
+    """Parse the drawn trajectory -> (tracks[Tpx,2500,2], vis, moving[2500]) or (None, msg).
+
+    Grid-snapped: moves the 50x50 grid points near the draw-start along the path,
+    keeping the rest static (in-distribution with the CoTracker training tracks).
+    """
     import json
     if not traj_json or traj_json.strip() in ("", "[]"):
         return None, "Record an action first: move the mouse over the frame and press Space (5 s)."
@@ -160,18 +187,11 @@ def _build_tracks(traj_json, grid_n, extent, background):
         traj = json.loads(traj_json)
     except Exception as e:  # noqa: BLE001
         return None, f"bad trajectory json: {e}"
-    Tpx = STATE["Tpx"]
-    patch, pvis = _patch_tracks(traj, Tpx, int(grid_n), float(extent))
-    if patch is None:
+    is_sparse = str(sparse).startswith("sparse")
+    tracks, vis, moving = _grid_action_tracks(traj, STATE["Tpx"], float(radius), str(falloff), is_sparse)
+    if tracks is None:
         return None, "trajectory too short — hold Space and move the mouse for the full 5 s."
-    if background == "static (dense)":
-        g = st.make_grid(50)
-        bt, bv = st.static(g, Tpx)
-        full_tr = np.concatenate([bt, patch], axis=1)
-        full_vs = np.concatenate([bv, pvis], axis=1)
-    else:
-        full_tr, full_vs = patch, pvis
-    return (patch, pvis, full_tr, full_vs), None
+    return (tracks, vis, moving), None
 
 
 def _first_frame_cached(clip_idx):
@@ -181,35 +201,35 @@ def _first_frame_cached(clip_idx):
     return cache[clip_idx]
 
 
-def on_preview(clip_idx, traj_json, grid_n, extent, background):
-    """Show the synthetic control tracks overlaid on the (frozen) first frame -- BEFORE generating."""
+def on_preview(clip_idx, traj_json, radius, falloff, sparse):
+    """Show the full grid-snapped control overlaid on the (frozen) first frame -- BEFORE generating."""
     clip_idx = int(clip_idx)
-    built, err = _build_tracks(traj_json, grid_n, extent, background)
+    built, err = _build_tracks(traj_json, radius, falloff, sparse)
     if built is None:
         return None, err
-    patch, pvis, full_tr, full_vs = built
+    tracks, vis, moving = built
     ff = _first_frame_cached(clip_idx)  # [H,W,3]
-    frames = np.repeat(ff[None], patch.shape[0], axis=0)  # freeze frame 0, T copies
-    out = _overlay_patch(frames, patch, pvis)
+    frames = np.repeat(ff[None], tracks.shape[0], axis=0)  # freeze frame 0, T copies
+    out = _overlay_grid(frames, tracks, vis, moving)
     path = os.path.join(STATE["out_dir"], f"preview_clip{clip_idx}.mp4")
     imageio.mimsave(path, out, fps=24, macro_block_size=1)
-    nbg = (full_tr.shape[1] - patch.shape[1])
-    return path, (f"PREVIEW of the traces to be fed (green = your {int(grid_n)}x{int(grid_n)} arm patch, "
-                  f"{patch.shape[1]} pts + {nbg} static background pts). Press Generate when it looks right.")
+    return path, (f"PREVIEW (snapped to the 50x50 training grid): {int(moving.sum())} points near your start "
+                  f"move (green, with tails), the other {int((~moving).sum())} stay static (gray). "
+                  f"This matches the training track format. Press Generate.")
 
 
-def on_generate(clip_idx, ckpt_name, traj_json, grid_n, extent, background, steps, seed):
+def on_generate(clip_idx, ckpt_name, traj_json, radius, falloff, sparse, steps, seed):
     """Generator: streams per-step denoise progress to the log, yields the video at the end."""
     import time
     from fastvideo.forward_context import set_forward_context
     from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
         FlowMatchEulerDiscreteScheduler, )
     clip_idx = int(clip_idx)
-    built, err = _build_tracks(traj_json, grid_n, extent, background)
+    built, err = _build_tracks(traj_json, radius, falloff, sparse)
     if built is None:
         yield gr.update(), f"[error] {err}", gr.update()
         return
-    patch, pvis, full_tr, full_vs = built
+    tracks, vis, moving = built
     steps = int(steps)
     t0 = time.time()
 
@@ -225,8 +245,8 @@ def on_generate(clip_idx, ckpt_name, traj_json, grid_n, extent, background, step
     txt = s["text_embedding"].to(device, dtype)
     mask = s["text_attention_mask"].to(device, dtype)
     img = s["clip_feature"].to(device, dtype)
-    tp = torch.from_numpy(full_tr)[None].to(device, dtype)
-    tv = torch.from_numpy(full_vs)[None].to(device, dtype)
+    tp = torch.from_numpy(tracks)[None].to(device, dtype)
+    tv = torch.from_numpy(vis)[None].to(device, dtype)
     _, _, T, H, W = ff.shape
     gen = torch.Generator(device="cpu").manual_seed(int(seed))
     latents = torch.randn((1, 16, T, H, W), generator=gen, dtype=torch.float32).to(device)
@@ -247,19 +267,22 @@ def on_generate(clip_idx, ckpt_name, traj_json, grid_n, extent, background, step
 
     yield gr.update(), f"[3/4] decoding latents ...  ({time.time() - t0:.1f}s)", gr.update()
     frames = twi.decode_to_pixels(model, latents)
-    out = _overlay_patch(frames, patch, pvis)
+    out = _overlay_grid(frames, tracks, vis, moving)
     tag = ckpt_name.replace(" ", "")
-    path = os.path.join(STATE["out_dir"], f"action_clip{clip_idx}_{tag}_g{int(grid_n)}.mp4")
+    path = os.path.join(STATE["out_dir"], f"action_clip{clip_idx}_{tag}.mp4")
     imageio.mimsave(path, out, fps=24, macro_block_size=1)
 
     yield gr.update(), f"[4/4] computing CoTracker EPE ...  ({time.time() - t0:.1f}s)", gr.update()
     from fastvideo.eval.metrics.motion.cotracker_epe.metric import compute_epe
-    ppx = patch.copy()
+    # EPE on the MOVING points only (did the arm actually follow your path)
+    mv_idx = np.where(moving)[0]
+    ppx = tracks[:, mv_idx].copy()
     ppx[..., 0] *= W
     ppx[..., 1] *= H
-    res = compute_epe(frames, ppx, pvis, STATE["ct"], device)
+    res = compute_epe(frames, ppx, vis[:, mv_idx], STATE["ct"], device)
     epe = res["epe"]
-    epe_msg = (f"patch EPE = {epe:.2f}px ({res['n_points']} pts) — lower = the arm patch followed your path."
+    epe_msg = (f"moving-point EPE = {epe:.2f}px ({res['n_points']} moved pts) — "
+               f"lower = the arm region followed your drawn path."
                if epe is not None else "EPE n/a (no points re-tracked)")
     yield path, f"[done] generated in {time.time() - t0:.1f}s", epe_msg
 
@@ -299,7 +322,7 @@ def build_ui(num_clips: int, ckpt_names: list[str], Tpx: int):
     with gr.Blocks(title="TrackWan — action recorder") as demo:
         gr.Markdown("## TrackWan — record an action, test action-following across checkpoints\n"
                     "Pick a clip + checkpoint, **press Space** and move the mouse over the frame to draw a "
-                    "5&nbsp;second motion, then **Generate**. An `N×N` patch of points is dragged along your path.")
+                    "5&nbsp;second motion, then **Generate**. The 50x50 grid points near your start are dragged along your path (rest stay static).")
         with gr.Row():
             with gr.Column(scale=1):
                 ckpt = gr.Dropdown(ckpt_names, value=ckpt_names[-1], label="Checkpoint (hot-swap)")
@@ -310,10 +333,11 @@ def build_ui(num_clips: int, ckpt_names: list[str], Tpx: int):
                     rec_btn = gr.Button("● Record (Space)")
                     clr_btn = gr.Button("Clear")
                 with gr.Row():
-                    grid_n = gr.Slider(1, 9, value=5, step=1, label="Patch grid N (N×N points)")
-                    extent = gr.Slider(0.02, 0.6, value=0.18, step=0.01, label="Patch extent (frac of frame)")
-                background = gr.Radio(["static (dense)", "none (sparse patch)"], value="static (dense)",
-                                      label="Background tracks")
+                    radius = gr.Slider(0.02, 0.5, value=0.15, step=0.01,
+                                       label="Action radius (grid pts within this move)")
+                    falloff = gr.Radio(["hard", "smooth"], value="hard", label="Falloff")
+                background = gr.Radio(["dense field (all visible)", "sparse (only moved visible)"],
+                                      value="dense field (all visible)", label="Visibility")
                 with gr.Row():
                     steps = gr.Slider(10, 60, value=30, step=5, label="Denoise steps")
                     seed = gr.Number(value=1000, label="Seed")
@@ -324,7 +348,7 @@ def build_ui(num_clips: int, ckpt_names: list[str], Tpx: int):
             with gr.Column(scale=1):
                 orig_vid = gr.Video(label="Original clip")
                 gen_vid = gr.Video(label="Preview traces / Generated (your action overlaid)")
-                epe_box = gr.Textbox(label="Action-following (CoTracker EPE on the patch)", interactive=False)
+                epe_box = gr.Textbox(label="Action-following (moving-point CoTracker EPE)", interactive=False)
 
         ff_b64 = gr.Textbox(elem_id="ff_b64", visible=False)
         traj_json = gr.Textbox(elem_id="traj_json", visible=False)
@@ -334,8 +358,8 @@ def build_ui(num_clips: int, ckpt_names: list[str], Tpx: int):
         ff_b64.change(None, [ff_b64], None, js="(b64)=>{ window._setbg(b64); }")
         rec_btn.click(None, None, None, js="()=>{ window._startRec(); }")
         clr_btn.click(None, None, None, js="()=>{ window._clear(); }")
-        preview_btn.click(on_preview, [clip, traj_json, grid_n, extent, background], [gen_vid, status])
-        gen_btn.click(on_generate, [clip, ckpt, traj_json, grid_n, extent, background, steps, seed],
+        preview_btn.click(on_preview, [clip, traj_json, radius, falloff, background], [gen_vid, status])
+        gen_btn.click(on_generate, [clip, ckpt, traj_json, radius, falloff, background, steps, seed],
                       [gen_vid, status, epe_box])
         demo.load(on_clip, [clip], [caption, ff_b64, orig_vid])
         demo.load(None, None, None, js=_canvas_js(Tpx))

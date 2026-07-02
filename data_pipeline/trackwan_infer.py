@@ -99,8 +99,14 @@ def generate(model: Any,
              track_visibility: torch.Tensor | None,
              clip_feature: torch.Tensor | None = None,
              num_steps: int = 30,
-             seed: int = 0) -> torch.Tensor:
-    """Denoise from noise -> normalized latents [1,16,T,H,W]. Tracks may be None."""
+             seed: int = 0,
+             guidance_scale: float = 1.0) -> torch.Tensor:
+    """Denoise from noise -> normalized latents [1,16,T,H,W]. Tracks may be None.
+
+    ``guidance_scale`` > 1 = MOTION classifier-free guidance:
+    v = v(no-tracks) + s*(v(tracks) - v(no-tracks)). The no-tracks branch is the
+    base first-frame+text I2V prediction (track channels zeroed), so it works on any
+    checkpoint (no training-time motion dropout needed)."""
     from fastvideo.forward_context import set_forward_context
     from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
         FlowMatchEulerDiscreteScheduler, )
@@ -121,21 +127,33 @@ def generate(model: Any,
 
     sched = FlowMatchEulerDiscreteScheduler(shift=float(model.timestep_shift))
     sched.set_timesteps(int(num_steps), device=device)
+    use_cfg = guidance_scale != 1.0 and tp is not None
     for t in sched.timesteps:
         model_in = torch.cat([latents.to(dtype), cond20], dim=1)  # [1,36,T,H,W]
         ts = t.reshape(1).to(device, dtype)
-        with torch.autocast(device.type, dtype=dtype), set_forward_context(current_timestep=ts, attn_metadata=None):
-            v = model.transformer(
-                hidden_states=model_in,
-                encoder_hidden_states=txt,
-                encoder_attention_mask=mask,
-                timestep=ts,
-                encoder_hidden_states_image=img,
-                track_points=tp,
-                track_visibility=tv,
-                return_dict=False,
-            )
-        latents = sched.step(v.float(), t, latents.float(), return_dict=False)[0]
+
+        def _fwd(tpp: torch.Tensor | None,
+                 tvv: torch.Tensor | None,
+                 mi: torch.Tensor = model_in,
+                 tsv: torch.Tensor = ts) -> torch.Tensor:
+            with torch.autocast(device.type, dtype=dtype), set_forward_context(current_timestep=tsv,
+                                                                               attn_metadata=None):
+                return model.transformer(hidden_states=mi,
+                                         encoder_hidden_states=txt,
+                                         encoder_attention_mask=mask,
+                                         timestep=tsv,
+                                         encoder_hidden_states_image=img,
+                                         track_points=tpp,
+                                         track_visibility=tvv,
+                                         return_dict=False)
+
+        if use_cfg:
+            v_cond = _fwd(tp, tv).float()
+            v_uncond = _fwd(None, None).float()  # base I2V (track channels -> 0)
+            v = v_uncond + guidance_scale * (v_cond - v_uncond)
+        else:
+            v = _fwd(tp, tv).float()
+        latents = sched.step(v, t, latents.float(), return_dict=False)[0]
     return latents
 
 
