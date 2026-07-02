@@ -20,7 +20,7 @@ from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
     Cosmos25_14BConfig,
 )
-from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BCamPipelineConfig
+from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BARPipelineConfig, DreamXWorld5BCamPipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.gen3c import Gen3CConfig
@@ -785,6 +785,21 @@ def _register_configs() -> None:
         model_detectors=[lambda path: "dreamx-world" in path.lower() or "dreamxworldpipeline" in path.lower()],
         model_family="dreamx_world",
         default_preset="dreamx_world_5b_cam",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=DreamXWorld5BARPipelineConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "GD-ML/DreamX-World-5B",
+        ],
+        model_detectors=[
+            lambda path:
+            ("dreamx-world-5b" in path.lower() and "cam" not in path.lower()) or "dreamxworldarpipeline" in path.lower(
+            )
+        ],
+        model_family="dreamx_world",
+        default_preset="dreamx_world_5b_ar",
     )
     register_configs(
         sampling_param_cls=None,

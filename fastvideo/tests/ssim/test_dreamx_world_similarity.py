@@ -11,6 +11,7 @@ from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     resolve_inference_device_reference_folder,
     run_image_to_video_similarity_test,
+    run_text_to_video_similarity_test,
 )
 
 logger = init_logger(__name__)
@@ -23,6 +24,18 @@ _LOCAL_CONVERTED_MODEL = Path("converted_weights/dreamx_world")
 _MODEL_PATH = os.getenv(
     "DREAMX_WORLD_SSIM_MODEL_PATH",
     str(_LOCAL_CONVERTED_MODEL),
+)
+_LOCAL_AR_CANDIDATES = (
+    Path("/tmp/converted_dreamx_world_ar"),
+    Path("/root/data/dreamx_world_ar_converted"),
+)
+_DEFAULT_AR_MODEL_PATH = next(
+    (str(path) for path in _LOCAL_AR_CANDIDATES if path.exists()),
+    str(_LOCAL_AR_CANDIDATES[0]),
+)
+_AR_MODEL_PATH = os.getenv(
+    "DREAMX_WORLD_AR_SSIM_MODEL_PATH",
+    _DEFAULT_AR_MODEL_PATH,
 )
 
 DREAMX_WORLD_PARAMS = {
@@ -46,12 +59,40 @@ DREAMX_WORLD_FULL_QUALITY_PARAMS = {
     "guidance_scale": 5.0,
 }
 
+
+DREAMX_WORLD_AR_PARAMS = {
+    "num_gpus": 1,
+    "model_path": _AR_MODEL_PATH,
+    "height": 192,
+    "width": 192,
+    "num_frames": 81,
+    "num_inference_steps": 4,
+    "guidance_scale": 1.0,
+    "seed": 2048,
+    "fps": 16,
+}
+
+DREAMX_WORLD_AR_FULL_QUALITY_PARAMS = {
+    **DREAMX_WORLD_AR_PARAMS,
+    "height": 704,
+    "width": 1280,
+    "num_frames": 1005,
+}
+
 DREAMX_WORLD_MODEL_TO_PARAMS = {
     "DreamX-World-5B-Cam": DREAMX_WORLD_PARAMS,
 }
 
+DREAMX_WORLD_AR_MODEL_TO_PARAMS = {
+    "DreamX-World-5B": DREAMX_WORLD_AR_PARAMS,
+}
+
 FULL_QUALITY_DREAMX_WORLD_MODEL_TO_PARAMS = {
     "DreamX-World-5B-Cam": DREAMX_WORLD_FULL_QUALITY_PARAMS,
+}
+
+FULL_QUALITY_DREAMX_WORLD_AR_MODEL_TO_PARAMS = {
+    "DreamX-World-5B": DREAMX_WORLD_AR_FULL_QUALITY_PARAMS,
 }
 
 DREAMX_WORLD_TEST_CASES = [
@@ -60,6 +101,16 @@ DREAMX_WORLD_TEST_CASES = [
         "reflective glass towers, clean streets, soft volumetric light.",
         ("w", "d", "w"),
         (4.0, 2.0, 4.0),
+    ),
+]
+
+
+DREAMX_WORLD_AR_TEST_CASES = [
+    (
+        "A long autonomous drive through a futuristic coastal city at sunrise, "
+        "smooth forward camera motion, reflective glass towers, clean streets.",
+        ("w", "d", "w", "a"),
+        (2.0, 1.0, 2.0, 1.0),
     ),
 ]
 
@@ -114,6 +165,47 @@ def test_dreamx_world_inference_similarity(
             "text_encoder_cpu_offload": True,
             "pin_cpu_memory": False,
             "override_pipeline_cls_name": "DreamXWorldPipeline",
+        },
+        generation_kwargs_override={
+            "action_list": list(action_list),
+            "action_speed_list": list(action_speed_list),
+        },
+    )
+
+@pytest.mark.parametrize(("prompt", "action_list", "action_speed_list"), DREAMX_WORLD_AR_TEST_CASES)
+@pytest.mark.parametrize("attention_backend_name", ["TORCH_SDPA"])
+@pytest.mark.parametrize("model_id", list(DREAMX_WORLD_AR_MODEL_TO_PARAMS.keys()))
+def test_dreamx_world_ar_inference_similarity(
+    prompt: str,
+    action_list: tuple[str, ...],
+    action_speed_list: tuple[float, ...],
+    attention_backend_name: str,
+    model_id: str,
+) -> None:
+    model_path = Path(str(DREAMX_WORLD_AR_MODEL_TO_PARAMS[model_id]["model_path"]))
+    if not model_path.exists():
+        pytest.skip(
+            f"DreamX-World AR converted model path is missing: {model_path}. "
+            "Set DREAMX_WORLD_AR_SSIM_MODEL_PATH to a FastVideo-loadable converted root."
+        )
+
+    run_text_to_video_similarity_test(
+        logger=logger,
+        script_dir=os.path.dirname(os.path.abspath(__file__)),
+        device_reference_folder=device_reference_folder,
+        prompt=prompt,
+        attention_backend_name=attention_backend_name,
+        model_id=model_id,
+        default_params_map=DREAMX_WORLD_AR_MODEL_TO_PARAMS,
+        full_quality_params_map=FULL_QUALITY_DREAMX_WORLD_AR_MODEL_TO_PARAMS,
+        min_acceptable_ssim=0.98,
+        init_kwargs_override={
+            "use_fsdp_inference": False,
+            "dit_cpu_offload": False,
+            "vae_cpu_offload": True,
+            "text_encoder_cpu_offload": True,
+            "pin_cpu_memory": False,
+            "override_pipeline_cls_name": "DreamXWorldARPipeline",
         },
         generation_kwargs_override={
             "action_list": list(action_list),
