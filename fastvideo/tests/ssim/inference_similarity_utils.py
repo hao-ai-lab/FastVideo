@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from logging import Logger
-from typing import Iterator
 
 from fastvideo import VideoGenerator
 from fastvideo.tests.ssim.reference_utils import (
@@ -65,6 +65,12 @@ def _find_reference_video(reference_folder: str, prompt: str) -> str:
         if filename.endswith(".mp4") and prompt_prefix in filename:
             return os.path.join(reference_folder, filename)
     raise FileNotFoundError("Reference video missing")
+
+
+def _remove_stale_generated_video(output_dir: str, output_video_name: str) -> None:
+    stale_path = os.path.join(output_dir, output_video_name)
+    if os.path.exists(stale_path):
+        os.remove(stale_path)
 
 
 def _assert_similarity(
@@ -214,6 +220,7 @@ def run_text_to_video_similarity_test(
         )
         output_video_name = f"{prompt[:100].strip()}.mp4"
         os.makedirs(output_dir, exist_ok=True)
+        _remove_stale_generated_video(output_dir, output_video_name)
 
         params_map = select_ssim_params(
             default_params_map,
@@ -289,6 +296,7 @@ def run_image_to_video_similarity_test(
         )
         output_video_name = f"{prompt[:100].strip()}.mp4"
         os.makedirs(output_dir, exist_ok=True)
+        _remove_stale_generated_video(output_dir, output_video_name)
 
         params_map = select_ssim_params(
             default_params_map,

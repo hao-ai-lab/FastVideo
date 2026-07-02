@@ -11,9 +11,7 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 from fastvideo.pipelines.basic.dreamx_world.camera_conditioning import (
-    build_dreamx_camera_condition,
-)
-
+    build_dreamx_camera_condition, )
 
 DREAMX_Y_CAMERA_KEY = "dreamx_y_camera"
 
@@ -31,8 +29,7 @@ class DreamXWorldCameraConditioningStage(PipelineStage):
             return batch
 
         action_seq = batch.extra.get("dreamx_action_seq", batch.action_list)
-        action_speed_list = batch.extra.get(
-            "dreamx_action_speed_list", batch.action_speed_list)
+        action_speed_list = batch.extra.get("dreamx_action_speed_list", batch.action_speed_list)
         if action_seq is None:
             action_seq = ["w"]
         if action_speed_list is None:
@@ -40,6 +37,10 @@ class DreamXWorldCameraConditioningStage(PipelineStage):
 
         if isinstance(action_seq, str):
             action_seq = [action_seq]
+        if isinstance(action_speed_list, int | float):
+            action_speed_list = [action_speed_list]
+        if len(action_speed_list) == 1 and len(action_seq) > 1:
+            action_speed_list = list(action_speed_list) * len(action_seq)
         action_speed_list = [float(speed) for speed in action_speed_list]
 
         height = int(batch.height) if batch.height is not None else 704
@@ -57,10 +58,7 @@ class DreamXWorldCameraConditioningStage(PipelineStage):
             dtype=dtype,
             device=device,
         )
-        batch.extra[DREAMX_Y_CAMERA_KEY] = {
-            key: value.unsqueeze(0)
-            for key, value in y_camera.items()
-        }
+        batch.extra[DREAMX_Y_CAMERA_KEY] = {key: value.unsqueeze(0) for key, value in y_camera.items()}
         return batch
 
     def verify_output(
