@@ -210,11 +210,14 @@ class WanTrackModel(WanModel):
         if track_visibility is not None:
             track_visibility = track_visibility[:, :expected_frames].to(device, dtype=dtype)
 
-        # Optional SAM object labels per track ([B,N] or [N]); enables object-coverage
-        # sampling in _augment_tracks. Absent until the segmentation preprocess adds it.
+        # Optional SAM object labels per track ([B,N]); enables object-coverage sampling
+        # in _augment_tracks. Empty/absent on datasets preprocessed before segmentation.
         object_ids = raw_batch.get("object_ids")
-        if object_ids is not None and torch.is_tensor(object_ids):
-            object_ids = object_ids.to(device)
+        if (object_ids is not None and torch.is_tensor(object_ids) and object_ids.numel() > 0
+                and object_ids.shape[-1] == (track_points.shape[2] if track_points is not None else -1)):
+            object_ids = object_ids.to(device).long()
+        else:
+            object_ids = None
 
         # MotionStream train-time augments (1000-2500 track sampling w/ object coverage +
         # diversity, contiguous-chunk masking). Env-gated; a no-op when WANTRACK_AUG=0.
