@@ -55,9 +55,7 @@ RUN --mount=type=cache,target=/opt/uv/cache \
 # copied source only on hosts configured for build-time GPU access.
 RUN --mount=type=cache,target=/opt/uv/cache \
     if [[ "${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE}" == "1" ]]; then \
-        sed -i 's/^git submodule update --init --recursive$/if [[ -d ..\/.git ]]; then git submodule update --init --recursive; fi/' \
-            /opt/FastVideo/fastvideo-kernel/build.sh \
-        && source /opt/venv/bin/activate \
+        source /opt/venv/bin/activate \
         && cd /opt/FastVideo/fastvideo-kernel \
         && ./build.sh; \
     else \

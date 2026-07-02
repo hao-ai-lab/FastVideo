@@ -40,8 +40,12 @@ if [[ -n "${CONDA_PREFIX:-}" ]]; then
 fi
 
 # Ensure only the kernel's required headers are initialized. A repository-wide
-# update also clones the unrelated VBench evaluation submodule.
-git submodule update --init --recursive include/cutlass include/tk
+# update also clones the unrelated VBench evaluation submodule. Skip outside a
+# git checkout (e.g. Docker contexts that exclude .git), where the submodule
+# contents must already be present.
+if git rev-parse --git-dir >/dev/null 2>&1; then
+    git submodule update --init --recursive include/cutlass include/tk
+fi
 
 # Install build dependencies
 uv pip install scikit-build-core cmake ninja
