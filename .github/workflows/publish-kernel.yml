@@ -47,12 +47,11 @@ jobs:
     name: Build Wheel
     needs: check-version-change
     if: ${{ needs.check-version-change.outputs.version-changed == 'true' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.platform.os }}
 
     strategy:
       fail-fast: false
       matrix:
-          os: [ubuntu-22.04]
           python-version: ['3.12']
           torch-cuda:
             # torch 2.12 dropped cu128; cu130 (CUDA 13) is the default wheel, cu126 covers older drivers.
@@ -62,6 +61,25 @@ jobs:
             - torch-version: '2.12.0'
               cuda-version: '13.0.0'
               torch-cuda-short: 'cu130'
+          platform:
+            # x86_64 builds the full cu126 + cu130 set (cu130 ships the consumer
+            # Blackwell sm_120a FP4 kernels).
+            - os: ubuntu-22.04
+              arch: x86_64
+              wheel-plat: manylinux_2_35_x86_64
+          # aarch64 is Blackwell (GB200 sm_100a + DGX Spark / consumer sm_120a), not
+          # Hopper, and Blackwell needs CUDA >= 12.8 — so only the cu130 leg applies.
+          # Added via include so x86 keeps cu126 + cu130 while aarch64 stays cu130-only.
+          include:
+            - python-version: '3.12'
+              torch-cuda:
+                torch-version: '2.12.0'
+                cuda-version: '13.0.0'
+                torch-cuda-short: 'cu130'
+              platform:
+                os: ubuntu-22.04-arm
+                arch: aarch64
+                wheel-plat: manylinux_2_35_aarch64
 
     steps:
       - name: Free up disk space
@@ -144,15 +162,22 @@ jobs:
 
           cd fastvideo-kernel
           git submodule update --init --recursive  # Ensure ThunderKittens submodule is initialized
-          # Release builds run on GPU-less runners, so force-enable TK and set the arch explicitly.
-          # The CUDA 13 (cu130) leg additionally targets Blackwell sm_120a and builds the
-          # attn_qat_infer FP4 inference kernels (they need CUDA Toolkit 12.8+, so the cu126 leg
-          # stays Hopper-only and ships without them).
-          # Cap Ninja build concurrency to fit the 16 GB standard runner. CUTLASS FP4
-          # and ThunderKittens template TUs each need several GB; Ninja's default
-          # (cores+2 ≈ 6 parallel jobs) exhausts RAM and the host OOM-kills the build
-          # (SIGTERM / exit 143, surfaced as "runner lost communication").
-          if [ "${{ matrix.torch-cuda.torch-cuda-short }}" = "cu130" ]; then
+          # Release builds run on GPU-less runners, so set kernels + arch explicitly:
+          #   * aarch64 = Blackwell (GB200 sm_100a + DGX Spark/consumer sm_120a), NOT
+          #     Hopper, so TK (sm_90a wgmma) is OFF. The C++ FP4 (attn_qat_infer, SM120)
+          #     covers sm_120a; turbodiffusion covers sm_100a+sm_120a. The sm_100 FP4
+          #     forward is the FA4 CuTe DSL path in the fastvideo package (PR #1221),
+          #     JIT-compiled at runtime — not built into this wheel.
+          #   * x86_64 cu130 = Hopper TK + consumer Blackwell sm_120a FP4.
+          #   * x86_64 cu126 = Hopper TK only (older drivers; CUDA < 12.8 has no FP4).
+          # The per-arch split in CMakeLists pins the FP4 targets to sm_120a and builds
+          # the main extension for the full arch list. CMAKE_BUILD_PARALLEL_LEVEL caps
+          # Ninja so heavy CUTLASS/TK template TUs don't OOM the 16 GB runner (exit 143).
+          if [ "${{ matrix.platform.arch }}" = "aarch64" ]; then
+            export TORCH_CUDA_ARCH_LIST="10.0a;12.0a"
+            export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=OFF -DFASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER=ON"
+            export CMAKE_BUILD_PARALLEL_LEVEL=1
+          elif [ "${{ matrix.torch-cuda.torch-cuda-short }}" = "cu130" ]; then
             export TORCH_CUDA_ARCH_LIST="9.0a;12.0a"
             export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=ON -DFASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER=ON -DCMAKE_CUDA_ARCHITECTURES=90a"
             # A single FP4 TU (attn_qat_infer) can use ~8-12 GB on its own, so serialize.
@@ -160,9 +185,8 @@ jobs:
           else
             export TORCH_CUDA_ARCH_LIST="9.0a"
             export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=ON -DCMAKE_CUDA_ARCHITECTURES=90a"
-            # No FP4 here; only the two TK TUs are heavy (single-arch) and they fit
-            # side by side. Uncapped (cores+2=6) has built but occasionally OOMs when
-            # the light TUs pile on; -j4 overlaps them safely (~12-14 GB peak).
+            # Hopper-only: the two TK TUs are the heavy ones (single-arch) and fit side
+            # by side; -j4 overlaps the light TUs without OOMing (~12-14 GB peak).
             export CMAKE_BUILD_PARALLEL_LEVEL=4
           fi
 
@@ -180,8 +204,8 @@ jobs:
           PY
           )
           export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}"
-          # Target manylinux_2_35 (Ubuntu 22.04 native)
-          auditwheel repair dist/*.whl --plat manylinux_2_35_x86_64 -w fixed_dist \
+          # Target manylinux_2_35 (Ubuntu 22.04 native), per-arch plat tag.
+          auditwheel repair dist/*.whl --plat ${{ matrix.platform.wheel-plat }} -w fixed_dist \
             --exclude libtorch_cuda.so \
             --exclude libtorch_cpu.so \
             --exclude libtorch.so \
@@ -197,7 +221,7 @@ jobs:
         # The publish job below selects which CUDA build is pushed to PyPI.
         uses: actions/upload-artifact@v4
         with:
-          name: fastvideo_kernel-py${{ matrix.python-version }}-${{ matrix.torch-cuda.torch-cuda-short }}-torch${{ matrix.torch-cuda.torch-version }}
+          name: fastvideo_kernel-py${{ matrix.python-version }}-${{ matrix.torch-cuda.torch-cuda-short }}-${{ matrix.platform.arch }}-torch${{ matrix.torch-cuda.torch-version }}
           path: fastvideo-kernel/dist/*.whl
           retention-days: 90
 
@@ -217,8 +241,12 @@ jobs:
           python-version: '3.12'
 
       - name: Download PyPI wheels
-        # Publish only the cu130 (CUDA 13) wheel to PyPI — it includes the Blackwell FP4 kernels.
-        # The cu126 wheel stays available as a build artifact / GitHub-release asset.
+        # Publish the cu130 (CUDA 13) wheels to PyPI for both architectures:
+        #   x86_64  — Hopper sm_90a TK + consumer Blackwell sm_120a FP4
+        #   aarch64 — Blackwell: turbodiffusion (sm_100a/sm_120a) + C++ FP4 (sm_120a);
+        #             no TK (Hopper). sm_100 FP4 forward is the FA4 CuTe DSL path in the
+        #             fastvideo package (#1221), shipped/JIT separately.
+        # The x86_64 cu126 wheel stays available as a build artifact / GitHub-release asset.
         uses: actions/download-artifact@v4
         with:
           path: fastvideo-kernel/dist/

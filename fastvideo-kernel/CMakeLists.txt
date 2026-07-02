@@ -295,6 +295,11 @@ set(CUDA_FLAGS
     "--expt-relaxed-constexpr"
     "-Xcompiler=-fno-strict-aliasing"
     "-Xcompiler=-fPIC"
+    # ARM/aarch64 defaults `char` to unsigned, but ThunderKittens headers assume the
+    # x86 signed-char behavior (else base_types.cuh hits "narrowing conversion from
+    # char to signed char"). Force signed char so TK compiles on Grace Hopper; this
+    # is a no-op on x86_64, where char is already signed.
+    "-Xcompiler=-fsigned-char"
     "-DTORCH_COMPILE"
     "-Xnvlink=--verbose"
     "-Xptxas=--verbose"
