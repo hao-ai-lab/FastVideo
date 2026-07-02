@@ -38,11 +38,17 @@ jobs:
             torch_backend: 'cu126'
             fa_tag: 'cu126torch2.12'
             cmake_build_parallel_level: '4'
+            torch_cuda_arch_list:
+              amd64: '9.0a'
+              arm64: '9.0a'
           - version: '13.0.0'
             suffix: '-cuda13.0.0'
             torch_backend: 'cu130'
             fa_tag: 'cu130torch2.12'
             cmake_build_parallel_level: '1'
+            torch_cuda_arch_list:
+              amd64: '9.0a'
+              arm64: '12.1'
         architecture:
           - name: amd64
             runner: ubuntu-latest
@@ -61,7 +67,7 @@ jobs:
         PYTHON_VERSION=3.12
         CUDA_VERSION=${{ matrix.cuda.version }}
         UV_TORCH_BACKEND=${{ matrix.cuda.torch_backend }}
-        TORCH_CUDA_ARCH_LIST=${{ matrix.architecture.name == 'arm64' && matrix.cuda.version == '13.0.0' && '12.1' || '9.0a' }}
+        TORCH_CUDA_ARCH_LIST=${{ matrix.cuda.torch_cuda_arch_list[matrix.architecture.name] }}
         CMAKE_BUILD_PARALLEL_LEVEL=${{ matrix.cuda.cmake_build_parallel_level }}
         FLASH_ATTN_WHEEL_TAG=${{ matrix.cuda.fa_tag }}
         FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17
@@ -69,7 +75,10 @@ jobs:
     secrets: inherit
 
   publish-cuda-manifests:
-    if: ${{ github.event.inputs.build_cuda_matrix == 'true' }}
+    # !cancelled(): a failed sibling build leg must not skip the manifests for a
+    # CUDA lane whose own digests all exist; the digest-count check below fails
+    # the incomplete lane loudly instead.
+    if: ${{ !cancelled() && github.event.inputs.build_cuda_matrix == 'true' }}
     needs: build-cuda-images
     runs-on: ubuntu-latest
     permissions:
