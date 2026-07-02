@@ -106,9 +106,23 @@ def run_test_command(test_command: str,
     if pr_number:
         print(f"PR number: {pr_number}")
 
-    # For PRs (including forks), use GitHub's PR refs to get the correct commit
+    # For PRs (including forks), use GitHub's PR refs to get the correct commit.
+    # Keep the fetch narrow and retry transient GitHub/HTTP2 disconnects; otherwise
+    # Modal shards can fail before pytest starts.
     if pr_number and pr_number != "false":
-        checkout_command = f"git fetch --prune origin refs/pull/{pr_number}/head && git checkout FETCH_HEAD"
+        checkout_command = f"""
+        for attempt in 1 2 3; do
+            git fetch --prune --no-tags --depth=1 origin refs/pull/{pr_number}/head &&
+            git checkout --detach FETCH_HEAD &&
+            break
+
+            status=$?
+            if [ "$attempt" -eq 3 ]; then
+                exit "$status"
+            fi
+            sleep $((attempt * 5))
+        done
+        """
         print(f"Using PR ref for checkout: {checkout_command}")
     else:
         checkout_command = f"git checkout {git_commit}"
@@ -125,7 +139,7 @@ def run_test_command(test_command: str,
     command = f"""
     source $HOME/.local/bin/env &&
     source /opt/venv/bin/activate &&
-    git clone {git_repo} /FastVideo &&
+    git clone --filter=blob:none --no-checkout {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
     git submodule update --init --recursive &&
