@@ -182,18 +182,20 @@ def _cute_forward(
         block_size=(q_sparse_block_size, kv_block_size),
     )
 
+    # Upstream FA4 cute (the cutlass-4.5-safe ref this repo pins) folds the
+    # fork's m_block_size/n_block_size pair into tile_mn, and its main path
+    # returns (out, lse, p, row_max) -- slice the first two.
     out, lse = _flash_attn_fwd(
         q_bshd,
         k_bshd,
         v_bshd,
-        m_block_size=_M_BLOCK_SIZE_DEFAULT,
-        n_block_size=kv_block_size,
+        tile_mn=(_M_BLOCK_SIZE_DEFAULT, kv_block_size),
         mask_mod=_build_vbs_mask_mod(kv_block_size),
         block_sparse_tensors=sparse_tensors,
         aux_tensors=[variable_block_sizes],
         causal=False,
         return_lse=True,
-    )
+    )[:2]
     return out, lse
 
 
