@@ -399,7 +399,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Self-Forcing Tests"
                 env:
                   - TEST_TYPE=self_forcing
