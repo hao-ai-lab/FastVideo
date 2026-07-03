@@ -8,8 +8,8 @@ video-generation jobs powered by the FastVideo library.
 This is the API-only server. Use web_server.py to serve the frontend.
 
 Usage:
-    python -m ui.api_server                       # from repo root
-    python ui/api_server.py --output-dir ./videos # explicit output dir
+    python -m fastvideo_studio.server             # from the apps/ directory
+    python -m fastvideo_studio.server --output-dir ./videos  # explicit output dir
 """
 
 from __future__ import annotations
@@ -31,15 +31,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from fastvideo.registry import (get_registered_model_paths, get_registered_models_with_workloads)
-from ui.database import Database, _get_db_path
-from ui.job_runner import JobRunner, JobStatus
-from ui.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest)
+from fastvideo_studio.database import Database, _get_db_path
+from fastvideo_studio.job_runner import JobRunner, JobStatus
+from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("fastvideo.ui.api")
+logger = logging.getLogger("fastvideo.studio.api")
 
 DEFAULT_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs", "ui_jobs")
 
@@ -571,7 +571,7 @@ def _setup_signal_handlers() -> None:
 
 
 def create_local_env(host: str, port: int) -> None:
-    """Check if .env.local exists in the ui directory, and create it if not."""
+    """Check if .env.local exists in the fastvideo_studio directory, and create it if not."""
     ui_dir = os.path.dirname(__file__)
     env_local_path = os.path.join(ui_dir, ".env.local")
 

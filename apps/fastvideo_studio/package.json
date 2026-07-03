@@ -1,5 +1,5 @@
 {
-	"name": "fastvideo-ui",
+	"name": "fastvideo-studio",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
@@ -8,7 +8,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"start": "concurrently --kill-others-on-fail \"npm:start:api\" \"npm:start:web\"",
-		"start:api": "cd .. && python -m ui.server",
+		"start:api": "cd .. && python -m fastvideo_studio.server",
 		"start:web": "node build",
 		"lint": "eslint ."
 	},

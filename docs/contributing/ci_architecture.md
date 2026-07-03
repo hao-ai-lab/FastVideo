@@ -210,7 +210,7 @@ Scope labels are inferred from changed files.
 | `scope: infra` | `.github/`, `.buildkite/`, `fastvideo/tests/`, `docker/` |
 | `scope: distributed` | `fastvideo/distributed/` |
 | `scope: docs` | `docs/` |
-| `scope: ui` | `ui/` |
+| `scope: studio` | `apps/fastvideo_studio/` |
 | `scope: model` | `fastvideo/models/`, `fastvideo/layers/`, `fastvideo/configs/models/` |
 
 Process labels:

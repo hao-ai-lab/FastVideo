@@ -24,14 +24,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from fastvideo.utils import get_mp_context
-from ui.database import Database
-from ui.training_config import (
+from fastvideo_studio.database import Database
+from fastvideo_studio.training_config import (
     build_training_args,
     get_training_env,
     get_training_module_info,
 )
 
-logger = logging.getLogger("fastvideo.ui.job_runner")
+logger = logging.getLogger("fastvideo.studio.job_runner")
 
 # Regex patterns for parsing tqdm-style progress output.
 # Matches e.g. " 40%|████      | 20/50 " or " 20/50 "

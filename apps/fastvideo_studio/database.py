@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-SQLite persistence for FastVideo UI.
+SQLite persistence for FastVideo Studio.
 
 Stores jobs and default settings. Uses Python's built-in sqlite3.
 """
@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger("fastvideo.ui.database")
+logger = logging.getLogger("fastvideo.studio.database")
 
 # Default options schema - used for settings table defaults
 DEFAULT_SETTINGS: dict[str, Any] = {

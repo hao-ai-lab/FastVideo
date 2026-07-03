@@ -1,4 +1,4 @@
-# FastVideo UI
+# FastVideo Studio
 
 A lightweight web-based UI for interacting with FastVideo.
 
@@ -16,7 +16,7 @@ The UI currently supports:
 The easiest way to run the application is:
 
 ```bash
-cd ui
+cd apps/fastvideo_studio
 npm install
 npm run build
 npm run start
@@ -33,10 +33,10 @@ The UI is composed of two separate components:
 
 To run each component separately, you can use the commands `npm run start:web` and `npm run start:api`.
 
-You can also run the API server with this command from the root directory:
+You can also run the API server with this command from the `apps/` directory:
 
 ```bash
-python -m ui.server --output-dir /path/to/videos --log-dir /path/to/logs
+python -m fastvideo_studio.server --output-dir /path/to/videos --log-dir /path/to/logs
 ```
 
 Running it this way allows you to pass command line parameters.
