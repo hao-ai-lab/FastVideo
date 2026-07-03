@@ -11,7 +11,7 @@ import {
   stopJob,
 } from '@/lib/api';
 import type { Job } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, downloadBlob } from '@/lib/utils';
 import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
 
 interface JobCardProps {
@@ -137,14 +137,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
     try {
       const blob = await downloadJobVideo(job.id);
       const ext = job.output_path.endsWith('.png') ? 'png' : 'mp4';
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `job_${job.id}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      downloadBlob(blob, `job_${job.id}.${ext}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to download video');
     } finally {

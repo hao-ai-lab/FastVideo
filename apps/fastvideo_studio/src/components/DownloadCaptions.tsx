@@ -3,15 +3,7 @@
 import { ChevronDown } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+import { downloadBlob } from '@/lib/utils';
 
 const MENU_ITEM =
   'block w-full cursor-pointer px-4 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';

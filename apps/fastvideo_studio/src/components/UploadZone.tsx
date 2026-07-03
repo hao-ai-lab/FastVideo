@@ -2,7 +2,6 @@
 
 import * as React from 'react';
 
-import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 export interface UploadZoneProps {
@@ -18,10 +17,6 @@ export interface UploadZoneProps {
   onClear?: () => void;
   disabled?: boolean;
   uploading?: boolean;
-  textInput?: boolean;
-  textValue?: string;
-  onTextChange?: (value: string) => void;
-  textPlaceholder?: string;
 }
 
 const linkButtonClass =
@@ -40,17 +35,13 @@ export default function UploadZone({
   onClear,
   disabled = false,
   uploading = false,
-  textInput = false,
-  textValue = '',
-  onTextChange,
-  textPlaceholder,
 }: UploadZoneProps) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const directoryInputRef = React.useRef<HTMLInputElement>(null);
 
   const useBoth = directory && allowBothFileAndDirectory;
-  const clickable = !textInput && !useBoth;
-  const hasContent = textInput ? !!textValue.trim() : !!(value || fileName);
+  const clickable = !useBoth;
+  const hasContent = !!(value || fileName);
 
   // `webkitdirectory` is a DOM property without a typed JSX prop, so set it
   // imperatively. The primary input only selects folders when it is the sole
@@ -73,7 +64,7 @@ export default function UploadZone({
   }
 
   function handleClick() {
-    if (!textInput && !disabled) {
+    if (!disabled) {
       fileInputRef.current?.click();
     }
   }
@@ -87,7 +78,7 @@ export default function UploadZone({
   }
 
   function handleDrop(e: React.DragEvent) {
-    if (textInput || disabled) return;
+    if (disabled) return;
     e.preventDefault();
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
@@ -96,7 +87,7 @@ export default function UploadZone({
   }
 
   function handleDragOver(e: React.DragEvent) {
-    if (textInput || disabled) return;
+    if (disabled) return;
     e.preventDefault();
   }
 
@@ -141,83 +132,71 @@ export default function UploadZone({
 
       <div className="mb-2 text-sm text-muted-foreground">{label}</div>
 
-      {textInput ? (
-        <Input
-          type="text"
-          value={textValue}
-          onChange={(e) => onTextChange?.(e.target.value)}
-          placeholder={textPlaceholder}
-          disabled={disabled}
-        />
-      ) : (
-        <>
-          {!hasContent && (
-            <span className="mt-1.5 text-xs text-muted-foreground">
-              {uploading ? (
-                'Uploading…'
-              ) : useBoth ? (
-                <>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    className="cursor-pointer text-accent hover:underline"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleClick();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleClick();
-                      }
-                    }}
-                  >
-                    Select files
-                  </span>
-                  {' · '}
-                  <button
-                    type="button"
-                    className={linkButtonClass}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (!disabled) directoryInputRef.current?.click();
-                    }}
-                    disabled={disabled}
-                  >
-                    Select folder
-                  </button>
-                </>
-              ) : directory ? (
-                'Click or drop folder'
-              ) : (
-                'Click or drop file(s)'
-              )}
-            </span>
+      {!hasContent && (
+        <span className="mt-1.5 text-xs text-muted-foreground">
+          {uploading ? (
+            'Uploading…'
+          ) : useBoth ? (
+            <>
+              <span
+                role="button"
+                tabIndex={0}
+                className="cursor-pointer text-accent hover:underline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleClick();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleClick();
+                  }
+                }}
+              >
+                Select files
+              </span>
+              {' · '}
+              <button
+                type="button"
+                className={linkButtonClass}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!disabled) directoryInputRef.current?.click();
+                }}
+                disabled={disabled}
+              >
+                Select folder
+              </button>
+            </>
+          ) : directory ? (
+            'Click or drop folder'
+          ) : (
+            'Click or drop file(s)'
           )}
-          {fileName && (
-            <div className="mt-2 text-sm text-foreground">
-              {fileName}
-              {onClear && (
-                <>
-                  {' · '}
-                  <button
-                    type="button"
-                    className={linkButtonClass}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onClear();
-                      clearInputs();
-                    }}
-                    disabled={disabled || uploading}
-                  >
-                    Clear
-                  </button>
-                </>
-              )}
-            </div>
+        </span>
+      )}
+      {fileName && (
+        <div className="mt-2 text-sm text-foreground">
+          {fileName}
+          {onClear && (
+            <>
+              {' · '}
+              <button
+                type="button"
+                className={linkButtonClass}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClear();
+                  clearInputs();
+                }}
+                disabled={disabled || uploading}
+              >
+                Clear
+              </button>
+            </>
           )}
-        </>
+        </div>
       )}
 
       {hint && <div className="mt-1.5 text-xs text-muted-foreground">{hint}</div>}

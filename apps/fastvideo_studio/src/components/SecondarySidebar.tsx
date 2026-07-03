@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useResizable } from '@/hooks/useResizable';
 import { downloadJobLog, getJobLogs } from '@/lib/api';
 import type { Job } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, downloadBlob } from '@/lib/utils';
 
 const SIDEBAR_MIN_WIDTH = 280;
 const SIDEBAR_MAX_WIDTH = 750;
@@ -120,14 +120,7 @@ export default function SecondarySidebar({
     setIsLoading(true);
     try {
       const blob = await downloadJobLog(job.id);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `job_${job.id}.log`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      downloadBlob(blob, `job_${job.id}.log`);
     } catch (err) {
       console.error('Failed to download log:', err);
       alert(err instanceof Error ? err.message : 'Failed to download log');
