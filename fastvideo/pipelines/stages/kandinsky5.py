@@ -289,7 +289,10 @@ class Kandinsky5DenoisingStage(PipelineStage):
         sparse_params = self.get_sparse_params(latents, device)
 
         # I2V keeps the first (conditioning) frame fixed during denoising.
-        cond_frames = 1 if getattr(self.transformer, "visual_cond", False) else 0
+        # Key off the actual image conditioning, not transformer.visual_cond:
+        # official T2V checkpoints also ship visual_cond=True, and skipping
+        # frame 0 for them leaves it as undenoised noise.
+        cond_frames = 1 if batch.image_latent is not None else 0
 
         with tqdm(total=batch.num_inference_steps, desc="Kandinsky5 Denoising") as progress_bar:
             for i, timestep in enumerate(batch.timesteps):

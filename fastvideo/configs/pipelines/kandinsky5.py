@@ -15,12 +15,17 @@ from fastvideo.configs.models.encoders.reason1 import Reason1Config
 from fastvideo.configs.models.vaes import HunyuanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig, preprocess_text
 
+# Byte-exact copy of the upstream Kandinsky5/diffusers template, including the
+# "promt"/"scren" typos: the checkpoints were trained with this exact system  # codespell:ignore promt,scren
+# prompt, and ENCODE_START_IDX below is the tokenized length of everything
+# before the user prompt. Fixing the typos shifts user content to index 127
+# and mis-conditions every generation.
 KANDINSKY5_PROMPT_TEMPLATE = "\n".join([
-    "<|im_start|>system\nYou are a prompt engineer. Describe the video in detail.",
+    "<|im_start|>system\nYou are a promt engineer. Describe the video in detail.",  # codespell:ignore promt
     "Describe how the camera moves or shakes, describe the zoom and view angle, whether it follows the objects.",
     "Describe the location of the video, main characters or objects and their action.",
     "Describe the dynamism of the video and presented actions.",
-    "Name the visual style of the video: whether it is a professional footage, user generated content, some kind of animation, video game or screen content.",
+    "Name the visual style of the video: whether it is a professional footage, user generated content, some kind of animation, video game or scren content.",  # codespell:ignore scren
     "Describe the visual effects, postprocessing and transitions if they are presented in the video.",
     "Pay attention to the order of key actions shown in the scene.<|im_end|>",
     "<|im_start|>user\n{}<|im_end|>",
