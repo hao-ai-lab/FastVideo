@@ -108,6 +108,8 @@ from fastvideo.attention.backends.abstract import (
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+_WARNED_NON_FA_DTYPE = False
 logger.info("Using FlashAttention-%s backend", fa_version)
 
 # FP4 FA4 support: quantize Q/K to NVFP4 E2M1 for block-scaled MMA on Blackwell.
@@ -258,6 +260,32 @@ class FlashAttentionImpl(AttentionImpl):
             logger.info("NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk only)")
 
     def forward(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: FlashAttnMetadata,
+    ):
+        # FlashAttention kernels only accept fp16/bf16, but some pipelines leak
+        # fp32 activations into attention (observed: LTX2 video self-attn under
+        # SP). Cast through bf16 and restore, matching TORCH_SDPA's tolerance.
+        orig_dtype = query.dtype
+        if orig_dtype not in (torch.float16, torch.bfloat16):
+            global _WARNED_NON_FA_DTYPE
+            if not _WARNED_NON_FA_DTYPE:
+                _WARNED_NON_FA_DTYPE = True
+                logger.warning(
+                    "FLASH_ATTN received %s inputs; casting to bfloat16 for the "
+                    "kernel and restoring on output.", orig_dtype)
+            query = query.to(torch.bfloat16)
+            key = key.to(torch.bfloat16)
+            value = value.to(torch.bfloat16)
+        output = self._forward_impl(query, key, value, attn_metadata)
+        if output.dtype != orig_dtype:
+            output = output.to(orig_dtype)
+        return output
+
+    def _forward_impl(
         self,
         query: torch.Tensor,
         key: torch.Tensor,
