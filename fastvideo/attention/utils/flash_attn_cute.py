@@ -49,6 +49,9 @@ def _flash_attn_cute_forward(
     causal: bool,
     deterministic: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    # _flash_attn_fwd returns (out, lse) on its empty-sequence early path but
+    # (out, lse, p, row_max) on the main path at the pinned FA4 cute ref; take
+    # the first two so both arities work.
     out, lse = _flash_attn_fwd(
         q,
         k,
@@ -60,7 +63,7 @@ def _flash_attn_cute_forward(
         softcap=0.0,
         num_splits=1,
         pack_gqa=None,
-    )
+    )[:2]
     return out, lse
 
 
@@ -152,7 +155,7 @@ def _flash_attn_cute_varlen_forward(
         softcap=0.0,
         num_splits=1,
         pack_gqa=None,
-    )
+    )[:2]
     return out, lse
 
 
@@ -273,7 +276,7 @@ def _flash_attn_cute_fp4_forward(
     softmax_scale: float | None,
     causal: bool,
 ) -> torch.Tensor:
-    out, _ = _flash_attn_fwd(
+    out = _flash_attn_fwd(
         q,
         k,
         v,
@@ -286,7 +289,7 @@ def _flash_attn_cute_fp4_forward(
         pack_gqa=None,
         mSFQ=sfq,
         mSFK=sfk,
-    )
+    )[0]
     return out
 
 
