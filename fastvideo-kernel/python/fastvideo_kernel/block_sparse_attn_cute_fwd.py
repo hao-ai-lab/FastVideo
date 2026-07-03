@@ -46,8 +46,7 @@ def _load_fa4_cute():
     return BlockSparseTensorsTorch, _flash_attn_fwd
 
 
-# 128 is the Q-side tile; kv_block_size comes from the caller's VSA logical
-# KV block.
+# Q-side tile size; kv_block_size comes from the caller's VSA logical KV block.
 _M_BLOCK_SIZE_DEFAULT = 128
 
 
@@ -182,9 +181,7 @@ def _cute_forward(
         block_size=(q_sparse_block_size, kv_block_size),
     )
 
-    # Upstream FA4 cute (the cutlass-4.5-safe ref this repo pins) folds the
-    # fork's m_block_size/n_block_size pair into tile_mn, and its main path
-    # returns (out, lse, p, row_max) -- slice the first two.
+    # _flash_attn_fwd returns (out, lse, p, row_max); keep the first two.
     out, lse = _flash_attn_fwd(
         q_bshd,
         k_bshd,

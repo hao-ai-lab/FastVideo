@@ -97,14 +97,11 @@ prerelease = "allow"
 members = ["apps/dreamverse"]
 
 [tool.uv.sources]
-# PyPI's aarch64 fastvideo-kernel wheels (cp312, sm_100a/sm_120a) do not cover
-# the NVIDIA DGX Spark / GB10 (sm_121), so on ARM build from the in-tree source
-# instead; x86_64 keeps the published PyPI wheel. uv installs the path source
-# regardless of the version pin above, so the in-tree kernel may run ahead of
-# the published release. This table is uv-only: plain pip ignores
-# it and it is not part of the published wheel metadata, so PyPI consumers are
-# unaffected. Pass --no-sources to bypass it (e.g. when the kernel is already
-# built/installed separately, as in the Spark install guide).
+# PyPI's aarch64 fastvideo-kernel wheels do not cover the NVIDIA DGX Spark /
+# GB10 (sm_121), so on ARM build from the in-tree source instead; x86_64 keeps
+# the published PyPI wheel. This table is uv-only: plain pip ignores it. Pass
+# --no-sources to bypass it (e.g. when the kernel is already installed, as in
+# the Spark install guide).
 fastvideo-kernel = [
   { path = "fastvideo-kernel", marker = "platform_machine == 'aarch64'" },
 ]
@@ -115,8 +112,8 @@ fastvideo-kernel = [
 # uv reads UV_TORCH_BACKEND / --torch-backend (not a pyproject setting). The
 # supported backends (cu126, cu130) both provide torch 2.12.0.
 imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
-# FA4 cute: upstream Dao-AILab (cutlass-4.5-safe; uses cute.ThrMma). torch.compile
-# support comes from FastVideo's own custom_op wrappers, so no fork is needed.
+# FA4 cute, pinned to a cutlass-4.5-compatible revision. torch.compile support
+# comes from FastVideo's own custom_op wrappers.
 flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "940cd9680f3315f2f06b43ab5bea2c2cf2d96806", subdirectory = "flash_attn/cute" }
 
 [project.optional-dependencies]
