@@ -244,6 +244,17 @@ torch.library.register_autograd(
 _FA4_RUNTIME_BROKEN = False
 
 
+def _needs_autograd(*tensors: torch.Tensor) -> bool:
+    """Whether this call must backprop through attention.
+
+    FA4 cute's backward asserts sm90+ (L40S/sm_89 dies on its arch check) and
+    has never been validated for training in this repo (its lse is not even
+    allocated through our inference-shaped custom op). Route grad-enabled
+    calls to FA2 instead -- the pre-FA4 training behavior on every device.
+    """
+    return torch.is_grad_enabled() and any(t.requires_grad for t in tensors)
+
+
 def _fa4_runtime_fallback(error: Exception) -> None:
     global _FA4_RUNTIME_BROKEN
     if not _FA4_RUNTIME_BROKEN:
@@ -264,7 +275,7 @@ def flash_attn_func(
 ) -> torch.Tensor:
     """Only returns the output, not the lse."""
     _check_dropout(dropout_p)
-    if not _FA4_RUNTIME_BROKEN:
+    if not _FA4_RUNTIME_BROKEN and not _needs_autograd(q, k, v):
         try:
             out, _ = torch.ops.fastvideo._flash_attn_cute_forward(q, k, v, softmax_scale, causal, deterministic)
             return out
@@ -365,7 +376,7 @@ def flash_attn_varlen_func(
 ) -> torch.Tensor:
     """Only returns the output, not the lse."""
     _check_dropout(dropout_p)
-    if not _FA4_RUNTIME_BROKEN:
+    if not _FA4_RUNTIME_BROKEN and not _needs_autograd(q, k, v):
         try:
             out, _ = torch.ops.fastvideo._flash_attn_cute_varlen_forward(
                 q,
