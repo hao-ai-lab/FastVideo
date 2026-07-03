@@ -22,12 +22,14 @@ import torch
 
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v_track
 from fastvideo.distributed import get_sp_group, get_world_group
+from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.training_utils import normalize_dit_input
-
 from fastvideo.train.models.wan.wan import WanModel
 from fastvideo.train.utils.dataloader import build_parquet_t2v_train_dataloader
 from fastvideo.train.utils.moduleloader import load_module_from_path
+
+logger = init_logger(__name__)
 
 
 class WanTrackModel(WanModel):
@@ -89,6 +91,10 @@ class WanTrackModel(WanModel):
         # CFG dropout (ours, not MotionStream) -> default OFF; enables motion/text CFG when >0.
         self._aug_motion_drop = float(os.getenv("WANTRACK_MOTION_DROP", "0.0"))
         self._aug_text_drop = float(os.getenv("WANTRACK_TEXT_DROP", "0.0"))
+        # TEMP debug: WANTRACK_DEBUG=1 logs per-step sampling stats (throttled) so we can verify
+        # the sampler keeps the right number of tracks / covers objects / uses the weights.
+        self._aug_debug = int(os.getenv("WANTRACK_DEBUG", "0"))
+        self._aug_calls = 0
 
     def _augment_tracks(
         self,
@@ -126,7 +132,10 @@ class WanTrackModel(WanModel):
         disp = ((tp - tp[:, :1])**2).sum(-1).sqrt()  # [B,T,N]
         motion = (disp * (track_visibility > 0.5).float()).amax(dim=1)  # [B,N]
 
-        if 0 < self._aug_max_points < N:
+        # Subsample whenever there's room to draw fewer than N (min_points < N). The old
+        # `max_points < N` gate silently disabled ALL sampling when max_points == N (== 2500),
+        # so coverage/weighted/uniform never ran. max_points == 0 still means "keep all".
+        if self._aug_max_points > 0 and self._aug_min_points < N:
             oids = object_ids
             if oids is not None and oids.dim() == 1:
                 oids = oids.unsqueeze(0).expand(B, -1)
@@ -183,6 +192,25 @@ class WanTrackModel(WanModel):
                     if bool(drop[b, c]):
                         frame_keep[b, c * L:(c + 1) * L] = 0.0
             vis = vis * frame_keep.to(device=device, dtype=vis.dtype).unsqueeze(-1)
+
+        # TEMP debug: verify the sampling is doing what we think (throttled).
+        if self._aug_debug and (self._aug_calls < 8 or self._aug_calls % 200 == 0):
+            ever0 = (vis[0].amax(dim=0) > 0.5)  # [N] tracks kept (any visible frame after sampling)
+            kept = int(ever0.sum().item())
+            cov = "n/a"
+            if object_ids is not None:
+                ob = object_ids[0] if object_ids.dim() > 1 else object_ids
+                present = int(torch.unique(ob[ob >= 0]).numel())
+                kept_obj = int(torch.unique(ob[(ever0) & (ob >= 0)]).numel())
+                cov = f"{kept_obj}/{present}"
+            tp0 = track_points[0]
+            logger.info(
+                "[WANTRACK_DEBUG] aug call=%d B=%d N=%d sample_range=[%d,%d] kept=%d obj_cov=%s "
+                "tw=%s oid=%s pmask=%.2f | coords x[%.3f,%.3f] y[%.3f,%.3f] vis_sum(f0)=%.0f", self._aug_calls, B, N,
+                self._aug_min_points, self._aug_max_points, kept, cov, "yes" if track_weights is not None else "NO",
+                "yes" if object_ids is not None else "NO", self._aug_pmask, float(tp0[..., 0].min()),
+                float(tp0[..., 0].max()), float(tp0[..., 1].min()), float(tp0[..., 1].max()), float(vis[0, 0].sum()))
+        self._aug_calls += 1
 
         # Motion CFG dropout (ours; default off): drop ALL motion for this step (-> cm = zeros).
         if (self._aug_motion_drop > 0.0
@@ -260,6 +288,15 @@ class WanTrackModel(WanModel):
                                                               generator,
                                                               object_ids=object_ids,
                                                               track_weights=track_weights)
+
+        # TEMP debug: confirm what actually flows into the forward (tracks not silently dropped).
+        if self._aug_debug and self._aug_calls <= 8:
+            logger.info(
+                "[WANTRACK_DEBUG] prepare_batch: latents=%s track_points=%s track_vis=%s object_ids=%s track_weights=%s",
+                tuple(latents.shape), (tuple(track_points.shape) if track_points is not None else None),
+                (tuple(track_visibility.shape) if track_visibility is not None else None),
+                (tuple(object_ids.shape) if object_ids is not None else None),
+                (tuple(track_weights.shape) if track_weights is not None else None))
 
         encoder_hidden_states = encoder_hidden_states.to(device, dtype=dtype)
         # Text CFG dropout: zero the text embedding for this step with prob.

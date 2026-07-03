@@ -194,6 +194,15 @@ class TrackValidationCallback(Callback):
 
         n = batch["text_embedding"].shape[0]
         infos = batch.get("info_list") or [{} for _ in range(n)]
+
+        def _opt(key: str, i: int) -> Any:
+            # optional per-sample tensor (object_ids / track_weights); None if absent/empty
+            t = batch.get(key)
+            if t is None or not torch.is_tensor(t) or t.numel() == 0 or t.shape[0] <= i:
+                return None
+            row = t[i:i + 1].clone()
+            return row if row.numel() > 0 else None
+
         for i in range(n):
             self._samples.append({
                 "text_embedding": batch["text_embedding"][i:i + 1].clone(),
@@ -203,6 +212,8 @@ class TrackValidationCallback(Callback):
                 "clip_feature": batch["clip_feature"][i:i + 1].clone(),
                 "track_points": batch["track_points"][i:i + 1].clone(),
                 "track_visibility": batch["track_visibility"][i:i + 1].clone(),
+                "object_ids": _opt("object_ids", i),
+                "track_weights": _opt("track_weights", i),
                 "caption": str(infos[i].get("caption", "") if i < len(infos) else ""),
             })
 
@@ -222,9 +233,12 @@ class TrackValidationCallback(Callback):
             gen_logs: list[Any] = []
             ref_logs: list[Any] = []
             for i, s in enumerate(self._samples):
-                gen_latents = self._sample(student, transformer, s)  # [1,16,T,H,W] normalized
+                # Apply the SAME training-time sampler so the model sees the sampled subset
+                # (not the full 2500 grid) and the overlay shows those sampled points.
+                tp_s, tv_s = self._sampled_tracks(student, s)
+                gen_latents = self._sample(student, transformer, s, tp_s, tv_s)  # [1,16,T,H,W] normalized
                 gen_px = student.decode_latents(gen_latents.permute(0, 2, 1, 3, 4))[0]  # [3,T,H,W] in [0,1]
-                gen_frames = self._overlay_tracks(gen_px, s)
+                gen_frames = self._overlay_tracks(gen_px, s, tp_s, tv_s)
                 if self._is_main:
                     fn = os.path.join(out_dir, f"step{step:06d}_sample{i}_gen.mp4")
                     imageio.mimsave(fn, gen_frames, fps=self.fps, macro_block_size=1)
@@ -232,10 +246,10 @@ class TrackValidationCallback(Callback):
                     if art is not None:
                         gen_logs.append(art)
 
-                # One-time ground-truth reference (VAE round-trip + same tracks).
+                # One-time ground-truth reference (VAE round-trip + same sampled tracks).
                 if not self._ref_logged and self._is_main:
                     ref_px = self._decode_reference(student, s)
-                    ref_frames = self._overlay_tracks(ref_px, s)
+                    ref_frames = self._overlay_tracks(ref_px, s, tp_s, tv_s)
                     fn_ref = os.path.join(out_dir, f"reference_sample{i}_gt.mp4")
                     imageio.mimsave(fn_ref, ref_frames, fps=self.fps, macro_block_size=1)
                     art = self.tracker.video(fn_ref, caption=f"GT {s['caption'][:120]}")
@@ -253,7 +267,26 @@ class TrackValidationCallback(Callback):
             if was_training:
                 transformer.train()
 
-    def _sample(self, student: Any, transformer: torch.nn.Module, s: dict[str, Any]) -> torch.Tensor:
+    def _sampled_tracks(self, student: Any, s: dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Run the training-time track sampler (_augment_tracks) on this val sample, deterministically
+        (fixed seed), so the model is conditioned on the sampled subset exactly like training. Falls
+        back to the full tracks if the sampler is disabled (WANTRACK_AUG=0) or drops motion."""
+        device = student.device
+        tp = s["track_points"].to(device)
+        tv = s["track_visibility"].to(device)
+        n = tp.shape[2]
+        oid = s.get("object_ids")
+        oid = oid.to(device).long() if (oid is not None and oid.shape[-1] == n) else None
+        tw = s.get("track_weights")
+        tw = tw.to(device).float() if (tw is not None and tw.shape[-1] == n) else None
+        gen = torch.Generator(device=device).manual_seed(self.seed)
+        tp_s, tv_s = student._augment_tracks(tp.float(), tv.float(), gen, object_ids=oid, track_weights=tw)
+        if tp_s is None or tv_s is None:  # motion-drop (off in val) -> keep full tracks
+            return tp, tv
+        return tp_s, tv_s
+
+    def _sample(self, student: Any, transformer: torch.nn.Module, s: dict[str, Any], tp_in: torch.Tensor,
+                tv_in: torch.Tensor) -> torch.Tensor:
         device = student.device
         dtype = torch.bfloat16
         flow_shift = float(student.timestep_shift)
@@ -262,8 +295,8 @@ class TrackValidationCallback(Callback):
         cond20 = student._build_i2v_cond_concat(ff)  # [1,20,T,H,W]
         txt = s["text_embedding"].to(device, dtype)
         mask = s["text_attention_mask"].to(device, dtype)
-        tp = s["track_points"].to(device, dtype)  # [1,T,N,2] normalized
-        tv = s["track_visibility"].to(device, dtype)  # [1,T,N]
+        tp = tp_in.to(device, dtype)  # [1,T,N,2] normalized (sampled subset)
+        tv = tv_in.to(device, dtype)  # [1,T,N] (sampled visibility)
         img = s["clip_feature"].to(device, dtype)  # [1,SeqLen,Dim] CLIP frame-0
 
         _, _, T, H, W = ff.shape
@@ -298,22 +331,31 @@ class TrackValidationCallback(Callback):
         norm = normalize_dit_input("wan", raw, student.vae)
         return student.decode_latents(norm.permute(0, 2, 1, 3, 4))[0]  # [3,T,H,W]
 
-    def _overlay_tracks(self, px: torch.Tensor, s: dict[str, Any]) -> list[np.ndarray]:
-        # px: [3,T,H,W] in [0,1]
+    def _overlay_tracks(self, px: torch.Tensor, s: dict[str, Any], tp_in: torch.Tensor,
+                        tv_in: torch.Tensor) -> list[np.ndarray]:
+        # px: [3,T,H,W] in [0,1]. Draws ONLY the sampled tracks (those the sampler kept), gated by
+        # the sampled visibility, so the overlay matches what the model was conditioned on.
         video = (px.clamp(0, 1).float().cpu().numpy() * 255.0).astype(np.uint8)
         frames = np.transpose(video, (1, 2, 3, 0))  # [T,H,W,3]
         T, H, W, _ = frames.shape
 
-        tp = s["track_points"][0].float().cpu().numpy()  # [Tt,N,2] normalized
-        tv = s["track_visibility"][0].float().cpu().numpy()  # [Tt,N]
+        tp = tp_in[0].float().cpu().numpy()  # [Tt,N,2] normalized
+        tv = tv_in[0].float().cpu().numpy()  # [Tt,N] sampled visibility
         tt = min(T, tp.shape[0])
         frames, tp, tv = frames[:tt], tp[:tt], tv[:tt]
+        n = tp.shape[1]
+        grid = int(round(n**0.5))
 
-        grid = int(round(tp.shape[1]**0.5))
-        tp, tv = _subsample(tp, tv, grid, self.grid_stride)
-        colors = _grid_colors(grid, self.grid_stride)
-        if colors.shape[0] != tp.shape[1]:
-            colors = _grid_colors(int(round(tp.shape[1]**0.5)) or 1, 1)[:tp.shape[1]]
+        colors = _grid_colors(grid, 1)  # one color per grid cell (row-major)
+        if colors.shape[0] < n:
+            colors = np.resize(colors, (n, 3))
+        colors = colors[:n]
+
+        # keep only tracks that are ever visible after sampling (the sampled subset)
+        ever = tv.max(axis=0) >= self.vis_thresh
+        if not ever.any():
+            ever = np.ones(n, dtype=bool)
+        tp, tv, colors = tp[:, ever], tv[:, ever], colors[ever]
 
         # Normalized [0,1] -> pixel coords of the generated frame.
         tp_px = tp.copy()
