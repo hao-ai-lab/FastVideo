@@ -111,6 +111,7 @@ class TrackValidationCallback(Callback):
         vis_thresh: float = 0.5,
         validate_at_start: bool = True,
         seed: int = 0,
+        paired_no_track: bool = True,
     ) -> None:
         self.every_steps = int(every_steps)
         self.num_val_samples = int(num_val_samples)
@@ -124,6 +125,9 @@ class TrackValidationCallback(Callback):
         self.vis_thresh = float(vis_thresh)
         self.validate_at_start = bool(validate_at_start)
         self.seed = int(seed)
+        # Also generate a NO-TRACK counterfactual per sample (same image + prompt, tracks=None).
+        # If it matches the with-track generation, the model is ignoring the tracks.
+        self.paired_no_track = bool(paired_no_track)
 
         self.tracker: Any = DummyTracker()
         self._samples: list[dict[str, Any]] = []
@@ -231,6 +235,7 @@ class TrackValidationCallback(Callback):
             os.makedirs(out_dir, exist_ok=True)
         try:
             gen_logs: list[Any] = []
+            notrack_logs: list[Any] = []
             ref_logs: list[Any] = []
             for i, s in enumerate(self._samples):
                 # Apply the SAME training-time sampler so the model sees the sampled subset
@@ -242,9 +247,23 @@ class TrackValidationCallback(Callback):
                 if self._is_main:
                     fn = os.path.join(out_dir, f"step{step:06d}_sample{i}_gen.mp4")
                     imageio.mimsave(fn, gen_frames, fps=self.fps, macro_block_size=1)
-                    art = self.tracker.video(fn, caption=f"[{step}] {s['caption'][:120]}")
+                    art = self.tracker.video(fn, caption=f"[{step}] WITH-track {s['caption'][:110]}")
                     if art is not None:
                         gen_logs.append(art)
+
+                # NO-TRACK counterfactual: same image + prompt, tracks=None (zero track map).
+                # Overlaid with the SAME sampled tracks for side-by-side comparison -- if this
+                # matches the with-track video, the model is ignoring the tracks.
+                if self.paired_no_track:
+                    nt_latents = self._sample(student, transformer, s, None, None)
+                    nt_px = student.decode_latents(nt_latents.permute(0, 2, 1, 3, 4))[0]
+                    nt_frames = self._overlay_tracks(nt_px, s, tp_s, tv_s)
+                    if self._is_main:
+                        fn_nt = os.path.join(out_dir, f"step{step:06d}_sample{i}_notrack.mp4")
+                        imageio.mimsave(fn_nt, nt_frames, fps=self.fps, macro_block_size=1)
+                        art = self.tracker.video(fn_nt, caption=f"[{step}] NO-track {s['caption'][:110]}")
+                        if art is not None:
+                            notrack_logs.append(art)
 
                 # One-time ground-truth reference (VAE round-trip + same sampled tracks).
                 if not self._ref_logged and self._is_main:
@@ -258,11 +277,14 @@ class TrackValidationCallback(Callback):
 
             if self._is_main and gen_logs:
                 logs: dict[str, Any] = {"track_val/generated": gen_logs}
+                if notrack_logs:
+                    logs["track_val/no_track"] = notrack_logs
                 if ref_logs and not self._ref_logged:
                     logs["track_val/reference_gt"] = ref_logs
                 self.tracker.log_artifacts(logs, step)
                 self._ref_logged = True
-                logger.info("TrackValidation: logged %d generated videos at step %d", len(gen_logs), step)
+                logger.info("TrackValidation: logged %d gen + %d no-track videos at step %d", len(gen_logs),
+                            len(notrack_logs), step)
         finally:
             if was_training:
                 transformer.train()
@@ -295,8 +317,9 @@ class TrackValidationCallback(Callback):
         cond20 = student._build_i2v_cond_concat(ff)  # [1,20,T,H,W]
         txt = s["text_embedding"].to(device, dtype)
         mask = s["text_attention_mask"].to(device, dtype)
-        tp = tp_in.to(device, dtype)  # [1,T,N,2] normalized (sampled subset)
-        tv = tv_in.to(device, dtype)  # [1,T,N] (sampled visibility)
+        # tp_in/tv_in None => no-track counterfactual (transformer builds a zero track map).
+        tp = tp_in.to(device, dtype) if tp_in is not None else None  # [1,T,N,2] normalized sampled subset
+        tv = tv_in.to(device, dtype) if tv_in is not None else None  # [1,T,N] sampled visibility
         img = s["clip_feature"].to(device, dtype)  # [1,SeqLen,Dim] CLIP frame-0
 
         _, _, T, H, W = ff.shape
