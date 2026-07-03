@@ -144,8 +144,6 @@ describe('CreateJobModal', () => {
       dmd_use_vsa: false,
       dmd_vsa_sparsity: 0.8,
       dmd_denoising_steps: '1000,757,522',
-      min_timestep_ratio: 0.02,
-      max_timestep_ratio: 0.98,
       real_score_guidance_scale: 3.5,
       generator_update_interval: 5,
       real_score_model_path: 'wan/t2v-1.3b',

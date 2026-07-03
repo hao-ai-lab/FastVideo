@@ -23,12 +23,13 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+import yaml
+
 from fastvideo.utils import get_mp_context
 from fastvideo_studio.database import Database
 from fastvideo_studio.training_config import (
-    build_training_args,
+    build_training_config,
     get_training_env,
-    get_training_module_info,
 )
 
 logger = logging.getLogger("fastvideo.studio.job_runner")
@@ -733,18 +734,8 @@ class JobRunner:
             self._save_job(job)
             return
 
-        module_info = get_training_module_info(job.workload_type, job.model_id)
-        if not module_info:
-            job.status = JobStatus.FAILED
-            job.error = f"Unknown workload type: {job.workload_type}"
-            job.finished_at = time.time()
-            self._save_job(job)
-            return
-
-        module_path, _pipeline_workload, use_vsa, _is_lora = module_info
-        dmd_use_vsa = (job.workload_type.startswith("dmd_") and getattr(job, "dmd_use_vsa", False))
         env = os.environ.copy()
-        env.update(get_training_env(use_vsa or dmd_use_vsa))
+        env.update(get_training_env())
 
         job_dict = {
             "model_id": job.model_id,
@@ -760,19 +751,28 @@ class JobRunner:
             "num_frames": job.num_frames,
             "validation_dataset_file": job.validation_dataset_file,
             "lora_rank": job.lora_rank,
-            "ltx2_first_frame_conditioning_p": job.ltx2_first_frame_conditioning_p,
         }
         if job.workload_type.startswith("dmd_") or job.workload_type.startswith("self_forcing_"):
             job_dict["dmd_use_vsa"] = getattr(job, "dmd_use_vsa", False)
             job_dict["dmd_vsa_sparsity"] = getattr(job, "dmd_vsa_sparsity", 0.8)
             job_dict["dmd_denoising_steps"] = getattr(job, "dmd_denoising_steps", "1000,757,522")
-            job_dict["min_timestep_ratio"] = getattr(job, "min_timestep_ratio", 0.02)
-            job_dict["max_timestep_ratio"] = getattr(job, "max_timestep_ratio", 0.98)
             job_dict["real_score_guidance_scale"] = getattr(job, "real_score_guidance_scale", 3.5)
             job_dict["generator_update_interval"] = getattr(job, "generator_update_interval", 5)
             job_dict["real_score_model_path"] = (getattr(job, "real_score_model_path", "") or job.model_id)
             job_dict["fake_score_model_path"] = (getattr(job, "fake_score_model_path", "") or job.model_id)
-        train_args = build_training_args(job_dict, job_output_dir)
+
+        try:
+            train_config = build_training_config(job_dict, job_output_dir)
+        except ValueError as exc:
+            job.status = JobStatus.FAILED
+            job.error = str(exc)
+            job.finished_at = time.time()
+            self._save_job(job)
+            return
+
+        config_path = os.path.join(job_output_dir, "train_config.yaml")
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(train_config, f, sort_keys=False)
 
         repo_root = Path(__file__).resolve().parent.parent
         torchrun_cmd = [
@@ -783,9 +783,12 @@ class JobRunner:
             str(job.num_gpus),
             "--nnodes",
             "1",
-            str(repo_root / module_path),
-        ] + train_args
-        buf.write(f"Starting training: {' '.join(torchrun_cmd[:12])}...")
+            "-m",
+            "fastvideo.train.entrypoint.train",
+            "--config",
+            config_path,
+        ]
+        buf.write(f"Starting training: {' '.join(torchrun_cmd)}")
         buf.phase = "starting"
 
         try:

@@ -96,14 +96,10 @@ export default function CreateJobModal({
   const [selectedValidationDatasetId, setSelectedValidationDatasetId] =
     React.useState('');
   const [loraRank, setLoraRank] = React.useState(32);
-  const [ltx2FirstFrameConditioningP, setLtx2FirstFrameConditioningP] =
-    React.useState(0.1);
   const [dmdUseVsa, setDmdUseVsa] = React.useState(false);
   const [dmdVsaSparsity, setDmdVsaSparsity] = React.useState(0.8);
   const [dmdDenoisingSteps, setDmdDenoisingSteps] =
     React.useState('1000,757,522');
-  const [minTimestepRatio, setMinTimestepRatio] = React.useState(0.02);
-  const [maxTimestepRatio, setMaxTimestepRatio] = React.useState(0.98);
   const [realScoreGuidanceScale, setRealScoreGuidanceScale] =
     React.useState(3.5);
   const [generatorUpdateInterval, setGeneratorUpdateInterval] =
@@ -113,10 +109,6 @@ export default function CreateJobModal({
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isLoadingModels, setIsLoadingModels] = React.useState(false);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
-
-  const isLtx2Model =
-    (modelId || '').toLowerCase().includes('ltx2') ||
-    (modelId || '').toLowerCase().includes('ltx-2');
 
   // Seed field values from the persisted default options each time the modal
   // OPENS. A naive port of the Svelte `$effect` would re-seed on every
@@ -161,8 +153,6 @@ export default function CreateJobModal({
       setDmdUseVsa(false);
       setDmdVsaSparsity(0.8);
       setDmdDenoisingSteps('1000,757,522');
-      setMinTimestepRatio(0.02);
-      setMaxTimestepRatio(0.98);
       setRealScoreGuidanceScale(3.5);
       setGeneratorUpdateInterval(5);
       setRealScoreModelPath('');
@@ -290,19 +280,11 @@ export default function CreateJobModal({
                   )?.name ?? '') || undefined
                 : undefined,
               lora_rank: loraRank,
-              ...(isLtx2Model
-                ? {
-                    ltx2_first_frame_conditioning_p:
-                      ltx2FirstFrameConditioningP,
-                  }
-                : {}),
               ...(workloadType === 'dmd_t2v'
                 ? {
                     dmd_use_vsa: dmdUseVsa,
                     dmd_vsa_sparsity: dmdVsaSparsity,
                     dmd_denoising_steps: dmdDenoisingSteps,
-                    min_timestep_ratio: minTimestepRatio,
-                    max_timestep_ratio: maxTimestepRatio,
                     real_score_guidance_scale: realScoreGuidanceScale,
                     generator_update_interval: generatorUpdateInterval,
                     real_score_model_path: realScoreModelPath || modelId,
@@ -546,20 +528,6 @@ export default function CreateJobModal({
                       disabled={isSubmitting}
                     />
                   )}
-                  {isLtx2Model && (
-                    <SliderRow
-                      id="modal-ltx2-first-frame"
-                      label="First Frame Conditioning"
-                      title="Probability of conditioning on the first frame during LTX-2 training"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={ltx2FirstFrameConditioningP}
-                      onChange={setLtx2FirstFrameConditioningP}
-                      disabled={isSubmitting}
-                      format={(v) => v.toFixed(2)}
-                    />
-                  )}
                   {workloadType === 'dmd_t2v' && (
                     <>
                       <ToggleRow
@@ -598,28 +566,6 @@ export default function CreateJobModal({
                           disabled={isSubmitting}
                         />
                       </FieldRow>
-                      <SliderRow
-                        id="modal-min-timestep-ratio"
-                        label="Min Timestep Ratio"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={minTimestepRatio}
-                        onChange={setMinTimestepRatio}
-                        disabled={isSubmitting}
-                        format={(v) => v.toFixed(2)}
-                      />
-                      <SliderRow
-                        id="modal-max-timestep-ratio"
-                        label="Max Timestep Ratio"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={maxTimestepRatio}
-                        onChange={setMaxTimestepRatio}
-                        disabled={isSubmitting}
-                        format={(v) => v.toFixed(2)}
-                      />
                       <SliderRow
                         id="modal-real-score-guidance-scale"
                         label="Real Score Guidance Scale"
