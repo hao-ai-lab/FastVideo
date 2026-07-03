@@ -85,7 +85,8 @@ python - <<'PY'
 import torch
 from fastvideo_kernel import Int8Linear
 lin  = torch.nn.Linear(512, 256, bias=False).cuda().to(torch.bfloat16)
-qlin = Int8Linear.from_linear(lin, quantize=True)        # compiled quant_cuda
+# .cuda() is required: from_linear() leaves the int8 buffers on the CPU
+qlin = Int8Linear.from_linear(lin, quantize=True).cuda()  # compiled quant_cuda
 x    = torch.randn(128, 512, device="cuda", dtype=torch.bfloat16)
 y, ref = qlin(x), lin(x)                                  # compiled gemm_cuda
 rel = (y.float() - ref.float()).norm() / ref.float().norm()
@@ -108,8 +109,7 @@ uv pip install -e .
 ```
 
 Or `cd fastvideo-kernel && ./build.sh`, which auto-detects the arch and does the
-same compile (it runs a global `git submodule update --init --recursive`, which
-also clones `vbench`).
+same compile (it initializes only the kernel's `cutlass` and `tk` submodules).
 
 ## Optional: flash-attn
 
