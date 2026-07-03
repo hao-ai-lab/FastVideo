@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Run a one-step interleaved generation trace through FastVideo.
 
-This is intentionally small: it uses the fallback single-prompt planner and an
-accept-all critic, so it exercises the native Interleave helper layer without
-requiring InterleaveThinker planner/critic checkpoints.
+This is intentionally small: it uses the single-prompt planner and an
+accept-all critic from the app-level Interleave helper package.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from fastvideo.api.schema import (
     OffloadConfig,
     PipelineSelection,
 )
-from fastvideo.workflow.interleave_thinker import (
+from apps.interleave_thinker import (
     AcceptAllCritic,
     FastVideoImageGeneratorBackend,
     InterleaveOrchestrator,

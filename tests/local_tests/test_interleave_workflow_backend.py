@@ -12,18 +12,18 @@ from fastvideo.api.compat import (
     legacy_generate_call_to_request,
 )
 from fastvideo.api.results import GenerationResult
-from fastvideo.workflow.interleave_thinker.generator import (
+from apps.interleave_thinker.generator import (
     FastVideoImageGeneratorBackend,
     NanoBananaImageGeneratorBackend,
 )
-from fastvideo.workflow.interleave_thinker.orchestrator import InterleaveOrchestrator
-from fastvideo.workflow.interleave_thinker.schema import (
+from apps.interleave_thinker.orchestrator import InterleaveOrchestrator
+from apps.interleave_thinker.schema import (
     CriticDecision,
     GeneratedImage,
     InterleaveEditRequest,
     PlannedInterleaveStep,
 )
-from fastvideo.workflow.interleave_thinker.trace import (
+from apps.interleave_thinker.trace import (
     save_trace,
     trace_to_dict,
 )

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastvideo.workflow.interleave_thinker.schema import (
+from apps.interleave_thinker.schema import (
     CriticDecision,
     GeneratedImage,
     InterleaveAttempt,

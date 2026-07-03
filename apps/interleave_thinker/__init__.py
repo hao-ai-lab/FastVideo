@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""InterleaveThinker workflow helpers for FastVideo."""
+"""InterleaveThinker example app helpers."""
 
-from fastvideo.workflow.interleave_thinker.config import (
+from apps.interleave_thinker.config import (
     InterleaveCriticConfig,
     InterleaveImageBackendConfig,
     InterleavePlannerConfig,
@@ -10,7 +10,7 @@ from fastvideo.workflow.interleave_thinker.config import (
     load_interleave_run_config,
     resolve_interleave_instruction,
 )
-from fastvideo.workflow.interleave_thinker.evaluation import (
+from apps.interleave_thinker.evaluation import (
     InterleavePromptItem,
     InterleavePromptResult,
     InterleavePromptSetSummary,
@@ -20,37 +20,36 @@ from fastvideo.workflow.interleave_thinker.evaluation import (
     run_interleave_prompt_set_config,
     save_prompt_set_summary,
 )
-from fastvideo.workflow.interleave_thinker.generator import (
+from apps.interleave_thinker.generator import (
     FastVideoImageGeneratorBackend,
     ImageGeneratorBackend,
 )
-from fastvideo.workflow.interleave_thinker.orchestrator import (
+from apps.interleave_thinker.orchestrator import (
     AcceptAllCritic,
     CriticProvider,
     InterleaveOrchestrator,
     PlannerProvider,
     SinglePromptPlanner,
 )
-from fastvideo.workflow.interleave_thinker.runner import (
+from apps.interleave_thinker.runner import (
     InterleaveRunResult,
     run_interleave_config,
 )
-from fastvideo.workflow.interleave_thinker.schema import (
+from apps.interleave_thinker.schema import (
     CriticDecision,
     CriticInput,
     GeneratedImage,
     InterleaveAttempt,
     InterleaveEditRequest,
-    InterleaveEditResponse,
     InterleaveTrace,
     PlannedInterleaveStep,
     PlannerInput,
 )
-from fastvideo.workflow.interleave_thinker.trace import (
+from apps.interleave_thinker.trace import (
     save_trace,
     trace_to_dict,
 )
-from fastvideo.workflow.interleave_thinker.trace_eval import (
+from apps.interleave_thinker.trace_eval import (
     InterleaveTraceEvaluationSummary,
     InterleaveTraceMetrics,
     discover_interleave_trace_paths,
@@ -72,7 +71,6 @@ __all__ = [
     "InterleaveAttempt",
     "InterleaveCriticConfig",
     "InterleaveEditRequest",
-    "InterleaveEditResponse",
     "InterleaveImageBackendConfig",
     "InterleaveOrchestrator",
     "InterleavePlannerConfig",

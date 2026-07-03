@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Config-driven native InterleaveThinker orchestration runner."""
+"""Config-driven runner for the InterleaveThinker example app."""
 
 from __future__ import annotations
 
@@ -7,27 +7,27 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastvideo.workflow.interleave_thinker.config import (
+from apps.interleave_thinker.config import (
     InterleaveCriticConfig,
     InterleaveImageBackendConfig,
     InterleavePlannerConfig,
     InterleaveRunConfig,
     resolve_interleave_instruction,
 )
-from fastvideo.workflow.interleave_thinker.generator import (
+from apps.interleave_thinker.generator import (
     FastVideoImageGeneratorBackend,
     ImageGeneratorBackend,
     NanoBananaImageGeneratorBackend,
 )
-from fastvideo.workflow.interleave_thinker.orchestrator import (
+from apps.interleave_thinker.orchestrator import (
     AcceptAllCritic,
     CriticProvider,
     InterleaveOrchestrator,
     PlannerProvider,
     SinglePromptPlanner,
 )
-from fastvideo.workflow.interleave_thinker.schema import InterleaveTrace
-from fastvideo.workflow.interleave_thinker.trace import save_trace
+from apps.interleave_thinker.schema import InterleaveTrace
+from apps.interleave_thinker.trace import save_trace
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ def run_interleave_config(
             initial_image_path=config.interleave.initial_image_path,
             metadata={
                 "image_backend": config.image_backend.kind,
-                "planner": config.planner.kind,
+                "planner": "single_prompt",
                 "critic": config.critic.kind,
             },
         )
@@ -83,19 +83,13 @@ def resolve_trace_path(config: InterleaveRunConfig) -> Path:
 
 
 def build_planner(config: InterleavePlannerConfig) -> PlannerProvider:
-    if config.kind == "single_prompt":
-        return SinglePromptPlanner(max_attempts=config.max_attempts_per_step)
-
-    raise ValueError("InterleaveThinker planner models require the deferred training integration PR")
+    return SinglePromptPlanner(max_attempts=config.max_attempts_per_step)
 
 
 def build_critic(config: InterleaveCriticConfig) -> CriticProvider | None:
     if config.kind == "none":
         return None
-    if config.kind == "accept_all":
-        return AcceptAllCritic()
-
-    raise ValueError("InterleaveThinker critic models require the deferred training integration PR")
+    return AcceptAllCritic()
 
 
 def build_image_backend(config: InterleaveRunConfig) -> tuple[ImageGeneratorBackend, Callable[[], None]]:

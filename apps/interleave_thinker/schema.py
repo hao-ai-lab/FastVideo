@@ -1,24 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Schemas for InterleaveThinker-style orchestration."""
+"""Schemas for the InterleaveThinker example app."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 
 class InterleaveEditRequest(BaseModel):
     """Image edit/generation request used by Interleave orchestration backends.
 
-    InterleaveThinker sends `num_inference_step` while FastVideo uses
-    `num_inference_steps`; accept both and let the plural form win when both are
-    provided. Unknown fields are tolerated so model-specific knobs can pass
-    through without forcing every backend to implement them immediately.
+    Some image-edit callers use `num_inference_step` while FastVideo uses
+    `num_inference_steps`; accept both and let the plural form win when both
+    are provided.
     """
-
-    model_config = ConfigDict(extra="allow")
 
     prompt: str
     image: str | None = None
@@ -31,20 +28,9 @@ class InterleaveEditRequest(BaseModel):
     guidance_scale: float | None = None
     true_cfg_scale: float | None = None
     output_format: Literal["png", "jpeg", "jpg", "webp"] | None = "png"
-    enhance_prompt: bool | None = None
 
     def resolved_num_inference_steps(self) -> int | None:
         return self.num_inference_steps if self.num_inference_steps is not None else self.num_inference_step
-
-
-class InterleaveEditResponse(BaseModel):
-    success: bool
-    edited_image: str | None = None
-    file_path: str | None = None
-    prompt: str | None = None
-    inference_time_s: float | None = None
-    error: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass(slots=True)

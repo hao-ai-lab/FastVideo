@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Typed config for native interleaved generation workflows."""
+"""Typed config for the InterleaveThinker example app."""
 
 from __future__ import annotations
 
@@ -39,47 +39,12 @@ class InterleaveImageBackendConfig:
 
 @dataclass
 class InterleavePlannerConfig:
-    kind: Literal["single_prompt", "interleave_thinker"] = "single_prompt"
-    init_from: str | None = None
-    processor_from: str | None = None
-    load_backend: bool = True
-    trainable: bool = False
-    image_dir: str = ""
-    torch_dtype: str = "auto"
-    device_map: Any | None = None
-    attn_implementation: str | None = None
-    trust_remote_code: bool = False
-    use_cache: bool = False
-    max_prompt_length: int = 16384
-    max_response_length: int = 4096
-    lora: dict[str, Any] | None = None
-    num_generations: int = 1
-    temperature: float = 0.0
-    top_p: float = 1.0
-    max_new_tokens: int | None = None
     max_attempts_per_step: int = 2
 
 
 @dataclass
 class InterleaveCriticConfig:
-    kind: Literal["none", "accept_all", "interleave_thinker"] = "accept_all"
-    init_from: str | None = None
-    processor_from: str | None = None
-    load_backend: bool = True
-    trainable: bool = False
-    image_dir: str = ""
-    torch_dtype: str = "auto"
-    device_map: Any | None = None
-    attn_implementation: str | None = None
-    trust_remote_code: bool = False
-    use_cache: bool = False
-    max_prompt_length: int = 16384
-    max_response_length: int = 4096
-    lora: dict[str, Any] | None = None
-    num_generations: int = 1
-    temperature: float = 0.0
-    top_p: float = 1.0
-    max_new_tokens: int | None = None
+    kind: Literal["none", "accept_all"] = "accept_all"
 
 
 @dataclass
@@ -154,11 +119,7 @@ def validate_interleave_run_config(
         resolve_interleave_instruction(config)
     if config.image_backend.kind == "fastvideo" and config.generator is None:
         raise ValueError("Interleave config with image_backend.kind=fastvideo requires a generator config")
-    if config.planner.kind == "interleave_thinker" and config.planner.max_new_tokens is not None:
-        _require_positive_int(config.planner.max_new_tokens, "planner.max_new_tokens")
     _require_positive_int(config.planner.max_attempts_per_step, "planner.max_attempts_per_step")
-    if config.critic.kind == "interleave_thinker" and config.critic.max_new_tokens is not None:
-        _require_positive_int(config.critic.max_new_tokens, "critic.max_new_tokens")
 
 
 def _apply_interleave_runtime_fields(

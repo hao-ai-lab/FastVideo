@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from fastvideo.workflow.interleave_thinker import (
+from apps.interleave_thinker import (
     GeneratedImage,
     InterleaveEditRequest,
     InterleavePromptItem,
@@ -17,8 +17,8 @@ from fastvideo.workflow.interleave_thinker import (
     run_interleave_prompt_set,
     run_interleave_config,
 )
-from fastvideo.workflow.interleave_thinker.orchestrator import SinglePromptPlanner
-from fastvideo.workflow.interleave_thinker.schema import PlannerInput
+from apps.interleave_thinker.orchestrator import SinglePromptPlanner
+from apps.interleave_thinker.schema import PlannerInput
 
 
 def test_interleave_run_config_loads_prompt_and_request_defaults(tmp_path: Path) -> None:
@@ -223,7 +223,6 @@ image_backend:
   kind: fastvideo
 
 planner:
-  kind: single_prompt
   max_attempts_per_step: 1
 
 critic:
