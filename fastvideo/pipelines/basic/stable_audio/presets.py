@@ -40,7 +40,7 @@ STABLE_AUDIO_OPEN_1_0_BASE = InferencePreset(
     description=("Stability AI Stable Audio Open 1.0 text-to-audio. Generates up "
                  "to ~47.5s of stereo 44.1 kHz audio per call. Default duration "
                  "is 10s; raise via `audio_end_in_s` up to the model max."),
-    workload_type="t2v",  # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28)
+    workload_type="t2v",  # Compatibility placeholder until WorkloadType supports T2A.
     stage_schemas=(_DENOISE_STAGE, ),
     defaults=dict(_SHARED_DEFAULTS),
 )

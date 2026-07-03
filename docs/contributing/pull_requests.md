@@ -1,40 +1,20 @@
-# Contributing via Pull Requests
+# Contributing Via Pull Requests
 
-This guide walks through the PR workflow: title format, labels, CI pipeline, and getting
-your changes merged.
+This page is the contributor workflow for opening, validating, and merging a
+FastVideo PR. For the full CI/CD implementation details, see
+[CI/CD Architecture](ci_architecture.md).
 
----
+## PR Title
 
-## PR Title Format (Required)
+Every PR targeting `main` must start with a bracketed type tag:
 
-Every PR targeting `main` must start with a type tag in square brackets. This is checked by
-Mergify before any merge is allowed.
-
-**Format:**
-
-```
+```text
 [type] Short description of the change
 ```
 
-**Valid type tags:**
+Common examples:
 
-| Tag | When to use |
-|-----|-------------|
-| `[feat]` or `[feature]` | New feature or capability |
-| `[bugfix]` or `[fix]` | Bug fix |
-| `[refactor]` | Code restructuring with no behavior change |
-| `[perf]` | Performance improvement |
-| `[ci]` | CI/CD or build tooling changes |
-| `[infra]` | Repo infrastructure: agent tooling, debug hooks, conversion scripts, dev infra |
-| `[doc]` or `[docs]` | Documentation only |
-| `[misc]` or `[chore]` | Housekeeping, dependency bumps, minor cleanup |
-| `[kernel]` | CUDA kernel changes in `fastvideo-kernel/` |
-| `[new-model]` | Adding a new model or pipeline |
-| `[skill]` or `[skills]` | Agent skills under `.agents/skills/` or `.claude/skills/` |
-
-**Examples:**
-
-```
+```text
 [feat] Add causal Wan 2.2 I2V pipeline
 [bugfix] Fix VAE temporal tiling corruption on H100
 [refactor] Restructure distributed attention dispatch
@@ -44,184 +24,119 @@ Mergify before any merge is allowed.
 [skill] Add add-model agent skill
 ```
 
-If your title is missing the tag, Mergify will post a comment listing the valid formats.
-Update the title and the check will re-evaluate automatically.
-
----
+Accepted tags are `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`,
+`ci`, `infra`, `doc`, `docs`, `misc`, `chore`, `kernel`, `new-model`, `skill`,
+and `skills`. Mergify checks this before merge. The full tag-to-label mapping
+is in [CI/CD Architecture](ci_architecture.md#title-tags-and-labels).
 
 ## Labels
 
-Labels are applied automatically based on your PR title and the files you changed. You don't
-need to set them manually.
+Most labels are automatic:
 
-**Type label** — set from the `[tag]` in your title:
-`type: feat`, `type: bugfix`, `type: refactor`, `type: perf`, `type: ci`, `type: infra`,
-`type: docs`, `type: misc`, `type: new-model`, `type: skill`
+- Type labels come from the PR title tag.
+- Scope labels come from the files you changed.
+- `needs-rebase` is added and removed by Mergify when conflicts appear or are
+  resolved.
 
-**Scope labels** — set from which files you modified (multiple labels can apply):
-`scope: training`, `scope: inference`, `scope: attention`, `scope: kernel`, `scope: data`,
-`scope: infra`, `scope: distributed`, `scope: docs`, `scope: ui`, `scope: model`
+The important process labels are:
 
-**Process labels** — set during review and merge:
+| Label | Meaning |
+|---|---|
+| `ready` | The PR is ready for Full Suite and auto-merge consideration. |
+| `needs-rebase` | The PR has merge conflicts with `main`. |
+| `do-not-merge` | A maintainer has blocked merge. |
 
-| Label | Who sets it | Meaning |
-|-------|-------------|---------|
-| `ready` | You (`/merge` comment) or a maintainer | Triggers Full Suite and enables auto-merge |
-| `needs-rebase` | Mergify (automatic) | Your PR has conflicts; rebase against `main` |
-| `do-not-merge` | Maintainer | Blocks merge regardless of CI status |
+## CI Summary
 
----
+FastVideo has three validation tiers:
 
-## CI Pipeline
+| Tier | Runs when | What it does |
+|---|---|---|
+| Pre-commit | Pull requests and `/test pre-commit` | Formatting, linting, typing, spelling, Markdown, workflow syntax, filename checks |
+| Fastcheck | PR Buildkite builds | Path-filtered component and unit checks on Modal GPU runners |
+| Full Suite | `/merge`, `ready`, `/test full`, or new pushes to ready PRs | Path-filtered integration, SSIM, training, eval, API, and performance checks |
 
-Three tiers run automatically on every PR.
+See [CI/CD Architecture](ci_architecture.md#ci-tiers) for exact jobs, path
+filters, and workflow files.
 
-**Tier 1: Pre-commit (~2 min) — runs on every push**
+## Merge Flow
 
-GitHub Actions checks formatting, linting, type correctness, and spelling using pre-commit
-hooks: yapf, ruff, mypy, codespell, pymarkdown, actionlint, and check-filenames.
-
-**Tier 2: Fastcheck (~10-20 min) — runs on every push, path-filtered**
-
-Buildkite runs GPU tests only for the components you changed. If you only modified
-`fastvideo/models/vaes/`, only VAE Tests run. Tests run in parallel.
-
-**Tier 3: Full Suite (~60-90 min) — triggered by the `ready` label**
-
-When you comment `/merge` (or a maintainer adds the `ready` label), Buildkite runs the
-complete test suite on your PR branch: SSIM regression, LoRA inference and training,
-distillation, self-forcing, VSA, VMoBA, performance benchmarks, and API server tests.
-
----
-
-## Getting Your PR Merged
-
-**Step-by-step:**
-
-1. Open a PR with a title that starts with a valid `[type]` tag.
-2. Push your changes. Pre-commit and Fastcheck run automatically.
-3. Fix any pre-commit failures locally (`pre-commit run --all-files`) and push again.
+1. Open a PR with a valid `[type]` title.
+2. Push your changes. Pre-commit and Fastcheck run for the PR.
+3. Fix pre-commit failures locally with `pre-commit run --all-files`.
 4. Wait for at least one approving review.
-5. Once approved and pre-commit is green, comment `/merge` on the PR.
-6. The `ready` label is added, which triggers the Full Suite on your PR branch.
-7. Mergify also auto-rebases your branch against `main` if it is behind and conflict-free.
-8. If all Full Suite tests pass and all merge conditions are met (approval, valid title,
-   pre-commit green, fastcheck green, no draft, no conflicts), Mergify squash-merges to
-   `main` automatically. Your branch is deleted.
-9. If a Full Suite test fails, check the Buildkite build log for the failing step. Fix the
-   issue, push, and comment `/merge` again. You can also re-run individual failed tests
-   with `/test <name>` — see below.
+5. When the PR is approved and ready, comment `/merge`.
+6. `/merge` adds `ready` and triggers the Full Suite for the PR branch.
+7. If all required checks pass, Mergify squash-merges the PR to `main`.
+8. If Full Suite fails, fix the regression, push again, and re-run `/merge` or
+   the failed test.
 
-!!! note
-    Only contributors with write permission to the repository can trigger slash commands.
-    If you're an external contributor, ask a maintainer to run `/merge` or add the `ready`
-    label for you.
-
----
+Only contributors with repository write permission can use slash commands. If
+you are an external contributor, ask a maintainer to run `/merge` or add
+`ready` after review.
 
 ## Running Tests On Demand
 
-Comment on your PR to trigger specific tests independently of the auto-merge flow.
+Use PR comments to re-run specific checks:
 
-**Trigger the entire Full Suite:**
-
-```
-/test full
-```
-
-**Trigger the Fastcheck suite:**
-
-```
+```text
+/test pre-commit
 /test fastcheck
+/test full
+/test ssim
+/test performance
+/test train-framework
 ```
 
-**Trigger individual tests:**
+All supported `/test` names and their `TEST_TYPE` mappings are listed in
+[CI/CD Architecture](ci_architecture.md#slash-commands).
 
-```
-/test encoder          # Encoder component tests
-/test vae              # VAE component tests
-/test transformer      # Transformer / DiT tests
-/test kernel           # CUDA kernel tests
-/test unit             # Unit tests
-
-/test ssim             # SSIM regression tests
-/test training         # Training pipeline tests
-/test lora-inference   # LoRA inference tests
-/test lora-training    # LoRA training tests
-/test distillation     # DMD distillation tests
-/test self-forcing     # Self-Forcing distillation tests
-/test vsa              # VSA training tests
-/test vmoba            # VMoBA inference tests
-/test performance      # Performance benchmarks
-/test api              # API server integration tests
-/test pre-commit       # Pre-commit checks on PR code
-```
-
-The workflow reacts with a 🚀 emoji to confirm the command was received.
-
-When you re-run an individual test with `/test <name>`, the new result overwrites the
-original failed check (same Buildkite check name). Once all tests in a tier pass, the
-`fastcheck-passed` or `full-suite-passed` status is automatically updated.
-
----
+When a direct test succeeds, the aggregate `fastcheck-passed` or
+`full-suite-passed` status is refreshed automatically if all jobs in that tier
+are now green.
 
 ## Troubleshooting
 
-### Pre-commit fails
+### Pre-commit Fails
 
-Run locally to reproduce and auto-fix:
+Run the project hook chain locally:
 
 ```bash
-# Install pre-commit if needed
 uv pip install pre-commit
-pre-commit install
-
-# Run all checks on all files
+pre-commit install --hook-type pre-commit --hook-type commit-msg
 pre-commit run --all-files
 ```
 
-Common quick fixes:
+Commit any fixes made by the hooks, then push again.
 
-- **yapf**: `yapf -i <file>` (Python formatting)
-- **ruff**: `ruff check --fix <file>` (linting)
-- **codespell**: `codespell --write-changes <file>` (spelling)
+### PR Title Check Fails
 
-### PR title format check fails
+Update the PR title so it starts with an accepted bracketed tag, for example
+`[bugfix] Fix tensor-parallel shape guard`. Mergify re-evaluates after the
+title changes.
 
-Update your title to start with a valid type tag. The Mergify merge protection check
-re-evaluates automatically after you save the title.
+### The PR Has `needs-rebase`
 
-Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `infra`, `doc`,
-`docs`, `misc`, `chore`, `kernel`, `new-model`, `skill`, `skills`
-
-### My PR has merge conflicts (`needs-rebase` label)
-
-Rebase against `main` and force-push:
+Rebase against `main` and force-push safely:
 
 ```bash
 git fetch origin main
 git rebase origin/main
-# Resolve any conflicts, then:
+# Resolve conflicts, then:
 git push --force-with-lease
 ```
 
-Mergify removes the `needs-rebase` label automatically once conflicts are resolved.
+Mergify removes `needs-rebase` after conflicts are resolved.
 
-### Full Suite failed after `/merge`
+### Full Suite Fails
 
-The Full Suite found a regression. Check the failing Buildkite step's output for assertion
-errors or tracebacks.
+The failing Buildkite step is the source of truth. Common causes are:
 
-Common causes:
+- a real regression from the PR,
+- missing dependencies or secrets,
+- GPU memory pressure or wrong hardware assumptions,
+- kernel build failures after `fastvideo-kernel/` changes,
+- stale SSIM or performance baselines after an intentional behavior change.
 
-- Test failures caused by your code changes
-- Missing dependency in `pyproject.toml`
-- GPU memory issue (some tests require specific hardware like L40S or H100)
-- Kernel build failure (if you changed `fastvideo-kernel/`)
-
-After fixing, push and comment `/merge` again.
-
-### I'm an external contributor without write permission
-
-You can't use slash commands directly. After your PR is approved, ask a maintainer to
-comment `/merge` or add the `ready` label.
+After fixing the issue, push again and use `/merge` or a targeted `/test`
+command.

@@ -443,7 +443,7 @@ class WanModel(ModelBase):
                 patch_size=patch_size,
                 VSA_sparsity=tc.vsa_sparsity,
                 device=self.device,
-                cache_tile_buf=False,
+                cache_tile_buf=tc.vsa_cache_tile_buf,
             )
         elif (envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN"):
             if (not is_vmoba_available() or VideoMobaAttentionMetadataBuilder is None):

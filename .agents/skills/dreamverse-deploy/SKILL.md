@@ -8,29 +8,28 @@ description: Use when redeploying the migrated Dreamverse app backend and fronte
 **Scope:** project (lives in this repo at `.agents/skills/dreamverse-deploy/`)
 
 **When to use:** you want to (re)launch the migrated `apps/dreamverse/` backend
-+ frontend on this dev node, pinned to a specific physical GPU. Tears down
+and frontend on this dev node, pinned to a specific physical GPU. Tears down
 any existing deploy on the same ports first, then boots fresh and waits for
 both `/readyz` and the FE root to return 200.
 
-**Pairs with:** [`integration-plan.md`](../../memory/dreamverse-integration/integration-plan.md)
-"Local GPU4 verification hook" + [`decisions-log.md D-19`](../../memory/dreamverse-integration/decisions-log.md#d-19).
-
 ## Prerequisites
 
-- Working tree on a branch that has `apps/dreamverse/` (e.g. `will/dreamverse-monorepo`)
+- Working tree containing `apps/dreamverse/`
+- `dreamverse-server` installed from this checkout; if missing, run
+  `uv pip install -e ".[dreamverse]"`
 - Local conda env at `~/miniconda3/envs/fv-main/` with `flashinfer-python`,
   `cerebras-cloud-sdk`, `openai` installed (override the default path with
   `DREAMVERSE_PYTHON=/path/to/python`)
 - `~/.env` exporting `CEREBRAS_API_KEY`, `GROQ_API_KEY`, etc.
 - npm available in `$PATH` (or set `NPM=/path/to/npm`)
 - `gcc-13` + `g++-13` at `/usr/bin/` (workaround for nvcc gcc-15 rejection)
-- **Recommended:** native ffmpeg env file at `apps/dreamverse/scripts/ffmpeg-env.sh`
-  (built once via `bash apps/dreamverse/scripts/install_native_ffmpeg.sh`).
-  When present, the deploy sources it inside the backend setsid block so the
-  worker spawns ffmpeg from `$HOME/opt/ffmpeg-native/bin/ffmpeg` (LTO + libx264
-  + native arch) instead of the system `/usr/bin/ffmpeg`. When missing, the
-  deploy falls back to system ffmpeg with a warning. Set
-  `DREAMVERSE_REQUIRE_NATIVE_FFMPEG=true` to make the missing env file a hard
+- **Recommended:** native ffmpeg at `$HOME/opt/ffmpeg-native/bin/ffmpeg`, built
+  via `bash apps/dreamverse/scripts/install_native_ffmpeg.sh`. The deploy
+  detects that binary directly and exports it for the backend. The installer's
+  generated `apps/dreamverse/scripts/ffmpeg-env.sh` is for manual launches.
+  When the binary is missing, the deploy falls back to system ffmpeg with a
+  warning. Set
+  `DREAMVERSE_REQUIRE_NATIVE_FFMPEG=true` to make the missing binary a hard
   failure.
 
 If any required prereq is missing, the script fails fast with a clear message.
@@ -38,23 +37,22 @@ If any required prereq is missing, the script fails fast with a clear message.
 ## Usage
 
 ```bash
-# Deploy on GPU 4 with default ports (backend 8009, FE 5274) — torch.compile
-# and warmup are both OFF by default so first-segment cold start is ~45s
-# instead of ~3-4min.
-./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4
+# Deploy on GPU 4 with the current web port. The legacy helper default remains
+# 5274, so pass 5299 explicitly. Torch compile and warmup are both off.
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4 8009 5299
 
 # Deploy on GPU 6 with custom ports
 ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 6 8089 5275
 
 # Deploy on GPU 0 with warmup enabled
-./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh --warmup 0
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh --warmup 0 8009 5299
 
 # Deploy with torch.compile enabled (max-autotune; first segment ~3-4min,
 # subsequent segments save ~3s — only worth it for benchmarking)
-./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh --torch-compile 4
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh --torch-compile 4 8009 5299
 
 # Deploy with both warmup AND torch.compile enabled
-./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh --warmup --torch-compile 4
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh --warmup --torch-compile 4 8009 5299
 
 # Flags can appear before, between, or after positional args
 ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4 8089 5275 --warmup
@@ -86,9 +84,9 @@ Flags can appear in any position relative to the positional args. Explicit flag 
 | `DREAMVERSE_WARMUP` | `false` | Same as `--warmup`/`--no-warmup`. Flag takes precedence |
 | `DREAMVERSE_TORCH_COMPILE` | `false` | Same as `--torch-compile`/`--no-torch-compile`. Flag takes precedence |
 | `DREAMVERSE_NVENC` | `false` | Same as `--nvenc`/`--no-nvenc`. Flag takes precedence |
-| `DREAMVERSE_PYTHON` | `~/miniconda3/envs/fv-main/bin/python` | Conda env python used for prereq probes (flashinfer import). The wrapper at `apps/dreamverse/scripts/dreamverse-server` still resolves python via the `.venv` symlink, which points at the same interpreter on this dev node |
+| `DREAMVERSE_PYTHON` | `~/miniconda3/envs/fv-main/bin/python` | Conda environment used for the flashinfer prerequisite probe; `dreamverse-server` itself is resolved from `PATH` |
 | `DREAMVERSE_REPO_ROOT` | git rev-parse | Repo root override |
-| `DREAMVERSE_LOG_DIR` | `/tmp/opencode/dreamverse-deploy` | Where to write `backend.log` / `frontend.log` |
+| `DREAMVERSE_LOG_DIR` | `/tmp/opencode/dreamverse-deploy` | Directory for the per-GPU backend and per-port frontend logs |
 | `DREAMVERSE_REQUIRE_NATIVE_FFMPEG` | `false` | If `true`, fail when `$HOME/opt/ffmpeg-native/bin/ffmpeg` is absent |
 
 ## What it does
@@ -106,12 +104,14 @@ Flags can appear in any position relative to the positional args. Explicit flag 
    - `CC=/usr/bin/gcc-13 CXX=/usr/bin/g++-13 CUDAHOSTCXX=/usr/bin/g++-13`
    - `NVCC_PREPEND_FLAGS="-ccbin /usr/bin/gcc-13 -allow-unsupported-compiler"`
    - `FASTVIDEO_FFMPEG_BIN=$HOME/opt/ffmpeg-native/bin/ffmpeg` +
-     `FASTVIDEO_VIDEO_CODEC=libx264` (when the native binary exists)
-5. Launches the backend via `apps/dreamverse/scripts/dreamverse-server` in a
-   detached `setsid` session, captures PID.
-6. Polls `/readyz` until 200 (max 5 min).
-7. Launches the frontend via `npm run dev:devtools` in a detached session,
-   captures PID.
+     `FASTVIDEO_VIDEO_CODEC=<libx264|h264_nvenc>` (when the native binary exists)
+5. Launches the installed `dreamverse-server` console command in a detached
+   `setsid` session and captures its PID.
+6. Polls `/readyz` until 200. The budget is 5 minutes by default, 8 minutes
+   with one startup optimization enabled, and 15 minutes with both warmup and
+   `torch.compile` enabled.
+7. Launches the devtools frontend through npm in a detached session and
+   captures its PID.
 8. Polls FE `/` until 200 (max 60s).
 9. Prints URLs, PIDs, and log paths.
 
@@ -122,13 +122,13 @@ Flags can appear in any position relative to the positional args. Explicit flag 
 - Does not run Playwright. Use the e2e wrapper separately:
   ```bash
   cd apps/dreamverse/web
-  PLAYWRIGHT_SKIP_WEBSERVER=1 BACKEND_URL=http://127.0.0.1:8009 \
-    PLAYWRIGHT_BASE_URL=http://127.0.0.1:5274 \
+  PLAYWRIGHT_SKIP_WEBSERVER=1 BACKEND_HOST=127.0.0.1 BACKEND_PORT=8009 \
+    PLAYWRIGHT_BASE_URL=http://127.0.0.1:5299 \
     NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \
     npm exec -- playwright test
   ```
-  The fast suite (8 specs, ~5s) runs by default; the long-running
-  two-segment audio-continuation spec is gated behind
+  The standard suite runs by default; the long-running two-segment
+  audio-continuation spec is gated behind
   `PLAYWRIGHT_LONG_RUNNING=1` (see below).
 
 ## Long-running e2e (paired with `--warmup --torch-compile`)
@@ -136,19 +136,20 @@ Flags can appear in any position relative to the positional args. Explicit flag 
 [`apps/dreamverse/web/e2e/long-running-segments.spec.ts`](../../../apps/dreamverse/web/e2e/long-running-segments.spec.ts)
 drives a real two-segment session through the FE, captures every WS
 frame, and asserts segments 1 AND 2 both reach `media_segment_complete`
-with at least one binary fMP4 chunk per segment — the canonical
-regression guard against the D-20 BrokenPipe pattern documented in
-[`decisions-log.md D-20`](../../memory/dreamverse-integration/decisions-log.md#d-20).
+with at least one binary fMP4 chunk per segment. It guards against the
+BrokenPipe regression previously caused by dropped LTX-2 audio continuation
+kwargs.
 Skipped by default. Enable with:
 
 ```bash
 ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh \
-    --warmup --torch-compile 4
+    --warmup --torch-compile 4 8009 5299
 
 cd apps/dreamverse/web
 PLAYWRIGHT_SKIP_WEBSERVER=1 \
-  BACKEND_URL=http://127.0.0.1:8009 \
-  PLAYWRIGHT_BASE_URL=http://127.0.0.1:5274 \
+  BACKEND_HOST=127.0.0.1 \
+  BACKEND_PORT=8009 \
+  PLAYWRIGHT_BASE_URL=http://127.0.0.1:5299 \
   NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \
   PLAYWRIGHT_LONG_RUNNING=1 \
   npm exec -- playwright test e2e/long-running-segments.spec.ts
@@ -180,11 +181,16 @@ children survive, GPU stays full, next deploy OOMs.
 
 ## Notes
 
-- The wrapper at `apps/dreamverse/scripts/dreamverse-server` is what makes
-  the migrated `apps/dreamverse/server/main.py` run instead of the legacy
-  conda-installed Dreamverse — see [decisions-log.md D-19](../../memory/dreamverse-integration/decisions-log.md#d-19) for why
-  this matters.
+- The installed `dreamverse-server` console command enters
+  `apps/dreamverse/dreamverse/server_entry.py`, which loads the current
+  Dreamverse runtime from `apps/dreamverse/dreamverse/`.
 - The B200 / sm_100a NVCC flags are mandatory on this dev node because the
-  conda toolchain ships gcc-15, which nvcc rejects. If you're on a machine
-  with a supported native gcc, those exports are still safe (no-op when the
-  paths don't exist; the script verifies them upfront).
+  conda toolchain ships gcc-15, which nvcc rejects. The script requires the
+  configured gcc-13 and g++-13 binaries during preflight.
+
+## Deployment boundary
+
+This skill is for a local checkout on a directly attached GPU. For a container
+image, use `apps/dreamverse/docker/README.md`. For Modal, follow
+`apps/dreamverse/scripts/modal/README.md`; do not adapt this process-killing
+workflow to a remote deployment.

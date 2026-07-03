@@ -1,11 +1,12 @@
 import math
 import torch
-from .block_sparse_attn import block_sparse_attn, block_sparse_attn_from_indices
+from .block_sparse_attn import block_sparse_attn
 from .block_sparse_attn_256 import (
     block_sparse_attn_256,
     block_sparse_attn_256_bshd,
 )
 from .triton_kernels.st_attn_triton import sliding_tile_attention_triton
+from .triton_kernels.fused_compress_topk import fused_block_mean, fused_topk_mask
 
 # Try to load the C++ extension
 try:
@@ -118,13 +119,10 @@ def video_sparse_attn(
             f"got {q_variable_block_sizes.numel()}"
         )
 
-    # Compression branch (token-level average per block + dense block-level attn).
-    q_c = q.view(batch, heads, q_num_blocks, block_elements, dim)
-    k_c = k.view(batch, heads, kv_num_blocks, block_elements, dim)
-    v_c = v.view(batch, heads, kv_num_blocks, block_elements, dim)
-    q_c = (q_c.float().sum(dim=3) / q_variable_block_sizes.view(1, 1, -1, 1)).to(q.dtype)
-    k_c = (k_c.float().sum(dim=3) / variable_block_sizes.view(1, 1, -1, 1)).to(k.dtype)
-    v_c = (v_c.float().sum(dim=3) / variable_block_sizes.view(1, 1, -1, 1)).to(v.dtype)
+    # Compression branch (fused Triton: bf16 read → fp32 accumulate → div → bf16 write)
+    q_c = fused_block_mean(q, q_variable_block_sizes, block_elements)
+    k_c = fused_block_mean(k, variable_block_sizes, block_elements)
+    v_c = fused_block_mean(v, variable_block_sizes, block_elements)
 
     scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (dim ** 0.5)
     attn = torch.softmax(scores, dim=-1)
@@ -132,25 +130,13 @@ def video_sparse_attn(
     out_c = out_c.view(batch, heads, q_num_blocks, 1, dim)
     out_c = out_c.repeat(1, 1, 1, block_elements, 1).view(batch, heads, q_seq_len, dim)
 
-    # Sparse branch.
-    topk_idx = torch.topk(scores, topk, dim=-1).indices
+    # Sparse branch (fused Triton topk mask)
+    mask = fused_topk_mask(scores, topk)
 
     if block_elements == 256:
-        # CuTe path consumes a bool mask (full/partial split inside the wrapper).
-        mask = torch.zeros_like(scores, dtype=torch.bool).scatter_(-1, topk_idx, True)
         out_s = block_sparse_attn_256(q, k, v, mask, variable_block_sizes)[0]
     else:
-        # Index-native path for 64-block (TK/Triton).
-        q2k_idx = topk_idx.to(torch.int32).contiguous()
-        q2k_num = torch.full(
-            (batch, heads, q_num_blocks),
-            topk,
-            dtype=torch.int32,
-            device=q.device,
-        )
-        out_s = block_sparse_attn_from_indices(
-            q, k, v, q2k_idx, q2k_num, variable_block_sizes
-        )[0]
+        out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
 
     if compress_attn_weight is not None:
         return out_c * compress_attn_weight + out_s
@@ -236,9 +222,8 @@ def video_sparse_attn_bshd(
     out_c_ch = torch.matmul(attn, v_ch)
     out_c_blk = out_c_ch.permute(0, 2, 1, 3).contiguous()
 
-    # Sparse branch (CuTe BSHD).
-    topk_idx = torch.topk(scores, topk, dim=-1).indices
-    mask = torch.zeros_like(scores, dtype=torch.bool).scatter_(-1, topk_idx, True)
+    # Sparse branch (fused Triton topk mask + CuTe BSHD).
+    mask = fused_topk_mask(scores, topk)
     out_s, _ = block_sparse_attn_256_bshd(q, k, v, mask, variable_block_sizes)
 
     out = out_s

@@ -66,8 +66,8 @@ class StableAudioDecodingStage(PipelineStage):
         # `VideoGenerator.generate_video` is video-shaped (asserts
         # `output_batch.output is not None`); fill with a placeholder of
         # the expected `[B, 3, num_frames, H, W]` shape — the real audio
-        # is on `batch.extra` above. Pure-audio workload support tracked
-        # in REVIEW item 28.
+        # is on `batch.extra` above. Keep this compatibility shim until
+        # WorkloadType and VideoGenerator support pure-audio outputs.
         b = decoded.shape[0]
         n_frames = int(getattr(batch, "num_frames", 1) or 1)
         h = int(getattr(batch, "height", 1) or 1)

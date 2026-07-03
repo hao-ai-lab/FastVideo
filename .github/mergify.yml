@@ -186,13 +186,13 @@ pull_request_rules:
       label:
         add: ["scope: docs"]
 
-  - name: "label scope: ui"
+  - name: "label scope: studio"
     conditions:
-      - files~=^ui/
+      - files~=^apps/fastvideo_studio/
       - -closed
     actions:
       label:
-        add: ["scope: ui"]
+        add: ["scope: studio"]
 
   - name: "label scope: model"
     conditions:
@@ -272,7 +272,7 @@ pull_request_rules:
         remove: [needs-rebase]
 
   # ============================================================
-  # Auto-merge and auto-rebase
+  # Auto-merge
   # ============================================================
 
   - name: auto-merge when ready and all checks pass
@@ -289,16 +289,6 @@ pull_request_rules:
     actions:
       merge:
         method: squash
-
-  - name: auto-update when ready
-    conditions:
-      - label=ready
-      - "#approved-reviews-by>=1"
-      - -conflict
-      - -closed
-      - -draft
-    actions:
-      update: {}
 
   # ============================================================
   # PR title format help

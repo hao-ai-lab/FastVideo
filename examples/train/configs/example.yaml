@@ -130,6 +130,11 @@ training:
   # --- training.vsa [TYPED] -> VSAConfig ---
   vsa:
     sparsity: 0.0                     # default: 0.0 (0.0 = disabled)
+    cache_tile_buf: false             # default: false. Reuse the per-step padded
+                                      # VSA tile buffer across attention layers.
+                                      # Off by default to avoid the activation-
+                                      # checkpointing OOM (#1423); set true on
+                                      # memory-rich setups for the buffer-reuse speedup.
 
   # --- training.model [TYPED] -> ModelTrainingConfig ---
   model:

@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+
 import torch
 import torch.nn as nn
 
@@ -11,6 +13,26 @@ from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb
+
+
+def _attention_compile_disabled() -> bool:
+    """Whether to keep attention ``forward`` out of the torch.compile graph.
+
+    Defaults to ``True`` (the historical behavior: attention runs eager via
+    ``torch.compiler.disable``). Set ``FASTVIDEO_DISABLE_ATTENTION_COMPILE=0``
+    to let attention be traced/compiled into the surrounding graph.
+    """
+    val = os.environ.get("FASTVIDEO_DISABLE_ATTENTION_COMPILE")
+    if val is None:
+        return True
+    return val.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def _maybe_compiler_disable(fn):
+    """Apply ``torch.compiler.disable`` unless disabled via env var."""
+    if _attention_compile_disabled():
+        return torch.compiler.disable(fn)
+    return fn
 
 
 class DistributedAttention(nn.Module):
@@ -56,7 +78,7 @@ class DistributedAttention(nn.Module):
         self.backend = backend_name_to_enum(attn_backend.get_name())
         self.dtype = dtype
 
-    @torch.compiler.disable
+    @_maybe_compiler_disable
     def forward(
         self,
         q: torch.Tensor,
@@ -146,7 +168,7 @@ class DistributedAttention_VSA(DistributedAttention):
     """Distributed attention layer with VSA support.
     """
 
-    @torch.compiler.disable
+    @_maybe_compiler_disable
     def forward(
         self,
         q: torch.Tensor,

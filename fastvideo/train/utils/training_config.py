@@ -88,6 +88,12 @@ class TrainingConfig:
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     vsa_sparsity: float = 0.0
+    # Reuse the per-step padded VSA tile buffer across attention layers.
+    # Defaults to False for training: under full activation checkpointing the
+    # cached buffer survives into the backward recompute and inflates peak
+    # memory (see #1423). Enable on memory-rich setups to keep the per-step
+    # buffer-reuse speedup.
+    vsa_cache_tile_buf: bool = False
     model: ModelTrainingConfig = field(default_factory=ModelTrainingConfig)
     pipeline_config: PipelineConfig | None = None
     model_path: str = ""

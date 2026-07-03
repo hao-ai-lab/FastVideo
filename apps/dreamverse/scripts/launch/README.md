@@ -13,12 +13,14 @@ apps/dreamverse/scripts/launch/launch_demo.sh
 
 The launcher starts the Dreamverse backend and frontend, polls readiness, and
 prints the active URLs. It defaults to `dreamverse-server` on backend port
-`8009` and frontend port `5274`.
+`8009` and its legacy frontend setting is `5274`. The current web package
+scripts bind `5299`, so pass that port explicitly until the launcher default is
+updated in a separate behavioral change.
 
 Useful overrides:
 
 ```bash
-BE_PORT=8010 FE_PORT=5274 apps/dreamverse/scripts/launch/launch_demo.sh
+BE_PORT=8010 FE_PORT=5299 apps/dreamverse/scripts/launch/launch_demo.sh
 NO_FRONTEND=1 apps/dreamverse/scripts/launch/launch_demo.sh
 NO_BROWSER=1 apps/dreamverse/scripts/launch/launch_demo.sh
 ```

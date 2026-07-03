@@ -55,6 +55,7 @@ _DEVICE_MAPPINGS: tuple[tuple[str, str], ...] = (
     ("L40S", "L40S"),
     ("GB200", "GB200"),
     ("B200", "GB200"),  # same Blackwell arch as GB200
+    ("H200", "H200"),
 )
 
 
@@ -78,6 +79,27 @@ def resolve_device_key(device_name: str | None = None) -> str | None:
     return None
 
 
+# Transformer block-list attribute names across model families. Wan / causal
+# Wan / Matrix-Game expose ``.blocks``; Cosmos (diffusers-derived) exposes
+# ``.transformer_blocks``. First non-empty match wins.
+_BLOCK_LIST_ATTRS: tuple[str, ...] = ("blocks", "transformer_blocks")
+
+
+def resolve_blocks(transformer):
+    """Return transformer block 0's containing ModuleList, or None.
+
+    Block 0 is the reference surface for the grad-norm check: its grad is the
+    *last* one produced during backprop, so a healthy value implies the whole
+    forward + chain-rule path is intact. Different model families name the
+    list differently (see ``_BLOCK_LIST_ATTRS``).
+    """
+    for attr in _BLOCK_LIST_ATTRS:
+        blocks = getattr(transformer, attr, None)
+        if blocks is not None and len(blocks) > 0:
+            return blocks
+    return None
+
+
 def layer0_grad_norm(transformer) -> float:
     """Global L2 norm of transformer block 0's trainable gradients.
 
@@ -88,15 +110,20 @@ def layer0_grad_norm(transformer) -> float:
     Accumulates the squared sums on the GPU and does a single CPU-GPU sync
     (``.item()``) at the end, rather than one per parameter.
     """
-    blocks = getattr(transformer, "blocks", None)
+    blocks = resolve_blocks(transformer)
     assert blocks is not None and len(blocks) > 0, (
-        "transformer is expected to expose a non-empty ``.blocks``")
+        "transformer is expected to expose a non-empty block list "
+        f"(one of {_BLOCK_LIST_ATTRS})")
     grads = [
         p.grad for p in blocks[0].parameters()
         if p.requires_grad and p.grad is not None
     ]
     if not grads:
         return 0.0
+    # Some loaders (e.g. Cosmos via fsdp_load) keep parameters/grads as
+    # DTensors even at world_size=1; localize so the reduction stays on plain
+    # tensors. ``to_local`` is a no-op for ordinary tensors at ws=1.
+    grads = [g.to_local() if hasattr(g, "to_local") else g for g in grads]
     sq_sum = torch.zeros((), device=grads[0].device, dtype=torch.float32)
     for g in grads:
         sq_sum += g.detach().float().pow(2).sum()

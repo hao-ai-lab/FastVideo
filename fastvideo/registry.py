@@ -294,8 +294,8 @@ def _register_configs() -> None:
     # ship `model.safetensors` as a single monolithic checkpoint with
     # no per-component subfolders our standard loader can consume. See
     # `scripts/checkpoint_conversion/stable_audio_to_diffusers.py`.
-    # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28); using
-    # T2V as the placeholder until the enum is extended.
+    # NOTE: WorkloadType has no T2A variant yet; use T2V as the
+    # compatibility placeholder until the enum is extended.
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=StableAudioT2AConfig,
@@ -621,6 +621,8 @@ def _register_configs() -> None:
                 "cosmos-predict2.5",
             )) and "14b" not in path.lower(),
         ],
+        model_family="cosmos25",
+        default_preset="cosmos25_predict2_2b",
     )
 
     # Cosmos 2.5 (14B)
