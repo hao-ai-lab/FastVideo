@@ -13,11 +13,30 @@ on:
         required: false
         default: false
         type: boolean
+  # Auto-rebuild the CUDA images when their Dockerfile changes on main. The CUDA
+  # matrix is the only lane that builds from docker/Dockerfile, so a path-scoped
+  # push trigger is a sufficient change detector on its own -- no separate
+  # detect-changes/paths-filter job is needed now that there is a single
+  # in-scope Dockerfile. Dreamverse (apps/dreamverse/docker/Dockerfile) and the
+  # rocm Dockerfile stay manual-dispatch only.
+  push:
+    branches: [main]
+    paths:
+      - 'docker/Dockerfile'
 
 
 permissions:
   contents: read
   packages: write
+
+# Scope the group by event type so push-triggered auto-rebuilds and manual
+# workflow_dispatch runs on main (both on refs/heads/main) never share a group
+# and cancel each other. Only a newer Dockerfile push supersedes an older push;
+# manual dispatches always run to completion so a zero-job dispatch can never
+# silently kill an in-progress rebuild (and vice versa).
+concurrency:
+  group: infra-build-image-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   # CUDA matrix: Python 3.12 x {12.6.3, 13.0.0} x {amd64, arm64}. Each architecture
@@ -28,7 +47,9 @@ jobs:
   # aliases; 13.0.0/cu130 is published under explicit versioned tags. Flash-attn
   # 2.8.3 comes from the architecture-specific prebuilt releases.
   build-cuda-images:
-    if: ${{ github.event.inputs.build_cuda_matrix == 'true' }}
+    # Runs on a manual dispatch when build_cuda_matrix is set, or automatically
+    # on a push that changed docker/Dockerfile (inputs are null on push).
+    if: ${{ github.event_name == 'push' || github.event.inputs.build_cuda_matrix == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,8 +98,9 @@ jobs:
   publish-cuda-manifests:
     # !cancelled(): a failed sibling build leg must not skip the manifests for a
     # CUDA lane whose own digests all exist; the digest-count check below fails
-    # the incomplete lane loudly instead.
-    if: ${{ !cancelled() && github.event.inputs.build_cuda_matrix == 'true' }}
+    # the incomplete lane loudly instead. Mirror build-cuda-images' trigger so
+    # manifests publish on both manual dispatch and Dockerfile-push rebuilds.
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event.inputs.build_cuda_matrix == 'true') }}
     needs: build-cuda-images
     runs-on: ubuntu-latest
     permissions:
