@@ -12,7 +12,14 @@ from typing import Any
 import modal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from modal_image_utils import resolve_image_ref  # noqa: E402
+try:
+    from modal_image_utils import resolve_image_ref  # noqa: E402
+except ModuleNotFoundError:
+    # Remote Modal containers re-import this module but mount only the
+    # entrypoint file; the digest resolution already happened at local
+    # launch time, so a passthrough is correct there.
+    def resolve_image_ref(image_ref: str) -> str:
+        return image_ref
 
 app = modal.App()
 
