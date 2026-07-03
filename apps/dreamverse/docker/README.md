@@ -47,7 +47,7 @@ Do not set `CUDA_TAG` and `CUDA_VERSION` together. The image installs FastVideo
 from this checkout with the `dreamverse` extra, including FA4 flash-attention
 and FlashInfer for NVFP4 quantization, and builds native FFmpeg.
 
-FastVideo's pinned `fastvideo-kernel==0.3.1` package is installed by default.
+FastVideo's pinned `fastvideo-kernel==0.3.2` package is installed by default.
 To rebuild `fastvideo-kernel` from this checkout during the image build, set:
 
 ```bash
