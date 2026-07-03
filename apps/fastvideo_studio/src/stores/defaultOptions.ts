@@ -13,9 +13,13 @@ export interface DefaultOptionsState {
   options: DefaultOptions;
 }
 
-export const defaultOptionsStore = createManagedStore<DefaultOptionsState>({
-  options: loadDefaultOptions(),
-});
+export const defaultOptionsStore = createManagedStore<DefaultOptionsState>(
+  { options: loadDefaultOptions() },
+  // Server prerender and the hydration render must use the same deterministic
+  // state (loadDefaultOptions reads localStorage on the client); the persisted
+  // values take over right after hydration.
+  { options: DEFAULT_OPTIONS },
+);
 
 export function initDefaultOptions(): void {
   getSettings()
@@ -59,8 +63,13 @@ export function updateOption<K extends keyof DefaultOptions>(
 }
 
 export function resetToDefaults(): void {
-  defaultOptionsStore.set({ options: DEFAULT_OPTIONS });
-  updateSettings(DEFAULT_OPTIONS).catch(() =>
-    saveDefaultOptions(DEFAULT_OPTIONS),
-  );
+  // apiServerBaseUrl is a purely local (per-browser) setting: keep the user's
+  // value across a reset and never send it to the backend.
+  const { apiServerBaseUrl: _local, ...serverDefaults } = DEFAULT_OPTIONS;
+  const next: DefaultOptions = {
+    ...DEFAULT_OPTIONS,
+    apiServerBaseUrl: defaultOptionsStore.get().options.apiServerBaseUrl,
+  };
+  defaultOptionsStore.set({ options: next });
+  updateSettings(serverDefaults).catch(() => saveDefaultOptions(next));
 }

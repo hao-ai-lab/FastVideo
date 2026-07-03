@@ -100,10 +100,21 @@ describe('defaultOptions store', () => {
     );
   });
 
-  it('resetToDefaults restores defaults and pushes them to the backend', () => {
-    defaultOptionsStore.set({ options: { ...DEFAULT_OPTIONS, numFrames: 200 } });
+  it('resetToDefaults restores defaults but keeps apiServerBaseUrl local', () => {
+    defaultOptionsStore.set({
+      options: {
+        ...DEFAULT_OPTIONS,
+        numFrames: 200,
+        apiServerBaseUrl: 'http://local:9999/api',
+      },
+    });
     resetToDefaults();
-    expect(defaultOptionsStore.get().options).toEqual(DEFAULT_OPTIONS);
-    expect(updateSettings).toHaveBeenCalledWith(DEFAULT_OPTIONS);
+    expect(defaultOptionsStore.get().options).toEqual({
+      ...DEFAULT_OPTIONS,
+      apiServerBaseUrl: 'http://local:9999/api',
+    });
+    // The purely-local apiServerBaseUrl is never sent to the backend.
+    const { apiServerBaseUrl: _local, ...serverDefaults } = DEFAULT_OPTIONS;
+    expect(updateSettings).toHaveBeenCalledWith(serverDefaults);
   });
 });

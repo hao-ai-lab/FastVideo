@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { DefaultOptions } from "./defaultOptions";
 import type { Job, JobType } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8189/api";
 
 export function getApiBaseUrl(): string {
-	// 1) Check user-configured value from local storage (Settings page)
+	// 1) Check user-configured value from local storage (Settings page).
+	// The settings sync persists the full options object, so the key holds an
+	// empty string until the user sets a URL — treat that as unset and fall
+	// through to the env/default below.
 	if (typeof window !== "undefined") {
 		try {
 			const stored = window.localStorage.getItem("fastvideo-default-options");
 			if (stored) {
 				const parsed = JSON.parse(stored) as { apiServerBaseUrl?: string };
-				return parsed.apiServerBaseUrl!.trim();
+				const configured = parsed.apiServerBaseUrl?.trim();
+				if (configured) return configured;
 			}
 		} catch {
 			// Ignore storage / JSON errors and fall back to env/default
@@ -81,32 +86,11 @@ export interface Model {
 	type: string;
 }
 
-export interface Settings {
-	defaultModelId: string;
-	defaultModelIdT2v: string;
-	defaultModelIdI2v: string;
-	defaultModelIdT2i: string;
-	numInferenceSteps: number;
-	numFrames: number;
-	height: number;
-	width: number;
-	guidanceScale: number;
-	guidanceRescale: number;
-	fps: number;
-	seed: number;
-	numGpus: number;
-	ditCpuOffload: boolean;
-	textEncoderCpuOffload: boolean;
-	vaeCpuOffload: boolean;
-	imageEncoderCpuOffload: boolean;
-	useFsdpInference: boolean;
-	enableTorchCompile: boolean;
-	vsaSparsity: number;
-	tpSize: number;
-	spSize: number;
-	autoStartJob: boolean;
-	datasetUploadPath: string;
-}
+/**
+ * Server-persisted settings: everything in DefaultOptions except
+ * apiServerBaseUrl, which is purely local (per-browser).
+ */
+export type Settings = Omit<DefaultOptions, "apiServerBaseUrl">;
 
 // MARK: - API Functions
 

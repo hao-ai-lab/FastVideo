@@ -3,6 +3,14 @@ type Subscriber<T> = (state: T) => void;
 export interface ManagedStore<T> {
   subscribe: (callback: Subscriber<T>) => () => void;
   get: () => T;
+  /**
+   * Stable state used for server prerender and the hydration render on the
+   * client (React's `getServerSnapshot`). Defaults to the initial state; pass
+   * `serverState` explicitly when the initial state is derived from browser
+   * state (e.g. localStorage), otherwise the server HTML and the client's
+   * hydration snapshot can disagree.
+   */
+  getServerSnapshot: () => T;
   set: (nextState: T) => T;
   update: (updater: (state: T) => T) => T;
   patch: (partial: Partial<T> | ((state: T) => Partial<T>)) => T;
@@ -10,9 +18,9 @@ export interface ManagedStore<T> {
 
 export function createManagedStore<T extends object>(
   initialState: T,
-  deriveState: (state: T) => T = (state) => state,
+  serverState: T = initialState,
 ): ManagedStore<T> {
-  let currentState = deriveState(initialState);
+  let currentState = initialState;
   const subscribers = new Set<Subscriber<T>>();
 
   function notify() {
@@ -20,7 +28,7 @@ export function createManagedStore<T extends object>(
   }
 
   function set(nextState: T): T {
-    currentState = deriveState(nextState);
+    currentState = nextState;
     notify();
     return currentState;
   }
@@ -44,6 +52,7 @@ export function createManagedStore<T extends object>(
       };
     },
     get: () => currentState,
+    getServerSnapshot: () => serverState,
     set,
     update,
     patch,

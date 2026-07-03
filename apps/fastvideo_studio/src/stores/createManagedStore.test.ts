@@ -40,10 +40,16 @@ describe('createManagedStore', () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
-  it('applies deriveState on init and on every set', () => {
-    const store = createManagedStore({ n: 3 }, (s) => ({ n: Math.min(s.n, 5) }));
-    expect(store.get().n).toBe(3);
-    store.set({ n: 10 });
+  it('getServerSnapshot defaults to the initial state', () => {
+    const store = createManagedStore({ a: 1 });
+    expect(store.getServerSnapshot()).toEqual({ a: 1 });
+  });
+
+  it('getServerSnapshot returns the server state, unaffected by set', () => {
+    const store = createManagedStore({ n: 1 }, { n: 0 });
+    expect(store.getServerSnapshot()).toEqual({ n: 0 });
+    store.set({ n: 5 });
     expect(store.get().n).toBe(5);
+    expect(store.getServerSnapshot()).toEqual({ n: 0 });
   });
 });
