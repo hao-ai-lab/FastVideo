@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
+
 import torch
+from flash_attn import flash_attn_func as _flash_attn_2_func
+from flash_attn import flash_attn_varlen_func as _flash_attn_2_varlen_func
 
 from fastvideo.logger import init_logger
 
@@ -237,33 +242,71 @@ torch.library.register_autograd(
     setup_context=_flash_attn_cute_varlen_setup_context,
 )
 
+
 # FA4's CuTeDSL kernels JIT-compile per shape family, and some configurations
 # fail MLIR op creation at runtime even though the import succeeded (observed:
 # GQA models on sm_89 dying in pack_gqa with "ValueError: Operation creation
 # failed"). Degrade to FA2 once, process-wide, instead of crashing inference.
-_FA4_RUNTIME_BROKEN = False
+class _FA4Policy:
+    """Per-call gate for the FA4 cute fast path, with FA2 as the fallback.
 
-
-def _needs_autograd(*tensors: torch.Tensor) -> bool:
-    """Whether this call must backprop through attention.
-
-    FA4 cute's backward asserts sm90+ (L40S/sm_89 dies on its arch check) and
-    has never been validated for training in this repo (its lse is not even
-    allocated through our inference-shaped custom op). Route grad-enabled
-    calls to FA2 instead -- the pre-FA4 training behavior on every device.
+    FA4 is skipped when:
+      * a previous call failed at runtime -- CuTeDSL JIT compilation is
+        shape-dependent, so the first failure disables FA4 for the rest of
+        the process instead of retrying a broken JIT on every call; or
+      * the call needs autograd -- FA4's backward asserts sm90+ (L40S/sm_89
+        dies on its arch check) and is unvalidated for training in this repo
+        (its lse is not even allocated through our inference-shaped custom
+        op), so training keeps the pre-FA4 behavior: FA2 on every device.
     """
-    return torch.is_grad_enabled() and any(t.requires_grad for t in tensors)
+
+    def __init__(self) -> None:
+        self.broken = False
+
+    def use_fa4(self, *tensors: torch.Tensor) -> bool:
+        if self.broken:
+            return False
+        return not (torch.is_grad_enabled() and any(t.requires_grad for t in tensors))
+
+    def mark_broken(self, error: Exception) -> None:
+        if not self.broken:
+            self.broken = True
+            logger.warning(
+                "flash_attn.cute (FA4) failed at runtime (%r); falling back "
+                "to FA2 for the rest of this process.", error)
 
 
-def _fa4_runtime_fallback(error: Exception) -> None:
-    global _FA4_RUNTIME_BROKEN
-    if not _FA4_RUNTIME_BROKEN:
-        _FA4_RUNTIME_BROKEN = True
-        logger.warning(
-            "flash_attn.cute (FA4) failed at runtime (%r); falling back to "
-            "FA2 for the rest of this process.", error)
+_FA4 = _FA4Policy()
 
 
+def _with_fa2_fallback(fa2_func: Callable) -> Callable:
+    """Pair an FA4 cute wrapper with its FA2 twin of the same signature.
+
+    The decorated body runs only when ``_FA4`` allows it; otherwise (or after
+    the first FA4 runtime failure) the call is served by ``fa2_func``.
+    ``NotImplementedError`` is a contract error (e.g. dropout), not a JIT
+    failure, so it propagates without disabling FA4.
+    """
+
+    def decorator(fa4_func: Callable) -> Callable:
+
+        @functools.wraps(fa4_func)
+        def wrapper(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+            if _FA4.use_fa4(q, k, v):
+                try:
+                    return fa4_func(q, k, v, *args, **kwargs)
+                except NotImplementedError:
+                    raise
+                except Exception as e:  # CuTeDSL compile errors surface as ValueError
+                    _FA4.mark_broken(e)
+            return fa2_func(q, k, v, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+@_with_fa2_fallback(_flash_attn_2_func)
 def flash_attn_func(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -275,20 +318,8 @@ def flash_attn_func(
 ) -> torch.Tensor:
     """Only returns the output, not the lse."""
     _check_dropout(dropout_p)
-    if not _FA4_RUNTIME_BROKEN and not _needs_autograd(q, k, v):
-        try:
-            out, _ = torch.ops.fastvideo._flash_attn_cute_forward(q, k, v, softmax_scale, causal, deterministic)
-            return out
-        except Exception as e:  # CuTeDSL compile errors surface as ValueError
-            _fa4_runtime_fallback(e)
-    from flash_attn import flash_attn_func as flash_attn_2_func
-    return flash_attn_2_func(q,
-                             k,
-                             v,
-                             dropout_p=dropout_p,
-                             softmax_scale=softmax_scale,
-                             causal=causal,
-                             deterministic=deterministic)
+    out, _ = torch.ops.fastvideo._flash_attn_cute_forward(q, k, v, softmax_scale, causal, deterministic)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +392,7 @@ def flash_attn_fp4_func(
     return torch.ops.fastvideo._flash_attn_cute_fp4_forward(q, k, v, sfq, sfk, softmax_scale, causal)
 
 
+@_with_fa2_fallback(_flash_attn_2_varlen_func)
 def flash_attn_varlen_func(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -376,32 +408,16 @@ def flash_attn_varlen_func(
 ) -> torch.Tensor:
     """Only returns the output, not the lse."""
     _check_dropout(dropout_p)
-    if not _FA4_RUNTIME_BROKEN and not _needs_autograd(q, k, v):
-        try:
-            out, _ = torch.ops.fastvideo._flash_attn_cute_varlen_forward(
-                q,
-                k,
-                v,
-                cu_seqlens_q,
-                cu_seqlens_k,
-                max_seqlen_q,
-                max_seqlen_k,
-                softmax_scale,
-                causal,
-                deterministic,
-            )
-            return out
-        except Exception as e:  # CuTeDSL compile errors surface as ValueError
-            _fa4_runtime_fallback(e)
-    from flash_attn import flash_attn_varlen_func as flash_attn_2_varlen_func
-    return flash_attn_2_varlen_func(q,
-                                    k,
-                                    v,
-                                    cu_seqlens_q,
-                                    cu_seqlens_k,
-                                    max_seqlen_q,
-                                    max_seqlen_k,
-                                    dropout_p=dropout_p,
-                                    softmax_scale=softmax_scale,
-                                    causal=causal,
-                                    deterministic=deterministic)
+    out, _ = torch.ops.fastvideo._flash_attn_cute_varlen_forward(
+        q,
+        k,
+        v,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q,
+        max_seqlen_k,
+        softmax_scale,
+        causal,
+        deterministic,
+    )
+    return out
