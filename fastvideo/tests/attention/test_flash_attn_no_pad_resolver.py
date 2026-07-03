@@ -3,15 +3,16 @@
 
 Landed in PR #1225 slice 5 (Attn-QAT 5/12). The resolver centralises the
 varlen-flash-attn import-fallback logic that several backends
-(``bsa_attn.py``, ``video_sparse_attn.py``) used to duplicate. The fallback
+(``bsa_attn.py``, ``video_sparse_attn.py``) used to duplicate. The resolution
 order is:
 
-    1. ``fastvideo.attention.utils.flash_attn_cute``
+    1. ``fastvideo.attention.utils.flash_attn_cute`` -- only when
+       ``FASTVIDEO_FA4=1`` (explicit opt-in), and then it must import or the
+       resolver raises instead of falling through
     2. ``flash_attn_interface``
     3. ``flash_attn``
 
-These tests verify that the resolver picks the highest-priority impl
-available and falls through cleanly on ``ImportError``. CPU-only, no
+These tests verify the opt-in gate and the FA3/FA2 fallthrough. CPU-only, no
 flash-attn install required.
 """
 
@@ -35,8 +36,30 @@ def _reload_resolver_module():
     return importlib.import_module("fastvideo.attention.utils.flash_attn_no_pad")
 
 
-def test_resolver_falls_back_when_cute_unavailable(monkeypatch) -> None:
-    """When ``flash_attn_cute`` is unimportable, resolver tries the next impl."""
+def test_resolver_skips_cute_without_opt_in(monkeypatch) -> None:
+    """Without ``FASTVIDEO_FA4=1`` the resolver must not even attempt the cute
+    import."""
+    monkeypatch.delenv("FASTVIDEO_FA4", raising=False)
+    attempted: list[str] = []
+    real_import = builtins.__import__
+
+    def spying_import(name, globals=None, locals=None, fromlist=(), level=0):
+        attempted.append(name)
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", spying_import)
+
+    mod = _reload_resolver_module()
+    resolved = mod._resolve_flash_attn_varlen_func()
+    assert resolved is not None
+    assert resolved.__name__ == "flash_attn_varlen_func"
+    assert "fastvideo.attention.utils.flash_attn_cute" not in attempted
+
+
+def test_resolver_raises_when_opted_in_but_cute_unavailable(monkeypatch) -> None:
+    """With ``FASTVIDEO_FA4=1`` an unimportable cute build fails loudly instead
+    of silently falling through to FA3/FA2."""
+    monkeypatch.setenv("FASTVIDEO_FA4", "1")
     real_import = builtins.__import__
 
     def patched_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -47,20 +70,17 @@ def test_resolver_falls_back_when_cute_unavailable(monkeypatch) -> None:
     monkeypatch.setattr(builtins, "__import__", patched_import)
 
     mod = _reload_resolver_module()
-    resolved = mod._resolve_flash_attn_varlen_func()
-    assert resolved is not None
-    assert resolved.__name__ == "flash_attn_varlen_func"
+    with pytest.raises(ImportError, match="cute disabled for test"):
+        mod._resolve_flash_attn_varlen_func()
 
 
-def test_resolver_returns_flash_attn_when_cute_and_interface_unavailable(monkeypatch) -> None:
+def test_resolver_returns_flash_attn_when_interface_unavailable(monkeypatch) -> None:
     """The terminal fallback is the plain ``flash_attn`` import."""
+    monkeypatch.delenv("FASTVIDEO_FA4", raising=False)
     real_import = builtins.__import__
 
     def patched_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name in {
-                "fastvideo.attention.utils.flash_attn_cute",
-                "flash_attn_interface",
-        }:
+        if name == "flash_attn_interface":
             raise ImportError(f"{name} disabled for test")
         return real_import(name, globals, locals, fromlist, level)
 

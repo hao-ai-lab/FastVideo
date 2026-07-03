@@ -98,6 +98,9 @@ image = (
         "TOKENIZERS_PARALLELISM": "false",
         **({"UV_TORCH_BACKEND": uv_torch_backend_override} if uv_torch_backend_override else {}),
         "FASTVIDEO_ATTENTION_BACKEND": os.environ.get("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN"),
+        # FA4 is opt-in (FASTVIDEO_FA4); keep CI parity with the seeded
+        # references. Caller override wins.
+        "FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1"),
     })
 )
 

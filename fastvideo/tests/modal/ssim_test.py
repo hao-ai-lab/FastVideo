@@ -64,6 +64,9 @@ image = (
             "BUILDKITE_PULL_REQUEST": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
             "IMAGE_VERSION": image_version,
             **({"UV_TORCH_BACKEND": uv_torch_backend_override} if uv_torch_backend_override else {}),
+            # FA4 is opt-in (FASTVIDEO_FA4); the SSIM references were seeded
+            # with FA4 inference, so keep it enabled in CI. Caller override wins.
+            "FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1"),
         }
     )
 )

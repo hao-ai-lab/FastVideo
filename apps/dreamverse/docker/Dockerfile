@@ -84,9 +84,12 @@ RUN source /opt/venv/bin/activate \
        FFMPEG_NATIVE_CXX=/usr/bin/g++ \
        bash /opt/FastVideo/apps/dreamverse/scripts/install_native_ffmpeg.sh
 
+# FASTVIDEO_FA4: FA4 (flash_attn.cute) is opt-in; this image installs it via
+# the dreamverse extra and is validated with it, so enable it here.
 ENV FASTVIDEO_DREAMVERSE_HOME=/var/lib/dreamverse \
     STREAM_MODE=av_fmp4 \
     FASTVIDEO_ENABLE_PROMPT_SAFETY=0 \
+    FASTVIDEO_FA4=1 \
     HF_HOME=/root/.cache/huggingface
 
 RUN mkdir -p /var/lib/dreamverse

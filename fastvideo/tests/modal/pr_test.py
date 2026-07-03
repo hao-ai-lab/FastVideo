@@ -61,6 +61,10 @@ image = (modal.Image.from_registry(
     **({
         "UV_TORCH_BACKEND": uv_torch_backend_override
     } if uv_torch_backend_override else {}),
+    # FA4 is opt-in (FASTVIDEO_FA4); CI lanes keep it enabled to match the
+    # SSIM/perf baselines. Caller override wins.
+    "FASTVIDEO_FA4":
+    os.environ.get("FASTVIDEO_FA4", "1"),
     "HF_REPO_ID":
     "FastVideo/performance-tracking",
 }))
