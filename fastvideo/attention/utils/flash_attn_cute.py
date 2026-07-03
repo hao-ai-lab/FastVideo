@@ -237,6 +237,21 @@ torch.library.register_autograd(
     setup_context=_flash_attn_cute_varlen_setup_context,
 )
 
+# FA4's CuTeDSL kernels JIT-compile per shape family, and some configurations
+# fail MLIR op creation at runtime even though the import succeeded (observed:
+# GQA models on sm_89 dying in pack_gqa with "ValueError: Operation creation
+# failed"). Degrade to FA2 once, process-wide, instead of crashing inference.
+_FA4_RUNTIME_BROKEN = False
+
+
+def _fa4_runtime_fallback(error: Exception) -> None:
+    global _FA4_RUNTIME_BROKEN
+    if not _FA4_RUNTIME_BROKEN:
+        _FA4_RUNTIME_BROKEN = True
+        logger.warning(
+            "flash_attn.cute (FA4) failed at runtime (%r); falling back to "
+            "FA2 for the rest of this process.", error)
+
 
 def flash_attn_func(
     q: torch.Tensor,
@@ -249,8 +264,20 @@ def flash_attn_func(
 ) -> torch.Tensor:
     """Only returns the output, not the lse."""
     _check_dropout(dropout_p)
-    out, _ = torch.ops.fastvideo._flash_attn_cute_forward(q, k, v, softmax_scale, causal, deterministic)
-    return out
+    if not _FA4_RUNTIME_BROKEN:
+        try:
+            out, _ = torch.ops.fastvideo._flash_attn_cute_forward(q, k, v, softmax_scale, causal, deterministic)
+            return out
+        except Exception as e:  # CuTeDSL compile errors surface as ValueError
+            _fa4_runtime_fallback(e)
+    from flash_attn import flash_attn_func as flash_attn_2_func
+    return flash_attn_2_func(q,
+                             k,
+                             v,
+                             dropout_p=dropout_p,
+                             softmax_scale=softmax_scale,
+                             causal=causal,
+                             deterministic=deterministic)
 
 
 # ---------------------------------------------------------------------------
@@ -338,16 +365,32 @@ def flash_attn_varlen_func(
 ) -> torch.Tensor:
     """Only returns the output, not the lse."""
     _check_dropout(dropout_p)
-    out, _ = torch.ops.fastvideo._flash_attn_cute_varlen_forward(
-        q,
-        k,
-        v,
-        cu_seqlens_q,
-        cu_seqlens_k,
-        max_seqlen_q,
-        max_seqlen_k,
-        softmax_scale,
-        causal,
-        deterministic,
-    )
-    return out
+    if not _FA4_RUNTIME_BROKEN:
+        try:
+            out, _ = torch.ops.fastvideo._flash_attn_cute_varlen_forward(
+                q,
+                k,
+                v,
+                cu_seqlens_q,
+                cu_seqlens_k,
+                max_seqlen_q,
+                max_seqlen_k,
+                softmax_scale,
+                causal,
+                deterministic,
+            )
+            return out
+        except Exception as e:  # CuTeDSL compile errors surface as ValueError
+            _fa4_runtime_fallback(e)
+    from flash_attn import flash_attn_varlen_func as flash_attn_2_varlen_func
+    return flash_attn_2_varlen_func(q,
+                                    k,
+                                    v,
+                                    cu_seqlens_q,
+                                    cu_seqlens_k,
+                                    max_seqlen_q,
+                                    max_seqlen_k,
+                                    dropout_p=dropout_p,
+                                    softmax_scale=softmax_scale,
+                                    causal=causal,
+                                    deterministic=deterministic)
