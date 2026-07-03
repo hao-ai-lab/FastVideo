@@ -18,9 +18,14 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest
 import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
+
+# The FP4 extensions are only compiled under the sm_120a (Blackwell) arch
+# gate; on other GPUs the api import below would die at collection time.
+pytest.importorskip("fp4attn_cuda", reason="ATTN_QAT_INFER FP4 kernels require a sm_120a build")
 
 from attn_qat_infer.api import sageattn_blackwell
 

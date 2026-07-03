@@ -72,16 +72,23 @@ dreamverse_image = (image.run_commands(
 
 def run_test(pytest_command: str):
     """Helper function to run a test suite with custom pytest command"""
-    run_test_command(f'uv pip install -e ".[test]" && {pytest_command}',
-                     build_kernel=True)
+    run_test_command(pytest_command, build_kernel=True)
 
 
-def run_test_command(test_command: str, build_kernel: bool):
+def run_test_command(test_command: str,
+                     build_kernel: bool,
+                     install_command: str = 'uv pip install -e ".[test]"'):
     """Helper function to run a test suite with custom test command.
 
     Most FastVideo CI suites need the custom kernel build. App-level tests like
     DreamVerse's mock-backend UI checks do not, so keep the kernel build
     optional to avoid unrelated CUDA/kernel setup in that CI path.
+
+    The dependency install runs BEFORE the kernel build: pyproject pins the
+    PyPI fastvideo-kernel wheel, so an install after the build silently
+    replaces the just-built in-tree kernel with the (older) wheel -- every
+    lane would then test stale kernels. Pass install_command="" for commands
+    that manage their own installs.
     """
     import subprocess
     import sys
@@ -110,6 +117,8 @@ def run_test_command(test_command: str, build_kernel: bool):
     cd .. &&
     """ if build_kernel else ""
 
+    install_clause = f"{install_command} &&" if install_command else ""
+
     command = f"""
     source $HOME/.local/bin/env &&
     source /opt/venv/bin/activate &&
@@ -117,6 +126,7 @@ def run_test_command(test_command: str, build_kernel: bool):
     cd /FastVideo &&
     {checkout_command} &&
     git submodule update --init --recursive &&
+    {install_clause}
     {build_kernel_command}
     {test_command}
     """
@@ -271,7 +281,9 @@ def run_unit_test():
 @app.function(gpu="L40S:1", image=dreamverse_image, timeout=1800)
 def run_dreamverse_app_tests():
     run_test_command(
-        """
+        install_command="",
+        build_kernel=False,
+        test_command="""
         uv pip install -e ".[test,dreamverse]" &&
         export PYTHONPATH=/FastVideo/apps/dreamverse:$PYTHONPATH &&
         pytest apps/dreamverse/dreamverse/tests -q &&
@@ -299,8 +311,7 @@ def run_dreamverse_app_tests():
                     --project=mobile-safari \
                     --project=mobile-chromium
         '
-        """,
-        build_kernel=False)
+        """)
 
 
 @app.function(gpu="L40S:1",
@@ -367,9 +378,9 @@ def run_eval_tests():
     # pass vacuously. detectron2-backed vbench metrics remain skipped by
     # design (not pip-installable; see fastvideo/eval/README.md).
     run_test_command(
-        'uv pip install -e ".[test,eval-full]" && '
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/eval -vs",
-        build_kernel=True)
+        build_kernel=True,
+        install_command='uv pip install -e ".[test,eval-full]"')
 
 
 @app.function(gpu="L40S:1",
