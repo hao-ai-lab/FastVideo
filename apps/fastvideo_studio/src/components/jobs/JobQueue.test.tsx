@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import JobQueue from '@/components/JobQueue';
+import JobQueue from '@/components/jobs/JobQueue';
 import { getJobsList } from '@/lib/api';
 import type { Job, JobType } from '@/lib/types';
 import { setActiveJobId } from '@/stores/activeJob';

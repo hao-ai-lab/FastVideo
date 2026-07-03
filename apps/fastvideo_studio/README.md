@@ -11,6 +11,41 @@ The UI currently supports:
 - Datasets
 - Gallery View
 
+## Project Structure
+
+```
+apps/fastvideo_studio/
+├── server.py / job_runner.py / database.py   # FastAPI backend + job lifecycle
+├── mock_server.py                            # In-memory API mock for e2e tests
+├── models/                                   # Pydantic request models (shared with the mock)
+├── training_config.py                        # Studio workloads → fastvideo/train YAML configs
+├── tests/                                    # Backend unit tests (pytest)
+├── e2e/                                      # Playwright specs (run against the mock)
+└── src/
+    ├── app/                                  # Next.js App Router pages (thin routes)
+    ├── components/
+    │   ├── shell/                            # App chrome: header, sidebars, layout
+    │   ├── jobs/                             # Job queue, cards, create-job modal, log sidebar
+    │   ├── datasets/                         # Dataset cards, upload, captions
+    │   └── ui/                               # shadcn-style primitives (shared theme)
+    ├── stores/                               # Framework-agnostic state + React bridge (hooks/)
+    ├── lib/                                  # API client, types, option persistence
+    └── test/                                 # Vitest setup + factories
+```
+
+The visual theme (slate light/dark palettes, IBM Plex type, `#356cff` accent)
+is shared with `apps/dreamverse`; the toggle in the header persists the choice
+per browser.
+
+## Testing
+
+```bash
+npm run typecheck        # tsc
+npm test                 # vitest unit tests
+npm run e2e              # Playwright against the in-memory mock backend
+python -m pytest tests/  # backend unit tests (from apps/fastvideo_studio)
+```
+
 ## Quick Start
 
 For local development, install dependencies and start the Next.js dev server:

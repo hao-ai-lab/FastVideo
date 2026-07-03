@@ -20,7 +20,7 @@ export interface UploadZoneProps {
 }
 
 const linkButtonClass =
-  'cursor-pointer bg-transparent p-0 text-accent hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50';
+  'cursor-pointer bg-transparent p-0 text-accent-blue hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50';
 
 export default function UploadZone({
   label,
@@ -99,9 +99,9 @@ export default function UploadZone({
   return (
     <div
       className={cn(
-        'flex min-h-[150px] grow flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-white/[0.02] px-5 py-6 text-center transition-colors hover:border-accent hover:bg-white/[0.04]',
+        'flex min-h-[150px] grow flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/40 px-5 py-6 text-center transition-colors hover:border-accent-blue hover:bg-muted/60',
         clickable ? 'cursor-pointer' : 'cursor-default',
-        hasContent && 'border-solid border-accent',
+        hasContent && 'border-solid border-accent-blue',
       )}
       onClick={clickable ? handleClick : undefined}
       onKeyDown={clickable ? handleKeyActivate : undefined}
@@ -141,7 +141,7 @@ export default function UploadZone({
               <span
                 role="button"
                 tabIndex={0}
-                className="cursor-pointer text-accent hover:underline"
+                className="cursor-pointer text-accent-blue hover:underline"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleClick();

@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import GalleryPage from './page';
-import { HeaderActionsProvider } from '@/components/HeaderActionsContext';
+import { HeaderActionsProvider } from '@/components/shell/HeaderActionsContext';
 import { getJobsList } from '@/lib/api';
 import type { Job } from '@/lib/types';
 import { makeJob as makeBaseJob } from '@/test/factories';

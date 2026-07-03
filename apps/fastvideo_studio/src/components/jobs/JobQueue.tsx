@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 
-import JobCard from '@/components/JobCard';
+import JobCard from '@/components/jobs/JobCard';
 import { useStore } from '@/hooks/useStore';
 import { getJobsList } from '@/lib/api';
 import type { Job, JobType } from '@/lib/types';

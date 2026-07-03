@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { ChevronDown } from 'lucide-react';
 
-import CreateJobModal from '@/components/CreateJobModal';
+import CreateJobModal from '@/components/jobs/CreateJobModal';
 import { Button } from '@/components/ui/button';
 import { WORKLOAD_OPTIONS } from '@/lib/jobConfig';
 import type { JobType } from '@/lib/types';

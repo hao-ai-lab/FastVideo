@@ -19,8 +19,8 @@ const JOB_ROUTES = [
 ] as const;
 
 const TAB_BASE =
-  'block px-5 py-[0.65rem] text-left text-sm text-muted-foreground transition-colors hover:bg-accent/5 hover:text-foreground';
-const TAB_ACTIVE = 'bg-accent/10 font-medium text-accent';
+  'block px-5 py-[0.65rem] text-left text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground';
+const TAB_ACTIVE = 'bg-accent-blue/10 font-medium text-accent-blue';
 
 export default function PrimarySidebar({
   onWidthChange,
@@ -139,7 +139,7 @@ export default function PrimarySidebar({
           onClick={() => setIsCollapsed((v) => !v)}
           title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           className={cn(
-            'flex items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground',
+            'flex items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
             isCollapsed ? 'p-3' : 'p-2',
           )}
         >
@@ -160,8 +160,8 @@ export default function PrimarySidebar({
           role="presentation"
           onMouseDown={onMouseDown}
           className={cn(
-            'absolute bottom-0 right-0 top-0 z-[1] w-1.5 cursor-col-resize hover:bg-accent/20',
-            isDragging && 'bg-accent/20',
+            'absolute bottom-0 right-0 top-0 z-[1] w-1.5 cursor-col-resize hover:bg-accent-blue/25',
+            isDragging && 'bg-accent-blue/25',
           )}
         />
       )}

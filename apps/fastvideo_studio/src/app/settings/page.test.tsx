@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HeaderActionsProvider } from '@/components/HeaderActionsContext';
+import { HeaderActionsProvider } from '@/components/shell/HeaderActionsContext';
 import { resetToDefaults, updateOption } from '@/stores/defaultOptions';
 
 import SettingsPage from './page';

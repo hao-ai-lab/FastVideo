@@ -67,7 +67,7 @@ export default function DatasetCard({
     <div
       className={cn(
         'mb-3 flex cursor-pointer flex-col gap-[0.6rem] rounded-lg border border-border bg-background px-[1.15rem] py-4',
-        isSelected && 'border-accent bg-accent/5',
+        isSelected && 'border-accent-blue bg-accent-blue/5',
       )}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('button')) return;

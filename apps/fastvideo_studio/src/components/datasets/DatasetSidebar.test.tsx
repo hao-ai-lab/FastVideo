@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 
-import DatasetSidebar from '@/components/DatasetSidebar';
+import DatasetSidebar from '@/components/datasets/DatasetSidebar';
 import * as api from '@/lib/api';
 import type { Dataset } from '@/lib/api';
 

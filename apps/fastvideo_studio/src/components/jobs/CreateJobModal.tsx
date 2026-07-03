@@ -373,7 +373,7 @@ export default function CreateJobModal({
                     type="button"
                     onClick={clearImage}
                     disabled={isSubmitting || isUploadingImage}
-                    className="text-indigo-400 underline-offset-2 hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    className="text-accent-blue underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Clear
                   </button>
@@ -464,7 +464,7 @@ export default function CreateJobModal({
               </div>
 
               <details>
-                <summary className="mb-2 cursor-pointer select-none text-sm text-indigo-400">
+                <summary className="mb-2 cursor-pointer select-none text-sm font-medium text-accent-blue">
                   Options
                 </summary>
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-3 gap-y-2">
@@ -624,7 +624,7 @@ export default function CreateJobModal({
 
           {isInference && (
             <details>
-              <summary className="mb-2 cursor-pointer select-none text-sm text-indigo-400">
+              <summary className="mb-2 cursor-pointer select-none text-sm font-medium text-accent-blue">
                 Options
               </summary>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-3 gap-y-2">

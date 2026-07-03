@@ -1,7 +1,9 @@
 'use client';
 
 import * as React from 'react';
+import { Timer } from 'lucide-react';
 
+import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/hooks/useStore';
 import {
@@ -45,14 +47,14 @@ function computeElapsed(job: Job, currentTime: number): string | null {
   return formatDuration(elapsedSeconds);
 }
 
-const BADGE_CLASSES: Record<string, string> = {
-  pending: 'bg-secondary text-muted-foreground',
-  running: 'bg-amber-500/20 text-amber-300',
-  completed: 'bg-emerald-500/20 text-emerald-300',
-  ready: 'bg-emerald-500/20 text-emerald-300',
-  failed: 'bg-rose-500/20 text-rose-300',
-  stopped: 'bg-secondary text-muted-foreground',
-  preprocessing: 'bg-blue-500/20 text-blue-300',
+const BADGE_VARIANTS: Record<string, BadgeProps['variant']> = {
+  pending: 'secondary',
+  running: 'warning',
+  completed: 'success',
+  ready: 'success',
+  failed: 'destructive',
+  stopped: 'secondary',
+  preprocessing: 'default',
 };
 
 export default function JobCard({ job, onJobUpdated }: JobCardProps) {
@@ -145,8 +147,6 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
     }
   }
 
-  const badgeClass = BADGE_CLASSES[job.status] ?? 'bg-secondary text-muted-foreground';
-
   return (
     <div
       role="button"
@@ -156,7 +156,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
       className={cn(
         'mb-3 flex cursor-pointer flex-col gap-2.5 rounded-lg border bg-background p-4 transition-colors last:mb-0',
         isSelected
-          ? 'border-primary bg-primary/5'
+          ? 'border-accent-blue bg-accent-blue/5'
           : 'border-border hover:border-muted-foreground/40',
       )}
     >
@@ -164,14 +164,9 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
         <span className="text-[0.95rem] font-semibold text-foreground">
           {job.model_id}
         </span>
-        <span
-          className={cn(
-            'inline-flex items-center rounded-full px-2 py-0.5 text-[0.7rem] font-bold uppercase tracking-wide',
-            badgeClass,
-          )}
-        >
+        <Badge variant={BADGE_VARIANTS[job.status] ?? 'secondary'}>
           {job.status}
-        </span>
+        </Badge>
       </div>
       <p className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-muted-foreground">
         {job.prompt}
@@ -187,7 +182,12 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
         ) : (
           <span>{job.workload_type?.replace(/_/g, ' ') ?? job.job_type}</span>
         )}
-        {elapsedTime && <span>⏱ {elapsedTime}</span>}
+        {elapsedTime && (
+          <span className="inline-flex items-center gap-1">
+            <Timer className="size-3.5" aria-hidden />
+            {elapsedTime}
+          </span>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         {job.status === 'running' ? (

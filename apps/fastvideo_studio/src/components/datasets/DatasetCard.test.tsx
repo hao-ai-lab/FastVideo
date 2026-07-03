@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import DatasetCard from '@/components/DatasetCard';
+import DatasetCard from '@/components/datasets/DatasetCard';
 import { deleteDataset } from '@/lib/api';
 import type { Dataset } from '@/lib/api';
 import { setActiveDatasetId } from '@/stores/activeDataset';
@@ -100,6 +100,6 @@ describe('DatasetCard', () => {
     const { container } = render(
       <DatasetCard dataset={dataset} onUpdated={() => {}} />,
     );
-    expect(container.firstChild).toHaveClass('border-accent', 'bg-accent/5');
+    expect(container.firstChild).toHaveClass('border-accent-blue', 'bg-accent-blue/5');
   });
 });

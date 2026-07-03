@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 
-import UploadZone from '@/components/UploadZone';
+import UploadZone from '@/components/datasets/UploadZone';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,

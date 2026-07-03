@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { X } from 'lucide-react';
 
-import DownloadCaptions from '@/components/DownloadCaptions';
+import DownloadCaptions from '@/components/datasets/DownloadCaptions';
 import { Textarea } from '@/components/ui/textarea';
 import { useResizable } from '@/hooks/useResizable';
 import {
@@ -41,7 +41,7 @@ const DatasetFileCard = React.memo(function DatasetFileCard({
     <div className="relative flex flex-col overflow-hidden rounded-lg border border-border bg-background">
       {!thumbLoaded && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-accent" />
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-accent-blue" />
         </div>
       )}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
@@ -191,7 +191,7 @@ export default function DatasetSidebar({
             onClick={onClose}
             title="Close"
             aria-label="Close"
-            className="flex items-center justify-center rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+            className="flex items-center justify-center rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <X className="h-[18px] w-[18px]" />
           </button>
@@ -232,8 +232,8 @@ export default function DatasetSidebar({
         role="presentation"
         onMouseDown={onMouseDown}
         className={cn(
-          'absolute bottom-0 left-0 top-0 z-[1] w-1.5 cursor-col-resize hover:bg-accent/20',
-          isDragging && 'bg-accent/20',
+          'absolute bottom-0 left-0 top-0 z-[1] w-1.5 cursor-col-resize hover:bg-accent-blue/25',
+          isDragging && 'bg-accent-blue/25',
         )}
       />
     </aside>

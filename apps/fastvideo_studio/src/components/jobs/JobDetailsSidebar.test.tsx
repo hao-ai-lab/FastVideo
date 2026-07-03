@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import SecondarySidebar from './SecondarySidebar';
+import JobDetailsSidebar from './JobDetailsSidebar';
 import { getJobLogs } from '@/lib/api';
 import type { Job } from '@/lib/types';
 import { makeJob as makeBaseJob } from '@/test/factories';
@@ -18,7 +18,7 @@ const makeJob = (overrides: Partial<Job> = {}): Job =>
     ...overrides,
   });
 
-describe('SecondarySidebar', () => {
+describe('JobDetailsSidebar', () => {
   it('renders log lines streamed from the job log poll', async () => {
     vi.mocked(getJobLogs).mockResolvedValue({
       lines: ['boot sequence started', 'loading model weights'],
@@ -29,7 +29,7 @@ describe('SecondarySidebar', () => {
     });
 
     render(
-      <SecondarySidebar job={makeJob({ status: 'running' })} onClose={vi.fn()} />,
+      <JobDetailsSidebar job={makeJob({ status: 'running' })} onClose={vi.fn()} />,
     );
 
     expect(await screen.findByText(/boot sequence started/)).toBeInTheDocument();
@@ -49,7 +49,7 @@ describe('SecondarySidebar', () => {
       });
 
       render(
-        <SecondarySidebar
+        <JobDetailsSidebar
           job={makeJob({ status: 'running' })}
           onClose={vi.fn()}
         />,
@@ -86,7 +86,7 @@ describe('SecondarySidebar', () => {
       });
 
       render(
-        <SecondarySidebar
+        <JobDetailsSidebar
           job={makeJob({ status: 'completed' })}
           onClose={vi.fn()}
         />,

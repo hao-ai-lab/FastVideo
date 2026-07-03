@@ -2,7 +2,8 @@
 
 import { usePathname } from 'next/navigation';
 
-import { useHeaderActions } from '@/components/HeaderActionsContext';
+import { useHeaderActions } from '@/components/shell/HeaderActionsContext';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 const TAB_TITLES: Record<string, string> = {
   '/inference': 'Jobs',
@@ -19,7 +20,7 @@ export default function Header() {
   const title = TAB_TITLES[pathname] ?? 'FastVideo';
 
   return (
-    <header className="fixed inset-x-0 top-0 z-[100] flex h-[var(--header-height)] items-center gap-6 border-b border-border bg-background px-6">
+    <header className="fixed inset-x-0 top-0 z-[100] flex h-[var(--header-height)] items-center gap-6 border-b border-border bg-background/80 px-6 backdrop-blur">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/logo.svg"
@@ -31,9 +32,10 @@ export default function Header() {
       <h1 className="m-0 flex-1 text-xl font-semibold tracking-tight">
         {title}
       </h1>
-      {actions ? (
-        <div className="flex items-center gap-3">{actions}</div>
-      ) : null}
+      <div className="flex items-center gap-3">
+        {actions}
+        <ThemeToggle />
+      </div>
     </header>
   );
 }

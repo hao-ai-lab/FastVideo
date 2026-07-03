@@ -2,10 +2,10 @@
 
 import * as React from 'react';
 
-import AddDatasetButton from '@/components/AddDatasetButton';
-import CreateDatasetModal from '@/components/CreateDatasetModal';
-import DatasetCard from '@/components/DatasetCard';
-import { HeaderActions } from '@/components/HeaderActionsContext';
+import AddDatasetButton from '@/components/datasets/AddDatasetButton';
+import CreateDatasetModal from '@/components/datasets/CreateDatasetModal';
+import DatasetCard from '@/components/datasets/DatasetCard';
+import { HeaderActions } from '@/components/shell/HeaderActionsContext';
 import { Card } from '@/components/ui/card';
 import { useStore } from '@/hooks/useStore';
 import { getDatasets } from '@/lib/api';

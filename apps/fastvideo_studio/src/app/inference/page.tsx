@@ -1,8 +1,8 @@
 'use client';
 
-import CreateJobButton from '@/components/CreateJobButton';
-import { HeaderActions } from '@/components/HeaderActionsContext';
-import JobQueue from '@/components/JobQueue';
+import CreateJobButton from '@/components/jobs/CreateJobButton';
+import { HeaderActions } from '@/components/shell/HeaderActionsContext';
+import JobQueue from '@/components/jobs/JobQueue';
 
 export default function InferencePage() {
   return (

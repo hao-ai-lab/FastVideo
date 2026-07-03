@@ -3,11 +3,11 @@
 import * as React from 'react';
 import { usePathname } from 'next/navigation';
 
-import DatasetSidebar from '@/components/DatasetSidebar';
-import Header from '@/components/Header';
-import { HeaderActionsProvider } from '@/components/HeaderActionsContext';
-import PrimarySidebar from '@/components/PrimarySidebar';
-import SecondarySidebar from '@/components/SecondarySidebar';
+import DatasetSidebar from '@/components/datasets/DatasetSidebar';
+import Header from '@/components/shell/Header';
+import { HeaderActionsProvider } from '@/components/shell/HeaderActionsContext';
+import PrimarySidebar from '@/components/shell/PrimarySidebar';
+import JobDetailsSidebar from '@/components/jobs/JobDetailsSidebar';
 import { Toaster } from '@/components/ui/sonner';
 import { useStore } from '@/hooks/useStore';
 import {
@@ -68,7 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         {jobSidebarOpen && activeJob && (
-          <SecondarySidebar
+          <JobDetailsSidebar
             job={activeJob}
             onClose={() => setActiveJobId(null)}
             onWidthChange={setSecondaryWidth}

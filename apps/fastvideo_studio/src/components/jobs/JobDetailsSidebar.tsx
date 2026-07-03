@@ -13,7 +13,7 @@ const SIDEBAR_MIN_WIDTH = 280;
 const SIDEBAR_MAX_WIDTH = 750;
 const POLL_INTERVAL_MS = 2000;
 
-export default function SecondarySidebar({
+export default function JobDetailsSidebar({
   job,
   onClose,
   onWidthChange,
@@ -173,7 +173,7 @@ export default function SecondarySidebar({
             Console Output
           </span>
           {job.status === 'running' && (
-            <span className="text-[0.7rem] font-medium text-[var(--green)]">
+            <span className="text-[0.7rem] font-medium text-emerald-600 dark:text-emerald-400">
               ● Live
             </span>
           )}
@@ -198,8 +198,8 @@ export default function SecondarySidebar({
         role="presentation"
         onMouseDown={onMouseDown}
         className={cn(
-          'absolute bottom-0 left-0 top-0 z-[1] w-1.5 cursor-col-resize hover:bg-accent/20',
-          isDragging && 'bg-accent/20',
+          'absolute bottom-0 left-0 top-0 z-[1] w-1.5 cursor-col-resize hover:bg-accent-blue/25',
+          isDragging && 'bg-accent-blue/25',
         )}
       />
     </aside>
