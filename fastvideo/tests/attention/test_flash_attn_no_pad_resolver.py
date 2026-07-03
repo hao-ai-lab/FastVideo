@@ -8,7 +8,7 @@ order is:
 
     1. ``fastvideo.attention.utils.flash_attn_cute`` -- only when
        ``FASTVIDEO_FA4=1`` (explicit opt-in), and then it must import or the
-       resolver raises instead of falling through
+       resolver raises RuntimeError instead of falling through
     2. ``flash_attn_interface``
     3. ``flash_attn``
 
@@ -58,7 +58,13 @@ def test_resolver_skips_cute_without_opt_in(monkeypatch) -> None:
 
 def test_resolver_raises_when_opted_in_but_cute_unavailable(monkeypatch) -> None:
     """With ``FASTVIDEO_FA4=1`` an unimportable cute build fails loudly instead
-    of silently falling through to FA3/FA2."""
+    of silently falling through to FA3/FA2.
+
+    The resolver runs at module import time, so the reload itself must raise.
+    It raises RuntimeError (not ImportError) so importers that treat
+    ImportError as "flash-attn not installed" (``bsa_attn.py``) cannot swallow
+    the opted-in failure.
+    """
     monkeypatch.setenv("FASTVIDEO_FA4", "1")
     real_import = builtins.__import__
 
@@ -69,9 +75,8 @@ def test_resolver_raises_when_opted_in_but_cute_unavailable(monkeypatch) -> None
 
     monkeypatch.setattr(builtins, "__import__", patched_import)
 
-    mod = _reload_resolver_module()
-    with pytest.raises(ImportError, match="cute disabled for test"):
-        mod._resolve_flash_attn_varlen_func()
+    with pytest.raises(RuntimeError, match="cute disabled for test"):
+        _reload_resolver_module()
 
 
 def test_resolver_returns_flash_attn_when_interface_unavailable(monkeypatch) -> None:

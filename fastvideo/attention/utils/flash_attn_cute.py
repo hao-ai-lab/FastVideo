@@ -6,6 +6,7 @@ from collections.abc import Callable
 import torch
 
 from fastvideo.logger import init_logger
+from fastvideo.platforms import current_platform
 
 logger = init_logger(__name__)
 
@@ -34,9 +35,8 @@ else:
     raise ImportError("flash_attn.cute is only available on CUDA devices; this error must be handled internally")
 
 try:
-    # FA2 serves grad-enabled calls on pre-sm90 GPUs, where FA4 cute's
-    # backward asserts. Optional so FA4-only installs can still import this
-    # module.
+    # FA2 serves the calls FA4 cute cannot on pre-sm90 GPUs (backward, GQA).
+    # Optional so FA4-only installs can still import this module.
     from flash_attn import flash_attn_func as _flash_attn_2_func
     from flash_attn import flash_attn_varlen_func as _flash_attn_2_varlen_func
 except ImportError:
@@ -50,22 +50,27 @@ def _check_dropout(dropout_p: float) -> None:
 
 
 @functools.cache
-def _fa4_backward_supported() -> bool:
-    # FA4 cute's backward asserts sm90+ (e.g. L40S/sm_89 dies on its arch
-    # check); below that, grad-enabled calls are served by FA2.
-    return torch.cuda.get_device_capability()[0] >= 9
+def _sm90_or_newer() -> bool:
+    return current_platform.has_device_capability(90)
 
 
-def _use_fa2(*tensors: torch.Tensor) -> bool:
-    if not (torch.is_grad_enabled() and any(t.requires_grad for t in tensors)):
+def _use_fa2(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> bool:
+    if _sm90_or_newer():
         return False
-    return not _fa4_backward_supported()
+    # Pre-sm90 FA4 cute limitations, both served by FA2 (deterministic
+    # capability gate, not a runtime fallback):
+    #   * the backward asserts sm90+ (L40S/sm_89 dies on its arch check);
+    #   * GQA fails CuTeDSL JIT in pack_gqa ("ValueError: Operation creation
+    #     failed", observed on sm_89 with HunyuanGameCraft/LTX2).
+    if q.shape[-2] != k.shape[-2]:
+        return True
+    return torch.is_grad_enabled() and any(t.requires_grad for t in (q, k, v))
 
 
 def _fa2_or_raise(fa2_func: Callable | None) -> Callable:
     if fa2_func is None:
-        raise RuntimeError("grad-enabled attention on the FA4 cute path requires FlashAttention-2 "
-                           "on pre-sm90 GPUs (FA4's backward needs sm90+), and flash-attn 2 is "
+        raise RuntimeError("this attention call cannot run on FA4 cute below sm90 (its backward and "
+                           "GQA support require sm90+) and flash-attn 2, which serves it there, is "
                            "not installed.")
     return fa2_func
 

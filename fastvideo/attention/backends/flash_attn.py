@@ -20,16 +20,18 @@ logger = init_logger(__name__)
 
 # FA4 (flash_attn.cute) is explicit opt-in via FASTVIDEO_FA4=1, mirroring the
 # kernel package's FASTVIDEO_VSA_CUTEDSL: its CuTeDSL kernels JIT-compile per
-# shape family and can fail at runtime on some arch/shape combinations
-# (observed: GQA on sm_89), so it is never auto-selected just because it is
-# installed. Grad-enabled calls use FA4's backward on sm90+ and FA2 below
-# that (FA4's backward asserts sm90+).
+# shape family and can fail at runtime on some arch/shape combinations, so it
+# is never auto-selected just because it is installed. Below sm90 a capability
+# gate in flash_attn_cute routes to FA2 the calls FA4 cannot serve there:
+# grad-enabled (its backward asserts sm90+) and GQA (pack_gqa fails CuTeDSL
+# JIT, observed on sm_89).
 if envs.FASTVIDEO_FA4:
     try:
         from fastvideo.attention.utils.flash_attn_cute import flash_attn_func
     except ImportError as e:
-        raise RuntimeError("FASTVIDEO_FA4=1 but flash_attn.cute (FA4) is not usable; install the "
-                           "pinned flash-attn-4 build (see pyproject.toml) or unset FASTVIDEO_FA4.") from e
+        raise RuntimeError(f"FASTVIDEO_FA4=1 but flash_attn.cute (FA4) is not usable ({e}); "
+                           "fix the FA4 install (see the flash-attn-4 pin in pyproject.toml) "
+                           "or unset FASTVIDEO_FA4.") from e
     fa_version = "4"
 else:
     try:
@@ -117,8 +119,8 @@ if fa_version in ("2", "3"):
 elif fa_version == "4":
     # FA4 path: `flash_attn_func` (from `flash_attn_cute`) goes through a
     # registered torch.library custom op (with an FA4 backward on sm90+;
-    # grad-enabled calls below sm90 route to FA2), so a passthrough is
-    # enough — no extra registration needed.
+    # grad-enabled and GQA calls below sm90 route to FA2), so a passthrough
+    # is enough — no extra registration needed.
     def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
         return flash_attn_func(q, k, v, softmax_scale=softmax_scale, causal=causal)
 else:

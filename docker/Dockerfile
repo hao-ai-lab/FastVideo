@@ -170,12 +170,14 @@ RUN --mount=type=cache,target=/opt/uv/cache \
 # rmtree clears the wheel's stale cute files first to avoid an install conflict.
 # Then verify both survive so a broken overlay fails the build instead of shipping
 # an FA2-less image. x86 only: the FA4 stack (quack-kernels etc.) is unvalidated on
-# arm64 / GB10 (sm_121), so there we skip the overlay and FA4 falls back to FA2.
+# arm64 / GB10 (sm_121), so there we skip the overlay; FA4 is opt-in
+# (FASTVIDEO_FA4=1) and errors if set without the overlay, so leave it unset on
+# arm64 and the image runs FA3/FA2 as usual.
 RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
     if [ "${TARGETARCH}" = "arm64" ]; then \
-        echo "Skipping FA4 cute overlay on arm64 (FA4 stack unvalidated there; FA4 falls back to FA2)"; \
+        echo "Skipping FA4 cute overlay on arm64 (FA4 stack unvalidated there; do not set FASTVIDEO_FA4)"; \
     else \
         python -c "import glob, shutil; [shutil.rmtree(d, ignore_errors=True) for d in glob.glob('/opt/venv/lib/python*/site-packages/flash_attn/cute')]" && \
         uv pip install "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@${FA4_CUTE_REF}#subdirectory=flash_attn/cute" && \

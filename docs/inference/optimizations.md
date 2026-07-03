@@ -85,10 +85,11 @@ runtime on some GPU/shape combinations. To use FA4, install the pinned
 export FASTVIDEO_FA4=1
 ```
 
-Grad-enabled (training) attention uses FA4's backward on sm90+ GPUs and falls
-back to FlashAttention-2 below that (FA4's backward requires sm90+). If FA4 is
-unusable while `FASTVIDEO_FA4=1` is set, FastVideo fails loudly instead of
-silently falling back.
+On GPUs below sm90 a capability gate routes to FlashAttention-2 the calls FA4
+cannot serve there: grad-enabled (training) attention (FA4's backward requires
+sm90+) and GQA attention (FA4's `pack_gqa` fails to JIT-compile below sm90).
+On sm90+ both run on FA4. If FA4 is unusable while `FASTVIDEO_FA4=1` is set,
+FastVideo fails loudly instead of silently falling back.
 
 ### FP4 Flash Attention 4 (Blackwell only)
 

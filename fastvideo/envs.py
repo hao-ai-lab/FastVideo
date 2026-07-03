@@ -215,8 +215,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
 
     # If set (=1), the FLASH_ATTN backend uses FlashAttention-4
     # (flash_attn.cute). FA4 is opt-in and never auto-selected just because it
-    # is installed. Grad-enabled attention uses FA4's backward on sm90+ and
-    # falls back to FA2 below that (FA4's backward asserts sm90+).
+    # is installed. Below sm90, grad-enabled and GQA calls are routed to FA2
+    # (FA4's backward asserts sm90+ and its pack_gqa fails to JIT there).
     "FASTVIDEO_FA4":
     lambda: os.getenv("FASTVIDEO_FA4", "0") != "0",
 
