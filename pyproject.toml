@@ -71,7 +71,7 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.2.6",
+    "fastvideo-kernel==0.3.1",
     "wheel",
 
     # Training Dependencies
@@ -97,9 +97,11 @@ prerelease = "allow"
 members = ["apps/dreamverse"]
 
 [tool.uv.sources]
-# No prebuilt aarch64 wheel for fastvideo-kernel exists on PyPI, so on ARM
-# (e.g. the NVIDIA DGX Spark / GB10) build it from the in-tree source instead;
-# x86_64 keeps the published PyPI wheel. This table is uv-only: plain pip ignores
+# PyPI's aarch64 fastvideo-kernel wheels (cp312, sm_100a/sm_120a) do not cover
+# the NVIDIA DGX Spark / GB10 (sm_121), so on ARM build from the in-tree source
+# instead; x86_64 keeps the published PyPI wheel. uv installs the path source
+# regardless of the version pin above, so the in-tree kernel may run ahead of
+# the published release. This table is uv-only: plain pip ignores
 # it and it is not part of the published wheel metadata, so PyPI consumers are
 # unaffected. Pass --no-sources to bypass it (e.g. when the kernel is already
 # built/installed separately, as in the Spark install guide).

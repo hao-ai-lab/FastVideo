@@ -39,13 +39,16 @@ fully usable without it).
 The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`,
 `flash_attn.cute.interface._flash_attn_fwd`) are provided upstream by
 [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention). Pin to
-commit `c19cd20e`: the wrapper targets that revision's `_flash_attn_fwd` signature
-(`m_block_size` / `n_block_size`); later upstream revisions reshaped it into a
-`tile_mn` tuple and are not drop-in compatible.
+commit `940cd9680f3315f2f06b43ab5bea2c2cf2d96806` — the cutlass-4.5-safe revision
+FastVideo itself pins (as the `flash-attn-4` source in the repo-root
+`pyproject.toml`). The wrapper targets that revision's `_flash_attn_fwd`
+signature (block sizes passed as a `tile_mn` tuple); older revisions that take
+`m_block_size` / `n_block_size` (upstream `c19cd20e`, the `fa4-compile` fork)
+are not compatible.
 
 ```bash
 pip install "nvidia-cutlass-dsl>=4.5.0" torchvision
-pip install "git+https://github.com/Dao-AILab/flash-attention.git@c19cd20e#subdirectory=flash_attn/cute"
+pip install "git+https://github.com/Dao-AILab/flash-attention.git@940cd9680f3315f2f06b43ab5bea2c2cf2d96806#subdirectory=flash_attn/cute"
 ```
 
 The CuTe kernel JIT-compiles on first use. Verified on Blackwell (sm_100) against

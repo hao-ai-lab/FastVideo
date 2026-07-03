@@ -48,7 +48,7 @@ from this checkout with the `dreamverse` extra, including the FA4
 flash-attention fork and FlashInfer for NVFP4 quantization, and builds native
 FFmpeg.
 
-FastVideo's pinned `fastvideo-kernel==0.3.0` package is installed by default.
+FastVideo's pinned `fastvideo-kernel==0.3.1` package is installed by default.
 To rebuild `fastvideo-kernel` from this checkout during the image build, set:
 
 ```bash
