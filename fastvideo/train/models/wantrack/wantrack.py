@@ -83,6 +83,9 @@ class WanTrackModel(WanModel):
         # Diversity: 0 = uniform (MotionStream). >0 up-weights moving/diverse tracks over
         # static/redundant ones (base weight 1 keeps SOME static tracks -- don't overdo it).
         self._aug_diversity = float(os.getenv("WANTRACK_DIVERSITY", "1.0"))
+        # Fraction of the (post-coverage) sampling budget drawn UNIFORMLY rather than by the
+        # informativeness weight -- keeps some static/background tracks in the mix.
+        self._aug_uniform_frac = float(os.getenv("WANTRACK_UNIFORM_FRAC", "0.3"))
         # CFG dropout (ours, not MotionStream) -> default OFF; enables motion/text CFG when >0.
         self._aug_motion_drop = float(os.getenv("WANTRACK_MOTION_DROP", "0.0"))
         self._aug_text_drop = float(os.getenv("WANTRACK_TEXT_DROP", "0.0"))
@@ -93,14 +96,17 @@ class WanTrackModel(WanModel):
         track_visibility: torch.Tensor | None,
         generator: torch.Generator,
         object_ids: torch.Tensor | None = None,
+        track_weights: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         """MotionStream-style track augmentation.
 
         Sampling keeps K~U[min,max] tracks per step by zeroing the visibility of the rest,
-        with two twists over uniform random: (a) OBJECT COVERAGE -- if ``object_ids``
-        ([B,N] or [N] SAM segment labels, -1 = none) is given, guarantee >=1 track per
-        segment; (b) DIVERSITY -- weight sampling by per-track motion so moving/unique
-        tracks are favored while some static ones survive (base weight 1).
+        combining three ideas: (a) OBJECT COVERAGE -- if ``object_ids`` ([B,N] or [N] SAM
+        segment labels, -1 = none) is given, guarantee >=1 track per segment; (b) an
+        INFORMATIVENESS-weighted draw for most of the remaining budget, using the precomputed
+        low-rank ``track_weights`` ([B,N] or [N] in [0,1]) when available and falling back to
+        per-track abs motion otherwise; (c) a UNIFORM draw for ``uniform_frac`` of the budget
+        so some static/background tracks always survive.
         """
         if track_points is None or track_visibility is None or not self._aug_enabled:
             return track_points, track_visibility
@@ -109,7 +115,13 @@ class WanTrackModel(WanModel):
         gdev = generator.device if generator is not None else device
         vis = track_visibility.clone()
 
-        # per-track motion magnitude (max displacement from frame 0, visible frames) -> diversity weight
+        # informativeness weight per track: precomputed low-rank track_weights if given,
+        # else abs-motion diversity (max displacement from frame 0 over visible frames).
+        tw = None
+        if track_weights is not None:
+            tw = track_weights.to(gdev).float()
+            if tw.dim() == 1:
+                tw = tw.unsqueeze(0).expand(B, -1)
         tp = track_points.float()
         disp = ((tp - tp[:, :1])**2).sum(-1).sqrt()  # [B,T,N]
         motion = (disp * (track_visibility > 0.5).float()).amax(dim=1)  # [B,N]
@@ -122,9 +134,14 @@ class WanTrackModel(WanModel):
                 hi = min(self._aug_max_points, N)
                 lo = min(self._aug_min_points, hi)
                 k = int(torch.randint(lo, hi + 1, (1, ), generator=generator, device=gdev).item())
-                m = motion[b].to(gdev)
-                w = 1.0 + self._aug_diversity * (m / (m.mean() + 1e-6))
-                w = w * (track_visibility[b, 0].to(gdev) > 0.5).float()  # only frame-0-visible are valid queries
+                valid = (track_visibility[b, 0].to(gdev) > 0.5).float()  # only frame-0-visible are valid queries
+                if tw is not None:
+                    w = (0.05 + self._aug_diversity * tw[b]) * valid  # informativeness (low-rank) weight
+                else:
+                    m = motion[b].to(gdev)
+                    w = (1.0 + self._aug_diversity * (m / (m.mean() + 1e-6))) * valid
+                if float(w.sum()) <= 0.0:
+                    w = valid.clone()
                 if float(w.sum()) <= 0.0:
                     w = torch.ones(N, device=gdev)
                 keep = torch.zeros(N, device=gdev)
@@ -139,12 +156,19 @@ class WanTrackModel(WanModel):
                         if float(ww.sum()) <= 0.0:
                             ww = torch.ones_like(ww)
                         keep[idxs[torch.multinomial(ww, 1, generator=generator)]] = 1.0
-                # (b) fill remaining budget with weighted sampling over not-yet-kept points
-                n_cov = int(keep.sum().item())
+                # (b) informativeness-weighted draw for (1 - uniform_frac) of the remaining budget
+                rem_total = max(0, k - int(keep.sum().item()))
+                n_weighted = rem_total - int(round(rem_total * self._aug_uniform_frac))
                 wa = w * (keep < 0.5).float()
-                rem = min(max(0, k - n_cov), int((wa > 0).sum().item()))
-                if rem > 0:
-                    keep[torch.multinomial(wa, rem, replacement=False, generator=generator)] = 1.0
+                nw = min(n_weighted, int((wa > 0).sum().item()))
+                if nw > 0:
+                    keep[torch.multinomial(wa, nw, replacement=False, generator=generator)] = 1.0
+                # (c) fill whatever is left up to k UNIFORMLY over remaining valid tracks
+                #     (also backfills any weighted-pool shortfall) -> keeps static context.
+                ua = valid * (keep < 0.5).float()
+                nu = min(max(0, k - int(keep.sum().item())), int((ua > 0).sum().item()))
+                if nu > 0:
+                    keep[torch.multinomial(ua, nu, replacement=False, generator=generator)] = 1.0
                 vis[b] = vis[b] * keep.to(device=device, dtype=vis.dtype).unsqueeze(0)
 
         # Stochastic CONTIGUOUS-chunk masking (MotionStream mid-frame chunks): zero L-frame
@@ -219,12 +243,23 @@ class WanTrackModel(WanModel):
         else:
             object_ids = None
 
+        # Optional precomputed low-rank informativeness weight per track ([B,N] in [0,1]);
+        # biases the sampling draw. Empty/absent if not precomputed by segment_tracks.
+        track_weights = raw_batch.get("track_weights")
+        if (track_weights is not None and torch.is_tensor(track_weights) and track_weights.numel() > 0
+                and track_weights.shape[-1] == (track_points.shape[2] if track_points is not None else -1)):
+            track_weights = track_weights.to(device).float()
+        else:
+            track_weights = None
+
         # MotionStream train-time augments (1000-2500 track sampling w/ object coverage +
-        # diversity, contiguous-chunk masking). Env-gated; a no-op when WANTRACK_AUG=0.
+        # informativeness-weighted + uniform draw, contiguous-chunk masking). Env-gated;
+        # a no-op when WANTRACK_AUG=0.
         track_points, track_visibility = self._augment_tracks(track_points,
                                                               track_visibility,
                                                               generator,
-                                                              object_ids=object_ids)
+                                                              object_ids=object_ids,
+                                                              track_weights=track_weights)
 
         encoder_hidden_states = encoder_hidden_states.to(device, dtype=dtype)
         # Text CFG dropout: zero the text embedding for this step with prob.

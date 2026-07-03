@@ -117,6 +117,7 @@ class PreprocessPipeline_I2V_Track(BasePreprocessPipeline):
         track_points_list: list[np.ndarray] = []
         track_visibility_list: list[np.ndarray] = []
         object_ids_list: list[np.ndarray] = []  # SAM object label per track [N] (float32; empty if unsegmented)
+        track_weights_list: list[np.ndarray] = []  # low-rank informativeness per track [N] (empty if not precomputed)
         for points_path in points_paths:
             d = np.load(points_path)
             tracks = d["tracks"].astype(np.float32)  # [T, N, 2] in pixel coords
@@ -135,10 +136,14 @@ class PreprocessPipeline_I2V_Track(BasePreprocessPipeline):
             # object_ids (from segment_tracks.py); float32 [N], -1 = background. Empty if absent.
             oid = d["object_ids"].astype(np.float32) if "object_ids" in d else np.empty(0, np.float32)
             object_ids_list.append(np.ascontiguousarray(oid, dtype=np.float32))
+            # track_weights (low-rank informativeness in [0,1]); float32 [N]. Empty if absent.
+            tw = d["track_weights"].astype(np.float32) if "track_weights" in d else np.empty(0, np.float32)
+            track_weights_list.append(np.ascontiguousarray(tw, dtype=np.float32))
 
         features["track_points"] = track_points_list
         features["track_visibility"] = track_visibility_list
         features["object_ids"] = object_ids_list
+        features["track_weights"] = track_weights_list
         return features
 
     def create_record(self,
@@ -171,6 +176,7 @@ class PreprocessPipeline_I2V_Track(BasePreprocessPipeline):
         _put("track_points", None)
         _put("track_visibility", None)
         _put("object_ids", None)
+        _put("track_weights", None)
         return record
 
 

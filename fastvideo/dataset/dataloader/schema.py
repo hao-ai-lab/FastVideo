@@ -81,6 +81,11 @@ pyarrow_schema_i2v_track = pa.schema([
     pa.field("object_ids_bytes", pa.binary()),
     pa.field("object_ids_shape", pa.list_(pa.int64())),  # [N]
     pa.field("object_ids_dtype", pa.string()),
+    # --- Per-track low-rank informativeness weight [N] (float32 in [0,1]). Optional/empty
+    #     if not precomputed; used to bias track sampling toward uniquely-moving points. ---
+    pa.field("track_weights_bytes", pa.binary()),
+    pa.field("track_weights_shape", pa.list_(pa.int64())),  # [N]
+    pa.field("track_weights_dtype", pa.string()),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),
