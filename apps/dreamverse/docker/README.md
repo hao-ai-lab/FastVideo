@@ -44,11 +44,10 @@ CUDA_TAG=12.6.3-cudnn-devel-ubuntu22.04 apps/dreamverse/docker/docker_build.sh
 ```
 
 Do not set `CUDA_TAG` and `CUDA_VERSION` together. The image installs FastVideo
-from this checkout with the `dreamverse` extra, including the FA4
-flash-attention fork and FlashInfer for NVFP4 quantization, and builds native
-FFmpeg.
+from this checkout with the `dreamverse` extra, including FA4 flash-attention
+and FlashInfer for NVFP4 quantization, and builds native FFmpeg.
 
-FastVideo's pinned `fastvideo-kernel==0.3.0` package is installed by default.
+FastVideo's pinned `fastvideo-kernel==0.3.1` package is installed by default.
 To rebuild `fastvideo-kernel` from this checkout during the image build, set:
 
 ```bash
