@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 
 import torch
@@ -10,7 +11,7 @@ logger = init_logger(__name__)
 
 if torch.cuda.is_available():
     try:
-        from flash_attn.cute.interface import _flash_attn_fwd
+        from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
     except ImportError:
         # flash_attn.cute (FA4) is simply not installed -- expected on builds
         # without it; callers handle the ImportError (the FASTVIDEO_FA4 gate in
@@ -33,9 +34,9 @@ else:
     raise ImportError("flash_attn.cute is only available on CUDA devices; this error must be handled internally")
 
 try:
-    # FA2 serves grad-enabled calls (FA4 cute's backward asserts sm90+ and is
-    # unvalidated for training in this repo). Optional so FA4-only installs
-    # can still import this module for inference.
+    # FA2 serves grad-enabled calls on pre-sm90 GPUs, where FA4 cute's
+    # backward asserts. Optional so FA4-only installs can still import this
+    # module.
     from flash_attn import flash_attn_func as _flash_attn_2_func
     from flash_attn import flash_attn_varlen_func as _flash_attn_2_varlen_func
 except ImportError:
@@ -48,16 +49,24 @@ def _check_dropout(dropout_p: float) -> None:
         raise NotImplementedError(f"flash_attn.cute does not support dropout (got dropout_p={dropout_p})")
 
 
+@functools.cache
+def _fa4_backward_supported() -> bool:
+    # FA4 cute's backward asserts sm90+ (e.g. L40S/sm_89 dies on its arch
+    # check); below that, grad-enabled calls are served by FA2.
+    return torch.cuda.get_device_capability()[0] >= 9
+
+
 def _use_fa2(*tensors: torch.Tensor) -> bool:
-    # Grad-enabled calls are served by FA2 on every device: the FA4 custom ops
-    # below are inference-only (no registered backward).
-    return torch.is_grad_enabled() and any(t.requires_grad for t in tensors)
+    if not (torch.is_grad_enabled() and any(t.requires_grad for t in tensors)):
+        return False
+    return not _fa4_backward_supported()
 
 
 def _fa2_or_raise(fa2_func: Callable | None) -> Callable:
     if fa2_func is None:
-        raise RuntimeError("grad-enabled attention on the FA4 cute path requires FlashAttention-2, "
-                           "which is not installed; the FA4 custom ops are inference-only.")
+        raise RuntimeError("grad-enabled attention on the FA4 cute path requires FlashAttention-2 "
+                           "on pre-sm90 GPUs (FA4's backward needs sm90+), and flash-attn 2 is "
+                           "not installed.")
     return fa2_func
 
 
@@ -106,6 +115,46 @@ def _flash_attn_cute_forward_fake(
     out = q.new_empty(batch, seqlen_q, nheads, v.shape[-1])
     lse = q.new_empty(batch, nheads, seqlen_q, dtype=torch.float32)
     return out, lse
+
+
+def _flash_attn_cute_setup_context(ctx: torch.autograd.function.FunctionCtx, inputs, output) -> None:
+    q, k, v, softmax_scale, causal, deterministic = inputs
+    out, lse = output
+    ctx.save_for_backward(q, k, v, out, lse)
+    ctx.softmax_scale = softmax_scale
+    ctx.causal = causal
+    ctx.deterministic = deterministic
+
+
+def _flash_attn_cute_backward(
+    ctx: torch.autograd.function.FunctionCtx,
+    grad_out: torch.Tensor,
+    grad_lse: torch.Tensor | None,
+):
+    del grad_lse
+    q, k, v, out, lse = ctx.saved_tensors
+    dq, dk, dv = _flash_attn_bwd(
+        q,
+        k,
+        v,
+        out,
+        grad_out,
+        lse,
+        softmax_scale=ctx.softmax_scale,
+        causal=ctx.causal,
+        softcap=0.0,
+        window_size_left=None,
+        window_size_right=None,
+        deterministic=ctx.deterministic,
+    )
+    return dq, dk, dv, None, None, None
+
+
+torch.library.register_autograd(
+    "fastvideo::_flash_attn_cute_forward",
+    _flash_attn_cute_backward,
+    setup_context=_flash_attn_cute_setup_context,
+)
 
 
 @torch.library.custom_op(
@@ -164,6 +213,63 @@ def _flash_attn_cute_varlen_forward_fake(
     out = q.new_empty(total_q, nheads, v.shape[-1])
     lse = q.new_empty(nheads, total_q, dtype=torch.float32)
     return out, lse
+
+
+def _flash_attn_cute_varlen_setup_context(ctx: torch.autograd.function.FunctionCtx, inputs, output) -> None:
+    (
+        q,
+        k,
+        v,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q,
+        max_seqlen_k,
+        softmax_scale,
+        causal,
+        deterministic,
+    ) = inputs
+    out, lse = output
+    ctx.save_for_backward(q, k, v, out, lse, cu_seqlens_q, cu_seqlens_k)
+    ctx.max_seqlen_q = max_seqlen_q
+    ctx.max_seqlen_k = max_seqlen_k
+    ctx.softmax_scale = softmax_scale
+    ctx.causal = causal
+    ctx.deterministic = deterministic
+
+
+def _flash_attn_cute_varlen_backward(
+    ctx: torch.autograd.function.FunctionCtx,
+    grad_out: torch.Tensor,
+    grad_lse: torch.Tensor | None,
+):
+    del grad_lse
+    q, k, v, out, lse, cu_seqlens_q, cu_seqlens_k = ctx.saved_tensors
+    dq, dk, dv = _flash_attn_bwd(
+        q,
+        k,
+        v,
+        out,
+        grad_out,
+        lse,
+        softmax_scale=ctx.softmax_scale,
+        causal=ctx.causal,
+        softcap=0.0,
+        window_size_left=None,
+        window_size_right=None,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=ctx.max_seqlen_q,
+        max_seqlen_k=ctx.max_seqlen_k,
+        deterministic=ctx.deterministic,
+    )
+    return dq, dk, dv, None, None, None, None, None, None, None
+
+
+torch.library.register_autograd(
+    "fastvideo::_flash_attn_cute_varlen_forward",
+    _flash_attn_cute_varlen_backward,
+    setup_context=_flash_attn_cute_varlen_setup_context,
+)
 
 
 def flash_attn_func(

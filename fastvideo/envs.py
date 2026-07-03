@@ -214,8 +214,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
 
     # If set (=1), the FLASH_ATTN backend uses FlashAttention-4
-    # (flash_attn.cute) for inference. FA4 is opt-in and never auto-selected
-    # just because it is installed; grad-enabled attention always runs FA2.
+    # (flash_attn.cute). FA4 is opt-in and never auto-selected just because it
+    # is installed. Grad-enabled attention uses FA4's backward on sm90+ and
+    # falls back to FA2 below that (FA4's backward asserts sm90+).
     "FASTVIDEO_FA4":
     lambda: os.getenv("FASTVIDEO_FA4", "0") != "0",
 

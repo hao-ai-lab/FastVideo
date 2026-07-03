@@ -22,7 +22,8 @@ logger = init_logger(__name__)
 # kernel package's FASTVIDEO_VSA_CUTEDSL: its CuTeDSL kernels JIT-compile per
 # shape family and can fail at runtime on some arch/shape combinations
 # (observed: GQA on sm_89), so it is never auto-selected just because it is
-# installed. Grad-enabled calls run FA2 even when FA4 is enabled.
+# installed. Grad-enabled calls use FA4's backward on sm90+ and FA2 below
+# that (FA4's backward asserts sm90+).
 if envs.FASTVIDEO_FA4:
     try:
         from fastvideo.attention.utils.flash_attn_cute import flash_attn_func
@@ -114,9 +115,10 @@ if fa_version in ("2", "3"):
             return _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal)
         return torch.ops.fastvideo._flash_attn_default_forward(q, k, v, softmax_scale, causal)
 elif fa_version == "4":
-    # FA4 path: `flash_attn_func` (from `flash_attn_cute`) routes inference
-    # through a registered torch.library custom op and grad-enabled calls to
-    # FA2, so a passthrough is enough — no extra registration needed.
+    # FA4 path: `flash_attn_func` (from `flash_attn_cute`) goes through a
+    # registered torch.library custom op (with an FA4 backward on sm90+;
+    # grad-enabled calls below sm90 route to FA2), so a passthrough is
+    # enough — no extra registration needed.
     def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
         return flash_attn_func(q, k, v, softmax_scale=softmax_scale, causal=causal)
 else:

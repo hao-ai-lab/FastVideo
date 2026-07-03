@@ -78,15 +78,15 @@ python setup.py install
 
 FastVideo never auto-selects FlashAttention-4 (`flash_attn.cute`) just because it
 is installed: its CuTeDSL kernels JIT-compile per shape family and can fail at
-runtime on some GPU/shape combinations. To use FA4 for inference, install the
-pinned `flash-attn-4` build (see the `flash-attn-4` source in `pyproject.toml`)
-and set:
+runtime on some GPU/shape combinations. To use FA4, install the pinned
+`flash-attn-4` build (see the `flash-attn-4` source in `pyproject.toml`) and set:
 
 ```bash
 export FASTVIDEO_FA4=1
 ```
 
-Grad-enabled (training) attention always runs FlashAttention-2, and if FA4 is
+Grad-enabled (training) attention uses FA4's backward on sm90+ GPUs and falls
+back to FlashAttention-2 below that (FA4's backward requires sm90+). If FA4 is
 unusable while `FASTVIDEO_FA4=1` is set, FastVideo fails loudly instead of
 silently falling back.
 
