@@ -121,8 +121,7 @@ def run_test_command(test_command: str,
                 exit "$status"
             fi
             sleep $((attempt * 5))
-        done
-        """
+        done"""
         print(f"Using PR ref for checkout: {checkout_command}")
     else:
         checkout_command = f"git checkout {git_commit}"
