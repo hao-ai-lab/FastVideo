@@ -18,6 +18,18 @@ interface JobQueueProps {
   jobTypesForList?: JobType[];
 }
 
+// Jobs are flat objects of primitives, so a shallow compare detects "nothing
+// changed" across poll responses (which are referentially fresh every fetch).
+function jobsShallowEqual(a: Job | null, b: Job | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const aKeys = Object.keys(a) as (keyof Job)[];
+  return (
+    aKeys.length === Object.keys(b).length &&
+    aKeys.every((k) => a[k] === b[k])
+  );
+}
+
 export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
   const [jobs, setJobs] = React.useState<Job[]>([]);
   const { nonce } = useStore(jobsRefreshStore);
@@ -33,26 +45,37 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
     [typesKey],
   );
 
+  // Guard the poll against slow responses: `inFlight` lets the interval skip
+  // a tick instead of stacking requests, and the sequence counter drops
+  // out-of-order responses so a delayed older payload can't overwrite a newer
+  // job list (direct refetches always run and supersede in-flight polls).
+  const fetchSeq = React.useRef(0);
+  const inFlight = React.useRef(false);
+
   const fetchJobs = React.useCallback(async () => {
+    const seq = ++fetchSeq.current;
+    inFlight.current = true;
     try {
+      let next: Job[];
       if (typesToFetch.length === 1) {
-        setJobs(await getJobsList(typesToFetch[0]));
+        next = await getJobsList(typesToFetch[0]);
       } else {
         const results = await Promise.all(
           typesToFetch.map((t) => getJobsList(t)),
         );
-        setJobs(
-          results
-            .flat()
-            .sort(
-              (a, b) =>
-                new Date(b.created_at ?? 0).getTime() -
-                new Date(a.created_at ?? 0).getTime(),
-            ),
-        );
+        next = results
+          .flat()
+          .sort(
+            (a, b) =>
+              new Date(b.created_at ?? 0).getTime() -
+              new Date(a.created_at ?? 0).getTime(),
+          );
       }
+      if (seq === fetchSeq.current) setJobs(next);
     } catch (e) {
       console.error('Failed to fetch jobs:', e);
+    } finally {
+      if (seq === fetchSeq.current) inFlight.current = false;
     }
   }, [typesKey]);
 
@@ -74,20 +97,25 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
   );
   React.useEffect(() => {
     if (!hasActive) return;
-    const interval = setInterval(() => fetchJobsRef.current(), 1000);
+    const interval = setInterval(() => {
+      if (!inFlight.current) fetchJobsRef.current();
+    }, 1000);
     return () => clearInterval(interval);
   }, [hasActive]);
 
   // Keep the active job in sync with the selected id, and void the selection
-  // if its job disappeared (e.g. deleted). When nothing is selected, clear the
-  // store at most once rather than writing null on every poll tick.
+  // if its job disappeared (e.g. deleted). Skip the store write when nothing
+  // changed — each poll returns fresh objects, and an unconditional write
+  // would re-render every subscriber (shell, sidebars, cards) once a second.
   React.useEffect(() => {
     if (!activeJobId) {
       if (activeJobStore.get().activeJob) setActiveJob(null);
       return;
     }
     const activeJob = jobs.find((j) => j.id === activeJobId) ?? null;
-    setActiveJob(activeJob);
+    if (!jobsShallowEqual(activeJob, activeJobStore.get().activeJob)) {
+      setActiveJob(activeJob);
+    }
     if (!activeJob) setActiveJobId(null);
   }, [activeJobId, jobs]);
 

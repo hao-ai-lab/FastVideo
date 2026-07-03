@@ -2,6 +2,11 @@
 
 import * as React from 'react';
 
+import {
+  NumberRow,
+  SliderRow,
+  ToggleRow,
+} from '@/components/form-rows';
 import { useHeaderActions } from '@/components/HeaderActionsContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -9,7 +14,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Separator } from '@/components/ui/separator';
-import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { useStore } from '@/hooks/useStore';
 import { getModels, type Model } from '@/lib/api';
@@ -21,70 +25,42 @@ import {
 
 const labelClass = 'text-xs font-normal text-muted-foreground';
 
-function ToggleRow({
+function TextSettingRow({
   id,
   label,
-  checked,
-  onChange,
+  value,
+  placeholder,
+  onCommit,
 }: {
   id: string;
   label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
+  value: string;
+  placeholder?: string;
+  onCommit: (v: string) => void;
 }) {
+  // Buffer keystrokes locally and persist on blur/Enter so each character
+  // doesn't fire a settings PUT (or a localStorage write).
+  const [draft, setDraft] = React.useState<string | null>(null);
   return (
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={id} className={labelClass}>
         {label}
       </Label>
-      <Switch id={id} checked={checked} onCheckedChange={onChange} />
-    </div>
-  );
-}
-
-function SliderRow({
-  id,
-  label,
-  title,
-  min,
-  max,
-  step,
-  value,
-  onChange,
-  format,
-}: {
-  id: string;
-  label: string;
-  title?: string;
-  min: number;
-  max: number;
-  step: number;
-  value: number;
-  onChange: (v: number) => void;
-  format?: (v: number) => string;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id} title={title} className={labelClass}>
-        {label}
-      </Label>
-      <div className="flex items-center gap-2">
-        <Slider
-          id={id}
-          min={min}
-          max={max}
-          step={step}
-          value={[value]}
-          onValueChange={(vals) => onChange(vals[0])}
-          className="min-w-0 flex-1"
-        />
-        <span
-          aria-hidden="true"
-          className="min-w-10 shrink-0 text-right text-xs text-muted-foreground"
-        >
-          {format ? format(value) : String(value)}
-        </span>
-      </div>
+      <Input
+        id={id}
+        type="text"
+        className="font-mono text-sm"
+        value={draft ?? value}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft !== null && draft !== value) onCommit(draft);
+          setDraft(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
+        placeholder={placeholder}
+      />
     </div>
   );
 }
@@ -161,42 +137,20 @@ export default function SettingsPage() {
 
           <h2 className="text-lg font-semibold">Paths</h2>
           <div className="space-y-4">
-            <div className="flex flex-col gap-1.5">
-              <Label
-                htmlFor="settings-api-server-base-url"
-                className={labelClass}
-              >
-                API Server Base URL
-              </Label>
-              <Input
-                id="settings-api-server-base-url"
-                type="text"
-                className="font-mono text-sm"
-                value={options.apiServerBaseUrl ?? ''}
-                onChange={(e) =>
-                  updateOption('apiServerBaseUrl', e.target.value)
-                }
-                placeholder="http://localhost:8189/api"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label
-                htmlFor="settings-dataset-upload-path"
-                className={labelClass}
-              >
-                Dataset Upload Path
-              </Label>
-              <Input
-                id="settings-dataset-upload-path"
-                type="text"
-                className="font-mono text-sm"
-                value={options.datasetUploadPath ?? ''}
-                onChange={(e) =>
-                  updateOption('datasetUploadPath', e.target.value)
-                }
-                placeholder="outputs/ui_data/uploads/datasets"
-              />
-            </div>
+            <TextSettingRow
+              id="settings-api-server-base-url"
+              label="API Server Base URL"
+              value={options.apiServerBaseUrl ?? ''}
+              onCommit={(v) => updateOption('apiServerBaseUrl', v)}
+              placeholder="http://localhost:8189/api"
+            />
+            <TextSettingRow
+              id="settings-dataset-upload-path"
+              label="Dataset Upload Path"
+              value={options.datasetUploadPath ?? ''}
+              onCommit={(v) => updateOption('datasetUploadPath', v)}
+              placeholder="outputs/ui_data/uploads/datasets"
+            />
           </div>
 
           <Separator />
@@ -404,21 +358,13 @@ export default function SettingsPage() {
               onChange={(v) => updateOption('numGpus', v)}
             />
 
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="settings-seed" className={labelClass}>
-                Seed
-              </Label>
-              <Input
-                id="settings-seed"
-                type="number"
-                min={0}
-                value={options.seed}
-                onChange={(e) => {
-                  const n = parseInt(e.target.value, 10);
-                  updateOption('seed', Number.isNaN(n) ? 0 : n);
-                }}
-              />
-            </div>
+            <NumberRow
+              id="settings-seed"
+              label="Seed"
+              min={0}
+              value={options.seed}
+              onChange={(v) => updateOption('seed', v)}
+            />
           </div>
         </CardContent>
       </Card>

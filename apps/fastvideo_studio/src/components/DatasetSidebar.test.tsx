@@ -98,4 +98,59 @@ describe('DatasetSidebar', () => {
       vi.useRealTimers();
     }
   });
+
+  it('debounces per file: editing another caption does not cancel a pending save', async () => {
+    render(<DatasetSidebar dataset={dataset} onClose={() => {}} />);
+    await screen.findByDisplayValue('cap a');
+    const [textareaA, textareaB] = screen.getAllByPlaceholderText('Caption');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(textareaA, { target: { value: 'new cap a' } });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      // Editing b.mp4 inside a.mp4's debounce window must not drop a's save.
+      fireEvent.change(textareaB, { target: { value: 'new cap b' } });
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+
+      expect(mockedApi.updateDatasetCaption).toHaveBeenCalledTimes(2);
+      expect(mockedApi.updateDatasetCaption).toHaveBeenCalledWith(
+        'ds-1',
+        'a.mp4',
+        'new cap a',
+      );
+      expect(mockedApi.updateDatasetCaption).toHaveBeenCalledWith(
+        'ds-1',
+        'b.mp4',
+        'new cap b',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flushes a pending save on unmount instead of dropping it', async () => {
+    const { unmount } = render(
+      <DatasetSidebar dataset={dataset} onClose={() => {}} />,
+    );
+    const textarea = await screen.findByDisplayValue('cap a');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(textarea, { target: { value: 'edited just before close' } });
+      unmount();
+
+      expect(mockedApi.updateDatasetCaption).toHaveBeenCalledTimes(1);
+      expect(mockedApi.updateDatasetCaption).toHaveBeenCalledWith(
+        'ds-1',
+        'a.mp4',
+        'edited just before close',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

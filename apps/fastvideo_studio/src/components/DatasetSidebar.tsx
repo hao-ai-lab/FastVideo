@@ -39,7 +39,11 @@ export default function DatasetSidebar({
     Record<string, boolean>
   >({});
 
-  const saveTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Pending debounced caption saves, keyed per file so editing one caption
+  // can't cancel another file's pending save.
+  const pendingSaves = React.useRef(
+    new Map<string, { timer: ReturnType<typeof setTimeout>; save: () => void }>(),
+  );
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -66,11 +70,17 @@ export default function DatasetSidebar({
     };
   }, [dataset.id]);
 
-  React.useEffect(() => {
-    return () => {
-      if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    };
+  const flushPendingSaves = React.useCallback(() => {
+    for (const { timer, save } of pendingSaves.current.values()) {
+      clearTimeout(timer);
+      save();
+    }
+    pendingSaves.current.clear();
   }, []);
+
+  // Flush (not drop) pending saves when the dataset changes or on unmount, so
+  // an edit made within the debounce window of closing isn't lost.
+  React.useEffect(() => flushPendingSaves, [dataset.id, flushPendingSaves]);
 
   const { onMouseDown } = useResizable({
     edge: 'right',
@@ -83,13 +93,19 @@ export default function DatasetSidebar({
 
   function handleCaptionChange(fileName: string, value: string) {
     setCaptions((prev) => ({ ...prev, [fileName]: value }));
-    if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(() => {
-      saveTimeout.current = null;
-      updateDatasetCaption(dataset.id, fileName, value).catch((err) =>
+    const datasetId = dataset.id;
+    const pending = pendingSaves.current.get(fileName);
+    if (pending) clearTimeout(pending.timer);
+    const save = () => {
+      updateDatasetCaption(datasetId, fileName, value).catch((err) =>
         console.error('Failed to save caption:', err),
       );
+    };
+    const timer = setTimeout(() => {
+      pendingSaves.current.delete(fileName);
+      save();
     }, 500);
+    pendingSaves.current.set(fileName, { timer, save });
   }
 
   function handleScroll() {

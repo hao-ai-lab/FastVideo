@@ -2,7 +2,12 @@
 
 import * as React from 'react';
 
-import { cn } from '@/lib/utils';
+import {
+  FieldRow,
+  NumberRow,
+  SliderRow,
+  ToggleRow,
+} from '@/components/form-rows';
 import {
   Dialog,
   DialogContent,
@@ -11,10 +16,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
-import { Slider } from '@/components/ui/slider';
-import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useStore } from '@/hooks/useStore';
 import { defaultOptionsStore } from '@/stores/defaultOptions';
@@ -36,112 +38,6 @@ export interface CreateJobModalProps {
   onSuccess: () => void;
   jobType: JobType;
   workloadType: string;
-}
-
-// --- Small presentational helpers (kept local so we don't touch the
-// foundation primitives). They mirror the Svelte `Toggle`/`Slider` UX on top
-// of the shadcn `Switch`/`Slider`. ---
-
-function FieldRow({
-  htmlFor,
-  label,
-  title,
-  className,
-  children,
-}: {
-  htmlFor: string;
-  label: string;
-  title?: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className={cn('flex flex-col gap-1.5', className)}>
-      <Label
-        htmlFor={htmlFor}
-        title={title}
-        className="pl-0.5 text-xs font-normal tracking-wide text-muted-foreground"
-      >
-        {label}
-      </Label>
-      {children}
-    </div>
-  );
-}
-
-function SliderRow({
-  id,
-  label,
-  title,
-  min,
-  max,
-  step,
-  value,
-  onChange,
-  disabled,
-  formatValue = (v) => String(v),
-}: {
-  id: string;
-  label: string;
-  title?: string;
-  min: number;
-  max: number;
-  step: number;
-  value: number;
-  onChange: (v: number) => void;
-  disabled?: boolean;
-  formatValue?: (v: number) => string;
-}) {
-  return (
-    <FieldRow htmlFor={id} label={label} title={title}>
-      <div className="flex items-center gap-2">
-        <Slider
-          id={id}
-          min={min}
-          max={max}
-          step={step}
-          value={[value]}
-          onValueChange={(v) => onChange(v[0])}
-          disabled={disabled}
-          aria-label={label}
-          className="min-w-0 flex-1"
-        />
-        <span
-          aria-hidden="true"
-          className="min-w-10 shrink-0 text-right text-sm tabular-nums text-muted-foreground"
-        >
-          {formatValue(value)}
-        </span>
-      </div>
-    </FieldRow>
-  );
-}
-
-function ToggleRow({
-  id,
-  label,
-  title,
-  checked,
-  onChange,
-  disabled,
-}: {
-  id: string;
-  label: string;
-  title?: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <FieldRow htmlFor={id} label={label} title={title}>
-      <Switch
-        id={id}
-        checked={checked}
-        onCheckedChange={onChange}
-        disabled={disabled}
-      />
-    </FieldRow>
-  );
 }
 
 function getModelWorkloadForTraining(_w: string): string {
@@ -618,24 +514,16 @@ export default function CreateJobModal({
                     onChange={setTrainBatchSize}
                     disabled={isSubmitting}
                   />
-                  <FieldRow
-                    htmlFor="modal-learning-rate"
+                  <NumberRow
+                    id="modal-learning-rate"
                     label="Learning Rate"
-                  >
-                    <Input
-                      id="modal-learning-rate"
-                      type="number"
-                      step="1e-6"
-                      min={1e-6}
-                      max={1}
-                      value={learningRate}
-                      onChange={(e) => {
-                        const v = e.target.valueAsNumber;
-                        if (!Number.isNaN(v)) setLearningRate(v);
-                      }}
-                      disabled={isSubmitting}
-                    />
-                  </FieldRow>
+                    step="1e-6"
+                    min={1e-6}
+                    max={1}
+                    value={learningRate}
+                    onChange={setLearningRate}
+                    disabled={isSubmitting}
+                  />
                   <SliderRow
                     id="modal-num-latent-t"
                     label="Num Latent T"
@@ -669,7 +557,7 @@ export default function CreateJobModal({
                       value={ltx2FirstFrameConditioningP}
                       onChange={setLtx2FirstFrameConditioningP}
                       disabled={isSubmitting}
-                      formatValue={(v) => v.toFixed(2)}
+                      format={(v) => v.toFixed(2)}
                     />
                   )}
                   {workloadType === 'dmd_t2v' && (
@@ -693,7 +581,7 @@ export default function CreateJobModal({
                           value={dmdVsaSparsity}
                           onChange={setDmdVsaSparsity}
                           disabled={isSubmitting}
-                          formatValue={(v) => v.toFixed(2)}
+                          format={(v) => v.toFixed(2)}
                         />
                       )}
                       <FieldRow
@@ -719,7 +607,7 @@ export default function CreateJobModal({
                         value={minTimestepRatio}
                         onChange={setMinTimestepRatio}
                         disabled={isSubmitting}
-                        formatValue={(v) => v.toFixed(2)}
+                        format={(v) => v.toFixed(2)}
                       />
                       <SliderRow
                         id="modal-max-timestep-ratio"
@@ -730,7 +618,7 @@ export default function CreateJobModal({
                         value={maxTimestepRatio}
                         onChange={setMaxTimestepRatio}
                         disabled={isSubmitting}
-                        formatValue={(v) => v.toFixed(2)}
+                        format={(v) => v.toFixed(2)}
                       />
                       <SliderRow
                         id="modal-real-score-guidance-scale"
@@ -741,7 +629,7 @@ export default function CreateJobModal({
                         value={realScoreGuidanceScale}
                         onChange={setRealScoreGuidanceScale}
                         disabled={isSubmitting}
-                        formatValue={(v) => v.toFixed(1)}
+                        format={(v) => v.toFixed(1)}
                       />
                       <SliderRow
                         id="modal-generator-update-interval"
@@ -858,7 +746,7 @@ export default function CreateJobModal({
                   value={vsaSparsity}
                   onChange={setVsaSparsity}
                   disabled={isSubmitting}
-                  formatValue={(v) => v.toFixed(2)}
+                  format={(v) => v.toFixed(2)}
                 />
                 <SliderRow
                   id="modal-guidance"
@@ -869,7 +757,7 @@ export default function CreateJobModal({
                   value={guidanceScale}
                   onChange={setGuidanceScale}
                   disabled={isSubmitting}
-                  formatValue={(v) => v.toFixed(1)}
+                  format={(v) => v.toFixed(1)}
                 />
                 <SliderRow
                   id="modal-guidance-rescale"
@@ -881,7 +769,7 @@ export default function CreateJobModal({
                   value={guidanceRescale}
                   onChange={setGuidanceRescale}
                   disabled={isSubmitting}
-                  formatValue={(v) => v.toFixed(2)}
+                  format={(v) => v.toFixed(2)}
                 />
                 <SliderRow
                   id="modal-tp-size"
@@ -893,7 +781,7 @@ export default function CreateJobModal({
                   value={tpSize}
                   onChange={setTpSize}
                   disabled={isSubmitting}
-                  formatValue={(v) => (v === -1 ? 'Auto' : String(v))}
+                  format={(v) => (v === -1 ? 'Auto' : String(v))}
                 />
                 <SliderRow
                   id="modal-sp-size"
@@ -905,7 +793,7 @@ export default function CreateJobModal({
                   value={spSize}
                   onChange={setSpSize}
                   disabled={isSubmitting}
-                  formatValue={(v) => (v === -1 ? 'Auto' : String(v))}
+                  format={(v) => (v === -1 ? 'Auto' : String(v))}
                 />
                 {workloadType !== 't2i' && (
                   <SliderRow
@@ -971,19 +859,14 @@ export default function CreateJobModal({
                   onChange={setNumGpus}
                   disabled={isSubmitting}
                 />
-                <FieldRow htmlFor="modal-seed" label="Seed">
-                  <Input
-                    id="modal-seed"
-                    type="number"
-                    min={0}
-                    value={seed}
-                    onChange={(e) => {
-                      const v = e.target.valueAsNumber;
-                      if (!Number.isNaN(v)) setSeed(v);
-                    }}
-                    disabled={isSubmitting}
-                  />
-                </FieldRow>
+                <NumberRow
+                  id="modal-seed"
+                  label="Seed"
+                  min={0}
+                  value={seed}
+                  onChange={setSeed}
+                  disabled={isSubmitting}
+                />
               </div>
             </details>
           )}
