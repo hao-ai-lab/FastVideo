@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { MOCK_SKIP_MESSAGE, mockIsUp, seedApiBaseUrl } from './helpers';
+import { MOCK_SKIP_MESSAGE, mockIsUp } from './helpers';
 
 /**
  * Create-job flow: open the Create Job modal on /inference, fill the prompt
@@ -8,9 +8,8 @@ import { MOCK_SKIP_MESSAGE, mockIsUp, seedApiBaseUrl } from './helpers';
  * confirm the new job lands in the queue.
  */
 test.describe('create inference job', () => {
-  test.beforeEach(async ({ page, request }) => {
+  test.beforeEach(async ({ request }) => {
     test.skip(!(await mockIsUp(request)), MOCK_SKIP_MESSAGE);
-    await seedApiBaseUrl(page);
   });
 
   test('creates a T2V job and shows it in the queue', async ({ page }) => {

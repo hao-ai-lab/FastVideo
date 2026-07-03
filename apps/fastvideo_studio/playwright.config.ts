@@ -1,8 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const apiPort = process.env.MOCK_API_PORT || '8189';
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL || `http://localhost:${apiPort}/api`;
+import { API_BASE, MOCK_API_PORT } from './e2e/helpers';
 
 /**
  * Playwright config for FastVideo Studio end-to-end tests.
@@ -35,8 +33,8 @@ export default defineConfig({
     ? undefined
     : [
         {
-          command: `PYTHONPATH=.. python -m fastvideo_studio.mock_server --port ${apiPort}`,
-          url: `http://127.0.0.1:${apiPort}/api/models`,
+          command: `PYTHONPATH=.. python -m fastvideo_studio.mock_server --port ${MOCK_API_PORT}`,
+          url: `http://127.0.0.1:${MOCK_API_PORT}/api/models`,
           reuseExistingServer: true,
           timeout: 120_000,
         },
@@ -46,7 +44,7 @@ export default defineConfig({
           reuseExistingServer: true,
           timeout: 120_000,
           env: {
-            NEXT_PUBLIC_API_BASE_URL: apiBaseUrl,
+            NEXT_PUBLIC_API_BASE_URL: API_BASE,
           },
         },
       ],

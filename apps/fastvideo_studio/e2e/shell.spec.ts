@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { MOCK_SKIP_MESSAGE, mockIsUp, seedApiBaseUrl } from './helpers';
+import { MOCK_SKIP_MESSAGE, mockIsUp } from './helpers';
 
 /**
  * App-shell smoke: the Next.js frontend hydrates, renders the FastVideo logo
@@ -8,9 +8,8 @@ import { MOCK_SKIP_MESSAGE, mockIsUp, seedApiBaseUrl } from './helpers';
  * sections works. Each spec self-skips when the mock backend isn't reachable.
  */
 test.describe('app shell', () => {
-  test.beforeEach(async ({ page, request }) => {
+  test.beforeEach(async ({ request }) => {
     test.skip(!(await mockIsUp(request)), MOCK_SKIP_MESSAGE);
-    await seedApiBaseUrl(page);
   });
 
   test('loads with the logo and primary-sidebar nav', async ({ page }) => {

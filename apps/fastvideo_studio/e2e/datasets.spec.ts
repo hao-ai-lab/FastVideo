@@ -1,15 +1,14 @@
 import { expect, test } from '@playwright/test';
 
-import { API_BASE, MOCK_SKIP_MESSAGE, mockIsUp, seedApiBaseUrl } from './helpers';
+import { API_BASE, MOCK_SKIP_MESSAGE, mockIsUp } from './helpers';
 
 /**
  * Datasets page: the seeded datasets render as cards, and the Create Dataset
  * modal opens from the header action.
  */
 test.describe('datasets', () => {
-  test.beforeEach(async ({ page, request }) => {
+  test.beforeEach(async ({ request }) => {
     test.skip(!(await mockIsUp(request)), MOCK_SKIP_MESSAGE);
-    await seedApiBaseUrl(page);
   });
 
   test('lists the seeded datasets', async ({ page, request }) => {
