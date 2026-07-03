@@ -467,6 +467,18 @@ class Qwen2_5_VisionTransformerPretrainedModel(nn.Module):
         return hidden_states
 
 
+def _compute_default_rope_parameters(config, device=None, seq_len=None, **kwargs):
+    # transformers>=5 removes the "default" entry from ROPE_INIT_FUNCTIONS and
+    # moves rope_theta inside rope_parameters; replicate the 4.x default init.
+    rope_params = getattr(config, "rope_parameters", None) or getattr(config, "rope_scaling", None) or {}
+    base = rope_params.get("rope_theta", getattr(config, "rope_theta", 10000.0))
+    head_dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
+    partial_rotary_factor = getattr(config, "partial_rotary_factor", 1.0)
+    dim = int(head_dim * partial_rotary_factor)
+    inv_freq = 1.0 / (base**(torch.arange(0, dim, 2, dtype=torch.int64).float().to(device) / dim))
+    return inv_freq, 1.0
+
+
 class Qwen2_5_VLRotaryEmbedding(nn.Module):
     def __init__(self, config: Qwen2_5_VLConfig, device=None):
         super().__init__()
@@ -479,7 +491,7 @@ class Qwen2_5_VLRotaryEmbedding(nn.Module):
         self.original_max_seq_len = config.max_position_embeddings
 
         self.config = config
-        self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
+        self.rope_init_fn = ROPE_INIT_FUNCTIONS.get(self.rope_type, _compute_default_rope_parameters)
 
         inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
@@ -948,6 +960,16 @@ QWEN2_5_VL_ATTENTION_CLASSES = {
 # If FlashAttention2 is not available, transparently fall back to SDPA.
 if not is_flash_attn_2_available():
     QWEN2_5_VL_ATTENTION_CLASSES["flash_attention_2"] = Qwen2_5_VLSdpaAttention
+else:
+    # transformers>=5 only resolves the flash-attn functions when the model
+    # preloads them via its attention interface; this module bypasses
+    # PreTrainedModel, so _flash_attention_forward(implementation=None) raises
+    # unless we preload here.
+    try:
+        from transformers.modeling_flash_attention_utils import lazy_import_flash_attention
+        lazy_import_flash_attention("flash_attention_2")
+    except (ImportError, ValueError):
+        QWEN2_5_VL_ATTENTION_CLASSES["flash_attention_2"] = Qwen2_5_VLSdpaAttention
     
 class Qwen2_5_VLDecoderLayer(nn.Module):
     def __init__(self, config: Qwen2_5_VLConfig, layer_idx: int):
@@ -1035,7 +1057,7 @@ class Qwen2_5_VLModel(nn.Module):
     def __init__(self, config: Qwen2_5_VLConfig):
         super().__init__()
         self.config = config
-        self.padding_idx = config.pad_token_id
+        self.padding_idx = getattr(config, "pad_token_id", None)
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
@@ -1408,6 +1430,18 @@ class Qwen2_5_VLCausalLMOutputWithPast(ModelOutput):
     rope_deltas: Optional[torch.LongTensor] = None
 
 
+def _flatten_text_config(config):
+    # transformers>=5 stops forwarding text-model attributes (hidden_size,
+    # vocab_size, rope_scaling, ...) from the composite Qwen2_5_VLConfig to
+    # config.text_config; this module reads them from the top level.
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        for key, value in text_config.to_dict().items():
+            if not hasattr(config, key):
+                setattr(config, key, value)
+    return config
+
+
 class Qwen2_5_VLForConditionalGenerationSimple(nn.Module):
     _tied_weights_keys = ["lm_head.weight"]
     config_class = Qwen2_5_VLConfig
@@ -1415,6 +1449,7 @@ class Qwen2_5_VLForConditionalGenerationSimple(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        config = _flatten_text_config(config)
         self.config = config
         self.visual = Qwen2_5_VisionTransformerPretrainedModel(config.vision_config)
 
