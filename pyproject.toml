@@ -150,7 +150,9 @@ eval-physics-iq = []
 eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "pytorchvideo"]
 eval-judge = ["google-genai"]
 eval = [
-    "lpips", "ptlflow", "qwen-vl-utils",
+    # ptlflow>=0.4: get_model() takes ckpt_path (0.3 called it
+    # pretrained_ckpt); unpinned, the resolver backtracked to 0.2.5.
+    "lpips", "ptlflow>=0.4", "qwen-vl-utils",
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
 ]
 eval-fast-decode = ["decord"]
