@@ -79,10 +79,21 @@ The `videos2caption.json` maps video filenames to captions:
 
 ```json
 [
-  {"path": "video_001.mp4", "cap": "A cat playing with yarn..."},
-  {"path": "video_002.mp4", "cap": "Ocean waves at sunset..."}
+  {
+    "path": "video_001.mp4",
+    "resolution": {"width": 1280, "height": 720},
+    "size": 1234567,
+    "fps": 24.0,
+    "duration": 8.0,
+    "num_frames": 192,
+    "cap": ["A cat playing with yarn..."]
+  }
 ]
 ```
+
+`path` is relative to `videos/`. Resolution, FPS, and frame count must describe
+the actual decoded file because the preprocessing validator and frame sampler
+use them directly.
 
 ### HuggingFace Dataset
 
@@ -110,9 +121,58 @@ your_raw_data/
 └── prompt.txt    # corresponding captions (one per line)
 ```
 
+## Generate a Dataset with NVIDIA Veo
+
+The Veo generator submits asynchronous NVIDIA Enterprise Inference Hub video
+jobs, resumes interrupted jobs, and writes the merged-dataset layout above.
+Both text-to-video and image-to-video records are supported.
+
+```bash
+export NVIDIA_API_KEY="your-inference-api-key"
+
+python scripts/dataset_preparation/generate_veo_training_data.py \
+    assets/prompts/veo_training_data.example.jsonl \
+    --output-dir data/veo_training_data \
+    --limit 1
+```
+
+`--limit 1` submits at most one new paid provider job. It does not limit polling,
+downloading, or resuming a job that was already submitted. Validate all inputs
+without making an API call with `--dry-run`.
+
+Each JSONL row requires a prompt. Add `input_image` to select image-to-video:
+
+```json
+{"id":"coast-001","prompt":"An aerial shot following a wave at sunrise."}
+{"id":"subject-001","prompt":"The subject turns and smiles.","input_image":"images/subject.jpg","seconds":8}
+```
+
+Relative image paths resolve from the JSONL file. Image-to-video duration must
+be 4, 6, or 8 seconds. The output is immediately consumable as a merged dataset:
+
+```text
+data/veo_training_data/
+├── videos/
+│   └── <record>-attempt-0001.mp4
+├── videos2caption.json
+├── merge.txt
+├── manifest.jsonl
+└── responses/
+```
+
+Only successfully downloaded and decoded MP4 files appear in
+`videos2caption.json`; pending and failed jobs stay in the append-only manifest.
+The current preprocessing workflow uses the first frame of each output video as
+I2V conditioning, while the original input image remains manifest provenance.
+For recipes targeting 77 frames at 16 FPS, prefer 6- or 8-second clips because a
+4-second clip may be filtered as too short.
+
 ## Output Format
 
-Preprocessing outputs Parquet files in the `combined_parquet_dataset/` subdirectory containing:
+The current preprocessing workflow writes Parquet shards below
+`<dataset_output_dir>/training_dataset/worker_<rank>/`. Point the training
+configuration's data path at `<dataset_output_dir>/training_dataset`. The
+records contain:
 
 - `vae_latent_bytes` — VAE-encoded video latent
 - `text_embedding_bytes` — text encoder output
