@@ -30,6 +30,9 @@ from typing import Any
 
 import modal
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from modal_image_utils import resolve_image_ref  # noqa: E402
+
 app = modal.App("fastvideo-gpu-job")
 
 REPO_DIR = "/FastVideo"
@@ -39,6 +42,7 @@ IMAGE_TAG = os.environ.get(
     "FASTVIDEO_MODAL_IMAGE",
     f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{IMAGE_VERSION}",
 )
+IMAGE_REF = resolve_image_ref(IMAGE_TAG)
 SECRET_ENV_KEYS = (
     "HF_API_KEY",
     "HUGGINGFACE_HUB_TOKEN",
@@ -48,7 +52,7 @@ SECRET_ENV_KEYS = (
     "WANDB_MODE",
 )
 
-print(f"Using image: {IMAGE_TAG}")
+print(f"Using image: {IMAGE_REF}")
 print(f"Using Modal volume: {MODEL_VOLUME_NAME}")
 
 model_vol = modal.Volume.from_name(MODEL_VOLUME_NAME, create_if_missing=True)
@@ -69,7 +73,7 @@ if not uv_torch_backend_override:
         uv_torch_backend_override = "cu126"
 
 image = (
-    modal.Image.from_registry(IMAGE_TAG, add_python="3.12")
+    modal.Image.from_registry(IMAGE_REF, add_python="3.12")
     .apt_install(
         "cmake",
         "pkg-config",

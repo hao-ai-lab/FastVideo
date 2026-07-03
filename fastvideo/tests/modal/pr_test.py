@@ -1,13 +1,18 @@
 import os
+import sys
 
 import modal
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from modal_image_utils import resolve_image_ref  # noqa: E402
 
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
 image_version = os.getenv("IMAGE_VERSION", "latest")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
-print(f"Using image: {image_tag}")
+image_ref = resolve_image_ref(image_tag)
+print(f"Using image: {image_ref}")
 
 # Mutable tags inherit the registry image's baked backend, keeping a latest-tag
 # transition safe. Explicit CUDA tags also work with older images that predate
@@ -20,7 +25,7 @@ if not uv_torch_backend_override:
         uv_torch_backend_override = "cu126"
 
 image = (modal.Image.from_registry(
-    image_tag, add_python="3.12"
+    image_ref, add_python="3.12"
 ).run_commands("rm -rf /FastVideo").apt_install(
     "cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg"
 ).run_commands(
