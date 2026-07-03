@@ -11,9 +11,11 @@ First, install FastVideo:
 uv venv --python 3.12 --seed
 source .venv/bin/activate
 
-# Install FastVideo
-uv pip install fastvideo
+# Install FastVideo on NVIDIA CUDA 12
+UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 ```
+
+Use `UV_TORCH_BACKEND=cu130` instead on CUDA 13.
 
 Also optionally install flash-attn:
 

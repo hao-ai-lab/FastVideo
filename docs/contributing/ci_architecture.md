@@ -80,11 +80,11 @@ status.
 
 | Buildkite label | `TEST_TYPE` | Main watched paths |
 |---|---|---|
-| Encoder Tests | `encoder` | `fastvideo/models/encoders/**`, `fastvideo/models/loader/**`, `fastvideo/tests/encoders/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
-| VAE Tests | `vae` | `fastvideo/models/vaes/**`, `fastvideo/models/loader/**`, `fastvideo/tests/vaes/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
-| Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
-| Kernel Tests | `kernel_tests` | `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
-| Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| Encoder Tests | `encoder` | `fastvideo/models/encoders/**`, `fastvideo/models/loader/**`, `fastvideo/tests/encoders/**`, `pyproject.toml`, `docker/Dockerfile` |
+| VAE Tests | `vae` | `fastvideo/models/vaes/**`, `fastvideo/models/loader/**`, `fastvideo/tests/vaes/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Kernel Tests | `kernel_tests` | `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile` |
 | DreamVerse App Tests | `dreamverse_app` | `apps/dreamverse/**`, `pyproject.toml` |
 
 ### Tier 3: Full Suite
@@ -101,18 +101,18 @@ can merge a PR.
 
 | Buildkite label | `TEST_TYPE` | Main watched paths |
 |---|---|---|
-| SSIM Tests | `ssim` | `fastvideo/**/*.py`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| SSIM Tests | `ssim` | `fastvideo/**/*.py`, `pyproject.toml`, `docker/Dockerfile` |
 | LoRA Inference Tests | `inference_lora` | LoRA tests, loader, transformer tests, pipelines, LoRA layers |
-| Training Tests | `training` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| Training Tests | `training` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Distillation DMD Tests | `distillation_dmd` | `fastvideo/training/*distillation_pipeline.py` |
 | Self-Forcing Tests | `self_forcing` | self-forcing distillation pipeline and tests |
-| LoRA Training Tests | `training_lora` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
-| Training Tests VSA | `training_vsa` | `fastvideo/**`, `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| LoRA Training Tests | `training_lora` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Training Tests VSA | `training_vsa` | `fastvideo/**`, `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Inference Tests VMoBA | `inference_vmoba` | `fastvideo-kernel/**`, `fastvideo/attention/backends/vmoba.py` |
 | Performance Tests | `performance` | DiTs, pipelines, attention, layers, worker, entrypoints, performance tests/configs |
 | API Server Tests | `api_server` | OpenAI entrypoints, serve CLI, OpenAI API integration test |
 | Train Framework Tests | `train_framework` | `fastvideo/train/**`, train model/method tests, model loader, DiTs |
-| Eval Metrics Tests | `eval` | `fastvideo/eval/**`, `fastvideo/tests/eval/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| Eval Metrics Tests | `eval` | `fastvideo/eval/**`, `fastvideo/tests/eval/**`, `pyproject.toml`, `docker/Dockerfile` |
 
 See [Performance Benchmarks](performance_benchmarks.md) for the performance
 lane's thresholds, rolling baseline, artifacts, and reseeding process.
@@ -260,8 +260,18 @@ The docs job:
 ### Docker Images
 
 `.github/workflows/infra-build-image.yml` is a manual `workflow_dispatch`
-workflow. Maintainers choose which image families to build, including Python
-development images and DreamVerse CUDA 12.9 images.
+workflow. Maintainers choose which image families to build. The
+`fastvideo-dev` matrix builds Python 3.12 images for CUDA 12.6 and CUDA 13 on
+native `amd64` and `arm64` runners, then publishes one multi-platform manifest
+per CUDA version. CUDA 12.6 owns the `py3.12-latest` and global `latest` tags,
+as well as the explicit `py3.12-cuda12.6.3-latest` alias. CUDA 13 is published
+under the explicit `py3.12-cuda13.0.0-latest` tag. This publication policy does
+not change the unparameterized `docker/Dockerfile` build defaults, which remain
+CUDA 13 and `cu130`.
+
+The optional Dreamverse matrix builds backend and UI images for CUDA 12.6 and
+CUDA 13 on `amd64`. Dreamverse remains `amd64`-only because its FA4 dependency
+stack is not yet validated on ARM64.
 
 The reusable implementation lives in
 `.github/workflows/_template-build-image.yml`.

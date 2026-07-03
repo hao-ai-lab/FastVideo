@@ -93,7 +93,12 @@ class StageAwareRMSNorm(nn.RMSNorm):
                 weight=self.weight,
                 eps=self.eps,
             )
-        return super().forward(x)
+        # torch 2.12 added rms_norm to autocast's float32 cast policy
+        # (aten/src/ATen/autocast_mode.h), so under autocast(bfloat16) this
+        # norm now returns float32 where torch <= 2.11 returned bfloat16.
+        # Restore the input dtype so autocast-blind consumers downstream
+        # (e.g. the flash-attention custom op) don't receive upcast q/k.
+        return super().forward(x).to(x.dtype)
 
 
 def _supports_prequantized_input(linear: ReplicatedLinear) -> bool:

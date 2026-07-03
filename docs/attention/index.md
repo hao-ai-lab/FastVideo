@@ -19,7 +19,7 @@ source, which includes both STA and VSA kernels.
 ### Prerequisites
 
 * **PyTorch**: 2.5.0+
-* **CUDA**: 12.4+ (12.8 recommended for best performance)
+* **CUDA**: 12.6+ (CUDA 13 recommended for Blackwell GPUs)
 * **C++ Compiler**: GCC 11+ (C++20 support required for ThunderKittens)
 
 Install system dependencies:
@@ -35,7 +35,7 @@ sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave 
 Set up your CUDA environment variables (adjust version as needed):
 
 ```bash
-export CUDA_HOME=/usr/local/cuda-12.8
+export CUDA_HOME=/usr/local/cuda
 export PATH=${CUDA_HOME}/bin:${PATH}
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 ```

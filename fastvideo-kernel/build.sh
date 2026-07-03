@@ -39,8 +39,13 @@ if [[ -n "${CONDA_PREFIX:-}" ]]; then
     unset _need_clean _host_arch
 fi
 
-# Ensure submodules are initialized if needed (tk)
-git submodule update --init --recursive
+# Ensure only the kernel's required headers are initialized. A repository-wide
+# update also clones the unrelated VBench evaluation submodule. Skip outside a
+# git checkout (e.g. Docker contexts that exclude .git), where the submodule
+# contents must already be present.
+if git rev-parse --git-dir >/dev/null 2>&1; then
+    git submodule update --init --recursive include/cutlass include/tk
+fi
 
 # Install build dependencies
 uv pip install scikit-build-core cmake ninja

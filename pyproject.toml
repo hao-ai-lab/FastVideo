@@ -22,14 +22,18 @@ dependencies = [
 
     # Machine Learning & Transformers
     "transformers>=4.57.3",
-    "tokenizers>=0.20.1",
+    # <0.23: tokenizers 0.23 renamed RobertaProcessing's binding args, so
+    # transformers' CLIP-style tokenizer loading dies with
+    # "RobertaProcessing.__new__() got an unexpected keyword argument 'cls'".
+    "tokenizers>=0.20.1,<0.23",
     "sentencepiece>=0.2.0",
     "timm>=1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.38.0",
-    "torch==2.11.0",
+    "torch==2.12.0",
     "torchvision",
     "torchaudio",
+    "flashinfer-python",
 
     # Acceleration & Optimization
     "accelerate==1.0.1",
@@ -93,30 +97,25 @@ prerelease = "allow"
 members = ["apps/dreamverse"]
 
 [tool.uv.sources]
-torch = [
-  { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
-  { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+# No prebuilt aarch64 wheel for fastvideo-kernel exists on PyPI, so on ARM
+# (e.g. the NVIDIA DGX Spark / GB10) build it from the in-tree source instead;
+# x86_64 keeps the published PyPI wheel. This table is uv-only: plain pip ignores
+# it and it is not part of the published wheel metadata, so PyPI consumers are
+# unaffected. Pass --no-sources to bypass it (e.g. when the kernel is already
+# built/installed separately, as in the Spark install guide).
+fastvideo-kernel = [
+  { path = "fastvideo-kernel", marker = "platform_machine == 'aarch64'" },
 ]
-torchvision = [
-  { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
-  { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
-]
-torchaudio = [
-  { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
-  { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
-]
+# torch / torchvision / torchaudio are intentionally NOT pinned to a PyTorch
+# index here. Pick the supported build explicitly at install time:
+#   UV_TORCH_BACKEND=cu126 uv pip install -e ".[dev]"   # CUDA 12
+#   UV_TORCH_BACKEND=cu130 uv pip install -e ".[dev]"   # CUDA 13
+# uv reads UV_TORCH_BACKEND / --torch-backend (not a pyproject setting). The
+# supported backends (cu126, cu130) both provide torch 2.12.0.
 imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
-flash-attn-cute = { git = "https://github.com/XOR-op/flash-attention.git", branch = "fa4-compile", subdirectory = "flash_attn/cute" }
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
+# FA4 cute: upstream Dao-AILab (cutlass-4.5-safe; uses cute.ThrMma). torch.compile
+# support comes from FastVideo's own custom_op wrappers, so no fork is needed.
+flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "940cd9680f3315f2f06b43ab5bea2c2cf2d96806", subdirectory = "flash_attn/cute" }
 
 [project.optional-dependencies]
 
@@ -151,7 +150,9 @@ eval-physics-iq = []
 eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "pytorchvideo"]
 eval-judge = ["google-genai"]
 eval = [
-    "lpips", "ptlflow", "qwen-vl-utils",
+    # ptlflow>=0.4: get_model() takes ckpt_path (0.3 called it
+    # pretrained_ckpt); unpinned, the resolver backtracked to 0.2.5.
+    "lpips", "ptlflow>=0.4", "qwen-vl-utils",
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
 ]
 eval-fast-decode = ["decord"]
@@ -176,10 +177,10 @@ streaming = [
 dreamverse = [
     "uvicorn[standard]>=0.41.0",
     "cerebras-cloud-sdk",
-    # PyPI forbids direct URL deps in published metadata; pin the fork via
+    # PyPI forbids direct URL deps in published metadata; pin upstream cute via
     # [tool.uv.sources] above (same pattern as imagebind) so the wheel stays
-    # publishable while uv workspace installs still get the fork.
-    "flash-attn-cute",
+    # publishable while uv workspace installs still get it.
+    "flash-attn-4",
     "flashinfer-python",
     "openai>=1.40",
 ]

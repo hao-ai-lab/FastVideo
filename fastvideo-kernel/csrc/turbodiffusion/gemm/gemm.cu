@@ -25,12 +25,16 @@
 #include "gemm/launch.hpp"
 
 void int8_gemm(
-  at::Tensor const& A, at::Tensor const& A_S, 
-  at::Tensor const& B, at::Tensor const& B_S, 
+  at::Tensor const& A, at::Tensor const& A_S,
+  at::Tensor const& B, at::Tensor const& B_S,
   torch::Tensor& C
 ) {
 
-  
+  // The kernel dereferences raw pointers; a CPU tensor here (e.g. an Int8Linear
+  // never moved to CUDA) would otherwise fail as an illegal memory access.
+  TORCH_CHECK(A.is_cuda() && A_S.is_cuda() && B.is_cuda() && B_S.is_cuda() && C.is_cuda(),
+              "int8_gemm: all tensors must be on CUDA (move Int8Linear to CUDA before forward)");
+
   static constexpr int swizzle_dir = 1;
   static constexpr int swizzle_size_log = 5;
 

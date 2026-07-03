@@ -24,10 +24,30 @@ on:
         required: false
         type: boolean
         default: true
+      mark_as_latest:
+        required: false
+        type: boolean
+        default: false
+      runner:
+        required: false
+        type: string
+        default: ubuntu-latest
+      architecture:
+        required: false
+        type: string
+        default: amd64
+      push_by_digest:
+        required: false
+        type: boolean
+        default: false
+      digest_artifact_name:
+        required: false
+        type: string
+        default: ''
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
       packages: write
@@ -35,6 +55,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        # The Docker context intentionally includes .git so the kernel build can
+        # initialize its pinned submodules. Do not copy the checkout token with it.
+        with:
+          persist-credentials: false
       
       - name: Free up disk space
         run: |
@@ -73,6 +97,12 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Normalize image reference
+        id: image
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}/${{ inputs.image_name }}
+        run: echo "name=${IMAGE,,}" >> "${GITHUB_OUTPUT}"
       
       - name: Prepare tags
         id: prepare-tags
@@ -85,8 +115,8 @@ jobs:
             TAGS="type=raw,value=${{ inputs.tag_suffix }}-latest\n${TAGS}"
           fi
 
-          # Set Python 3.10 as the default image
-          if [[ "${{ inputs.include_latest_tags }}" == "true" && "${{ inputs.python_version }}" == "3.10" ]]; then
+          # Tag the designated default variant as the global `latest` image
+          if [[ "${{ inputs.include_latest_tags }}" == "true" && "${{ inputs.mark_as_latest }}" == "true" ]]; then
             TAGS="${TAGS}\ntype=raw,value=latest"
           fi
           
@@ -100,23 +130,71 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/${{ inputs.image_name }}
+          images: ${{ steps.image.outputs.name }}
           tags: ${{ steps.prepare-tags.outputs.tags }}
       
       - name: Build and push Docker image
+        if: ${{ !inputs.push_by_digest }}
         id: build-push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ inputs.dockerfile_path }}
+          platforms: linux/${{ inputs.architecture }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build_args }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ inputs.image_name }}-${{ inputs.tag_suffix }}-${{ inputs.architecture }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.image_name }}-${{ inputs.tag_suffix }}-${{ inputs.architecture }}
+
+      # Multi-architecture callers publish immutable manifests by digest here,
+      # then create the shared user-facing tags in a single downstream job.
+      # This prevents architecture jobs from racing to replace the same tag.
+      - name: Build and push Docker image by digest
+        if: ${{ inputs.push_by_digest }}
+        id: build-push-digest
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ inputs.dockerfile_path }}
+          platforms: linux/${{ inputs.architecture }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ inputs.build_args }}
+          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ inputs.image_name }}-${{ inputs.tag_suffix }}-${{ inputs.architecture }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.image_name }}-${{ inputs.tag_suffix }}-${{ inputs.architecture }}
+
+      - name: Export digest
+        if: ${{ inputs.push_by_digest }}
+        env:
+          DIGEST: ${{ steps.build-push-digest.outputs.digest }}
+        run: |
+          if [[ -z "${{ inputs.digest_artifact_name }}" ]]; then
+            echo "digest_artifact_name is required when push_by_digest is true" >&2
+            exit 1
+          fi
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        if: ${{ inputs.push_by_digest }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.digest_artifact_name }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
       
       - name: Success message
+        if: ${{ !inputs.push_by_digest }}
         run: |
-          echo "✅ Python ${{ inputs.python_version }} image successfully built and pushed to ghcr.io/${{ github.repository }}/${{ inputs.image_name }}:${{ inputs.tag_suffix }}-sha-${GITHUB_SHA::7}"
+          echo "✅ Python ${{ inputs.python_version }} image successfully built and pushed to ${{ steps.image.outputs.name }}:${{ inputs.tag_suffix }}-sha-${GITHUB_SHA::7}"
           echo "To run tests with this image, manually trigger the 'Run Tests' workflow."
+
+      - name: Digest success message
+        if: ${{ inputs.push_by_digest }}
+        env:
+          DIGEST: ${{ steps.build-push-digest.outputs.digest }}
+        run: |
+          echo "✅ Python ${{ inputs.python_version }} linux/${{ inputs.architecture }} image pushed as ${DIGEST}"

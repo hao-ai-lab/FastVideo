@@ -30,6 +30,16 @@ from typing import Any
 
 import modal
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from modal_image_utils import resolve_image_ref  # noqa: E402
+except ModuleNotFoundError:
+    # Remote Modal containers re-import this module but mount only the
+    # entrypoint file; the digest resolution already happened at local
+    # launch time, so a passthrough is correct there.
+    def resolve_image_ref(image_ref: str) -> str:
+        return image_ref
+
 app = modal.App("fastvideo-gpu-job")
 
 REPO_DIR = "/FastVideo"
@@ -39,6 +49,7 @@ IMAGE_TAG = os.environ.get(
     "FASTVIDEO_MODAL_IMAGE",
     f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{IMAGE_VERSION}",
 )
+IMAGE_REF = resolve_image_ref(IMAGE_TAG)
 SECRET_ENV_KEYS = (
     "HF_API_KEY",
     "HUGGINGFACE_HUB_TOKEN",
@@ -48,7 +59,7 @@ SECRET_ENV_KEYS = (
     "WANDB_MODE",
 )
 
-print(f"Using image: {IMAGE_TAG}")
+print(f"Using image: {IMAGE_REF}")
 print(f"Using Modal volume: {MODEL_VOLUME_NAME}")
 
 model_vol = modal.Volume.from_name(MODEL_VOLUME_NAME, create_if_missing=True)
@@ -58,8 +69,18 @@ local_secrets = modal.Secret.from_dict({
     if os.environ.get(key)
 })
 
+# Mutable tags inherit the registry image's baked backend, including custom
+# FASTVIDEO_MODAL_IMAGE overrides. Explicit CUDA tags also work with older
+# images that predate the baked setting, and a caller override always wins.
+uv_torch_backend_override = os.environ.get("UV_TORCH_BACKEND")
+if not uv_torch_backend_override:
+    if "cuda13" in IMAGE_TAG.lower():
+        uv_torch_backend_override = "cu130"
+    elif "cuda12.6" in IMAGE_TAG.lower():
+        uv_torch_backend_override = "cu126"
+
 image = (
-    modal.Image.from_registry(IMAGE_TAG, add_python="3.12")
+    modal.Image.from_registry(IMAGE_REF, add_python="3.12")
     .apt_install(
         "cmake",
         "pkg-config",
@@ -75,6 +96,7 @@ image = (
         "PATH": "/root/.cargo/bin:$PATH",
         "HF_HOME": "/root/data/.cache",
         "TOKENIZERS_PARALLELISM": "false",
+        **({"UV_TORCH_BACKEND": uv_torch_backend_override} if uv_torch_backend_override else {}),
         "FASTVIDEO_ATTENTION_BACKEND": os.environ.get("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN"),
     })
 )
