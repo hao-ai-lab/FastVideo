@@ -25,14 +25,16 @@ export default function SecondarySidebar({
   const [width, setWidth] = React.useState(360);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
-  const [logs, setLogs] = React.useState<string[]>([]);
+  const [logs, setLogs] = React.useState('');
 
   // Race-guard refs (mirror the Svelte original): the cursor + accumulated
-  // lines live here so in-flight polls don't read stale React state, and
+  // text live here so in-flight polls don't read stale React state, and
   // pollingLock prevents overlapping fetches. Do NOT swap these for effect
   // deps — they must update synchronously, outside React's render cycle.
-  const stateRef = React.useRef<{ logs: string[]; logAfter: number }>({
-    logs: [],
+  // The log is one growing string (amortized O(new) appends), not an array
+  // re-copied and re-joined on every poll tick.
+  const stateRef = React.useRef<{ text: string; logAfter: number }>({
+    text: '',
     logAfter: 0,
   });
   const pollingLock = React.useRef(false);
@@ -76,9 +78,9 @@ export default function SecondarySidebar({
       (job.status === 'pending' || job.status === 'running');
 
     if (previousJobId.current !== job.id || isRestarting) {
-      stateRef.current.logs = [];
+      stateRef.current.text = '';
       stateRef.current.logAfter = 0;
-      setLogs([]);
+      setLogs('');
     }
     previousJobId.current = job.id;
     previousStatus.current = job.status;
@@ -95,9 +97,12 @@ export default function SecondarySidebar({
       try {
         const logData = await getJobLogs(job.id, stateRef.current.logAfter);
         if (mounted && logData.lines.length > 0) {
-          stateRef.current.logs = [...stateRef.current.logs, ...logData.lines];
+          const chunk = logData.lines.join('\n');
+          stateRef.current.text = stateRef.current.text
+            ? `${stateRef.current.text}\n${chunk}`
+            : chunk;
           stateRef.current.logAfter = logData.total;
-          setLogs(stateRef.current.logs);
+          setLogs(stateRef.current.text);
         }
       } catch (e) {
         console.error('Failed to fetch logs:', e);
@@ -177,14 +182,14 @@ export default function SecondarySidebar({
           ref={consoleRef}
           className="m-0 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-background p-3 font-mono text-xs leading-normal text-foreground"
         >
-          {logs.length === 0 ? (
+          {logs === '' ? (
             <span className="italic text-muted-foreground">
               {job.status === 'running'
                 ? 'Waiting for logs...'
                 : 'No logs available'}
             </span>
           ) : (
-            logs.join('\n')
+            logs
           )}
         </pre>
       </div>

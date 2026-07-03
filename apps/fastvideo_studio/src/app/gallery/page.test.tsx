@@ -5,38 +5,23 @@ import GalleryPage from './page';
 import { HeaderActionsProvider } from '@/components/HeaderActionsContext';
 import { getJobsList } from '@/lib/api';
 import type { Job } from '@/lib/types';
+import { makeJob as makeBaseJob } from '@/test/factories';
 
 vi.mock('@/lib/api', () => ({
   getJobsList: vi.fn(),
   getJobVideoUrl: (id: string) => `http://test.local/api/jobs/${id}/video`,
 }));
 
-function makeJob(overrides: Partial<Job> = {}): Job {
-  return {
-    id: 'job-1',
+const makeJob = (overrides: Partial<Job> = {}): Job =>
+  makeBaseJob({
     model_id: 'wan',
     prompt: 'a cat surfing a wave',
-    job_type: 'inference',
     status: 'completed',
     created_at: 1,
-    started_at: null,
     finished_at: 2,
-    error: null,
     output_path: '/out/clip.mp4',
-    log_file_path: null,
-    num_inference_steps: 0,
-    num_frames: 0,
-    height: 0,
-    width: 0,
-    guidance_scale: 0,
-    seed: 0,
-    num_gpus: 0,
-    progress: 0,
-    progress_msg: '',
-    phase: '',
     ...overrides,
-  };
-}
+  });
 
 function renderGallery() {
   return render(

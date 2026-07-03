@@ -122,17 +122,16 @@ def _method_section(job: dict[str, Any], workload_type: str, output_dir: str) ->
     if workload_type in ("full_t2v", "vsa_t2v", "lora_t2v"):
         return {"_target_": FINETUNE_METHOD}
 
+    # Knobs equal to the method's own defaults are omitted throughout this
+    # module so the generated YAML records only deliberate studio choices.
     if workload_type == "ode_init":
-        # Mirrors examples/train/scenario/ode_init_self_forcing_wan_causal/step1_kd.yaml:
-        # KD against the teacher's ODE trajectories, cached under the job dir.
+        # KD against the teacher's ODE trajectories, cached under the job dir
+        # (the first stage of the ode_init_self_forcing_wan_causal scenario).
         return {
             "_target_": KD_CAUSAL_METHOD,
             "teacher_path_cache": os.path.join(output_dir, "kd_cache"),
             "t_list": [995, 937, 833, 625, 0],
-            "student_sample_steps": 4,
-            "teacher_inference_steps": 48,
             "teacher_guidance_scale": 3.5,
-            "num_frames_per_block": 3,
         }
 
     # DMD / self-forcing distillation. The studio exposes a single learning
@@ -149,16 +148,11 @@ def _method_section(job: dict[str, Any], workload_type: str, output_dir: str) ->
         "fake_score_lr_scheduler": "constant",
     }
     if workload_type == "self_forcing_t2v":
-        # Streaming-rollout knobs mirroring
+        # Non-default rollout knobs from
         # examples/train/configs/distribution_matching/wan/self_forcing_causal_t2v.yaml.
         method.update({
             "warp_denoising_step": True,
-            "chunk_size": 3,
-            "student_sample_type": "sde",
-            "context_noise": 0.0,
             "same_step_across_blocks": True,
-            "enable_gradient_in_rollout": True,
-            "start_gradient_frame": 0,
         })
     return method
 
@@ -176,9 +170,6 @@ def _training_section(job: dict[str, Any], workload_type: str, output_dir: str) 
     return {
         "distributed": {
             "num_gpus": num_gpus,
-            "sp_size": 1,
-            "tp_size": 1,
-            "hsdp_replicate_dim": 1,
             "hsdp_shard_dim": num_gpus,
         },
         "data": {
@@ -194,10 +185,11 @@ def _training_section(job: dict[str, Any], workload_type: str, output_dir: str) 
         },
         "optimizer": {
             "learning_rate": job.get("learning_rate", 5e-5),
-            "betas": [0.0, 0.999] if distill else [0.9, 0.999],
+            # Finetunes keep the schema's (0.9, 0.999) default.
+            **({
+                "betas": [0.0, 0.999]
+            } if distill else {}),
             "weight_decay": 1e-4,
-            "lr_scheduler": "constant",
-            "lr_warmup_steps": 0,
         },
         "loop": {
             "max_train_steps": int(job.get("max_train_steps", 1000) or 1000),

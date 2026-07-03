@@ -5,7 +5,7 @@ import * as React from 'react';
 import AddDatasetButton from '@/components/AddDatasetButton';
 import CreateDatasetModal from '@/components/CreateDatasetModal';
 import DatasetCard from '@/components/DatasetCard';
-import { useHeaderActions } from '@/components/HeaderActionsContext';
+import { HeaderActions } from '@/components/HeaderActionsContext';
 import { Card } from '@/components/ui/card';
 import { useStore } from '@/hooks/useStore';
 import { getDatasets } from '@/lib/api';
@@ -22,7 +22,6 @@ import {
 export default function DatasetsPage() {
   const [datasets, setDatasets] = React.useState<Dataset[]>([]);
   const { open } = useStore(createDatasetModalStore);
-  const { setActions } = useHeaderActions();
 
   const fetchDatasets = React.useCallback(async () => {
     try {
@@ -36,11 +35,6 @@ export default function DatasetsPage() {
     fetchDatasets();
   }, [fetchDatasets]);
 
-  React.useEffect(() => {
-    setActions(<AddDatasetButton />);
-    return () => setActions(null);
-  }, [setActions]);
-
   function handleSelectDataset(ds: Dataset) {
     setActiveDataset(ds);
     setActiveDatasetId(ds.id);
@@ -48,6 +42,9 @@ export default function DatasetsPage() {
 
   return (
     <>
+      <HeaderActions>
+        <AddDatasetButton />
+      </HeaderActions>
       <main className="mx-auto flex w-full max-w-[850px] flex-col gap-6 px-4 pb-12">
         <Card className="p-6">
           <div>

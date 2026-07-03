@@ -34,7 +34,9 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest)
+from fastvideo_studio.database import default_settings_dict
+from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
+                                     model_label)
 
 # --- Config -----------------------------------------------------------------
 
@@ -58,11 +60,6 @@ _MODELS_BY_WORKLOAD: dict[str, list[str]] = {
 }
 
 
-def _model_label(model_path: str) -> str:
-    """Derive a readable label from an HF-style model path."""
-    return model_path.split("/")[-1].replace("-", " ").replace("_", " ")
-
-
 def _models_for(workload_type: str | None) -> list[dict[str, str]]:
     if workload_type:
         paths = _MODELS_BY_WORKLOAD.get(workload_type, [])
@@ -72,36 +69,17 @@ def _models_for(workload_type: str | None) -> list[dict[str, str]]:
             for path in paths_for_workload:
                 seen.setdefault(path, None)
         paths = list(seen)
-    return [{"id": path, "label": _model_label(path)} for path in paths]
+    return [{"id": path, "label": model_label(path)} for path in paths]
 
 
-# camelCase settings dict, mirroring database.get_settings() / the frontend
-# Settings interface in src/lib/api.ts.
+# The real settings catalogue lives in database.py; the mock only pre-fills
+# the default model ids so the Create Job modal auto-selects one.
 _DEFAULT_SETTINGS: dict[str, Any] = {
+    **default_settings_dict(),
     "defaultModelId": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     "defaultModelIdT2v": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     "defaultModelIdI2v": "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
     "defaultModelIdT2i": "black-forest-labs/FLUX.1-schnell",
-    "numInferenceSteps": 50,
-    "numFrames": 81,
-    "height": 480,
-    "width": 832,
-    "guidanceScale": 5.0,
-    "guidanceRescale": 0.0,
-    "fps": 24,
-    "seed": 1024,
-    "numGpus": 1,
-    "ditCpuOffload": False,
-    "textEncoderCpuOffload": False,
-    "vaeCpuOffload": False,
-    "imageEncoderCpuOffload": False,
-    "useFsdpInference": False,
-    "enableTorchCompile": False,
-    "vsaSparsity": 0.0,
-    "tpSize": -1,
-    "spSize": -1,
-    "autoStartJob": False,
-    "datasetUploadPath": "",
 }
 
 # --- In-memory state --------------------------------------------------------

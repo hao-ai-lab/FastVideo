@@ -40,10 +40,6 @@ export interface CreateJobModalProps {
   workloadType: string;
 }
 
-function getModelWorkloadForTraining(_w: string): string {
-  return 't2v';
-}
-
 export default function CreateJobModal({
   isOpen,
   onClose,
@@ -54,9 +50,8 @@ export default function CreateJobModal({
   const { options } = useStore(defaultOptionsStore);
 
   const isInference = jobType === 'inference';
-  const inferenceWorkload = isInference
-    ? workloadType
-    : getModelWorkloadForTraining(workloadType);
+  // Training jobs always pick from the t2v model catalogue.
+  const inferenceWorkload = isInference ? workloadType : 't2v';
 
   const [models, setModels] = React.useState<Model[]>([]);
   const [modelId, setModelId] = React.useState('');
@@ -164,17 +159,14 @@ export default function CreateJobModal({
   React.useEffect(() => {
     if (!isOpen) return;
     setIsLoadingModels(true);
-    const filter = isInference
-      ? workloadType
-      : getModelWorkloadForTraining(workloadType);
-    getModels(filter)
+    getModels(inferenceWorkload)
       .then((list) => {
         setModels(list);
         const ids = list.map((m) => m.id);
         const opts = defaultOptionsStore.get().options;
         const defaultId = getDefaultModelForWorkload(
           opts,
-          filter as 't2v' | 'i2v' | 't2i',
+          inferenceWorkload as 't2v' | 'i2v' | 't2i',
         );
         const chosen = ids.includes(defaultId) ? defaultId : (list[0]?.id ?? '');
         setModelId(chosen);
@@ -185,7 +177,7 @@ export default function CreateJobModal({
       })
       .catch((e) => console.error('Failed to load models:', e))
       .finally(() => setIsLoadingModels(false));
-  }, [isOpen, isInference, workloadType]);
+  }, [isOpen, inferenceWorkload, workloadType]);
 
   // Training jobs need a dataset; load the ready datasets when relevant.
   React.useEffect(() => {
@@ -587,46 +579,42 @@ export default function CreateJobModal({
                         onChange={setGeneratorUpdateInterval}
                         disabled={isSubmitting}
                       />
-                      <FieldRow
-                        htmlFor="modal-real-score-model"
-                        label="Real Score Model"
-                      >
-                        <NativeSelect
-                          id="modal-real-score-model"
-                          value={realScoreModelPath}
-                          onChange={(e) =>
-                            setRealScoreModelPath(e.target.value)
-                          }
-                          disabled={isSubmitting || isLoadingModels}
+                      {(
+                        [
+                          {
+                            id: 'modal-real-score-model',
+                            label: 'Real Score Model',
+                            value: realScoreModelPath,
+                            onChange: setRealScoreModelPath,
+                          },
+                          {
+                            id: 'modal-fake-score-model',
+                            label: 'Fake Score Model',
+                            value: fakeScoreModelPath,
+                            onChange: setFakeScoreModelPath,
+                          },
+                        ] as const
+                      ).map((select) => (
+                        <FieldRow
+                          key={select.id}
+                          htmlFor={select.id}
+                          label={select.label}
                         >
-                          <option value="">Same as main model</option>
-                          {models.map((model) => (
-                            <option key={model.id} value={model.id}>
-                              {model.label} ({model.id})
-                            </option>
-                          ))}
-                        </NativeSelect>
-                      </FieldRow>
-                      <FieldRow
-                        htmlFor="modal-fake-score-model"
-                        label="Fake Score Model"
-                      >
-                        <NativeSelect
-                          id="modal-fake-score-model"
-                          value={fakeScoreModelPath}
-                          onChange={(e) =>
-                            setFakeScoreModelPath(e.target.value)
-                          }
-                          disabled={isSubmitting || isLoadingModels}
-                        >
-                          <option value="">Same as main model</option>
-                          {models.map((model) => (
-                            <option key={model.id} value={model.id}>
-                              {model.label} ({model.id})
-                            </option>
-                          ))}
-                        </NativeSelect>
-                      </FieldRow>
+                          <NativeSelect
+                            id={select.id}
+                            value={select.value}
+                            onChange={(e) => select.onChange(e.target.value)}
+                            disabled={isSubmitting || isLoadingModels}
+                          >
+                            <option value="">Same as main model</option>
+                            {models.map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.label} ({model.id})
+                              </option>
+                            ))}
+                          </NativeSelect>
+                        </FieldRow>
+                      ))}
                     </>
                   )}
                 </div>

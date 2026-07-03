@@ -1,25 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { DefaultOptions } from "./defaultOptions";
+import {
+	STORAGE_KEY,
+	loadDefaultOptions,
+	type DefaultOptions,
+} from "./defaultOptions";
 import type { Job, JobType } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8189/api";
 
+// getApiBaseUrl runs on every request and in render paths (media URL
+// builders), so cache the configured URL keyed on the raw stored options
+// string instead of re-parsing the options JSON each call.
+let cachedRaw: string | null = null;
+let cachedConfigured = "";
+
 export function getApiBaseUrl(): string {
-	// 1) Check user-configured value from local storage (Settings page).
-	// The settings sync persists the full options object, so the key holds an
-	// empty string until the user sets a URL — treat that as unset and fall
-	// through to the env/default below.
+	// 1) Check user-configured value from the persisted options (Settings
+	// page). The settings sync persists the full options object, so the key
+	// holds an empty string until the user sets a URL — treat that as unset
+	// and fall through to the env/default below.
 	if (typeof window !== "undefined") {
 		try {
-			const stored = window.localStorage.getItem("fastvideo-default-options");
-			if (stored) {
-				const parsed = JSON.parse(stored) as { apiServerBaseUrl?: string };
-				const configured = parsed.apiServerBaseUrl?.trim();
-				if (configured) return configured;
+			const raw = window.localStorage.getItem(STORAGE_KEY);
+			if (raw !== cachedRaw) {
+				cachedRaw = raw;
+				cachedConfigured = loadDefaultOptions().apiServerBaseUrl.trim();
 			}
+			if (cachedConfigured) return cachedConfigured;
 		} catch {
-			// Ignore storage / JSON errors and fall back to env/default
+			// Ignore storage errors and fall back to env/default
 		}
 	}
 

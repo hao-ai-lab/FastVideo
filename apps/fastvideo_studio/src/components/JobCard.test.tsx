@@ -11,6 +11,7 @@ import {
 } from '@/lib/api';
 import type { Job } from '@/lib/types';
 import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
+import { makeJob as makeBaseJob } from '@/test/factories';
 
 vi.mock('@/lib/api', () => ({
   startJob: vi.fn(),
@@ -19,20 +20,11 @@ vi.mock('@/lib/api', () => ({
   downloadJobVideo: vi.fn(),
 }));
 
-function makeJob(overrides: Partial<Job> = {}): Job {
-  return {
-    id: 'job-1',
+const makeJob = (overrides: Partial<Job> = {}): Job =>
+  makeBaseJob({
     model_id: 'Wan2.1-T2V',
     prompt: 'a cat surfing a wave',
-    job_type: 'inference',
-    workload_type: 't2v',
-    status: 'pending',
     created_at: 1_700_000_000,
-    started_at: null,
-    finished_at: null,
-    error: null,
-    output_path: null,
-    log_file_path: null,
     num_inference_steps: 50,
     num_frames: 81,
     height: 480,
@@ -40,12 +32,8 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     guidance_scale: 5,
     seed: 42,
     num_gpus: 1,
-    progress: 0,
-    progress_msg: '',
-    phase: '',
     ...overrides,
-  };
-}
+  });
 
 beforeEach(() => {
   setActiveJobId(null);

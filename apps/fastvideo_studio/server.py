@@ -33,7 +33,8 @@ from fastapi.responses import FileResponse
 from fastvideo.registry import (get_registered_model_paths, get_registered_models_with_workloads)
 from fastvideo_studio.database import Database, _get_db_path
 from fastvideo_studio.job_runner import JobRunner, JobStatus
-from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest)
+from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
+                                     model_label)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,15 +44,9 @@ logger = logging.getLogger("fastvideo.studio.api")
 
 DEFAULT_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs", "ui_jobs")
 
-
-def _get_model_label(model_path: str) -> str:
-    """Derive a readable label from a HF model path."""
-    return model_path.split("/")[-1].replace("-", " ").replace("_", " ")
-
-
 _available_models: list[dict[str, str]] = [{
     "id": path,
-    "label": _get_model_label(path)
+    "label": model_label(path)
 } for path in get_registered_model_paths()]
 
 job_runner: JobRunner
@@ -264,7 +259,6 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         num_latent_t=req.num_latent_t,
         validation_dataset_file=req.validation_dataset_file or "",
         lora_rank=req.lora_rank,
-        ltx2_first_frame_conditioning_p=req.ltx2_first_frame_conditioning_p,
         negative_prompt=req.negative_prompt,
         num_inference_steps=req.num_inference_steps,
         num_frames=req.num_frames,
@@ -287,8 +281,6 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         dmd_use_vsa=req.dmd_use_vsa,
         dmd_vsa_sparsity=req.dmd_vsa_sparsity,
         dmd_denoising_steps=req.dmd_denoising_steps or "1000,757,522",
-        min_timestep_ratio=req.min_timestep_ratio,
-        max_timestep_ratio=req.max_timestep_ratio,
         real_score_guidance_scale=req.real_score_guidance_scale,
         generator_update_interval=req.generator_update_interval,
         real_score_model_path=req.real_score_model_path or "",

@@ -1,4 +1,4 @@
-import type { APIRequestContext } from '@playwright/test';
+import { test, type APIRequestContext } from '@playwright/test';
 
 /**
  * Port and base URL of the mock API — the single source of truth shared by
@@ -26,4 +26,11 @@ export async function mockIsUp(request: APIRequestContext): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Self-skip every test in the enclosing describe when the mock is down. */
+export function skipWithoutMock(): void {
+  test.beforeEach(async ({ request }) => {
+    test.skip(!(await mockIsUp(request)), MOCK_SKIP_MESSAGE);
+  });
 }

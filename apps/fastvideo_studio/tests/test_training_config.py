@@ -135,7 +135,7 @@ def test_self_forcing_uses_causal_student_and_rollout_knobs() -> None:
     method = config["method"]
     assert method["_target_"].endswith("SelfForcingMethod")
     assert method["warp_denoising_step"] is True
-    assert method["student_sample_type"] == "sde"
+    assert method["same_step_across_blocks"] is True
     assert config["pipeline"]["dit_config"] == {
         "local_attn_size": -1,
         "sink_size": 0,
@@ -198,3 +198,16 @@ def test_training_env_has_no_backend_override() -> None:
     assert env["TOKENIZERS_PARALLELISM"] == "false"
     assert env["WANDB_MODE"] == "offline"
     assert "FASTVIDEO_ATTENTION_BACKEND" not in env
+
+
+def test_workloads_match_frontend_job_config() -> None:
+    """SUPPORTED_WORKLOADS must stay in sync with the UI's workload menu
+    (src/lib/jobConfig.ts) — drift means creatable-but-unrunnable jobs."""
+    import re
+
+    job_config = (Path(__file__).resolve().parents[1] / "src" / "lib" /
+                  "jobConfig.ts").read_text(encoding="utf-8")
+    all_types = set(re.findall(r'type:\s*"([^"]+)"', job_config))
+    inference_types = {"t2v", "i2v", "t2i"}
+    assert inference_types <= all_types, "jobConfig.ts parse failed"
+    assert all_types - inference_types == set(SUPPORTED_WORKLOADS)

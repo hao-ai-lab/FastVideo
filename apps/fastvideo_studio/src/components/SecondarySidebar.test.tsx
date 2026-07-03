@@ -4,37 +4,19 @@ import { describe, expect, it, vi } from 'vitest';
 import SecondarySidebar from './SecondarySidebar';
 import { getJobLogs } from '@/lib/api';
 import type { Job } from '@/lib/types';
+import { makeJob as makeBaseJob } from '@/test/factories';
 
 vi.mock('@/lib/api', () => ({
   getJobLogs: vi.fn(),
   downloadJobLog: vi.fn(),
 }));
 
-function makeJob(overrides: Partial<Job> = {}): Job {
-  return {
-    id: 'job-1',
-    model_id: 'model-x',
-    prompt: 'a prompt',
+const makeJob = (overrides: Partial<Job> = {}): Job =>
+  makeBaseJob({
     status: 'running',
-    created_at: 0,
-    started_at: null,
-    finished_at: null,
-    error: null,
-    output_path: null,
     log_file_path: '/logs/job-1.log',
-    num_inference_steps: 0,
-    num_frames: 0,
-    height: 0,
-    width: 0,
-    guidance_scale: 0,
-    seed: 0,
-    num_gpus: 0,
-    progress: 0,
-    progress_msg: '',
-    phase: '',
     ...overrides,
-  };
-}
+  });
 
 describe('SecondarySidebar', () => {
   it('renders log lines streamed from the job log poll', async () => {

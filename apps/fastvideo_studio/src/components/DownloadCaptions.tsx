@@ -15,11 +15,14 @@ export default function DownloadCaptions({
   fileNames: string[];
   captions: Record<string, string>;
 }) {
-  const sortedNames = [...fileNames].sort();
   const disabled = fileNames.length === 0;
 
+  // Sorted lazily in the click handlers: this component re-renders with the
+  // sidebar on every caption keystroke, and the sort is only needed on click.
+  const sortedFileNames = () => [...fileNames].sort();
+
   function handleDownloadJson() {
-    const data = sortedNames.map((path) => ({
+    const data = sortedFileNames().map((path) => ({
       path,
       cap: captions[path] ?? '',
     }));
@@ -30,6 +33,7 @@ export default function DownloadCaptions({
   }
 
   function handleDownloadTxt() {
+    const sortedNames = sortedFileNames();
     const videosContent = sortedNames.join('\n');
     const promptContent = sortedNames
       .map((fn) => captions[fn] ?? '')
@@ -51,7 +55,7 @@ export default function DownloadCaptions({
       s.includes('"') || s.includes(',') || s.includes('\n')
         ? `"${s.replace(/"/g, '""')}"`
         : s;
-    const rows = sortedNames.map(
+    const rows = sortedFileNames().map(
       (fn) => `${escape(fn)},${escape(captions[fn] ?? '')}`,
     );
     const csv = ['video_name,caption', ...rows].join('\n');

@@ -20,6 +20,52 @@ const INITIAL_PAGE_SIZE = 24;
 const PAGE_SIZE = 24;
 const SCROLL_THRESHOLD = 200;
 
+// Memoized so a caption keystroke re-renders only the edited card, not every
+// visible <video> in the grid (visibleCount grows unbounded with scrolling).
+const DatasetFileCard = React.memo(function DatasetFileCard({
+  fileName,
+  mediaUrl,
+  caption,
+  thumbLoaded,
+  onCaptionChange,
+  onThumbLoaded,
+}: {
+  fileName: string;
+  mediaUrl: string;
+  caption: string;
+  thumbLoaded: boolean;
+  onCaptionChange: (fileName: string, value: string) => void;
+  onThumbLoaded: (fileName: string) => void;
+}) {
+  return (
+    <div className="relative flex flex-col overflow-hidden rounded-lg border border-border bg-background">
+      {!thumbLoaded && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-accent" />
+        </div>
+      )}
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <video
+        src={mediaUrl}
+        className="aspect-video w-full bg-border object-cover"
+        muted
+        autoPlay
+        loop
+        playsInline
+        onLoadedData={() => onThumbLoaded(fileName)}
+        onError={() => onThumbLoaded(fileName)}
+      />
+      <Textarea
+        value={caption}
+        onChange={(e) => onCaptionChange(fileName, e.target.value)}
+        placeholder="Caption"
+        rows={2}
+        className="min-h-[2.5rem] resize-y rounded-none border-0 bg-transparent p-1.5 text-xs shadow-none focus-visible:border-transparent focus-visible:ring-0"
+      />
+    </div>
+  );
+});
+
 export default function DatasetSidebar({
   dataset,
   onClose,
@@ -91,22 +137,25 @@ export default function DatasetSidebar({
     onDragChange: setIsDragging,
   });
 
-  function handleCaptionChange(fileName: string, value: string) {
-    setCaptions((prev) => ({ ...prev, [fileName]: value }));
-    const datasetId = dataset.id;
-    const pending = pendingSaves.current.get(fileName);
-    if (pending) clearTimeout(pending.timer);
-    const save = () => {
-      updateDatasetCaption(datasetId, fileName, value).catch((err) =>
-        console.error('Failed to save caption:', err),
-      );
-    };
-    const timer = setTimeout(() => {
-      pendingSaves.current.delete(fileName);
-      save();
-    }, 500);
-    pendingSaves.current.set(fileName, { timer, save });
-  }
+  const datasetId = dataset.id;
+  const handleCaptionChange = React.useCallback(
+    (fileName: string, value: string) => {
+      setCaptions((prev) => ({ ...prev, [fileName]: value }));
+      const pending = pendingSaves.current.get(fileName);
+      if (pending) clearTimeout(pending.timer);
+      const save = () => {
+        updateDatasetCaption(datasetId, fileName, value).catch((err) =>
+          console.error('Failed to save caption:', err),
+        );
+      };
+      const timer = setTimeout(() => {
+        pendingSaves.current.delete(fileName);
+        save();
+      }, 500);
+      pendingSaves.current.set(fileName, { timer, save });
+    },
+    [datasetId],
+  );
 
   function handleScroll() {
     const el = scrollRef.current;
@@ -118,9 +167,11 @@ export default function DatasetSidebar({
     }
   }
 
-  function markThumbLoaded(fileName: string) {
-    setThumbLoaded((prev) => ({ ...prev, [fileName]: true }));
-  }
+  const markThumbLoaded = React.useCallback((fileName: string) => {
+    setThumbLoaded((prev) =>
+      prev[fileName] ? prev : { ...prev, [fileName]: true },
+    );
+  }, []);
 
   const visibleFiles = fileNames.slice(0, visibleCount);
 
@@ -162,36 +213,15 @@ export default function DatasetSidebar({
           ) : (
             <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
               {visibleFiles.map((fileName) => (
-                <div
+                <DatasetFileCard
                   key={fileName}
-                  className="relative flex flex-col overflow-hidden rounded-lg border border-border bg-background"
-                >
-                  {!thumbLoaded[fileName] && (
-                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70">
-                      <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-accent" />
-                    </div>
-                  )}
-                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                  <video
-                    src={getDatasetMediaUrl(dataset.id, fileName)}
-                    className="aspect-video w-full bg-border object-cover"
-                    muted
-                    autoPlay
-                    loop
-                    playsInline
-                    onLoadedData={() => markThumbLoaded(fileName)}
-                    onError={() => markThumbLoaded(fileName)}
-                  />
-                  <Textarea
-                    value={captions[fileName] ?? ''}
-                    onChange={(e) =>
-                      handleCaptionChange(fileName, e.target.value)
-                    }
-                    placeholder="Caption"
-                    rows={2}
-                    className="min-h-[2.5rem] resize-y rounded-none border-0 bg-transparent p-1.5 text-xs shadow-none focus-visible:border-transparent focus-visible:ring-0"
-                  />
-                </div>
+                  fileName={fileName}
+                  mediaUrl={getDatasetMediaUrl(dataset.id, fileName)}
+                  caption={captions[fileName] ?? ''}
+                  thumbLoaded={!!thumbLoaded[fileName]}
+                  onCaptionChange={handleCaptionChange}
+                  onThumbLoaded={markThumbLoaded}
+                />
               ))}
             </div>
           )}

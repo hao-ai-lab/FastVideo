@@ -1,15 +1,13 @@
 import { expect, test } from '@playwright/test';
 
-import { API_BASE, MOCK_SKIP_MESSAGE, mockIsUp } from './helpers';
+import { API_BASE, skipWithoutMock } from './helpers';
 
 /**
  * Datasets page: the seeded datasets render as cards, and the Create Dataset
  * modal opens from the header action.
  */
 test.describe('datasets', () => {
-  test.beforeEach(async ({ request }) => {
-    test.skip(!(await mockIsUp(request)), MOCK_SKIP_MESSAGE);
-  });
+  skipWithoutMock();
 
   test('lists the seeded datasets', async ({ page, request }) => {
     // Read the seeded names from the mock so the assertion tracks the fixture.

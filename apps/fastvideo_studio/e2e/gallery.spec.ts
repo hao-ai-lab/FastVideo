@@ -1,15 +1,13 @@
 import { expect, test } from '@playwright/test';
 
-import { API_BASE, MOCK_SKIP_MESSAGE, mockIsUp } from './helpers';
+import { API_BASE, skipWithoutMock } from './helpers';
 
 /**
  * Gallery page: the seeded completed inference job surfaces as a media tile
  * (an <article> wrapping a <video>) captioned with its prompt.
  */
 test.describe('gallery', () => {
-  test.beforeEach(async ({ request }) => {
-    test.skip(!(await mockIsUp(request)), MOCK_SKIP_MESSAGE);
-  });
+  skipWithoutMock();
 
   test('shows a media tile for the seeded completed job', async ({
     page,

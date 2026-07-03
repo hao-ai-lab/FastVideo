@@ -33,3 +33,20 @@ export function useHeaderActions(): HeaderActionsContextValue {
   }
   return ctx;
 }
+
+/**
+ * Declaratively publish the current page's header actions: renders nothing,
+ * registers `children` in the header on mount and clears them on unmount.
+ * Pages without actions simply don't render it.
+ */
+export function HeaderActions({ children }: { children: React.ReactNode }) {
+  const { setActions } = useHeaderActions();
+  // Mount-only on purpose: pages pass inline JSX, which is referentially new
+  // every render and would re-register per render if it were a dependency.
+  React.useEffect(() => {
+    setActions(children);
+    return () => setActions(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setActions]);
+  return null;
+}

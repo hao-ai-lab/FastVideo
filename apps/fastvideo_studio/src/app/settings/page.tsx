@@ -3,11 +3,11 @@
 import * as React from 'react';
 
 import {
+  FieldRow,
   NumberRow,
   SliderRow,
   ToggleRow,
 } from '@/components/form-rows';
-import { useHeaderActions } from '@/components/HeaderActionsContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -22,8 +22,6 @@ import {
   resetToDefaults,
   updateOption,
 } from '@/stores/defaultOptions';
-
-const labelClass = 'text-xs font-normal text-muted-foreground';
 
 function TextSettingRow({
   id,
@@ -42,10 +40,7 @@ function TextSettingRow({
   // doesn't fire a settings PUT (or a localStorage write).
   const [draft, setDraft] = React.useState<string | null>(null);
   return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id} className={labelClass}>
-        {label}
-      </Label>
+    <FieldRow htmlFor={id} label={label}>
       <Input
         id={id}
         type="text"
@@ -61,7 +56,7 @@ function TextSettingRow({
         }}
         placeholder={placeholder}
       />
-    </div>
+    </FieldRow>
   );
 }
 
@@ -79,10 +74,7 @@ function SelectRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id} className={labelClass}>
-        {label}
-      </Label>
+    <FieldRow htmlFor={id} label={label}>
       <NativeSelect
         id={id}
         value={value}
@@ -90,30 +82,20 @@ function SelectRow({
       >
         {children}
       </NativeSelect>
-    </div>
+    </FieldRow>
   );
 }
 
 export default function SettingsPage() {
   const { options } = useStore(defaultOptionsStore);
-  const { setActions } = useHeaderActions();
 
-  const [modelsT2v, setModelsT2v] = React.useState<Model[]>([]);
-  const [modelsI2v, setModelsI2v] = React.useState<Model[]>([]);
-  const [modelsT2i, setModelsT2i] = React.useState<Model[]>([]);
-
-  React.useEffect(() => {
-    setActions(null);
-    return () => setActions(null);
-  }, [setActions]);
+  const [models, setModels] = React.useState<
+    Record<'t2v' | 'i2v' | 't2i', Model[]>
+  >({ t2v: [], i2v: [], t2i: [] });
 
   React.useEffect(() => {
     Promise.all([getModels('t2v'), getModels('i2v'), getModels('t2i')])
-      .then(([t2v, i2v, t2i]) => {
-        setModelsT2v(t2v);
-        setModelsI2v(i2v);
-        setModelsT2i(t2i);
-      })
+      .then(([t2v, i2v, t2i]) => setModels({ t2v, i2v, t2i }))
       .catch((e) => console.error('Failed to load models:', e));
   }, []);
 
@@ -123,7 +105,10 @@ export default function SettingsPage() {
         <CardContent className="space-y-4 p-6">
           <h2 className="text-lg font-semibold">Behavior</h2>
           <div className="flex items-center justify-between gap-4">
-            <Label htmlFor="settings-auto-start-job" className={labelClass}>
+            <Label
+              htmlFor="settings-auto-start-job"
+              className="pl-0.5 text-xs font-normal tracking-wide text-muted-foreground"
+            >
               Auto Start Job on Create
             </Label>
             <Switch
@@ -178,7 +163,7 @@ export default function SettingsPage() {
               onChange={(v) => updateOption('defaultModelIdT2v', v)}
             >
               <option value="">None (select when creating job)</option>
-              {modelsT2v.map((model) => (
+              {models.t2v.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.label} ({model.id})
                 </option>
@@ -191,7 +176,7 @@ export default function SettingsPage() {
               onChange={(v) => updateOption('defaultModelIdI2v', v)}
             >
               <option value="">None</option>
-              {modelsI2v.map((model) => (
+              {models.i2v.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.label} ({model.id})
                 </option>
@@ -204,7 +189,7 @@ export default function SettingsPage() {
               onChange={(v) => updateOption('defaultModelIdT2i', v)}
             >
               <option value="">None</option>
-              {modelsT2i.map((model) => (
+              {models.t2i.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.label} ({model.id})
                 </option>

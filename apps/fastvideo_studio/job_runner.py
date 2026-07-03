@@ -161,13 +161,10 @@ class Job:
     num_latent_t: int = 20
     validation_dataset_file: str = ""
     lora_rank: int = 32
-    ltx2_first_frame_conditioning_p: float | None = None
     # DMD options
     dmd_use_vsa: bool = False
     dmd_vsa_sparsity: float = 0.8
     dmd_denoising_steps: str = "1000,757,522"
-    min_timestep_ratio: float = 0.02
-    max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
     generator_update_interval: int = 5
     real_score_model_path: str = ""
@@ -222,12 +219,9 @@ class Job:
             "num_width": self.width,
             "validation_dataset_file": self.validation_dataset_file,
             "lora_rank": self.lora_rank,
-            "ltx2_first_frame_conditioning_p": self.ltx2_first_frame_conditioning_p,
             "dmd_use_vsa": self.dmd_use_vsa,
             "dmd_vsa_sparsity": self.dmd_vsa_sparsity,
             "dmd_denoising_steps": self.dmd_denoising_steps,
-            "min_timestep_ratio": self.min_timestep_ratio,
-            "max_timestep_ratio": self.max_timestep_ratio,
             "real_score_guidance_scale": self.real_score_guidance_scale,
             "generator_update_interval": self.generator_update_interval,
             "real_score_model_path": self.real_score_model_path or "",
@@ -331,12 +325,9 @@ class JobRunner:
                     num_latent_t=row.get("num_latent_t", 20),
                     validation_dataset_file=row.get("validation_dataset_file", "") or "",
                     lora_rank=row.get("lora_rank", 32),
-                    ltx2_first_frame_conditioning_p=row.get("ltx2_first_frame_conditioning_p"),
                     dmd_use_vsa=row.get("dmd_use_vsa", False),
                     dmd_vsa_sparsity=float(row.get("dmd_vsa_sparsity", 0.8)),
                     dmd_denoising_steps=row.get("dmd_denoising_steps", "1000,757,522") or "1000,757,522",
-                    min_timestep_ratio=float(row.get("min_timestep_ratio", 0.02)),
-                    max_timestep_ratio=float(row.get("max_timestep_ratio", 0.98)),
                     real_score_guidance_scale=float(row.get("real_score_guidance_scale", 3.5)),
                     generator_update_interval=int(row.get("generator_update_interval", 5)),
                     real_score_model_path=row.get("real_score_model_path", "") or "",
@@ -413,12 +404,9 @@ class JobRunner:
         num_latent_t: int = 20,
         validation_dataset_file: str = "",
         lora_rank: int = 32,
-        ltx2_first_frame_conditioning_p: float | None = None,
         dmd_use_vsa: bool = False,
         dmd_vsa_sparsity: float = 0.8,
         dmd_denoising_steps: str = "1000,757,522",
-        min_timestep_ratio: float = 0.02,
-        max_timestep_ratio: float = 0.98,
         real_score_guidance_scale: float = 3.5,
         generator_update_interval: int = 5,
         real_score_model_path: str = "",
@@ -458,12 +446,9 @@ class JobRunner:
             num_latent_t=num_latent_t,
             validation_dataset_file=validation_dataset_file or "",
             lora_rank=lora_rank,
-            ltx2_first_frame_conditioning_p=ltx2_first_frame_conditioning_p,
             dmd_use_vsa=dmd_use_vsa,
             dmd_vsa_sparsity=dmd_vsa_sparsity,
             dmd_denoising_steps=dmd_denoising_steps,
-            min_timestep_ratio=min_timestep_ratio,
-            max_timestep_ratio=max_timestep_ratio,
             real_score_guidance_scale=real_score_guidance_scale,
             generator_update_interval=generator_update_interval,
             real_score_model_path=real_score_model_path or "",
@@ -737,32 +722,10 @@ class JobRunner:
         env = os.environ.copy()
         env.update(get_training_env())
 
-        job_dict = {
-            "model_id": job.model_id,
-            "data_path": job.data_path,
-            "workload_type": job.workload_type,
-            "num_gpus": job.num_gpus,
-            "max_train_steps": job.max_train_steps,
-            "train_batch_size": job.train_batch_size,
-            "learning_rate": job.learning_rate,
-            "num_latent_t": job.num_latent_t,
-            "num_height": job.height,
-            "num_width": job.width,
-            "num_frames": job.num_frames,
-            "validation_dataset_file": job.validation_dataset_file,
-            "lora_rank": job.lora_rank,
-        }
-        if job.workload_type.startswith("dmd_") or job.workload_type.startswith("self_forcing_"):
-            job_dict["dmd_use_vsa"] = getattr(job, "dmd_use_vsa", False)
-            job_dict["dmd_vsa_sparsity"] = getattr(job, "dmd_vsa_sparsity", 0.8)
-            job_dict["dmd_denoising_steps"] = getattr(job, "dmd_denoising_steps", "1000,757,522")
-            job_dict["real_score_guidance_scale"] = getattr(job, "real_score_guidance_scale", 3.5)
-            job_dict["generator_update_interval"] = getattr(job, "generator_update_interval", 5)
-            job_dict["real_score_model_path"] = (getattr(job, "real_score_model_path", "") or job.model_id)
-            job_dict["fake_score_model_path"] = (getattr(job, "fake_score_model_path", "") or job.model_id)
-
         try:
-            train_config = build_training_config(job_dict, job_output_dir)
+            # Job.to_dict() carries every key the config builder reads
+            # (extra keys are ignored by its .get() lookups).
+            train_config = build_training_config(job.to_dict(), job_output_dir)
         except ValueError as exc:
             job.status = JobStatus.FAILED
             job.error = str(exc)

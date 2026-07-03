@@ -3,7 +3,6 @@
 import { Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { useHeaderActions } from '@/components/HeaderActionsContext';
 import { Card } from '@/components/ui/card';
 import { getJobVideoUrl, getJobsList } from '@/lib/api';
 import type { Job } from '@/lib/types';
@@ -13,14 +12,9 @@ function isImage(job: Job): boolean {
 }
 
 export default function GalleryPage() {
-  const { setActions } = useHeaderActions();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setActions(null);
-  }, [setActions]);
 
   useEffect(() => {
     let cancelled = false;
