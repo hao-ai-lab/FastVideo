@@ -20,6 +20,7 @@ import pytest
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
 from fastvideo.tests.performance.identity import (
+    benchmark_identity_from_config,
     build_recipe_from_benchmark_config,
     environment_fingerprint,
     environment_metadata,
@@ -302,10 +303,10 @@ def _runtime_identity_from_generator(generator) -> dict[str, Any]:
 
 
 def _benchmark_identity_fields(cfg):
+    identity = benchmark_identity_from_config(cfg)
     return {
-        key: cfg[key]
+        key: identity[key]
         for key in ("workload_id", "variant_id", "benchmark_version")
-        if cfg.get(key) is not None
     }
 
 

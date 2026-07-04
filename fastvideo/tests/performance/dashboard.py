@@ -29,15 +29,76 @@ METRICS = (
     "dit_time_s",
     "vae_decode_time_s",
 )
+COMPARISON_COHORT_KEYS = (
+    "workload_id",
+    "variant_id",
+    "benchmark_version",
+    "recipe_fingerprint",
+    "hardware_profile_id",
+    "software_profile_id",
+)
+GROUP_KEYS = ("model_id", "gpu_type", *COMPARISON_COHORT_KEYS)
+
+
+def _cohort_value(value: object) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
+def _display_value(value: object) -> str:
+    return _cohort_value(value) or "legacy"
+
+
+def _short_value(value: object) -> str:
+    text = _display_value(value)
+    if text == "legacy" or len(text) <= 14:
+        return text
+    return text[:12]
+
+
+def _cohort_title(group_key: tuple[object, ...]) -> str:
+    workload = _display_value(group_key[2])
+    variant = _display_value(group_key[3])
+    version = _display_value(group_key[4])
+    version_label = version if version == "legacy" else f"v{version}"
+    return f"{workload} / {variant} / {version_label}"
+
+
+def _cohort_detail(group_key: tuple[object, ...]) -> str:
+    return " | ".join((
+        f"recipe {_short_value(group_key[5])}",
+        _short_value(group_key[6]),
+        _short_value(group_key[7]),
+    ))
+
+
+def _group_record(group_key: tuple[object, ...]) -> dict[str, str]:
+    return {
+        key: _cohort_value(value)
+        for key, value in zip(GROUP_KEYS, group_key)
+    }
+
+
+def _dashboard_frame(df: pd.DataFrame) -> pd.DataFrame:
+    dashboard_df = df.copy()
+    for key in GROUP_KEYS:
+        if key not in dashboard_df.columns:
+            dashboard_df[key] = ""
+        dashboard_df[key] = dashboard_df[key].map(_cohort_value)
+    return dashboard_df
 
 # -----------------------------
 # 1. Grouping
 # -----------------------------
 def group_data(df: pd.DataFrame):
-    # Group only by model+GPU so each group produces a time-series line.
-    # config_id (commit SHA) is carried as a column for hover/color use.
-    keys = ["model_id", "gpu_type"]
-    return df.groupby(keys, dropna=False)
+    # Group by the same comparison cohort used by baseline gating.
+    return _dashboard_frame(df).groupby(list(GROUP_KEYS), dropna=False)
 
 # -----------------------------
 # 2. Plot builder
@@ -46,15 +107,20 @@ def build_plots(df: pd.DataFrame) -> tuple[list, list[dict[str, object]]]:
     figs = []
     skipped_metrics: list[dict[str, object]] = []
 
-    for (model_id, gpu_type), g in group_data(df):
+    for group_key, g in group_data(df):
+        model_id, gpu_type = group_key[:2]
+        group_record = _group_record(group_key)
+        cohort_title = _cohort_title(group_key)
+        cohort_detail = _cohort_detail(group_key)
         g = g.sort_values("timestamp")
 
         # One chart per metric so the y-axes aren't on wildly different scales
         for metric in METRICS:
             if metric not in g.columns:
                 skipped_metrics.append({
-                    "model_id": model_id,
-                    "gpu_type": gpu_type,
+                    **group_record,
+                    "cohort": cohort_title,
+                    "cohort_detail": cohort_detail,
                     "metric": metric,
                     "reason": "column missing from loaded records",
                     "records": len(g),
@@ -65,8 +131,9 @@ def build_plots(df: pd.DataFrame) -> tuple[list, list[dict[str, object]]]:
             non_null = int(g[metric].notna().sum())
             if non_null == 0:
                 skipped_metrics.append({
-                    "model_id": model_id,
-                    "gpu_type": gpu_type,
+                    **group_record,
+                    "cohort": cohort_title,
+                    "cohort_detail": cohort_detail,
                     "metric": metric,
                     "reason": "no non-null values in loaded records",
                     "records": len(g),
@@ -79,8 +146,8 @@ def build_plots(df: pd.DataFrame) -> tuple[list, list[dict[str, object]]]:
                 x="timestamp",
                 y=metric,
                 markers=True,
-                hover_data=["config_id", "commit_sha"],
-                title=f"{model_id} | {gpu_type} | {metric}",
+                hover_data=["config_id", "commit_sha", *COMPARISON_COHORT_KEYS],
+                title=f"{model_id} | {gpu_type} | {cohort_title} | {cohort_detail} | {metric}",
                 labels={"timestamp": "Time", metric: metric},
             )
             figs.append(fig)
@@ -95,7 +162,7 @@ def render_skipped_metrics(skipped_metrics: list[dict[str, object]]) -> str:
     rows = [
         "<h3>Skipped Metric Plots</h3>",
         "<table>",
-        ("<thead><tr><th>Model</th><th>GPU</th><th>Metric</th>"
+        ("<thead><tr><th>Model</th><th>GPU</th><th>Cohort</th><th>Metric</th>"
          "<th>Records</th><th>Non-null</th><th>Reason</th></tr></thead>"),
         "<tbody>",
     ]
@@ -104,6 +171,7 @@ def render_skipped_metrics(skipped_metrics: list[dict[str, object]]) -> str:
             "<tr>"
             f"<td>{escape(str(item['model_id']))}</td>"
             f"<td>{escape(str(item['gpu_type']))}</td>"
+            f"<td>{escape(str(item['cohort']))}<br><code>{escape(str(item['cohort_detail']))}</code></td>"
             f"<td>{escape(str(item['metric']))}</td>"
             f"<td>{item['records']}</td>"
             f"<td>{item['non_null']}</td>"
@@ -165,6 +233,7 @@ def main() -> None:
         print("Skipped metric plots:")
         for item in skipped_metrics:
             print(f"  - {item['model_id']} | {item['gpu_type']} | "
+                  f"{item['cohort']} | {item['cohort_detail']} | "
                   f"{item['metric']}: {item['reason']} "
                   f"({item['non_null']}/{item['records']} non-null)")
     print(f"Generated {len(figs)} metric plot(s)")

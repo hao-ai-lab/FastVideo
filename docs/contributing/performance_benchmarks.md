@@ -296,7 +296,12 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     "python": "3.12",
     "pytorch": "2.12",
     "cuda": "13.0",
-    "packages": { "fastvideo_kernel": "0.3.2", "triton": "3.4.1" }
+    "packages": {
+      "fastvideo_kernel": "0.3.2",
+      "flashinfer": "0.2.11",
+      "nvidia_cutlass_dsl": "4.5.0",
+      "triton": "3.4.1"
+    }
   },
   "software_profile_id": "sw-<sha256-prefix>",
   "environment_metadata": { "env": { "IMAGE_VERSION": "py3.12-cuda13.0.0" } },
@@ -355,6 +360,9 @@ part of the comparison key.
 The recipe prompt digests describe the prompts actually measured by the
 benchmark run; extra configured prompts are ignored unless the benchmark runner
 executes them.
+Software profile package cohorts keep exact versions for relevant
+attention/kernel packages, including FastVideo kernels, FlashAttention,
+FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 
 ## Environment variable reference
 
@@ -409,8 +417,8 @@ When the rolling-baseline phase runs, it emits:
    {
      "benchmark_id": "<unique-id>",
      "config_schema_version": 2,
-     "workload_id": "<workload-family>",
-     "variant_id": "<model-or-runtime-variant>",
+     "workload_id": "<stable-workload-id>",
+     "variant_id": "canonical",
      "benchmark_version": 1,
      "model": { "model_path": "...", "model_short_name": "..." },
      "init_kwargs": { "num_gpus": 1, ... },
@@ -437,7 +445,9 @@ When the rolling-baseline phase runs, it emits:
 
    Legacy v1 configs without `config_schema_version` still load, but should not
    gain v2 identity or metadata fields until they are migrated to
-   `config_schema_version: 2`.
+   `config_schema_version: 2`. For v2 configs, `workload_id`, `variant_id`,
+   and `benchmark_version` are part of the comparison key; benchmark runs
+   fail if any of these identity fields are missing.
 
 2. The pytest test auto-discovers all configs — no test code needed. CI
    picks it up on the next `/test performance` run.

@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 
+import pytest
 import torch
 
 from fastvideo.tests.performance import identity as identity_module
@@ -84,6 +85,14 @@ def test_recipe_includes_first_class_benchmark_identity():
         "variant_id": "1.3b-sp2",
         "benchmark_version": 2,
     }
+
+
+def test_recipe_requires_first_class_benchmark_identity():
+    cfg = _benchmark_config()
+    del cfg["workload_id"]
+
+    with pytest.raises(ValueError, match="workload_id"):
+        build_recipe_from_benchmark_config(cfg)
 
 
 def test_semantically_equivalent_sequence_forms_match():
@@ -176,6 +185,9 @@ def test_software_profile_uses_exact_attention_kernel_package_versions_for_id():
         package_versions={
             "triton": "3.4.1",
             "fastvideo_kernel": "0.3.2",
+            "flash_attn_4": "4.0.0.dev0",
+            "flashinfer": "0.2.11",
+            "nvidia_cutlass_dsl": "4.5.0",
         },
     )
     profile_b = software_profile(
@@ -185,6 +197,9 @@ def test_software_profile_uses_exact_attention_kernel_package_versions_for_id():
         package_versions={
             "triton": "3.4.9",
             "fastvideo_kernel": "0.3.7",
+            "flash_attn_4": "4.0.0.dev1",
+            "flashinfer": "0.2.12",
+            "nvidia_cutlass_dsl": "4.5.1",
         },
     )
 
@@ -194,6 +209,9 @@ def test_software_profile_uses_exact_attention_kernel_package_versions_for_id():
         "cuda": "13.0",
         "packages": {
             "fastvideo_kernel": "0.3.2",
+            "flash_attn_4": "4.0.0.dev0",
+            "flashinfer": "0.2.11",
+            "nvidia_cutlass_dsl": "4.5.0",
             "triton": "3.4.1",
         },
     }
@@ -201,6 +219,33 @@ def test_software_profile_uses_exact_attention_kernel_package_versions_for_id():
     assert profile_b["pytorch"] == "2.12"
     assert profile_b["cuda"] == "13.0"
     assert software_profile_id(profile_a) != software_profile_id(profile_b)
+
+
+def test_installed_package_versions_checks_attention_kernel_distributions(monkeypatch):
+    versions = {
+        "fastvideo-kernel": "0.3.2",
+        "flash-attn": "2.8.1",
+        "flash-attn-4": "4.0.0.dev0",
+        "flash-attention-fp4": "0.1.0",
+        "flashinfer-python": "0.2.11",
+        "nvidia-cutlass-dsl": "4.5.0",
+    }
+
+    def fake_version(name):
+        if name not in versions:
+            raise identity_module.importlib.metadata.PackageNotFoundError(name)
+        return versions[name]
+
+    monkeypatch.setattr(identity_module.importlib.metadata, "version", fake_version)
+
+    installed = identity_module._installed_package_versions()
+
+    assert installed["fastvideo_kernel"] == "0.3.2"
+    assert installed["flash_attn"] == "2.8.1"
+    assert installed["flash_attn_4"] == "4.0.0.dev0"
+    assert installed["flash_attention_fp4"] == "0.1.0"
+    assert installed["flashinfer"] == "0.2.11"
+    assert installed["nvidia_cutlass_dsl"] == "4.5.0"
 
 
 def test_hardware_profile_id_uses_normalized_gpu_cohort():
