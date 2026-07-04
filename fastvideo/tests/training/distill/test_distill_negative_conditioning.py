@@ -35,14 +35,16 @@ class _DistillationPipelineForTest(DistillationPipeline):
         self.validation_pipeline = _ValidationPipeline()
 
 
-def _make_pipeline():
+def _make_pipeline(device=None):
     pipeline = object.__new__(_DistillationPipelineForTest)
     pipeline.validation_pipeline_init_calls = 0
+    if device is not None:
+        pipeline.device = device
     return pipeline
 
 
 def test_negative_prompt_conditioning_initializes_without_validation_enabled(monkeypatch):
-    pipeline = _make_pipeline()
+    pipeline = _make_pipeline(device=torch.device("cpu"))
     training_args = types.SimpleNamespace(model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
     monkeypatch.setattr(
         SamplingParam,
@@ -55,8 +57,8 @@ def test_negative_prompt_conditioning_initializes_without_validation_enabled(mon
     assert pipeline.validation_pipeline_init_calls == 1
     assert pipeline.validation_pipeline.prompt_encoding_stage.calls == 1
     assert pipeline.validation_pipeline.prompt_encoding_stage.prompts == ["low quality"]
-    assert torch.equal(pipeline.negative_prompt_embeds, torch.ones(1, 2, 3))
-    assert torch.equal(pipeline.negative_prompt_attention_mask, torch.ones(1, 2))
+    assert torch.equal(pipeline.negative_prompt_embeds, torch.ones(1, 2, 3, dtype=torch.bfloat16))
+    assert torch.equal(pipeline.negative_prompt_attention_mask, torch.ones(1, 2, dtype=torch.bfloat16))
 
     pipeline._ensure_negative_prompt_conditioning(training_args)
 
@@ -65,9 +67,13 @@ def test_negative_prompt_conditioning_initializes_without_validation_enabled(mon
 
 
 def test_initialized_negative_prompt_conditioning_builds_unconditional_kwargs():
-    pipeline = _make_pipeline()
+    pipeline = _make_pipeline(device=torch.device("cpu"))
     training_args = types.SimpleNamespace(model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
     pipeline._ensure_negative_prompt_conditioning(training_args, negative_prompt="low quality")
+    assert pipeline.negative_prompt_embeds.device.type == "cpu"
+    assert pipeline.negative_prompt_embeds.dtype == torch.bfloat16
+    assert pipeline.negative_prompt_attention_mask.device.type == "cpu"
+    assert pipeline.negative_prompt_attention_mask.dtype == torch.bfloat16
     training_batch = TrainingBatch()
     text_dict = {
         "encoder_hidden_states": pipeline.negative_prompt_embeds,

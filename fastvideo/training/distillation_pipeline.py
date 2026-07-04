@@ -348,12 +348,19 @@ class DistillationPipeline(TrainingPipeline):
             prompt_attention_mask=[],
         )
         result_batch = prompt_encoding_stage(batch_negative, training_args)
+        prompt_embeds = result_batch.prompt_embeds
         prompt_attention_mask = result_batch.prompt_attention_mask
-        if (not result_batch.prompt_embeds or prompt_attention_mask is None or len(prompt_attention_mask) == 0):
+        if (not prompt_embeds or prompt_embeds[0] is None or prompt_attention_mask is None
+                or len(prompt_attention_mask) == 0 or prompt_attention_mask[0] is None):
             raise RuntimeError("Failed to initialize negative prompt conditioning for distillation")
 
-        self.negative_prompt_embeds = result_batch.prompt_embeds[0]
-        self.negative_prompt_attention_mask = prompt_attention_mask[0]
+        device = getattr(self, "device", None)
+        if device is not None:
+            self.negative_prompt_embeds = prompt_embeds[0].to(device=device, dtype=torch.bfloat16)
+            self.negative_prompt_attention_mask = prompt_attention_mask[0].to(device=device, dtype=torch.bfloat16)
+        else:
+            self.negative_prompt_embeds = prompt_embeds[0]
+            self.negative_prompt_attention_mask = prompt_attention_mask[0]
         logger.info("Initialized negative prompt conditioning for distillation")
 
     def apply_ema_to_model(self, model):
