@@ -38,6 +38,16 @@ from v2.runtime.context import RuntimeLoopContext
 _HUB = Engine()           # borrow its observer/interceptor hubs for the loop context
 
 
+def _cuda_available() -> bool:
+    if importlib.util.find_spec("torch") is None:
+        return False
+    try:
+        import torch
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
 def _instance(platform):
     card = build_wan21_card()
     return load_card(card, cache_manager=CacheManager.from_card(card), platform=platform)
@@ -64,8 +74,12 @@ def _drive_denoise(inst, prompt="a fox", seed=1, *, steps=8, sde=False, loop_id=
 # --------------------------------------------------------------------------- #
 def test_detect_is_cpu_without_torch():
     p = Platform.detect()
-    assert p.device == "cpu" and p.arch == "numpy"
-    assert p.device_chain == ("cpu",)
+    if _cuda_available():
+        assert p.device == "cuda"
+        assert p.device_chain == ("cuda", "cpu")
+    else:
+        assert p.device == "cpu" and p.arch == "numpy"
+        assert p.device_chain == ("cpu",)
 
 
 def test_default_instance_is_cpu_and_factory_terminal_unchanged():
@@ -125,6 +139,8 @@ def test_unknown_variant_falls_back_to_default():
 def test_cuda_platform_falls_back_to_cpu_when_unavailable():
     """A cuda platform on a torchless box: the cuda cells are unavailable, so resolution skips them
     and walks the device chain cuda→cpu to the numpy terminal."""
+    if _cuda_available():
+        return
     p = Platform.cuda("sm90")
     assert "('flow_match_step', 'cpu', 'numpy', 'default')" in p.kernels.resolved_source(FLOW_MATCH_STEP)
 
@@ -143,6 +159,8 @@ def test_accel_component_override_and_device_fallback():
 
 
 def test_cuda_component_falls_back_to_factory_when_unavailable():
+    if _cuda_available():
+        return
     inst = _instance(Platform.cuda("sm90"))           # cuda dit cell unavailable on this box
     assert isinstance(inst.component("transformer"), ToyDiT)   # → spec.factory terminal
 
@@ -192,14 +210,14 @@ def test_kernel_matrix_enumerates_all_backends_including_unavailable_cuda():
     devices = {r["device"] for r in rows}
     assert {"cpu", "accel", "cuda"} <= devices
     cuda_rows = [r for r in rows if r["device"] == "cuda"]
-    assert cuda_rows and all(r["available"] is False for r in cuda_rows)   # declared, not runnable here
+    assert cuda_rows and all(r["available"] is _cuda_available() for r in cuda_rows)
     assert all(r["available"] is True for r in rows if r["device"] == "cpu")
 
 
 def test_component_matrix_includes_declared_unavailable_torch_adapter():
     rows = component_matrix()
     cuda = [r for r in rows if r["device"] == "cuda" and r["kind"] == "dit"]
-    assert cuda and cuda[0]["available"] is False
+    assert cuda and cuda[0]["available"] is _cuda_available()
     accel = [r for r in rows if r["device"] == "accel" and r["kind"] == "dit"]
     assert accel and accel[0]["available"] is True
 

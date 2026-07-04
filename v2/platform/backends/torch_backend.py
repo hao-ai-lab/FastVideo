@@ -2,7 +2,7 @@
 
 A ``TorchComponent`` base centralizes the shared mechanics — ``.to(device,dtype).eval()``, the
 numpy<->torch marshalling at the loop boundary, the ``set_forward_context`` wrap every fastvideo
-forward needs, and the weight surface (copy_from / blend_from / clone). Thin per-model subclasses
+forward needs, and the resident-weight surface (copy_from / blend_from / clone). Thin per-model subclasses
 carry only the forward semantics (Wan ``sigma*1000`` -> velocity; LTX-2 per-token sigma,
 x0 -> ``(x_t-x0)/sigma``, joint A/V; VAE normalization; T5 padding; Gemma dual-projection; upsampler;
 audio decode->vocoder). A single ``build_component(spec, instance, platform)`` dispatches by
@@ -70,22 +70,45 @@ def _model_root(spec) -> str:
     return os.path.dirname(os.path.normpath(_require_checkpoint(spec)))
 
 
-def _fastvideo_args(spec: Any) -> Any:
+def _torch_compile_kwargs(compile_config: Any) -> dict[str, Any]:
+    """Map v2's typed compile config to ``torch.compile`` kwargs."""
+    if compile_config is None:
+        return {}
+    component_kwargs = getattr(compile_config, "dit_kwargs", None)
+    if component_kwargs:
+        return dict(component_kwargs)
+    kwargs = dict(getattr(compile_config, "extras", None) or {})
+    for key in ("backend", "fullgraph", "mode", "dynamic"):
+        value = getattr(compile_config, key, None)
+        if value is not None:
+            kwargs[key] = value
+    return kwargs
+
+
+def _fastvideo_args(spec: Any, instance: Any | None = None) -> Any:
     """Build the FastVideoArgs the real loaders need (BRINGUP risk A). ``from_kwargs`` populates
     ``pipeline_config`` (dit/vae/text-encoder configs + precisions) from the model root. Single-GPU,
     all offload/FSDP OFF — weights resident on one device, the simplest correct bring-up."""
     from v2._vendor.fastvideo_args import FastVideoArgs
-    return FastVideoArgs.from_kwargs(model_path=_model_root(spec),
-                                     num_gpus=1,
-                                     tp_size=1,
-                                     sp_size=1,
-                                     dit_cpu_offload=False,
-                                     text_encoder_cpu_offload=False,
-                                     vae_cpu_offload=False,
-                                     image_encoder_cpu_offload=False,
-                                     dit_layerwise_offload=False,
-                                     use_fsdp_inference=False,
-                                     pin_cpu_memory=False)
+    kwargs = dict(model_path=_model_root(spec),
+                  num_gpus=1,
+                  tp_size=1,
+                  sp_size=1,
+                  dit_cpu_offload=False,
+                  text_encoder_cpu_offload=False,
+                  vae_cpu_offload=False,
+                  image_encoder_cpu_offload=False,
+                  dit_layerwise_offload=False,
+                  use_fsdp_inference=False,
+                  pin_cpu_memory=False)
+    compile_config = getattr(getattr(instance, "_engine_config", None), "compile", None)
+    if spec.kind == "dit" and bool(getattr(compile_config, "enabled", False)):
+        kwargs["enable_torch_compile"] = True
+        kwargs["torch_compile_kwargs"] = _torch_compile_kwargs(compile_config)
+    if spec.kind == "dit" and getattr(spec, "precision_policy", None) == "fp8":
+        from v2._vendor.layers.quantization import get_quantization_config
+        kwargs["transformer_quant"] = get_quantization_config("FP8")()
+    return FastVideoArgs.from_kwargs(**kwargs)
 
 
 def load_component(loader_attr: str, path: str, args):
@@ -110,6 +133,19 @@ def _native_dtype(module: Any) -> Any:
         return torch.float32
 
 
+def _has_float8_buffers(module: Any) -> bool:
+    float8_dtypes = {
+        dtype
+        for dtype in (
+            getattr(torch, "float8_e4m3fn", None),
+            getattr(torch, "float8_e4m3fnuz", None),
+            getattr(torch, "float8_e5m2", None),
+            getattr(torch, "float8_e5m2fnuz", None),
+        ) if dtype is not None
+    }
+    return any(getattr(buf, "dtype", None) in float8_dtypes for buf in module.buffers())
+
+
 def _to_torch(a: Any, *, device: Any, dtype: Any) -> torch.Tensor | None:
     return None if a is None else torch.as_tensor(np.asarray(a), dtype=dtype, device=device)
 
@@ -127,9 +163,19 @@ class TorchComponent:
     """Wraps a real ``fastvideo.models.*`` module to the mini's numpy duck-typed surface. Subclasses
     override only the forward semantics (``__call__`` / ``encode`` / ``decode`` / ``upsample`` / ...)."""
 
-    def __init__(self, module: Any, *, device: Any, dtype: Any, eager: bool = True) -> None:
+    def __init__(self,
+                 module: Any,
+                 *,
+                 device: Any,
+                 dtype: Any,
+                 eager: bool = True,
+                 cast_module_dtype: bool = True) -> None:
         self.device, self.dtype = device, dtype
-        self.module = module.to(device=device, dtype=dtype).eval() if eager else module
+        if eager:
+            self.module = (module.to(device=device, dtype=dtype) if cast_module_dtype else module.to(
+                device=device)).eval()
+        else:
+            self.module = module
         # When True (set by build_component from the card's device_io flag on a GPU box), the loop
         # boundary keeps tensors on-device — no per-step host<->device copy. Default False = today's
         # numpy in/out, so un-migrated families and the CPU toy are unchanged.
@@ -166,11 +212,11 @@ class TorchComponent:
         from v2._vendor.forward_context import set_forward_context
         return set_forward_context(current_timestep=current_timestep, attn_metadata=None)
 
-    # weight surface used by serving weight-sync + training ----------------------------------------- #
+    # resident-weight surface used by serving hot-reload / version-boundary tests -------------------- #
     def copy_from(self, other) -> None:
         self.module.load_state_dict(other.module.state_dict())
 
-    def blend_from(self, other, decay: float) -> None:  # EMA / decayed-old-policy
+    def blend_from(self, other, decay: float) -> None:
         with torch.no_grad():
             for p, q in zip(self.module.parameters(), other.module.parameters(), strict=False):
                 p.mul_(decay).add_(q, alpha=1.0 - decay)
@@ -181,10 +227,6 @@ class TorchComponent:
         c.__dict__.update(self.__dict__)  # tokenizer / shapes / sibling refs shared
         c.module = copy.deepcopy(self.module)  # independent weights
         return c
-
-    def mse_grad_step(self, *a, **k):
-        raise NotImplementedError(
-            "GPU training surface (mse_grad_step) is a separate workstream — see GPU_BRINGUP.md risk F")
 
 
 # --------------------------------------------------------------------------- #
@@ -201,15 +243,21 @@ class WanDiT(TorchComponent):
                  device: Any,
                  dtype: Any,
                  offload_group: Any = None,
-                 component_id: str = "transformer") -> None:
+                 component_id: str = "transformer",
+                 cast_module_dtype: bool = True) -> None:
         # Wan2.2 MoE (A14B): two 14B experts don't both fit one 80GB GPU. With ``offload_group`` set, keep
         # this expert on CPU and bring only the *active* one onto the GPU on demand (single swap at the
         # boundary, not per-step thrash). Single-expert Wan stays resident (offload_group=None).
         self.offload_group = offload_group
         self.component_id = component_id
-        super().__init__(module, device=device, dtype=dtype, eager=(offload_group is None))
+        super().__init__(module,
+                         device=device,
+                         dtype=dtype,
+                         eager=(offload_group is None),
+                         cast_module_dtype=cast_module_dtype)
         if offload_group is not None:
-            self.module = self.module.to(device="cpu", dtype=dtype).eval()
+            self.module = (self.module.to(device="cpu", dtype=dtype) if cast_module_dtype else self.module.to(
+                device="cpu")).eval()
             self._on_gpu = False
             offload_group[component_id] = self
         else:
@@ -563,7 +611,12 @@ def _make_dit(spec: Any, instance: Any, platform: Any, args: Any) -> TorchCompon
         grp = getattr(instance, "_dit_offload_group", None)
         if grp is None:
             grp = instance._dit_offload_group = {}
-    return WanDiT(module, device=device, dtype=dtype, offload_group=grp, component_id=spec.component_id)
+    return WanDiT(module,
+                  device=device,
+                  dtype=dtype,
+                  offload_group=grp,
+                  component_id=spec.component_id,
+                  cast_module_dtype=not _has_float8_buffers(module))
 
 
 def _make_vae(spec: Any, instance: Any, platform: Any, args: Any) -> TorchComponent:
@@ -631,7 +684,7 @@ def build_component(spec: Any, instance: Any, platform: Any) -> TorchComponent:
     — checkpoint check, dist-init, FastVideoArgs — then dispatch by ``spec.kind`` to its maker."""
     _require_checkpoint(spec)  # fail fast on a mis-stamped card, before any dist init
     _ensure_fastvideo_runtime()
-    args = _fastvideo_args(spec)
+    args = _fastvideo_args(spec, instance)
     try:
         maker = _MAKERS[spec.kind]
     except KeyError:

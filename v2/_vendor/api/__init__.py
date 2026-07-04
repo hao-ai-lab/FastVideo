@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from v2._vendor.api.results import GenerationResult
 from v2._vendor.api.schema import (
+    CompileConfig,
     EngineConfig,
     GenerationRequest,
     GeneratorConfig,
@@ -16,6 +17,12 @@ from v2._vendor.api.schema import (
 )
 
 __all__ = [
-    "EngineConfig", "GenerationRequest", "GeneratorConfig", "OffloadConfig", "OutputConfig", "SamplingConfig",
+    "CompileConfig",
+    "EngineConfig",
+    "GenerationRequest",
+    "GeneratorConfig",
+    "OffloadConfig",
+    "OutputConfig",
+    "SamplingConfig",
     "GenerationResult",
 ]

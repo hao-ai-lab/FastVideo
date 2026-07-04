@@ -10,7 +10,9 @@ the box — so they're worth pinning here.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
+import tempfile
 
 import pytest
 
@@ -59,8 +61,15 @@ def test_cuda_solver_source_is_honest_no_fake_kernel():
 
 
 def test_cuda_cells_unavailable_on_this_box():
-    assert all(not r["available"] for r in component_matrix() if r["device"] == "cuda")
-    assert all(not r["available"] for r in kernel_matrix() if r["device"] == "cuda")
+    cuda_available = False
+    if importlib.util.find_spec("torch") is not None:
+        try:
+            import torch
+            cuda_available = bool(torch.cuda.is_available())
+        except Exception:
+            cuda_available = False
+    assert all(r["available"] is cuda_available for r in component_matrix() if r["device"] == "cuda")
+    assert all(r["available"] is cuda_available for r in kernel_matrix() if r["device"] == "cuda")
 
 
 # --------------------------------------------------------------------------- #
@@ -101,9 +110,85 @@ def test_cuda_build_fails_loudly_without_torch(monkeypatch):
         inst.component("transformer")
 
 
+def test_torch_backend_compile_kwargs_mapping():
+    pytest.importorskip("torch")
+    from v2._vendor.api import CompileConfig
+    from v2.platform.backends.torch_backend import _torch_compile_kwargs
+
+    cfg = CompileConfig(backend="inductor",
+                        mode="reduce-overhead",
+                        fullgraph=False,
+                        dynamic=True,
+                        extras={"options": {"trace.enabled": False}})
+    assert _torch_compile_kwargs(cfg) == {
+        "backend": "inductor",
+        "mode": "reduce-overhead",
+        "fullgraph": False,
+        "dynamic": True,
+        "options": {
+            "trace.enabled": False
+        },
+    }
+
+    override = CompileConfig(backend="inductor", dit_kwargs={"backend": "eager"})
+    assert _torch_compile_kwargs(override) == {"backend": "eager"}
+
+
 # --------------------------------------------------------------------------- #
 # The checkpoint seam (risk A) is additive — toy cards are unaffected         #
 # --------------------------------------------------------------------------- #
 def test_checkpoint_field_defaults_empty_on_toy_cards():
     card = build_wan21_card()
     assert all(spec.checkpoint == "" for spec in card.components.values())   # CPU toys need no weights
+
+
+def test_real_wan21_v2_smoke_when_enabled():
+    """Opt-in live check: V2 must load Wan2.1 through torch adapters, not CPU toys.
+
+    This downloads/loads the public 1.3B checkpoint and runs a 1-step 256px generation,
+    so it stays gated for normal CPU/unit-test runs.
+    """
+    if os.environ.get("FASTVIDEO_V2_RUN_REAL_WAN21") != "1":
+        return
+    if importlib.util.find_spec("torch") is None:
+        raise AssertionError("FASTVIDEO_V2_RUN_REAL_WAN21=1 requires torch")
+    import torch
+    if not torch.cuda.is_available():
+        raise AssertionError("FASTVIDEO_V2_RUN_REAL_WAN21=1 requires CUDA")
+
+    os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+    from v2 import VideoGenerator
+
+    with tempfile.TemporaryDirectory(prefix="v2-wan21-smoke-") as tmp:
+        generator = VideoGenerator.from_pretrained(
+            "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+            num_gpus=1,
+            use_fsdp_inference=False,
+            dit_cpu_offload=False,
+            vae_cpu_offload=False,
+            text_encoder_cpu_offload=False,
+            pin_cpu_memory=False,
+        )
+        result = generator.generate_video(
+            "health check",
+            output_path=tmp,
+            output_video_name="wan21_v2_smoke",
+            save_video=True,
+            return_frames=False,
+            num_frames=8,
+            height=256,
+            width=256,
+            num_inference_steps=1,
+            guidance_scale=1.0,
+        )
+
+        component_types = {name: type(component).__name__ for name, component in generator._inst._components.items()}
+        assert component_types == {
+            "text_encoder": "T5Encoder",
+            "transformer": "WanDiT",
+            "vae": "WanVAE",
+        }
+        assert result.video_path is not None
+        assert os.path.exists(result.video_path)

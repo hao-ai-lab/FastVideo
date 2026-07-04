@@ -62,13 +62,30 @@ class VideoGenerator:
         (``num_gpus`` / ``use_fsdp_inference`` / ``*_cpu_offload`` / ``pin_cpu_memory`` / ``VSA_sparsity``
         / ...). The v2 bring-up runs single-GPU, resident, on SDPA, so these are accepted for parity but
         not all applied."""
-        from v2._vendor.api import EngineConfig, GeneratorConfig, OffloadConfig
+        from v2._vendor.api import CompileConfig, EngineConfig, GeneratorConfig, OffloadConfig
+        compile_kwargs = dict(kwargs.get("torch_compile_kwargs") or {})
+        compile_config = CompileConfig(
+            enabled=bool(kwargs.get("enable_torch_compile", False)),
+            backend=kwargs.get("torch_compile_backend", compile_kwargs.pop("backend", None)),
+            fullgraph=kwargs.get("torch_compile_fullgraph", compile_kwargs.pop("fullgraph", None)),
+            mode=kwargs.get("torch_compile_mode", compile_kwargs.pop("mode", None)),
+            dynamic=kwargs.get("torch_compile_dynamic", compile_kwargs.pop("dynamic", None)),
+            extras=compile_kwargs,
+            text_encoder_enabled=kwargs.get("enable_torch_compile_text_encoder"),
+            vae_enabled=kwargs.get("enable_torch_compile_vae"),
+            audio_vae_enabled=kwargs.get("enable_torch_compile_audio_vae"),
+            dit_kwargs=dict(kwargs.get("torch_compile_kwargs_dit") or {}),
+            text_encoder_kwargs=dict(kwargs.get("torch_compile_kwargs_text_encoder") or {}),
+            vae_kwargs=dict(kwargs.get("torch_compile_kwargs_vae") or {}),
+            audio_vae_kwargs=dict(kwargs.get("torch_compile_kwargs_audio_vae") or {}),
+        )
         engine = EngineConfig(num_gpus=int(kwargs.get("num_gpus", 1)),
                               use_fsdp_inference=bool(kwargs.get("use_fsdp_inference", False)),
                               offload=OffloadConfig(text_encoder=bool(kwargs.get("text_encoder_cpu_offload", False)),
                                                     dit=bool(kwargs.get("dit_cpu_offload", False)),
                                                     vae=bool(kwargs.get("vae_cpu_offload", False)),
-                                                    pin_cpu_memory=bool(kwargs.get("pin_cpu_memory", False))))
+                                                    pin_cpu_memory=bool(kwargs.get("pin_cpu_memory", False))),
+                              compile=compile_config)
         return cls.from_config(GeneratorConfig(model_path=model_path, engine=engine))
 
     @classmethod
@@ -108,9 +125,11 @@ class VideoGenerator:
 
         from v2.core.enums import Capability
         from v2.core.card import load_card
+        from v2.platform import Platform
         from v2.runtime.cache import CacheManager
         from v2.runtime import Engine
-        inst = load_card(card, cache_manager=CacheManager.from_card(card))  # platform auto-detect -> cuda
+        inst = load_card(card, cache_manager=CacheManager.from_card(card), platform=Platform.detect())
+        inst._engine_config = config.engine
         eng = Engine()
         eng.register(card.model_id, inst, program)
         # A model that advertises TEXT_TO_VIDEO_SOUND (LTX-2.3) generates joint video+audio; the

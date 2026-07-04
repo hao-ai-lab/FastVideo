@@ -30,15 +30,15 @@ class ModelInstance:
         self.weights_version = weights_version
         # The detected (device, arch). Resolves component/kernel implementations through the two
         # backend registries; defaults to CPU/numpy. Swapping this to a GPU platform changes only
-        # the backend, not the loops/policies/training.
+        # the backend, not the inference loops/policies.
         self.platform = platform if platform is not None else Platform.cpu()
         # Piecewise CUDA-graph cache for loops declaring graph_capture="breakable_cudagraph". Lazily
         # created by the runtime (kept as a plain attr so card/ stays free of any runtime import);
         # a captured graph is tied to this instance's resident weights.
         self.graphs: Any = None
         self.adapter_versions: dict[str, str] = {}
-        # Per-component weight versions: a component's version changes only when IT is synced,
-        # so a transformer-only RL sync never invalidates the frozen text-encoder's feature cache.
+        # Per-component weight versions: a component's version changes only when that component is
+        # published, so a transformer-only reload never invalidates the text-encoder feature cache.
         self.component_versions: dict[str, str] = {cid: weights_version for cid in card.components}
         self._components: dict[str, Any] = {}
         self._loops: dict[str, Any] = {}
@@ -88,8 +88,8 @@ class ModelInstance:
 
     def set_weights_version(self, version: str, components: list[str] | None = None) -> None:
         """Publish a new weights version. If ``components`` is given, only those components' versions
-        bump and only their caches are invalidated (partition, not flush) — so a transformer-only RL
-        weight sync leaves the frozen text-encoder's feature cache intact."""
+        bump and only their caches are invalidated (partition, not flush) — so a transformer-only
+        reload leaves the text-encoder feature cache intact."""
         self.weights_version = version
         changed = components if components is not None else list(self.card.components.keys())
         for c in changed:
@@ -114,13 +114,14 @@ def load_card(card: ModelCard,
               platform: Any = None) -> ModelInstance:
     """The card-as-factory entrypoint: the card is a runtime factory.
 
-    ``platform`` selects the backend (device, arch); when omitted it is detected (CPU/numpy here,
-    CUDA on a torch+GPU box). The same card loads on any backend — only the resolved component/kernel
-    implementations differ.
+    ``platform`` selects the backend (device, arch); when omitted, use CPU/numpy so unstamped toy cards
+    stay lightweight and deterministic even on a GPU box. Real entrypoints pass ``Platform.detect()``
+    explicitly after checkpoint stamping. The same card loads on any backend — only the resolved
+    component/kernel implementations differ.
     """
     if validate:
         card.validate()
     return ModelInstance(card,
                          parallel_plan=parallel_plan,
                          cache_manager=cache_manager,
-                         platform=platform if platform is not None else Platform.detect())
+                         platform=platform if platform is not None else Platform.cpu())
