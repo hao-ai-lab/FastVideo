@@ -103,6 +103,7 @@ can merge a PR.
 |---|---|---|
 | SSIM Tests | `ssim` | `fastvideo/**/*.py`, `pyproject.toml`, `docker/Dockerfile` |
 | LoRA Inference Tests | `inference_lora` | LoRA tests, loader, transformer tests, pipelines, LoRA layers |
+| LoRA Extraction Tests | `lora_extraction` | LoRA extraction scripts/tests, loader, training utilities, LoRA layers |
 | Training Tests | `training` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Distillation DMD Tests | `distillation_dmd` | `fastvideo/training/*distillation_pipeline.py` |
 | Self-Forcing Tests | `self_forcing` | self-forcing distillation pipeline and tests |
@@ -144,6 +145,7 @@ Valid direct test names:
 | `/test training` | `training` |
 | `/test lora-inference` | `inference_lora` |
 | `/test lora-training` | `training_lora` |
+| `/test lora-extraction` | `lora_extraction` |
 | `/test distillation` | `distillation_dmd` |
 | `/test self-forcing` | `self_forcing` |
 | `/test vsa` | `training_vsa` |
