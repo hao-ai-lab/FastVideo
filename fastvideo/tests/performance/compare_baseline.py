@@ -5,8 +5,8 @@ This script:
 1) reads current benchmark results from fastvideo/tests/performance/results,
 2) syncs the canonical baseline from the configured HF dataset repo,
 3) compares each current record against the median of up to 5 prior
-   baseline-eligible successful records in the same GPU/recipe/hardware/software
-   cohort,
+   baseline-eligible successful records in the same workload/variant/version,
+   GPU, recipe, hardware, and software cohort,
 4) writes normalized records back to the HF dataset repo according to
    PERF_UPLOAD_POLICY,
 5) exits non-zero if any gated metric exceeds both its percent and absolute
@@ -79,6 +79,9 @@ IDENTITY_KEYS = (
     "environment_fingerprint",
 )
 COMPARISON_IDENTITY_KEYS = (
+    "workload_id",
+    "variant_id",
+    "benchmark_version",
     "recipe_fingerprint",
     "hardware_profile_id",
     "software_profile_id",

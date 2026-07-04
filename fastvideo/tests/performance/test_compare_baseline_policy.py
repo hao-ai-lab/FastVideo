@@ -179,6 +179,26 @@ def test_normalized_record_reads_identity_labels_from_recipe(monkeypatch):
     assert record["benchmark_version"] == 2
 
 
+def test_comparison_identity_filters_use_full_issue_key():
+    record = {
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-1",
+        "software_profile_id": "sw-1",
+    }
+
+    assert compare_baseline._comparison_identity_filters(record) == {
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": "2",
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-1",
+        "software_profile_id": "sw-1",
+    }
+
+
 def test_baseline_eligibility_only_for_successful_scheduled_main():
     assert compare_baseline._is_baseline_eligible("scheduled_main", True) is True
     assert compare_baseline._is_baseline_eligible("scheduled_main", False) is False

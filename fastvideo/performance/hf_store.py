@@ -268,6 +268,9 @@ def load_records_for_model(
     model_id: str,
     gpu_type: str | None = None,
     *,
+    workload_id: str | None = None,
+    variant_id: str | None = None,
+    benchmark_version: str | None = None,
     recipe_fingerprint: str | None = None,
     hardware_profile_id: str | None = None,
     software_profile_id: str | None = None,
@@ -281,6 +284,9 @@ def load_records_for_model(
         local_dir: Root directory previously populated by :func:`sync_from_hf`.
         model_id: Matches the ``model_id`` field inside each JSON record.
         gpu_type: When set, only records whose ``gpu_type`` matches are returned.
+        workload_id: When set, only records from the same workload are returned.
+        variant_id: When set, only records from the same workload variant are returned.
+        benchmark_version: When set, only records from the same benchmark version are returned.
         recipe_fingerprint: When set, only records from the same benchmark
             recipe are returned.
         hardware_profile_id: When set, only records from the same hardware
@@ -309,13 +315,16 @@ def load_records_for_model(
         records = [r for r in records if r.get("gpu_type") == gpu_type]
 
     identity_filters = {
+        "workload_id": workload_id,
+        "variant_id": variant_id,
+        "benchmark_version": benchmark_version,
         "recipe_fingerprint": recipe_fingerprint,
         "hardware_profile_id": hardware_profile_id,
         "software_profile_id": software_profile_id,
     }
     for key, expected in identity_filters.items():
         if expected is not None:
-            records = [r for r in records if r.get(key) == expected]
+            records = [r for r in records if str(r.get(key)) == str(expected)]
 
     if last_n is not None:
         records = records[-last_n:]
