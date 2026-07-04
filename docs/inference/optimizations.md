@@ -74,6 +74,23 @@ uv pip install ninja
 python setup.py install
 ```
 
+### Flash Attention 4 (opt-in)
+
+FastVideo never auto-selects FlashAttention-4 (`flash_attn.cute`) just because it
+is installed: its CuTeDSL kernels JIT-compile per shape family and can fail at
+runtime on some GPU/shape combinations. To use FA4, install the pinned
+`flash-attn-4` build (see the `flash-attn-4` source in `pyproject.toml`) and set:
+
+```bash
+export FASTVIDEO_FA4=1
+```
+
+On GPUs below sm90 a capability gate routes to FlashAttention-2 the calls FA4
+cannot serve there: grad-enabled (training) attention (FA4's backward requires
+sm90+) and GQA attention (FA4's `pack_gqa` fails to JIT-compile below sm90).
+On sm90+ both run on FA4. If FA4 is unusable while `FASTVIDEO_FA4=1` is set,
+FastVideo fails loudly instead of silently falling back.
+
 ### FP4 Flash Attention 4 (Blackwell only)
 
 **`FLASH_ATTN`** with **`--nvfp4_fa4`**

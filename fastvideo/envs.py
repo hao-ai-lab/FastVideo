@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     FASTVIDEO_LOGGING_CONFIG_PATH: str | None = None
     FASTVIDEO_TRACE_FUNCTION: int = 0
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
+    FASTVIDEO_FA4: bool = False
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: str | None = None
@@ -207,8 +208,17 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # - "VIDEO_SPARSE_ATTN": use Video Sparse Attention
     # - "SAGE_ATTN": use Sage Attention
     # - "SAGE_ATTN_THREE": use Sage Attention 3
+    # FLASH_ATTN uses FlashAttention-3/2; to run FlashAttention-4 set
+    # FASTVIDEO_FA4=1 as well (see below).
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
+
+    # If set (=1), the FLASH_ATTN backend uses FlashAttention-4
+    # (flash_attn.cute). FA4 is opt-in and never auto-selected just because it
+    # is installed. Below sm90, grad-enabled and GQA calls are routed to FA2
+    # (FA4's backward asserts sm90+ and its pack_gqa fails to JIT there).
+    "FASTVIDEO_FA4":
+    lambda: os.getenv("FASTVIDEO_FA4", "0") != "0",
 
     # Use dedicated multiprocess context for workers.
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":

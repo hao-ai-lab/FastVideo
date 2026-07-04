@@ -1,15 +1,39 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import importlib.util
 import os
+
 import torch
 import torch.nn.functional as F
 from dataclasses import dataclass
 
-try:
-    from fastvideo.attention.utils.flash_attn_cute import flash_attn_func
+from fastvideo import envs
+from fastvideo.attention.backends.abstract import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionMetadata,
+    AttentionMetadataBuilder,
+)
+from fastvideo.logger import init_logger
 
+logger = init_logger(__name__)
+
+# FA4 (flash_attn.cute) is explicit opt-in via FASTVIDEO_FA4=1, mirroring the
+# kernel package's FASTVIDEO_VSA_CUTEDSL: its CuTeDSL kernels JIT-compile per
+# shape family and can fail at runtime on some arch/shape combinations, so it
+# is never auto-selected just because it is installed. Below sm90 a capability
+# gate in flash_attn_cute routes to FA2 the calls FA4 cannot serve there:
+# grad-enabled (its backward asserts sm90+) and GQA (pack_gqa fails CuTeDSL
+# JIT, observed on sm_89).
+if envs.FASTVIDEO_FA4:
+    try:
+        from fastvideo.attention.utils.flash_attn_cute import flash_attn_func
+    except ImportError as e:
+        raise RuntimeError(f"FASTVIDEO_FA4=1 but flash_attn.cute (FA4) is not usable ({e}); "
+                           "fix the FA4 install (see the flash-attn-4 pin in pyproject.toml) "
+                           "or unset FASTVIDEO_FA4.") from e
     fa_version = "4"
-except ImportError:
+else:
     try:
         from flash_attn_interface import flash_attn_func as flash_attn_3_func
 
@@ -21,6 +45,12 @@ except ImportError:
         from flash_attn import flash_attn_func as flash_attn_2_func
         flash_attn_func = flash_attn_2_func
         fa_version = "2"
+    try:
+        if importlib.util.find_spec("flash_attn.cute") is not None:
+            logger.info("flash_attn.cute (FA4) is installed but not enabled; "
+                        "set FASTVIDEO_FA4=1 to use it for inference.")
+    except ImportError:
+        pass
 
 # torch.compile traceability: the FA4/cute path (fa_version=="4") is
 # already a registered torch.library custom op, so dynamo treats it as a
@@ -87,9 +117,10 @@ if fa_version in ("2", "3"):
             return _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal)
         return torch.ops.fastvideo._flash_attn_default_forward(q, k, v, softmax_scale, causal)
 elif fa_version == "4":
-    # FA4 path: `flash_attn_func` is already a torch.library custom op
-    # (registered in `fastvideo.attention.utils.flash_attn_cute`), so a
-    # passthrough is enough — no extra registration needed.
+    # FA4 path: `flash_attn_func` (from `flash_attn_cute`) goes through a
+    # registered torch.library custom op (with an FA4 backward on sm90+;
+    # grad-enabled and GQA calls below sm90 route to FA2), so a passthrough
+    # is enough — no extra registration needed.
     def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
         return flash_attn_func(q, k, v, softmax_scale=softmax_scale, causal=causal)
 else:
@@ -99,17 +130,6 @@ else:
     raise RuntimeError(f"Unsupported FlashAttention version: {fa_version!r} — expected "
                        f"'2', '3', or '4' from the import probe above.")
 
-from fastvideo.attention.backends.abstract import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionMetadata,
-    AttentionMetadataBuilder,
-)
-from fastvideo.logger import init_logger
-
-logger = init_logger(__name__)
-
-_WARNED_NON_FA_DTYPE = False
 logger.info("Using FlashAttention-%s backend", fa_version)
 
 # FP4 FA4 support: quantize Q/K to NVFP4 E2M1 for block-scaled MMA on Blackwell.
@@ -271,12 +291,8 @@ class FlashAttentionImpl(AttentionImpl):
         # SP). Cast through bf16 and restore, matching TORCH_SDPA's tolerance.
         orig_dtype = query.dtype
         if orig_dtype not in (torch.float16, torch.bfloat16):
-            global _WARNED_NON_FA_DTYPE
-            if not _WARNED_NON_FA_DTYPE:
-                _WARNED_NON_FA_DTYPE = True
-                logger.warning(
-                    "FLASH_ATTN received %s inputs; casting to bfloat16 for the "
-                    "kernel and restoring on output.", orig_dtype)
+            logger.warning_once(f"FLASH_ATTN received {orig_dtype} inputs; casting to "
+                                f"bfloat16 for the kernel and restoring on output.")
             query = query.to(torch.bfloat16)
             key = key.to(torch.bfloat16)
             value = value.to(torch.bfloat16)
