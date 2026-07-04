@@ -102,12 +102,16 @@ def _validate_benchmark_config(cfg, path="<memory>"):
 def _config_identity_metadata(cfg):
     if not _is_v2_config(cfg):
         return {}
-    return {
+    metadata = {
         "config_schema_version": cfg["config_schema_version"],
         "workload_id": cfg["workload_id"],
         "variant_id": cfg["variant_id"],
         "benchmark_version": cfg["benchmark_version"],
     }
+    for field in V2_OPTIONAL_METADATA_FIELDS:
+        if field in cfg:
+            metadata[field] = cfg[field]
+    return metadata
 
 
 def _benchmark_display_id(cfg):

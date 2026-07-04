@@ -34,6 +34,7 @@ def test_v1_benchmark_config_without_schema_version_validates():
 
 def test_v2_benchmark_config_identity_validates_and_is_preserved():
     cfg = _v2_config()
+    cfg["quality_metadata"] = {"some": "data"}
 
     _validate_benchmark_config(cfg, "wan.json")
 
@@ -43,6 +44,7 @@ def test_v2_benchmark_config_identity_validates_and_is_preserved():
         "workload_id": "wan-t2v-1.3b",
         "variant_id": "canonical",
         "benchmark_version": 1,
+        "quality_metadata": {"some": "data"},
     }
 
 
