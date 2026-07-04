@@ -112,11 +112,15 @@ class TrackValidationCallback(Callback):
         validate_at_start: bool = True,
         seed: int = 0,
         paired_no_track: bool = True,
+        motion_guidance_scale: float = 1.0,
     ) -> None:
         self.every_steps = int(every_steps)
         self.num_val_samples = int(num_val_samples)
         self.num_inference_steps = int(num_inference_steps)
+        # ``guidance_scale`` is TEXT CFG (v_uncond + s_text*(v_text - v_uncond)); at 1.0 == disabled.
+        # ``motion_guidance_scale`` is MotionStream MOTION CFG on top of that (s_motion*(v_full - v_text)).
         self.guidance_scale = float(guidance_scale)
+        self.motion_guidance_scale = float(motion_guidance_scale)
         self.output_dir = str(output_dir) if output_dir is not None else None
         self.fps = int(fps)
         self.grid_stride = int(grid_stride)
@@ -328,21 +332,47 @@ class TrackValidationCallback(Callback):
 
         sched = FlowMatchEulerDiscreteScheduler(shift=flow_shift)
         sched.set_timesteps(self.num_inference_steps, device=device)
+
+        wt = float(self.guidance_scale)
+        wm = float(self.motion_guidance_scale)
+        cfg_on = (wt != 1.0) or (wm != 1.0)  # (1.0, 1.0) collapses to plain v_full
+        # "unconditional" text = zero embed (matches WANTRACK_TEXT_DROP training).
+        txt_null = torch.zeros_like(txt) if cfg_on else None
+
+        def _fwd(text_e: torch.Tensor, tp_e: torch.Tensor | None, tv_e: torch.Tensor | None, mi: torch.Tensor,
+                 tsv: torch.Tensor) -> torch.Tensor:
+            with torch.autocast(device.type, dtype=dtype), set_forward_context(current_timestep=tsv,
+                                                                               attn_metadata=None):
+                return transformer(hidden_states=mi,
+                                   encoder_hidden_states=text_e,
+                                   encoder_attention_mask=mask,
+                                   timestep=tsv,
+                                   encoder_hidden_states_image=img,
+                                   track_points=tp_e,
+                                   track_visibility=tv_e,
+                                   return_dict=False)
+
         for t in sched.timesteps:
             model_in = torch.cat([latents.to(dtype), cond20], dim=1)  # [1,36,T,H,W]
             ts = t.reshape(1).to(device, dtype)
-            with torch.autocast(device.type, dtype=dtype), set_forward_context(current_timestep=ts, attn_metadata=None):
-                # WanTransformer3DModel.forward returns a bare [B,C,T,H,W] tensor.
-                v = transformer(
-                    hidden_states=model_in,
-                    encoder_hidden_states=txt,
-                    encoder_attention_mask=mask,
-                    timestep=ts,
-                    encoder_hidden_states_image=img,
-                    track_points=tp,
-                    track_visibility=tv,
-                    return_dict=False,
-                )
+            v_full = _fwd(txt, tp, tv, model_in, ts)  # v(c_t, c_m)
+            if not cfg_on:
+                v = v_full
+            elif tp is None:
+                # No-track counterfactual: motion CFG undefined -> plain text CFG only.
+                v_uncond = _fwd(txt_null, None, None, model_in, ts)
+                v = v_uncond + wt * (v_full - v_uncond)
+            else:
+                # MotionStream Eq. 2: joint text+motion CFG (3 NFE / step).
+                #   v_no_text   = v(∅, c_m)   (drop text, keep tracks)
+                #   v_no_motion = v(c_t, ∅)   (keep text, drop tracks)
+                #   v_base      = α · v_no_text + (1-α) · v_no_motion,  α = wt / (wt+wm)
+                #   v̂           = v_base + wt·(v_full - v_no_text) + wm·(v_full - v_no_motion)
+                v_no_text = _fwd(txt_null, tp, tv, model_in, ts)
+                v_no_motion = _fwd(txt, None, None, model_in, ts)
+                alpha = wt / (wt + wm) if (wt + wm) > 0 else 0.5
+                v_base = alpha * v_no_text + (1.0 - alpha) * v_no_motion
+                v = v_base + wt * (v_full - v_no_text) + wm * (v_full - v_no_motion)
             latents = sched.step(v.float(), t, latents.float(), return_dict=False)[0]
         return latents
 

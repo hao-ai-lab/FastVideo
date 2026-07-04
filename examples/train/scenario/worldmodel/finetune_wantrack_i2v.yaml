@@ -68,7 +68,8 @@ callbacks:
     every_steps: 500
     num_val_samples: 2
     num_inference_steps: 30
-    guidance_scale: 1.0
+    guidance_scale: 3.0
+    motion_guidance_scale: 1.5
     fps: 24
     grid_stride: 3
     tail: 12
