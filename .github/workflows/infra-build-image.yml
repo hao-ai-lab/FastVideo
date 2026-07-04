@@ -29,14 +29,16 @@ permissions:
   contents: read
   packages: write
 
-# Scope the group by event type so push-triggered auto-rebuilds and manual
-# workflow_dispatch runs on main (both on refs/heads/main) never share a group
-# and cancel each other. Only a newer Dockerfile push supersedes an older push;
-# manual dispatches always run to completion so a zero-job dispatch can never
-# silently kill an in-progress rebuild (and vice versa).
+# One static group, no cancellation: every run of this workflow writes the same
+# mutable registry tags (latest, py3.12-latest, ...), so runs must serialize —
+# concurrent push/dispatch runs would race on those tags, and cancelling a run
+# mid-publish can strand the cu126/cu130 tag families at different commits. An
+# in-flight superseded build wastes its runner time, but its tags are then
+# overwritten by the newer queued run. GitHub keeps a single pending run per
+# group: the newest queued run replaces any older queued one.
 concurrency:
-  group: infra-build-image-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  group: infra-build-image
+  cancel-in-progress: false
 
 jobs:
   # CUDA matrix: Python 3.12 x {12.6.3, 13.0.0} x {amd64, arm64}. Each architecture
