@@ -428,7 +428,12 @@ def promote_draft_references(
     draft_prefix = "/".join(draft_prefix_parts)
     reference_prefix = "/".join(reference_prefix_parts)
 
-    existing_repo_files = set(api.list_repo_files(repo_id=repo_id, repo_type=repo_type))
+    try:
+        existing_repo_files = set(api.list_repo_files(repo_id=repo_id, repo_type=repo_type))
+    except Exception:
+        # Fresh repo or list failure — treat as empty so promotion can report
+        # a clear "no drafts found" error instead of surfacing HF internals.
+        existing_repo_files = set()
     draft_files = sorted(f for f in existing_repo_files if f.startswith(f"{draft_prefix}/"))
     if not draft_files:
         raise RuntimeError(f"No draft references found under {repo_id}/{draft_prefix}")
