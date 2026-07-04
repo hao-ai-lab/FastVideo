@@ -649,6 +649,7 @@ def _build_pytest_extra_args(
     ssim_full_quality: bool,
     ssim_reference_repo: str,
     skip_ssim_reference_download: bool,
+    ssim_bootstrap_mode: bool,
     pytest_k: str,
 ) -> list[str]:
     args = []
@@ -658,6 +659,8 @@ def _build_pytest_extra_args(
         args.extend(["--ssim-reference-repo", ssim_reference_repo.strip()])
     if skip_ssim_reference_download:
         args.append("--skip-ssim-reference-download")
+    if ssim_bootstrap_mode:
+        args.append("--ssim-bootstrap-mode")
     if pytest_k.strip():
         args.extend(["-k", pytest_k.strip()])
     return args
@@ -859,6 +862,7 @@ def run_ssim_partition(
     ssim_full_quality: bool = False,
     ssim_reference_repo: str = "",
     skip_ssim_reference_download: bool = False,
+    ssim_bootstrap_mode: bool = False,
     pytest_k: str = "",
     sync_generated_to_volume: bool = False,
     generated_volume_subdir: str = "",
@@ -887,6 +891,7 @@ def run_ssim_partition(
         ssim_full_quality=ssim_full_quality,
         ssim_reference_repo=ssim_reference_repo,
         skip_ssim_reference_download=skip_ssim_reference_download,
+        ssim_bootstrap_mode=ssim_bootstrap_mode,
         pytest_k=pytest_k,
     )
     results = _schedule_ssim_tasks(
@@ -929,6 +934,7 @@ def run_ssim_tests(
     full_quality: bool = False,
     reference_repo: str = "",
     skip_reference_download: bool = False,
+    bootstrap_mode: bool = False,
     pytest_k: str = "",
     sync_generated_to_volume: bool = False,
     generated_volume_subdir: str = "",
@@ -949,15 +955,24 @@ def run_ssim_tests(
         print(f"Selected model ids: {model_ids}")
     if pytest_k.strip():
         print(f"Using pytest -k filter: {pytest_k}")
+    if bootstrap_mode:
+        print(
+            "SSIM bootstrap mode enabled: missing references will upload "
+            "draft artifacts and xfail."
+        )
     quality_tier = _resolve_output_quality_tier(full_quality)
     if sync_generated_to_volume:
         resolved_subdir = _resolve_generated_volume_subdir(
             generated_volume_subdir,
             resolved_git_commit,
         )
+        generated_volume_path = _build_generated_volume_relative_path(
+            generated_volume_subdir=resolved_subdir,
+            quality_tier=quality_tier,
+        )
         print(
             "Raw generated videos will be saved to Modal volume path: "
-            f"{_build_generated_volume_relative_path(generated_volume_subdir=resolved_subdir, quality_tier=quality_tier)}"
+            f"{generated_volume_path}"
         )
     else:
         resolved_subdir = ""
@@ -972,6 +987,7 @@ def run_ssim_tests(
         ssim_full_quality=full_quality,
         ssim_reference_repo=reference_repo,
         skip_ssim_reference_download=skip_reference_download,
+        ssim_bootstrap_mode=bootstrap_mode,
         pytest_k=pytest_k,
         sync_generated_to_volume=sync_generated_to_volume,
         generated_volume_subdir=resolved_subdir,

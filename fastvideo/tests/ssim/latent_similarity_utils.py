@@ -63,6 +63,9 @@ import torch
 from torch.nn.functional import cosine_similarity
 
 from fastvideo import VideoGenerator
+from fastvideo.tests.ssim.bootstrap_references import (
+    xfail_missing_reference_in_bootstrap_mode,
+)
 from fastvideo.tests.ssim.inference_similarity_utils import (
     attention_backend,
     build_generation_kwargs,
@@ -465,6 +468,11 @@ def run_text_to_latent_similarity_test(
         attention_backend_name,
     )
     if not os.path.exists(reference_folder):
+        xfail_missing_reference_in_bootstrap_mode(
+            generated_artifact_path=generated_latent_path,
+            reference_folder=reference_folder,
+            artifact_kind="latent",
+        )
         raise FileNotFoundError(
             f"Reference folder does not exist: {reference_folder}\n"
             f"To download references, run:\n"
@@ -475,6 +483,11 @@ def run_text_to_latent_similarity_test(
         output_latent_name,
     )
     if not os.path.exists(reference_latent_path):
+        xfail_missing_reference_in_bootstrap_mode(
+            generated_artifact_path=generated_latent_path,
+            reference_folder=reference_folder,
+            artifact_kind="latent",
+        )
         raise FileNotFoundError(
             "Reference latent missing for prompt/backend: "
             f"{reference_latent_path}")

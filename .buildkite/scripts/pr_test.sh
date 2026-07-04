@@ -80,6 +80,23 @@ MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUI
 
 POST_RUN_HOOK=""
 
+is_truthy() {
+    case "${1:-}" in
+        1|true|TRUE|yes|YES|on|ON) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+ssim_bootstrap_args() {
+    local title="${PR_TITLE:-}"
+    local message="${BUILDKITE_MESSAGE:-}"
+    if is_truthy "${FASTVIDEO_SSIM_BOOTSTRAP_MODE:-}" \
+        || [[ "$title" == *"[new-model]"* ]] \
+        || [[ "$message" == *"[new-model]"* ]]; then
+        printf ' --bootstrap-mode'
+    fi
+}
+
 upload_performance_artifacts() {
     SHORT_SHA=${BUILDKITE_COMMIT:0:7}
     LOCAL_DIR="downloaded_reports"
@@ -172,7 +189,12 @@ case "$TEST_TYPE" in
         ;;
     "ssim")
         log "Running SSIM tests..."
-        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_SSIM_TEST_FILE::run_ssim_tests"
+        SSIM_BOOTSTRAP_ARGS=$(ssim_bootstrap_args)
+        if [ -n "$SSIM_BOOTSTRAP_ARGS" ]; then
+            log "SSIM bootstrap mode enabled for new-model reference draft generation"
+        fi
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run "
+        MODAL_COMMAND+="$MODAL_SSIM_TEST_FILE::run_ssim_tests$SSIM_BOOTSTRAP_ARGS"
         ;;
     "training")
         log "Running training tests..."

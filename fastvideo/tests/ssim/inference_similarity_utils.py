@@ -8,6 +8,9 @@ from logging import Logger
 from typing import Iterator
 
 from fastvideo import VideoGenerator
+from fastvideo.tests.ssim.bootstrap_references import (
+    xfail_missing_reference_in_bootstrap_mode,
+)
 from fastvideo.tests.ssim.reference_utils import (
     build_generated_output_dir,
     build_reference_folder_path,
@@ -79,8 +82,14 @@ def _assert_similarity(
     model_id: str,
     attention_backend_name: str,
 ) -> None:
+    generated_video_path = os.path.join(output_dir, output_video_name)
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing: %s", reference_folder)
+        xfail_missing_reference_in_bootstrap_mode(
+            generated_artifact_path=generated_video_path,
+            reference_folder=reference_folder,
+            artifact_kind="video",
+        )
         error_msg = (
             f"Reference video folder does not exist: {reference_folder}\n"
             f"To download reference videos, run:\n"
@@ -96,9 +105,12 @@ def _assert_similarity(
             prompt,
             attention_backend_name,
         )
+        xfail_missing_reference_in_bootstrap_mode(
+            generated_artifact_path=generated_video_path,
+            reference_folder=reference_folder,
+            artifact_kind="video",
+        )
         raise error
-
-    generated_video_path = os.path.join(output_dir, output_video_name)
 
     logger.info(
         "Computing SSIM between %s and %s",

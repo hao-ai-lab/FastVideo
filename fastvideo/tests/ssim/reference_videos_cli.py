@@ -22,6 +22,7 @@ REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + LATENT_EXTENSIONS
 HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
 HF_REPO_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO"
 HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE"
+BOOTSTRAP_ENV_KEY = "FASTVIDEO_SSIM_BOOTSTRAP_MODE"
 
 DEFAULT_REPO_ID = "FastVideo/ssim-reference-videos"
 DEFAULT_REPO_TYPE = "dataset"
@@ -29,6 +30,7 @@ DEFAULT_OUTPUT_QUALITY_TIER = "default"
 FULL_OUTPUT_QUALITY_TIER = "full_quality"
 ALL_OUTPUT_QUALITY_TIERS = "all"
 REFERENCE_VIDEOS_DIRNAME = "reference_videos"
+DRAFTS_DIRNAME = "drafts"
 DEFAULT_DEVICE_REFERENCE_FOLDER = "L40S_reference_videos"
 QUALITY_TIERS = (
     DEFAULT_OUTPUT_QUALITY_TIER,
@@ -317,6 +319,154 @@ def upload_reference_videos(
         )
 
 
+def _reference_folder_repo_relative(reference_folder: Path, base_dir: Path | None = None) -> Path:
+    resolved_reference_folder = reference_folder.resolve()
+    resolved_base_dir = (base_dir or _ssim_dir()).resolve()
+    tiered_root = resolved_base_dir / REFERENCE_VIDEOS_DIRNAME
+    try:
+        relative = resolved_reference_folder.relative_to(tiered_root)
+    except ValueError:
+        try:
+            legacy_relative = resolved_reference_folder.relative_to(resolved_base_dir)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Reference folder {reference_folder} is not under SSIM directory {resolved_base_dir}"
+            ) from exc
+        if not legacy_relative.parts or not legacy_relative.parts[0].endswith("_reference_videos"):
+            raise RuntimeError(
+                f"Reference folder {reference_folder} does not match reference_videos/<tier>/<device>/<model>/<backend>"
+            )
+        relative = Path(DEFAULT_OUTPUT_QUALITY_TIER, *legacy_relative.parts)
+
+    if len(relative.parts) < 4:
+        raise RuntimeError(
+            f"Reference folder {reference_folder} does not include <quality>/<device>/<model>/<backend>"
+        )
+    return relative
+
+
+def upload_draft_reference_artifact(
+    *,
+    repo_id: str,
+    repo_type: str,
+    generated_artifact_path: Path,
+    reference_folder: Path,
+    token: str | None = None,
+    base_dir: Path | None = None,
+    private: bool = False,
+) -> str:
+    resolved_token = token or _get_hf_token()
+    if resolved_token is None:
+        raise RuntimeError(
+            "Hugging Face API key is required for SSIM bootstrap draft upload. "
+            "Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN."
+        )
+    if not generated_artifact_path.exists():
+        raise FileNotFoundError(f"Generated artifact not found: {generated_artifact_path}")
+
+    relative_reference_folder = _reference_folder_repo_relative(
+        reference_folder=reference_folder,
+        base_dir=base_dir,
+    )
+    path_in_repo = f"{DRAFTS_DIRNAME}/{relative_reference_folder.as_posix()}/{generated_artifact_path.name}"
+
+    HfApi, _ = _load_hf_sdk()
+    api = HfApi(token=resolved_token)
+    api.create_repo(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        private=private,
+        exist_ok=True,
+    )
+    print(f"Uploading SSIM draft reference to {repo_id}/{path_in_repo} ...")
+    api.upload_file(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        path_or_fileobj=str(generated_artifact_path),
+        path_in_repo=path_in_repo,
+        token=resolved_token,
+    )
+    print("Draft reference uploaded. Review before promotion.")
+    return path_in_repo
+
+
+def promote_draft_references(
+    *,
+    repo_id: str,
+    repo_type: str,
+    quality_tier: str,
+    device_folder: str,
+    model_id: str,
+    token: str,
+    attention_backend: str | None = None,
+    private: bool = False,
+    force: bool = False,
+) -> None:
+    HfApi, snapshot_download = _load_hf_sdk()
+    api = HfApi(token=token)
+    api.create_repo(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        private=private,
+        exist_ok=True,
+    )
+    draft_prefix_parts = [
+        DRAFTS_DIRNAME,
+        quality_tier,
+        device_folder,
+        model_id,
+    ]
+    reference_prefix_parts = [
+        REFERENCE_VIDEOS_DIRNAME,
+        quality_tier,
+        device_folder,
+        model_id,
+    ]
+    if attention_backend:
+        draft_prefix_parts.append(attention_backend)
+        reference_prefix_parts.append(attention_backend)
+    draft_prefix = "/".join(draft_prefix_parts)
+    reference_prefix = "/".join(reference_prefix_parts)
+
+    existing_repo_files = set(api.list_repo_files(repo_id=repo_id, repo_type=repo_type))
+    draft_files = sorted(f for f in existing_repo_files if f.startswith(f"{draft_prefix}/"))
+    if not draft_files:
+        raise RuntimeError(f"No draft references found under {repo_id}/{draft_prefix}")
+
+    conflicts = sorted(
+        f for f in existing_repo_files
+        if f.startswith(f"{reference_prefix}/") or f == reference_prefix)
+    if conflicts and not force:
+        preview = "\n".join(f"  - {c}" for c in conflicts[:10])
+        more = f"\n  ... and {len(conflicts) - 10} more" if len(conflicts) > 10 else ""
+        raise RuntimeError(
+            f"Refusing to overwrite existing HF files under {reference_prefix} "
+            f"({len(conflicts)} file(s) already present):\n{preview}{more}\n"
+            f"Re-run with --force to overwrite.")
+
+    with tempfile.TemporaryDirectory(prefix="fv2-ssim-draft-") as tmp_cache_dir:
+        snapshot_path = Path(
+            snapshot_download(
+                repo_id=repo_id,
+                repo_type=repo_type,
+                cache_dir=tmp_cache_dir,
+                token=token,
+                allow_patterns=[f"{draft_prefix}/**"],
+            )
+        )
+        draft_root = snapshot_path / draft_prefix
+        if not draft_root.exists():
+            raise RuntimeError(f"Downloaded draft path is missing: {draft_root}")
+        print(f"Promoting {len(draft_files)} draft reference file(s) to {repo_id}/{reference_prefix} ...")
+        api.upload_folder(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            folder_path=str(draft_root),
+            path_in_repo=reference_prefix,
+            token=token,
+        )
+
+
 def _resolve_upload_reference_dirs(
     *,
     base_dir: Path,
@@ -559,6 +709,55 @@ def _build_parser() -> argparse.ArgumentParser:
             "clobber existing references."),
     )
 
+    promote_parser = subparsers.add_parser(
+        "promote-draft",
+        help="Promote reviewed draft references into the canonical HF reference layout.",
+    )
+    promote_parser.add_argument(
+        "--repo-id",
+        default=_default_repo_id(),
+        help=f"HF repo id. Default: env {HF_REPO_ENV_KEY} or {DEFAULT_REPO_ID}",
+    )
+    promote_parser.add_argument(
+        "--repo-type",
+        default=_default_repo_type(),
+        help=f"HF repo type. Default: env {HF_REPO_TYPE_ENV_KEY} or {DEFAULT_REPO_TYPE}",
+    )
+    promote_parser.add_argument(
+        "--quality-tier",
+        choices=(
+            DEFAULT_OUTPUT_QUALITY_TIER,
+            FULL_OUTPUT_QUALITY_TIER,
+        ),
+        default=DEFAULT_OUTPUT_QUALITY_TIER,
+        help="Quality tier to promote.",
+    )
+    promote_parser.add_argument(
+        "--device-folder",
+        default=DEFAULT_DEVICE_REFERENCE_FOLDER,
+        help="GPU reference folder to promote, e.g. L40S_reference_videos.",
+    )
+    promote_parser.add_argument(
+        "--model-id",
+        required=True,
+        help="Model subfolder to promote from drafts.",
+    )
+    promote_parser.add_argument(
+        "--attention-backend",
+        default=None,
+        help="Optional backend subfolder to promote. Default promotes all backends under the model.",
+    )
+    promote_parser.add_argument(
+        "--private",
+        action="store_true",
+        help="Create/use a private repo instead of public.",
+    )
+    promote_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow overwriting existing canonical references. Off by default.",
+    )
+
     ensure_parser = subparsers.add_parser(
         "ensure",
         help="Download refs only when the selected local quality tier is missing.",
@@ -669,6 +868,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             force=args.force,
         )
         print("Upload complete.")
+        return 0
+
+    if args.command == "promote-draft":
+        token = _get_hf_token()
+        if token is None:
+            raise RuntimeError(
+                "Hugging Face API key is required for promote-draft. "
+                "Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN."
+            )
+        promote_draft_references(
+            repo_id=args.repo_id,
+            repo_type=args.repo_type,
+            quality_tier=args.quality_tier,
+            device_folder=args.device_folder,
+            model_id=args.model_id,
+            attention_backend=args.attention_backend,
+            token=token,
+            private=args.private,
+            force=args.force,
+        )
+        print("Promotion complete.")
         return 0
 
     if args.command == "ensure":
