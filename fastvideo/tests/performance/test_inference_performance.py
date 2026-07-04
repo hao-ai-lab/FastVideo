@@ -248,14 +248,24 @@ def _backend_name(value) -> str:
 def _collect_worker_identity(worker) -> dict[str, Any]:
     pipeline = getattr(worker, "pipeline", None)
     model_path = getattr(pipeline, "model_path", None)
-    modules = getattr(pipeline, "modules", {}) or {}
     backends: set[str] = set()
 
-    for module in modules.values():
-        if not isinstance(module, torch.nn.Module):
-            continue
-        for submodule in module.modules():
-            backend = getattr(submodule, "backend", None)
+    modules = getattr(pipeline, "modules", None)
+    if isinstance(modules, Mapping):
+        module_iter = modules.values()
+    elif isinstance(pipeline, torch.nn.Module):
+        module_iter = (pipeline,)
+    else:
+        module_iter = ()
+
+    for module in module_iter:
+        if isinstance(module, torch.nn.Module):
+            for submodule in module.modules():
+                backend = getattr(submodule, "backend", None)
+                if backend is not None:
+                    backends.add(_backend_name(backend))
+        else:
+            backend = getattr(module, "backend", None)
             if backend is not None:
                 backends.add(_backend_name(backend))
 
