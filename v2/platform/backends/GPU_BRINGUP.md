@@ -10,8 +10,8 @@ This doc is the checklist for a human on a GPU box to take it from "resolves" to
 ## What it does
 
 On a box with torch + CUDA + the parent `fastvideo` package installed, `Platform.detect()` returns a
-`cuda` platform. The existing v2 loops/policies/scheduler/training are **unchanged**; only the
-resolved implementations differ:
+`cuda` platform. The existing v2 inference loops, policies, scheduler, cache logic, and parity checks
+are **unchanged**; only the resolved implementations differ:
 
 - **Components** resolve to torch adapters that wrap the real module named by the card's `load_id`
   (`fastvideo.models.dits.wanvideo:WanTransformer3DModel`, `…vaes.wanvae:AutoencoderKLWan`,
@@ -51,9 +51,8 @@ resolved implementations differ:
    Confirm the exact tokenizer kwargs (`text_len`/`max_length`, special tokens) from the model config. *(E)*
 8. **End-to-end.** Full t2v denoise → VAE decode → compare to a known-good fastvideo generation
    (SSIM / the ssim regression harness).
-9. **RL / SDE path.** `flow_sde_step` returns a finite `(prev, log_prob, mean, eff_std)`; run a
-   rollout. Note: the **training** weight-surface (`mse_grad_step`) is NOT implemented on the cuda
-   rung — RL/distill on GPU is a separate workstream. *(F)*
+9. **SDE sampling path.** `flow_sde_step` returns a finite `(prev, log_prob, mean, eff_std)`; run a
+   stochastic sampling request and confirm it eager-breaks graph capture correctly. *(F)*
 10. **CUDA-graph capture.** Last. The wan21 loop declares `breakable_cudagraph`; capturing a real
     torch graph (vs the numpy `StaticWorkspace` model) is GPU-only work.
 
@@ -72,8 +71,8 @@ in code (real loaders instead of the nonexistent `from_pretrained`; UMT5-vs-T5 r
 | **C** | DiT output velocity (noise−clean) — cross-checked as matching; confirm sign on box | denoises backward |
 | **D** | `shift_factor` placement/sign + dtype of the (now-applied) latent normalization | washed-out / saturated video |
 | **E** | exact tokenizer kwargs (`text_len`/`max_length`, special tokens) from config — class + `set_forward_context` now fixed in code | wrong/empty conditioning |
-| **F** | torch training surface (`mse_grad_step`) not implemented | RL/distill on cuda is a separate workstream |
+| **F** | SDE stochastic sampling + graph eager-break behavior | stochastic path or capture accounting wrong |
 | **G** | numpy↔torch marshalling per DiT call (H2D/D2H + dtype round-trip) | correct but slow; torch-native surface is the perf follow-up |
 
-Items A–E are correctness; F–G are scope/perf. None block the **CPU mini** (all gated `available=False`).
+Items A–F are correctness; G is perf. None block the **CPU mini** (all gated `available=False`).
 Multi-GPU FSDP sharding via the loaders also needs on-box verification (single-GPU bring-up first).

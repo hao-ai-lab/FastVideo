@@ -1,7 +1,7 @@
 # v2_examples/omni — MoT & cascade models
 
 Runnable examples of the omni models: one request that spans **multiple loop types**. Two topologies
-(designv4 §2.3):
+are covered:
 
   * **MoT / shared-weight** (Cosmos3, BAGEL) — ONE resident instance whose `transformer` runs *both* an
     `ar_decode` loop and a `diffusion_denoise` loop on the same weights. Every AR token and denoise step
@@ -22,4 +22,4 @@ python3 v2_examples/omni/01_cosmos3.py
 | `03_qwen_omni.py` | Qwen-Omni (3 separate experts) | `ar_decode` → `ar_decode` → `audio_decode` (text + speech) |
 | `04_interleave_across_loop_types.py` | — | the interleave parity gate holds across AR + diffusion steps |
 
-`build_omni_engine()` registers all three; see designv4 §9.5 (Qwen-Omni cascade).
+`build_omni_engine()` registers all three.

@@ -25,16 +25,16 @@ d6d0580a [fix]  correct GPU adapters against real fastvideo API (cross-check fin
 b8d78f40 [feat] real torch/CUDA backend (written-not-run) behind the cuda cells
 27791b51 [feat] static-buffer capture form for the cudagraph step body (Path A)
 ae6a170d [feat] piecewise CUDA-graph capture/replay at the step boundary (Path A)
-9308d87e [feat] route all diffusion loops + RL recompute through the kernel table
+9308d87e [feat] route diffusion loops through the kernel table
 7490c590 [feat] multi-backend dispatch substrate (device/arch/kernel registries)
 ```
 
 The dispatch substrate (two tuple-keyed registries `COMPONENTS(kind,device,variant)` +
 `KERNELS(op,device,arch,variant)`, a detected `Platform`, numpy terminal + parity oracle), the
-universal kernel seam (all diffusion loops + RL recompute go through `model.platform.kernels`), the
+universal kernel seam (diffusion loops go through `model.platform.kernels`), the
 piecewise cudagraph lifecycle, and the torch backend cells are all in place. On a GPU box,
 `Platform.detect()` returns a `cuda` platform and resolves the torch cells instead of the numpy toys —
-**the loops/policies/scheduler/training are unchanged**; only the resolved implementations differ.
+**the inference loops/policies/scheduler are unchanged**; only the resolved implementations differ.
 
 ## 2. The files you'll touch
 
@@ -64,7 +64,7 @@ The surface the adapters must honor (what the loops call):
    `set_forward_context`, latent normalization, UMT5-from-config). What's left is box-dependent:
    `FastVideoArgs` fields, `shift_factor` placement/sign, exact tokenizer kwargs, FSDP sharding.
 4. **Bring up in order:** build each component in isolation → one DiT step → one solver step → VAE
-   decode → full t2v → SDE rollout → cudagraph capture (last).
+   decode → full t2v → SDE stochastic sampling → cudagraph capture (last).
 
 ## 4. The verification bar (how you know it's right)
 
@@ -85,8 +85,8 @@ The surface the adapters must honor (what the loops call):
 - **NEVER add Claude as a co-author** (repo policy, `/Users/willlin/src/.claude/CLAUDE.md`).
 - **Do not rewrite or force-push** the six commits above — build on top.
 - When the CPU suite is green **and** a GPU generation matches the reference, **push your branch.**
-- If you launch training/inference with wandb, log in with the token in the project `CLAUDE.md`
-  (`/Users/willlin/src/.claude/CLAUDE.md`) — **do not paste it into any committed file.**
+- If you launch inference with wandb logging enabled, log in with the token in the project
+  `CLAUDE.md` (`/Users/willlin/src/.claude/CLAUDE.md`) — **do not paste it into any committed file.**
 
 ## 6. Gotchas (don't relearn these the hard way)
 
@@ -100,8 +100,6 @@ The surface the adapters must honor (what the loops call):
 - **The loop surface stays numpy** for bring-up; adapters marshal numpy↔torch at the boundary. A
   torch-native surface (latent on-device through forward→combine→solver) is the **perf follow-up**
   (Risk G), not bring-up — don't rewrite `cfg.combine`/`precision.cast`/the samplers yet.
-- **`mse_grad_step` raises on the cuda DiT** (Risk F). RL/distill *training* on GPU is a separate
-  workstream; inference + SDE *rollout* bring-up don't need it.
 - **cudagraph capture is last.** The wan21 loop declares `breakable_cudagraph`; the v2 capturer models
   the lifecycle with a numpy `StaticWorkspace`. Capturing a real `torch.cuda.CUDAGraph` is GPU-only
   work and the riskiest step — leave it until inference is verified.
