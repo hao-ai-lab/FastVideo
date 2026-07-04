@@ -5,7 +5,8 @@ This script:
 1) reads current benchmark results from fastvideo/tests/performance/results,
 2) syncs the canonical baseline from the configured HF dataset repo,
 3) compares each current record against the median of up to 5 prior
-   baseline-eligible successful records (filtered by gpu_type),
+   baseline-eligible successful records in the same GPU/recipe/hardware/software
+   cohort,
 4) writes normalized records back to the HF dataset repo according to
    PERF_UPLOAD_POLICY,
 5) exits non-zero if any gated metric exceeds both its percent and absolute
@@ -64,6 +65,21 @@ PERF_REPORTS_DIR = os.environ.get("PERF_REPORTS_DIR", "/root/data/perf_reports")
 UPLOAD_POLICY = os.environ.get("PERF_UPLOAD_POLICY", "never").strip().lower()
 VALID_UPLOAD_POLICIES = {"never", "pass", "always"}
 VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
+IDENTITY_KEYS = (
+    "recipe",
+    "recipe_fingerprint",
+    "hardware_profile",
+    "hardware_profile_id",
+    "software_profile",
+    "software_profile_id",
+    "environment_metadata",
+    "environment_fingerprint",
+)
+COMPARISON_IDENTITY_KEYS = (
+    "recipe_fingerprint",
+    "hardware_profile_id",
+    "software_profile_id",
+)
 
 
 def _should_persist_tracking() -> bool:
@@ -136,6 +152,29 @@ def _record_metadata(run_source: str, result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _identity_metadata(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: result[key]
+        for key in IDENTITY_KEYS
+        if key in result and result[key] is not None
+    }
+
+
+def _comparison_identity_filters(record: dict[str, Any]) -> dict[str, str]:
+    return {
+        key: str(record[key])
+        for key in COMPARISON_IDENTITY_KEYS
+        if record.get(key)
+    }
+
+
+def _format_identity_filters(filters: dict[str, str]) -> str:
+    if not filters:
+        return ""
+    compact = ", ".join(f"{key}={value}" for key, value in filters.items())
+    return f" ({compact})"
+
+
 def _load_current_results() -> list[dict[str, Any]]:
     pattern = os.path.join(RESULTS_DIR, "perf_*.json")
     records: list[dict[str, Any]] = []
@@ -169,7 +208,7 @@ def normalize_performance_result(result: dict[str, Any]) -> dict[str, Any]:
     vae_decode_time = safe_float(result.get("vae_decode_time_s"))
     metric_policies = resolve_metric_policies(result.get("regression_thresholds"))
 
-    return {
+    record = {
         "model_id": model_id,
         "timestamp": timestamp,
         "commit_sha": commit_sha,
@@ -184,6 +223,8 @@ def normalize_performance_result(result: dict[str, Any]) -> dict[str, Any]:
         "success": True,
         **_record_metadata(_detect_run_source(), result),
     }
+    record.update(_identity_metadata(result))
+    return record
 
 
 def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
@@ -422,6 +463,7 @@ def main() -> int:
             TRACKING_ROOT,
             record["model_id"],
             record["gpu_type"],
+            **_comparison_identity_filters(record),
             last_n=5,
             successful_only=True,
             baseline_eligible_only=True,
@@ -429,7 +471,8 @@ def main() -> int:
 
         if not baseline_records:
             print(f"No baseline for {record['model_id']} on "
-                  f"{record['gpu_type']}. Initializing...")
+                  f"{record['gpu_type']}"
+                  f"{_format_identity_filters(_comparison_identity_filters(record))}. Initializing...")
             failures: list[str] = []
             record["success"] = True
         else:

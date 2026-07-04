@@ -268,16 +268,25 @@ def load_records_for_model(
     model_id: str,
     gpu_type: str | None = None,
     *,
+    recipe_fingerprint: str | None = None,
+    hardware_profile_id: str | None = None,
+    software_profile_id: str | None = None,
     last_n: int | None = None,
     successful_only: bool = True,
     baseline_eligible_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return records for a specific *model_id*, optionally filtered by GPU.
+    """Return records for a specific *model_id*, optionally filtered by cohort.
 
     Args:
         local_dir: Root directory previously populated by :func:`sync_from_hf`.
         model_id: Matches the ``model_id`` field inside each JSON record.
         gpu_type: When set, only records whose ``gpu_type`` matches are returned.
+        recipe_fingerprint: When set, only records from the same benchmark
+            recipe are returned.
+        hardware_profile_id: When set, only records from the same hardware
+            cohort are returned.
+        software_profile_id: When set, only records from the same software
+            cohort are returned.
         last_n: When set, return only the most recent *n* records (after all
             other filters). Useful for sliding-window baseline calculations.
         successful_only: Passed through to :func:`load_records`.
@@ -298,6 +307,15 @@ def load_records_for_model(
 
     if gpu_type is not None:
         records = [r for r in records if r.get("gpu_type") == gpu_type]
+
+    identity_filters = {
+        "recipe_fingerprint": recipe_fingerprint,
+        "hardware_profile_id": hardware_profile_id,
+        "software_profile_id": software_profile_id,
+    }
+    for key, expected in identity_filters.items():
+        if expected is not None:
+            records = [r for r in records if r.get(key) == expected]
 
     if last_n is not None:
         records = records[-last_n:]

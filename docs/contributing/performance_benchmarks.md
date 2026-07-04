@@ -270,7 +270,33 @@ Written by `test_inference_performance.py`. One file per benchmark run.
   "timestamp": "2026-05-08T22:00:00+00:00",
   "text_encoder_time_s": 2.141,
   "dit_time_s": 8.437,
-  "vae_decode_time_s": 3.208
+  "vae_decode_time_s": 3.208,
+  "recipe": {
+    "recipe_schema_version": 1,
+    "benchmark": { "benchmark_id": "wan-t2v-1.3b-2gpu" },
+    "model": { "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" },
+    "init_kwargs": { "num_gpus": 2, "sp_size": 2, "tp_size": 1 },
+    "generation_kwargs": { "height": 480, "width": 832, "num_frames": 45 },
+    "inputs": { "prompt_count": 1, "prompt_sha256": ["<sha256>"] },
+    "attention": { "requested_backend": "FLASH_ATTN" }
+  },
+  "recipe_fingerprint": "<sha256>",
+  "hardware_profile": {
+    "device_type": "cuda",
+    "gpu_count": 2,
+    "gpus": [{ "name": "NVIDIA L40S", "memory_gb": 48, "compute_capability": "8.9" }],
+    "interconnect": "none_or_partial"
+  },
+  "hardware_profile_id": "hw-<sha256-prefix>",
+  "software_profile": {
+    "python": "3.12",
+    "pytorch": "2.12",
+    "cuda": "13.0",
+    "packages": { "fastvideo_kernel": "0.3", "triton": "3.4" }
+  },
+  "software_profile_id": "sw-<sha256-prefix>",
+  "environment_metadata": { "env": { "IMAGE_VERSION": "py3.12-cuda13.0.0" } },
+  "environment_fingerprint": "env-<sha256-prefix>"
 }
 ```
 
@@ -298,6 +324,10 @@ result, used as the rolling-baseline source of truth.
       "gated": true
     }
   },
+  "recipe_fingerprint": "<sha256>",
+  "hardware_profile_id": "hw-<sha256-prefix>",
+  "software_profile_id": "sw-<sha256-prefix>",
+  "environment_fingerprint": "env-<sha256-prefix>",
   "success": true
 }
 ```
@@ -309,6 +339,11 @@ comparator ignores missing or `null` metrics when computing a median, and the
 dashboard lists skipped plots for metric series that have no non-null values.
 Records missing both `run_source` and `baseline_eligible` are treated as legacy
 successful main/full-suite uploads and remain eligible for rolling baselines.
+
+New records compare only against the same `model_id`, `gpu_type`,
+`recipe_fingerprint`, `hardware_profile_id`, and `software_profile_id` cohort.
+`environment_metadata` and `environment_fingerprint` are audit data and are not
+part of the comparison key.
 
 ## Environment variable reference
 
