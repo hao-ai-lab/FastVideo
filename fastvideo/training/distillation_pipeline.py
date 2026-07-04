@@ -318,6 +318,44 @@ class DistillationPipeline(TrainingPipeline):
         """Initialize validation pipeline - must be implemented by subclasses."""
         raise NotImplementedError("Distillation pipelines must implement this method")
 
+    @torch.no_grad()
+    def _ensure_negative_prompt_conditioning(self,
+                                             training_args: TrainingArgs,
+                                             negative_prompt: str | None = None) -> None:
+        if (getattr(self, "negative_prompt_embeds", None) is not None
+                and getattr(self, "negative_prompt_attention_mask", None) is not None):
+            return
+
+        validation_pipeline = getattr(self, "validation_pipeline", None)
+        if validation_pipeline is None:
+            self.initialize_validation_pipeline(training_args)
+            validation_pipeline = getattr(self, "validation_pipeline", None)
+        if validation_pipeline is None:
+            raise RuntimeError("Distillation requires negative prompt conditioning, but validation pipeline is not set")
+
+        prompt_encoding_stage = getattr(validation_pipeline, "prompt_encoding_stage", None)
+        if prompt_encoding_stage is None:
+            raise RuntimeError("Distillation requires negative prompt conditioning, but validation pipeline has no "
+                               "prompt_encoding_stage")
+
+        if negative_prompt is None:
+            negative_prompt = SamplingParam.from_pretrained(training_args.model_path).negative_prompt
+
+        batch_negative = ForwardBatch(
+            data_type="video",
+            prompt=negative_prompt,
+            prompt_embeds=[],
+            prompt_attention_mask=[],
+        )
+        result_batch = prompt_encoding_stage(batch_negative, training_args)
+        prompt_attention_mask = result_batch.prompt_attention_mask
+        if (not result_batch.prompt_embeds or prompt_attention_mask is None or len(prompt_attention_mask) == 0):
+            raise RuntimeError("Failed to initialize negative prompt conditioning for distillation")
+
+        self.negative_prompt_embeds = result_batch.prompt_embeds[0]
+        self.negative_prompt_attention_mask = prompt_attention_mask[0]
+        logger.info("Initialized negative prompt conditioning for distillation")
+
     def apply_ema_to_model(self, model):
         """Apply EMA weights to the model for validation or inference."""
         if model is self.transformer and self.generator_ema is not None:
@@ -1018,6 +1056,7 @@ class DistillationPipeline(TrainingPipeline):
 
         # Create sampling parameters if not provided
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+        self._ensure_negative_prompt_conditioning(training_args, sampling_param.negative_prompt)
 
         # Set deterministic seed for validation
 
@@ -1079,18 +1118,6 @@ class DistillationPipeline(TrainingPipeline):
                 audio_sample_rates: list[Any] = []
                 for validation_batch in validation_dataloader:
                     batch = self._prepare_validation_batch(sampling_param, training_args, validation_batch, steps)
-
-                    negative_prompt = batch.negative_prompt
-                    batch_negative = ForwardBatch(
-                        data_type="video",
-                        prompt=negative_prompt,
-                        prompt_embeds=[],
-                        prompt_attention_mask=[],
-                    )
-                    result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
-                        batch_negative, training_args)
-                    self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
-                        0], result_batch.prompt_attention_mask[0]
 
                     logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
                                 self.global_rank,
@@ -1314,6 +1341,7 @@ class DistillationPipeline(TrainingPipeline):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
+        self._ensure_negative_prompt_conditioning(self.training_args)
         self._log_validation(self.transformer, self.training_args, self.init_steps)
 
         progress_bar = tqdm(
