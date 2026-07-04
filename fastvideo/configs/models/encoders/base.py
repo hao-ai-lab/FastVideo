@@ -43,11 +43,16 @@ class TextEncoderArchConfig(EncoderArchConfig):
     require_processor: bool = False
 
     def __post_init__(self) -> None:
-        self.tokenizer_kwargs = {
+        # update_model_arch re-runs __post_init__ after pipeline configs may
+        # have customized tokenizer_kwargs (e.g. kandinsky5/gen3c/longcat set
+        # "padding"); rebuilding the dict here would silently wipe those
+        # customizations, so only fill in defaults for keys not already set.
+        defaults = {
             "truncation": True,
             "max_length": self.text_len,
             "return_tensors": "pt",
         }
+        self.tokenizer_kwargs = defaults | self.tokenizer_kwargs
 
 
 @dataclass
