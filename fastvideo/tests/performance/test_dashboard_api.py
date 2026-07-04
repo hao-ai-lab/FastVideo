@@ -56,8 +56,34 @@ def _record(model_id, gpu_type, ts, commit, latency, throughput, success=True, *
 
 def test_summary_endpoint_returns_latest_group_status():
     app = create_app(FakeStore([
-        _record("wan", "NVIDIA L40S", "2026-01-01T00:00:00+00:00", "a" * 40, 10.0, 10.0),
-        _record("wan", "NVIDIA L40S", "2026-01-02T00:00:00+00:00", "b" * 40, 11.0, 9.0),
+        _record(
+            "wan",
+            "NVIDIA L40S",
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            workload_id="wan-t2v",
+            variant_id="1.3b-sp2",
+            benchmark_version=2,
+            recipe_fingerprint="recipe-a",
+            hardware_profile_id="hw-l40s",
+            software_profile_id="sw-cu130",
+        ),
+        _record(
+            "wan",
+            "NVIDIA L40S",
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            11.0,
+            9.0,
+            workload_id="wan-t2v",
+            variant_id="1.3b-sp2",
+            benchmark_version=2,
+            recipe_fingerprint="recipe-a",
+            hardware_profile_id="hw-l40s",
+            software_profile_id="sw-cu130",
+        ),
     ]))
     client = TestClient(app)
 
@@ -71,6 +97,10 @@ def test_summary_endpoint_returns_latest_group_status():
     assert body["rows"][0]["metrics"]["latency"]["threshold_exceeded"] is True
     assert body["rows"][0]["threshold_exceeded_metrics"] == ["latency", "throughput"]
     assert body["rows"][0]["computed_regression_status"] == "fail"
+    assert body["rows"][0]["workload_id"] == "wan-t2v"
+    assert body["rows"][0]["variant_id"] == "1.3b-sp2"
+    assert body["rows"][0]["benchmark_version"] == 2
+    assert body["rows"][0]["recipe_fingerprint"] == "recipe-a"
 
 
 def test_summary_status_is_independent_of_days_window():

@@ -2,6 +2,9 @@
 
 from copy import deepcopy
 
+import torch
+
+from fastvideo.tests.performance import identity as identity_module
 from fastvideo.tests.performance.identity import (
     build_recipe_from_benchmark_config,
     canonical_json,
@@ -19,6 +22,9 @@ from fastvideo.tests.performance.identity import (
 def _benchmark_config():
     return {
         "benchmark_id": "wan-t2v-1.3b-2gpu",
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
         "model": {
             "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
             "model_short_name": "Wan2.1-T2V-1.3B",
@@ -58,10 +64,26 @@ def test_canonical_json_is_stable_for_mapping_order():
     assert canonical_json(left) == canonical_json(right)
 
 
+def test_canonical_json_handles_sets_deterministically():
+    assert canonical_json({"values": {"b", "a"}}) == '{"values":["a","b"]}'
+    assert canonical_json({"values": frozenset(("b", "a"))}) == '{"values":["a","b"]}'
+
+
 def test_same_config_produces_same_recipe_fingerprint():
     cfg = _benchmark_config()
 
     assert _fingerprint(cfg) == _fingerprint(deepcopy(cfg))
+
+
+def test_recipe_includes_first_class_benchmark_identity():
+    recipe = build_recipe_from_benchmark_config(_benchmark_config())
+
+    assert recipe["benchmark"] == {
+        "benchmark_id": "wan-t2v-1.3b-2gpu",
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+    }
 
 
 def test_semantically_equivalent_sequence_forms_match():
@@ -103,6 +125,14 @@ def test_num_inference_steps_changes_recipe_fingerprint():
     assert _fingerprint(cfg) != _fingerprint(changed)
 
 
+def test_benchmark_version_changes_recipe_fingerprint():
+    cfg = _benchmark_config()
+    changed = deepcopy(cfg)
+    changed["benchmark_version"] = 3
+
+    assert _fingerprint(cfg) != _fingerprint(changed)
+
+
 def test_attention_backend_changes_recipe_fingerprint():
     cfg = _benchmark_config()
 
@@ -138,7 +168,7 @@ def test_distributed_layout_changes_recipe_fingerprint():
     assert _fingerprint(cfg) != _fingerprint(changed)
 
 
-def test_software_profile_uses_major_minor_versions_for_id():
+def test_software_profile_uses_exact_attention_kernel_package_versions_for_id():
     profile_a = software_profile(
         python_version="3.12.4",
         torch_version="2.12.0+cu130",
@@ -163,11 +193,14 @@ def test_software_profile_uses_major_minor_versions_for_id():
         "pytorch": "2.12",
         "cuda": "13.0",
         "packages": {
-            "fastvideo_kernel": "0.3",
-            "triton": "3.4",
+            "fastvideo_kernel": "0.3.2",
+            "triton": "3.4.1",
         },
     }
-    assert software_profile_id(profile_a) == software_profile_id(profile_b)
+    assert profile_b["python"] == "3.12"
+    assert profile_b["pytorch"] == "2.12"
+    assert profile_b["cuda"] == "13.0"
+    assert software_profile_id(profile_a) != software_profile_id(profile_b)
 
 
 def test_hardware_profile_id_uses_normalized_gpu_cohort():
@@ -206,6 +239,41 @@ def test_hardware_profile_id_uses_normalized_gpu_cohort():
         "interconnect": "none_or_partial",
     }
     assert hardware_profile_id(profile).startswith("hw-")
+
+
+def test_hardware_profile_pads_missing_requested_cuda_devices(monkeypatch):
+    class Props:
+        name = "NVIDIA L40S"
+        total_memory = 48 * 1024**3
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device_id: Props())
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device_id: (8, 9))
+
+    profile = hardware_profile(num_gpus=2, interconnect="unknown")
+
+    assert profile["gpu_count"] == 2
+    assert profile["gpus"] == [
+        {
+            "name": "NVIDIA L40S",
+            "memory_gb": 48,
+            "compute_capability": "8.9",
+        },
+        {
+            "name": "unknown",
+            "memory_gb": None,
+            "compute_capability": None,
+        },
+    ]
+
+
+def test_local_path_detection_checks_both_path_separators(monkeypatch):
+    monkeypatch.setattr(identity_module.os, "sep", "\\")
+
+    assert identity_module._looks_like_local_path("models/local/checkpoint") is True
+    assert identity_module._looks_like_local_path(r"C:\models\checkpoint") is True
+    assert identity_module._looks_like_local_path("Wan-AI/Wan2.1-T2V-1.3B-Diffusers") is False
 
 
 def test_environment_metadata_is_separate_audit_fingerprint():
@@ -260,4 +328,29 @@ def test_runtime_identity_from_generator_summarizes_worker_records():
     assert _runtime_identity_from_generator(FakeGenerator()) == {
         "resolved_attention_backend": "FLASH_ATTN",
         "resolved_model_revision": revision,
+    }
+
+
+def test_collect_worker_identity_handles_torch_module_pipeline():
+    from fastvideo.tests.performance.test_inference_performance import _collect_worker_identity
+
+    class Backend:
+        name = "FLASH_ATTN"
+
+    class Leaf(torch.nn.Module):
+        backend = Backend()
+
+    class Pipeline(torch.nn.Module):
+        model_path = "/models/local"
+
+        def __init__(self):
+            super().__init__()
+            self.leaf = Leaf()
+
+    class Worker:
+        pipeline = Pipeline()
+
+    assert _collect_worker_identity(Worker()) == {
+        "resolved_attention_backends": ["FLASH_ATTN"],
+        "resolved_model_path": "/models/local",
     }

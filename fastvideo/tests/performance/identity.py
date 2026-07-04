@@ -186,7 +186,11 @@ def hardware_profile(
 
     gpu_count = int(num_gpus if num_gpus is not None else torch.cuda.device_count())
     devices = []
+    cuda_device_count = torch.cuda.device_count()
     for device_id in range(gpu_count):
+        if device_id >= cuda_device_count:
+            devices.append(_normalize_gpu_device({}))
+            continue
         props = torch.cuda.get_device_properties(device_id)
         capability = torch.cuda.get_device_capability(device_id)
         devices.append(
@@ -211,7 +215,11 @@ def software_profile(
     cuda_version: str | None = None,
     package_versions: Mapping[str, str | None] | None = None,
 ) -> dict[str, Any]:
-    """Return normalized software cohort metadata using major/minor versions."""
+    """Return normalized software cohort metadata.
+
+    Python, PyTorch, and CUDA use major/minor cohorts. Attention and kernel
+    packages keep exact versions because patch releases can change performance.
+    """
 
     versions = dict(package_versions) if package_versions is not None else _installed_package_versions()
     return {
@@ -219,7 +227,7 @@ def software_profile(
         "pytorch": _major_minor(torch_version or torch.__version__),
         "cuda": _major_minor(cuda_version or torch.version.cuda),
         "packages": {
-            name: _major_minor(version)
+            name: str(version)
             for name, version in sorted(versions.items())
             if version
         },
@@ -276,6 +284,8 @@ def _canonicalize(value: Any) -> Any:
             str(key): _canonicalize(value[key])
             for key in sorted(value, key=lambda item: str(item))
         }
+    if isinstance(value, (set, frozenset)):
+        return [_canonicalize(item) for item in sorted(value, key=lambda item: str(item))]
     if isinstance(value, tuple):
         return [_canonicalize(item) for item in value]
     if isinstance(value, list):
@@ -311,7 +321,8 @@ def _looks_like_local_path(value: str) -> bool:
     if value.startswith(("/", "./", "../", "~")):
         return True
     looks_like_hf_repo = re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", value)
-    return os.sep in value and looks_like_hf_repo is None
+    has_separator = "/" in value or "\\" in value or os.sep in value
+    return has_separator and looks_like_hf_repo is None
 
 
 def _normalize_gpu_device(device: Mapping[str, Any]) -> dict[str, Any]:

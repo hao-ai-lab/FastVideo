@@ -13,6 +13,17 @@ export type MetricValue = {
   precision: number;
 };
 
+export type CohortValue = string | number | null;
+
+export type ComparisonCohort = {
+  workload_id: CohortValue;
+  variant_id: CohortValue;
+  benchmark_version: CohortValue;
+  recipe_fingerprint: CohortValue;
+  hardware_profile_id: CohortValue;
+  software_profile_id: CohortValue;
+};
+
 export type SummaryRow = {
   model_id: string;
   gpu_type: string;
@@ -34,7 +45,7 @@ export type SummaryRow = {
   build_id: string;
   job_id: string;
   metrics: Record<string, MetricValue>;
-};
+} & ComparisonCohort;
 
 export type RunSource = "pr" | "local" | "scheduled_main" | "unknown";
 
@@ -68,13 +79,13 @@ export type TrendPoint = {
   build_id: string;
   job_id: string;
   metrics: Record<string, number | null>;
-};
+} & ComparisonCohort;
 
 export type TrendGroup = {
   model_id: string;
   gpu_type: string;
   points: TrendPoint[];
-};
+} & ComparisonCohort;
 
 export type TrendsResponse = {
   groups: TrendGroup[];

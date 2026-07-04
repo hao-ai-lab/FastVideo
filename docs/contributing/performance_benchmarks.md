@@ -273,7 +273,12 @@ Written by `test_inference_performance.py`. One file per benchmark run.
   "vae_decode_time_s": 3.208,
   "recipe": {
     "recipe_schema_version": 1,
-    "benchmark": { "benchmark_id": "wan-t2v-1.3b-2gpu" },
+    "benchmark": {
+      "benchmark_id": "wan-t2v-1.3b-2gpu",
+      "workload_id": "wan-t2v",
+      "variant_id": "1.3b-sp2",
+      "benchmark_version": 2
+    },
     "model": { "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" },
     "init_kwargs": { "num_gpus": 2, "sp_size": 2, "tp_size": 1 },
     "generation_kwargs": { "height": 480, "width": 832, "num_frames": 45 },
@@ -292,7 +297,7 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     "python": "3.12",
     "pytorch": "2.12",
     "cuda": "13.0",
-    "packages": { "fastvideo_kernel": "0.3", "triton": "3.4" }
+    "packages": { "fastvideo_kernel": "0.3.2", "triton": "3.4.1" }
   },
   "software_profile_id": "sw-<sha256-prefix>",
   "environment_metadata": { "env": { "IMAGE_VERSION": "py3.12-cuda13.0.0" } },
@@ -344,7 +349,8 @@ Records missing both `run_source` and `baseline_eligible` are treated as legacy
 successful main/full-suite uploads and remain eligible for rolling baselines.
 
 New records compare only against the same `model_id`, `gpu_type`,
-`recipe_fingerprint`, `hardware_profile_id`, and `software_profile_id` cohort.
+`workload_id`, `variant_id`, `benchmark_version`, `recipe_fingerprint`,
+`hardware_profile_id`, and `software_profile_id` cohort.
 `environment_metadata` and `environment_fingerprint` are audit data and are not
 part of the comparison key.
 The recipe prompt digests describe the prompts actually measured by the
@@ -404,8 +410,8 @@ When the rolling-baseline phase runs, it emits:
    {
      "benchmark_id": "<unique-id>",
      "config_schema_version": 2,
-     "workload_id": "<stable-workload-id>",
-     "variant_id": "canonical",
+     "workload_id": "<workload-family>",
+     "variant_id": "<model-or-runtime-variant>",
      "benchmark_version": 1,
      "model": { "model_path": "...", "model_short_name": "..." },
      "init_kwargs": { "num_gpus": 1, ... },

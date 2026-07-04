@@ -150,6 +150,9 @@ def test_build_latest_summary_keeps_identity_cohorts_separate():
             10.0,
             10.0,
             recipe_fingerprint="recipe-a",
+            workload_id="wan-t2v",
+            variant_id="1.3b-sp2",
+            benchmark_version=2,
             hardware_profile_id="hw-l40s",
             software_profile_id="sw-cu130",
             run_source="scheduled_main",
@@ -161,6 +164,9 @@ def test_build_latest_summary_keeps_identity_cohorts_separate():
             20.0,
             5.0,
             recipe_fingerprint="recipe-b",
+            workload_id="wan-t2v",
+            variant_id="1.3b-sp2",
+            benchmark_version=2,
             hardware_profile_id="hw-l40s",
             software_profile_id="sw-cu130",
             run_source="scheduled_main",
@@ -172,6 +178,9 @@ def test_build_latest_summary_keeps_identity_cohorts_separate():
             22.0,
             4.5,
             recipe_fingerprint="recipe-b",
+            workload_id="wan-t2v",
+            variant_id="1.3b-sp2",
+            benchmark_version=2,
             hardware_profile_id="hw-l40s",
             software_profile_id="sw-cu130",
         ),
@@ -183,6 +192,61 @@ def test_build_latest_summary_keeps_identity_cohorts_separate():
     assert len(rows) == 2
     assert recipe_b_row["baseline_n"] == 1
     assert recipe_b_row["metrics"]["latency"]["baseline"] == 20.0
+    assert recipe_b_row["workload_id"] == "wan-t2v"
+    assert recipe_b_row["variant_id"] == "1.3b-sp2"
+    assert recipe_b_row["benchmark_version"] == 2
+
+
+def test_build_latest_summary_keeps_variant_versions_separate():
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            workload_id="wan-t2v",
+            variant_id="1.3b-sp2",
+            benchmark_version=1,
+            recipe_fingerprint="recipe-a",
+            hardware_profile_id="hw-l40s",
+            software_profile_id="sw-cu130",
+            run_source="scheduled_main",
+            baseline_eligible=True,
+        ),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            20.0,
+            5.0,
+            workload_id="wan-t2v",
+            variant_id="1.3b-sp2",
+            benchmark_version=2,
+            recipe_fingerprint="recipe-a",
+            hardware_profile_id="hw-l40s",
+            software_profile_id="sw-cu130",
+            run_source="scheduled_main",
+            baseline_eligible=True,
+        ),
+        _record(
+            "2026-01-03T00:00:00+00:00",
+            "c" * 40,
+            22.0,
+            4.5,
+            workload_id="wan-t2v",
+            variant_id="1.3b-sp2",
+            benchmark_version=2,
+            recipe_fingerprint="recipe-a",
+            hardware_profile_id="hw-l40s",
+            software_profile_id="sw-cu130",
+        ),
+    ]
+
+    rows = build_latest_summary(records, max_regression=0.05)
+    version_2_row = next(row for row in rows if row["benchmark_version"] == 2)
+
+    assert len(rows) == 2
+    assert version_2_row["baseline_n"] == 1
+    assert version_2_row["metrics"]["latency"]["baseline"] == 20.0
 
 
 def test_filter_records_and_trends_preserve_metric_points():
@@ -272,6 +336,9 @@ def test_load_records_for_model_filters_identity_cohort(tmp_path):
           "timestamp": "2026-01-01T00:00:00+00:00",
           "success": true,
           "baseline_eligible": true,
+          "workload_id": "wan-t2v",
+          "variant_id": "1.3b-sp2",
+          "benchmark_version": 2,
           "recipe_fingerprint": "recipe-a",
           "hardware_profile_id": "hw-l40s",
           "software_profile_id": "sw-cu130"
@@ -287,7 +354,28 @@ def test_load_records_for_model_filters_identity_cohort(tmp_path):
           "timestamp": "2026-01-02T00:00:00+00:00",
           "success": true,
           "baseline_eligible": true,
+          "workload_id": "wan-t2v",
+          "variant_id": "1.3b-sp2",
+          "benchmark_version": 2,
           "recipe_fingerprint": "recipe-b",
+          "hardware_profile_id": "hw-l40s",
+          "software_profile_id": "sw-cu130"
+        }
+        """,
+        encoding="utf-8",
+    )
+    (model_dir / "other_version.json").write_text(
+        """
+        {
+          "model_id": "wan",
+          "gpu_type": "NVIDIA L40S",
+          "timestamp": "2026-01-03T00:00:00+00:00",
+          "success": true,
+          "baseline_eligible": true,
+          "workload_id": "wan-t2v",
+          "variant_id": "1.3b-sp2",
+          "benchmark_version": 3,
+          "recipe_fingerprint": "recipe-a",
           "hardware_profile_id": "hw-l40s",
           "software_profile_id": "sw-cu130"
         }
@@ -299,6 +387,9 @@ def test_load_records_for_model_filters_identity_cohort(tmp_path):
         str(tmp_path),
         "wan",
         "NVIDIA L40S",
+        workload_id="wan-t2v",
+        variant_id="1.3b-sp2",
+        benchmark_version="2",
         recipe_fingerprint="recipe-a",
         hardware_profile_id="hw-l40s",
         software_profile_id="sw-cu130",
