@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from fastvideo.tests.performance import hf_store
+from fastvideo.performance import hf_store
 
 from .service import build_latest_summary, build_trends, filter_records
 

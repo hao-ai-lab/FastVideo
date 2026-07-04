@@ -37,7 +37,7 @@ DEFAULT_METRIC_POLICIES: tuple[MetricPolicy, ...] = (
 )
 
 def _optional_float(value: Any) -> float | None:
-    if value is None:
+    if value is None or isinstance(value, bool):
         return None
     try:
         return float(value)
@@ -62,7 +62,8 @@ def resolve_metric_policies(
 ) -> tuple[MetricPolicy, ...]:
     """Return default metric policies with optional per-metric overrides."""
 
-    threshold_overrides = threshold_overrides or {}
+    if not isinstance(threshold_overrides, Mapping):
+        threshold_overrides = {}
     policies: list[MetricPolicy] = []
     for base_policy in DEFAULT_METRIC_POLICIES:
         raw_override = threshold_overrides.get(base_policy.key, {})
@@ -115,10 +116,7 @@ def regression_delta(
 ) -> MetricDelta | None:
     if baseline <= 0:
         return None
-    if policy.lower_is_better:
-        absolute_delta = current - baseline
-    else:
-        absolute_delta = baseline - current
+    absolute_delta = current - baseline if policy.lower_is_better else baseline - current
     percent_delta = absolute_delta / baseline
     threshold_exceeded = (
         percent_delta > policy.threshold_percent

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from fastvideo.tests.performance import compare_baseline
-from fastvideo.tests.performance.metric_policy import resolve_metric_policies
+from fastvideo.performance.metric_policy import resolve_metric_policies
 
 
 def _raw_result():
@@ -95,6 +95,30 @@ def test_normalized_record_includes_effective_regression_thresholds(monkeypatch)
         "gated": True,
     }
     assert record["regression_thresholds"]["throughput"]["gated"] is False
+
+
+def test_invalid_regression_threshold_container_uses_defaults():
+    policies = resolve_metric_policies(["not", "a", "mapping"])
+
+    latency = next(policy for policy in policies if policy.key == "latency")
+    assert latency.threshold_percent == 0.08
+    assert latency.threshold_absolute == 0.5
+    assert latency.gated is True
+
+
+def test_boolean_regression_threshold_values_are_ignored():
+    policies = resolve_metric_policies({
+        "latency": {
+            "threshold_percent": True,
+            "threshold_absolute": False,
+            "gated": "false",
+        }
+    })
+
+    latency = next(policy for policy in policies if policy.key == "latency")
+    assert latency.threshold_percent == 0.08
+    assert latency.threshold_absolute == 0.5
+    assert latency.gated is False
 
 
 def test_baseline_eligibility_only_for_successful_scheduled_main():

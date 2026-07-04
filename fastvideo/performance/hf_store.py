@@ -57,9 +57,7 @@ def is_baseline_eligible_record(record: dict[str, Any]) -> bool:
     """
     if record.get("baseline_eligible") is True:
         return True
-    if "baseline_eligible" not in record and "run_source" not in record:
-        return True
-    return False
+    return "baseline_eligible" not in record and "run_source" not in record
 
 
 def resolve_hf_token() -> str | None:

@@ -21,30 +21,31 @@ from datetime import datetime, timezone
 from typing import Any
 
 try:
-    from .hf_store import (
+    from fastvideo.performance.hf_store import (
         load_records_for_model,
         safe_float,
         sanitize,
         sync_from_hf,
         upload_record,
     )
-    from .metric_policy import (
-        MetricDelta,
+    from fastvideo.performance.metric_policy import (
         MetricPolicy,
         regression_delta,
         resolve_metric_policies,
         serialize_metric_thresholds,
     )
 except ImportError:
-    from hf_store import (
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from fastvideo.performance.hf_store import (
         load_records_for_model,
         safe_float,
         sanitize,
         sync_from_hf,
         upload_record,
     )
-    from metric_policy import (
-        MetricDelta,
+    from fastvideo.performance.metric_policy import (
         MetricPolicy,
         regression_delta,
         resolve_metric_policies,
@@ -229,18 +230,6 @@ def _baseline_metric(records: list[dict[str, Any]], key: str) -> float | None:
     return statistics.median(values)
 
 
-def _metric_delta(
-    policy: MetricPolicy,
-    current: dict[str, Any],
-    baseline_records: list[dict[str, Any]],
-) -> MetricDelta | None:
-    curr = safe_float(current.get(policy.key))
-    baseline = _baseline_metric(baseline_records, policy.key)
-    if curr is None or baseline is None:
-        return None
-    return regression_delta(policy, curr, baseline)
-
-
 def _metric_policy_summary(policy: MetricPolicy) -> str:
     gated = "gated" if policy.gated else "info"
     return (
@@ -297,7 +286,11 @@ def _build_summary_row(
     for policy in metric_policies:
         curr = safe_float(record.get(policy.key))
         baseline = _baseline_metric(baseline_records, policy.key)
-        delta = _metric_delta(policy, record, baseline_records)
+        delta = (
+            regression_delta(policy, curr, baseline)
+            if curr is not None and baseline is not None
+            else None
+        )
         regression = None if delta is None else delta.percent * 100.0
         absolute_delta = None if delta is None else delta.absolute
         metric_values[policy.key] = {

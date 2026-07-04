@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Metric definitions shared by the performance dashboard backend."""
 
-from fastvideo.tests.performance.metric_policy import DEFAULT_METRIC_POLICIES
+from fastvideo.performance.metric_policy import DEFAULT_METRIC_POLICIES
 
 METRICS = DEFAULT_METRIC_POLICIES
 

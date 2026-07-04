@@ -13,8 +13,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from fastvideo.tests.performance.hf_store import is_baseline_eligible_record, safe_float
-from fastvideo.tests.performance.metric_policy import regression_delta, resolve_metric_policies
+from fastvideo.performance.hf_store import is_baseline_eligible_record, safe_float
+from fastvideo.performance.metric_policy import regression_delta, resolve_metric_policies
 
 Record = dict[str, Any]
 

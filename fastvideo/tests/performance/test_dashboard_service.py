@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+from fastvideo.performance import hf_store
 from fastvideo.performance_dashboard.service import build_latest_summary, build_trends, filter_records
-from fastvideo.tests.performance import hf_store
 
 
 def _record(ts, commit, latency, throughput, success=True, **metadata):
