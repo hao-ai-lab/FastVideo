@@ -5,7 +5,7 @@ Pooled run-to-completion: each request's program runs start-to-finish via one Pr
 the serving layer (AsyncEngine), not by a step-interleaved scheduler.
 
 The engine owns admission (a refundable memory/OOM reservation before stepping), the observer bus,
-and the interceptor chain (deploy scope). It never imports ``training`` (dependency rule).
+and the interceptor chain (deploy scope). It never imports training stacks.
 """
 from __future__ import annotations
 
@@ -83,6 +83,7 @@ class ProgramRunner:
                                       profile=profile,
                                       metrics=self.metrics,
                                       request_id=request.request_id)
+        self.nodes = program.active_nodes(request)
         self.node_idx = 0
         self.loop_runner: LoopRunner | None = None
         self._resident_res: Any = None
@@ -97,7 +98,7 @@ class ProgramRunner:
         if self.done:
             return True
         self.cancel_scope.check()  # common-path cancellation (offline + all-component programs)
-        nodes = self.program.nodes
+        nodes = self.nodes
         while True:
             if self.node_idx >= len(nodes):
                 self.done = True

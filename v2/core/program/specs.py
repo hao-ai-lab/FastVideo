@@ -2,10 +2,11 @@
 
 > The card says what loops *exist*, the program says how to *run* them for this request.
 
-Kinds: InlineProgram (many loops, one resident instance — the omni default), TrainingProgram,
-etc. Nodes are typed (ModelLoopNode / ComponentNode / ...); edges are typed and carry *named*
-artifacts (not a god-batch). Linear pipelines are the degenerate case; ``when=`` predicates and
-multiple producers give branches/fan-out (LTX-2 base→upsample→refine→decode; A/V fan-out).
+Kinds: InlineProgram (many loops, one resident instance - the omni default),
+DisaggregatedProgram, RealtimeProgram, and WorkflowProgram. A Program is an
+ordered list of typed nodes that communicate through named slots. ``when=``
+predicates select the per-request sub-sequence; the runtime intentionally does
+not interpret a separate graph IR.
 """
 from __future__ import annotations
 
@@ -20,7 +21,6 @@ from v2.core.request.tasks import TaskType
 class ProgramKind(str, Enum):
     INLINE = "inline"
     DISAGGREGATED = "disaggregated"
-    TRAINING = "training"
     REALTIME = "realtime"
     WORKFLOW = "workflow"
 
@@ -65,30 +65,12 @@ class ModelLoopNode(ProgramNode):
     output_slot: str = "latents"
 
 
-# --- typed edges (graph IR; validated, data flows via named slots) ------------ #
-class EdgeKind(str, Enum):
-    TENSOR = "tensor"
-    ARTIFACT = "artifact"
-    STREAM = "stream"
-    CONTROL = "control"
-    CACHE = "cache"
-    BEHAVIOR = "behavior"
-
-
-@dataclass
-class Edge:
-    src: str  # slot or node id
-    dst: str
-    kind: EdgeKind = EdgeKind.TENSOR
-
-
 # --- program ------------------------------------------------------------------ #
 @dataclass
 class Program:
     program_id: str
     kind: ProgramKind
     nodes: list[ProgramNode] = field(default_factory=list)
-    edges: list[Edge] = field(default_factory=list)
     # artifact name -> slot that holds its value at the end
     output_artifacts: dict[str, str] = field(default_factory=dict)
 

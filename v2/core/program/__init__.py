@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from v2.core.program.specs import (
     ComponentNode,
-    Edge,
-    EdgeKind,
     ModelLoopNode,
     Program,
     ProgramKind,
@@ -22,6 +20,6 @@ from v2.core.program.workflow import (
 )
 
 __all__ = [
-    "Program", "ProgramKind", "ProgramNode", "ComponentNode", "ModelLoopNode", "Edge", "EdgeKind", "always",
-    "when_task", "when_opt", "Workflow", "WorkflowStage", "WorkflowRegistry", "ParallelWorkflow", "BestOfNWorkflow"
+    "Program", "ProgramKind", "ProgramNode", "ComponentNode", "ModelLoopNode", "always", "when_task", "when_opt",
+    "Workflow", "WorkflowStage", "WorkflowRegistry", "ParallelWorkflow", "BestOfNWorkflow"
 ]

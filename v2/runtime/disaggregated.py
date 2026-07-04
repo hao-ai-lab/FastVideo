@@ -36,6 +36,7 @@ class DisaggregatedRunner:
         self.slot_pool: dict[str, str] = {}  # slot name -> pool_id currently holding it
         self.metrics: dict[str, float] = {}
         self.transfers = 0
+        self.nodes = program.active_nodes(request)
         self.node_idx = 0
         self.done = False
         self.state = "waiting"
@@ -102,7 +103,7 @@ class DisaggregatedRunner:
         if self.done:
             return True
         self.cancel_scope.check()  # common-path cancellation (online + offline, all nodes)
-        nodes = self.program.active_nodes(self.request)
+        nodes = self.nodes
         while True:
             if self.node_idx >= len(nodes):
                 self._leave_current()
