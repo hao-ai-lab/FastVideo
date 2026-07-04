@@ -78,8 +78,9 @@ def build_recipe_from_benchmark_config(
     cfg: Mapping[str, Any],
     *,
     attention_backend: str | None = None,
-    resolved_attention_backend: str | None = None,
-    resolved_model_revision: str | None = None,
+    resolved_attention_backend: Any | None = None,
+    resolved_model_revision: Any | None = None,
+    measured_prompts: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
     """Build a deterministic recipe document from a benchmark config.
 
@@ -90,7 +91,8 @@ def build_recipe_from_benchmark_config(
     model = dict(cfg.get("model") or {})
     init_kwargs = dict(cfg.get("init_kwargs") or {})
     generation_kwargs = dict(cfg.get("generation_kwargs") or {})
-    prompts = list(cfg.get("test_prompts") or ["A cinematic video."])
+    prompts = list(measured_prompts) if measured_prompts is not None else list(
+        cfg.get("test_prompts") or ["A cinematic video."])
     if attention_backend is None:
         attention_backend = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
 
@@ -138,6 +140,19 @@ def normalize_model_path(value: Any) -> str | None:
     if _looks_like_local_path(text):
         return Path(text).expanduser().as_posix()
     return re.sub(r"/+", "/", text)
+
+
+def resolved_revision_from_model_path(value: Any) -> str | None:
+    normalized = normalize_model_path(value)
+    if normalized is None:
+        return None
+    parts = Path(normalized).parts
+    for index, part in enumerate(parts[:-1]):
+        if part == "snapshots":
+            revision = parts[index + 1]
+            if re.fullmatch(r"[0-9a-f]{40}", revision):
+                return revision
+    return None
 
 
 def hardware_profile(
@@ -358,6 +373,7 @@ __all__ = [
     "normalize_model_path",
     "profile_id",
     "recipe_fingerprint",
+    "resolved_revision_from_model_path",
     "build_recipe_from_benchmark_config",
     "sha256_hexdigest",
     "software_profile",

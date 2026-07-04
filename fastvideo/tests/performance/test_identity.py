@@ -10,6 +10,7 @@ from fastvideo.tests.performance.identity import (
     hardware_profile,
     hardware_profile_id,
     recipe_fingerprint,
+    resolved_revision_from_model_path,
     software_profile,
     software_profile_id,
 )
@@ -78,6 +79,20 @@ def test_output_path_does_not_change_recipe_fingerprint():
     with_output_path["generation_kwargs"]["output_path"] = "/tmp/generated"
 
     assert _fingerprint(cfg) == _fingerprint(with_output_path)
+
+
+def test_measured_prompt_override_ignores_unused_configured_prompts():
+    cfg = _benchmark_config()
+    changed = deepcopy(cfg)
+    changed["test_prompts"] = [
+        "Unused prompt that should not affect this measured workload.",
+        cfg["test_prompts"][0],
+    ]
+
+    recipe = build_recipe_from_benchmark_config(cfg, measured_prompts=[cfg["test_prompts"][0]])
+    changed_recipe = build_recipe_from_benchmark_config(changed, measured_prompts=[cfg["test_prompts"][0]])
+
+    assert recipe_fingerprint(recipe) == recipe_fingerprint(changed_recipe)
 
 
 def test_num_inference_steps_changes_recipe_fingerprint():
@@ -211,3 +226,38 @@ def test_environment_metadata_is_separate_audit_fingerprint():
 
     assert recipe_hash == _fingerprint(cfg)
     assert environment_fingerprint(audit_a) != environment_fingerprint(audit_b)
+
+
+def test_resolved_revision_from_hf_snapshot_path():
+    revision = "a" * 40
+
+    assert resolved_revision_from_model_path(
+        f"/root/.cache/huggingface/hub/models--org--repo/snapshots/{revision}") == revision
+    assert resolved_revision_from_model_path("/models/local-repo") is None
+
+
+def test_runtime_identity_from_generator_summarizes_worker_records():
+    from fastvideo.tests.performance.test_inference_performance import _runtime_identity_from_generator
+
+    revision = "b" * 40
+
+    class FakeExecutor:
+        def collective_rpc(self, _method):
+            return [
+                {
+                    "resolved_attention_backends": ["FLASH_ATTN"],
+                    "resolved_model_path": f"/root/.cache/huggingface/hub/models--org--repo/snapshots/{revision}",
+                },
+                {
+                    "resolved_attention_backends": ["FLASH_ATTN"],
+                    "resolved_model_path": f"/root/.cache/huggingface/hub/models--org--repo/snapshots/{revision}",
+                },
+            ]
+
+    class FakeGenerator:
+        executor = FakeExecutor()
+
+    assert _runtime_identity_from_generator(FakeGenerator()) == {
+        "resolved_attention_backend": "FLASH_ATTN",
+        "resolved_model_revision": revision,
+    }

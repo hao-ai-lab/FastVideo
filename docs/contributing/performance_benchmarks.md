@@ -276,8 +276,8 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     "model": { "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" },
     "init_kwargs": { "num_gpus": 2, "sp_size": 2, "tp_size": 1 },
     "generation_kwargs": { "height": 480, "width": 832, "num_frames": 45 },
-    "inputs": { "prompt_count": 1, "prompt_sha256": ["<sha256>"] },
-    "attention": { "requested_backend": "FLASH_ATTN" }
+    "inputs": { "prompt_count": 1, "prompt_sha256": ["<measured-prompt-sha256>"] },
+    "attention": { "requested_backend": "FLASH_ATTN", "resolved_backend": "FLASH_ATTN" }
   },
   "recipe_fingerprint": "<sha256>",
   "hardware_profile": {
@@ -307,6 +307,9 @@ result, used as the rolling-baseline source of truth.
 ```jsonc
 {
   "model_id": "wan-t2v-1.3b-2gpu",
+  "workload_id": "wan-t2v",
+  "variant_id": "1.3b-sp2",
+  "benchmark_version": 2,
   "timestamp": "2026-05-08T22:00:00+00:00",
   "commit_sha": "<full sha>",
   "gpu_type": "NVIDIA L40S",
@@ -343,6 +346,9 @@ New records compare only against the same `model_id`, `gpu_type`,
 `recipe_fingerprint`, `hardware_profile_id`, and `software_profile_id` cohort.
 `environment_metadata` and `environment_fingerprint` are audit data and are not
 part of the comparison key.
+The recipe prompt digests describe the prompts actually measured by the
+benchmark run; extra configured prompts are ignored unless the benchmark runner
+executes them.
 
 ## Environment variable reference
 
