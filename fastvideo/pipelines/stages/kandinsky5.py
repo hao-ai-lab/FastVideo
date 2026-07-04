@@ -12,6 +12,7 @@ from tqdm.auto import tqdm
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader, VAELoader
 from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.models.vision_utils import normalize, numpy_to_pt, pil_to_numpy, resize
@@ -22,6 +23,8 @@ from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import PRECISION_TO_TYPE
+
+logger = init_logger(__name__)
 
 
 class Kandinsky5LatentPreparationStage(PipelineStage):
@@ -50,6 +53,16 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
         if height % required_divisor != 0 or width % required_divisor != 0:
             raise ValueError(f"Kandinsky5 height/width must be divisible by {required_divisor}; "
                              f"got height={height}, width={width}.")
+
+        # NABLA sparse attention (Pro checkpoints) reshapes the post-patch grid
+        # into 8x8 blocks; validate here instead of crashing mid-denoise after
+        # all the encoding work is done.
+        arch_cfg = getattr(self.transformer, "config", None) or fastvideo_args.pipeline_config.dit_config.arch_config
+        if getattr(arch_cfg, "attention_type", "regular") == "nabla":
+            nabla_divisor = required_divisor * 8
+            if height % nabla_divisor != 0 or width % nabla_divisor != 0:
+                raise ValueError(f"Kandinsky5 NABLA checkpoints require height/width divisible by {nabla_divisor}; "
+                                 f"got height={height}, width={width}.")
 
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -294,6 +307,9 @@ class Kandinsky5DenoisingStage(PipelineStage):
         # frame 0 for them leaves it as undenoised noise.
         cond_frames = 1 if batch.image_latent is not None else 0
 
+        trajectory_timesteps: list[torch.Tensor] = []
+        trajectory_latents: list[torch.Tensor] = []
+
         with tqdm(total=batch.num_inference_steps, desc="Kandinsky5 Denoising") as progress_bar:
             for i, timestep in enumerate(batch.timesteps):
                 if hasattr(self, "interrupt") and self.interrupt:
@@ -337,8 +353,17 @@ class Kandinsky5DenoisingStage(PipelineStage):
                     return_dict=False,
                 )[0]
 
+                if batch.return_trajectory_latents:
+                    trajectory_timesteps.append(timestep)
+                    # latents is mutated in place, so snapshot a channels-first copy.
+                    trajectory_latents.append(latents[..., :num_channels].permute(0, 4, 1, 2, 3).cpu())
+
                 if i == len(batch.timesteps) - 1 or (i + 1) % self.scheduler.order == 0:
                     progress_bar.update()
+
+        if trajectory_latents:
+            batch.trajectory_latents = torch.stack(trajectory_latents, dim=1)
+            batch.trajectory_timesteps = torch.stack(trajectory_timesteps, dim=0).cpu()
 
         batch.latents = latents[:, :, :, :, :num_channels]
         return batch
@@ -356,9 +381,12 @@ class Kandinsky5DecodingStage(DecodingStage):
         super().__init__(vae=vae, pipeline=pipeline)
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["vae"]:
             loader = VAELoader()
             self.vae = loader.load(fastvideo_args.model_paths["vae"], fastvideo_args)
+            if pipeline:
+                pipeline.add_module("vae", self.vae)
             fastvideo_args.model_loaded["vae"] = True
 
         if batch.latents is None:
@@ -368,6 +396,16 @@ class Kandinsky5DecodingStage(DecodingStage):
             frames = batch.latents.permute(0, 4, 1, 2, 3).contiguous()
         else:
             frames = self.decode(batch.latents.permute(0, 4, 1, 2, 3).contiguous(), fastvideo_args)
+
+        # Trajectory latents are recorded channels-first by the denoising stage.
+        if batch.return_trajectory_decoded:
+            batch.trajectory_decoded = []
+            assert batch.trajectory_latents is not None, "batch should have trajectory latents"
+            for idx in range(batch.trajectory_latents.shape[1]):
+                cur_latent = batch.trajectory_latents[:, idx]
+                logger.info("decoding trajectory latent for timestep: %s", batch.trajectory_timesteps[idx])
+                decoded_frames = self.decode(cur_latent, fastvideo_args)
+                batch.trajectory_decoded.append(decoded_frames.cpu().float())
 
         batch.output = frames.to(torch.float32)
         if fastvideo_args.vae_cpu_offload:
@@ -385,8 +423,15 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
     def _preprocess(image, height: int, width: int) -> torch.Tensor:
         if isinstance(image, PIL.Image.Image):
             image = resize(image, height, width)
-            image = numpy_to_pt(pil_to_numpy(image))
+            image = numpy_to_pt(pil_to_numpy(image))  # always lands in [0, 1]
+            return normalize(image)  # [0, 1] -> [-1, 1]
+        # Tensor input: no reliable way to tell [0, 1] from an already
+        # normalized [-1, 1] tensor whose values happen to be non-negative,
+        # so mirror diffusers' heuristic and say what we assumed.
         if image.min() >= 0:
+            logger.warning("Kandinsky5 conditioning image tensor has no negative values; "
+                           "assuming range [0, 1] and normalizing to [-1, 1]. "
+                           "Pass a [-1, 1] tensor with negative values to skip normalization.")
             image = normalize(image)  # [0, 1] -> [-1, 1]
         return image
 
@@ -421,7 +466,13 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
             with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
                 if not vae_autocast_enabled:
                     image = image.to(vae_dtype)
-                image_latent = vae.encode(image).mode()
+                # Sample with the batch generator (diffusers parity); mode()
+                # would make seed-for-seed reproduction of the reference
+                # pipeline impossible.
+                generator = batch.generator
+                if isinstance(generator, list) and len(generator) != image.shape[0]:
+                    generator = generator[0]
+                image_latent = vae.encode(image).sample(generator=generator)
         finally:
             vae.use_tiling = prev_use_tiling
 
