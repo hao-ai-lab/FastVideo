@@ -1,8 +1,7 @@
 """Qwen-Omni thinker→talker→vocoder — the third weight-sharing topology (vllm-omni
 ``qwen2_5_omni`` pipeline).
 
-Asserts the Card/Loop/Program vocabulary holds for a THREE-expert, THREE-loop cascade — the topology
-neither MoT (one shared module, two loops) nor joint-RL (two disjoint experts, two loops) covers:
+Asserts the Card/Loop/Program vocabulary holds for a THREE-expert, THREE-loop cascade:
 
   * three disjoint experts (thinker, talker, vocoder) on three loop *types* (ar_decode, ar_decode,
     audio_decode) in one request — every token and vocoder chunk a runtime-visible WorkUnit;
@@ -101,5 +100,4 @@ def test_vocoder_streams_audio_chunks():
     assert n_chunks >= 1
     # the audio-streaming delta is exactly the vocoder's per-chunk emits (AR text emits are common)
     assert on.metrics["stream_chunks"] - off.metrics["stream_chunks"] == n_chunks
-
 

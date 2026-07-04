@@ -1,10 +1,9 @@
 """The consistency ladder + numeric comparison helpers.
 
-C0 component · C1 loop · C2 behavioral · C3 distribution · C4 artifact.
+C0 component · C1 loop · C2 trajectory behavior · C3 distribution · C4 artifact.
 
-The C2 split is load-bearing: likelihood-based methods compare per-step log-probs;
-likelihood-free methods (DiffusionNFT) compare seeded final-sample + prediction-space
-identity (old_deviate / ref-MSE) — there are NO log-probs to match.
+The ladder is for inference parity. C0/C1 are component and loop parity, C2 can compare
+captured trajectory records, C3 covers stochastic distribution parity, and C4 covers artifact quality.
 """
 from __future__ import annotations
 

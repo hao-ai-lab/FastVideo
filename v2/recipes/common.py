@@ -1,7 +1,6 @@
 """Shared component-node helpers (text encode with feature cache, etc.).
 
-The content-hash feature cache lets a K-sample RL group encode its shared prompt once instead of
-K times.
+The content-hash feature cache lets repeated requests reuse prompt embeddings safely.
 """
 from __future__ import annotations
 

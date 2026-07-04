@@ -3,7 +3,7 @@
 Two tuple-keyed registries (``COMPONENTS``, ``KERNELS``) + a ``Platform`` that detects ``(device,
 arch)`` and resolves both, with the numpy reference as the terminal fallback rung and parity oracle.
 Lets CPU, GPU, and other backends coexist: a model's loops, policies, scheduler, caches, and
-training code never name a device; they call through the component/kernel seams and the resolved
+inference code never names a device; it calls through the component/kernel seams and the resolved
 ``Platform`` decides the implementation.
 
 Importing this package is cheap and cycle-free (registry + platform classes only); the concrete

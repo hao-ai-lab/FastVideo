@@ -1,9 +1,9 @@
 """ChunkRolloutLoop — causal/AR video.
 
-Loop shape: outer loop over latent-frame chunks × inner denoise per chunk, carrying a per-chunk
-KV/context via the slab-KV cache (sink/local window in inference; full history in self-forcing
-training mode). Each completed chunk is streamable (``StepResult.emit``), and the rollout profile
-captures per-chunk behavior for the self-forcing distillation method.
+Loop shape: outer loop over latent-frame chunks x inner denoise per chunk, carrying a per-chunk
+KV/context via the slab-KV cache. The cache can use a sink/local window or preserve full request
+history. Each completed chunk is streamable (``StepResult.emit``), and the rollout profile can
+capture per-chunk inference trajectory records.
 
 State is entirely in ``LoopState`` (the slab list + chunk position), so interleaving causal
 rollouts of two sessions cannot smear context — and the slab-KV pool is namespaced per request.
@@ -151,9 +151,7 @@ class ChunkRolloutLoop:
                             seq=st.scratch["chunk_idx"],
                             data=x,
                             preview=False))
-        res = ResourceRequest(
-                              resident_bytes=int(x.nbytes),
-                              peak_activation_bytes=int(x.nbytes * len(branches)))
+        res = ResourceRequest(resident_bytes=int(x.nbytes), peak_activation_bytes=int(x.nbytes * len(branches)))
         return WorkPlan(loop_id=self.loop_id,
                         instance_id=st.instance_id,
                         kind=WorkUnitKind.CHUNK_STEP,

@@ -8,7 +8,7 @@ talker token, and vocoder chunk is a runtime-visible WorkUnit.
 A third weight-sharing topology, in the same Card/Loop/Program vocabulary:
 
   * Cosmos3/BAGEL — ONE shared MoT module, two loops (weight sharing within a request).
-  * unified/UniRL — TWO disjoint experts, two loops, jointly RL-trained.
+  * multi-expert inference — TWO disjoint experts, two loops, one request.
   * Qwen-Omni    — THREE disjoint experts (thinker, talker, vocoder), three loops, cascaded:
                    the talker conditions on the thinker's tokens+hidden state, the vocoder on the
                    talker's speech tokens; streaming codec→waveform.
@@ -51,10 +51,7 @@ def build_qwen_omni_card(model_id: str = "qwen-omni-tts") -> ModelCard:
                             prompt_slot="talker_prompt_tokens")
 
     def vocoder_factory():
-        return VocoderLoop(loop_id="vocoder",
-                           vocoder_id="vocoder",
-                           chunk_tokens=2,
-                           speech_slot="speech_tokens")
+        return VocoderLoop(loop_id="vocoder", vocoder_id="vocoder", chunk_tokens=2, speech_slot="speech_tokens")
 
     components = {
         "tokenizer":
@@ -115,8 +112,7 @@ def build_qwen_omni_card(model_id: str = "qwen-omni-tts") -> ModelCard:
         family="qwen_omni",
         components=components,
         loops=loops,
-        capabilities=CapabilityMatrix.of(Capability.REASONING_TEXT, Capability.TEXT_TO_SPEECH,
-                                         Capability.POLICY_ROLLOUT),
+        capabilities=CapabilityMatrix.of(Capability.REASONING_TEXT, Capability.TEXT_TO_SPEECH),
         recipe=RecipeSpec(method="base",
                           assumes_loop="vocoder",
                           assumes_precision="float32",
@@ -125,7 +121,7 @@ def build_qwen_omni_card(model_id: str = "qwen-omni-tts") -> ModelCard:
         caches={
             "paged_kv": CacheContract("paged_kv", max_bytes=1 << 24, block_bytes=1 << 12, reuse_across_requests=False),
         },
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
     )
     return card.validate()

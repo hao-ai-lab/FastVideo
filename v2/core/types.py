@@ -1,6 +1,6 @@
 """Shared lightweight type aliases for v2.
 
-The core (card/loop/runtime/cache/parity/program/request/training) is numpy-only
+The core (card/loop/runtime/cache/parity/program/request) is numpy-only
 and CPU-testable, so tensors are typed structurally as ``TensorLike``: a
 ``numpy.ndarray`` on the CPU test path, a ``torch.Tensor`` on GPU. The core never
 imports torch — only model-component adapters do, lazily (see

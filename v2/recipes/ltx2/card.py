@@ -135,7 +135,7 @@ def build_ltx2_card(model_id: str = "ltx2-2stage-distilled") -> ModelCard:
             negative_prompt=""),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1]),
         caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True)},
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
     )
     return card.validate()
@@ -211,7 +211,7 @@ def build_ltx2_base_card(model_id: str = "ltx2-single-stage") -> ModelCard:
                                            negative_prompt=LTX2_NEG),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1]),
         caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True)},
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
     )
     return card.validate()
@@ -301,7 +301,7 @@ def build_ltx2_3_card(model_id: str = "ltx2.3-distilled") -> ModelCard:
             }),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1]),
         caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True)},
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
     )
     return card.validate()

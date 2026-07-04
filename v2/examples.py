@@ -11,7 +11,6 @@ from typing import Any
 from v2.recipes import build_default_engine, build_omni_engine
 from v2.recipes.wan21 import build_wan21_card
 from v2.core.request import DiffusionParams, OutputSpec, Request, SamplingParams, TaskType, make_request
-from v2.training import build_diffusion_nft
 
 
 def _t2v(mid: str, prompt: str, seed: int, steps: int = 4, **kw: Any) -> Request:
@@ -38,17 +37,6 @@ def example_c_causal_streaming(eng) -> None:
         _t2v("wan-causal-sf-1.3b", "a drone flight over mountains", 3, outputs=OutputSpec(stream={"video": True})))
     print(f"    latents {out.artifacts['latents'].latent.shape}  chunks={out.metrics['chunks']:.0f}  "
           f"streamed_chunks={out.metrics.get('stream_chunks', 0)}")
-
-
-def example_d_rl_rollout() -> None:
-    print("\n(d) RL rollout (DiffusionNFT): the SAME denoise loop + behavior capture (train ≡ serve)")
-    nft = build_diffusion_nft(build_wan21_card(), num_video_per_prompt=4, num_inner_timesteps=2)
-    loss, m = nft.managed_train_step({"prompts": ["a red car", "a blue boat"], "seeds": [1, 2]}, 0)
-    fc = nft.old.caches.stats()["feature"]
-    print(f"    policy_loss={loss['policy_loss']:.3f} kl={loss['kl_div_loss']:.5f} "
-          f"reward_mean={m['reward_mean']:.3f}  consistency={nft.consistency_level().value} (likelihood-free)")
-    print(f"    shared-prompt feature-cache reuse: {fc['hits']} hits / {fc['misses']} misses "
-          f"(K samples encode the prompt once — the 24× reduction)")
 
 
 def example_g_omni_mot() -> None:
@@ -78,7 +66,7 @@ async def _serving_demo() -> None:
     import asyncio
 
     from v2.serving.deploy import DynamoWorkerAdapter, FakeDynamoRuntime, LocalFleet, build_deployment_card
-    from v2.recipes.wan21 import build_wan21_card, build_wan_t2v_program
+    from v2.recipes.wan21 import build_wan_t2v_program
     from v2.runtime import AsyncEngine, PoolSet, wan_t2v_disaggregated
     from v2.serving import OmniOpenAIServer
 
@@ -143,12 +131,11 @@ def main() -> None:
     example_a_text_to_video(eng)
     example_b_ltx2_two_stage(eng)
     example_c_causal_streaming(eng)
-    example_d_rl_rollout()
     example_g_omni_mot()
     example_h_serving_and_fleet()
     print("\n" + "=" * 78)
     print("All examples ran on CPU with numpy toy components. The architecture (cards, driven")
-    print("loops, scheduler, caches, parity, training-on-shared-loops) is real; the neural")
+    print("loops, scheduler, caches, parity, and serving) is real; the neural")
     print("forwards are toys. On a GPU box, swap ComponentSpec.factory for the torch adapters.")
     print("=" * 78)
 

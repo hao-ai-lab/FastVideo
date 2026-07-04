@@ -4,7 +4,7 @@ No single unified block pool: cache classes differ by 150-500x in natural granul
 each gets its own statically budgeted pool behind one ``CacheHandle``. Four classes:
   * ``FeatureCache``   — content-hash keyed, partitioned by adapter+weights (text/vision encoders)
   * ``ResidualCache``  — cache-dit residuals, scoped per request AND per CFG branch
-  * ``SlabKVCache``    — chunk-KV slabs (self-forcing / world models); training mode disables recycle
+  * ``SlabKVCache``    — chunk-KV slabs for causal/world models; can disable recycle
   * ``PagedKVCache``   — paged text-KV stub for ar_decode (phase-2 omni); minority case, lazy
 
 KV is the minority case — a pure bidirectional deployment (Wan/LTX T2V) allocates none of it.
@@ -71,7 +71,7 @@ class FeatureCache(_Pool):
             self.used_bytes -= nb
 
     def invalidate_weights(self, version: str) -> None:
-        """RL update_weights bumps weight epoch → drop entries from older epochs (wholesale)."""
+        """Drop entries from older resident-weight epochs."""
         drop = [h for h, (_v, _nb, k) in self._store.items() if k.weights_version != version]
         for h in drop:
             _v, nb, _k = self._store.pop(h)
@@ -124,21 +124,21 @@ class Slab:
 class SlabKVCache(_Pool):
     """Chunk-KV slabs for causal/world-model rollout.
 
-    ``training_mode`` disables mid-rollout recycling so activation-checkpoint recompute
-    doesn't double-advance the cache (self-forcing).
+    ``disable_recycle`` preserves the full request-local context. Otherwise the
+    cache behaves as a sliding window with the declared ``window`` size.
     """
 
     def __init__(self, policy: CachePolicy):
         super().__init__(policy)
         self._store: dict[str, list[Slab]] = {}
         self.window = max(1, policy.per_component.get("window", 1 << 30))
-        self.training_mode = policy.training_mode_disables_recycle
+        self.disable_recycle = policy.disable_recycle
 
     def append(self, namespace: str, slab: Slab) -> None:
         slabs = self._store.setdefault(namespace, [])
         slabs.append(slab)
         self.used_bytes += _nbytes(slab.k) + _nbytes(slab.v)
-        if not self.training_mode and len(slabs) > self.window:
+        if not self.disable_recycle and len(slabs) > self.window:
             dropped = slabs.pop(0)  # sliding-window recycle (inference only)
             self.used_bytes -= _nbytes(dropped.k) + _nbytes(dropped.v)
 

@@ -2,8 +2,7 @@
 
 If a field can change output semantics, it is in the key (incorrect reuse is worse than no reuse).
 The serving hazard this kills: a request that shares a prompt but differs in te-LoRA stack must not
-serve stale embeddings — so the key is *partitioned* by ``adapter_versions``, not flushed. An RL
-``update_weights`` bumps ``weights_version`` and invalidates wholesale.
+serve stale embeddings, so the key is *partitioned* by ``adapter_versions``.
 """
 from __future__ import annotations
 
@@ -15,7 +14,7 @@ from typing import Any
 def content_hash(obj: Any) -> str:
     """Stable content hash for feature-cache keys (text/vision embeddings).
 
-    Lets K rollout samples of one prompt reuse a single text encode.
+    Lets repeated requests for one prompt reuse a single text encode.
     """
     h = hashlib.sha256()
     if isinstance(obj, str):
@@ -78,4 +77,4 @@ class CachePolicy:
     eviction: str = "lru"  # "lru" | "fifo" | "none"
     reuse_across_requests: bool = True
     per_component: dict[str, int] = field(default_factory=dict)
-    training_mode_disables_recycle: bool = False
+    disable_recycle: bool = False

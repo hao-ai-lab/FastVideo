@@ -21,8 +21,6 @@ if TYPE_CHECKING:  # avoid runtime card -> parallel coupling
     pass
 
 
-
-
 # --------------------------------------------------------------------------- #
 # Precision, parallelism, parity, cache, checkpoint contracts                 #
 # --------------------------------------------------------------------------- #
@@ -31,7 +29,6 @@ class PrecisionContract:
     default_dtype: str = "float32"
     component_overrides: dict[str, str] = field(default_factory=dict)
     quantization_scheme: str | None = None  # "nvfp4" | "int8" | None
-    training_precision: str = "float32"  # distinct from serving precision
 
     def dtype_for(self, component_id: str) -> str:
         return self.component_overrides.get(component_id, self.default_dtype)
@@ -52,7 +49,7 @@ class CacheContract:
     eviction: str = "lru"  # "lru" | "fifo" | "none"
     reuse_across_requests: bool = True  # paged/feature=True; slab depends on mode
     per_component: dict[str, int] = field(default_factory=dict)
-    training_mode_disables_recycle: bool = False  # chunk-KV training mode
+    disable_recycle: bool = False  # keep full causal/world context instead of sliding-window recycle
 
 
 @dataclass
@@ -133,7 +130,7 @@ class LoopSpec:
     loop_id: str
     kind: LoopKind
     work_unit_kind: WorkUnitKind
-    behavior_schema: type | None = None  # what to capture for RL (None if not training-relevant)
+    behavior_schema: type | None = None  # optional inference trajectory/debug payload schema
     extension_schema: type | None = None  # per-model LoopState extension (Cosmos3PackedSeq, etc.)
     cache_policy: list[str] = field(default_factory=list)  # cache class names this loop draws from
     graph_capture: str = "eager"  # eager | breakable_cudagraph

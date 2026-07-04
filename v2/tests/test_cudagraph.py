@@ -89,7 +89,7 @@ def test_weight_version_bump_recaptures_and_evicts_stale():
     inst = _wan()
     _drive(inst, seed=1, steps=4)
     assert inst.graphs.stats["captures"] == 1 and inst.graphs.captured == 1
-    inst.set_weights_version("v1", ["transformer"])    # RL weight sync: bumps version + evicts graph
+    inst.set_weights_version("v1", ["transformer"])    # version bump evicts stale graphs
     assert inst.graphs.captured == 0                    # stale graph dropped (no leak)
     _drive(inst, seed=1, steps=4)
     assert inst.graphs.stats["captures"] == 2           # recaptured under the new version...

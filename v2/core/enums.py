@@ -17,7 +17,6 @@ class LoopKind(str, Enum):
     VAE_TILE = "vae_tile"  # tiled VAE encode/decode
     ENCODER = "encoder"  # one-shot encoder (text/vision) — degenerate single-step loop
     AUDIO_DECODE = "audio_decode"  # vocoder / codec decode
-    TRAIN_FORWARD = "train_forward"  # grad-enabled forward for a training method
 
 
 class WorkUnitKind(str, Enum):
@@ -34,18 +33,16 @@ class WorkUnitKind(str, Enum):
     ENCODER_CHUNK = "encoder_chunk"
     VAE_TILE = "vae_tile"
     AUDIO_CHUNK = "audio_chunk"
-    REWARD_BATCH = "reward_batch"  # RL
-    LOGPROB_BATCH = "logprob_batch"  # RL (likelihood-based)
     TRANSFER = "transfer"
     CACHE_IO = "cache_io"
     GRAPH_CAPTURE = "graph_capture"
 
 
 class ConsistencyLevel(str, Enum):
-    """The consistency ladder. RL methods declare their required rung."""
+    """The inference parity ladder."""
     C0 = "C0"  # component parity (VAE/encoder/block/scheduler-step in isolation)
     C1 = "C1"  # loop parity (full denoise trajectory / AR logits, fixed seed)
-    C2 = "C2"  # behavioral identity (train-forward ≡ serve-forward on the RL objective's quantity)
+    C2 = "C2"  # behavioral identity for inference-visible trajectories
     C3 = "C3"  # distribution parity (rollout distribution under allowed nondeterminism)
     C4 = "C4"  # artifact quality (SSIM / reward agreement / human preference)
 
@@ -55,10 +52,9 @@ class ConsistencyLevel(str, Enum):
 
 
 class ExecutionProfile(str, Enum):
-    """Three forwards, one loop definition — differ only in grad mode + capture."""
+    """Inference execution profiles."""
     SERVE = "serve"  # no-grad, graphed, cached, possibly quantized
-    ROLLOUT = "rollout"  # serve profile + behavior capture
-    TRAIN = "train"  # grad, checkpointed, FSDP-gathered
+    ROLLOUT = "rollout"  # serve profile + trajectory capture / stochastic rollout
 
 
 class Capability(str, Enum):
@@ -75,5 +71,3 @@ class Capability(str, Enum):
     STREAMING_VIDEO_CONTINUATION = "streaming_video_continuation"
     VAE_ENCODE = "vae_encode"
     VAE_DECODE = "vae_decode"
-    POLICY_ROLLOUT = "policy_rollout"  # can serve as an RL rollout engine
-    LOGPROB_RECOMPUTE = "logprob_recompute"

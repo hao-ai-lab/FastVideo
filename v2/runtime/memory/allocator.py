@@ -3,7 +3,7 @@
 Reservation must be pre-flight: a scheduler that admits a diffusion step and then discovers it
 cannot allocate the VAE tile is wrong.
 
-Sleep/wake is component-granular (tags are component names) for RL: drop DiT + caches,
+Sleep/wake is component-granular (tags are component names): drop DiT + caches,
 keep VAE/text-encoder resident (CuMem-style).
 """
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Per-class cache pools: feature partition/invalidation, slab-KV window/training."""
+"""Per-class cache pools: feature partition/invalidation and slab-KV windows."""
 from __future__ import annotations
 
 import numpy as np
@@ -23,7 +23,7 @@ def test_feature_cache_weight_invalidation_is_wholesale():
     fc = FeatureCache(CachePolicy("feature", max_bytes=1 << 20))
     k = CacheKey(model_id="m", component_id="te", weights_version="v0")
     fc.put(k, np.ones((2,), dtype="float32"))
-    fc.invalidate_weights("v1")                # RL update_weights bump
+    fc.invalidate_weights("v1")
     assert fc.get(k) is None
 
 
@@ -35,17 +35,16 @@ def test_feature_cache_budget_eviction():
     assert fc.used_bytes <= 8
 
 
-def test_slab_kv_inference_window_vs_training_mode():
+def test_slab_kv_window_vs_disable_recycle():
     inf = SlabKVCache(CachePolicy("slab_kv", reuse_across_requests=False, per_component={"window": 2}))
     for i in range(4):
         inf.append("r", Slab(i, np.zeros((3,), dtype="float32"), None))
     assert len(inf.get("r")) == 2              # sliding window recycles (inference)
 
-    tr = SlabKVCache(CachePolicy("slab_kv", training_mode_disables_recycle=True,
-                                 per_component={"window": 2}))
+    tr = SlabKVCache(CachePolicy("slab_kv", disable_recycle=True, per_component={"window": 2}))
     for i in range(4):
         tr.append("r", Slab(i, np.zeros((3,), dtype="float32"), None))
-    assert len(tr.get("r")) == 4               # no mid-rollout recycle in training mode (self-forcing)
+    assert len(tr.get("r")) == 4               # no mid-rollout recycle when full context is requested
     assert tr.used_bytes > 0
     tr.clear_namespace("r")
     assert tr.used_bytes == 0

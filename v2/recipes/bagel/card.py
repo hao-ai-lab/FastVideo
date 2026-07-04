@@ -38,12 +38,13 @@ def build_bagel_card(model_id: str = "bagel-mot") -> ModelCard:
         return ARDecodeLoop(loop_id="generate_text", transformer_id="transformer", max_tokens=6)
 
     def image_factory():
-        return WanDenoiseLoop(loop_id="generate_image",
-                              cfg=cfg,
-                              flow_shift=flow,
-                              precision=precision,
-                              expert=expert,
-                              )
+        return WanDenoiseLoop(
+            loop_id="generate_image",
+            cfg=cfg,
+            flow_shift=flow,
+            precision=precision,
+            expert=expert,
+        )
 
     components = {
         "tokenizer":
@@ -93,7 +94,7 @@ def build_bagel_card(model_id: str = "bagel-mot") -> ModelCard:
             "feature": CacheContract("feature", max_bytes=1 << 24, reuse_across_requests=True),
             "paged_kv": CacheContract("paged_kv", max_bytes=1 << 24, block_bytes=1 << 12, reuse_across_requests=False),
         },
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
     )
     return card.validate()

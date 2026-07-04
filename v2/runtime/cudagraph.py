@@ -19,7 +19,7 @@ correctness-critical and bug-prone regardless of device:
   * the **eager-break** — a step that is model-declared non-capturable (host RNG / data-dependent
     branch, e.g. the FlowGRPO SDE step) or that an interceptor overrode this step never touches the
     graph cache (vLLM's ``@eager_break_during_capture``).
-  * **invalidation** — a resident-weights version bump (RL weight sync) or a shape change changes the
+  * **invalidation** — a resident-weights version bump or a shape change changes the
     key → recapture, so a graph never outlives the weights/shape it was captured for. This is
     AUTOMATIC: the resident-weight version is *in* the key, so a synced component's old graphs simply
     become unreachable and the next step recaptures.
@@ -159,7 +159,7 @@ class GraphCapturer:
         return plan.graph_fn(instance, g.workspace)
 
     def invalidate(self, component_ids: Any = None) -> int:
-        """Evict captured graphs whose resident weights just changed (RL weight sync), mirroring
+        """Evict captured graphs whose resident weights just changed, mirroring
         ``CacheManager.invalidate_components``. Without this, a synced component's old graphs become
         unreachable (the version is in the key) but linger — a real GPU memory leak across FlowGRPO's
         per-iteration syncs. With ``component_ids=None``, clears all. Returns the count dropped."""

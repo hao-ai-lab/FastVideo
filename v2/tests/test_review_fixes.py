@@ -43,12 +43,12 @@ def test_feature_key_partitions_by_adapter_stack():
     assert inst.caches.stats()["feature"]["misses"] == m + 1
 
 
-def test_transformer_weight_sync_keeps_text_encoder_cache():
+def test_transformer_weight_reload_keeps_text_encoder_cache():
     card = build_wan21_card()
     inst = load_card(card, cache_manager=CacheManager.from_card(card))
     cached_text_encode(inst, "p")
     assert inst.caches.stats()["feature"]["used_bytes"] > 0
-    inst.set_weights_version("w1", components=["transformer"])   # RL-style transformer-only sync
+    inst.set_weights_version("w1", components=["transformer"])   # transformer-only reload
     h = inst.caches.stats()["feature"]["hits"]
     cached_text_encode(inst, "p")                   # text-encoder embed survived ⇒ hit (not flushed)
     assert inst.caches.stats()["feature"]["hits"] == h + 1

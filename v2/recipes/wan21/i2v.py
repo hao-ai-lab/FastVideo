@@ -53,12 +53,13 @@ def build_wan21_i2v_card(model_id: str = "wan2.1-i2v-1.3b",
     precision, expert = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True), NoRouting("transformer")
 
     def loop_factory():
-        return WanDenoiseLoop(loop_id="i2v_denoise",
-                              cfg=cfg,
-                              flow_shift=flow,
-                              precision=precision,
-                              expert=expert,
-                              )
+        return WanDenoiseLoop(
+            loop_id="i2v_denoise",
+            cfg=cfg,
+            flow_shift=flow,
+            precision=precision,
+            expert=expert,
+        )
 
     components = {
         "text_encoder":
@@ -109,7 +110,7 @@ def build_wan21_i2v_card(model_id: str = "wan2.1-i2v-1.3b",
                           consistency_required=ConsistencyLevel.C1),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1]),
         caches={"feature": CacheContract("feature", max_bytes=1 << 24, reuse_across_requests=True)},
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
         sampling_defaults=SamplingDefaults(num_steps=40,
                                            guidance_scale=5.0,
@@ -138,12 +139,13 @@ def build_wan22_i2v_a14b_card(model_id: str = "wan2.2-i2v-a14b",
     expert = BoundaryTimestepRouting(high_noise="transformer", low_noise="transformer_2", boundary=boundary)
 
     def loop_factory():
-        return WanDenoiseLoop(loop_id="i2v_denoise",
-                              cfg=cfg,
-                              flow_shift=flow,
-                              precision=precision,
-                              expert=expert,
-                              )
+        return WanDenoiseLoop(
+            loop_id="i2v_denoise",
+            cfg=cfg,
+            flow_shift=flow,
+            precision=precision,
+            expert=expert,
+        )
 
     def _dit(cid: str) -> ComponentSpec:
         return ComponentSpec(cid,
@@ -198,7 +200,7 @@ def build_wan22_i2v_a14b_card(model_id: str = "wan2.2-i2v-a14b",
                           consistency_required=ConsistencyLevel.C1),
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1]),
         caches={"feature": CacheContract("feature", max_bytes=1 << 24, reuse_across_requests=True)},
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
         sampling_defaults=SamplingDefaults(num_steps=40,
                                            guidance_scale=3.5,

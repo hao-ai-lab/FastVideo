@@ -107,7 +107,7 @@ def _build_flux2_card(model_id: str, *, text_encoder_load_id: str, text_encoder_
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1],
                           tests=[ParityTestSpec(name="denoise_trajectory", level=ConsistencyLevel.C1, tap="latents")]),
         caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True)},
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
         sampling_defaults=sampling_defaults,
     )

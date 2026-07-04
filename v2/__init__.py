@@ -1,15 +1,14 @@
-"""v2 — a scoped, CPU-testable realization of the model-native runtime (see v2/README.md).
+"""v2 - the FastVideo inference runtime (see v2/README.md).
 
 > A model card is a (recipe, runtime) pair with a parity obligation.
 > The model owns loop semantics; the runtime owns loop lifecycle.
 > One resident instance runs many loops; one scheduler runs their steps in one currency.
-> Caches are correct by key; parity is correct by test; the interleave gate is non-negotiable.
-> Training records behavior on the same loops it serves.
+> Caches are correct by key; parity is correct by test.
 
-Phase 1 supports Wan2.1-1.3B (T2V) and LTX2.3 (2-stage distilled), plus four training
-methods on Wan2.1-1.3B (finetuning, DMD2, DiffusionNFT, self-forcing). The spine is
-omni-ready (multi-loop ModelInstance, ar_decode/chunk_rollout loop kinds) for the phase-2
-Cosmos3 + vllm-omni omni ports.
+v2 is inference-only. Training, finetuning, distillation, RL, and optimizer
+loops belong to ``fastvideo/train`` or ``fastvideo/training``. v2 only records
+checkpoint provenance in recipe metadata so inference can bind weights to the
+right loop and precision policy.
 
 The core is numpy-only and CPU-testable; heavy Wan/LTX neural forwards become lazy torch
 adapters (see ``v2/platform/backends/``) that are off the test path.

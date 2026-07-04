@@ -32,7 +32,7 @@ def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b",
                           num_chunks: int = 7,
                           chunk_size: int = 3,
                           steps_per_chunk: int = 4,
-                          training_mode: bool = False) -> ModelCard:
+                          preserve_full_context: bool = False) -> ModelCard:
     # Self-forcing DMD reference (fastvideo SelfForcingWanT2V480PConfig + causal_denoising.py): the
     # distilled student is CFG-FREE (guidance 1.0, single forward/step) and denoises with the 4-step DMD
     # schedule (dmd_denoising_steps=[1000,750,500,250], warped — reproduced by FlowShiftPolicy(5.0) over 4
@@ -44,14 +44,15 @@ def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b",
     precision = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True)
 
     def loop_factory():
-        return ChunkRolloutLoop(loop_id="chunk_rollout",
-                                num_chunks=num_chunks,
-                                chunk_size=chunk_size,
-                                steps_per_chunk=steps_per_chunk,
-                                cfg=cfg,
-                                flow_shift=flow,
-                                precision=precision,
-                                )
+        return ChunkRolloutLoop(
+            loop_id="chunk_rollout",
+            num_chunks=num_chunks,
+            chunk_size=chunk_size,
+            steps_per_chunk=steps_per_chunk,
+            cfg=cfg,
+            flow_shift=flow,
+            precision=precision,
+        )
 
     components = {
         "text_encoder":
@@ -89,7 +90,7 @@ def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b",
         components=components,
         loops=loops,
         capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.STREAMING_VIDEO_CONTINUATION,
-                                         Capability.VAE_DECODE, Capability.POLICY_ROLLOUT),
+                                         Capability.VAE_DECODE),
         recipe=RecipeSpec(method="self_forcing",
                           parents=["wan2.1-1.3b"],
                           assumes_loop="chunk_rollout",
@@ -103,10 +104,10 @@ def build_wan_causal_card(model_id: str = "wan-causal-sf-1.3b",
             CacheContract(cache_class="slab_kv",
                           max_bytes=1 << 26,
                           reuse_across_requests=False,
-                          per_component={"window": (num_chunks if training_mode else 2)},
-                          training_mode_disables_recycle=training_mode),
+                          per_component={"window": (num_chunks if preserve_full_context else 2)},
+                          disable_recycle=preserve_full_context),
         },
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
         sampling_defaults=SamplingDefaults(
             num_steps=4, guidance_scale=1.0, height=480, width=832, num_frames=81, fps=16,

@@ -45,7 +45,7 @@ class AccelDiT:
         return self._inner(*args, **kwargs)
 
     def __getattr__(self, name: str):
-        # delegate the trainable surface (clone/copy_from/blend_from/mse_grad_step) to the inner toy
+        # delegate the weight/version surface (clone/copy_from/blend_from) to the inner toy
         return getattr(self._inner, name)
 
 

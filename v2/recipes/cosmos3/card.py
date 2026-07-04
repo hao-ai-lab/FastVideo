@@ -37,12 +37,13 @@ def build_cosmos3_card(model_id: str = "cosmos3-vfm") -> ModelCard:
         return ARDecodeLoop(loop_id="ar_decode", transformer_id="transformer", max_tokens=6)
 
     def dn_factory():
-        return WanDenoiseLoop(loop_id="diffusion_denoise",
-                              cfg=cfg,
-                              flow_shift=flow,
-                              precision=precision,
-                              expert=expert,
-                              )
+        return WanDenoiseLoop(
+            loop_id="diffusion_denoise",
+            cfg=cfg,
+            flow_shift=flow,
+            precision=precision,
+            expert=expert,
+        )
 
     components = {
         "tokenizer":
@@ -89,8 +90,7 @@ def build_cosmos3_card(model_id: str = "cosmos3-vfm") -> ModelCard:
         components=components,
         loops=loops,
         capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.REASONING_TEXT,
-                                         Capability.TEXT_TO_VIDEO_SOUND, Capability.VAE_DECODE,
-                                         Capability.POLICY_ROLLOUT),
+                                         Capability.TEXT_TO_VIDEO_SOUND, Capability.VAE_DECODE),
         recipe=RecipeSpec(method="base",
                           assumes_loop="diffusion_denoise",
                           assumes_precision="float32",
@@ -100,7 +100,7 @@ def build_cosmos3_card(model_id: str = "cosmos3-vfm") -> ModelCard:
             "feature": CacheContract("feature", max_bytes=1 << 24, reuse_across_requests=True),
             "paged_kv": CacheContract("paged_kv", max_bytes=1 << 24, block_bytes=1 << 12, reuse_across_requests=False),
         },
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
     )
     return card.validate()

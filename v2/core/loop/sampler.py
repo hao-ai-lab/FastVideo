@@ -47,13 +47,11 @@ def flow_sde_step_with_logprob(x_t,
                                noise=None,
                                prev_sample=None,
                                noise_scale: float = 0.7):
-    """FlowGRPO-style stochastic step + Gaussian log-prob.
+    """Stochastic diffusion step + Gaussian log-prob metadata.
 
-    The RL *rollout* sampler (vs the deterministic ODE ``flow_match_euler_step`` used at serve time).
-    Injects noise for exploration and returns the log-prob of the realized sample under the step's
-    Gaussian — the quantity the FlowGRPO PPO ratio uses. ``prev_sample=None`` samples a new step;
-    passing ``prev_sample`` (the rollout sample) recomputes its log-prob under the *current* velocity
-    (the ratio's numerator at update time). Returns ``(prev_sample, log_prob, mean, eff_std)``.
+    This is the stochastic counterpart to deterministic ``flow_match_euler_step``. ``prev_sample=None``
+    samples a new step; passing ``prev_sample`` recomputes its log-prob under the current velocity.
+    Returns ``(prev_sample, log_prob, mean, eff_std)``.
     """
     x_t = np.asarray(x_t, dtype=np.float64)
     velocity = np.asarray(velocity, dtype=np.float64)

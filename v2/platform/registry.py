@@ -40,7 +40,7 @@ from collections.abc import Callable, Iterable
 # Op names — the stable identifiers a loop dispatches on (not free functions). #
 # --------------------------------------------------------------------------- #
 FLOW_MATCH_STEP = "flow_match_step"  # deterministic flow-match Euler solver step (ODE serve)
-FLOW_SDE_STEP = "flow_sde_step"  # FlowGRPO stochastic step + log-prob (RL rollout)
+FLOW_SDE_STEP = "flow_sde_step"  # stochastic diffusion step + log-prob metadata
 
 
 def _always_available() -> bool:

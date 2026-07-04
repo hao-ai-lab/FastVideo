@@ -2,7 +2,7 @@
 
 Static partitioning makes cross-class fragmentation impossible (jumbo slab traffic cannot
 strand text-KV pages and vice versa). Each class gets a budget carved at init from the card's
-CacheContracts. ``invalidate_weights`` implements the wholesale RL weight-epoch bump.
+CacheContracts.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class CacheManager:
                     eviction=cc.eviction,
                     reuse_across_requests=cc.reuse_across_requests,
                     per_component=dict(cc.per_component),
-                    training_mode_disables_recycle=cc.training_mode_disables_recycle,
+                    disable_recycle=cc.disable_recycle,
                 ))
         return cls(policies)
 

@@ -132,8 +132,7 @@ class ParallelWorkflow(Workflow):
 
 class BestOfNWorkflow(Workflow):
     """Inference-time scaling / rejection sampling: generate N candidates (varying seed), score each with
-    a reward scorer, return the best. A feedback loop across models — generator + reward (e.g. the served
-    REWARD_BATCH card) — the other non-linear shape."""
+    a scorer, return the best. This is a feedback loop across servable models, not a training loop."""
 
     def __init__(self, workflow_id, generator_stage, *, scorer, n: int = 4, score_key: str = "latents"):
         super().__init__(workflow_id, [generator_stage])

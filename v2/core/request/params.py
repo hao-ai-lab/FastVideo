@@ -35,8 +35,8 @@ class DiffusionParams:
     num_frames: int = 81
     fps: int = 16
     seed: int | None = None
-    # FlowGRPO-style RL rollout: use the SDE sampler (with per-step log-prob capture) instead of the
-    # deterministic ODE serve sampler. Default False ⇒ the serve path is unchanged.
+    # Stochastic sampling: use the SDE sampler instead of the deterministic ODE serve sampler.
+    # Default False means the normal serve path is unchanged.
     sde_rollout: bool = False
     sde_noise_scale: float = 0.7
     # Active adapters for this request (LoRA / ControlNet ids on the base).
@@ -47,7 +47,7 @@ class DiffusionParams:
 class CaptureMode(str, Enum):
     """What the loop captures while running."""
     NONE = "none"  # serve forward: no-grad, no capture
-    BEHAVIOR = "behavior"  # rollout forward: emit BehaviorRecord slices for RL/distill
+    BEHAVIOR = "behavior"  # trajectory/debug capture for inference diagnostics
 
 
 @dataclass(frozen=True)

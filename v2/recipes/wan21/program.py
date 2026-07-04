@@ -1,7 +1,7 @@
-"""Wan2.1 T2V program: text_encode → diffusion_denoise → vae_decode.
+"""Wan2.1 T2V program: text_encode -> diffusion_denoise -> vae_decode.
 
-The text-encode node uses the content-hash feature cache: the same prompt across requests (e.g. a
-K=24 RL group) encodes once and reuses.
+The text-encode node uses the content-hash feature cache: the same prompt across requests encodes
+once and reuses.
 """
 from __future__ import annotations
 
