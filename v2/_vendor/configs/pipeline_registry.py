@@ -24,8 +24,8 @@ from v2._vendor.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfi
 from v2._vendor.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from v2._vendor.configs.pipelines.gen3c import Gen3CConfig
 from v2._vendor.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
-                                                   Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
-                                                   Hunyuan15SR1080PConfig)
+                                                    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
+                                                    Hunyuan15SR1080PConfig)
 from v2._vendor.configs.pipelines.hyworld import HYWorldConfig
 from v2._vendor.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from v2._vendor.configs.pipelines.longcat import LongCatT2V480PConfig
@@ -736,8 +736,9 @@ def _register_configs() -> None:
         hf_model_paths=[
             "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
             "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers",
+            "FastVideo/FastWan-QAD-FP8-1.3B",
         ],
-        model_detectors=[lambda path: "wandmdpipeline" in path.lower()],
+        model_detectors=[lambda path: "wandmdpipeline" in path.lower() or "fastwan-qad-fp8" in path.lower()],
         model_family="wan",
         default_preset="fast_wan_t2v_480p",
     )

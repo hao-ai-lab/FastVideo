@@ -2,7 +2,7 @@ from typing import Literal, get_args
 
 from v2._vendor.layers.quantization.base_config import QuantizationConfig
 
-QuantizationMethods = Literal[None, "AbsMaxFP8", "NVFP4", "nvfp4_qat"]
+QuantizationMethods = Literal[None, "AbsMaxFP8", "FP8", "NVFP4", "nvfp4_qat"]
 
 QUANTIZATION_METHODS: list[str] = list(get_args(QuantizationMethods))
 
@@ -49,20 +49,21 @@ def get_quantization_config(quantization: str) -> type[QuantizationConfig]:
     if quantization not in QUANTIZATION_METHODS:
         raise ValueError(f"Invalid quantization method: {quantization}")
 
-    # lazy import to avoid triggering `torch.compile` too early
-    from .absmax_fp8 import AbsMaxFP8Config
-    from .nvfp4_config import NVFP4Config
-    from .nvfp4_qat_config import NVFP4QATConfig
-
-    method_to_config: dict[str, type[QuantizationConfig]] = {
-        "AbsMaxFP8": AbsMaxFP8Config,
-        "NVFP4": NVFP4Config,
-        "nvfp4_qat": NVFP4QATConfig,
-    }
-    # Update the `method_to_config` with customized quantization methods.
-    method_to_config.update(_CUSTOMIZED_METHOD_TO_QUANT_CONFIG)
-
-    return method_to_config[quantization]
+    if quantization in _CUSTOMIZED_METHOD_TO_QUANT_CONFIG:
+        return _CUSTOMIZED_METHOD_TO_QUANT_CONFIG[quantization]
+    if quantization == "AbsMaxFP8":
+        from .absmax_fp8 import AbsMaxFP8Config
+        return AbsMaxFP8Config
+    if quantization == "FP8":
+        from .fp8_config import FP8Config
+        return FP8Config
+    if quantization == "NVFP4":
+        from .nvfp4_config import NVFP4Config
+        return NVFP4Config
+    if quantization == "nvfp4_qat":
+        from .nvfp4_qat_config import NVFP4QATConfig
+        return NVFP4QATConfig
+    raise ValueError(f"Invalid quantization method: {quantization}")
 
 
 all = [

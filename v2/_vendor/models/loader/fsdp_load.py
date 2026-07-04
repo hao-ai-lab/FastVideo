@@ -15,54 +15,42 @@ import torch
 from torch import nn
 from torch.distributed import DeviceMesh, init_device_mesh
 from torch.distributed._tensor import distribute_tensor
-from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule,
-                                    MixedPrecisionPolicy, fully_shard)
+from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule, MixedPrecisionPolicy, fully_shard)
 from torch.nn.modules.module import _IncompatibleKeys
 
 from v2._vendor.logger import init_logger
-from v2._vendor.models.loader.utils import (get_param_names_mapping,
-                                           hf_to_custom_state_dict)
+from v2._vendor.models.loader.utils import (get_param_names_mapping, hf_to_custom_state_dict)
 from v2._vendor.models.loader.weight_utils import safetensors_weights_iterator
 from v2._vendor.utils import set_mixed_precision_policy, is_pin_memory_available
 
 logger = init_logger(__name__)
 
 
-def _maybe_convert_model_to_nvfp4(model: nn.Module) -> None:
-    """Quantize NVFP4-tagged linear layers in-place after weights are loaded.
+def _maybe_quantize_model(model: nn.Module) -> None:
+    """Quantize tagged linear layers in-place after weights are loaded.
 
-    Walks the module tree once, looking for layers whose ``quant_method``
-    is an :class:`NVFP4QuantizeMethod` (attached at construction time by
-    :meth:`NVFP4Config.get_quant_method`). When at least one such layer
-    exists, calls :func:`convert_model_to_nvfp4` to register the
-    ``_nvfp4_weight*`` / ``_nvfp4_alpha`` / ``_weight_global_sf`` buffers
-    on each targeted layer.
-
-    The walk returns on the first NVFP4 layer found so non-NVFP4 callers
-    pay only an ``isinstance`` check per module. flashinfer is imported
-    lazily inside :func:`convert_model_to_nvfp4` so this helper is a
-    no-op on hosts without the NVFP4 backend.
+    Quantization configs attach a ``quant_method`` to each targeted linear layer
+    at construction time. The loader materializes the matching quantized weight
+    buffers from freshly-loaded dense weights, then removes the dense parameter
+    where that quantizer owns storage.
     """
-    # Defer the import: nvfp4_config imports heavy diffusers /
-    # torch.distributed symbols at module-load time, and unconditional
-    # import would penalize every loader call regardless of whether
-    # NVFP4 is wired.
-    from v2._vendor.layers.quantization.nvfp4_config import (
-        NVFP4QuantizeMethod, convert_model_to_nvfp4,
-    )
-    from v2._vendor.layers.quantization.nvfp4_qat_config import (
-        NVFP4QATQuantizeMethod, convert_model_to_fp4,
-    )
-
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
-        if isinstance(qm, NVFP4QuantizeMethod):
+        quant_method_name = type(qm).__name__
+        if quant_method_name == "NVFP4QuantizeMethod":
+            from v2._vendor.layers.quantization.nvfp4_config import convert_model_to_nvfp4
             logger.info("Converting loaded model weights for NVFP4 linear layers")
             convert_model_to_nvfp4(model)
             return
-        if isinstance(qm, NVFP4QATQuantizeMethod):
+        if quant_method_name == "NVFP4QATQuantizeMethod":
+            from v2._vendor.layers.quantization.nvfp4_qat_config import convert_model_to_fp4
             logger.info("Converting loaded model weights for NVFP4-QAT linear layers")
             convert_model_to_fp4(model)
+            return
+        if quant_method_name == "FP8QuantizeMethod":
+            from v2._vendor.layers.quantization.fp8_config import convert_model_to_fp8
+            logger.info("Converting loaded model weights for FP8 linear layers")
+            convert_model_to_fp8(model)
             return
 
 
@@ -119,10 +107,7 @@ def maybe_load_fsdp_model(
     """
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
-    mp_policy = MixedPrecisionPolicy(param_dtype,
-                                     reduce_dtype,
-                                     output_dtype,
-                                     cast_forward_inputs=False)
+    mp_policy = MixedPrecisionPolicy(param_dtype, reduce_dtype, output_dtype, cast_forward_inputs=False)
 
     set_mixed_precision_policy(
         param_dtype=param_dtype,
@@ -150,7 +135,7 @@ def maybe_load_fsdp_model(
         if not training_mode and not fsdp_inference:
             hsdp_replicate_dim = world_size
             hsdp_shard_dim = 1
-        
+
         if current_platform.is_npu():
             with torch.device("cpu"):
                 device_mesh = init_device_mesh(
@@ -161,11 +146,11 @@ def maybe_load_fsdp_model(
                 )
         else:
             device_mesh = init_device_mesh(
-            "cuda",
-            # (Replicate(), Shard(dim=0))
-            mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
-            mesh_dim_names=("replicate", "shard"),
-        )
+                "cuda",
+                # (Replicate(), Shard(dim=0))
+                mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+                mesh_dim_names=("replicate", "shard"),
+            )
         shard_model(model,
                     cpu_offload=cpu_offload,
                     reshard_after_forward=True,
@@ -186,30 +171,23 @@ def maybe_load_fsdp_model(
         param_names_mapping=param_names_mapping_fn,
     )
     if hasattr(model, "materialize_non_persistent_buffers"):
-        model.materialize_non_persistent_buffers(
-            device=device, dtype=default_dtype)
+        model.materialize_non_persistent_buffers(device=device, dtype=default_dtype)
     for n, p in chain(model.named_parameters(), model.named_buffers()):
         if p.is_meta:
-            raise RuntimeError(
-                f"Unexpected param or buffer {n} on meta device.")
+            raise RuntimeError(f"Unexpected param or buffer {n} on meta device.")
         # Avoid unintended computation graph accumulation during inference
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
 
-    # NVFP4 weight prequantization. We detect by the registered
-    # ``quant_method`` on linear layers rather than by a separate flag —
-    # construction-time ``NVFP4Config.get_quant_method`` already attached
-    # ``NVFP4QuantizeMethod`` to every targeted layer, so the loader's
-    # responsibility is just to materialize the per-layer nvfp4 weight /
-    # scale buffers from the freshly-loaded bf16 weights. No-op when
-    # ``flashinfer`` is not installed (lazy import inside the helper).
-    _maybe_convert_model_to_nvfp4(model)
+    # Post-load weight quantization. We detect by the registered
+    # ``quant_method`` on linear layers rather than by a separate flag.
+    _maybe_quantize_model(model)
 
-    compile_in_loader = enable_torch_compile and training_mode
+    compile_in_loader = enable_torch_compile
     if compile_in_loader:
         compile_kwargs = torch_compile_kwargs or {}
-        logger.info("Enabling torch.compile for FSDP training module with kwargs=%s",
-                    compile_kwargs)
+        profile = "training" if training_mode else "inference"
+        logger.info("Enabling torch.compile for %s module with kwargs=%s", profile, compile_kwargs)
         model = torch.compile(model, **compile_kwargs)
         logger.info("torch.compile enabled for %s", type(model).__name__)
     return model
@@ -253,7 +231,7 @@ def shard_model(
     """
     # Check if we should use size-based filtering
     use_size_filtering = os.environ.get("FASTVIDEO_FSDP2_AUTOWRAP", "0") == "1"
-    
+
     if not fsdp_shard_conditions:
         logger.warning("No FSDP shard conditions provided; nothing will be sharded.")
         return
@@ -264,44 +242,41 @@ def shard_model(
         "mp_policy": mp_policy,
     }
     if cpu_offload:
-        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(
-            pin_memory=pin_cpu_memory)
+        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(pin_memory=pin_cpu_memory)
 
     # iterating in reverse to start with
     # lowest-level modules first
     num_layers_sharded = 0
-    
+
     if use_size_filtering:
         # Size-based filtering mode
         min_params = int(os.environ.get("FASTVIDEO_FSDP2_MIN_PARAMS", "10000000"))
         logger.info("Using size-based filtering with threshold: %.2fM", min_params / 1e6)
-        
+
         for n, m in reversed(list(model.named_modules())):
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
                 # Count all parameters
                 param_count = sum(p.numel() for p in m.parameters(recurse=True))
-                
+
                 # Skip small modules
                 if param_count < min_params:
-                    logger.info("Skipping module %s (%.2fM params < %.2fM threshold)", 
-                               n, param_count / 1e6, min_params / 1e6)
+                    logger.info("Skipping module %s (%.2fM params < %.2fM threshold)", n, param_count / 1e6,
+                                min_params / 1e6)
                     continue
-                
+
                 # Shard this module
                 logger.info("Sharding module %s (%.2fM params)", n, param_count / 1e6)
                 fully_shard(m, **fsdp_kwargs)
                 num_layers_sharded += 1
     else:
-        # Shard all modules matching conditions        
+        # Shard all modules matching conditions
         for n, m in reversed(list(model.named_modules())):
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
                 fully_shard(m, **fsdp_kwargs)
                 num_layers_sharded += 1
-        
+
         if num_layers_sharded == 0:
-            raise ValueError(
-                "No layer modules were sharded. Please check if shard conditions are working as expected."
-            )
+            raise ValueError("No layer modules were sharded. Please check if shard conditions are working as expected.")
 
     # Finally shard the entire model to account for any stragglers
     fully_shard(model, **fsdp_kwargs)
@@ -341,16 +316,15 @@ def load_model_from_full_model_state_dict(
     meta_sd = model.state_dict()
     named_parameters = dict(model.named_parameters())
     sharded_sd = {}
-    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
-        full_sd_iterator, param_names_mapping)  # type: ignore
+    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
+                                                                           param_names_mapping)  # type: ignore
     for target_param_name, full_tensor in custom_param_sd.items():
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:
             # Some checkpoints include extra entries that are not part of the
             # instantiated model's state_dict (e.g. `_extra_state` keys from
             # some FSDP checkpoint formats). These can be safely skipped.
-            if (target_param_name.endswith("._extra_state")
-                    or target_param_name.endswith("_extra_state")):
+            if (target_param_name.endswith("._extra_state") or target_param_name.endswith("_extra_state")):
                 logger.warning(
                     "Skipping non-parameter checkpoint key: %s",
                     target_param_name,
@@ -379,9 +353,7 @@ def load_model_from_full_model_state_dict(
             # fall through to the original `sharded_tensor = full_tensor` below.
             if target_param is not None and callable(weight_loader) and tuple(target_param.shape) != tuple(
                     full_tensor.shape):
-                loaded_param = nn.Parameter(torch.empty(tuple(target_param.shape),
-                                                        device=device,
-                                                        dtype=param_dtype),
+                loaded_param = nn.Parameter(torch.empty(tuple(target_param.shape), device=device, dtype=param_dtype),
                                             requires_grad=False)
                 for attr_name, attr_value in vars(target_param).items():
                     setattr(loaded_param, attr_name, attr_value)
@@ -404,31 +376,23 @@ def load_model_from_full_model_state_dict(
     model.reverse_param_names_mapping = reverse_param_names_mapping
     unused_keys = set(meta_sd.keys()) - set(sharded_sd.keys())
     if unused_keys:
-        logger.warning("Found unloaded parameters in meta state dict: %s",
-                       unused_keys)
+        logger.warning("Found unloaded parameters in meta state dict: %s", unused_keys)
 
     # List of allowed parameter name patterns
     ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l"]  # Can be extended as needed
     for new_param_name in unused_keys:
-        if not any(pattern in new_param_name
-                   for pattern in ALLOWED_NEW_PARAM_PATTERNS):
-            logger.error("Unsupported new parameter: %s. Allowed patterns: %s",
-                         new_param_name, ALLOWED_NEW_PARAM_PATTERNS)
-            raise ValueError(
-                f"New parameter '{new_param_name}' is not supported. "
-                f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed."
-            )
+        if not any(pattern in new_param_name for pattern in ALLOWED_NEW_PARAM_PATTERNS):
+            logger.error("Unsupported new parameter: %s. Allowed patterns: %s", new_param_name,
+                         ALLOWED_NEW_PARAM_PATTERNS)
+            raise ValueError(f"New parameter '{new_param_name}' is not supported. "
+                             f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed.")
         meta_sharded_param = meta_sd.get(new_param_name)
         if not hasattr(meta_sharded_param, "device_mesh"):
             # Initialize with zeros
-            sharded_tensor = torch.zeros_like(meta_sharded_param,
-                                              device=device,
-                                              dtype=param_dtype)
+            sharded_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=param_dtype)
         else:
             # Initialize with zeros and distribute
-            full_tensor = torch.zeros_like(meta_sharded_param,
-                                           device=device,
-                                           dtype=param_dtype)
+            full_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=param_dtype)
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,
