@@ -10,6 +10,16 @@ from fastvideo.tests.performance.test_inference_performance import (
 )
 
 
+def _v2_config():
+    return {
+        "benchmark_id": "wan-t2v-1.3b-2gpu",
+        "config_schema_version": 2,
+        "workload_id": "wan-t2v-1.3b",
+        "variant_id": "canonical",
+        "benchmark_version": 1,
+    }
+
+
 def test_v1_benchmark_config_without_schema_version_validates():
     cfg = {
         "benchmark_id": "legacy-benchmark",
@@ -23,13 +33,7 @@ def test_v1_benchmark_config_without_schema_version_validates():
 
 
 def test_v2_benchmark_config_identity_validates_and_is_preserved():
-    cfg = {
-        "benchmark_id": "wan-t2v-1.3b-2gpu",
-        "config_schema_version": 2,
-        "workload_id": "wan-t2v-1.3b",
-        "variant_id": "canonical",
-        "benchmark_version": 1,
-    }
+    cfg = _v2_config()
 
     _validate_benchmark_config(cfg, "wan.json")
 
@@ -43,13 +47,41 @@ def test_v2_benchmark_config_identity_validates_and_is_preserved():
 
 
 def test_v2_benchmark_config_missing_identity_fields_fails_clearly():
-    cfg = {
-        "benchmark_id": "wan-t2v-1.3b-2gpu",
-        "config_schema_version": 2,
-        "workload_id": "wan-t2v-1.3b",
-    }
+    cfg = _v2_config()
+    del cfg["variant_id"]
+    del cfg["benchmark_version"]
 
     expected = "wan.json: missing required v2 identity fields: variant_id, benchmark_version"
+    with pytest.raises(ValueError, match=expected):
+        _validate_benchmark_config(cfg, "wan.json")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("workload_id", {}),
+        ("workload_id", ""),
+        ("workload_id", "   "),
+        ("variant_id", []),
+        ("variant_id", ""),
+        ("variant_id", "   "),
+    ],
+)
+def test_v2_benchmark_config_rejects_invalid_string_identity_values(field, value):
+    cfg = _v2_config()
+    cfg[field] = value
+
+    expected = f"wan.json: v2 identity field {field!r} must be a non-empty string"
+    with pytest.raises(ValueError, match=expected):
+        _validate_benchmark_config(cfg, "wan.json")
+
+
+@pytest.mark.parametrize("value", [None, "1", 1.5, True])
+def test_v2_benchmark_config_rejects_invalid_benchmark_version_values(value):
+    cfg = _v2_config()
+    cfg["benchmark_version"] = value
+
+    expected = "wan.json: v2 identity field 'benchmark_version' must be an integer"
     with pytest.raises(ValueError, match=expected):
         _validate_benchmark_config(cfg, "wan.json")
 

@@ -62,6 +62,16 @@ def _is_v2_config(cfg):
     return cfg.get("config_schema_version") == V2_CONFIG_SCHEMA_VERSION
 
 
+def _validate_non_empty_string(value, field, path):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{path}: v2 identity field {field!r} must be a non-empty string")
+
+
+def _validate_integer(value, field, path):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{path}: v2 identity field {field!r} must be an integer")
+
+
 def _validate_benchmark_config(cfg, path="<memory>"):
     missing_common = [field for field in ("benchmark_id",) if field not in cfg]
     if missing_common:
@@ -79,6 +89,10 @@ def _validate_benchmark_config(cfg, path="<memory>"):
     missing_v2 = [field for field in V2_REQUIRED_IDENTITY_FIELDS if field not in cfg]
     if missing_v2:
         raise ValueError(f"{path}: missing required v2 identity fields: {', '.join(missing_v2)}")
+
+    _validate_non_empty_string(cfg["workload_id"], "workload_id", path)
+    _validate_non_empty_string(cfg["variant_id"], "variant_id", path)
+    _validate_integer(cfg["benchmark_version"], "benchmark_version", path)
 
     for field in V2_OPTIONAL_METADATA_FIELDS:
         if field in cfg and not isinstance(cfg[field], Mapping):
