@@ -50,8 +50,10 @@ jobs:
   # 2.8.3 comes from the architecture-specific prebuilt releases.
   build-cuda-images:
     # Runs on a manual dispatch when build_cuda_matrix is set, or automatically
-    # on a push that changed docker/Dockerfile (inputs are null on push).
-    if: ${{ github.event_name == 'push' || github.event.inputs.build_cuda_matrix == 'true' }}
+    # on a push that changed docker/Dockerfile (inputs are null on push). The
+    # repository guard keeps fork syncs from auto-building; manual dispatch
+    # still works in forks.
+    if: ${{ (github.event_name == 'push' && github.repository == 'hao-ai-lab/FastVideo') || github.event.inputs.build_cuda_matrix == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -102,7 +104,7 @@ jobs:
     # CUDA lane whose own digests all exist; the digest-count check below fails
     # the incomplete lane loudly instead. Mirror build-cuda-images' trigger so
     # manifests publish on both manual dispatch and Dockerfile-push rebuilds.
-    if: ${{ !cancelled() && (github.event_name == 'push' || github.event.inputs.build_cuda_matrix == 'true') }}
+    if: ${{ !cancelled() && ((github.event_name == 'push' && github.repository == 'hao-ai-lab/FastVideo') || github.event.inputs.build_cuda_matrix == 'true') }}
     needs: build-cuda-images
     runs-on: ubuntu-latest
     permissions:
