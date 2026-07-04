@@ -17,7 +17,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
-from v2._vendor.models import build_default_engine
+from v2.recipes import build_default_engine
 from v2.core.request import DiffusionParams, OutputSpec, TaskType, make_request
 
 MODEL = "wan2.1-1.3b"

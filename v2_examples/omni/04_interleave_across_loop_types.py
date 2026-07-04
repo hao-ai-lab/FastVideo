@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from v2._vendor.models import build_omni_engine
+from v2.recipes import build_omni_engine
 from v2.core.parity import assert_interleave_parity
 from v2.core.request import DiffusionParams, SamplingParams, TaskType, make_request
 

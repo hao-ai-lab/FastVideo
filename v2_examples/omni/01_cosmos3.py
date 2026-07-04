@@ -17,7 +17,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
-from v2._vendor.models import build_omni_engine
+from v2.recipes import build_omni_engine
 from v2.core.request import DiffusionParams, SamplingParams, TaskType, make_request
 
 
@@ -31,8 +31,7 @@ def main() -> None:
     print("Cosmos3 (one MoT instance, two loop types on shared weights):")
     print(f"  reasoner text : {out.artifacts['text'].text}")
     print(f"  video         : {np.asarray(out.artifacts['video'].frames).shape}")
-    print(f"  metrics       : reasoner tokens + denoise steps both ran as WorkUnits "
-          f"(gpu_seconds={out.metrics['gpu_seconds']:.2e})")
+    print(f"  metrics       : reasoner tokens + denoise steps both ran as WorkUnits ({out.metrics})")
 
 
 if __name__ == "__main__":

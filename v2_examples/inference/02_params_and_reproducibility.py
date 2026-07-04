@@ -19,7 +19,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
-from v2._vendor.models import build_default_engine
+from v2.recipes import build_default_engine
 from v2.core.request import DiffusionParams, TaskType, make_request
 
 MODEL = "wan2.1-1.3b"
@@ -44,8 +44,7 @@ def main() -> None:
     print("\n== num_steps (latency/quality knob) ==")
     for steps in (2, 8, 25):
         out = eng.run(make_request(TaskType.T2V, MODEL, "a comet", diffusion=DiffusionParams(num_steps=steps, seed=1)))
-        print(f"  num_steps={steps:>2}  denoise_steps={out.metrics['denoise_steps']:.0f}  "
-              f"gpu_seconds={out.metrics['gpu_seconds']:.2e}")
+        print(f"  num_steps={steps:>2}  metrics={out.metrics}")
 
     print("\n== guidance_scale (CFG strength) ==")
     base = _video(eng, num_steps=6, seed=1, guidance_scale=1.0)        # 1.0 ⇒ effectively no CFG

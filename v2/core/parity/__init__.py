@@ -8,9 +8,10 @@ from __future__ import annotations
 from v2.core.enums import ConsistencyLevel, ExecutionProfile
 from v2.core.parity.aligner import ParityAligner
 from v2.core.parity.compare import compare_outputs
+from v2.core.parity.interleave import assert_interleave_parity, run_interleaved
 from v2.core.parity.ladder import Divergence, array_diff, bit_identical, within
 
 __all__ = [
     "ConsistencyLevel", "ExecutionProfile", "ParityAligner", "Divergence", "array_diff", "bit_identical", "within",
-    "compare_outputs"
+    "compare_outputs", "assert_interleave_parity", "run_interleaved"
 ]

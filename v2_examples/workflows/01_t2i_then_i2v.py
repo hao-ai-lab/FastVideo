@@ -18,7 +18,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
-from v2._vendor.models import build_image_video_engine, build_t2i_then_i2v_workflow
+from v2.recipes import build_image_video_engine, build_t2i_then_i2v_workflow
 
 
 def main() -> None:

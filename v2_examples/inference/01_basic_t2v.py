@@ -19,7 +19,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))  # repo roo
 
 import numpy as np
 
-from v2._vendor.models import build_default_engine
+from v2.recipes import build_default_engine
 from v2.core.request import DiffusionParams, TaskType, make_request
 
 MODEL = "wan2.1-1.3b"
@@ -40,8 +40,7 @@ def main() -> None:
     print(f"video    : shape={video.shape} dtype={video.dtype} "
           f"range=[{video.min():.3f}, {video.max():.3f}]")
     print(f"latent   : shape={latent.shape}")
-    print(f"metrics  : denoise_steps={out.metrics['denoise_steps']:.0f} "
-          f"gpu_seconds={out.metrics['gpu_seconds']:.2e}")
+    print(f"metrics  : {out.metrics}")
 
     print("\nThe shapes and control flow are real; the pixels are a numpy toy. On GPU, swap "
           "ComponentSpec.factory\nfor the torch Wan adapter — this script is unchanged.")
