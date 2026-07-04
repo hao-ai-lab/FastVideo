@@ -21,6 +21,12 @@ RECIPE_SCHEMA_VERSION = 1
 PROFILE_ID_LENGTH = 16
 _PATH_EXCLUDED_GENERATION_KEYS = {"output_path", "output_video_name"}
 _PROMPT_KEYS = {"prompt", "negative_prompt", "neg_prompt"}
+REQUIRED_BENCHMARK_IDENTITY_KEYS = (
+    "benchmark_id",
+    "workload_id",
+    "variant_id",
+    "benchmark_version",
+)
 _PROFILE_ENV_VARS = (
     "CUDA_VISIBLE_DEVICES",
     "FASTVIDEO_ATTENTION_BACKEND",
@@ -30,6 +36,10 @@ _PROFILE_ENV_VARS = (
 _PACKAGE_DISTRIBUTIONS = {
     "fastvideo_kernel": ("fastvideo-kernel", "fastvideo_kernel"),
     "flash_attn": ("flash-attn", "flash_attn"),
+    "flash_attn_4": ("flash-attn-4",),
+    "flash_attention_fp4": ("flash-attention-fp4",),
+    "flashinfer": ("flashinfer-python", "flashinfer"),
+    "nvidia_cutlass_dsl": ("nvidia-cutlass-dsl", "cutlass-dsl"),
     "sageattention": ("sageattention",),
     "sageattn3": ("sageattn3",),
     "triton": ("triton",),
@@ -74,6 +84,19 @@ def environment_fingerprint(metadata: Mapping[str, Any]) -> str:
     return profile_id("env", metadata)
 
 
+def benchmark_identity_from_config(cfg: Mapping[str, Any]) -> dict[str, Any]:
+    missing = [
+        key for key in REQUIRED_BENCHMARK_IDENTITY_KEYS
+        if _none_if_empty(cfg.get(key)) is None
+    ]
+    if missing:
+        raise ValueError("Benchmark config missing required identity fields: " + ", ".join(missing))
+    return {
+        key: cfg[key]
+        for key in REQUIRED_BENCHMARK_IDENTITY_KEYS
+    }
+
+
 def build_recipe_from_benchmark_config(
     cfg: Mapping[str, Any],
     *,
@@ -91,6 +114,7 @@ def build_recipe_from_benchmark_config(
     model = dict(cfg.get("model") or {})
     init_kwargs = dict(cfg.get("init_kwargs") or {})
     generation_kwargs = dict(cfg.get("generation_kwargs") or {})
+    benchmark_identity = benchmark_identity_from_config(cfg)
     prompts = list(measured_prompts) if measured_prompts is not None else list(
         cfg.get("test_prompts") or ["A cinematic video."])
     if attention_backend is None:
@@ -105,12 +129,7 @@ def build_recipe_from_benchmark_config(
 
     return {
         "recipe_schema_version": RECIPE_SCHEMA_VERSION,
-        "benchmark": {
-            "benchmark_id": cfg.get("benchmark_id"),
-            "workload_id": cfg.get("workload_id"),
-            "variant_id": cfg.get("variant_id"),
-            "benchmark_version": cfg.get("benchmark_version"),
-        },
+        "benchmark": benchmark_identity,
         "model": {
             "model_path": normalize_model_path(model.get("model_path")),
             "revision": _none_if_empty(model.get("revision") or cfg.get("revision")),
@@ -376,6 +395,8 @@ def _major_minor(version: str | None) -> str | None:
 
 __all__ = [
     "RECIPE_SCHEMA_VERSION",
+    "REQUIRED_BENCHMARK_IDENTITY_KEYS",
+    "benchmark_identity_from_config",
     "canonical_json",
     "environment_fingerprint",
     "environment_metadata",

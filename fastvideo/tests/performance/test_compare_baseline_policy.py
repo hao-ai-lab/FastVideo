@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import pytest
+
 from fastvideo.tests.performance import compare_baseline
 from fastvideo.performance.metric_policy import resolve_metric_policies
 
@@ -197,6 +199,32 @@ def test_comparison_identity_filters_use_full_issue_key():
         "hardware_profile_id": "hw-1",
         "software_profile_id": "sw-1",
     }
+
+
+def test_comparison_identity_filters_require_full_issue_key():
+    record = {
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 0,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-1",
+    }
+
+    with pytest.raises(ValueError, match="software_profile_id"):
+        compare_baseline._comparison_identity_filters(record)
+
+
+def test_comparison_identity_filters_keep_zero_version():
+    record = {
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 0,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-1",
+        "software_profile_id": "sw-1",
+    }
+
+    assert compare_baseline._comparison_identity_filters(record)["benchmark_version"] == "0"
 
 
 def test_baseline_eligibility_only_for_successful_scheduled_main():
