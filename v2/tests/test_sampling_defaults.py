@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from v2.core.card import SamplingDefaults
 from v2.recipes.ltx2 import build_ltx2_3_card, build_ltx2_base_card, build_ltx2_card
 from v2.recipes.wan21 import (
+    build_fastwan_qad_fp8_card,
     build_wan21_card,
     build_wan22_a14b_card,
     build_wan22_ti2v_card,
@@ -11,7 +12,7 @@ from v2.recipes.wan21 import (
 )
 from v2.recipes.wan_causal import build_wan_causal_card
 from v2.registry import resolve
-from v2.video_generator import _resolve_default
+from v2.video_generator import VideoGenerator, _resolve_default
 
 
 def test_wan_t2v_14b_defaults_and_registry():
@@ -42,6 +43,19 @@ def test_wan22_a14b_defaults():
 def test_wan_causal_defaults():
     sd = build_wan_causal_card().sampling_defaults
     assert (sd.num_steps, sd.guidance_scale, sd.height, sd.width, sd.num_frames, sd.fps) == (4, 1.0, 480, 832, 81, 16)
+
+
+def test_fastwan_qad_fp8_defaults_and_registry():
+    card = build_fastwan_qad_fp8_card()
+    sd = card.sampling_defaults
+    assert (sd.num_steps, sd.guidance_scale, sd.height, sd.width, sd.num_frames, sd.fps) == (3, 1.0, 480, 832, 81, 16)
+    assert sd.negative_prompt == ""
+    assert card.components["transformer"].precision_policy == "fp8"
+    assert card.precision.quantization_scheme == "fp8"
+    build_card, _ = resolve("FastVideo/FastWan-QAD-FP8-1.3B")
+    resolved = build_card()
+    assert resolved.model_id == "fastwan-qad-fp8-1.3b"
+    assert resolved.recipe.method == "qad_fp8"
 
 
 def test_ltx2_two_stage_defaults():
@@ -75,3 +89,29 @@ def test_resolve_precedence():
     assert _resolve_default("width", 832, {}, None, sd) == 832
     # empty-string negative prompt is a real value, not "unset"
     assert _resolve_default("negative_prompt", None, {}, None, SamplingDefaults(negative_prompt="")) == ""
+
+
+def test_from_pretrained_threads_compile_config(monkeypatch):
+    captured = {}
+
+    def fake_from_config(cls, config):
+        captured["config"] = config
+        return "ok"
+
+    monkeypatch.setattr(VideoGenerator, "from_config", classmethod(fake_from_config))
+
+    result = VideoGenerator.from_pretrained("model",
+                                            enable_torch_compile=True,
+                                            torch_compile_backend="inductor",
+                                            torch_compile_mode="reduce-overhead",
+                                            torch_compile_kwargs={"dynamic": False},
+                                            enable_torch_compile_vae=True)
+
+    assert result == "ok"
+    compile_config = captured["config"].engine.compile
+    assert compile_config.enabled is True
+    assert compile_config.backend == "inductor"
+    assert compile_config.mode == "reduce-overhead"
+    assert compile_config.dynamic is False
+    assert compile_config.extras == {}
+    assert compile_config.vae_enabled is True

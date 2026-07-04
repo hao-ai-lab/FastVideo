@@ -26,6 +26,7 @@ from v2.core.card import (
 from v2.core.loop.policies import (
     BoundaryTimestepRouting,
     ClassicCFG,
+    EmbeddedGuidance,
     FlowShiftPolicy,
     NoRouting,
     PrecisionPolicy,
@@ -33,7 +34,7 @@ from v2.core.loop.policies import (
 from v2.core.parallel import ParallelPlan
 from v2.platform.backends.toy import ToyDiT, ToyTextEncoder, ToyVAE, _seed_from
 from v2.recipes._prompts import WAN_NEG_CN, WAN_NEG_EN
-from v2.recipes.wan21.loop import WanDenoiseLoop
+from v2.recipes.wan21.loop import WanDMDLoop, WanDenoiseLoop
 
 
 def build_wan21_card(model_id: str = "wan2.1-1.3b",
@@ -99,8 +100,7 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b",
         loops=loops,
         capabilities=CapabilityMatrix.of(
             Capability.TEXT_TO_VIDEO,  # base Wan2.1 is T2V-only; i2v is the separate InP variant
-            Capability.VAE_DECODE,
-            Capability.POLICY_ROLLOUT),
+            Capability.VAE_DECODE),
         recipe=RecipeSpec(method="base",
                           assumes_loop="diffusion_denoise",
                           assumes_precision="float32",
@@ -108,7 +108,7 @@ def build_wan21_card(model_id: str = "wan2.1-1.3b",
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1],
                           tests=[ParityTestSpec(name="denoise_trajectory", level=ConsistencyLevel.C1, tap="latents")]),
         caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True)},
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(
             valid_plans=[ParallelPlan.single(),
                          ParallelPlan(axes={
@@ -181,12 +181,13 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b",
     expert = BoundaryTimestepRouting(high_noise="transformer", low_noise="transformer_2", boundary=boundary)
 
     def loop_factory():
-        return WanDenoiseLoop(loop_id="diffusion_denoise",
-                              cfg=cfg,
-                              flow_shift=flow,
-                              precision=precision,
-                              expert=expert,
-                              )  # 16/8/4 default geometry
+        return WanDenoiseLoop(
+            loop_id="diffusion_denoise",
+            cfg=cfg,
+            flow_shift=flow,
+            precision=precision,
+            expert=expert,
+        )  # 16/8/4 default geometry
 
     def _dit_spec(cid: str) -> ComponentSpec:
         return ComponentSpec(component_id=cid,
@@ -229,7 +230,7 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b",
         family="wan",
         components=components,
         loops=loops,
-        capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.VAE_DECODE, Capability.POLICY_ROLLOUT),
+        capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.VAE_DECODE),
         recipe=RecipeSpec(method="base",
                           assumes_loop="diffusion_denoise",
                           assumes_precision="float32",
@@ -237,7 +238,7 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b",
         parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1],
                           tests=[ParityTestSpec(name="denoise_trajectory", level=ConsistencyLevel.C1, tap="latents")]),
         caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True)},
-        precision=PrecisionContract(default_dtype="float32", training_precision="float32"),
+        precision=PrecisionContract(default_dtype="float32"),
         parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
         sampling_defaults=SamplingDefaults(num_steps=40,
                                            guidance_scale=4.0,
@@ -247,6 +248,96 @@ def build_wan22_a14b_card(model_id: str = "wan2.2-t2v-a14b",
                                            fps=16,
                                            negative_prompt=WAN_NEG_CN),
         device_io=True,  # WanDenoiseLoop + Wan adapters are array-agnostic -> keep the latent on-device
+    )
+    card.validate()
+    if checkpoint_root:
+        stamp_wan21_checkpoints(card, checkpoint_root)
+    return card
+
+
+def build_fastwan_qad_fp8_card(
+    model_id: str = "fastwan-qad-fp8-1.3b",
+    *,
+    checkpoint_root: str | None = None,
+    dmd_timesteps: tuple[int, ...] = (1000, 757, 522)) -> ModelCard:
+    """FastWan-QAD-FP8-1.3B card.
+
+    The checkpoint uses the Wan2.1 1.3B component layout, but the QAD distilled
+    weights assume a three-step DMD loop with no classifier-free guidance and
+    FP8 post-load linear quantization.
+    """
+    seed = _seed_from(model_id)
+    cfg = EmbeddedGuidance()
+    flow = FlowShiftPolicy(shift=8.0)
+    precision = PrecisionPolicy(compute_dtype="float32", scheduler_step_in_fp32=True)
+    expert = NoRouting("transformer")
+
+    def loop_factory():
+        return WanDMDLoop(loop_id="diffusion_denoise",
+                          cfg=cfg,
+                          flow_shift=flow,
+                          precision=precision,
+                          expert=expert,
+                          dmd_timesteps=dmd_timesteps)
+
+    components = {
+        "text_encoder":
+        ComponentSpec(component_id="text_encoder",
+                      kind="text_encoder",
+                      load_id="fastvideo.models.encoders.t5:T5EncoderModel",
+                      factory=lambda inst: ToyTextEncoder(),
+                      required_for={"t2v"}),
+        "vae":
+        ComponentSpec(component_id="vae",
+                      kind="vae",
+                      load_id="fastvideo.models.vaes.wanvae:AutoencoderKLWan",
+                      factory=lambda inst: ToyVAE(),
+                      required_for={"t2v"}),
+        "transformer":
+        ComponentSpec(component_id="transformer",
+                      kind="dit",
+                      load_id="fastvideo.models.dits.wanvideo:WanTransformer3DModel",
+                      precision_policy="fp8",
+                      factory=lambda inst: ToyDiT(seed=seed),
+                      resident_for=["diffusion_denoise"],
+                      required_for={"t2v"}),
+    }
+    loops = {
+        "diffusion_denoise":
+        LoopSpec(loop_id="diffusion_denoise",
+                 kind=LoopKind.DIFFUSION_DENOISE,
+                 work_unit_kind=WorkUnitKind.DIFFUSION_STEP,
+                 shared_weight_components=["transformer"],
+                 cache_policy=["feature"],
+                 graph_capture="eager",
+                 loop_factory=loop_factory),
+    }
+    card = ModelCard(
+        model_id=model_id,
+        family="wan",
+        components=components,
+        loops=loops,
+        capabilities=CapabilityMatrix.of(Capability.TEXT_TO_VIDEO, Capability.VAE_DECODE),
+        recipe=RecipeSpec(method="qad_fp8",
+                          parents=["wan2.1-1.3b"],
+                          assumes_loop="diffusion_denoise",
+                          assumes_precision="fp8",
+                          consistency_required=ConsistencyLevel.C1),
+        parity=ParitySpec(consistency_levels=[ConsistencyLevel.C1],
+                          tests=[ParityTestSpec(name="dmd_trajectory", level=ConsistencyLevel.C1, tap="latents")]),
+        caches={"feature": CacheContract(cache_class="feature", max_bytes=1 << 24, reuse_across_requests=True)},
+        precision=PrecisionContract(default_dtype="float32",
+                                    component_overrides={"transformer": "fp8"},
+                                    quantization_scheme="fp8"),
+        parallelism=ParallelismContract(valid_plans=[ParallelPlan.single()], default_plan=ParallelPlan.single()),
+        sampling_defaults=SamplingDefaults(num_steps=len(dmd_timesteps),
+                                           guidance_scale=1.0,
+                                           height=480,
+                                           width=832,
+                                           num_frames=81,
+                                           fps=16,
+                                           negative_prompt=""),
+        device_io=True,
     )
     card.validate()
     if checkpoint_root:

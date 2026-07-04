@@ -79,6 +79,7 @@ def _entries() -> list[ModelEntry]:
     )
     from v2.recipes.wan_causal import build_wan_causal_card, build_wan_causal_program
     from v2.recipes.wan21 import (
+        build_fastwan_qad_fp8_card,
         build_wan21_card,
         build_wan22_a14b_card,
         build_wan22_ti2v_card,
@@ -102,6 +103,7 @@ def _entries() -> list[ModelEntry]:
         ModelEntry(("Wan-AI/Wan2.2-I2V-A14B-Diffusers", ), build_wan22_i2v_a14b_card, build_wan21_i2v_program),
         ModelEntry(("Wan-AI/Wan2.2-TI2V-5B-Diffusers", ), build_wan22_ti2v_card, build_wan_t2v_program),
         ModelEntry(("Wan-AI/Wan2.2-T2V-A14B-Diffusers", ), build_wan22_a14b_card, build_wan_t2v_program),
+        ModelEntry(("FastVideo/FastWan-QAD-FP8-1.3B", ), build_fastwan_qad_fp8_card, build_wan_t2v_program),
         ModelEntry(("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers", ), build_wan_causal_card, build_wan_causal_program),
         # LTX-2 two-stage distilled (ships a spatial_upsampler: base -> upsample -> refine):
         ModelEntry(("FastVideo/LTX2-Distilled-Diffusers", ), build_ltx2_card, build_ltx2_program),

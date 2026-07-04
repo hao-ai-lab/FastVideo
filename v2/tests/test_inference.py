@@ -5,9 +5,12 @@ import numpy as np
 
 from v2.recipes import build_default_engine
 from v2.recipes.ltx2 import BASE_SIGMAS, REFINE_SIGMAS, build_ltx2_card
-from v2.recipes.wan21 import build_wan21_card
+from v2.recipes.wan21 import build_fastwan_qad_fp8_card, build_wan21_card, build_wan_t2v_program
 from v2.recipes.wan_causal import build_wan_causal_card
+from v2.core.card import load_card
 from v2.core.request import DiffusionParams, OutputSpec, TaskType, make_request
+from v2.runtime import Engine
+from v2.runtime.cache import CacheManager
 
 
 def _eng():
@@ -22,6 +25,19 @@ def test_wan_t2v_produces_video_and_latents():
     assert out.artifacts["video"].frames is not None
     assert out.artifacts["latents"].latent is not None
     assert out.metrics["denoise_steps"] == 4.0
+
+
+def test_fastwan_qad_fp8_dmd_loop_produces_video_and_latents():
+    card = build_fastwan_qad_fp8_card()
+    eng = Engine()
+    eng.register(card.model_id,
+                 load_card(card, cache_manager=CacheManager.from_card(card)),
+                 build_wan_t2v_program())
+    req = make_request(TaskType.T2V, card.model_id, "a cat", diffusion=DiffusionParams(num_steps=50, seed=1))
+    out = eng.run(req)
+    assert out.artifacts["video"].frames is not None
+    assert out.artifacts["latents"].latent is not None
+    assert out.metrics["denoise_steps"] == 3.0
 
 
 def test_ltx2_two_stage_step_counts():
@@ -73,6 +89,6 @@ def test_streaming_emits_chunks_only_when_requested():
 
 def test_all_cards_recipe_runtime_bound():
     # the (recipe, runtime) pair: every card's recipe assumes a loop the card declares
-    for build in (build_wan21_card, build_ltx2_card, build_wan_causal_card):
+    for build in (build_wan21_card, build_fastwan_qad_fp8_card, build_ltx2_card, build_wan_causal_card):
         card = build()
         assert card.recipe.assumes_loop in card.loops

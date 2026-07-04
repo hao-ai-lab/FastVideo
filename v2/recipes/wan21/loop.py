@@ -3,7 +3,7 @@
 Bidirectional video diffusion: N flow-match steps over the full latent. Composed from policies
 (CFG / flow-shift / precision / expert routing). ``next`` is kernel-free (it builds the
 forward+combine+solver thunk); ``advance`` folds the result and, under the ROLLOUT profile,
-captures a behavior slice — so the *same* loop serves and rolls out for RL. All per-request
+captures an inference trajectory slice. All per-request
 state lives in ``LoopState`` (interleave-safe).
 """
 from __future__ import annotations
@@ -57,14 +57,14 @@ class WanDenoiseLoop:
 
     def __init__(self,
                  *,
-                 loop_id,
-                 cfg,
-                 flow_shift,
-                 precision,
-                 expert,
-                 latent_channels=WAN_LATENT_CHANNELS,
-                 spatial_ratio=WAN_SPATIAL_RATIO,
-                 temporal_ratio=WAN_TEMPORAL_RATIO):
+                 loop_id: str,
+                 cfg: Any,
+                 flow_shift: Any,
+                 precision: Any,
+                 expert: Any,
+                 latent_channels: int = WAN_LATENT_CHANNELS,
+                 spatial_ratio: int = WAN_SPATIAL_RATIO,
+                 temporal_ratio: int = WAN_TEMPORAL_RATIO) -> None:
         self.loop_id = loop_id
         self.cfg = cfg
         self.flow_shift = flow_shift
@@ -110,7 +110,7 @@ class WanDenoiseLoop:
         # Absent for T2V -> None -> the dit call + capture are unchanged.
         st.scratch["i2v_cond"] = ctx.slots.get("i2v_cond")
         st.scratch["i2v_img_embeds"] = ctx.slots.get("i2v_img_embeds")
-        # FlowGRPO RL rollout: switch the sampler to SDE-with-logprob (else deterministic ODE serve).
+        # Stochastic sampling: switch the sampler to SDE-with-logprob metadata.
         st.scratch["sde"] = bool(getattr(req.diffusion, "sde_rollout", False))
         st.scratch["sde_noise_scale"] = float(getattr(req.diffusion, "sde_noise_scale", 0.7))
         st.plugin_state["cfg"] = {}
@@ -257,3 +257,116 @@ class WanDenoiseLoop:
         return LoopResult(outputs={"latents": st.latents["video"]},
                           metrics={"denoise_steps": float(st.step_idx)},
                           behavior=st.trajectory or None)
+
+
+class WanDMDLoop(WanDenoiseLoop):
+    """Few-step FastWan/QAD loop.
+
+    FastWan's DMD sampler predicts a clean latent at explicit timesteps, then
+    re-noises that prediction to the next timestep. This differs from the base
+    Wan Euler loop, so the distilled weights get their own loop contract.
+    """
+
+    def __init__(self, *, dmd_timesteps: tuple[int, ...] = (1000, 757, 522), **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.dmd_timesteps = tuple(int(t) for t in dmd_timesteps)
+
+    @staticmethod
+    def _sigmas_from_timesteps(timesteps: tuple[int, ...]) -> list[float]:
+        return [max(0.0, min(1.0, float(t) / 1000.0)) for t in timesteps]
+
+    def init(self, req, model, ctx) -> LoopState:
+        seed = req.diffusion.seed if req.diffusion.seed is not None else 0
+        rng = np.random.default_rng(seed)
+        sig = self._sigmas_from_timesteps(self.dmd_timesteps)
+        shape = latent_shape(req,
+                             model,
+                             channels=self.latent_channels,
+                             spatial_ratio=self.spatial_ratio,
+                             temporal_ratio=self.temporal_ratio)
+        xp = model.platform.xp
+        x = xp.from_host((rng.standard_normal(shape) * float(sig[0])).astype("float32"))
+        st = LoopState(loop_id=self.loop_id,
+                       instance_id=model.card.model_id,
+                       request_id=req.request_id,
+                       profile=ctx.profile,
+                       rng=rng,
+                       seed=seed,
+                       latents={"video": x},
+                       sigmas=sig,
+                       timesteps=[float(t) for t in self.dmd_timesteps])
+        st.cond["prompt_embeds"] = ctx.slots.get("text_embeds")
+        st.cond["negative_prompt_embeds"] = ctx.slots.get("neg_text_embeds")
+        st.scratch["xp"] = xp
+        st.scratch["on_device"] = (getattr(model.platform, "device", "cpu") == "cuda")
+        st.scratch["guidance_scale"] = float(req.diffusion.guidance_scale)
+        st.scratch["stream_video"] = bool(req.outputs.stream.get("video"))
+        st.scratch["i2v_cond"] = ctx.slots.get("i2v_cond")
+        st.scratch["i2v_img_embeds"] = ctx.slots.get("i2v_img_embeds")
+        st.plugin_state["cfg"] = {}
+        return st
+
+    def next(self, st: LoopState):
+        i = st.step_idx
+        if i >= len(st.sigmas):
+            return Done()
+        sigma_t = st.sigmas[i]
+        expert_id = self.expert.expert_for(StepContext(i, st.timesteps[i], sigma_t))
+        sctx = StepContext(step_idx=i, timestep=st.timesteps[i], sigma=sigma_t, active_expert_id=expert_id)
+        cfg_state = st.plugin_state["cfg"]
+        branches = self.cfg.branches_this_step(sctx, cfg_state)
+        x = st.latents["video"]
+        pe, ne = st.cond["prompt_embeds"], st.cond["negative_prompt_embeds"]
+        scale = st.scratch["guidance_scale"]
+        cfg, precision = self.cfg, self.precision
+        xp, rng = st.scratch["xp"], st.rng
+        i2v_ctx, i2v_cond = st.scratch.get("i2v_img_embeds"), st.scratch.get("i2v_cond")
+
+        def _velocity(model: Any, x_: Any, sigma_t_: float, pe_: Any, ne_: Any, scale_: float) -> Any:
+            dit = model.component(expert_id)
+            preds = {
+                b: dit(x_, pe_ if b == "cond" else ne_, sigma_t_, context=i2v_ctx, cond=i2v_cond)
+                for b in branches
+            }
+            return precision.cast(cfg.combine(preds, scale_, sctx, cfg_state))
+
+        def run(model, override=None):
+            if override is not None and "noise_pred" in override:
+                velocity = precision.cast(xp.from_host(override["noise_pred"]))
+            else:
+                velocity = _velocity(model, x, sigma_t, pe, ne, scale)
+            pred_video = precision.cast(x) - float(sigma_t) * velocity
+            if i < len(st.sigmas) - 1:
+                sigma_next = st.sigmas[i + 1]
+                noise = xp.from_host(rng.standard_normal(x.shape).astype("float32"))
+                x_next = (1.0 - float(sigma_next)) * pred_video + float(sigma_next) * noise
+            else:
+                x_next = pred_video
+            return StepResult(output={"noise_pred": xp.to_f32(velocity), "latents": xp.to_f32(x_next)})
+
+        cond_bytes = sum(int(e.nbytes) for e in (pe, ne) if e is not None)
+        res = ResourceRequest(resident_bytes=int(x.nbytes) + cond_bytes, peak_activation_bytes=int(x.nbytes))
+        emits = []
+        if st.scratch.get("stream_video"):
+            emits.append(StreamChunk(stream_id=st.request_id, modality="video", seq=i, data=xp.to_host(x),
+                                     preview=True))
+        return WorkPlan(
+            loop_id=self.loop_id,
+            instance_id=st.instance_id,
+            kind=WorkUnitKind.DIFFUSION_STEP,
+            shape_sig=ShapeSignature(
+                WorkUnitKind.DIFFUSION_STEP,
+                dims=tuple(x.shape),
+                dtype=precision.compute_dtype,
+                extra=(("cfg", type(cfg).__name__), ("sampler", "dmd")),
+            ),
+            resources=res,
+            payload={
+                "branch": "combined",
+                "step": i,
+            },
+            run=run,
+            label=f"wan.dmd.{i}",
+            emits=emits,
+            capturable=False,
+        )
