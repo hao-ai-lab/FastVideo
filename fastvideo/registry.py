@@ -506,8 +506,12 @@ def _register_configs() -> None:
         return _is_kandinsky5(path_lower) and "t2v" in path_lower and "i2v" not in path_lower
 
     def _is_kandinsky5_i2v(path: str) -> bool:
+        # Exclude "t2v" so a T2V checkpoint stored under an i2v-containing
+        # directory (e.g. ~/i2v_experiments/kandinsky5-t2v-ft) is not
+        # misrouted; ambiguous paths fall through to the model_index
+        # _class_name fallback detectors below.
         path_lower = path.lower()
-        return _is_kandinsky5(path_lower) and "i2v" in path_lower
+        return _is_kandinsky5(path_lower) and "i2v" in path_lower and "t2v" not in path_lower
 
     def _is_kandinsky5_t2v_lite(path: str) -> bool:
         path_lower = path.lower()
@@ -574,7 +578,7 @@ def _register_configs() -> None:
         pipeline_config_cls=Kandinsky5T2VConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
-            "kandinskylab/Kandinsky-5.0-T2V-Lite-distilled-5s-Diffusers",
+            "kandinskylab/Kandinsky-5.0-T2V-Lite-distilled16steps-5s-Diffusers",
         ],
         model_detectors=[
             _is_kandinsky5_t2v_lite_distilled,
@@ -636,6 +640,35 @@ def _register_configs() -> None:
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_i2v_pro_distilled_5s",
+    )
+
+    # Kandinsky5 fallbacks — registered AFTER the variant detectors so those
+    # win first-match. Catch checkpoints the variant detectors cannot resolve:
+    # token-less local paths matched via the model_index _class_name
+    # ("kandinsky5t2vpipeline" carries no lite/pro marker), variant combos
+    # without a dedicated entry (e.g. I2V Lite distilled), and t2v+i2v
+    # ambiguous paths resolved by the checkpoint's _class_name.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5T2VConfig,
+        workload_types=(),
+        model_detectors=[
+            _is_kandinsky5_t2v,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_t2v_lite_5s",
+        pipeline_cls_name="Kandinsky5T2VPipeline",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5I2VConfig,
+        workload_types=(),
+        model_detectors=[
+            _is_kandinsky5_i2v,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_i2v_lite_5s",
+        pipeline_cls_name="Kandinsky5I2VPipeline",
     )
 
     # LongCat (T2V, I2V, VC use same config; workload varies by path)
