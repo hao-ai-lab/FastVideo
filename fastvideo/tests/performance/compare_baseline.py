@@ -174,10 +174,15 @@ def _identity_metadata(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _comparison_identity_filters(record: dict[str, Any]) -> dict[str, str]:
+    missing = [
+        key for key in COMPARISON_IDENTITY_KEYS
+        if key not in record or record[key] is None or (isinstance(record[key], str) and not record[key].strip())
+    ]
+    if missing:
+        raise ValueError("Performance record missing required comparison identity fields: " + ", ".join(missing))
     return {
         key: str(record[key])
         for key in COMPARISON_IDENTITY_KEYS
-        if record.get(key)
     }
 
 
