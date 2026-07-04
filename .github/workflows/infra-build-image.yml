@@ -100,11 +100,10 @@ jobs:
     secrets: inherit
 
   publish-cuda-manifests:
-    # !cancelled(): a failed sibling build leg must not skip the manifests for a
-    # CUDA lane whose own digests all exist; the digest-count check below fails
-    # the incomplete lane loudly instead. Mirror build-cuda-images' trigger so
-    # manifests publish on both manual dispatch and Dockerfile-push rebuilds.
-    if: ${{ !cancelled() && ((github.event_name == 'push' && github.repository == 'hao-ai-lab/FastVideo') || github.event.inputs.build_cuda_matrix == 'true') }}
+    # !cancelled(): publish lanes whose digests exist even if a sibling build
+    # leg failed (the digest-count check fails incomplete lanes); it also
+    # bypasses skipped-needs propagation, hence the explicit skipped check.
+    if: ${{ !cancelled() && needs.build-cuda-images.result != 'skipped' }}
     needs: build-cuda-images
     runs-on: ubuntu-latest
     permissions:
