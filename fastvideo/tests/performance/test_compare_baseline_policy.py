@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from fastvideo.tests.performance import compare_baseline
+from fastvideo.tests.performance.metric_policy import resolve_metric_policies
 
 
 def _raw_result():
@@ -72,9 +73,130 @@ def test_normalized_record_includes_source_metadata(monkeypatch):
     assert record["job_id"] == "job-1"
 
 
+def test_normalized_record_includes_effective_regression_thresholds(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    raw = _raw_result()
+    raw["regression_thresholds"] = {
+        "latency": {
+            "threshold_percent": 0.09,
+            "threshold_absolute": 0.75,
+            "gated": True,
+        },
+        "throughput": {
+            "gated": False,
+        },
+    }
+
+    record = compare_baseline.normalize_performance_result(raw)
+
+    assert record["regression_thresholds"]["latency"] == {
+        "threshold_percent": 0.09,
+        "threshold_absolute": 0.75,
+        "gated": True,
+    }
+    assert record["regression_thresholds"]["throughput"]["gated"] is False
+
+
 def test_baseline_eligibility_only_for_successful_scheduled_main():
     assert compare_baseline._is_baseline_eligible("scheduled_main", True) is True
     assert compare_baseline._is_baseline_eligible("scheduled_main", False) is False
     assert compare_baseline._is_baseline_eligible("pr", True) is False
     assert compare_baseline._is_baseline_eligible("local", True) is False
 
+
+def test_latency_regression_requires_percent_and_absolute_floors():
+    baseline = [{"latency": 10.0}]
+    current = {"model_id": "wan", "latency": 10.6}
+
+    percent_only = resolve_metric_policies({
+        "latency": {
+            "threshold_percent": 0.05,
+            "threshold_absolute": 0.75,
+        }
+    })
+    absolute_only = resolve_metric_policies({
+        "latency": {
+            "threshold_percent": 0.10,
+            "threshold_absolute": 0.5,
+        }
+    })
+    both = resolve_metric_policies({
+        "latency": {
+            "threshold_percent": 0.05,
+            "threshold_absolute": 0.5,
+        }
+    })
+
+    assert compare_baseline._check_regressions(current, baseline, percent_only) == []
+    assert compare_baseline._check_regressions(current, baseline, absolute_only) == []
+
+    failures = compare_baseline._check_regressions(current, baseline, both)
+    assert len(failures) == 1
+    assert "latency regressed by 6.0% and 0.600" in failures[0]
+
+
+def test_throughput_regression_uses_higher_is_better_direction():
+    baseline = [{"throughput": 10.0}]
+    current = {"model_id": "wan", "throughput": 9.0}
+    policies = resolve_metric_policies({
+        "throughput": {
+            "threshold_percent": 0.05,
+            "threshold_absolute": 0.5,
+        }
+    })
+
+    failures = compare_baseline._check_regressions(current, baseline, policies)
+
+    assert len(failures) == 1
+    assert "throughput regressed by 10.0% and 1.000" in failures[0]
+
+
+def test_memory_regression_uses_metric_specific_absolute_floor():
+    baseline = [{"memory": 10000.0}]
+    current = {"model_id": "wan", "memory": 10600.0}
+    policies = resolve_metric_policies({
+        "memory": {
+            "threshold_percent": 0.05,
+            "threshold_absolute": 256.0,
+        }
+    })
+
+    failures = compare_baseline._check_regressions(current, baseline, policies)
+
+    assert len(failures) == 1
+    assert "memory regressed by 6.0% and 600.0" in failures[0]
+
+
+def test_component_metric_can_gate_independently():
+    baseline = [{"dit_time_s": 8.0}]
+    current = {"model_id": "wan", "dit_time_s": 8.6}
+    policies = resolve_metric_policies({
+        "dit_time_s": {
+            "threshold_percent": 0.05,
+            "threshold_absolute": 0.25,
+        }
+    })
+
+    failures = compare_baseline._check_regressions(current, baseline, policies)
+
+    assert len(failures) == 1
+    assert "dit_time_s regressed by 7.5% and 0.600" in failures[0]
+
+
+def test_informational_metric_remains_visible_without_failing():
+    baseline = [{"throughput": 10.0}]
+    current = {"model_id": "wan", "gpu_type": "NVIDIA L40S", "throughput": 8.0}
+    policies = resolve_metric_policies({
+        "throughput": {
+            "threshold_percent": 0.01,
+            "threshold_absolute": 0.01,
+            "gated": False,
+        }
+    })
+
+    row = compare_baseline._build_summary_row(current, baseline, policies, False)
+
+    assert compare_baseline._check_regressions(current, baseline, policies) == []
+    assert row["metrics"]["throughput"]["regression_pct"] == 20.0
+    assert row["metrics"]["throughput"]["gated"] is False
+    assert row["metrics"]["throughput"]["regressed"] is False

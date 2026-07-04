@@ -45,5 +45,37 @@
       "max_generation_time_s": 120.0,
       "max_peak_memory_mb": 30000.0
     }
+  },
+  "regression_thresholds": {
+    "latency": {
+      "threshold_percent": 0.08,
+      "threshold_absolute": 0.5,
+      "gated": true
+    },
+    "throughput": {
+      "threshold_percent": 0.08,
+      "threshold_absolute": 0.05,
+      "gated": true
+    },
+    "memory": {
+      "threshold_percent": 0.05,
+      "threshold_absolute": 256.0,
+      "gated": true
+    },
+    "text_encoder_time_s": {
+      "threshold_percent": 0.05,
+      "threshold_absolute": 0.25,
+      "gated": true
+    },
+    "dit_time_s": {
+      "threshold_percent": 0.05,
+      "threshold_absolute": 0.25,
+      "gated": true
+    },
+    "vae_decode_time_s": {
+      "threshold_percent": 0.05,
+      "threshold_absolute": 0.25,
+      "gated": true
+    }
   }
 }

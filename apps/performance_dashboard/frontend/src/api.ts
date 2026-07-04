@@ -2,6 +2,11 @@ export type MetricValue = {
   current: number | null;
   baseline: number | null;
   regression_pct: number | null;
+  absolute_delta: number | null;
+  threshold_percent: number;
+  threshold_absolute: number;
+  gated: boolean;
+  regressed: boolean;
   label: string;
   lower_is_better: boolean;
   precision: number;
@@ -15,7 +20,7 @@ export type SummaryRow = {
   success: boolean;
   baseline_n: number;
   worst_regression_pct: number | null;
-  regression_threshold_pct: number;
+  failing_metrics: string[];
   computed_regression_status: "pass" | "fail";
   status: "pass" | "fail";
   run_source: RunSource;

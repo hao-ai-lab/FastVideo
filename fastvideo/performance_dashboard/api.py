@@ -150,7 +150,6 @@ def create_app(store: PerformanceDataStore | None = None) -> FastAPI:
         filtered = filter_records(loaded, model_id=model_id, gpu_type=gpu_type)
         rows = build_latest_summary(
             filtered,
-            max_regression=float(os.environ.get("PERF_MAX_REGRESSION", "0.05")),
             run_source=run_source,
         )
         return {

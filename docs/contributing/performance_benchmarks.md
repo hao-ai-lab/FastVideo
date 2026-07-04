@@ -92,16 +92,18 @@ and recipe changes instead of treating all records for a model as equivalent.
 
 ## Metrics
 
-Each benchmark records six metrics:
+Each benchmark records six metrics. The rolling-baseline comparator also has a
+per-metric policy with direction, percent threshold, absolute threshold, and a
+`gated` flag.
 
-| Metric | Raw key | Normalized key | Direction |
-|---|---|---|---|
-| End-to-end generation latency | `avg_generation_time_s` | `latency` | Lower is better |
-| Video throughput | `throughput_fps` | `throughput` | Higher is better |
-| Peak GPU memory | `max_peak_memory_mb` | `memory` | Lower is better |
-| Text encoder time | `text_encoder_time_s` | `text_encoder_time_s` | Lower is better |
-| DiT denoising time | `dit_time_s` | `dit_time_s` | Lower is better |
-| VAE decode time | `vae_decode_time_s` | `vae_decode_time_s` | Lower is better |
+| Metric | Raw key | Normalized key | Direction | Default rolling policy |
+|---|---|---|---|---|
+| End-to-end generation latency | `avg_generation_time_s` | `latency` | Lower is better | 8% and 0.5 s |
+| Video throughput | `throughput_fps` | `throughput` | Higher is better | 8% and 0.05 FPS |
+| Peak GPU memory | `max_peak_memory_mb` | `memory` | Lower is better | 5% and 256 MB |
+| Text encoder time | `text_encoder_time_s` | `text_encoder_time_s` | Lower is better | 5% and 0.25 s |
+| DiT denoising time | `dit_time_s` | `dit_time_s` | Lower is better | 5% and 0.25 s |
+| VAE decode time | `vae_decode_time_s` | `vae_decode_time_s` | Lower is better | 5% and 0.25 s |
 
 `test_inference_performance.py` temporarily sets `FASTVIDEO_STAGE_LOGGING=1`
 while it runs so pipeline stage execution times are available in
@@ -156,9 +158,19 @@ headroom and almost never need touching.
 
 `compare_baseline.py` loads the last 5 successful, baseline-eligible records
 for the same `(model_id, gpu_type)` from the HF dataset, computes the median
-for each available metric, and fails if the current run regresses by more than
-`PERF_MAX_REGRESSION` (default 5%). For latency, memory, and component times,
-higher values are regressions. For throughput, lower values are regressions.
+for each available metric, and evaluates the current run with the metric's
+rolling regression policy. For latency, memory, and component times, higher
+values are regressions. For throughput, lower values are regressions.
+
+A gated metric fails only when both of these are true:
+
+```text
+percent_delta > threshold_percent
+absolute_delta > threshold_absolute
+```
+
+Set `gated: false` for metrics that should remain visible in reports and the
+dashboard without failing CI. Missing or `null` metrics are skipped.
 
 This is the **drift detector** — it catches sub-threshold regressions that
 slowly add up. Only scheduled-main successful records are baseline eligible.
@@ -196,6 +208,23 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     "max_dit_time_s": 10.0,
     "max_vae_decode_time_s": 10.0
   },
+  "regression_thresholds": {
+    "latency": {
+      "threshold_percent": 0.08,
+      "threshold_absolute": 0.5,
+      "gated": true
+    },
+    "throughput": {
+      "threshold_percent": 0.08,
+      "threshold_absolute": 0.05,
+      "gated": true
+    },
+    "memory": {
+      "threshold_percent": 0.05,
+      "threshold_absolute": 256.0,
+      "gated": true
+    }
+  },
   "commit": "<full sha>",
   "pr_number": "1234",
   "timestamp": "2026-05-08T22:00:00+00:00",
@@ -222,6 +251,13 @@ result, used as the rolling-baseline source of truth.
   "text_encoder_time_s": 2.141,
   "dit_time_s": 8.437,
   "vae_decode_time_s": 3.208,
+  "regression_thresholds": {
+    "latency": {
+      "threshold_percent": 0.08,
+      "threshold_absolute": 0.5,
+      "gated": true
+    }
+  },
   "success": true
 }
 ```
@@ -238,7 +274,6 @@ successful main/full-suite uploads and remain eligible for rolling baselines.
 
 | Variable | Default | Used by | Purpose |
 |---|---|---|---|
-| `PERF_MAX_REGRESSION` | `0.05` | `compare_baseline.py` | Per-metric regression fraction that fails the build. |
 | `PERFORMANCE_TRACKING_ROOT` | `/tmp/perf-tracking` | `compare_baseline.py`, `dashboard.py` | Local directory the HF dataset is synced to. |
 | `PERF_REPORTS_DIR` | `/root/data/perf_reports` | `compare_baseline.py`, `dashboard.py` | Where the Markdown summary and Plotly HTML get written for Buildkite to pick up. |
 | `HF_REPO_ID` | `FastVideo/performance-tracking` | `hf_store.py` | HF dataset repo holding rolling-baseline records. |
@@ -261,9 +296,11 @@ Buildkite artifact upload is in
 `.buildkite/scripts/pr_test.sh:upload_performance_artifacts`.
 
 Each performance build runs pytest first. If that fixed-threshold phase fails,
-`compare_baseline.py` is skipped, so Markdown summaries and normalized JSON
-artifacts are not emitted. The dashboard still runs best-effort for
-observability. When pytest passes, the rolling-baseline phase emits:
+PR/direct runs skip `compare_baseline.py` because they only upload passing
+records. Scheduled-main runs still execute `compare_baseline.py` with
+`PERF_PYTEST_RC` set so the failed canonical attempt is visible in normalized
+JSON and dashboard history. The dashboard runs best-effort for observability.
+When the rolling-baseline phase runs, it emits:
 
 * **Markdown summary** — appended to `$GITHUB_STEP_SUMMARY` when that variable
   is set, and written as `perf_<sha>_<ts>.md` for Buildkite upload. Contains a
@@ -299,6 +336,14 @@ observability. When pytest passes, the rolling-baseline phase emits:
          "max_vae_decode_time_s": 10.0
        },
        "default": { "max_generation_time_s": 120.0, "max_peak_memory_mb": 30000.0 }
+     },
+     "regression_thresholds": {
+       "latency": { "threshold_percent": 0.08, "threshold_absolute": 0.5, "gated": true },
+       "throughput": { "threshold_percent": 0.08, "threshold_absolute": 0.05, "gated": true },
+       "memory": { "threshold_percent": 0.05, "threshold_absolute": 256.0, "gated": true },
+       "text_encoder_time_s": { "threshold_percent": 0.05, "threshold_absolute": 0.25, "gated": true },
+       "dit_time_s": { "threshold_percent": 0.05, "threshold_absolute": 0.25, "gated": true },
+       "vae_decode_time_s": { "threshold_percent": 0.05, "threshold_absolute": 0.25, "gated": true }
      }
    }
    ```
@@ -319,6 +364,11 @@ observability. When pytest passes, the rolling-baseline phase emits:
 5. Add component thresholds only when the stage timing is stable enough to be
    a useful fixed gate. The rolling baseline will still track component times
    when static component thresholds are omitted.
+
+6. Tune `regression_thresholds` independently from the fixed thresholds when a
+   metric is noisy or should be informational. The fixed `thresholds` block is
+   an absolute pytest ceiling. The `regression_thresholds` block controls
+   rolling-baseline comparisons against recent scheduled-main records.
 
 ## Troubleshooting
 
