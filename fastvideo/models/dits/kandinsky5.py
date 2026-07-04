@@ -9,23 +9,28 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-try: 
+try:
     from torch.nn.attention.flex_attention import create_block_mask, flex_attention
     from torch.nn.attention.flex_attention import BlockMask
     flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
     CAN_USE_FLEX_ATTN = True
-except:
-    print("\n" * 10, "Flex Attention is not present in your version of PyTorch, therefore NABLA can not be used.", "\n" * 10)
+except ImportError:
     CAN_USE_FLEX_ATTN = False
-    
-    
+
 from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits import Kandinsky5VideoConfig
 from fastvideo.layers.layernorm import LayerNormScaleShift
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
+from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
+
+logger = init_logger(__name__)
+
+if not CAN_USE_FLEX_ATTN:
+    logger.warning("torch.nn.attention.flex_attention is unavailable in this PyTorch build; "
+                   "Kandinsky5 NABLA sparse attention (Pro checkpoints) cannot be used.")
 
 FRACTAL_PIXEL_SIZE = 8
 _ARCH_CONFIG_DEFAULTS = Kandinsky5VideoConfig().arch_config
@@ -306,7 +311,7 @@ class Kandinsky5Modulation(nn.Module):
 def _apply_rotary(x: torch.Tensor, rope: torch.Tensor) -> torch.Tensor:
     x_ = x.reshape(*x.shape[:-1], -1, 1, 2).to(torch.float32)
     x_out = (rope * x_).sum(dim=-1)
-    return x_out.reshape(*x.shape).to(torch.bfloat16)
+    return x_out.reshape(*x.shape).to(x.dtype)
 
 
 class Kandinsky5Attention(nn.Module):
@@ -378,7 +383,12 @@ class Kandinsky5Attention(nn.Module):
             query = _apply_rotary(query, rotary_emb).type_as(query)
             key = _apply_rotary(key, rotary_emb).type_as(key)
 
-        if sparse_params is not None and CAN_USE_FLEX_ATTN:
+        if sparse_params is not None:
+            if not CAN_USE_FLEX_ATTN:
+                raise RuntimeError(
+                    "Kandinsky5 NABLA sparse attention requires torch.nn.attention.flex_attention, "
+                    "which is unavailable in this PyTorch build. Falling back to dense attention would "
+                    "be orders of magnitude slower and diverge from the reference implementation.")
             attn_mask = nablaT_v2(
                 query,
                 key,
