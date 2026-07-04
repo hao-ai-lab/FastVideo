@@ -18,6 +18,16 @@ import pytest
 
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
+from fastvideo.tests.performance.identity import (
+    build_recipe_from_benchmark_config,
+    environment_fingerprint,
+    environment_metadata,
+    hardware_profile,
+    hardware_profile_id,
+    recipe_fingerprint,
+    software_profile,
+    software_profile_id,
+)
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
@@ -227,6 +237,27 @@ def _write_results(results):
     logger.info("Performance results written to %s", filepath)
 
 
+def _build_identity_fields(cfg, init_kwargs):
+    recipe = build_recipe_from_benchmark_config(cfg)
+    num_gpus = init_kwargs.get("num_gpus", cfg.get("run_config", {}).get("required_gpus", 1))
+    hw_profile = hardware_profile(num_gpus=num_gpus)
+    sw_profile = software_profile()
+    env_metadata = environment_metadata(
+        hardware=hw_profile,
+        software=sw_profile,
+    )
+    return {
+        "recipe": recipe,
+        "recipe_fingerprint": recipe_fingerprint(recipe),
+        "hardware_profile": hw_profile,
+        "hardware_profile_id": hardware_profile_id(hw_profile),
+        "software_profile": sw_profile,
+        "software_profile_id": software_profile_id(sw_profile),
+        "environment_metadata": env_metadata,
+        "environment_fingerprint": environment_fingerprint(env_metadata),
+    }
+
+
 # -- Test -------------------------------------------------------------------
 
 def _run_benchmark(cfg):
@@ -318,6 +349,7 @@ def _run_benchmark(cfg):
         "dit_time_s": _avg_component(all_component_times, "dit_time_s"),
         "vae_decode_time_s": _avg_component(all_component_times,
                                             "vae_decode_time_s"),
+        **_build_identity_fields(cfg, init_kwargs),
     }
 
     logger.info(

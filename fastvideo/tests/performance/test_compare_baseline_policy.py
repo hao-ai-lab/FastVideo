@@ -119,6 +119,40 @@ def test_boolean_regression_threshold_values_are_ignored():
     assert latency.threshold_percent == 0.08
     assert latency.threshold_absolute == 0.5
     assert latency.gated is False
+def test_normalized_record_preserves_identity_metadata(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    raw = _raw_result()
+    raw.update({
+        "recipe": {
+            "recipe_schema_version": 1,
+        },
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile": {
+            "gpu_count": 1,
+        },
+        "hardware_profile_id": "hw-1",
+        "software_profile": {
+            "python": "3.12",
+        },
+        "software_profile_id": "sw-1",
+        "environment_metadata": {
+            "env": {
+                "IMAGE_VERSION": "latest",
+            },
+        },
+        "environment_fingerprint": "env-1",
+    })
+
+    record = compare_baseline.normalize_performance_result(raw)
+
+    assert record["recipe"] == {"recipe_schema_version": 1}
+    assert record["recipe_fingerprint"] == "recipe-1"
+    assert record["hardware_profile"] == {"gpu_count": 1}
+    assert record["hardware_profile_id"] == "hw-1"
+    assert record["software_profile"] == {"python": "3.12"}
+    assert record["software_profile_id"] == "sw-1"
+    assert record["environment_metadata"] == {"env": {"IMAGE_VERSION": "latest"}}
+    assert record["environment_fingerprint"] == "env-1"
 
 
 def test_baseline_eligibility_only_for_successful_scheduled_main():
