@@ -12,6 +12,7 @@ import os
 import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from typing import Any
 
 import torch
 import pytest
@@ -25,6 +26,7 @@ from fastvideo.tests.performance.identity import (
     hardware_profile,
     hardware_profile_id,
     recipe_fingerprint,
+    resolved_revision_from_model_path,
     software_profile,
     software_profile_id,
 )
@@ -241,8 +243,73 @@ def _write_results(results):
     logger.info("Performance results written to %s", filepath)
 
 
-def _build_identity_fields(cfg, init_kwargs):
-    recipe = build_recipe_from_benchmark_config(cfg)
+def _backend_name(value) -> str:
+    if hasattr(value, "name"):
+        return str(value.name)
+    return str(value)
+
+
+def _collect_worker_identity(worker) -> dict[str, Any]:
+    pipeline = getattr(worker, "pipeline", None)
+    model_path = getattr(pipeline, "model_path", None)
+    modules = getattr(pipeline, "modules", {}) or {}
+    backends: set[str] = set()
+
+    for module in modules.values():
+        if not isinstance(module, torch.nn.Module):
+            continue
+        for submodule in module.modules():
+            backend = getattr(submodule, "backend", None)
+            if backend is not None:
+                backends.add(_backend_name(backend))
+
+    return {
+        "resolved_attention_backends": sorted(backends),
+        "resolved_model_path": model_path,
+    }
+
+
+def _single_or_list(values: set[str]) -> str | list[str] | None:
+    ordered = sorted(values)
+    if not ordered:
+        return None
+    if len(ordered) == 1:
+        return ordered[0]
+    return ordered
+
+
+def _runtime_identity_from_generator(generator) -> dict[str, Any]:
+    worker_records = generator.executor.collective_rpc(_collect_worker_identity)
+    resolved_backends: set[str] = set()
+    resolved_revisions: set[str] = set()
+
+    for record in worker_records:
+        resolved_backends.update(record.get("resolved_attention_backends") or [])
+        revision = resolved_revision_from_model_path(record.get("resolved_model_path"))
+        if revision is not None:
+            resolved_revisions.add(revision)
+
+    return {
+        "resolved_attention_backend": _single_or_list(resolved_backends),
+        "resolved_model_revision": _single_or_list(resolved_revisions),
+    }
+
+
+def _benchmark_identity_fields(cfg):
+    return {
+        key: cfg[key]
+        for key in ("workload_id", "variant_id", "benchmark_version")
+        if cfg.get(key) is not None
+    }
+
+
+def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
+    recipe = build_recipe_from_benchmark_config(
+        cfg,
+        resolved_attention_backend=runtime_identity.get("resolved_attention_backend"),
+        resolved_model_revision=runtime_identity.get("resolved_model_revision"),
+        measured_prompts=[prompt],
+    )
     num_gpus = init_kwargs.get("num_gpus", cfg.get("run_config", {}).get("required_gpus", 1))
     hw_profile = hardware_profile(num_gpus=num_gpus)
     sw_profile = software_profile()
@@ -259,6 +326,7 @@ def _build_identity_fields(cfg, init_kwargs):
         "software_profile_id": software_profile_id(sw_profile),
         "environment_metadata": env_metadata,
         "environment_fingerprint": environment_fingerprint(env_metadata),
+        **_benchmark_identity_fields(cfg),
     }
 
 
@@ -299,6 +367,7 @@ def _run_benchmark(cfg):
             model_path=model_info["model_path"],
             **init_kwargs,
         )
+        runtime_identity = _runtime_identity_from_generator(generator)
 
         for i in range(num_warmup):
             logger.info("Warmup run %d/%d", i + 1, num_warmup)
@@ -353,7 +422,7 @@ def _run_benchmark(cfg):
         "dit_time_s": _avg_component(all_component_times, "dit_time_s"),
         "vae_decode_time_s": _avg_component(all_component_times,
                                             "vae_decode_time_s"),
-        **_build_identity_fields(cfg, init_kwargs),
+        **_build_identity_fields(cfg, init_kwargs, prompt, runtime_identity),
     }
 
     logger.info(

@@ -66,6 +66,9 @@ UPLOAD_POLICY = os.environ.get("PERF_UPLOAD_POLICY", "never").strip().lower()
 VALID_UPLOAD_POLICIES = {"never", "pass", "always"}
 VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
 IDENTITY_KEYS = (
+    "workload_id",
+    "variant_id",
+    "benchmark_version",
     "recipe",
     "recipe_fingerprint",
     "hardware_profile",
@@ -153,11 +156,18 @@ def _record_metadata(run_source: str, result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _identity_metadata(result: dict[str, Any]) -> dict[str, Any]:
-    return {
+    metadata = {
         key: result[key]
         for key in IDENTITY_KEYS
         if key in result and result[key] is not None
     }
+    recipe = result.get("recipe")
+    benchmark = recipe.get("benchmark") if isinstance(recipe, dict) else None
+    if isinstance(benchmark, dict):
+        for key in ("workload_id", "variant_id", "benchmark_version"):
+            if key not in metadata and benchmark.get(key) is not None:
+                metadata[key] = benchmark[key]
+    return metadata
 
 
 def _comparison_identity_filters(record: dict[str, Any]) -> dict[str, str]:

@@ -123,6 +123,9 @@ def test_normalized_record_preserves_identity_metadata(monkeypatch):
     monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
     raw = _raw_result()
     raw.update({
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
         "recipe": {
             "recipe_schema_version": 1,
         },
@@ -145,6 +148,9 @@ def test_normalized_record_preserves_identity_metadata(monkeypatch):
 
     record = compare_baseline.normalize_performance_result(raw)
 
+    assert record["workload_id"] == "wan-t2v"
+    assert record["variant_id"] == "1.3b-sp2"
+    assert record["benchmark_version"] == 2
     assert record["recipe"] == {"recipe_schema_version": 1}
     assert record["recipe_fingerprint"] == "recipe-1"
     assert record["hardware_profile"] == {"gpu_count": 1}
@@ -153,6 +159,24 @@ def test_normalized_record_preserves_identity_metadata(monkeypatch):
     assert record["software_profile_id"] == "sw-1"
     assert record["environment_metadata"] == {"env": {"IMAGE_VERSION": "latest"}}
     assert record["environment_fingerprint"] == "env-1"
+
+
+def test_normalized_record_reads_identity_labels_from_recipe(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    raw = _raw_result()
+    raw["recipe"] = {
+        "benchmark": {
+            "workload_id": "wan-t2v",
+            "variant_id": "1.3b-sp2",
+            "benchmark_version": 2,
+        },
+    }
+
+    record = compare_baseline.normalize_performance_result(raw)
+
+    assert record["workload_id"] == "wan-t2v"
+    assert record["variant_id"] == "1.3b-sp2"
+    assert record["benchmark_version"] == 2
 
 
 def test_baseline_eligibility_only_for_successful_scheduled_main():
