@@ -28,6 +28,17 @@ STAGE_METRIC_MAP: dict[str, str] = {
     "DmdDenoisingStage": "dit_time_s",
     "DecodingStage": "vae_decode_time_s",
 }
+V2_CONFIG_SCHEMA_VERSION = 2
+V2_REQUIRED_IDENTITY_FIELDS = (
+    "workload_id",
+    "variant_id",
+    "benchmark_version",
+)
+V2_OPTIONAL_METADATA_FIELDS = (
+    "recipe",
+    "metric_threshold_policy",
+    "quality_metadata",
+)
 
 # -- Config discovery -------------------------------------------------------
 
@@ -42,6 +53,53 @@ _BENCHMARKS_DIR = os.path.join(
 )
 
 
+def _has_v2_fields(cfg):
+    v2_fields = V2_REQUIRED_IDENTITY_FIELDS + V2_OPTIONAL_METADATA_FIELDS
+    return any(field in cfg for field in v2_fields)
+
+
+def _is_v2_config(cfg):
+    return cfg.get("config_schema_version") == V2_CONFIG_SCHEMA_VERSION
+
+
+def _validate_benchmark_config(cfg, path="<memory>"):
+    missing_common = [field for field in ("benchmark_id",) if field not in cfg]
+    if missing_common:
+        raise ValueError(f"{path}: missing required benchmark config fields: {', '.join(missing_common)}")
+
+    schema_version = cfg.get("config_schema_version")
+    if schema_version is None:
+        if _has_v2_fields(cfg):
+            raise ValueError(f"{path}: v2 benchmark identity fields require config_schema_version=2")
+        return
+
+    if schema_version != V2_CONFIG_SCHEMA_VERSION:
+        raise ValueError(f"{path}: unsupported benchmark config_schema_version={schema_version!r}")
+
+    missing_v2 = [field for field in V2_REQUIRED_IDENTITY_FIELDS if field not in cfg]
+    if missing_v2:
+        raise ValueError(f"{path}: missing required v2 identity fields: {', '.join(missing_v2)}")
+
+    for field in V2_OPTIONAL_METADATA_FIELDS:
+        if field in cfg and not isinstance(cfg[field], Mapping):
+            raise ValueError(f"{path}: optional v2 metadata field {field!r} must be an object")
+
+
+def _config_identity_metadata(cfg):
+    if not _is_v2_config(cfg):
+        return {}
+    return {
+        "config_schema_version": cfg["config_schema_version"],
+        "workload_id": cfg["workload_id"],
+        "variant_id": cfg["variant_id"],
+        "benchmark_version": cfg["benchmark_version"],
+    }
+
+
+def _benchmark_display_id(cfg):
+    return cfg["benchmark_id"]
+
+
 def _discover_benchmarks():
     """Glob benchmark JSON configs and return list of (id, config) tuples."""
     pattern = os.path.join(_BENCHMARKS_DIR, "*.json")
@@ -49,6 +107,7 @@ def _discover_benchmarks():
     for path in sorted(glob.glob(pattern)):
         with open(path) as f:
             cfg = json.load(f)
+        _validate_benchmark_config(cfg, path)
         configs.append(cfg)
     return configs
 
@@ -219,6 +278,7 @@ def _run_benchmark(cfg):
 
     results = {
         "benchmark_id": cfg["benchmark_id"],
+        **_config_identity_metadata(cfg),
         "model_short_name": model_info.get("model_short_name", ""),
         "device": device_name,
         "num_gpus": init_kwargs.get("num_gpus", 1),
@@ -275,7 +335,7 @@ def _run_benchmark(cfg):
 @pytest.mark.parametrize(
     "cfg",
     _BENCHMARK_CONFIGS,
-    ids=[c["benchmark_id"] for c in _BENCHMARK_CONFIGS],
+    ids=[_benchmark_display_id(c) for c in _BENCHMARK_CONFIGS],
 )
 def test_inference_performance(cfg):
     """Measure generation latency, peak GPU memory, and component-level timings
