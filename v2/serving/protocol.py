@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from v2.core.request import DiffusionParams, OutputSpec, SamplingParams, TaskType, make_request
+from v2.core.request import DiffusionParams, ImagePart, OutputSpec, SamplingParams, TaskType, TextPart, make_request
 
 
 def _wh(size: str, default=(832, 480)) -> tuple[int, int]:
@@ -16,21 +16,6 @@ def _wh(size: str, default=(832, 480)) -> tuple[int, int]:
         return int(w), int(h)
     except Exception:
         return default
-
-
-def _task_for(model_id: str, kind: str) -> TaskType:
-    m = model_id.lower()
-    if kind == "image":
-        return TaskType.T2I if ("bagel" in m or "image" in m) else TaskType.T2V
-    if kind == "video":
-        return TaskType.T2V
-    if kind == "chat":
-        if "bagel" in m:
-            return TaskType.T2I
-        if "cosmos" in m or "omni" in m:
-            return TaskType.T2V
-        return TaskType.T2V
-    return TaskType.T2V
 
 
 @dataclass
@@ -53,9 +38,9 @@ class ImageGenerationRequest:
                    guidance_scale=float(d.get("guidance_scale", 5.0)),
                    seed=int(d.get("seed", 0)))
 
-    def to_omni(self):
+    def to_omni(self, task: TaskType = TaskType.T2I):
         w, h = _wh(self.size)
-        return make_request(_task_for(self.model, "image"),
+        return make_request(task,
                             self.model,
                             self.prompt,
                             diffusion=DiffusionParams(num_steps=self.num_inference_steps,
@@ -89,9 +74,9 @@ class VideoGenerationRequest:
                    seed=int(d.get("seed", 0)),
                    stream={"video": True} if d.get("stream") else {})
 
-    def to_omni(self):
+    def to_omni(self, task: TaskType = TaskType.T2V):
         w, h = _wh(self.size)
-        return make_request(TaskType.T2V,
+        return make_request(task,
                             self.model,
                             self.prompt,
                             diffusion=DiffusionParams(num_steps=self.num_inference_steps,
@@ -125,13 +110,39 @@ class ChatCompletionRequest:
         for m in reversed(self.messages):
             if m.get("role") == "user":
                 c = m.get("content", "")
-                return c if isinstance(c, str) else " ".join(p.get("text", "") for p in c if isinstance(p, dict))
+                return c if isinstance(c, str) else " ".join(
+                    p.get("text", "") for p in c if isinstance(p, dict) and p.get("type") == "text")
         return ""
 
-    def to_omni(self):
-        return make_request(_task_for(self.model, "chat"),
+    def image_parts(self) -> list[ImagePart]:
+        parts: list[ImagePart] = []
+        for m in self.messages:
+            content = m.get("content", "")
+            if not isinstance(content, list):
+                continue
+            for p in content:
+                if not isinstance(p, dict):
+                    continue
+                typ = p.get("type")
+                if typ not in ("image", "image_url", "input_image"):
+                    continue
+                url = p.get("url") or p.get("image_url") or p.get("image")
+                if isinstance(url, dict):
+                    url = url.get("url")
+                parts.append(ImagePart(path=url if isinstance(url, str) else None))
+        return parts
+
+    def has_image(self) -> bool:
+        return bool(self.image_parts())
+
+    def to_omni(self, task: TaskType = TaskType.REASON):
+        stream = {}
+        if self.stream:
+            stream = {"audio": True} if task == TaskType.T2A else {"video": True}
+        inputs = (TextPart(self.prompt()), *self.image_parts())
+        return make_request(task,
                             self.model,
-                            self.prompt(),
+                            inputs=inputs,
                             sampling=SamplingParams(max_tokens=self.max_tokens, seed=self.seed),
                             diffusion=DiffusionParams(num_steps=self.num_inference_steps, seed=self.seed),
-                            outputs=OutputSpec(stream={"video": True} if self.stream else {}))
+                            outputs=OutputSpec(stream=stream))

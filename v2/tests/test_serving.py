@@ -228,6 +228,59 @@ def test_server_health_and_models_over_real_socket():
     asyncio.run(run())
 
 
+def test_server_routes_tasks_from_card_capabilities():
+    s = _server()
+    assert s._task_for_endpoint("wan2.1-1.3b", "video") == TaskType.T2V
+    assert s._task_for_endpoint("bagel-mot", "image") == TaskType.T2I
+    assert s._task_for_endpoint("bagel-mot", "chat") == TaskType.T2I
+    assert s._task_for_endpoint("cosmos3-vfm", "chat") == TaskType.T2V
+    assert s._task_for_endpoint("qwen-omni-tts", "chat") == TaskType.T2A
+
+
+def test_chat_request_preserves_image_inputs_for_i2v():
+    from v2.serving.protocol import ChatCompletionRequest
+
+    cc = ChatCompletionRequest.from_json({
+        "model":
+        "wan2.1-i2v-1.3b",
+        "messages": [{
+            "role":
+            "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "animate this"
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.test/frame.png"
+                    }
+                },
+            ],
+        }],
+    })
+    req = cc.to_omni(TaskType.I2V)
+    assert req.task == TaskType.I2V
+    assert req.prompt() == "animate this"
+    assert req.image().path == "https://example.test/frame.png"
+
+
+def test_server_routes_image_chat_only_when_card_declares_i2v():
+    from v2.core.card import load_card
+    from v2.recipes.wan21.i2v import build_wan21_i2v_card, build_wan21_i2v_program
+    from v2.runtime.cache import CacheManager
+
+    eng = Engine()
+    card = build_wan21_i2v_card()
+    eng.register(card.model_id, load_card(card, cache_manager=CacheManager.from_card(card)), build_wan21_i2v_program())
+    s = OmniOpenAIServer(AsyncEngine(eng))
+    assert s._task_for_endpoint(card.model_id, "chat", has_image=True) == TaskType.I2V
+
+    cosmos = _server()
+    assert cosmos._task_for_endpoint("cosmos3-vfm", "chat", has_image=True) == TaskType.T2V
+
+
 def test_server_images_video_job_and_sync():
     import json
 
@@ -279,5 +332,38 @@ def test_server_chat_json_and_sse_stream():
         assert data_lines[-1] == "[DONE]" and len(data_lines) >= 12
         types = [json.loads(x).get("event") for x in data_lines[:-2]]
         assert "request.start" in types and "request.complete" in types
+        await s.close()
+    asyncio.run(run())
+
+
+def test_server_rejects_image_chat_for_non_i2v_card():
+    import json
+
+    async def run():
+        s = _server()
+        host, port = await s.serve(port=0)
+        b = json.dumps({
+            "model":
+            "cosmos3-vfm",
+            "messages": [{
+                "role":
+                "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "animate this"
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "https://example.test/frame.png"
+                        }
+                    },
+                ],
+            }],
+        }).encode()
+        st, _, body = await _http(host, port, "POST", "/v1/chat/completions", b)
+        assert st == 400
+        assert "image-to-video" in json.loads(body)["error"]
         await s.close()
     asyncio.run(run())

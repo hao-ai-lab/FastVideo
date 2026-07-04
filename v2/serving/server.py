@@ -19,8 +19,10 @@ from typing import Any
 
 import numpy as np
 
+from v2.core.enums import Capability
 from v2.core.request.artifacts import Output
 from v2.core.request.streams import StreamChunk
+from v2.core.request.tasks import TaskType
 from v2.serving.http import HttpServer, Request, Response
 from v2.serving.protocol import ChatCompletionRequest, ImageGenerationRequest, VideoGenerationRequest
 
@@ -138,10 +140,64 @@ class OmniOpenAIServer:
                )  # workflows are servables too
         return {"object": "list", "data": [{"id": m, "object": "model"} for m in ids]}
 
+    def _card_for_model(self, model_id: str) -> Any | None:
+        reg = self.engine.engine._registry
+        if model_id in reg:
+            return reg[model_id][0].card
+        if model_id in self.engine._disagg:
+            pools, _program = self.engine._disagg[model_id]
+            return getattr(pools, "card", None)
+        return None
+
+    def _task_for_endpoint(self, model_id: str, endpoint: str, *, has_image: bool = False) -> TaskType:
+        """Resolve endpoint intent against the registered card's capabilities.
+
+        The serving boundary may choose a default task; the protocol parser itself
+        must not infer tasks from model-name substrings.
+        """
+        card = self._card_for_model(model_id)
+        caps = getattr(card, "capabilities", None)
+
+        def has(cap: Capability) -> bool:
+            return bool(caps is not None and caps.has(cap))
+
+        if endpoint == "image":
+            if has(Capability.TEXT_TO_IMAGE):
+                return TaskType.T2I
+            if has(Capability.TEXT_TO_VIDEO):
+                return TaskType.T2V
+            if has(Capability.TEXT_TO_VIDEO_SOUND):
+                return TaskType.T2VS
+            return TaskType.T2I
+
+        if endpoint == "video":
+            if has(Capability.TEXT_TO_VIDEO):
+                return TaskType.T2V
+            if has(Capability.TEXT_TO_VIDEO_SOUND):
+                return TaskType.T2VS
+            if has(Capability.TEXT_TO_IMAGE):
+                return TaskType.T2I
+            return TaskType.T2V
+
+        if endpoint == "chat":
+            if has_image and has(Capability.IMAGE_TO_VIDEO):
+                return TaskType.I2V
+            if has(Capability.TEXT_TO_VIDEO):
+                return TaskType.T2V
+            if has(Capability.TEXT_TO_IMAGE):
+                return TaskType.T2I
+            if has(Capability.TEXT_TO_SPEECH):
+                return TaskType.T2A
+            if has(Capability.REASONING_TEXT):
+                return TaskType.REASON
+            return TaskType.T2V
+
+        return TaskType.T2V
+
     # --- images ------------------------------------------------------------- #
     async def _images(self, req: Request) -> Response:
         ig = ImageGenerationRequest.from_json(req.json())
-        out = await self.engine.generate(ig.to_omni())
+        out = await self.engine.generate(ig.to_omni(self._task_for_endpoint(ig.model, "image")))
         self.served += 1
         arts = _ser_artifacts(out)
         primary = arts.get("image") or arts.get("video") or arts.get("latents")
@@ -170,7 +226,7 @@ class OmniOpenAIServer:
     async def _run_video_job(self, job_id: str, vg: VideoGenerationRequest) -> None:
         self.jobs[job_id]["status"] = "running"
         try:
-            out = await self.engine.generate(vg.to_omni())
+            out = await self.engine.generate(vg.to_omni(self._task_for_endpoint(vg.model, "video")))
             self.served += 1
             self.jobs[job_id].update(status="completed",
                                      result=_ser_artifacts(out),
@@ -189,7 +245,7 @@ class OmniOpenAIServer:
 
     async def _video_sync(self, req: Request) -> Response:
         vg = VideoGenerationRequest.from_json(req.json())
-        out = await self.engine.generate(vg.to_omni())
+        out = await self.engine.generate(vg.to_omni(self._task_for_endpoint(vg.model, "video")))
         self.served += 1
         return Response.json({
             "model": vg.model,
@@ -203,7 +259,12 @@ class OmniOpenAIServer:
     # --- chat: SSE stream or JSON ------------------------------------------- #
     async def _chat(self, req: Request) -> Response:
         cc = ChatCompletionRequest.from_json(req.json())
-        omni = cc.to_omni()
+        has_image = cc.has_image()
+        task = self._task_for_endpoint(cc.model, "chat", has_image=has_image)
+        if has_image and task not in (TaskType.I2V, TaskType.TI2V):
+            return Response.json({"error": f"model {cc.model!r} does not declare image-to-video chat support"},
+                                 status=400)
+        omni = cc.to_omni(task)
         if cc.stream:
             return Response.sse(self._chat_sse(omni, cc.model))
         out = await self.engine.generate(omni)
