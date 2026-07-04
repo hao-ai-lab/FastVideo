@@ -162,15 +162,18 @@ for each available metric, and evaluates the current run with the metric's
 rolling regression policy. For latency, memory, and component times, higher
 values are regressions. For throughput, lower values are regressions.
 
-A gated metric fails only when both of these are true:
+A metric exceeds its rolling threshold when both of these are true:
 
 ```text
 percent_delta > threshold_percent
 absolute_delta > threshold_absolute
 ```
 
-Set `gated: false` for metrics that should remain visible in reports and the
-dashboard without failing CI. Missing or `null` metrics are skipped.
+Gated metrics fail CI when that threshold crossing happens. Set `gated: false`
+for metrics that should remain visible in reports and the dashboard without
+failing CI. Dashboard/API payloads expose `threshold_exceeded` separately from
+`regressed`, where `regressed` means a gated CI failure. Missing or `null`
+metrics are skipped.
 
 This is the **drift detector** — it catches sub-threshold regressions that
 slowly add up. Only scheduled-main successful records are baseline eligible.
@@ -210,18 +213,8 @@ Written by `test_inference_performance.py`. One file per benchmark run.
   },
   "regression_thresholds": {
     "latency": {
-      "threshold_percent": 0.08,
-      "threshold_absolute": 0.5,
-      "gated": true
-    },
-    "throughput": {
-      "threshold_percent": 0.08,
-      "threshold_absolute": 0.05,
-      "gated": true
-    },
-    "memory": {
-      "threshold_percent": 0.05,
-      "threshold_absolute": 256.0,
+      "threshold_percent": 0.10,
+      "threshold_absolute": 1.0,
       "gated": true
     }
   },
@@ -338,15 +331,11 @@ When the rolling-baseline phase runs, it emits:
        "default": { "max_generation_time_s": 120.0, "max_peak_memory_mb": 30000.0 }
      },
      "regression_thresholds": {
-       "latency": { "threshold_percent": 0.08, "threshold_absolute": 0.5, "gated": true },
-       "throughput": { "threshold_percent": 0.08, "threshold_absolute": 0.05, "gated": true },
-       "memory": { "threshold_percent": 0.05, "threshold_absolute": 256.0, "gated": true },
-       "text_encoder_time_s": { "threshold_percent": 0.05, "threshold_absolute": 0.25, "gated": true },
-       "dit_time_s": { "threshold_percent": 0.05, "threshold_absolute": 0.25, "gated": true },
-       "vae_decode_time_s": { "threshold_percent": 0.05, "threshold_absolute": 0.25, "gated": true }
+       "latency": { "threshold_percent": 0.10, "threshold_absolute": 1.0, "gated": true }
      }
-   }
-   ```
+  }
+
+  ```
 
 2. The pytest test auto-discovers all configs — no test code needed. CI
    picks it up on the next `/test performance` run.
@@ -365,10 +354,12 @@ When the rolling-baseline phase runs, it emits:
    a useful fixed gate. The rolling baseline will still track component times
    when static component thresholds are omitted.
 
-6. Tune `regression_thresholds` independently from the fixed thresholds when a
-   metric is noisy or should be informational. The fixed `thresholds` block is
-   an absolute pytest ceiling. The `regression_thresholds` block controls
-   rolling-baseline comparisons against recent scheduled-main records.
+6. Omit `regression_thresholds` to use the default rolling-baseline policy, or
+   include only benchmark-specific deviations. Tune these independently from
+   the fixed thresholds when a metric is noisy or should be informational. The
+   fixed `thresholds` block is an absolute pytest ceiling. The
+   `regression_thresholds` block controls rolling-baseline comparisons against
+   recent scheduled-main records.
 
 ## Troubleshooting
 

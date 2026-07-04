@@ -293,6 +293,7 @@ def _build_summary_row(
     metric_values: dict[str, dict[str, Any]] = {}
     regressions: list[float] = []
     failing_metrics: list[str] = []
+    threshold_exceeded_metrics: list[str] = []
     for policy in metric_policies:
         curr = safe_float(record.get(policy.key))
         baseline = _baseline_metric(baseline_records, policy.key)
@@ -307,10 +308,13 @@ def _build_summary_row(
             "threshold_percent": policy.threshold_percent * 100.0,
             "threshold_absolute": policy.threshold_absolute,
             "gated": policy.gated,
+            "threshold_exceeded": False if delta is None else delta.threshold_exceeded,
             "regressed": False if delta is None else delta.regressed,
         }
         if regression is not None:
             regressions.append(regression)
+        if delta is not None and delta.threshold_exceeded:
+            threshold_exceeded_metrics.append(policy.key)
         if delta is not None and delta.regressed:
             failing_metrics.append(policy.key)
 
@@ -322,6 +326,7 @@ def _build_summary_row(
         "baseline_n": len(baseline_records),
         "metrics": metric_values,
         "worst_regression_pct": worst_regression_pct,
+        "threshold_exceeded_metrics": threshold_exceeded_metrics,
         "failing_metrics": failing_metrics,
         "failed": has_failed,
     }
@@ -340,8 +345,9 @@ def _build_markdown_summary(
         ("| Model | GPU | Baseline N | Latency (curr/base) | "
          "Throughput (curr/base) | Memory (curr/base) | "
          "Text Enc (curr/base) | DiT (curr/base) | "
-         "VAE Decode (curr/base) | Worst Regression | Failing Metrics | Status |"),
-        "|---|---|---:|---|---|---|---|---|---|---:|---|---|",
+         "VAE Decode (curr/base) | Worst Regression | Exceeded Metrics | "
+         "Failing Metrics | Status |"),
+        "|---|---|---:|---|---|---|---|---|---|---:|---|---|---|",
     ]
 
     for row in summary_rows:
@@ -352,13 +358,18 @@ def _build_markdown_summary(
                                 f"{_compact_value(values['base'], policy.precision)}")
 
         worst_reg = ("n/a" if row["worst_regression_pct"] is None else f"{row['worst_regression_pct']:.1f}%")
+        exceeded_metrics = (
+            ", ".join(row["threshold_exceeded_metrics"])
+            if row["threshold_exceeded_metrics"]
+            else "none"
+        )
         failing_metrics = ", ".join(row["failing_metrics"]) if row["failing_metrics"] else "none"
         status = "FAIL" if row["failed"] else "PASS"
 
         lines.append(f"| {row['model_id']} | {row['gpu_type']} | "
                      f"{row['baseline_n']} | "
                      f"{' | '.join(metric_cells)} | "
-                     f"{worst_reg} | {failing_metrics} | {status} |")
+                     f"{worst_reg} | {exceeded_metrics} | {failing_metrics} | {status} |")
 
     return "\n".join(lines) + "\n"
 

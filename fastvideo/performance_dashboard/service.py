@@ -117,6 +117,7 @@ def build_latest_summary(records: list[Record],
         metrics: dict[str, Record] = {}
         regressions: list[float] = []
         failing_metrics: list[str] = []
+        threshold_exceeded_metrics: list[str] = []
         for policy in metric_policies:
             current = safe_float(latest.get(policy.key))
             baseline = baseline_value(baseline_records, policy.key)
@@ -132,6 +133,7 @@ def build_latest_summary(records: list[Record],
                 "threshold_percent": policy.threshold_percent * 100.0,
                 "threshold_absolute": policy.threshold_absolute,
                 "gated": policy.gated,
+                "threshold_exceeded": False if delta is None else delta.threshold_exceeded,
                 "regressed": False if delta is None else delta.regressed,
                 "label": policy.label,
                 "lower_is_better": policy.lower_is_better,
@@ -139,6 +141,8 @@ def build_latest_summary(records: list[Record],
             }
             if regression is not None:
                 regressions.append(regression)
+            if delta is not None and delta.threshold_exceeded:
+                threshold_exceeded_metrics.append(policy.key)
             if delta is not None and delta.regressed:
                 failing_metrics.append(policy.key)
 
@@ -155,6 +159,7 @@ def build_latest_summary(records: list[Record],
             "success": success,
             "baseline_n": len(baseline_records),
             "worst_regression_pct": worst_regression,
+            "threshold_exceeded_metrics": threshold_exceeded_metrics,
             "failing_metrics": failing_metrics,
             "computed_regression_status": "fail" if failing_metrics else "pass",
             "status": status,

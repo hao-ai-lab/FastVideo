@@ -23,6 +23,7 @@ class MetricPolicy:
 class MetricDelta:
     absolute: float
     percent: float
+    threshold_exceeded: bool
     regressed: bool
 
 
@@ -119,12 +120,13 @@ def regression_delta(
     else:
         absolute_delta = baseline - current
     percent_delta = absolute_delta / baseline
+    threshold_exceeded = (
+        percent_delta > policy.threshold_percent
+        and absolute_delta > policy.threshold_absolute
+    )
     return MetricDelta(
         absolute=absolute_delta,
         percent=percent_delta,
-        regressed=(
-            policy.gated
-            and percent_delta > policy.threshold_percent
-            and absolute_delta > policy.threshold_absolute
-        ),
+        threshold_exceeded=threshold_exceeded,
+        regressed=policy.gated and threshold_exceeded,
     )

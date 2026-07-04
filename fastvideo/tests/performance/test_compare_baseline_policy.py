@@ -199,4 +199,7 @@ def test_informational_metric_remains_visible_without_failing():
     assert compare_baseline._check_regressions(current, baseline, policies) == []
     assert row["metrics"]["throughput"]["regression_pct"] == 20.0
     assert row["metrics"]["throughput"]["gated"] is False
+    assert row["metrics"]["throughput"]["threshold_exceeded"] is True
     assert row["metrics"]["throughput"]["regressed"] is False
+    assert row["threshold_exceeded_metrics"] == ["throughput"]
+    assert row["failing_metrics"] == []

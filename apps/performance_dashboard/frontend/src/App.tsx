@@ -440,6 +440,7 @@ export default function App() {
                   <th>Throughput</th>
                   <th>Memory</th>
                   <th>Worst</th>
+                  <th>Exceeded</th>
                   <th>Failing</th>
                 </tr>
               </thead>
@@ -466,6 +467,11 @@ export default function App() {
                     <td>{formatNumber(row.metrics.throughput?.current, 3)}</td>
                     <td>{formatNumber(row.metrics.memory?.current, 1)}</td>
                     <td>{formatNumber(row.worst_regression_pct, 1)}%</td>
+                    <td>
+                      {row.threshold_exceeded_metrics.length
+                        ? row.threshold_exceeded_metrics.join(", ")
+                        : "none"}
+                    </td>
                     <td>{row.failing_metrics.length ? row.failing_metrics.join(", ") : "none"}</td>
                   </tr>
                 ))}

@@ -6,6 +6,7 @@ export type MetricValue = {
   threshold_percent: number;
   threshold_absolute: number;
   gated: boolean;
+  threshold_exceeded: boolean;
   regressed: boolean;
   label: string;
   lower_is_better: boolean;
@@ -20,6 +21,7 @@ export type SummaryRow = {
   success: boolean;
   baseline_n: number;
   worst_regression_pct: number | null;
+  threshold_exceeded_metrics: string[];
   failing_metrics: string[];
   computed_regression_status: "pass" | "fail";
   status: "pass" | "fail";
