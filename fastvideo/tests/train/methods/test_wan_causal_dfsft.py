@@ -127,4 +127,12 @@ def test_wan_causal_dfsft_single_train_step(
 
     # 5a-ii: device-keyed grad-norm regression on top of the same harness.
     # Skips when the current GPU has no seeded reference.
-    check_grad_norm_regression("test_wan_causal_dfsft", model.transformer)
+    # rtol above the harness default: the causal model compiles flex_attention
+    # with max-autotune (required for Wan 1.3B's head config), and the
+    # timing-based kernel selection is bimodal across L40S containers —
+    # observed 3.2562 vs 3.5860 (10.13% apart) with identical code, straddling
+    # the default 10%. 12% covers both winners; real wiring breakage (dead
+    # grads, scale bugs) still lands far outside it.
+    check_grad_norm_regression("test_wan_causal_dfsft",
+                               model.transformer,
+                               rtol=0.12)
