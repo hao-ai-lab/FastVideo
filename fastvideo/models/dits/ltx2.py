@@ -72,8 +72,12 @@ def _rms_norm_dispatch(
     """Use QuACK RMSNorm only for LTX-2 refine stage, else Torch RMSNorm."""
     if _is_ltx2_refine_stage():
         return _quack_rmsnorm(x, weight=weight, eps=eps)
+    # torch 2.12 added rms_norm to autocast's float32 cast policy, so under
+    # autocast(bfloat16) this norm now returns float32 where torch <= 2.11
+    # returned bfloat16. Restore the input dtype so autocast-blind consumers
+    # downstream don't receive upcast activations.
     return torch.nn.functional.rms_norm(
-        x, (x.shape[-1], ), weight=weight, eps=eps)
+        x, (x.shape[-1], ), weight=weight, eps=eps).to(x.dtype)
 
 
 class StageAwareRMSNorm(nn.RMSNorm):
