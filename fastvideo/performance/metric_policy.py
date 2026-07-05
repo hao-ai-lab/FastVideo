@@ -36,6 +36,7 @@ DEFAULT_METRIC_POLICIES: tuple[MetricPolicy, ...] = (
     MetricPolicy("vae_decode_time_s", "VAE Decode", 3, True, 0.05, 0.25),
 )
 
+
 def _optional_float(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
@@ -57,9 +58,7 @@ def _optional_bool(value: Any) -> bool | None:
     return None
 
 
-def resolve_metric_policies(
-    threshold_overrides: Mapping[str, Any] | None,
-) -> tuple[MetricPolicy, ...]:
+def resolve_metric_policies(threshold_overrides: Mapping[str, Any] | None, ) -> tuple[MetricPolicy, ...]:
     """Return default metric policies with optional per-metric overrides."""
 
     if not isinstance(threshold_overrides, Mapping):
@@ -80,25 +79,15 @@ def resolve_metric_policies(
                 label=base_policy.label,
                 precision=base_policy.precision,
                 lower_is_better=base_policy.lower_is_better,
-                threshold_percent=(
-                    base_policy.threshold_percent
-                    if threshold_percent is None
-                    else threshold_percent
-                ),
-                threshold_absolute=(
-                    base_policy.threshold_absolute
-                    if threshold_absolute is None
-                    else threshold_absolute
-                ),
+                threshold_percent=(base_policy.threshold_percent if threshold_percent is None else threshold_percent),
+                threshold_absolute=(base_policy.threshold_absolute
+                                    if threshold_absolute is None else threshold_absolute),
                 gated=base_policy.gated if gated is None else gated,
-            )
-        )
+            ))
     return tuple(policies)
 
 
-def serialize_metric_thresholds(
-    policies: tuple[MetricPolicy, ...],
-) -> dict[str, dict[str, float | bool]]:
+def serialize_metric_thresholds(policies: tuple[MetricPolicy, ...], ) -> dict[str, dict[str, float | bool]]:
     return {
         policy.key: {
             "threshold_percent": policy.threshold_percent,
@@ -118,10 +107,7 @@ def regression_delta(
         return None
     absolute_delta = current - baseline if policy.lower_is_better else baseline - current
     percent_delta = absolute_delta / baseline
-    threshold_exceeded = (
-        percent_delta > policy.threshold_percent
-        and absolute_delta > policy.threshold_absolute
-    )
+    threshold_exceeded = (percent_delta > policy.threshold_percent and absolute_delta > policy.threshold_absolute)
     return MetricDelta(
         absolute=absolute_delta,
         percent=percent_delta,
