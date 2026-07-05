@@ -48,17 +48,21 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 # Fail fast with a clear message if the headers are still missing (e.g. a
 # Docker context that excluded .git AND the submodule contents) instead of
-# dying later in a wall of nvcc include errors.
-for _sub in include/cutlass/include include/tk/include; do
-    if [ ! -d "${_sub}" ]; then
-        echo "ERROR: ${_sub} is missing. Outside a git checkout the CUTLASS/" >&2
-        echo "       ThunderKittens sources must already be present (run" >&2
-        echo "       'git submodule update --init --recursive include/cutlass include/tk'" >&2
-        echo "       in the source checkout, or include them in the build context)." >&2
-        exit 1
-    fi
-done
-unset _sub
+# dying later in a wall of nvcc include errors. CUTLASS is consumed by the
+# always-built turbodiffusion sources, so it is a hard error; ThunderKittens
+# only feeds the TK-gated Hopper kernels, so a missing tree just warns (the
+# TK gate resolves later, and non-SM90/ROCm builds never touch it).
+if [ ! -d include/cutlass/include ]; then
+    echo "ERROR: include/cutlass/include is missing. Outside a git checkout the" >&2
+    echo "       CUTLASS sources must already be present (run" >&2
+    echo "       'git submodule update --init --recursive include/cutlass include/tk'" >&2
+    echo "       in the source checkout, or include them in the build context)." >&2
+    exit 1
+fi
+if [ ! -d include/tk/include ]; then
+    echo "WARNING: include/tk/include is missing; ThunderKittens (Hopper sm_90a)" >&2
+    echo "         kernels cannot be built. Fine for non-SM90/ROCm targets." >&2
+fi
 
 # Install build dependencies
 uv pip install scikit-build-core cmake ninja
