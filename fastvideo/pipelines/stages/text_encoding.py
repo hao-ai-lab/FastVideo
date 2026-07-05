@@ -8,6 +8,8 @@ This module contains implementations of prompt encoding stages for diffusion pip
 import torch
 from typing import Any
 
+from torch.distributed.tensor import DTensor
+
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -203,10 +205,21 @@ class TextEncodingStage(PipelineStage):
             encoder_config = encoder_cfgs[i]
             preprocess_func = preprocess_funcs[i]
             postprocess_func = postprocess_funcs[i]
-            encoder_device = next(
-                (param.device for param in text_encoder.parameters()),
-                torch.device(target_device),
-            )
+            # cpu_offload semantics: params rest on CPU between calls but the
+            # forward computes on GPU. FSDP2-wrapped encoders (CPUOffloadPolicy;
+            # DTensor params) stream themselves per-layer — leave inputs on the
+            # param device and let FSDP's root pre-forward move them. A plain
+            # module parked on CPU by text_encoder_cpu_offload is swapped to the
+            # target device for the forward and back afterwards, mirroring the
+            # image-encoder/VAE offload pattern.
+            first_param = next(text_encoder.parameters(), None)
+            encoder_device = first_param.device if first_param is not None else torch.device(target_device)
+            moved_for_forward = False
+            if (first_param is not None and not isinstance(first_param, DTensor)
+                    and encoder_device.type != torch.device(target_device).type):
+                text_encoder = text_encoder.to(target_device)
+                encoder_device = torch.device(target_device)
+                moved_for_forward = True
 
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
@@ -297,6 +310,8 @@ class TextEncodingStage(PipelineStage):
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
                 attn_masks_list.append(attention_mask.to(device=target_device))
+            if moved_for_forward and fastvideo_args.text_encoder_cpu_offload:
+                text_encoder.to("cpu")
         self._last_audio_embeds = audio_embeds_list if is_ltx2 else None
         return self.return_embeds(embeds_list, attn_masks_list, return_type, return_attention_mask, indices)
 
