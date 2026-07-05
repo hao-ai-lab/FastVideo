@@ -10,8 +10,10 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 from tqdm.auto import tqdm
 
+from fastvideo.attention.backends.nabla import NablaAttentionMetadataBuilder
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader, VAELoader
 from fastvideo.models.vaes.common import ParallelTiledVAE
@@ -108,15 +110,9 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
             )
             latents = torch.cat([latents, cond, cond_mask], dim=-1)
 
-        # I2V: place the encoded image in the first frame and, when the
-        # transformer expects visual conditioning, in the cond/mask channels.
-        if batch.image_latent is not None:
-            image_latent = batch.image_latent.to(device=device, dtype=dtype)
-            latents[:, 0:1, :, :, :num_channels] = image_latent
-            if visual_cond:
-                latents[:, 0:1, :, :, num_channels:2 * num_channels] = image_latent
-                latents[:, 0:1, :, :, 2 * num_channels:] = 1.0
-
+        # I2V image conditioning is placed by Kandinsky5ImageEncodingStage,
+        # which runs AFTER this stage so the initial noise is the generator's
+        # first draw (matching the official kandinskylab/kandinsky-5 order).
         batch.latents = latents
         batch.raw_latent_shape = (
             batch_size,
@@ -316,9 +312,18 @@ class Kandinsky5DenoisingStage(PipelineStage):
                     continue
 
                 t_expand = timestep.unsqueeze(0).repeat(latents.shape[0]).to(device=device, dtype=target_dtype)
+                attn_metadata = None
+                if sparse_params is not None:
+                    attn_metadata = NablaAttentionMetadataBuilder().build(
+                        current_timestep=i,
+                        sta_mask=sparse_params["sta_mask"],
+                        P=sparse_params["P"],
+                        visual_shape=sparse_params["visual_shape"],
+                    )
                 autocast_ctx = (torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled)
                                 if device.type == "cuda" else contextlib.nullcontext())
-                with autocast_ctx:
+                with set_forward_context(current_timestep=i, attn_metadata=attn_metadata,
+                                         forward_batch=batch), autocast_ctx:
                     pred_velocity = self.transformer(
                         hidden_states=latents.to(dtype=target_dtype),
                         encoder_hidden_states=prompt_embeds,
@@ -381,36 +386,13 @@ class Kandinsky5DecodingStage(DecodingStage):
         super().__init__(vae=vae, pipeline=pipeline)
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        pipeline = self.pipeline() if self.pipeline else None
-        if not fastvideo_args.model_loaded["vae"]:
-            loader = VAELoader()
-            self.vae = loader.load(fastvideo_args.model_paths["vae"], fastvideo_args)
-            if pipeline:
-                pipeline.add_module("vae", self.vae)
-            fastvideo_args.model_loaded["vae"] = True
-
         if batch.latents is None:
             raise ValueError("latents must be available before Kandinsky5 decoding.")
-
-        if fastvideo_args.output_type == "latent":
-            frames = batch.latents.permute(0, 4, 1, 2, 3).contiguous()
-        else:
-            frames = self.decode(batch.latents.permute(0, 4, 1, 2, 3).contiguous(), fastvideo_args)
-
-        # Trajectory latents are recorded channels-first by the denoising stage.
-        if batch.return_trajectory_decoded:
-            batch.trajectory_decoded = []
-            assert batch.trajectory_latents is not None, "batch should have trajectory latents"
-            for idx in range(batch.trajectory_latents.shape[1]):
-                cur_latent = batch.trajectory_latents[:, idx]
-                logger.info("decoding trajectory latent for timestep: %s", batch.trajectory_timesteps[idx])
-                decoded_frames = self.decode(cur_latent, fastvideo_args)
-                batch.trajectory_decoded.append(decoded_frames.cpu().float())
-
-        batch.output = frames.to(torch.float32)
-        if fastvideo_args.vae_cpu_offload:
-            self.vae.to("cpu")
-        return batch
+        # Kandinsky5 latents are channels-last [B, T, H, W, C]; the base stage
+        # (and the trajectory latents recorded by the denoising stage) work
+        # channels-first.
+        batch.latents = batch.latents.permute(0, 4, 1, 2, 3).contiguous()
+        return super().forward(batch, fastvideo_args)
 
 
 class Kandinsky5ImageEncodingStage(EncodingStage):
@@ -433,6 +415,13 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
                            "assuming range [0, 1] and normalizing to [-1, 1]. "
                            "Pass a [-1, 1] tensor with negative values to skip normalization.")
             image = normalize(image)  # [0, 1] -> [-1, 1]
+        if image.ndim == 3:
+            image = image.unsqueeze(0)
+        if image.shape[-2:] != (height, width):
+            image = torch.nn.functional.interpolate(image.float(),
+                                                    size=(height, width),
+                                                    mode="bilinear",
+                                                    antialias=True)
         return image
 
     @torch.no_grad()
@@ -480,6 +469,18 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
         # [B, C, 1, H, W] -> [B, 1, H, W, C] to match channels-last latents
         batch.image_latent = image_latent.permute(0, 2, 3, 4, 1).contiguous()
 
+        # Place the conditioning latent into the prepared latents: frame 0 of
+        # the main channels and, when the transformer expects visual
+        # conditioning, the cond/mask channels.
+        latents = batch.latents
+        image_latent = batch.image_latent.to(device=latents.device, dtype=latents.dtype)
+        num_channels = image_latent.shape[-1]
+        latents[:, 0:1, :, :, :num_channels] = image_latent
+        if latents.shape[-1] > num_channels:
+            latents[:, 0:1, :, :, num_channels:2 * num_channels] = image_latent
+            latents[:, 0:1, :, :, 2 * num_channels:] = 1.0
+        batch.latents = latents
+
         if fastvideo_args.vae_cpu_offload:
             vae.to("cpu")
         return batch
@@ -489,6 +490,8 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
         result.add_check("pil_image", batch.pil_image, V.not_none)
         result.add_check("height", batch.height, V.positive_int)
         result.add_check("width", batch.width, V.positive_int)
+        # This stage runs after latent preparation and writes into its output.
+        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         return result
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
