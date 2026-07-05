@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from apps.interleave_thinker import (
+from fastvideo.workflows.interleave_thinker import (
     discover_interleave_trace_paths,
     evaluate_interleave_traces,
     interleave_trace_evaluation_to_dict,
