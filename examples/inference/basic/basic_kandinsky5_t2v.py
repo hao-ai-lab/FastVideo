@@ -12,7 +12,7 @@ def main():
         use_fsdp_inference=False,
         dit_cpu_offload=False,
         vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
+        text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
         # image_encoder_cpu_offload=False,
     )
