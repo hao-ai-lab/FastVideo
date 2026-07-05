@@ -327,14 +327,12 @@ class Qwen3ForCausalLM(TextEncoder):
         dtype: torch.dtype,
         device: torch.device,
     ) -> nn.Module:
-        from transformers import AutoModelForCausalLM
+        from transformers import AutoModel
 
-        if device.type == "cpu" and torch.cuda.is_available():
-            from fastvideo.distributed import get_local_torch_device
-
-            device = get_local_torch_device()
-
-        return AutoModelForCausalLM.from_pretrained(
+        # FastVideo uses Qwen3 only as a text encoder. Loading the body avoids
+        # materializing an unused LM head and full-vocabulary logits, including
+        # for checkpoints whose metadata names Qwen3ForCausalLM.
+        return AutoModel.from_pretrained(
             model_path,
             local_files_only=True,
             torch_dtype=dtype,
@@ -375,7 +373,10 @@ class Qwen3ForCausalLM(TextEncoder):
             # the batch dim into the head dim and misaligns RoPE. Expanding to
             # ``batch_size * seq_len`` tokens keeps the layout correct.
             position_ids = torch.arange(
-                0, hidden_states.shape[1], device=hidden_states.device
+                0,
+                hidden_states.shape[1],
+                device=hidden_states.device,
+                dtype=torch.long,
             ).unsqueeze(0).expand(hidden_states.shape[0], -1)
 
         all_hidden_states: tuple[Any, ...] | None = (
@@ -411,6 +412,20 @@ class Qwen3ForCausalLM(TextEncoder):
     ) -> set[str]:
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
+        stacked_params_mapping = self.config.arch_config.stacked_params_mapping
+        # A fused destination is initialized either by one already-fused tensor
+        # or after every split source projection has been loaded. Include
+        # auxiliary quantization parameters (for example scale_weight) rather
+        # than limiting completeness checks to weight/bias tensors.
+        expected_stacked_shards = {
+            (name, shard_id)
+            for name in params_dict
+            for param_name, _, shard_id in stacked_params_mapping
+            if param_name in name
+        }
+        fused_param_names = {name for name, _ in expected_stacked_shards}
+        loaded_stacked_shards: set[tuple[str, str | int]] = set()
+        loaded_fused_params: set[str] = set()
 
         for name, loaded_weight in weights:
             if name.startswith("model."):
@@ -429,37 +444,66 @@ class Qwen3ForCausalLM(TextEncoder):
                     continue
                 name = kv_scale_name
 
-            for (
-                param_name,
-                weight_name,
-                shard_id,
-            ) in self.config.arch_config.stacked_params_mapping:
+            matched_stacked_param = False
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
-                name = name.replace(weight_name, param_name)
+                matched_stacked_param = True
+                target_name = name.replace(weight_name, param_name)
 
-                if name.endswith(".bias") and name not in params_dict:
-                    continue
+                if target_name.endswith(".bias") and target_name not in params_dict:
+                    break
 
-                if name not in params_dict:
-                    continue
+                if target_name not in params_dict:
+                    break
 
-                param = params_dict[name]
+                param = params_dict[target_name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
+                loaded_params.add(target_name)
+                loaded_stacked_shards.add((target_name, shard_id))
                 break
+
+            if matched_stacked_param:
+                continue
+
+            if name.endswith(".bias") and name not in params_dict:
+                continue
+
+            if name not in params_dict:
+                continue
+
+            param = params_dict[name]
+            if name in fused_param_names and name.endswith(".scale_weight"):
+                # Merged scale loaders interpret a missing shard id as shard 0.
+                # An exact fused key is already a complete vector, so copy it
+                # atomically and retain the default loader's shape validation.
+                default_weight_loader(param, loaded_weight)
             else:
-                if name.endswith(".bias") and name not in params_dict:
-                    continue
-
-                if name not in params_dict:
-                    continue
-
-                param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
-
             loaded_params.add(name)
+            if name in fused_param_names:
+                loaded_fused_params.add(name)
+
+        required_split_shards = {
+            (name, shard_id)
+            for name, shard_id in expected_stacked_shards
+            if name not in loaded_fused_params
+        }
+        missing_stacked_shards = required_split_shards - loaded_stacked_shards
+        if missing_stacked_shards:
+            formatted_missing = ", ".join(
+                f"{name}[{shard_id}]"
+                for name, shard_id in sorted(
+                    missing_stacked_shards,
+                    key=lambda item: (item[0], str(item[1])),
+                )
+            )
+            raise ValueError(
+                "Missing required stacked checkpoint shards: "
+                f"{formatted_missing}"
+            )
 
         return loaded_params
 

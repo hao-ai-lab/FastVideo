@@ -11,10 +11,13 @@ Usage:
 
 from __future__ import annotations
 
+import importlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 from torch.testing import assert_close
@@ -25,22 +28,58 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+ZIMAGE_REPO = REPO_ROOT / "Z-Image"
 ZIMAGE_SRC = REPO_ROOT / "Z-Image" / "src"
 ZIMAGE_SCHEDULER_CFG = (
     REPO_ROOT / "official_weights" / "Z-Image" / "scheduler" / "scheduler_config.json"
 )
+ZIMAGE_REFERENCE_REVISION = "26f23eda626ffadda020b04ff79488e1d72004cd"
+PARITY_SCOPE = "implementation_subcomponent"
 
 
-if str(ZIMAGE_SRC) not in sys.path:
-    sys.path.insert(0, str(ZIMAGE_SRC))
+def _require_pinned_reference_module(module_name: str, source_file: Path):
+    if not ZIMAGE_REPO.exists():
+        pytest.skip(f"Pinned Z-Image reference clone not found: {ZIMAGE_REPO}")
+    if not source_file.is_file():
+        pytest.fail(f"Z-Image reference clone is incomplete; missing {source_file}")
 
-try:
-    from zimage.scheduler import FlowMatchEulerDiscreteScheduler as ReferenceScheduler
-except Exception as exc:  # pragma: no cover - handled by skip in fixture
-    ReferenceScheduler = None
-    _IMPORT_ERROR = exc
-else:
-    _IMPORT_ERROR = None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(ZIMAGE_REPO), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        pytest.fail(f"Cannot verify Z-Image reference revision: {exc}")
+
+    actual_revision = result.stdout.strip()
+    assert actual_revision == ZIMAGE_REFERENCE_REVISION, (
+        "Z-Image reference clone is not at the pinned revision: "
+        f"expected {ZIMAGE_REFERENCE_REVISION}, got {actual_revision}"
+    )
+
+    if str(ZIMAGE_SRC) not in sys.path:
+        sys.path.insert(0, str(ZIMAGE_SRC))
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as exc:
+        pytest.fail(f"Cannot import pinned Z-Image module {module_name}: {exc}")
+
+    module_file = Path(module.__file__ or "").resolve()
+    assert module_file.is_relative_to(ZIMAGE_SRC.resolve()), (
+        f"{module_name} resolved outside the pinned clone: {module_file}"
+    )
+    return module
+
+
+@pytest.fixture(scope="module")
+def reference_scheduler_cls():
+    module = _require_pinned_reference_module(
+        "zimage.scheduler",
+        ZIMAGE_SRC / "zimage" / "scheduler.py",
+    )
+    return module.FlowMatchEulerDiscreteScheduler
 
 
 @pytest.fixture(scope="module")
@@ -63,15 +102,26 @@ def _scheduler_kwargs_from_config(scheduler_config: dict) -> dict:
     return {k: v for k, v in scheduler_config.items() if k not in _SCHEDULER_CONFIG_LOADER_KEYS}
 
 
-@pytest.fixture(scope="module")
-def scheduler_pair(scheduler_config: dict):
-    if ReferenceScheduler is None:
-        pytest.skip(f"Cannot import Z-Image reference scheduler: {_IMPORT_ERROR}")
-
+def _make_scheduler_pair(reference_scheduler_cls, scheduler_config: dict, **overrides):
     kwargs = _scheduler_kwargs_from_config(scheduler_config)
-    ref = ReferenceScheduler(**kwargs)
-    fv = FastVideoScheduler(**kwargs, use_reference_discrete_timesteps=True)
+    kwargs.update(overrides)
+
+    ref = reference_scheduler_cls(**kwargs)
+    # The pinned Z-Image pipeline mutates this immediately before scheduling.
+    ref.sigma_min = 0.0
+
+    # These values must be serialized by the future production pipeline config.
+    # setdefault also allows this test to consume that config once it lands.
+    fv_kwargs = dict(kwargs)
+    fv_kwargs.setdefault("use_reference_discrete_timesteps", True)
+    fv_kwargs.setdefault("sigma_min", 0.0)
+    fv = FastVideoScheduler(**fv_kwargs)
     return ref, fv
+
+
+@pytest.fixture(scope="module")
+def scheduler_pair(reference_scheduler_cls, scheduler_config: dict):
+    return _make_scheduler_pair(reference_scheduler_cls, scheduler_config)
 
 
 def _run_step_loop(ref_scheduler, fv_scheduler, sample_shape=(2, 4, 32, 32)):
@@ -115,14 +165,56 @@ def test_zimage_scheduler_parity_default_schedule_and_step(scheduler_pair):
     _run_step_loop(ref, fv)
 
 
-def test_zimage_scheduler_parity_dynamic_shifting_with_mu(scheduler_config: dict):
-    if ReferenceScheduler is None:
-        pytest.skip(f"Cannot import Z-Image reference scheduler: {_IMPORT_ERROR}")
+def test_scheduler_positional_args_keep_existing_bindings_and_default_schedule():
+    scheduler = FastVideoScheduler(1000, 1.0, False, 0.7)
 
-    kwargs = _scheduler_kwargs_from_config(scheduler_config)
-    kwargs["use_dynamic_shifting"] = True
-    ref = ReferenceScheduler(**kwargs)
-    fv = FastVideoScheduler(**kwargs, use_reference_discrete_timesteps=True)
+    assert scheduler.config.base_shift == 0.7
+    assert scheduler.config.use_reference_discrete_timesteps is False
+
+    scheduler.set_timesteps(num_inference_steps=8, device="cpu")
+    assert_close(scheduler.sigmas[-2], torch.tensor(scheduler.sigma_min))
+
+
+def test_scheduler_honors_explicit_zero_sigma_min():
+    scheduler = FastVideoScheduler(
+        sigma_min=0.0,
+        use_reference_discrete_timesteps=True,
+    )
+
+    assert scheduler.sigma_min == 0.0
+    scheduler.set_timesteps(num_inference_steps=8, device="cpu")
+    assert_close(scheduler.timesteps[-1], torch.tensor(125.0))
+
+
+def test_reference_schedule_preserves_float64_linspace_rounding():
+    scheduler = FastVideoScheduler(
+        sigma_min=0.0,
+        use_reference_discrete_timesteps=True,
+    )
+    scheduler.set_timesteps(num_inference_steps=9, device="cpu")
+
+    expected = torch.from_numpy(
+        np.linspace(1000.0, 0.0, 10)[:-1] / 1000.0,
+    ).to(torch.float32) * 1000.0
+    float32_regression = torch.from_numpy(
+        np.linspace(1000.0, 0.0, 10, dtype=np.float32)[:-1] / np.float32(1000.0),
+    ) * 1000.0
+
+    # The fifth timestep differs by one float32 ULP depending on where the
+    # linspace is rounded, so this assertion fails if dtype=np.float32 returns.
+    assert expected[4].item() != float32_regression[4].item()
+    assert scheduler.timesteps[4].item() == expected[4].item()
+
+
+def test_zimage_scheduler_parity_dynamic_shifting_with_mu(
+    reference_scheduler_cls,
+    scheduler_config: dict,
+):
+    ref, fv = _make_scheduler_pair(
+        reference_scheduler_cls,
+        scheduler_config,
+        use_dynamic_shifting=True,
+    )
 
     mu = 0.75
     num_inference_steps = 8

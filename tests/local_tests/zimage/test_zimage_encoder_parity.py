@@ -4,7 +4,8 @@ Parity test for Z-Image Qwen3 text encoder support in FastVideo.
 
 This compares:
 1) direct transformers AutoModel output, and
-2) FastVideo's shared Qwen3 encoder (``Qwen3ForCausalLM``, added for Flux2
+2) FastVideo's production ``TextEncoderLoader`` passthrough, and
+3) FastVideo's shared native Qwen3 encoder (``Qwen3ForCausalLM``, added for Flux2
    Klein and reused here — Z-Image-Turbo's ``Qwen3Model`` checkpoint routes
    to it via the model registry),
 
@@ -17,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 import gc
 import json
 import os
@@ -43,12 +45,17 @@ def _gpu_mem_mb() -> float:
         return torch.cuda.memory_allocated() / (1024 ** 2)
     return 0.0
 from torch.testing import assert_close
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 from safetensors.torch import safe_open
 
 from fastvideo.configs.models.encoders.qwen3 import Qwen3TextConfig
 from fastvideo.distributed.parallel_state import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
+from fastvideo.layers.quantization.absmax_fp8 import AbsMaxFP8MergedParameter
+from fastvideo.models.encoders.qwen3 import Qwen3ForCausalLM
+from fastvideo.models.loader.component_loader import TextEncoderLoader
 from fastvideo.models.registry import ModelRegistry
+
+PARITY_SCOPE = "both"
 
 # Strict-load contract: the shared Qwen3 encoder is body-only (embed_tokens +
 # layers + norm, no lm_head). Z-Image-Turbo ships a full Qwen3 checkpoint, so
@@ -106,17 +113,131 @@ def _iter_pretrained_safetensors(model_dir: Path):
     )
 
 
-# bf16 tolerance reflects accumulated drift across the Qwen3 encoder
-# (Z-Image-Turbo ships a 35-layer Qwen3 variant). Per
-# add-model-02-parity's calibration block, bf16 max-based asserts are
-# meaningless for deep encoders — fused-vs-unfused linear order alone
-# produces a long tail. We use distribution checks (mean + median)
-# instead. The per-layer diagnostic test in this file confirmed the
-# growth is monotonic with layer depth (no single-layer spike), and
-# fp32 forwards are bit-exact, so this is the textbook bf16-tail
-# signature and not a code bug.
+def _pretrained_safetensor_keys(model_dir: Path) -> set[str]:
+    return {name for name, _ in _iter_pretrained_safetensors(model_dir)}
+
+
+def _load_qwen3_config() -> Qwen3TextConfig:
+    cfg_raw = _load_json(ZIMAGE_TEXT_ENCODER_DIR / "config.json")
+    for key in ("_name_or_path", "transformers_version", "model_type", "torch_dtype"):
+        cfg_raw.pop(key, None)
+    config = Qwen3TextConfig()
+    config.update_model_arch(cfg_raw)
+    assert config.num_hidden_layers == 36
+    assert config.hidden_size == 2560
+    assert config.intermediate_size == 9728
+    assert config.num_attention_heads == 32
+    assert config.num_key_value_heads == 8
+    return config
+
+
+def _loader_args(cpu_offload: bool) -> SimpleNamespace:
+    return SimpleNamespace(
+        text_encoder_cpu_offload=cpu_offload,
+        override_text_encoder_quant=None,
+        override_text_encoder_safetensors=None,
+        pin_cpu_memory=False,
+    )
+
+
+def _precision_name(dtype: torch.dtype) -> str:
+    if dtype == torch.float32:
+        return "fp32"
+    if dtype == torch.bfloat16:
+        return "bf16"
+    raise ValueError(f"Unsupported parity dtype: {dtype}")
+
+
+def _tokenize_official_prompts(tokenizer, prompts: list[str]):
+    formatted = [
+        tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt}],
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=True,
+        )
+        for prompt in prompts
+    ]
+    return tokenizer(
+        formatted,
+        padding="max_length",
+        truncation=True,
+        max_length=512,
+        return_tensors="pt",
+    )
+
+
+def _assert_native_load_surface(
+    model,
+    checkpoint_keys: set[str],
+    loaded_params: set[str],
+) -> None:
+    param_names = {name for name, _ in model.named_parameters()}
+    missing = param_names - loaded_params
+    assert not missing, f"FastVideo parameters not loaded: {sorted(missing)}"
+
+    normalized_keys = {
+        name[len("model."):] if name.startswith("model.") else name
+        for name in checkpoint_keys
+    }
+    mapped_keys: set[str] = set()
+    for checkpoint_name in normalized_keys:
+        for param_name, weight_name, _ in model.config.arch_config.stacked_params_mapping:
+            if weight_name in checkpoint_name:
+                mapped_keys.add(checkpoint_name.replace(weight_name, param_name))
+                break
+        else:
+            mapped_keys.add(checkpoint_name)
+
+    unexpected = mapped_keys - param_names - {
+        "rotary_emb.inv_freq",
+        "rotary_emb.cos_cached",
+        "rotary_emb.sin_cached",
+    }
+    assert unexpected <= _ALLOWED_UNEXPECTED_KEYS, (
+        "Unexpected checkpoint keys not in allowlist: "
+        f"{sorted(unexpected - _ALLOWED_UNEXPECTED_KEYS)}"
+    )
+
+
+def _fake_qwen3_weight_target(include_quant_scales: bool = False):
+    stacked = Qwen3TextConfig().arch_config.stacked_params_mapping
+    params = {
+        "layers.0.self_attn.qkv_proj.weight": torch.nn.Parameter(torch.empty(1)),
+        "layers.0.mlp.gate_up_proj.weight": torch.nn.Parameter(torch.empty(1)),
+    }
+    if include_quant_scales:
+        qkv_scale = AbsMaxFP8MergedParameter(torch.zeros(3), requires_grad=False)
+        qkv_scale.output_partition_sizes = [1, 1, 1]
+        gate_up_scale = AbsMaxFP8MergedParameter(torch.zeros(2), requires_grad=False)
+        gate_up_scale.output_partition_sizes = [1, 1]
+        params.update({
+            "layers.0.self_attn.qkv_proj.scale_weight": qkv_scale,
+            "layers.0.mlp.gate_up_proj.scale_weight": gate_up_scale,
+        })
+    for param in params.values():
+        if not hasattr(param, "weight_loader"):
+            param.weight_loader = (
+                lambda target, loaded, *args: target.data.copy_(loaded)
+            )
+
+    model = SimpleNamespace(
+        config=SimpleNamespace(
+            arch_config=SimpleNamespace(stacked_params_mapping=stacked)
+        ),
+        named_parameters=lambda: params.items(),
+    )
+    return model, params, stacked
+
+
+# The provisional bf16 thresholds below come from the historical unpinned
+# 35-layer run. Per add-model-02-parity's calibration block, bf16 max-based
+# asserts are meaningless for deep encoders — fused-vs-unfused linear order
+# alone produces a long tail, so the test uses mean + median instead. The
+# pinned snapshot has 36 blocks and must be rerun before these thresholds are
+# treated as current evidence.
 #
-# Empirical numbers (Z-Image-Turbo Qwen3, 35 layers, observed on CUDA):
+# Historical empirical numbers (unrecorded snapshot, 35 layers, CUDA):
 #   last_hidden_state (post-norm):  mean=0.0152, median=0.0117
 #   hidden_states[-2] (pre-norm):   mean=0.0754, median=0.0625
 # Thresholds below add ~1.6x headroom over observed.
@@ -138,6 +259,227 @@ def _print_diag(label: str, ref: torch.Tensor, fv: torch.Tensor) -> torch.Tensor
         flush=True,
     )
     return diff
+
+
+def test_qwen3_production_loader_uses_body_only_model_and_honors_cpu_offload(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The production passthrough must avoid the LM head and preserve CPU placement."""
+    import fastvideo.platforms as platforms
+
+    placements: list[torch.device] = []
+    auto_model_calls: list[dict] = []
+
+    class FakeHFModel:
+        def eval(self):
+            return self
+
+        def to(self, device: torch.device):
+            placements.append(torch.device(device))
+            return self
+
+    fake_model = FakeHFModel()
+
+    def fake_auto_model_from_pretrained(*args, **kwargs):
+        auto_model_calls.append(kwargs)
+        return fake_model
+
+    def fail_causal_lm_from_pretrained(*args, **kwargs):
+        raise AssertionError("Qwen text encoding must not load AutoModelForCausalLM")
+
+    monkeypatch.setattr(
+        AutoModel,
+        "from_pretrained",
+        staticmethod(fake_auto_model_from_pretrained),
+    )
+    monkeypatch.setattr(
+        AutoModelForCausalLM,
+        "from_pretrained",
+        staticmethod(fail_causal_lm_from_pretrained),
+    )
+    monkeypatch.setattr(
+        platforms,
+        "_current_platform",
+        SimpleNamespace(
+            is_mps=lambda: False,
+            verify_model_arch=lambda _arch: None,
+        ),
+    )
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(
+        "fastvideo.distributed.get_local_torch_device",
+        lambda: torch.device("cuda"),
+    )
+
+    config = Qwen3TextConfig()
+    # The pinned checkpoint names the causal wrapper even though the official
+    # Z-Image loader intentionally asks Transformers for the body-only model.
+    config.arch_config.architectures = ["Qwen3ForCausalLM"]
+    loaded = TextEncoderLoader().load_model(
+        "unused-by-mock",
+        config,
+        torch.device("cuda"),
+        _loader_args(cpu_offload=True),
+        dtype="fp32",
+        use_text_encoder_override=True,
+    )
+
+    assert loaded is fake_model
+    assert auto_model_calls == [{
+        "local_files_only": True,
+        "torch_dtype": torch.float32,
+        "low_cpu_mem_usage": True,
+    }]
+    assert placements == [torch.device("cpu")]
+    assert loaded._fastvideo_input_device == torch.device("cpu")
+
+
+@pytest.mark.parametrize("checkpoint_prefix", ["", "model."])
+def test_qwen3_native_load_accepts_already_fused_weights_and_scales(
+    checkpoint_prefix: str,
+):
+    """Direct FastVideo/state-dict keys satisfy each fused target atomically."""
+    fake_model, params, _ = _fake_qwen3_weight_target(include_quant_scales=True)
+    expected = {
+        name: torch.arange(1, param.numel() + 1, dtype=param.dtype)
+        for name, param in params.items()
+    }
+    weights = [
+        (f"{checkpoint_prefix}{name}", expected[name])
+        for name in params
+    ]
+
+    loaded = Qwen3ForCausalLM.load_weights(fake_model, weights)
+
+    assert loaded == set(params)
+    for name, param in params.items():
+        assert torch.equal(param.data, expected[name])
+    _assert_native_load_surface(
+        fake_model,
+        {name for name, _ in weights},
+        loaded,
+    )
+
+
+def test_qwen3_native_load_rejects_incompatible_fused_quant_scale_shape():
+    fake_model, params, _ = _fake_qwen3_weight_target(include_quant_scales=True)
+    weights = [
+        (name, torch.ones_like(param))
+        for name, param in params.items()
+        if name != "layers.0.self_attn.qkv_proj.scale_weight"
+    ]
+    weights.append(("layers.0.self_attn.qkv_proj.scale_weight", torch.ones(1)))
+
+    with pytest.raises(AssertionError, match="Attempted to load weight"):
+        Qwen3ForCausalLM.load_weights(fake_model, weights)
+
+
+def test_qwen3_native_load_uses_real_shard_loader_for_split_quant_scales():
+    fake_model, params, stacked = _fake_qwen3_weight_target(include_quant_scales=True)
+    weights = [
+        (name, torch.ones_like(param))
+        for name, param in params.items()
+        if name.endswith(".weight")
+    ]
+    weights.extend(
+        (f"model.layers.0.self_attn{weight_name}.scale_weight", torch.tensor(float(index + 1)))
+        for index, (_, weight_name, _) in enumerate(stacked[:3])
+    )
+    weights.extend(
+        (f"model.layers.0.mlp{weight_name}.scale_weight", torch.tensor(float(index + 4)))
+        for index, (_, weight_name, _) in enumerate(stacked[3:])
+    )
+
+    loaded = Qwen3ForCausalLM.load_weights(fake_model, weights)
+
+    assert loaded == set(params)
+    assert torch.equal(
+        params["layers.0.self_attn.qkv_proj.scale_weight"].data,
+        torch.tensor([1.0, 2.0, 3.0]),
+    )
+    assert torch.equal(
+        params["layers.0.mlp.gate_up_proj.scale_weight"].data,
+        torch.tensor([4.0, 5.0]),
+    )
+
+
+@pytest.mark.parametrize(
+    ("missing_weight_name", "missing_shard_id"),
+    [
+        (".q_proj", "q"),
+        (".k_proj", "k"),
+        (".v_proj", "v"),
+        (".gate_proj", 0),
+        (".up_proj", 1),
+    ],
+)
+def test_qwen3_native_load_rejects_missing_fused_weight_shard(
+    missing_weight_name: str,
+    missing_shard_id: str | int,
+):
+    fake_model, _, stacked = _fake_qwen3_weight_target()
+    weights = [
+        (f"model.layers.0.self_attn{weight_name}.weight", torch.empty(1))
+        for _, weight_name, _ in stacked[:3]
+        if weight_name != missing_weight_name
+    ]
+    weights.extend(
+        (f"model.layers.0.mlp{weight_name}.weight", torch.empty(1))
+        for _, weight_name, _ in stacked[3:]
+        if weight_name != missing_weight_name
+    )
+
+    with pytest.raises(ValueError, match="Missing required stacked checkpoint shards") as exc_info:
+        Qwen3ForCausalLM.load_weights(fake_model, weights)
+
+    destination = (
+        "layers.0.self_attn.qkv_proj.weight"
+        if isinstance(missing_shard_id, str)
+        else "layers.0.mlp.gate_up_proj.weight"
+    )
+    assert f"{destination}[{missing_shard_id}]" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("missing_weight_name", "missing_shard_id"),
+    [
+        (".q_proj", "q"),
+        (".k_proj", "k"),
+        (".v_proj", "v"),
+        (".gate_proj", 0),
+        (".up_proj", 1),
+    ],
+)
+def test_qwen3_native_load_rejects_missing_fused_quant_scale_shard(
+    missing_weight_name: str,
+    missing_shard_id: str | int,
+):
+    fake_model, params, stacked = _fake_qwen3_weight_target(include_quant_scales=True)
+    weights = [
+        (name, torch.empty(1))
+        for name in params
+        if name.endswith(".weight")
+    ]
+    weights.extend(
+        (f"model.layers.0.self_attn{weight_name}.scale_weight", torch.empty(1))
+        for _, weight_name, _ in stacked[:3]
+        if weight_name != missing_weight_name
+    )
+    weights.extend(
+        (f"model.layers.0.mlp{weight_name}.scale_weight", torch.empty(1))
+        for _, weight_name, _ in stacked[3:]
+        if weight_name != missing_weight_name
+    )
+
+    with pytest.raises(ValueError, match="Missing required stacked checkpoint shards") as exc_info:
+        Qwen3ForCausalLM.load_weights(fake_model, weights)
+
+    destination = (
+        "layers.0.self_attn.qkv_proj.scale_weight"
+        if isinstance(missing_shard_id, str)
+        else "layers.0.mlp.gate_up_proj.scale_weight"
+    )
+    assert f"{destination}[{missing_shard_id}]" in str(exc_info.value)
 
 
 @pytest.mark.skipif(not ZIMAGE_TEXT_ENCODER_DIR.exists(), reason="Z-Image text encoder checkpoint required")
@@ -168,15 +510,10 @@ def test_zimage_qwen3_encoder_parity_forward(dtype: torch.dtype):
         "A cinematic shot of a rainy neon street at night.",
         "A watercolor illustration of a fox in autumn leaves.",
     ]
-    toks = tokenizer(
-        prompts,
-        padding="max_length",
-        truncation=True,
-        max_length=128,
-        return_tensors="pt",
-    )
+    toks = _tokenize_official_prompts(tokenizer, prompts)
     input_ids = toks["input_ids"].to(device)
     attention_mask = toks["attention_mask"].to(device)
+    config = _load_qwen3_config()
 
     ref = AutoModel.from_pretrained(
         str(ZIMAGE_TEXT_ENCODER_DIR),
@@ -194,51 +531,56 @@ def test_zimage_qwen3_encoder_parity_forward(dtype: torch.dtype):
             return_dict=True,
         )
         ref_last = ref_out.last_hidden_state.detach().float().cpu()
+        assert ref_out.hidden_states is not None
         ref_hs_m2 = ref_out.hidden_states[-2].detach().float().cpu()
 
     print(f"[mem] after HF ref forward: {_gpu_mem_mb():.0f} MiB", flush=True)
-    # Free the HF reference before loading the FastVideo model — its outputs
-    # are already on CPU, so keeping it resident just doubles peak VRAM (two
-    # full encoder copies OOMs a 44 GB L40S in fp32).
+    # Keep only CPU outputs so each full encoder is resident one at a time.
     del ref, ref_out
     _reclaim_vram()
     print(f"[mem] after freeing HF ref:  {_gpu_mem_mb():.0f} MiB", flush=True)
 
-    fv_cls, _ = ModelRegistry.resolve_model_cls("Qwen3Model")
-    cfg_raw = _load_json(ZIMAGE_TEXT_ENCODER_DIR / "config.json")
-    for k in ("_name_or_path", "transformers_version", "model_type", "torch_dtype"):
-        cfg_raw.pop(k, None)
+    production = TextEncoderLoader().load_model(
+        str(ZIMAGE_TEXT_ENCODER_DIR),
+        config,
+        device,
+        _loader_args(cpu_offload=False),
+        dtype=_precision_name(dtype),
+        use_text_encoder_override=True,
+    )
+    assert production.__class__.__name__ == "Qwen3Model"
+    assert not hasattr(production, "lm_head")
+    assert production._fastvideo_input_device == device
 
-    cfg = Qwen3TextConfig()
-    cfg.update_model_arch(cfg_raw)
-    fv = fv_cls(cfg).eval()
+    with torch.no_grad():
+        production_out = production(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        production_last = production_out.last_hidden_state.detach().float().cpu()
+        assert production_out.hidden_states is not None
+        production_hs_m2 = production_out.hidden_states[-2].detach().float().cpu()
+
+    # Production loading must preserve the independent Transformers oracle
+    # exactly; native-kernel drift is assessed separately below.
+    assert_close(ref_last, production_last, atol=0.0, rtol=0.0)
+    assert_close(ref_hs_m2, production_hs_m2, atol=0.0, rtol=0.0)
+    del production, production_out, production_last, production_hs_m2
+    _reclaim_vram()
+
+    fv_cls, _ = ModelRegistry.resolve_model_cls("Qwen3Model")
+    fv = fv_cls(config).eval()
     loaded = fv.load_weights(_iter_pretrained_safetensors(ZIMAGE_TEXT_ENCODER_DIR))
     assert loaded, "No Qwen3 weights were loaded into FastVideo model"
     fv = fv.to(device=device, dtype=dtype)
     print(f"[mem] after FastVideo load:  {_gpu_mem_mb():.0f} MiB", flush=True)
 
-    # Strict-load contract: assert the checkpoint surface matches the model's
-    # params modulo the allowlist. Non-encoder heads like `lm_head.weight`
-    # (the body-only encoder has no lm_head) are the only acceptable unmatched
-    # keys; anything else means a real silent drop.
-    checkpoint_keys = {name for name, _ in _iter_pretrained_safetensors(ZIMAGE_TEXT_ENCODER_DIR)}
-    checkpoint_keys = {k[len("model."):] if k.startswith("model.") else k for k in checkpoint_keys}
-    param_names = {name for name, _ in fv.named_parameters()}
-    # Map stacked-param checkpoint keys to their merged FastVideo names so the
-    # diff below only surfaces *unexpected* keys, not the qkv/gate_up fusion.
-    stacked = fv.config.arch_config.stacked_params_mapping
-    mapped_keys: set[str] = set()
-    for ckpt_name in checkpoint_keys:
-        for param_name, weight_name, _ in stacked:
-            if weight_name in ckpt_name:
-                mapped_keys.add(ckpt_name.replace(weight_name, param_name))
-                break
-        else:
-            mapped_keys.add(ckpt_name)
-    unexpected = mapped_keys - param_names - {"rotary_emb.inv_freq", "rotary_emb.cos_cached", "rotary_emb.sin_cached"}
-    assert unexpected <= _ALLOWED_UNEXPECTED_KEYS, (
-        f"Unexpected checkpoint keys not in allowlist: "
-        f"{sorted(unexpected - _ALLOWED_UNEXPECTED_KEYS)}"
+    _assert_native_load_surface(
+        fv,
+        _pretrained_safetensor_keys(ZIMAGE_TEXT_ENCODER_DIR),
+        loaded,
     )
 
     with torch.no_grad():
@@ -317,12 +659,9 @@ def test_zimage_qwen3_encoder_per_layer_bf16_diagnostic():
     torch.manual_seed(11)
 
     tokenizer = AutoTokenizer.from_pretrained(str(ZIMAGE_TOKENIZER_DIR), local_files_only=True)
-    toks = tokenizer(
+    toks = _tokenize_official_prompts(
+        tokenizer,
         ["A cinematic shot of a rainy neon street at night."],
-        padding="max_length",
-        truncation=True,
-        max_length=128,
-        return_tensors="pt",
     )
     input_ids = toks["input_ids"].to(device)
     attention_mask = toks["attention_mask"].to(device)
@@ -367,6 +706,9 @@ def test_zimage_qwen3_encoder_per_layer_bf16_diagnostic():
         fv_hidden_cpu = [h.detach().float().cpu() for h in fv_out.hidden_states]
 
     assert fv_out.hidden_states is not None
+    assert len(ref_hidden_cpu) == 37, (
+        f"expected embeddings plus 36 block outputs, got {len(ref_hidden_cpu)} entries"
+    )
     assert len(ref_hidden_cpu) == len(fv_hidden_cpu), (
         f"len mismatch: HF={len(ref_hidden_cpu)} FV={len(fv_hidden_cpu)}"
     )

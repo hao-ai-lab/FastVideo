@@ -1,91 +1,142 @@
 # Z-Image Local Tests
 
-Local-only component parity tests for the `zimage` FastVideo port (T2I).
-Compares FastVideo's Qwen3 text encoder, AutoencoderKL VAE, and
-FlowMatchEulerDiscreteScheduler (Z-Image reference-timestep branch) against
-the local Z-Image reference implementation. Skipped in CI; CUDA recommended
-(required for bf16 encoder parity).
+Local-only component coverage for the `zimage` FastVideo port (`T2I`,
+Z-Image-Turbo only). This component-only PR covers the Qwen3 text encoder,
+tokenizer, AutoencoderKL VAE, and FlowMatchEulerDiscreteScheduler. The native
+`ZImageTransformer2DModel`, pipeline, pipeline parity, example, and image-quality
+regression remain out of scope.
 
-> **Status:** DRAFT port, in-progress. The transformer (ZImageTransformer2DModel),
-> pipeline, conversion script, and SSIM media regression are not yet
-> implemented — see [`PORT_STATUS.md`](./PORT_STATUS.md) for the live state.
+> **Status:** DRAFT port, in progress. Every test that consumes the reference
+> clone or HF assets requires a fresh non-skip rerun against the immutable pins
+> below. Earlier A40/L40S results used an unrecorded HF snapshot and are retained
+> only as historical diagnostics, not current verification evidence. See
+> [`PORT_STATUS.md`](./PORT_STATUS.md) for the live state.
 
-## Reference Assets
+## Reference assets and scope
 
 | Field | Value |
 |---|---|
-| Model family | `zimage` |
-| Workload types | `T2I` |
-| Official reference | Tongyi-MAI / `Z-Image` (Qwen3-based T2I) |
-| Local reference dir | `<repo_root>/Z-Image/src` (cloned manually) |
-| Official commit/version | `<TODO: pin a Z-Image git SHA before handoff>` |
-| HF weights | `<TODO: pin published HF id once Tongyi-MAI publishes weights>` |
-| Local weights dir | `<repo_root>/official_weights/Z-Image/` (subfolders: `text_encoder/`, `tokenizer/`, `vae/`, `scheduler/`) |
-| Source layout | Diffusers-style (per-component subfolders + `config.json`) |
-| Needs conversion | `<TODO: confirm after transformer port — encoder loads raw safetensors today>` |
+| Model family / variant | `zimage` / `Z-Image-Turbo` |
+| Workload | `T2I` |
+| Component-only PR scope | text encoder, tokenizer, VAE, scheduler |
+| Official reference | `https://github.com/Tongyi-MAI/Z-Image` |
+| Local reference dir | `<repo_root>/Z-Image/src` |
+| Official commit | `26f23eda626ffadda020b04ff79488e1d72004cd` |
+| HF weights | `Tongyi-MAI/Z-Image-Turbo@f332072aa78be7aecdf3ee76d5c247082da564a6` |
+| Local weights dir | `<repo_root>/official_weights/Z-Image/` (`text_encoder/`, `tokenizer/`, `vae/`, `scheduler/`) |
+| Source layout | Diffusers-style per-component subfolders |
+| Conversion | not needed for the reused components in this PR; the future native transformer/full-pipeline decision will come from native and official key/shape prototypes |
+| HF token env | `HF_TOKEN` (the pinned repository is public; never record a token value) |
 
-> Use only the env-var **name** for tokens (e.g., `HF_TOKEN`). Never paste a token value.
+The pinned text-encoder config declares `Qwen3ForCausalLM` with 36 decoder
+blocks, hidden size 2560, intermediate size 9728, 32 attention heads, 8 KV
+heads, and head dimension 128. FastVideo loads those values from
+`text_encoder/config.json`; they are not hard-coded in the Z-Image integration.
 
-## Shared Environment Setup
+## Shared environment setup
 
-Run from the FastVideo repo root in the same env used for FastVideo. The
-reference is the Z-Image source clone under `<repo_root>/Z-Image/src/` — the
-scheduler and VAE parity tests add this to `sys.path` at import time.
+Run from the FastVideo repository root in the same environment used for
+FastVideo. Keep the reference clone and weights inside the ignored paths shown
+below.
 
-Clone the reference (one-time):
+Clone and pin the official reference:
 
 ```bash
-git clone <Z-Image repo URL> Z-Image
-cd Z-Image && git checkout <TODO: pin SHA> && cd ..
+python .agents/skills/add-model-01-prep/scripts/clone_reference_repo.py \
+  https://github.com/Tongyi-MAI/Z-Image.git \
+  Z-Image \
+  --commit 26f23eda626ffadda020b04ff79488e1d72004cd \
+  --update-gitignore
+git -C Z-Image rev-parse HEAD
+```
+
+The final command must print
+`26f23eda626ffadda020b04ff79488e1d72004cd`. The scheduler and VAE tests also
+enforce that exact HEAD and verify that imported `zimage` modules resolve under
+`<repo_root>/Z-Image/src`. A missing clone may skip local parity; a wrong SHA or
+wrong import origin fails rather than silently testing another installation.
+
+Download the immutable HF snapshot:
+
+```bash
+python .agents/skills/add-model-01-prep/scripts/download_hf_weights.py \
+  Tongyi-MAI/Z-Image-Turbo \
+  official_weights/Z-Image \
+  --revision f332072aa78be7aecdf3ee76d5c247082da564a6 \
+  --allow-pattern 'text_encoder/*' \
+  --allow-pattern 'tokenizer/*' \
+  --allow-pattern 'vae/*' \
+  --allow-pattern 'scheduler/*'
 ```
 
 Do not change core dependency versions (`torch`, `diffusers`, `transformers`,
-`flash-attn`, `triton`, CUDA packages) without explicit approval.
-
-## Official Environment Status
+`flash-attn`, `triton`, or CUDA packages) without explicit approval.
 
 ```text
 dependency_changes: none
-official_env_status: imports_ok
+official_env_status: not_verified
 private_dep_stubs: none
-blocked_on: <TODO: pin Z-Image reference clone SHA>
+blocked_on: pinned-snapshot non-skip component reruns
 ```
 
-## Tests in this directory
+## Run the tests
 
 ```bash
 pytest tests/local_tests/zimage/ -v -s
 ```
 
-| Component | Test | Concerns | Status |
-|---|---|---|---|
-| Scheduler (`FlowMatchEulerDiscreteScheduler` + `use_reference_discrete_timesteps`) | [`test_zimage_scheduler_parity.py`](./test_zimage_scheduler_parity.py) | full `scheduler_config.json` forwarded; pipeline must also pin the new flag at load time | PASS |
-| Tokenizer (`TokenizerLoader` vs `AutoTokenizer`) | [`test_zimage_tokenizer_parity.py`](./test_zimage_tokenizer_parity.py) | `apply_chat_template` parity included | PASS |
-| VAE decode (`AutoencoderKL`) | [`test_zimage_vae_parity.py`](./test_zimage_vae_parity.py) | decode-only; encode path deferred until pipeline | PASS |
-| Text encoder (shared `Qwen3ForCausalLM`, reused) | [`test_zimage_encoder_parity.py`](./test_zimage_encoder_parity.py) | parametrized fp32 + bf16; bf16 uses calibrated distribution checks + diagnostic prints. Z-Image's `Qwen3Model` checkpoint routes to the shared encoder via the registry | PASS (fp32 bit-exact + bf16, L40S 2026-06-21) |
+| Component | Coverage scope and contract | Status |
+|---|---|---|
+| Scheduler ([`test_zimage_scheduler_parity.py`](./test_zimage_scheduler_parity.py)) | `implementation_subcomponent`; exact official `sigma_min=0.0` plus `use_reference_discrete_timesteps=True`; positional/default-path regressions remain asset-free | REVALIDATION REQUIRED |
+| Tokenizer ([`test_zimage_tokenizer_parity.py`](./test_zimage_tokenizer_parity.py)) | `production_loader`; exact `apply_chat_template(tokenize=False, add_generation_prompt=True, enable_thinking=True)` and `max_length=512`; absence of `apply_chat_template` is a failure, not a skip | REVALIDATION REQUIRED (historical unpinned PASS) |
+| VAE ([`test_zimage_vae_parity.py`](./test_zimage_vae_parity.py)) | `both`; direct implementation decode plus production `VAELoader`; production check applies `(latents / scaling_factor) + shift_factor` before decode | REVALIDATION REQUIRED (historical unpinned direct-decode PASS only) |
+| Text encoder ([`test_zimage_encoder_parity.py`](./test_zimage_encoder_parity.py)) | `both`; independent Transformers `AutoModel` reference, body-only production loader, and FastVideo-native implementation; fp32/bf16 output checks plus fused/split/quant-scale strictness | REVALIDATION REQUIRED (historical unpinned native PASS only) |
 
-## Known Blockers / Open Items
+## Component contracts
 
-See [`PORT_STATUS.md`](./PORT_STATUS.md) for the live tracker. Highlights:
+### Text encoder and tokenizer
 
-- The text encoder reuses the shared `Qwen3ForCausalLM` (added for Flux2 Klein,
-  #1349); Z-Image-Turbo's `Qwen3Model` architecture string routes to it via the
-  model registry. Z-Image-Turbo's full Qwen3 checkpoint carries an `lm_head.weight`
-  the body-only encoder does not own, so the encoder parity test allowlists exactly
-  that key (`_ALLOWED_UNEXPECTED_KEYS`) and fails on any other unmatched key.
-- `tests/local_tests/zimage/test_zimage_scheduler_parity.py` builds the
-  FastVideo scheduler with `use_reference_discrete_timesteps=True` programmatically.
-  When the pipeline lands, `<repo_root>/official_weights/Z-Image/scheduler/scheduler_config.json`
-  must pin this flag, otherwise stock loaders will silently fall back to the
-  default Diffusers timestep mode (numerically different).
-- The shared `Qwen3TextArchConfig.text_len = 512` derives `tokenizer_kwargs.max_length = 512`
-  via `TextEncoderArchConfig.__post_init__`, but the parity tests tokenize at
-  `max_length=96..128`. Reconcile when the pipeline preset lands. (Also note the
-  shared config defaults `is_chat_model=True`, vs Z-Image's removed bespoke `False`.)
+- The production `TextEncoderLoader` path deliberately loads Transformers
+  `AutoModel`, even when the checkpoint advertises `Qwen3ForCausalLM`. FastVideo
+  consumes hidden states only, so the production path is body-only and does not
+  materialize or execute an LM head.
+- The parity oracle is a separate `AutoModel` instance; it is not the object
+  returned by the production loader. The native `Qwen3ForCausalLM` implementation
+  is compared separately.
+- CPU/MPS text-encoder offload remains on the requested device. The loader records
+  `_fastvideo_input_device`, and `TextEncodingStage` sends token tensors there.
+- Native loading must account for every destination parameter and every required
+  fused source shard. Q/K/V and gate/up shards are all required unless the exact
+  destination is supplied already fused; quantized auxiliary parameters such as
+  `scale_weight` are not silently ignored.
+- The pinned official prompt path enables thinking, tokenizes to 512, and consumes
+  `hidden_states[-2]` at valid-token positions. A 36-block Qwen model exposes 37
+  hidden-state entries in this contract (embedding/intermediate entries plus the
+  final normalized state).
+- `TextEncoderConfig.chat_template_enable_thinking` is keyword-only and defaults
+  to `False` for existing model families. A future Z-Image pipeline config must
+  opt in with `True`.
 
-## Review Notes
+### VAE
 
-- Required before handoff: non-skip PASS for each component parity test,
-  including the bf16 path for the encoder.
-- Pipeline parity, conversion, transformer, and SSIM are deferred to future
-  PRs; this directory will gain new tests as those land.
+The test covers both direct implementation parity and production `VAELoader`
+resolution/strict loading. This component-only PR explicitly accepts the
+existing shared `fastvideo.models.vaes.autoencoder_kl.AutoencoderKL` wrapper,
+which subclasses Diffusers `AutoencoderKL`, as a narrowly scoped exception to
+the native-component boundary. This is not precedent for the future transformer
+or full Z-Image pipeline, and the exception must be revisited if that scope grows.
+
+### Scheduler
+
+The pinned official pipeline mutates `scheduler.sigma_min = 0.0` before building
+its `num_steps + 1` schedule. A future Z-Image pipeline config must set both
+`use_reference_discrete_timesteps=True` and `sigma_min=0.0`; the published
+`scheduler_config.json` alone does not encode the complete runtime contract.
+
+## Remaining work
+
+- Run every asset-backed component test non-skip against the pinned clone and HF
+  snapshot before claiming component parity.
+- Port and validate `ZImageTransformer2DModel` in a separate PR.
+- Add the Z-Image pipeline/config/preset/registry/example, pipeline parity, and
+  image-quality regression after all component gates pass.

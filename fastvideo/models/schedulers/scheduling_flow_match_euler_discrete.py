@@ -64,14 +64,6 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             The shift value for the timestep schedule.
         use_dynamic_shifting (`bool`, defaults to False):
             Whether to apply timestep shifting on-the-fly based on the image resolution.
-        use_reference_discrete_timesteps (`bool`, defaults to False):
-            Some reference schedulers (e.g. Z-Image) construct the timestep
-            schedule by linspacing `num_inference_steps + 1` points from
-            `t_max` to `t_min` and dropping the terminal point. Default
-            (`False`) preserves the original `np.linspace(t_max, t_min,
-            num_inference_steps)` (float64) behaviour used by every existing
-            model. Enable this flag only when matching a reference scheduler
-            that expects the +1 + drop-terminal construction.
         base_shift (`float`, defaults to 0.5):
             Value to stabilize image generation. Increasing `base_shift` reduces variation and image is more consistent
             with desired output.
@@ -104,6 +96,14 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             The minimum sigma value for the noise schedule.
         sigma_data (`float`, *optional*):
             The sigma data value for scaling.
+        use_reference_discrete_timesteps (`bool`, defaults to False):
+            Some reference schedulers (e.g. Z-Image) construct the timestep
+            schedule by linspacing `num_inference_steps + 1` points from
+            `t_max` to `t_min` and dropping the terminal point. Default
+            (`False`) preserves the original `np.linspace(t_max, t_min,
+            num_inference_steps)` (float64) behaviour used by every existing
+            model. Enable this flag only when matching a reference scheduler
+            that expects the +1 + drop-terminal construction.
     """
 
     _compatibles: list[Any] = []
@@ -115,7 +115,6 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         num_train_timesteps: int = 1000,
         shift: float = 1.0,
         use_dynamic_shifting: bool = False,
-        use_reference_discrete_timesteps: bool = False,
         base_shift: float | None = 0.5,
         max_shift: float | None = 1.15,
         base_image_seq_len: int | None = 256,
@@ -131,6 +130,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         sigma_max: float | None = None,
         sigma_min: float | None = None,
         sigma_data: float | None = None,
+        use_reference_discrete_timesteps: bool = False,
     ):
         if sum([
                 self.config.use_beta_sigmas, self.config.use_exponential_sigmas,
@@ -164,7 +164,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
 
         self.sigmas = sigmas.to(
             "cpu")  # to avoid too much CPU/GPU communication
-        self.sigma_min = self.sigmas[-1].item()
+        self.sigma_min = sigma_min if sigma_min is not None else self.sigmas[-1].item()
         self.sigma_max = self.sigmas[0].item()
 
         BaseScheduler.__init__(self)
@@ -361,12 +361,11 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
                 t_min = self._sigma_to_t(self.sigma_min)
                 if self.config.use_reference_discrete_timesteps:
                     # Some reference schedulers (for example Z-Image) build a
-                    # num_steps+1 linspace and drop the terminal point.
+                    # float64 num_steps+1 linspace and drop the terminal point.
                     timesteps_array = np.linspace(
                         t_max,
                         t_min,
                         num_inference_steps + 1,
-                        dtype=np.float32,
                     )[:-1]
                 else:
                     # Preserve the original numpy default (float64) here —

@@ -221,6 +221,13 @@ class TextEncodingStage(PipelineStage):
                 encoder_device = torch.device(target_device)
                 moved_for_forward = True
 
+            # An explicit `device=` wins. Otherwise HF-passthrough encoders pin
+            # their own placement via _fastvideo_input_device (they return before
+            # the FSDP wrapping path, so encoder_device cannot speak for them);
+            # every other encoder follows its (possibly just-moved) param device.
+            input_device = (torch.device(target_device) if device is not None else getattr(
+                text_encoder, "_fastvideo_input_device", encoder_device))
+
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
                 tok_kwargs["max_length"] = max_length
@@ -264,7 +271,7 @@ class TextEncodingStage(PipelineStage):
                     # pre-format prompts into message lists upstream and rely on
                     # the inner tokenizer + full tokenizer_kwargs (which include
                     # add_generation_prompt). Preserve that original path exactly.
-                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(encoder_device)
+                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(input_device)
                 else:
                     # Two-step approach matching Diffusers: format with chat
                     # template first, then tokenize the resulting strings.
@@ -275,12 +282,12 @@ class TextEncodingStage(PipelineStage):
                             messages,
                             tokenize=False,
                             add_generation_prompt=True,
-                            enable_thinking=False,
+                            enable_thinking=encoder_config.chat_template_enable_thinking,
                         )
                         formatted_texts.append(formatted)
-                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(encoder_device)
+                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(input_device)
             else:
-                text_inputs = tok(processed_texts, **tok_kwargs).to(encoder_device)
+                text_inputs = tok(processed_texts, **tok_kwargs).to(input_device)
 
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]

@@ -6,7 +6,8 @@ This compares:
 1) direct transformers AutoTokenizer loading from local tokenizer dir, and
 2) FastVideo TokenizerLoader loading path,
 
-using identical prompts and tokenization settings.
+using the exact chat-template and tokenization settings from the pinned
+Z-Image pipeline.
 
 Usage:
     pytest tests/local_tests/zimage/test_zimage_tokenizer_parity.py -v
@@ -27,6 +28,13 @@ from fastvideo.models.loader.component_loader import TokenizerLoader
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ZIMAGE_TOKENIZER_DIR = REPO_ROOT / "official_weights" / "Z-Image" / "tokenizer"
+PARITY_SCOPE = "production_loader"
+OFFICIAL_MAX_SEQUENCE_LENGTH = 512
+OFFICIAL_CHAT_TEMPLATE_KWARGS = {
+    "tokenize": False,
+    "add_generation_prompt": True,
+    "enable_thinking": True,
+}
 
 
 @dataclass
@@ -63,7 +71,7 @@ def test_zimage_tokenizer_loader_and_tokenization_parity():
 
     tok_kwargs = {
         "padding": "max_length",
-        "max_length": 96,
+        "max_length": OFFICIAL_MAX_SEQUENCE_LENGTH,
         "truncation": True,
         "return_tensors": "pt",
     }
@@ -85,19 +93,38 @@ def test_zimage_tokenizer_chat_template_parity():
     ref_tok = _load_reference_tokenizer()
     fv_tok = _load_fastvideo_tokenizer()
 
-    if not hasattr(ref_tok, "apply_chat_template") or not hasattr(fv_tok, "apply_chat_template"):
-        pytest.skip("Tokenizer does not expose apply_chat_template")
+    assert callable(getattr(ref_tok, "apply_chat_template", None)), (
+        "Pinned Z-Image tokenizer must expose apply_chat_template"
+    )
+    assert callable(getattr(fv_tok, "apply_chat_template", None)), (
+        "FastVideo TokenizerLoader dropped the required apply_chat_template API"
+    )
 
     messages = [{"role": "user", "content": "Describe a futuristic city skyline."}]
 
-    # Keep kwargs minimal for broad compatibility across tokenizer versions.
-    ref_text = ref_tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    fv_text = fv_tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    ref_text = ref_tok.apply_chat_template(messages, **OFFICIAL_CHAT_TEMPLATE_KWARGS)
+    fv_text = fv_tok.apply_chat_template(messages, **OFFICIAL_CHAT_TEMPLATE_KWARGS)
 
     assert ref_text == fv_text
 
-    ref_tokens = ref_tok(ref_text, padding="max_length", max_length=128, truncation=True, return_tensors="pt")
-    fv_tokens = fv_tok(fv_text, padding="max_length", max_length=128, truncation=True, return_tensors="pt")
+    # Z-Image deliberately enables Qwen's thinking template. Guard against a
+    # pipeline silently using the generic non-thinking prompt path.
+    non_thinking_text = fv_tok.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    )
+    assert fv_text != non_thinking_text
+
+    tokenization_kwargs = {
+        "padding": "max_length",
+        "max_length": OFFICIAL_MAX_SEQUENCE_LENGTH,
+        "truncation": True,
+        "return_tensors": "pt",
+    }
+    ref_tokens = ref_tok(ref_text, **tokenization_kwargs)
+    fv_tokens = fv_tok(fv_text, **tokenization_kwargs)
 
     assert_close(ref_tokens["input_ids"], fv_tokens["input_ids"], atol=0, rtol=0)
     assert_close(ref_tokens["attention_mask"], fv_tokens["attention_mask"], atol=0, rtol=0)

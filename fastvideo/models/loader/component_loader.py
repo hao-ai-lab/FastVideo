@@ -401,6 +401,10 @@ class TextEncoderLoader(ComponentLoader):
                         dtype=PRECISION_TO_TYPE[dtype],
                         device=target_device,
                     )
+                    # HF passthrough encoders return before FastVideo's FSDP
+                    # wrapping path, so the text stage needs their placement to
+                    # put token tensors on the same device.
+                    model._fastvideo_input_device = target_device
                     return model.eval()
 
                 model = model_cls(model_config)  # type: ignore
