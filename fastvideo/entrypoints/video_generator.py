@@ -633,11 +633,12 @@ class VideoGenerator:
                             **item_kwargs,
                         ))
 
-                results = self._generate_prepared_work_items(work_items)
+                results = self._generate_prepared_work_items(work_items, tolerate_failures=True)
                 for i, (result, batch_prompt) in enumerate(zip(results, prompts, strict=True)):
                     result["prompt_index"] = i
                     result["prompt"] = batch_prompt
-                logger.info("Completed batch processing. Generated %d videos successfully.", len(results))
+                logger.info("Completed batch processing. Generated %d videos successfully.",
+                            sum(1 for result in results if "error" not in result))
                 return results
 
             results = []
@@ -1103,15 +1104,48 @@ class VideoGenerator:
         current_requests = [item.sampling_param for item in current_group]
         return admission.reject_reason_for_candidate(current_requests, candidate.sampling_param) is None
 
+    def _run_work_item_group(self, group: list[_GenerationWorkItem]) -> list[dict[str, Any]]:
+        if len(group) == 1:
+            return [self._execute_single_work_item(group[0])]
+        merged = self._merge_work_items(group)
+        output_batch, gen_time, start_time = self._run_forward_batch(merged.batch, merged.fastvideo_args)
+        return [
+            self._postprocess_generation_output(
+                item,
+                self._split_output_batch(output_batch, index=item_index, batch_size=len(group)),
+                gen_time,
+                start_time,
+            ) for item_index, item in enumerate(group)
+        ]
+
     def _generate_prepared_work_items(
         self,
         work_items: list[_GenerationWorkItem],
+        tolerate_failures: bool = False,
     ) -> list[dict[str, Any]]:
+        """Execute prepared work items, batching compatible neighbors.
+
+        With ``tolerate_failures`` (prompt-file semantics), a failed group
+        yields one ``{"error": ..., "prompt": ...}`` entry per work item so
+        completed results survive and stay aligned with the inputs; otherwise
+        the exception propagates.
+        """
         if not work_items:
             return []
+
+        def run_group(group: list[_GenerationWorkItem]) -> list[dict[str, Any]]:
+            if not tolerate_failures:
+                return self._run_work_item_group(group)
+            try:
+                return self._run_work_item_group(group)
+            except Exception as e:
+                logger.error("Failed to generate videos for batched prompts %s: %s",
+                             [item.prompt[:100] for item in group], e)
+                return [{"error": str(e), "prompt": item.prompt} for item in group]
+
         fastvideo_args = work_items[0].fastvideo_args
         if not self._dynamic_batching_enabled(fastvideo_args):
-            return [self._execute_single_work_item(item) for item in work_items]
+            return [result for item in work_items for result in run_group([item])]
 
         admission = BatchAdmissionController(fastvideo_args)
         results: list[dict[str, Any]] = []
@@ -1125,17 +1159,7 @@ class VideoGenerator:
                     break
                 group.append(candidate)
                 index += 1
-
-            if len(group) == 1:
-                results.append(self._execute_single_work_item(group[0]))
-                continue
-
-            merged = self._merge_work_items(group)
-            output_batch, gen_time, start_time = self._run_forward_batch(merged.batch, merged.fastvideo_args)
-            batch_size = len(group)
-            for item_index, item in enumerate(group):
-                split_batch = self._split_output_batch(output_batch, index=item_index, batch_size=batch_size)
-                results.append(self._postprocess_generation_output(item, split_batch, gen_time, start_time))
+            results.extend(run_group(group))
         return results
 
     def _execute_single_work_item(self, work_item: _GenerationWorkItem) -> dict[str, Any]:
