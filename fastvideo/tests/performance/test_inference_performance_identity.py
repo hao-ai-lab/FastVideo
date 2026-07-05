@@ -7,6 +7,7 @@ from fastvideo.tests.performance import test_inference_performance as perf
 def _benchmark_config():
     return {
         "benchmark_id": "wan-t2v-1.3b-2gpu",
+        "config_schema_version": perf.V2_CONFIG_SCHEMA_VERSION,
         "workload_id": "wan-t2v-1.3b",
         "variant_id": "canonical",
         "benchmark_version": 1,
@@ -107,6 +108,7 @@ def test_software_profile_tracks_attention_kernel_and_container_versions(monkeyp
 
     monkeypatch.setattr(perf.importlib_metadata, "version", fake_version)
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    monkeypatch.setenv("FASTVIDEO_FA4", "1")
     monkeypatch.setenv("FASTVIDEO_PERFORMANCE_PROFILE_VERSION", "perf-profile-v2")
     monkeypatch.setenv("IMAGE_VERSION", "py3.12-cuda13.0")
 
@@ -121,6 +123,7 @@ def test_software_profile_tracks_attention_kernel_and_container_versions(monkeyp
 
     assert profile["profile_schema_version"] == perf.SOFTWARE_PROFILE_SCHEMA_VERSION
     assert profile["attention_backend"] == "SAGE_ATTN"
+    assert profile["flash_attention_4_enabled"] is True
     assert profile["performance_profile_version"] == "perf-profile-v2"
     assert profile["container_image_version"] == "py3.12-cuda13.0"
     assert profile["packages"] == {
@@ -132,3 +135,10 @@ def test_software_profile_tracks_attention_kernel_and_container_versions(monkeyp
         "flashinfer-python": "0.2",
     }
     assert perf._profile_id("sw", profile) != perf._profile_id("sw", changed_profile)
+    assert perf._profile_id("sw", profile) != perf._profile_id(
+        "sw",
+        {
+            **profile,
+            "flash_attention_4_enabled": False,
+        },
+    )

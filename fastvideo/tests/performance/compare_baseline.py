@@ -220,9 +220,14 @@ def _recipe_mismatch_records(
     current_recipe = str(record.get("recipe_fingerprint"))
     return [
         item for item in cohort_records
-        if _none_if_empty(item.get("recipe_fingerprint")) is not None
+        if _record_can_authorize_recipe_mismatch(item)
+        and _none_if_empty(item.get("recipe_fingerprint")) is not None
         and str(item.get("recipe_fingerprint")) != current_recipe
     ]
+
+
+def _record_can_authorize_recipe_mismatch(record: dict[str, Any]) -> bool:
+    return record.get("run_source") == "scheduled_main" or record.get("baseline_eligible") is True
 
 
 def _format_identity_filters(filters: dict[str, str]) -> str:

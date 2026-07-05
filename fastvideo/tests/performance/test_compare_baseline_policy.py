@@ -581,11 +581,14 @@ def test_same_recipe_calibration_record_does_not_report_recipe_mismatch(monkeypa
 
     assert compare_baseline._recipe_mismatch_records(
         record,
-        [{"recipe_fingerprint": "recipe-1"}],
+        [{
+            "recipe_fingerprint": "recipe-1",
+            "run_source": "scheduled_main",
+        }],
     ) == []
 
 
-def test_prior_uploaded_calibration_record_can_report_recipe_mismatch(
+def test_prior_scheduled_main_calibration_record_can_report_recipe_mismatch(
     monkeypatch,
     tmp_path,
 ):
@@ -603,6 +606,7 @@ def test_prior_uploaded_calibration_record_can_report_recipe_mismatch(
             "timestamp": "2026-06-15T00:00:00+00:00",
             "success": True,
             "baseline_eligible": False,
+            "run_source": "scheduled_main",
             "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
             "latency": 10.0,
             "workload_id": "wan-t2v",
@@ -632,6 +636,55 @@ def test_prior_uploaded_calibration_record_can_report_recipe_mismatch(
 
     assert normalized["comparison_status"] == compare_baseline.STATUS_RECIPE_MISMATCH
     assert "recipe-1" in normalized["comparison_status_reason"]
+
+
+def test_prior_pr_calibration_record_does_not_report_recipe_mismatch(
+    monkeypatch,
+    tmp_path,
+):
+    tracking_root = tmp_path / "tracking"
+    results_dir = tmp_path / "results"
+    reports_dir = tmp_path / "reports"
+    results_dir.mkdir()
+    _write_record(
+        tracking_root,
+        "renamed-benchmark-id",
+        "prior-pr-calibration.json",
+        {
+            "model_id": "renamed-benchmark-id",
+            "gpu_type": "NVIDIA L40S PCIe",
+            "timestamp": "2026-06-15T00:00:00+00:00",
+            "success": True,
+            "baseline_eligible": False,
+            "run_source": "pr",
+            "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+            "latency": 10.0,
+            "workload_id": "wan-t2v",
+            "variant_id": "1.3b-sp2",
+            "benchmark_version": 2,
+            "recipe_fingerprint": "recipe-1",
+            "hardware_profile_id": "hw-l40s-2",
+            "software_profile_id": "sw-cuda",
+        },
+    )
+    with open(results_dir / "perf_current.json", "w", encoding="utf-8") as f:
+        json.dump(_v2_raw_result(recipe_fingerprint="recipe-2"), f)
+
+    monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
+    monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
+    monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
+    monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
+    monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
+    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+
+    assert compare_baseline.main() == 0
+
+    artifacts = list((reports_dir / "results").glob("normalized_perf_*.json"))
+    assert len(artifacts) == 1
+    with open(artifacts[0], encoding="utf-8") as f:
+        normalized = json.load(f)
+
+    assert normalized["comparison_status"] == compare_baseline.STATUS_CALIBRATION_NEEDED
 
 
 def test_v2_records_do_not_compare_against_v1_records_by_default(tmp_path):
