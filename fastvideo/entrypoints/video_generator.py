@@ -461,6 +461,7 @@ class VideoGenerator:
     def generate_video_batch(self, request_kwargs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Generate multiple legacy video requests, batching compatible items."""
         work_items: list[_GenerationWorkItem] = []
+        reserved_output_paths: set[str] = set()
         fastvideo_args_by_pipeline_override: dict[tuple[tuple[str, str], ...], FastVideoArgs] = {
             (): self.fastvideo_args
         }
@@ -508,7 +509,8 @@ class VideoGenerator:
                 request,
                 model_path=self.fastvideo_args.model_path,
             )
-            output_path = self._prepare_output_path(resolved_sampling_param.output_path, request.prompt)
+            output_path = self._prepare_output_path(resolved_sampling_param.output_path, request.prompt,
+                                                    reserved_output_paths)
             work_items.append(
                 self._prepare_generation_work_item(
                     prompt=request.prompt,
@@ -618,9 +620,11 @@ class VideoGenerator:
 
             if self._dynamic_batching_enabled(fastvideo_args):
                 work_items: list[_GenerationWorkItem] = []
+                reserved_output_paths: set[str] = set()
                 for batch_prompt in prompts:
                     item_kwargs = dict(kwargs)
-                    item_kwargs["output_path"] = self._prepare_output_path(sampling_param.output_path, batch_prompt)
+                    item_kwargs["output_path"] = self._prepare_output_path(sampling_param.output_path, batch_prompt,
+                                                                           reserved_output_paths)
                     work_items.append(
                         self._prepare_generation_work_item(
                             prompt=batch_prompt,
@@ -689,6 +693,7 @@ class VideoGenerator:
         self,
         output_path: str,
         prompt: str,
+        reserved_paths: set[str] | None = None,
     ) -> str:
         """Build a unique, sanitized output file path.
 
@@ -703,6 +708,9 @@ class VideoGenerator:
         - Invalid filename characters are removed; if the name changes, a
           warning is logged.
         - If the target path already exists, a numeric suffix is appended.
+        - ``reserved_paths`` lets batch callers resolve every path before any
+          file is written: paths in the set are treated as taken, and the
+          chosen path is added to the set.
         """
         target_ext = ".png" if self._is_image_workload() else ".mp4"
 
@@ -747,13 +755,18 @@ class VideoGenerator:
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
+        def _is_taken(path: str) -> bool:
+            return os.path.exists(path) or (reserved_paths is not None and path in reserved_paths)
+
         new_output_path = os.path.join(output_dir, out_name)
         counter = 1
-        while os.path.exists(new_output_path):
+        while _is_taken(new_output_path):
             name_part, ext_part = os.path.splitext(out_name)
             new_name = f"{name_part}_{counter}{ext_part}"
             new_output_path = os.path.join(output_dir, new_name)
             counter += 1
+        if reserved_paths is not None:
+            reserved_paths.add(new_output_path)
         return new_output_path
 
     def _dynamic_batching_enabled(self, fastvideo_args: FastVideoArgs) -> bool:
