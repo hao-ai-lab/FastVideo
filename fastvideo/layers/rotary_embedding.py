@@ -529,7 +529,10 @@ def get_rotary_pos_embed(
     if cached is not None:
         # Move to most-recently-used position so the active table is not evicted
         # when several resolutions / buckets share the process (LRU recency).
-        _ROTARY_POS_EMBED_CACHE[cache_key] = _ROTARY_POS_EMBED_CACHE.pop(cache_key)
+        # Pop with a default: a concurrent eviction between the get() above and
+        # here would otherwise raise KeyError on the hit path.
+        if _ROTARY_POS_EMBED_CACHE.pop(cache_key, None) is not None:
+            _ROTARY_POS_EMBED_CACHE[cache_key] = cached
         return cached
 
     freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
@@ -545,7 +548,10 @@ def get_rotary_pos_embed(
         start_frame=start_frame,
         use_real=use_real,
     )
-    # Cached tensors are shared (read-only); callers copy via .to()/.float().
+    # The returned tensors are shared cache entries: callers must never mutate
+    # them in place. Note .to(device) is an identity alias when the tensor is
+    # already on the target device (e.g. CPU runs), so it does NOT guarantee a
+    # copy — treat the tables as read-only and copy before any in-place op.
     # Reached only on a miss, so evict the least-recently-used entry at capacity.
     if len(_ROTARY_POS_EMBED_CACHE) >= _ROTARY_POS_EMBED_CACHE_MAXSIZE:
         _ROTARY_POS_EMBED_CACHE.pop(next(iter(_ROTARY_POS_EMBED_CACHE)))
