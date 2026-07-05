@@ -124,6 +124,14 @@ def _make_inputs():
 
 def test_dreamx_world_ar_tiny_forward_matches_official():
     official = _load_official_tiny()
+    # The official init_weights zero-inits the output head (head.head.weight and
+    # biases), so both models would output exactly zero and the comparison would
+    # pass vacuously. Randomize the head (deterministically) before copying the
+    # state dict so the outputs reflect the internal computation.
+    generator = torch.Generator().manual_seed(7)
+    with torch.no_grad():
+        official.head.head.weight.normal_(std=0.5, generator=generator)
+        official.head.head.bias.normal_(std=0.5, generator=generator)
     fastvideo = DreamXWorldARTransformer3DModel(_tiny_config(), {}).eval()
     fastvideo.load_state_dict(official.state_dict(), strict=True)
 
@@ -133,6 +141,7 @@ def test_dreamx_world_ar_tiny_forward_matches_official():
     x, t, context, camera, kv_cache, cross_cache = _make_inputs()
     fastvideo_out = fastvideo(x=x, t=t, context=context, seq_len=4, y_camera=camera,
                               kv_cache=kv_cache, crossattn_cache=cross_cache).detach()
+    assert official_out.abs().max() > 0, "official output is all-zero; parity comparison is vacuous"
     assert_close(fastvideo_out, official_out, atol=1e-5, rtol=1e-5)
 
 
