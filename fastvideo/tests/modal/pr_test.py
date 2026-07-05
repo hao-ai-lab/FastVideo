@@ -106,14 +106,14 @@ def run_test_command(test_command: str,
     if pr_number:
         print(f"PR number: {pr_number}")
 
-    # For PRs (including forks), use GitHub's PR refs to get the correct commit.
-    # Keep the fetch narrow and retry transient GitHub/HTTP2 disconnects; otherwise
-    # Modal shards can fail before pytest starts.
-    if pr_number and pr_number != "false":
-        checkout_command = f"""
+    # The blob-less clone (--filter=blob:none) defers all file-content
+    # downloads to the checkout, so BOTH paths below perform a large lazy blob
+    # fetch from GitHub. Retry transient GitHub/HTTP2 disconnects on each;
+    # otherwise Modal shards can fail before pytest starts.
+    def with_retries(inner_command: str) -> str:
+        return f"""
         for attempt in 1 2 3; do
-            git fetch --prune --no-tags --depth=1 origin refs/pull/{pr_number}/head &&
-            git checkout --detach FETCH_HEAD &&
+            {inner_command} &&
             break
 
             status=$?
@@ -122,9 +122,14 @@ def run_test_command(test_command: str,
             fi
             sleep $((attempt * 5))
         done"""
+
+    # For PRs (including forks), use GitHub's PR refs to get the correct commit.
+    if pr_number and pr_number != "false":
+        checkout_command = with_retries(f"git fetch --prune --no-tags --depth=1 origin refs/pull/{pr_number}/head &&"
+                                        "\n            git checkout --detach FETCH_HEAD")
         print(f"Using PR ref for checkout: {checkout_command}")
     else:
-        checkout_command = f"git checkout {git_commit}"
+        checkout_command = with_retries(f"git checkout {git_commit}")
         print(f"Using direct commit checkout: {checkout_command}")
 
     build_kernel_command = """
