@@ -16,12 +16,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.configs.models.dits.dreamx_world import DreamXWorldARConfig
+from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.dreamx_world import (_dreamx_apply_tiled_projmat,
                                                _dreamx_prope_qkv)
 
 
 def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    # Deliberately raw SDPA rather than fastvideo.attention.LocalAttention:
+    # (1) LocalAttention dispatches through the attention-backend registry, so
+    #     FLASH_ATTN could be selected and its kernel is not bit-identical to
+    #     torch SDPA — the AR KV-cache rollout must stay numerically frozen;
+    # (2) LocalAttention requires an active ForwardContext, which direct
+    #     transformer invocations (parity tests) do not set;
+    # (3) the sibling causal model keeps raw SDPA in the same KV-cache window
+    #     path (matrixgame2/causal_model.py).
+    # Sequence-parallel gap: this model never shards the sequence; run with
+    # sp_size=1 (see fastvideo/layers/AGENTS.md on documenting raw SDPA).
     q_bhld = q.transpose(1, 2)
     k_bhld = k.transpose(1, 2)
     v_bhld = v.transpose(1, 2)
@@ -58,6 +69,15 @@ def rope_params(max_seq_len, dim, theta=10000):
 
 
 class WanRMSNorm(nn.Module):
+    """Kept private instead of fastvideo.layers.layernorm.RMSNorm.
+
+    The official DreamX-World ``model_2_2.py`` computes the RMS statistics in
+    the *input* dtype — the upstream code has the fp32 upcast explicitly
+    commented out (``# return self._norm(x.float())...``). FastVideo's RMSNorm
+    always normalizes in fp32, which is not bit-identical under bf16, so the
+    verbatim implementation stays.
+    """
+
     def __init__(self, dim, eps=1e-5):
         super().__init__()
         self.dim = dim
@@ -72,6 +92,14 @@ class WanRMSNorm(nn.Module):
 
 
 class WanLayerNorm(nn.LayerNorm):
+    """Kept private instead of fastvideo.layers.layernorm.FP32LayerNorm.
+
+    The official DreamX-World ``model_2_2.py`` normalizes in the *input* dtype
+    (no ``x.float()`` upcast, unlike Wan2.1). FP32LayerNorm casts input and
+    affine params to fp32, which is not bit-identical under bf16, so the
+    verbatim implementation stays.
+    """
+
     def __init__(self, dim, eps=1e-6, elementwise_affine=False):
         super().__init__(dim, elementwise_affine=elementwise_affine, eps=eps)
 
@@ -84,34 +112,41 @@ class WanCrossAttention(nn.Module):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
-        self.q = nn.Linear(dim, dim)
-        self.k = nn.Linear(dim, dim)
-        self.v = nn.Linear(dim, dim)
-        self.o = nn.Linear(dim, dim)
+        self.q = ReplicatedLinear(dim, dim)
+        self.k = ReplicatedLinear(dim, dim)
+        self.v = ReplicatedLinear(dim, dim)
+        self.o = ReplicatedLinear(dim, dim)
         self.norm_q = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
+    def _kv(self, context, b, n, d):
+        k, _ = self.k(context)
+        k = self.norm_k(k).view(b, -1, n, d)
+        v, _ = self.v(context)
+        v = v.view(b, -1, n, d)
+        return k, v
+
     def forward(self, x, context, context_lens, crossattn_cache=None):
         b, n, d = x.size(0), self.num_heads, self.head_dim
-        q = self.norm_q(self.q(x)).view(b, -1, n, d)
+        q, _ = self.q(x)
+        q = self.norm_q(q).view(b, -1, n, d)
 
         if crossattn_cache is not None:
             if not crossattn_cache["is_init"]:
                 crossattn_cache["is_init"] = True
-                k = self.norm_k(self.k(context)).view(b, -1, n, d)
-                v = self.v(context).view(b, -1, n, d)
+                k, v = self._kv(context, b, n, d)
                 crossattn_cache["k"] = k
                 crossattn_cache["v"] = v
             else:
                 k = crossattn_cache["k"]
                 v = crossattn_cache["v"]
         else:
-            k = self.norm_k(self.k(context)).view(b, -1, n, d)
-            v = self.v(context).view(b, -1, n, d)
+            k, v = self._kv(context, b, n, d)
 
         x = attention(q, k, v)
         x = x.flatten(2)
-        return self.o(x)
+        out, _ = self.o(x)
+        return out
 
 
 def block_relativistic_rope(x, grid_sizes, freqs, start_frame=0, relative_frame_indices=None):
@@ -171,10 +206,10 @@ class CausalWanSelfAttention(nn.Module):
         self.eps = eps
         self.max_attention_size = 39600 if local_attn_size == -1 else local_attn_size * 880
 
-        self.q = nn.Linear(dim, dim)
-        self.k = nn.Linear(dim, dim)
-        self.v = nn.Linear(dim, dim)
-        self.o = nn.Linear(dim, dim)
+        self.q = ReplicatedLinear(dim, dim)
+        self.k = ReplicatedLinear(dim, dim)
+        self.v = ReplicatedLinear(dim, dim)
+        self.o = ReplicatedLinear(dim, dim)
         self.norm_q = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
@@ -193,9 +228,12 @@ class CausalWanSelfAttention(nn.Module):
         if cache_start is None:
             cache_start = current_start
 
-        q = self.norm_q(self.q(x)).view(b, s, n, d)
-        k = self.norm_k(self.k(x)).view(b, s, n, d)
-        v = self.v(x).view(b, s, n, d)
+        q, _ = self.q(x)
+        q = self.norm_q(q).view(b, s, n, d)
+        k, _ = self.k(x)
+        k = self.norm_k(k).view(b, s, n, d)
+        v, _ = self.v(x)
+        v = v.view(b, s, n, d)
 
         frame_seqlen = math.prod(grid_sizes[0][1:]).item()
         num_new_frames = grid_sizes[0][0].item()
@@ -326,7 +364,7 @@ class CausalWanSelfAttention(nn.Module):
                 temp_v[:, window_start:local_end_index])
 
         x = x.flatten(2)
-        x = self.o(x)
+        x, _ = self.o(x)
         return x, (current_end, local_end_index, cache_update_info)
 
 
@@ -349,10 +387,10 @@ class CausalPropeSelfAttention(nn.Module):
         self.window_size = window_size
         self.max_attention_size = 39600 if local_attn_size == -1 else local_attn_size * 880
 
-        self.q_proj = nn.Linear(dim, attn_dim)
-        self.k_proj = nn.Linear(dim, attn_dim)
-        self.v_proj = nn.Linear(dim, attn_dim)
-        self.out_proj = nn.Linear(attn_dim, dim)
+        self.q_proj = ReplicatedLinear(dim, attn_dim)
+        self.k_proj = ReplicatedLinear(dim, attn_dim)
+        self.v_proj = ReplicatedLinear(dim, attn_dim)
+        self.out_proj = ReplicatedLinear(attn_dim, dim)
 
         self.norm_q = WanRMSNorm(attn_dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = WanRMSNorm(attn_dim, eps=eps) if qk_norm else nn.Identity()
@@ -374,9 +412,12 @@ class CausalPropeSelfAttention(nn.Module):
         if cache_start is None:
             cache_start = current_start
 
-        q = self.norm_q(self.q_proj(x)).view(b, s, n, d)
-        k = self.norm_k(self.k_proj(x)).view(b, s, n, d)
-        v = self.v_proj(x).view(b, s, n, d)
+        q, _ = self.q_proj(x)
+        q = self.norm_q(q).view(b, s, n, d)
+        k, _ = self.k_proj(x)
+        k = self.norm_k(k).view(b, s, n, d)
+        v, _ = self.v_proj(x)
+        v = v.view(b, s, n, d)
 
         # Apply PRoPE (Positional Rotary Position Embedding from camera parameters)
         q_t, k_t, v_t, apply_fn_o = prope_qkv(
@@ -466,7 +507,7 @@ class CausalPropeSelfAttention(nn.Module):
         # Apply inverse PRoPE
         x = apply_fn_o(x_out.transpose(1, 2)).transpose(1, 2)
         x = x.flatten(2)
-        x = self.out_proj(x)
+        x, _ = self.out_proj(x)
         return x
 
 
@@ -497,6 +538,11 @@ class CausalWanAttentionBlock(nn.Module):
             dim, eps, elementwise_affine=True) if cross_attn_norm else nn.Identity()
         self.cross_attn = WanCrossAttention(dim, num_heads, (-1, -1), qk_norm, eps)
         self.norm2 = WanLayerNorm(dim, eps)
+        # nn.Linear (not ReplicatedLinear) on purpose: the official checkpoint
+        # stores these as positional Sequential keys (ffn.0 / ffn.2) that the
+        # copy-only converter and the strict-load tests require verbatim, and
+        # ReplicatedLinear's (out, bias) tuple return cannot compose inside
+        # nn.Sequential without renaming the state-dict surface.
         self.ffn = nn.Sequential(
             nn.Linear(dim, ffn_dim), nn.GELU(approximate='tanh'),
             nn.Linear(ffn_dim, dim))
@@ -567,13 +613,13 @@ class CausalHead(nn.Module):
 
         out_dim = math.prod(patch_size) * out_dim
         self.norm = WanLayerNorm(dim, eps)
-        self.head = nn.Linear(dim, out_dim)
+        self.head = ReplicatedLinear(dim, out_dim)
         self.modulation = nn.Parameter(torch.randn(1, 2, dim) / dim**0.5)
 
     def forward(self, x, e):
         num_frames, frame_seqlen = e.shape[1], x.shape[1] // e.shape[1]
         e = (self.modulation.unsqueeze(1) + e).chunk(2, dim=2)
-        x = self.head(
+        x, _ = self.head(
             self.norm(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen))
             * (1 + e[1]) + e[0])
         return x
@@ -631,7 +677,9 @@ class DreamXWorldARTransformer3DModel(BaseDiT):
         self.cross_attn_norm = cross_attn_norm
         self.eps = eps
 
-        # embeddings
+        # embeddings — nn.Linear inside nn.Sequential on purpose: the official
+        # checkpoint keys are positional (text_embedding.0/.2, time_embedding.0/.2,
+        # time_projection.1) and must load verbatim (see ffn comment above).
         self.patch_embedding = nn.Conv3d(
             in_dim, dim, kernel_size=patch_size, stride=patch_size)
         self.text_embedding = nn.Sequential(
@@ -853,7 +901,7 @@ class DreamXWorldARTransformer3DModel(BaseDiT):
     def init_weights(self):
         """Initialize model parameters using Xavier initialization."""
         for m in self.modules():
-            if isinstance(m, nn.Linear):
+            if isinstance(m, (nn.Linear, ReplicatedLinear)):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
