@@ -51,6 +51,8 @@ class VideoBatchScheduler:
             self._task = None
 
     async def submit(self, request_id: str, kwargs: dict[str, Any]) -> Any:
+        if self._stopped:
+            raise RuntimeError("Video batch scheduler is stopped; cannot submit new requests")
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         await self._queue.put(
