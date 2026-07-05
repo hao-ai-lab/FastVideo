@@ -365,7 +365,7 @@ def run_self_forcing_tests():
 @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_unit_test():
     run_test(
-        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
+        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/batching/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
         "./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ "
         "./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/worker/ "
         "./fastvideo/tests/training/test_trackers.py "
