@@ -178,6 +178,11 @@ def _comparison_identity_filters(record: dict[str, Any]) -> dict[str, str]:
         key for key in COMPARISON_IDENTITY_KEYS
         if key not in record or record[key] is None or (isinstance(record[key], str) and not record[key].strip())
     ]
+    if len(missing) == len(COMPARISON_IDENTITY_KEYS):
+        # Legacy v1 record: no identity fields at all. Keep the pre-v2
+        # (model_id, gpu_type) rolling-baseline comparison instead of
+        # crashing — v1 configs are documented as loadable.
+        return {}
     if missing:
         raise ValueError("Performance record missing required comparison identity fields: " + ", ".join(missing))
     return {
