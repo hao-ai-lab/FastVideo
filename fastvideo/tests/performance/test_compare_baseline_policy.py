@@ -125,6 +125,7 @@ def test_normalized_record_preserves_identity_metadata(monkeypatch):
     monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
     raw = _raw_result()
     raw.update({
+        "result_schema_version": 2,
         "workload_id": "wan-t2v",
         "variant_id": "1.3b-sp2",
         "benchmark_version": 2,
@@ -146,10 +147,14 @@ def test_normalized_record_preserves_identity_metadata(monkeypatch):
             },
         },
         "environment_fingerprint": "env-1",
+        "quality_metadata": {
+            "quality_status": "canonical",
+        },
     })
 
     record = compare_baseline.normalize_performance_result(raw)
 
+    assert record["result_schema_version"] == 2
     assert record["workload_id"] == "wan-t2v"
     assert record["variant_id"] == "1.3b-sp2"
     assert record["benchmark_version"] == 2
@@ -161,6 +166,46 @@ def test_normalized_record_preserves_identity_metadata(monkeypatch):
     assert record["software_profile_id"] == "sw-1"
     assert record["environment_metadata"] == {"env": {"IMAGE_VERSION": "latest"}}
     assert record["environment_fingerprint"] == "env-1"
+    assert record["quality_metadata"] == {"quality_status": "canonical"}
+
+
+def test_normalized_record_prefers_raw_v2_provenance(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    monkeypatch.setenv("BUILDKITE_BRANCH", "feature/from-env")
+    monkeypatch.setenv("TEST_SCOPE", "direct")
+    monkeypatch.setenv("BUILDKITE_BUILD_URL", "https://buildkite.example/env")
+    monkeypatch.setenv("BUILDKITE_BUILD_ID", "env-build")
+    monkeypatch.setenv("BUILDKITE_JOB_ID", "env-job")
+    raw = _raw_result()
+    raw.update({
+        "result_schema_version": 2,
+        "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "build_url": "https://buildkite.example/raw",
+        "build_id": "raw-build",
+        "job_id": "raw-job",
+        "pr_number": "false",
+    })
+
+    record = compare_baseline.normalize_performance_result(raw)
+
+    assert record["result_schema_version"] == 2
+    assert record["run_source"] == "scheduled_main"
+    assert record["branch"] == "main"
+    assert record["test_scope"] == "full"
+    assert record["build_url"] == "https://buildkite.example/raw"
+    assert record["build_id"] == "raw-build"
+    assert record["job_id"] == "raw-job"
+    assert record["pr_number"] == ""
+
+
+def test_v1_normalized_record_has_no_result_schema_version(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+
+    record = compare_baseline.normalize_performance_result(_raw_result())
+
+    assert "result_schema_version" not in record
 
 
 def test_normalized_record_reads_identity_labels_from_recipe(monkeypatch):

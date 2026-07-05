@@ -55,6 +55,9 @@ V2_OPTIONAL_METADATA_FIELDS = (
     "metric_threshold_policy",
     "quality_metadata",
 )
+RESULT_SCHEMA_VERSION = 2
+VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
+OPTIONAL_RESULT_METADATA_FIELDS = ("quality_metadata", "variant_metadata")
 
 # -- Config discovery -------------------------------------------------------
 
@@ -231,6 +234,7 @@ def _run_generation(generator, prompt, generation_kwargs):
     component_times = _extract_component_times(result)
     return elapsed, peak_memory_mb, component_times
 
+
 def _write_results(results):
     """Write JSON results to the results directory."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -351,6 +355,99 @@ def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
     }
 
 
+def _truthy_pr_number(value: str | None) -> bool:
+    return bool(value and value not in {"false", "0", "None", "none"})
+
+
+def _detect_run_source() -> str:
+    explicit = os.environ.get("PERF_RUN_SOURCE", "").strip().lower()
+    if explicit in VALID_RUN_SOURCES:
+        return explicit
+    if _truthy_pr_number(os.environ.get("BUILDKITE_PULL_REQUEST")):
+        return "pr"
+    if os.environ.get("BUILDKITE_BRANCH") == "main" and os.environ.get("TEST_SCOPE") == "full":
+        return "scheduled_main"
+    if not os.environ.get("BUILDKITE_COMMIT"):
+        return "local"
+    return "unknown"
+
+
+def _ci_provenance_fields() -> dict[str, str]:
+    pr_number = os.environ.get("BUILDKITE_PULL_REQUEST", "")
+    if not _truthy_pr_number(pr_number):
+        pr_number = ""
+    return {
+        "run_source": _detect_run_source(),
+        "branch": os.environ.get("BUILDKITE_BRANCH", ""),
+        "pr_number": pr_number,
+        "test_scope": os.environ.get("TEST_SCOPE", ""),
+        "build_url": os.environ.get("BUILDKITE_BUILD_URL", ""),
+        "build_id": os.environ.get("BUILDKITE_BUILD_ID", ""),
+        "job_id": os.environ.get("BUILDKITE_JOB_ID", ""),
+    }
+
+
+def _configured_result_metadata(cfg: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        field: cfg[field]
+        for field in OPTIONAL_RESULT_METADATA_FIELDS
+        if field in cfg and cfg[field] is not None
+    }
+
+
+def _build_result_record(
+    *,
+    cfg: Mapping[str, Any],
+    model_info: Mapping[str, Any],
+    init_kwargs: Mapping[str, Any],
+    gen_kwargs: Mapping[str, Any],
+    num_warmup: int,
+    num_measure: int,
+    thresholds: Mapping[str, Any],
+    times: list[float],
+    peak_memories: list[float],
+    all_component_times: list[dict],
+    prompt: str,
+    runtime_identity: Mapping[str, Any],
+    device_name: str,
+    timestamp: str | None = None,
+) -> dict[str, Any]:
+    avg_time = sum(times) / len(times)
+    max_peak_memory = max(peak_memories)
+    num_frames = gen_kwargs.get("num_frames")
+    throughput_fps = (1.0 / avg_time) if avg_time > 0 else None
+    if isinstance(num_frames, (int, float)) and avg_time > 0:
+        throughput_fps = num_frames / avg_time
+
+    return {
+        "benchmark_id": cfg["benchmark_id"],
+        "result_schema_version": RESULT_SCHEMA_VERSION,
+        "model_short_name": model_info.get("model_short_name", ""),
+        "device": device_name,
+        "num_gpus": init_kwargs.get("num_gpus", 1),
+        "num_warmup_runs": num_warmup,
+        "num_measurement_runs": num_measure,
+        "avg_generation_time_s": round(avg_time, 3),
+        "individual_times_s": [round(t, 3) for t in times],
+        "throughput_fps": round(throughput_fps, 3)
+        if throughput_fps is not None else None,
+        "max_peak_memory_mb": round(max_peak_memory, 1),
+        "individual_peak_memories_mb": [round(m, 1) for m in peak_memories],
+        "thresholds": dict(thresholds),
+        "regression_thresholds": cfg.get("regression_thresholds", {}),
+        "commit": os.environ.get("BUILDKITE_COMMIT", ""),
+        **_ci_provenance_fields(),
+        "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
+        **_configured_result_metadata(cfg),
+        "text_encoder_time_s": _avg_component(all_component_times,
+                                              "text_encoder_time_s"),
+        "dit_time_s": _avg_component(all_component_times, "dit_time_s"),
+        "vae_decode_time_s": _avg_component(all_component_times,
+                                            "vae_decode_time_s"),
+        **_build_identity_fields(cfg, init_kwargs, prompt, runtime_identity),
+    }
+
+
 # -- Test -------------------------------------------------------------------
 
 def _run_benchmark(cfg):
@@ -414,37 +511,21 @@ def _run_benchmark(cfg):
     avg_time = sum(times) / len(times)
     max_peak_memory = max(peak_memories)
     device_name = torch.cuda.get_device_name()
-    num_frames = gen_kwargs.get("num_frames")
-    throughput_fps = (1.0 / avg_time) if avg_time > 0 else None
-    if isinstance(num_frames, (int, float)) and avg_time > 0:
-        throughput_fps = num_frames / avg_time
-
-    results = {
-        "benchmark_id": cfg["benchmark_id"],
-        **_config_identity_metadata(cfg),
-        "model_short_name": model_info.get("model_short_name", ""),
-        "device": device_name,
-        "num_gpus": init_kwargs.get("num_gpus", 1),
-        "num_warmup_runs": num_warmup,
-        "num_measurement_runs": num_measure,
-        "avg_generation_time_s": round(avg_time, 3),
-        "individual_times_s": [round(t, 3) for t in times],
-        "throughput_fps": round(throughput_fps, 3)
-        if throughput_fps is not None else None,
-        "max_peak_memory_mb": round(max_peak_memory, 1),
-        "individual_peak_memories_mb": [round(m, 1) for m in peak_memories],
-        "thresholds": thresholds,
-        "regression_thresholds": cfg.get("regression_thresholds", {}),
-        "commit": os.environ.get("BUILDKITE_COMMIT", ""),
-        "pr_number": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "text_encoder_time_s": _avg_component(all_component_times,
-                                              "text_encoder_time_s"),
-        "dit_time_s": _avg_component(all_component_times, "dit_time_s"),
-        "vae_decode_time_s": _avg_component(all_component_times,
-                                            "vae_decode_time_s"),
-        **_build_identity_fields(cfg, init_kwargs, prompt, runtime_identity),
-    }
+    results = _build_result_record(
+        cfg=cfg,
+        model_info=model_info,
+        init_kwargs=init_kwargs,
+        gen_kwargs=gen_kwargs,
+        num_warmup=num_warmup,
+        num_measure=num_measure,
+        thresholds=thresholds,
+        times=times,
+        peak_memories=peak_memories,
+        all_component_times=all_component_times,
+        prompt=prompt,
+        runtime_identity=runtime_identity,
+        device_name=device_name,
+    )
 
     logger.info(
         "Performance results: avg_time=%.2fs, "

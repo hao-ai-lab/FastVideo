@@ -66,6 +66,7 @@ UPLOAD_POLICY = os.environ.get("PERF_UPLOAD_POLICY", "never").strip().lower()
 VALID_UPLOAD_POLICIES = {"never", "pass", "always"}
 VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
 IDENTITY_KEYS = (
+    "result_schema_version",
     "workload_id",
     "variant_id",
     "benchmark_version",
@@ -77,6 +78,8 @@ IDENTITY_KEYS = (
     "software_profile_id",
     "environment_metadata",
     "environment_fingerprint",
+    "quality_metadata",
+    "variant_metadata",
 )
 COMPARISON_IDENTITY_KEYS = (
     "workload_id",
@@ -143,18 +146,22 @@ def _result_failed_static_thresholds() -> bool:
 
 
 def _record_metadata(run_source: str, result: dict[str, Any]) -> dict[str, Any]:
+    raw_run_source = str(result.get("run_source") or "").strip().lower()
+    if raw_run_source in VALID_RUN_SOURCES:
+        run_source = raw_run_source
+
     pr_number = result.get("pr_number") or os.environ.get("BUILDKITE_PULL_REQUEST", "")
     if not _truthy_pr_number(str(pr_number)):
         pr_number = ""
     return {
         "run_source": run_source,
         "baseline_eligible": False,
-        "branch": os.environ.get("BUILDKITE_BRANCH", ""),
+        "branch": result.get("branch") or os.environ.get("BUILDKITE_BRANCH", ""),
         "pr_number": pr_number,
-        "test_scope": os.environ.get("TEST_SCOPE", ""),
-        "build_url": os.environ.get("BUILDKITE_BUILD_URL", ""),
-        "build_id": os.environ.get("BUILDKITE_BUILD_ID", ""),
-        "job_id": os.environ.get("BUILDKITE_JOB_ID", ""),
+        "test_scope": result.get("test_scope") or os.environ.get("TEST_SCOPE", ""),
+        "build_url": result.get("build_url") or os.environ.get("BUILDKITE_BUILD_URL", ""),
+        "build_id": result.get("build_id") or os.environ.get("BUILDKITE_BUILD_ID", ""),
+        "job_id": result.get("job_id") or os.environ.get("BUILDKITE_JOB_ID", ""),
     }
 
 
