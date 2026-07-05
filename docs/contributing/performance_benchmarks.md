@@ -172,6 +172,45 @@ agent skill to advance the rolling median.
 
 ## Schemas
 
+### Benchmark config (`.buildkite/performance-benchmarks/tests/*.json`)
+
+Benchmark configs without `config_schema_version` are treated as legacy v1
+configs and remain loadable. New or migrated configs should use
+`config_schema_version: 2` and include explicit comparable identity fields:
+
+```jsonc
+{
+  "benchmark_id": "wan-t2v-1.3b-2gpu",
+  "config_schema_version": 2,
+  "workload_id": "wan-t2v-1.3b",
+  "variant_id": "canonical",
+  "benchmark_version": 1
+}
+```
+
+`benchmark_id` is still required in this phase because raw artifact names,
+generated-video directories, normalized record paths, and the current rolling
+baseline comparator still depend on it. The v2 identity fields are config
+metadata that make the measured workload explicit:
+
+| Field | Purpose |
+|---|---|
+| `workload_id` | Stable benchmark family, such as `wan-t2v-1.3b`. |
+| `variant_id` | Intentional recipe family, such as `canonical`. |
+| `benchmark_version` | Version of the measurement protocol and comparison policy. |
+
+If a config declares `config_schema_version: 2`, loading fails clearly when any
+required v2 identity field is missing. If v2 identity or metadata fields are
+added without `config_schema_version: 2`, loading also fails so partial
+migrations do not silently run as v1 configs. Optional v2 metadata fields
+reserved for follow-up work, such as `recipe`, `metric_threshold_policy`, and
+`quality_metadata`, must be JSON objects when present.
+
+Recipe fingerprinting, hardware/software profile IDs, exact-identity
+comparison, metric-specific threshold policy behavior, promoted baselines, and
+dashboard regrouping are separate follow-up changes. Until those land, rolling
+baseline comparison remains keyed by `(model_id, gpu_type)`.
+
 ### Raw record (`results/perf_*.json`)
 
 Written by `test_inference_performance.py`. One file per benchmark run.
@@ -179,6 +218,10 @@ Written by `test_inference_performance.py`. One file per benchmark run.
 ```jsonc
 {
   "benchmark_id": "wan-t2v-1.3b-2gpu",
+  "config_schema_version": 2,
+  "workload_id": "wan-t2v-1.3b",
+  "variant_id": "canonical",
+  "benchmark_version": 1,
   "model_short_name": "Wan2.1-T2V-1.3B-Diffusers",
   "device": "NVIDIA L40S",
   "num_gpus": 2,
@@ -279,11 +322,16 @@ observability. When pytest passes, the rolling-baseline phase emits:
 ## Adding a new benchmark
 
 1. Drop a new JSON config into
-   `.buildkite/performance-benchmarks/tests/<name>.json`. Required keys:
+   `.buildkite/performance-benchmarks/tests/<name>.json`. New configs should
+   use v2 identity fields:
 
    ```json
    {
      "benchmark_id": "<unique-id>",
+     "config_schema_version": 2,
+     "workload_id": "<stable-workload-id>",
+     "variant_id": "canonical",
+     "benchmark_version": 1,
      "model": { "model_path": "...", "model_short_name": "..." },
      "init_kwargs": { "num_gpus": 1, ... },
      "generation_kwargs": { "num_frames": 45, ... },
@@ -302,6 +350,10 @@ observability. When pytest passes, the rolling-baseline phase emits:
      }
    }
    ```
+
+   Legacy v1 configs without `config_schema_version` still load, but should not
+   gain v2 identity or metadata fields until they are migrated to
+   `config_schema_version: 2`.
 
 2. The pytest test auto-discovers all configs — no test code needed. CI
    picks it up on the next `/test performance` run.
