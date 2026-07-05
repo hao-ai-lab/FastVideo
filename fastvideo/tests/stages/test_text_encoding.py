@@ -21,6 +21,26 @@ class FakeTokenizer:
             "attention_mask": torch.ones(B, seq_len, dtype=torch.long),
         })
 
+
+class FakeChatTokenizer:
+    def __init__(self):
+        self.last_messages = None
+        self.last_kwargs = None
+
+    def apply_chat_template(self, messages, **kwargs):
+        self.last_messages = messages
+        self.last_kwargs = kwargs
+        assert isinstance(messages[0], list)
+        assert messages[0][0]["role"] == "system"
+        assert messages[0][1]["role"] == "user"
+        B = len(messages)
+        seq_len = int(kwargs.get("max_length", 4))
+        return TensorDict({
+            "input_ids": torch.arange(B * seq_len).view(B, seq_len),
+            "attention_mask": torch.ones(B, seq_len, dtype=torch.long),
+        })
+
+
 class FakeTextEncoder(torch.nn.Module):
     def __init__(self, hidden_size=8):
         super().__init__()
@@ -37,6 +57,14 @@ class FakeTextEncoder(torch.nn.Module):
 
 def id_preprocess(x: str) -> str:
     return x
+
+
+def chat_list_preprocess(x: str):
+    return [
+        {"role": "system", "content": "Describe the video."},
+        {"role": "user", "content": x if x else " "},
+    ]
+
 
 def take_mean_postprocess(outputs: BaseEncoderOutput) -> torch.Tensor:
     # [B, T, H] -> [B, H]
@@ -156,3 +184,32 @@ def test_encode_text_does_not_force_hidden_states_for_ltx2_prefix():
     stage.encode_text("a", fastvideo_args, encoder_index=[0])
 
     assert stage.text_encoders[0].last_output_hidden_states is False
+
+
+def test_chat_list_preprocess_output_is_not_stripped():
+    fastvideo_args, hidden = make_args(num_encoders=1, text_len=5, hidden_size=8)
+    encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[0]
+    encoder_config.is_chat_model = True
+    encoder_config.treat_empty_as_dot = True
+    fastvideo_args.pipeline_config.preprocess_text_funcs = (chat_list_preprocess, )
+
+    tokenizer = FakeChatTokenizer()
+    stage = TextEncodingStage(
+        text_encoders=[FakeTextEncoder(hidden_size=hidden)],
+        tokenizers=[tokenizer],
+    )
+
+    embeds, masks = stage.encode_text(
+        "a robotic arm welding a metal structure",
+        fastvideo_args,
+        encoder_index=[0],
+        return_attention_mask=True,
+    )
+
+    assert embeds[0].shape == (1, hidden)
+    assert masks[0].shape == (1, 5)
+    assert tokenizer.last_messages == [[
+        {"role": "system", "content": "Describe the video."},
+        {"role": "user", "content": "a robotic arm welding a metal structure"},
+    ]]
+    assert tokenizer.last_kwargs["return_tensors"] == "pt"
