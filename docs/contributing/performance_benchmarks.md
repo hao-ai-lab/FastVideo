@@ -416,11 +416,14 @@ point is `fastvideo/tests/modal/pr_test.py:run_performance_tests` and the
 Buildkite artifact upload is in
 `.buildkite/scripts/pr_test.sh:upload_performance_artifacts`.
 
-Each performance build runs pytest first. If that fixed-threshold phase fails,
-PR/direct runs skip `compare_baseline.py` because they only upload passing
-records. Scheduled-main runs still execute `compare_baseline.py` with
-`PERF_PYTEST_RC` set so the failed canonical attempt is visible in normalized
-JSON and dashboard history. The dashboard runs best-effort for observability.
+Each performance build runs pytest first. PR and direct runs only continue to
+`compare_baseline.py` when that fixed-threshold phase passes; if pytest fails,
+Markdown summaries and normalized JSON artifacts are not emitted. Scheduled
+main runs set `PERF_UPLOAD_POLICY=always`, so they still run
+`compare_baseline.py` (with `PERF_PYTEST_RC` set) after a fixed-threshold
+failure. Those failed scheduled main runs emit summaries and normalized
+records, upload records with `success=false`, and are excluded from future
+rolling baselines. The dashboard still runs best-effort for observability.
 When the rolling-baseline phase runs, it emits:
 
 * **Markdown summary** — appended to `$GITHUB_STEP_SUMMARY` when that variable
