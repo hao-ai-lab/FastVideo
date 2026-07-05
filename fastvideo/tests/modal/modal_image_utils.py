@@ -5,6 +5,7 @@ through the ``fastvideo`` package, so they keep working on thin CI hosts that
 have ``modal`` but not torch.
 """
 import json
+import os
 import urllib.request
 
 _REGISTRY = "ghcr.io"
@@ -55,3 +56,23 @@ def resolve_image_ref(image_ref: str) -> str:
         print(f"WARNING: could not resolve {image_ref} to a digest ({error}); "
               "Modal may reuse a stale cached image for this tag.")
     return image_ref
+
+
+def resolve_uv_torch_backend(image_tag: str) -> str | None:
+    """UV_TORCH_BACKEND for a launcher image tag.
+
+    A caller-set UV_TORCH_BACKEND always wins. Otherwise sniff the CUDA
+    version from an explicit image tag (cuda13 -> cu130, cuda12.6 -> cu126)
+    so uv resolves torch against the image's toolkit. Mutable tags (e.g.
+    py3.12-latest) return None and inherit the registry image's baked
+    backend, which keeps a latest-tag CUDA transition safe.
+    """
+    override = os.environ.get("UV_TORCH_BACKEND")
+    if override:
+        return override
+    tag = image_tag.lower()
+    if "cuda13" in tag:
+        return "cu130"
+    if "cuda12.6" in tag:
+        return "cu126"
+    return None
