@@ -5,7 +5,11 @@ import json
 import pytest
 
 from fastvideo.tests.performance import compare_baseline
-from fastvideo.performance.hf_store import load_records_for_model, sanitize
+from fastvideo.performance.hf_store import (
+    load_records_for_identity,
+    load_records_for_model,
+    sanitize,
+)
 from fastvideo.performance.metric_policy import resolve_metric_policies
 
 
@@ -337,6 +341,10 @@ def test_comparison_identity_filters_keep_zero_version():
 def test_baseline_eligibility_only_for_successful_scheduled_main():
     assert compare_baseline._is_baseline_eligible("scheduled_main", True) is True
     assert compare_baseline._is_baseline_eligible("scheduled_main", False) is False
+    assert compare_baseline._is_baseline_eligible(
+        "scheduled_main", True, compare_baseline.STATUS_PASS) is True
+    assert compare_baseline._is_baseline_eligible(
+        "scheduled_main", False, compare_baseline.STATUS_PASS) is False
     assert compare_baseline._is_baseline_eligible("pr", True) is False
     assert compare_baseline._is_baseline_eligible("local", True) is False
 
@@ -578,13 +586,43 @@ def test_v2_records_do_not_compare_against_v1_records_by_default(tmp_path):
     record = _v2_record()
     identity_filters = compare_baseline._comparison_identity_filters(record)
 
-    assert load_records_for_model(
+    assert load_records_for_identity(
         str(tmp_path),
-        model_id,
-        "NVIDIA L40S",
-        **identity_filters,
+        identity_filters,
         baseline_eligible_only=True,
     ) == []
+
+
+def test_v2_identity_lookup_ignores_model_id_and_gpu_display_string(tmp_path):
+    model_id = "wan-t2v-1.3b-2gpu"
+    model_dir = tmp_path / sanitize(model_id)
+    model_dir.mkdir()
+    baseline = {
+        "model_id": "renamed-benchmark-id",
+        "gpu_type": "NVIDIA L40S PCIe",
+        "timestamp": "2026-06-15T00:00:00+00:00",
+        "success": True,
+        "baseline_eligible": True,
+        "latency": 10.0,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-l40s-2",
+        "software_profile_id": "sw-cuda",
+    }
+    with open(model_dir / "baseline.json", "w", encoding="utf-8") as f:
+        json.dump(baseline, f)
+
+    identity_filters = compare_baseline._comparison_identity_filters(_v2_record())
+
+    records = load_records_for_identity(
+        str(tmp_path),
+        identity_filters,
+        baseline_eligible_only=True,
+    )
+
+    assert records == [baseline]
 
 
 def test_load_records_filters_same_variant_changed_recipe(tmp_path):
@@ -610,27 +648,48 @@ def test_load_records_filters_same_variant_changed_recipe(tmp_path):
     exact_filters = compare_baseline._comparison_identity_filters(_v2_record(recipe_fingerprint="recipe-2"))
     recipe_cohort_filters = compare_baseline._recipe_cohort_filters(_v2_record(recipe_fingerprint="recipe-2"))
 
-    assert load_records_for_model(
+    assert load_records_for_identity(
         str(tmp_path),
-        model_id,
-        "NVIDIA L40S",
-        **exact_filters,
+        exact_filters,
         baseline_eligible_only=True,
     ) == []
-    mismatch_records = load_records_for_model(
+    mismatch_records = load_records_for_identity(
         str(tmp_path),
-        model_id,
-        "NVIDIA L40S",
-        **recipe_cohort_filters,
+        recipe_cohort_filters,
         baseline_eligible_only=True,
     )
 
     assert len(mismatch_records) == 1
 
 
+def test_legacy_record_lookup_still_uses_model_and_gpu(tmp_path):
+    model_id = "wan-t2v-1.3b-2gpu"
+    model_dir = tmp_path / sanitize(model_id)
+    model_dir.mkdir()
+    baseline = {
+        "model_id": model_id,
+        "gpu_type": "NVIDIA L40S",
+        "timestamp": "2026-06-15T00:00:00+00:00",
+        "success": True,
+        "baseline_eligible": True,
+        "latency": 10.0,
+    }
+    with open(model_dir / "baseline.json", "w", encoding="utf-8") as f:
+        json.dump(baseline, f)
+
+    assert load_records_for_model(
+        str(tmp_path),
+        model_id,
+        "NVIDIA L40S",
+        baseline_eligible_only=True,
+    ) == [baseline]
+
+
 def test_non_pass_status_is_not_baseline_eligible():
     assert compare_baseline._is_baseline_eligible(
         "scheduled_main", True, compare_baseline.STATUS_CALIBRATION_NEEDED) is False
+    assert compare_baseline._is_baseline_eligible("pr", True, compare_baseline.STATUS_PASS) is False
+    assert compare_baseline._is_baseline_eligible("local", True, compare_baseline.STATUS_PASS) is False
 
 
 def test_upload_policy_pass_allows_calibration_record(monkeypatch):

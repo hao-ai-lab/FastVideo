@@ -7,8 +7,11 @@ per-device thresholds.  This test module auto-discovers all configs and
 parametrizes a single test function over them.
 """
 import glob
+import hashlib
 import json
 import os
+import platform
+import re
 import time
 from collections.abc import Mapping
 from datetime import datetime, timezone

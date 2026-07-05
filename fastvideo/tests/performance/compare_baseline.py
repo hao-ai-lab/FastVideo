@@ -23,6 +23,7 @@ from typing import Any
 
 try:
     from fastvideo.performance.hf_store import (
+        load_records_for_identity,
         load_records_for_model,
         safe_float,
         sanitize,
@@ -40,6 +41,7 @@ except ImportError:
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
     from fastvideo.performance.hf_store import (
+        load_records_for_identity,
         load_records_for_model,
         safe_float,
         sanitize,

@@ -332,6 +332,36 @@ def load_records_for_model(
     return records
 
 
+def load_records_for_identity(
+    local_dir: str,
+    identity_filters: dict[str, str],
+    *,
+    last_n: int | None = None,
+    successful_only: bool = True,
+    baseline_eligible_only: bool = False,
+) -> list[dict[str, Any]]:
+    """Return records matching comparable identity fields.
+
+    V2 performance comparison is intentionally independent from the legacy
+    ``model_id`` directory and ``gpu_type`` display string. The comparable
+    identity filters usually contain the full v2 comparison key, and may also
+    contain a subset when looking for same-cohort recipe mismatches.
+    """
+    records = load_records(
+        local_dir,
+        successful_only=successful_only,
+        baseline_eligible_only=baseline_eligible_only,
+    )
+
+    for key, expected in identity_filters.items():
+        records = [r for r in records if str(r.get(key)) == str(expected)]
+
+    if last_n is not None:
+        records = records[-last_n:]
+
+    return records
+
+
 # ---------------------------------------------------------------------------
 # DataFrame helpers (dashboard / analytics consumers)
 # ---------------------------------------------------------------------------

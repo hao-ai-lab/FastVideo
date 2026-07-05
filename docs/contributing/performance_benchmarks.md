@@ -12,7 +12,8 @@ It serves three audiences:
 * **Maintainers** — surfaces regressions in a Markdown summary on every
   performance build and a long-form Plotly dashboard.
 * **Local developers** — lets you run the same benchmark on your own machine,
-  then compare against the historical baseline for the same model and GPU.
+  then compare against the historical baseline for the same comparable
+  identity.
 
 ## Quick start (local)
 
