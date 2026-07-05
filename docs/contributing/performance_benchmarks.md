@@ -200,9 +200,9 @@ configs and remain loadable. New or migrated configs should use
 {
   "benchmark_id": "wan-t2v-1.3b-2gpu",
   "config_schema_version": 2,
-  "workload_id": "wan-t2v-1.3b",
-  "variant_id": "canonical",
-  "benchmark_version": 1
+  "workload_id": "wan-t2v",
+  "variant_id": "1.3b-sp2",
+  "benchmark_version": 2
 }
 ```
 
@@ -213,8 +213,8 @@ metadata that make the measured workload explicit:
 
 | Field | Purpose |
 |---|---|
-| `workload_id` | Stable benchmark family, such as `wan-t2v-1.3b`. |
-| `variant_id` | Intentional recipe family, such as `canonical`. |
+| `workload_id` | Stable benchmark family, such as `wan-t2v`. |
+| `variant_id` | Intentional recipe family, including model size and parallelism config, such as `1.3b-sp2`. |
 | `benchmark_version` | Version of the measurement protocol and comparison policy. |
 
 If a config declares `config_schema_version: 2`, loading fails clearly when any
@@ -241,9 +241,9 @@ Written by `test_inference_performance.py`. One file per benchmark run.
 {
   "benchmark_id": "wan-t2v-1.3b-2gpu",
   "config_schema_version": 2,
-  "workload_id": "wan-t2v-1.3b",
-  "variant_id": "canonical",
-  "benchmark_version": 1,
+  "workload_id": "wan-t2v",
+  "variant_id": "1.3b-sp2",
+  "benchmark_version": 2,
   "model_short_name": "Wan2.1-T2V-1.3B-Diffusers",
   "device": "NVIDIA L40S",
   "num_gpus": 2,
@@ -278,9 +278,9 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     "recipe_schema_version": 1,
     "benchmark": {
       "benchmark_id": "wan-t2v-1.3b-2gpu",
-      "workload_id": "wan-t2v-1.3b",
-      "variant_id": "canonical",
-      "benchmark_version": 1
+      "workload_id": "wan-t2v",
+      "variant_id": "1.3b-sp2",
+      "benchmark_version": 2
     },
     "model": { "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" },
     "init_kwargs": { "num_gpus": 2, "sp_size": 2, "tp_size": 1 },
@@ -321,9 +321,9 @@ result, used as the rolling-baseline source of truth.
 ```jsonc
 {
   "model_id": "wan-t2v-1.3b-2gpu",
-  "workload_id": "wan-t2v-1.3b",
-  "variant_id": "canonical",
-  "benchmark_version": 1,
+  "workload_id": "wan-t2v",
+  "variant_id": "1.3b-sp2",
+  "benchmark_version": 2,
   "timestamp": "2026-05-08T22:00:00+00:00",
   "commit_sha": "<full sha>",
   "gpu_type": "NVIDIA L40S",
@@ -422,7 +422,7 @@ When the rolling-baseline phase runs, it emits:
      "benchmark_id": "<unique-id>",
      "config_schema_version": 2,
      "workload_id": "<stable-workload-id>",
-     "variant_id": "canonical",
+     "variant_id": "<variant, e.g. 1.3b-sp2>",
      "benchmark_version": 1,
      "model": { "model_path": "...", "model_short_name": "..." },
      "init_kwargs": { "num_gpus": 1, ... },
