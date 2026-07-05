@@ -84,8 +84,9 @@ def get_attn_backend(
     dtype: torch.dtype,
     supported_attention_backends: tuple[AttentionBackendEnum, ...]
     | None = None,
+    default_backend: AttentionBackendEnum | None = None,
 ) -> type[AttentionBackend]:
-    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends)
+    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends, default_backend)
 
 
 @cache
@@ -94,6 +95,7 @@ def _cached_get_attn_backend(
     dtype: torch.dtype,
     supported_attention_backends: tuple[AttentionBackendEnum, ...]
     | None = None,
+    default_backend: AttentionBackendEnum | None = None,
 ) -> type[AttentionBackend]:
     # Check whether a particular choice of backend was
     # previously forced.
@@ -111,6 +113,12 @@ def _cached_get_attn_backend(
         backend_by_env_var: str | None = envs.FASTVIDEO_ATTENTION_BACKEND
         if backend_by_env_var is not None:
             selected_backend = backend_name_to_enum(backend_by_env_var)
+
+    # Layer-level default (e.g. a checkpoint that requires a specific sparse
+    # backend). Lower precedence than the global force and the env var, so
+    # users can still override it.
+    if selected_backend is None and default_backend is not None:
+        selected_backend = default_backend
 
     # get device-specific attn_backend
     from fastvideo.platforms import current_platform
