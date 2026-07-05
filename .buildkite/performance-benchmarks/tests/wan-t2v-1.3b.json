@@ -1,9 +1,9 @@
 {
   "benchmark_id": "wan-t2v-1.3b-2gpu",
   "config_schema_version": 2,
-  "workload_id": "wan-t2v-1.3b",
-  "variant_id": "canonical",
-  "benchmark_version": 1,
+  "workload_id": "wan-t2v",
+  "variant_id": "1.3b-sp2",
+  "benchmark_version": 2,
   "description": "Wan2.1 T2V 1.3B inference performance",
   "model": {
     "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
