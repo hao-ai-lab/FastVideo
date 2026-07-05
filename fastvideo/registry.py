@@ -782,7 +782,14 @@ def _register_configs() -> None:
         hf_model_paths=[
             "GD-ML/DreamX-World-5B-Cam",
         ],
-        model_detectors=[lambda path: "dreamx-world" in path.lower() or "dreamxworldpipeline" in path.lower()],
+        model_detectors=[
+            # Mutually exclusive with the AR detector below: Cam requires an
+            # explicit "cam" marker so hyphenated AR local paths (e.g.
+            # /ckpts/dreamx-world-5b-converted) don't first-match here —
+            # detector resolution is first-match in registration order.
+            lambda path:
+            ("dreamx-world" in path.lower() and "cam" in path.lower()) or "dreamxworldpipeline" in path.lower()
+        ],
         model_family="dreamx_world",
         default_preset="dreamx_world_5b_cam",
     )

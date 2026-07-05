@@ -21,6 +21,7 @@ from fastvideo.models.dits.wanvideo import (LayerNormScaleShift,
                                             WanTransformerBlock)
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 from fastvideo.attention import LocalAttention
+from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.models.dits.base import BaseDiT
 
@@ -168,6 +169,16 @@ class DreamXPropeSelfAttention(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor,
                 y_camera: dict[str, torch.Tensor]) -> torch.Tensor:
+        if get_sp_world_size() > 1:
+            # The transformer shards the sequence before the block loop and
+            # this branch uses LocalAttention (no all-to-all): under
+            # sequence parallelism each rank would attend only within its
+            # own shard — silently wrong output. Fail loudly until this
+            # path is ported to DistributedAttention and validated.
+            raise NotImplementedError(
+                "DreamXPropeSelfAttention does not support sequence "
+                "parallelism yet (LocalAttention on a sharded sequence "
+                "corrupts output). Run with sp_size=1.")
         batch_size, seq_len, _ = hidden_states.shape
 
         query, _ = self.q_proj(hidden_states)
