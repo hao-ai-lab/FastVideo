@@ -185,17 +185,24 @@ def _comparison_identity_filters(record: dict[str, Any]) -> dict[str, str]:
         key for key in COMPARISON_IDENTITY_KEYS
         if key not in record or record[key] is None or (isinstance(record[key], str) and not record[key].strip())
     ]
-    if len(missing) == len(COMPARISON_IDENTITY_KEYS):
-        # Legacy v1 record: no identity fields at all. Keep the pre-v2
-        # (model_id, gpu_type) rolling-baseline comparison instead of
-        # crashing — v1 configs are documented as loadable.
-        return {}
     if missing:
         raise ValueError("Performance record missing required comparison identity fields: " + ", ".join(missing))
     return {
         key: str(record[key])
         for key in COMPARISON_IDENTITY_KEYS
     }
+
+
+def _comparison_identity_filters_or_none(record: dict[str, Any]) -> dict[str, str] | None:
+    try:
+        return _comparison_identity_filters(record)
+    except ValueError as exc:
+        print("Skipping rolling baseline comparison for "
+              f"{record.get('model_id', 'unknown')} on "
+              f"{record.get('gpu_type', 'unknown')}: {exc}. "
+              "The normalized artifact will still be written, but this record "
+              "will not be baseline eligible.")
+        return None
 
 
 def _format_identity_filters(filters: dict[str, str]) -> str:
@@ -488,43 +495,53 @@ def main() -> int:
     for raw in current_results:
         record = _normalize_record(raw)
         metric_policies = resolve_metric_policies(record.get("regression_thresholds"))
+        identity_filters = _comparison_identity_filters_or_none(record)
 
-        baseline_records = load_records_for_model(
-            TRACKING_ROOT,
-            record["model_id"],
-            record["gpu_type"],
-            **_comparison_identity_filters(record),
-            last_n=5,
-            successful_only=True,
-            baseline_eligible_only=True,
-        )
-
-        if not baseline_records:
-            # A brand-new cohort has NO regression gating until history
-            # accumulates — make that loud and machine-readable instead of
-            # an indistinguishable pass, so a cohort shift (intended or
-            # accidental, e.g. an identity-field change) never silently
-            # blinds the comparison.
-            record["baseline_status"] = "initialized_new_cohort"
-            print("=" * 72)
-            print(f"WARNING: NO BASELINE — initializing a NEW cohort for "
-                  f"{record['model_id']} on {record['gpu_type']}"
-                  f"{_format_identity_filters(_comparison_identity_filters(record))}")
-            print("Regression gating is INACTIVE for this cohort until "
-                  "baseline history accumulates. If this cohort shift is "
-                  "unexpected, check the identity fields above.")
-            print("=" * 72)
+        baseline_records: list[dict[str, Any]] = []
+        if identity_filters is None:
+            # Records without the full v2 identity block skip rolling-baseline
+            # comparison entirely: only the static thresholds gate them and
+            # they never become baseline eligible.
+            record["baseline_status"] = "skipped_missing_identity"
             failures: list[str] = []
-            record["success"] = True
         else:
-            record["baseline_status"] = "compared"
-            failures = _check_regressions(record, baseline_records, metric_policies)
+            baseline_records = load_records_for_model(
+                TRACKING_ROOT,
+                record["model_id"],
+                record["gpu_type"],
+                **identity_filters,
+                last_n=5,
+                successful_only=True,
+                baseline_eligible_only=True,
+            )
+
+            if not baseline_records:
+                # A brand-new cohort has NO regression gating until history
+                # accumulates — make that loud and machine-readable instead of
+                # an indistinguishable pass, so a cohort shift (intended or
+                # accidental, e.g. an identity-field change) never silently
+                # blinds the comparison.
+                record["baseline_status"] = "initialized_new_cohort"
+                print("=" * 72)
+                print(f"WARNING: NO BASELINE — initializing a NEW cohort for "
+                      f"{record['model_id']} on {record['gpu_type']}"
+                      f"{_format_identity_filters(identity_filters)}")
+                print("Regression gating is INACTIVE for this cohort until "
+                      "baseline history accumulates. If this cohort shift is "
+                      "unexpected, check the identity fields above.")
+                print("=" * 72)
+                failures = []
+            else:
+                record["baseline_status"] = "compared"
+                failures = _check_regressions(record, baseline_records, metric_policies)
         if static_threshold_failed:
             failures.append(f"{record['model_id']} fixed-threshold phase failed "
                             f"(PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')})")
 
         record["success"] = not failures
-        record["baseline_eligible"] = _is_baseline_eligible(record["run_source"], record["success"])
+        record["baseline_eligible"] = (
+            identity_filters is not None and _is_baseline_eligible(record["run_source"], record["success"])
+        )
         all_failures.extend(failures)
 
         _write_normalized_artifact(record)
