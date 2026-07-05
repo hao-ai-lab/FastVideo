@@ -51,6 +51,7 @@ class DenoisingStage(PipelineStage):
     This stage handles the iterative denoising process that transforms
     the initial noise into the final output.
     """
+    performance_component_metric = "dit_time_s"
 
     def __init__(self, transformer, scheduler, pipeline=None, transformer_2=None, vae=None) -> None:
         super().__init__()

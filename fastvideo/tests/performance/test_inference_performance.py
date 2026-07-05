@@ -102,7 +102,11 @@ def _extract_component_times(result: dict) -> dict[str, float | None]:
             logger.debug("Skipping malformed stage '%s' data: %r", stage_name, stage_data)
             continue
         stage_class = stage_data.get("stage_class", stage_name)
-        metric_key = STAGE_METRIC_MAP.get(stage_class)
+        component_metric = stage_data.get("component_metric")
+        if isinstance(component_metric, str) and component_metric in component_times:
+            metric_key = component_metric
+        else:
+            metric_key = STAGE_METRIC_MAP.get(stage_class)
         if metric_key is None:
             logger.debug("Unmapped stage '%s' class '%s' (%.3fs)",
                          stage_name,

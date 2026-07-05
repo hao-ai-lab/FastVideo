@@ -24,6 +24,7 @@ class TextEncodingStage(PipelineStage):
     This stage handles the encoding of text prompts into the embedding space
     expected by the diffusion model.
     """
+    performance_component_metric = "text_encoder_time_s"
 
     def __init__(self, text_encoders, tokenizers) -> None:
         """

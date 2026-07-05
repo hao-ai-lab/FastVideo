@@ -107,10 +107,11 @@ Each benchmark records six metrics:
 while it runs so pipeline stage execution times are available in
 `generate_video(...).logging_info`. Stage logs use pipeline-unique keys such as
 `prompt_encoding_stage` so duplicate stage classes do not collide. For
-`PipelineStage` entries, the extractor maps the `stage_class` field:
-`TextEncodingStage` maps to `text_encoder_time_s`, `DenoisingStage` and
-`DmdDenoisingStage` map to `dit_time_s`, and `DecodingStage` maps to
-`vae_decode_time_s`, with a fallback for older logs that used the class name as
+`PipelineStage` entries, shared component stage bases emit a stable
+`component_metric`: text encoding stages map to `text_encoder_time_s`,
+denoising stages and subclasses map to `dit_time_s`, and decoding stages map to
+`vae_decode_time_s`. The extractor falls back to known `stage_class` names for
+older logs that do not include `component_metric` or that used the class name as
 the stage key. Generator-side timings such as `PostDecodeFrameProcessStage`,
 `VideoSaveStage`, and `AudioMuxStage` are intentionally ignored. If a pipeline
 does not report one of the mapped stages, that component metric is stored as
@@ -336,5 +337,5 @@ pipelines that did not report a mapped component stage.
 
 **Component timing is `null`** — the generated result did not include a mapped
 stage in `logging_info.stages`. Check that the pipeline emits stage logging
-and that the stage name is listed in `STAGE_METRIC_MAP` in
-`test_inference_performance.py`.
+and that the stage emits `component_metric` or is covered by the legacy
+`STAGE_METRIC_MAP` fallback in `test_inference_performance.py`.
