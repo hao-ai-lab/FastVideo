@@ -235,6 +235,16 @@ def _run_generation(generator, prompt, generation_kwargs):
     return elapsed, peak_memory_mb, component_times
 
 
+def _validate_run_counts(run_config: Mapping[str, Any], benchmark_id: str) -> tuple[int, int]:
+    num_warmup = run_config.get("num_warmup_runs", 1)
+    num_measure = run_config.get("num_measurement_runs", 3)
+    if isinstance(num_warmup, bool) or not isinstance(num_warmup, int) or num_warmup < 0:
+        raise ValueError(f"{benchmark_id}: run_config.num_warmup_runs must be a non-negative integer")
+    if isinstance(num_measure, bool) or not isinstance(num_measure, int) or num_measure < 1:
+        raise ValueError(f"{benchmark_id}: run_config.num_measurement_runs must be a positive integer")
+    return num_warmup, num_measure
+
+
 def _write_results(results):
     """Write JSON results to the results directory."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -412,6 +422,8 @@ def _build_result_record(
     device_name: str,
     timestamp: str | None = None,
 ) -> dict[str, Any]:
+    if not times or not peak_memories:
+        raise ValueError("Cannot build a performance result record without measurement runs")
     avg_time = sum(times) / len(times)
     max_peak_memory = max(peak_memories)
     num_frames = gen_kwargs.get("num_frames")
@@ -463,8 +475,7 @@ def _run_benchmark(cfg):
     prompts = cfg.get("test_prompts", ["A cinematic video."])
     prompt = prompts[0]
 
-    num_warmup = run_config.get("num_warmup_runs", 1)
-    num_measure = run_config.get("num_measurement_runs", 3)
+    num_warmup, num_measure = _validate_run_counts(run_config, cfg["benchmark_id"])
     thresholds = _get_thresholds(cfg)
 
     # Remap JSON keys to VideoGenerator kwargs
