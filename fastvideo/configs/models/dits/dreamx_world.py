@@ -37,7 +37,29 @@ class DreamXWorldARArchConfig(DreamXWorldArchConfig):
     sink_size: int = 3
     num_frames_per_block: int = 3
     rope_cache_policy: str = "block_relativistic"
-    param_names_mapping: dict = field(default_factory=dict)
+    # The official AR checkpoint (AMAP-ML/DreamX-World ``model.safetensors``)
+    # already uses FastVideo's native key names and the converter copies the
+    # tensors verbatim, so every rule is an identity. The rules enumerate the
+    # full state-dict surface of ``DreamXWorldARTransformer3DModel`` (norm1 /
+    # norm2 / head.norm are affine-free and have no parameters).
+    param_names_mapping: dict = field(
+        default_factory=lambda: {
+            r"^patch_embedding\.(.*)$": r"patch_embedding.\1",
+            r"^text_embedding\.([02])\.(.*)$": r"text_embedding.\1.\2",
+            r"^time_embedding\.([02])\.(.*)$": r"time_embedding.\1.\2",
+            r"^time_projection\.1\.(.*)$": r"time_projection.1.\1",
+            r"^blocks\.(\d+)\.self_attn\.(q|k|v|o)\.(.*)$": r"blocks.\1.self_attn.\2.\3",
+            r"^blocks\.(\d+)\.self_attn\.norm_(q|k)\.weight$": r"blocks.\1.self_attn.norm_\2.weight",
+            r"^blocks\.(\d+)\.cross_attn\.(q|k|v|o)\.(.*)$": r"blocks.\1.cross_attn.\2.\3",
+            r"^blocks\.(\d+)\.cross_attn\.norm_(q|k)\.weight$": r"blocks.\1.cross_attn.norm_\2.weight",
+            r"^blocks\.(\d+)\.cam_self_attn\.(q_proj|k_proj|v_proj|out_proj)\.(.*)$": r"blocks.\1.cam_self_attn.\2.\3",
+            r"^blocks\.(\d+)\.cam_self_attn\.norm_(q|k)\.weight$": r"blocks.\1.cam_self_attn.norm_\2.weight",
+            r"^blocks\.(\d+)\.norm3\.(.*)$": r"blocks.\1.norm3.\2",
+            r"^blocks\.(\d+)\.ffn\.([02])\.(.*)$": r"blocks.\1.ffn.\2.\3",
+            r"^blocks\.(\d+)\.modulation$": r"blocks.\1.modulation",
+            r"^head\.head\.(.*)$": r"head.head.\1",
+            r"^head\.modulation$": r"head.modulation",
+        })
     reverse_param_names_mapping: dict = field(default_factory=dict)
     lora_param_names_mapping: dict = field(default_factory=dict)
 
