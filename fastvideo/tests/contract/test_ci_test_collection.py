@@ -67,6 +67,15 @@ def test_every_test_directory_is_collected_or_allowlisted():
         f"allowlist entry with a reason in {__file__}.")
 
 
+def test_local_tests_stays_out_of_ci():
+    # tests/local_tests/ (repo root) is developer-local by design (author
+    # decision, 2026-07-05): parity scaffolds and machine-specific checks
+    # that must never gate CI. Fail if any CI source starts collecting it.
+    assert "tests/local_tests" not in _ci_text(), (
+        "tests/local_tests/ is local-only by design; remove the CI "
+        "reference or move the tests into a fastvideo/tests/ lane.")
+
+
 def test_allowlist_entries_are_still_real_directories():
     # A stale allowlist hides regressions; entries must track reality.
     missing = [
