@@ -8,7 +8,10 @@ from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.basic.dreamx_world.ar_denoising import DreamXWorldARCausalDenoisingStage
-from fastvideo.pipelines.basic.dreamx_world.stages import DreamXWorldCameraConditioningStage
+from fastvideo.pipelines.basic.dreamx_world.stages import (
+    DreamXWorldCameraConditioningStage,
+    DreamXWorldImageVAEEncodingStage,
+)
 from fastvideo.pipelines.stages import (
     ConditioningStage,
     DecodingStage,
@@ -47,6 +50,8 @@ class DreamXWorldARPipeline(LoRAPipeline, ComposedPipelineBase):
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer", None),
                        ))
+        self.add_stage(stage_name="image_latent_preparation_stage",
+                       stage=DreamXWorldImageVAEEncodingStage(vae=self.get_module("vae")))
         self.add_stage(stage_name="dreamx_camera_conditioning_stage", stage=DreamXWorldCameraConditioningStage())
         self.add_stage(stage_name="denoising_stage",
                        stage=DreamXWorldARCausalDenoisingStage(
