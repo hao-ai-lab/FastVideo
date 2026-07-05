@@ -106,30 +106,12 @@ def run_test_command(test_command: str,
     if pr_number:
         print(f"PR number: {pr_number}")
 
-    # The blob-less clone (--filter=blob:none) defers all file-content
-    # downloads to the checkout, so BOTH paths below perform a large lazy blob
-    # fetch from GitHub. Retry transient GitHub/HTTP2 disconnects on each;
-    # otherwise Modal shards can fail before pytest starts.
-    def with_retries(inner_command: str) -> str:
-        return f"""
-        for attempt in 1 2 3; do
-            {inner_command} &&
-            break
-
-            status=$?
-            if [ "$attempt" -eq 3 ]; then
-                exit "$status"
-            fi
-            sleep $((attempt * 5))
-        done"""
-
-    # For PRs (including forks), use GitHub's PR refs to get the correct commit.
+    # For PRs (including forks), use GitHub's PR refs to get the correct commit
     if pr_number and pr_number != "false":
-        checkout_command = with_retries(f"git fetch --prune --no-tags --depth=1 origin refs/pull/{pr_number}/head &&"
-                                        "\n            git checkout --detach FETCH_HEAD")
+        checkout_command = f"git fetch --prune origin refs/pull/{pr_number}/head && git checkout FETCH_HEAD"
         print(f"Using PR ref for checkout: {checkout_command}")
     else:
-        checkout_command = with_retries(f"git checkout {git_commit}")
+        checkout_command = f"git checkout {git_commit}"
         print(f"Using direct commit checkout: {checkout_command}")
 
     build_kernel_command = """
@@ -143,7 +125,7 @@ def run_test_command(test_command: str,
     command = f"""
     source $HOME/.local/bin/env &&
     source /opt/venv/bin/activate &&
-    git clone --filter=blob:none --no-checkout {git_repo} /FastVideo &&
+    git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
     git submodule update --init --recursive &&
