@@ -47,8 +47,11 @@ V2_REQUIRED_IDENTITY_FIELDS = (
     "variant_id",
     "benchmark_version",
 )
+# "recipe" is no longer config-declarable: the fingerprint follow-up landed,
+# and the generated recipe document owns that key in emitted records. A config
+# declaring it now fails validation loudly instead of being silently
+# overwritten by the generated one.
 V2_OPTIONAL_METADATA_FIELDS = (
-    "recipe",
     "metric_threshold_policy",
     "quality_metadata",
 )
@@ -315,6 +318,13 @@ def _benchmark_identity_fields(cfg):
 
 
 def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
+    # Legacy v1 configs (no config_schema_version) stay on the legacy
+    # (model_id, gpu_type) cohort: they lack the required identity fields,
+    # and building a recipe for them would raise AFTER the GPU measurement
+    # completed. The validator already enforces that v2 configs carry the
+    # identity fields, so v2 records always get the full identity block.
+    if cfg.get("config_schema_version") is None:
+        return {}
     recipe = build_recipe_from_benchmark_config(
         cfg,
         resolved_attention_backend=runtime_identity.get("resolved_attention_backend"),

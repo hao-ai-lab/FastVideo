@@ -222,13 +222,17 @@ If a config declares `config_schema_version: 2`, loading fails clearly when any
 required v2 identity field is missing. If v2 identity or metadata fields are
 added without `config_schema_version: 2`, loading also fails so partial
 migrations do not silently run as v1 configs. Optional v2 metadata fields
-reserved for follow-up work, such as `recipe`, `metric_threshold_policy`, and
-`quality_metadata`, must be JSON objects when present.
+reserved for follow-up work, such as `metric_threshold_policy` and
+`quality_metadata`, must be JSON objects when present. (`recipe` is emitted
+by the harness and is not config-declarable.)
 
 Recipe fingerprinting, hardware/software profile IDs, exact-identity
-comparison, metric-specific threshold policy behavior, promoted baselines, and
-dashboard regrouping are separate follow-up changes. Until those land, rolling
-baseline comparison remains keyed by `(model_id, gpu_type)`.
+comparison, and dashboard cohort grouping land with this change: v2 records
+compare only within their identity cohort, and a record that opens a NEW
+cohort is marked `baseline_status: "initialized_new_cohort"` (regression
+gating starts once that cohort accumulates history). Legacy v1 configs keep
+the `(model_id, gpu_type)` rolling-baseline comparison. Metric-specific
+threshold policies and promoted baselines remain separate follow-ups.
 
 ### Raw record (`results/perf_*.json`)
 

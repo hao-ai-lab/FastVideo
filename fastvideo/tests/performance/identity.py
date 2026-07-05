@@ -78,6 +78,15 @@ def recipe_fingerprint(recipe: Mapping[str, Any]) -> str:
     model = pruned.get("model")
     if isinstance(model, dict):
         model.pop("resolved_revision", None)
+    attention = pruned.get("attention")
+    if isinstance(attention, dict):
+        # Same reasoning as resolved_revision: with requested_backend="auto",
+        # a silent runtime fallback (e.g. a broken flash-attn wheel) must NOT
+        # open a fresh ungated cohort and seed degraded numbers as the new
+        # baseline — it should fail the regression gate in the old cohort.
+        # Intentional backend changes are declared via requested_backend,
+        # which stays in the hash.
+        attention.pop("resolved_backend", None)
     return sha256_hexdigest(canonical_json(pruned))
 
 
