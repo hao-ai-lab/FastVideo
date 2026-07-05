@@ -60,6 +60,19 @@ def is_baseline_eligible_record(record: dict[str, Any]) -> bool:
     return "baseline_eligible" not in record and "run_source" not in record
 
 
+def _parse_record_timestamp(record: dict[str, Any]) -> datetime | None:
+    raw_ts = record.get("timestamp")
+    if not raw_ts:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(raw_ts))
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
 def resolve_hf_token() -> str | None:
     """Return the first configured Hugging Face token env var."""
     for env_var in HF_TOKEN_ENV_VARS:
@@ -231,7 +244,7 @@ def load_records(
     if days is not None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-    records: list[dict[str, Any]] = []
+    records: list[tuple[datetime, str, dict[str, Any]]] = []
 
     for path in sorted(glob.glob(os.path.join(local_dir, "**", "*.json"), recursive=True)):
         try:
@@ -247,20 +260,17 @@ def load_records(
             continue
 
         if cutoff is not None:
-            raw_ts = data.get("timestamp")
-            if raw_ts:
-                try:
-                    ts = datetime.fromisoformat(raw_ts)
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
-                    if ts < cutoff:
-                        continue
-                except ValueError:
-                    pass  # keep records with unparsable timestamps
+            ts = _parse_record_timestamp(data)
+            if ts is not None and ts < cutoff:
+                continue
 
-        records.append(data)
+        records.append((
+            _parse_record_timestamp(data) or datetime.min.replace(tzinfo=timezone.utc),
+            path,
+            data,
+        ))
 
-    return records
+    return [data for _ts, _path, data in sorted(records)]
 
 
 def load_records_for_model(

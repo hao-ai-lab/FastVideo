@@ -44,6 +44,13 @@ def _v2_record(**overrides):
     return compare_baseline.normalize_performance_result(_v2_raw_result(**overrides))
 
 
+def _write_record(root, model_id, filename, record):
+    model_dir = root / sanitize(model_id)
+    model_dir.mkdir(parents=True, exist_ok=True)
+    with open(model_dir / filename, "w", encoding="utf-8") as f:
+        json.dump(record, f)
+
+
 def test_detect_run_source_prefers_explicit_env(monkeypatch):
     monkeypatch.setenv("PERF_RUN_SOURCE", "local")
     monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "123")
@@ -568,6 +575,65 @@ def test_same_variant_changed_recipe_reports_recipe_mismatch(monkeypatch):
     assert "recipe-1" in reason
 
 
+def test_same_recipe_calibration_record_does_not_report_recipe_mismatch(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    record = _v2_record()
+
+    assert compare_baseline._recipe_mismatch_records(
+        record,
+        [{"recipe_fingerprint": "recipe-1"}],
+    ) == []
+
+
+def test_prior_uploaded_calibration_record_can_report_recipe_mismatch(
+    monkeypatch,
+    tmp_path,
+):
+    tracking_root = tmp_path / "tracking"
+    results_dir = tmp_path / "results"
+    reports_dir = tmp_path / "reports"
+    results_dir.mkdir()
+    _write_record(
+        tracking_root,
+        "renamed-benchmark-id",
+        "prior-calibration.json",
+        {
+            "model_id": "renamed-benchmark-id",
+            "gpu_type": "NVIDIA L40S PCIe",
+            "timestamp": "2026-06-15T00:00:00+00:00",
+            "success": True,
+            "baseline_eligible": False,
+            "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+            "latency": 10.0,
+            "workload_id": "wan-t2v",
+            "variant_id": "1.3b-sp2",
+            "benchmark_version": 2,
+            "recipe_fingerprint": "recipe-1",
+            "hardware_profile_id": "hw-l40s-2",
+            "software_profile_id": "sw-cuda",
+        },
+    )
+    with open(results_dir / "perf_current.json", "w", encoding="utf-8") as f:
+        json.dump(_v2_raw_result(recipe_fingerprint="recipe-2"), f)
+
+    monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
+    monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
+    monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
+    monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
+    monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
+    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+
+    assert compare_baseline.main() == 1
+
+    artifacts = list((reports_dir / "results").glob("normalized_perf_*.json"))
+    assert len(artifacts) == 1
+    with open(artifacts[0], encoding="utf-8") as f:
+        normalized = json.load(f)
+
+    assert normalized["comparison_status"] == compare_baseline.STATUS_RECIPE_MISMATCH
+    assert "recipe-1" in normalized["comparison_status_reason"]
+
+
 def test_v2_records_do_not_compare_against_v1_records_by_default(tmp_path):
     model_id = "wan-t2v-1.3b-2gpu"
     model_dir = tmp_path / sanitize(model_id)
@@ -623,6 +689,50 @@ def test_v2_identity_lookup_ignores_model_id_and_gpu_display_string(tmp_path):
     )
 
     assert records == [baseline]
+
+
+def test_v2_identity_lookup_last_n_uses_timestamp_across_model_dirs(tmp_path):
+    identity_fields = {
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-l40s-2",
+        "software_profile_id": "sw-cuda",
+    }
+    records = [
+        ("aaa-renamed", "newer-6.json", "2026-06-06T00:00:00+00:00", 6.0),
+        ("aaa-renamed", "newer-7.json", "2026-06-07T00:00:00+00:00", 7.0),
+        ("zzz-original", "older-1.json", "2026-06-01T00:00:00+00:00", 1.0),
+        ("zzz-original", "older-2.json", "2026-06-02T00:00:00+00:00", 2.0),
+        ("zzz-original", "older-3.json", "2026-06-03T00:00:00+00:00", 3.0),
+        ("zzz-original", "older-4.json", "2026-06-04T00:00:00+00:00", 4.0),
+        ("zzz-original", "older-5.json", "2026-06-05T00:00:00+00:00", 5.0),
+    ]
+    for model_id, filename, timestamp, latency in records:
+        _write_record(
+            tmp_path,
+            model_id,
+            filename,
+            {
+                "model_id": model_id,
+                "gpu_type": "NVIDIA L40S",
+                "timestamp": timestamp,
+                "success": True,
+                "baseline_eligible": True,
+                "latency": latency,
+                **identity_fields,
+            },
+        )
+
+    loaded = load_records_for_identity(
+        str(tmp_path),
+        compare_baseline._comparison_identity_filters(_v2_record()),
+        last_n=5,
+        baseline_eligible_only=True,
+    )
+
+    assert [record["latency"] for record in loaded] == [3.0, 4.0, 5.0, 6.0, 7.0]
 
 
 def test_load_records_filters_same_variant_changed_recipe(tmp_path):

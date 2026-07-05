@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from fastvideo.tests.performance import compare_baseline
-from fastvideo.tests.performance.test_inference_performance import _build_v2_identity_fields
+from fastvideo.tests.performance import test_inference_performance as perf
 
 
 def _benchmark_config():
@@ -50,7 +50,7 @@ def test_performance_producer_emits_v2_identity_from_raw_result_shape(monkeypatc
     generation_kwargs["output_path"] = "/tmp/generated"
     prompt = "A cinematic video."
 
-    identity_fields = _build_v2_identity_fields(
+    identity_fields = perf._build_v2_identity_fields(
         cfg,
         init_kwargs,
         generation_kwargs,
@@ -88,3 +88,47 @@ def test_performance_producer_emits_v2_identity_from_raw_result_shape(monkeypatc
     assert record["software_profile_id"].startswith("sw-")
     assert len(record["recipe_fingerprint"]) == 64
     assert "output_path" not in record["recipe"]["generation_kwargs"]
+
+
+def test_software_profile_tracks_attention_kernel_and_container_versions(monkeypatch):
+    package_versions = {
+        "triton": "3.2.1",
+        "flash-attn": "2.8.1",
+        "sageattention": "2.1.1",
+        "xformers": "0.0.31",
+        "fastvideo-kernel": "0.3.2",
+        "flashinfer-python": "0.2.3",
+    }
+
+    def fake_version(package_name):
+        if package_name not in package_versions:
+            raise perf.importlib_metadata.PackageNotFoundError(package_name)
+        return package_versions[package_name]
+
+    monkeypatch.setattr(perf.importlib_metadata, "version", fake_version)
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    monkeypatch.setenv("FASTVIDEO_PERFORMANCE_PROFILE_VERSION", "perf-profile-v2")
+    monkeypatch.setenv("IMAGE_VERSION", "py3.12-cuda13.0")
+
+    profile = perf._software_profile()
+    changed_profile = {
+        **profile,
+        "packages": {
+            **profile["packages"],
+            "triton": "3.3",
+        },
+    }
+
+    assert profile["profile_schema_version"] == perf.SOFTWARE_PROFILE_SCHEMA_VERSION
+    assert profile["attention_backend"] == "SAGE_ATTN"
+    assert profile["performance_profile_version"] == "perf-profile-v2"
+    assert profile["container_image_version"] == "py3.12-cuda13.0"
+    assert profile["packages"] == {
+        "triton": "3.2",
+        "flash-attn": "2.8",
+        "sageattention": "2.1",
+        "xformers": "0.0",
+        "fastvideo-kernel": "0.3",
+        "flashinfer-python": "0.2",
+    }
+    assert perf._profile_id("sw", profile) != perf._profile_id("sw", changed_profile)

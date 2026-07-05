@@ -213,6 +213,18 @@ def _comparison_identity_filters_or_none(record: dict[str, Any]) -> dict[str, st
         return None
 
 
+def _recipe_mismatch_records(
+    record: dict[str, Any],
+    cohort_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    current_recipe = str(record.get("recipe_fingerprint"))
+    return [
+        item for item in cohort_records
+        if _none_if_empty(item.get("recipe_fingerprint")) is not None
+        and str(item.get("recipe_fingerprint")) != current_recipe
+    ]
+
+
 def _format_identity_filters(filters: dict[str, str]) -> str:
     if not filters:
         return ""

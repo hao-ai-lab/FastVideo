@@ -197,7 +197,7 @@ Comparator summaries and normalized artifacts include an explicit
 | `PASS` | Comparable baseline exists and no gated metric regressed. Legacy records with no baseline also keep the historical initialization behavior. | Passes |
 | `REGRESSION` | Comparable baseline exists and at least one gated metric regressed. | Fails |
 | `CALIBRATION_NEEDED` | A v2 record has no exact comparable baseline. | Passes, may upload when `PERF_UPLOAD_POLICY=pass`, never seeds a baseline |
-| `RECIPE_MISMATCH` | The same workload, variant, benchmark version, hardware profile, and software profile has existing baselines under another recipe fingerprint. | Fails |
+| `RECIPE_MISMATCH` | The same workload, variant, benchmark version, hardware profile, and software profile has existing successful records under another recipe fingerprint. | Fails |
 | `INFRA_ERROR` | The comparator cannot safely classify the record, such as a v2 record missing required identity fields. | Fails |
 
 `QUALITY_BLOCKED` is reserved for a future variant-promotion workflow and is
@@ -426,6 +426,9 @@ FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 | `BUILDKITE_BRANCH`, `BUILDKITE_COMMIT`, `BUILDKITE_PULL_REQUEST` | unset | `compare_baseline.py`, `test_inference_performance.py` | CI metadata stamped into records. |
 | `DASHBOARD_DAYS` | `30` | `dashboard.py` | Lookback window for the Plotly trend pages. |
 | `PERFORMANCE_TRACKING_SYNC_REUSE_TTL_SECONDS` | `3600` | `fastvideo/performance/hf_store.py` | Freshness window for reusing an existing HF sync when requested by dashboard consumers. |
+| `FASTVIDEO_ATTENTION_BACKEND` | `auto` | `test_inference_performance.py` | Requested attention backend included in `software_profile_id`. |
+| `FASTVIDEO_PERFORMANCE_PROFILE_VERSION` | unset | `test_inference_performance.py` | Optional explicit software cohort/profile version included in `software_profile_id`. |
+| `IMAGE_VERSION` | unset | `test_inference_performance.py` | CI container image/profile version included in `software_profile_id` when available. |
 | `FASTVIDEO_STAGE_LOGGING` | set by the pytest test | `test_inference_performance.py` | Enables pipeline stage timing capture for component metrics during benchmark runs. |
 
 ## CI integration
