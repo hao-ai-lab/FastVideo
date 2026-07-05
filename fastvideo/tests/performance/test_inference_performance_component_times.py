@@ -1,13 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from fastvideo.pipelines.pipeline_batch_info import PipelineLoggingInfo
+from fastvideo.pipelines.stages.denoising import Cosmos25AutoDenoisingStage, DenoisingStage
+from fastvideo.pipelines.stages.text_encoding import Cosmos25TextEncodingStage
 from fastvideo.tests.performance.test_inference_performance import _extract_component_times
+
+
+class SubclassStyleDenoisingStage(DenoisingStage):
+    pass
 
 
 def test_extract_component_times_handles_pipeline_logging_info_object():
     logging_info = PipelineLoggingInfo()
     logging_info.add_stage_execution_time("prompt_encoding_stage", 1.25)
     logging_info.add_stage_metric("prompt_encoding_stage", "stage_class", "TextEncodingStage")
+    logging_info.add_stage_metric("prompt_encoding_stage", "component_metric", "text_encoder_time_s")
 
     assert _extract_component_times({"logging_info": logging_info}) == {
         "text_encoder_time_s": 1.25,
@@ -42,6 +49,35 @@ def test_extract_component_times_uses_stage_class_for_pipeline_stage_keys():
         "text_encoder_time_s": 1.2,
         "dit_time_s": 3.4,
         "vae_decode_time_s": 0.8,
+    }
+
+
+def test_denoising_stage_subclasses_inherit_component_metric():
+    assert SubclassStyleDenoisingStage.performance_component_metric == "dit_time_s"
+
+
+def test_cosmos25_direct_pipeline_stages_define_component_metrics():
+    assert Cosmos25TextEncodingStage.performance_component_metric == "text_encoder_time_s"
+    assert Cosmos25AutoDenoisingStage.performance_component_metric == "dit_time_s"
+
+
+def test_extract_component_times_uses_component_metric_for_stage_subclasses():
+    result = {
+        "logging_info": {
+            "stages": {
+                "denoising_stage": {
+                    "execution_time": 4.2,
+                    "stage_class": "CosmosDenoisingStage",
+                    "component_metric": "dit_time_s",
+                },
+            },
+        },
+    }
+
+    assert _extract_component_times(result) == {
+        "text_encoder_time_s": None,
+        "dit_time_s": 4.2,
+        "vae_decode_time_s": None,
     }
 
 
