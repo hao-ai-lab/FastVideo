@@ -36,7 +36,6 @@ ALLOWLIST = {
     "layers": "no lane yet — torchrun FSDP dispatch tests, run manually",
     "nightly": "by design: nightly cadence, not per-PR",
     "ops": "no lane yet — GPU op tests, run manually",
-    "stages": "wiring in flight (PR #1518 review); remove when it lands",
     "modal": "CI infrastructure itself, not a test suite",
 }
 
