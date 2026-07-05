@@ -195,13 +195,13 @@ dreamverse-mock-server = "dreamverse.mock_server:cli"
 
 [tool.setuptools.packages.find]
 where = [".", "apps/dreamverse"]
-exclude = ["assets*", "docker*", "docs", "scripts*", "apps.dreamverse*", "dreamverse.tests*"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*"]
 
 [tool.setuptools.package-data]
 dreamverse = ["prompts/*.md"]
 
 [tool.wheel]
-exclude = ["assets*", "docker*", "docs", "scripts*", "apps/dreamverse*"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]
 
 [tool.pytest.ini_options]
 markers = [

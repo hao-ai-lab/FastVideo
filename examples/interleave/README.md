@@ -2,8 +2,8 @@
 
 This directory contains a small Python example for running an application-level
 InterleaveThinker-style image generation trace on top of FastVideo. The helper
-code lives under `apps/interleave_thinker` so it stays separate from FastVideo's
-core generation package.
+code lives under `fastvideo/workflows/interleave_thinker` and is importable as
+`fastvideo.workflows.interleave_thinker`.
 
 ## Single-Prompt Trace
 
@@ -39,7 +39,7 @@ added later.
 The app helper can also use closed-source Google image models through lazy
 wrappers when you instantiate the backend directly:
 
-- `apps.interleave_thinker.generator.NanoBananaImageGeneratorBackend`
+- `fastvideo.workflows.interleave_thinker.generator.NanoBananaImageGeneratorBackend`
   implements the same image backend protocol as the local FastVideo generator.
 
 Install the optional SDK and provide a key only when using these API backends:

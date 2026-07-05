@@ -18,7 +18,7 @@ from fastvideo.api.schema import (
     OffloadConfig,
     PipelineSelection,
 )
-from apps.interleave_thinker import (
+from fastvideo.workflows.interleave_thinker import (
     AcceptAllCritic,
     FastVideoImageGeneratorBackend,
     InterleaveOrchestrator,

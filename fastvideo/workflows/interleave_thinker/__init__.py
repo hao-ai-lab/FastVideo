@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """InterleaveThinker example app helpers."""
 
-from apps.interleave_thinker.config import (
+from fastvideo.workflows.interleave_thinker.config import (
     InterleaveCriticConfig,
     InterleaveImageBackendConfig,
     InterleavePlannerConfig,
@@ -10,7 +10,7 @@ from apps.interleave_thinker.config import (
     load_interleave_run_config,
     resolve_interleave_instruction,
 )
-from apps.interleave_thinker.evaluation import (
+from fastvideo.workflows.interleave_thinker.evaluation import (
     InterleavePromptItem,
     InterleavePromptResult,
     InterleavePromptSetSummary,
@@ -20,22 +20,22 @@ from apps.interleave_thinker.evaluation import (
     run_interleave_prompt_set_config,
     save_prompt_set_summary,
 )
-from apps.interleave_thinker.generator import (
+from fastvideo.workflows.interleave_thinker.generator import (
     FastVideoImageGeneratorBackend,
     ImageGeneratorBackend,
 )
-from apps.interleave_thinker.orchestrator import (
+from fastvideo.workflows.interleave_thinker.orchestrator import (
     AcceptAllCritic,
     CriticProvider,
     InterleaveOrchestrator,
     PlannerProvider,
     SinglePromptPlanner,
 )
-from apps.interleave_thinker.runner import (
+from fastvideo.workflows.interleave_thinker.runner import (
     InterleaveRunResult,
     run_interleave_config,
 )
-from apps.interleave_thinker.schema import (
+from fastvideo.workflows.interleave_thinker.schema import (
     CriticDecision,
     CriticInput,
     GeneratedImage,
@@ -45,11 +45,11 @@ from apps.interleave_thinker.schema import (
     PlannedInterleaveStep,
     PlannerInput,
 )
-from apps.interleave_thinker.trace import (
+from fastvideo.workflows.interleave_thinker.trace import (
     save_trace,
     trace_to_dict,
 )
-from apps.interleave_thinker.trace_eval import (
+from fastvideo.workflows.interleave_thinker.trace_eval import (
     InterleaveTraceEvaluationSummary,
     InterleaveTraceMetrics,
     discover_interleave_trace_paths,

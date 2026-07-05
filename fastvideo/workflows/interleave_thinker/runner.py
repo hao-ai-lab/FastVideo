@@ -7,27 +7,27 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from apps.interleave_thinker.config import (
+from fastvideo.workflows.interleave_thinker.config import (
     InterleaveCriticConfig,
     InterleaveImageBackendConfig,
     InterleavePlannerConfig,
     InterleaveRunConfig,
     resolve_interleave_instruction,
 )
-from apps.interleave_thinker.generator import (
+from fastvideo.workflows.interleave_thinker.generator import (
     FastVideoImageGeneratorBackend,
     ImageGeneratorBackend,
     NanoBananaImageGeneratorBackend,
 )
-from apps.interleave_thinker.orchestrator import (
+from fastvideo.workflows.interleave_thinker.orchestrator import (
     AcceptAllCritic,
     CriticProvider,
     InterleaveOrchestrator,
     PlannerProvider,
     SinglePromptPlanner,
 )
-from apps.interleave_thinker.schema import InterleaveTrace
-from apps.interleave_thinker.trace import save_trace
+from fastvideo.workflows.interleave_thinker.schema import InterleaveTrace
+from fastvideo.workflows.interleave_thinker.trace import save_trace
 
 
 @dataclass(frozen=True)
