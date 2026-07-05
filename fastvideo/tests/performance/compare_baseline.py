@@ -122,7 +122,13 @@ def _detect_run_source() -> str:
     return "unknown"
 
 
-def _is_baseline_eligible(run_source: str, success: bool) -> bool:
+def _is_baseline_eligible(
+    run_source: str,
+    success: bool,
+    comparison_status: str | None = None,
+) -> bool:
+    if comparison_status is not None and comparison_status != STATUS_PASS:
+        return False
     return run_source == "scheduled_main" and success
 
 
@@ -343,10 +349,66 @@ def _check_regressions(
     return failures
 
 
+def _fixed_threshold_failure(record: dict[str, Any]) -> str:
+    return (f"{record['model_id']} fixed-threshold phase failed "
+            f"(PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')})")
+
+
+def _recipe_mismatch_failure(
+    record: dict[str, Any],
+    recipe_mismatch_records: list[dict[str, Any]],
+) -> str:
+    seen = sorted({
+        str(item.get("recipe_fingerprint"))
+        for item in recipe_mismatch_records
+        if item.get("recipe_fingerprint") is not None
+    })
+    suffix = f"; existing recipe_fingerprint values: {', '.join(seen)}" if seen else ""
+    return (f"{record['model_id']} recipe_fingerprint={record.get('recipe_fingerprint')} "
+            "does not match baseline records for the same workload, variant, "
+            "benchmark version, hardware profile, and software profile"
+            f"{suffix}")
+
+
+def _evaluate_record_comparison(
+    record: dict[str, Any],
+    baseline_records: list[dict[str, Any]],
+    recipe_mismatch_records: list[dict[str, Any]],
+    metric_policies: tuple[MetricPolicy, ...],
+    static_threshold_failed: bool,
+) -> tuple[list[str], str, str]:
+    if static_threshold_failed:
+        failure = _fixed_threshold_failure(record)
+        return [failure], STATUS_INFRA_ERROR, failure
+
+    if not baseline_records:
+        if _record_uses_v2_identity(record):
+            if recipe_mismatch_records:
+                failure = _recipe_mismatch_failure(record, recipe_mismatch_records)
+                return [failure], STATUS_RECIPE_MISMATCH, failure
+            return [], STATUS_CALIBRATION_NEEDED, (
+                "No baseline found for exact comparable identity"
+                f"{_format_identity_filters(_comparison_identity_filters(record))}"
+            )
+
+        return [], STATUS_PASS, f"No legacy baseline for {record['model_id']} on {record['gpu_type']}"
+
+    failures = _check_regressions(record, baseline_records, metric_policies)
+    if failures:
+        return failures, STATUS_REGRESSION, "; ".join(failures)
+
+    return [], STATUS_PASS, "Comparable baseline found with no gated regressions"
+
+
 def _compact_value(value: float | None, precision: int = 3) -> str:
     if value is None:
         return "n/a"
     return f"{value:.{precision}f}"
+
+
+def _markdown_cell(value: Any) -> str:
+    text = str(value) if value is not None else ""
+    return text.replace("\n", " ").replace("|", "/")
 
 
 def _build_summary_row(
@@ -400,6 +462,8 @@ def _build_summary_row(
         "threshold_exceeded_metrics": threshold_exceeded_metrics,
         "failing_metrics": failing_metrics,
         "failed": has_failed,
+        "status": record.get("comparison_status", STATUS_REGRESSION if has_failed else STATUS_PASS),
+        "status_reason": record.get("comparison_status_reason", ""),
     }
 
 
@@ -417,8 +481,8 @@ def _build_markdown_summary(
          "Throughput (curr/base) | Memory (curr/base) | "
          "Text Enc (curr/base) | DiT (curr/base) | "
          "VAE Decode (curr/base) | Worst Regression | Exceeded Metrics | "
-         "Failing Metrics | Status |"),
-        "|---|---|---:|---|---|---|---|---|---|---:|---|---|---|",
+         "Failing Metrics | Status | Status Detail |"),
+        "|---|---|---:|---|---|---|---|---|---|---:|---|---|---|---|",
     ]
 
     for row in summary_rows:
@@ -435,12 +499,14 @@ def _build_markdown_summary(
             else "none"
         )
         failing_metrics = ", ".join(row["failing_metrics"]) if row["failing_metrics"] else "none"
-        status = "FAIL" if row["failed"] else "PASS"
+        status = row["status"]
+        status_detail = row["status_reason"]
 
         lines.append(f"| {row['model_id']} | {row['gpu_type']} | "
                      f"{row['baseline_n']} | "
                      f"{' | '.join(metric_cells)} | "
-                     f"{worst_reg} | {exceeded_metrics} | {failing_metrics} | {status} |")
+                     f"{worst_reg} | {exceeded_metrics} | {failing_metrics} | "
+                     f"{_markdown_cell(status)} | {_markdown_cell(status_detail)} |")
 
     return "\n".join(lines) + "\n"
 
@@ -543,6 +609,9 @@ def main() -> int:
             identity_filters is not None and _is_baseline_eligible(record["run_source"], record["success"])
         )
         all_failures.extend(failures)
+
+        print(f"{record['model_id']} comparison status: "
+              f"{comparison_status} - {comparison_status_reason}")
 
         _write_normalized_artifact(record)
 

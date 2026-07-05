@@ -5,6 +5,7 @@ import json
 import pytest
 
 from fastvideo.tests.performance import compare_baseline
+from fastvideo.performance.hf_store import load_records_for_model, sanitize
 from fastvideo.performance.metric_policy import resolve_metric_policies
 
 
@@ -19,6 +20,24 @@ def _raw_result():
         "timestamp": "2026-06-16T00:00:00+00:00",
         "pr_number": "123",
     }
+
+
+def _v2_raw_result(**overrides):
+    raw = _raw_result()
+    raw.update({
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-l40s-2",
+        "software_profile_id": "sw-cuda",
+    })
+    raw.update(overrides)
+    return raw
+
+
+def _v2_record(**overrides):
+    return compare_baseline.normalize_performance_result(_v2_raw_result(**overrides))
 
 
 def test_detect_run_source_prefers_explicit_env(monkeypatch):
@@ -421,3 +440,203 @@ def test_informational_metric_remains_visible_without_failing():
     assert row["metrics"]["throughput"]["regressed"] is False
     assert row["threshold_exceeded_metrics"] == ["throughput"]
     assert row["failing_metrics"] == []
+
+
+def test_normalized_record_preserves_v2_comparison_identity(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+
+    record = _v2_record()
+
+    assert record["workload_id"] == "wan-t2v"
+    assert record["variant_id"] == "1.3b-sp2"
+    assert record["benchmark_version"] == 2
+    assert record["recipe_fingerprint"] == "recipe-1"
+    assert record["hardware_profile_id"] == "hw-l40s-2"
+    assert record["software_profile_id"] == "sw-cuda"
+
+
+def test_comparison_identity_filters_require_full_issue_key():
+    record = {
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-l40s-2",
+    }
+
+    with pytest.raises(ValueError, match="software_profile_id"):
+        compare_baseline._comparison_identity_filters(record)
+
+
+def test_comparison_identity_filters_keep_zero_version():
+    record = {
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 0,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-l40s-2",
+        "software_profile_id": "sw-cuda",
+    }
+
+    assert compare_baseline._comparison_identity_filters(record)["benchmark_version"] == "0"
+
+
+def test_exact_comparable_baseline_without_regression_reports_pass(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    record = _v2_record()
+    baseline_records = [{
+        "latency": 10.0,
+        "throughput": 4.5,
+        "memory": 10000.0,
+    }]
+
+    failures, status, reason = compare_baseline._evaluate_record_comparison(
+        record,
+        baseline_records,
+        [],
+        resolve_metric_policies(None),
+        False,
+    )
+
+    assert failures == []
+    assert status == compare_baseline.STATUS_PASS
+    assert "no gated regressions" in reason
+
+
+def test_slower_gated_metric_reports_regression(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    record = _v2_record(avg_generation_time_s=11.0)
+    baseline_records = [{"latency": 10.0}]
+
+    failures, status, reason = compare_baseline._evaluate_record_comparison(
+        record,
+        baseline_records,
+        [],
+        resolve_metric_policies(None),
+        False,
+    )
+
+    assert status == compare_baseline.STATUS_REGRESSION
+    assert len(failures) == 1
+    assert "latency regressed by 10.0%" in failures[0]
+    assert reason == failures[0]
+
+
+def test_missing_exact_v2_baseline_reports_calibration_needed(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    record = _v2_record()
+
+    failures, status, reason = compare_baseline._evaluate_record_comparison(
+        record,
+        [],
+        [],
+        resolve_metric_policies(None),
+        False,
+    )
+
+    assert failures == []
+    assert status == compare_baseline.STATUS_CALIBRATION_NEEDED
+    assert "No baseline found for exact comparable identity" in reason
+
+
+def test_same_variant_changed_recipe_reports_recipe_mismatch(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    record = _v2_record(recipe_fingerprint="recipe-2")
+    recipe_mismatch_records = [{
+        "recipe_fingerprint": "recipe-1",
+    }]
+
+    failures, status, reason = compare_baseline._evaluate_record_comparison(
+        record,
+        [],
+        recipe_mismatch_records,
+        resolve_metric_policies(None),
+        False,
+    )
+
+    assert status == compare_baseline.STATUS_RECIPE_MISMATCH
+    assert len(failures) == 1
+    assert "recipe_fingerprint=recipe-2" in failures[0]
+    assert "recipe-1" in reason
+
+
+def test_v2_records_do_not_compare_against_v1_records_by_default(tmp_path):
+    model_id = "wan-t2v-1.3b-2gpu"
+    model_dir = tmp_path / sanitize(model_id)
+    model_dir.mkdir()
+    legacy_record = {
+        "model_id": model_id,
+        "gpu_type": "NVIDIA L40S",
+        "timestamp": "2026-06-15T00:00:00+00:00",
+        "success": True,
+        "baseline_eligible": True,
+        "latency": 10.0,
+    }
+    with open(model_dir / "legacy.json", "w", encoding="utf-8") as f:
+        json.dump(legacy_record, f)
+
+    record = _v2_record()
+    identity_filters = compare_baseline._comparison_identity_filters(record)
+
+    assert load_records_for_model(
+        str(tmp_path),
+        model_id,
+        "NVIDIA L40S",
+        **identity_filters,
+        baseline_eligible_only=True,
+    ) == []
+
+
+def test_load_records_filters_same_variant_changed_recipe(tmp_path):
+    model_id = "wan-t2v-1.3b-2gpu"
+    model_dir = tmp_path / sanitize(model_id)
+    model_dir.mkdir()
+    baseline = {
+        "model_id": model_id,
+        "gpu_type": "NVIDIA L40S",
+        "timestamp": "2026-06-15T00:00:00+00:00",
+        "success": True,
+        "baseline_eligible": True,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-l40s-2",
+        "software_profile_id": "sw-cuda",
+    }
+    with open(model_dir / "baseline.json", "w", encoding="utf-8") as f:
+        json.dump(baseline, f)
+
+    exact_filters = compare_baseline._comparison_identity_filters(_v2_record(recipe_fingerprint="recipe-2"))
+    recipe_cohort_filters = compare_baseline._recipe_cohort_filters(_v2_record(recipe_fingerprint="recipe-2"))
+
+    assert load_records_for_model(
+        str(tmp_path),
+        model_id,
+        "NVIDIA L40S",
+        **exact_filters,
+        baseline_eligible_only=True,
+    ) == []
+    mismatch_records = load_records_for_model(
+        str(tmp_path),
+        model_id,
+        "NVIDIA L40S",
+        **recipe_cohort_filters,
+        baseline_eligible_only=True,
+    )
+
+    assert len(mismatch_records) == 1
+
+
+def test_non_pass_status_is_not_baseline_eligible():
+    assert compare_baseline._is_baseline_eligible(
+        "scheduled_main", True, compare_baseline.STATUS_CALIBRATION_NEEDED) is False
+
+
+def test_upload_policy_pass_allows_calibration_record(monkeypatch):
+    monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "pass")
+
+    assert compare_baseline._upload_allowed({
+        "success": True,
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+    }) is True

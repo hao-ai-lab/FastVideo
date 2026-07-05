@@ -188,6 +188,20 @@ slowly add up. Only scheduled-main successful records are baseline eligible.
 Local and pull-request runs can upload dashboard-visible records, but they do
 not update future gating baselines.
 
+Comparator summaries and normalized artifacts include an explicit
+`comparison_status`:
+
+| Status | Meaning | CI behavior |
+|---|---|---|
+| `PASS` | Comparable baseline exists and no gated metric regressed. Legacy records with no baseline also keep the historical initialization behavior. | Passes |
+| `REGRESSION` | Comparable baseline exists and at least one gated metric regressed. | Fails |
+| `CALIBRATION_NEEDED` | A v2 record has no exact comparable baseline. | Passes, may upload when `PERF_UPLOAD_POLICY=pass`, never seeds a baseline |
+| `RECIPE_MISMATCH` | The same workload, variant, benchmark version, hardware profile, and software profile has existing baselines under another recipe fingerprint. | Fails |
+| `INFRA_ERROR` | The comparator cannot safely classify the record, such as a v2 record missing required identity fields. | Fails |
+
+`QUALITY_BLOCKED` is reserved for a future variant-promotion workflow and is
+not emitted by normal rolling-baseline comparison.
+
 When the baseline shifts for a legitimate reason (torch upgrade, kernel
 change, etc.) and CI starts failing, use the
 [`reseed-performance-baseline`](https://github.com/hao-ai-lab/FastVideo/blob/main/.agents/skills/reseed-performance-baseline/SKILL.md)
@@ -487,10 +501,12 @@ When the rolling-baseline phase runs, it emits:
 2. The pytest test auto-discovers all configs — no test code needed. CI
    picks it up on the next `/test performance` run.
 
-3. The first persisted main-branch run with no HF history initializes the
-   baseline (passes automatically). Subsequent runs compare against it. Local
-   and pull-request runs with no HF history also pass, but they do not seed the
-   shared baseline.
+3. Legacy benchmarks keep the historical initialization behavior: the first
+   persisted main-branch run with no HF history passes and seeds the rolling
+   baseline. V2 benchmarks with no exact comparable baseline report
+   `CALIBRATION_NEEDED`; the record remains visible but does not become
+   baseline eligible until a comparable scheduled-main run is reviewed and
+   seeded through the baseline workflow.
 
 4. If the benchmark targets a GPU not currently in `thresholds`, either add
    that GPU as a key or rely on the `default` block. Note that `default` is
