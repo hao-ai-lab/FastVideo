@@ -504,13 +504,20 @@ class CausalWanTransformer3DModel(BaseDiT):
     @staticmethod
     def _prepare_teacher_forcing_mask(
         device: torch.device | str, num_frames: int = 21,
-        frame_seqlen: int = 1560, num_frame_per_block=1
+        frame_seqlen: int = 1560, num_frame_per_block=1, local_attn_size=-1
     ) -> BlockMask:
         """Attention mask for the teacher-forcing ``[clean | noisy]`` sequence.
 
         A noisy token attends to its own block plus the clean context of all
         strictly previous blocks; clean tokens are block-wise causal.
         """
+        if local_attn_size != -1:
+            raise NotImplementedError(
+                f"Teacher forcing ignores local_attn_size={local_attn_size}: "
+                "unlike the block-wise causal mask, this mask always attends "
+                "to the full clean context. Windowed teacher forcing is not "
+                "implemented; use local_attn_size=-1 for teacher-forcing "
+                "training.")
         total_length = num_frames * frame_seqlen * 2
         padded_length = math.ceil(total_length / 128) * 128 - total_length
 
@@ -731,6 +738,7 @@ class CausalWanTransformer3DModel(BaseDiT):
                     num_frames=num_frames,
                     frame_seqlen=post_patch_height * post_patch_width,
                     num_frame_per_block=self.num_frame_per_block,
+                    local_attn_size=self.local_attn_size,
                 )
             block_mask = self.teacher_forcing_block_mask
         else:
