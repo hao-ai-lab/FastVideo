@@ -310,8 +310,12 @@ def load_records_for_model(
 # ---------------------------------------------------------------------------
 
 _NUMERIC_COLS = (
-    "latency", "throughput", "memory",
-    "text_encoder_time_s", "dit_time_s", "vae_decode_time_s",
+    "latency",
+    "throughput",
+    "memory",
+    "text_encoder_time_s",
+    "dit_time_s",
+    "vae_decode_time_s",
 )
 
 
