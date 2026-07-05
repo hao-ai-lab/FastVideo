@@ -12,6 +12,9 @@ set(_FASTVIDEO_USER_CUDA_ARCH "${CMAKE_CUDA_ARCHITECTURES}")
 if(NOT DEFINED GPU_BACKEND AND DEFINED ENV{GPU_BACKEND})
     set(GPU_BACKEND "$ENV{GPU_BACKEND}")
 endif()
+if(NOT GPU_BACKEND)
+    set(GPU_BACKEND "CUDA")
+endif()
 
 if(GPU_BACKEND STREQUAL "ROCM")
     enable_language(HIP)
@@ -173,6 +176,14 @@ else()
     endif()
 endif()
 
+# ThunderKittens headers don't compile on aarch64 hosts: plain char is unsigned
+# there, and tk's base_types.cuh brace-initializes signed-char vector members
+# from char (narrowing error). Skip TK until upstream is aarch64-clean.
+if(ENABLE_TK_KERNELS AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    message(STATUS "ThunderKittens kernels: forced OFF on ${CMAKE_SYSTEM_PROCESSOR} (tk headers are not aarch64-clean)")
+    set(ENABLE_TK_KERNELS OFF)
+endif()
+
 if(ENABLE_TK_KERNELS)
     message(STATUS "ThunderKittens kernels: ENABLED")
 else()
@@ -263,11 +274,6 @@ set(CUDA_FLAGS
     "--expt-relaxed-constexpr"
     "-Xcompiler=-fno-strict-aliasing"
     "-Xcompiler=-fPIC"
-    # ARM/aarch64 defaults `char` to unsigned, but ThunderKittens headers assume the
-    # x86 signed-char behavior (else base_types.cuh hits "narrowing conversion from
-    # char to signed char"). Force signed char so TK compiles on Grace Hopper; this
-    # is a no-op on x86_64, where char is already signed.
-    "-Xcompiler=-fsigned-char"
     "-DTORCH_COMPILE"
     "-Xnvlink=--verbose"
     "-Xptxas=--verbose"
@@ -426,3 +432,14 @@ if(ENABLE_ATTN_QAT_INFER)
     install(TARGETS fp4attn_cuda LIBRARY DESTINATION .)
     install(TARGETS fp4quant_cuda LIBRARY DESTINATION .)
 endif()
+
+# One-look answer to "what is this build producing?" — kept last so it is the
+# final thing configure prints. The per-kernel matrix lives in README.md.
+message(STATUS "============== fastvideo-kernel build summary ==============")
+message(STATUS "host / backend:       ${CMAKE_SYSTEM_PROCESSOR} / ${GPU_BACKEND}")
+message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
+message(STATUS "fastvideo_kernel_ops: ON  (turbodiffusion int8-gemm/quant/rmsnorm/layernorm, all listed archs)")
+message(STATUS "  + TK sta/block_sparse (sm_90a only):          ${ENABLE_TK_KERNELS}")
+message(STATUS "fp4attn/fp4quant (sm_120a only, CUDA >= 12.8):  ${ENABLE_ATTN_QAT_INFER}")
+message(STATUS "Triton fallbacks ship in python/fastvideo_kernel/triton_kernels regardless.")
+message(STATUS "============================================================")
