@@ -13,13 +13,17 @@ import modal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
-    from modal_image_utils import resolve_image_ref  # noqa: E402
+    from modal_image_utils import (  # noqa: E402
+        resolve_image_ref, resolve_uv_torch_backend)
 except ModuleNotFoundError:
     # Remote Modal containers re-import this module but mount only the
     # entrypoint file; the digest resolution already happened at local
     # launch time, so a passthrough is correct there.
     def resolve_image_ref(image_ref: str) -> str:
         return image_ref
+
+    def resolve_uv_torch_backend(image_tag: str) -> str | None:
+        return os.environ.get("UV_TORCH_BACKEND")
 
 app = modal.App()
 
@@ -32,12 +36,7 @@ print(f"Using image: {image_ref}")
 # Mutable tags inherit the registry image's baked backend, keeping a latest-tag
 # transition safe. Explicit CUDA tags also work with older images that predate
 # the baked setting, and a caller override always wins.
-uv_torch_backend_override = os.environ.get("UV_TORCH_BACKEND")
-if not uv_torch_backend_override:
-    if "cuda13" in image_tag.lower():
-        uv_torch_backend_override = "cu130"
-    elif "cuda12.6" in image_tag.lower():
-        uv_torch_backend_override = "cu126"
+uv_torch_backend_override = resolve_uv_torch_backend(image_tag)
 
 image = (
     modal.Image.from_registry(image_ref, add_python="3.12")
