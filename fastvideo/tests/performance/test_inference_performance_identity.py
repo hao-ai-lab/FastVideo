@@ -91,7 +91,7 @@ def test_performance_producer_emits_v2_identity_from_raw_result_shape(monkeypatc
     assert "output_path" not in record["recipe"]["generation_kwargs"]
 
 
-def test_software_profile_tracks_attention_kernel_and_container_versions(monkeypatch):
+def test_software_profile_tracks_exact_runtime_attention_kernel_and_container_versions(monkeypatch):
     package_versions = {
         "triton": "3.2.1",
         "flash-attn": "2.8.1",
@@ -107,32 +107,40 @@ def test_software_profile_tracks_attention_kernel_and_container_versions(monkeyp
         return package_versions[package_name]
 
     monkeypatch.setattr(perf.importlib_metadata, "version", fake_version)
+    monkeypatch.setattr(perf.platform, "python_version", lambda: "3.12.11")
+    monkeypatch.setattr(perf.torch, "__version__", "2.7.1+cu128")
+    monkeypatch.setattr(perf.torch.version, "cuda", "12.8.1", raising=False)
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
     monkeypatch.setenv("FASTVIDEO_FA4", "1")
     monkeypatch.setenv("FASTVIDEO_PERFORMANCE_PROFILE_VERSION", "perf-profile-v2")
     monkeypatch.setenv("IMAGE_VERSION", "py3.12-cuda13.0")
+    monkeypatch.setenv("FASTVIDEO_CONTAINER_IMAGE_REF", "ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev@sha256:abc")
 
     profile = perf._software_profile()
     changed_profile = {
         **profile,
         "packages": {
             **profile["packages"],
-            "triton": "3.3",
+            "triton": "3.2.2",
         },
     }
 
     assert profile["profile_schema_version"] == perf.SOFTWARE_PROFILE_SCHEMA_VERSION
+    assert profile["python"] == "3.12.11"
+    assert profile["pytorch"] == "2.7.1+cu128"
+    assert profile["cuda"] == "12.8.1"
     assert profile["attention_backend"] == "SAGE_ATTN"
     assert profile["flash_attention_4_enabled"] is True
     assert profile["performance_profile_version"] == "perf-profile-v2"
     assert profile["container_image_version"] == "py3.12-cuda13.0"
+    assert profile["container_image_ref"] == "ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev@sha256:abc"
     assert profile["packages"] == {
-        "triton": "3.2",
-        "flash-attn": "2.8",
-        "sageattention": "2.1",
-        "xformers": "0.0",
-        "fastvideo-kernel": "0.3",
-        "flashinfer-python": "0.2",
+        "triton": "3.2.1",
+        "flash-attn": "2.8.1",
+        "sageattention": "2.1.1",
+        "xformers": "0.0.31",
+        "fastvideo-kernel": "0.3.2",
+        "flashinfer-python": "0.2.3",
     }
     assert perf._profile_id("sw", profile) != perf._profile_id("sw", changed_profile)
     assert perf._profile_id("sw", profile) != perf._profile_id(
@@ -140,5 +148,12 @@ def test_software_profile_tracks_attention_kernel_and_container_versions(monkeyp
         {
             **profile,
             "flash_attention_4_enabled": False,
+        },
+    )
+    assert perf._profile_id("sw", profile) != perf._profile_id(
+        "sw",
+        {
+            **profile,
+            "container_image_ref": "ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev@sha256:def",
         },
     )

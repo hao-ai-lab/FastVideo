@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import platform
-import re
 import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
