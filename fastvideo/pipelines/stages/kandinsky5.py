@@ -470,8 +470,14 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
         batch.image_latent = image_latent.permute(0, 2, 3, 4, 1).contiguous()
 
         # Place the conditioning latent into the prepared latents: frame 0 of
-        # the main channels and, when the transformer expects visual
-        # conditioning, the cond/mask channels.
+        # the main channels, the visual_cond channel block, and the mask.
+        # NOTE: the official kandinsky-5 repo leaves the visual_cond block
+        # zeros (generation_utils.py generate()), while the diffusers port
+        # copies the image latent into it. A same-seed A/B on
+        # Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers showed the Diffusers
+        # export requires the copy: zeroing the block produces smeared faces
+        # mid-video. Keep the diffusers semantics for Diffusers-format
+        # checkpoints.
         latents = batch.latents
         image_latent = batch.image_latent.to(device=latents.device, dtype=latents.dtype)
         num_channels = image_latent.shape[-1]
