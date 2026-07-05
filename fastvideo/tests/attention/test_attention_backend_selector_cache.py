@@ -5,14 +5,17 @@ import torch
 
 import fastvideo.platforms as platforms
 from fastvideo.attention import selector
+from fastvideo.attention.backends.abstract import AttentionBackend
 from fastvideo.platforms.interface import AttentionBackendEnum
 
 
-class FlashBackend:
+# Subclass AttentionBackend so the selector's capability validation
+# (validate_compatibility) sees the permissive base-class defaults.
+class FlashBackend(AttentionBackend):
     pass
 
 
-class VideoSparseBackend:
+class VideoSparseBackend(AttentionBackend):
     pass
 
 

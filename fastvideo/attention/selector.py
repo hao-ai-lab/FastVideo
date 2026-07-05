@@ -183,7 +183,22 @@ def _cached_get_attn_backend(
     attention_cls = current_platform.get_attn_backend_cls(selected_backend, head_size, dtype)
     if not attention_cls:
         raise ValueError(f"Invalid attention backend for {current_platform.device_name}")
-    return cast(type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
+    backend = cast(type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
+
+    # Validate the resolved backend against its self-described capabilities
+    # (see AttentionBackend.validate_compatibility, #1254). An explicitly
+    # selected backend hard-fails, mirroring how the platform layer hard-fails
+    # on missing explicitly-requested backends; an auto-selected backend only
+    # warns -- once per resolution, since this function is cached.
+    incompatibility = backend.validate_compatibility(head_size, dtype)
+    if incompatibility is not None:
+        if selected_backend is not None:
+            raise ValueError(f"Attention backend {selected_backend.name} was explicitly selected but is incompatible "
+                             f"with this layer: {incompatibility}. Select a compatible backend or unset "
+                             "FASTVIDEO_ATTENTION_BACKEND.")
+        logger.warning("Auto-selected attention backend %s may be incompatible with this layer: %s", backend.get_name(),
+                       incompatibility)
+    return backend
 
 
 @contextmanager
