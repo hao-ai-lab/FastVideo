@@ -86,20 +86,32 @@ def record_metadata(record: Record) -> Record:
     }
 
 
+def _cohort_metadata_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, str) and not value.strip():
+        return ""
+    return value
+
+
+def _cohort_key_value(value: Any) -> str:
+    return str(_cohort_metadata_value(value))
+
+
 def record_comparison_metadata(record: Record) -> Record:
-    return {key: record.get(key) or "" for key in COMPARISON_COHORT_KEYS}
+    return {key: _cohort_metadata_value(record.get(key)) for key in COMPARISON_COHORT_KEYS}
 
 
 def comparison_cohort_key(record: Record) -> CohortKey:
     return (
         str(record.get("model_id") or "unknown"),
         str(record.get("gpu_type") or "unknown"),
-        str(record.get("workload_id") or ""),
-        str(record.get("variant_id") or ""),
-        str(record.get("benchmark_version") or ""),
-        str(record.get("recipe_fingerprint") or ""),
-        str(record.get("hardware_profile_id") or ""),
-        str(record.get("software_profile_id") or ""),
+        _cohort_key_value(record.get("workload_id")),
+        _cohort_key_value(record.get("variant_id")),
+        _cohort_key_value(record.get("benchmark_version")),
+        _cohort_key_value(record.get("recipe_fingerprint")),
+        _cohort_key_value(record.get("hardware_profile_id")),
+        _cohort_key_value(record.get("software_profile_id")),
     )
 
 
@@ -146,9 +158,10 @@ def build_latest_summary(records: list[Record],
             continue
 
         latest = latest_candidates[-1]
+        latest_index = next(index for index, record in enumerate(group) if record is latest)
         baseline_pool = [
-            record for record in group
-            if record is not latest and record.get("success", True) and is_baseline_eligible_record(record)
+            record for record in group[:latest_index]
+            if record.get("success", True) and is_baseline_eligible_record(record)
         ]
         baseline_records = baseline_pool[-baseline_window:]
         metric_policies = resolve_metric_policies(latest.get("regression_thresholds"))
