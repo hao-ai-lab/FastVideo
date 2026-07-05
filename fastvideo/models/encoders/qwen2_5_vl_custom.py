@@ -491,7 +491,14 @@ class Qwen2_5_VLRotaryEmbedding(nn.Module):
         self.original_max_seq_len = config.max_position_embeddings
 
         self.config = config
-        self.rope_init_fn = ROPE_INIT_FUNCTIONS.get(self.rope_type, _compute_default_rope_parameters)
+        if self.rope_type in ROPE_INIT_FUNCTIONS:
+            self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
+        elif self.rope_type == "default":
+            # transformers>=5 drops the "default" entry from ROPE_INIT_FUNCTIONS.
+            self.rope_init_fn = _compute_default_rope_parameters
+        else:
+            raise KeyError(f"Unsupported rope_type '{self.rope_type}'; available: "
+                           f"{['default', *ROPE_INIT_FUNCTIONS]}")
 
         inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
