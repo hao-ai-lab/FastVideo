@@ -65,7 +65,20 @@ def sha256_hexdigest(payload: str | bytes) -> str:
 
 
 def recipe_fingerprint(recipe: Mapping[str, Any]) -> str:
-    return sha256_hexdigest(canonical_json(recipe))
+    # Runtime-resolved values are audit metadata, not identity: hashing the
+    # resolved HF snapshot revision would churn the cohort (and via the
+    # no-baseline init path, silently reset the rolling baseline) on ANY
+    # upstream repo commit, including model-card edits with unchanged
+    # weights. The fingerprint is pinned to declared inputs only; the
+    # resolved values stay in the stored recipe for auditability.
+    pruned = {
+        key: (dict(value) if isinstance(value, Mapping) else value)
+        for key, value in recipe.items()
+    }
+    model = pruned.get("model")
+    if isinstance(model, dict):
+        model.pop("resolved_revision", None)
+    return sha256_hexdigest(canonical_json(pruned))
 
 
 def profile_id(prefix: str, profile: Mapping[str, Any]) -> str:

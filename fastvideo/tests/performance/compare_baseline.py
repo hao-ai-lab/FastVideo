@@ -488,12 +488,24 @@ def main() -> int:
         )
 
         if not baseline_records:
-            print(f"No baseline for {record['model_id']} on "
-                  f"{record['gpu_type']}"
-                  f"{_format_identity_filters(_comparison_identity_filters(record))}. Initializing...")
+            # A brand-new cohort has NO regression gating until history
+            # accumulates — make that loud and machine-readable instead of
+            # an indistinguishable pass, so a cohort shift (intended or
+            # accidental, e.g. an identity-field change) never silently
+            # blinds the comparison.
+            record["baseline_status"] = "initialized_new_cohort"
+            print("=" * 72)
+            print(f"WARNING: NO BASELINE — initializing a NEW cohort for "
+                  f"{record['model_id']} on {record['gpu_type']}"
+                  f"{_format_identity_filters(_comparison_identity_filters(record))}")
+            print("Regression gating is INACTIVE for this cohort until "
+                  "baseline history accumulates. If this cohort shift is "
+                  "unexpected, check the identity fields above.")
+            print("=" * 72)
             failures: list[str] = []
             record["success"] = True
         else:
+            record["baseline_status"] = "compared"
             failures = _check_regressions(record, baseline_records, metric_policies)
         if static_threshold_failed:
             failures.append(f"{record['model_id']} fixed-threshold phase failed "
