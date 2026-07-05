@@ -50,7 +50,16 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
         if(_FASTVIDEO_USER_CUDA_ARCH)
             # Caller pinned -DCMAKE_CUDA_ARCHITECTURES (which torch ignores); translate it
             # to the TORCH_CUDA_ARCH_LIST spelling: "121" -> "12.1", "90a" -> "9.0a".
+            # Only numeric spellings translate; keywords like "native"/"all" would
+            # otherwise be mangled into nonsense ("nativ.e").
             foreach(_fv_arch IN LISTS _FASTVIDEO_USER_CUDA_ARCH)
+                if(NOT _fv_arch MATCHES "^[0-9]+[af]?$")
+                    message(FATAL_ERROR
+                        "fastvideo-kernel: CMAKE_CUDA_ARCHITECTURES='${_fv_arch}' is not "
+                        "supported. Use a numeric arch (e.g. 90a, 121), set "
+                        "TORCH_CUDA_ARCH_LIST directly (e.g. 9.0a), or unset both to "
+                        "auto-detect from the visible GPU.")
+                endif()
                 string(REGEX MATCH "[af]$" _fv_suffix "${_fv_arch}")
                 string(REGEX REPLACE "[af]$" "" _fv_num "${_fv_arch}")
                 string(REGEX REPLACE "(.)$" ".\\1" _fv_num "${_fv_num}")    # dot before the last digit
