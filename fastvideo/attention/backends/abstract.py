@@ -47,6 +47,78 @@ class AttentionBackend(ABC):
     def get_builder_cls() -> type["AttentionMetadataBuilder"]:
         raise NotImplementedError
 
+    # ------------------------------------------------------------------
+    # Capability self-description
+    #
+    # These let the selector validate a requested backend against a
+    # layer's needs and emit a clear reason on mismatch, instead of
+    # failing later with an opaque kernel error (see #1254). They are
+    # additive: the defaults describe the least-restrictive behavior, so
+    # a backend that does not override them keeps today's behavior.
+    # Several backends already declare ``get_supported_head_sizes``; this
+    # formalizes that hook on the base class and adds the other
+    # capability axes. Only override with values verifiable from the
+    # backend's implementation.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_supported_head_sizes() -> list[int] | None:
+        """Attention head sizes this backend supports.
+
+        Return None for no restriction.
+        """
+        return None
+
+    @classmethod
+    def get_supported_dtypes(cls) -> tuple[torch.dtype, ...]:
+        """Floating-point dtypes this backend supports."""
+        return (torch.float16, torch.bfloat16)
+
+    @classmethod
+    def supports_attention_mask(cls) -> bool:
+        """Whether this backend can consume an explicit attention mask/bias.
+
+        Dense backends generally can; tiled/sparse video backends generally
+        cannot, since they impose their own sparsity pattern.
+        """
+        return True
+
+    @classmethod
+    def supports_varlen(cls) -> bool:
+        """Whether this backend supports single-launch variable-length
+        sequence packing (``cu_seqlens``), as in ``flash_attn_varlen_func``.
+        """
+        return False
+
+    @classmethod
+    def validate_compatibility(
+        cls,
+        head_size: int,
+        dtype: torch.dtype,
+        *,
+        needs_attention_mask: bool = False,
+        needs_varlen: bool = False,
+    ) -> str | None:
+        """Return None if this backend is compatible with the given
+        requirements, else a human-readable reason for the mismatch.
+
+        The selector surfaces this reason, so an unsupported request is
+        never silently dropped.
+        """
+        supported_sizes = cls.get_supported_head_sizes()
+        if supported_sizes is not None and head_size not in supported_sizes:
+            return (f"{cls.get_name()} does not support head_size="
+                    f"{head_size} (supported: {supported_sizes})")
+        if dtype not in cls.get_supported_dtypes():
+            return f"{cls.get_name()} does not support dtype={dtype}"
+        if needs_attention_mask and not cls.supports_attention_mask():
+            return (f"{cls.get_name()} cannot consume the attention mask this "
+                    "layer requires")
+        if needs_varlen and not cls.supports_varlen():
+            return (f"{cls.get_name()} does not support variable-length "
+                    "sequence packing (varlen)")
+        return None
+
 
 @dataclass
 class AttentionMetadata:

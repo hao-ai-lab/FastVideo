@@ -18,6 +18,12 @@ class VMOBAAttentionBackend(AttentionBackend):
 
     accept_output_buffer: bool = True
 
+    @classmethod
+    def supports_attention_mask(cls) -> bool:
+        # VMoBA selects blocks via its own MoBA routing; it does not consume
+        # a general dense attention mask.
+        return False
+
     @staticmethod
     def get_name() -> str:
         return "VMOBA_ATTN"
