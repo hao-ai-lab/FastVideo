@@ -47,11 +47,6 @@ class Kandinsky5I2VPipeline(ComposedPipelineBase):
         )
 
         self.add_stage(
-            stage_name="image_encoding_stage",
-            stage=Kandinsky5ImageEncodingStage(vae=self.get_module("vae")),
-        )
-
-        self.add_stage(
             stage_name="timestep_preparation_stage",
             stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")),
         )
@@ -62,6 +57,14 @@ class Kandinsky5I2VPipeline(ComposedPipelineBase):
                 scheduler=self.get_module("scheduler"),
                 transformer=self.get_module("transformer"),
             ),
+        )
+
+        # Runs AFTER latent preparation so the initial noise is the seeded
+        # generator's first draw (official kandinsky-5 RNG order); this stage
+        # then samples the image latent and places it into the latents.
+        self.add_stage(
+            stage_name="image_encoding_stage",
+            stage=Kandinsky5ImageEncodingStage(vae=self.get_module("vae")),
         )
 
         self.add_stage(
