@@ -112,6 +112,19 @@ def test_output_path_does_not_change_recipe_fingerprint():
     assert _fingerprint(cfg) == _fingerprint(with_output_path)
 
 
+def test_resolved_revision_does_not_change_recipe_fingerprint():
+    # Runtime-resolved snapshot revisions are audit metadata: an upstream
+    # repo commit (even a README-only edit) must not churn the cohort.
+    cfg = _benchmark_config()
+    recipe = build_recipe_from_benchmark_config(
+        cfg, attention_backend="FLASH_ATTN", resolved_model_revision="aaaa1111")
+    changed = build_recipe_from_benchmark_config(
+        cfg, attention_backend="FLASH_ATTN", resolved_model_revision="bbbb2222")
+
+    assert recipe["model"]["resolved_revision"] == "aaaa1111"  # kept for audit
+    assert recipe_fingerprint(recipe) == recipe_fingerprint(changed)
+
+
 def test_measured_prompt_override_ignores_unused_configured_prompts():
     cfg = _benchmark_config()
     changed = deepcopy(cfg)
