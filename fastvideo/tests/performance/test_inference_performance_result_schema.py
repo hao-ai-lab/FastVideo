@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import pytest
+
 from fastvideo.tests.performance import test_inference_performance as perf_test
 
 
@@ -131,3 +133,44 @@ def test_build_result_record_emits_v2_wan_shape(monkeypatch):
     assert record["text_encoder_time_s"] == 1.1
     assert record["dit_time_s"] == 8.2
     assert record["vae_decode_time_s"] == 3.2
+
+
+def test_validate_run_counts_rejects_zero_measurement_runs():
+    with pytest.raises(ValueError, match="num_measurement_runs"):
+        perf_test._validate_run_counts({
+            "num_warmup_runs": 1,
+            "num_measurement_runs": 0,
+        }, "wan-t2v-1.3b-2gpu")
+
+
+def test_validate_run_counts_rejects_negative_warmup_runs():
+    with pytest.raises(ValueError, match="num_warmup_runs"):
+        perf_test._validate_run_counts({
+            "num_warmup_runs": -1,
+            "num_measurement_runs": 3,
+        }, "wan-t2v-1.3b-2gpu")
+
+
+def test_validate_run_counts_returns_defaults():
+    assert perf_test._validate_run_counts({}, "wan-t2v-1.3b-2gpu") == (1, 3)
+
+
+def test_build_result_record_rejects_empty_measurements(monkeypatch):
+    monkeypatch.setattr(perf_test, "_build_identity_fields", lambda *_args: _identity_fields())
+
+    with pytest.raises(ValueError, match="measurement runs"):
+        perf_test._build_result_record(
+            cfg=_benchmark_config(),
+            model_info={},
+            init_kwargs={},
+            gen_kwargs={},
+            num_warmup=0,
+            num_measure=0,
+            thresholds={},
+            times=[],
+            peak_memories=[],
+            all_component_times=[],
+            prompt="A cinematic video.",
+            runtime_identity={},
+            device_name="NVIDIA L40S",
+        )
