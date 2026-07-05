@@ -234,8 +234,10 @@ Recipe fingerprinting, hardware/software profile IDs, exact-identity
 comparison, and dashboard cohort grouping land with this change: v2 records
 compare only within their identity cohort, and a record that opens a NEW
 cohort is marked `baseline_status: "initialized_new_cohort"` (regression
-gating starts once that cohort accumulates history). Legacy v1 configs keep
-the `(model_id, gpu_type)` rolling-baseline comparison. Metric-specific
+gating starts once that cohort accumulates history). Legacy v1 configs still
+run and are normalized for reporting, but their records skip rolling-baseline
+comparison entirely (`baseline_status: "skipped_missing_identity"`, never
+baseline eligible); only static thresholds gate them. Metric-specific
 threshold policies and promoted baselines remain separate follow-ups.
 
 ### Raw record (`results/perf_*.json`)
@@ -378,6 +380,9 @@ component timing fields, or v2 identity/profile fields. Records without
 for metric series that have no non-null values. Records missing both
 `run_source` and `baseline_eligible` are treated as legacy successful
 main/full-suite uploads and remain eligible for rolling baselines.
+Current `perf_*.json` artifacts that lack the v2 comparison identity are
+normalized for reporting but skip rolling-baseline comparison and are not marked
+baseline eligible.
 
 New records compare only against the same `model_id`, `gpu_type`,
 `workload_id`, `variant_id`, `benchmark_version`, `recipe_fingerprint`,
