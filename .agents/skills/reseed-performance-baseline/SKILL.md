@@ -1,20 +1,23 @@
 ---
 name: reseed-performance-baseline
-description: Re-seed the HF performance-tracking baseline for an intentional runtime, dependency, or environment-caused benchmark shift using one or more reviewed normalized performance JSONs. Use when performance CI fails because metrics such as latency, throughput, component time, or peak memory changed for an accepted reason and the rolling median baseline in FastVideo/performance-tracking must be advanced from a consistent batch of reviewed source results. The workflow backs up existing history under /tmp, validates all source JSONs for the same (model_id, gpu_type), rejects internally inconsistent source batches, uploads one success=true reseed record per accepted source JSON, and offers to clean local temp state after a successful upload.
+description: Re-seed the HF performance-tracking baseline for an intentional runtime, dependency, environment-caused benchmark shift, or reviewed v2 calibration using one or more reviewed normalized performance JSONs. Use when performance CI fails because metrics such as latency, throughput, component time, or peak memory changed for an accepted reason and the rolling median baseline in FastVideo/performance-tracking must be advanced, or when a new v2 exact comparable identity needs its first approved baseline. The workflow backs up existing history under /tmp, validates all source JSONs for the same legacy (model_id, gpu_type) target or the same v2 exact identity, rejects internally inconsistent source batches, uploads one success=true baseline record per accepted source JSON, and offers to clean local temp state after a successful upload.
 ---
 
 # Re-seed Performance Baseline
 
 ## Purpose
 
-Replace or advance the rolling performance baseline for a single
-`(model_id, gpu_type)` pair in the HF dataset
-`FastVideo/performance-tracking`.
+Replace or advance the rolling performance baseline in the HF dataset
+`FastVideo/performance-tracking`. Legacy targets are scoped by
+`(model_id, gpu_type)`. V2 targets are scoped by exact comparable identity:
+`workload_id`, `variant_id`, `benchmark_version`, `hardware_profile_id`,
+`software_profile_id`, and `recipe_fingerprint`.
 
-Performance comparison uses the median of up to the last 5 successful records
-for the same model and GPU. Failed records are useful audit history, but they
-do not move the future baseline because `compare_baseline.py` loads records
-with `successful_only=True`.
+Performance comparison uses the median of up to the last 5 successful,
+baseline-eligible records for the same target. Failed or calibration-only
+records are useful audit history, but they do not move the future baseline
+because `compare_baseline.py` loads records with `successful_only=True` and
+`baseline_eligible_only=True`.
 
 This skill now reseeds from a reviewed batch of one or more source performance
 JSONs. It uploads one new `success=true` record per accepted source JSON; it
@@ -22,11 +25,13 @@ does not blindly replicate one measurement into 3 or 5 records. The effective
 reseed size is therefore dynamic and equals the number of provided, validated,
 internally consistent source JSONs.
 
-If the operator provides fewer than 3 records, call out that the last-5 rolling
-median may not move immediately. If the operator provides 3 consistent shifted
-records, the rolling median usually moves immediately. If the operator provides
-5 consistent shifted records, the last-5 window is effectively reset to the new
-runtime profile.
+For baseline shifts with existing history, if the operator provides fewer than
+3 records, call out that the last-5 rolling median may not move immediately. If
+the operator provides 3 consistent shifted records, the rolling median usually
+moves immediately. If the operator provides 5 consistent shifted records, the
+last-5 window is effectively reset to the new runtime profile. For the first
+approved v2 baseline of a new exact identity, one reviewed calibration seed is
+enough for the next comparable run to leave `CALIBRATION_NEEDED`.
 
 These records are intentional operator-approved baseline resets, not ordinary
 independent main-branch persistence. Mark them clearly with provenance fields
@@ -66,8 +71,8 @@ approval, then upload reviewed accepted baseline records.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `model_id` | Yes | Benchmark id, e.g. `wan-t2v-1.3b-2gpu`. This maps to the HF subdirectory after `sanitize(model_id)`. |
-| `gpu_type` | Yes | Exact GPU device string from the performance record, e.g. the L40S device name emitted by CI. Baselines are GPU-specific. |
+| `model_id` | Legacy required; v2 inferred | Benchmark id, e.g. `wan-t2v-1.3b-2gpu`. This maps to the HF subdirectory after `sanitize(model_id)`. For v2 records, use the `model_id` from each source artifact only as the upload directory; comparison is by exact identity. |
+| `gpu_type` | Legacy required; v2 inferred | Exact GPU device string from the performance record, e.g. the L40S device name emitted by CI. V2 hardware matching uses `hardware_profile_id`; preserve `gpu_type` as display metadata. |
 | `source_results` | Yes | One or more local paths or Buildkite artifact URLs for accepted shifted performance JSONs. Prefer normalized `normalized_perf_*.json` artifacts emitted by `compare_baseline.py`. Accept `source_result` as an alias only for a single JSON. |
 | `max_intra_batch_regression` | No | Maximum allowed regression of any source JSON against the source batch median. Default: `0.05` (5%). |
 | `intent_rationale` | Yes | One-line explanation for why the baseline shift is legitimate. This is written into provenance and should be reused in the PR. |
@@ -80,8 +85,9 @@ Hardcoded defaults:
   is supported).
 - Backup root: `/tmp/performance_reseed_backup`.
 - Download scratch root for source artifact URLs: `/tmp/performance_reseed_source`.
-- Baseline window: last 5 `success=true` records for the same
-  `(model_id, gpu_type)`.
+- Baseline window: last 5 `success=true`, `baseline_eligible=true` records
+  for the same legacy `(model_id, gpu_type)` target or the same v2 exact
+  comparable identity.
 - Reseed count: dynamic. Upload exactly one accepted seed record per validated
   source JSON.
 
@@ -115,12 +121,22 @@ with open(source_result, encoding="utf-8") as f:
     record = json.load(f)
 ```
 
-Stop if any normalized record's `model_id` or `gpu_type` does not match the
-requested `model_id` and `gpu_type`.
+Classify the source batch before continuing:
+
+- **Legacy source records** have no v2 exact identity fields. Stop if any
+  normalized record's `model_id` or `gpu_type` does not match the requested
+  `model_id` and `gpu_type`.
+- **V2 source records** have exact identity fields. Stop unless every source
+  record has all six comparable identity fields and they are identical across
+  the batch: `workload_id`, `variant_id`, `benchmark_version`,
+  `hardware_profile_id`, `software_profile_id`, and `recipe_fingerprint`.
+  Do not fall back to legacy `(model_id, gpu_type)` matching for v2 records.
 
 The source records may have `success: false` when they came from failed
 rolling baseline comparisons. That is expected; only the reviewed reseed
 records become new `success: true` baseline records after explicit approval.
+For a first v2 baseline seed, the source records must instead be successful
+`CALIBRATION_NEEDED` normalized artifacts.
 
 Sort validated source records by their original `timestamp` ascending before
 preparing the seed records. If a source timestamp is missing or unparsable,
@@ -194,7 +210,7 @@ export HF_REPO_ID="${HF_REPO_ID:-FastVideo/performance-tracking}"
 python -c 'from fastvideo.performance.hf_store import sync_from_hf; import os; sync_from_hf(os.environ["PERFORMANCE_TRACKING_ROOT"], strict=True)'
 ```
 
-Then back up only the sanitized model directory under `/tmp`:
+For legacy records, back up the sanitized model directory under `/tmp`:
 
 ```bash
 SHORT_COMMIT=$(git rev-parse --short=12 HEAD)
@@ -207,6 +223,16 @@ PY
 BACKUP_DIR="/tmp/performance_reseed_backup/${TIMESTAMP}_${SHORT_COMMIT}_${MODEL_SAFE}"
 mkdir -p "$BACKUP_DIR"
 cp -R "${PERFORMANCE_TRACKING_ROOT}/${MODEL_SAFE}" "$BACKUP_DIR/" 2>/dev/null || true
+```
+
+For v2 records, back up the full local tracking root after sync. Exact identity
+lookup scans across model directories, so a benchmark rename may have relevant
+history outside the current source artifact's `model_id` directory:
+
+```bash
+BACKUP_DIR="/tmp/performance_reseed_backup/${TIMESTAMP}_${SHORT_COMMIT}_v2_exact_identity"
+mkdir -p "$BACKUP_DIR"
+cp -R "${PERFORMANCE_TRACKING_ROOT}" "$BACKUP_DIR/tracking-root"
 ```
 
 Write provenance next to the backup:
@@ -231,7 +257,9 @@ first baseline seed. Continue, but report that baseline history was empty.
 
 ### 3. Compute old baseline and candidate shift
 
-Load the last 5 successful records for the target:
+Load the last 5 successful baseline records for the target.
+
+For legacy targets:
 
 ```python
 from fastvideo.performance.hf_store import load_records_for_model
@@ -242,6 +270,28 @@ records = load_records_for_model(
     "<gpu_type>",
     last_n=5,
     successful_only=True,
+    baseline_eligible_only=True,
+)
+```
+
+For v2 exact-identity targets:
+
+```python
+from hf_store import load_records_for_identity
+
+records = load_records_for_identity(
+    "/tmp/perf-tracking",
+    {
+        "workload_id": "<workload_id>",
+        "variant_id": "<variant_id>",
+        "benchmark_version": "<benchmark_version>",
+        "hardware_profile_id": "<hardware_profile_id>",
+        "software_profile_id": "<software_profile_id>",
+        "recipe_fingerprint": "<recipe_fingerprint>",
+    },
+    last_n=5,
+    successful_only=True,
+    baseline_eligible_only=True,
 )
 ```
 
@@ -257,7 +307,8 @@ medians after appending the proposed seed records, and source batch spread for:
 
 Also print how many successful old records exist. Make clear:
 
-- 1 seed record usually does not move a last-5 median by itself.
+- 1 seed record usually does not move an existing last-5 median by itself, but
+  it is enough to establish the first v2 baseline for a new exact identity.
 - 3 consistent seed records usually move the last-5 median immediately.
 - 5 consistent seed records effectively reset the last-5 window.
 - The records are intentional approved baseline resets and must be labeled
@@ -267,10 +318,10 @@ Also print how many successful old records exist. Make clear:
 
 Require an explicit confirmation phrase before preparing the upload:
 
-> About to RE-SEED performance baseline for `<model_id>` on `<gpu_type>`.
+> About to RE-SEED performance baseline for `<target description>`.
 > This will upload `<N>` new `success=true` records to
-> `FastVideo/performance-tracking/<sanitize(model_id)>/`, one per accepted
-> source JSON.
+> `FastVideo/performance-tracking/<sanitize(model_id)>/` or the source
+> artifact's v2 model directory, one per accepted source JSON.
 >
 > Reason: `<intent_rationale>`
 > Source results: `<source_results>`
@@ -288,25 +339,47 @@ Do not continue unless the user types exactly `confirm performance reseed`.
 
 ### 5. Create the accepted seed records
 
-Create one seed record from each normalized source result. Do not copy the
+Create one seed record from each normalized source result.
+
+For first v2 baseline seeds, use the scoped utility. It validates exact
+identity, requires successful `CALIBRATION_NEEDED` source artifacts, preserves
+the normalized v2 identity and metadata fields, and writes seed records with
+`success=true`, `baseline_eligible=true`, and `comparison_status=PASS`:
+
+```bash
+python fastvideo/tests/performance/seed_baseline.py \
+  --source-result <normalized_perf_1.json> \
+  --source-result <normalized_perf_2.json> \
+  --intent-rationale "<intent_rationale>" \
+  --tracking-root "${PERFORMANCE_TRACKING_ROOT}"
+```
+
+If the prepared seed records look correct, upload only those scoped records in
+step 7. Do not rerun the utility with a different source list after approval.
+
+For legacy reseeds or accepted v2 baseline shifts from regression artifacts,
+create one seed record from each normalized source result. Do not copy the
 source JSON wholesale.
 
 Infer the baseline field allowlist from all existing HF records for the target
-`(model_id, gpu_type)` after syncing, including both `success=true` and
-`success=false` records. Use the union of non-provenance keys present in those
-target records, preserving only fields that also exist in the normalized
-source record or are explicitly set by the reseed workflow. Always include
-`model_id`, `timestamp`, and `success` because the upload path and baseline
-loader depend on them. Always set `timestamp` to a fresh reseed timestamp and
-`success` to `true`. Do not include unrelated source-only fields that are
-absent from existing HF records.
+after syncing, including both `success=true` and `success=false` records. For
+legacy targets the target is `(model_id, gpu_type)`. For v2 baseline-shift
+reseeds the target is the exact comparable identity. Use the union of
+non-provenance keys present in those target records, preserving only fields
+that also exist in the normalized source record or are explicitly set by the
+reseed workflow. Always include `model_id`, `timestamp`, `success`,
+`baseline_eligible`, and `comparison_status` because the upload path and
+baseline loader depend on them. Always set `timestamp` to a fresh reseed
+timestamp, `success` to `true`, `baseline_eligible` to `true`, and
+`comparison_status` to `PASS`. Do not include unrelated source-only fields
+that are absent from existing HF records.
 
 Exclude existing provenance or operator metadata from the inferred baseline
 field allowlist. At minimum, exclude keys prefixed with `baseline_reseed` and
 any fields known to be local-only audit metadata.
 
-If there are no previous HF records for the target model/GPU, fall back to this
-default baseline field list:
+If there are no previous HF records for the target, fall back to this default
+baseline field list:
 
 - `model_id`
 - `timestamp`
@@ -319,6 +392,21 @@ default baseline field list:
 - `dit_time_s`
 - `vae_decode_time_s`
 - `success`
+- `baseline_eligible`
+- `comparison_status`
+
+For v2 baseline-shift reseeds with no previous HF records for the exact
+identity, also preserve:
+
+- `workload_id`
+- `variant_id`
+- `benchmark_version`
+- `recipe_fingerprint`
+- `hardware_profile_id`
+- `software_profile_id`
+- `recipe`
+- `hardware_profile`
+- `software_profile`
 
 Do not upload extra fields from the source artifact.
 
@@ -333,6 +421,19 @@ Optional provenance fields are allowed and useful:
 - `baseline_reseed_batch_index`
 - `baseline_reseed_operator`
 - `baseline_reseed_max_intra_batch_regression`
+
+The v2 calibration seed utility writes analogous first-seed provenance:
+
+- `baseline_seed: true`
+- `baseline_seed_reason`
+- `baseline_seed_source_result`
+- `baseline_seed_source_status`
+- `baseline_seed_source_timestamp`
+- `baseline_seed_source_success`
+- `baseline_seed_source_run_source`
+- `baseline_seed_batch_size`
+- `baseline_seed_batch_index`
+- `baseline_seed_operator`
 
 Use a fresh reseed timestamp for each seed record, not the original source
 result timestamp. This is required because
@@ -436,7 +537,9 @@ directories created for this reseed. Never remove unrelated `/tmp` contents.
   against the source batch median by more than `max_intra_batch_regression`.
   Ask for cleaner sources or a reviewed explanation before continuing.
 - **Too few source records to move the median.** Continue only after making
-  clear that one or two records may not immediately move the last-5 median.
+  clear that one or two records may not immediately move an existing last-5
+  median. This warning does not block a first v2 calibration seed for an exact
+  identity with no eligible baseline yet.
 - **The source results are noisy or suspicious.** Stop. Reseeding amplifies
   those measurements into the baseline, so they must be reviewed first.
 - **HF sync fails.** Stop for destructive reseeds. A stale or empty sync can

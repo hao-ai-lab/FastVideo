@@ -5,6 +5,7 @@ import json
 import pytest
 
 from fastvideo.tests.performance import compare_baseline
+from fastvideo.tests.performance import seed_baseline
 from fastvideo.performance.hf_store import (
     load_records_for_identity,
     load_records_for_model,
@@ -552,6 +553,94 @@ def test_missing_exact_v2_baseline_reports_calibration_needed(monkeypatch):
     assert failures == []
     assert status == compare_baseline.STATUS_CALIBRATION_NEEDED
     assert "No baseline found for exact comparable identity" in reason
+
+
+def test_seeded_v2_calibration_artifact_enables_next_compare_pass(
+    monkeypatch,
+    tmp_path,
+):
+    tracking_root = tmp_path / "tracking"
+    results_dir = tmp_path / "results"
+    reports_dir = tmp_path / "reports"
+    results_dir.mkdir()
+
+    calibration_record = _v2_record()
+    calibration_record.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "comparison_status_reason": "No baseline found for exact comparable identity",
+        "success": True,
+        "baseline_eligible": False,
+        "run_source": "scheduled_main",
+    })
+    seed_record = seed_baseline.build_baseline_seed_record(
+        calibration_record,
+        reason="reviewed first v2 baseline",
+        timestamp="2026-06-17T00:00:00+00:00",
+        operator="test",
+    )
+    seed_baseline.write_seed_record(str(tracking_root), seed_record)
+
+    assert seed_record["baseline_eligible"] is True
+    assert seed_record["comparison_status"] == compare_baseline.STATUS_PASS
+    assert seed_record["baseline_seed_source_status"] == compare_baseline.STATUS_CALIBRATION_NEEDED
+    assert load_records_for_identity(
+        str(tracking_root),
+        compare_baseline._comparison_identity_filters(calibration_record),
+        baseline_eligible_only=True,
+    ) == [seed_record]
+
+    with open(results_dir / "perf_current.json", "w", encoding="utf-8") as f:
+        json.dump(_v2_raw_result(
+            avg_generation_time_s=10.1,
+            timestamp="2026-06-18T00:00:00+00:00",
+        ), f)
+
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
+    monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
+    monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
+    monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
+    monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
+    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+
+    assert compare_baseline.main() == 0
+
+    artifacts = list((reports_dir / "results").glob("normalized_perf_*.json"))
+    assert len(artifacts) == 1
+    with open(artifacts[0], encoding="utf-8") as f:
+        normalized = json.load(f)
+
+    assert normalized["comparison_status"] == compare_baseline.STATUS_PASS
+    assert normalized["baseline_eligible"] is False
+
+
+def test_baseline_seed_rejects_non_calibration_sources(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+    record = _v2_record()
+    record.update({
+        "comparison_status": compare_baseline.STATUS_PASS,
+        "success": True,
+    })
+
+    with pytest.raises(ValueError, match="CALIBRATION_NEEDED"):
+        seed_baseline.build_baseline_seed_record(
+            record,
+            reason="not a calibration",
+        )
+
+
+def test_baseline_seed_rejects_mixed_exact_identities(monkeypatch):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+    first = _v2_record()
+    second = _v2_record(variant_id="different-variant")
+    for record in (first, second):
+        record.update({
+            "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+            "success": True,
+        })
+
+    with pytest.raises(ValueError, match="exact comparable identity"):
+        seed_baseline._validate_same_identity([first, second])
 
 
 def test_same_variant_changed_recipe_reports_recipe_mismatch(monkeypatch):

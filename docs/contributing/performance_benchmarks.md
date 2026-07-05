@@ -210,7 +210,11 @@ visible but do not authorize future CI-gating recipe mismatch failures.
 When the baseline shifts for a legitimate reason (torch upgrade, kernel
 change, etc.) and CI starts failing, use the
 [`reseed-performance-baseline`](https://github.com/hao-ai-lab/FastVideo/blob/main/.agents/skills/reseed-performance-baseline/SKILL.md)
-agent skill to advance the rolling median.
+agent skill to advance the rolling median. To approve the first baseline for
+a new v2 exact identity, use `fastvideo/tests/performance/seed_baseline.py`
+from a reviewed `CALIBRATION_NEEDED` normalized artifact; it writes an
+explicit `baseline_eligible=true` seed record with the same six identity
+fields.
 
 ## Schemas
 
@@ -516,7 +520,7 @@ When the rolling-baseline phase runs, it emits:
    baseline. V2 benchmarks with no exact comparable baseline report
    `CALIBRATION_NEEDED`; the record remains visible but does not become
    baseline eligible until a comparable scheduled-main run is reviewed and
-   seeded through the baseline workflow.
+   seeded with `fastvideo/tests/performance/seed_baseline.py`.
 
 4. If the benchmark targets a GPU not currently in `thresholds`, either add
    that GPU as a key or rely on the `default` block. Note that `default` is
