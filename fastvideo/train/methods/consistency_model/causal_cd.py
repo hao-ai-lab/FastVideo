@@ -121,6 +121,11 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         )
         latent_t = (1.0 - sigma_t) * clean_latents + sigma_t * noise
 
+        # Set before any forward: predict_noise feeds batch.timesteps into
+        # set_forward_context (VSA sparsity gating), so the teacher CFG
+        # passes below must not see the stale timesteps from prepare_batch.
+        training_batch.timesteps = t_pf
+
         with torch.no_grad():
             v_cond = self._predict_flow(self.teacher,
                                         latent_t,
@@ -138,7 +143,6 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
             dt = ((t - t_next) / float(self.student.num_train_timesteps))
             latent_t_next = latent_t - dt * v_pred
 
-        training_batch.timesteps = t_pf
         flow_student = self._predict_flow(self.student,
                                           latent_t,
                                           t_pf,
