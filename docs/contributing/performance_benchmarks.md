@@ -275,9 +275,9 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     "recipe_schema_version": 1,
     "benchmark": {
       "benchmark_id": "wan-t2v-1.3b-2gpu",
-      "workload_id": "wan-t2v",
-      "variant_id": "1.3b-sp2",
-      "benchmark_version": 2
+      "workload_id": "wan-t2v-1.3b",
+      "variant_id": "canonical",
+      "benchmark_version": 1
     },
     "model": { "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" },
     "init_kwargs": { "num_gpus": 2, "sp_size": 2, "tp_size": 1 },
@@ -318,9 +318,9 @@ result, used as the rolling-baseline source of truth.
 ```jsonc
 {
   "model_id": "wan-t2v-1.3b-2gpu",
-  "workload_id": "wan-t2v",
-  "variant_id": "1.3b-sp2",
-  "benchmark_version": 2,
+  "workload_id": "wan-t2v-1.3b",
+  "variant_id": "canonical",
+  "benchmark_version": 1,
   "timestamp": "2026-05-08T22:00:00+00:00",
   "commit_sha": "<full sha>",
   "gpu_type": "NVIDIA L40S",
