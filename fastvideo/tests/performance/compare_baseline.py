@@ -8,8 +8,8 @@ This script:
    baseline-eligible successful records (filtered by gpu_type),
 4) writes normalized records back to the HF dataset repo according to
    PERF_UPLOAD_POLICY,
-5) exits non-zero if any metric regresses by more than PERF_MAX_REGRESSION
-   (default 5%).
+5) exits non-zero if any gated metric exceeds both its percent and absolute
+   regression floors.
 """
 
 import glob
@@ -21,20 +21,35 @@ from datetime import datetime, timezone
 from typing import Any
 
 try:
-    from .hf_store import (
+    from fastvideo.performance.hf_store import (
         load_records_for_model,
         safe_float,
         sanitize,
         sync_from_hf,
         upload_record,
     )
+    from fastvideo.performance.metric_policy import (
+        MetricPolicy,
+        regression_delta,
+        resolve_metric_policies,
+        serialize_metric_thresholds,
+    )
 except ImportError:
-    from hf_store import (
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from fastvideo.performance.hf_store import (
         load_records_for_model,
         safe_float,
         sanitize,
         sync_from_hf,
         upload_record,
+    )
+    from fastvideo.performance.metric_policy import (
+        MetricPolicy,
+        regression_delta,
+        resolve_metric_policies,
+        serialize_metric_thresholds,
     )
 
 RESULTS_DIR = os.path.join(
@@ -46,25 +61,9 @@ TRACKING_ROOT = os.environ.get(
     "/tmp/perf-tracking",
 )
 PERF_REPORTS_DIR = os.environ.get("PERF_REPORTS_DIR", "/root/data/perf_reports")
-MAX_REGRESSION = float(os.environ.get("PERF_MAX_REGRESSION", "0.05"))
 UPLOAD_POLICY = os.environ.get("PERF_UPLOAD_POLICY", "never").strip().lower()
 VALID_UPLOAD_POLICIES = {"never", "pass", "always"}
 VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
-METRICS = (
-    ("latency", "Latency", 3),
-    ("throughput", "Throughput", 3),
-    ("memory", "Memory", 1),
-    ("text_encoder_time_s", "Text Enc", 3),
-    ("dit_time_s", "DiT", 3),
-    ("vae_decode_time_s", "VAE Decode", 3),
-)
-LOWER_IS_BETTER_METRICS = {
-    "latency",
-    "memory",
-    "text_encoder_time_s",
-    "dit_time_s",
-    "vae_decode_time_s",
-}
 
 
 def _should_persist_tracking() -> bool:
@@ -168,6 +167,7 @@ def normalize_performance_result(result: dict[str, Any]) -> dict[str, Any]:
     text_encoder_time = safe_float(result.get("text_encoder_time_s"))
     dit_time = safe_float(result.get("dit_time_s"))
     vae_decode_time = safe_float(result.get("vae_decode_time_s"))
+    metric_policies = resolve_metric_policies(result.get("regression_thresholds"))
 
     return {
         "model_id": model_id,
@@ -180,6 +180,7 @@ def normalize_performance_result(result: dict[str, Any]) -> dict[str, Any]:
         "text_encoder_time_s": text_encoder_time,
         "dit_time_s": dit_time,
         "vae_decode_time_s": vae_decode_time,
+        "regression_thresholds": serialize_metric_thresholds(metric_policies),
         "success": True,
         **_record_metadata(_detect_run_source(), result),
     }
@@ -229,53 +230,39 @@ def _baseline_metric(records: list[dict[str, Any]], key: str) -> float | None:
     return statistics.median(values)
 
 
+def _metric_policy_summary(policy: MetricPolicy) -> str:
+    gated = "gated" if policy.gated else "info"
+    return (
+        f"{gated}, >{policy.threshold_percent * 100:.1f}% "
+        f"and >{policy.threshold_absolute:.{policy.precision}f}"
+    )
+
+
 def _check_regressions(
     current: dict[str, Any],
     baseline_records: list[dict[str, Any]],
-    max_regression: float,
+    metric_policies: tuple[MetricPolicy, ...],
 ) -> list[str]:
     failures: list[str] = []
 
-    for metric, _label, _precision in METRICS:
-        if metric not in LOWER_IS_BETTER_METRICS:
+    for policy in metric_policies:
+        baseline = _baseline_metric(baseline_records, policy.key)
+        curr = safe_float(current.get(policy.key))
+        if baseline is None or curr is None:
             continue
-        baseline = _baseline_metric(baseline_records, metric)
-        curr = safe_float(current.get(metric))
-        if baseline is None or curr is None or baseline <= 0:
+        delta = regression_delta(policy, curr, baseline)
+        if delta is None or not delta.regressed:
             continue
-        regression = (curr - baseline) / baseline
-        if regression > max_regression:
-            failures.append(f"{current['model_id']} {metric} regressed by "
-                            f"{regression * 100:.1f}% "
-                            f"(current={curr:.3f}, baseline_median={baseline:.3f})")
-
-    baseline_tp = _baseline_metric(baseline_records, "throughput")
-    curr_tp = safe_float(current.get("throughput"))
-    if baseline_tp is not None and curr_tp is not None and baseline_tp > 0:
-        regression = (baseline_tp - curr_tp) / baseline_tp
-        if regression > max_regression:
-            failures.append(f"{current['model_id']} throughput regressed by "
-                            f"{regression * 100:.1f}% "
-                            f"(current={curr_tp:.3f}, baseline_median={baseline_tp:.3f})")
+        failures.append(
+            f"{current['model_id']} {policy.key} regressed by "
+            f"{delta.percent * 100:.1f}% and "
+            f"{delta.absolute:.{policy.precision}f} "
+            f"(current={curr:.{policy.precision}f}, "
+            f"baseline_median={baseline:.{policy.precision}f}, "
+            f"threshold={_metric_policy_summary(policy)})"
+        )
 
     return failures
-
-
-def _metric_delta_percent(
-    metric: str,
-    current: dict[str, Any],
-    baseline_records: list[dict[str, Any]],
-) -> float | None:
-    curr = safe_float(current.get(metric))
-    baseline = _baseline_metric(baseline_records, metric)
-    if curr is None or baseline is None or baseline <= 0:
-        return None
-
-    if metric in LOWER_IS_BETTER_METRICS:
-        return (curr - baseline) / baseline * 100.0
-    if metric == "throughput":
-        return (baseline - curr) / baseline * 100.0
-    return None
 
 
 def _compact_value(value: float | None, precision: int = 3) -> str:
@@ -287,23 +274,42 @@ def _compact_value(value: float | None, precision: int = 3) -> str:
 def _build_summary_row(
     record: dict[str, Any],
     baseline_records: list[dict[str, Any]],
+    metric_policies: tuple[MetricPolicy, ...],
     has_failed: bool,
 ) -> dict[str, Any]:
     """Format a single benchmark result as a row for the Markdown table."""
 
-    metric_values: dict[str, dict[str, float | None]] = {}
+    metric_values: dict[str, dict[str, Any]] = {}
     regressions: list[float] = []
-    for metric, _label, _precision in METRICS:
-        curr = safe_float(record.get(metric))
-        baseline = _baseline_metric(baseline_records, metric)
-        regression = _metric_delta_percent(metric, record, baseline_records)
-        metric_values[metric] = {
+    failing_metrics: list[str] = []
+    threshold_exceeded_metrics: list[str] = []
+    for policy in metric_policies:
+        curr = safe_float(record.get(policy.key))
+        baseline = _baseline_metric(baseline_records, policy.key)
+        delta = (
+            regression_delta(policy, curr, baseline)
+            if curr is not None and baseline is not None
+            else None
+        )
+        regression = None if delta is None else delta.percent * 100.0
+        absolute_delta = None if delta is None else delta.absolute
+        metric_values[policy.key] = {
             "curr": curr,
             "base": baseline,
             "regression_pct": regression,
+            "absolute_delta": absolute_delta,
+            "threshold_percent": policy.threshold_percent * 100.0,
+            "threshold_absolute": policy.threshold_absolute,
+            "gated": policy.gated,
+            "threshold_exceeded": False if delta is None else delta.threshold_exceeded,
+            "regressed": False if delta is None else delta.regressed,
         }
         if regression is not None:
             regressions.append(regression)
+        if delta is not None and delta.threshold_exceeded:
+            threshold_exceeded_metrics.append(policy.key)
+        if delta is not None and delta.regressed:
+            failing_metrics.append(policy.key)
 
     worst_regression_pct = max(regressions) if regressions else None
 
@@ -313,40 +319,50 @@ def _build_summary_row(
         "baseline_n": len(baseline_records),
         "metrics": metric_values,
         "worst_regression_pct": worst_regression_pct,
+        "threshold_exceeded_metrics": threshold_exceeded_metrics,
+        "failing_metrics": failing_metrics,
         "failed": has_failed,
     }
 
 
 def _build_markdown_summary(
     summary_rows: list[dict[str, Any]],
-    max_regression: float,
+    metric_policies: tuple[MetricPolicy, ...],
 ) -> str:
     lines = [
         "## Performance Baseline Comparison",
         "",
-        f"Threshold: regressions greater than {max_regression * 100:.1f}% fail",
+        "Threshold: gated metrics fail only when both percent and absolute "
+        "regression floors are exceeded.",
         "",
         ("| Model | GPU | Baseline N | Latency (curr/base) | "
          "Throughput (curr/base) | Memory (curr/base) | "
          "Text Enc (curr/base) | DiT (curr/base) | "
-         "VAE Decode (curr/base) | Worst Regression | Status |"),
-        "|---|---|---:|---|---|---|---|---|---|---:|---|",
+         "VAE Decode (curr/base) | Worst Regression | Exceeded Metrics | "
+         "Failing Metrics | Status |"),
+        "|---|---|---:|---|---|---|---|---|---|---:|---|---|---|",
     ]
 
     for row in summary_rows:
         metric_cells = []
-        for metric, _label, precision in METRICS:
-            values = row["metrics"][metric]
-            metric_cells.append(f"{_compact_value(values['curr'], precision)} / "
-                                f"{_compact_value(values['base'], precision)}")
+        for policy in metric_policies:
+            values = row["metrics"][policy.key]
+            metric_cells.append(f"{_compact_value(values['curr'], policy.precision)} / "
+                                f"{_compact_value(values['base'], policy.precision)}")
 
         worst_reg = ("n/a" if row["worst_regression_pct"] is None else f"{row['worst_regression_pct']:.1f}%")
+        exceeded_metrics = (
+            ", ".join(row["threshold_exceeded_metrics"])
+            if row["threshold_exceeded_metrics"]
+            else "none"
+        )
+        failing_metrics = ", ".join(row["failing_metrics"]) if row["failing_metrics"] else "none"
         status = "FAIL" if row["failed"] else "PASS"
 
         lines.append(f"| {row['model_id']} | {row['gpu_type']} | "
                      f"{row['baseline_n']} | "
                      f"{' | '.join(metric_cells)} | "
-                     f"{worst_reg} | {status} |")
+                     f"{worst_reg} | {exceeded_metrics} | {failing_metrics} | {status} |")
 
     return "\n".join(lines) + "\n"
 
@@ -400,6 +416,7 @@ def main() -> int:
 
     for raw in current_results:
         record = _normalize_record(raw)
+        metric_policies = resolve_metric_policies(record.get("regression_thresholds"))
 
         baseline_records = load_records_for_model(
             TRACKING_ROOT,
@@ -416,7 +433,7 @@ def main() -> int:
             failures: list[str] = []
             record["success"] = True
         else:
-            failures = _check_regressions(record, baseline_records, MAX_REGRESSION)
+            failures = _check_regressions(record, baseline_records, metric_policies)
         if static_threshold_failed:
             failures.append(f"{record['model_id']} fixed-threshold phase failed "
                             f"(PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')})")
@@ -434,10 +451,10 @@ def main() -> int:
             print("Tracking upload skipped for "
                   f"{record['model_id']} ({record['run_source']}, success={record['success']})")
 
-        summary_rows.append(_build_summary_row(record, baseline_records, bool(failures)))
+        summary_rows.append(_build_summary_row(record, baseline_records, metric_policies, bool(failures)))
 
     commit_sha = os.environ.get("BUILDKITE_COMMIT", "unknown")[:7]
-    markdown = _build_markdown_summary(summary_rows, MAX_REGRESSION)
+    markdown = _build_markdown_summary(summary_rows, resolve_metric_policies(None))
     _emit_markdown_summary(markdown, commit_sha)
 
     if all_failures:

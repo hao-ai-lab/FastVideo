@@ -1,12 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
+import sys
 from html import escape
 from datetime import datetime
 
 import plotly.express as px
 import pandas as pd
 
-from hf_store import sync_from_hf, load_as_dataframe
+try:
+    from fastvideo.performance.hf_store import load_as_dataframe, sync_from_hf
+except ImportError:
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from fastvideo.performance.hf_store import load_as_dataframe, sync_from_hf
 
 TRACKING_ROOT = os.environ.get(
     "PERFORMANCE_TRACKING_ROOT",

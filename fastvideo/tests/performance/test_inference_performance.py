@@ -309,6 +309,7 @@ def _run_benchmark(cfg):
         "max_peak_memory_mb": round(max_peak_memory, 1),
         "individual_peak_memories_mb": [round(m, 1) for m in peak_memories],
         "thresholds": thresholds,
+        "regression_thresholds": cfg.get("regression_thresholds", {}),
         "commit": os.environ.get("BUILDKITE_COMMIT", ""),
         "pr_number": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
         "timestamp": datetime.now(timezone.utc).isoformat(),
