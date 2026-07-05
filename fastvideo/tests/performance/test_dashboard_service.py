@@ -186,7 +186,7 @@ def test_build_latest_summary_keeps_identity_cohorts_separate():
         ),
     ]
 
-    rows = build_latest_summary(records, max_regression=0.05)
+    rows = build_latest_summary(records)
     recipe_b_row = next(row for row in rows if row["recipe_fingerprint"] == "recipe-b")
 
     assert len(rows) == 2
@@ -241,7 +241,7 @@ def test_build_latest_summary_keeps_variant_versions_separate():
         ),
     ]
 
-    rows = build_latest_summary(records, max_regression=0.05)
+    rows = build_latest_summary(records)
     version_2_row = next(row for row in rows if row["benchmark_version"] == 2)
 
     assert len(rows) == 2
