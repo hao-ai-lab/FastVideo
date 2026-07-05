@@ -497,49 +497,30 @@ def _register_configs() -> None:
         default_preset="lingbotworld_i2v",
     )
 
-    def _is_kandinsky5(path: str) -> bool:
-        path_lower = path.lower()
-        return "kandinsky5" in path_lower or "kandinsky-5" in path_lower
+    def _kandinsky5_detector(require: tuple[str, ...] = (), exclude: tuple[str, ...] = ()) -> Callable[[str], bool]:
 
-    def _is_kandinsky5_t2v(path: str) -> bool:
-        path_lower = path.lower()
-        return _is_kandinsky5(path_lower) and "t2v" in path_lower and "i2v" not in path_lower
+        def detect(path: str) -> bool:
+            path_lower = path.lower()
+            if "kandinsky5" not in path_lower and "kandinsky-5" not in path_lower:
+                return False
+            return (all(token in path_lower for token in require) and not any(token in path_lower for token in exclude))
 
-    def _is_kandinsky5_i2v(path: str) -> bool:
-        # Exclude "t2v" so a T2V checkpoint stored under an i2v-containing
-        # directory (e.g. ~/i2v_experiments/kandinsky5-t2v-ft) is not
-        # misrouted; ambiguous paths fall through to the model_index
-        # _class_name fallback detectors below.
-        path_lower = path.lower()
-        return _is_kandinsky5(path_lower) and "i2v" in path_lower and "t2v" not in path_lower
+        return detect
 
-    def _is_kandinsky5_t2v_lite(path: str) -> bool:
-        path_lower = path.lower()
-        return _is_kandinsky5_t2v(path_lower) and "lite" in path_lower and "distilled" not in path_lower
-
-    def _is_kandinsky5_t2v_pro(path: str) -> bool:
-        path_lower = path.lower()
-        return _is_kandinsky5_t2v(path_lower) and "pro" in path_lower and "distilled" not in path_lower
-
-    def _is_kandinsky5_t2v_lite_distilled(path: str) -> bool:
-        path_lower = path.lower()
-        return _is_kandinsky5_t2v(path_lower) and "lite" in path_lower and "distilled" in path_lower
-
-    def _is_kandinsky5_t2v_pro_distilled(path: str) -> bool:
-        path_lower = path.lower()
-        return _is_kandinsky5_t2v(path_lower) and "pro" in path_lower and "distilled" in path_lower
-
-    def _is_kandinsky5_i2v_lite(path: str) -> bool:
-        path_lower = path.lower()
-        return _is_kandinsky5_i2v(path_lower) and "lite" in path_lower and "distilled" not in path_lower
-
-    def _is_kandinsky5_i2v_pro(path: str) -> bool:
-        path_lower = path.lower()
-        return _is_kandinsky5_i2v(path_lower) and "pro" in path_lower and "distilled" not in path_lower
-
-    def _is_kandinsky5_i2v_pro_distilled(path: str) -> bool:
-        path_lower = path.lower()
-        return _is_kandinsky5_i2v(path_lower) and "pro" in path_lower and "distilled" in path_lower
+    # t2v/i2v exclude each other so a checkpoint stored under a directory
+    # containing the other token (e.g. ~/i2v_experiments/kandinsky5-t2v-ft)
+    # falls through to the model_index _class_name fallback detectors below
+    # instead of being misrouted.
+    _is_kandinsky5_t2v = _kandinsky5_detector(require=("t2v", ), exclude=("i2v", ))
+    _is_kandinsky5_i2v = _kandinsky5_detector(require=("i2v", ), exclude=("t2v", ))
+    _is_kandinsky5_t2v_lite = _kandinsky5_detector(require=("t2v", "lite"), exclude=("i2v", "distilled"))
+    _is_kandinsky5_t2v_pro = _kandinsky5_detector(require=("t2v", "pro"), exclude=("i2v", "distilled"))
+    _is_kandinsky5_t2v_lite_distilled = _kandinsky5_detector(require=("t2v", "lite", "distilled"), exclude=("i2v", ))
+    _is_kandinsky5_t2v_pro_distilled = _kandinsky5_detector(require=("t2v", "pro", "distilled"), exclude=("i2v", ))
+    _is_kandinsky5_i2v_lite = _kandinsky5_detector(require=("i2v", "lite"), exclude=("t2v", "distilled"))
+    _is_kandinsky5_i2v_pro = _kandinsky5_detector(require=("i2v", "pro"), exclude=("t2v", "distilled"))
+    _is_kandinsky5_i2v_lite_distilled = _kandinsky5_detector(require=("i2v", "lite", "distilled"), exclude=("t2v", ))
+    _is_kandinsky5_i2v_pro_distilled = _kandinsky5_detector(require=("i2v", "pro", "distilled"), exclude=("t2v", ))
 
     # Kandinsky5 Lite T2V
     register_configs(
@@ -640,6 +621,21 @@ def _register_configs() -> None:
         ],
         model_family="kandinsky5",
         default_preset="kandinsky5_i2v_pro_distilled_5s",
+    )
+
+    # Kandinsky5 Lite I2V Distilled (no official hub repo yet; local
+    # conversions get distilled sampling defaults instead of the sft ones the
+    # fallback would apply).
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5I2VConfig,
+        workload_types=(),
+        model_detectors=[
+            _is_kandinsky5_i2v_lite_distilled,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_i2v_lite_distilled_5s",
+        pipeline_cls_name="Kandinsky5I2VPipeline",
     )
 
     # Kandinsky5 fallbacks — registered AFTER the variant detectors so those
@@ -1068,21 +1064,25 @@ def get_model_info(
     config_info = _get_config_info(model_path, raise_on_missing=True)
     assert config_info is not None, "config_info must be resolved"
 
-    if os.path.exists(model_path):
-        config = verify_model_config_and_directory(model_path)
-    else:
-        config = maybe_download_model_index(model_path)
-
-    pipeline_name = config.get("_class_name")
     if override_pipeline_cls_name:
-        pipeline_name = override_pipeline_cls_name
-        logger.info("Overriding pipeline class name from %s to %s", config.get("_class_name"), pipeline_name)
-    elif config_info.pipeline_cls_name is not None:
-        # The resolved (path/detector-based) config pins the pipeline class,
-        # e.g. an I2V checkpoint whose `_class_name` would otherwise resolve to
-        # the T2V pipeline.
-        logger.info("Pinning pipeline class name from %s to %s", pipeline_name, config_info.pipeline_cls_name)
-        pipeline_name = config_info.pipeline_cls_name
+        # Explicit override: skip config resolution entirely so checkpoints
+        # without a diffusers model_index.json keep working (and no download
+        # is triggered just to log the replaced name).
+        pipeline_name: str | None = override_pipeline_cls_name
+        logger.info("Using override pipeline class name %s", pipeline_name)
+    else:
+        if os.path.exists(model_path):
+            config = verify_model_config_and_directory(model_path)
+        else:
+            config = maybe_download_model_index(model_path)
+
+        pipeline_name = config.get("_class_name")
+        if config_info.pipeline_cls_name is not None:
+            # The resolved (path/detector-based) config pins the pipeline class,
+            # e.g. an I2V checkpoint whose `_class_name` would otherwise resolve
+            # to the T2V pipeline.
+            logger.info("Pinning pipeline class name from %s to %s", pipeline_name, config_info.pipeline_cls_name)
+            pipeline_name = config_info.pipeline_cls_name
 
     if pipeline_name is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
