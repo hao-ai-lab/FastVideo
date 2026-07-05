@@ -157,6 +157,14 @@ class CudaPlatformBase(Platform):
                 "ATTN_QAT_TRAIN selected but fastvideo_kernel.triton_kernels.attn_qat_train is not built. "
                 "Silent fallback would produce a non-QAT training run; refusing to proceed. "
                 "Install the training kernel or pick a different FASTVIDEO_ATTENTION_BACKEND.")
+        elif selected_backend == AttentionBackendEnum.NABLA_ATTN:
+            from fastvideo.attention.backends.nabla import CAN_USE_FLEX_ATTN
+            if CAN_USE_FLEX_ATTN:
+                logger.info("Using NABLA block-sparse flex-attention backend.")
+                return "fastvideo.attention.backends.nabla.NablaAttentionBackend"
+            raise ImportError("NABLA_ATTN selected but torch.nn.attention.flex_attention is unavailable in this "
+                              "PyTorch build. Silent fallback to dense attention would be orders of magnitude "
+                              "slower and diverge from the reference; upgrade PyTorch or pick a different backend.")
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from fastvideo_kernel import video_sparse_attn  # noqa: F401
