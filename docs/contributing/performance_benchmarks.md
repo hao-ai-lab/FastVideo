@@ -241,7 +241,7 @@ Written by `test_inference_performance.py`. One file per benchmark run.
 ```jsonc
 {
   "benchmark_id": "wan-t2v-1.3b-2gpu",
-  "config_schema_version": 2,
+  "result_schema_version": 2,
   "workload_id": "wan-t2v",
   "variant_id": "1.3b-sp2",
   "benchmark_version": 2,
@@ -270,8 +270,15 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     }
   },
   "commit": "<full sha>",
+  "run_source": "pr",
+  "branch": "feature/perf-change",
   "pr_number": "1234",
+  "test_scope": "direct",
+  "build_url": "https://buildkite.example/build",
+  "build_id": "<buildkite-build-id>",
+  "job_id": "<buildkite-job-id>",
   "timestamp": "2026-05-08T22:00:00+00:00",
+  "quality_metadata": { "quality_status": "canonical" },
   "text_encoder_time_s": 2.141,
   "dit_time_s": 8.437,
   "vae_decode_time_s": 3.208,
@@ -322,6 +329,7 @@ result, used as the rolling-baseline source of truth.
 ```jsonc
 {
   "model_id": "wan-t2v-1.3b-2gpu",
+  "result_schema_version": 2,
   "workload_id": "wan-t2v",
   "variant_id": "1.3b-sp2",
   "benchmark_version": 2,
@@ -345,17 +353,27 @@ result, used as the rolling-baseline source of truth.
   "hardware_profile_id": "hw-<sha256-prefix>",
   "software_profile_id": "sw-<sha256-prefix>",
   "environment_fingerprint": "env-<sha256-prefix>",
+  "run_source": "pr",
+  "branch": "feature/perf-change",
+  "pr_number": "1234",
+  "test_scope": "direct",
+  "build_url": "https://buildkite.example/build",
+  "build_id": "<buildkite-build-id>",
+  "job_id": "<buildkite-job-id>",
+  "quality_metadata": { "quality_status": "canonical" },
   "success": true
 }
 ```
 
 ### Compatibility with legacy records
 
-Older records in the HF dataset may not have component timing fields. The
-comparator ignores missing or `null` metrics when computing a median, and the
-dashboard lists skipped plots for metric series that have no non-null values.
-Records missing both `run_source` and `baseline_eligible` are treated as legacy
-successful main/full-suite uploads and remain eligible for rolling baselines.
+Older records in the HF dataset may not have `result_schema_version`,
+component timing fields, or v2 identity/profile fields. Records without
+`result_schema_version` are treated as v1. The comparator ignores missing or
+`null` metrics when computing a median, and the dashboard lists skipped plots
+for metric series that have no non-null values. Records missing both
+`run_source` and `baseline_eligible` are treated as legacy successful
+main/full-suite uploads and remain eligible for rolling baselines.
 
 New records compare only against the same `model_id`, `gpu_type`,
 `workload_id`, `variant_id`, `benchmark_version`, `recipe_fingerprint`,
@@ -377,7 +395,7 @@ FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 | `PERF_REPORTS_DIR` | `/root/data/perf_reports` | `compare_baseline.py`, `dashboard.py` | Where the Markdown summary and Plotly HTML get written for Buildkite to pick up. |
 | `HF_REPO_ID` | `FastVideo/performance-tracking` | `fastvideo/performance/hf_store.py` | HF dataset repo holding rolling-baseline records. |
 | `HF_API_KEY`, `HUGGINGFACE_HUB_TOKEN`, `HF_TOKEN` | unset | `fastvideo/performance/hf_store.py` | Required for upload or private dataset reads. |
-| `PERF_RUN_SOURCE` | inferred | `compare_baseline.py` | Source metadata for uploaded records: `pr`, `local`, `scheduled_main`, or `unknown`. |
+| `PERF_RUN_SOURCE` | inferred | `compare_baseline.py`, `test_inference_performance.py` | Source metadata for uploaded records: `pr`, `local`, `scheduled_main`, or `unknown`. |
 | `PERF_UPLOAD_POLICY` | `never` | `compare_baseline.py` | Upload policy: `never`, `pass`, or `always`. |
 | `PERF_PYTEST_RC` | unset | `compare_baseline.py` | Static-threshold pytest exit code, used so scheduled-main failures can be uploaded with `success=false`. |
 | `TEST_SCOPE` | unset | `compare_baseline.py` | CI context used to infer scheduled-main runs together with `BUILDKITE_BRANCH=main`. |
