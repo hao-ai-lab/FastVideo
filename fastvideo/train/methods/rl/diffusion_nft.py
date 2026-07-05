@@ -10,12 +10,6 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
-from torch.distributed.checkpoint.state_dict import (
-    StateDictOptions,
-    get_model_state_dict,
-    set_model_state_dict,
-)
-from torch.distributed.checkpoint.stateful import Stateful
 from tqdm.auto import tqdm
 
 from fastvideo.dataset.parquet_dataset_map_style import (
@@ -37,6 +31,7 @@ from fastvideo.train.methods.rl.common import (
     validation_caption,
     validation_shard_indices,
 )
+from fastvideo.train.utils.checkpoint import _FullModelState
 from fastvideo.train.utils.config import (
     get_optional_float,
     get_optional_int,
@@ -76,31 +71,6 @@ class _DiffusionNFTEMAState:
         if torch.is_tensor(update_count):
             update_count = int(update_count.item())
         self._method._ema_update_count = int(update_count)
-
-
-class _FullModelState(Stateful):
-    """DCP wrapper that saves frozen model parameters too.
-
-    The shared ``ModelWrapper`` intentionally filters to ``requires_grad``
-    parameters. DiffusionNFT's old policy is frozen but must be restored on
-    resume, so it needs full model state.
-    """
-
-    def __init__(self, model: torch.nn.Module) -> None:
-        self.model = model
-
-    def state_dict(self) -> dict[str, Any]:
-        return get_model_state_dict(self.model)  # type: ignore[no-any-return]
-
-    def load_state_dict(
-        self,
-        state_dict: dict[str, Any],
-    ) -> None:
-        set_model_state_dict(
-            self.model,
-            model_state_dict=state_dict,
-            options=StateDictOptions(strict=False),
-        )
 
 
 class DiffusionNFTMethod(TrainingMethod):

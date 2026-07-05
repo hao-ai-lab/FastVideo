@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.models.base import ModelBase
+from fastvideo.train.utils.checkpoint import _FullModelState
 from fastvideo.train.utils.optimizer import build_optimizer_and_scheduler
 
 
@@ -74,6 +75,15 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
     def get_lr_schedulers(self, iteration: int) -> list[Any]:
         del iteration
         return [self._student_lr_scheduler]
+
+    def checkpoint_state(self) -> dict[str, Any]:
+        # The EMA role is frozen (so the base class skips it) but mutated by
+        # _update_ema every step; without persisting it a resume reloads the
+        # EMA from init_from and the consistency target snaps back to the
+        # base checkpoint. Mirrors DiffusionNFT's frozen "old" role.
+        states = super().checkpoint_state()
+        states["roles.ema.transformer"] = _FullModelState(self.ema_model.transformer)
+        return states
 
     # ------------------------------------------------------------------
 
