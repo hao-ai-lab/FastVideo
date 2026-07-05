@@ -30,7 +30,7 @@ Runtime-JIT kernels (no build step, ship in every wheel/image):
 | Docker images `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev` (`.github/workflows/infra-build-image.yml`) | `docker/Dockerfile` changes on main, or manual dispatch | amd64 cuda12.6.3 + cuda13.0.0 | `9.0a` | ON | — |
 | | | arm64 cuda12.6.3 (GH200) | `9.0a` | — (aarch64) | — |
 | | | arm64 cuda13.0.0 (GB10 / DGX Spark) | `12.1` | — | — |
-| Local `./build.sh` | manual | probes the visible GPU via torch | detected | ON iff sm_90 | ON iff sm_120 |
+| Local `./build.sh` | manual | probes the visible GPU via torch | detected | ON iff sm_90 (non-aarch64 host) | ON iff sm_120 |
 
 Notes:
 
