@@ -46,6 +46,19 @@ fi
 if git rev-parse --git-dir >/dev/null 2>&1; then
     git submodule update --init --recursive include/cutlass include/tk
 fi
+# Fail fast with a clear message if the headers are still missing (e.g. a
+# Docker context that excluded .git AND the submodule contents) instead of
+# dying later in a wall of nvcc include errors.
+for _sub in include/cutlass/include include/tk/include; do
+    if [ ! -d "${_sub}" ]; then
+        echo "ERROR: ${_sub} is missing. Outside a git checkout the CUTLASS/" >&2
+        echo "       ThunderKittens sources must already be present (run" >&2
+        echo "       'git submodule update --init --recursive include/cutlass include/tk'" >&2
+        echo "       in the source checkout, or include them in the build context)." >&2
+        exit 1
+    fi
+done
+unset _sub
 
 # Install build dependencies
 uv pip install scikit-build-core cmake ninja
