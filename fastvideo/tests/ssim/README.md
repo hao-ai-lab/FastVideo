@@ -34,6 +34,28 @@ run `pytest fastvideo/tests/ssim/ -vs --ssim-full-quality` to use the
 `*_FULL_QUALITY_PARAMS` configs (default run keeps the original shortened test
 configs).
 
+For a local machine with mixed one-, two-, and four-GPU SSIM jobs, use the
+resource-aware runner instead of plain pytest:
+
+```bash
+.venv/bin/python fastvideo/tests/ssim/run_parallel.py \
+  --ssim-full-quality \
+  --hf-home /mnt/.cache \
+  --gpu-ids 0,1,2,3
+```
+
+The runner assigns disjoint `CUDA_VISIBLE_DEVICES` sets, keeps scheduling tasks
+that fit the currently free GPUs, and continues after individual failures by
+default. Per-task logs, JUnit XML, and `summary.json` are written under
+`generated_videos/<quality-tier>/_runs/<timestamp>/`. Use `--dry-run` to inspect
+the task/GPU plan, `--fail-fast` to stop after the first failure, or repeat
+`--test-file` / `--model-id` to select a subset. Worker core dumps are disabled
+by default; pass `--allow-core-dumps` only when a native crash needs debugging.
+
+Full-quality references are device-specific. A missing reference can therefore
+make pytest fail after generation even though the generated video or latent was
+successfully preserved under `generated_videos/full_quality/`.
+
 to override the HF reference repo at test time:
 `pytest fastvideo/tests/ssim/ -vs --ssim-reference-repo <org/repo>`
 

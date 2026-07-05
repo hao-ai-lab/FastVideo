@@ -28,6 +28,7 @@ device_reference_folder = resolve_device_reference_folder(
         ("A40", "A40"),
         ("L40S", "L40S"),
         ("H200", "H200"),
+        ("B200", "B200"),
     ),
     device_name=get_cuda_device_name(),
     fallback_device_prefix="L40S",

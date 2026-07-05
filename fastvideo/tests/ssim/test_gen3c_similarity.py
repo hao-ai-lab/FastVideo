@@ -20,10 +20,16 @@ import glob
 from pathlib import Path
 
 import pytest
-import torch
 
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
+from fastvideo.tests.ssim.reference_utils import (
+    build_generated_output_dir,
+    build_reference_folder_path,
+    get_cuda_device_name,
+    resolve_device_reference_folder,
+    select_ssim_params,
+)
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
@@ -50,16 +56,16 @@ def _resolve_gen3c_test_image_path() -> str:
 # Device detection
 # ---------------------------------------------------------------------------
 
-device_name = torch.cuda.get_device_name() if torch.cuda.is_available() else "cpu"
-device_reference_folder_suffix = "_reference_videos"
-
-if "A40" in device_name:
-    device_reference_folder = "A40" + device_reference_folder_suffix
-elif "L40S" in device_name:
-    device_reference_folder = "L40S" + device_reference_folder_suffix
-else:
-    device_reference_folder = None
-    logger.warning(f"Unsupported device for GEN3C SSIM tests: {device_name}")
+device_name = get_cuda_device_name()
+device_reference_folder = resolve_device_reference_folder(
+    (
+        ("A40", "A40"),
+        ("L40S", "L40S"),
+        ("B200", "B200"),
+    ),
+    device_name=device_name,
+    logger=logger,
+)
 
 # ---------------------------------------------------------------------------
 # GEN3C generation parameters
@@ -86,9 +92,16 @@ GEN3C_T2V_PARAMS = {
 MODEL_TO_PARAMS = {
     "GEN3C-Cosmos-7B": GEN3C_T2V_PARAMS,
 }
+FULL_QUALITY_MODEL_TO_PARAMS = {
+    # GEN3C has one production recipe today. Keeping an explicit map makes the
+    # full-quality tier selection and reference/output layout consistent with
+    # the rest of the SSIM suite without claiming a different recipe.
+    "GEN3C-Cosmos-7B": dict(GEN3C_T2V_PARAMS),
+}
 
 TEST_PROMPTS = [
-    "A camera slowly orbits around a young woman sitting at a table with a coffee mug with coffee in it in front of her, "
+    "A camera slowly orbits around a young woman sitting at a table with a "
+    "coffee mug with coffee in it in front of her, "
     "looking away naturally. Soft indoor lighting, cinematic framing, shallow depth of field, smooth camera motion.",
 ]
 
@@ -115,12 +128,17 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    base_output_dir = os.path.join(script_dir, "generated_videos", model_id)
-    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
+    output_dir = build_generated_output_dir(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     output_video_name = CANDIDATE_VIDEO_NAME
     os.makedirs(output_dir, exist_ok=True)
 
-    BASE_PARAMS = MODEL_TO_PARAMS[model_id]
+    params_map = select_ssim_params(MODEL_TO_PARAMS, FULL_QUALITY_MODEL_TO_PARAMS)
+    BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
     model_path = BASE_PARAMS["model_path"]
 
@@ -178,18 +196,23 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     for stale_video in glob.glob(stale_pattern):
         os.remove(stale_video)
 
-    generator = VideoGenerator.from_pretrained(
-        model_path=model_path, **init_kwargs
-    )
-    generator.generate_video(prompt, **generation_kwargs)
-
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator = None
+    try:
+        generator = VideoGenerator.from_pretrained(
+            model_path=model_path, **init_kwargs
+        )
+        generator.generate_video(prompt, **generation_kwargs)
+    finally:
+        if generator is not None and isinstance(generator.executor, MultiprocExecutor):
+            generator.executor.shutdown()
 
     assert os.path.exists(output_dir), f"Output not generated at {output_dir}"
 
-    reference_folder = os.path.join(
-        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    reference_folder = build_reference_folder_path(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
     )
     if not os.path.exists(reference_folder):
         raise FileNotFoundError(

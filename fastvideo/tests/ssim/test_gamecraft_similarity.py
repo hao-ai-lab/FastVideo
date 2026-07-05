@@ -47,6 +47,7 @@ device_reference_folder = resolve_device_reference_folder(
         ("A100", "A100"),
         ("H100", "H100"),
         ("H200", "H200"),
+        ("B200", "B200"),
     ),
     device_name=get_cuda_device_name(),
     unknown_device_prefix="Unknown",
