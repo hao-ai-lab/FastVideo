@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import socket
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -15,14 +14,9 @@ import torch
 import torch.distributed as dist
 from torch.distributed import init_device_mesh
 from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard
+from torch.distributed.tensor import DTensor
 
 from fastvideo.layers.layernorm import RMSNorm
-
-try:
-    from torch.distributed.tensor import DTensor
-except ImportError:
-    from torch.distributed._tensor import DTensor
-
 
 WORLD_SIZE = 2
 HIDDEN_SIZE = 8
@@ -30,21 +24,14 @@ SEED = 1379
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
 def _run_torchrun(script_path: Path, mode: str, output_path: Path) -> None:
+    # --standalone binds the rendezvous port atomically, avoiding the
+    # free-port-probe race a hand-picked --master_port would have.
     cmd = [
         "torchrun",
-        "--nnodes",
-        "1",
+        "--standalone",
         "--nproc_per_node",
         str(WORLD_SIZE),
-        "--master_port",
-        str(_free_port()),
         str(script_path),
         "--rmsnorm-fsdp-worker",
         "--mode",
@@ -112,9 +99,12 @@ def _run_worker(mode: str, output_path: Path) -> None:
         fsdp_kwargs: dict[str, Any] = {"mesh": mesh}
         if mode.endswith("cpu_offload"):
             fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(pin_memory=False)
-        sharded_norm = fully_shard(norm, **fsdp_kwargs)
-        if sharded_norm is not None:
-            norm = sharded_norm
+        # fully_shard is applied to the bare RMSNorm to make the hook bypass
+        # observable. Production sharding (fsdp_load.shard_model) only wraps
+        # whole transformer blocks, whose pre-forward all-gather localizes norm
+        # weights before the qk-norm call sites run, so this pins the dispatch
+        # invariant rather than reproducing a production topology.
+        fully_shard(norm, **fsdp_kwargs)
 
         x = torch.randn(2, 3, HIDDEN_SIZE, device=device, dtype=torch.bfloat16)
         call_kind = "direct" if mode.startswith("direct") else "module"
@@ -179,18 +169,21 @@ def test_rmsnorm_forward_native_bypasses_fsdp_hooks(mode: str, expect_ok: bool, 
     successes = [result for result in results if result["ok"]]
     assert not successes, json.dumps(results, indent=2)
     error_text = "\n".join(result.get("error", "") for result in results)
-    assert "DTensor" in error_text and "Tensor" in error_text, json.dumps(results, indent=2)
+    # Pin the specific bypassed-hook failure: "got mixed torch.Tensor and
+    # DTensor" ("Tensor" alone is a substring of "DTensor", so it adds nothing).
+    assert "mixed" in error_text and "DTensor" in error_text, json.dumps(results, indent=2)
 
 
-def test_qk_rmsnorm_call_sites_use_module_dispatch() -> None:
-    target_paths = [
-        REPO_ROOT / "fastvideo/models/dits/causal_wanvideo.py",
-        REPO_ROOT / "fastvideo/models/dits/matrixgame2/causal_model.py",
+def test_no_direct_forward_native_calls_in_models() -> None:
+    """Direct .forward_native(...) calls bypass nn.Module.__call__ and FSDP
+    hooks (issue #1379); model code must use module dispatch instead."""
+    models_dir = REPO_ROOT / "fastvideo" / "models"
+    offenders = [
+        str(path.relative_to(REPO_ROOT))
+        for path in sorted(models_dir.rglob("*.py"))
+        if ".forward_native(" in path.read_text(encoding="utf-8")
     ]
-    for path in target_paths:
-        source = path.read_text(encoding="utf-8")
-        assert ".norm_q.forward_native(" not in source
-        assert ".norm_k.forward_native(" not in source
+    assert not offenders, f"Replace .forward_native(...) with module dispatch in: {offenders}"
 
 
 def _parse_args() -> argparse.Namespace:
