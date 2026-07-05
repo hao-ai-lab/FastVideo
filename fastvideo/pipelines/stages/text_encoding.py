@@ -351,6 +351,7 @@ class Cosmos25TextEncodingStage(PipelineStage):
     Cosmos 2.5 uses Reason1 (Qwen2.5-VL) and relies on the encoder's
     `compute_text_embeddings_online()`.
     """
+    performance_component_metric = "text_encoder_time_s"
 
     def __init__(self, text_encoder) -> None:
         super().__init__()

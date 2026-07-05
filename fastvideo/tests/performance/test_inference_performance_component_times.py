@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from fastvideo.pipelines.pipeline_batch_info import PipelineLoggingInfo
-from fastvideo.pipelines.stages.denoising import DenoisingStage
+from fastvideo.pipelines.stages.denoising import Cosmos25AutoDenoisingStage, DenoisingStage
+from fastvideo.pipelines.stages.text_encoding import Cosmos25TextEncodingStage
 from fastvideo.tests.performance.test_inference_performance import _extract_component_times
 
 
@@ -53,6 +54,11 @@ def test_extract_component_times_uses_stage_class_for_pipeline_stage_keys():
 
 def test_denoising_stage_subclasses_inherit_component_metric():
     assert SubclassStyleDenoisingStage.performance_component_metric == "dit_time_s"
+
+
+def test_cosmos25_direct_pipeline_stages_define_component_metrics():
+    assert Cosmos25TextEncodingStage.performance_component_metric == "text_encoder_time_s"
+    assert Cosmos25AutoDenoisingStage.performance_component_metric == "dit_time_s"
 
 
 def test_extract_component_times_uses_component_metric_for_stage_subclasses():

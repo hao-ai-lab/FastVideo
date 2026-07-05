@@ -1188,6 +1188,7 @@ class Cosmos25V2WDenoisingStage(Cosmos25DenoisingStage):
 
 class Cosmos25AutoDenoisingStage(PipelineStage):
     """Route Cosmos 2.5 denoising to T2W vs V2W/I2W."""
+    performance_component_metric = "dit_time_s"
 
     def __init__(self, transformer, scheduler) -> None:
         super().__init__()

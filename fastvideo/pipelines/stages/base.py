@@ -156,7 +156,7 @@ class PipelineStage(ABC):
                 logger.info("[%s] Execution completed in %s ms", stage_name, execution_time * 1000)
                 batch.logging_info.add_stage_execution_time(stage_key, execution_time)
                 batch.logging_info.add_stage_metric(stage_key, "stage_class", stage_class_name)
-                component_metric = getattr(self, "performance_component_metric", None)
+                component_metric = self.performance_component_metric
                 if component_metric is not None:
                     batch.logging_info.add_stage_metric(stage_key, "component_metric", component_metric)
             except Exception as e:
