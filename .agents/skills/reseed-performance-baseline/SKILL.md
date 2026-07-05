@@ -69,7 +69,7 @@ approval, then upload reviewed accepted baseline records.
 | `model_id` | Yes | Benchmark id, e.g. `wan-t2v-1.3b-2gpu`. This maps to the HF subdirectory after `sanitize(model_id)`. |
 | `gpu_type` | Yes | Exact GPU device string from the performance record, e.g. the L40S device name emitted by CI. Baselines are GPU-specific. |
 | `source_results` | Yes | One or more local paths or Buildkite artifact URLs for accepted shifted performance JSONs. Prefer normalized `normalized_perf_*.json` artifacts emitted by `compare_baseline.py`. Accept `source_result` as an alias only for a single JSON. |
-| `max_intra_batch_regression` | No | Maximum allowed regression of any source JSON against the source batch median. Default: `PERF_MAX_REGRESSION` if set, otherwise `0.05` (5%). |
+| `max_intra_batch_regression` | No | Maximum allowed regression of any source JSON against the source batch median. Default: `0.05` (5%). |
 | `intent_rationale` | Yes | One-line explanation for why the baseline shift is legitimate. This is written into provenance and should be reused in the PR. |
 
 Hardcoded defaults:
@@ -148,8 +148,7 @@ For each metric with at least two non-null source values:
 4. Stop if any source record regresses against the batch median by more than
    `max_intra_batch_regression`.
 
-Default `max_intra_batch_regression` to `PERF_MAX_REGRESSION` when set,
-otherwise `0.05`. Print a table with per-source values, batch median, and
+Default `max_intra_batch_regression` to `0.05`. Print a table with per-source values, batch median, and
 worst intra-batch regression.
 
 This check prevents uploading a mixed batch where one JSON is materially
@@ -183,7 +182,7 @@ present, that run is not a valid source for baseline reseeding.
 
 ### 2. Sync and back up existing HF records under /tmp
 
-Use `fastvideo/tests/performance/hf_store.py` helpers directly. Do **not** use
+Use `fastvideo/performance/hf_store.py` helpers directly. Do **not** use
 `compare_baseline.py` as a sync shortcut; on full main runs it can persist
 records, while this step must only fetch and back up existing history.
 
@@ -192,7 +191,7 @@ The sync command pattern is:
 ```bash
 export PERFORMANCE_TRACKING_ROOT="${PERFORMANCE_TRACKING_ROOT:-/tmp/perf-tracking}"
 export HF_REPO_ID="${HF_REPO_ID:-FastVideo/performance-tracking}"
-PYTHONPATH=fastvideo/tests/performance python -c 'from hf_store import sync_from_hf; import os; sync_from_hf(os.environ["PERFORMANCE_TRACKING_ROOT"], strict=True)'
+python -c 'from fastvideo.performance.hf_store import sync_from_hf; import os; sync_from_hf(os.environ["PERFORMANCE_TRACKING_ROOT"], strict=True)'
 ```
 
 Then back up only the sanitized model directory under `/tmp`:
@@ -200,8 +199,8 @@ Then back up only the sanitized model directory under `/tmp`:
 ```bash
 SHORT_COMMIT=$(git rev-parse --short=12 HEAD)
 TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
-MODEL_SAFE=$(PYTHONPATH=fastvideo/tests/performance python - <<'PY'
-from hf_store import sanitize
+MODEL_SAFE=$(python - <<'PY'
+from fastvideo.performance.hf_store import sanitize
 print(sanitize("<model_id>"))
 PY
 )
@@ -235,7 +234,7 @@ first baseline seed. Continue, but report that baseline history was empty.
 Load the last 5 successful records for the target:
 
 ```python
-from hf_store import load_records_for_model
+from fastvideo.performance.hf_store import load_records_for_model
 
 records = load_records_for_model(
     "/tmp/perf-tracking",
@@ -372,7 +371,7 @@ prepared records plus backup on disk.
 Use the shared storage helper so the path and repo type match CI:
 
 ```python
-from hf_store import upload_record
+from fastvideo.performance.hf_store import upload_record
 
 upload_record("<local_record_path>", record, strict=True)
 ```
@@ -460,7 +459,7 @@ directories created for this reseed. Never remove unrelated `/tmp` contents.
   intentional baseline replacement.
 - `fastvideo/tests/performance/compare_baseline.py` — normalization, rolling
   median comparison, and persistence rules.
-- `fastvideo/tests/performance/hf_store.py` — HF sync, record loading,
+- `fastvideo/performance/hf_store.py` — HF sync, record loading,
   `sanitize()`, and `upload_record()`.
 - `fastvideo/tests/performance/test_inference_performance.py` — source result
   JSON schema.
