@@ -146,7 +146,9 @@ def _copy_or_link_component(component: str, component_source: Path, output: Path
     dst = output / component
     if not src.exists():
         raise FileNotFoundError(f"Missing reused component source: {src}")
-    if dst.exists() or dst.is_symlink():
+    if dst.is_symlink() and not dst.exists():
+        dst.unlink()  # dangling symlink: replace so re-conversion self-heals
+    if dst.exists():
         print(f"keeping existing {dst}")
         return
     if symlink:
