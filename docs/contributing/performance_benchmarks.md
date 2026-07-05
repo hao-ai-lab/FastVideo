@@ -212,9 +212,9 @@ change, etc.) and CI starts failing, use the
 [`reseed-performance-baseline`](https://github.com/hao-ai-lab/FastVideo/blob/main/.agents/skills/reseed-performance-baseline/SKILL.md)
 agent skill to advance the rolling median. To approve the first baseline for
 a new v2 exact identity, use `fastvideo/tests/performance/seed_baseline.py`
-from a reviewed `CALIBRATION_NEEDED` normalized artifact; it writes an
-explicit `baseline_eligible=true` seed record with the same six identity
-fields.
+from a reviewed scheduled-main full-suite `CALIBRATION_NEEDED` normalized
+artifact; it writes an explicit `baseline_eligible=true` seed record with the
+same six identity fields.
 
 ## Schemas
 
@@ -438,7 +438,7 @@ FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 | `FASTVIDEO_FA4` | `0` | `test_inference_performance.py` | FlashAttention-4 toggle included in `software_profile_id`. |
 | `FASTVIDEO_PERFORMANCE_PROFILE_VERSION` | unset | `test_inference_performance.py` | Optional explicit software cohort/profile version included in `software_profile_id`. |
 | `IMAGE_VERSION` | unset | `test_inference_performance.py` | CI container image/profile version included in `software_profile_id` when available. |
-| `FASTVIDEO_CONTAINER_IMAGE_REF` | unset | `pr_test.py`, `launch_l40s_job.py`, `test_inference_performance.py` | Resolved CI container image ref or digest included in `software_profile_id` when available. |
+| `FASTVIDEO_CONTAINER_IMAGE_REF` | unset | `pr_test.py`, `launch_l40s_job.py`, `test_inference_performance.py` | Resolved CI container image ref or digest recorded in `software_profile` audit metadata when available. |
 | `FASTVIDEO_STAGE_LOGGING` | set by the pytest test | `test_inference_performance.py` | Enables pipeline stage timing capture for component metrics during benchmark runs. |
 
 ## CI integration
@@ -519,8 +519,8 @@ When the rolling-baseline phase runs, it emits:
    persisted main-branch run with no HF history passes and seeds the rolling
    baseline. V2 benchmarks with no exact comparable baseline report
    `CALIBRATION_NEEDED`; the record remains visible but does not become
-   baseline eligible until a comparable scheduled-main run is reviewed and
-   seeded with `fastvideo/tests/performance/seed_baseline.py`.
+   baseline eligible until a comparable scheduled-main full-suite run is
+   reviewed and seeded with `fastvideo/tests/performance/seed_baseline.py`.
 
 4. If the benchmark targets a GPU not currently in `thresholds`, either add
    that GPU as a key or rely on the `default` block. Note that `default` is

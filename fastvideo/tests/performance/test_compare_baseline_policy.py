@@ -571,6 +571,9 @@ def test_seeded_v2_calibration_artifact_enables_next_compare_pass(
         "success": True,
         "baseline_eligible": False,
         "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "pr_number": "",
     })
     seed_record = seed_baseline.build_baseline_seed_record(
         calibration_record,
@@ -626,6 +629,57 @@ def test_baseline_seed_rejects_non_calibration_sources(monkeypatch):
         seed_baseline.build_baseline_seed_record(
             record,
             reason="not a calibration",
+        )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({
+            "run_source": "pr",
+            "branch": "main",
+            "test_scope": "full",
+            "pr_number": "123",
+        }, "scheduled_main"),
+        ({
+            "run_source": "local",
+            "branch": "",
+            "test_scope": "",
+            "pr_number": "",
+        }, "scheduled_main"),
+        ({
+            "run_source": "scheduled_main",
+            "branch": "main",
+            "test_scope": "full",
+            "pr_number": "123",
+        }, "non-PR"),
+        ({
+            "run_source": "scheduled_main",
+            "branch": "feature",
+            "test_scope": "full",
+            "pr_number": "",
+        }, "main-branch full-suite"),
+        ({
+            "run_source": "scheduled_main",
+            "branch": "main",
+            "test_scope": "direct",
+            "pr_number": "",
+        }, "main-branch full-suite"),
+    ],
+)
+def test_baseline_seed_rejects_untrusted_calibration_sources(monkeypatch, overrides, match):
+    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+    record = _v2_record()
+    record.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "success": True,
+        **overrides,
+    })
+
+    with pytest.raises(ValueError, match=match):
+        seed_baseline.build_baseline_seed_record(
+            record,
+            reason="not trusted",
         )
 
 

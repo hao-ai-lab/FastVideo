@@ -51,12 +51,22 @@ def _source_identity(record: dict[str, Any]) -> dict[str, str]:
     return _comparison_identity_filters(record)
 
 
+def _truthy_pr_number(value: Any) -> bool:
+    return bool(value and str(value) not in {"false", "0", "None", "none"})
+
+
 def _validate_calibration_source(record: dict[str, Any]) -> None:
     _source_identity(record)
     if record.get("comparison_status") != STATUS_CALIBRATION_NEEDED:
         raise ValueError("baseline seeds require a CALIBRATION_NEEDED source artifact")
     if record.get("success") is not True:
         raise ValueError("baseline seeds require a successful source artifact")
+    if record.get("run_source") != "scheduled_main":
+        raise ValueError("baseline seeds require a scheduled_main source artifact")
+    if _truthy_pr_number(record.get("pr_number")):
+        raise ValueError("baseline seeds require a non-PR source artifact")
+    if record.get("branch") != "main" or record.get("test_scope") != "full":
+        raise ValueError("baseline seeds require a main-branch full-suite source artifact")
 
 
 def build_baseline_seed_record(
@@ -87,6 +97,9 @@ def build_baseline_seed_record(
         "baseline_seed_source_timestamp": source_record.get("timestamp"),
         "baseline_seed_source_success": source_record.get("success"),
         "baseline_seed_source_run_source": source_record.get("run_source"),
+        "baseline_seed_source_branch": source_record.get("branch"),
+        "baseline_seed_source_test_scope": source_record.get("test_scope"),
+        "baseline_seed_source_pr_number": source_record.get("pr_number"),
         "baseline_seed_batch_size": batch_size,
         "baseline_seed_batch_index": batch_index,
     })

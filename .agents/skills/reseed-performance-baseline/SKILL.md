@@ -136,7 +136,9 @@ The source records may have `success: false` when they came from failed
 rolling baseline comparisons. That is expected; only the reviewed reseed
 records become new `success: true` baseline records after explicit approval.
 For a first v2 baseline seed, the source records must instead be successful
-`CALIBRATION_NEEDED` normalized artifacts.
+scheduled-main full-suite `CALIBRATION_NEEDED` normalized artifacts. Reject PR,
+local, direct-run, non-main-branch, or non-full-suite calibration artifacts as
+seed sources.
 
 Sort validated source records by their original `timestamp` ascending before
 preparing the seed records. If a source timestamp is missing or unparsable,
@@ -342,9 +344,10 @@ Do not continue unless the user types exactly `confirm performance reseed`.
 Create one seed record from each normalized source result.
 
 For first v2 baseline seeds, use the scoped utility. It validates exact
-identity, requires successful `CALIBRATION_NEEDED` source artifacts, preserves
-the normalized v2 identity and metadata fields, and writes seed records with
-`success=true`, `baseline_eligible=true`, and `comparison_status=PASS`:
+identity, requires successful scheduled-main full-suite `CALIBRATION_NEEDED`
+source artifacts, preserves the normalized v2 identity and metadata fields,
+and writes seed records with `success=true`, `baseline_eligible=true`, and
+`comparison_status=PASS`:
 
 ```bash
 python fastvideo/tests/performance/seed_baseline.py \
@@ -407,6 +410,7 @@ identity, also preserve:
 - `recipe`
 - `hardware_profile`
 - `software_profile`
+- `software_comparison_profile`
 
 Do not upload extra fields from the source artifact.
 
@@ -431,6 +435,9 @@ The v2 calibration seed utility writes analogous first-seed provenance:
 - `baseline_seed_source_timestamp`
 - `baseline_seed_source_success`
 - `baseline_seed_source_run_source`
+- `baseline_seed_source_branch`
+- `baseline_seed_source_test_scope`
+- `baseline_seed_source_pr_number`
 - `baseline_seed_batch_size`
 - `baseline_seed_batch_index`
 - `baseline_seed_operator`
