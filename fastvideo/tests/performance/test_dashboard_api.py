@@ -154,8 +154,8 @@ def test_dashboard_endpoints_filter_and_return_run_source_metadata():
     assert summary["count"] == 1
     assert summary["rows"][0]["run_source"] == "pr"
     assert summary["rows"][0]["pr_number"] == "123"
-    assert summary["rows"][0]["baseline_n"] == 1
-    assert summary["rows"][0]["metrics"]["latency"]["baseline"] == 11.0
+    assert summary["rows"][0]["baseline_n"] == 0
+    assert summary["rows"][0]["metrics"]["latency"]["baseline"] is None
     assert summary["filters"]["run_source"] == "pr"
     assert trends["count"] == 1
     assert trends["groups"][0]["points"][0]["run_source"] == "pr"

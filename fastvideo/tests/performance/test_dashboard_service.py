@@ -142,6 +142,47 @@ def test_build_latest_summary_separates_informational_threshold_crossing():
     assert rows[0]["threshold_exceeded_metrics"] == ["latency"]
     assert rows[0]["failing_metrics"] == []
     assert rows[0]["computed_regression_status"] == "pass"
+
+
+def test_build_latest_summary_run_source_filter_excludes_future_baselines():
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            run_source="scheduled_main",
+            baseline_eligible=True,
+        ),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            11.0,
+            9.0,
+            run_source="pr",
+            baseline_eligible=False,
+            pr_number="123",
+        ),
+        _record(
+            "2026-01-03T00:00:00+00:00",
+            "c" * 40,
+            30.0,
+            3.0,
+            run_source="scheduled_main",
+            baseline_eligible=True,
+        ),
+    ]
+
+    rows = build_latest_summary(records, run_source="pr")
+
+    assert len(rows) == 1
+    assert rows[0]["run_source"] == "pr"
+    assert rows[0]["baseline_n"] == 1
+    assert rows[0]["metrics"]["latency"]["baseline"] == 10.0
+    assert rows[0]["metrics"]["throughput"]["baseline"] == 10.0
+
+
+
 def test_build_latest_summary_keeps_identity_cohorts_separate():
     records = [
         _record(
@@ -186,7 +227,7 @@ def test_build_latest_summary_keeps_identity_cohorts_separate():
         ),
     ]
 
-    rows = build_latest_summary(records, max_regression=0.05)
+    rows = build_latest_summary(records)
     recipe_b_row = next(row for row in rows if row["recipe_fingerprint"] == "recipe-b")
 
     assert len(rows) == 2
@@ -241,12 +282,64 @@ def test_build_latest_summary_keeps_variant_versions_separate():
         ),
     ]
 
-    rows = build_latest_summary(records, max_regression=0.05)
+    rows = build_latest_summary(records)
     version_2_row = next(row for row in rows if row["benchmark_version"] == 2)
 
     assert len(rows) == 2
     assert version_2_row["baseline_n"] == 1
     assert version_2_row["metrics"]["latency"]["baseline"] == 20.0
+
+
+def test_dashboard_identity_preserves_zero_benchmark_version():
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            workload_id="wan-t2v",
+            variant_id="1.3b-sp2",
+            benchmark_version=0,
+            recipe_fingerprint="recipe-a",
+            hardware_profile_id="hw-l40s",
+            software_profile_id="sw-cu130",
+            run_source="scheduled_main",
+            baseline_eligible=True,
+        ),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            11.0,
+            9.0,
+            workload_id="wan-t2v",
+            variant_id="1.3b-sp2",
+            benchmark_version=0,
+            recipe_fingerprint="recipe-a",
+            hardware_profile_id="hw-l40s",
+            software_profile_id="sw-cu130",
+        ),
+        _record(
+            "2026-01-03T00:00:00+00:00",
+            "c" * 40,
+            20.0,
+            5.0,
+        ),
+    ]
+
+    rows = build_latest_summary(records)
+    version_zero_row = next(row for row in rows if row["benchmark_version"] == 0)
+    legacy_row = next(row for row in rows if row["benchmark_version"] == "")
+    trends = build_trends(records)
+    version_zero_trend = next(trend for trend in trends if trend["benchmark_version"] == 0)
+    legacy_trend = next(trend for trend in trends if trend["benchmark_version"] == "")
+
+    assert len(rows) == 2
+    assert version_zero_row["baseline_n"] == 1
+    assert version_zero_row["metrics"]["latency"]["baseline"] == 10.0
+    assert legacy_row["baseline_n"] == 0
+    assert len(trends) == 2
+    assert version_zero_trend["points"][0]["benchmark_version"] == 0
+    assert legacy_trend["points"][0]["benchmark_version"] == ""
 
 
 def test_filter_records_and_trends_preserve_metric_points():

@@ -79,10 +79,11 @@ fastvideo/performance/
 ```
 
 The HF dataset (`FastVideo/performance-tracking` by default) holds one
-normalized JSON per `(model_id, gpu_type, run)` tuple. The rolling baseline is
-the median of the last 5 successful, baseline-eligible records for that
-model+GPU. PR and local records are visible in the dashboard but are not
-baseline eligible.
+normalized JSON per run. For v2 records, the rolling baseline is the median of
+the last 5 successful, baseline-eligible records in the same comparison cohort:
+`model_id`, `gpu_type`, `workload_id`, `variant_id`, `benchmark_version`,
+`recipe_fingerprint`, `hardware_profile_id`, and `software_profile_id`. PR and
+local records are visible in the dashboard but are not baseline eligible.
 
 ## Planned Coverage
 
@@ -158,13 +159,16 @@ unrealistic memory growth, and optionally large component-specific slowdowns
 even when the rolling baseline is empty. They are hand-set with generous
 headroom and almost never need touching.
 
-### Rolling baseline (per `(model_id, gpu_type)`)
+### Rolling baseline (per comparison cohort)
 
 `compare_baseline.py` loads the last 5 successful, baseline-eligible records
-for the same `(model_id, gpu_type)` from the HF dataset, computes the median
-for each available metric, and evaluates the current run with the metric's
-rolling regression policy. For latency, memory, and component times, higher
-values are regressions. For throughput, lower values are regressions.
+for the same comparison cohort from the HF dataset, computes the median for
+each available metric, and evaluates the current run with the metric's
+rolling regression policy. For v2 records, that cohort is `model_id`,
+`gpu_type`, `workload_id`, `variant_id`, `benchmark_version`,
+`recipe_fingerprint`, `hardware_profile_id`, and `software_profile_id`. For
+latency, memory, and component times, higher values are regressions. For
+throughput, lower values are regressions.
 
 A metric exceeds its rolling threshold when both of these are true:
 
@@ -424,7 +428,7 @@ When the rolling-baseline phase runs, it emits:
   per-benchmark row with current vs. baseline values for latency, throughput,
   memory, text encoder time, DiT time, and VAE decode time.
 * **Plotly dashboard** — `dashboard_<sha>_<ts>.html` showing time-series for
-  each metric grouped by `(model_id, gpu_type)`.
+  each metric grouped by comparison cohort.
 * **Normalized records** — `normalized_perf_*.json`, one per benchmark.
   Useful as input to the
   [`reseed-performance-baseline`](https://github.com/hao-ai-lab/FastVideo/blob/main/.agents/skills/reseed-performance-baseline/SKILL.md)
@@ -498,8 +502,8 @@ When the rolling-baseline phase runs, it emits:
 
 ## Troubleshooting
 
-**"No baseline for ... Initializing"** — first run for this `(model_id,
-gpu_type)`. Run will pass and (if persisting) seed the first record.
+**"No baseline for ... Initializing"** — first run for this comparison cohort.
+Run will pass and (if persisting) seed the first record.
 
 **Persistent failure right after a torch / kernel / image upgrade** —
 genuine regression *or* baseline drift. Compare the failing normalized record
