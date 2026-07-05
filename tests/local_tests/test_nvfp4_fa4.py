@@ -10,15 +10,6 @@ import pytest
 
 os.environ["CUTE_DSL_ENABLE_TVM_FFI"] = "1"
 
-# Warm up flashinfer JIT before any FA4 imports
-from flashinfer.quantization import nvfp4_quantize, SfLayout
-_warmup = nvfp4_quantize(
-    torch.randn(4, 128, device="cuda", dtype=torch.bfloat16),
-    torch.ones(1, device="cuda", dtype=torch.float32),
-    sfLayout=SfLayout.layout_128x4, do_shuffle=False,
-)
-del _warmup
-
 
 def _make_impl(nheads, headdim, nvfp4=False):
     from fastvideo.attention.backends.flash_attn import FlashAttentionImpl
@@ -45,7 +36,8 @@ def _cuda_timer(fn, warmup=5, iters=20):
 
 
 @pytest.mark.skipif(
-    torch.cuda.get_device_capability() not in [(10, 0), (10, 3)],
+    not torch.cuda.is_available()
+    or torch.cuda.get_device_capability() not in [(10, 0), (10, 3)],
     reason="Requires Blackwell GPU (sm100a or sm103a)"
 )
 class TestNVFP4FA4:
@@ -54,6 +46,17 @@ class TestNVFP4FA4:
     MODEL_NHEADS = 12
     MODEL_HEADDIM = 128
     MODEL_SEQLEN = 32760  # 480x832 video, 81 frames
+
+    @pytest.fixture(scope="class", autouse=True)
+    def _flashinfer_warmup(self):
+        # Warm up flashinfer JIT before any FA4 imports
+        from flashinfer.quantization import SfLayout, nvfp4_quantize
+        _warmup = nvfp4_quantize(
+            torch.randn(4, 128, device="cuda", dtype=torch.bfloat16),
+            torch.ones(1, device="cuda", dtype=torch.float32),
+            sfLayout=SfLayout.layout_128x4, do_shuffle=False,
+        )
+        del _warmup
 
     def test_quantize_fn_shapes(self):
         """_nvfp4_quantize_for_fa4 produces correct shapes and strides."""
