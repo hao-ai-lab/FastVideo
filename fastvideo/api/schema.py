@@ -25,7 +25,7 @@ class ParallelismConfig:
 class OffloadConfig:
     dit: bool = True
     dit_layerwise: bool = True
-    text_encoder: bool = False
+    text_encoder: bool = True
     image_encoder: bool = True
     vae: bool = True
     pin_cpu_memory: bool = True
