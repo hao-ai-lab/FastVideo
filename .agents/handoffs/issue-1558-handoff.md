@@ -57,6 +57,62 @@
 - 2026-07-06T07:03Z: Modal L40S validation `ap-hrzrFjSWJ2w8h8qcjaDmqW` passed with interleavethinker launcher, `--install-extra none`, `--env-vars FASTVIDEO_FA4=0`, and local code/test patch:
   `pytest fastvideo/tests/transformers -vs`
   Result: `5 passed, 1 skipped in 265.13s`. Logs again showed FA4 installed but not enabled and FlashAttention-2 selected for the affected FLASH_ATTN path.
+- 2026-07-06T07:04Z: Created signed commit `81baaa34048484add1aacb720ebe9d29ace869fe` (`[ci] Stop forcing FA4 in model-load lanes`) and pushed it to `origin/issue/1558-fa4-fmax-typeerror`. `git log -1 --show-signature` reported a good signature from `Mac Lee <macthecadillac@gmail.com>`.
+- 2026-07-06T07:08Z: Modal L40S pre-commit validation `ap-4iiXhNnoFvM881XZRV0iY4` passed on pushed commit `81baaa34048484add1aacb720ebe9d29ace869fe` using interleavethinker launcher:
+  `pre-commit run --all-files`
+  Result: yapf, ruff, codespell, PyMarkdown, actionlint, mypy, filename-space check, and suggestion all passed.
+
+## Stage 3 Log
+
+- 2026-07-06T07:08Z: Spawned fresh review-code sub-agent `019f363f-94fc-7873-9b13-5ca79f824585` / nickname `Lorentz` to review committed branch `macthecadillac/FastVideo issue/1558-fa4-fmax-typeerror` for issue #1558. The sub-agent was instructed to use `$review-code` and not modify code or GitHub state.
+- 2026-07-06T07:10Z: Review-code sub-agent completed with no actionable findings. Summary:
+  - Reviewed commit `81baaa34048484add1aacb720ebe9d29ace869fe` in a temp worktree.
+  - Found the branch matches issue #1558's CI-unblock path: model-load/training lanes force `FASTVIDEO_FA4=0`, generic launcher defaults FA4 off, and the new contract test covers the intended Modal policy.
+  - Issue fit: addresses the "do not force FA4 for model-load/training lanes" path; explicit FA4 image compatibility remains a separate follow-up.
+  - Related branches: only `issue/1558-fa4-fmax-typeerror`.
+  - Validation gaps noted by reviewer: full `pr_test.py` suite and explicit FA4/image-pin validation remain unverified.
+- No adjudicator/fixer sub-agent was spawned because the review-code sub-agent reported no actionable findings.
+
+## Draft PR Message
+
+Title: `[ci] Stop forcing FA4 in model-load lanes`
+
+Body:
+
+```markdown
+## Summary
+
+Fixes #1558 by keeping FA4 enabled only where CI intentionally exercises FA4, while returning model-load and training-style Modal lanes to the product default (`FASTVIDEO_FA4=0` unless explicitly opted in).
+
+- Set `FASTVIDEO_FA4=0` for transformer/model-load and training-style `pr_test.py` lanes.
+- Default generic `launch_l40s_job.py` runs to FA4 off, preserving opt-in through local env or `--env-vars`.
+- Add a source-only contract test covering the Modal FA4 policy and preserving SSIM's FA4 default.
+
+## Validation
+
+- Modal L40S `pytest fastvideo/tests/contract/test_modal_fa4_policy.py fastvideo/tests/train/models -vs`
+  - `9 passed in 92.34s`
+  - App: `ap-dBp3HNyPscUyqd2TamekW3`
+- Modal L40S `pytest fastvideo/tests/transformers -vs`
+  - `5 passed, 1 skipped in 265.13s`
+  - App: `ap-hrzrFjSWJ2w8h8qcjaDmqW`
+- Modal L40S `pre-commit run --all-files`
+  - passed
+  - App: `ap-4iiXhNnoFvM881XZRV0iY4`
+
+## Notes
+
+This unblocks CI lanes that do not need FA4. It does not resolve the underlying explicit-FA4 image compatibility mismatch between the pinned FA4 cute overlay and the currently resolved `nvidia-cutlass-dsl`; that remains a separate image/dependency follow-up.
+
+# Checklist
+- [ ] I ran pre-commit run --all-files and fixed all issues
+- [ ] I added or updated tests for my changes
+- [ ] I updated documentation if needed
+- [ ] I considered GPU memory impact of my changes
+For model/pipeline changes, also check:
+- [ ] I verified targeted Wan T2V SSIM regression tests pass on L40S
+- [ ] I updated the support matrix if adding a new model
+```
 
 ## Files Changed
 
@@ -133,6 +189,10 @@
 
 - No local pytest run, per FastVideo validation rules.
 - Modal model-load and transformer-lane validation passed on L40S as above.
+- Modal `pre-commit run --all-files` passed on L40S as above.
+- Latest pushed fix commit: `81baaa34048484add1aacb720ebe9d29ace869fe`.
+- Stage 3 review-code loop completed with no actionable findings. No PR has been opened.
+- Handoff remains active and must be removed before any future Stage 4 draft PR creation.
 
 ## Planned Validation
 
