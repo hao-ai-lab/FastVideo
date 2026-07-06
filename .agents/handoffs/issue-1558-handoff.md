@@ -14,8 +14,8 @@
 - Branch: issue/1558-fa4-fmax-typeerror
 - Worktree: /tmp/fastvideo-worktrees/issue-1558-fa4-fmax-typeerror
 - Handoff path: .agents/handoffs/issue-1558-handoff.md
-- Current stage: Stage 1 - Deep Dive And Plan
-- Implementation begun: no
+- Current stage: Stage 2 - Implement The User-Directed Fix
+- Implementation begun: yes
 
 ## Authentication And Git Notes
 
@@ -25,6 +25,8 @@
 - Fetched origin and upstream before branch creation. `git fetch origin` completed with known_hosts cross-device-link warnings but no nonzero exit.
 - No local/fetched branch or handoff containing issue 1558 existed before this branch was created.
 - Worktree was created from upstream/main at 9d909f5f0 ([test]: remove dead and duplicate tests (-489 lines) (#1556)).
+- 2026-07-06T05:39Z: Recreated the issue worktree from existing branch `issue/1558-fa4-fmax-typeerror` after the `/tmp` worktree disappeared from `git worktree list`; resumed from pushed handoff commit 8be27f48625f3a0bc1b2515eed7da5b15050d16a.
+- 2026-07-06T05:52Z: After user interruption, `/tmp` issue and validation worktrees were again missing/prunable. Ran `git worktree prune`, recreated `/tmp/fastvideo-worktrees/issue-1558-fa4-fmax-typeerror` and `/tmp/fastvideo-worktrees/interleavethinker-modal`, and reapplied the Stage 2 patch.
 
 ## Stage 1 Log
 
@@ -35,6 +37,36 @@
 - 2026-07-06T05:27Z: Read root, `fastvideo/`, `fastvideo/attention/`, and `fastvideo/tests/` AGENTS guidance before code inspection.
 - 2026-07-06T05:31Z: Inspected FA4 env declarations, Modal harness defaults, Docker FA4 overlay, pyproject dependency surface, and FA4 attention routing.
 - 2026-07-06T05:34Z: Read merged PRs #1539, #1540, and #1541 for the intended FA4 opt-in and kernel-pin behavior.
+
+## Stage 2 Log
+
+- 2026-07-06T05:39Z: User approved the recommended targeted CI harness scope fix.
+- 2026-07-06T05:39Z: Re-checked issue #1558 and comments with gh. State remained OPEN, no new comments since 2026-07-05T22:28:48Z.
+- 2026-07-06T05:39Z: Re-checked open PRs for `1558`, `fmax`, `FASTVIDEO_FA4`, `FA4_CUTE_REF`, and `nvidia-cutlass-dsl`. No open PR mentions or closes #1558.
+- 2026-07-06T05:39Z: Searched `.agents/lessons`, Modal harness files, attention tests, and contract tests for related pitfalls/coverage terms. No relevant lesson was found; existing attention tests cover FA4 explicit opt-in behavior.
+- Selected approach: Option A - keep SSIM FA4 default enabled, disable FA4 for model-load/training-style Modal lanes that do not intend to exercise FA4, and make the generic L40S launcher default follow product behavior (`FASTVIDEO_FA4=0`) unless the caller opts in.
+- Implementation scope: edit `fastvideo/tests/modal/pr_test.py` and `fastvideo/tests/modal/launch_l40s_job.py`; do not edit FA4 runtime fallback behavior, Docker pins, `pyproject.toml`, or `fastvideo/tests/modal/ssim_test.py`.
+- 2026-07-06T05:53Z: Patched `fastvideo/tests/modal/pr_test.py` so transformer/model-load/training-style lanes set `FASTVIDEO_FA4=0` in their pytest command strings while leaving image-level FA4 default `1` for inference/perf parity.
+- 2026-07-06T05:53Z: Patched `fastvideo/tests/modal/launch_l40s_job.py` so generic ad hoc jobs default `FASTVIDEO_FA4` to `0`, preserving explicit opt-in through local env or `--env-vars`.
+- 2026-07-06T05:53Z: Added `fastvideo/tests/contract/test_modal_fa4_policy.py`, a source-only contract test that guards the generic launcher default, the SSIM FA4 default, and the pr_test training/model-load command policy.
+- 2026-07-06T06:00Z: Modal L40S validation attempt `ap-E3CvsFRa3g2mEb5UH9Vyu4` failed before tests ran. Command used interleavethinker launcher with `--install-extra test`, `--env-vars FASTVIDEO_FA4=0`, and local code/test patch. Failure was dependency install: `uv pip install -e '.[test]'` tried to build `fastvideo-kernel==0.3.2` from sdist and failed with `fatal error: cutlass/cutlass.h: No such file or directory`. This did not reach pytest and is unrelated to the FA4 policy patch.
+- 2026-07-06T06:01Z: Modal L40S validation attempt `ap-AWGczZL2hKCLnzOLMnvIvD` used `--install-extra none` and reached the command, but failed before pytest because `hf auth login --token $HF_API_KEY` received an empty token. This did not reach pytest and is unrelated to the FA4 policy patch.
+- 2026-07-06T06:57Z: Modal L40S validation `ap-dBp3HNyPscUyqd2TamekW3` passed with interleavethinker launcher, `--install-extra none`, `--env-vars FASTVIDEO_FA4=0`, and local code/test patch:
+  `pytest fastvideo/tests/contract/test_modal_fa4_policy.py fastvideo/tests/train/models -vs`
+  Result: `9 passed in 92.34s`. The suite included the new contract test plus Cosmos, Hunyuan, LongCat, MatrixGame2, Wan, and Wan causal model-load/forward tests. Logs showed `flash_attn.cute (FA4) is installed but not enabled` and `Using FlashAttention-2 backend` for the affected path, so the reported FA4 `fmax()` compile path was avoided.
+- 2026-07-06T07:03Z: Modal L40S validation `ap-hrzrFjSWJ2w8h8qcjaDmqW` passed with interleavethinker launcher, `--install-extra none`, `--env-vars FASTVIDEO_FA4=0`, and local code/test patch:
+  `pytest fastvideo/tests/transformers -vs`
+  Result: `5 passed, 1 skipped in 265.13s`. Logs again showed FA4 installed but not enabled and FlashAttention-2 selected for the affected FLASH_ATTN path.
+
+## Files Changed
+
+- `fastvideo/tests/modal/pr_test.py`
+  - Kept image-level `FASTVIDEO_FA4` default as `1` for existing inference/perf parity.
+  - Added `FASTVIDEO_FA4=0` to `run_transformer_tests`, legacy training, LoRA training, VSA training, distill DMD, self-forcing, modular train model/methods, and grad-norm seeding commands.
+- `fastvideo/tests/modal/launch_l40s_job.py`
+  - Changed generic launcher default from `os.environ.get("FASTVIDEO_FA4", "1")` to `os.environ.get("FASTVIDEO_FA4", "0")`.
+- `fastvideo/tests/contract/test_modal_fa4_policy.py`
+  - New source/AST contract coverage for the intended Modal FA4 policy.
 
 ## GitHub Context
 
@@ -99,7 +131,8 @@
 
 ## Validation Status
 
-- No tests or Modal jobs run. Stage 1 must not run Modal or implement changes.
+- No local pytest run, per FastVideo validation rules.
+- Modal model-load and transformer-lane validation passed on L40S as above.
 
 ## Planned Validation
 
