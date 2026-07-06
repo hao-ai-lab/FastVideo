@@ -75,6 +75,15 @@ def test_wan_block_selection_rejects_vsa_for_fullattn(monkeypatch: pytest.Monkey
         _select_wan_transformer_block(FastWan2_2_TI2V_5B_FullAttn_Config().dit_config)
 
 
+def test_wan_block_selection_rejects_vsa_with_missing_backend_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+    config = FastWan2_2_TI2V_5B_FullAttn_Config().dit_config
+    config._supported_attention_backends = None  # type: ignore[assignment]
+
+    with pytest.raises(ValueError, match="VIDEO_SPARSE_ATTN.*FullAttn"):
+        _select_wan_transformer_block(config)
+
+
 def test_wan_block_selection_preserves_existing_vsa_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
     assert _select_wan_transformer_block(FastWan2_2_TI2V_5B_Config().dit_config) is WanTransformerBlock_VSA

@@ -292,9 +292,8 @@ class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
     ti2v_task: bool = False
 
     def __post_init__(self) -> None:
-        assert not (self.ti2v_task and self.lucy_edit_task)
-        WanT2V480PConfig.__post_init__(self)
-        self.dit_config.expand_timesteps = self.expand_timesteps
+        super().__post_init__()
+        self.vae_config.load_encoder = False
 
     def check_pipeline_config(self) -> None:
         super().check_pipeline_config()
