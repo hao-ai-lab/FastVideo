@@ -11,6 +11,41 @@ from pytorch_msssim import ms_ssim, ssim
 logger = init_logger(__name__)
 
 
+def skip_if_gated_repo_inaccessible(repo_id: str,
+                                    *,
+                                    local_path: str | None = None,
+                                    test_name: str = "test",
+                                    allow_module_level: bool = False) -> None:
+    """Skip a test when ``repo_id`` is gated/private and the token lacks access.
+
+    Local weights win: when ``local_path`` already exists the check is skipped
+    entirely, so cached machines keep running offline. Transient hub failures
+    (offline, DNS, 429/5xx) do NOT skip either — the subsequent download will
+    serve from cache or fail loudly, preserving the CI failure signal. Only a
+    positively-identified authorization problem produces a skip.
+    """
+    import pytest
+
+    if local_path is not None and os.path.exists(local_path):
+        return
+
+    from huggingface_hub import HfApi
+    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
+
+    try:
+        HfApi().auth_check(repo_id)
+    except (GatedRepoError, RepositoryNotFoundError) as exc:
+        pytest.skip(
+            f"Skipping {test_name}: the configured HuggingFace token cannot "
+            f"access the gated repo {repo_id}: {exc}",
+            allow_module_level=allow_module_level,
+        )
+    except Exception as exc:  # noqa: BLE001 - hub unreachable, proxies, 5xx
+        logger.warning(
+            "Gated-repo access probe for %s failed (%s); proceeding — the "
+            "download will serve from cache or fail loudly.", repo_id, exc)
+
+
 def _read_video_frames(path: str) -> torch.Tensor:
     """Read video frames as a ``(T, C, H, W)`` uint8 tensor.
 

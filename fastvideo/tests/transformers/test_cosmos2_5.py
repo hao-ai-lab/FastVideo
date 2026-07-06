@@ -8,8 +8,6 @@ import sys
 
 import pytest
 import torch
-from huggingface_hub import hf_hub_download
-from huggingface_hub.errors import HfHubHTTPError
 
 # Add cosmos-predict2.5 to Python path for loading reference model
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +19,7 @@ if os.path.exists(COSMOS_PREDICT2_5_PATH) and COSMOS_PREDICT2_5_PATH not in sys.
 
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.tests.utils import skip_if_gated_repo_inaccessible
 from fastvideo.utils import maybe_download_model
 # Use Cosmos 2.5 specific config
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
@@ -45,29 +44,11 @@ CHECKPOINT_SUBDIR = "base/post-trained"
 CHECKPOINT_FILENAME = "81edfebe-bd6a-4039-8c1d-737df1a790bf_ema_bf16.pt"
 
 
-def _skip_if_gated_weights_unavailable() -> None:
-    try:
-        hf_hub_download(BASE_MODEL_PATH, filename=".gitattributes")
-    except HfHubHTTPError as exc:
-        pytest.skip(
-            "Skipping Cosmos 2.5 transformer test because the configured "
-            "HuggingFace token cannot access the gated Cosmos weights: "
-            f"{exc}",
-            allow_module_level=True,
-        )
-
-
 def _resolve_model_path() -> str:
-    _skip_if_gated_weights_unavailable()
-    try:
-        return maybe_download_model(BASE_MODEL_PATH, local_dir=None)
-    except ValueError as exc:
-        pytest.skip(
-            "Skipping Cosmos 2.5 transformer test because the configured "
-            "HuggingFace token cannot access the gated Cosmos weights: "
-            f"{exc}",
-            allow_module_level=True,
-        )
+    skip_if_gated_repo_inaccessible(BASE_MODEL_PATH,
+                                    test_name="Cosmos 2.5 transformer test",
+                                    allow_module_level=True)
+    return maybe_download_model(BASE_MODEL_PATH, local_dir=None)
 
 
 MODEL_PATH = _resolve_model_path()
