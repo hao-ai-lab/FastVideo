@@ -7,12 +7,12 @@
 - Repo: hao-ai-lab/FastVideo
 - Worktree: /tmp/fastvideo-worktrees/issue-864-fastwan22-ti2v-size-mismatch
 - Branch: issue/864-fastwan22-ti2v-size-mismatch
-- Current stage: Stage 1 complete; awaiting user guidance before implementation
-- Implementation begun: no
+- Current stage: Stage 2 implementation in progress
+- Implementation begun: yes
 - Handoff path: .agents/handoffs/issue-864-handoff.md
 - Created: 2026-07-06T05:21:35Z
 - Recreated after interrupted /tmp worktree loss: 2026-07-06
-- Last updated: 2026-07-06T05:39:09Z
+- Last updated: 2026-07-06T07:31:43Z
 
 ## Stage 0 Resume Or Start
 
@@ -230,5 +230,39 @@ Implementation steps for Stage 2:
 
 ## Next Decision
 
-- Await user guidance before implementation.
-- Recommended choice: proceed with Approach A, the minimal FullAttn-specific T2V-only config/registry fix plus early VSA rejection and focused tests.
+- User approved Approach A.
+
+## Stage 2 Implementation Log
+
+- 2026-07-06T07:05:06Z: Reattached the issue worktree after `/tmp` checkout disappeared again:
+  - `git worktree add /tmp/fastvideo-worktrees/issue-864-fastwan22-ti2v-size-mismatch issue/864-fastwan22-ti2v-size-mismatch`
+- Rechecked issue #864 with `gh issue view`; state/comments unchanged.
+- Rechecked related open PRs with `gh pr list --search '864 OR FastWan2.2-TI2V-5B-FullAttn-Diffusers OR "size of tensor a"'`; only related open PR remains #1494, ready-for-review, not draft, not closing #864.
+- Selected approach: Approach A, the minimal FullAttn-specific T2V-only config/registry fix plus early VSA rejection and focused tests.
+- 2026-07-06T07:10:58Z: Applied implementation patch:
+  - `fastvideo/configs/pipelines/wan.py`: added `FastWan2_2_TI2V_5B_FullAttn_Config`, with `ti2v_task=False`, VAE encode disabled, dense supported attention backends, and early rejection for `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`.
+  - `fastvideo/registry.py`: split `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers` from the generic FastWan2.2 TI2V mapping and registered it as T2V-only.
+  - `fastvideo/models/dits/wanvideo.py`: added `_select_wan_transformer_block` so direct Wan construction rejects VSA when the config does not list `VIDEO_SPARSE_ATTN`.
+  - `fastvideo/tests/api/test_fastwan_fullattn.py`: added focused registry/config/backend guard tests.
+  - `docs/inference/support_matrix.md`: marked FullAttn as T2V-only and not VSA-compatible.
+  - `scripts/inference/inference_wan_VSA_DMD_5B_720P.yaml`: added a dense-attention warning for the FullAttn checkpoint.
+- Static local check run: `git diff --check` passed. No local pytest was run.
+- Planned Modal validation command from issue worktree using the `interleavethinker` launcher:
+  - `python -m modal run /tmp/fastvideo-worktrees/interleavethinker-modal/fastvideo/tests/modal/launch_l40s_job.py --install-extra test --command "pytest fastvideo/tests/api/test_fastwan_fullattn.py -q" --apply-local-patch --patch-paths docs/inference/support_matrix.md,fastvideo/configs/pipelines/wan.py,fastvideo/models/dits/wanvideo.py,fastvideo/registry.py,fastvideo/tests/api/test_fastwan_fullattn.py,scripts/inference/inference_wan_VSA_DMD_5B_720P.yaml`
+- Modal validation:
+  - First attempt used the planned command above with `--install-extra test`.
+  - Modal run: `ap-A54rMzpP8mj3BqXd0WRCuM`.
+  - Result: failed before pytest during `uv pip install -e '.[test]'` because building `fastvideo-kernel==0.3.2` from sdist failed on missing `cutlass/cutlass.h`. This was treated as validation infrastructure/dependency setup failure, not a failure of the new tests.
+  - Second attempt skipped dependency installation because the Modal image already has FastVideo installed and applied the same local patch:
+    - `python -m modal run /tmp/fastvideo-worktrees/interleavethinker-modal/fastvideo/tests/modal/launch_l40s_job.py --install-extra none --command "pytest fastvideo/tests/api/test_fastwan_fullattn.py -q" --apply-local-patch --patch-paths docs/inference/support_matrix.md,fastvideo/configs/pipelines/wan.py,fastvideo/models/dits/wanvideo.py,fastvideo/registry.py,fastvideo/tests/api/test_fastwan_fullattn.py,scripts/inference/inference_wan_VSA_DMD_5B_720P.yaml`
+  - Modal run: `ap-lgDm4aiyDLfjbUhojHub9q`.
+  - Result: `5 passed in 0.03s`.
+  - Modal completion summary: command `pytest fastvideo/tests/api/test_fastwan_fullattn.py -q`, git repo `https://github.com/macthecadillac/FastVideo.git`, git commit `7d60a4824ea473e0577cd13d95b8f04c067a1e9f`, `install_extra='none'`, `local_patch_applied=True`.
+- Resume re-check before commit/push on 2026-07-06T07:31Z:
+  - `gh api user --jq .login` returned `macthecadillac`.
+  - `gh issue view 864 ...` showed issue still open, no assignees, same two comments, updatedAt still `2026-02-06T19:45:44Z`.
+  - Related open PR search still returned only #1494, ready-for-review (`isDraft=false`), head `attn-loud-fail`, not closing #864.
+- Static local checks after patch:
+  - `git diff --check` passed.
+- Next step:
+  - Commit the implementation with GPG signing, push immediately, then start Stage 3 review/adjudication on the committed branch.
