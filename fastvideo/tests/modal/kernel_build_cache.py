@@ -6,7 +6,6 @@ cloned checkout after dependency installation.
 
 import argparse
 import datetime
-import glob
 import hashlib
 import json
 import os
@@ -204,9 +203,9 @@ def _build_metadata(repo_root: Path) -> dict[str, object]:
 
 def _find_wheel(directory: Path) -> Path:
     candidates = sorted(
-        Path(path)
+        path
         for pattern in ("fastvideo_kernel-*.whl", "fastvideo-kernel-*.whl")
-        for path in glob.glob(str(directory / pattern))
+        for path in directory.glob(pattern)
     )
     if not candidates:
         raise RuntimeError(f"No fastvideo-kernel wheel found in {directory}")
@@ -281,9 +280,9 @@ def _store_cache_entry(cache_root: Path, metadata: dict[str, object], wheel: Pat
                                             encoding="utf-8")
     try:
         temp_entry.rename(cache_entry)
-    except FileExistsError:
+    except OSError as error:
         shutil.rmtree(temp_entry, ignore_errors=True)
-        _log(f"cache entry {cache_entry} was created concurrently; keeping existing entry")
+        _log(f"cache entry {cache_entry} was created concurrently or could not be moved: {error}")
     return cache_entry
 
 
