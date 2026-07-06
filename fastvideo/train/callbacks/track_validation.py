@@ -240,6 +240,7 @@ class TrackValidationCallback(Callback):
         try:
             gen_logs: list[Any] = []
             notrack_logs: list[Any] = []
+            nomocfg_logs: list[Any] = []
             ref_logs: list[Any] = []
             for i, s in enumerate(self._samples):
                 # Apply the SAME training-time sampler so the model sees the sampled subset
@@ -254,6 +255,21 @@ class TrackValidationCallback(Callback):
                     art = self.tracker.video(fn, caption=f"[{step}] WITH-track {s['caption'][:110]}")
                     if art is not None:
                         gen_logs.append(art)
+
+                # WITH-TRACK, NO-MOTION-CFG: same conditioning as gen but drops the motion arm
+                # of the joint CFG -- text CFG only, tracks still in the forward. Isolates how
+                # much of the "gen" quality comes from motion CFG amplification vs the base model.
+                if self.paired_no_track:
+                    nm_latents = self._sample(student, transformer, s, tp_s, tv_s, motion_cfg=False)
+                    nm_px = student.decode_latents(nm_latents.permute(0, 2, 1, 3, 4))[0]
+                    nm_frames = self._overlay_tracks(nm_px, s, tp_s, tv_s)
+                    if self._is_main:
+                        fn_nm = os.path.join(out_dir, f"step{step:06d}_sample{i}_nomotioncfg.mp4")
+                        imageio.mimsave(fn_nm, nm_frames, fps=self.fps, macro_block_size=1)
+                        art = self.tracker.video(fn_nm,
+                                                 caption=f"[{step}] WITH-track NO-motion-CFG {s['caption'][:100]}")
+                        if art is not None:
+                            nomocfg_logs.append(art)
 
                 # NO-TRACK counterfactual: same image + prompt, tracks=None (zero track map).
                 # Overlaid with the SAME sampled tracks for side-by-side comparison -- if this
@@ -281,14 +297,16 @@ class TrackValidationCallback(Callback):
 
             if self._is_main and gen_logs:
                 logs: dict[str, Any] = {"track_val/generated": gen_logs}
+                if nomocfg_logs:
+                    logs["track_val/no_motion_cfg"] = nomocfg_logs
                 if notrack_logs:
                     logs["track_val/no_track"] = notrack_logs
                 if ref_logs and not self._ref_logged:
                     logs["track_val/reference_gt"] = ref_logs
                 self.tracker.log_artifacts(logs, step)
                 self._ref_logged = True
-                logger.info("TrackValidation: logged %d gen + %d no-track videos at step %d", len(gen_logs),
-                            len(notrack_logs), step)
+                logger.info("TrackValidation: logged %d gen + %d nomocfg + %d no-track videos at step %d",
+                            len(gen_logs), len(nomocfg_logs), len(notrack_logs), step)
         finally:
             if was_training:
                 transformer.train()
@@ -311,8 +329,14 @@ class TrackValidationCallback(Callback):
             return tp, tv
         return tp_s, tv_s
 
-    def _sample(self, student: Any, transformer: torch.nn.Module, s: dict[str, Any], tp_in: torch.Tensor,
-                tv_in: torch.Tensor) -> torch.Tensor:
+    def _sample(self,
+                student: Any,
+                transformer: torch.nn.Module,
+                s: dict[str, Any],
+                tp_in: torch.Tensor,
+                tv_in: torch.Tensor,
+                *,
+                motion_cfg: bool = True) -> torch.Tensor:
         device = student.device
         dtype = torch.bfloat16
         flow_shift = float(student.timestep_shift)
@@ -358,10 +382,11 @@ class TrackValidationCallback(Callback):
             v_full = _fwd(txt, tp, tv, model_in, ts)  # v(c_t, c_m)
             if not cfg_on:
                 v = v_full
-            elif tp is None:
-                # No-track counterfactual: motion CFG undefined -> plain text CFG only.
-                v_uncond = _fwd(txt_null, None, None, model_in, ts)
-                v = v_uncond + wt * (v_full - v_uncond)
+            elif tp is None or not motion_cfg:
+                # No motion arm: (a) no-track counterfactual OR (b) motion_cfg=False. Use text
+                # CFG only, tracks-still-in-forward: v = v(∅text, tp) + wt·(v(text, tp) - v(∅text, tp)).
+                v_no_text = _fwd(txt_null, tp, tv, model_in, ts)
+                v = v_no_text + wt * (v_full - v_no_text)
             else:
                 # MotionStream Eq. 2: joint text+motion CFG (3 NFE / step).
                 #   v_no_text   = v(∅, c_m)   (drop text, keep tracks)

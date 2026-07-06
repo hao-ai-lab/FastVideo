@@ -25,6 +25,7 @@ it is handed.
 from __future__ import annotations
 
 import math
+import os
 
 import torch
 import torch.nn.functional as F
@@ -52,7 +53,7 @@ class TrackEncoder(nn.Module):
                  vae_spatial_compression: int = 8,
                  vae_temporal_compression: int = 4,
                  max_track_id: int = 100_000,
-                 zero_init: bool = True) -> None:
+                 zero_init: bool = False) -> None:
         super().__init__()
         self.id_dim = id_dim
         self.track_channels = track_channels
@@ -61,15 +62,21 @@ class TrackEncoder(nn.Module):
         self.max_track_id = max_track_id
 
         # Track head: 4x temporal compression followed by a 1x1x1 conv (MotionStream).
+        # bias=False is LOAD-BEARING: the paper's Eq. 1 says c_m is nonzero ONLY at track cells.
+        # With bias=True, empty spatial cells get the bias broadcast to every location, turning
+        # the sparse track signal into a dense (bias + sparse-signal) tensor — with-track and
+        # no-track differ only at ~3% of cells, so the model learns to ignore the sparse part
+        # and rely on the bias / I2V shortcut.
         self.temporal_conv = nn.Conv3d(id_dim,
                                        track_channels,
                                        kernel_size=(vae_temporal_compression, 1, 1),
-                                       stride=(vae_temporal_compression, 1, 1))
-        self.proj = nn.Conv3d(track_channels, track_channels, kernel_size=1)
+                                       stride=(vae_temporal_compression, 1, 1),
+                                       bias=False)
+        self.proj = nn.Conv3d(track_channels, track_channels, kernel_size=1, bias=False)
         if zero_init:
-            # Start with zero track contribution so step-0 behavior == the teacher.
+            # Legacy ControlNet-style zero-init; MotionStream explicitly avoids ControlNet
+            # architecture, so this defaults off. Kept for backward compat with older checkpoints.
             nn.init.zeros_(self.proj.weight)
-            nn.init.zeros_(self.proj.bias)
 
     def sample_ids(self, batch: int, num_tracks: int, device: torch.device,
                    generator: torch.Generator | None = None) -> torch.Tensor:
@@ -94,7 +101,13 @@ class TrackEncoder(nn.Module):
         B, T, N, _ = coords.shape
         device = coords.device
         if track_ids is None:
-            track_ids = self.sample_ids(B, N, device)
+            # WANTRACK_FIXED_SAMPLE=1 -> deterministic IDs = arange(N), same across steps.
+            # For overfit debugging: model sees the same phi_n at each track cell every step
+            # instead of a fresh random vector, so it can lock onto the pattern.
+            if os.getenv("WANTRACK_FIXED_SAMPLE", "0") not in ("0", "false", "False"):
+                track_ids = torch.arange(N, device=device).unsqueeze(0).expand(B, N).contiguous()
+            else:
+                track_ids = self.sample_ids(B, N, device)
 
         phi = sinusoidal_embedding(track_ids, self.id_dim)  # (B, N, id_dim) float32
 

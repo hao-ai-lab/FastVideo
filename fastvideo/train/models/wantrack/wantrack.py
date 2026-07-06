@@ -59,7 +59,23 @@ class WanTrackModel(WanModel):
         self._init_track_aug()
 
     def on_train_start(self) -> None:
-        return
+        # Optional experiment: re-init the (checkpoint zero-conv) track-head proj to a non-zero
+        # Conv3d init at runtime (WANTRACK_NONZERO_INIT=1), so tracks carry a signal from step 0.
+        # Done here (post-load, post-FSDP) so it overrides the checkpoint's zero proj WITHOUT
+        # rewriting the checkpoint file (a load/save round-trip corrupts the other weights).
+        if os.getenv("WANTRACK_NONZERO_INIT", "0") in ("0", "false", "False"):
+            return
+        import torch.nn as nn
+        tenc = getattr(getattr(self, "transformer", None), "track_encoder", None)
+        if tenc is None:
+            logger.warning("[WANTRACK] WANTRACK_NONZERO_INIT set but no track_encoder found; skipping")
+            return
+        with torch.no_grad():
+            wl = tenc.proj.weight.to_local() if hasattr(tenc.proj.weight, "to_local") else tenc.proj.weight
+            bl = tenc.proj.bias.to_local() if hasattr(tenc.proj.bias, "to_local") else tenc.proj.bias
+            nn.init.kaiming_uniform_(wl, a=5**0.5)  # default Conv3d init (non-zero)
+            nn.init.zeros_(bl)
+            logger.info("[WANTRACK] re-inited track_encoder.proj to NON-ZERO (norm=%.4f)", float(wl.float().norm()))
 
     # ------------------------------------------------------------------
     # MotionStream train-time augmentations (in-wrapper; no trainer changes).
@@ -91,6 +107,12 @@ class WanTrackModel(WanModel):
         # CFG dropout (ours, not MotionStream) -> default OFF; enables motion/text CFG when >0.
         self._aug_motion_drop = float(os.getenv("WANTRACK_MOTION_DROP", "0.0"))
         self._aug_text_drop = float(os.getenv("WANTRACK_TEXT_DROP", "0.0"))
+        # SPARSE MODE (Yongqi/labmate recipe): if WANTRACK_SPARSE=1, ignore MIN/MAX and instead
+        # keep exactly `1 per SAM object + WANTRACK_EXTRA_RANDOM background points`. The extras
+        # are drawn UNIFORMLY (mode="random") or by lowrank informativeness weight (mode="weighted").
+        self._aug_sparse = os.getenv("WANTRACK_SPARSE", "0") not in ("0", "false", "False")
+        self._aug_extra_random = int(os.getenv("WANTRACK_EXTRA_RANDOM", "20"))
+        self._aug_extra_mode = os.getenv("WANTRACK_EXTRA_MODE", "random")  # "random" or "weighted"
         # TEMP debug: WANTRACK_DEBUG=1 logs per-step sampling stats (throttled) so we can verify
         # the sampler keeps the right number of tracks / covers objects / uses the weights.
         self._aug_debug = int(os.getenv("WANTRACK_DEBUG", "0"))
@@ -103,6 +125,7 @@ class WanTrackModel(WanModel):
         generator: torch.Generator,
         object_ids: torch.Tensor | None = None,
         track_weights: torch.Tensor | None = None,
+        sample_seeds: list[int] | None = None,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         """MotionStream-style track augmentation.
 
@@ -132,17 +155,51 @@ class WanTrackModel(WanModel):
         disp = ((tp - tp[:, :1])**2).sum(-1).sqrt()  # [B,T,N]
         motion = (disp * (track_visibility > 0.5).float()).amax(dim=1)  # [B,N]
 
-        # Subsample whenever there's room to draw fewer than N (min_points < N). The old
-        # `max_points < N` gate silently disabled ALL sampling when max_points == N (== 2500),
-        # so coverage/weighted/uniform never ran. max_points == 0 still means "keep all".
-        if self._aug_max_points > 0 and self._aug_min_points < N:
+        # SPARSE MODE (labmate recipe): 1-per-SAM-object + WANTRACK_EXTRA_RANDOM extras from
+        # remaining valid tracks. Ignores MIN/MAX. Object pick is UNIFORM inside each segment
+        # (not weighted) so we don't bias toward high-motion background near objects.
+        if self._aug_sparse and object_ids is not None:
+            oids = object_ids
+            if oids.dim() == 1:
+                oids = oids.unsqueeze(0).expand(B, -1)
+            for b in range(B):
+                gen_b = torch.Generator(device=gdev).manual_seed(int(sample_seeds[b])) \
+                    if sample_seeds is not None else generator
+                valid = (track_visibility[b, 0].to(gdev) > 0.5).float()
+                keep = torch.zeros(N, device=gdev)
+                ob = oids[b].to(gdev)
+                for oid in torch.unique(ob):
+                    if int(oid) < 0:
+                        continue
+                    idxs = (ob == oid).nonzero(as_tuple=True)[0]
+                    v_i = valid[idxs]
+                    if float(v_i.sum()) <= 0.0:
+                        v_i = torch.ones_like(v_i)
+                    keep[idxs[torch.multinomial(v_i, 1, generator=gen_b)]] = 1.0
+                # extras drawn from the remaining valid pool
+                if self._aug_extra_random > 0:
+                    pool_mask = valid * (keep < 0.5).float()
+                    if self._aug_extra_mode == "weighted" and tw is not None:
+                        pw = (0.05 + tw[b]) * pool_mask
+                    else:  # "random"
+                        pw = pool_mask
+                    ne = min(self._aug_extra_random, int((pw > 0).sum().item()))
+                    if ne > 0:
+                        keep[torch.multinomial(pw, ne, replacement=False, generator=gen_b)] = 1.0
+                vis[b] = vis[b] * keep.to(device=device, dtype=vis.dtype).unsqueeze(0)
+        # DENSE (MotionStream) MODE: sample K~U[min,max] with coverage+weighted+uniform.
+        elif self._aug_max_points > 0 and self._aug_min_points < N:
             oids = object_ids
             if oids is not None and oids.dim() == 1:
                 oids = oids.unsqueeze(0).expand(B, -1)
             for b in range(B):
+                # WANTRACK_FIXED_SAMPLE=1 -> per-sample deterministic generator so the same
+                # video always gets the same subset across training steps (overfit debugging).
+                gen_b = torch.Generator(device=gdev).manual_seed(int(sample_seeds[b])) \
+                    if sample_seeds is not None else generator
                 hi = min(self._aug_max_points, N)
                 lo = min(self._aug_min_points, hi)
-                k = int(torch.randint(lo, hi + 1, (1, ), generator=generator, device=gdev).item())
+                k = int(torch.randint(lo, hi + 1, (1, ), generator=gen_b, device=gdev).item())
                 valid = (track_visibility[b, 0].to(gdev) > 0.5).float()  # only frame-0-visible are valid queries
                 if tw is not None:
                     w = (0.05 + self._aug_diversity * tw[b]) * valid  # informativeness (low-rank) weight
@@ -164,20 +221,20 @@ class WanTrackModel(WanModel):
                         ww = w[idxs]
                         if float(ww.sum()) <= 0.0:
                             ww = torch.ones_like(ww)
-                        keep[idxs[torch.multinomial(ww, 1, generator=generator)]] = 1.0
+                        keep[idxs[torch.multinomial(ww, 1, generator=gen_b)]] = 1.0
                 # (b) informativeness-weighted draw for (1 - uniform_frac) of the remaining budget
                 rem_total = max(0, k - int(keep.sum().item()))
                 n_weighted = rem_total - int(round(rem_total * self._aug_uniform_frac))
                 wa = w * (keep < 0.5).float()
                 nw = min(n_weighted, int((wa > 0).sum().item()))
                 if nw > 0:
-                    keep[torch.multinomial(wa, nw, replacement=False, generator=generator)] = 1.0
+                    keep[torch.multinomial(wa, nw, replacement=False, generator=gen_b)] = 1.0
                 # (c) fill whatever is left up to k UNIFORMLY over remaining valid tracks
                 #     (also backfills any weighted-pool shortfall) -> keeps static context.
                 ua = valid * (keep < 0.5).float()
                 nu = min(max(0, k - int(keep.sum().item())), int((ua > 0).sum().item()))
                 if nu > 0:
-                    keep[torch.multinomial(ua, nu, replacement=False, generator=generator)] = 1.0
+                    keep[torch.multinomial(ua, nu, replacement=False, generator=gen_b)] = 1.0
                 vis[b] = vis[b] * keep.to(device=device, dtype=vis.dtype).unsqueeze(0)
 
         # Stochastic CONTIGUOUS-chunk masking (MotionStream mid-frame chunks): zero L-frame
@@ -280,6 +337,21 @@ class WanTrackModel(WanModel):
         else:
             track_weights = None
 
+        # WANTRACK_FIXED_SAMPLE=1 -> parse per-sample seeds from info_list["id"] ("vid_000007" -> 7)
+        # so the same clip always gets the same track subset AND (via TrackEncoder) the same
+        # sinusoidal IDs across steps. For overfit debugging on small datasets.
+        sample_seeds: list[int] | None = None
+        if os.getenv("WANTRACK_FIXED_SAMPLE", "0") not in ("0", "false", "False"):
+            infos = raw_batch.get("info_list") or []
+            seeds = []
+            for info in infos:
+                try:
+                    seeds.append(int(str(info.get("id", "0")).split("_")[-1]) + 1)  # +1 avoids seed=0
+                except (ValueError, AttributeError, TypeError):
+                    seeds.append(1)
+            if seeds:
+                sample_seeds = seeds
+
         # MotionStream train-time augments (1000-2500 track sampling w/ object coverage +
         # informativeness-weighted + uniform draw, contiguous-chunk masking). Env-gated;
         # a no-op when WANTRACK_AUG=0.
@@ -287,7 +359,8 @@ class WanTrackModel(WanModel):
                                                               track_visibility,
                                                               generator,
                                                               object_ids=object_ids,
-                                                              track_weights=track_weights)
+                                                              track_weights=track_weights,
+                                                              sample_seeds=sample_seeds)
 
         # TEMP debug: confirm what actually flows into the forward (tracks not silently dropped).
         if self._aug_debug and self._aug_calls <= 8:
