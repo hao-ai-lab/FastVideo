@@ -7,11 +7,11 @@
 - Repository: hao-ai-lab/FastVideo
 - Branch: issue/1523-fix
 - Worktree: /tmp/fastvideo-worktrees/issue-1523-fix
-- Current commit: 0a699ec836ea7cbfe5ec4173a800af6a8adef117
+- Current code commit: 7012450b8d59badb69f61f36d0ddfb500f858ead
 - Handoff path: .agents/handoffs/issue-1523-handoff.md
-- Current stage: Stage 2 - Implement The User-Directed Fix
+- Current stage: Stage 3 - Review, Adjudicate, And Iterate
 - Implementation begun: yes
-- Last updated: 2026-07-06T07:05:36Z
+- Last updated: 2026-07-06T07:31:17Z
 
 ## Resume Notes
 - The first Stage 1 attempt created this branch/worktree and staged a handoff, but the user interrupted before the handoff was committed.
@@ -54,6 +54,10 @@
     - #1389 `[ci] Modal: enable Flash Attention 3 on H100 perf tests with build cache` is a ready-for-review PR that adds an opt-in H100 perf entrypoint and FA3 runtime cache only. It does not cache `fastvideo-kernel` builds or touch SSIM.
     - #1449 `[feat]: add Hugging Face Kernel Hub packaging` closes #1318 and adds HF Kernel Hub packaging/workflow files; it is not Modal CI wheel caching for `pr_test.py`/`ssim_test.py`.
 - There are no commenter-proposed fixes to evaluate because issue #1523 has no comments.
+- Stage 3 adjudicator/fixer re-check on 2026-07-06T07:31Z:
+  - `gh api user --jq .login` remained `macthecadillac`.
+  - `gh issue view 1523 -R hao-ai-lab/FastVideo --json ...` showed issue #1523 still OPEN with no comments and no assignees.
+  - Open PR narrowing for issue #1523 found no PR closing or directly implementing #1523. PR #1389 is still related H100/FA3 Modal work, but it does not close #1523 and does not replace this branch.
 
 ## Code Findings
 - `fastvideo/tests/modal/pr_test.py`
@@ -184,20 +188,55 @@
   - `python -m py_compile fastvideo/tests/modal/kernel_build_cache.py fastvideo/tests/modal/pr_test.py fastvideo/tests/modal/ssim_test.py`
   - `bash -n fastvideo-kernel/build.sh`
 - No local project tests were run, per FastVideo validation rules.
+- Commit `d27ff9b8d60cf24c552b9e00647599752bada1f3` was created with GPG signing and pushed to `origin/issue/1523-fix`.
+- Modal validation used `fastvideo/tests/modal/launch_l40s_job.py` from branch `interleavethinker` against `https://github.com/macthecadillac/FastVideo.git` at commit `d27ff9b8d60cf24c552b9e00647599752bada1f3`.
+- Modal L40S syntax/key smoke passed:
+  - Command compiled `kernel_build_cache.py`, `pr_test.py`, `ssim_test.py`, ran `bash -n fastvideo-kernel/build.sh`, and generated a nonempty cache key JSON.
+  - Modal run URL: https://modal.com/apps/hao-ai-lab/main/ap-GJrX0ZNA0NQcoasf0FukQS
+- A first cache-miss Modal attempt was aborted before any kernel build because the local shell expanded `$CACHE_ROOT` too early. No code change was needed.
+  - Aborted Modal run URL: https://modal.com/apps/hao-ai-lab/main/ap-OWs8WeaYydL5gelxt1aSvL
+- A second cache-miss Modal attempt failed before build because the generic launcher command path did not source `$HOME/.local/bin/env`, so `uv` was not on PATH. This is not a PR/SSIM runner bug because both real runners source that environment before invoking the helper.
+  - Failed Modal run URL: https://modal.com/apps/hao-ai-lab/main/ap-9PHHwcX3MgDwXKuFLLjk0l
+- Corrected Modal L40S cache-miss validation passed:
+  - Command sourced `$HOME/.local/bin/env` and `/opt/venv/bin/activate`, used cache root `/root/data/fastvideo-kernel-cache-issue-1523-d27ff9b8d`, and committed the Modal volume.
+  - Helper resolved cache key `568b1b25a969a65afde984b81c23f13e731e8c037f0135913eb8c4f960c8a249`.
+  - Logs showed `cache miss`, `./build.sh --wheel-dir`, a successful `fastvideo_kernel-0.3.2-cp310-cp310-linux_x86_64.whl` build/install, and `stored wheel cache entry`.
+  - Modal run URL: https://modal.com/apps/hao-ai-lab/main/ap-F9ypVMugXKRi2yJKqCVKgp
+- Modal L40S cache-hit validation passed:
+  - Same cache root and key installed the cached wheel from the Modal volume.
+  - Logs showed `cache hit`, no `cache miss`, and no `./build.sh --wheel-dir`.
+  - Modal run URL: https://modal.com/apps/hao-ai-lab/main/ap-zGcoK2fY2KQEwHzcRBNaiO
+- `uv tool run pre-commit run --files docker/Dockerfile fastvideo/tests/modal/kernel_build_cache.py fastvideo/tests/modal/pr_test.py fastvideo/tests/modal/ssim_test.py` passed the applicable hooks.
+  - The repo hook regex excluded the `fastvideo/tests/modal/*.py` files from yapf/ruff/mypy, so this was not formatter/linter coverage for those test-path Python files.
+  - `fastvideo-kernel/build.sh` and `.agents/` are also excluded by repo pre-commit config; shell syntax was covered by `bash -n`.
+- Stage 3 adjudicator/fixer validation after commit `7012450b8d59badb69f61f36d0ddfb500f858ead`:
+  - `python -m py_compile fastvideo/tests/modal/kernel_build_cache.py fastvideo/tests/modal/ssim_test.py` passed.
+  - Focused isolated metadata-key check passed: explicit `TORCH_CUDA_ARCH_LIST=9.0a` and auto-detected `9.0a` produce the same cache key while preserving different diagnostic raw metadata, and auto-detected `8.9` produces a different key.
+  - `git diff --check` passed.
+  - No local FastVideo project tests were run, per FastVideo validation rules.
+
+## Stage 3 Adjudicator/Fixer Decisions
+- Reviewer finding 1, Docker-prebuilt reuse false-misses on valid H100 jobs: accepted.
+  - Independent assessment: valid. The prebuilt metadata written during Docker build included raw `TORCH_CUDA_ARCH_LIST=9.0a` in the same JSON payload used for `cache_key`, while Modal runtime H100 jobs can auto-detect the same resolved arch with raw env empty. That creates different keys for equivalent `9.0a` builds and prevents valid Docker-prebuilt reuse.
+  - Fix: `_build_metadata()` now computes `cache_key` from key-relevant metadata that includes only the resolved architecture, while keeping raw `torch_cuda_arch_list` in persisted metadata as diagnostics. Explicit/detected `9.0a` matches; detected L40S `8.9` still misses.
+- Reviewer finding 2, SSIM success logs hide cache hit/miss status: accepted.
+  - Independent assessment: valid. `_prepare_ssim_workspace()` captured the setup subprocess output and only printed it on failure, so successful SSIM workspace setup could hide the cache helper's hit/miss logs.
+  - Fix: successful and failed workspace setup now print captured stdout/stderr before committing the cache volume or raising. This exposes the cache helper's hit/miss/miss-build logs in successful SSIM runs.
+- Files changed by adjudicator/fixer:
+  - `fastvideo/tests/modal/kernel_build_cache.py`
+  - `fastvideo/tests/modal/ssim_test.py`
+- Signed/pushed code commit:
+  - `7012450b8d59badb69f61f36d0ddfb500f858ead` (`[ci]: fix modal kernel cache review issues`)
 
 ## Next Steps
-- Stage and inspect the complete diff including the new helper.
-- Commit with GPG signing and push immediately.
-- Run Modal validation through `fastvideo/tests/modal/launch_l40s_job.py` from branch `interleavethinker`:
-  1. Modal L40S syntax/import smoke for the changed Modal scripts and helper.
-  2. Modal L40S cache miss validation with a dedicated cache root.
-  3. Modal L40S cache hit validation with the same cache root.
-  4. If feasible, a narrow Modal runner smoke proving `pr_test.py` calls the helper.
-- If Modal exposes issues, fix, commit, push, and update this handoff.
-- After implementation validation, run the required Stage 3 review/adjudication loop before presenting the draft PR message.
+- Stage 3 adjudicator/fixer accepted both actionable reviewer findings and pushed code commit `7012450b8d59badb69f61f36d0ddfb500f858ead`.
+- Because the adjudicator/fixer changed code, the Stage 3 loop should run a fresh `review-code` sub-agent against the updated committed branch before preparing any final draft PR message.
+- Keep this handoff active until Stage 4 is explicitly requested. Do not open a PR from Stage 3.
 
 ## Running Log
 - 2026-07-06T05:23:38Z: First attempt initialized Stage 1 handoff and inspected initial GitHub/code context. User interrupted before commit; `/tmp` worktree was later lost.
 - 2026-07-06T05:38:05Z: Resumed, recreated missing worktree, fast-forwarded branch to current main, re-checked GitHub state, and recreated detailed Stage 1 handoff. No implementation changes made.
 - 2026-07-06T06:55:05Z: User approved the recommended approach with "Go ahead". Recreated missing `/tmp` worktree from pushed branch, re-checked issue/PR state, inspected related PRs #1389 and #1449, and moved to Stage 2.
 - 2026-07-06T07:05:36Z: Implemented shared Modal wheel-cache helper, `build.sh --wheel-dir`, PR/SSIM runner wiring, and Docker-prebuilt build-info support. Local syntax-only checks passed; Modal validation still pending.
+- 2026-07-06T07:16:16Z: Signed/pushed commit `d27ff9b8d`, validated syntax/key generation and cache miss/hit on Modal L40S via the `interleavethinker` launcher, and ran applicable pre-commit hooks. Stage 3 reviewer sub-agent is running.
+- 2026-07-06T07:31:17Z: Stage 3 adjudicator/fixer independently inspected issue #1523, open PR state, and committed code. Accepted both reviewer findings, patched cache key arch normalization and SSIM setup log visibility, validated with syntax/key/diff checks, signed commit `7012450b8`, and pushed it to `origin/issue/1523-fix`.
