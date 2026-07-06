@@ -7,12 +7,12 @@
 - Repo: hao-ai-lab/FastVideo
 - Worktree: /tmp/fastvideo-worktrees/issue-864-fastwan22-ti2v-size-mismatch
 - Branch: issue/864-fastwan22-ti2v-size-mismatch
-- Current stage: Stage 2 implementation in progress
+- Current stage: Stage 3 review/adjudication complete; draft PR message prepared
 - Implementation begun: yes
 - Handoff path: .agents/handoffs/issue-864-handoff.md
 - Created: 2026-07-06T05:21:35Z
 - Recreated after interrupted /tmp worktree loss: 2026-07-06
-- Last updated: 2026-07-06T07:54:06Z
+- Last updated: 2026-07-06T08:06:33Z
 
 ## Stage 0 Resume Or Start
 
@@ -359,3 +359,67 @@ Implementation steps for Stage 2:
   - The accepted finding was specifically about instantiated Wan block construction using the config's backend tuple.
   - Existing tests cover the registry/config guard and direct Wan block selection; the new test covers actual `WanTransformer3DModel` block construction.
   - A full public constructor call can proceed into executor/model setup, so it was left as optional residual validation rather than run as part of this narrow fix.
+
+## Stage 3 Final Review And Draft PR Message
+
+- Spawned third fresh review-code sub-agent after adjudicator/fixer changed code:
+  - Agent id: `019f366e-392a-75f0-949b-60501cbef2e5`
+  - Nickname: `Sagan`
+  - Prompt summary: review latest pushed branch `macthecadillac/FastVideo` `issue/864-fastwan22-ti2v-size-mismatch` at head `d43aed74c` after adjudicator/fixer commits, with issue #864 context and no mutation.
+- Third reviewer result:
+  - No actionable findings.
+  - Issue fit: branch addresses #864 by resolving FullAttn to T2V-only config, rejecting explicit `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`, and making direct Wan block construction respect the config-level dense backend set.
+  - Related work: only matching fork branch is this issue branch; upstream PR #1494 remains open and overlaps broader backend validation but this branch is a narrower issue-specific fix.
+  - Validation gap noted: no full public `VideoGenerator.from_pretrained(..., FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN)` smoke was recorded; branch instead validates config and Wan construction paths directly.
+- Final GitHub re-check before final handoff push:
+  - `gh api user --jq .login` returned `macthecadillac`.
+  - Issue #864 remains open, no assignees, same two comments, updatedAt `2026-02-06T19:45:44Z`.
+  - Related open PR search still returns only upstream #1494, ready-for-review (`isDraft=false`), head `attn-loud-fail`, not closing #864.
+- Final validation status before draft PR creation:
+  - Modal L40S targeted pytest after adjudicator fix: `6 passed in 0.03s`, run `ap-uaZrKwXeCVqZvDnSOo10YZ`.
+  - All-files pre-commit passed after adjudicator fix on detached validation worktree `/tmp/fastvideo_worktrees/issue_864_fastwan22_ti2v_size_mismatch` using `UV_TOOL_DIR=/tmp/uv-tools-864 UV_CACHE_DIR=/tmp/uv-cache-864 PRE_COMMIT_HOME=/tmp/pre-commit-cache-864 uvx --from pre-commit pre-commit run --all-files`.
+  - A final all-files pre-commit run will be repeated on the final handoff-only commit head before sending the Stage 3 report.
+- Handoff status:
+  - Handoff remains active and tracked on the branch.
+  - Before Stage 4 PR creation, transfer needed context into the PR body, remove `.agents/handoffs/issue-864-handoff.md` with `git rm`, commit and push the deletion, and verify the branch no longer contains the handoff.
+
+### Draft PR Message
+
+Title:
+
+```text
+[bugfix]: guard FastWan FullAttn backend config
+```
+
+Body:
+
+```markdown
+## Summary
+- split `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers` into a FullAttn-specific T2V-only pipeline config
+- reject `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN` for the dense FullAttn checkpoint before it can hit the latent shape mismatch path
+- make Wan block construction use the active config's supported attention backends and add regression coverage for registry, config, backend selection, and block construction
+- update durable docs/examples to stop advertising FullAttn as VSA-compatible
+
+Fixes #864.
+
+## Validation
+- Modal L40S: `pytest fastvideo/tests/api/test_fastwan_fullattn.py -q` passed, 6 tests
+- `pre-commit run --all-files` passed from the underscore-named validation worktree using `/tmp` uv/pre-commit caches
+- Stage 3 review loop:
+  - reviewer 1: no actionable findings
+  - reviewer 2: found Wan blocks still received the class-level backend tuple
+  - adjudicator/fixer: accepted the finding, patched Wan block construction, added regression coverage, and pushed commits
+  - reviewer 3: no actionable findings
+
+## GPU Memory Impact
+- No expected increase. This change only adjusts config/registry validation, backend support plumbing, docs, and lightweight tests.
+
+# Checklist
+- [ ] I ran pre-commit run --all-files and fixed all issues
+- [ ] I added or updated tests for my changes
+- [ ] I updated documentation if needed
+- [ ] I considered GPU memory impact of my changes
+For model/pipeline changes, also check:
+- [ ] I verified targeted Wan T2V SSIM regression tests pass on L40S
+- [ ] I updated the support matrix if adding a new model
+```
