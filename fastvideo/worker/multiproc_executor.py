@@ -73,8 +73,8 @@ class StreamingResult:
     error: Exception | None = None
 
 
-def _prepare_worker_output_for_parent(result: Any, fastvideo_args: FastVideoArgs) -> Any:
-    if (fastvideo_args.output_type == "latent" and isinstance(result, torch.Tensor) and result.is_cuda):
+def _prepare_worker_output_for_parent(result: Any, fastvideo_args: FastVideoArgs | None) -> Any:
+    if (fastvideo_args is not None and getattr(fastvideo_args, "output_type", None) == "latent" and isinstance(result, torch.Tensor) and result.is_cuda):
         return result.detach().cpu()
     return result
 
