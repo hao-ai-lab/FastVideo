@@ -35,7 +35,6 @@ ALLOWLIST = {
     "hooks": "no lane yet — run manually",
     "layers": "no lane yet — torchrun FSDP dispatch tests, run manually",
     "nightly": "by design: nightly cadence, not per-PR",
-    "ops": "no lane yet — GPU op tests, run manually",
     "modal": "CI infrastructure itself, not a test suite",
 }
 
