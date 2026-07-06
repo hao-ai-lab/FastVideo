@@ -173,6 +173,9 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         img_v_prope = img_v_prope.permute(0, 2, 1, 3)  # [batch, seqlen, num_heads, head_dim]
         # end hyworld
 
+        # The metadata only carries the text padding mask; the executing
+        # attention kernel is still whatever the layer's selector picked
+        # (flash-attn when installed), not necessarily torch SDPA.
         from fastvideo.attention.backends.sdpa import SDPAMetadataBuilder
         attn_metadata = SDPAMetadataBuilder().build(
             current_timestep=0,
@@ -192,14 +195,9 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
             )
         
         # begin hyworld
-        # attention with prope
-        from fastvideo.attention.backends.sdpa import SDPAMetadataBuilder
-        attn_metadata_prope = SDPAMetadataBuilder().build(
-            current_timestep=0,
-            attn_mask=encoder_attention_mask,
-        )       
+        # attention with prope (same text mask, so reuse the metadata)
         # NOTE: Do NOT pass freqs_cis to prope attention - HY-WorldPlay does not apply RoPE to prope
-        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata_prope):
+        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
             img_attn_prope, _ = self.attn(
                 img_q_prope,
                 img_k_prope,

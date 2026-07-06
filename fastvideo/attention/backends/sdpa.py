@@ -50,6 +50,13 @@ class SDPAMetadataBuilder(AttentionMetadataBuilder):
             current_timestep: int,
             attn_mask: torch.Tensor,
     ) -> SDPAMetadata:
+        # A 2D mask handed to the builder is a tokenizer-style
+        # [batch, key_len] padding mask (the HunyuanVideo/HYWorld call
+        # sites); lift it to a broadcastable [batch, 1, 1, key_len] HERE,
+        # where that semantic is known. Masks that reach the impl as 2D keep
+        # torch's documented [query_len, key_len] broadcast meaning.
+        if attn_mask is not None and attn_mask.dim() == 2:
+            attn_mask = attn_mask[:, None, None, :]
         return SDPAMetadata(current_timestep=current_timestep, attn_mask=attn_mask)
 
 
@@ -62,19 +69,26 @@ def _normalize_attn_mask_for_sdpa(
         return None
 
     attn_mask = attn_mask.to(device=query.device)
+    # F.scaled_dot_product_attention only accepts bool or float masks;
+    # tokenizers commonly produce int64 0/1 padding masks.
+    if attn_mask.dtype != torch.bool and not attn_mask.dtype.is_floating_point:
+        attn_mask = attn_mask != 0
+
     key_len = key.shape[-2]
     if attn_mask.shape[-1] > key_len:
         raise ValueError("Invalid attention mask length for SDPA: "
                          f"expected at most {key_len}, got {attn_mask.shape[-1]}")
     if attn_mask.shape[-1] < key_len:
+        # Front-pad as "attend": double-stream layouts (HYWorld) prepend
+        # non-text tokens the tokenizer mask does not cover.
         valid_value = True if attn_mask.dtype == torch.bool else 0.0
         attn_mask = F.pad(attn_mask, (key_len - attn_mask.shape[-1], 0), value=valid_value)
 
-    if attn_mask.dim() == 2:
-        return attn_mask[:, None, None, :]
     if attn_mask.dim() == 3:
         return attn_mask[:, None, :, :]
-    if attn_mask.dim() == 4:
+    if attn_mask.dim() in (2, 4):
+        # 2D keeps torch's documented [query_len, key_len] broadcast; batch
+        # padding masks are lifted to 4D by SDPAMetadataBuilder.build.
         return attn_mask
     raise ValueError(f"Unsupported attention mask shape for SDPA: {attn_mask.shape}")
 
