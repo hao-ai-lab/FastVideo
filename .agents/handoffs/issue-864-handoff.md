@@ -12,7 +12,7 @@
 - Handoff path: .agents/handoffs/issue-864-handoff.md
 - Created: 2026-07-06T05:21:35Z
 - Recreated after interrupted /tmp worktree loss: 2026-07-06
-- Last updated: 2026-07-06T07:32:18Z
+- Last updated: 2026-07-06T07:51:39Z
 
 ## Stage 0 Resume Or Start
 
@@ -298,4 +298,54 @@ Implementation steps for Stage 2:
   - Created detached validation worktree `/tmp/fastvideo_worktrees/issue_864_fastwan22_ti2v_size_mismatch` from branch head to avoid the hyphenated package-name path issue.
   - Reran all-files pre-commit there with the same `uvx` command and `/tmp` caches. `yapf`, `ruff`, `codespell`, `PyMarkdown`, `actionlint`, filename-space, and suggestion hooks passed. `mypy` failed on one patch-owned issue: `fastvideo/configs/pipelines/wan.py:296: error: Call to untyped function "__post_init__" in typed context [no-untyped-call]`.
   - Fix applied: annotated existing `WanT2V480PConfig.__post_init__` as `-> None`, matching its current behavior and letting the FullAttn config call the base initializer without a `type: ignore`.
-  - Next: commit/push the type annotation and handoff update, then rerun Modal targeted tests and all-files pre-commit.
+  - Commit `7026df0d5` (`[bugfix]: satisfy Wan config post init typing`) created with `git commit -S` and pushed to `origin/issue/864-fastwan22-ti2v-size-mismatch`.
+- Validation after `7026df0d5`:
+  - Modal L40S run on pushed commit, no local patch:
+    - `python -m modal run /tmp/fastvideo-worktrees/interleavethinker-modal/fastvideo/tests/modal/launch_l40s_job.py --git-repo https://github.com/macthecadillac/FastVideo.git --git-commit 7026df0d5fae849dc7d1316dd26d5a28e9169f42 --install-extra none --command "pytest fastvideo/tests/api/test_fastwan_fullattn.py -q"`
+    - Run: `ap-3JIZ8ITC7ZuTgVmWNR6TQ2`
+    - Result: `5 passed in 0.04s`
+  - All-files pre-commit on detached validation worktree `/tmp/fastvideo_worktrees/issue_864_fastwan22_ti2v_size_mismatch` at commit `7026df0d5fae849dc7d1316dd26d5a28e9169f42`:
+    - `UV_TOOL_DIR=/tmp/uv-tools-864 UV_CACHE_DIR=/tmp/uv-cache-864 PRE_COMMIT_HOME=/tmp/pre-commit-cache-864 uvx --from pre-commit pre-commit run --all-files`
+    - Result: passed (`yapf`, `ruff`, `codespell`, `PyMarkdown`, `actionlint`, `mypy`, filename-space, suggestion).
+- Spawned second fresh review-code sub-agent because code changed after the first review:
+  - Agent id: `019f365a-ddd5-7c90-80ad-01105ce2e518`
+  - Nickname: `Parfit`
+  - Prompt summary: review updated branch `macthecadillac/FastVideo` `issue/864-fastwan22-ti2v-size-mismatch` at pushed head `7026df0d5fae849dc7d1316dd26d5a28e9169f42`, with issue #864 context and no mutation.
+- Second reviewer result:
+  - Actionable finding reported, severity medium:
+    - `fastvideo/models/dits/wanvideo.py` still passes the class-level default `self._supported_attention_backends` into every block, even though the FullAttn config narrows `config._supported_attention_backends`.
+    - Reviewer recommendation: pass `config._supported_attention_backends` into the block constructor and add a test that actual Wan block construction uses the FullAttn config backend set.
+  - Issue fit: branch mostly addresses #864 by splitting FullAttn to T2V-only, removing it from I2V workloads, and rejecting VSA before the old tensor-size mismatch path.
+  - Validation gap noted: handoff in reviewed commit did not yet contain final Modal/pre-commit pass because that local handoff update had not been committed.
+- Spawned fresh adjudicator/fixer sub-agent:
+  - Agent id: `019f3663-228c-7b91-ad9b-da1110f4f5e0`
+  - Nickname: `Russell`
+  - Prompt was limited to issue/repo, committed branch/head, reviewer findings verbatim, and instructions to inspect issue/comments and committed code independently, accept or reject each finding, and if accepted implement, sign commit, and push.
+- Awaiting adjudicator/fixer decision.
+
+## Stage 3 Adjudicator/Fixer Decision For Reviewer Finding
+
+- 2026-07-06T07:50:14Z: Fresh adjudicator/fixer resumed in `/tmp/fastvideo-worktrees/issue-864-fastwan22-ti2v-size-mismatch`.
+- Re-read the `fix-issue` skill and required handoff/stage references.
+- Re-verified GitHub access:
+  - `gh api user --jq .login` returned `macthecadillac`.
+  - `gh issue view 864 ...` showed issue #864 still open, same body/comments, no assignees.
+  - Open PR checks found no PR for `macthecadillac:issue/864-fastwan22-ti2v-size-mismatch`.
+  - Related PR #1494 remains open/ready-for-review on upstream branch `attn-loud-fail` and overlaps broader backend enforcement, but it is separate from this branch and not relied upon.
+- Independently accepted the reviewer finding:
+  - `FastWan2_2_TI2V_5B_FullAttn_Config` narrows `config.dit_config._supported_attention_backends` to dense backends.
+  - `WanTransformer3DModel.__init__` still passed class-level `self._supported_attention_backends` into each block, so instantiated attention layers did not receive the FullAttn config's dense-only backend tuple.
+  - This is valid for issue #864 because the branch's fix depends on making the FullAttn checkpoint dense/T2V-only and preventing unsupported VSA/global-forced backend paths from being treated as supported.
+- Patch applied:
+  - `fastvideo/models/dits/wanvideo.py`: pass `config._supported_attention_backends` to each Wan block constructor.
+  - `fastvideo/tests/api/test_fastwan_fullattn.py`: add a focused constructor regression test that monkeypatches the Wan block class, builds a miniature FullAttn Wan config, and asserts the actual `WanTransformer3DModel` block construction receives the config backend tuple without `VIDEO_SPARSE_ATTN`.
+- Local static check:
+  - `git diff --check` passed.
+- Targeted validation before commit:
+  - Modal L40S with local patch:
+    - `python -m modal run /tmp/fastvideo-worktrees/interleavethinker-modal/fastvideo/tests/modal/launch_l40s_job.py --install-extra none --command "pytest fastvideo/tests/api/test_fastwan_fullattn.py -q" --apply-local-patch --patch-paths fastvideo/models/dits/wanvideo.py,fastvideo/tests/api/test_fastwan_fullattn.py`
+    - Run: `ap-uaZrKwXeCVqZvDnSOo10YZ`
+    - Result: `6 passed in 0.03s`.
+- Next:
+  - Commit the code/test/handoff update with GPG signing and push.
+  - Run all-files pre-commit on the detached underscore-named validation worktree at the pushed commit.

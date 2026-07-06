@@ -672,7 +672,7 @@ class WanTransformer3DModel(BaseDiT):
                               config.cross_attn_norm,
                               config.eps,
                               config.added_kv_proj_dim,
-                              self._supported_attention_backends,
+                              config._supported_attention_backends,
                               quant_config=config.quant_config,
                               prefix=f"{config.prefix}.blocks.{i}")
             for i in range(config.num_layers)

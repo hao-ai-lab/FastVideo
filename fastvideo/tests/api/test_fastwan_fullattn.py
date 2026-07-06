@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
+import torch.nn as nn
+
 import pytest
 
 from fastvideo.configs.pipelines.wan import (
     FastWan2_2_TI2V_5B_Config,
     FastWan2_2_TI2V_5B_FullAttn_Config,
 )
+from fastvideo.models.dits import wanvideo as wanvideo_module
 from fastvideo.models.dits.wanvideo import (
     WanTransformerBlock,
     WanTransformerBlock_VSA,
+    WanTransformer3DModel,
     _select_wan_transformer_block,
 )
 from fastvideo.platforms import AttentionBackendEnum
@@ -77,3 +81,47 @@ def test_wan_block_selection_preserves_existing_vsa_config(monkeypatch: pytest.M
 
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
     assert _select_wan_transformer_block(FastWan2_2_TI2V_5B_Config().dit_config) is WanTransformerBlock
+
+
+def test_wan_transformer_uses_config_supported_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FASTVIDEO_ATTENTION_BACKEND", raising=False)
+    captured_backends = []
+
+    class CapturingWanTransformerBlock(nn.Module):
+
+        def __init__(self,
+                     dim: int,
+                     ffn_dim: int,
+                     num_heads: int,
+                     qk_norm: str = "rms_norm_across_heads",
+                     cross_attn_norm: bool = False,
+                     eps: float = 1e-6,
+                     added_kv_proj_dim: int | None = None,
+                     supported_attention_backends: tuple[
+                         AttentionBackendEnum, ...] | None = None,
+                     **kwargs) -> None:
+            super().__init__()
+            captured_backends.append(supported_attention_backends)
+
+    monkeypatch.setattr(wanvideo_module, "WanTransformerBlock", CapturingWanTransformerBlock)
+    monkeypatch.setattr(wanvideo_module, "get_sp_world_size", lambda: 1)
+
+    config = FastWan2_2_TI2V_5B_FullAttn_Config().dit_config
+    config.arch_config.num_attention_heads = 1
+    config.arch_config.attention_head_dim = 4
+    config.arch_config.in_channels = 4
+    config.arch_config.out_channels = 4
+    config.arch_config.num_layers = 2
+    config.arch_config.ffn_dim = 8
+    config.arch_config.text_dim = 4
+    config.arch_config.freq_dim = 4
+    config.arch_config.patch_size = (1, 1, 1)
+    config.arch_config.__post_init__()
+
+    WanTransformer3DModel(config=config, hf_config={})
+
+    assert captured_backends == [
+        config._supported_attention_backends,
+        config._supported_attention_backends,
+    ]
+    assert AttentionBackendEnum.VIDEO_SPARSE_ATTN not in captured_backends[0]
