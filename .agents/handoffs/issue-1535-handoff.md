@@ -153,4 +153,5 @@
 ## Commits And Pushes
 
 - `56f9e3e092838bc18137209110232b0b995cabf6` - signed handoff-only commit `[misc]: add issue 1535 handoff`, pushed to `origin/issue/1535-ci-dashboard-grouping-legacy-v1`.
-- Final handoff update commit pending at the time this section was written; commit and push this update before ending the work segment.
+- `aecb30397` - signed handoff status update `[misc]: record issue 1535 handoff status`, pushed to `origin/issue/1535-ci-dashboard-grouping-legacy-v1`.
+- Handoff remains active and should not be removed until Stage 4 immediately before creating any draft PR.
