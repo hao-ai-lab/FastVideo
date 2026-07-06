@@ -7,11 +7,11 @@
 - Repository: hao-ai-lab/FastVideo
 - Branch: issue/1523-fix
 - Worktree: /tmp/fastvideo-worktrees/issue-1523-fix
-- Current commit: 9d909f5f0457ac91f489d5fc8000931f042b72ce
+- Current commit: 0a699ec836ea7cbfe5ec4173a800af6a8adef117
 - Handoff path: .agents/handoffs/issue-1523-handoff.md
-- Current stage: Stage 1 - Deep Dive And Plan, awaiting user guidance
-- Implementation begun: no
-- Last updated: 2026-07-06T05:38:05Z
+- Current stage: Stage 2 - Implement The User-Directed Fix
+- Implementation begun: yes
+- Last updated: 2026-07-06T07:05:36Z
 
 ## Resume Notes
 - The first Stage 1 attempt created this branch/worktree and staged a handoff, but the user interrupted before the handoff was committed.
@@ -49,6 +49,10 @@
   - Nearby related CI PRs exist but do not cover this issue: #1547 closes #1522, #1557 closes #1524, #1559 wires ops tests, #1560 closes #1532.
   - Targeted open-PR search for `1523 OR modal kernel cache OR fastvideo-kernel build.sh cache` returned no results.
   - Targeted duplicate issue searches for `modal kernel cache` and `fastvideo-kernel build cache` returned no results.
+  - Stage 2 re-check on 2026-07-06T06:55:05Z: issue still open with no comments; no open PR closes or directly references #1523.
+  - Inspected potentially related PRs:
+    - #1389 `[ci] Modal: enable Flash Attention 3 on H100 perf tests with build cache` is a ready-for-review PR that adds an opt-in H100 perf entrypoint and FA3 runtime cache only. It does not cache `fastvideo-kernel` builds or touch SSIM.
+    - #1449 `[feat]: add Hugging Face Kernel Hub packaging` closes #1318 and adds HF Kernel Hub packaging/workflow files; it is not Modal CI wheel caching for `pr_test.py`/`ssim_test.py`.
 - There are no commenter-proposed fixes to evaluate because issue #1523 has no comments.
 
 ## Code Findings
@@ -152,11 +156,48 @@
 - Whether the implementation should mount a new dedicated Modal volume for kernel wheels or use the existing `hf-model-weights` volume under a namespaced cache directory. A dedicated volume is cleaner; the existing volume needs fewer new Modal resources.
 - Whether Docker-prebuilt reuse is required in the first implementation pass, or whether conservative Modal wheel caching is sufficient for the first fix and Docker metadata can follow.
 
+## Stage 2 Implementation Notes
+- Added `fastvideo/tests/modal/kernel_build_cache.py`.
+  - Standalone Modal-side CLI with `install`, `write-build-info`, and `print-key` commands.
+  - Computes a conservative key from cache schema, kernel package version, `fastvideo-kernel` git tree/diff/submodule status or directory hash fallback, Python platform/cache tag, torch version/CUDA/file, nvcc output, CUDA-related env, backend, normalized `TORCH_CUDA_ARCH_LIST`, and normalized `CMAKE_ARGS`.
+  - `install` first checks Docker-prebuilt metadata at `/opt/fastvideo-kernel-build-info.json`; exact key match installs the baked wheel.
+  - If no matching baked wheel exists, it checks a Modal cache root, installs a matching cached wheel on hit, or builds a wheel on miss and stores `metadata.json` plus the wheel atomically under the cache key.
+  - Cache-miss fallback builds without storing if the cache directory is unavailable.
+- Updated `fastvideo-kernel/build.sh`.
+  - Default `./build.sh` behavior remains source build/install.
+  - New `--wheel-dir <dir>` mode uses the existing arch/backend setup, builds a wheel with `uv build --wheel --no-build-isolation`, then installs that wheel.
+- Updated `fastvideo/tests/modal/pr_test.py`.
+  - Adds a dedicated Modal volume named `fastvideo-kernel-build-cache` mounted at `/root/fastvideo-kernel-cache` for every build-kernel lane.
+  - Replaces direct `cd fastvideo-kernel && ./build.sh` with the cache helper after dependency install and before the test command.
+  - Commits the cache volume after build-kernel lanes, warning rather than masking the test result if the commit fails.
+  - Leaves DreamVerse with `build_kernel=False` and no kernel cache volume.
+- Updated `fastvideo/tests/modal/ssim_test.py`.
+  - Mounts the same cache volume in SSIM workers.
+  - Replaces direct `./build.sh` during `_prepare_ssim_workspace()` with the shared helper.
+  - Commits the cache volume after workspace setup, warning rather than masking the setup result if the commit fails.
+- Updated `docker/Dockerfile`.
+  - Kernel image build now uses `./build.sh --wheel-dir /opt/fastvideo-kernel-wheels`.
+  - Writes `/opt/fastvideo-kernel-build-info.json` with the helper so future images can prove when the baked wheel matches the checked-out CI source/ABI key.
+
+## Validation So Far
+- Local syntax-only checks passed:
+  - `python -m py_compile fastvideo/tests/modal/kernel_build_cache.py fastvideo/tests/modal/pr_test.py fastvideo/tests/modal/ssim_test.py`
+  - `bash -n fastvideo-kernel/build.sh`
+- No local project tests were run, per FastVideo validation rules.
+
 ## Next Steps
-- Ask the user to approve the recommended approach or choose an alternative before Stage 2.
-- If approved, implement the shared helper, minimal `build.sh` wheel mode if needed, and Modal runner wiring.
-- After implementation, validate on Modal, commit with GPG signing, push immediately, then run the required Stage 3 review/adjudication loop.
+- Stage and inspect the complete diff including the new helper.
+- Commit with GPG signing and push immediately.
+- Run Modal validation through `fastvideo/tests/modal/launch_l40s_job.py` from branch `interleavethinker`:
+  1. Modal L40S syntax/import smoke for the changed Modal scripts and helper.
+  2. Modal L40S cache miss validation with a dedicated cache root.
+  3. Modal L40S cache hit validation with the same cache root.
+  4. If feasible, a narrow Modal runner smoke proving `pr_test.py` calls the helper.
+- If Modal exposes issues, fix, commit, push, and update this handoff.
+- After implementation validation, run the required Stage 3 review/adjudication loop before presenting the draft PR message.
 
 ## Running Log
 - 2026-07-06T05:23:38Z: First attempt initialized Stage 1 handoff and inspected initial GitHub/code context. User interrupted before commit; `/tmp` worktree was later lost.
 - 2026-07-06T05:38:05Z: Resumed, recreated missing worktree, fast-forwarded branch to current main, re-checked GitHub state, and recreated detailed Stage 1 handoff. No implementation changes made.
+- 2026-07-06T06:55:05Z: User approved the recommended approach with "Go ahead". Recreated missing `/tmp` worktree from pushed branch, re-checked issue/PR state, inspected related PRs #1389 and #1449, and moved to Stage 2.
+- 2026-07-06T07:05:36Z: Implemented shared Modal wheel-cache helper, `build.sh --wheel-dir`, PR/SSIM runner wiring, and Docker-prebuilt build-info support. Local syntax-only checks passed; Modal validation still pending.

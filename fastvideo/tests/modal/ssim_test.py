@@ -28,6 +28,8 @@ except ModuleNotFoundError:
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
+KERNEL_CACHE_VOLUME_PATH = "/root/fastvideo-kernel-cache"
+kernel_cache_vol = modal.Volume.from_name("fastvideo-kernel-build-cache", create_if_missing=True)
 image_version = os.getenv("IMAGE_VERSION", "latest")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 image_ref = resolve_image_ref(image_tag)
@@ -68,6 +70,7 @@ image = (
             # FA4 is opt-in (FASTVIDEO_FA4); the SSIM references were seeded
             # with FA4 inference, so keep it enabled in CI. Caller override wins.
             "FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1"),
+            "FASTVIDEO_KERNEL_CACHE_ROOT": KERNEL_CACHE_VOLUME_PATH,
         }
     )
 )
@@ -82,7 +85,7 @@ MODAL_DEVICE_REFERENCE_FOLDER = "L40S_reference_videos"
 SSIM_COMMON_KWARGS = dict(
     image=image,
     timeout=5400,
-    volumes={"/root/data": model_vol},
+    volumes={"/root/data": model_vol, KERNEL_CACHE_VOLUME_PATH: kernel_cache_vol},
 )
 
 
@@ -481,6 +484,7 @@ def _prepare_ssim_workspace(
 
     checkout_command = _build_checkout_command(git_commit, pr_number)
     repo_root = "/FastVideo"
+    cache_root = shlex.quote(KERNEL_CACHE_VOLUME_PATH)
 
     command = f"""
     set -euo pipefail
@@ -507,9 +511,7 @@ def _prepare_ssim_workspace(
     rm -rf fastvideo/tests/ssim/reference_videos
     git_retry git submodule update --init --recursive
     uv pip install -e ".[test]"
-    cd fastvideo-kernel
-    ./build.sh
-    cd ..
+    python fastvideo/tests/modal/kernel_build_cache.py install --cache-root {cache_root}
     uv pip install git+https://github.com/microsoft/MoGe.git
     # Stable Audio Open 1.0 inference deps (optional in basic install,
     # required by `StableAudioDenoisingStage`; consumed by
@@ -527,6 +529,11 @@ def _prepare_ssim_workspace(
             "HF_API_KEY": hf_api_key,
         },
     )
+    print("Committing fastvideo-kernel build cache volume", flush=True)
+    try:
+        kernel_cache_vol.commit()
+    except Exception as error:
+        print(f"WARNING: failed to commit fastvideo-kernel build cache volume: {error}", flush=True)
     if result.returncode != 0:
         print(result.stdout)
         print(result.stderr)

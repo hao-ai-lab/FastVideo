@@ -189,12 +189,19 @@ COPY . .
 # Install FastVideo Unified Kernel exactly once. build.sh initializes only its
 # CUTLASS/ThunderKittens submodules, then compiles for TORCH_CUDA_ARCH_LIST
 # (default Hopper sm_90a) without requiring a live GPU.
+ARG FASTVIDEO_KERNEL_WHEEL_DIR=/opt/fastvideo-kernel-wheels
+ARG FASTVIDEO_KERNEL_BUILD_INFO=/opt/fastvideo-kernel-build-info.json
 RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
+    export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} && \
     cd fastvideo-kernel && \
     CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL} \
-    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} ./build.sh
+    ./build.sh --wheel-dir ${FASTVIDEO_KERNEL_WHEEL_DIR} && \
+    cd /FastVideo && \
+    python fastvideo/tests/modal/kernel_build_cache.py write-build-info \
+        --wheel-dir ${FASTVIDEO_KERNEL_WHEEL_DIR} \
+        --output ${FASTVIDEO_KERNEL_BUILD_INFO}
 
 # Install FastVideo itself (editable) now that the source is present, and set up
 # shell configuration. Dependencies and the local kernel are already installed,

@@ -4,6 +4,7 @@ set -ex
 # Simple build script wrapping uv/pip
 # Usage:
 #   ./build.sh  # local build (torch-based arch detection, TK only on SM90)
+#   ./build.sh --wheel-dir /tmp/wheels  # build + install a reusable wheel
 # Environment overrides (if set, they win over auto-detection):
 #   TORCH_CUDA_ARCH_LIST
 #   CMAKE_ARGS (for FASTVIDEO_KERNEL_BUILD_TK / CMAKE_CUDA_ARCHITECTURES / GPU_BACKEND)
@@ -67,12 +68,25 @@ fi
 # Install build dependencies
 uv pip install scikit-build-core cmake ninja
 
-RELEASE=0
 GPU_BACKEND=CUDA
-for arg in "$@"; do
-    case "$arg" in
+WHEEL_DIR=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --rocm)
             GPU_BACKEND=ROCM
+            shift
+            ;;
+        --wheel-dir)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --wheel-dir requires a directory path" >&2
+                exit 2
+            fi
+            WHEEL_DIR="$2"
+            shift 2
+            ;;
+        *)
+            echo "ERROR: unknown argument: $1" >&2
+            exit 2
             ;;
     esac
 done
@@ -165,4 +179,15 @@ echo "CMAKE_ARGS: ${CMAKE_ARGS:-<unset>}"
 echo "GPU_BACKEND: ${GPU_BACKEND:-<unset>}"
 # Build and install
 # Use -v for verbose output
-uv pip install . -v --no-build-isolation
+if [ -n "${WHEEL_DIR}" ]; then
+    mkdir -p "${WHEEL_DIR}"
+    uv build --wheel -v --no-build-isolation --out-dir "${WHEEL_DIR}" .
+    wheel_path="$(find "${WHEEL_DIR}" -maxdepth 1 -type f \( -name 'fastvideo_kernel-*.whl' -o -name 'fastvideo-kernel-*.whl' \) | sort | tail -n 1)"
+    if [ -z "${wheel_path}" ]; then
+        echo "ERROR: no fastvideo-kernel wheel was built in ${WHEEL_DIR}" >&2
+        exit 1
+    fi
+    uv pip install "${wheel_path}" --reinstall-package fastvideo-kernel --no-deps
+else
+    uv pip install . -v --no-build-isolation
+fi
