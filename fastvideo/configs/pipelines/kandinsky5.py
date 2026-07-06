@@ -84,6 +84,12 @@ class Kandinsky5T2VConfig(PipelineConfig):
         if len(self.text_encoder_configs) != 2:
             raise ValueError(f"Kandinsky5 pipeline requires exactly 2 text encoders (qwen and clip), "
                              f"but got {len(self.text_encoder_configs)} encoder(s).")
+        if len(self.text_encoder_precisions) != 2:
+            raise ValueError("Kandinsky5 pipeline requires exactly 2 text encoder precisions, "
+                             f"but got {len(self.text_encoder_precisions)}.")
+        if len(self.text_encoder_max_lengths) != 2:
+            raise ValueError("Kandinsky5 pipeline requires exactly 2 text encoder max lengths, "
+                             f"but got {len(self.text_encoder_max_lengths)}.")
 
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True

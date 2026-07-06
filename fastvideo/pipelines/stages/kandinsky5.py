@@ -51,9 +51,11 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
             num_frames = num_frames // temporal_ratio * temporal_ratio + 1
             batch.num_frames = num_frames
 
-        required_divisor = spatial_ratio * patch_size[1]
-        if height % required_divisor != 0 or width % required_divisor != 0:
-            raise ValueError(f"Kandinsky5 height/width must be divisible by {required_divisor}; "
+        required_divisor_h = spatial_ratio * patch_size[1]
+        required_divisor_w = spatial_ratio * patch_size[2]
+        if height % required_divisor_h != 0 or width % required_divisor_w != 0:
+            raise ValueError(f"Kandinsky5 height must be divisible by {required_divisor_h} and width by "
+                             f"{required_divisor_w}; "
                              f"got height={height}, width={width}.")
 
         # NABLA sparse attention (Pro checkpoints) reshapes the post-patch grid
@@ -61,9 +63,11 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
         # all the encoding work is done.
         arch_cfg = getattr(self.transformer, "config", None) or fastvideo_args.pipeline_config.dit_config.arch_config
         if getattr(arch_cfg, "attention_type", "regular") == "nabla":
-            nabla_divisor = required_divisor * 8
-            if height % nabla_divisor != 0 or width % nabla_divisor != 0:
-                raise ValueError(f"Kandinsky5 NABLA checkpoints require height/width divisible by {nabla_divisor}; "
+            nabla_divisor_h = required_divisor_h * 8
+            nabla_divisor_w = required_divisor_w * 8
+            if height % nabla_divisor_h != 0 or width % nabla_divisor_w != 0:
+                raise ValueError(f"Kandinsky5 NABLA checkpoints require height divisible by {nabla_divisor_h} and "
+                                 f"width divisible by {nabla_divisor_w}; "
                                  f"got height={height}, width={width}.")
 
         if isinstance(batch.prompt, list):
@@ -93,14 +97,21 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
         if isinstance(batch.generator, list) and len(batch.generator) != batch_size:
             raise ValueError(f"generator list length {len(batch.generator)} does not match batch size {batch_size}.")
 
+        visual_cond = getattr(self.transformer, "visual_cond", False)
+
         if batch.latents is None:
             latents = randn_tensor(shape, generator=batch.generator, device=device, dtype=dtype)
             if hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
         else:
+            valid_shapes = [shape]
+            if visual_cond:
+                valid_shapes.append((*shape[:-1], num_channels * 2 + 1))
+            if tuple(batch.latents.shape) not in valid_shapes:
+                raise ValueError(f"Provided latents shape {list(batch.latents.shape)} does not match expected "
+                                 f"Kandinsky5 latent shape(s): {[list(s) for s in valid_shapes]}.")
             latents = batch.latents.to(device=device, dtype=dtype)
 
-        visual_cond = getattr(self.transformer, "visual_cond", False)
         if visual_cond and latents.shape[-1] == num_channels:
             cond = torch.zeros_like(latents)
             cond_mask = torch.zeros(
@@ -309,7 +320,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
         with tqdm(total=batch.num_inference_steps, desc="Kandinsky5 Denoising") as progress_bar:
             for i, timestep in enumerate(batch.timesteps):
                 if hasattr(self, "interrupt") and self.interrupt:
-                    continue
+                    break
 
                 t_expand = timestep.unsqueeze(0).repeat(latents.shape[0]).to(device=device, dtype=target_dtype)
                 attn_metadata = None
@@ -376,7 +387,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
-        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        result.add_check("prompt_embeds", batch.prompt_embeds, lambda x: V.list_min_length(x, 2))
         return result
 
 

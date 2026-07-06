@@ -5,6 +5,8 @@ import numpy as np
 import pytest
 import torch
 from diffusers.models.transformers.transformer_cosmos import CosmosTransformer3DModel
+from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import HfHubHTTPError
 
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
@@ -24,7 +26,20 @@ os.environ["MASTER_PORT"] = "29504"
 BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Video2World"
 
 
+def _skip_if_gated_weights_unavailable() -> None:
+    try:
+        hf_hub_download(BASE_MODEL_PATH, filename=".gitattributes")
+    except HfHubHTTPError as exc:
+        pytest.skip(
+            "Skipping Cosmos transformer test because the configured "
+            "HuggingFace token cannot access the gated Cosmos weights: "
+            f"{exc}",
+            allow_module_level=True,
+        )
+
+
 def _resolve_model_path() -> str:
+    _skip_if_gated_weights_unavailable()
     try:
         return maybe_download_model(
             BASE_MODEL_PATH,
