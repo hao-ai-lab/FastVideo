@@ -5,14 +5,13 @@ import numpy as np
 import pytest
 import torch
 from diffusers.models.transformers.transformer_cosmos import CosmosTransformer3DModel
-from huggingface_hub import hf_hub_download
-from huggingface_hub.errors import HfHubHTTPError
 
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
+from fastvideo.tests.utils import skip_if_gated_repo_inaccessible
 from fastvideo.utils import maybe_download_model
 from fastvideo.configs.models.dits import CosmosVideoConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -26,32 +25,13 @@ os.environ["MASTER_PORT"] = "29504"
 BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Video2World"
 
 
-def _skip_if_gated_weights_unavailable() -> None:
-    try:
-        hf_hub_download(BASE_MODEL_PATH, filename=".gitattributes")
-    except HfHubHTTPError as exc:
-        pytest.skip(
-            "Skipping Cosmos transformer test because the configured "
-            "HuggingFace token cannot access the gated Cosmos weights: "
-            f"{exc}",
-            allow_module_level=True,
-        )
-
-
 def _resolve_model_path() -> str:
-    _skip_if_gated_weights_unavailable()
-    try:
-        return maybe_download_model(
-            BASE_MODEL_PATH,
-            local_dir=os.path.join("data", BASE_MODEL_PATH),
-        )
-    except ValueError as exc:
-        pytest.skip(
-            "Skipping Cosmos transformer test because the configured "
-            "HuggingFace token cannot access the gated Cosmos weights: "
-            f"{exc}",
-            allow_module_level=True,
-        )
+    local_dir = os.path.join("data", BASE_MODEL_PATH)
+    skip_if_gated_repo_inaccessible(BASE_MODEL_PATH,
+                                    local_path=local_dir,
+                                    test_name="Cosmos transformer test",
+                                    allow_module_level=True)
+    return maybe_download_model(BASE_MODEL_PATH, local_dir=local_dir)
 
 
 MODEL_PATH = _resolve_model_path()

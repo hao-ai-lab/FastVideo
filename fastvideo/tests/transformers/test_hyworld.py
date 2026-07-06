@@ -35,6 +35,15 @@ REFERENCE_LATENTS = {
 def test_hyworld_transformer():
     transformer_path = TRANSFORMER_PATH
 
+    # An env-forced backend is knowable before the multi-GB download and GPU
+    # load; the authoritative check on the layer's resolved backend still runs
+    # after construction below.
+    forced_backend_name = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
+    if forced_backend_name:
+        forced_backend = getattr(AttentionBackendEnum, forced_backend_name, None)
+        if forced_backend is not None and forced_backend not in REFERENCE_LATENTS:
+            pytest.skip(f"HYWorld transformer test has no reference latent for {forced_backend_name}.")
+
     sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()
 
