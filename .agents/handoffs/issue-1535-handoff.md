@@ -9,9 +9,9 @@
 - Branch: issue/1535-ci-dashboard-grouping-legacy-v1
 - Base: upstream/main at 9d909f5f0457ac91f489d5fc8000931f042b72ce
 - Handoff path: .agents/handoffs/issue-1535-handoff.md
-- Current stage: Stage 1 - Deep Dive And Plan
+- Current stage: Stage 1 complete - awaiting user guidance
 - Implementation begun: no
-- Last updated: 2026-07-06 03:48:31 UTC
+- Last updated: 2026-07-06 03:49:21 UTC
 
 ## Authentication And Sandbox Notes
 
@@ -147,6 +147,10 @@
 
 ## Next Steps
 
-1. Commit and push this handoff-only Stage 1 state.
-2. Present Stage 1 report to the user.
-3. Wait for user guidance before implementation. No implementation has been performed.
+1. Present Stage 1 report to the user.
+2. Wait for user guidance before implementation. No implementation has been performed.
+
+## Commits And Pushes
+
+- `56f9e3e092838bc18137209110232b0b995cabf6` - signed handoff-only commit `[misc]: add issue 1535 handoff`, pushed to `origin/issue/1535-ci-dashboard-grouping-legacy-v1`.
+- Final handoff update commit pending at the time this section was written; commit and push this update before ending the work segment.
