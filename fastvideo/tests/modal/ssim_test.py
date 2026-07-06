@@ -524,6 +524,7 @@ def _spawn_ssim_task(
     log_dir: str,
     task_index: int,
     pytest_extra_args: list[str],
+    hf_api_key: str,
 ) -> _RunningTask:
     import shlex
 
@@ -533,6 +534,7 @@ def _spawn_ssim_task(
     command = f"set -euo pipefail && source $HOME/.local/bin/env && source /opt/venv/bin/activate && {pytest_command}"
     env = os.environ.copy()
     env["HF_HOME"] = "/root/data/.cache"
+    env["HF_API_KEY"] = hf_api_key
     # MultiprocExecutor returns CUDA tensors through mp pipes (CUDA IPC).
     # On kernels without pidfd_open support, PyTorch fails when
     # expandable_segments=True. Force False for CI compatibility.
@@ -670,6 +672,7 @@ def _schedule_ssim_tasks(
     repo_root: str,
     tasks: list[SSIMTask],
     pytest_extra_args: list[str],
+    hf_api_key: str,
     fail_fast: bool = True,
 ) -> dict[int, _TaskResult]:
     import tempfile
@@ -712,6 +715,7 @@ def _schedule_ssim_tasks(
                 log_dir=log_dir,
                 task_index=task.task_id,
                 pytest_extra_args=pytest_extra_args,
+                hf_api_key=hf_api_key,
             )
             print(f"Started {task.test_name} on GPUs {','.join(assigned_gpu_ids)}")
             running_tasks.append(running_task)
@@ -898,6 +902,7 @@ def run_ssim_partition(
         repo_root,
         partition,
         pytest_extra_args=pytest_extra_args,
+        hf_api_key=hf_api_key,
         fail_fast=fail_fast,
     )
     summaries = _collect_task_summaries(partition, results)
