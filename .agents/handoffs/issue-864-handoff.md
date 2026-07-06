@@ -12,7 +12,7 @@
 - Handoff path: .agents/handoffs/issue-864-handoff.md
 - Created: 2026-07-06T05:21:35Z
 - Recreated after interrupted /tmp worktree loss: 2026-07-06
-- Last updated: 2026-07-06T07:31:43Z
+- Last updated: 2026-07-06T07:17:55Z
 
 ## Stage 0 Resume Or Start
 
@@ -258,11 +258,15 @@ Implementation steps for Stage 2:
   - Modal run: `ap-lgDm4aiyDLfjbUhojHub9q`.
   - Result: `5 passed in 0.03s`.
   - Modal completion summary: command `pytest fastvideo/tests/api/test_fastwan_fullattn.py -q`, git repo `https://github.com/macthecadillac/FastVideo.git`, git commit `7d60a4824ea473e0577cd13d95b8f04c067a1e9f`, `install_extra='none'`, `local_patch_applied=True`.
-- Resume re-check before commit/push on 2026-07-06T07:31Z:
+- Resume re-check before commit/push on 2026-07-06T07:16Z:
   - `gh api user --jq .login` returned `macthecadillac`.
   - `gh issue view 864 ...` showed issue still open, no assignees, same two comments, updatedAt still `2026-02-06T19:45:44Z`.
   - Related open PR search still returned only #1494, ready-for-review (`isDraft=false`), head `attn-loud-fail`, not closing #864.
 - Static local checks after patch:
   - `git diff --check` passed.
+- Implementation commit and push:
+  - Commit `21ba1d7c6` (`[bugfix]: guard FastWan FullAttn backend config`) created with `git commit -S`.
+  - Pushed to `origin/issue/864-fastwan22-ti2v-size-mismatch`.
+  - Push printed the known `known_hosts` cross-device-link warning, then updated the remote from `7d60a4824` to `21ba1d7c6`.
 - Next step:
-  - Commit the implementation with GPG signing, push immediately, then start Stage 3 review/adjudication on the committed branch.
+  - Commit and push this handoff-only update, then start Stage 3 review/adjudication on the committed branch.
