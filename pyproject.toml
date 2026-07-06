@@ -114,7 +114,7 @@ fastvideo-kernel = [
 imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
 # FA4 cute, pinned to a cutlass-4.5-compatible revision. torch.compile support
 # comes from FastVideo's own custom_op wrappers.
-flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "940cd9680f3315f2f06b43ab5bea2c2cf2d96806", subdirectory = "flash_attn/cute" }
+flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "82d6441eec5d4dfec120153db2c0145ae855a083", subdirectory = "flash_attn/cute" }
 
 [project.optional-dependencies]
 

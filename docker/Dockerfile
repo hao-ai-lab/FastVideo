@@ -68,7 +68,7 @@ ARG FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-p
 # cutlass-4.4 `cute.core.ThrMma` API, which crashes on the cutlass-dsl 4.5 that
 # flashinfer/quack pull in. After the wheel install we overlay this cutlass-4.5-safe
 # upstream cute (flash-attn-4) so the image runs FA4 instead of the FA2 fallback.
-ARG FA4_CUTE_REF=940cd9680f3315f2f06b43ab5bea2c2cf2d96806
+ARG FA4_CUTE_REF=82d6441eec5d4dfec120153db2c0145ae855a083
 
 # Provided automatically by BuildKit/buildx (e.g. "amd64" / "arm64") and used to
 # select the prebuilt flash-attn wheel. Empty under a plain `docker build` without
@@ -161,7 +161,7 @@ RUN --mount=type=cache,target=/opt/uv/cache \
         uv pip install flash-attn==${FLASH_ATTN_VERSION} --no-build-isolation; \
     fi
 
-# Overlay the cutlass-4.5-safe upstream FA4 cute (FA4_CUTE_REF) over the
+# Overlay the CuTe-DSL-4.6-compatible upstream FA4 cute (FA4_CUTE_REF) over the
 # wheel/source one so the image runs FA4, not the FA2 fallback. This pulls the FA4
 # runtime stack (cutlass-dsl, quack-kernels, apache-tvm-ffi, torch-c-dlpack-ext) --
 # the same deps the [dreamverse] extra already installs in CI; the installed torch
