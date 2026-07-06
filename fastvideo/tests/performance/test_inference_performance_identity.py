@@ -95,6 +95,23 @@ def test_performance_producer_emits_v2_identity_from_raw_result_shape(monkeypatc
     assert "output_path" not in record["recipe"]["generation_kwargs"]
 
 
+def test_v2_identity_tolerates_null_run_config(monkeypatch):
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN")
+    cfg = _benchmark_config()
+    cfg["run_config"] = None
+    init_kwargs = dict(cfg["init_kwargs"])
+
+    identity_fields = perf._build_v2_identity_fields(
+        cfg,
+        init_kwargs,
+        dict(cfg["generation_kwargs"]),
+        "A cinematic video.",
+        "NVIDIA L40S PCIe",
+    )
+
+    assert identity_fields["hardware_profile"]["gpu_count"] == 2
+
+
 def test_software_profile_tracks_exact_runtime_attention_kernel_and_container_versions(monkeypatch):
     package_versions = {
         "triton": "3.2.1",

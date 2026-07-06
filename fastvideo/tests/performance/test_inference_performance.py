@@ -348,7 +348,8 @@ def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
         resolved_model_revision=runtime_identity.get("resolved_model_revision"),
         measured_prompts=[prompt],
     )
-    num_gpus = init_kwargs.get("num_gpus", cfg.get("run_config", {}).get("required_gpus", 1))
+    run_config = cfg.get("run_config") or {}
+    num_gpus = init_kwargs.get("num_gpus", run_config.get("required_gpus", 1))
     hw_profile = hardware_profile(num_gpus=num_gpus)
     sw_profile = software_profile()
     env_metadata = environment_metadata(
@@ -466,7 +467,7 @@ def _build_result_record(
 # -- Test -------------------------------------------------------------------
 
 def _run_benchmark(cfg):
-    run_config = cfg.get("run_config", {})
+    run_config = cfg.get("run_config") or {}
     required_gpus = run_config.get("required_gpus", 1)
     available = torch.cuda.device_count()
     if available < required_gpus:

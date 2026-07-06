@@ -259,13 +259,12 @@ def load_records(
         if baseline_eligible_only and not is_baseline_eligible_record(data):
             continue
 
-        if cutoff is not None:
-            ts = _parse_record_timestamp(data)
-            if ts is not None and ts < cutoff:
-                continue
+        ts = _parse_record_timestamp(data)
+        if cutoff is not None and ts is not None and ts < cutoff:
+            continue
 
         records.append((
-            _parse_record_timestamp(data) or datetime.min.replace(tzinfo=timezone.utc),
+            ts or datetime.min.replace(tzinfo=timezone.utc),
             path,
             data,
         ))

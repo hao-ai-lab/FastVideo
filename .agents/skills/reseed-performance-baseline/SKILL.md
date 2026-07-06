@@ -279,7 +279,7 @@ records = load_records_for_model(
 For v2 exact-identity targets:
 
 ```python
-from hf_store import load_records_for_identity
+from fastvideo.performance.hf_store import load_records_for_identity
 
 records = load_records_for_identity(
     "/tmp/perf-tracking",
