@@ -12,7 +12,7 @@
 - Handoff path: .agents/handoffs/issue-864-handoff.md
 - Created: 2026-07-06T05:21:35Z
 - Recreated after interrupted /tmp worktree loss: 2026-07-06
-- Last updated: 2026-07-06T07:17:55Z
+- Last updated: 2026-07-06T07:28:42Z
 
 ## Stage 0 Resume Or Start
 
@@ -270,3 +270,27 @@ Implementation steps for Stage 2:
   - Push printed the known `known_hosts` cross-device-link warning, then updated the remote from `7d60a4824` to `21ba1d7c6`.
 - Next step:
   - Commit and push this handoff-only update, then start Stage 3 review/adjudication on the committed branch.
+
+## Stage 3 Review And Adjudication Log
+
+- Handoff-only update after implementation:
+  - Commit `627c4bded` (`[misc]: update issue 864 handoff after implementation`) created with `git commit -S`.
+  - Pushed to `origin/issue/864-fastwan22-ti2v-size-mismatch`.
+  - Push printed the known `known_hosts` cross-device-link warning, then updated the remote from `21ba1d7c6` to `627c4bded`.
+- Read `/home/toolbox/.codex/skills/review-code/SKILL.md` completely before spawning the review agent.
+- Spawned fresh review-code sub-agent:
+  - Agent id: `019f364b-51f5-74b1-b6cd-10c4aa1af3ea`
+  - Nickname: `Wegener`
+  - Prompt summary: use `$review-code` to review committed branch `macthecadillac/FastVideo` `issue/864-fastwan22-ti2v-size-mismatch` against issue `https://github.com/hao-ai-lab/FastVideo/issues/864`, using only `gh` as `macthecadillac`, no GitHub connector, no local tests/pre-commit, no file edits or GitHub mutations.
+- Reviewer result:
+  - No actionable findings.
+  - Issue fit: branch addresses #864 by splitting `FastWan2.2-TI2V-5B-FullAttn-Diffusers` into a T2V-only config, removing it from I2V workloads, and guarding against `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`.
+  - Validation gaps noted by reviewer: did not independently rerun validation; a public adapter check through `FastVideoArgs.from_kwargs` or `VideoGenerator.from_pretrained` with VSA would be useful but was not required by a finding.
+- Adjudicator/fixer:
+  - Not spawned because the review-code sub-agent reported no actionable findings.
+- Stage 3 pre-PR-message gate:
+  - Initial direct command `PRE_COMMIT_HOME=/tmp/pre-commit-cache-864 pre-commit run --all-files` failed because `pre-commit` was not installed on PATH.
+  - `uvx` attempt with `/tmp` cache failed under sandboxed network DNS restrictions.
+  - Escalated command `UV_TOOL_DIR=/tmp/uv-tools-864 UV_CACHE_DIR=/tmp/uv-cache-864 PRE_COMMIT_HOME=/tmp/pre-commit-cache-864 uvx --from pre-commit pre-commit run --all-files` installed the hook environments and ran.
+  - Result: failed. `yapf` reformatted `fastvideo/configs/pipelines/wan.py`; unrelated files mentioned by hook output did not remain modified. `mypy` failed with `issue-864-fastwan22-ti2v-size-mismatch is not a valid Python package name`, apparently due the hyphenated `/tmp` worktree basename.
+  - Kept the relevant `yapf` reflow in `fastvideo/configs/pipelines/wan.py`. Plan is to commit/push that formatting plus this handoff update, then rerun all-files pre-commit from a detached worktree with a Python-package-safe basename.

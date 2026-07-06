@@ -281,8 +281,8 @@ class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
 
 @dataclass
 class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
-    dit_config: DiTConfig = field(default_factory=lambda: WanVideoConfig(arch_config=WanVideoArchConfig(
-        _supported_attention_backends=(
+    dit_config: DiTConfig = field(
+        default_factory=lambda: WanVideoConfig(arch_config=WanVideoArchConfig(_supported_attention_backends=(
             AttentionBackendEnum.FLASH_ATTN,
             AttentionBackendEnum.TORCH_SDPA,
             AttentionBackendEnum.SAGE_ATTN,
