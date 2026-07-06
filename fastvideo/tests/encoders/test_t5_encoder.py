@@ -4,6 +4,8 @@ import os
 import numpy as np
 import pytest
 import torch
+from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import HfHubHTTPError
 from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel, T5EncoderModel
@@ -22,6 +24,16 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
 
+def _skip_if_gated_cosmos_weights_unavailable(model_path: str) -> None:
+    try:
+        hf_hub_download(model_path, filename=".gitattributes")
+    except HfHubHTTPError as exc:
+        pytest.skip(
+            "Skipping Cosmos T5-large encoder test because the configured "
+            "HuggingFace token cannot access the gated Cosmos weights: "
+            f"{exc}")
+
+
 @pytest.fixture
 def t5_model_paths_and_config():
     base_model_path = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
@@ -36,9 +48,16 @@ def t5_model_paths_and_config():
 @pytest.fixture
 def t5_large_model_paths_and_config():
     base_model_path = "nvidia/Cosmos-Predict2-2B-Video2World"
-    model_path = maybe_download_model(base_model_path,
-                                      local_dir=os.path.join(
-                                          'data', base_model_path))
+    _skip_if_gated_cosmos_weights_unavailable(base_model_path)
+    try:
+        model_path = maybe_download_model(base_model_path,
+                                          local_dir=os.path.join(
+                                              'data', base_model_path))
+    except ValueError as exc:
+        pytest.skip(
+            "Skipping Cosmos T5-large encoder test because the configured "
+            "HuggingFace token cannot access the gated Cosmos weights: "
+            f"{exc}")
     text_encoder_path = os.path.join(model_path, "text_encoder")
     tokenizer_path = os.path.join(model_path, "tokenizer")
     return text_encoder_path, tokenizer_path, CosmosConfig()

@@ -173,8 +173,8 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         img_v_prope = img_v_prope.permute(0, 2, 1, 3)  # [batch, seqlen, num_heads, head_dim]
         # end hyworld
 
-        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
-        attn_metadata = FlashAttnMetadataBuilder().build(
+        from fastvideo.attention.backends.sdpa import SDPAMetadataBuilder
+        attn_metadata = SDPAMetadataBuilder().build(
             current_timestep=0,
             attn_mask=encoder_attention_mask,
         )
@@ -193,8 +193,8 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         
         # begin hyworld
         # attention with prope
-        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
-        attn_metadata_prope = FlashAttnMetadataBuilder().build(
+        from fastvideo.attention.backends.sdpa import SDPAMetadataBuilder
+        attn_metadata_prope = SDPAMetadataBuilder().build(
             current_timestep=0,
             attn_mask=encoder_attention_mask,
         )       
