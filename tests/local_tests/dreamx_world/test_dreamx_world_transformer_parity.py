@@ -38,6 +38,7 @@ OFFICIAL_REF_DIR = Path(os.getenv("DREAMX_WORLD_OFFICIAL_REF_DIR", REPO_ROOT / "
 LOCAL_WEIGHTS_DIR = Path(os.getenv("DREAMX_WORLD_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / "dreamx_world"))
 WAN_BASE_DIR = Path(os.getenv("DREAMX_WORLD_WAN_BASE_DIR", REPO_ROOT / "official_weights" / "Wan2.2-TI2V-5B"))
 CONVERTED_WEIGHTS_DIR = Path(os.getenv("DREAMX_WORLD_CONVERTED_WEIGHTS_DIR", REPO_ROOT / "converted_weights" / "dreamx_world"))
+CONVERTED_HF_REPO = "FastVideo/DreamX-World-5B-Cam-Diffusers"
 PARITY_SCOPE = "both"
 
 
@@ -130,7 +131,10 @@ def _load_fastvideo_transformer(device: torch.device, dtype: torch.dtype) -> tor
 def _load_fastvideo_transformer_strict(device: torch.device, dtype: torch.dtype) -> torch.nn.Module:
     transformer_dir = CONVERTED_WEIGHTS_DIR / "transformer"
     if not transformer_dir.exists():
-        pytest.skip(f"Converted DreamX transformer missing: {transformer_dir}")
+        # No local conversion: pull the published Diffusers transformer from the hub.
+        from huggingface_hub import snapshot_download
+
+        transformer_dir = Path(snapshot_download(CONVERTED_HF_REPO, allow_patterns=["transformer/*"])) / "transformer"
     safetensors_files = resolve_safetensors_files(str(transformer_dir))
     config = make_dreamx_world_5b_cam_dit_config()
     import fastvideo.models.dits.dreamx_world as fastvideo_dreamx

@@ -780,13 +780,15 @@ def _register_configs() -> None:
         pipeline_config_cls=DreamXWorld5BCamPipelineConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
-            "GD-ML/DreamX-World-5B-Cam",
+            "FastVideo/DreamX-World-5B-Cam-Diffusers",
         ],
         model_detectors=[
-            # Mutually exclusive with the AR detector below: Cam requires an
-            # explicit "cam" marker so hyphenated AR local paths (e.g.
-            # /ckpts/dreamx-world-5b-converted) don't first-match here —
-            # detector resolution is first-match in registration order.
+            # Pattern also catches the raw GD-ML/DreamX-World-5B-Cam id and
+            # local converted dirs. Mutually exclusive with the AR detector
+            # below: Cam requires an explicit "cam" marker so hyphenated AR
+            # local paths (e.g. /ckpts/dreamx-world-5b-converted) don't
+            # first-match here — detector resolution is first-match in
+            # registration order.
             lambda path:
             ("dreamx-world" in path.lower() and "cam" in path.lower()) or "dreamxworldpipeline" in path.lower()
         ],
@@ -798,7 +800,7 @@ def _register_configs() -> None:
         pipeline_config_cls=DreamXWorld5BARPipelineConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
-            "GD-ML/DreamX-World-5B",
+            "FastVideo/DreamX-World-5B-Diffusers",
         ],
         model_detectors=[
             lambda path:

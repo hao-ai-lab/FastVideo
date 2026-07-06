@@ -1,3 +1,10 @@
+"""DreamX-World-5B-Cam camera-controlled video generation.
+
+Uses the pre-converted Diffusers checkpoint FastVideo/DreamX-World-5B-Cam-Diffusers.
+To convert the raw GD-ML/DreamX-World-5B-Cam checkpoint yourself, see
+scripts/checkpoint_conversion/dreamx_world_to_diffusers.py.
+"""
+
 import os
 
 from fastvideo import VideoGenerator
@@ -15,7 +22,7 @@ def _env_float(name: str, default: float) -> float:
 
 
 def main():
-    model_name = os.getenv("DREAMX_WORLD_MODEL_DIR", "GD-ML/DreamX-World-5B-Cam")
+    model_name = os.getenv("DREAMX_WORLD_MODEL_DIR", "FastVideo/DreamX-World-5B-Cam-Diffusers")
     generator = VideoGenerator.from_pretrained(
         model_name,
         num_gpus=1,
@@ -24,7 +31,6 @@ def main():
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=False,
-        override_pipeline_cls_name="DreamXWorldPipeline",
     )
 
     prompt = os.getenv(

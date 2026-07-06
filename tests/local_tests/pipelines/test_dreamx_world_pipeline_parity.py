@@ -20,7 +20,8 @@ from torch.testing import assert_close
 
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
-MODEL_DIR = Path(os.getenv("DREAMX_WORLD_MODEL_DIR", "converted_weights/dreamx_world"))
+# Local converted dir or HF repo id; the loader downloads hub ids itself.
+MODEL_DIR = os.getenv("DREAMX_WORLD_MODEL_DIR", "FastVideo/DreamX-World-5B-Cam-Diffusers")
 
 
 pytestmark = pytest.mark.skipif(
@@ -68,9 +69,6 @@ def _close_generator(generator: Any) -> None:
 
 
 def test_dreamx_world_one_step_pipeline_latent_matches_manual_pass() -> None:
-    if not MODEL_DIR.exists():
-        pytest.fail(f"DreamX-World converted model directory is missing: {MODEL_DIR}")
-
     from fastvideo import VideoGenerator
     common_kwargs = dict(
         prompt="a quiet road through a futuristic city at sunrise",
@@ -88,7 +86,7 @@ def test_dreamx_world_one_step_pipeline_latent_matches_manual_pass() -> None:
     )
 
     generator = VideoGenerator.from_pretrained(
-        str(MODEL_DIR),
+        MODEL_DIR,
         num_gpus=1,
         use_fsdp_inference=False,
         dit_cpu_offload=False,

@@ -13,7 +13,8 @@ from PIL import Image, ImageDraw
 
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
-MODEL_DIR = Path(os.getenv("DREAMX_WORLD_MODEL_DIR", "converted_weights/dreamx_world"))
+# Local converted dir or HF repo id; the loader downloads hub ids itself.
+MODEL_DIR = os.getenv("DREAMX_WORLD_MODEL_DIR", "FastVideo/DreamX-World-5B-Cam-Diffusers")
 
 
 
@@ -113,16 +114,13 @@ def test_dreamx_world_camera_stage_writes_y_camera() -> None:
 
 
 def test_dreamx_world_pipeline_load_generate_latent_smoke(tmp_path: Path) -> None:
-    if not MODEL_DIR.exists():
-        pytest.fail(f"DreamX-World converted model directory is missing: {MODEL_DIR}")
-
     from fastvideo import VideoGenerator
 
     image_path = tmp_path / "dreamx_world_smoke_input.png"
     _write_smoke_image(image_path)
 
     generator = VideoGenerator.from_pretrained(
-        str(MODEL_DIR),
+        MODEL_DIR,
         num_gpus=1,
         use_fsdp_inference=False,
         dit_cpu_offload=False,

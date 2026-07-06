@@ -26,6 +26,7 @@ from fastvideo.models.loader.weight_utils import resolve_safetensors_files, safe
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_REF_DIR = Path(os.getenv("DREAMX_WORLD_OFFICIAL_REF_DIR", REPO_ROOT / "DreamX-World"))
 CONVERTED_AR_DIR = Path(os.getenv("DREAMX_WORLD_AR_CONVERTED_DIR", "/tmp/converted_dreamx_world_ar"))
+CONVERTED_AR_HF_REPO = "FastVideo/DreamX-World-5B-Diffusers"
 PARITY_SCOPE = "both"
 
 
@@ -161,7 +162,10 @@ def test_dreamx_world_ar_5b_config_matches_official_shape():
 def test_dreamx_world_ar_converted_5b_transformer_strict_loads():
     transformer_dir = CONVERTED_AR_DIR / "transformer"
     if not transformer_dir.exists():
-        pytest.skip(f"Converted AR transformer missing: {transformer_dir}")
+        # No local conversion: pull the published Diffusers transformer from the hub.
+        from huggingface_hub import snapshot_download
+
+        transformer_dir = Path(snapshot_download(CONVERTED_AR_HF_REPO, allow_patterns=["transformer/*"])) / "transformer"
     with torch.device("meta"):
         model = DreamXWorldARTransformer3DModel(make_dreamx_world_5b_ar_dit_config(), {})
     incompatible = load_model_from_full_model_state_dict(
