@@ -167,7 +167,12 @@ def _torch_metadata() -> dict[str, str]:
 def _build_metadata(repo_root: Path) -> dict[str, object]:
     explicit_arch = os.environ.get("TORCH_CUDA_ARCH_LIST", "").strip()
     resolved_arch = explicit_arch or _detect_arch_from_torch()
-    metadata: dict[str, object] = {
+    cache_key_build = {
+        "gpu_backend": os.environ.get("GPU_BACKEND", "CUDA"),
+        "resolved_torch_cuda_arch_list": resolved_arch,
+        "cmake_args": " ".join(os.environ.get("CMAKE_ARGS", "").split()),
+    }
+    cache_key_metadata: dict[str, object] = {
         "schema_version": CACHE_SCHEMA_VERSION,
         "kernel_version": _read_kernel_version(repo_root),
         "source": _kernel_source_hash(repo_root),
@@ -184,14 +189,16 @@ def _build_metadata(repo_root: Path) -> dict[str, object]:
             "cudacxx": os.environ.get("CUDACXX", ""),
             "nvcc_version": _run_optional(["nvcc", "--version"]),
         },
+        "build": cache_key_build,
+    }
+    metadata = {
+        **cache_key_metadata,
         "build": {
-            "gpu_backend": os.environ.get("GPU_BACKEND", "CUDA"),
+            **cache_key_build,
             "torch_cuda_arch_list": explicit_arch,
-            "resolved_torch_cuda_arch_list": resolved_arch,
-            "cmake_args": " ".join(os.environ.get("CMAKE_ARGS", "").split()),
         },
     }
-    metadata["cache_key"] = _sha256_text(json.dumps(metadata, sort_keys=True, separators=(",", ":")))
+    metadata["cache_key"] = _sha256_text(json.dumps(cache_key_metadata, sort_keys=True, separators=(",", ":")))
     return metadata
 
 

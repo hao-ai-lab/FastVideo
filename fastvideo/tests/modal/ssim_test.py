@@ -529,14 +529,16 @@ def _prepare_ssim_workspace(
             "HF_API_KEY": hf_api_key,
         },
     )
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.stderr:
+        print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
     print("Committing fastvideo-kernel build cache volume", flush=True)
     try:
         kernel_cache_vol.commit()
     except Exception as error:
         print(f"WARNING: failed to commit fastvideo-kernel build cache volume: {error}", flush=True)
     if result.returncode != 0:
-        print(result.stdout)
-        print(result.stderr)
         raise RuntimeError(f"Workspace setup failed with exit code {result.returncode}")
 
     ssim_dir = os.path.join(repo_root, "fastvideo", "tests", "ssim")
