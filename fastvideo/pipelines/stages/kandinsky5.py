@@ -387,7 +387,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
-        result.add_check("prompt_embeds", batch.prompt_embeds, lambda x: V.list_min_length(x, 2))
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.min_list_length(2))
         return result
 
 
