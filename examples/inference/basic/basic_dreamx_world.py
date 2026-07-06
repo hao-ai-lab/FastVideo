@@ -15,7 +15,7 @@ def _env_float(name: str, default: float) -> float:
 
 
 def main():
-    model_name = os.getenv("DREAMX_WORLD_MODEL_DIR", "GD-ML/DreamX-World-5B-Cam")
+    model_name = os.getenv("DREAMX_WORLD_MODEL_DIR", "FastVideo/DreamX-World-5B-Cam-Diffusers")
     generator = VideoGenerator.from_pretrained(
         model_name,
         num_gpus=1,

@@ -20,22 +20,13 @@ REQUIRED_GPUS = 1
 
 device_reference_folder = resolve_inference_device_reference_folder(logger)
 
-_LOCAL_CONVERTED_MODEL = Path("converted_weights/dreamx_world")
 _MODEL_PATH = os.getenv(
     "DREAMX_WORLD_SSIM_MODEL_PATH",
-    str(_LOCAL_CONVERTED_MODEL),
-)
-_LOCAL_AR_CANDIDATES = (
-    Path("/tmp/converted_dreamx_world_ar"),
-    Path("/root/data/dreamx_world_ar_converted"),
-)
-_DEFAULT_AR_MODEL_PATH = next(
-    (str(path) for path in _LOCAL_AR_CANDIDATES if path.exists()),
-    str(_LOCAL_AR_CANDIDATES[0]),
+    "FastVideo/DreamX-World-5B-Cam-Diffusers",
 )
 _AR_MODEL_PATH = os.getenv(
     "DREAMX_WORLD_AR_SSIM_MODEL_PATH",
-    _DEFAULT_AR_MODEL_PATH,
+    "FastVideo/DreamX-World-5B-Diffusers",
 )
 
 DREAMX_WORLD_PARAMS = {
@@ -137,13 +128,6 @@ def test_dreamx_world_inference_similarity(
     model_id: str,
     tmp_path: Path,
 ) -> None:
-    model_path = Path(str(DREAMX_WORLD_MODEL_TO_PARAMS[model_id]["model_path"]))
-    if not model_path.exists():
-        pytest.skip(
-            f"DreamX-World converted model path is missing: {model_path}. "
-            "Set DREAMX_WORLD_SSIM_MODEL_PATH to a FastVideo-loadable converted root."
-        )
-
     image_path = tmp_path / "dreamx_world_ssim_input.png"
     _write_deterministic_reference_image(image_path)
 
@@ -182,13 +166,6 @@ def test_dreamx_world_ar_inference_similarity(
     attention_backend_name: str,
     model_id: str,
 ) -> None:
-    model_path = Path(str(DREAMX_WORLD_AR_MODEL_TO_PARAMS[model_id]["model_path"]))
-    if not model_path.exists():
-        pytest.skip(
-            f"DreamX-World AR converted model path is missing: {model_path}. "
-            "Set DREAMX_WORLD_AR_SSIM_MODEL_PATH to a FastVideo-loadable converted root."
-        )
-
     run_text_to_video_similarity_test(
         logger=logger,
         script_dir=os.path.dirname(os.path.abspath(__file__)),

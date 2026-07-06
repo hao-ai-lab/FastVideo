@@ -780,7 +780,7 @@ def _register_configs() -> None:
         pipeline_config_cls=DreamXWorld5BCamPipelineConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
-            "GD-ML/DreamX-World-5B-Cam",
+            "FastVideo/DreamX-World-5B-Cam-Diffusers",
         ],
         model_detectors=[
             # Mutually exclusive with the AR detector below: Cam requires an
@@ -798,7 +798,7 @@ def _register_configs() -> None:
         pipeline_config_cls=DreamXWorld5BARPipelineConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
-            "GD-ML/DreamX-World-5B",
+            "FastVideo/DreamX-World-5B-Diffusers",
         ],
         model_detectors=[
             lambda path:
