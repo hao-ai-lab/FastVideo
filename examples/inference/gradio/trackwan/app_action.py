@@ -218,7 +218,8 @@ def on_preview(clip_idx, traj_json, radius, falloff, sparse):
                   f"This matches the training track format. Press Generate.")
 
 
-def on_generate(clip_idx, ckpt_name, traj_json, radius, falloff, sparse, steps, seed):
+def on_generate(clip_idx, ckpt_name, traj_json, radius, falloff, sparse, steps, seed,
+                w_text: float = 3.0, w_motion: float = 1.5, mode: str = "joint"):
     """Generator: streams per-step denoise progress to the log, yields the video at the end."""
     import time
     from fastvideo.forward_context import set_forward_context
@@ -253,17 +254,41 @@ def on_generate(clip_idx, ckpt_name, traj_json, radius, falloff, sparse, steps, 
     sched = FlowMatchEulerDiscreteScheduler(shift=float(model.timestep_shift))
     sched.set_timesteps(steps, device=device)
 
+    # Match TrackValidationCallback._sample: MotionStream joint text+motion CFG (Eq. 2).
+    #   mode="joint"     -> full formula (3 NFE / step). Default. Matches training-time val.
+    #   mode="text_only" -> text CFG only, tracks in forward (2 NFE / step).
+    #   mode="no_track"  -> tracks=None, text CFG only (2 NFE / step).
+    tp_eff = None if mode == "no_track" else tp
+    tv_eff = None if mode == "no_track" else tv
+    wt, wm = float(w_text), float(w_motion)
+    cfg_on = (wt != 1.0) or (wm != 1.0)
+    txt_null = torch.zeros_like(txt) if cfg_on else None
+
+    def _fwd(text_e, tp_e, tv_e, mi, tsv):
+        with torch.no_grad(), torch.autocast(device.type, dtype=dtype), \
+                set_forward_context(current_timestep=tsv, attn_metadata=None):
+            return model.transformer(hidden_states=mi, encoder_hidden_states=text_e,
+                                     encoder_attention_mask=mask, timestep=tsv,
+                                     encoder_hidden_states_image=img, track_points=tp_e,
+                                     track_visibility=tv_e, return_dict=False)
+
     for i, t in enumerate(sched.timesteps):
         model_in = torch.cat([latents.to(dtype), cond20], dim=1)
         ts = t.reshape(1).to(device, dtype)
-        with torch.no_grad(), torch.autocast(device.type, dtype=dtype), \
-                set_forward_context(current_timestep=ts, attn_metadata=None):
-            v = model.transformer(hidden_states=model_in, encoder_hidden_states=txt,
-                                  encoder_attention_mask=mask, timestep=ts,
-                                  encoder_hidden_states_image=img, track_points=tp,
-                                  track_visibility=tv, return_dict=False)
+        v_full = _fwd(txt, tp_eff, tv_eff, model_in, ts)
+        if not cfg_on:
+            v = v_full
+        elif tp_eff is None or mode == "text_only":
+            v_no_text = _fwd(txt_null, tp_eff, tv_eff, model_in, ts)
+            v = v_no_text + wt * (v_full - v_no_text)
+        else:  # mode="joint" (Eq. 2)
+            v_no_text = _fwd(txt_null, tp_eff, tv_eff, model_in, ts)
+            v_no_motion = _fwd(txt, None, None, model_in, ts)
+            alpha = wt / (wt + wm) if (wt + wm) > 0 else 0.5
+            v_base = alpha * v_no_text + (1.0 - alpha) * v_no_motion
+            v = v_base + wt * (v_full - v_no_text) + wm * (v_full - v_no_motion)
         latents = sched.step(v.float(), t, latents.float(), return_dict=False)[0]
-        yield gr.update(), f"[2/4] denoising {i + 1}/{steps}  ({time.time() - t0:.1f}s)", gr.update()
+        yield gr.update(), f"[2/4] denoising {i + 1}/{steps}  ({time.time() - t0:.1f}s, cfg={mode})", gr.update()
 
     yield gr.update(), f"[3/4] decoding latents ...  ({time.time() - t0:.1f}s)", gr.update()
     frames = twi.decode_to_pixels(model, latents)
@@ -342,6 +367,12 @@ def build_ui(num_clips: int, ckpt_names: list[str], Tpx: int):
                     steps = gr.Slider(10, 60, value=30, step=5, label="Denoise steps")
                     seed = gr.Number(value=1000, label="Seed")
                 with gr.Row():
+                    w_text = gr.Slider(1.0, 8.0, value=3.0, step=0.5, label="Text CFG (w_t)")
+                    w_motion = gr.Slider(1.0, 5.0, value=1.5, step=0.25, label="Motion CFG (w_m)")
+                mode = gr.Radio(["joint", "text_only", "no_track"],
+                                value="joint",
+                                label="CFG mode (joint = Eq. 2; text_only = drop motion arm; no_track = tracks=None)")
+                with gr.Row():
                     preview_btn = gr.Button("Preview traces")
                     gen_btn = gr.Button("Generate", variant="primary")
                 status = gr.Textbox(label="Status / generation log", interactive=False, lines=2)
@@ -359,7 +390,8 @@ def build_ui(num_clips: int, ckpt_names: list[str], Tpx: int):
         rec_btn.click(None, None, None, js="()=>{ window._startRec(); }")
         clr_btn.click(None, None, None, js="()=>{ window._clear(); }")
         preview_btn.click(on_preview, [clip, traj_json, radius, falloff, background], [gen_vid, status])
-        gen_btn.click(on_generate, [clip, ckpt, traj_json, radius, falloff, background, steps, seed],
+        gen_btn.click(on_generate,
+                      [clip, ckpt, traj_json, radius, falloff, background, steps, seed, w_text, w_motion, mode],
                       [gen_vid, status, epe_box])
         demo.load(on_clip, [clip], [caption, ff_b64, orig_vid])
         demo.load(None, None, None, js=_canvas_js(Tpx))

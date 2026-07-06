@@ -50,10 +50,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=1024, help="Base seed; per-video seed = seed + global index.")
     p.add_argument("--num-inference-steps", type=int, default=None, help="Override model default if set.")
     p.add_argument("--negative-prompt", type=str, default=None)
+    p.add_argument("--image",
+                   type=str,
+                   default=None,
+                   help="If set, do I2V from this image (same for every prompt); else T2V.")
     # Offload controls. Default OFF: Wan2.2-A14B is ~56GB bf16 and fits on a single H200 (143GB),
     # so offloading (esp. layerwise) only makes generation ~10x slower. Enable on small GPUs.
     p.add_argument("--dit-cpu-offload", action="store_true", help="Offload DiT to CPU (slow).")
-    p.add_argument("--dit-layerwise-offload", action="store_true",
+    p.add_argument("--dit-layerwise-offload",
+                   action="store_true",
                    help="Stream DiT layers from CPU per step (very slow; only for tiny GPUs).")
     p.add_argument("--text-encoder-cpu-offload", action="store_true", help="Offload text encoder to CPU.")
     p.add_argument("--vae-cpu-offload", action="store_true", help="Offload VAE to CPU.")
@@ -62,10 +67,8 @@ def parse_args() -> argparse.Namespace:
 
 def load_prompts(path: Path, start: int, num: int, shuffle: bool, seed: int) -> list[tuple[int, str]]:
     if not path.exists():
-        raise FileNotFoundError(
-            f"Prompts file not found: {path}\n"
-            "Download it first (login node): cd examples/dataset/vidprom && ./download_dataset.sh"
-        )
+        raise FileNotFoundError(f"Prompts file not found: {path}\n"
+                                "Download it first (login node): cd examples/dataset/vidprom && ./download_dataset.sh")
     lines = [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
     indexed = list(enumerate(lines))  # global index is stable w.r.t. the raw file order
     if shuffle:
@@ -163,6 +166,7 @@ def main() -> None:
 
         t0 = time.time()
         try:
+            i2v_kwargs = {"image_path": args.image} if args.image else {}
             generator.generate_video(
                 prompt,
                 output_path=str(tmp_dir),
@@ -172,6 +176,7 @@ def main() -> None:
                 num_frames=args.num_frames,
                 fps=args.fps,
                 seed=args.seed + idx,
+                **i2v_kwargs,
                 **extra,
             )
             produced = sorted(tmp_dir.glob("*.mp4"))
@@ -193,7 +198,10 @@ def main() -> None:
             "fps": float(args.fps),
             "duration": duration,
             "num_frames": int(args.num_frames),
-            "resolution": {"width": args.width, "height": args.height},
+            "resolution": {
+                "width": args.width,
+                "height": args.height
+            },
         }
         with manifest_jsonl.open("a") as f:
             f.write(json.dumps(record) + "\n")
