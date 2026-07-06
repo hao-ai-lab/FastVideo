@@ -20,13 +20,6 @@ from fastvideo.tests.ssim.inference_similarity_utils import (
 
 logger = init_logger(__name__)
 
-# The SSIM lane image bakes FASTVIDEO_FA4=1, but on L40S (sm89) the CLIP
-# encoder's dense MHA inference call routes into the FA4 CuTeDSL JIT, which
-# fails to compile there (nvvm.fmax signature mismatch vs the image's
-# nvidia_cutlass_dsl). Pin FA4 off so reference seeding and CI runs both use
-# the FA2 path with identical numerics.
-os.environ["FASTVIDEO_FA4"] = "0"
-
 REQUIRED_GPUS = 1
 
 device_reference_folder = resolve_inference_device_reference_folder(logger)
@@ -52,8 +45,8 @@ KANDINSKY5_T2V_FULL_QUALITY_PARAMS = {
     **KANDINSKY5_T2V_PARAMS,
     "height": _PRESET_DEFAULTS["height"],
     "width": _PRESET_DEFAULTS["width"],
-    # Keep the reduced frame count even at full quality (preset default: 121).
-    "num_frames": KANDINSKY5_T2V_PARAMS["num_frames"],
+    # num_frames stays at the inherited reduced 21 even at full quality
+    # (preset default: 121).
 }
 
 KANDINSKY5_T2V_MODEL_TO_PARAMS = {
@@ -79,22 +72,38 @@ def test_kandinsky5_t2v_inference_similarity(
     attention_backend_name: str,
     model_id: str,
 ) -> None:
-    run_text_to_video_similarity_test(
-        logger=logger,
-        script_dir=os.path.dirname(os.path.abspath(__file__)),
-        device_reference_folder=device_reference_folder,
-        prompt=prompt,
-        attention_backend_name=attention_backend_name,
-        model_id=model_id,
-        default_params_map=KANDINSKY5_T2V_MODEL_TO_PARAMS,
-        full_quality_params_map=FULL_QUALITY_KANDINSKY5_T2V_MODEL_TO_PARAMS,
-        min_acceptable_ssim=0.93,
-        # Match examples/inference/basic/basic_kandinsky5_t2v.py: FSDP inference
-        # is not used for Kandinsky-5, and the Qwen2.5-VL text encoder stays on
-        # CPU between encodes.
-        init_kwargs_override={
-            "use_fsdp_inference": False,
-            "text_encoder_cpu_offload": True,
-            "pin_cpu_memory": True,
-        },
-    )
+    # The SSIM lane image bakes FASTVIDEO_FA4=1, but on L40S (sm89) the CLIP
+    # encoder's dense MHA inference call routes into the FA4 CuTeDSL JIT,
+    # which fails to compile there (nvvm.fmax signature mismatch vs the
+    # image's nvidia_cutlass_dsl). Pin FA4 off so reference seeding and CI
+    # runs both use the FA2 path with identical numerics. Scoped to this test
+    # and restored afterwards: the other SSIM references are seeded with FA4
+    # on, so a module-level pin would corrupt every test collected in the
+    # same pytest process.
+    saved_fa4 = os.environ.get("FASTVIDEO_FA4")
+    os.environ["FASTVIDEO_FA4"] = "0"
+    try:
+        run_text_to_video_similarity_test(
+            logger=logger,
+            script_dir=os.path.dirname(os.path.abspath(__file__)),
+            device_reference_folder=device_reference_folder,
+            prompt=prompt,
+            attention_backend_name=attention_backend_name,
+            model_id=model_id,
+            default_params_map=KANDINSKY5_T2V_MODEL_TO_PARAMS,
+            full_quality_params_map=FULL_QUALITY_KANDINSKY5_T2V_MODEL_TO_PARAMS,
+            min_acceptable_ssim=0.93,
+            # Match examples/inference/basic/basic_kandinsky5_t2v.py: FSDP
+            # inference is not used for Kandinsky-5, and the Qwen2.5-VL text
+            # encoder stays on CPU between encodes.
+            init_kwargs_override={
+                "use_fsdp_inference": False,
+                "text_encoder_cpu_offload": True,
+                "pin_cpu_memory": True,
+            },
+        )
+    finally:
+        if saved_fa4 is None:
+            os.environ.pop("FASTVIDEO_FA4", None)
+        else:
+            os.environ["FASTVIDEO_FA4"] = saved_fa4
