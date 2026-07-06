@@ -17,7 +17,7 @@ SSIM_TEST = MODAL_ROOT / "ssim_test.py"
 
 
 def _function_strings(path: Path, function_name: str) -> str:
-    source = path.read_text()
+    source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == function_name:
@@ -31,12 +31,12 @@ def _function_strings(path: Path, function_name: str) -> str:
 
 
 def test_generic_l40s_launcher_defaults_fa4_off():
-    source = LAUNCH_L40S_JOB.read_text()
+    source = LAUNCH_L40S_JOB.read_text(encoding="utf-8")
     assert '"FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "0")' in source
 
 
 def test_ssim_launcher_keeps_fa4_enabled_by_default():
-    source = SSIM_TEST.read_text()
+    source = SSIM_TEST.read_text(encoding="utf-8")
     assert '"FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1")' in source
 
 
