@@ -12,7 +12,7 @@
 - Handoff path: .agents/handoffs/issue-864-handoff.md
 - Created: 2026-07-06T05:21:35Z
 - Recreated after interrupted /tmp worktree loss: 2026-07-06
-- Last updated: 2026-07-06T07:51:39Z
+- Last updated: 2026-07-06T07:54:06Z
 
 ## Stage 0 Resume Or Start
 
@@ -346,6 +346,16 @@ Implementation steps for Stage 2:
     - `python -m modal run /tmp/fastvideo-worktrees/interleavethinker-modal/fastvideo/tests/modal/launch_l40s_job.py --install-extra none --command "pytest fastvideo/tests/api/test_fastwan_fullattn.py -q" --apply-local-patch --patch-paths fastvideo/models/dits/wanvideo.py,fastvideo/tests/api/test_fastwan_fullattn.py`
     - Run: `ap-uaZrKwXeCVqZvDnSOo10YZ`
     - Result: `6 passed in 0.03s`.
-- Next:
-  - Commit the code/test/handoff update with GPG signing and push.
-  - Run all-files pre-commit on the detached underscore-named validation worktree at the pushed commit.
+- Commit and push:
+  - Commit `cbe2082bc8` (`[bugfix]: honor Wan config attention backends`) created with `git commit -S`.
+  - Pushed to `origin/issue/864-fastwan22-ti2v-size-mismatch`.
+  - Push printed the known `known_hosts` cross-device-link warning, then updated the remote from `7026df0d5` to `cbe2082bc`.
+- All-files pre-commit after code fix:
+  - Detached underscore-named validation worktree `/tmp/fastvideo_worktrees/issue_864_fastwan22_ti2v_size_mismatch` checked out to `cbe2082bc8ddc11d49804c234dec4857139fe945`.
+  - Command:
+    - `UV_TOOL_DIR=/tmp/uv-tools-864 UV_CACHE_DIR=/tmp/uv-cache-864 PRE_COMMIT_HOME=/tmp/pre-commit-cache-864 uvx --from pre-commit pre-commit run --all-files`
+  - Result: passed (`yapf`, `ruff`, `codespell`, `PyMarkdown`, `actionlint`, `mypy`, filename-space, suggestion).
+- Public `VideoGenerator.from_pretrained(..., FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN)` guard check not run in this adjudicator pass:
+  - The accepted finding was specifically about instantiated Wan block construction using the config's backend tuple.
+  - Existing tests cover the registry/config guard and direct Wan block selection; the new test covers actual `WanTransformer3DModel` block construction.
+  - A full public constructor call can proceed into executor/model setup, so it was left as optional residual validation rather than run as part of this narrow fix.
