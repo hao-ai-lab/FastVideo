@@ -65,7 +65,7 @@ class WanT2V480PConfig(PipelineConfig):
 
     # WanConfig-specific added parameters
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
 

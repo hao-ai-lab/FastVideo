@@ -12,7 +12,7 @@
 - Handoff path: .agents/handoffs/issue-864-handoff.md
 - Created: 2026-07-06T05:21:35Z
 - Recreated after interrupted /tmp worktree loss: 2026-07-06
-- Last updated: 2026-07-06T07:28:42Z
+- Last updated: 2026-07-06T07:32:18Z
 
 ## Stage 0 Resume Or Start
 
@@ -294,3 +294,8 @@ Implementation steps for Stage 2:
   - Escalated command `UV_TOOL_DIR=/tmp/uv-tools-864 UV_CACHE_DIR=/tmp/uv-cache-864 PRE_COMMIT_HOME=/tmp/pre-commit-cache-864 uvx --from pre-commit pre-commit run --all-files` installed the hook environments and ran.
   - Result: failed. `yapf` reformatted `fastvideo/configs/pipelines/wan.py`; unrelated files mentioned by hook output did not remain modified. `mypy` failed with `issue-864-fastwan22-ti2v-size-mismatch is not a valid Python package name`, apparently due the hyphenated `/tmp` worktree basename.
   - Kept the relevant `yapf` reflow in `fastvideo/configs/pipelines/wan.py`. Plan is to commit/push that formatting plus this handoff update, then rerun all-files pre-commit from a detached worktree with a Python-package-safe basename.
+  - Commit `f7cbe61a8` (`[misc]: record issue 864 review pass`) created with `git commit -S` and pushed to `origin/issue/864-fastwan22-ti2v-size-mismatch`.
+  - Created detached validation worktree `/tmp/fastvideo_worktrees/issue_864_fastwan22_ti2v_size_mismatch` from branch head to avoid the hyphenated package-name path issue.
+  - Reran all-files pre-commit there with the same `uvx` command and `/tmp` caches. `yapf`, `ruff`, `codespell`, `PyMarkdown`, `actionlint`, filename-space, and suggestion hooks passed. `mypy` failed on one patch-owned issue: `fastvideo/configs/pipelines/wan.py:296: error: Call to untyped function "__post_init__" in typed context [no-untyped-call]`.
+  - Fix applied: annotated existing `WanT2V480PConfig.__post_init__` as `-> None`, matching its current behavior and letting the FullAttn config call the base initializer without a `type: ignore`.
+  - Next: commit/push the type annotation and handoff update, then rerun Modal targeted tests and all-files pre-commit.
