@@ -6,7 +6,6 @@ from fastvideo.logger import init_logger
 
 import numpy as np
 import torch
-from pytorch_msssim import ms_ssim, ssim
 
 logger = init_logger(__name__)
 
@@ -87,6 +86,8 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
         video2_path: Path to the second video.
         use_ms_ssim: Whether to use Multi-Scale Structural Similarity(MS-SSIM) instead of SSIM.
     """
+    from pytorch_msssim import ms_ssim, ssim
+
     print(f"Computing SSIM between {video1_path} and {video2_path}...")
     if not os.path.exists(video1_path):
         raise FileNotFoundError(f"Video1 not found: {video1_path}")
