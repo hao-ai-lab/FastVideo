@@ -187,6 +187,8 @@ def run_transformer_tests():
 
 
 @app.function(gpu="L40S:4",
+              cpu=8.0,
+              memory=32768,
               image=image,
               timeout=900,
               secrets=[
@@ -201,6 +203,8 @@ def run_training_tests():
 
 
 @app.function(gpu="L40S:2",
+              cpu=8.0,
+              memory=32768,
               image=image,
               timeout=900,
               secrets=[
@@ -276,7 +280,7 @@ def run_self_forcing_tests():
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_unit_test():
     run_test(
-        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ ./fastvideo/tests/stages/ ./fastvideo/tests/ops/ --ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py --ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs"
+        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ ./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/training/test_trackers.py ./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py --ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py --ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs"
     )
 
 
@@ -318,6 +322,8 @@ def run_dreamverse_app_tests():
 
 
 @app.function(gpu="L40S:1",
+              cpu=8.0,
+              memory=32768,
               image=image,
               timeout=1800,
               secrets=[
@@ -400,6 +406,8 @@ def run_lora_extraction_tests():
 
 
 @app.function(gpu="L40S:2",
+              cpu=8.0,
+              memory=32768,
               image=image,
               timeout=1800,
               secrets=[
@@ -427,6 +435,8 @@ def run_performance_tests():
         "export PERF_RUN_SOURCE='unknown'; "
         "export PERF_UPLOAD_POLICY='never'; "
         "fi; "
+        "(nvidia-smi --query-gpu=index,timestamp,clocks.sm,clocks.max.sm,power.draw,power.limit,temperature.gpu "
+        "--format=csv -l 10 > /tmp/gpu_telemetry.csv 2>/dev/null &); "
         "pytest ./fastvideo/tests/performance -vs; "
         "PYTEST_RC=$?; "
         "PERF_RC=0; "
@@ -435,6 +445,8 @@ def run_performance_tests():
         "PERF_RC=$?; "
         "fi; "
         "python ./fastvideo/tests/performance/dashboard.py || true; "
+        "echo '--- GPU telemetry (clocks.sm vs clocks.max.sm reveals capped hosts) ---'; "
+        "cat /tmp/gpu_telemetry.csv || true; "
         "FINAL_RC=$PYTEST_RC; "
         "if [ $FINAL_RC -eq 0 ]; then FINAL_RC=$PERF_RC; fi; "
         "exit $FINAL_RC")

@@ -23,6 +23,7 @@ If you only need to use the distributed environment without model parallelism,
  you can skip the model parallel initialization and destruction steps.
 """
 import contextlib
+import gc
 import os
 import pickle
 import weakref
@@ -1006,6 +1007,13 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
     if shutdown_ray:
         import ray  # Lazy import Ray
         ray.shutdown()
+    # Actually free GPU memory, as the name promises. FSDP-wrapped modules sit
+    # in reference cycles (module <-> FSDP state <-> hooks), so dropping the
+    # last user reference does not free their parameters until a gc pass runs.
+    # Without this, back-to-back model-load tests in one pytest session OOM.
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def get_same_node_ranks(pg: ProcessGroup | StatelessProcessGroup, source_rank: int = 0) -> list[int]:

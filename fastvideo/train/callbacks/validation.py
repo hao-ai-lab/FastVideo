@@ -143,7 +143,7 @@ class ValidationCallback(Callback):
         self.num_frames = (int(num_frames) if num_frames is not None else None)
         self.output_dir = (str(output_dir) if output_dir is not None else None)
         self.sampling_timesteps = ([int(s) for s in sampling_timesteps] if sampling_timesteps is not None else None)
-        self.overlay_actions = bool(overlay_actions)
+        self.overlay_actions = self._coerce_bool(overlay_actions)
         # Validation-only action amplification for world model; training keeps raw action values.
         self.keyboard_value_scale = float(keyboard_value_scale)
         metrics_config = pipeline_kwargs.pop("metrics", None)
@@ -563,6 +563,7 @@ class ValidationCallback(Callback):
                         all_captions,
                         key=f"validation_videos_{num_inference_steps}_steps",
                         step=step,
+                        fps=sp.fps,
                     )
                     if all_overlay_video_filenames:
                         self._log_validation_video_artifacts(
@@ -571,6 +572,7 @@ class ValidationCallback(Callback):
                             key=(f"validation_videos_{num_inference_steps}"
                                  f"_steps_overlay"),
                             step=step,
+                            fps=sp.fps,
                         )
                 else:
                     self.world_group.send_object(
@@ -653,6 +655,7 @@ class ValidationCallback(Callback):
         *,
         key: str,
         step: int,
+        fps: int,
     ) -> None:
         video_logs = []
         for fname, cap in zip(
@@ -663,6 +666,7 @@ class ValidationCallback(Callback):
             art = self.tracker.video(
                 fname,
                 caption=cap,
+                fps=fps,
             )
             if art is not None:
                 video_logs.append(art)
@@ -1074,11 +1078,16 @@ class ValidationCallback(Callback):
             None,
         )
 
+        loaded_modules: dict[str, Any] = {"transformer": transformer}
+        # Distillation methods build the flow-match scheduler their few-step DMD
+        # sampler needs; inject it so the pipeline doesn't fall back to UniPC.
+        method_scheduler = getattr(self.method, "_sf_scheduler", None)
+        if method_scheduler is not None:
+            loaded_modules["scheduler"] = method_scheduler
+
         kwargs: dict[str, Any] = {
             "inference_mode": True,
-            "loaded_modules": {
-                "transformer": transformer,
-            },
+            "loaded_modules": loaded_modules,
             "tp_size": tc.distributed.tp_size,
             "sp_size": tc.distributed.sp_size,
             "num_gpus": tc.distributed.num_gpus,
@@ -1103,12 +1112,6 @@ class ValidationCallback(Callback):
                 getattr(arch_config, "sink_size", None),
                 getattr(self._pipeline.fastvideo_args.pipeline_config.dit_config, "boundary_ratio", None),
             )
-
-        scheduler = self._pipeline.get_module("scheduler")
-        if (scheduler is not None and type(scheduler).__name__ == "SelfForcingFlowMatchScheduler"):
-            scheduler.sigma_min = 0.0
-            scheduler.extra_one_step = True
-            scheduler.set_timesteps(num_inference_steps=1000, training=True)
 
         self._pipeline_key = key
         return self._pipeline

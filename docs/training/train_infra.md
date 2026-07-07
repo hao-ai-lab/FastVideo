@@ -173,6 +173,9 @@ training:
 
 The repeat count duplicates that dataset's parquet file list before shuffling/sampling, so the example above trains with roughly twice as much `multi3d_games` exposure as `zeldam2-clean`. Paths are just suggested locations; use any local path that contains a FastVideo preprocessed parquet dataset.
 
+See [Training Trackers](trackers.md) to configure Weights & Biases or SwanLab,
+including SwanLab installation and authentication.
+
 ### `callbacks` — Pluggable hooks
 
 Callbacks run at specific points in the training loop (before/after optimizer

@@ -338,7 +338,11 @@ class FlashAttentionImpl(AttentionImpl):
                 )
 
             qkv = torch.stack([query, key, value], dim=2)
-            attn_mask_padded = F.pad(attn_mask, (qkv.shape[1] - attn_mask.shape[1], 0), value=True)
+            key_padding_mask = _key_padding_mask_from_attn_mask(attn_mask, attn_mask.shape[-1]).to(device=query.device)
+            if key_padding_mask.shape[-1] > qkv.shape[1]:
+                raise ValueError("Invalid key padding mask length for FLASH_ATTN: "
+                                 f"expected at most {qkv.shape[1]}, got {key_padding_mask.shape[-1]}")
+            attn_mask_padded = F.pad(key_padding_mask, (qkv.shape[1] - key_padding_mask.shape[-1], 0), value=True)
             output = flash_attn_no_pad(qkv, attn_mask_padded, causal=False, dropout_p=0, softmax_scale=None)
         elif self.nvfp4_fa4:
             output = self._forward_nvfp4(query, key, value)

@@ -1180,7 +1180,7 @@ class DistillationPipeline(TrainingPipeline):
 
                     artifacts = []
                     for filename, caption in zip(video_filenames, all_captions, strict=True):
-                        video_artifact = self.tracker.video(filename, caption=caption)
+                        video_artifact = self.tracker.video(filename, caption=caption, fps=sampling_param.fps)
                         if video_artifact is not None:
                             artifacts.append(video_artifact)
                     if artifacts:

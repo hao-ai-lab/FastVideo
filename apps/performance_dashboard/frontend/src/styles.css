@@ -149,6 +149,11 @@ h3 {
   font-size: 0.82rem;
 }
 
+.trend-card p {
+  display: grid;
+  gap: 2px;
+}
+
 .stat strong {
   display: block;
   margin-top: 8px;
@@ -186,7 +191,7 @@ h3 {
 
 table {
   width: 100%;
-  min-width: 1120px;
+  min-width: 1260px;
   border-collapse: collapse;
 }
 
@@ -207,6 +212,25 @@ th {
 td {
   color: #1b2836;
   font-size: 0.9rem;
+}
+
+.cohort-cell {
+  display: grid;
+  gap: 2px;
+}
+
+.cohort-cell strong,
+.trend-card p span {
+  color: #1b2836;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.cohort-cell span,
+.trend-card p span + span {
+  color: #607080;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
 }
 
 .badge {

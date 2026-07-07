@@ -201,9 +201,9 @@ configs and remain loadable. New or migrated configs should use
 {
   "benchmark_id": "wan-t2v-1.3b-2gpu",
   "config_schema_version": 2,
-  "workload_id": "wan-t2v-1.3b",
-  "variant_id": "canonical",
-  "benchmark_version": 1
+  "workload_id": "wan-t2v",
+  "variant_id": "1.3b-sp2",
+  "benchmark_version": 2
 }
 ```
 
@@ -214,21 +214,25 @@ metadata that make the measured workload explicit:
 
 | Field | Purpose |
 |---|---|
-| `workload_id` | Stable benchmark family, such as `wan-t2v-1.3b`. |
-| `variant_id` | Intentional recipe family, such as `canonical`. |
+| `workload_id` | Stable benchmark family, such as `wan-t2v`. |
+| `variant_id` | Intentional recipe family, including model size and parallelism config, such as `1.3b-sp2`. |
 | `benchmark_version` | Version of the measurement protocol and comparison policy. |
 
 If a config declares `config_schema_version: 2`, loading fails clearly when any
 required v2 identity field is missing. If v2 identity or metadata fields are
 added without `config_schema_version: 2`, loading also fails so partial
 migrations do not silently run as v1 configs. Optional v2 metadata fields
-reserved for follow-up work, such as `recipe`, `metric_threshold_policy`, and
-`quality_metadata`, must be JSON objects when present.
+reserved for follow-up work, such as `metric_threshold_policy` and
+`quality_metadata`, must be JSON objects when present. (`recipe` is emitted
+by the harness and is not config-declarable.)
 
 Recipe fingerprinting, hardware/software profile IDs, exact-identity
-comparison, metric-specific threshold policy behavior, promoted baselines, and
-dashboard regrouping are separate follow-up changes. Until those land, rolling
-baseline comparison remains keyed by `(model_id, gpu_type)`.
+comparison, and dashboard cohort grouping land with this change: v2 records
+compare only within their identity cohort, and a record that opens a NEW
+cohort is marked `baseline_status: "initialized_new_cohort"` (regression
+gating starts once that cohort accumulates history). Legacy v1 configs keep
+the `(model_id, gpu_type)` rolling-baseline comparison. Metric-specific
+threshold policies and promoted baselines remain separate follow-ups.
 
 ### Raw record (`results/perf_*.json`)
 
@@ -238,9 +242,9 @@ Written by `test_inference_performance.py`. One file per benchmark run.
 {
   "benchmark_id": "wan-t2v-1.3b-2gpu",
   "config_schema_version": 2,
-  "workload_id": "wan-t2v-1.3b",
-  "variant_id": "canonical",
-  "benchmark_version": 1,
+  "workload_id": "wan-t2v",
+  "variant_id": "1.3b-sp2",
+  "benchmark_version": 2,
   "model_short_name": "Wan2.1-T2V-1.3B-Diffusers",
   "device": "NVIDIA L40S",
   "num_gpus": 2,
@@ -270,7 +274,43 @@ Written by `test_inference_performance.py`. One file per benchmark run.
   "timestamp": "2026-05-08T22:00:00+00:00",
   "text_encoder_time_s": 2.141,
   "dit_time_s": 8.437,
-  "vae_decode_time_s": 3.208
+  "vae_decode_time_s": 3.208,
+  "recipe": {
+    "recipe_schema_version": 1,
+    "benchmark": {
+      "benchmark_id": "wan-t2v-1.3b-2gpu",
+      "workload_id": "wan-t2v",
+      "variant_id": "1.3b-sp2",
+      "benchmark_version": 2
+    },
+    "model": { "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" },
+    "init_kwargs": { "num_gpus": 2, "sp_size": 2, "tp_size": 1 },
+    "generation_kwargs": { "height": 480, "width": 832, "num_frames": 45 },
+    "inputs": { "prompt_count": 1, "prompt_sha256": ["<measured-prompt-sha256>"] },
+    "attention": { "requested_backend": "FLASH_ATTN", "resolved_backend": "FLASH_ATTN" }
+  },
+  "recipe_fingerprint": "<sha256>",
+  "hardware_profile": {
+    "device_type": "cuda",
+    "gpu_count": 2,
+    "gpus": [{ "name": "NVIDIA L40S", "memory_gb": 48, "compute_capability": "8.9" }],
+    "interconnect": "none_or_partial"
+  },
+  "hardware_profile_id": "hw-<sha256-prefix>",
+  "software_profile": {
+    "python": "3.12",
+    "pytorch": "2.12",
+    "cuda": "13.0",
+    "packages": {
+      "fastvideo_kernel": "0.3.2",
+      "flashinfer": "0.2.11",
+      "nvidia_cutlass_dsl": "4.5.0",
+      "triton": "3.4.1"
+    }
+  },
+  "software_profile_id": "sw-<sha256-prefix>",
+  "environment_metadata": { "env": { "IMAGE_VERSION": "py3.12-cuda13.0.0" } },
+  "environment_fingerprint": "env-<sha256-prefix>"
 }
 ```
 
@@ -282,6 +322,9 @@ result, used as the rolling-baseline source of truth.
 ```jsonc
 {
   "model_id": "wan-t2v-1.3b-2gpu",
+  "workload_id": "wan-t2v",
+  "variant_id": "1.3b-sp2",
+  "benchmark_version": 2,
   "timestamp": "2026-05-08T22:00:00+00:00",
   "commit_sha": "<full sha>",
   "gpu_type": "NVIDIA L40S",
@@ -298,6 +341,10 @@ result, used as the rolling-baseline source of truth.
       "gated": true
     }
   },
+  "recipe_fingerprint": "<sha256>",
+  "hardware_profile_id": "hw-<sha256-prefix>",
+  "software_profile_id": "sw-<sha256-prefix>",
+  "environment_fingerprint": "env-<sha256-prefix>",
   "success": true
 }
 ```
@@ -309,6 +356,18 @@ comparator ignores missing or `null` metrics when computing a median, and the
 dashboard lists skipped plots for metric series that have no non-null values.
 Records missing both `run_source` and `baseline_eligible` are treated as legacy
 successful main/full-suite uploads and remain eligible for rolling baselines.
+
+New records compare only against the same `model_id`, `gpu_type`,
+`workload_id`, `variant_id`, `benchmark_version`, `recipe_fingerprint`,
+`hardware_profile_id`, and `software_profile_id` cohort.
+`environment_metadata` and `environment_fingerprint` are audit data and are not
+part of the comparison key.
+The recipe prompt digests describe the prompts actually measured by the
+benchmark run; extra configured prompts are ignored unless the benchmark runner
+executes them.
+Software profile package cohorts keep exact versions for relevant
+attention/kernel packages, including FastVideo kernels, FlashAttention,
+FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 
 ## Environment variable reference
 
@@ -364,7 +423,7 @@ When the rolling-baseline phase runs, it emits:
      "benchmark_id": "<unique-id>",
      "config_schema_version": 2,
      "workload_id": "<stable-workload-id>",
-     "variant_id": "canonical",
+     "variant_id": "<variant, e.g. 1.3b-sp2>",
      "benchmark_version": 1,
      "model": { "model_path": "...", "model_short_name": "..." },
      "init_kwargs": { "num_gpus": 1, ... },
@@ -391,7 +450,9 @@ When the rolling-baseline phase runs, it emits:
 
    Legacy v1 configs without `config_schema_version` still load, but should not
    gain v2 identity or metadata fields until they are migrated to
-   `config_schema_version: 2`.
+   `config_schema_version: 2`. For v2 configs, `workload_id`, `variant_id`,
+   and `benchmark_version` are part of the comparison key; benchmark runs
+   fail if any of these identity fields are missing.
 
 2. The pytest test auto-discovers all configs — no test code needed. CI
    picks it up on the next `/test performance` run.
