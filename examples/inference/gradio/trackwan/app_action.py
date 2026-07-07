@@ -108,14 +108,19 @@ def swap_checkpoint(name: str) -> str:
     return f"checkpoint: {name} (swapped){warn}"
 
 
-def _grid_action_tracks(traj, Tpx: int, radius: float, falloff: str, sparse: bool):
-    """Snap the drawn action to the TRAINING 50x50 grid.
+def _grid_action_tracks(traj, Tpx: int, radius: float, falloff: str, sparse: str, num_bg: int, seed: int):
+    """Build the input tracks for the drawn action, matching the model's training regime.
 
-    The grid points within ``radius`` of the drawn start follow the recorded path;
-    the rest stay static. This matches the CoTracker training format exactly (2500
-    grid points, a local region moves) -- unlike an off-grid patch added on top of a
-    static grid, which is out-of-distribution. Returns
-    (tracks[Tpx,2500,2], vis[Tpx,2500], moving[2500]) or (None, None, None).
+    Modes (``sparse``):
+      "dense"  -- full 50x50 = 2500 tracks; the ones within ``radius`` of the draw-start
+                  follow the path, the rest stay static and visible. Matches the OLD
+                  training regime (WANTRACK_SPARSE=0, sample K=1000-2500 per step).
+      "sparse" -- ONLY the moving handle + ``num_bg`` random background points from the
+                  training grid. Total N ~= handle_size + num_bg. Matches the SPARSE
+                  training regime (WANTRACK_SPARSE=1, 1-per-object + ~20 background).
+                  ``num_bg`` should be small (5-30) to match training.
+
+    Returns (tracks[Tpx,N,2], vis[Tpx,N], moving[N]) or (None, None, None).
     """
     traj = np.asarray(traj, np.float32)
     if traj.ndim != 2 or len(traj) < 2:
@@ -133,27 +138,51 @@ def _grid_action_tracks(traj, Tpx: int, radius: float, falloff: str, sparse: boo
         w = (0.5 - 0.5 * np.cos(np.pi * w)).astype(np.float32)  # handle-like weighting
     else:  # hard
         w = (d <= radius).astype(np.float32)
+    handle_mask = w > 1e-3  # [2500] which grid points are the moving handle
     disp = path - start[None]  # [Tpx,2] displacement from start each frame
+    mode = str(sparse)
+    if mode == "sparse":
+        # Take the moving handle + `num_bg` random background points (indices from the
+        # non-handle pool), matching the sparse training sampler shape (~num_objects + extras).
+        rng = np.random.default_rng(int(seed))
+        bg_pool = np.where(~handle_mask)[0]
+        n_bg = int(min(max(num_bg, 0), bg_pool.size))
+        bg_idx = rng.choice(bg_pool, size=n_bg, replace=False) if n_bg > 0 else np.zeros(0, np.int64)
+        handle_idx = np.where(handle_mask)[0]
+        keep = np.concatenate([handle_idx, bg_idx])
+        g_k = g[keep]  # [N,2]
+        w_k = w[keep]  # [N] (background weights are ~0 -> stay static)
+        tracks = (g_k[None] + w_k[None, :, None] * disp[:, None, :]).astype(np.float32)  # [Tpx,N,2]
+        tracks = np.clip(tracks, 0.0, 1.0)
+        moving = np.zeros(keep.size, bool)
+        moving[:handle_idx.size] = True
+        vis = np.ones(tracks.shape[:2], np.float32)  # all sparse points visible from start
+        return tracks, vis, moving
+    # "dense" (original behavior): 2500 tracks, handle moves, rest static + visible.
     tracks = (g[None] + w[None, :, None] * disp[:, None, :]).astype(np.float32)  # [Tpx,2500,2]
     tracks = np.clip(tracks, 0.0, 1.0)
-    moving = w > 1e-3
-    if sparse:  # only the moved handle is visible (rest occluded)
-        vis = np.tile(moving[None].astype(np.float32), (Tpx, 1))
-    else:  # dense field: whole grid visible (a few static + the moving region)
-        vis = np.ones(tracks.shape[:2], np.float32)
-    return tracks, vis, moving
+    vis = np.ones(tracks.shape[:2], np.float32)
+    return tracks, vis, handle_mask
 
 
 def _overlay_grid(frames: np.ndarray, tracks: np.ndarray, vis: np.ndarray, moving, stride: int = 3) -> np.ndarray:
-    """Draw the WHOLE (subsampled) 50x50 field: static background points (gray dots) +
-    the moving region (green, with motion tails) -- so what's fed is what you see."""
+    """Draw the input tracks: moving handle (green + tails) + static background (gray dots).
+
+    For dense mode (N = 50*50 = 2500) we grid-subsample by ``stride`` for legibility. For
+    sparse mode (N ~= handle + num_bg, much smaller) we draw every point, no subsample.
+    """
     from fastvideo.train.callbacks.track_validation import _draw_overlay, _subsample
     T, H, W, _ = frames.shape
     tt = min(T, tracks.shape[0])
-    tr, vs = _subsample(tracks[:tt], vis[:tt], 50, stride)
-    mv, _ = _subsample(np.broadcast_to(moving[None, :, None].astype(np.float32),
-                                       (tt, moving.shape[0], 2)).copy(), vis[:tt], 50, stride)
-    is_mv = mv[0, :, 0] > 0.5  # [Nsub]
+    tr, vs, mv = tracks[:tt], vis[:tt], moving
+    if tr.shape[1] == 2500:
+        tr, vs = _subsample(tr, vs, 50, stride)
+        mv_full = np.broadcast_to(moving[None, :, None].astype(np.float32),
+                                  (tt, moving.shape[0], 2)).copy()
+        mv, _ = _subsample(mv_full, vis[:tt], 50, stride)
+        is_mv = mv[0, :, 0] > 0.5
+    else:  # sparse: draw all points
+        is_mv = mv.astype(bool)
     colors = np.where(is_mv[:, None], np.array([0, 255, 100], np.uint8),
                       np.array([120, 120, 120], np.uint8)).astype(np.uint8)
     trpx = tr.copy()
@@ -174,11 +203,12 @@ def on_ckpt(name):
     return swap_checkpoint(name)
 
 
-def _build_tracks(traj_json, radius, falloff, sparse):
-    """Parse the drawn trajectory -> (tracks[Tpx,2500,2], vis, moving[2500]) or (None, msg).
+def _build_tracks(traj_json, radius, falloff, sparse, num_bg, seed):
+    """Parse the drawn trajectory -> (tracks[Tpx,N,2], vis, moving[N]) or (None, msg).
 
-    Grid-snapped: moves the 50x50 grid points near the draw-start along the path,
-    keeping the rest static (in-distribution with the CoTracker training tracks).
+    ``sparse``: "dense" (full 2500 grid, background static) matches the OLD training
+    regime, "sparse" (handle + ``num_bg`` random background) matches the SPARSE
+    training regime our overfit runs used (WANTRACK_SPARSE=1, ~20 background extras).
     """
     import json
     if not traj_json or traj_json.strip() in ("", "[]"):
@@ -187,8 +217,8 @@ def _build_tracks(traj_json, radius, falloff, sparse):
         traj = json.loads(traj_json)
     except Exception as e:  # noqa: BLE001
         return None, f"bad trajectory json: {e}"
-    is_sparse = str(sparse).startswith("sparse")
-    tracks, vis, moving = _grid_action_tracks(traj, STATE["Tpx"], float(radius), str(falloff), is_sparse)
+    tracks, vis, moving = _grid_action_tracks(traj, STATE["Tpx"], float(radius), str(falloff),
+                                              str(sparse), int(num_bg), int(seed))
     if tracks is None:
         return None, "trajectory too short — hold Space and move the mouse for the full 5 s."
     return (tracks, vis, moving), None
@@ -201,10 +231,10 @@ def _first_frame_cached(clip_idx):
     return cache[clip_idx]
 
 
-def on_preview(clip_idx, traj_json, radius, falloff, sparse):
-    """Show the full grid-snapped control overlaid on the (frozen) first frame -- BEFORE generating."""
+def on_preview(clip_idx, traj_json, radius, falloff, sparse, num_bg, seed):
+    """Show the input tracks overlaid on the (frozen) first frame -- BEFORE generating."""
     clip_idx = int(clip_idx)
-    built, err = _build_tracks(traj_json, radius, falloff, sparse)
+    built, err = _build_tracks(traj_json, radius, falloff, sparse, num_bg, seed)
     if built is None:
         return None, err
     tracks, vis, moving = built
@@ -213,20 +243,23 @@ def on_preview(clip_idx, traj_json, radius, falloff, sparse):
     out = _overlay_grid(frames, tracks, vis, moving)
     path = os.path.join(STATE["out_dir"], f"preview_clip{clip_idx}.mp4")
     imageio.mimsave(path, out, fps=24, macro_block_size=1)
-    return path, (f"PREVIEW (snapped to the 50x50 training grid): {int(moving.sum())} points near your start "
-                  f"move (green, with tails), the other {int((~moving).sum())} stay static (gray). "
+    kind = "SPARSE" if str(sparse) == "sparse" else "DENSE 50x50"
+    return path, (f"PREVIEW ({kind}, N={tracks.shape[1]}): {int(moving.sum())} moving handle points (green, tails) "
+                  f"and {int((~moving).sum())} background points (gray). "
                   f"This matches the training track format. Press Generate.")
 
 
 def on_generate(clip_idx, ckpt_name, traj_json, radius, falloff, sparse, steps, seed,
-                w_text: float = 3.0, w_motion: float = 1.5, mode: str = "joint"):
+                w_text: float = 3.0, w_motion: float = 1.5, mode: str = "joint", num_bg: int = 20):
     """Generator: streams per-step denoise progress to the log, yields the video at the end."""
     import time
     from fastvideo.forward_context import set_forward_context
     from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
         FlowMatchEulerDiscreteScheduler, )
     clip_idx = int(clip_idx)
-    built, err = _build_tracks(traj_json, radius, falloff, sparse)
+    # Sparse mode uses the same "seed" slider as the tracks background seed AND the noise seed
+    # (fine for interactive use; the two are independent knobs technically).
+    built, err = _build_tracks(traj_json, radius, falloff, sparse, num_bg, seed)
     if built is None:
         yield gr.update(), f"[error] {err}", gr.update()
         return
@@ -361,11 +394,15 @@ def build_ui(num_clips: int, ckpt_names: list[str], Tpx: int):
                     radius = gr.Slider(0.02, 0.5, value=0.15, step=0.01,
                                        label="Action radius (grid pts within this move)")
                     falloff = gr.Radio(["hard", "smooth"], value="hard", label="Falloff")
-                background = gr.Radio(["dense field (all visible)", "sparse (only moved visible)"],
-                                      value="dense field (all visible)", label="Visibility")
+                with gr.Row():
+                    background = gr.Radio(["dense", "sparse"],
+                                          value="sparse",
+                                          label="Track budget (matches training: WANTRACK_SPARSE)")
+                    num_bg = gr.Slider(0, 60, value=20, step=1,
+                                       label="Sparse: # background points (WANTRACK_EXTRA_RANDOM)")
                 with gr.Row():
                     steps = gr.Slider(10, 60, value=30, step=5, label="Denoise steps")
-                    seed = gr.Number(value=1000, label="Seed")
+                    seed = gr.Number(value=1000, label="Seed (also seeds sparse background pool)")
                 with gr.Row():
                     w_text = gr.Slider(1.0, 8.0, value=3.0, step=0.5, label="Text CFG (w_t)")
                     w_motion = gr.Slider(1.0, 5.0, value=1.5, step=0.25, label="Motion CFG (w_m)")
@@ -389,9 +426,12 @@ def build_ui(num_clips: int, ckpt_names: list[str], Tpx: int):
         ff_b64.change(None, [ff_b64], None, js="(b64)=>{ window._setbg(b64); }")
         rec_btn.click(None, None, None, js="()=>{ window._startRec(); }")
         clr_btn.click(None, None, None, js="()=>{ window._clear(); }")
-        preview_btn.click(on_preview, [clip, traj_json, radius, falloff, background], [gen_vid, status])
+        preview_btn.click(on_preview,
+                          [clip, traj_json, radius, falloff, background, num_bg, seed],
+                          [gen_vid, status])
         gen_btn.click(on_generate,
-                      [clip, ckpt, traj_json, radius, falloff, background, steps, seed, w_text, w_motion, mode],
+                      [clip, ckpt, traj_json, radius, falloff, background, steps, seed,
+                       w_text, w_motion, mode, num_bg],
                       [gen_vid, status, epe_box])
         demo.load(on_clip, [clip], [caption, ff_b64, orig_vid])
         demo.load(None, None, None, js=_canvas_js(Tpx))
