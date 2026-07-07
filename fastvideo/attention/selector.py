@@ -186,17 +186,24 @@ def _cached_get_attn_backend(
     backend = cast(type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
 
     # Validate the resolved backend against its self-described capabilities
-    # (see AttentionBackend.validate_compatibility, #1254). An explicitly
-    # selected backend hard-fails, mirroring how the platform layer hard-fails
-    # on missing explicitly-requested backends; an auto-selected backend only
-    # warns -- once per resolution, since this function is cached.
+    # (see AttentionBackend.validate_compatibility, #1254). An explicit
+    # selection hard-fails only when it was actually honored: resolution can
+    # substitute a fallback for the selected backend (e.g. a FLASH_ATTN pin on
+    # a CLIP layer whose head size only SDPA serves -- see
+    # CudaPlatformBase.get_attn_backend_cls -- or a pin outside the layer's
+    # supported set above). Such a layer never participated in the pin, so its
+    # fallback degrades to the auto-selection warning -- emitted once per
+    # resolution, since this function is cached.
     incompatibility = backend.validate_compatibility(head_size, dtype)
     if incompatibility is not None:
-        if selected_backend is not None:
+        # SDPABackend reports "SDPA" for AttentionBackendEnum.TORCH_SDPA.
+        pinned_name = None if selected_backend is None else (
+            "SDPA" if selected_backend is AttentionBackendEnum.TORCH_SDPA else selected_backend.name)
+        if selected_backend is not None and backend.get_name() == pinned_name:
             raise ValueError(f"Attention backend {selected_backend.name} was explicitly selected but is incompatible "
                              f"with this layer: {incompatibility}. Select a compatible backend or unset "
                              "FASTVIDEO_ATTENTION_BACKEND.")
-        logger.warning("Auto-selected attention backend %s may be incompatible with this layer: %s", backend.get_name(),
+        logger.warning("Resolved attention backend %s may be incompatible with this layer: %s", backend.get_name(),
                        incompatibility)
     return backend
 
