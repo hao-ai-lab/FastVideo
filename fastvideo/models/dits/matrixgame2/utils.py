@@ -48,6 +48,27 @@ SOLARIS_MOVEMENT_KEY_INDICES = {
 }
 
 
+def retain_kv_with_sink(
+    k: torch.Tensor,
+    v: torch.Tensor,
+    target_len: int,
+    sink_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if k.shape[1] <= target_len or sink_size <= 0:
+        return k[:, -target_len:], v[:, -target_len:]
+
+    sink_len = min(int(sink_size), target_len, k.shape[1])
+    tail_len = target_len - sink_len
+    sink_k = k[:, :sink_len]
+    sink_v = v[:, :sink_len]
+    if tail_len <= 0:
+        return sink_k, sink_v
+
+    tail_k = k[:, sink_len:][:, -tail_len:]
+    tail_v = v[:, sink_len:][:, -tail_len:]
+    return torch.cat([sink_k, tail_k], dim=1), torch.cat([sink_v, tail_v], dim=1)
+
+
 def _require_cv2() -> bool:
     if cv2 is None:
         logger.warning(

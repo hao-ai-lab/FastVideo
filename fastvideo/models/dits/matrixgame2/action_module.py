@@ -16,6 +16,8 @@ from fastvideo.layers.rotary_embedding import (
 )
 from fastvideo.platforms import AttentionBackendEnum
 
+from .utils import retain_kv_with_sink
+
 
 DISABLE_COMPILE = False
 flex_attention = torch.compile(
@@ -89,27 +91,6 @@ def _padding_q_k_v(tensor: torch.Tensor, padded_length: int) -> torch.Tensor:
         ],
         dim=1,
     )
-
-
-def _retain_kv_with_sink(
-    k: torch.Tensor,
-    v: torch.Tensor,
-    target_len: int,
-    sink_size: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    if k.shape[1] <= target_len or sink_size <= 0:
-        return k[:, -target_len:], v[:, -target_len:]
-
-    sink_len = min(int(sink_size), target_len, k.shape[1])
-    tail_len = target_len - sink_len
-    sink_k = k[:, :sink_len]
-    sink_v = v[:, :sink_len]
-    if tail_len <= 0:
-        return sink_k, sink_v
-
-    tail_k = k[:, sink_len:][:, -tail_len:]
-    tail_v = v[:, sink_len:][:, -tail_len:]
-    return torch.cat([sink_k, tail_k], dim=1), torch.cat([sink_v, tail_v], dim=1)
 
 
 def _update_kv_cache_and_attend(
@@ -237,7 +218,7 @@ def _update_kv_cache_and_attend(
         kv_cache["k"][:, local_start_index:local_end_index] = k
         kv_cache["v"][:, local_start_index:local_end_index] = v
 
-    cached_k, cached_v = _retain_kv_with_sink(
+    cached_k, cached_v = retain_kv_with_sink(
         kv_cache["k"][:, :local_end_index],
         kv_cache["v"][:, :local_end_index],
         min(local_end_index, max_attention_size),

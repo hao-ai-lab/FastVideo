@@ -10,12 +10,15 @@ from typing import Any
 import torch
 import torch.distributed as dist
 
+from fastvideo.logger import init_logger
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.train.methods.base import LogScalar
 from fastvideo.train.methods.distribution_matching.self_forcing import (
     SelfForcingMethod, )
 from fastvideo.train.models.base import CausalModelBase
 from fastvideo.train.utils.config import get_optional_float, get_optional_int
+
+logger = init_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +34,6 @@ class DistillStage:
     streaming_max_length: int | None = None
     streaming_min_new_frame: int | None = None
     streaming_fixed_overlap_latents: int | None = None
-    train_first_chunk: bool = True
 
 
 @dataclass(slots=True)
@@ -190,7 +192,6 @@ def parse_multi_phased_distill_schedule(
             chunk_size = stage_raw.get("streaming_chunk_size", None)
             min_new = stage_raw.get("streaming_min_new_frame", None)
             fixed_overlap = stage_raw.get("streaming_fixed_overlap_latents", None)
-            train_first = stage_raw.get("train_first_chunk", True)
             stages.append(
                 DistillStage(
                     name=name,
@@ -218,10 +219,6 @@ def parse_multi_phased_distill_schedule(
                         where=("multi_phased_distill_schedule"
                                f"[{idx}].streaming_fixed_overlap_latents"),
                     )),
-                    train_first_chunk=_as_bool(
-                        train_first,
-                        where=f"multi_phased_distill_schedule[{idx}].train_first_chunk",
-                    ),
                 ))
             if end_step is not None:
                 previous_end = end_step
@@ -939,13 +936,16 @@ class StreamingLongTuningMethod(SelfForcingMethod):
         state.previous_latents = full_chunk.detach()[:, -chunk_size:]
 
         if not dist.is_initialized() or dist.get_rank() == 0:
-            print(
-                "[StreamingLong] "
-                f"stage={state.stage.name} start={current} "
-                f"new={new_frames} overlap={overlap} "
-                f"blocks={block_lengths} "
-                f"current_length={state.current_length}/{max_length}",
-                flush=True,
+            logger.info(
+                "[StreamingLong] stage=%s start=%s new=%s overlap=%s "
+                "blocks=%s current_length=%s/%s",
+                state.stage.name,
+                current,
+                new_frames,
+                overlap,
+                block_lengths,
+                state.current_length,
+                max_length,
             )
 
         return full_chunk, chunk_mask, chunk_info
@@ -1181,15 +1181,22 @@ class StreamingLongTuningMethod(SelfForcingMethod):
 
         generator_state = "on" if update_student else "off"
         train_target = "generator+critic" if update_student else "critic"
-        print(
-            "[StreamingLong] "
-            f"step={iteration} stage={stage.name} "
-            f"chunk_latents={chunk_info.chunk_start}-{chunk_info.chunk_end} "
-            f"train_latents={chunk_info.train_start}-{chunk_info.train_end} "
-            f"new={chunk_info.new_frames} overlap={chunk_info.overlap} "
-            f"current_length={chunk_info.current_length}/{chunk_info.max_length} "
-            f"train={train_target} generator={generator_state} critic=on",
-            flush=True,
+        logger.info(
+            "[StreamingLong] step=%s stage=%s chunk_latents=%s-%s "
+            "train_latents=%s-%s new=%s overlap=%s current_length=%s/%s "
+            "train=%s generator=%s critic=on",
+            iteration,
+            stage.name,
+            chunk_info.chunk_start,
+            chunk_info.chunk_end,
+            chunk_info.train_start,
+            chunk_info.train_end,
+            chunk_info.new_frames,
+            chunk_info.overlap,
+            chunk_info.current_length,
+            chunk_info.max_length,
+            train_target,
+            generator_state,
         )
 
     def _select_new_frame_count(

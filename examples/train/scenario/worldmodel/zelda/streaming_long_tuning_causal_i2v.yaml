@@ -42,7 +42,6 @@ method:
   streaming_reencode_overlap_anchor: true
   streaming_anchor_inject_k: 1
   streaming_require_full_blocks: true
-  train_first_chunk: true
 
   multi_phased_distill_schedule:
     - stage: streaming_long
@@ -53,7 +52,6 @@ method:
       streaming_chunk_size: 9
       streaming_max_length: 39
       streaming_fixed_overlap_latents: 3
-      train_first_chunk: true
 
   # Critic optimizer
   fake_score_learning_rate: 3.0e-7
