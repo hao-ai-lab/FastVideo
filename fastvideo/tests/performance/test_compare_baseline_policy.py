@@ -421,3 +421,196 @@ def test_informational_metric_remains_visible_without_failing():
     assert row["metrics"]["throughput"]["regressed"] is False
     assert row["threshold_exceeded_metrics"] == ["throughput"]
     assert row["failing_metrics"] == []
+
+
+def _v2_raw_result(**overrides):
+    raw = _raw_result()
+    raw.update({
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-1",
+        "software_profile_id": "sw-1",
+    })
+    raw.update(overrides)
+    return raw
+
+
+def _v2_baseline_record(**overrides):
+    record = {
+        "gpu_type": "NVIDIA L40S",
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "recipe-1",
+        "hardware_profile_id": "hw-1",
+        "software_profile_id": "sw-1",
+        "latency": 10.0,
+        "throughput": 4.5,
+        "memory": 10000.0,
+        "timestamp": "2026-06-15T00:00:00+00:00",
+        "success": True,
+        "run_source": "scheduled_main",
+        "baseline_eligible": True,
+    }
+    record.update(overrides)
+    return record
+
+
+def _run_compare(monkeypatch, tmp_path, raw_result, baseline_records):
+    """Run compare_baseline.main() against a local tracking root.
+
+    Returns (exit_code, normalized_record, markdown_report).
+    """
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+    (results_dir / "perf_current.json").write_text(json.dumps(raw_result))
+
+    model_dir = tmp_path / "tracking" / raw_result["benchmark_id"]
+    model_dir.mkdir(parents=True)
+    for index, record in enumerate(baseline_records):
+        (model_dir / f"rec{index}.json").write_text(json.dumps(record))
+
+    reports_dir = tmp_path / "reports"
+    monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
+    monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tmp_path / "tracking"))
+    monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
+    monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
+    monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda *args, **kwargs: None)
+    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+    exit_code = compare_baseline.main()
+
+    normalized_paths = list((reports_dir / "results").glob("normalized_perf_*.json"))
+    assert len(normalized_paths) == 1
+    markdown = "\n".join(path.read_text() for path in reports_dir.glob("perf_*.md"))
+    return exit_code, json.loads(normalized_paths[0].read_text()), markdown
+
+
+def test_main_pass_with_comparable_baseline(monkeypatch, tmp_path):
+    exit_code, record, markdown = _run_compare(
+        monkeypatch, tmp_path, _v2_raw_result(), [_v2_baseline_record()])
+
+    assert exit_code == 0
+    assert record["comparator_status"] == "PASS"
+    assert record["baseline_status"] == "compared"
+    assert record["success"] is True
+    # Scheduled-main PASS records keep advancing the rolling baseline.
+    assert record["baseline_eligible"] is True
+    assert "| PASS |" in markdown
+
+
+def test_main_regression_on_gated_metric_fails_ci(monkeypatch, tmp_path):
+    exit_code, record, markdown = _run_compare(
+        monkeypatch, tmp_path, _v2_raw_result(avg_generation_time_s=20.0),
+        [_v2_baseline_record()])
+
+    assert exit_code == 1
+    assert record["comparator_status"] == "REGRESSION"
+    assert record["success"] is False
+    assert record["baseline_eligible"] is False
+    assert "| REGRESSION |" in markdown
+
+
+def test_main_missing_baseline_is_calibration_needed_and_does_not_seed(monkeypatch, tmp_path):
+    exit_code, record, markdown = _run_compare(
+        monkeypatch, tmp_path, _v2_raw_result(), [])
+
+    assert exit_code == 0
+    assert record["comparator_status"] == "CALIBRATION_NEEDED"
+    assert record["baseline_status"] == "initialized_new_cohort"
+    assert record["success"] is True
+    # Visible, but never silently seeds a passing baseline.
+    assert record["baseline_eligible"] is False
+    assert "| CALIBRATION_NEEDED |" in markdown
+
+
+def test_main_recipe_change_without_new_variant_is_recipe_mismatch(monkeypatch, tmp_path):
+    exit_code, record, markdown = _run_compare(
+        monkeypatch, tmp_path, _v2_raw_result(recipe_fingerprint="recipe-2"),
+        [_v2_baseline_record()])
+
+    assert exit_code == 1
+    assert record["comparator_status"] == "RECIPE_MISMATCH"
+    assert record["success"] is False
+    assert record["baseline_eligible"] is False
+    assert "| RECIPE_MISMATCH |" in markdown
+
+
+def test_main_recipe_change_as_new_variant_is_calibration_needed(monkeypatch, tmp_path):
+    exit_code, record, _ = _run_compare(
+        monkeypatch, tmp_path,
+        _v2_raw_result(variant_id="1.3b-sp2-r2", recipe_fingerprint="recipe-2"),
+        [_v2_baseline_record()])
+
+    assert exit_code == 0
+    assert record["comparator_status"] == "CALIBRATION_NEEDED"
+
+
+def test_main_v2_record_never_compares_against_v1_baselines(monkeypatch, tmp_path):
+    legacy_v1_baseline = {
+        "gpu_type": "NVIDIA L40S",
+        # Would be a >100% latency regression if the comparator (wrongly)
+        # matched the v2 record against v1 history.
+        "latency": 1.0,
+        "timestamp": "2026-06-15T00:00:00+00:00",
+        "success": True,
+    }
+
+    exit_code, record, _ = _run_compare(
+        monkeypatch, tmp_path, _v2_raw_result(), [legacy_v1_baseline])
+
+    assert exit_code == 0
+    assert record["comparator_status"] == "CALIBRATION_NEEDED"
+
+
+def test_main_legacy_v1_record_skips_comparison_with_pass_verdict(monkeypatch, tmp_path):
+    legacy_v1_baseline = {
+        "gpu_type": "NVIDIA L40S",
+        # Would be a >100% latency regression if the comparator (wrongly)
+        # compared the identity-less v1 record against this history.
+        "latency": 1.0,
+        "timestamp": "2026-06-15T00:00:00+00:00",
+        "success": True,
+    }
+
+    exit_code, record, markdown = _run_compare(
+        monkeypatch, tmp_path, _raw_result(), [legacy_v1_baseline])
+
+    assert exit_code == 0
+    assert record["comparator_status"] == "PASS"
+    assert record["baseline_status"] == "skipped_missing_identity"
+    assert record["baseline_eligible"] is False
+    assert "| PASS |" in markdown
+
+
+def test_main_partial_identity_skips_comparison(monkeypatch, tmp_path):
+    raw = _v2_raw_result()
+    del raw["software_profile_id"]
+
+    exit_code, record, _ = _run_compare(monkeypatch, tmp_path, raw, [])
+
+    assert exit_code == 0
+    assert record["comparator_status"] == "PASS"
+    assert record["baseline_status"] == "skipped_missing_identity"
+    assert record["success"] is True
+    assert record["baseline_eligible"] is False
+
+
+def test_main_baseline_load_failure_is_infra_error_and_fails_ci(monkeypatch, tmp_path):
+    def _boom(*_args, **_kwargs):
+        raise OSError("hf store unavailable")
+
+    monkeypatch.setattr(compare_baseline, "load_records_for_model", _boom)
+
+    exit_code, record, markdown = _run_compare(
+        monkeypatch, tmp_path, _v2_raw_result(), [])
+
+    assert exit_code == 1
+    assert record["comparator_status"] == "INFRA_ERROR"
+    assert record["success"] is False
+    assert record["baseline_eligible"] is False
+    assert "| INFRA_ERROR |" in markdown

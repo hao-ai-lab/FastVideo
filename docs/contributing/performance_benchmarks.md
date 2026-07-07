@@ -232,13 +232,25 @@ by the harness and is not config-declarable.)
 
 Recipe fingerprinting, hardware/software profile IDs, exact-identity
 comparison, and dashboard cohort grouping land with this change: v2 records
-compare only within their identity cohort, and a record that opens a NEW
-cohort is marked `baseline_status: "initialized_new_cohort"` (regression
-gating starts once that cohort accumulates history). Legacy v1 configs still
-run and are normalized for reporting, but their records skip rolling-baseline
-comparison entirely (`baseline_status: "skipped_missing_identity"`, never
-baseline eligible); only static thresholds gate them. Metric-specific
-threshold policies and promoted baselines remain separate follow-ups.
+compare only within their identity cohort and are never compared against v1
+records (or vice versa). Legacy records missing any comparison identity field
+still run and are normalized for reporting, but they skip rolling-baseline
+comparison entirely (`baseline_status: "skipped_missing_identity"`, comparator
+verdict `PASS`, never baseline eligible); only static thresholds gate them.
+Each comparison reports an explicit `comparator_status` on the normalized
+record and in the Markdown summary:
+
+| Status | Meaning | CI |
+|---|---|---|
+| `PASS` | Comparable baseline found with no gated regression, or comparison was skipped for a record without the v2 identity block. | passes |
+| `REGRESSION` | A gated metric regressed past both its percent and absolute floors. | fails |
+| `CALIBRATION_NEEDED` | No comparable baseline exists. Gating is inactive and the record does **not** seed a baseline — seed new cohorts explicitly via the reseed workflow. The record also carries `baseline_status: "initialized_new_cohort"`. | passes |
+| `RECIPE_MISMATCH` | Baseline history exists for the same variant/hardware/software cohort but under a different `recipe_fingerprint`. Represent recipe changes as a new `variant_id`, or reseed. | fails |
+| `INFRA_ERROR` | The comparison itself failed (for example, baseline history could not be loaded). | fails |
+| `QUALITY_BLOCKED` | Reserved for the promoted-baseline workflow; never emitted by the comparator. | n/a |
+
+Metric-specific threshold policies and promoted baselines remain separate
+follow-ups.
 
 ### Raw record (`results/perf_*.json`)
 
@@ -367,6 +379,8 @@ result, used as the rolling-baseline source of truth.
   "build_id": "<buildkite-build-id>",
   "job_id": "<buildkite-job-id>",
   "quality_metadata": { "quality_status": "canonical" },
+  "baseline_status": "compared",
+  "comparator_status": "PASS",
   "success": true
 }
 ```
@@ -487,10 +501,10 @@ When the rolling-baseline phase runs, it emits:
 2. The pytest test auto-discovers all configs — no test code needed. CI
    picks it up on the next `/test performance` run.
 
-3. The first persisted main-branch run with no HF history initializes the
-   baseline (passes automatically). Subsequent runs compare against it. Local
-   and pull-request runs with no HF history also pass, but they do not seed the
-   shared baseline.
+3. The first run with no HF history reports `CALIBRATION_NEEDED`: it passes,
+   but it does not seed the shared baseline. Seed the cohort explicitly with
+   the `reseed-performance-baseline` skill; subsequent scheduled-main runs
+   then compare against it and keep the rolling baseline advancing.
 
 4. If the benchmark targets a GPU not currently in `thresholds`, either add
    that GPU as a key or rely on the `default` block. Note that `default` is
@@ -510,8 +524,13 @@ When the rolling-baseline phase runs, it emits:
 
 ## Troubleshooting
 
-**"No baseline for ... Initializing"** — first run for this comparison cohort.
-Run will pass and (if persisting) seed the first record.
+**`CALIBRATION_NEEDED: no comparable baseline`** — first run for this cohort.
+The run passes but does not seed a baseline; seed it explicitly with the
+`reseed-performance-baseline` skill.
+
+**`RECIPE_MISMATCH`** — the benchmark recipe changed without a new
+`variant_id`. Either bump `variant_id` to open a new cohort, or reseed the
+baseline if the existing variant should adopt the new recipe.
 
 **Persistent failure right after a torch / kernel / image upgrade** —
 genuine regression *or* baseline drift. Compare the failing normalized record
