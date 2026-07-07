@@ -5,7 +5,8 @@ This script:
 1) reads current benchmark results from fastvideo/tests/performance/results,
 2) syncs the canonical baseline from the configured HF dataset repo,
 3) compares each current record against the median of up to 5 prior
-   baseline-eligible successful records (filtered by gpu_type),
+   baseline-eligible successful records in the same workload/variant/version,
+   GPU, recipe, hardware, and software cohort,
 4) writes normalized records back to the HF dataset repo according to
    PERF_UPLOAD_POLICY,
 5) exits non-zero if any gated metric exceeds both its percent and absolute
@@ -64,6 +65,27 @@ PERF_REPORTS_DIR = os.environ.get("PERF_REPORTS_DIR", "/root/data/perf_reports")
 UPLOAD_POLICY = os.environ.get("PERF_UPLOAD_POLICY", "never").strip().lower()
 VALID_UPLOAD_POLICIES = {"never", "pass", "always"}
 VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
+IDENTITY_KEYS = (
+    "workload_id",
+    "variant_id",
+    "benchmark_version",
+    "recipe",
+    "recipe_fingerprint",
+    "hardware_profile",
+    "hardware_profile_id",
+    "software_profile",
+    "software_profile_id",
+    "environment_metadata",
+    "environment_fingerprint",
+)
+COMPARISON_IDENTITY_KEYS = (
+    "workload_id",
+    "variant_id",
+    "benchmark_version",
+    "recipe_fingerprint",
+    "hardware_profile_id",
+    "software_profile_id",
+)
 
 
 def _should_persist_tracking() -> bool:
@@ -136,6 +158,46 @@ def _record_metadata(run_source: str, result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _identity_metadata(result: dict[str, Any]) -> dict[str, Any]:
+    metadata = {
+        key: result[key]
+        for key in IDENTITY_KEYS
+        if key in result and result[key] is not None
+    }
+    recipe = result.get("recipe")
+    benchmark = recipe.get("benchmark") if isinstance(recipe, dict) else None
+    if isinstance(benchmark, dict):
+        for key in ("workload_id", "variant_id", "benchmark_version"):
+            if key not in metadata and benchmark.get(key) is not None:
+                metadata[key] = benchmark[key]
+    return metadata
+
+
+def _comparison_identity_filters(record: dict[str, Any]) -> dict[str, str]:
+    missing = [
+        key for key in COMPARISON_IDENTITY_KEYS
+        if key not in record or record[key] is None or (isinstance(record[key], str) and not record[key].strip())
+    ]
+    if len(missing) == len(COMPARISON_IDENTITY_KEYS):
+        # Legacy v1 record: no identity fields at all. Keep the pre-v2
+        # (model_id, gpu_type) rolling-baseline comparison instead of
+        # crashing — v1 configs are documented as loadable.
+        return {}
+    if missing:
+        raise ValueError("Performance record missing required comparison identity fields: " + ", ".join(missing))
+    return {
+        key: str(record[key])
+        for key in COMPARISON_IDENTITY_KEYS
+    }
+
+
+def _format_identity_filters(filters: dict[str, str]) -> str:
+    if not filters:
+        return ""
+    compact = ", ".join(f"{key}={value}" for key, value in filters.items())
+    return f" ({compact})"
+
+
 def _load_current_results() -> list[dict[str, Any]]:
     pattern = os.path.join(RESULTS_DIR, "perf_*.json")
     records: list[dict[str, Any]] = []
@@ -169,7 +231,7 @@ def normalize_performance_result(result: dict[str, Any]) -> dict[str, Any]:
     vae_decode_time = safe_float(result.get("vae_decode_time_s"))
     metric_policies = resolve_metric_policies(result.get("regression_thresholds"))
 
-    return {
+    record = {
         "model_id": model_id,
         "timestamp": timestamp,
         "commit_sha": commit_sha,
@@ -184,6 +246,8 @@ def normalize_performance_result(result: dict[str, Any]) -> dict[str, Any]:
         "success": True,
         **_record_metadata(_detect_run_source(), result),
     }
+    record.update(_identity_metadata(result))
+    return record
 
 
 def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
@@ -422,17 +486,31 @@ def main() -> int:
             TRACKING_ROOT,
             record["model_id"],
             record["gpu_type"],
+            **_comparison_identity_filters(record),
             last_n=5,
             successful_only=True,
             baseline_eligible_only=True,
         )
 
         if not baseline_records:
-            print(f"No baseline for {record['model_id']} on "
-                  f"{record['gpu_type']}. Initializing...")
+            # A brand-new cohort has NO regression gating until history
+            # accumulates — make that loud and machine-readable instead of
+            # an indistinguishable pass, so a cohort shift (intended or
+            # accidental, e.g. an identity-field change) never silently
+            # blinds the comparison.
+            record["baseline_status"] = "initialized_new_cohort"
+            print("=" * 72)
+            print(f"WARNING: NO BASELINE — initializing a NEW cohort for "
+                  f"{record['model_id']} on {record['gpu_type']}"
+                  f"{_format_identity_filters(_comparison_identity_filters(record))}")
+            print("Regression gating is INACTIVE for this cohort until "
+                  "baseline history accumulates. If this cohort shift is "
+                  "unexpected, check the identity fields above.")
+            print("=" * 72)
             failures: list[str] = []
             record["success"] = True
         else:
+            record["baseline_status"] = "compared"
             failures = _check_regressions(record, baseline_records, metric_policies)
         if static_threshold_failed:
             failures.append(f"{record['model_id']} fixed-threshold phase failed "

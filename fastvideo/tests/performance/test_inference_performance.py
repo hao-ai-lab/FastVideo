@@ -12,12 +12,25 @@ import os
 import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from typing import Any
 
 import torch
 import pytest
 
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
+from fastvideo.tests.performance.identity import (
+    benchmark_identity_from_config,
+    build_recipe_from_benchmark_config,
+    environment_fingerprint,
+    environment_metadata,
+    hardware_profile,
+    hardware_profile_id,
+    recipe_fingerprint,
+    resolved_revision_from_model_path,
+    software_profile,
+    software_profile_id,
+)
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
@@ -34,8 +47,11 @@ V2_REQUIRED_IDENTITY_FIELDS = (
     "variant_id",
     "benchmark_version",
 )
+# "recipe" is no longer config-declarable: the fingerprint follow-up landed,
+# and the generated recipe document owns that key in emitted records. A config
+# declaring it now fails validation loudly instead of being silently
+# overwritten by the generated one.
 V2_OPTIONAL_METADATA_FIELDS = (
-    "recipe",
     "metric_threshold_policy",
     "quality_metadata",
 )
@@ -231,6 +247,110 @@ def _write_results(results):
     logger.info("Performance results written to %s", filepath)
 
 
+def _backend_name(value) -> str:
+    if hasattr(value, "name"):
+        return str(value.name)
+    return str(value)
+
+
+def _collect_worker_identity(worker) -> dict[str, Any]:
+    pipeline = getattr(worker, "pipeline", None)
+    model_path = getattr(pipeline, "model_path", None)
+    backends: set[str] = set()
+
+    modules = getattr(pipeline, "modules", None)
+    if isinstance(modules, Mapping):
+        module_iter = modules.values()
+    elif isinstance(pipeline, torch.nn.Module):
+        module_iter = (pipeline,)
+    else:
+        module_iter = ()
+
+    for module in module_iter:
+        if isinstance(module, torch.nn.Module):
+            for submodule in module.modules():
+                backend = getattr(submodule, "backend", None)
+                if backend is not None:
+                    backends.add(_backend_name(backend))
+        else:
+            backend = getattr(module, "backend", None)
+            if backend is not None:
+                backends.add(_backend_name(backend))
+
+    return {
+        "resolved_attention_backends": sorted(backends),
+        "resolved_model_path": model_path,
+    }
+
+
+def _single_or_list(values: set[str]) -> str | list[str] | None:
+    ordered = sorted(values)
+    if not ordered:
+        return None
+    if len(ordered) == 1:
+        return ordered[0]
+    return ordered
+
+
+def _runtime_identity_from_generator(generator) -> dict[str, Any]:
+    worker_records = generator.executor.collective_rpc(_collect_worker_identity)
+    resolved_backends: set[str] = set()
+    resolved_revisions: set[str] = set()
+
+    for record in worker_records:
+        resolved_backends.update(record.get("resolved_attention_backends") or [])
+        revision = resolved_revision_from_model_path(record.get("resolved_model_path"))
+        if revision is not None:
+            resolved_revisions.add(revision)
+
+    return {
+        "resolved_attention_backend": _single_or_list(resolved_backends),
+        "resolved_model_revision": _single_or_list(resolved_revisions),
+    }
+
+
+def _benchmark_identity_fields(cfg):
+    identity = benchmark_identity_from_config(cfg)
+    return {
+        key: identity[key]
+        for key in ("workload_id", "variant_id", "benchmark_version")
+    }
+
+
+def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
+    # Legacy v1 configs (no config_schema_version) stay on the legacy
+    # (model_id, gpu_type) cohort: they lack the required identity fields,
+    # and building a recipe for them would raise AFTER the GPU measurement
+    # completed. The validator already enforces that v2 configs carry the
+    # identity fields, so v2 records always get the full identity block.
+    if cfg.get("config_schema_version") is None:
+        return {}
+    recipe = build_recipe_from_benchmark_config(
+        cfg,
+        resolved_attention_backend=runtime_identity.get("resolved_attention_backend"),
+        resolved_model_revision=runtime_identity.get("resolved_model_revision"),
+        measured_prompts=[prompt],
+    )
+    num_gpus = init_kwargs.get("num_gpus", cfg.get("run_config", {}).get("required_gpus", 1))
+    hw_profile = hardware_profile(num_gpus=num_gpus)
+    sw_profile = software_profile()
+    env_metadata = environment_metadata(
+        hardware=hw_profile,
+        software=sw_profile,
+    )
+    return {
+        "recipe": recipe,
+        "recipe_fingerprint": recipe_fingerprint(recipe),
+        "hardware_profile": hw_profile,
+        "hardware_profile_id": hardware_profile_id(hw_profile),
+        "software_profile": sw_profile,
+        "software_profile_id": software_profile_id(sw_profile),
+        "environment_metadata": env_metadata,
+        "environment_fingerprint": environment_fingerprint(env_metadata),
+        **_benchmark_identity_fields(cfg),
+    }
+
+
 # -- Test -------------------------------------------------------------------
 
 def _run_benchmark(cfg):
@@ -268,6 +388,7 @@ def _run_benchmark(cfg):
             model_path=model_info["model_path"],
             **init_kwargs,
         )
+        runtime_identity = _runtime_identity_from_generator(generator)
 
         for i in range(num_warmup):
             logger.info("Warmup run %d/%d", i + 1, num_warmup)
@@ -322,6 +443,7 @@ def _run_benchmark(cfg):
         "dit_time_s": _avg_component(all_component_times, "dit_time_s"),
         "vae_decode_time_s": _avg_component(all_component_times,
                                             "vae_decode_time_s"),
+        **_build_identity_fields(cfg, init_kwargs, prompt, runtime_identity),
     }
 
     logger.info(

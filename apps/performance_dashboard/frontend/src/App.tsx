@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchSummary, fetchTrends, refreshData, RunSource, SummaryResponse, TrendGroup, TrendPoint } from "./api";
+import { fetchSummary, fetchTrends, refreshData } from "./api";
+import type { CohortValue, RunSource, SummaryResponse, TrendGroup, TrendPoint } from "./api";
 
 const METRIC_KEYS = ["latency", "throughput", "memory", "text_encoder_time_s", "dit_time_s", "vae_decode_time_s"];
 const RUN_SOURCES: Array<{ value: "" | RunSource; label: string }> = [
@@ -109,6 +110,61 @@ function metricLabel(metricKey: string) {
   return METRIC_DEFINITIONS[metricKey]?.label ?? metricKey;
 }
 
+type CohortFields = {
+  model_id: string;
+  gpu_type: string;
+  workload_id: CohortValue;
+  variant_id: CohortValue;
+  benchmark_version: CohortValue;
+  recipe_fingerprint: CohortValue;
+  hardware_profile_id: CohortValue;
+  software_profile_id: CohortValue;
+};
+
+function cohortValue(value: CohortValue) {
+  if (value === null || value === undefined || value === "") {
+    return "legacy";
+  }
+  return String(value);
+}
+
+function shortCohortValue(value: CohortValue) {
+  const text = cohortValue(value);
+  if (text === "legacy" || text.length <= 14) {
+    return text;
+  }
+  return text.slice(0, 12);
+}
+
+function cohortKey(cohort: CohortFields) {
+  return [
+    cohort.model_id,
+    cohort.gpu_type,
+    cohortValue(cohort.workload_id),
+    cohortValue(cohort.variant_id),
+    cohortValue(cohort.benchmark_version),
+    cohortValue(cohort.recipe_fingerprint),
+    cohortValue(cohort.hardware_profile_id),
+    cohortValue(cohort.software_profile_id)
+  ].join("|");
+}
+
+function cohortTitle(cohort: CohortFields) {
+  const workload = cohortValue(cohort.workload_id);
+  const variant = cohortValue(cohort.variant_id);
+  const version = cohortValue(cohort.benchmark_version);
+  const versionLabel = version === "legacy" ? version : `v${version}`;
+  return `${workload} / ${variant} / ${versionLabel}`;
+}
+
+function cohortDetail(cohort: CohortFields) {
+  return [
+    `recipe ${shortCohortValue(cohort.recipe_fingerprint)}`,
+    shortCohortValue(cohort.hardware_profile_id),
+    shortCohortValue(cohort.software_profile_id)
+  ].join(" | ");
+}
+
 function formatMetricValue(metricKey: string, value: number | null | undefined, tooltip = false) {
   const definition = METRIC_DEFINITIONS[metricKey];
   if (!definition) {
@@ -171,7 +227,9 @@ function TrendChart({ group, metricKey }: { group: TrendGroup; metricKey: string
         top: `${(activePoint.y / height) * 100}%`
       }
     : undefined;
-  const ariaLabel = `${metricLabel(metricKey)} trend for ${group.model_id} on ${group.gpu_type}`;
+  const ariaLabel = `${metricLabel(metricKey)} trend for ${group.model_id} on ${group.gpu_type}, ${cohortTitle(
+    group
+  )}`;
 
   return (
     <div className="chart-shell">
@@ -419,7 +477,7 @@ export default function App() {
       <section className="panel">
         <div className="panel-header">
           <h2>Latest Status</h2>
-          <span>{latestRows.length} model/GPU groups</span>
+          <span>{latestRows.length} comparison cohorts</span>
         </div>
         {latestRows.length === 0 ? (
           <div className="empty">No records match the selected filters.</div>
@@ -432,6 +490,7 @@ export default function App() {
                   <th>Recomputed</th>
                   <th>Model</th>
                   <th>GPU</th>
+                  <th>Cohort</th>
                   <th>Commit</th>
                   <th>Source</th>
                   <th>Baseline</th>
@@ -446,7 +505,7 @@ export default function App() {
               </thead>
               <tbody>
                 {latestRows.map((row) => (
-                  <tr key={`${row.model_id}-${row.gpu_type}`}>
+                  <tr key={cohortKey(row)}>
                     <td>
                       <span className={`badge ${row.status}`}>{row.status}</span>
                     </td>
@@ -457,6 +516,12 @@ export default function App() {
                     </td>
                     <td>{row.model_id}</td>
                     <td>{row.gpu_type}</td>
+                    <td>
+                      <div className="cohort-cell">
+                        <strong>{cohortTitle(row)}</strong>
+                        <span>{cohortDetail(row)}</span>
+                      </div>
+                    </td>
                     <td>{shortSha(row.commit_sha)}</td>
                     <td>
                       <span className={`source-badge source-${row.run_source}`}>{runSourceLabel(row.run_source)}</span>
@@ -495,11 +560,13 @@ export default function App() {
           ) : (
             trends.map((group) =>
               METRIC_KEYS.map((metricKey) => (
-                <article className="trend-card" key={`${group.model_id}-${group.gpu_type}-${metricKey}`}>
+                <article className="trend-card" key={`${cohortKey(group)}-${metricKey}`}>
                   <div>
                     <h3>{metricLabel(metricKey)}</h3>
                     <p>
                       {group.model_id} | {group.gpu_type}
+                      <span>{cohortTitle(group)}</span>
+                      <span>{cohortDetail(group)}</span>
                     </p>
                   </div>
                   <TrendChart group={group} metricKey={metricKey} />
