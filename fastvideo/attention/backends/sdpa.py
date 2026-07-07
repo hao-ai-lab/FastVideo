@@ -50,13 +50,11 @@ class SDPAMetadataBuilder(AttentionMetadataBuilder):
             current_timestep: int,
             attn_mask: torch.Tensor,
     ) -> SDPAMetadata:
-        # A 2D mask handed to the builder is a tokenizer-style
-        # [batch, key_len] padding mask (the HunyuanVideo/HYWorld call
-        # sites); lift it to a broadcastable [batch, 1, 1, key_len] HERE,
-        # where that semantic is known. Masks that reach the impl as 2D keep
-        # torch's documented [query_len, key_len] broadcast meaning.
-        if attn_mask is not None and attn_mask.dim() == 2:
-            attn_mask = attn_mask[:, None, None, :]
+        # Store the mask exactly as passed. The metadata is cross-backend:
+        # call sites (HYWorld, HunyuanVideo15) build SDPAMetadata while the
+        # layer's selector may pick FLASH_ATTN, whose impl requires the
+        # tokenizer-style 2D [batch, key_len] padding mask. Any reshaping for
+        # torch.sdpa happens inside the SDPA impl (_normalize_attn_mask_for_sdpa).
         return SDPAMetadata(current_timestep=current_timestep, attn_mask=attn_mask)
 
 
@@ -84,11 +82,14 @@ def _normalize_attn_mask_for_sdpa(
         valid_value = True if attn_mask.dtype == torch.bool else 0.0
         attn_mask = F.pad(attn_mask, (key_len - attn_mask.shape[-1], 0), value=valid_value)
 
+    if attn_mask.dim() == 2:
+        # In-tree producers pass 2D [batch, key_len] padding masks; lift to a
+        # broadcastable [batch, 1, 1, key_len] here so torch.sdpa does not
+        # reinterpret 2D as its documented [query_len, key_len] broadcast.
+        return attn_mask[:, None, None, :]
     if attn_mask.dim() == 3:
         return attn_mask[:, None, :, :]
-    if attn_mask.dim() in (2, 4):
-        # 2D keeps torch's documented [query_len, key_len] broadcast; batch
-        # padding masks are lifted to 4D by SDPAMetadataBuilder.build.
+    if attn_mask.dim() == 4:
         return attn_mask
     raise ValueError(f"Unsupported attention mask shape for SDPA: {attn_mask.shape}")
 
