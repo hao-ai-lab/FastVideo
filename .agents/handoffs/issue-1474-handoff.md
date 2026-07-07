@@ -127,6 +127,10 @@
   - Modal L40S rerun `ap-7ETeTJfHzyShAylBS7eMFb` used the same command with `--install-extra none`
     to use the dev image's existing environment. Result:
     `pytest fastvideo/tests/entrypoints/test_video_generator.py -q` passed, `25 passed in 0.33s`.
+- Commit/push:
+  - Implementation commit: `908738c2139c921c139c9b97430aaba71b9311f4`
+    (`[bugfix]: skip unused output materialization`), GPG-signed by Mac Lee.
+  - Pushed to `origin/issue/1474-output-materialization`.
 
 ## Current Hypothesis
 - The issue is valid on current `origin/main`: even in the exact no-output mode (`save_video=False`, `return_frames=False`), `_generate_single_video` still performs at least one CPU materialization of `output_batch.output`, then builds a `frames` list and drops both `samples` and `frames` from the returned result.
@@ -202,6 +206,7 @@ Recommended approach: Approach A. It directly resolves #1474 with the smallest b
 - 2026-07-07: Completed Stage 1 recommendation. No implementation changes.
 - 2026-07-07: Rechecked PR #1362 after user asked about conflicts/dependency. It remains open, `isDraft=false`, `mergeable=MERGEABLE`, `mergeStateStatus=BLOCKED`, touches only `fastvideo/entrypoints/video_generator.py`, and has no `closingIssuesReferences`.
 - 2026-07-07: User approved moving to Stage 2 with recommended Approach A. Rechecked issue #1474 and related PR state before editing: issue still open with no comments; no open PR references #1474; PR #1362 remains open, `isDraft=false`, `mergeable=MERGEABLE`, `mergeStateStatus=BLOCKED`, and touches `fastvideo/entrypoints/video_generator.py`.
+- 2026-07-07: Implemented Approach A, validated targeted entrypoint tests on Modal L40S, committed and pushed implementation commit `908738c2139c921c139c9b97430aaba71b9311f4`.
 
 ## Next Steps
 - Implement Approach A in `fastvideo/entrypoints/video_generator.py`.
