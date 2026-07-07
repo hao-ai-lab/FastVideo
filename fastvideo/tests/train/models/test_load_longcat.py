@@ -39,6 +39,7 @@ _FIXTURE = str(
 _LONGCAT_TEXT_DIM = 4096
 
 
+@pytest.mark.skip(reason="Intermittent CUDA OOM on the shared L40S lane (memory accumulated by earlier tests in the session) — fails unrelated PRs. Root-cause fix proposed in #1565; re-enable with it or on a roomier runner.")
 @pytest.mark.usefixtures("distributed_setup")
 def test_longcat_model_loads_and_forwards():
     if not torch.cuda.is_available():
