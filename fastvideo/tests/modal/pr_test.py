@@ -435,6 +435,8 @@ def run_performance_tests():
         "export PERF_RUN_SOURCE='unknown'; "
         "export PERF_UPLOAD_POLICY='never'; "
         "fi; "
+        "(nvidia-smi --query-gpu=index,timestamp,clocks.sm,clocks.max.sm,power.draw,power.limit,temperature.gpu "
+        "--format=csv -l 10 > /tmp/gpu_telemetry.csv 2>/dev/null &); "
         "pytest ./fastvideo/tests/performance -vs; "
         "PYTEST_RC=$?; "
         "PERF_RC=0; "
@@ -443,6 +445,8 @@ def run_performance_tests():
         "PERF_RC=$?; "
         "fi; "
         "python ./fastvideo/tests/performance/dashboard.py || true; "
+        "echo '--- GPU telemetry (clocks.sm vs clocks.max.sm reveals capped hosts) ---'; "
+        "cat /tmp/gpu_telemetry.csv || true; "
         "FINAL_RC=$PYTEST_RC; "
         "if [ $FINAL_RC -eq 0 ]; then FINAL_RC=$PERF_RC; fi; "
         "exit $FINAL_RC")
