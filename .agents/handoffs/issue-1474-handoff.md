@@ -16,8 +16,8 @@
 - Branch: issue/1474-output-materialization
 - Base ref: origin/main at 9d909f5f0 ([test]: remove dead and duplicate tests (-489 lines) (#1556))
 - Handoff path: .agents/handoffs/issue-1474-handoff.md
-- Current stage: Stage 1 complete - awaiting user guidance
-- Implementation begun: no
+- Current stage: Stage 2 - implementing user-approved narrow metadata-only fix
+- Implementation begun: yes
 
 ## Authentication And Sandbox
 - `gh api user --jq .login` was run outside the sandbox after sandboxed network failed.
@@ -98,6 +98,36 @@
   - `fastvideo/tests/entrypoints/test_video_generator.py` mostly tests routing and path helpers; it does not currently exercise the `_generate_single_video` output materialization block.
   - `fastvideo/tests/performance/test_inference_performance_component_times.py:127-144` intentionally excludes generator bookkeeping stages such as `PostDecodeFrameProcessStage` from component metrics.
 
+## Stage 2 Implementation
+- Files changed:
+  - `fastvideo/entrypoints/video_generator.py`
+  - `fastvideo/tests/entrypoints/test_video_generator.py`
+- Generator change:
+  - Computes `is_latent_output`, `needs_frame_output`, and `needs_samples_buffer` before CPU sample allocation.
+  - Skips pinned CPU sample allocation and skips the decoded tensor D->H copy when neither returned samples nor frames are needed.
+  - Skips post-decode frame construction when no frames are needed.
+  - Keeps existing return-frame and save-video behavior on the original `samples` path.
+  - Keeps audio-only metadata output returning `audio` and `audio_sample_rate` while avoiding frame output when `return_frames=False`.
+  - Keeps latent metadata output returning no `samples` when `return_frames=False`.
+- Tests added:
+  - metadata-only pixel output skips shape inspection, `.cpu()`, and frame-grid construction;
+  - `return_frames=True` still materializes samples and frames;
+  - `save_video=True, return_frames=False` still builds frames and saves;
+  - audio-only metadata mode returns audio without frames;
+  - latent metadata mode skips CPU materialization.
+- Static checks:
+  - `git diff --check` passed.
+  - Manual >120-column scan found only a pre-existing line in `video_generator.py:156`, outside the patch.
+- Validation status:
+  - Modal L40S attempt `ap-XvjXs8VEmzo4robtq5g4fC` ran
+    `pytest fastvideo/tests/entrypoints/test_video_generator.py -q` through
+    `launch_l40s_job.py` from branch `interleavethinker`, with local patch applied.
+  - Attempt failed before tests during `uv pip install -e '.[dev]'` because `fastvideo-kernel==0.3.2`
+    was built from an sdist and could not find `cutlass/cutlass.h`.
+  - Modal L40S rerun `ap-7ETeTJfHzyShAylBS7eMFb` used the same command with `--install-extra none`
+    to use the dev image's existing environment. Result:
+    `pytest fastvideo/tests/entrypoints/test_video_generator.py -q` passed, `25 passed in 0.33s`.
+
 ## Current Hypothesis
 - The issue is valid on current `origin/main`: even in the exact no-output mode (`save_video=False`, `return_frames=False`), `_generate_single_video` still performs at least one CPU materialization of `output_batch.output`, then builds a `frames` list and drops both `samples` and `frames` from the returned result.
 - The minimal behavior change should be a metadata-only path gated by `not batch.save_video and not batch.return_frames` for pixel outputs. In that mode, skip:
@@ -171,8 +201,11 @@ Recommended approach: Approach A. It directly resolves #1474 with the smallest b
 - 2026-07-07: Inspected `fastvideo/entrypoints/video_generator.py`, `fastvideo/pipelines/pipeline_batch_info.py`, `fastvideo/api/results.py`, and relevant tests. Current code confirms the issue.
 - 2026-07-07: Completed Stage 1 recommendation. No implementation changes.
 - 2026-07-07: Rechecked PR #1362 after user asked about conflicts/dependency. It remains open, `isDraft=false`, `mergeable=MERGEABLE`, `mergeStateStatus=BLOCKED`, touches only `fastvideo/entrypoints/video_generator.py`, and has no `closingIssuesReferences`.
+- 2026-07-07: User approved moving to Stage 2 with recommended Approach A. Rechecked issue #1474 and related PR state before editing: issue still open with no comments; no open PR references #1474; PR #1362 remains open, `isDraft=false`, `mergeable=MERGEABLE`, `mergeStateStatus=BLOCKED`, and touches `fastvideo/entrypoints/video_generator.py`.
 
 ## Next Steps
-- Commit and push this handoff-only state.
-- Present Stage 1 report to the user.
-- Wait for user guidance before Stage 2 implementation. Recommended: Approach A.
+- Implement Approach A in `fastvideo/entrypoints/video_generator.py`.
+- Add focused regression tests in `fastvideo/tests/entrypoints/test_video_generator.py`.
+- Validate on Modal L40S through `fastvideo/tests/modal/launch_l40s_job.py` from branch `interleavethinker`.
+- Commit with GPG signing and push.
+- Run Stage 3 review/adjudication.

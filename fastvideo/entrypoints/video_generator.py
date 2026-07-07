@@ -748,13 +748,16 @@ class VideoGenerator:
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
         latent_batch_size = _infer_latent_batch_size(batch)
+        is_latent_output = fastvideo_args.output_type == "latent"
+        needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
+        needs_samples_buffer = batch.return_frames or needs_frame_output
         # When ``output_type == "latent"`` the forward output has latent
         # shape (e.g. ``[B, C_latent, T_latent, H_latent, W_latent]``)
         # rather than the pre-allocation's pixel shape. Skip the pinned
-        # ~50 MB buffer entirely; we always fall through to the
-        # ``samples = output_batch.output.cpu()`` branch below in that
-        # mode. ``skip_pixel_prealloc`` also gates the slow-path warning.
-        skip_pixel_prealloc = fastvideo_args.output_type == "latent"
+        # ~50 MB buffer entirely. Also skip it for metadata-only calls;
+        # neither the result nor save path will consume the decoded tensor.
+        # ``skip_pixel_prealloc`` also gates the slow-path warning.
+        skip_pixel_prealloc = is_latent_output or not needs_samples_buffer
         if skip_pixel_prealloc:
             samples = torch.empty(0, device='cpu')
         else:
@@ -773,7 +776,11 @@ class VideoGenerator:
             raise RuntimeError("Forward execution returned no output tensor. "
                                "This usually means the executor/pipeline failed earlier.")
 
-        if output_batch.output.shape == samples.shape:
+        if not needs_samples_buffer:
+            # Metadata-only request: keep the empty placeholder and avoid the
+            # decoded tensor D->H copy.
+            pass
+        elif output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
         else:
             if not skip_pixel_prealloc:
@@ -796,13 +803,14 @@ class VideoGenerator:
         #   2. Audio-only workload — `samples` is a 1×3×1×8×8 placeholder
         #      no caller will use; skip the grid loop and save a `.wav`.
         #   3. Pixel video / image — the historical happy path.
-        is_latent_output = fastvideo_args.output_type == "latent"
         audio_only = bool(output_batch.extra.get("audio_only"))
 
         postprocess_start = time.perf_counter()
         frames: list[np.ndarray] | None
         if is_latent_output or audio_only:
-            frames = None if is_latent_output else []
+            frames = [] if audio_only and batch.return_frames else None
+        elif not needs_frame_output:
+            frames = None
         else:
             videos = rearrange(samples, "b c t h w -> t b c h w")
             frames = []
