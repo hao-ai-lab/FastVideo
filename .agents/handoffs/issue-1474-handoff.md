@@ -154,6 +154,21 @@
   - Review/adjudication loop stopped after one no-finding review.
   - Handoff remains active and must be removed before any Stage 4 draft PR creation.
 
+## Stage 4 PR Creation
+- User explicitly requested moving to the next stage on 2026-07-07.
+- Rechecked GitHub state before PR mutation:
+  - `gh api user --jq .login`: `macthecadillac`.
+  - Issue #1474 remains open with no comments.
+  - No open PR exists for `macthecadillac:issue/1474-output-materialization`.
+  - No open PR directly references #1474.
+  - Related PR #1362 remains open, `isDraft=false`, `mergeable=MERGEABLE`, `mergeStateStatus=BLOCKED`, and touches `fastvideo/entrypoints/video_generator.py`.
+- Final pre-PR gate:
+  - Modal L40S app `ap-EY9bnjjKjQwRjDTeM1YxTF`.
+  - Command: `pre-commit run --all-files`.
+  - Commit: `2c82c4e27ef42300e703094ee37958639c9e456e`.
+  - Result: passed all hooks (`yapf`, `ruff`, `codespell`, `PyMarkdown`, `actionlint`, `mypy`, filename-space check, suggestion).
+- Next Stage 4 step: transfer the draft PR message into the PR body, delete this handoff with `git rm`, commit/push the deletion, verify the branch no longer contains the handoff, and create a draft PR only.
+
 ## Draft PR Message
 ```markdown
 ## Summary
@@ -281,6 +296,7 @@ Recommended approach: Approach A. It directly resolves #1474 with the smallest b
 - 2026-07-07: User approved moving to Stage 2 with recommended Approach A. Rechecked issue #1474 and related PR state before editing: issue still open with no comments; no open PR references #1474; PR #1362 remains open, `isDraft=false`, `mergeable=MERGEABLE`, `mergeStateStatus=BLOCKED`, and touches `fastvideo/entrypoints/video_generator.py`.
 - 2026-07-07: Implemented Approach A, validated targeted entrypoint tests on Modal L40S, committed and pushed implementation commit `908738c2139c921c139c9b97430aaba71b9311f4`.
 - 2026-07-07: Stage 3 reviewer found no actionable findings. Modal committed-branch targeted pytest and full pre-commit passed. Draft PR message prepared. No PR opened.
+- 2026-07-07: Stage 4 started on explicit user request. Rechecked issue/PR state and reran final pre-PR pre-commit on Modal L40S; passed. Preparing to retire handoff before opening draft PR.
 
 ## Next Steps
 - Implement Approach A in `fastvideo/entrypoints/video_generator.py`.
