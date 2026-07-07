@@ -170,6 +170,7 @@ Recommended approach: Approach A. It directly resolves #1474 with the smallest b
 - 2026-07-07: Checked open PRs and focused searches. PR #1362 is the only directly overlapping open PR and is ready-for-review; no draft status changed.
 - 2026-07-07: Inspected `fastvideo/entrypoints/video_generator.py`, `fastvideo/pipelines/pipeline_batch_info.py`, `fastvideo/api/results.py`, and relevant tests. Current code confirms the issue.
 - 2026-07-07: Completed Stage 1 recommendation. No implementation changes.
+- 2026-07-07: Rechecked PR #1362 after user asked about conflicts/dependency. It remains open, `isDraft=false`, `mergeable=MERGEABLE`, `mergeStateStatus=BLOCKED`, touches only `fastvideo/entrypoints/video_generator.py`, and has no `closingIssuesReferences`.
 
 ## Next Steps
 - Commit and push this handoff-only state.
