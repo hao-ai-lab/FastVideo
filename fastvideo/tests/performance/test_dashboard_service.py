@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+from fastvideo.performance import hf_store
 from fastvideo.performance_dashboard.service import build_latest_summary, build_trends, filter_records
-from fastvideo.tests.performance import hf_store
 
 
 def _record(ts, commit, latency, throughput, success=True, **metadata):
@@ -28,16 +28,23 @@ def test_build_latest_summary_uses_previous_successful_records_for_baseline():
         _record("2026-01-03T00:00:00+00:00", "c" * 40, 11.0, 9.0),
     ]
 
-    rows = build_latest_summary(records, max_regression=0.05)
+    rows = build_latest_summary(records)
 
     assert len(rows) == 1
     row = rows[0]
     assert row["baseline_n"] == 1
     assert row["metrics"]["latency"]["baseline"] == 10.0
     assert row["metrics"]["latency"]["regression_pct"] == 10.0
+    assert row["metrics"]["latency"]["absolute_delta"] == 1.0
+    assert row["metrics"]["latency"]["threshold_percent"] == 8.0
+    assert row["metrics"]["latency"]["threshold_absolute"] == 0.5
+    assert row["metrics"]["latency"]["threshold_exceeded"] is True
+    assert row["metrics"]["latency"]["regressed"] is True
     assert row["metrics"]["throughput"]["regression_pct"] == 10.0
     assert row["status"] == "pass"
     assert row["computed_regression_status"] == "fail"
+    assert row["threshold_exceeded_metrics"] == ["latency", "throughput"]
+    assert row["failing_metrics"] == ["latency", "throughput"]
 
 
 def test_build_latest_summary_status_uses_latest_record_success_field():
@@ -73,7 +80,7 @@ def test_build_latest_summary_run_source_filter_keeps_canonical_baseline():
         ),
     ]
 
-    rows = build_latest_summary(records, max_regression=0.05, run_source="pr")
+    rows = build_latest_summary(records, run_source="pr")
 
     assert len(rows) == 1
     assert rows[0]["run_source"] == "pr"
@@ -81,6 +88,60 @@ def test_build_latest_summary_run_source_filter_keeps_canonical_baseline():
     assert rows[0]["baseline_n"] == 1
     assert rows[0]["metrics"]["latency"]["baseline"] == 10.0
     assert rows[0]["computed_regression_status"] == "fail"
+
+
+def test_build_latest_summary_requires_absolute_floor_for_computed_regression():
+    records = [
+        _record("2026-01-01T00:00:00+00:00", "a" * 40, 10.0, 10.0),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            10.6,
+            10.0,
+            regression_thresholds={
+                "latency": {
+                    "threshold_percent": 0.05,
+                    "threshold_absolute": 0.75,
+                    "gated": True,
+                }
+            },
+        ),
+    ]
+
+    rows = build_latest_summary(records)
+
+    assert round(rows[0]["metrics"]["latency"]["regression_pct"], 1) == 6.0
+    assert round(rows[0]["metrics"]["latency"]["absolute_delta"], 3) == 0.6
+    assert rows[0]["metrics"]["latency"]["threshold_exceeded"] is False
+    assert rows[0]["metrics"]["latency"]["regressed"] is False
+    assert rows[0]["computed_regression_status"] == "pass"
+
+
+def test_build_latest_summary_separates_informational_threshold_crossing():
+    records = [
+        _record("2026-01-01T00:00:00+00:00", "a" * 40, 10.0, 10.0),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            10.6,
+            10.0,
+            regression_thresholds={
+                "latency": {
+                    "threshold_percent": 0.05,
+                    "threshold_absolute": 0.5,
+                    "gated": False,
+                }
+            },
+        ),
+    ]
+
+    rows = build_latest_summary(records)
+
+    assert rows[0]["metrics"]["latency"]["threshold_exceeded"] is True
+    assert rows[0]["metrics"]["latency"]["regressed"] is False
+    assert rows[0]["threshold_exceeded_metrics"] == ["latency"]
+    assert rows[0]["failing_metrics"] == []
+    assert rows[0]["computed_regression_status"] == "pass"
 
 
 def test_filter_records_and_trends_preserve_metric_points():

@@ -28,6 +28,7 @@ class DecodingStage(PipelineStage):
     This stage handles the decoding of latent representations into the final
     output format (e.g., pixel values).
     """
+    performance_component_metric = "vae_decode_time_s"
 
     def __init__(self, vae, pipeline=None) -> None:
         self.vae: ParallelTiledVAE = vae

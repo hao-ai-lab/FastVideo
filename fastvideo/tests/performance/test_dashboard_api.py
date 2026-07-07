@@ -68,6 +68,8 @@ def test_summary_endpoint_returns_latest_group_status():
     assert body["count"] == 1
     assert body["status_counts"] == {"pass": 1, "fail": 0}
     assert body["rows"][0]["metrics"]["latency"]["baseline"] == 10.0
+    assert body["rows"][0]["metrics"]["latency"]["threshold_exceeded"] is True
+    assert body["rows"][0]["threshold_exceeded_metrics"] == ["latency", "throughput"]
     assert body["rows"][0]["computed_regression_status"] == "fail"
 
 

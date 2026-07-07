@@ -12,13 +12,17 @@ Defaults:
 
 - `HF_REPO_ID=FastVideo/performance-tracking`
 - `PERFORMANCE_TRACKING_ROOT=/tmp/fastvideo-perf-dashboard`
-- `PERF_MAX_REGRESSION=0.05`
 
-Records can include source metadata:
+Records can include source metadata and rolling-baseline policy context:
 
 - `run_source`: `pr`, `local`, `scheduled_main`, or `unknown`
 - `baseline_eligible`: only successful scheduled-main records should be true
 - Buildkite metadata such as branch, PR number, build URL, build ID, and job ID
+- `regression_thresholds`: per-metric rolling-baseline percent and absolute
+  floors used for recomputed status context
+
+Dashboard/API metric payloads expose `threshold_exceeded` for raw threshold
+crossings; `regressed` remains the gated CI-failure signal.
 
 Set one of `HF_API_KEY`, `HUGGINGFACE_HUB_TOKEN`, or `HF_TOKEN` if the
 configured dataset repo requires authenticated access:
@@ -89,7 +93,8 @@ Trend charts show metric-specific axes and exact point details on hover/focus:
 - PR number, branch, and Buildkite URL when present
 
 The latest status table uses the stored JSON `success` value. Recomputed
-baseline context is shown separately and does not override stored status.
+baseline context applies each metric's percent and absolute regression floors
+and does not override stored status.
 
 ## API
 

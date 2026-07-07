@@ -11,15 +11,35 @@ from typing import Any
 
 import modal
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from modal_image_utils import (  # noqa: E402
+        resolve_image_ref, resolve_uv_torch_backend)
+except ModuleNotFoundError:
+    # Remote Modal containers re-import this module but mount only the
+    # entrypoint file; the digest resolution already happened at local
+    # launch time, so a passthrough is correct there.
+    def resolve_image_ref(image_ref: str) -> str:
+        return image_ref
+
+    def resolve_uv_torch_backend(image_tag: str) -> str | None:
+        return os.environ.get("UV_TORCH_BACKEND")
+
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
 image_version = os.getenv("IMAGE_VERSION", "latest")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
-print(f"Using image: {image_tag}")
+image_ref = resolve_image_ref(image_tag)
+print(f"Using image: {image_ref}")
+
+# Mutable tags inherit the registry image's baked backend, keeping a latest-tag
+# transition safe. Explicit CUDA tags also work with older images that predate
+# the baked setting, and a caller override always wins.
+uv_torch_backend_override = resolve_uv_torch_backend(image_tag)
 
 image = (
-    modal.Image.from_registry(image_tag, add_python="3.12")
+    modal.Image.from_registry(image_ref, add_python="3.12")
     .apt_install(
         "cmake",
         "pkg-config",
@@ -41,7 +61,11 @@ image = (
             "BUILDKITE_REPO": os.environ.get("BUILDKITE_REPO", ""),
             "BUILDKITE_COMMIT": os.environ.get("BUILDKITE_COMMIT", ""),
             "BUILDKITE_PULL_REQUEST": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
-            "IMAGE_VERSION": os.environ.get("IMAGE_VERSION", ""),
+            "IMAGE_VERSION": image_version,
+            **({"UV_TORCH_BACKEND": uv_torch_backend_override} if uv_torch_backend_override else {}),
+            # FA4 is opt-in (FASTVIDEO_FA4); the SSIM references were seeded
+            # with FA4 inference, so keep it enabled in CI. Caller override wins.
+            "FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1"),
         }
     )
 )
