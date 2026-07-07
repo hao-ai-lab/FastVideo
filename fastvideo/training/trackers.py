@@ -7,21 +7,27 @@ interface that can be used across all FastVideo training pipelines.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 import contextlib
 import copy
+import math
 import os
 import pathlib
+import tempfile
 import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
-from collections.abc import Iterable, Iterator
 
+import numpy as np
 import torch
 
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+_DEFAULT_VIDEO_FPS = 16
+_MISSING_ARTIFACT = object()
 
 
 def _sanitize_wandb_config(value: Any) -> Any:
@@ -54,6 +60,140 @@ def _sanitize_wandb_config(value: Any) -> Any:
     if callable(value):
         return getattr(value, "__name__", repr(value))
     return repr(value)
+
+
+def _prepare_video_array(data: Any) -> np.ndarray:
+    """Convert W&B-style TCHW/BTCHW video data into GIF-ready frames."""
+    if isinstance(data, torch.Tensor):
+        data = data.detach().cpu().numpy()
+
+    video = np.asarray(data)
+    if video.ndim == 4:
+        video = video.reshape(1, *video.shape)
+    elif video.ndim != 5:
+        raise ValueError("Video data must have shape [T, C, H, W] or [B, T, C, H, W]")
+
+    batch_size, num_frames, channels, height, width = video.shape
+    if batch_size == 0 or num_frames == 0:
+        raise ValueError("Video data must contain at least one batch item and one frame")
+    if channels not in (1, 3, 4):
+        raise ValueError(f"Video data must have 1, 3, or 4 channels; got {channels}")
+    if video.dtype != np.uint8:
+        logger.warning("Converting video data to uint8 for SwanLab")
+        video = video.astype(np.uint8)
+
+    # Match wandb.Video's batch tiling so the same input has a familiar layout
+    # in either tracker.
+    if batch_size & (batch_size - 1):
+        padded_batch_size = 1 << batch_size.bit_length()
+        padding = np.zeros(
+            (padded_batch_size - batch_size, num_frames, channels, height, width),
+            dtype=video.dtype,
+        )
+        video = np.concatenate((video, padding), axis=0)
+
+    num_rows = 1 << ((batch_size.bit_length() - 1) // 2)
+    num_columns = video.shape[0] // num_rows
+    video = video.reshape(num_rows, num_columns, num_frames, channels, height, width)
+    video = np.transpose(video, axes=(2, 0, 4, 1, 5, 3))
+    video = video.reshape(num_frames, num_rows * height, num_columns * width, channels)
+    if channels == 1:
+        video = video[..., 0]
+    return np.ascontiguousarray(video)
+
+
+def _read_video_file(file_path: str) -> tuple[list[np.ndarray], float | None]:
+    """Decode a video file and return its frames and encoded frame rate."""
+    import imageio.v2 as imageio
+
+    reader = imageio.get_reader(file_path)
+    try:
+        metadata = reader.get_meta_data() or {}
+        frames = [np.asarray(frame) for frame in reader]
+    finally:
+        reader.close()
+
+    if not frames:
+        raise ValueError(f"Video file contains no frames: {file_path}")
+
+    raw_source_fps = metadata.get("fps")
+    try:
+        source_fps = float(str(raw_source_fps))
+    except ValueError:
+        source_fps = None
+    if source_fps is not None and (not math.isfinite(source_fps) or source_fps <= 0):
+        source_fps = None
+    return frames, source_fps
+
+
+def _coerce_video_fps(fps: int | float | None) -> float:
+    if fps is None:
+        return _DEFAULT_VIDEO_FPS
+    value = float(fps)
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"Video fps must be a positive finite number; got {fps!r}")
+    return value
+
+
+def _write_gif(file_path: str, frames: Any, fps: float) -> None:
+    """Encode frames as an animated GIF for SwanLab's video API."""
+    from PIL import Image
+
+    images = []
+    for frame in frames:
+        array = np.asarray(frame)
+        if array.dtype != np.uint8:
+            array = array.astype(np.uint8)
+        if array.ndim == 3 and array.shape[-1] == 1:
+            array = array[..., 0]
+        if array.ndim not in (2, 3) or (array.ndim == 3 and array.shape[-1] not in (3, 4)):
+            raise ValueError(f"GIF frames must be grayscale, RGB, or RGBA; got shape {array.shape}")
+        images.append(Image.fromarray(array))
+
+    if not images:
+        raise ValueError("Video data must contain at least one frame")
+
+    duration_ms = max(1, round(1000 / fps))
+    images[0].save(
+        file_path,
+        format="GIF",
+        save_all=True,
+        append_images=images[1:],
+        duration=duration_ms,
+        loop=0,
+    )
+
+
+@dataclass(frozen=True)
+class _SequentialArtifact:
+    """Backend-specific versions of one artifact created by a tracker group."""
+
+    values: tuple[Any | None, ...]
+
+
+def _select_tracker_artifact(value: Any, tracker_index: int) -> Any:
+    """Resolve nested sequential artifacts for one child tracker."""
+    if isinstance(value, _SequentialArtifact):
+        selected = value.values[tracker_index]
+        return _MISSING_ARTIFACT if selected is None else selected
+    if isinstance(value, dict):
+        selected_dict = {}
+        for key, item in value.items():
+            selected = _select_tracker_artifact(item, tracker_index)
+            if selected is not _MISSING_ARTIFACT:
+                selected_dict[key] = selected
+        return selected_dict if selected_dict else _MISSING_ARTIFACT
+    if isinstance(value, list):
+        selected_list = [
+            selected for item in value
+            if (selected := _select_tracker_artifact(item, tracker_index)) is not _MISSING_ARTIFACT
+        ]
+        return selected_list if selected_list else _MISSING_ARTIFACT
+    if isinstance(value, tuple):
+        selected_tuple = tuple(selected for item in value
+                               if (selected := _select_tracker_artifact(item, tracker_index)) is not _MISSING_ARTIFACT)
+        return selected_tuple if selected_tuple else _MISSING_ARTIFACT
+    return value
 
 
 @dataclass
@@ -222,8 +362,7 @@ class WandbTracker(BaseTracker):
         kwargs: dict[str, Any] = {}
         if caption is not None:
             kwargs["caption"] = caption
-        if fps is not None:
-            kwargs["fps"] = fps
+        kwargs["fps"] = fps if fps is not None else _DEFAULT_VIDEO_FPS
         if format is not None:
             kwargs["format"] = format
         else:
@@ -254,8 +393,10 @@ class SequentialTracker(BaseTracker):
         self._timed_metrics = {}
 
     def log_artifacts(self, artifacts: dict[str, Any], step: int) -> None:
-        for tracker in self._trackers:
-            tracker.log_artifacts(artifacts, step)
+        for tracker_index, tracker in enumerate(self._trackers):
+            tracker_artifacts = _select_tracker_artifact(artifacts, tracker_index)
+            if tracker_artifacts is not _MISSING_ARTIFACT:
+                tracker.log_artifacts(tracker_artifacts, step)
         self._timed_metrics = {}
 
     def log_file(
@@ -278,16 +419,91 @@ class SequentialTracker(BaseTracker):
         fps: int | None = None,
         format: str | None = None,
     ) -> Any | None:
-        for tracker in self._trackers:
-            video = tracker.video(data, caption=caption, fps=fps, format=format)
-            if video is not None:
-                return video
-        return None
+        videos = tuple(tracker.video(data, caption=caption, fps=fps, format=format) for tracker in self._trackers)
+        if all(video is None for video in videos):
+            return None
+        return _SequentialArtifact(videos)
+
+
+class SwanlabTracker(BaseTracker):
+    """Tracker implementation for SwanLab."""
+
+    def __init__(
+        self,
+        experiment_name: str,
+        log_dir: str,
+        *,
+        config: dict[str, Any] | None = None,
+        run_name: str | None = None,
+    ) -> None:
+        super().__init__()
+
+        try:
+            import swanlab
+        except ModuleNotFoundError as error:
+            if error.name != "swanlab":
+                raise
+            raise ModuleNotFoundError("SwanLab tracking requires the optional 'swanlab' dependency. "
+                                      "Install it with `uv pip install 'fastvideo[swanlab]'` (or "
+                                      "`uv pip install -e '.[swanlab]'` from a source checkout).") from error
+
+        pathlib.Path(log_dir).mkdir(parents=True, exist_ok=True)
+
+        self._swanlab = swanlab
+        self._run = swanlab.init(
+            project=experiment_name,
+            experiment_name=run_name,
+            config=(_sanitize_wandb_config(config) if config is not None else None),
+            logdir=log_dir,
+        )
+        logger.info("Initialized SwanLab tracker")
+
+    def log(self, metrics: dict[str, Any], step: int) -> None:
+        metrics = {**self._timed_metrics, **metrics}
+        if metrics:
+            self._swanlab.log(metrics, step=step)
+        self._timed_metrics = {}
+
+    def finish(self) -> None:
+        self._swanlab.finish()
+
+    def video(
+        self,
+        data: Any,
+        *,
+        caption: str | None = None,
+        fps: int | None = None,
+        format: str | None = None,
+    ) -> Any:
+        """Create a SwanLab GIF artifact from a file or W&B-style array."""
+        del format  # SwanLab currently supports GIF artifacts only.
+
+        if isinstance(data, str | os.PathLike):
+            source_path = os.fspath(data)
+            if pathlib.Path(source_path).suffix.lower() == ".gif":
+                return self._swanlab.Video(source_path, caption=caption)
+            frames, source_fps = _read_video_file(source_path)
+            if fps is not None:
+                video_fps = _coerce_video_fps(fps)
+            else:
+                video_fps = source_fps if source_fps is not None else _coerce_video_fps(None)
+        else:
+            frames = _prepare_video_array(data)
+            video_fps = _coerce_video_fps(fps)
+
+        file_descriptor, gif_path = tempfile.mkstemp(suffix=".gif")
+        os.close(file_descriptor)
+        try:
+            _write_gif(gif_path, frames, video_fps)
+            return self._swanlab.Video(gif_path, caption=caption)
+        finally:
+            pathlib.Path(gif_path).unlink(missing_ok=True)
 
 
 class Trackers(str, Enum):
     NONE = "none"
     WANDB = "wandb"
+    SWANLAB = "swanlab"
 
 
 SUPPORTED_TRACKERS = {tracker.value for tracker in Trackers}
@@ -319,6 +535,14 @@ def initialize_trackers(
         elif tracker_name == Trackers.WANDB.value:
             tracker_instances.append(
                 WandbTracker(
+                    experiment_name,
+                    os.path.abspath(log_dir),
+                    config=config,
+                    run_name=run_name,
+                ))
+        elif tracker_name == Trackers.SWANLAB.value:
+            tracker_instances.append(
+                SwanlabTracker(
                     experiment_name,
                     os.path.abspath(log_dir),
                     config=config,
