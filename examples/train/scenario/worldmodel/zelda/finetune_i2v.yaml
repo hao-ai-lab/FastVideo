@@ -62,7 +62,7 @@ callbacks:
   validation:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
     pipeline_target: fastvideo.pipelines.basic.matrixgame2.matrixgame2_i2v_pipeline.MatrixGame2I2VPipeline
-    dataset_file: data/worldmodel_validation_data/validation_zelda.json
+    dataset_file: data/zelda_validation_data/validation_zelda.json
     every_steps: 200
     sampling_steps: [40]
     num_frames: 33

@@ -17,8 +17,8 @@ data and Zelda data, using the new YAML-driven trainer
 | Config | Method | Student | Notes |
 |---|---|---|---|
 | `zelda/finetune_i2v.yaml` | `FineTuneMethod` | `MatrixGame2Model` (bidirectional) | Zelda bidirectional I2V finetuning from `FastVideo/Matrix-Game-2.0-Base-Diffusers`. Uses 33-frame clips and Zelda validation with action overlays. |
-| `zelda/dfsft_causal_i2v.yaml` | `DiffusionForcingSFTMethod` | `MatrixGame2CausalModel` | Zelda causal Diffusion-Forcing SFT from `FastVideo/Matrix-Game-2.0-Base-Diffusers`. Uses the same Zelda data, resolution, optimizer, checkpoint, and validation defaults as the Zelda finetune config. |
-| `zelda/self_forcing_causal_i2v.yaml` | `SelfForcingMethod` | `MatrixGame2CausalModel` | Zelda DMD/Self-Forcing distillation; teacher = bidirectional, critic = bidirectional. |
+| `zelda/dfsft_causal_i2v.yaml` | `DiffusionForcingSFTMethod` | `MatrixGame2CausalModel` | Zelda causal Diffusion-Forcing SFT from `mignonjia/mg_bidirectional_zelda`. Uses the same Zelda data, resolution, optimizer, and validation defaults as the Zelda finetune config. |
+| `zelda/self_forcing_causal_i2v.yaml` | `SelfForcingMethod` | `MatrixGame2CausalModel` | Zelda DMD/Self-Forcing distillation; student init = `mignonjia/mg_causal_zelda`, teacher = bidirectional (`mignonjia/mg_bidirectional_zelda`), critic = bidirectional. |
 | `zelda/streaming_long_tuning_causal_i2v.yaml` | `StreamingLongTuningMethod` | `MatrixGame2CausalModel` | LongLive-style streaming long tuning from the 1k-step Zelda self-forcing checkpoint. |
 
 Zelda world-model distillation is a two-run workflow: first run
@@ -59,24 +59,22 @@ samples are shuffled.
 
 ## World Model Validation Data
 
-The world-model validation configs expect a small public validation bundle under
-`data/worldmodel_validation_data`.
+The Zelda validation configs expect a small public validation bundle under
+`data/zelda_validation_data`.
 
-Download it from Hugging Face before running the Zelda or mixed finetune
-scenarios:
+Download it from Hugging Face before running the Zelda scenarios:
 
 ```bash
 python scripts/huggingface/download_hf.py \
-    --repo_id mignonjia/worldmodel_validation_data \
-    --local_dir data/worldmodel_validation_data \
+    --repo_id mignonjia/zelda_validation_data \
+    --local_dir data/zelda_validation_data \
     --repo_type dataset
 ```
 
-The bundle contains `validation_zelda.json`, `validation_mc_ood.json`,
-`images/`, and `actions/`. The Zelda configs point
+The bundle contains `validation_zelda.json`, `images/`, and `actions/`.
+The Zelda configs point
 `callbacks.validation.dataset_file` at
-`data/worldmodel_validation_data/validation_zelda.json`; mixed or OOD finetune
-configs can point at `data/worldmodel_validation_data/validation_mc_ood.json`.
+`data/zelda_validation_data/validation_zelda.json`.
 
 ## Usage
 
