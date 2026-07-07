@@ -57,10 +57,12 @@ image = (
     .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
     .env(
         {
+            # INVARIANT: keep this image identical for every CI job at a given
+            # base digest -- per-job/per-commit values (BUILDKITE_*) must never
+            # be baked here as image layers or every job rebuilds its own image
+            # variant. repo/commit/PR already reach the container as
+            # run_ssim_partition() arguments.
             "PATH": "/root/.cargo/bin:$PATH",
-            "BUILDKITE_REPO": os.environ.get("BUILDKITE_REPO", ""),
-            "BUILDKITE_COMMIT": os.environ.get("BUILDKITE_COMMIT", ""),
-            "BUILDKITE_PULL_REQUEST": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
             "IMAGE_VERSION": image_version,
             **({"UV_TORCH_BACKEND": uv_torch_backend_override} if uv_torch_backend_override else {}),
             # FA4 is opt-in (FASTVIDEO_FA4); the SSIM references were seeded
