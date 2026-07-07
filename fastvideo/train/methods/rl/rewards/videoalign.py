@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
-from importlib import import_module, util
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -177,22 +177,9 @@ def _patch_videoalign_modules() -> Any:
     if _VIDEOALIGN_PATCHED:
         return inference_mod
 
-    train_reward_mod = import_module("train_reward")
-    trainer_mod = import_module("trainer")
+    reward_model_mod = import_module("reward_model")
     _patch_videoalign_video_reader()
-    if util.find_spec("flash_attn") is None:
-        for mod in (train_reward_mod, inference_mod):
-            original_create = mod.__dict__["create_model_and_processor"]
-
-            def create_model_and_processor_sdpa(*args, _original_create=original_create, **kwargs):
-                training_args = kwargs.get("training_args")
-                if training_args is not None:
-                    training_args.disable_flash_attn2 = True
-                return _original_create(*args, **kwargs)
-
-            mod.__dict__["create_model_and_processor"] = create_model_and_processor_sdpa
-
-    _patch_load_state_dict(trainer_mod.Qwen2VLRewardModelBT)
+    _patch_load_state_dict(reward_model_mod.Qwen2VLRewardModelBT)
     try:
         peft_mod = import_module("peft")
     except ImportError:

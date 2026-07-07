@@ -54,7 +54,6 @@ report_to: tensorboard
 # System Configuration
 bf16: True
 torch_dtype: "bfloat16"
-deepspeed: hpsv3/config/ds_config/zero2.json
 save_only_model: True
 save_full_model: True
 dataloader_num_workers: 8

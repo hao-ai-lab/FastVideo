@@ -1,13 +1,14 @@
 import glob
+from importlib import util
 import os
 from dataclasses import dataclass, field
 from typing import Literal
 
 import safetensors
 import torch
-from transformers import TrainingArguments
-
-########## DataClass For Configure ##########
+from peft import LoraConfig, get_peft_model
+from reward_model import Qwen2VLRewardModelBT
+from transformers import AutoProcessor, TrainingArguments
 
 
 @dataclass
@@ -81,72 +82,118 @@ class ModelConfig:
         if self.load_in_8bit and self.load_in_4bit:
             raise ValueError("You can't use 8 bit and 4 bit precision at the same time")
 
-        # if isinstance(self.lora_target_modules, list) and len(self.lora_target_modules) == 1:
-        #     self.lora_target_modules = self.lora_target_modules[0]
 
-        # if isinstance(self.lora_namespan_exclude, list) and len(self.lora_namespan_exclude) == 1:
-        #     self.lora_namespan_exclude = self.lora_namespan_exclude[0]
+def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=None):
+    linear_cls = torch.nn.Linear
+    embedding_cls = torch.nn.Embedding
+    excluded = lora_namespan_exclude or []
+    lora_module_names = []
+
+    for name, module in model.named_modules():
+        if any(ex_keyword in name for ex_keyword in excluded):
+            continue
+
+        if isinstance(module, (linear_cls, embedding_cls)):
+            lora_module_names.append(name)
+
+    if num_lora_modules > 0:
+        lora_module_names = lora_module_names[-num_lora_modules:]
+    return lora_module_names
 
 
-########## Functions for get trainable modules' parameters ##########
+def _get_quantization_config(model_config):
+    if not model_config.load_in_8bit and not model_config.load_in_4bit:
+        return None
+    from transformers import BitsAndBytesConfig
+
+    if model_config.load_in_8bit:
+        return BitsAndBytesConfig(load_in_8bit=True)
+    return BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type=model_config.bnb_4bit_quant_type,
+        bnb_4bit_use_double_quant=model_config.use_bnb_nested_quant,
+    )
 
 
-def maybe_zero_3(param, ignore_status=False, name=None):
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+def create_model_and_processor(
+    model_config,
+    peft_lora_config,
+    training_args,
+    cache_dir=None,
+):
+    torch_dtype = (
+        model_config.torch_dtype
+        if model_config.torch_dtype in ["auto", None]
+        else getattr(torch, model_config.torch_dtype)
+    )
+    quantization_config = _get_quantization_config(model_config)
+    model_kwargs = dict(
+        revision=model_config.model_revision,
+        device_map="auto" if quantization_config is not None else None,
+        quantization_config=quantization_config,
+        use_cache=True if training_args.gradient_checkpointing else False,
+    )
 
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
+    processor = AutoProcessor.from_pretrained(
+        model_config.model_name_or_path, padding_side="right", cache_dir=cache_dir
+    )
+
+    special_token_ids = None
+    if model_config.use_special_tokens:
+        special_tokens = ["<|VQ_reward|>", "<|MQ_reward|>", "<|TA_reward|>"]
+        processor.tokenizer.add_special_tokens({"additional_special_tokens": special_tokens})
+        special_token_ids = processor.tokenizer.convert_tokens_to_ids(special_tokens)
+
+    has_flash_attn = util.find_spec("flash_attn") is not None
+    model = Qwen2VLRewardModelBT.from_pretrained(
+        model_config.model_name_or_path,
+        output_dim=model_config.output_dim,
+        reward_token=model_config.reward_token,
+        special_token_ids=special_token_ids,
+        torch_dtype=torch_dtype,
+        attn_implementation=(
+            "flash_attention_2" if not training_args.disable_flash_attn2 and has_flash_attn else "sdpa"
+        ),
+        cache_dir=cache_dir,
+        **model_kwargs,
+    )
+    if model_config.use_special_tokens:
+        model.resize_token_embeddings(len(processor.tokenizer))
+
+    if training_args.bf16:
+        model.to(torch.bfloat16)
+    if training_args.fp16:
+        model.to(torch.float16)
+
+    if peft_lora_config.lora_enable:
+        target_modules = find_target_linear_names(
+            model,
+            num_lora_modules=peft_lora_config.num_lora_modules,
+            lora_namespan_exclude=peft_lora_config.lora_namespan_exclude,
+        )
+        peft_config = LoraConfig(
+            target_modules=target_modules,
+            r=peft_lora_config.lora_r,
+            lora_alpha=peft_lora_config.lora_alpha,
+            lora_dropout=peft_lora_config.lora_dropout,
+            task_type=peft_lora_config.lora_task_type,
+            use_rslora=peft_lora_config.use_rslora,
+            bias="none",
+            modules_to_save=peft_lora_config.lora_modules_to_save,
+        )
+        model = get_peft_model(model, peft_config)
     else:
-        param = param.detach().cpu().clone()
-    return param
+        peft_config = None
 
+    model.config.tokenizer_padding_side = processor.tokenizer.padding_side
+    model.config.pad_token_id = processor.tokenizer.pad_token_id
 
-# Borrowed from peft.utils.get_peft_model_state_dict
-def get_peft_state_maybe_zero_3(named_params, bias):
-    if bias == "none":
-        to_return = {k: t for k, t in named_params if "lora_" in k}
-    elif bias == "all":
-        to_return = {k: t for k, t in named_params if "lora_" in k or "bias" in k}
-    elif bias == "lora_only":
-        to_return = {}
-        maybe_lora_bias = {}
-        lora_bias_names = set()
-        for k, t in named_params:
-            if "lora_" in k:
-                to_return[k] = t
-                bias_name = k.split("lora_")[0] + "bias"
-                lora_bias_names.add(bias_name)
-            elif "bias" in k:
-                maybe_lora_bias[k] = t
-        for k, t in maybe_lora_bias:
-            if bias_name in lora_bias_names:
-                to_return[bias_name] = t
-    else:
-        raise NotImplementedError
-    to_return = {k: maybe_zero_3(v, ignore_status=True) for k, v in to_return.items()}
-    return to_return
-
-
-def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
-    to_return = {k: t for k, t in named_params if "lora_" not in k}
-    if require_grad_only:
-        to_return = {k: t for k, t in to_return.items() if t.requires_grad}
-    to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
-    return to_return
-
-
-########## Load Models From Folder ##########
+    return model, processor, peft_config
 
 
 def _insert_adapter_name_into_state_dict(
     state_dict: dict[str, torch.Tensor], adapter_name: str, parameter_prefix: str
 ) -> dict[str, torch.Tensor]:
-    """Utility function to remap the state_dict keys to fit the PEFT model by inserting the adapter name."""
     peft_model_state_dict = {}
     for key, val in state_dict.items():
         if parameter_prefix in key:
@@ -162,30 +209,19 @@ def _insert_adapter_name_into_state_dict(
     return peft_model_state_dict
 
 
-def save_video(tensor, path):
-    from torchvision.io import write_video
-
-    tensor = tensor * 255.0
-    tensor = tensor.permute(0, 2, 3, 1)
-    tensor = tensor.clamp(0, 255).byte()
-    write_video(path, tensor, 4, video_codec="h264")
-
-
 def load_model_from_checkpoint(model, checkpoint_dir, checkpoint_step):
     checkpoint_paths = glob.glob(os.path.join(checkpoint_dir, "checkpoint-*"))
     checkpoint_paths.sort(key=lambda x: int(x.split("-")[-1]), reverse=True)
 
     if checkpoint_step is None or checkpoint_step == -1:
-        # get the latest checkpoint
-        checkpoint_path = checkpoint_paths[0]
-        print(f"===> Checkpoint step is not provided, using the latest checkpoint: {checkpoint_path}")
+        if checkpoint_paths:
+            checkpoint_path = checkpoint_paths[0]
+        else:
+            checkpoint_path = checkpoint_dir
     else:
         checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint-{checkpoint_step}")
         if checkpoint_path not in checkpoint_paths:
-            checkpoint_path = checkpoint_paths[0]
-            print(f"===> Checkpoint step {checkpoint_step} not found, using the latest checkpoint: {checkpoint_path}")
-        else:
-            print(f"===> Checkpoint step {checkpoint_step} found, using the specified checkpoint: {checkpoint_path}")
+            checkpoint_path = checkpoint_paths[0] if checkpoint_paths else checkpoint_dir
 
     checkpoint_step = checkpoint_path.split("checkpoint-")[-1].split("/")[0]
 

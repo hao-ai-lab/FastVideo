@@ -5,13 +5,8 @@ from pathlib import Path
 import huggingface_hub
 import torch
 
-from .dataset.data_collator_qwen import (
-    INSTRUCTION,
-    prompt_with_special_token,
-    prompt_without_special_token,
-)
 from .dataset.utils import process_vision_info
-from .train import create_model_and_processor
+from .runtime import create_model_and_processor
 from .utils.parser import (
     DataConfig,
     ModelConfig,
@@ -22,6 +17,27 @@ from .utils.parser import (
 
 _MODEL_CONFIG_PATH = Path(__file__).parent / "config/"
 
+INSTRUCTION = """
+You are tasked with evaluating a generated image based on Visual Quality and
+Text Alignment and give a overall score to estimate the human preference.
+Please provide a rating from 0 to 10, with 0 being the worst and 10 being the
+best.
+
+Textual prompt - {text_prompt}
+
+
+"""
+
+prompt_with_special_token = """
+Please provide the overall ratings of this image: <|Reward|>
+
+END
+"""
+
+prompt_without_special_token = """
+Please provide the overall ratings of this image:
+"""
+
 
 class HPSv3RewardInferencer:
     def __init__(
@@ -31,6 +47,8 @@ class HPSv3RewardInferencer:
         device="cuda",
         differentiable=False,
     ):
+        if differentiable:
+            raise ValueError("The vendored HPSv3 runtime is inference-only and does not support differentiable mode.")
         if config_path is None:
             config_path = os.path.join(_MODEL_CONFIG_PATH, "HPSv3_7B.yaml")
 
@@ -55,7 +73,6 @@ class HPSv3RewardInferencer:
             model_config=model_config,
             peft_lora_config=peft_lora_config,
             training_args=training_args,
-            differentiable=differentiable,
         )
 
         self.device = device
@@ -168,20 +185,3 @@ class HPSv3RewardInferencer:
         rewards = self.model(return_dict=True, **batch)["logits"]
 
         return rewards
-
-
-if __name__ == "__main__":
-    config_path = "config/inference/HPSv3_7B.yaml"
-    checkpoint_path = "checkpoints/HPSv3_7B.pth"
-    device = "cuda"
-    dtype = torch.bfloat16
-    inferencer = HPSv3RewardInferencer(config_path, checkpoint_path, device=device)
-
-    image_paths = ["assets/example1.png", "assets/example2.png"]
-    prompts = [
-        "cute chibi anime cartoon fox, smiling wagging tail with a small cartoon heart above sticker",
-        "cute chibi anime cartoon fox, smiling wagging tail with a small cartoon heart above sticker",
-    ]
-    rewards = inferencer.reward(image_paths, prompts)
-    print(rewards[0][0].item())  # miu and sigma. we select miu as the final output
-    print(rewards[1][0].item())

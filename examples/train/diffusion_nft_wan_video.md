@@ -57,8 +57,8 @@ NUM_GPUS=4 bash examples/train/run.sh \
     outputs/diffusion_nft_run_configs/diffusion_nft_wan_run.yaml
 ```
 
-W&B logging records the resolved config and a code snapshot by default. Set
-`FASTVIDEO_WANDB_LOG_CODE=0` only when intentionally disabling code capture.
+W&B logging records the resolved training config and scalar/video validation
+artifacts from the tracker.
 
 The video config intentionally uses the Wan/MAY-30 rollout sampler profile:
 `flow_unipc`, 50 denoising steps, flow shift 8, and CFG 6. Validation uses the

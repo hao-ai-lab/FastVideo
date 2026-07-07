@@ -109,8 +109,8 @@ image = (modal.Image.from_registry(
     "python -c 'import cv2, imageio; print(\"video io ok\")'",
     "python -c 'import cloudpickle, pyarrow, torchdata; "
     "print(\"training deps ok\")'",
-    "python -c 'import datasets, matplotlib, peft, qwen_vl_utils, "
-    "safetensors, timm, trl; "
+    "python -c 'import datasets, peft, qwen_vl_utils, "
+    "safetensors, timm; "
     "from transformers import Qwen2VLForConditionalGeneration; "
     "print(\"reward deps ok\")'",
 ).env({

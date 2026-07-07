@@ -5,8 +5,7 @@ from collections.abc import Mapping
 import torch
 from data import DataConfig
 from prompt_template import build_prompt
-from train_reward import create_model_and_processor
-from utils import ModelConfig, PEFTLoraConfig, TrainingConfig, load_model_from_checkpoint
+from runtime import ModelConfig, PEFTLoraConfig, TrainingConfig, create_model_and_processor, load_model_from_checkpoint
 from vision_process import process_vision_info
 
 
@@ -114,12 +113,6 @@ class VideoVLMRewardInference:
             return type(data)(self._prepare_input(v) for v in data)
         if isinstance(data, torch.Tensor):
             kwargs = {"device": self.device}
-            ## TODO: Maybe need to add dtype
-            # if self.is_deepspeed_enabled and (torch.is_floating_point(data) or torch.is_complex(data)):
-            #     # NLP models inputs are int/uint and those get adjusted to the right dtype of the
-            #     # embedding. Other models such as wav2vec2's inputs are already float and thus
-            #     # may need special handling to match the dtypes of the model
-            #     kwargs.update({"dtype": self.accelerator.state.deepspeed_plugin.hf_ds_config.dtype()})
             return data.to(**kwargs)
         return data
 
@@ -243,27 +236,3 @@ class VideoVLMRewardInference:
             rewards[i]["Overall"] = rewards[i]["VQ"] + rewards[i]["MQ"] + rewards[i]["TA"]
 
         return rewards
-
-
-if __name__ == "__main__":
-    load_from_pretrained = "./checkpoints"
-    device = "cuda:0"
-    dtype = torch.bfloat16
-
-    inferencer = VideoVLMRewardInference(load_from_pretrained, device=device, dtype=dtype)
-
-    video_paths = [
-        "datasets/train/videos/example_1_A.mp4",
-        "datasets/train/videos/example_1_B.mp4",
-        "datasets/train/videos/example_2_A.mp4",
-    ]
-
-    prompts = [
-        "The camera remains still, a girl with braided hair and wearing a pink dress approached the chair in the room and sat on it, the background is a cozy bedroom, warm indoor lighting.",
-        "The camera remains still, a girl with braided hair and wearing a pink dress approached the chair in the room and sat on it, the background is a cozy bedroom, warm indoor lighting.",
-        "The camera follows a young explorer through an abandoned urban building at night, exploring hidden corridors and forgotten spaces, with a mix of light and shadow creating a mysterious atmosphere.",
-    ]
-
-    with torch.no_grad():
-        rewards = inferencer.reward(video_paths, prompts, use_norm=True)
-        print(rewards)
