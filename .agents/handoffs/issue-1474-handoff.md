@@ -127,10 +127,83 @@
   - Modal L40S rerun `ap-7ETeTJfHzyShAylBS7eMFb` used the same command with `--install-extra none`
     to use the dev image's existing environment. Result:
     `pytest fastvideo/tests/entrypoints/test_video_generator.py -q` passed, `25 passed in 0.33s`.
+  - Modal L40S committed-branch rerun `ap-AWUSYHT59MDnsTydcGhFXA` ran
+    `pytest fastvideo/tests/entrypoints/test_video_generator.py -q` at commit
+    `ec00dc9cef168d674097a5fd4bd56c17343c9222` without local patch. Result:
+    `25 passed in 0.21s`.
+  - Modal L40S full pre-commit `ap-joqSmxY493ckKKxpmjG1EC` ran
+    `pre-commit run --all-files` at commit `ec00dc9cef168d674097a5fd4bd56c17343c9222`
+    with `--install-extra none`. Result: passed all hooks (`yapf`, `ruff`, `codespell`,
+    `PyMarkdown`, `actionlint`, `mypy`, filename-space check, suggestion).
 - Commit/push:
   - Implementation commit: `908738c2139c921c139c9b97430aaba71b9311f4`
     (`[bugfix]: skip unused output materialization`), GPG-signed by Mac Lee.
   - Pushed to `origin/issue/1474-output-materialization`.
+
+## Stage 3 Review And Adjudication
+- Review-code sub-agent:
+  - Agent id: `019f3c31-8a74-7932-80fb-bdccc7c1641d`
+  - Reviewed source: `macthecadillac/FastVideo@ec00dc9cef168d674097a5fd4bd56c17343c9222`, branch `issue/1474-output-materialization`
+  - Result: no actionable findings.
+  - Issue fit: reviewer confirmed the branch addresses `hao-ai-lab/FastVideo#1474`.
+  - Related branches: reviewer found only `issue/1474-output-materialization`.
+  - Residual risk noted by reviewer: tests use a mocked executor, so they prove the entrypoint branching but not a full model-backed GPU profile showing the avoided D2H copy.
+- Adjudicator/fixer:
+  - Not spawned because the reviewer reported no actionable findings.
+- Stage 3 status:
+  - Review/adjudication loop stopped after one no-finding review.
+  - Handoff remains active and must be removed before any Stage 4 draft PR creation.
+
+## Draft PR Message
+```markdown
+## Summary
+
+Fixes #1474 by adding a metadata-only output path for `VideoGenerator` calls where both `save_video=False` and `return_frames=False`.
+
+This change:
+- skips the decoded output tensor CPU materialization when neither returned samples nor saved/returned frames need it
+- skips post-decode frame construction for metadata-only pixel outputs
+- preserves existing materialization behavior for `return_frames=True` and `save_video=True`
+- keeps audio metadata output available for audio-only workloads
+- keeps latent outputs tied to `return_frames`, so metadata-only latent calls do not force a CPU latent copy
+- adds entrypoint regression coverage for metadata-only, return-frames, save-only, audio-only, and latent metadata cases
+
+## Validation
+
+- Modal L40S targeted pytest at committed branch head:
+  - `pytest fastvideo/tests/entrypoints/test_video_generator.py -q`
+  - `25 passed in 0.21s`
+  - App: `ap-AWUSYHT59MDnsTydcGhFXA`
+- Modal L40S full pre-commit:
+  - `pre-commit run --all-files`
+  - passed
+  - App: `ap-joqSmxY493ckKKxpmjG1EC`
+- Earlier Modal L40S local-patch targeted pytest:
+  - `pytest fastvideo/tests/entrypoints/test_video_generator.py -q`
+  - `25 passed in 0.33s`
+  - App: `ap-7ETeTJfHzyShAylBS7eMFb`
+- Stage 3 review loop:
+  - `review-code` sub-agent reported no actionable findings.
+
+## GPU Memory Impact
+
+Expected to reduce host/GPU transfer overhead and avoid unnecessary CPU frame/sample buffers for metadata-only generation. No expected increase in GPU memory use. Save and return-frame paths continue to materialize outputs as before.
+
+## Notes
+
+- A first Modal targeted-test attempt failed before tests during `uv pip install -e '.[dev]'` because `fastvideo-kernel==0.3.2` was built from an sdist that could not find `cutlass/cutlass.h`; reruns used the dev image environment with `--install-extra none`.
+- Wan T2V SSIM was not run because this change does not alter generated pixels for save or return-frame paths; it only skips work when frames/samples are not requested.
+- Related open PR #1362 touches the same `VideoGenerator` region with a broader post-decode optimization. This branch is the narrow issue-specific metadata-only fix.
+
+# Checklist
+- [x] I ran pre-commit run --all-files and fixed all issues
+- [x] I added or updated tests for my changes
+- [x] I updated documentation if needed
+- [x] I considered GPU memory impact of my changes
+For model/pipeline changes, also check:
+- [ ] I verified targeted Wan T2V SSIM regression tests pass on L40S
+- [ ] I updated the support matrix if adding a new model
+```
 
 ## Current Hypothesis
 - The issue is valid on current `origin/main`: even in the exact no-output mode (`save_video=False`, `return_frames=False`), `_generate_single_video` still performs at least one CPU materialization of `output_batch.output`, then builds a `frames` list and drops both `samples` and `frames` from the returned result.
@@ -207,10 +280,10 @@ Recommended approach: Approach A. It directly resolves #1474 with the smallest b
 - 2026-07-07: Rechecked PR #1362 after user asked about conflicts/dependency. It remains open, `isDraft=false`, `mergeable=MERGEABLE`, `mergeStateStatus=BLOCKED`, touches only `fastvideo/entrypoints/video_generator.py`, and has no `closingIssuesReferences`.
 - 2026-07-07: User approved moving to Stage 2 with recommended Approach A. Rechecked issue #1474 and related PR state before editing: issue still open with no comments; no open PR references #1474; PR #1362 remains open, `isDraft=false`, `mergeable=MERGEABLE`, `mergeStateStatus=BLOCKED`, and touches `fastvideo/entrypoints/video_generator.py`.
 - 2026-07-07: Implemented Approach A, validated targeted entrypoint tests on Modal L40S, committed and pushed implementation commit `908738c2139c921c139c9b97430aaba71b9311f4`.
+- 2026-07-07: Stage 3 reviewer found no actionable findings. Modal committed-branch targeted pytest and full pre-commit passed. Draft PR message prepared. No PR opened.
 
 ## Next Steps
 - Implement Approach A in `fastvideo/entrypoints/video_generator.py`.
-- Add focused regression tests in `fastvideo/tests/entrypoints/test_video_generator.py`.
-- Validate on Modal L40S through `fastvideo/tests/modal/launch_l40s_job.py` from branch `interleavethinker`.
-- Commit with GPG signing and push.
-- Run Stage 3 review/adjudication.
+- Sign and push this Stage 3 handoff update.
+- Wait for explicit Stage 4 direction before opening a draft PR.
+- Before opening a draft PR: re-check issue/PR state, rerun `pre-commit run --all-files`, transfer handoff context into the PR body, remove this handoff with `git rm`, commit/push the deletion, and verify the handoff is absent.
