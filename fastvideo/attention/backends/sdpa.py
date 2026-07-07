@@ -2,6 +2,7 @@
 
 import torch
 from dataclasses import dataclass
+from torch.nn import functional as F
 from fastvideo.attention.backends.abstract import (  # FlashAttentionMetadata,
     AttentionBackend, AttentionImpl, AttentionMetadata, AttentionMetadataBuilder)
 from fastvideo.logger import init_logger
@@ -19,7 +20,7 @@ class SDPABackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "SDPA"
+        return "TORCH_SDPA"
 
     @staticmethod
     def get_impl_cls() -> type["SDPAImpl"]:
@@ -49,7 +50,49 @@ class SDPAMetadataBuilder(AttentionMetadataBuilder):
             current_timestep: int,
             attn_mask: torch.Tensor,
     ) -> SDPAMetadata:
+        # Store the mask exactly as passed. The metadata is cross-backend:
+        # call sites (HYWorld, HunyuanVideo15) build SDPAMetadata while the
+        # layer's selector may pick FLASH_ATTN, and the shared convention for
+        # padding masks is the tokenizer-style 2D [batch, key_len]. Any
+        # reshaping for torch.sdpa happens inside the SDPA impl
+        # (_normalize_attn_mask_for_sdpa).
         return SDPAMetadata(current_timestep=current_timestep, attn_mask=attn_mask)
+
+
+def _normalize_attn_mask_for_sdpa(
+    attn_mask: torch.Tensor | None,
+    query: torch.Tensor,
+    key: torch.Tensor,
+) -> torch.Tensor | None:
+    if attn_mask is None:
+        return None
+
+    attn_mask = attn_mask.to(device=query.device)
+    # F.scaled_dot_product_attention only accepts bool or float masks;
+    # tokenizers commonly produce int64 0/1 padding masks.
+    if attn_mask.dtype != torch.bool and not attn_mask.dtype.is_floating_point:
+        attn_mask = attn_mask != 0
+
+    key_len = key.shape[-2]
+    if attn_mask.shape[-1] > key_len:
+        raise ValueError("Invalid attention mask length for SDPA: "
+                         f"expected at most {key_len}, got {attn_mask.shape[-1]}")
+    if attn_mask.shape[-1] < key_len:
+        # Front-pad as "attend": double-stream layouts (HYWorld) prepend
+        # non-text tokens the tokenizer mask does not cover.
+        valid_value = True if attn_mask.dtype == torch.bool else 0.0
+        attn_mask = F.pad(attn_mask, (key_len - attn_mask.shape[-1], 0), value=valid_value)
+
+    if attn_mask.dim() == 2:
+        # In-tree producers pass 2D [batch, key_len] padding masks; lift to a
+        # broadcastable [batch, 1, 1, key_len] here so torch.sdpa does not
+        # reinterpret 2D as its documented [query_len, key_len] broadcast.
+        return attn_mask[:, None, None, :]
+    if attn_mask.dim() == 3:
+        return attn_mask[:, None, :, :]
+    if attn_mask.dim() == 4:
+        return attn_mask
+    raise ValueError(f"Unsupported attention mask shape for SDPA: {attn_mask.shape}")
 
 
 class SDPAImpl(AttentionImpl):
@@ -82,6 +125,7 @@ class SDPAImpl(AttentionImpl):
 
         attn_mask = attn_metadata.attn_mask if (attn_metadata is not None
                                                 and hasattr(attn_metadata, "attn_mask")) else None
+        attn_mask = _normalize_attn_mask_for_sdpa(attn_mask, query, key)
         attn_kwargs = {
             "attn_mask": attn_mask,
             "dropout_p": self.dropout,

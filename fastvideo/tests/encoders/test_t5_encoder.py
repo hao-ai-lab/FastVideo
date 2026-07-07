@@ -12,6 +12,7 @@ from fastvideo.configs.pipelines import CosmosConfig, PipelineConfig, WanT2V480P
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
+from fastvideo.tests.utils import skip_if_gated_repo_inaccessible
 from fastvideo.utils import maybe_download_model, PRECISION_TO_TYPE
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.configs.models.encoders import T5Config, T5LargeConfig
@@ -36,9 +37,11 @@ def t5_model_paths_and_config():
 @pytest.fixture
 def t5_large_model_paths_and_config():
     base_model_path = "nvidia/Cosmos-Predict2-2B-Video2World"
-    model_path = maybe_download_model(base_model_path,
-                                      local_dir=os.path.join(
-                                          'data', base_model_path))
+    local_dir = os.path.join('data', base_model_path)
+    skip_if_gated_repo_inaccessible(base_model_path,
+                                    local_path=local_dir,
+                                    test_name="Cosmos T5-large encoder test")
+    model_path = maybe_download_model(base_model_path, local_dir=local_dir)
     text_encoder_path = os.path.join(model_path, "text_encoder")
     tokenizer_path = os.path.join(model_path, "tokenizer")
     return text_encoder_path, tokenizer_path, CosmosConfig()
