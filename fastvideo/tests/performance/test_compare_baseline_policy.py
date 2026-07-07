@@ -614,3 +614,54 @@ def test_main_baseline_load_failure_is_infra_error_and_fails_ci(monkeypatch, tmp
     assert record["success"] is False
     assert record["baseline_eligible"] is False
     assert "| INFRA_ERROR |" in markdown
+
+
+def test_main_host_below_profile_skips_gate_and_never_seeds_baseline(
+        monkeypatch, tmp_path, capsys):
+    # A 2x latency "regression" measured on a packed host must not fail CI.
+    exit_code, record, markdown = _run_compare(
+        monkeypatch, tmp_path,
+        _v2_raw_result(avg_generation_time_s=20.0, host_cpu_score=0.55),
+        [_v2_baseline_record()])
+
+    assert exit_code == 0
+    assert record["comparator_status"] == "HOST_BELOW_PROFILE"
+    assert record["success"] is True
+    assert record["baseline_eligible"] is False
+    assert "| HOST_BELOW_PROFILE |" in markdown
+    assert ("host below profile — measurements not comparable"
+            in capsys.readouterr().out)
+
+
+def test_main_healthy_host_score_gates_normally(monkeypatch, tmp_path):
+    exit_code, record, _ = _run_compare(
+        monkeypatch, tmp_path,
+        _v2_raw_result(avg_generation_time_s=20.0, host_cpu_score=0.97),
+        [_v2_baseline_record()])
+
+    assert exit_code == 1
+    assert record["comparator_status"] == "REGRESSION"
+
+
+def test_main_healthy_host_pass_keeps_baseline_eligibility_and_score(
+        monkeypatch, tmp_path):
+    exit_code, record, _ = _run_compare(
+        monkeypatch, tmp_path, _v2_raw_result(host_cpu_score=1.02),
+        [_v2_baseline_record()])
+
+    assert exit_code == 0
+    assert record["comparator_status"] == "PASS"
+    assert record["baseline_eligible"] is True
+    assert record["host_cpu_score"] == 1.02
+
+
+def test_host_cpu_min_score_env_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("PERF_HOST_CPU_MIN_SCORE", "0.5")
+
+    exit_code, record, _ = _run_compare(
+        monkeypatch, tmp_path,
+        _v2_raw_result(avg_generation_time_s=20.0, host_cpu_score=0.55),
+        [_v2_baseline_record()])
+
+    assert exit_code == 1
+    assert record["comparator_status"] == "REGRESSION"

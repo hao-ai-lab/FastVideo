@@ -19,6 +19,7 @@ import pytest
 
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
+from fastvideo.tests.performance.host_probe import measure_host_cpu_profile
 from fastvideo.tests.performance.identity import (
     benchmark_identity_from_config,
     build_recipe_from_benchmark_config,
@@ -152,6 +153,24 @@ def _discover_benchmarks():
 _BENCHMARK_CONFIGS = _discover_benchmarks()
 
 # -- Helpers ----------------------------------------------------------------
+
+# Probed once per pytest process (before the first benchmark's GPU work) and
+# attached to every result: the comparator skips gating when the host is
+# below the healthy-host CPU profile. Fail-open: a probe error just omits the
+# fields, and the comparator gates normally.
+_HOST_CPU_PROFILE: dict[str, float] | None = None
+
+
+def _host_cpu_profile() -> dict[str, float]:
+    global _HOST_CPU_PROFILE
+    if _HOST_CPU_PROFILE is None:
+        try:
+            _HOST_CPU_PROFILE = measure_host_cpu_profile()
+            logger.info("Host CPU probe: %s", _HOST_CPU_PROFILE)
+        except Exception as e:
+            logger.warning("Host CPU probe failed (%s); records will carry no host_cpu_score", e)
+            _HOST_CPU_PROFILE = {}
+    return _HOST_CPU_PROFILE
 
 
 def _get_thresholds(cfg):
@@ -477,6 +496,7 @@ def _run_benchmark(cfg):
 
     num_warmup, num_measure = _validate_run_counts(run_config, cfg["benchmark_id"])
     thresholds = _get_thresholds(cfg)
+    host_cpu_profile = _host_cpu_profile()
 
     # Remap JSON keys to VideoGenerator kwargs
     text_enc_prec = init_kwargs.pop("text_encoder_precisions", None)
@@ -537,6 +557,9 @@ def _run_benchmark(cfg):
         runtime_identity=runtime_identity,
         device_name=device_name,
     )
+    # Attach the host CPU probe so the comparator can skip gating on
+    # below-profile (packed) hosts. Fail-open: an empty probe adds nothing.
+    results.update(host_cpu_profile)
 
     logger.info(
         "Performance results: avg_time=%.2fs, "

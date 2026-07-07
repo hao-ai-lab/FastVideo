@@ -95,8 +95,28 @@ STATUS_REGRESSION = "REGRESSION"
 STATUS_CALIBRATION_NEEDED = "CALIBRATION_NEEDED"
 STATUS_RECIPE_MISMATCH = "RECIPE_MISMATCH"
 STATUS_INFRA_ERROR = "INFRA_ERROR"
+STATUS_HOST_BELOW_PROFILE = "HOST_BELOW_PROFILE"
 # Reserved for the promoted-baseline workflow; never emitted by this comparator.
 STATUS_QUALITY_BLOCKED = "QUALITY_BLOCKED"
+
+# Floor for host_cpu_score (host_probe.py: ~1.0 on a healthy perf-lane host).
+# Calibration basis (see host_probe.py for the sampled data): healthy lane
+# hosts scored 0.97-1.17; the packed-host signature (review r30; TE 3.595s vs
+# the 2.03s healthy cluster, DiT +58-80%) inflates CPU-bound wall time by
+# 1.58-1.77x, i.e. a packed host projects to 0.54-0.73. 0.75 sits above every
+# packed projection and below every healthy sample.
+DEFAULT_HOST_CPU_MIN_SCORE = 0.75
+
+
+def _host_cpu_min_score() -> float:
+    raw = os.environ.get("PERF_HOST_CPU_MIN_SCORE", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            print(f"Invalid PERF_HOST_CPU_MIN_SCORE={raw!r}; "
+                  f"using {DEFAULT_HOST_CPU_MIN_SCORE}")
+    return DEFAULT_HOST_CPU_MIN_SCORE
 
 
 def _should_persist_tracking() -> bool:
@@ -268,6 +288,13 @@ def normalize_performance_result(result: dict[str, Any]) -> dict[str, Any]:
         "success": True,
         **_record_metadata(_detect_run_source(), result),
     }
+    # Host CPU probe fields (host_probe.py); absent on records measured
+    # before the probe existed or when the probe failed.
+    for key in ("host_cpu_score", "host_cpu_single_thread_kops",
+                "host_cpu_multi_thread_gflops"):
+        value = safe_float(result.get(key))
+        if value is not None:
+            record[key] = value
     record.update(_identity_metadata(result))
     return record
 
@@ -386,6 +413,26 @@ def _compare_record(
     for cohort bookkeeping) and returns ``(failures, baseline_records)``.
     """
     model = record.get("model_id", "unknown")
+
+    # Host-profile guard (r30 option a): a measurement taken on a packed host
+    # is not comparable to anything, so skip gating loudly instead of failing
+    # the PR. The record keeps its non-PASS status, so it can never advance
+    # the rolling baseline. Records without a score gate normally (fail-open).
+    host_cpu_score = safe_float(record.get("host_cpu_score"))
+    min_score = _host_cpu_min_score()
+    if host_cpu_score is not None and host_cpu_score < min_score:
+        record["comparator_status"] = STATUS_HOST_BELOW_PROFILE
+        print("=" * 72)
+        print(f"HOST_BELOW_PROFILE: host below profile — measurements not "
+              f"comparable (host_cpu_score={host_cpu_score:.3f} < floor "
+              f"{min_score:.2f}) for {model}.")
+        print("Regression gating is SKIPPED for this record and it will NOT "
+              "seed a baseline. This is host CPU contention on the shared "
+              "runner, not a property of the PR; retry the lane to land on a "
+              "healthy host.")
+        print("=" * 72)
+        return [], []
+
     try:
         identity_filters = _comparison_identity_filters(record)
         baseline_records = load_records_for_model(

@@ -247,6 +247,7 @@ record and in the Markdown summary:
 | `CALIBRATION_NEEDED` | No comparable baseline exists. Gating is inactive and the record does **not** seed a baseline — seed new cohorts explicitly via the reseed workflow. The record also carries `baseline_status: "initialized_new_cohort"`. | passes |
 | `RECIPE_MISMATCH` | Baseline history exists for the same variant/hardware/software cohort but under a different `recipe_fingerprint`. Represent recipe changes as a new `variant_id`, or reseed. | fails |
 | `INFRA_ERROR` | The comparison itself failed (for example, baseline history could not be loaded). | fails |
+| `HOST_BELOW_PROFILE` | The harness's ~2s host CPU probe (`host_probe.py`) scored below the healthy-host floor (`PERF_HOST_CPU_MIN_SCORE`, default 0.75): the shared runner was packed, so the measurements are not comparable. Gating is skipped and the record never seeds a baseline. | passes |
 | `QUALITY_BLOCKED` | Reserved for the promoted-baseline workflow; never emitted by the comparator. | n/a |
 
 Metric-specific threshold policies and promoted baselines remain separate
@@ -531,6 +532,14 @@ The run passes but does not seed a baseline; seed it explicitly with the
 **`RECIPE_MISMATCH`** — the benchmark recipe changed without a new
 `variant_id`. Either bump `variant_id` to open a new cohort, or reseed the
 baseline if the existing variant should adopt the new recipe.
+
+**`HOST_BELOW_PROFILE: host below profile — measurements not comparable`** —
+the shared Modal host was packed during the run (host CPU contention; GPU
+telemetry typically still looks healthy). Not a property of the PR: the gate
+is skipped and CI passes. Retry the lane if you need a comparable measurement.
+If every host suddenly scores low after an image/python/torch bump, the probe
+reference is stale — recalibrate `PERF_HOST_CPU_ST_REF_KOPS` (see
+`host_probe.py`, which documents the calibration procedure and sampled data).
 
 **Persistent failure right after a torch / kernel / image upgrade** —
 genuine regression *or* baseline drift. Compare the failing normalized record
