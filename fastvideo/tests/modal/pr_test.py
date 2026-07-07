@@ -187,8 +187,8 @@ def run_transformer_tests():
 
 
 @app.function(gpu="L40S:4",
-              cpu=8.0,
-              memory=32768,
+              cpu=16.0,
+              memory=65536,
               image=image,
               timeout=900,
               secrets=[
@@ -203,8 +203,8 @@ def run_training_tests():
 
 
 @app.function(gpu="L40S:2",
-              cpu=8.0,
-              memory=32768,
+              cpu=16.0,
+              memory=65536,
               image=image,
               timeout=900,
               secrets=[
@@ -322,8 +322,8 @@ def run_dreamverse_app_tests():
 
 
 @app.function(gpu="L40S:1",
-              cpu=8.0,
-              memory=32768,
+              cpu=16.0,
+              memory=65536,
               image=image,
               timeout=1800,
               secrets=[
@@ -406,8 +406,8 @@ def run_lora_extraction_tests():
 
 
 @app.function(gpu="L40S:2",
-              cpu=8.0,
-              memory=32768,
+              cpu=16.0,
+              memory=65536,
               image=image,
               timeout=1800,
               secrets=[
