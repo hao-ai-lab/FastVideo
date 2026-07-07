@@ -319,6 +319,34 @@ def test_generate_single_video_audio_only_metadata_returns_audio_without_frames(
     assert result["audio_sample_rate"] == 44100
 
 
+def test_generate_single_video_audio_only_save_skips_placeholder_materialization(tmp_path):
+    audio = torch.zeros((16,), dtype=torch.float32)
+    output_batch = _single_video_output_batch(
+        _NoCpuMaterializationOutput(),
+        extra={
+            "audio_only": True,
+            "audio": audio,
+            "audio_sample_rate": 44100,
+        },
+    )
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    output_path = str(tmp_path / "audio.mp4")
+
+    result = generator._generate_single_video(
+        prompt="audio only",
+        sampling_param=_small_sampling_param(save_video=True, return_frames=False),
+        fastvideo_args=fastvideo_args,
+        output_path=output_path,
+    )
+
+    assert result["samples"] is None
+    assert result["frames"] is None
+    assert result["audio"] is audio
+    assert result["audio_sample_rate"] == 44100
+    assert result["video_path"] == str(tmp_path / "audio.wav")
+
+
 def test_generate_single_video_latent_metadata_skips_cpu_materialization(tmp_path):
     output_batch = _single_video_output_batch(_NoCpuMaterializationOutput())
     fastvideo_args = _single_video_args(output_type="latent")

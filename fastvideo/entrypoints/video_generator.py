@@ -776,10 +776,15 @@ class VideoGenerator:
             raise RuntimeError("Forward execution returned no output tensor. "
                                "This usually means the executor/pipeline failed earlier.")
 
-        if not needs_samples_buffer:
-            # Metadata-only request: keep the empty placeholder and avoid the
-            # decoded tensor D->H copy.
+        audio_only = bool(output_batch.extra.get("audio_only"))
+        if not needs_samples_buffer or (audio_only and not batch.return_frames):
+            # Metadata-only/audio-only request: keep the empty placeholder and
+            # avoid the decoded tensor D->H copy.
             pass
+        elif audio_only:
+            # Audio-only return-frames requests expose the small placeholder
+            # without warning about expected video shape.
+            samples = output_batch.output.cpu()
         elif output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
         else:
@@ -803,8 +808,6 @@ class VideoGenerator:
         #   2. Audio-only workload — `samples` is a 1×3×1×8×8 placeholder
         #      no caller will use; skip the grid loop and save a `.wav`.
         #   3. Pixel video / image — the historical happy path.
-        audio_only = bool(output_batch.extra.get("audio_only"))
-
         postprocess_start = time.perf_counter()
         frames: list[np.ndarray] | None
         if is_latent_output or audio_only:
