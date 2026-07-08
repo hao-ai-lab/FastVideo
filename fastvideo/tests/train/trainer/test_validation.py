@@ -53,6 +53,9 @@ class _DummyMethod:
     def on_train_start(self) -> None:
         self.train_start_calls += 1
 
+    def manages_optimization(self) -> bool:
+        return False
+
     def single_train_step(
         self,
         batch: dict[str, Any],
