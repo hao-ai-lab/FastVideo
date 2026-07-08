@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage 0d: segment frame-0 (FastSAM) and label each CoTracker grid point by object.
+"""Stage 0d: segment frames (FastSAM) and label each CoTracker grid point by object.
 
 Adds an ``object_ids`` array ([N] int, -1 = background/none) to each tracks ``.npz``,
-so the trainer's object-coverage sampling can guarantee >=1 track per object. A grid
-point is assigned the SMALLEST mask that contains it (most specific object).
+so the trainer's object-coverage sampling can guarantee >=1 track per object.
+
+Each point is assigned based on its FIRST-VISIBLE frame (from CoTracker visibility):
+FastSAM runs on each unique first-visible frame, and the point is assigned the smallest
+mask containing its position at that frame. This correctly handles objects that enter
+the scene after frame 0.
 
 Run on a GPU node (FastSAM is light). Idempotent (skips npz that already have object_ids)::
 
@@ -19,16 +23,19 @@ from pathlib import Path
 import numpy as np
 
 
-def read_frame0(path: str) -> np.ndarray:
+def read_frame(path: str, idx: int) -> np.ndarray:
+    """Read a single frame by index, return HxWx3 uint8."""
     try:
         from decord import VideoReader, cpu
-        return VideoReader(path, ctx=cpu(0))[0].asnumpy()  # HxWx3 uint8
+        vr = VideoReader(path, ctx=cpu(0))
+        return vr[idx].asnumpy()
     except Exception:  # noqa: BLE001
         import av
         c = av.open(path)
-        for f in c.decode(video=0):
-            return f.to_ndarray(format="rgb24")
-    raise RuntimeError(f"could not read {path}")
+        for i, f in enumerate(c.decode(video=0)):
+            if i == idx:
+                return f.to_ndarray(format="rgb24")
+    raise RuntimeError(f"could not read frame {idx} from {path}")
 
 
 def object_ids_for_points(masks: np.ndarray, pts_xy: np.ndarray, H: int, W: int) -> np.ndarray:
@@ -46,6 +53,54 @@ def object_ids_for_points(masks: np.ndarray, pts_xy: np.ndarray, H: int, W: int)
         inside = masks[m][yi, xi] & (~assigned)
         oid[inside] = int(m)
         assigned |= inside
+    return oid
+
+
+def extract_masks(res, H: int, W: int, min_area_frac: float, max_masks: int) -> np.ndarray:
+    """Pull masks out of a FastSAM result, resize if needed, and apply filtering."""
+    masks = np.zeros((0, H, W), bool)
+    if res and res[0].masks is not None:
+        masks = res[0].masks.data.cpu().numpy().astype(bool)
+        if masks.shape[0] and masks.shape[1:] != (H, W):
+            import cv2
+            masks = np.stack([
+                cv2.resize(m.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST).astype(bool)
+                for m in masks
+            ])
+    if masks.shape[0] and (min_area_frac > 0 or max_masks):
+        areas = masks.reshape(masks.shape[0], -1).sum(1).astype(np.float64)
+        if min_area_frac > 0:
+            keep = (areas / float(H * W)) >= min_area_frac
+            masks, areas = masks[keep], areas[keep]
+        if max_masks and masks.shape[0] > max_masks:
+            masks = masks[np.argsort(-areas)[:max_masks]]
+    return masks
+
+
+def assign_object_ids_multiframe(
+    frame_masks: dict[int, np.ndarray],
+    first_visible: np.ndarray,
+    tracks: np.ndarray,
+    H: int,
+    W: int,
+) -> np.ndarray:
+    """Assign globally-unique object IDs using each point's first-visible frame.
+
+    frame_masks: {frame_idx: masks [M,H,W] bool}
+    first_visible: [N] int, -1 = never visible
+    tracks: [T,N,2] px
+    Returns object_ids [N] int64, -1 = background/never visible.
+    """
+    N = first_visible.shape[0]
+    oid = np.full(N, -1, np.int64)
+    global_offset = 0
+    for frame_t, masks in sorted(frame_masks.items()):
+        point_sel = first_visible == frame_t
+        if point_sel.any() and masks.shape[0] > 0:
+            pts_xy = tracks[frame_t, point_sel]
+            local_oid = object_ids_for_points(masks, pts_xy, H, W)
+            oid[point_sel] = np.where(local_oid >= 0, local_oid + global_offset, -1)
+        global_offset += masks.shape[0]
     return oid
 
 
@@ -79,12 +134,11 @@ def main() -> None:
     p.add_argument("--imgsz", type=int, default=1024)
     p.add_argument("--conf", type=float, default=0.4)
     p.add_argument("--iou", type=float, default=0.9)
-    p.add_argument("--min-area-frac",
-                   type=float,
-                   default=0.0,
-                   help="drop masks smaller than this fraction of the frame (fights over-segmentation)")
+    p.add_argument("--min-area-frac", type=float, default=0.0,
+                   help="drop masks smaller than this fraction of the frame")
     p.add_argument("--max-masks", type=int, default=0, help="keep only the N largest masks (0 = keep all)")
     p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--force", action="store_true", help="re-run even if object_ids already present")
     args = p.parse_args()
 
     from ultralytics import FastSAM
@@ -102,46 +156,40 @@ def main() -> None:
             print(f"[seg] [{k}/{len(items)}] {vpath.name}: no npz, skip", flush=True)
             continue
         d = dict(np.load(npz_path))
-        if "object_ids" in d and "track_weights" in d:
+        if not args.force and "object_ids" in d and "track_weights" in d:
             n_ok += 1
             continue
-        frame0 = read_frame0(str(vpath))
-        H, W = frame0.shape[0], frame0.shape[1]
-        res = model(frame0,
-                    device=args.device,
-                    retina_masks=True,
-                    imgsz=args.imgsz,
-                    conf=args.conf,
-                    iou=args.iou,
-                    verbose=False)
-        masks = np.zeros((0, H, W), bool)
-        if res and res[0].masks is not None:
-            masks = res[0].masks.data.cpu().numpy().astype(bool)  # [M,h,w]
-            if masks.shape[1:] != (H, W):  # resize masks to frame res if needed
-                import cv2
-                masks = np.stack([cv2.resize(m.astype(np.uint8), (W, H),
-                                             interpolation=cv2.INTER_NEAREST).astype(bool) for m in masks]) \
-                    if masks.shape[0] else np.zeros((0, H, W), bool)
-        # drop tiny masks / cap count to fight FastSAM over-segmentation
-        if masks.shape[0] and (args.min_area_frac > 0 or args.max_masks):
-            areas = masks.reshape(masks.shape[0], -1).sum(1).astype(np.float64)
-            if args.min_area_frac > 0:
-                keep = (areas / float(H * W)) >= args.min_area_frac
-                masks, areas = masks[keep], areas[keep]
-            if args.max_masks and masks.shape[0] > args.max_masks:
-                masks = masks[np.argsort(-areas)[:args.max_masks]]
-        tracks = d["tracks"].astype(np.float32)  # [T,N,2] px (orig res)
-        oid = object_ids_for_points(masks, tracks[0], H, W)  # frame-0 positions
+
+        tracks = d["tracks"].astype(np.float32)   # [T,N,2] px
+        vis = d["visibility"].astype(bool)         # [T,N]
+        H, W = int(d["height"]), int(d["width"])
+
+        # Per-point first-visible frame; -1 for points CoTracker never marks visible
+        ever_visible = vis.any(axis=0)                                          # [N]
+        first_visible = np.where(ever_visible, np.argmax(vis, axis=0), -1)     # [N]
+        unique_frames = sorted(set(first_visible[ever_visible].tolist()))
+
+        # Run FastSAM on each unique first-visible frame
+        frame_masks: dict[int, np.ndarray] = {}
+        for frame_t in unique_frames:
+            frame = read_frame(str(vpath), frame_t)
+            res = model(frame, device=args.device, retina_masks=True,
+                        imgsz=args.imgsz, conf=args.conf, iou=args.iou, verbose=False)
+            frame_masks[frame_t] = extract_masks(res, H, W, args.min_area_frac, args.max_masks)
+
+        oid = assign_object_ids_multiframe(frame_masks, first_visible, tracks, H, W)
+        n_objects = int(np.unique(oid[oid >= 0]).shape[0]) if (oid >= 0).any() else 0
+
         d["object_ids"] = oid.astype(np.int64)
-        d["n_objects"] = np.int64(masks.shape[0])
-        d["track_weights"] = lowrank_track_weights(tracks)  # [N] low-rank informativeness in [0,1]
+        d["n_objects"] = np.int64(n_objects)
+        d["track_weights"] = lowrank_track_weights(tracks)
         tmp = npz_path.with_suffix(".tmp.npz")
         np.savez(tmp, **d)
         tmp.replace(npz_path)
         n_ok += 1
         cov = int((oid >= 0).sum())
         print(
-            f"[seg] [{k}/{len(items)}] {vpath.name}: {masks.shape[0]} objs, "
+            f"[seg] [{k}/{len(items)}] {vpath.name}: {n_objects} objs across {len(unique_frames)} frames, "
             f"{cov}/{oid.shape[0]} grid pts labeled, "
             f"w[mean={d['track_weights'].mean():.3f} >0.5={(d['track_weights'] > 0.5).mean():.2f}]",
             flush=True)

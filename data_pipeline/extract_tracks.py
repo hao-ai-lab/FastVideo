@@ -46,6 +46,8 @@ def parse_args() -> argparse.Namespace:
                    help="Run tracking at this spatial scale (coords rescaled back to original px). "
                         "Use <1.0 (e.g. 0.5) if full-res OOMs.")
     p.add_argument("--limit", type=int, default=None, help="Only process the first N videos (for smoke tests).")
+    p.add_argument("--index", type=int, nargs="+", default=None, metavar="IDX",
+                   help="Only process videos with these indices (e.g. --index 4 7 12).")
     return p.parse_args()
 
 
@@ -134,6 +136,9 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     videos = sorted(videos_dir.glob("*.mp4"))
+    if args.index is not None:
+        wanted = {f"vid_{i:06d}.mp4" for i in args.index}
+        videos = [v for v in videos if v.name in wanted]
     if args.limit is not None:
         videos = videos[:args.limit]
     if not videos:

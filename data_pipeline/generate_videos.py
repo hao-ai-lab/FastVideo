@@ -47,6 +47,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--width", type=int, default=1280)
     p.add_argument("--num-frames", type=int, default=121)
     p.add_argument("--fps", type=int, default=24)
+    p.add_argument("--trim-start-frames", type=int, default=0,
+                   help="Drop this many frames from the start of each generated video (VAE warm-up artifact). "
+                        "Generation runs for num_frames+trim_start_frames and the head is discarded.")
     p.add_argument("--seed", type=int, default=1024, help="Base seed; per-video seed = seed + global index.")
     p.add_argument("--num-inference-steps", type=int, default=None, help="Override model default if set.")
     p.add_argument("--negative-prompt", type=str, default=None)
@@ -154,6 +157,11 @@ def main() -> None:
     if args.negative_prompt is not None:
         extra["negative_prompt"] = args.negative_prompt
 
+    # Wan VAE requires num_frames = 4k+1. Round up gen_frames to satisfy this,
+    # then trim the actual excess (may be more than trim_start_frames).
+    _raw = args.num_frames + args.trim_start_frames
+    gen_frames = _raw if (_raw - 1) % 4 == 0 else _raw + (4 - (_raw - 1) % 4)
+    actual_trim = gen_frames - args.num_frames
     duration = float(args.num_frames) / float(args.fps)
     for n_done, (idx, prompt) in enumerate(todo, 1):
         final_path = videos_dir / f"vid_{idx:06d}.mp4"
@@ -173,7 +181,7 @@ def main() -> None:
                 save_video=True,
                 height=args.height,
                 width=args.width,
-                num_frames=args.num_frames,
+                num_frames=gen_frames,
                 fps=args.fps,
                 seed=args.seed + idx,
                 **i2v_kwargs,
@@ -182,7 +190,19 @@ def main() -> None:
             produced = sorted(tmp_dir.glob("*.mp4"))
             if not produced:
                 raise RuntimeError("no .mp4 produced by generate_video")
-            shutil.move(str(produced[0]), str(final_path))
+            src = str(produced[0])
+            if actual_trim > 0:
+                import subprocess as _sp
+                tmp_trim = str(final_path) + ".trim.mp4"
+                _sp.run(
+                    ["ffmpeg", "-y", "-i", src,
+                     "-vf", f"trim=start_frame={actual_trim},setpts=PTS-STARTPTS",
+                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-an", tmp_trim],
+                    check=True, capture_output=True,
+                )
+                Path(tmp_trim).replace(final_path)
+            else:
+                shutil.move(src, str(final_path))
         except Exception as e:  # noqa: BLE001 - keep the batch alive, log and move on
             with fail_log.open("a") as f:
                 f.write(json.dumps({"idx": idx, "error": repr(e), "prompt": prompt}) + "\n")
