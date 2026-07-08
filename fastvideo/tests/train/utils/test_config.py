@@ -266,6 +266,27 @@ def test_data_path_mapping_parses_repeat_counts(tmp_path: Path) -> None:
     }
 
 
+def test_dotted_override_replaces_mapping_data_path(tmp_path: Path) -> None:
+    # A dict-valued data_path is a single leaf for overrides: a scalar
+    # --training.data.data_path replaces the whole mapping.
+    data = _minimal_yaml()
+    data["training"] = {
+        "data": {
+            "data_path": {
+                "data/path1": 1,
+                "data/path2": 2,
+            }
+        }
+    }
+
+    cfg = load_run_config(
+        _write_yaml(tmp_path, data),
+        overrides=["--training.data.data_path=data/only"],
+    )
+
+    assert cfg.training.data.data_path == "data/only"
+
+
 def test_dotted_overrides_apply_with_type_coercion(tmp_path: Path) -> None:
     path = _write_yaml(tmp_path, _minimal_yaml())
     overrides = [
