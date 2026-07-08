@@ -527,7 +527,12 @@ class ASTModel(ASTPreTrainedModel):
         # attention_probs has shape bsz x n_heads x N x N
         # input head_mask has shape [num_heads] or [num_hidden_layers x num_heads]
         # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
-        head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
+        # transformers 5.x removed PreTrainedModel.get_head_mask; replicate the
+        # old helper for the None case (synchformer never passes a head mask).
+        if head_mask is None:
+            head_mask = [None] * self.config.num_hidden_layers
+        else:
+            head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
 
         embedding_output = self.embeddings(input_values)
 

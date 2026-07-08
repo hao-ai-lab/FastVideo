@@ -62,16 +62,24 @@ class ClapScoreMetric(BaseMetric):
         audio, _ = librosa.load(audio_path, sr=CLAP_SAMPLE_RATE, mono=True)
         return pyln.normalize.peak(audio, -1.0)
 
+    @staticmethod
+    def _projected_features(features) -> torch.Tensor:
+        # transformers >= 5 returns a ModelOutput whose pooler_output holds the
+        # (L2-normalized) projected CLAP features; 4.x returned the projected
+        # tensor directly. Cosine similarity is scale-invariant, so both yield
+        # the same score.
+        return features.pooler_output if hasattr(features, "pooler_output") else features
+
     def _audio_emb(self, audio_path: str) -> torch.Tensor:
         audio = self._load_audio(audio_path)
         inputs = self._processor(audio=audio, sampling_rate=CLAP_SAMPLE_RATE, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        return self._model.get_audio_features(**inputs)
+        return self._projected_features(self._model.get_audio_features(**inputs))
 
     def _text_emb(self, text: str) -> torch.Tensor:
         inputs = self._processor(text=[text], return_tensors="pt", padding=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        return self._model.get_text_features(**inputs)
+        return self._projected_features(self._model.get_text_features(**inputs))
 
     @torch.no_grad()
     def compute(self, sample: dict) -> MetricResult:

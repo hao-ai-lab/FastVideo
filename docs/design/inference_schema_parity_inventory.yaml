@@ -191,6 +191,9 @@ surfaces:
         sources:
           - fastvideo.configs.pipelines.gen3c.Gen3CConfig
           - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      color_correction_strength:
+        sources:
+          - fastvideo.configs.pipelines.dreamx_world.DreamXWorld5BARPipelineConfig
       default_camera_rotation:
         sources:
           - fastvideo.configs.pipelines.gen3c.Gen3CConfig

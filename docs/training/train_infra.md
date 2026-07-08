@@ -161,6 +161,9 @@ training:
     decay_interval_steps: 0
 ```
 
+See [Training Trackers](trackers.md) to configure Weights & Biases or SwanLab,
+including SwanLab installation and authentication.
+
 ### `callbacks` — Pluggable hooks
 
 Callbacks run at specific points in the training loop (before/after optimizer

@@ -21,7 +21,47 @@ if [[ -z "${DOCKER_BUILDKIT:-}" ]] && docker buildx version >/dev/null 2>&1; the
 fi
 
 build_args=()
-[[ -n "${CUDA_TAG:-}"        ]] && build_args+=(--build-arg "CUDA_TAG=${CUDA_TAG}")
+cuda_version="${CUDA_VERSION:-}"
+torch_backend="${UV_TORCH_BACKEND:-}"
+
+# CUDA_TAG was the Dockerfile's original override and contains the complete
+# nvidia/cuda tag (for example, 12.6.3-cudnn-devel-ubuntu22.04). Keep accepting
+# it while translating it to the parameterized Dockerfile inputs.
+if [[ -n "${CUDA_TAG:-}" ]]; then
+  if [[ -n "${CUDA_VERSION:-}" ]]; then
+    printf 'CUDA_TAG and CUDA_VERSION cannot both be set. Use CUDA_VERSION for new builds.\n' >&2
+    exit 2
+  fi
+
+  cuda_version="${CUDA_TAG%%-*}"
+  if [[ ! "${cuda_version}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    printf 'Cannot infer CUDA_VERSION from CUDA_TAG=%s. Use CUDA_VERSION and UV_TORCH_BACKEND instead.\n' \
+      "${CUDA_TAG}" >&2
+    exit 2
+  fi
+  build_args+=(--build-arg "BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_TAG}")
+fi
+
+if [[ -n "${cuda_version}" ]]; then
+  build_args+=(--build-arg "CUDA_VERSION=${cuda_version}")
+fi
+
+if [[ -z "${torch_backend}" && -n "${cuda_version}" ]]; then
+  case "${cuda_version}" in
+    12.*) torch_backend=cu126 ;;
+    13.*) torch_backend=cu130 ;;
+    *)
+      printf 'No default UV_TORCH_BACKEND for CUDA_VERSION=%s. Set UV_TORCH_BACKEND explicitly.\n' \
+        "${cuda_version}" >&2
+      exit 2
+      ;;
+  esac
+fi
+
+if [[ -n "${torch_backend}" ]]; then
+  build_args+=(--build-arg "UV_TORCH_BACKEND=${torch_backend}")
+fi
+
 [[ -n "${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE:-}" ]] && \
   build_args+=(--build-arg "BUILD_FASTVIDEO_KERNEL_FROM_SOURCE=${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE}")
 build_args+=(--build-arg "BUILD_DREAMVERSE_UI=${BUILD_DREAMVERSE_UI:-0}")

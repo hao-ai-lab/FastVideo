@@ -22,6 +22,7 @@ class AttentionBackendEnum(enum.Enum):
     VMOBA_ATTN = enum.auto()
     SLA_ATTN = enum.auto()
     SAGE_SLA_ATTN = enum.auto()
+    NABLA_ATTN = enum.auto()
     NO_ATTENTION = enum.auto()
 
 
