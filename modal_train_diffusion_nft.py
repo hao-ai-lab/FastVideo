@@ -1,7 +1,7 @@
 """Run DiffusionNFT Wan RL training on Modal.
 
 By default, video generation uses the Microsoft World-R1 enhanced prompt
-dataset and Flow-GRPO reward implementations. ``num_frames`` is exposed as a
+dataset and VideoAlign/VideoReward rewards. ``num_frames`` is exposed as a
 Modal argument so the same video-policy path can run cheap one-frame debug jobs
 or multi-frame video generation. Pass a DiffusionNFT dataset name to
 ``dataset`` to load prompts from the cached external DiffusionNFT checkout.

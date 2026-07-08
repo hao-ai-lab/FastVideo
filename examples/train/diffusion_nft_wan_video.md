@@ -40,7 +40,7 @@ The script:
 
 - resolves `num_latent_t` from Wan's frame rule,
 - downloads World-R1 prompts or reads a DiffusionNFT `dataset/<name>/train.txt`,
-- clones `DiffusionNFT` only when a selected dataset/reward needs Flow-GRPO,
+- clones `DiffusionNFT` only when a selected dataset or fallback reward needs it,
 - downloads the `KwaiVGI/VideoReward` snapshot when VideoAlign rewards are selected,
 - preprocesses prompts into FastVideo text-only parquet,
 - writes `outputs/diffusion_nft_run_configs/diffusion_nft_wan_run.yaml`.
@@ -99,7 +99,6 @@ WANDB_MODE=offline NUM_GPUS=4 bash examples/train/run.sh \
 ## Reward Presets
 
 - `--reward videoalign`: `videoalign_vq`, `videoalign_mq`, `videoalign_ta`
-- `--reward videoalign_hpsv3`: VideoAlign plus `hpsv3_general`
 - `--reward multi_reward`: DiffusionNFT image reward preset
 - `--reward <name>`: one explicit reward name
 

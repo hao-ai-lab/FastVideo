@@ -1,6 +1,6 @@
 # Reward runtime pins for DiffusionNFT video reward training.
 #
-# The vendored HPSv3/VideoAlign runtimes follow the Qwen2-VL package layout
+# The vendored VideoAlign runtime follows the Qwen2-VL package layout
 # used by Transformers 4.x. Newer Transformers 5.x moves Qwen2VL internals and
 # can load VideoReward with missing language-model weights.
 datasets==3.6.0

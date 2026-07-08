@@ -23,9 +23,6 @@ from fastvideo.train.methods.rl.rewards.media import (
 )
 
 GENRL_REWARD_NAMES = frozenset({
-    "video_ocr",
-    "hpsv3_general",
-    "hpsv3_percentile",
     "videoalign_mq",
     "videoalign_ta",
     "videoalign_vq",
@@ -43,14 +40,6 @@ def _build_lazy_genrl_scorer(
     *,
     device,
 ) -> RewardScorer:
-    if name == "hpsv3_general":
-        from fastvideo.train.methods.rl.rewards.hpsv3 import HPSv3GeneralScorer
-
-        return HPSv3GeneralScorer(device=device)
-    if name == "hpsv3_percentile":
-        from fastvideo.train.methods.rl.rewards.hpsv3 import HPSv3PercentileScorer
-
-        return HPSv3PercentileScorer(device=device)
     if name == "videoalign_mq":
         from fastvideo.train.methods.rl.rewards.videoalign import VideoAlignMotionQualityScorer
 
@@ -63,10 +52,6 @@ def _build_lazy_genrl_scorer(
         from fastvideo.train.methods.rl.rewards.videoalign import VideoAlignVisualQualityScorer
 
         return VideoAlignVisualQualityScorer(device=device)
-    if name == "video_ocr":
-        from fastvideo.train.methods.rl.rewards.ocr import VideoOCRScorer
-
-        return VideoOCRScorer()
     raise ValueError(f"Unsupported GenRL reward {name!r}. "
                      f"Available GenRL rewards: {sorted(GENRL_REWARD_NAMES)}")
 
