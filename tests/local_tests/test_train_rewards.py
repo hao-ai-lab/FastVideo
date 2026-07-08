@@ -72,14 +72,14 @@ def test_normalize_reward_weights_reports_nested_backend():
         "backend": "genrl",
         "rewards": {
             "videoalign_vq": 0.75,
-            "videoalign_mq": 0.25,
+            "hpsv3_general": 0.25,
         },
     })
 
     assert backend == "genrl"
     assert weights == {
         "videoalign_vq": 0.75,
-        "videoalign_mq": 0.25,
+        "hpsv3_general": 0.25,
     }
 
 

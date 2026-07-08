@@ -23,6 +23,8 @@ from fastvideo.train.methods.rl.rewards.media import (
 )
 
 GENRL_REWARD_NAMES = frozenset({
+    "hpsv3_general",
+    "hpsv3_percentile",
     "videoalign_mq",
     "videoalign_ta",
     "videoalign_vq",
@@ -40,6 +42,14 @@ def _build_lazy_genrl_scorer(
     *,
     device,
 ) -> RewardScorer:
+    if name == "hpsv3_general":
+        from fastvideo.train.methods.rl.rewards.hpsv3 import HPSv3GeneralScorer
+
+        return HPSv3GeneralScorer(device=device)
+    if name == "hpsv3_percentile":
+        from fastvideo.train.methods.rl.rewards.hpsv3 import HPSv3PercentileScorer
+
+        return HPSv3PercentileScorer(device=device)
     if name == "videoalign_mq":
         from fastvideo.train.methods.rl.rewards.videoalign import VideoAlignMotionQualityScorer
 

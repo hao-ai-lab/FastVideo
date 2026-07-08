@@ -99,6 +99,7 @@ WANDB_MODE=offline NUM_GPUS=4 bash examples/train/run.sh \
 ## Reward Presets
 
 - `--reward videoalign`: `videoalign_vq`, `videoalign_mq`, `videoalign_ta`
+- `--reward videoalign_hpsv3`: VideoAlign plus reward-only `hpsv3_general`
 - `--reward multi_reward`: DiffusionNFT image reward preset
 - `--reward <name>`: one explicit reward name
 
