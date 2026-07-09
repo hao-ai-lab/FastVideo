@@ -130,6 +130,30 @@ python fastvideo/tests/ssim/reference_videos_cli.py download \
   --device-folder H200_reference_videos
 ```
 
+### SSIM Bootstrap Mode
+
+Normal SSIM runs are strict: if a reference video or latent is missing, the
+test fails. For new-model PRs, CI can run SSIM in bootstrap mode so missing
+references are uploaded as draft artifacts for review instead of immediately
+blocking on a missing canonical reference.
+
+Buildkite enables SSIM bootstrap mode when either condition is true:
+
+- the PR title or Buildkite message contains `[new-model]`;
+- `FASTVIDEO_SSIM_BOOTSTRAP_MODE=1` is set for the Buildkite job.
+
+Bootstrap mode passes `--ssim-bootstrap-mode` to pytest. When a generated
+artifact is available, the test uploads it under the `drafts/...` namespace in
+the SSIM reference repo and marks that case as expected-failed. After reviewing
+the draft, promote it into the canonical reference layout:
+
+```bash
+python fastvideo/tests/ssim/reference_videos_cli.py promote-draft \
+  --quality-tier default \
+  --device-folder L40S_reference_videos \
+  --model-id <model_id>
+```
+
 ### Running SSIM Locally
 
 ```bash
