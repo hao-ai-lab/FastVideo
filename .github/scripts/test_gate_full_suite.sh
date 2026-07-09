@@ -32,9 +32,9 @@ OTHER='{"name": "Trigger Full Suite", "id": 3, "status": "in_progress", "conclus
 
 fails=0
 expect() { # <name> <expected-exit> <response json>...
-  local name=$1 want=$2 dir="$tmp/$RANDOM$RANDOM" i=1
+  local name=$1 want=$2 dir i=1
   shift 2
-  mkdir "$dir"
+  dir=$(mktemp -d "$tmp/test_XXXXXX")
   for body in "$@"; do
     printf '{"workflow_runs": [%s]}' "$body" > "$dir/response_$i.json"
     i=$(( i + 1 ))

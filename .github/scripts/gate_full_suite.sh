@@ -39,7 +39,7 @@ while true; do
 
   if runs_json=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${PR_SHA}&per_page=100" 2>/dev/null) \
      && state=$(jq --arg re "$WATCHED_REGEX" '
-          [.workflow_runs[] | select(.name | test($re))]
+          [.workflow_runs[]? | select(.name | test($re))]
           | group_by(.name) | map(max_by(.id))
           | map({name, status, conclusion})' <<<"$runs_json" 2>/dev/null); then
     api_fails=0
