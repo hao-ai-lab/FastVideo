@@ -221,12 +221,19 @@ class TextEncodingStage(PipelineStage):
                 encoder_device = torch.device(target_device)
                 moved_for_forward = True
 
-            # An explicit `device=` wins. Otherwise HF-passthrough encoders pin
-            # their own placement via _fastvideo_input_device (they return before
-            # the FSDP wrapping path, so encoder_device cannot speak for them);
-            # every other encoder follows its (possibly just-moved) param device.
-            input_device = (torch.device(target_device) if device is not None else getattr(
-                text_encoder, "_fastvideo_input_device", encoder_device))
+            # An explicit `device=` wins. Otherwise follow the encoder's real
+            # param device. Once it has been moved for the forward that is the
+            # target device, and an HF-passthrough encoder's
+            # _fastvideo_input_device (stamped at load, e.g. "cpu" under
+            # text_encoder_cpu_offload) is stale -- honouring it would feed cpu
+            # token ids to cuda weights. The marker only speaks when nothing
+            # moved and the module has no parameters to speak for it.
+            if device is not None:
+                input_device = torch.device(target_device)
+            elif moved_for_forward:
+                input_device = encoder_device
+            else:
+                input_device = getattr(text_encoder, "_fastvideo_input_device", encoder_device)
 
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
