@@ -30,6 +30,15 @@ print(f"Using image: {image_ref}")
 # the baked setting, and a caller override always wins.
 uv_torch_backend_override = resolve_uv_torch_backend(image_tag)
 
+# INVARIANT: this image definition must be byte-identical for every CI job at
+# a given base image digest -- one build, shared cache across all concurrent
+# lanes. Never put a per-job/per-commit value (BUILDKITE_*, TEST_SCOPE,
+# env-derived overrides) into the image via .env()/run_commands: it becomes an
+# image layer, so whenever the base digest changes every concurrent job
+# rebuilds its own image variant (~15-20 min each), blowing the Buildkite job
+# budget. `image_ref` is the only env-derived input allowed here, because it
+# *selects* the base digest. Per-job values arrive at runtime via
+# `ci_env_secret` below.
 image = (modal.Image.from_registry(
     image_ref, add_python="3.12"
 ).run_commands("rm -rf /FastVideo").apt_install(
@@ -37,40 +46,42 @@ image = (modal.Image.from_registry(
 ).run_commands(
     "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
 ).run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc").env({
-    "PATH":
-    "/root/.cargo/bin:$PATH",
-    "BUILDKITE_REPO":
-    os.environ.get("BUILDKITE_REPO", ""),
-    "BUILDKITE_COMMIT":
-    os.environ.get("BUILDKITE_COMMIT", ""),
-    "BUILDKITE_PULL_REQUEST":
-    os.environ.get("BUILDKITE_PULL_REQUEST", ""),
-    "BUILDKITE_BRANCH":
-    os.environ.get("BUILDKITE_BRANCH", ""),
-    "BUILDKITE_BUILD_URL":
-    os.environ.get("BUILDKITE_BUILD_URL", ""),
-    "BUILDKITE_BUILD_ID":
-    os.environ.get("BUILDKITE_BUILD_ID", ""),
-    "BUILDKITE_JOB_ID":
-    os.environ.get("BUILDKITE_JOB_ID", ""),
-    "TEST_SCOPE":
-    os.environ.get("TEST_SCOPE", ""),
-    "IMAGE_VERSION":
-    image_version,
-    **({
-        "UV_TORCH_BACKEND": uv_torch_backend_override
-    } if uv_torch_backend_override else {}),
-    # FA4 is opt-in (FASTVIDEO_FA4); CI lanes keep it enabled to match the
-    # SSIM/perf baselines. Caller override wins.
-    "FASTVIDEO_FA4":
-    os.environ.get("FASTVIDEO_FA4", "1"),
-    "HF_REPO_ID":
-    "FastVideo/performance-tracking",
+    "PATH": "/root/.cargo/bin:$PATH",
+    "HF_REPO_ID": "FastVideo/performance-tracking",
 }))
 
 dreamverse_image = (image.run_commands(
     "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"
 ).apt_install("nodejs").run_commands("node --version && npm --version"))
+
+# Per-job/per-invocation values are injected into the container environment at
+# RUNTIME via this secret (attached to every function below), so the image
+# stays identical across jobs. Consumers (run_test_command's checkout,
+# fastvideo/tests/performance/{compare_baseline,identity}.py, the FA4
+# resolver, `uv pip install`) all read os.environ at runtime, so nothing else
+# changes.
+ci_env_secret = modal.Secret.from_dict({
+    "BUILDKITE_REPO": os.environ.get("BUILDKITE_REPO", ""),
+    "BUILDKITE_COMMIT": os.environ.get("BUILDKITE_COMMIT", ""),
+    "BUILDKITE_PULL_REQUEST": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
+    "BUILDKITE_BRANCH": os.environ.get("BUILDKITE_BRANCH", ""),
+    "BUILDKITE_BUILD_URL": os.environ.get("BUILDKITE_BUILD_URL", ""),
+    "BUILDKITE_BUILD_ID": os.environ.get("BUILDKITE_BUILD_ID", ""),
+    "BUILDKITE_JOB_ID": os.environ.get("BUILDKITE_JOB_ID", ""),
+    "TEST_SCOPE": os.environ.get("TEST_SCOPE", ""),
+    "IMAGE_VERSION": image_version,
+    **({
+        "UV_TORCH_BACKEND": uv_torch_backend_override
+    } if uv_torch_backend_override else {}),
+    # FA4 is opt-in (FASTVIDEO_FA4); CI lanes keep it enabled to match the
+    # SSIM/perf baselines. Caller override wins.
+    "FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1"),
+})
+
+hf_secret = modal.Secret.from_dict(
+    {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
+wandb_secret = modal.Secret.from_dict(
+    {"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})
 
 
 def run_test(pytest_command: str):
@@ -147,10 +158,7 @@ def run_test_command(test_command: str,
 @app.function(gpu="H100:1",
               image=image,
               timeout=1200,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
-              ],
+              secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_encoder_tests():
     run_test(
@@ -161,10 +169,7 @@ def run_encoder_tests():
 @app.function(gpu="L40S:1",
               image=image,
               timeout=1200,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
-              ],
+              secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_vae_tests():
     run_test(
@@ -175,10 +180,7 @@ def run_vae_tests():
 @app.function(gpu="L40S:1",
               image=image,
               timeout=900,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
-              ],
+              secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_transformer_tests():
     run_test(
@@ -191,10 +193,7 @@ def run_transformer_tests():
               memory=32768,
               image=image,
               timeout=900,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})
-              ],
+              secrets=[wandb_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_training_tests():
     run_test(
@@ -207,10 +206,7 @@ def run_training_tests():
               memory=32768,
               image=image,
               timeout=900,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})
-              ],
+              secrets=[wandb_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_training_lora_tests():
     run_test(
@@ -221,44 +217,41 @@ def run_training_lora_tests():
 @app.function(gpu="H100:2",
               image=image,
               timeout=900,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})
-              ])
+              secrets=[wandb_secret, ci_env_secret])
 def run_training_tests_VSA():
     run_test(
         "wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/VSA -srP"
     )
 
 
-@app.function(gpu="H100:1", image=image, timeout=900)
+@app.function(gpu="H100:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_kernel_tests():
     run_test("pytest fastvideo-kernel/tests/ -vs")
 
 
-# @app.function(gpu="H100:1", image=image, timeout=900)
+# @app.function(gpu="H100:1", image=image, timeout=900, secrets=[ci_env_secret])
 # def run_precision_tests_VSA():
 #     # VSA correctness is covered by the same file now
 #     run_test("pytest fastvideo-kernel/tests/test_correctness.py")
 
-# @app.function(gpu="L40S:1", image=image, timeout=900)
+# @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 # def run_precision_tests_vmoba():
 #     run_test("pytest fastvideo-kernel/tests/test_vmoba_correctness.py")
 
 
-@app.function(gpu="L40S:1", image=image, timeout=900)
+@app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_inference_tests_vmoba():
     run_test('python fastvideo/tests/inference/vmoba/test_vmoba_inference.py')
 
 
-@app.function(gpu="L40S:1", image=image, timeout=1200)
+@app.function(gpu="L40S:1", image=image, timeout=1200, secrets=[ci_env_secret])
 def run_inference_lora_tests():
     run_test(
         "pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs"
     )
 
 
-@app.function(gpu="L40S:2", image=image, timeout=900)
+@app.function(gpu="L40S:2", image=image, timeout=900, secrets=[ci_env_secret])
 def run_distill_dmd_tests():
     run_test(
         "pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
@@ -267,17 +260,14 @@ def run_distill_dmd_tests():
 @app.function(gpu="L40S:2",
               image=image,
               timeout=900,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})
-              ])
+              secrets=[wandb_secret, ci_env_secret])
 def run_self_forcing_tests():
     run_test(
         "wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/self-forcing/test_self_forcing.py -vs"
     )
 
 
-@app.function(gpu="L40S:1", image=image, timeout=900)
+@app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_unit_test():
     run_test(
         "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ ./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/training/test_trackers.py ./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py --ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py --ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs"
@@ -285,7 +275,10 @@ def run_unit_test():
 
 
 # TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?
-@app.function(gpu="L40S:1", image=dreamverse_image, timeout=1800)
+@app.function(gpu="L40S:1",
+              image=dreamverse_image,
+              timeout=1800,
+              secrets=[ci_env_secret])
 def run_dreamverse_app_tests():
     run_test_command(
         install_command="",
@@ -326,10 +319,7 @@ def run_dreamverse_app_tests():
               memory=32768,
               image=image,
               timeout=1800,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
-              ],
+              secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_train_framework_tests():
     run_test(
@@ -340,10 +330,7 @@ def run_train_framework_tests():
 @app.function(gpu="L40S:1",
               image=image,
               timeout=1800,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
-              ],
+              secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def seed_grad_norm_references():
     """Record the per-method grad-norm reference for the **CI GPU (L40S only)**.
@@ -369,10 +356,7 @@ def seed_grad_norm_references():
 @app.function(gpu="L40S:1",
               image=image,
               timeout=3600,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
-              ],
+              secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_eval_tests():
     # Eval metric regression: drives the high-level fastvideo.eval API on a
@@ -395,10 +379,7 @@ def run_eval_tests():
 @app.function(gpu="L40S:1",
               image=image,
               timeout=3600,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
-              ])
+              secrets=[hf_secret, ci_env_secret])
 def run_lora_extraction_tests():
     run_test(
         "hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/lora_extraction/test_lora_extraction.py"
@@ -410,10 +391,7 @@ def run_lora_extraction_tests():
               memory=32768,
               image=image,
               timeout=1800,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
-              ],
+              secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_performance_tests():
     # PR/direct records are uploaded only on pass; scheduled main uploads pass
@@ -455,10 +433,7 @@ def run_performance_tests():
 @app.function(gpu="L40S:1",
               image=image,
               timeout=1800,
-              secrets=[
-                  modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
-              ],
+              secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_api_server_tests():
     run_test(
