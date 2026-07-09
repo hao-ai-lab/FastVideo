@@ -58,8 +58,9 @@ def _can_use_flashinfer(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropo
     if not q.is_cuda:
         return _fall_back(f"device {q.device} is not CUDA")
     cap = torch.cuda.get_device_capability(q.device)
-    if cap != (12, 0):
-        return _fall_back(f"compute capability {cap[0]}.{cap[1]} is not 12.0 (kernel is SM120-only)")
+    # SM121 (GB10 / DGX Spark) is enabled by flashinfer#3897.
+    if cap not in ((12, 0), (12, 1)):
+        return _fall_back(f"compute capability {cap[0]}.{cap[1]} is not 12.0/12.1 (kernel is SM120/SM121-only)")
     if q.dtype not in _SUPPORTED_DTYPES:
         return _fall_back(f"dtype {q.dtype} is not fp16/bf16")
     if q.shape[-1] not in _SUPPORTED_HEAD_DIMS:

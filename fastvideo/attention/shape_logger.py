@@ -33,7 +33,7 @@ import torch
 _LOG_PATH: str | None = os.environ.get("FASTVIDEO_ATTN_SHAPE_LOG")
 enabled: bool = _LOG_PATH is not None
 
-_FLUSH_EVERY = 32  # rewrite the file every N new unique shapes (crash-safety)
+_FLUSH_EVERY = 1  # rewrite the file every N new unique shapes (crash-safety)
 
 _lock = threading.Lock()
 _entries: dict[tuple, dict] = {}

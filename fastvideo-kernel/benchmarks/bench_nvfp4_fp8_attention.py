@@ -126,6 +126,7 @@ def parse_shapes_jsonl(paths: list[str], default_dtype: str) -> list[Shape]:
 class LaneSpec:
     name: str
     exact_cap: tuple[int, int] | None = None  # kernel runs on exactly this SM
+    caps: tuple[tuple[int, int], ...] | None = None  # kernel runs only on these SMs
     min_cap: tuple[int, int] | None = None
     head_dims: tuple[int, ...] | None = None  # None = any
     same_shape: bool = False  # requires q/k/v equal shapes (self-attention)
@@ -142,6 +143,9 @@ def skip_reason(spec: LaneSpec, shape: Shape, cap: tuple[int, int] | None,
     if spec.exact_cap is not None and cap != spec.exact_cap:
         return (f"requires SM {spec.exact_cap[0]}.{spec.exact_cap[1]}, "
                 f"device is SM {cap[0]}.{cap[1]}")
+    if spec.caps is not None and cap not in spec.caps:
+        allowed = "/".join(f"{a}.{b}" for a, b in spec.caps)
+        return f"requires SM {allowed}, device is SM {cap[0]}.{cap[1]}"
     if spec.min_cap is not None and cap < spec.min_cap:
         return (f"requires SM >= {spec.min_cap[0]}.{spec.min_cap[1]}, "
                 f"device is SM {cap[0]}.{cap[1]}")
@@ -188,6 +192,23 @@ def _run_sdpa(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool, s
     return torch.nn.functional.scaled_dot_product_attention(q, k, v, **kwargs)
 
 
+def _ref_sdpa_fp32(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool, scale: float) -> torch.Tensor:
+    """fp32 SDPA ground truth, chunked over query length.
+
+    Where flash/mem-efficient SDPA reject fp32 (e.g. SM121), torch falls back
+    to the math backend, which materializes the full [B, H, Lq, Lkv] score
+    matrix -- ~274 GB for the 75600-token default shape (host OOM-kill on
+    unified-memory devices like GB10). Non-causal attention is exact under
+    query chunking; causal shapes stay unchunked (per-chunk is_causal would
+    mis-align the mask), so they keep the old memory ceiling.
+    """
+    chunk = 2048
+    if causal or q.shape[2] <= chunk:
+        return _run_sdpa(q, k, v, causal, scale)
+    return torch.cat([_run_sdpa(q[:, :, i:i + chunk], k, v, False, scale)
+                      for i in range(0, q.shape[2], chunk)], dim=2)
+
+
 def _load_nvfp4_local(single_level_p_quant: bool) -> Lane:
     spec = LaneSpec("nvfp4_local", exact_cap=(12, 0), head_dims=(64, 128), same_shape=True)
     for p in (_REPO_ROOT, _REPO_ROOT / "fastvideo-kernel", _REPO_ROOT / "fastvideo-kernel" / "python"):
@@ -207,7 +228,8 @@ def _load_nvfp4_local(single_level_p_quant: bool) -> Lane:
 
 
 def _load_nvfp4_flashinfer() -> Lane:
-    spec = LaneSpec("nvfp4_flashinfer", exact_cap=(12, 0), head_dims=(64, 128), same_shape=True)
+    # SM121 (GB10 / DGX Spark) is enabled by flashinfer#3897.
+    spec = LaneSpec("nvfp4_flashinfer", caps=((12, 0), (12, 1)), head_dims=(64, 128), same_shape=True)
     try:
         from flashinfer import (  # noqa: PLC0415
             nvfp4_attention_sm120_fwd, nvfp4_attention_sm120_quantize_qkv)
@@ -220,6 +242,17 @@ def _load_nvfp4_flashinfer() -> Lane:
 
     def fn(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool, scale: float) -> torch.Tensor:
         seq_len = q.shape[2]
+        # flashinfer's per-block-mean quantize (flashinfer#3897 _preprocess_qkv)
+        # materializes an fp32 [B, H, Lpad, Lpad] qk-correction matrix (48 GiB at
+        # L=32760, 274 GiB at L=75600). Preflight it so an oversized shape becomes
+        # a "fail" row instead of the host OOM-killer SIGKILLing the whole bench
+        # (observed on GB10 unified memory).
+        lpad = -(-seq_len // 128) * 128
+        need = 4 * q.shape[0] * q.shape[1] * lpad * lpad
+        free = torch.cuda.mem_get_info(q.device)[0]
+        if need > free:
+            raise RuntimeError(f"qk_correction workspace {need / 2**30:.0f} GiB exceeds "
+                               f"free device memory {free / 2**30:.0f} GiB")
         packed = nvfp4_attention_sm120_quantize_qkv(q, k, v, **quant_kwargs)
         out, _lse = nvfp4_attention_sm120_fwd(*packed, sm_scale=scale, causal=causal, out_dtype=q.dtype)
         # flashinfer pads seq_len to a multiple of 128; trim it back off.
@@ -305,7 +338,7 @@ def bench_shape(shape: Shape, lanes: list[Lane], cap: tuple[int, int] | None,
         q, k, v = make_qkv(shape, args.seed)
         scale = shape.sm_scale or shape.head_dim**-0.5
         # fp32 SDPA ground truth (accuracy baseline only; never timed).
-        ref = _run_sdpa(q.float(), k.float(), v.float(), shape.causal, scale)
+        ref = _ref_sdpa_fp32(q.float(), k.float(), v.float(), shape.causal, scale)
     for lane, reason in runnable:
         rec: dict = {"shape": shape.label(), "lane": lane.spec.name, **dataclasses.asdict(shape)}
         if reason is not None:
