@@ -3,6 +3,7 @@
 import torch
 from sageattn3 import sageattn3_blackwell
 
+from fastvideo.attention import shape_logger
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder)
 from fastvideo.logger import init_logger
@@ -78,6 +79,14 @@ class SageAttention3Impl(AttentionImpl):
     ) -> torch.Tensor:
         """Call sageattn3_blackwell directly. Input is already [B, H, L, D]
         and contiguous from preprocess_qkv."""
+        if shape_logger.enabled:
+            shape_logger.record("SAGE_ATTN_THREE",
+                                query,
+                                key,
+                                value,
+                                causal=self.causal,
+                                sm_scale=self.softmax_scale,
+                                layout="bhsd")
         output = sageattn3_blackwell(query, key, value, is_causal=self.causal)
         return output
 

@@ -140,6 +140,12 @@ class CudaPlatformBase(Platform):
             except ImportError as e:
                 logger.info(e)
                 logger.info("Sage Attention 3 backend is not installed. Fall back to Flash Attention.")
+        elif selected_backend == AttentionBackendEnum.FLASHINFER_SAGE_ATTN3:
+            # No import guard needed: the backend imports without flashinfer
+            # and falls back to torch SDPA internally (it stays usable as a
+            # shape-collection vehicle via FASTVIDEO_ATTN_SHAPE_LOG).
+            logger.info("Using FlashInfer SageAttention3 backend.")
+            return "fastvideo.attention.backends.flashinfer_sageattn3.FlashInferSageAttention3Backend"
         elif selected_backend == AttentionBackendEnum.ATTN_QAT_INFER:
             from fastvideo.attention.backends.attn_qat_infer import (  # noqa: F401
                 AttnQatInferBackend, is_attn_qat_infer_available)

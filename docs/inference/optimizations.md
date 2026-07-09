@@ -27,6 +27,7 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
+- FlashInfer SageAttention3 (SM120 NVFP4): `FASTVIDEO_ATTENTION_BACKEND=FLASHINFER_SAGE_ATTN3`
 - Attn-QAT inference (modified SageAttention3 FP4, sm_120/RTX 5090): `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
@@ -236,6 +237,54 @@ If you are using `uv` and `torch==2.8.0`, make sure that
 `sentencepiece==0.2.1` in the `pyproject.toml` file.
 
 To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repository to install the package from source.
+
+### FlashInfer SageAttention3
+
+**`FLASHINFER_SAGE_ATTN3`**
+
+Wraps [FlashInfer](https://github.com/flashinfer-ai/flashinfer)'s dense SM120
+NVFP4 attention (`nvfp4_attention_sm120_quantize_qkv` +
+`nvfp4_attention_sm120_fwd`, added in
+[flashinfer#3640](https://github.com/flashinfer-ai/flashinfer/pull/3640)).
+
+```bash
+FASTVIDEO_ATTENTION_BACKEND=FLASHINFER_SAGE_ATTN3 python example.py
+```
+
+#### Kernel requirements
+
+- Compute capability **12.0 only** (consumer Blackwell, e.g. RTX 5090), CUDA 12.8+
+- `head_dim` 64 or 128, fp16/bf16, equal-shape q/k/v (self-attention)
+- `flashinfer-python` installed (the kernel is JIT-built on first use)
+
+Where any of these do not hold — including when flashinfer is not installed at
+all — the backend logs one warning and transparently falls back to torch SDPA,
+so it can run anywhere.
+
+#### Attention shape logging
+
+The fallback exists on purpose: this backend doubles as a shape-collection
+vehicle for tuning the SageAttention3 kernel on SM 12.1 (DGX Spark). Set
+
+```bash
+export FASTVIDEO_ATTENTION_BACKEND=FLASHINFER_SAGE_ATTN3   # or SAGE_ATTN_THREE
+export FASTVIDEO_ATTN_SHAPE_LOG=/tmp/attn_shapes.jsonl
+```
+
+and run your normal workload (no GPU/kernel required). Each process writes
+`/tmp/attn_shapes.jsonl.rank<N>` (or `.pid<N>` when not distributed) with one
+JSON line per unique attention shape:
+
+```json
+{"backend": "FLASHINFER_SAGE_ATTN3", "batch": 1, "num_q_heads": 12,
+ "num_kv_heads": 12, "seq_len_q": 75600, "seq_len_kv": 75600, "head_dim": 128,
+ "dtype": "torch.bfloat16", "causal": false, "sm_scale": 0.0884, "count": 1200,
+ "torch": "2.8.0", "device": "NVIDIA GB10", "sm": "12.1"}
+```
+
+Counts accumulate per shape; the file is flushed periodically and at exit.
+Hand the JSONL files to the kernel folks. The `SAGE_ATTN_THREE` backend records
+to the same log, so either implementation can be used for collection.
 
 ### V-MoBA / SLA / SageSLA
 

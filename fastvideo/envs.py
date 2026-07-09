@@ -208,10 +208,21 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # - "VIDEO_SPARSE_ATTN": use Video Sparse Attention
     # - "SAGE_ATTN": use Sage Attention
     # - "SAGE_ATTN_THREE": use Sage Attention 3
+    # - "FLASHINFER_SAGE_ATTN3": use FlashInfer SageAttention3 (SM120 NVFP4);
+    #   falls back to torch SDPA where the kernel cannot run
     # FLASH_ATTN uses FlashAttention-3/2; to run FlashAttention-4 set
     # FASTVIDEO_FA4=1 as well (see below).
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
+
+    # If set to a file path, attention backends that support it (currently
+    # FLASHINFER_SAGE_ATTN3 and SAGE_ATTN_THREE) record every unique attention
+    # shape they run to <path>.rank<N>/<path>.pid<N> as JSONL, with occurrence
+    # counts and device metadata. Used to hand real workload shapes to kernel
+    # authors (e.g. SageAttention3 tuning for DGX Spark / SM121).
+    # See fastvideo/attention/shape_logger.py. Read once at import time.
+    "FASTVIDEO_ATTN_SHAPE_LOG":
+    lambda: os.getenv("FASTVIDEO_ATTN_SHAPE_LOG", None),
 
     # If set (=1), the FLASH_ATTN backend uses FlashAttention-4
     # (flash_attn.cute). FA4 is opt-in and never auto-selected just because it
