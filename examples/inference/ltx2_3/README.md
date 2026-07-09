@@ -1,6 +1,6 @@
 # LTX-2.3 distilled inference configs
 
-Ready-to-run [`fastvideo generate`](../../..) run configs for the LTX-2.3
+Ready-to-run `fastvideo generate` run configs for the LTX-2.3
 distilled model (`FastVideo/LTX-2.3-Distilled-Diffusers`), covering both
 workloads (t2v / i2v), both two-stage step schedules (`5+2`, `8+3` = denoise
 + refine), and four resolutions.
