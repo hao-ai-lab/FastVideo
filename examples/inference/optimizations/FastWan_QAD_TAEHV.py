@@ -46,8 +46,11 @@ OUTPUT_PATH = "video_samples"
 # guidance 1.0). Loaded on top of the base Wan2.1 pipeline; pass
 # ``--distilled_model ''`` to run the base weights instead.
 DEFAULT_DISTILLED_MODEL = "FastVideo/FastWan-QAD-1.3B"
-DISTILLED_WEIGHTS_FILE = (
-    "generator_inference_transformer/diffusion_pytorch_model.safetensors"
+# The HF repo moved the transformer weights; try current layout first,
+# then the legacy path (pre-2026-07 uploads).
+DISTILLED_WEIGHTS_FILES = (
+    "transformer/diffusion_pytorch_model.safetensors",
+    "generator_inference_transformer/diffusion_pytorch_model.safetensors",
 )
 
 # TAEHV checkpoint for Wan2.1. Clone https://github.com/madebyollin/taehv to get
@@ -101,7 +104,14 @@ def resolve_distilled_weights(hf_id: str) -> str:
     if os.path.exists(hf_id):
         return hf_id
     from huggingface_hub import hf_hub_download
-    return hf_hub_download(repo_id=hf_id, filename=DISTILLED_WEIGHTS_FILE)
+    from huggingface_hub.errors import EntryNotFoundError
+    for filename in DISTILLED_WEIGHTS_FILES:
+        try:
+            return hf_hub_download(repo_id=hf_id, filename=filename)
+        except EntryNotFoundError:
+            continue
+    raise FileNotFoundError(
+        f"None of {DISTILLED_WEIGHTS_FILES} found in {hf_id!r}")
 
 
 @contextlib.contextmanager
