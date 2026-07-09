@@ -157,3 +157,93 @@ def test_ltx2_finetune_single_train_step(
     # Device-keyed grad-norm regression on top of the same harness.
     # Skips when the current GPU has no seeded reference.
     check_grad_norm_regression(ref_name, model.transformer.model)
+
+
+def _flashinfer_fp4_available() -> bool:
+    try:
+        from flashinfer import mm_fp4, nvfp4_quantize  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+@pytest.mark.usefixtures("distributed_setup")
+def test_ltx2_nvfp4_qat_finetune_single_train_step(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same harness as the dense test, with NVFP4 QAT enabled via
+    ``pipeline.dit_config.quant_config: nvfp4_qat_train``. Additionally
+    asserts the QAT quant method is actually attached to the expected
+    attention/FFN linears."""
+    if _gpu_too_small():
+        pytest.skip(f"requires a CUDA GPU with >= {_MIN_GPU_MEMORY_GB}GB "
+                    "memory (LTX-2 DiT is 18.9B params)")
+    if not _flashinfer_fp4_available():
+        pytest.skip("requires flashinfer with FP4 kernels")
+
+    from fastvideo.layers.quantization.nvfp4_qat_train_config import (
+        NVFP4QATTrainConfig,
+        NVFP4QATTrainQuantizeMethod,
+    )
+
+    cfg = load_run_config(str(_FIXTURE_DIR / "ltx2_t2v_qat_finetune_min.yaml"))
+    assert isinstance(cfg.training.pipeline_config.dit_config.quant_config,
+                      NVFP4QATTrainConfig), (
+                          "quant_config string was not resolved to "
+                          "NVFP4QATTrainConfig by config parsing")
+
+    device = torch.device("cuda:0")
+    dtype = torch.bfloat16
+
+    monkeypatch.setattr(
+        "fastvideo.train.utils.dataloader."
+        "build_parquet_t2v_train_dataloader",
+        lambda *args, **kwargs: None,
+    )
+
+    model = LTX2Model(
+        init_from=cfg.models["student"]["init_from"],
+        training_config=cfg.training,
+        trainable=True,
+    )
+    model.transformer = model.transformer.to(device=device, dtype=dtype)
+
+    # 48 audio+video blocks x 28 substring-matched linears (attn1 4 +
+    # attn2 4 + ffn 2, video and audio branches, + a2v 4 + v2a 4).
+    quantized = sum(
+        isinstance(getattr(m, "quant_method", None),
+                   NVFP4QATTrainQuantizeMethod)
+        for m in model.transformer.modules())
+    assert quantized == 1344, (
+        f"expected 1344 NVFP4-QAT linears on the LTX-2 DiT, found "
+        f"{quantized}")
+
+    method = FineTuneMethod(
+        cfg=cfg,
+        role_models={"student": model},
+    )
+    method.on_train_start()
+
+    batch = _build_synthetic_batch(device, dtype, text_dim=3840)
+    loss_map, outputs, _metrics = method.single_train_step(batch, iteration=0)
+
+    loss = loss_map["total_loss"]
+    assert torch.isfinite(loss).item(), (
+        f"total_loss is not finite: {loss.item()}")
+
+    method.backward(loss_map, outputs, grad_accum_rounds=1)
+
+    blocks = resolve_blocks(model.transformer.model)
+    assert blocks is not None and len(blocks) > 0
+    trainable = [p for p in blocks[0].parameters() if p.requires_grad]
+    assert trainable, "layer 0 has no trainable parameters"
+    for i, p in enumerate(trainable):
+        assert p.grad is not None, f"layer 0 param[{i}] has None grad"
+        assert torch.isfinite(p.grad).all().item(), (
+            f"layer 0 param[{i}] grad contains NaN/Inf")
+    assert any(
+        p.grad.detach().float().norm().item() > 0.0 for p in trainable), (
+            "all layer-0 grads are exactly zero; STE backward did not "
+            "reach the first transformer block")
+
+    check_grad_norm_regression("test_ltx2_nvfp4_qat_finetune",
+                               model.transformer.model)

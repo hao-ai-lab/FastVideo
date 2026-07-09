@@ -52,6 +52,15 @@ _CASES = {
         "prep_dir": Path(DATA_DIR) / "ltx2_3_overfit_preprocessed",
         "out_dir": Path(DATA_DIR) / "outputs_ltx2_3_overfit",
     },
+    # NVFP4 quantization-aware training: same LTX-2.0 data, attention/FFN
+    # linears forward through real FP4 GEMMs with an STE backward.
+    # Requires flashinfer FP4 kernels (sm_100-class GPU).
+    "ltx2_nvfp4_qat": {
+        "model": "FastVideo/LTX2-Distilled-Diffusers",
+        "config": "examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml",
+        "prep_dir": Path(DATA_DIR) / "ltx2_overfit_preprocessed",
+        "out_dir": Path(DATA_DIR) / "outputs_ltx2_nvfp4_qat_overfit",
+    },
 }
 
 

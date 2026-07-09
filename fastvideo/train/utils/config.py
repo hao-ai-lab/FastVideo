@@ -282,7 +282,26 @@ def _parse_pipeline_config(
 
     pipeline_config = PipelineConfig.from_kwargs(kwargs)
     _apply_training_dit_arch_overrides(pipeline_config, dit_arch_overrides)
+    _resolve_dit_quant_config(pipeline_config)
     return pipeline_config
+
+
+def _resolve_dit_quant_config(pipeline_config: Any) -> None:
+    """Resolve a string ``pipeline.dit_config.quant_config`` (e.g.
+    ``nvfp4_qat_train``) into its registered QuantizationConfig instance.
+
+    Model construction calls ``quant_config.get_quant_method()`` inside
+    ``LinearBase.__init__``, so a bare YAML string would crash there.
+    This must live in ``_parse_pipeline_config`` (not ``load_run_config``)
+    because ``dcp_to_diffusers`` rebuilds models from a checkpoint's raw
+    config by calling ``_parse_pipeline_config`` directly.
+    """
+    dit_config = getattr(pipeline_config, "dit_config", None)
+    quant = getattr(dit_config, "quant_config", None)
+    if isinstance(quant, str):
+        from fastvideo.layers.quantization import (
+            get_quantization_config, )
+        dit_config.quant_config = get_quantization_config(quant)()
 
 
 def _split_training_dit_arch_overrides(pipeline_raw: Any) -> tuple[Any, dict[str, Any]]:
