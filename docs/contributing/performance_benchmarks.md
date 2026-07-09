@@ -79,10 +79,11 @@ fastvideo/performance/
 ```
 
 The HF dataset (`FastVideo/performance-tracking` by default) holds one
-normalized JSON per `(model_id, gpu_type, run)` tuple. The rolling baseline is
-the median of the last 5 successful, baseline-eligible records for that
-model+GPU. PR and local records are visible in the dashboard but are not
-baseline eligible.
+normalized JSON per run. For v2 records, the rolling baseline is the median of
+the last 5 successful, baseline-eligible records in the same comparison cohort:
+`model_id`, `gpu_type`, `workload_id`, `variant_id`, `benchmark_version`,
+`recipe_fingerprint`, `hardware_profile_id`, and `software_profile_id`. PR and
+local records are visible in the dashboard but are not baseline eligible.
 
 ## Planned Coverage
 
@@ -158,13 +159,16 @@ unrealistic memory growth, and optionally large component-specific slowdowns
 even when the rolling baseline is empty. They are hand-set with generous
 headroom and almost never need touching.
 
-### Rolling baseline (per `(model_id, gpu_type)`)
+### Rolling baseline (per comparison cohort)
 
 `compare_baseline.py` loads the last 5 successful, baseline-eligible records
-for the same `(model_id, gpu_type)` from the HF dataset, computes the median
-for each available metric, and evaluates the current run with the metric's
-rolling regression policy. For latency, memory, and component times, higher
-values are regressions. For throughput, lower values are regressions.
+for the same comparison cohort from the HF dataset, computes the median for
+each available metric, and evaluates the current run with the metric's
+rolling regression policy. For v2 records, that cohort is `model_id`,
+`gpu_type`, `workload_id`, `variant_id`, `benchmark_version`,
+`recipe_fingerprint`, `hardware_profile_id`, and `software_profile_id`. For
+latency, memory, and component times, higher values are regressions. For
+throughput, lower values are regressions.
 
 A metric exceeds its rolling threshold when both of these are true:
 
@@ -230,8 +234,10 @@ Recipe fingerprinting, hardware/software profile IDs, exact-identity
 comparison, and dashboard cohort grouping land with this change: v2 records
 compare only within their identity cohort, and a record that opens a NEW
 cohort is marked `baseline_status: "initialized_new_cohort"` (regression
-gating starts once that cohort accumulates history). Legacy v1 configs keep
-the `(model_id, gpu_type)` rolling-baseline comparison. Metric-specific
+gating starts once that cohort accumulates history). Legacy v1 configs still
+run and are normalized for reporting, but their records skip rolling-baseline
+comparison entirely (`baseline_status: "skipped_missing_identity"`, never
+baseline eligible); only static thresholds gate them. Metric-specific
 threshold policies and promoted baselines remain separate follow-ups.
 
 ### Raw record (`results/perf_*.json`)
@@ -241,7 +247,7 @@ Written by `test_inference_performance.py`. One file per benchmark run.
 ```jsonc
 {
   "benchmark_id": "wan-t2v-1.3b-2gpu",
-  "config_schema_version": 2,
+  "result_schema_version": 2,
   "workload_id": "wan-t2v",
   "variant_id": "1.3b-sp2",
   "benchmark_version": 2,
@@ -270,8 +276,15 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     }
   },
   "commit": "<full sha>",
+  "run_source": "pr",
+  "branch": "feature/perf-change",
   "pr_number": "1234",
+  "test_scope": "direct",
+  "build_url": "https://buildkite.example/build",
+  "build_id": "<buildkite-build-id>",
+  "job_id": "<buildkite-job-id>",
   "timestamp": "2026-05-08T22:00:00+00:00",
+  "quality_metadata": { "quality_status": "canonical" },
   "text_encoder_time_s": 2.141,
   "dit_time_s": 8.437,
   "vae_decode_time_s": 3.208,
@@ -322,6 +335,7 @@ result, used as the rolling-baseline source of truth.
 ```jsonc
 {
   "model_id": "wan-t2v-1.3b-2gpu",
+  "result_schema_version": 2,
   "workload_id": "wan-t2v",
   "variant_id": "1.3b-sp2",
   "benchmark_version": 2,
@@ -345,17 +359,30 @@ result, used as the rolling-baseline source of truth.
   "hardware_profile_id": "hw-<sha256-prefix>",
   "software_profile_id": "sw-<sha256-prefix>",
   "environment_fingerprint": "env-<sha256-prefix>",
+  "run_source": "pr",
+  "branch": "feature/perf-change",
+  "pr_number": "1234",
+  "test_scope": "direct",
+  "build_url": "https://buildkite.example/build",
+  "build_id": "<buildkite-build-id>",
+  "job_id": "<buildkite-job-id>",
+  "quality_metadata": { "quality_status": "canonical" },
   "success": true
 }
 ```
 
 ### Compatibility with legacy records
 
-Older records in the HF dataset may not have component timing fields. The
-comparator ignores missing or `null` metrics when computing a median, and the
-dashboard lists skipped plots for metric series that have no non-null values.
-Records missing both `run_source` and `baseline_eligible` are treated as legacy
-successful main/full-suite uploads and remain eligible for rolling baselines.
+Older records in the HF dataset may not have `result_schema_version`,
+component timing fields, or v2 identity/profile fields. Records without
+`result_schema_version` are treated as v1. The comparator ignores missing or
+`null` metrics when computing a median, and the dashboard lists skipped plots
+for metric series that have no non-null values. Records missing both
+`run_source` and `baseline_eligible` are treated as legacy successful
+main/full-suite uploads and remain eligible for rolling baselines.
+Current `perf_*.json` artifacts that lack the v2 comparison identity are
+normalized for reporting but skip rolling-baseline comparison and are not marked
+baseline eligible.
 
 New records compare only against the same `model_id`, `gpu_type`,
 `workload_id`, `variant_id`, `benchmark_version`, `recipe_fingerprint`,
@@ -377,7 +404,7 @@ FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 | `PERF_REPORTS_DIR` | `/root/data/perf_reports` | `compare_baseline.py`, `dashboard.py` | Where the Markdown summary and Plotly HTML get written for Buildkite to pick up. |
 | `HF_REPO_ID` | `FastVideo/performance-tracking` | `fastvideo/performance/hf_store.py` | HF dataset repo holding rolling-baseline records. |
 | `HF_API_KEY`, `HUGGINGFACE_HUB_TOKEN`, `HF_TOKEN` | unset | `fastvideo/performance/hf_store.py` | Required for upload or private dataset reads. |
-| `PERF_RUN_SOURCE` | inferred | `compare_baseline.py` | Source metadata for uploaded records: `pr`, `local`, `scheduled_main`, or `unknown`. |
+| `PERF_RUN_SOURCE` | inferred | `compare_baseline.py`, `test_inference_performance.py` | Source metadata for uploaded records: `pr`, `local`, `scheduled_main`, or `unknown`. |
 | `PERF_UPLOAD_POLICY` | `never` | `compare_baseline.py` | Upload policy: `never`, `pass`, or `always`. |
 | `PERF_PYTEST_RC` | unset | `compare_baseline.py` | Static-threshold pytest exit code, used so scheduled-main failures can be uploaded with `success=false`. |
 | `TEST_SCOPE` | unset | `compare_baseline.py` | CI context used to infer scheduled-main runs together with `BUILDKITE_BRANCH=main`. |
@@ -394,11 +421,14 @@ point is `fastvideo/tests/modal/pr_test.py:run_performance_tests` and the
 Buildkite artifact upload is in
 `.buildkite/scripts/pr_test.sh:upload_performance_artifacts`.
 
-Each performance build runs pytest first. If that fixed-threshold phase fails,
-PR/direct runs skip `compare_baseline.py` because they only upload passing
-records. Scheduled-main runs still execute `compare_baseline.py` with
-`PERF_PYTEST_RC` set so the failed canonical attempt is visible in normalized
-JSON and dashboard history. The dashboard runs best-effort for observability.
+Each performance build runs pytest first. PR and direct runs only continue to
+`compare_baseline.py` when that fixed-threshold phase passes; if pytest fails,
+Markdown summaries and normalized JSON artifacts are not emitted. Scheduled
+main runs set `PERF_UPLOAD_POLICY=always`, so they still run
+`compare_baseline.py` (with `PERF_PYTEST_RC` set) after a fixed-threshold
+failure. Those failed scheduled main runs emit summaries and normalized
+records, upload records with `success=false`, and are excluded from future
+rolling baselines. The dashboard still runs best-effort for observability.
 When the rolling-baseline phase runs, it emits:
 
 * **Markdown summary** — appended to `$GITHUB_STEP_SUMMARY` when that variable
@@ -406,7 +436,7 @@ When the rolling-baseline phase runs, it emits:
   per-benchmark row with current vs. baseline values for latency, throughput,
   memory, text encoder time, DiT time, and VAE decode time.
 * **Plotly dashboard** — `dashboard_<sha>_<ts>.html` showing time-series for
-  each metric grouped by `(model_id, gpu_type)`.
+  each metric grouped by comparison cohort.
 * **Normalized records** — `normalized_perf_*.json`, one per benchmark.
   Useful as input to the
   [`reseed-performance-baseline`](https://github.com/hao-ai-lab/FastVideo/blob/main/.agents/skills/reseed-performance-baseline/SKILL.md)
@@ -480,8 +510,8 @@ When the rolling-baseline phase runs, it emits:
 
 ## Troubleshooting
 
-**"No baseline for ... Initializing"** — first run for this `(model_id,
-gpu_type)`. Run will pass and (if persisting) seed the first record.
+**"No baseline for ... Initializing"** — first run for this comparison cohort.
+Run will pass and (if persisting) seed the first record.
 
 **Persistent failure right after a torch / kernel / image upgrade** —
 genuine regression *or* baseline drift. Compare the failing normalized record

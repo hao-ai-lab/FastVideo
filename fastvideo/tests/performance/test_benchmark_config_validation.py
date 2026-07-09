@@ -14,9 +14,9 @@ def _v2_config():
     return {
         "benchmark_id": "wan-t2v-1.3b-2gpu",
         "config_schema_version": 2,
-        "workload_id": "wan-t2v-1.3b",
-        "variant_id": "canonical",
-        "benchmark_version": 1,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
     }
 
 
@@ -41,9 +41,9 @@ def test_v2_benchmark_config_identity_validates_and_is_preserved():
     assert _is_v2_config(cfg) is True
     assert _config_identity_metadata(cfg) == {
         "config_schema_version": 2,
-        "workload_id": "wan-t2v-1.3b",
-        "variant_id": "canonical",
-        "benchmark_version": 1,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
         "quality_metadata": {"some": "data"},
     }
 
@@ -91,9 +91,9 @@ def test_v2_benchmark_config_rejects_invalid_benchmark_version_values(value):
 def test_partial_v2_identity_requires_schema_version():
     cfg = {
         "benchmark_id": "wan-t2v-1.3b-2gpu",
-        "workload_id": "wan-t2v-1.3b",
-        "variant_id": "canonical",
-        "benchmark_version": 1,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
     }
 
     expected = "wan.json: v2 benchmark identity fields require config_schema_version=2"
@@ -105,9 +105,9 @@ def test_optional_v2_metadata_fields_must_be_objects():
     cfg = {
         "benchmark_id": "wan-t2v-1.3b-2gpu",
         "config_schema_version": 2,
-        "workload_id": "wan-t2v-1.3b",
-        "variant_id": "canonical",
-        "benchmark_version": 1,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
         "quality_metadata": ["not", "an", "object"],
     }
 
