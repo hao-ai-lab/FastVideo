@@ -111,6 +111,13 @@ def _fetch_image_bytes(url: str,
             response.raise_for_status()
             return response.content
         except requests.RequestException as e:
+            status = getattr(getattr(e, "response", None), "status_code",
+                             None)
+            # Permanent client errors (4xx except 408/429) won't heal on
+            # retry — fail fast.
+            if (status is not None and 400 <= status < 500
+                    and status not in (408, 429)):
+                raise
             if attempt == attempts - 1:
                 raise
             backoff = 2**attempt

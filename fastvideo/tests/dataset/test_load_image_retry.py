@@ -62,3 +62,19 @@ def test_load_image_raises_after_exhausting_retries(monkeypatch):
 
     assert get.call_count == 3
     assert sleeps == [1, 2]
+
+
+def test_load_image_does_not_retry_on_client_error(monkeypatch):
+    sleeps: list[float] = []
+    monkeypatch.setattr(vision_utils.time, "sleep", sleeps.append)
+    response = mock.Mock(status_code=404)
+    error = requests.HTTPError("404 Client Error", response=response)
+    response.raise_for_status.side_effect = error
+    get = mock.Mock(return_value=response)
+    monkeypatch.setattr(vision_utils.requests, "get", get)
+
+    with pytest.raises(requests.HTTPError):
+        vision_utils.load_image("https://example.com/missing.png")
+
+    assert get.call_count == 1
+    assert sleeps == []
