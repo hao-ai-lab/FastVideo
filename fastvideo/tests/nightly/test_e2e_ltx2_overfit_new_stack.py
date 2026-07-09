@@ -1,16 +1,17 @@
-"""E2E overfit test for LTX-2 fine-tuning on the modular trainer (fastvideo/train).
+"""E2E overfit tests for LTX-2 fine-tuning on the modular trainer (fastvideo/train).
 
-Downloads the single-sample cats dataset, preprocesses it with the
-LTX-2 VAE + Gemma text encoder into the t2v parquet format, trains
-LTX2Model with FineTuneMethod for 300 steps on 4 GPUs, and checks that
-the final validation video reproduces the training clip (MS-SSIM
-against the preprocessed ground-truth clip) better than the step-0
-baseline.
+Parametrized over LTX-2.0 and LTX-2.3 distilled checkpoints. Each case
+downloads the single-sample cats dataset, preprocesses it with the
+matching LTX-2 VAE + Gemma text encoder into the t2v parquet format,
+trains LTX2Model with FineTuneMethod for 300 steps on 4 GPUs, and
+checks that the final validation video reproduces the training clip
+(MS-SSIM against the preprocessed ground-truth clip) better than the
+step-0 baseline.
 
 GPU assumptions: 4 x large-memory GPUs (developed on 4x GB200 192GB;
 the 18.9B-param DiT trains FSDP-sharded with fp32 master weights).
-Requires the FastVideo/LTX2-Distilled-Diffusers checkpoint (set
-HF_HOME to a cache that contains it, or allow ~60GB of downloads).
+Requires the FastVideo LTX-2 distilled checkpoints (set HF_HOME to a
+cache that contains them, or allow ~60GB of downloads per version).
 
 Guarded by FASTVIDEO_NIGHTLY=1 so the default test suite stays fast.
 """
@@ -35,11 +36,23 @@ NUM_GPUS_TRAINING = "4"
 
 DATA_DIR = "data"
 LOCAL_RAW_DATA_DIR = Path(DATA_DIR) / "cats"
-LOCAL_PREPROCESSED_DATA_DIR = Path(DATA_DIR) / "ltx2_overfit_preprocessed"
-LOCAL_OUTPUT_DIR = Path(DATA_DIR) / "outputs_ltx2_overfit"
 
 PREPROCESSING_SCRIPT = "fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py"
-TRAINING_CONFIG = "examples/train/configs/overfit_ltx2_t2v.yaml"
+
+_CASES = {
+    "ltx2": {
+        "model": "FastVideo/LTX2-Distilled-Diffusers",
+        "config": "examples/train/configs/overfit_ltx2_t2v.yaml",
+        "prep_dir": Path(DATA_DIR) / "ltx2_overfit_preprocessed",
+        "out_dir": Path(DATA_DIR) / "outputs_ltx2_overfit",
+    },
+    "ltx2_3": {
+        "model": "FastVideo/LTX-2.3-Distilled-Diffusers",
+        "config": "examples/train/configs/overfit_ltx2_3_t2v.yaml",
+        "prep_dir": Path(DATA_DIR) / "ltx2_3_overfit_preprocessed",
+        "out_dir": Path(DATA_DIR) / "outputs_ltx2_3_overfit",
+    },
+}
 
 
 def download_data():
@@ -55,17 +68,18 @@ def download_data():
         f"Download appeared to succeed but {LOCAL_RAW_DATA_DIR} does not exist")
 
 
-def run_preprocessing():
+def run_preprocessing(case: dict):
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = env.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]
     env["LTX2_OVERFIT_DATA_DIR"] = str(LOCAL_RAW_DATA_DIR)
-    env["LTX2_OVERFIT_OUTPUT_DIR"] = str(LOCAL_PREPROCESSED_DATA_DIR)
+    env["LTX2_OVERFIT_OUTPUT_DIR"] = str(case["prep_dir"])
+    env["LTX2_OVERFIT_MODEL"] = case["model"]
     cmd = [sys.executable, PREPROCESSING_SCRIPT]
-    print(f"Running preprocessing: {cmd}")
+    print(f"Running preprocessing: {cmd} (model={case['model']})")
     subprocess.run(cmd, check=True, env=env)
 
 
-def run_training():
+def run_training(case: dict):
     env = os.environ.copy()
     env.setdefault("WANDB_MODE", "offline")
     cmd = [
@@ -73,18 +87,18 @@ def run_training():
         "--nnodes", "1",
         "--nproc_per_node", NUM_GPUS_TRAINING,
         "-m", "fastvideo.train.entrypoint.train",
-        "--config", TRAINING_CONFIG,
-        "--training.checkpoint.output_dir", str(LOCAL_OUTPUT_DIR),
-        "--training.data.data_path", str(LOCAL_PREPROCESSED_DATA_DIR),
+        "--config", case["config"],
+        "--training.checkpoint.output_dir", str(case["out_dir"]),
+        "--training.data.data_path", str(case["prep_dir"]),
         "--callbacks.validation.dataset_file",
-        str(LOCAL_PREPROCESSED_DATA_DIR / "validation_prompts.json"),
+        str(case["prep_dir"] / "validation_prompts.json"),
     ]
     print(f"Running training: {cmd}")
     subprocess.run(cmd, check=True, env=env)
 
 
-def _validation_videos_by_step() -> dict[int, str]:
-    pattern = os.path.join(str(LOCAL_OUTPUT_DIR), "validation_step_*_video_0.mp4")
+def _validation_videos_by_step(out_dir: Path) -> dict[int, str]:
+    pattern = os.path.join(str(out_dir), "validation_step_*_video_0.mp4")
     videos: dict[int, str] = {}
     for path in glob.glob(pattern):
         match = re.search(r"validation_step_(\d+)_", os.path.basename(path))
@@ -97,27 +111,29 @@ def _validation_videos_by_step() -> dict[int, str]:
     os.environ.get("FASTVIDEO_NIGHTLY") != "1",
     reason="nightly e2e overfit test; set FASTVIDEO_NIGHTLY=1 to run",
 )
-def test_e2e_ltx2_overfit_new_stack():
+@pytest.mark.parametrize("case_id", _CASES.keys())
+def test_e2e_ltx2_overfit_new_stack(case_id: str):
+    case = _CASES[case_id]
     download_data()
-    run_preprocessing()
-    run_training()
+    run_preprocessing(case)
+    run_training(case)
 
-    reference_video = LOCAL_PREPROCESSED_DATA_DIR / "training_sample_0.mp4"
+    reference_video = case["prep_dir"] / "training_sample_0.mp4"
     assert reference_video.exists(), (
         f"Reference (preprocessed training clip) not found at {reference_video}")
 
-    videos = _validation_videos_by_step()
-    assert videos, f"No validation videos found under {LOCAL_OUTPUT_DIR}"
+    videos = _validation_videos_by_step(case["out_dir"])
+    assert videos, f"No validation videos found under {case['out_dir']}"
     final_step = max(videos)
     final_video = videos[final_step]
     print(f"Final validation video (step {final_step}): {final_video}")
 
     final_mean, final_min, final_max = compute_video_ssim_torchvision(
         str(reference_video), final_video, use_ms_ssim=True)
-    print(f"\n===== MS-SSIM vs training clip at step {final_step} =====")
+    print(f"\n===== MS-SSIM vs training clip at step {final_step} ({case_id}) =====")
     print(f"Mean: {final_mean:.4f}  Min: {final_min:.4f}  Max: {final_max:.4f}")
 
-    results = {"final_step": final_step, "final_mean_ssim": final_mean}
+    results = {"case": case_id, "final_step": final_step, "final_mean_ssim": final_mean}
     baseline_step = min(videos)
     if baseline_step != final_step:
         base_mean, _, _ = compute_video_ssim_torchvision(
@@ -136,4 +152,5 @@ def test_e2e_ltx2_overfit_new_stack():
 
 if __name__ == "__main__":
     os.environ.setdefault("FASTVIDEO_NIGHTLY", "1")
-    test_e2e_ltx2_overfit_new_stack()
+    for _case_id in _CASES:
+        test_e2e_ltx2_overfit_new_stack(_case_id)

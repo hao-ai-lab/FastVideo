@@ -8,7 +8,10 @@ t2v parquet schema expected by the training framework.
 The stored text embeddings are POST-connector: the connector replaces
 pad positions with learnable registers and returns an all-valid mask,
 so the parquet collate's ones/zeros mask stays semantically correct
-and training needs no text encoder at all.
+and training needs no text encoder at all. Captions are encoded via
+the encoder's forward() (the exact inference path), which handles both
+LTX-2.0 (shared 3840-d features) and LTX-2.3 (separate 4096-d video /
+2048-d audio feature extractors).
 
 Videos are resampled to TRAIN_FPS and the preprocessed clip is also
 saved as an mp4 next to the parquet so overfit tests can use it as
@@ -20,6 +23,7 @@ Usage:
 
 import json
 import os
+import shutil
 from typing import Any
 
 import av
@@ -105,6 +109,9 @@ def main() -> None:
     model_index = verify_model_config_and_directory(model_path)
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    # The map-style dataset caches parquet file metadata; a stale cache
+    # next to a regenerated parquet can crash or serve old rows.
+    shutil.rmtree(os.path.join(OUTPUT_DIR, "map_style_cache"), ignore_errors=True)
 
     with open(os.path.join(DATA_DIR, CAPTION_JSON)) as f:
         caption_data = json.load(f)
@@ -170,17 +177,16 @@ def main() -> None:
         print(f"  Latent shape: {latent.shape}")
 
         with torch.no_grad():
-            pre_embeds, attention_mask = text_encoder.preprocess_text_embeddings(
-                prompts=[preprocess_text(caption)],
-                tokenizer=tokenizer,
-                tokenizer_kwargs=tokenizer_kwargs,
-                padding_side=encoder_config.arch_config.padding_side,
+            # Encode through forward() — the inference text path. The
+            # two-step preprocess_text_embeddings + run_connectors route
+            # breaks on LTX-2.3, whose separate audio feature extractor
+            # is narrower than the video one.
+            text_inputs = tokenizer([preprocess_text(caption)], **tokenizer_kwargs)
+            encoder_out = text_encoder(
+                input_ids=text_inputs["input_ids"].to(device),
+                attention_mask=text_inputs["attention_mask"].to(device),
             )
-            video_embeds, _audio_embeds, _post_mask = text_encoder.run_connectors(
-                pre_embeds,
-                attention_mask,
-            )
-            text_embedding = video_embeds.squeeze(0).float().cpu()
+            text_embedding = encoder_out.last_hidden_state.squeeze(0).float().cpu()
         print(f"  Text embedding shape: {text_embedding.shape}")
 
         record = {

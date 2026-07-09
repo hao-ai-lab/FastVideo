@@ -272,6 +272,8 @@ class LTX2Model(WanModel):
             raise ValueError(f"Unknown latents_source: "
                              f"{latents_source!r}")
 
+        self._check_text_embedding_dim(encoder_hidden_states)
+
         # LTX-2 VAE encode() already applies per-channel normalization
         # (scaling_factor is 1.0); latents are used as stored.
         training_batch.latents = latents
@@ -365,6 +367,28 @@ class LTX2Model(WanModel):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _check_text_embedding_dim(self, encoder_hidden_states: torch.Tensor) -> None:
+        """Fail fast when the parquet was preprocessed with a mismatched
+        text stack (LTX-2.0 stores 3840-d post-connector embeddings; 2.3
+        has no in-DiT caption projection and expects 4096-d)."""
+        # Read the LOADED transformer's config: the transformer loader
+        # deepcopies pipeline_config.dit_config before applying the
+        # checkpoint's arch flags, so training_config.pipeline_config
+        # never sees version flags like caption_proj_before_connector.
+        arch = self.transformer.config.arch_config
+        if bool(getattr(arch, "caption_proj_before_connector", False)):
+            expected_dim = int(arch.cross_attention_dim)
+        else:
+            expected_dim = int(arch.caption_channels)
+        actual_dim = int(encoder_hidden_states.shape[-1])
+        if actual_dim != expected_dim:
+            raise ValueError(f"text_embedding width {actual_dim} does not match the "
+                             f"checkpoint's expected text context dim {expected_dim}. "
+                             "The parquet was likely preprocessed with a different "
+                             "LTX-2 version (2.0 stores 3840-d, 2.3 stores 4096-d); "
+                             "re-run preprocess_ltx2_overfit.py with LTX2_OVERFIT_MODEL "
+                             "set to the same checkpoint as models.student.init_from.")
 
     def _update_rope_fps(self, infos: list[dict[str, Any]] | None) -> None:
         fps: float | None = None

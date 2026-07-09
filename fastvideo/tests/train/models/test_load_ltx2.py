@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """GPU loading + forward smoke test for ``LTX2Model``.
 
-Loads the real FastVideo/LTX2-Distilled-Diffusers checkpoint (18.9B at
-bf16, ~38GB — skips on GPUs with less than 60GB memory) via
+Loads the real LTX-2.0 / LTX-2.3 distilled checkpoints (18.9B at bf16,
+~38GB — skips on GPUs with less than 60GB memory) via
 ``LTX2Model.__init__`` and runs one transformer forward pass on
 synthetic inputs. Catches loader or forward-signature regressions in
 ``fastvideo.train.models.ltx2.LTX2Model`` and the underlying
 ``LTX2Transformer3DModel``.
 
 LTX-2's transformer takes per-token sigma timesteps in [0, 1] shaped
-[B, tokens] and a post-connector Gemma text embedding ([1024, 3840]);
-it returns the denoised x0 prediction. This mirrors the kwargs in
+[B, tokens] and a post-connector Gemma text embedding (3840-d for 2.0;
+4096-d for 2.3, which has no in-DiT caption projection); it returns
+the denoised x0 prediction. This mirrors the kwargs in
 ``LTX2Model._build_distill_input_kwargs``.
 """
 
@@ -33,12 +34,14 @@ from fastvideo.pipelines import ForwardBatch
 from fastvideo.train.models.ltx2 import LTX2Model
 from fastvideo.train.utils.config import load_run_config
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures"
-    / "ltx2_t2v_finetune_min.yaml")
+_FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 
-# Post-connector Gemma embedding width / length.
-_LTX2_TEXT_DIM = 3840
+# id -> (fixture, post-connector text embedding width)
+_CASES = {
+    "ltx2": ("ltx2_t2v_finetune_min.yaml", 3840),
+    "ltx2_3": ("ltx2_3_t2v_finetune_min.yaml", 4096),
+}
+
 _LTX2_TEXT_LEN = 1024
 
 _MIN_GPU_MEMORY_GB = 60
@@ -52,12 +55,14 @@ def _gpu_too_small() -> bool:
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_ltx2_model_loads_and_forwards():
+@pytest.mark.parametrize("case", _CASES.keys())
+def test_ltx2_model_loads_and_forwards(case: str):
     if _gpu_too_small():
         pytest.skip(f"requires a CUDA GPU with >= {_MIN_GPU_MEMORY_GB}GB "
                     "memory (LTX-2 DiT is 18.9B params)")
 
-    cfg = load_run_config(_FIXTURE)
+    fixture_name, text_dim = _CASES[case]
+    cfg = load_run_config(str(_FIXTURE_DIR / fixture_name))
     model = LTX2Model(
         init_from=cfg.models["student"]["init_from"],
         training_config=cfg.training,
@@ -81,7 +86,7 @@ def test_ltx2_model_loads_and_forwards():
     hidden_states = torch.randn(b, c, t, h, w, device=device, dtype=dtype)
     encoder_hidden_states = torch.randn(b,
                                         _LTX2_TEXT_LEN,
-                                        _LTX2_TEXT_DIM,
+                                        text_dim,
                                         device=device,
                                         dtype=dtype)
     timestep = torch.full((b, tokens), 0.5, device=device, dtype=torch.float32)

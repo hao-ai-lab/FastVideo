@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Per-method GPU smoke test: ``LTX2Model`` + ``FineTuneMethod``.
 
-Mirrors ``test_wan_finetune.py`` for the LTX-2 plugin. LTX2-specific
-differences: the synthetic ``raw_batch`` carries a single
-post-connector Gemma embedding ([1024, 3840]) and 128-channel VAE
-latents; the DiT is 18.9B params, so the test skips on GPUs with less
-than 60GB memory (e.g. the L40S CI runner).
+Mirrors ``test_wan_finetune.py`` for the LTX-2 plugin, parametrized
+over LTX-2.0 and LTX-2.3 checkpoints. LTX2-specific differences: the
+synthetic ``raw_batch`` carries a single post-connector Gemma
+embedding (3840-d for 2.0, 4096-d for 2.3 which has no in-DiT caption
+projection) and 128-channel VAE latents; the DiT is 18.9B params, so
+the test skips on GPUs with less than 60GB memory (e.g. the L40S CI
+runner).
 """
 
 from __future__ import annotations
@@ -30,12 +32,14 @@ from .grad_norm_regression import (
     resolve_blocks,
 )
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures"
-    / "ltx2_t2v_finetune_min.yaml")
+_FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 
-# Post-connector Gemma embedding width / length.
-_LTX2_TEXT_DIM = 3840
+# id -> (fixture, post-connector text embedding width, grad-norm ref name)
+_CASES = {
+    "ltx2": ("ltx2_t2v_finetune_min.yaml", 3840, "test_ltx2_finetune"),
+    "ltx2_3": ("ltx2_3_t2v_finetune_min.yaml", 4096, "test_ltx2_3_finetune"),
+}
+
 _LTX2_TEXT_LEN = 1024
 
 _MIN_GPU_MEMORY_GB = 60
@@ -51,6 +55,7 @@ def _gpu_too_small() -> bool:
 def _build_synthetic_batch(
     device: torch.device,
     dtype: torch.dtype,
+    text_dim: int,
 ) -> dict[str, torch.Tensor]:
     """Tiny synthetic ``raw_batch`` matching ``LTX2Model.prepare_batch``.
 
@@ -62,7 +67,7 @@ def _build_synthetic_batch(
         "text_embedding":
         torch.randn(batch_size,
                     _LTX2_TEXT_LEN,
-                    _LTX2_TEXT_DIM,
+                    text_dim,
                     device=device,
                     dtype=dtype),
         "text_attention_mask":
@@ -73,13 +78,15 @@ def _build_synthetic_batch(
 
 
 @pytest.mark.usefixtures("distributed_setup")
+@pytest.mark.parametrize("case", _CASES.keys())
 def test_ltx2_finetune_single_train_step(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+        case: str, monkeypatch: pytest.MonkeyPatch) -> None:
     if _gpu_too_small():
         pytest.skip(f"requires a CUDA GPU with >= {_MIN_GPU_MEMORY_GB}GB "
                     "memory (LTX-2 DiT is 18.9B params)")
 
-    cfg = load_run_config(_FIXTURE)
+    fixture_name, text_dim, ref_name = _CASES[case]
+    cfg = load_run_config(str(_FIXTURE_DIR / fixture_name))
 
     device = torch.device("cuda:0")
     dtype = torch.bfloat16
@@ -107,7 +114,7 @@ def test_ltx2_finetune_single_train_step(
     )
     method.on_train_start()
 
-    batch = _build_synthetic_batch(device, dtype)
+    batch = _build_synthetic_batch(device, dtype, text_dim)
     loss_map, outputs, _metrics = method.single_train_step(batch, iteration=0)
 
     loss = loss_map["total_loss"]
@@ -149,4 +156,4 @@ def test_ltx2_finetune_single_train_step(
 
     # Device-keyed grad-norm regression on top of the same harness.
     # Skips when the current GPU has no seeded reference.
-    check_grad_norm_regression("test_ltx2_finetune", model.transformer.model)
+    check_grad_norm_regression(ref_name, model.transformer.model)
