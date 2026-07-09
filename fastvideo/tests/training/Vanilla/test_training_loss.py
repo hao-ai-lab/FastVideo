@@ -14,6 +14,7 @@ from fastvideo.training.wan_training_pipeline import main
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
+from fastvideo.tests.performance.host_probe import measure_host_cpu_profile
 
 wandb_name = "test_training_loss"
 a40_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/a40_reference_wandb_summary.json"
@@ -141,6 +142,31 @@ def test_distributed_training():
         'step_time': 15.0,
         'train_loss': 0.0025
     }
+
+    # Host-profile guard (mirrors compare_baseline.py's HOST_BELOW_PROFILE):
+    # a packed shared host inflates wall time (observed ~8x) with bit-clean
+    # loss, so the step-time gates are skipped loudly on a below-profile
+    # host. Loss and grad-norm stay asserted — they are host-independent.
+    # Fail-open: a probe error keeps the step-time gates active.
+    try:
+        min_score = float(os.environ.get("PERF_HOST_CPU_MIN_SCORE", "") or 0.75)
+    except ValueError:
+        min_score = 0.75
+    try:
+        host_cpu_score = measure_host_cpu_profile()["host_cpu_score"]
+    except Exception as e:
+        host_cpu_score = None
+        print(f"Host CPU probe failed ({e}); step-time gates stay active")
+    if host_cpu_score is not None and host_cpu_score < min_score:
+        print("=" * 72)
+        print(f"HOST_BELOW_PROFILE: host_cpu_score={host_cpu_score:.3f} < "
+              f"floor {min_score:.2f} — skipping the step-time gates "
+              "(avg_step_time, step_time). This is host CPU contention on "
+              "the shared runner, not a property of the PR. Loss values are "
+              "still asserted.")
+        print("=" * 72)
+        del fields_and_thresholds['avg_step_time']
+        del fields_and_thresholds['step_time']
 
     failures = []
     for field, threshold in fields_and_thresholds.items():
