@@ -91,6 +91,11 @@ class WanVideoArchConfig(DiTArchConfig):
     # RoPE policy for the causal-rollout paths (causal Wan / MatrixGame2).
     # "relativistic" keeps long rollouts in-distribution; a no-op unless sink_size > 0 and local_attn_size > 0.
     rope_cache_policy: str = "absolute"
+    # Full-sequence training attention implementation for causal models:
+    # "flex" (FlexAttention BlockMask, default), "triton" (fused sink +
+    # rolling-window kernel with exact relativistic sink RoPE correction), or
+    # "reference" (slow pure-PyTorch, for tests).
+    causal_train_attention: str = "flex"
 
     # AnyFlow dual-timestep conditioning. Defaults preserve bit-identity with
     # the legacy single-timestep forward (no delta_embedder allocated, no
