@@ -73,9 +73,9 @@ class DecodingStage(PipelineStage):
 
         cfg = getattr(self.vae, "config", None)
 
-        # Matrix-Game 2.0-style: z = z * std + mean. Diffusers AutoencoderKL
-        # configs may define these fields as None, in which case decoding must
-        # fall through to scaling_factor/shift_factor normalization.
+        # Matrix-Game 2.0-style: z = z * std + mean. Some configs declare these
+        # fields as None, so test the values rather than mere attribute presence
+        # -- otherwise torch.tensor(None) raises instead of falling through.
         latents_mean_value = getattr(cfg, "latents_mean", None) if cfg is not None else None
         latents_std_value = getattr(cfg, "latents_std", None) if cfg is not None else None
         if latents_mean_value is not None and latents_std_value is not None:
@@ -85,12 +85,12 @@ class DecodingStage(PipelineStage):
                                        dtype=latents.dtype).view(1, -1, 1, 1, 1)
             return latents * latents_std + latents_mean
 
-        # Diffusers-style: scaling_factor (+ optional shift_factor). Native
-        # FastVideo VAEs may expose these on the module, while Diffusers
-        # AutoencoderKL stores them in its config.
+        # Diffusers-style: scaling_factor (+ optional shift_factor), read from
+        # the module only. Nearly every VAE *config* also carries a
+        # scaling_factor whose decode() already accounts for it, so sourcing it
+        # from cfg here would newly divide latents for VAEs that have always
+        # passed through untouched (flux2, hunyuanvideo, hunyuanvideo15, ltx2).
         scaling_factor = getattr(self.vae, "scaling_factor", None)
-        if scaling_factor is None and cfg is not None:
-            scaling_factor = getattr(cfg, "scaling_factor", None)
         if scaling_factor is not None:
             if isinstance(scaling_factor, torch.Tensor):
                 latents = latents / scaling_factor.to(latents.device, latents.dtype)
@@ -98,8 +98,6 @@ class DecodingStage(PipelineStage):
                 latents = latents / scaling_factor
 
             shift_factor = getattr(self.vae, "shift_factor", None)
-            if shift_factor is None and cfg is not None:
-                shift_factor = getattr(cfg, "shift_factor", None)
             if shift_factor is not None:
                 if isinstance(shift_factor, torch.Tensor):
                     latents = latents + shift_factor.to(latents.device, latents.dtype)
