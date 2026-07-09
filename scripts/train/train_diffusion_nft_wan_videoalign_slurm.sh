@@ -13,6 +13,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
+ENV_FILE="${ENV_FILE:-${REPO_ROOT}/.env}"
+if [[ -f "${ENV_FILE}" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${ENV_FILE}"
+    set +a
+fi
+
 CONFIG="${CONFIG:-examples/train/configs/rl/wan/diffusion_nft_videoalign.yaml}"
 PARTITION="${PARTITION:-all}"
 NUM_NODES="${NUM_NODES:-1}"
@@ -106,7 +114,13 @@ if [[ ! -f "${CONFIG_PATH}" ]]; then
     exit 1
 fi
 
-if [[ -n "${CONDA_ROOT:-}" ]]; then
+if [[ -n "${CONDA_ENV_PATH:-}" ]]; then
+    if [[ ! -x "${CONDA_ENV_PATH}/bin/python" ]]; then
+        echo "CONDA_ENV_PATH was set, but no python was found at ${CONDA_ENV_PATH}/bin/python" >&2
+        exit 1
+    fi
+    export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
+elif [[ -n "${CONDA_ROOT:-}" ]]; then
     if [[ ! -f "${CONDA_ROOT}/etc/profile.d/conda.sh" ]]; then
         echo "CONDA_ROOT was set, but conda.sh was not found under ${CONDA_ROOT}" >&2
         exit 1
@@ -153,6 +167,7 @@ PREPROCESS_BATCH_SIZE="${PREPROCESS_BATCH_SIZE:-128}"
 PREPROCESS_NUM_GPUS="${PREPROCESS_NUM_GPUS:-1}"
 PREPROCESS_MASTER_PORT="${PREPROCESS_MASTER_PORT:-29541}"
 DATALOADER_NUM_WORKERS="${DATALOADER_NUM_WORKERS:-0}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 SP_SIZE="${SP_SIZE:-1}"
 TP_SIZE="${TP_SIZE:-1}"
 HSDP_REPLICATE_DIM="${HSDP_REPLICATE_DIM:-1}"
@@ -206,7 +221,7 @@ echo "=================================="
 nvidia-smi || true
 
 prep_cmd=(
-    python examples/train/prepare_diffusion_nft_assets.py
+    "${PYTHON_BIN}" examples/train/prepare_diffusion_nft_assets.py
     --repo-root "${REPO_ROOT}"
     --config "${CONFIG_PATH}"
     --data-root "${DATA_ROOT}"
