@@ -80,7 +80,7 @@ def _resolve_torch_dtype(dtype, default: torch.dtype = torch.float32) -> torch.d
     if isinstance(dtype, torch.dtype):
         return dtype
     if isinstance(dtype, str):
-        normalized = dtype.removeprefix("torch.").lower()
+        normalized = dtype.strip().removeprefix("torch.").lower()
         return {
             "bfloat16": torch.bfloat16,
             "bf16": torch.bfloat16,
