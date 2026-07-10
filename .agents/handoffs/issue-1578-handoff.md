@@ -7,10 +7,10 @@
 - Branch: `issue/1578-qwen-vl-vision-dtype`
 - Worktree: `/tmp/fastvideo-worktrees/issue-1578-qwen-vl-vision-dtype`
 - Handoff path: `.agents/handoffs/issue-1578-handoff.md`
-- Current stage: Stage 1 complete - awaiting user guidance for Stage 2
-- Implementation begun: no
+- Current stage: Stage 2 - implementing user-approved Approach A
+- Implementation begun: yes
 - Created: 2026-07-10T08:36:53Z
-- Last updated: 2026-07-10T09:02:00Z
+- Last updated: 2026-07-10T10:27:00Z
 
 ## Workflow State
 - Stage 0 completed: no existing local or fetched `origin`/`upstream` branch containing `1578` was found.
@@ -31,6 +31,31 @@
   - `.agents/lessons/2026-05-07_dit-dtype-boundary-with-flash-attn.md`
 - Local config-only Python reproduction was attempted, but local environment lacks `torch`:
   `ModuleNotFoundError: No module named 'torch'`. Do not rely on local tests; validate on Modal in Stage 2.
+
+## Stage 2 Notes
+- User approved the recommended plan: "The plan looks good. Go ahead".
+- Re-checked GitHub before editing:
+  - `gh api user --jq .login` returned `macthecadillac`.
+  - `gh issue view 1578 ...` still shows issue OPEN, no comments, no assignees.
+  - `gh pr list ... --state open` reviewed again. New PR #1579 is an unrelated LingBot model port. Related #1577 remains open and ready-for-review, covering #1576 test coverage only.
+  - Targeted `gh search prs --repo hao-ai-lab/FastVideo "Qwen2.5-VL"` still finds #1577 as the only open Qwen2.5-VL PR.
+  - Targeted `gh search prs --repo hao-ai-lab/FastVideo "vision_config torch_dtype"` still returns none.
+- Selected approach: Approach A, local dtype normalization helper plus parent dtype propagation into the visual constructor.
+- Patch applied:
+  - Added `_resolve_torch_dtype()` in `fastvideo/models/encoders/qwen2_5_vl_custom.py`.
+  - Changed `Qwen2_5_VisionTransformerPretrainedModel.__init__` to accept `parent_torch_dtype`, prefer explicit vision dtype, and fall back to parent dtype before defaulting to fp32.
+  - Changed `Qwen2_5_VLForConditionalGenerationSimple.__init__` to pass parent `config.torch_dtype` into the visual tower.
+  - Added `fastvideo/tests/encoders/test_qwen2_5_vl_vision_dtype.py` with tiny-config tests for parent string dtype, parent `torch.dtype`, vision override, fp32 fallback, and full parent-to-visual constructor propagation.
+- Local syntax-only AST parse passed for:
+  - `fastvideo/models/encoders/qwen2_5_vl_custom.py`
+  - `fastvideo/tests/encoders/test_qwen2_5_vl_vision_dtype.py`
+- Local pytest was not run.
+- Modal L40S targeted validation passed with local patch applied:
+  - App: `ap-pZmxjLGQ8YtuIuz7c0TSta`
+  - Command: `pytest fastvideo/tests/encoders/test_qwen2_5_vl_vision_dtype.py -q`
+  - Result: `5 passed, 16 warnings in 0.23s`
+  - Launcher used `uvx --from modal modal run fastvideo/tests/modal/launch_l40s_job.py --install-extra none --apply-local-patch --command "pytest fastvideo/tests/encoders/test_qwen2_5_vl_vision_dtype.py -q"`.
+  - The first launch attempt with `python -m modal ...` failed locally before contacting Modal because `/home/toolbox/venv/bin/python` had no `modal` module. No repo state changed from that failure.
 
 ## GitHub Context
 - `gh issue view 1578 -R hao-ai-lab/FastVideo --json ...` reviewed at 2026-07-10T08:40Z.
