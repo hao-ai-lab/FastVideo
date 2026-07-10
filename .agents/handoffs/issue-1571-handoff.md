@@ -15,9 +15,9 @@
 - Branch: `issue/1571-flaky-gpu-test-retry`
 - Base: `origin/main` at `9d909f5f0 [test]: remove dead and duplicate tests (-489 lines) (#1556)`
 - Handoff path: `.agents/handoffs/issue-1571-handoff.md`
-- Current stage: Stage 1 - Deep Dive And Plan
-- Implementation begun: no. Stage 1 is analysis/planning only.
-- Last updated: 2026-07-10T08:40:26Z
+- Current stage: Stage 2 - Implement The User-Directed Fix
+- Implementation begun: yes. User approved the recommended central Modal pytest rerun approach.
+- Last updated: 2026-07-10T10:23:10Z
 
 ## Stage 0 Notes
 
@@ -52,6 +52,11 @@
   - #1389 `[ci] Modal: enable Flash Attention 3 on H100 perf tests with build cache`, ready-for-review, not draft. Modal/perf infrastructure, not pytest rerun support.
   - #1494 and #1183 are attention-related but not focused on CI retry behavior.
 - No PR draft status was changed.
+- Stage 2 re-check on 2026-07-10T10:10:42Z:
+  - Verified `gh` identity as `macthecadillac`.
+  - Issue #1571 remains OPEN with no comments and no assignees.
+  - Focused open PR search for issue number/title/`pytest-rerunfailures`/`--only-rerun`/reruns found no direct implementation of this issue.
+  - No PR draft status was changed.
 
 ## Investigation Log
 
@@ -159,7 +164,52 @@
 - Recommended approach: central pytest-rerunfailures support in Modal orchestrators with a transient-only regex, plus docs.
 - Awaiting user guidance before Stage 2 implementation.
 
+## Selected Approach
+
+- User approved the Stage 1 recommendation on 2026-07-10.
+- Implement Approach B:
+  - Add `pytest-rerunfailures` to the test extra.
+  - Add one Modal-local helper for retry args and transient regex.
+  - Apply it centrally to `fastvideo/tests/modal/pr_test.py` and `fastvideo/tests/modal/ssim_test.py`.
+  - Add focused static contract coverage.
+  - Update CI/testing docs.
+
+## Stage 2 Implementation Log
+
+- Implemented central Modal pytest retry wiring:
+  - Added `fastvideo/tests/modal/pytest_retry.py` with shared `pytest-rerunfailures` args, retry count `2`, delay `10s`, and a conservative transient-only regex.
+  - Updated `fastvideo/tests/modal/pr_test.py` to compute `PYTEST_ADDOPTS` from the cloned repo's helper after checkout, so Modal does not need to mount helper files beside the entrypoint.
+  - Updated `fastvideo/tests/modal/ssim_test.py` to append the same retry args to each SSIM subprocess pytest command.
+  - Added `pytest-rerunfailures` to the `test` extra in `pyproject.toml`.
+  - Added static contract coverage in `fastvideo/tests/contract/test_ci_pytest_reruns.py`.
+  - Updated `docs/contributing/ci_architecture.md` and `docs/contributing/testing.md` with durable retry policy documentation.
+- Local cleanup:
+  - `uv run --with modal ... --help` was accidentally started from the repo without `--no-project`; it began resolving FastVideo dependencies and created a small `.venv`.
+  - Stopped that process and removed the generated `.venv`.
+
+## Validation Log
+
+- Do not run project tests locally rule followed; validation was run on Modal L40S through `/tmp/fastvideo-worktrees/interleavethinker-launcher/fastvideo/tests/modal/launch_l40s_job.py`.
+- Failed validation attempt 1:
+  - Command:
+    `uv run --no-project --with modal python -m modal run /tmp/fastvideo-worktrees/interleavethinker-launcher/fastvideo/tests/modal/launch_l40s_job.py --install-extra test --no-build-kernel --apply-local-patch --patch-paths "pyproject.toml,fastvideo/tests/modal/pr_test.py,fastvideo/tests/modal/ssim_test.py,fastvideo/tests/modal/pytest_retry.py,fastvideo/tests/contract/test_ci_pytest_reruns.py,docs/contributing/ci_architecture.md,docs/contributing/testing.md" --command "pytest fastvideo/tests/contract/test_ci_test_collection.py fastvideo/tests/contract/test_ci_pytest_reruns.py -q"`
+  - Modal URL: https://modal.com/apps/hao-ai-lab/main/ap-r6oqddOSxQlgIduaTgx2Jq
+  - Result: failed before tests. `uv pip install -e '.[test]'` attempted to build `fastvideo-kernel==0.3.2` from sdist and failed because `cutlass/cutlass.h` was missing from the package build context.
+  - Assessment: unrelated to this CI retry patch; the targeted static tests do not require installing FastVideo or building kernels.
+- Failed validation attempt 2:
+  - Command used `--install-extra none` and `uv pip install pytest` in the remote command.
+  - Modal URL: https://modal.com/apps/hao-ai-lab/main/ap-njpA3gOITr1UJ4QO3DdqD6
+  - Result: failed before tests with `/bin/bash: line 1: uv: command not found` because `--install-extra none` skips environment sourcing that places `uv` on PATH.
+  - Assessment: command setup issue only.
+- Passing validation:
+  - Command:
+    `uv run --no-project --with modal python -m modal run /tmp/fastvideo-worktrees/interleavethinker-launcher/fastvideo/tests/modal/launch_l40s_job.py --install-extra none --no-build-kernel --apply-local-patch --patch-paths "pyproject.toml,fastvideo/tests/modal/pr_test.py,fastvideo/tests/modal/ssim_test.py,fastvideo/tests/modal/pytest_retry.py,fastvideo/tests/contract/test_ci_pytest_reruns.py,docs/contributing/ci_architecture.md,docs/contributing/testing.md" --command "source $HOME/.local/bin/env 2>/dev/null || true; source /opt/venv/bin/activate 2>/dev/null || true; uv pip install pytest && pytest fastvideo/tests/contract/test_ci_test_collection.py fastvideo/tests/contract/test_ci_pytest_reruns.py -q"`
+  - Modal URL: https://modal.com/apps/hao-ai-lab/main/ap-Z7mqFKXntYOTP64dNof6m8
+  - Result: passed, `6 passed in 0.04s`.
+  - Modal return summary: local patch applied, `install_extra=none`, `build_kernel=False`, commit `732f9df86c5c67b6f55a7dd1e7400e1b78d9e69a`.
+
 ## Next Steps
 
-- Commit and push this handoff-only Stage 1 state.
-- Present Stage 1 report to the user and ask whether to implement the recommended approach.
+- Stage and commit signed implementation changes.
+- Push branch.
+- Proceed to Stage 3 review/adjudication loop before presenting the draft PR message.
