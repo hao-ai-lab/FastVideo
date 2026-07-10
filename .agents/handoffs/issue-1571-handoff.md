@@ -11,13 +11,13 @@
 - Created: 2026-07-09T16:47:04Z
 - Updated: 2026-07-09T16:47:12Z
 - Repo: `hao-ai-lab/FastVideo`
-- Worktree: `/tmp/fastvideo-worktrees/issue-1571-flaky-gpu-test-retry`
+- Worktree: `/tmp/fastvideo_worktrees/issue_1571_flaky_gpu_test_retry`
 - Branch: `issue/1571-flaky-gpu-test-retry`
 - Base: `origin/main` at `9d909f5f0 [test]: remove dead and duplicate tests (-489 lines) (#1556)`
 - Handoff path: `.agents/handoffs/issue-1571-handoff.md`
-- Current stage: Stage 3 - Review, Adjudicate, And Iterate
+- Current stage: Stage 4 - Create Draft PR And Address Bot Reviews
 - Implementation begun: yes. User approved the recommended central Modal pytest rerun approach.
-- Last updated: 2026-07-10T10:35:28Z
+- Last updated: 2026-07-10T12:29:36Z
 
 ## Stage 0 Notes
 
@@ -296,7 +296,26 @@ No direct GPU memory impact. The change can extend wall time for transient infra
 - End-to-end Modal CI lanes were not run through `pr_test.py::run_unit_test` or SSIM. Static contract validation verifies dependency/wiring/docs, but not a full Modal lane executing pytest with the retry args in a real suite.
 - Handoff remains active and tracked. Before Stage 4 draft PR creation, transfer needed context into the PR body, remove `.agents/handoffs/issue-1571-handoff.md` with `git rm`, commit and push that deletion, and verify the branch no longer contains the handoff.
 
+## Stage 4 Log
+
+- User explicitly requested the next stage on 2026-07-10.
+- Re-checked GitHub state with `gh` as `macthecadillac`:
+  - Issue #1571 remains open with no comments and no assignees.
+  - No existing PR for `macthecadillac:issue/1571-flaky-gpu-test-retry`.
+  - Focused related PR search found no direct implementation of #1571.
+- Moved active issue worktree from `/tmp/fastvideo-worktrees/issue-1571-flaky-gpu-test-retry` to `/tmp/fastvideo_worktrees/issue_1571_flaky_gpu_test_retry` so the mypy pre-commit hook can run from a Python-valid directory basename.
+- Final Stage 4 pre-PR gate:
+  - Command: `uv run --no-project --with pre-commit pre-commit run --all-files`
+  - Worktree: `/tmp/fastvideo_worktrees/issue_1571_flaky_gpu_test_retry`
+  - Result: passed.
+  - Hooks passed: yapf, ruff, codespell, PyMarkdown, actionlint, mypy, check-filenames, suggestion.
+- PR body transferred to `/tmp/fastvideo_issue_1571_pr_body.md`.
+- Next: remove this handoff with `git rm`, commit and push deletion, verify absence from branch, then create draft PR.
+
 ## Next Steps
 
 - Commit and push final handoff state.
-- Present Stage 3 summary and full draft PR message to the user without opening a PR.
+- Remove this handoff with `git rm`, commit and push the deletion, and verify the branch tree no longer contains the handoff.
+- Create the draft PR from `/tmp/fastvideo_issue_1571_pr_body.md`.
+- Add `macthecadillac` to issue #1571 assignees after draft PR creation.
+- Poll for GitHub bot reviews for about four to five minutes and address only accepted findings.
