@@ -17,7 +17,7 @@
 - Handoff path: `.agents/handoffs/issue-1571-handoff.md`
 - Current stage: Stage 2 - Implement The User-Directed Fix
 - Implementation begun: yes. User approved the recommended central Modal pytest rerun approach.
-- Last updated: 2026-07-10T10:23:10Z
+- Last updated: 2026-07-10T10:25:01Z
 
 ## Stage 0 Notes
 
@@ -208,8 +208,13 @@
   - Result: passed, `6 passed in 0.04s`.
   - Modal return summary: local patch applied, `install_extra=none`, `build_kernel=False`, commit `732f9df86c5c67b6f55a7dd1e7400e1b78d9e69a`.
 
+## Commits And Pushes
+
+- `732f9df86c5c67b6f55a7dd1e7400e1b78d9e69a` - signed Stage 1 handoff commit, pushed to `origin/issue/1571-flaky-gpu-test-retry`.
+- `8923d8b60` - signed Stage 2 implementation commit `[ci]: add transient pytest reruns for modal tests`, pushed to `origin/issue/1571-flaky-gpu-test-retry`.
+- Pending: handoff-only commit recording this commit/push status.
+
 ## Next Steps
 
-- Stage and commit signed implementation changes.
-- Push branch.
+- Commit and push this handoff-only status update.
 - Proceed to Stage 3 review/adjudication loop before presenting the draft PR message.
