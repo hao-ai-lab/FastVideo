@@ -699,8 +699,8 @@ class IndividualTokenRefinerBlock(nn.Module):
         if mask is None:
             attn_output = self.attn(q, k, v) 
         else:
-            from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
-            attn_metadata = FlashAttnMetadataBuilder().build(
+            from fastvideo.attention.backends.sdpa import SDPAMetadataBuilder
+            attn_metadata = SDPAMetadataBuilder().build(
                 current_timestep=0,
                 attn_mask=mask,
             )

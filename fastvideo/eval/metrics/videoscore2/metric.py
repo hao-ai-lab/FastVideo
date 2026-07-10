@@ -158,7 +158,13 @@ class VideoScore2Metric(BaseMetric):
         infer_fps: float = 2.0,
         max_tokens: int = 1024,
         temperature: float = 0.7,
-        do_sample: bool = True,
+        # Greedy by default — eval metrics should be deterministic on a
+        # given input.  Upstream's vs2_inference.py defaults to
+        # do_sample=True with temperature=0.7, but stochastic decoding
+        # makes the score irreproducible run-to-run AND can land the
+        # chain-of-thought outside the regex anchor (yielding score=0).
+        # Pass do_sample=True explicitly if you want BoN/ensembling.
+        do_sample: bool = False,
     ) -> None:
         super().__init__()
         self._model_name = model_name
@@ -214,11 +220,23 @@ class VideoScore2Metric(BaseMetric):
 
     def _subsample_frames(self,
                           pil_frames: list[Image.Image],
+                          source_fps: float | None,
                           max_frames: int = 64,
                           max_resolution: int = 960) -> list[Image.Image]:
-        """Subsample to ~infer_fps worth of frames (max 64), resize if too large."""
+        """Subsample to ``infer_fps`` worth of frames, capped at ``max_frames``.
+
+        Mirrors upstream's path-based qwen_vl_utils flow, which samples at
+        ``infer_fps``.  Without ``source_fps`` we can't convert frame count
+        to duration, so we fall back to ``max_frames`` evenly spaced — the
+        pre-fps-derivation behavior.  Pass ``sample["fps"]`` from the
+        caller to get the upstream-aligned sampling rate.
+        """
         n = len(pil_frames)
-        target = min(n, max_frames)
+        if source_fps is not None and source_fps > 0:
+            duration = n / source_fps
+            target = max(1, min(max_frames, int(round(duration * self.infer_fps))))
+        else:
+            target = min(n, max_frames)
         if target < n:
             indices = np.linspace(0, n - 1, target, dtype=int)
             pil_frames = [pil_frames[i] for i in indices]
@@ -244,7 +262,11 @@ class VideoScore2Metric(BaseMetric):
             text = text[0] if text else ""
 
         pil_frames = self._tensor_to_pil_list(video)
-        pil_frames = self._subsample_frames(pil_frames)
+        source_fps = sample.get("fps")
+        pil_frames = self._subsample_frames(
+            pil_frames,
+            source_fps=float(source_fps) if source_fps is not None else None,
+        )
         user_prompt = VS2_QUERY_TEMPLATE.substitute(t2v_prompt=text)
 
         messages = [{

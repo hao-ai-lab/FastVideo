@@ -60,7 +60,7 @@ list_port_pids() {
 }
 
 if [[ "${1:-}" == "--stop" ]]; then
-  for pat in 'apps/dreamverse/server/main.py' 'main.py --host 0.0.0.0 --port' 'next dev --port' 'next-server (v'; do
+  for pat in 'apps/dreamverse/dreamverse/main.py' 'dreamverse-server --host 0.0.0.0 --port' 'next dev --port' 'next-server (v'; do
     terminate_pattern "${pat}"
   done
   if [[ -n "${2:-}" ]] && [[ "${2}" =~ ^[0-9]+$ ]]; then
@@ -176,8 +176,9 @@ bail() { echo "error: $*" >&2; exit 3; }
 
 [[ -d "${REPO_ROOT}/apps/dreamverse" ]] \
   || bail "REPO_ROOT '${REPO_ROOT}' does not contain apps/dreamverse/. Are you on a migration branch?"
-[[ -x "${REPO_ROOT}/apps/dreamverse/scripts/dreamverse-server" ]] \
-  || bail "wrapper script missing or not executable: apps/dreamverse/scripts/dreamverse-server"
+DREAMVERSE_SERVER="$(command -v dreamverse-server 2>/dev/null || true)"
+[[ -n "${DREAMVERSE_SERVER}" ]] && [[ -x "${DREAMVERSE_SERVER}" ]] \
+  || bail "dreamverse-server not executable or not in PATH (run: uv pip install -e \".[dreamverse]\")"
 
 CONDA_ENV_PYTHON="${DREAMVERSE_PYTHON:-${HOME}/miniconda3/envs/fv-main/bin/python}"
 [[ -x "${CONDA_ENV_PYTHON}" ]] \
@@ -248,7 +249,7 @@ kill_port_pid() {
   done
 }
 
-for pat in "main.py --host 0.0.0.0 --port ${BACKEND_PORT}" "next dev --port ${FRONTEND_PORT}" "NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 next dev --port ${FRONTEND_PORT}"; do
+for pat in "dreamverse-server --host 0.0.0.0 --port ${BACKEND_PORT}" "next dev --port ${FRONTEND_PORT}" "NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 next dev --port ${FRONTEND_PORT}"; do
   terminate_pattern "${pat}"
 done
 kill_port_pid "${BACKEND_PORT}"
@@ -310,14 +311,14 @@ setsid bash -c "
   export CUDAHOSTCXX=${GPP13}
   export NVCC_PREPEND_FLAGS=\"-ccbin ${GCC13} -allow-unsupported-compiler\"
   cd \"${REPO_ROOT}\"
-  exec ./apps/dreamverse/scripts/dreamverse-server --host 0.0.0.0 --port ${BACKEND_PORT}
+  exec \"${DREAMVERSE_SERVER}\" --host 0.0.0.0 --port ${BACKEND_PORT}
 " > "${backend_log}" 2>&1 < /dev/null &
 disown
 
 # Wait briefly, then resolve actual python PID (the inner process, not the
 # wrapper bash).
 sleep 4
-backend_pid="$(pgrep -f "main.py --host 0.0.0.0 --port ${BACKEND_PORT}" | head -1 || true)"
+backend_pid="$(pgrep -f "dreamverse-server --host 0.0.0.0 --port ${BACKEND_PORT}" | head -1 || true)"
 
 if [[ -z "${backend_pid}" ]]; then
   echo "error: backend failed to spawn. Last 30 lines of log:" >&2

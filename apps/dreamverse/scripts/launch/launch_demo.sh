@@ -7,12 +7,13 @@
 # Defaults match internal/ui:
 #   * BE = dreamverse-server (8009) — full FE compatibility
 #   * FE = Next.js dev:devtools (5274)
+# The current web package scripts bind 5299; pass FE_PORT=5299 explicitly.
 #
 # Switch BE to fastvideo serve --config (typed-only path):
 #   BE_FLAVOR=fastvideo bash launch_demo.sh
 #
 # Other env knobs:
-#   BE_PORT=8010 FE_PORT=5274 bash launch_demo.sh
+#   BE_PORT=8010 FE_PORT=5299 bash launch_demo.sh
 #   NO_FRONTEND=1 bash launch_demo.sh        # backend only
 #   NO_BROWSER=1 bash launch_demo.sh         # skip xdg-open
 

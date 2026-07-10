@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the Dreamverse Next.js frontend in dev mode on port 5274
+# Launch the Dreamverse Next.js frontend in dev mode on port 5299
 # (the devtools-enabled build the e2e tests target).
 #
 # Usage:
@@ -40,7 +40,7 @@ fi
 
 case "${FRONTEND_MODE}" in
   devtools)
-    echo "[launch-demo] starting Next.js dev:devtools (port 5274)"
+    echo "[launch-demo] starting Next.js dev:devtools (port 5299)"
     exec npm run dev:devtools -- "$@"
     ;;
   dev)
@@ -48,7 +48,7 @@ case "${FRONTEND_MODE}" in
     exec npm run dev -- "$@"
     ;;
   single5s)
-    echo "[launch-demo] starting Next.js dev:single5s (port 5274)"
+    echo "[launch-demo] starting Next.js dev:single5s (port 5299)"
     exec npm run dev:single5s -- "$@"
     ;;
 esac

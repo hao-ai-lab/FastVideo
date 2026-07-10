@@ -1,7 +1,11 @@
 name: pre-commit
 
 on:
-  pull_request:
+  # pull_request_target instead of pull_request: the workflow definition and
+  # the hook config are always taken from the BASE branch, so fork /
+  # first-time-contributor PRs run immediately without a maintainer clicking
+  # "Approve and run". The PR head is checked out as data only.
+  pull_request_target:
     branches: [main]
   workflow_call:
     inputs:
@@ -15,12 +19,25 @@ permissions:
 
 jobs:
   pre-commit:
-    if: github.event_name == 'workflow_call' || github.event.pull_request.draft != true
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
       with:
         ref: ${{ inputs.ref || '' }}
+    # For PR events, lint the PR head — but keep the hook definitions from
+    # the base branch so an untrusted PR cannot alter what gets executed.
+    - name: Save trusted hook config
+      if: github.event_name == 'pull_request_target'
+      run: cp .pre-commit-config.yaml "$RUNNER_TEMP/trusted-pre-commit-config.yaml"
+    - uses: actions/checkout@v4
+      if: github.event_name == 'pull_request_target'
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        persist-credentials: false
+    - name: Restore trusted hook config
+      if: github.event_name == 'pull_request_target'
+      run: cp "$RUNNER_TEMP/trusted-pre-commit-config.yaml" .pre-commit-config.yaml
     - uses: actions/setup-python@v5
       with:
         python-version: "3.12"

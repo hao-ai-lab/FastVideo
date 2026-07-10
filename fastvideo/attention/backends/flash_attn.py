@@ -1,15 +1,39 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import importlib.util
 import os
+
 import torch
 import torch.nn.functional as F
 from dataclasses import dataclass
 
-try:
-    from fastvideo.attention.utils.flash_attn_cute import flash_attn_func
+from fastvideo import envs
+from fastvideo.attention.backends.abstract import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionMetadata,
+    AttentionMetadataBuilder,
+)
+from fastvideo.logger import init_logger
 
+logger = init_logger(__name__)
+
+# FA4 (flash_attn.cute) is explicit opt-in via FASTVIDEO_FA4=1, mirroring the
+# kernel package's FASTVIDEO_VSA_CUTEDSL: its CuTeDSL kernels JIT-compile per
+# shape family and can fail at runtime on some arch/shape combinations, so it
+# is never auto-selected just because it is installed. Below sm90 a capability
+# gate in flash_attn_cute routes to FA2 the calls FA4 cannot serve there:
+# grad-enabled (its backward asserts sm90+) and GQA (pack_gqa fails CuTeDSL
+# JIT, observed on sm_89).
+if envs.FASTVIDEO_FA4:
+    try:
+        from fastvideo.attention.utils.flash_attn_cute import flash_attn_func
+    except ImportError as e:
+        raise RuntimeError(f"FASTVIDEO_FA4=1 but flash_attn.cute (FA4) is not usable ({e}); "
+                           "fix the FA4 install (see the flash-attn-4 pin in pyproject.toml) "
+                           "or unset FASTVIDEO_FA4.") from e
     fa_version = "4"
-except ImportError:
+else:
     try:
         # Wrap FA3 in torch.library.custom_op so torch.compile can graph through
         # it (otherwise inductor sees the raw `flash_attn_interface` Python call
@@ -22,6 +46,12 @@ except ImportError:
         from flash_attn import flash_attn_func as flash_attn_2_func
         flash_attn_func = flash_attn_2_func
         fa_version = "2"
+    try:
+        if importlib.util.find_spec("flash_attn.cute") is not None:
+            logger.info("flash_attn.cute (FA4) is installed but not enabled; "
+                        "set FASTVIDEO_FA4=1 to use it for inference.")
+    except ImportError:
+        pass
 
 # torch.compile traceability: the FA4/cute path (fa_version=="4") is
 # already a registered torch.library custom op, so dynamo treats it as a
@@ -88,9 +118,10 @@ if fa_version in ("2", "3"):
             return _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal)
         return torch.ops.fastvideo._flash_attn_default_forward(q, k, v, softmax_scale, causal)
 elif fa_version == "4":
-    # FA4 path: `flash_attn_func` is already a torch.library custom op
-    # (registered in `fastvideo.attention.utils.flash_attn_cute`), so a
-    # passthrough is enough — no extra registration needed.
+    # FA4 path: `flash_attn_func` (from `flash_attn_cute`) goes through a
+    # registered torch.library custom op (with an FA4 backward on sm90+;
+    # grad-enabled and GQA calls below sm90 route to FA2), so a passthrough
+    # is enough — no extra registration needed.
     def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
         return flash_attn_func(q, k, v, softmax_scale=softmax_scale, causal=causal)
 else:
@@ -100,15 +131,6 @@ else:
     raise RuntimeError(f"Unsupported FlashAttention version: {fa_version!r} — expected "
                        f"'2', '3', or '4' from the import probe above.")
 
-from fastvideo.attention.backends.abstract import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionMetadata,
-    AttentionMetadataBuilder,
-)
-from fastvideo.logger import init_logger
-
-logger = init_logger(__name__)
 logger.info("Using FlashAttention-%s backend", fa_version)
 
 # FP4 FA4 support: quantize Q/K to NVFP4 E2M1 for block-scaled MMA on Blackwell.
@@ -265,6 +287,28 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: FlashAttnMetadata,
     ):
+        # FlashAttention kernels only accept fp16/bf16, but some pipelines leak
+        # fp32 activations into attention (observed: LTX2 video self-attn under
+        # SP). Cast through bf16 and restore, matching TORCH_SDPA's tolerance.
+        orig_dtype = query.dtype
+        if orig_dtype not in (torch.float16, torch.bfloat16):
+            logger.warning_once(f"FLASH_ATTN received {orig_dtype} inputs; casting to "
+                                f"bfloat16 for the kernel and restoring on output.")
+            query = query.to(torch.bfloat16)
+            key = key.to(torch.bfloat16)
+            value = value.to(torch.bfloat16)
+        output = self._forward_impl(query, key, value, attn_metadata)
+        if output.dtype != orig_dtype:
+            output = output.to(orig_dtype)
+        return output
+
+    def _forward_impl(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: FlashAttnMetadata,
+    ):
         if (attn_metadata is not None and hasattr(attn_metadata, "attn_mask") and attn_metadata.attn_mask is not None):
             from fastvideo.attention.utils.flash_attn_no_pad import (
                 flash_attn_no_pad,
@@ -295,7 +339,11 @@ class FlashAttentionImpl(AttentionImpl):
                 )
 
             qkv = torch.stack([query, key, value], dim=2)
-            attn_mask_padded = F.pad(attn_mask, (qkv.shape[1] - attn_mask.shape[1], 0), value=True)
+            key_padding_mask = _key_padding_mask_from_attn_mask(attn_mask, attn_mask.shape[-1]).to(device=query.device)
+            if key_padding_mask.shape[-1] > qkv.shape[1]:
+                raise ValueError("Invalid key padding mask length for FLASH_ATTN: "
+                                 f"expected at most {qkv.shape[1]}, got {key_padding_mask.shape[-1]}")
+            attn_mask_padded = F.pad(key_padding_mask, (qkv.shape[1] - key_padding_mask.shape[-1], 0), value=True)
             output = flash_attn_no_pad(qkv, attn_mask_padded, causal=False, dropout_p=0, softmax_scale=None)
         elif self.nvfp4_fa4:
             output = self._forward_nvfp4(query, key, value)

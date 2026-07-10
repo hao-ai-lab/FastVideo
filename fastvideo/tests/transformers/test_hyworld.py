@@ -15,6 +15,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
@@ -24,12 +25,24 @@ os.environ["MASTER_PORT"] = "29503"
 
 MODEL_PATH = maybe_download_model("FastVideo/HY-WorldPlay-Bidirectional-Diffusers")
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
-REFERENCE_LATENT = -197132.85557549074  # Pre-computed reference value
+REFERENCE_LATENTS = {
+    AttentionBackendEnum.FLASH_ATTN: -197132.85557549074,
+    AttentionBackendEnum.TORCH_SDPA: -211007.95158730447,
+}
 
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_hyworld_transformer():
     transformer_path = TRANSFORMER_PATH
+
+    # An env-forced backend is knowable before the multi-GB download and GPU
+    # load; the authoritative check on the layer's resolved backend still runs
+    # after construction below.
+    forced_backend_name = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
+    if forced_backend_name:
+        forced_backend = getattr(AttentionBackendEnum, forced_backend_name, None)
+        if forced_backend is not None and forced_backend not in REFERENCE_LATENTS:
+            pytest.skip(f"HYWorld transformer test has no reference latent for {forced_backend_name}.")
 
     sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()
@@ -51,6 +64,9 @@ def test_hyworld_transformer():
     loader = TransformerLoader()
     model = loader.load(transformer_path, args).to(device, dtype=precision)
     model.eval()
+    attention_backend = model.double_blocks[0].attn.backend
+    if attention_backend not in REFERENCE_LATENTS:
+        pytest.skip(f"HYWorld transformer test has no reference latent for {attention_backend}.")
 
     total_params = sum(p.numel() for p in model.parameters())
     weight_sum = sum(p.to(torch.float64).sum().item() for p in model.parameters())
@@ -147,9 +163,10 @@ def test_hyworld_transformer():
 
     latent = output.double().sum().item()
 
-    diff = abs(REFERENCE_LATENT - latent)
-    relative_diff = diff / abs(REFERENCE_LATENT)
-    logger.info(f"Reference latent: {REFERENCE_LATENT}, Current latent: {latent}")
+    reference_latent = REFERENCE_LATENTS[attention_backend]
+    diff = abs(reference_latent - latent)
+    relative_diff = diff / abs(reference_latent)
+    logger.info(f"Reference latent: {reference_latent}, Current latent: {latent}")
     logger.info(f"Absolute diff: {diff}, Relative diff: {relative_diff * 100:.4f}%")
 
     # Allow 0.5% relative difference

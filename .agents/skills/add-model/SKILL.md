@@ -422,8 +422,6 @@ matching `*secret*`.
   script shape.
 - `scripts/checkpoint_conversion/wan_to_diffusers.py` for legacy regex mapping
   reference only.
-- `REVIEW.md` is historical; its decisions are incorporated here as of
-  2026-04-30.
 
 ## Changelog
 
@@ -431,7 +429,7 @@ matching `*secret*`.
 |---|---|
 | 2026-04-24 | Initial FastVideo add-model workflow. |
 | 2026-04-30 | Split external setup into `add-model-01-prep`. |
-| 2026-04-30 | Rewrote as manual `/add-model` phase workflow and incorporated `REVIEW.md` decisions. |
+| 2026-04-30 | Rewrote as manual `/add-model` phase workflow and incorporated prior review decisions. |
 | 2026-04-30 | Extracted early parity scaffolding into `add-model-02-parity` and moved it before conversion/component implementation. |
 | 2026-04-30 | Added component reuse proof gate, bucket-specific porting skills, and parity PASS requirement for reused components. |
 | 2026-04-30 | Split prototype, conversion, and parity-debug phases; added conversion skill for monolithic and separate checkpoint layouts. |

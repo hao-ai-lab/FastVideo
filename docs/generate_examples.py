@@ -12,6 +12,13 @@ ROOT_DIR_RELATIVE = '../..'
 EXAMPLE_DIR = ROOT_DIR / "examples"
 EXAMPLE_DOC_DIR = ROOT_DIR / "docs/getting_started/examples"
 GITHUB_REPO = "hao-ai-lab/FastVideo"  # Update this to your repo
+GENERATED_DOC_PREFIXES = (
+    "examples/",
+    "getting_started/examples/",
+    "inference/examples/",
+    "training/examples/",
+    "distillation/examples/",
+)
 
 
 def fix_case(text: str) -> str:
@@ -524,14 +531,21 @@ def generate_examples(generate_main_index: bool = False) -> None:
             f.write(examples_index.generate())
 
 
-def on_pre_build_hook(config, **kwargs):
+def on_pre_build(config, **kwargs):
     """
     MkDocs hook to generate examples before building the documentation.
-    This function is called automatically by the mkdocs-simple-hooks plugin.
+    This function is called automatically by MkDocs' native hook system.
     """
     print("Generating example documentation...")
     generate_examples(generate_main_index=True)
     print("Example documentation generated successfully!")
+
+
+def on_page_context(context, page, **kwargs):
+    """Hide repository edit actions for pages that only exist at build time."""
+    if page.file.src_uri.startswith(GENERATED_DOC_PREFIXES):
+        page.edit_url = None
+    return context
 
 
 if __name__ == "__main__":

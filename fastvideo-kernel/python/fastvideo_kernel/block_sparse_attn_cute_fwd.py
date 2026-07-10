@@ -46,8 +46,7 @@ def _load_fa4_cute():
     return BlockSparseTensorsTorch, _flash_attn_fwd
 
 
-# FA4 BSA fwd uses (m_block_size, n_block_size); m_block_size=128 is the
-# Q-side tile, kv_block_size comes from the caller's VSA logical KV block.
+# Q-side tile size; kv_block_size comes from the caller's VSA logical KV block.
 _M_BLOCK_SIZE_DEFAULT = 128
 
 
@@ -182,18 +181,18 @@ def _cute_forward(
         block_size=(q_sparse_block_size, kv_block_size),
     )
 
+    # _flash_attn_fwd returns (out, lse, p, row_max); keep the first two.
     out, lse = _flash_attn_fwd(
         q_bshd,
         k_bshd,
         v_bshd,
-        m_block_size=_M_BLOCK_SIZE_DEFAULT,
-        n_block_size=kv_block_size,
+        tile_mn=(_M_BLOCK_SIZE_DEFAULT, kv_block_size),
         mask_mod=_build_vbs_mask_mod(kv_block_size),
         block_sparse_tensors=sparse_tensors,
         aux_tensors=[variable_block_sizes],
         causal=False,
         return_lse=True,
-    )
+    )[:2]
     return out, lse
 
 

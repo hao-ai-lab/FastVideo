@@ -1,0 +1,12 @@
+{
+  "metric": "audio.audiobox_aesthetics",
+  "score": 6.900569438934326,
+  "details": {
+    "CE": 5.3528289794921875,
+    "CU": 6.002830982208252,
+    "PC": 2.6171281337738037,
+    "PQ": 6.900569438934326,
+    "upstream": "facebookresearch/audiobox-aesthetics",
+    "asset_audio": "fastvideo/tests/eval/asset/ltx2.wav"
+  }
+}

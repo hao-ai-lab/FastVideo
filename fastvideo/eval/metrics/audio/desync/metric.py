@@ -77,11 +77,21 @@ def _segment_video(frames: torch.Tensor) -> torch.Tensor:
 
 
 def _load_audio_waveform(audio_path: str, resample_cache: dict[int, Any]) -> torch.Tensor:
-    """Load *audio_path* at 16 kHz mono, native length. Returns ``(N,)``."""
-    import torchaudio
-    waveform, sr = torchaudio.load(audio_path)
-    waveform = waveform.mean(dim=0)
+    """Load *audio_path* at 16 kHz mono, native length. Returns ``(N,)``.
+
+    Decode with librosa (libsndfile) rather than ``torchaudio.load``: recent
+    torchaudio routes ``load`` through torchcodec, whose shared libraries fail
+    to load when the installed build doesn't match the pinned torch. The other
+    audio metrics already decode via librosa, and the asset / PyAV-extracted
+    clips are PCM WAV, so libsndfile reproduces the samples bit-for-bit — the
+    score is unchanged. ``sr=None`` keeps the native rate so the torchaudio
+    resampler below is identical to before.
+    """
+    import librosa
+    waveform_np, sr = librosa.load(audio_path, sr=None, mono=True)
+    waveform = torch.from_numpy(waveform_np)
     if sr != _AUDIO_SR:
+        import torchaudio
         if sr not in resample_cache:
             resample_cache[sr] = torchaudio.transforms.Resample(sr, _AUDIO_SR)
         waveform = resample_cache[sr](waveform)
@@ -134,7 +144,7 @@ class DeSyncMetric(BaseMetric):
     needs_gpu = True
     is_set_metric = False
     backbone = "synchformer"
-    dependencies = ["torchaudio"]
+    dependencies = ["librosa", "torchaudio"]
 
     def __init__(self, src_fps: float | None = None) -> None:
         super().__init__()

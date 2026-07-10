@@ -34,6 +34,9 @@ class TestAbsMaxFP8LinearMethod(unittest.TestCase):
             method._convert_scale(scale)
 
     def test_create_weights_rejects_invalid_dtype(self):
+        # float64 is outside the supported set (bf16/fp16/fp32). The test
+        # originally passed float32, which create_weights has accepted since
+        # PR #981 — it never ran in CI, so the mismatch went unnoticed.
         method = AbsMaxFP8LinearMethod()
         layer = nn.Module()
         with self.assertRaisesRegex(AssertionError, "only supports"):
@@ -43,7 +46,7 @@ class TestAbsMaxFP8LinearMethod(unittest.TestCase):
                 output_partition_sizes=[3],
                 input_size=2,
                 output_size=3,
-                params_dtype=torch.float32,
+                params_dtype=torch.float64,
             )
 
     def test_absmax_fp8_parameter_weight_loader(self):

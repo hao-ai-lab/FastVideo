@@ -35,6 +35,11 @@ class PipelineConfig:
     flow_shift: float | None = None
     flow_shift_sr: float | None = None
     disable_autocast: bool = False
+    # When True, the scheduler's Euler update runs in fp32 outside the autocast
+    # block (Diffusers-style; avoids BF16 drift over multiple steps). Flux2 sets
+    # this True for reference parity; other models keep the legacy in-autocast
+    # behavior to preserve existing SSIM references.
+    scheduler_step_in_fp32: bool = False
     is_causal: bool = False
 
     # Model configuration
@@ -46,6 +51,12 @@ class PipelineConfig:
     # VAE configuration
     vae_config: VAEConfig = field(default_factory=VAEConfig)
     vae_precision: str = "fp32"
+    # Optional decode-only precision override. When None, the decode stage falls
+    # back to `vae_precision`. This lets a pipeline run a faster, lossless bf16
+    # decode while keeping a higher-precision *encode* (the image/video VAE
+    # encode seeds the denoising trajectory, so lowering its precision can shift
+    # the output for I2V/causal models — decode is output-only and safe to lower).
+    vae_decode_precision: str | None = None
     vae_tiling: bool = True
     vae_sp: bool = True
 
@@ -64,8 +75,9 @@ class PipelineConfig:
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
 
-    # Wan2.2 TI2V parameters
+    # Wan2.2 task modifiers
     ti2v_task: bool = False
+    lucy_edit_task: bool = False
     boundary_ratio: float | None = None
 
     # Compilation
@@ -126,6 +138,15 @@ class PipelineConfig:
             default=PipelineConfig.vae_precision,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for VAE",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}vae-decode-precision",
+            type=str,
+            dest=f"{prefix_with_dot.replace('-', '_')}vae_decode_precision",
+            default=PipelineConfig.vae_decode_precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Optional decode-only VAE precision override (falls back to "
+            "--vae-precision when unset)",
         )
         parser.add_argument(
             f"--{prefix_with_dot}vae-tiling",

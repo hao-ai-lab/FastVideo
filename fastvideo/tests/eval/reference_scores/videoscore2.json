@@ -1,0 +1,18 @@
+{
+  "metric": "videoscore2",
+  "score": 3.6666333333333334,
+  "details": {
+    "visual_quality": 4.0,
+    "text_alignment": 2.9999,
+    "physical_consistency": 4.0,
+    "visual_quality_hard": 4,
+    "text_alignment_hard": 3,
+    "physical_consistency_hard": 4,
+    "raw_output": "\n<think>\nmulti-dimensional analysis:\nLet me analyze this video based on the provided frames and the text prompt.\n\nText Prompt Analysis:\nThe prompt describes a warm sunny backyard with a tight cinematic close-up of two adults facing each other, where the woman expresses drama about losing someone named Dad, and the man tries to calm her down by telling her to stop being dramatic. In the video, the setting and framing match the description, but the exact dialogue is not clearly conveyed; the emotional tension is present but the specific lines are not verifiable from visuals alone.\n\nVisual Quality Analysis:\nThe video maintains solid visual quality overall. Resolution and detail are good, lighting is warm and consistent with a sunny outdoor scene, and color grading remains cohesive across shots. There are no major distortions or artifacts, and transitions feel smooth. However, there are occasional minor softness and slight noise in some frames, which prevents a perfect top-tier score. Overall, Visual Quality aligns with a strong 4/5.\n\nText-to-Video Alignment Analysis:\nThe video largely reflects the intended scenario: a warm backyard setting, a tight close-up, and two adults facing each other with serious expressions. The emotional dynamics are suggested, but the precise dialogue content cannot be confirmed from visuals alone. Given these constraints, the alignment is moderate rather than perfect, corresponding to a 3/5.\n\nPhysical/Common-sense Consistency:\nInteractions appear natural and coherent within the scene\u2019s context. Body language, spacing, and lighting support a believable outdoor confrontation, with no obvious logical inconsistencies. This dimension is well-supported, warranting a 4/5.\n\nGround-truth scores:\nVisual Quality: 4\nText-to-Video Alignment: 3\nPhysical Consistency: 4\n</think>\n\n(1) visual quality \u2013 clarity, smoothness, artifacts: 4\n(2) text-to-video alignment \u2013 fidelity to the prompt: 3\n(3) physical/common-sense consistency \u2013 naturalness and physics plausibility: 4\n",
+    "upstream": "TIGER-AI-Lab/VideoScore2 (greedy)",
+    "model_name": "TIGER-Lab/VideoScore2",
+    "infer_fps": 2.0,
+    "do_sample": false,
+    "frame_sampler": "fastvideo tensor->PIL, np.linspace at infer_fps*duration (~10 frames for 5s clip); upstream vs2_inference.py uses qwen_vl_utils path-based sampler which picks slightly different frames \u2014 same model, ~1-soft-score difference on the physics dim is the residual gap."
+  }
+}

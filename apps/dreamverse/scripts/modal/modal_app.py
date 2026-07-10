@@ -10,8 +10,9 @@ IMAGE = os.environ.get("DREAMVERSE_IMAGE")
 if not IMAGE:
     raise RuntimeError(
         "DREAMVERSE_IMAGE is required. Set it to a published SHA-specific Dreamverse image, "
-        "for example a dreamverse-backend-cuda12.9.1-sha-* tag or a "
-        "dreamverse-ui-cuda12.9.1-sha-* tag if serving the static UI."
+        "for example a dreamverse-backend-cuda13.0.0-sha-* tag or a "
+        "dreamverse-ui-cuda13.0.0-sha-* tag if serving the static UI. "
+        "CUDA 12 / cu126 images use the corresponding cuda12.6.3 tag."
     )
 
 # ``@modal.web_server`` invokes ``serve()`` directly and bypasses the image
