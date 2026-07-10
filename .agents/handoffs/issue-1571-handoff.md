@@ -15,9 +15,9 @@
 - Branch: `issue/1571-flaky-gpu-test-retry`
 - Base: `origin/main` at `9d909f5f0 [test]: remove dead and duplicate tests (-489 lines) (#1556)`
 - Handoff path: `.agents/handoffs/issue-1571-handoff.md`
-- Current stage: Stage 2 - Implement The User-Directed Fix
+- Current stage: Stage 3 - Review, Adjudicate, And Iterate
 - Implementation begun: yes. User approved the recommended central Modal pytest rerun approach.
-- Last updated: 2026-07-10T10:25:01Z
+- Last updated: 2026-07-10T10:35:28Z
 
 ## Stage 0 Notes
 
@@ -207,14 +207,96 @@
   - Modal URL: https://modal.com/apps/hao-ai-lab/main/ap-Z7mqFKXntYOTP64dNof6m8
   - Result: passed, `6 passed in 0.04s`.
   - Modal return summary: local patch applied, `install_extra=none`, `build_kernel=False`, commit `732f9df86c5c67b6f55a7dd1e7400e1b78d9e69a`.
+- Pre-commit gate:
+  - Initial command from issue worktree:
+    `pre-commit run --all-files`
+  - Result: failed because `pre-commit` was not installed.
+  - Rerun command from issue worktree:
+    `uv run --no-project --with pre-commit pre-commit run --all-files`
+  - Result: all hooks passed except mypy, which failed with `issue-1571-flaky-gpu-test-retry is not a valid Python package name`. This was a worktree path artifact, not a code failure.
+  - Created detached validation worktree at `/tmp/fastvideo_worktrees/issue_1571_precommit` from `HEAD` to avoid the hyphenated worktree basename.
+  - Passing command from detached validation worktree:
+    `uv run --no-project --with pre-commit pre-commit run --all-files`
+  - Passing result:
+    - yapf: Passed
+    - ruff: Passed
+    - codespell: Passed
+    - PyMarkdown: Passed
+    - actionlint: Passed
+    - mypy: Passed
+    - Check filenames: Passed
+    - suggestion: Passed
+  - Detached validation worktree had no file changes after pre-commit and was removed.
 
 ## Commits And Pushes
 
 - `732f9df86c5c67b6f55a7dd1e7400e1b78d9e69a` - signed Stage 1 handoff commit, pushed to `origin/issue/1571-flaky-gpu-test-retry`.
 - `8923d8b60` - signed Stage 2 implementation commit `[ci]: add transient pytest reruns for modal tests`, pushed to `origin/issue/1571-flaky-gpu-test-retry`.
-- Pending: handoff-only commit recording this commit/push status.
+- `624ed3cff` - signed handoff-only commit recording Stage 2 validation/commit/push status, pushed to `origin/issue/1571-flaky-gpu-test-retry`.
+
+## Stage 3 Review Loop
+
+- Review-code sub-agent 1:
+  - Agent id: `019f4b90-0944-7882-8648-8d797dc9b4d7`
+  - Nickname: Copernicus
+  - Prompt summary: use `$review-code` to review `macthecadillac/FastVideo` branch `issue/1571-flaky-gpu-test-retry` for issue #1571; review-only; use `gh` as `macthecadillac`; no local tests/pre-commit; report actionable findings or no findings.
+  - Status: completed.
+  - Findings: no actionable code findings in committed branch `issue/1571-flaky-gpu-test-retry` at `624ed3cff4f4a193e27bb1a8f5bd122bc7977e81`.
+  - Issue fit: branch appears to address hao-ai-lab/FastVideo#1571 by adding pytest-level reruns, using `--only-rerun`, keeping the policy transient-focused, and wiring Modal pytest CI paths instead of broad Buildkite lane retries.
+  - Related branches: `issue/1571-flaky-gpu-test-retry` only; it is the reviewed branch.
+  - Validation gaps noted: existing Modal static contract validation does not prove an end-to-end Modal CI lane executes pytest with the retry options; useful follow-ups would be `pr_test.py::run_unit_test` or a targeted SSIM run on the committed branch.
+  - Adjudicator/fixer: not spawned because there were no actionable findings.
+
+## Draft PR Message
+
+Title:
+
+```text
+[ci]: add transient pytest reruns for Modal tests
+```
+
+Body:
+
+```markdown
+## Summary
+
+- add a shared Modal pytest retry policy using `pytest-rerunfailures`
+- apply transient-only reruns to standard Modal pytest lanes through `PYTEST_ADDOPTS`
+- apply the same rerun arguments to SSIM subprocess pytest commands
+- document the CI retry behavior and add static contract coverage
+
+Fixes #1571.
+
+## Validation
+
+- Modal L40S focused contract validation:
+  - `uv run --no-project --with modal python -m modal run /tmp/fastvideo-worktrees/interleavethinker-launcher/fastvideo/tests/modal/launch_l40s_job.py --install-extra none --no-build-kernel --apply-local-patch --patch-paths "pyproject.toml,fastvideo/tests/modal/pr_test.py,fastvideo/tests/modal/ssim_test.py,fastvideo/tests/modal/pytest_retry.py,fastvideo/tests/contract/test_ci_pytest_reruns.py,docs/contributing/ci_architecture.md,docs/contributing/testing.md" --command "source $HOME/.local/bin/env 2>/dev/null || true; source /opt/venv/bin/activate 2>/dev/null || true; uv pip install pytest && pytest fastvideo/tests/contract/test_ci_test_collection.py fastvideo/tests/contract/test_ci_pytest_reruns.py -q"`
+  - Result: `6 passed in 0.04s`
+- `uv run --no-project --with pre-commit pre-commit run --all-files`
+  - Result: passed from `/tmp/fastvideo_worktrees/issue_1571_precommit`
+
+## Review Loop
+
+- `review-code` sub-agent reviewed `macthecadillac/FastVideo` branch `issue/1571-flaky-gpu-test-retry` for issue #1571 and reported no actionable findings.
+- No adjudicator/fixer sub-agent was spawned because there were no actionable findings to adjudicate.
+
+## GPU Memory Impact
+
+No direct GPU memory impact. The change can extend wall time for transient infrastructure failures by rerunning matching individual pytest failures, but it avoids broad Buildkite lane retries for deterministic failures.
+
+# Checklist
+- [x] I ran pre-commit run --all-files and fixed all issues
+- [x] I added or updated tests for my changes
+- [x] I updated documentation if needed
+- [x] I considered GPU memory impact of my changes
+```
+
+## Remaining Risk
+
+- End-to-end Modal CI lanes were not run through `pr_test.py::run_unit_test` or SSIM. Static contract validation verifies dependency/wiring/docs, but not a full Modal lane executing pytest with the retry args in a real suite.
+- Handoff remains active and tracked. Before Stage 4 draft PR creation, transfer needed context into the PR body, remove `.agents/handoffs/issue-1571-handoff.md` with `git rm`, commit and push that deletion, and verify the branch no longer contains the handoff.
 
 ## Next Steps
 
-- Commit and push this handoff-only status update.
-- Proceed to Stage 3 review/adjudication loop before presenting the draft PR message.
+- Commit and push final handoff state.
+- Present Stage 3 summary and full draft PR message to the user without opening a PR.
