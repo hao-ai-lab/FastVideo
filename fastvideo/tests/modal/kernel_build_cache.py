@@ -228,7 +228,7 @@ def _install_wheel(wheel: Path) -> None:
 def _metadata_matches(path: Path, cache_key: str) -> bool:
     try:
         metadata = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError):
         return False
     return metadata.get("cache_key") == cache_key and metadata.get("schema_version") == CACHE_SCHEMA_VERSION
 
@@ -255,7 +255,7 @@ def _cache_hit(cache_entry: Path, cache_key: str) -> Path | None:
         return None
     try:
         return _find_wheel(cache_entry)
-    except RuntimeError:
+    except (OSError, RuntimeError):
         return None
 
 
@@ -263,8 +263,11 @@ def _store_cache_entry(cache_root: Path, metadata: dict[str, object], wheel: Pat
     cache_key = str(metadata["cache_key"])
     cache_entry = cache_root / cache_key
     if cache_entry.exists():
-        _log(f"cache entry {cache_entry} appeared after build; leaving existing entry in place")
-        return cache_entry
+        if _cache_hit(cache_entry, cache_key) is not None:
+            _log(f"cache entry {cache_entry} appeared after build; leaving existing entry in place")
+            return cache_entry
+        raise RuntimeError(
+            f"Cache entry {cache_entry} exists but does not contain a valid wheel for this build")
 
     temp_entry = cache_root / f".{cache_key}.tmp-{os.getpid()}"
     if temp_entry.exists():
@@ -282,7 +285,10 @@ def _store_cache_entry(cache_root: Path, metadata: dict[str, object], wheel: Pat
         temp_entry.rename(cache_entry)
     except OSError as error:
         shutil.rmtree(temp_entry, ignore_errors=True)
-        _log(f"cache entry {cache_entry} was created concurrently or could not be moved: {error}")
+        if _cache_hit(cache_entry, cache_key) is not None:
+            _log(f"cache entry {cache_entry} was created concurrently; leaving existing entry in place")
+            return cache_entry
+        raise RuntimeError(f"Failed to store kernel cache entry at {cache_entry}") from error
     return cache_entry
 
 

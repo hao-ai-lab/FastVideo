@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import errno
 import importlib.util
+import json
 from pathlib import Path
+
+import pytest
 
 
 def _load_kernel_build_cache():
@@ -65,12 +68,29 @@ def test_find_wheel_uses_fastvideo_kernel_wheel_patterns(tmp_path) -> None:
     assert kernel_build_cache._find_wheel(tmp_path) == expected
 
 
+def _write_cache_entry(cache_root: Path, cache_key: str, wheel_name: str) -> Path:
+    cache_entry = cache_root / cache_key
+    cache_entry.mkdir()
+    (cache_entry / wheel_name).write_text("cached wheel")
+    (cache_entry / kernel_build_cache.METADATA_FILE).write_text(
+        json.dumps(
+            {
+                "cache_key": cache_key,
+                "schema_version": kernel_build_cache.CACHE_SCHEMA_VERSION,
+            }))
+    return cache_entry
+
+
 def test_store_cache_entry_handles_concurrent_rename_error(monkeypatch, tmp_path) -> None:
     cache_root = tmp_path / "cache"
     cache_root.mkdir()
     wheel = tmp_path / "fastvideo_kernel-0.3.2-cp310-cp310-linux_x86_64.whl"
     wheel.write_text("wheel")
-    metadata = {"cache_key": "cache-key"}
+    metadata = {
+        "cache_key": "cache-key",
+        "schema_version": kernel_build_cache.CACHE_SCHEMA_VERSION,
+    }
+    existing_entry = _write_cache_entry(cache_root, "cache-key", wheel.name)
     rename_calls = []
 
     def fake_rename(self, target):
@@ -81,6 +101,45 @@ def test_store_cache_entry_handles_concurrent_rename_error(monkeypatch, tmp_path
 
     cache_entry = kernel_build_cache._store_cache_entry(cache_root, metadata, wheel)
 
-    assert cache_entry == cache_root / "cache-key"
+    assert cache_entry == existing_entry
     assert rename_calls
     assert not list(cache_root.glob(".cache-key.tmp-*"))
+
+
+def test_store_cache_entry_raises_when_rename_fails_without_valid_entry(monkeypatch, tmp_path) -> None:
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    wheel = tmp_path / "fastvideo_kernel-0.3.2-cp310-cp310-linux_x86_64.whl"
+    wheel.write_text("wheel")
+    metadata = {
+        "cache_key": "cache-key",
+        "schema_version": kernel_build_cache.CACHE_SCHEMA_VERSION,
+    }
+
+    def fake_rename(self, target):
+        raise OSError(errno.ENOTEMPTY, "Directory not empty")
+
+    monkeypatch.setattr(Path, "rename", fake_rename)
+
+    with pytest.raises(RuntimeError, match="Failed to store kernel cache entry"):
+        kernel_build_cache._store_cache_entry(cache_root, metadata, wheel)
+
+    assert not list(cache_root.glob(".cache-key.tmp-*"))
+
+
+def test_store_cache_entry_rejects_existing_invalid_entry(tmp_path) -> None:
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    wheel = tmp_path / "fastvideo_kernel-0.3.2-cp310-cp310-linux_x86_64.whl"
+    wheel.write_text("wheel")
+    metadata = {
+        "cache_key": "cache-key",
+        "schema_version": kernel_build_cache.CACHE_SCHEMA_VERSION,
+    }
+    invalid_entry = cache_root / "cache-key"
+    invalid_entry.mkdir()
+    (invalid_entry / kernel_build_cache.METADATA_FILE).write_text(
+        json.dumps({"cache_key": "other-key"}))
+
+    with pytest.raises(RuntimeError, match="does not contain a valid wheel"):
+        kernel_build_cache._store_cache_entry(cache_root, metadata, wheel)
