@@ -130,6 +130,7 @@ class InputConfig:
     keyboard_cond: Any | None = None
     grid_sizes: Any | None = None
     c2ws_plucker_emb: Any | None = None
+    action_path: str | None = None
     refine_from: str | None = None
     stage1_video: Any | None = None
 
