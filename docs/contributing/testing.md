@@ -219,6 +219,12 @@ instances. The main files are:
 For exact tier membership, path filters, slash commands, and aggregate statuses,
 see [CI/CD Architecture](ci_architecture.md).
 
+Modal pytest commands use `pytest-rerunfailures` with the shared transient-only
+policy in `fastvideo/tests/modal/pytest_retry.py`. The retry layer reruns
+individual pytest failures for infrastructure-style errors such as connection,
+Modal worker, NCCL, or CUDA initialization failures. Deterministic assertion
+and numerical parity failures should still fail immediately.
+
 ### Adding A New CI Test Category
 
 If a new test does not fit an existing lane:
