@@ -7,10 +7,10 @@
 - Branch: `issue/1578-qwen-vl-vision-dtype`
 - Worktree: `/tmp/fastvideo-worktrees/issue-1578-qwen-vl-vision-dtype`
 - Handoff path: `.agents/handoffs/issue-1578-handoff.md`
-- Current stage: Stage 2 complete - ready for Stage 3 review/adjudication
+- Current stage: Stage 3 complete - awaiting explicit Stage 4 PR creation request
 - Implementation begun: yes
 - Created: 2026-07-10T08:36:53Z
-- Last updated: 2026-07-10T10:34:00Z
+- Last updated: 2026-07-10T10:56:00Z
 
 ## Workflow State
 - Stage 0 completed: no existing local or fetched `origin`/`upstream` branch containing `1578` was found.
@@ -66,6 +66,82 @@
   - Command: `pytest fastvideo/tests/encoders/test_qwen2_5_vl_vision_dtype.py -q`
   - Result: `5 passed, 16 warnings in 0.19s`
   - `local_patch_applied`: false.
+
+## Stage 3 Notes
+- Started review/adjudication loop after pushed Stage 2 code.
+- Read `/home/toolbox/.codex/skills/review-code/SKILL.md` before spawning reviewer.
+- Spawned fresh review-code sub-agent:
+  - Agent id: `019f4b8e-6673-7871-a79a-ca33f41a7f44`
+  - Nickname: `Euclid`
+  - Prompt summary: review `macthecadillac/FastVideo` branch `issue/1578-qwen-vl-vision-dtype` for `hao-ai-lab/FastVideo#1578`, use `$review-code`, read-only, no GitHub connector, no code/GitHub mutations, no local tests.
+  - Status: completed.
+  - Findings: no actionable code findings.
+  - Issue fit: reviewer reported the branch addresses `hao-ai-lab/FastVideo#1578`.
+  - Related branches: only `issue/1578-qwen-vl-vision-dtype`; no open PR targets this branch or issue.
+  - Validation gaps: reviewer did not rerun tests, noted the existing Modal targeted pytest evidence.
+- Because reviewer reported no actionable findings, no adjudicator/fixer sub-agent was spawned in this loop.
+- Stage 3 pre-commit gate passed on Modal:
+  - App: `ap-PUuLQNwzBFA3D3Wz43815o`
+  - Commit checked out: `dee590b8826e38ea41aa8738b5e28b4dcab9af13`
+  - Local handoff patch applied: true
+  - Command: `pre-commit run --all-files`
+  - Result: passed (`yapf`, `ruff`, `codespell`, `PyMarkdown`, `actionlint`, `mypy`, filename spaces, suggestion all passed).
+  - Launcher used `uvx --from modal modal run fastvideo/tests/modal/launch_l40s_job.py --install-extra none --apply-local-patch --command "pre-commit run --all-files"`.
+- No PR or draft PR has been opened.
+- Handoff remains active and must be removed before Stage 4 PR creation.
+
+## Draft PR Message
+Title:
+`[bugfix]: propagate Qwen2.5-VL visual dtype`
+
+Body:
+```markdown
+## Summary
+
+Fixes #1578 by resolving the Qwen2.5-VL visual tower dtype from the parent config when `vision_config.torch_dtype` is absent.
+
+This change:
+- normalizes `torch_dtype` values supplied as strings or `torch.dtype` objects
+- keeps explicit `vision_config.torch_dtype` as the highest-priority source
+- falls back to parent `config.torch_dtype` for real Qwen2.5-VL configs where dtype is top-level only
+- preserves the existing fp32 fallback for missing or unknown dtype values
+- adds CPU-only regression coverage for parent dtype propagation, dtype-object handling, vision override behavior, and fp32 fallback
+
+## Validation
+
+- Modal L40S targeted pytest against pushed branch commit `67e394cb2e1a09831d78bb0ecd16edcf7b93f44d`:
+  - `pytest fastvideo/tests/encoders/test_qwen2_5_vl_vision_dtype.py -q`
+  - `5 passed, 16 warnings in 0.19s`
+  - App: `ap-7bddOhh3JwhxxSE4nwL7tP`
+- Earlier Modal L40S targeted pytest with local patch applied:
+  - `pytest fastvideo/tests/encoders/test_qwen2_5_vl_vision_dtype.py -q`
+  - `5 passed, 16 warnings in 0.23s`
+  - App: `ap-pZmxjLGQ8YtuIuz7c0TSta`
+- Modal L40S pre-commit gate:
+  - `pre-commit run --all-files`
+  - passed
+  - App: `ap-PUuLQNwzBFA3D3Wz43815o`
+- Stage 3 review loop:
+  - `review-code` sub-agent reported no actionable findings.
+
+## GPU Memory Impact
+
+No expected increase. For Qwen2.5-VL visual inputs, this avoids resolving `self.visual.dtype` to fp32 when the parent config declares bf16. The current text-only Reason1 path remains unchanged.
+
+## Notes
+
+- Wan T2V SSIM was not run because this change is limited to Qwen2.5-VL encoder dtype plumbing and does not affect Wan generated pixels.
+- The support matrix was not updated because no new model or user-facing support claim was added.
+
+# Checklist
+- [x] I ran pre-commit run --all-files and fixed all issues
+- [x] I added or updated tests for my changes
+- [x] I updated documentation if needed
+- [x] I considered GPU memory impact of my changes
+For model/pipeline changes, also check:
+- [ ] I verified targeted Wan T2V SSIM regression tests pass on L40S
+- [ ] I updated the support matrix if adding a new model
+```
 
 ## GitHub Context
 - `gh issue view 1578 -R hao-ai-lab/FastVideo --json ...` reviewed at 2026-07-10T08:40Z.
