@@ -156,7 +156,7 @@ def cmd_render(args: argparse.Namespace) -> None:
     from PIL import Image, ImageDraw
     from ultralytics import FastSAM
     from fastvideo.train.callbacks.track_validation import _draw_overlay
-    from segment_tracks import object_ids_for_points
+    from segment_tracks import assign_object_ids_multiframe, extract_masks
     import imageio.v2 as imageio
 
     configs = _load_configs(args)
@@ -181,16 +181,25 @@ def cmd_render(args: argparse.Namespace) -> None:
         vis = d["visibility"].astype(np.float32)[:frames.shape[0]]  # [T,N]
         disp = np.sqrt(((tracks - tracks[0:1])**2).sum(-1)).max(0)  # [N] max displacement
 
+        ever_visible = vis.astype(bool).any(axis=0)                                      # [N]
+        first_visible = np.where(ever_visible, np.argmax(vis.astype(bool), axis=0), -1)  # [N]
+        unique_frames = sorted(set(first_visible[ever_visible].tolist()))
+
         for cfg in configs:
-            res = model(frames[0],
-                        device=args.device,
-                        retina_masks=True,
-                        imgsz=cfg["imgsz"],
-                        conf=cfg["conf"],
-                        iou=cfg["iou"],
-                        verbose=False)
-            masks = filter_masks(_extract_masks(res, H, W), cfg["min_area_frac"], cfg["max_masks"])
-            oid = object_ids_for_points(masks, tracks[0], H, W)  # [N] mask idx per point (-1 none)
+            # Run FastSAM on each unique first-visible frame for this config.
+            frame_masks: dict[int, np.ndarray] = {}
+            for frame_t in unique_frames:
+                res = model(frames[frame_t],
+                            device=args.device,
+                            retina_masks=True,
+                            imgsz=cfg["imgsz"],
+                            conf=cfg["conf"],
+                            iou=cfg["iou"],
+                            verbose=False)
+                frame_masks[frame_t] = extract_masks(res, H, W, cfg["min_area_frac"], cfg["max_masks"])
+
+            oid = assign_object_ids_multiframe(frame_masks, first_visible, tracks, H, W)
+            masks = frame_masks.get(0, np.zeros((0, H, W), bool))  # frame-0 masks for SAM panel
             objs = sorted(int(o) for o in np.unique(oid) if int(o) >= 0)
 
             # (1) SAM panel: colored masks + chosen point (highest-motion track) per object

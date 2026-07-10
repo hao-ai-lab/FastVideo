@@ -23,6 +23,63 @@ from pathlib import Path
 import numpy as np
 
 
+def read_all_frames(path: str) -> np.ndarray:
+    """Read all frames from a video, return [T,H,W,3] uint8."""
+    try:
+        from decord import VideoReader, cpu
+        vr = VideoReader(path, ctx=cpu(0))
+        return vr.get_batch(list(range(len(vr)))).asnumpy()
+    except Exception:  # noqa: BLE001
+        import av
+        c = av.open(path)
+        return np.stack([f.to_ndarray(format="rgb24") for f in c.decode(video=0)])
+
+
+def _colors(n: int) -> np.ndarray:
+    import colorsys
+    return np.array(
+        [[int(255 * c) for c in colorsys.hsv_to_rgb((i * 0.61803) % 1.0, 0.65, 1.0)]
+         for i in range(max(1, n))],
+        np.uint8,
+    )
+
+
+def render_viz(frames: np.ndarray, tracks: np.ndarray, vis: np.ndarray,
+               object_ids: np.ndarray, out_path: Path, fps: int = 24) -> None:
+    import imageio.v2 as imageio
+    from fastvideo.train.callbacks.track_validation import _draw_overlay
+
+    objs = sorted(int(o) for o in np.unique(object_ids) if int(o) >= 0)
+    ocols = _colors(len(objs) + 1)
+    N = tracks.shape[1]
+    pcols = np.tile(np.array([[110, 110, 110]], np.uint8), (N, 1))
+    for oi, o in enumerate(objs):
+        pcols[object_ids == o] = ocols[oi % len(ocols)]
+
+    G = int(round(N**0.5))
+    if G * G == N:
+        k = max(1, G // 50)
+        sel = np.arange(N).reshape(G, G)[::k, ::k].reshape(-1)
+    else:
+        st = max(1, N // 1500)
+        sel = np.arange(0, N, st)
+
+    ov = _draw_overlay(frames, tracks[:, sel].copy(), vis[:, sel], pcols[sel], 12, 2, 0.5)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    imageio.mimsave(str(out_path), ov, fps=fps, macro_block_size=1)
+
+
+def render_seg_viz(frame: np.ndarray, masks: np.ndarray, out_path: Path) -> None:
+    import imageio.v2 as imageio
+    img = frame.copy()
+    if masks.shape[0] > 0:
+        colors = _colors(masks.shape[0])
+        for i, mask in enumerate(masks):
+            img[mask] = (img[mask] * 0.5 + colors[i % len(colors)] * 0.5).astype(np.uint8)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    imageio.imwrite(str(out_path), img)
+
+
 def read_frame(path: str, idx: int) -> np.ndarray:
     """Read a single frame by index, return HxWx3 uint8."""
     try:
@@ -138,16 +195,33 @@ def main() -> None:
                    help="drop masks smaller than this fraction of the frame")
     p.add_argument("--max-masks", type=int, default=0, help="keep only the N largest masks (0 = keep all)")
     p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--index", type=int, nargs="+", default=None, metavar="IDX",
+                   help="Only process videos at these manifest indices (e.g. --index 4 7 12).")
+    p.add_argument("--rank", type=int, default=0, help="GPU rank for sharding (0-indexed).")
+    p.add_argument("--world-size", type=int, default=1, help="Total number of parallel processes.")
     p.add_argument("--force", action="store_true", help="re-run even if object_ids already present")
+    p.add_argument("--vis-override-every", type=int, default=0,
+                   help="Run FastSAM every N frames and set vis=True for object points inside masks. "
+                        "Fixes CoTracker vis=0 on edge-of-frame objects. 0 = disabled.")
+    p.add_argument("--viz", action="store_true", help="Render a track-overlay mp4 after each video.")
+    p.add_argument("--viz-dir", type=str, default=None,
+                   help="Output directory for viz mp4s (default: <data-dir>/viz).")
+    p.add_argument("--verbose", action="store_true", help="Print per-frame debug info.")
     args = p.parse_args()
+    if args.viz and args.viz_dir is None:
+        args.viz_dir = str(args.data_dir / "viz")
 
     from ultralytics import FastSAM
     model = FastSAM(args.model)
 
     manifest_path = args.data_dir / args.manifest
     items = json.loads(manifest_path.read_text()) if manifest_path.exists() else []
+    if args.index is not None:
+        items = [items[i] for i in args.index if i < len(items)]
     if args.limit:
         items = items[:args.limit]
+    if args.world_size > 1:
+        items = items[args.rank::args.world_size]
     n_ok = 0
     for k, item in enumerate(items, 1):
         vpath = args.data_dir / args.videos_subdir / item["path"]
@@ -169,16 +243,64 @@ def main() -> None:
         first_visible = np.where(ever_visible, np.argmax(vis, axis=0), -1)     # [N]
         unique_frames = sorted(set(first_visible[ever_visible].tolist()))
 
+        if args.verbose:
+            fv_counts = {f: int((first_visible == f).sum()) for f in unique_frames}
+            print(f"  [seg] first_visible frames: {fv_counts}", flush=True)
+
         # Run FastSAM on each unique first-visible frame
         frame_masks: dict[int, np.ndarray] = {}
         for frame_t in unique_frames:
             frame = read_frame(str(vpath), frame_t)
             res = model(frame, device=args.device, retina_masks=True,
                         imgsz=args.imgsz, conf=args.conf, iou=args.iou, verbose=False)
-            frame_masks[frame_t] = extract_masks(res, H, W, args.min_area_frac, args.max_masks)
+            masks = extract_masks(res, H, W, args.min_area_frac, args.max_masks)
+            frame_masks[frame_t] = masks
+            if args.verbose:
+                areas = masks.reshape(masks.shape[0], -1).sum(1).tolist() if masks.shape[0] else []
+                print(f"  [seg] frame {frame_t}: {masks.shape[0]} masks, areas={[int(a) for a in areas]}", flush=True)
 
         oid = assign_object_ids_multiframe(frame_masks, first_visible, tracks, H, W)
         n_objects = int(np.unique(oid[oid >= 0]).shape[0]) if (oid >= 0).any() else 0
+
+        if args.verbose:
+            for frame_t in unique_frames:
+                pt_sel = first_visible == frame_t
+                labeled = int((oid[pt_sel] >= 0).sum())
+                print(f"  [seg] frame {frame_t}: {pt_sel.sum()} pts, {labeled} got oid>=0", flush=True)
+
+        # Vis override: run FastSAM every N frames and set vis=True for object points
+        # that fall inside any mask — fixes CoTracker vis=0 on edge-of-frame objects.
+        n_overrides = 0
+        if args.vis_override_every > 0 and (oid >= 0).any():
+            T = tracks.shape[0]
+            object_pts = np.where(oid >= 0)[0]
+            for frame_t in range(0, T, args.vis_override_every):
+                frame = read_frame(str(vpath), frame_t)
+                res = model(frame, device=args.device, retina_masks=True,
+                            imgsz=args.imgsz, conf=args.conf, iou=args.iou, verbose=False)
+                masks = extract_masks(res, H, W, args.min_area_frac, args.max_masks)
+                if masks.shape[0] == 0:
+                    continue
+                pts = tracks[frame_t, object_pts]                              # [K,2]
+                xi = np.clip(pts[:, 0].round().astype(int), 0, W - 1)
+                yi = np.clip(pts[:, 1].round().astype(int), 0, H - 1)
+                in_any_mask = masks[:, yi, xi].any(axis=0)                    # [K] bool
+                newly_visible = in_any_mask & ~vis[frame_t, object_pts]
+                vis[frame_t, object_pts] |= in_any_mask
+                n_overrides += int(newly_visible.sum())
+
+            # Fill gaps between True frames caused by the sampling interval.
+            # If vis is True at frame T and True again at T+k (k <= override_every),
+            # the frames in between should also be True — the object didn't disappear.
+            for pt_idx in object_pts:
+                last_true = -1
+                for t in range(T):
+                    if vis[t, pt_idx]:
+                        if last_true >= 0 and (t - last_true) <= args.vis_override_every:
+                            vis[last_true:t, pt_idx] = True
+                        last_true = t
+
+            d["visibility"] = vis
 
         d["object_ids"] = oid.astype(np.int64)
         d["n_objects"] = np.int64(n_objects)
@@ -187,10 +309,26 @@ def main() -> None:
         np.savez(tmp, **d)
         tmp.replace(npz_path)
         n_ok += 1
+        if args.viz:
+            frames = read_all_frames(str(vpath))[:tracks.shape[0]]
+            T_v = frames.shape[0]
+            stem_dir = Path(args.viz_dir) / vpath.stem
+            stem_dir.mkdir(parents=True, exist_ok=True)
+            render_viz(frames, tracks, vis, oid, stem_dir / "tracks.mp4",
+                       fps=int(item.get("fps", 24)))
+            for label, fidx in [("000", 0), ("mid", T_v // 2), ("last", T_v - 1)]:
+                frame = frames[fidx]
+                res = model(frame, device=args.device, retina_masks=True,
+                            imgsz=args.imgsz, conf=args.conf, iou=args.iou, verbose=False)
+                fmasks = extract_masks(res, H, W, args.min_area_frac, args.max_masks)
+                render_seg_viz(frame, fmasks, stem_dir / f"seg_frame{label}.jpg")
+            print(f"  viz -> {stem_dir}/", flush=True)
+
         cov = int((oid >= 0).sum())
+        override_str = f", {n_overrides} vis overrides" if args.vis_override_every > 0 else ""
         print(
             f"[seg] [{k}/{len(items)}] {vpath.name}: {n_objects} objs across {len(unique_frames)} frames, "
-            f"{cov}/{oid.shape[0]} grid pts labeled, "
+            f"{cov}/{oid.shape[0]} grid pts labeled{override_str}, "
             f"w[mean={d['track_weights'].mean():.3f} >0.5={(d['track_weights'] > 0.5).mean():.2f}]",
             flush=True)
     print(f"[seg] done; {n_ok}/{len(items)} npz have object_ids", flush=True)
