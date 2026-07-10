@@ -1,6 +1,6 @@
-# LingBot World v2 Example Dataset
+# LingBot World 2 Example Dataset
 
-These files were copied unchanged from the LingBot World v2 repository for the
+These files were copied unchanged from the LingBot World 2 repository for the
 FastVideo causal-fast inference example.
 
 - Repository: `https://github.com/Robbyant/lingbot-world-v2.git`

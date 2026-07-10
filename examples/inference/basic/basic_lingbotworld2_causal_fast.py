@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Run LingBot-World v2 14B causal-fast I2V generation with FastVideo."""
+"""Run LingBot World 2 14B causal-fast I2V generation with FastVideo."""
 
 from pathlib import Path
 
@@ -7,12 +7,12 @@ from fastvideo import VideoGenerator
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DATASET_DIR = REPO_ROOT / "examples" / "dataset" / "lingbot_world_v2"
-OUTPUT_PATH = REPO_ROOT / "outputs" / "lingbotworld_causal_fast.mp4"
+DATASET_DIR = REPO_ROOT / "examples" / "dataset" / "lingbotworld2"
+OUTPUT_PATH = REPO_ROOT / "outputs" / "lingbotworld2_causal_fast.mp4"
 
 
 def main() -> None:
-    """Load the native FastVideo LingBot causal-fast pipeline and generate one video."""
+    """Load the native FastVideo LingBot World 2 causal-fast pipeline and generate one video."""
     generator = VideoGenerator.from_pretrained(
         "/mnt/weka/shrd/wm/junda/fv-hub/lingbot-world-v2/ckpts/lingbot-world-v2-14b-causal-fast-fastvideo",
         num_gpus=8,
@@ -24,7 +24,7 @@ def main() -> None:
         vae_cpu_offload=False,
         text_encoder_cpu_offload=False,
         pin_cpu_memory=True,
-        override_pipeline_cls_name="LingBotWorldCausalFastPipeline",
+        override_pipeline_cls_name="LingBotWorld2CausalFastPipeline",
     )
 
     try:
