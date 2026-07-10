@@ -63,3 +63,30 @@ def _raise_module_on_import(name: str) -> types.ModuleType:
             raise ImportError(f"No module named '{name}.{item}'")
 
     return _RaisingModule(name)
+
+
+def test_coerce_fp4_input_dtype_casts_and_rejects():
+    """The FP4 input-dtype coercion (CPU-only, no flashinfer/CUDA): bf16/fp16
+    pass through, other floats (the fp32 pre-attention norm in eager mode) are
+    cast to bf16, and non-floating inputs are rejected fast."""
+    import torch
+
+    from fastvideo.layers.quantization.nvfp4_config import (
+        _coerce_fp4_input_dtype)
+
+    # bf16 / fp16 pass through untouched.
+    bf16 = torch.zeros(4, 8, dtype=torch.bfloat16)
+    assert _coerce_fp4_input_dtype(bf16) is bf16
+    fp16 = torch.zeros(4, 8, dtype=torch.float16)
+    assert _coerce_fp4_input_dtype(fp16) is fp16
+
+    # Other floating dtypes (fp32 from an unfused norm, fp64) -> bf16.
+    assert _coerce_fp4_input_dtype(
+        torch.zeros(4, 8, dtype=torch.float32)).dtype is torch.bfloat16
+    assert _coerce_fp4_input_dtype(
+        torch.zeros(4, 8, dtype=torch.float64)).dtype is torch.bfloat16
+
+    # Non-floating inputs are a real error, not silently cast.
+    for bad in (torch.int32, torch.int64, torch.bool):
+        with pytest.raises(TypeError, match="floating-point"):
+            _coerce_fp4_input_dtype(torch.zeros(4, 8, dtype=bad))
