@@ -232,31 +232,44 @@ def run_test_command(test_command: str,
         print(f"PR number: {pr_number}")
     _checkout_repository(git_repo, git_commit, pr_number)
 
-    build_kernel_command = """
-    python fastvideo/tests/modal/kernel_build_cache.py install --cache-root """ + shlex.quote(KERNEL_CACHE_VOLUME_PATH) + """ &&
-    """ if build_kernel else ""
+    setup_steps = [
+        "source $HOME/.local/bin/env",
+        "source /opt/venv/bin/activate",
+        "cd /FastVideo",
+    ]
+    if install_command:
+        setup_steps.append(install_command)
+    if build_kernel:
+        setup_steps.append(
+            "python fastvideo/tests/modal/kernel_build_cache.py install --cache-root "
+            + shlex.quote(KERNEL_CACHE_VOLUME_PATH))
+    setup_command = " &&\n    ".join(setup_steps)
 
-    install_clause = f"{install_command} &&" if install_command else ""
+    setup_result = subprocess.run(["/bin/bash", "-c", setup_command],
+                                  stdout=sys.stdout,
+                                  stderr=sys.stderr,
+                                  check=False)
+    if setup_result.returncode != 0:
+        raise RuntimeError(
+            f"Setup command failed with exit code {setup_result.returncode}")
 
-    command = f"""
-    source $HOME/.local/bin/env &&
-    source /opt/venv/bin/activate &&
-    cd /FastVideo &&
-    {install_clause}
-    {build_kernel_command}
-    {test_command}
-    """
-
-    result = subprocess.run(["/bin/bash", "-c", command],
-                            stdout=sys.stdout,
-                            stderr=sys.stderr,
-                            check=False)
     if build_kernel:
         print("Committing fastvideo-kernel build cache volume", flush=True)
         try:
             kernel_cache_vol.commit()
         except Exception as error:
             print(f"WARNING: failed to commit fastvideo-kernel build cache volume: {error}", flush=True)
+
+    command = " &&\n    ".join([
+        "source $HOME/.local/bin/env",
+        "source /opt/venv/bin/activate",
+        "cd /FastVideo",
+        test_command,
+    ])
+    result = subprocess.run(["/bin/bash", "-c", command],
+                            stdout=sys.stdout,
+                            stderr=sys.stderr,
+                            check=False)
 
     # Modal containers crash on sys.exit(0); raise on failure, return on success.
     if result.returncode != 0:
