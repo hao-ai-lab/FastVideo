@@ -90,18 +90,18 @@ def test_store_cache_entry_handles_concurrent_rename_error(monkeypatch, tmp_path
         "cache_key": "cache-key",
         "schema_version": kernel_build_cache.CACHE_SCHEMA_VERSION,
     }
-    existing_entry = _write_cache_entry(cache_root, "cache-key", wheel.name)
     rename_calls = []
 
     def fake_rename(self, target):
         rename_calls.append((self, target))
+        _write_cache_entry(target.parent, target.name, wheel.name)
         raise OSError(errno.ENOTEMPTY, "Directory not empty")
 
     monkeypatch.setattr(Path, "rename", fake_rename)
 
     cache_entry = kernel_build_cache._store_cache_entry(cache_root, metadata, wheel)
 
-    assert cache_entry == existing_entry
+    assert cache_entry == cache_root / "cache-key"
     assert rename_calls
     assert not list(cache_root.glob(".cache-key.tmp-*"))
 
