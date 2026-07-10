@@ -5,6 +5,7 @@
   "disable_autocast": false,
   "precision": "bf16",
   "vae_precision": "fp32",
+  "vae_decode_precision": "bf16",
   "vae_tiling": false,
   "vae_sp": false,
   "vae_config": {

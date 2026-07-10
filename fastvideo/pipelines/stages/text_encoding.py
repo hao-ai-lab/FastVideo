@@ -8,6 +8,8 @@ This module contains implementations of prompt encoding stages for diffusion pip
 import torch
 from typing import Any
 
+from torch.distributed.tensor import DTensor
+
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -24,6 +26,7 @@ class TextEncodingStage(PipelineStage):
     This stage handles the encoding of text prompts into the embedding space
     expected by the diffusion model.
     """
+    performance_component_metric = "text_encoder_time_s"
 
     def __init__(self, text_encoders, tokenizers) -> None:
         """
@@ -56,6 +59,10 @@ class TextEncodingStage(PipelineStage):
         """
         assert len(self.tokenizers) == len(self.text_encoders)
         assert len(self.text_encoders) == len(fastvideo_args.pipeline_config.text_encoder_configs)
+
+        # Skip encoding if precomputed prompt_embeds were provided
+        if batch.prompt_embeds is not None and len(batch.prompt_embeds) > 0:
+            return batch
 
         # Encode positive prompt with all available encoders
         assert batch.prompt is not None
@@ -198,6 +205,21 @@ class TextEncodingStage(PipelineStage):
             encoder_config = encoder_cfgs[i]
             preprocess_func = preprocess_funcs[i]
             postprocess_func = postprocess_funcs[i]
+            # cpu_offload semantics: params rest on CPU between calls but the
+            # forward computes on GPU. FSDP2-wrapped encoders (CPUOffloadPolicy;
+            # DTensor params) stream themselves per-layer — leave inputs on the
+            # param device and let FSDP's root pre-forward move them. A plain
+            # module parked on CPU by text_encoder_cpu_offload is swapped to the
+            # target device for the forward and back afterwards, mirroring the
+            # image-encoder/VAE offload pattern.
+            first_param = next(text_encoder.parameters(), None)
+            encoder_device = first_param.device if first_param is not None else torch.device(target_device)
+            moved_for_forward = False
+            if (first_param is not None and not isinstance(first_param, DTensor)
+                    and encoder_device.type != torch.device(target_device).type):
+                text_encoder = text_encoder.to(target_device)
+                encoder_device = torch.device(target_device)
+                moved_for_forward = True
 
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
@@ -218,7 +240,8 @@ class TextEncodingStage(PipelineStage):
                     # Qwen2-style tokenizers. Scoped via treat_empty_as_dot so
                     # models that legitimately use "" (e.g. negative_prompt="")
                     # are not affected.
-                    if not processed_text.strip() and getattr(encoder_config, "treat_empty_as_dot", False):
+                    if isinstance(processed_text, str) and not processed_text.strip() and getattr(
+                            encoder_config, "treat_empty_as_dot", False):
                         processed_text = "."
                     processed_texts.append(processed_text)
                 else:
@@ -235,9 +258,29 @@ class TextEncodingStage(PipelineStage):
             tok = getattr(tokenizer, "tokenizer", tokenizer)
 
             if encoder_config.is_chat_model:
-                text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(target_device)
+                already_chat_formatted = bool(processed_texts) and isinstance(processed_texts[0], list)
+                if already_chat_formatted:
+                    # Existing chat models (e.g. HunyuanVideo 1.5 / Qwen2.5-VL)
+                    # pre-format prompts into message lists upstream and rely on
+                    # the inner tokenizer + full tokenizer_kwargs (which include
+                    # add_generation_prompt). Preserve that original path exactly.
+                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(encoder_device)
+                else:
+                    # Two-step approach matching Diffusers: format with chat
+                    # template first, then tokenize the resulting strings.
+                    formatted_texts = []
+                    for pt in processed_texts:
+                        messages = [{"role": "user", "content": pt}]
+                        formatted = tokenizer.apply_chat_template(
+                            messages,
+                            tokenize=False,
+                            add_generation_prompt=True,
+                            enable_thinking=False,
+                        )
+                        formatted_texts.append(formatted)
+                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(encoder_device)
             else:
-                text_inputs = tok(processed_texts, **tok_kwargs).to(target_device)
+                text_inputs = tok(processed_texts, **tok_kwargs).to(encoder_device)
 
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
@@ -257,15 +300,18 @@ class TextEncodingStage(PipelineStage):
             except Exception:
                 prompt_embeds, attention_mask = postprocess_func(outputs, attention_mask)
             if is_ltx2 and getattr(outputs, "hidden_states", None):
-                audio_embed = outputs.hidden_states[0]
+                audio_embed = outputs.hidden_states[0].to(device=target_device)
                 if dtype is not None:
                     audio_embed = audio_embed.to(dtype=dtype)
                 audio_embeds_list.append(audio_embed)
+            prompt_embeds = prompt_embeds.to(device=target_device)
             if dtype is not None:
                 prompt_embeds = prompt_embeds.to(dtype=dtype)
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
-                attn_masks_list.append(attention_mask)
+                attn_masks_list.append(attention_mask.to(device=target_device))
+            if moved_for_forward and fastvideo_args.text_encoder_cpu_offload:
+                text_encoder.to("cpu")
         self._last_audio_embeds = audio_embeds_list if is_ltx2 else None
         return self.return_embeds(embeds_list, attn_masks_list, return_type, return_attention_mask, indices)
 
@@ -325,6 +371,7 @@ class Cosmos25TextEncodingStage(PipelineStage):
     Cosmos 2.5 uses Reason1 (Qwen2.5-VL) and relies on the encoder's
     `compute_text_embeddings_online()`.
     """
+    performance_component_metric = "text_encoder_time_s"
 
     def __init__(self, text_encoder) -> None:
         super().__init__()

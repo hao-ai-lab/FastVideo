@@ -52,6 +52,7 @@ jobs:
             core.setOutput('pr_sha', pr.head.sha);
             core.setOutput('pr_branch', pr.head.ref);
             core.setOutput('pr_number', String(prNumber));
+            core.setOutput('pr_title', pr.title);
 
       - name: Trigger Full Suite
         if: steps.perm.outputs.has_write == 'true'
@@ -60,6 +61,7 @@ jobs:
           PR_SHA: ${{ steps.label.outputs.pr_sha }}
           PR_BRANCH: ${{ steps.label.outputs.pr_branch }}
           PR_NUMBER: ${{ steps.label.outputs.pr_number }}
+          PR_TITLE: ${{ steps.label.outputs.pr_title }}
           BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
           BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
         run: |
@@ -71,6 +73,7 @@ jobs:
               --arg commit "$PR_SHA" \
               --arg branch "$PR_BRANCH" \
               --arg message "Full Suite for PR #${PR_NUMBER} (via /merge)" \
+              --arg pr_title "$PR_TITLE" \
               --argjson pr_id "$PR_NUMBER" \
               '{
                 commit: $commit,
@@ -80,11 +83,12 @@ jobs:
                 pull_request_id: $pr_id,
                 pull_request_base_branch: "main",
                 env: {
-                  TEST_SCOPE: "full",
-                  FULL_SUITE: "true",
-                  PR_NUMBER: ($pr_id | tostring)
-                }
-              }')"
+                    TEST_SCOPE: "full",
+                    FULL_SUITE: "true",
+                    PR_NUMBER: ($pr_id | tostring),
+                    PR_TITLE: $pr_title
+                  }
+                }')"
 
   parse-command:
     if: >-
@@ -125,7 +129,7 @@ jobs:
           set -euo pipefail
           TEST_NAME=$(echo "$COMMENT" | grep -oP '(?<=/test\s)\S+' | head -1 || true)
 
-          VALID="encoder vae transformer kernel unit dreamverse ssim training lora-inference lora-training distillation self-forcing vsa vmoba performance api train-framework full fastcheck pre-commit"
+          VALID="encoder vae transformer kernel unit dreamverse ssim training lora-inference lora-training lora-extraction distillation self-forcing vsa vmoba performance api train-framework eval full fastcheck pre-commit"
           if [ -z "$TEST_NAME" ] || ! echo "$VALID" | grep -qw "$TEST_NAME"; then
             echo "Unknown test: '$TEST_NAME'. Valid: $VALID"
             exit 1
@@ -136,10 +140,11 @@ jobs:
             [kernel]=kernel_tests [unit]=unit_test [dreamverse]=dreamverse_app
             [ssim]=ssim [training]=training
             [lora-inference]=inference_lora [lora-training]=training_lora
+            [lora-extraction]=lora_extraction
             [distillation]=distillation_dmd [self-forcing]=self_forcing
             [vsa]=training_vsa [vmoba]=inference_vmoba
             [performance]=performance [api]=api_server
-            [train-framework]=train_framework
+            [train-framework]=train_framework [eval]=eval
           )
 
           if [ "$TEST_NAME" = "full" ]; then
@@ -240,6 +245,7 @@ jobs:
           TEST_SCOPE: ${{ needs.parse-command.outputs.test_scope }}
           FULL_SUITE: ${{ needs.parse-command.outputs.full_suite }}
           TEST_TYPE: ${{ needs.parse-command.outputs.test_type }}
+          PR_TITLE: ${{ github.event.issue.title }}
           BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
           BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
         run: |
@@ -256,6 +262,7 @@ jobs:
               --arg full_suite "$FULL_SUITE" \
               --arg test_type "$TEST_TYPE" \
               --arg pr_number "$PR_NUMBER" \
+              --arg pr_title "$PR_TITLE" \
               '{
                 commit: $commit,
                 branch: $branch,
@@ -265,8 +272,9 @@ jobs:
                 pull_request_base_branch: "main",
                 env: {
                   TEST_SCOPE: $test_scope,
-                  FULL_SUITE: $full_suite,
-                  TEST_TYPE: $test_type,
-                  PR_NUMBER: $pr_number
-                }
-              }')"
+                    FULL_SUITE: $full_suite,
+                    TEST_TYPE: $test_type,
+                    PR_NUMBER: $pr_number,
+                    PR_TITLE: $pr_title
+                  }
+                }')"

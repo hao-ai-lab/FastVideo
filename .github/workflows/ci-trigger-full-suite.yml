@@ -56,6 +56,7 @@ jobs:
           PR_SHA: ${{ github.event.pull_request.head.sha }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
           BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
           BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
         run: |
@@ -67,6 +68,7 @@ jobs:
               --arg commit "$PR_SHA" \
               --arg branch "$PR_BRANCH" \
               --arg message "Full Suite for PR #${PR_NUMBER}" \
+              --arg pr_title "$PR_TITLE" \
               --argjson pr_id "$PR_NUMBER" \
               '{
                 commit: $commit,
@@ -78,6 +80,7 @@ jobs:
                 env: {
                   TEST_SCOPE: "full",
                   FULL_SUITE: "true",
-                  PR_NUMBER: ($pr_id | tostring)
+                  PR_NUMBER: ($pr_id | tostring),
+                  PR_TITLE: $pr_title
                 }
               }')"

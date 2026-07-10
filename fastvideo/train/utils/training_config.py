@@ -22,7 +22,8 @@ class DistributedConfig:
 
 @dataclass(slots=True)
 class DataConfig:
-    data_path: str = ""
+    data_path: str | list[str] | dict[str, int] = ""
+    preprocessed_data_type: str = "t2v"
     train_batch_size: int = 1
     dataloader_num_workers: int = 0
     training_cfg_rate: float = 0.0
@@ -62,6 +63,7 @@ class CheckpointConfig:
 @dataclass(slots=True)
 class TrackerConfig:
     trackers: list[str] = field(default_factory=list)
+    entity: str = ""
     project_name: str = "fastvideo"
     run_name: str = ""
 
@@ -86,6 +88,12 @@ class TrainingConfig:
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     vsa_sparsity: float = 0.0
+    # Reuse the per-step padded VSA tile buffer across attention layers.
+    # Defaults to False for training: under full activation checkpointing the
+    # cached buffer survives into the backward recompute and inflates peak
+    # memory (see #1423). Enable on memory-rich setups to keep the per-step
+    # buffer-reuse speedup.
+    vsa_cache_tile_buf: bool = False
     model: ModelTrainingConfig = field(default_factory=ModelTrainingConfig)
     pipeline_config: PipelineConfig | None = None
     model_path: str = ""

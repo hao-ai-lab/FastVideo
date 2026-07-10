@@ -307,6 +307,8 @@ class RayDistributedExecutor(Executor):
             data_type=forward_batch.data_type,
             output=output,
             logging_info=logging_info,
+            trajectory_latents=responses[0].trajectory_latents,
+            trajectory_timesteps=responses[0].trajectory_timesteps,
         )
         return result_batch
 

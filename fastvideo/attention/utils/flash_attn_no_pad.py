@@ -21,24 +21,35 @@ from einops import rearrange
 from flash_attn import flash_attn_varlen_qkvpacked_func
 from flash_attn.bert_padding import pad_input, unpad_input
 
+from fastvideo import envs
+
 
 def _resolve_flash_attn_varlen_func() -> Any:
-    try:
-        from fastvideo.attention.utils.flash_attn_cute import (
-            flash_attn_varlen_func as flash_attn_varlen_func_cute, )
+    if envs.FASTVIDEO_FA4:
+        # FA4 cute is explicit opt-in (see fastvideo/attention/backends/
+        # flash_attn.py); with FASTVIDEO_FA4=1 an unimportable FA4 build must
+        # fail loudly here rather than fall through to FA3/FA2. RuntimeError,
+        # not ImportError: importers like bsa_attn.py treat ImportError as
+        # "flash-attn not installed" and silently degrade to reference kernels.
+        try:
+            from fastvideo.attention.utils.flash_attn_cute import (
+                flash_attn_varlen_func as flash_attn_varlen_func_cute, )
+        except ImportError as e:
+            raise RuntimeError(f"FASTVIDEO_FA4=1 but flash_attn.cute (FA4) is not usable ({e}); "
+                               "fix the FA4 install (see the flash-attn-4 pin in pyproject.toml) "
+                               "or unset FASTVIDEO_FA4.") from e
 
         return flash_attn_varlen_func_cute
+    try:
+        from flash_attn_interface import (
+            flash_attn_varlen_func as flash_attn_varlen_func_interface, )
+
+        return flash_attn_varlen_func_interface
     except ImportError:
-        try:
-            from flash_attn_interface import (
-                flash_attn_varlen_func as flash_attn_varlen_func_interface, )
+        from flash_attn import (
+            flash_attn_varlen_func as flash_attn_varlen_func_flash, )
 
-            return flash_attn_varlen_func_interface
-        except ImportError:
-            from flash_attn import (
-                flash_attn_varlen_func as flash_attn_varlen_func_flash, )
-
-            return flash_attn_varlen_func_flash
+        return flash_attn_varlen_func_flash
 
 
 flash_attn_varlen_func_impl = _resolve_flash_attn_varlen_func()

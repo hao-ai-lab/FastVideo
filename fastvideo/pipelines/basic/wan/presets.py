@@ -268,6 +268,24 @@ FAST_WAN_2_2_TI2V_5B = InferencePreset(
     },
 )
 
+LUCY_EDIT_DEV = InferencePreset(
+    name="lucy_edit_dev",
+    version=1,
+    model_family="wan",
+    description="Lucy Edit Dev 5B video editing",
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "height": 480,
+        "width": 832,
+        "num_frames": 81,
+        "fps": 24,
+        "guidance_scale": 5.0,
+        "num_inference_steps": 50,
+        "negative_prompt": "",
+    },
+)
+
 # -------------------------------------------------------------------
 # Self-Forcing (causal) presets
 # -------------------------------------------------------------------
@@ -341,6 +359,7 @@ ALL_PRESETS = (
     FAST_WAN_T2V_480P,
     WAN_2_2_TI2V_5B,
     FAST_WAN_2_2_TI2V_5B,
+    LUCY_EDIT_DEV,
     SF_WAN_T2V_1_3B,
     SF_WAN_2_2_T2V_A14B,
     SF_WAN_2_2_I2V_A14B,

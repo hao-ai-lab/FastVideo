@@ -1,0 +1,3 @@
+# fastvideo-kernel is compiled once from the complete source tree after the
+# cached dependency layer. In particular, do not PEP 517-build it here on ARM.
+fastvideo-kernel

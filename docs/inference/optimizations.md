@@ -11,6 +11,9 @@ This page describes the various options for speeding up generation times in Fast
   - [Sliding Tile Attention (Archived)](#sliding-tile-attention-archived)
   - [Sage Attention](#sage-attention)
   - [Sage Attention 3](#sage-attention-3)
+
+- [FP8 Weight Quantization](#fp8-weight-quantization)
+
 - [Adaptive Guidance (CFG gating)](#adaptive-guidance-cfg-gating)
 
 - [torch.compile](#torch-compile)
@@ -24,6 +27,7 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
+- Attn-QAT inference (modified SageAttention3 FP4, sm_120/RTX 5090): `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
@@ -70,6 +74,23 @@ uv pip install ninja
 python setup.py install
 ```
 
+### Flash Attention 4 (opt-in)
+
+FastVideo never auto-selects FlashAttention-4 (`flash_attn.cute`) just because it
+is installed: its CuTeDSL kernels JIT-compile per shape family and can fail at
+runtime on some GPU/shape combinations. To use FA4, install the pinned
+`flash-attn-4` build (see the `flash-attn-4` source in `pyproject.toml`) and set:
+
+```bash
+export FASTVIDEO_FA4=1
+```
+
+On GPUs below sm90 a capability gate routes to FlashAttention-2 the calls FA4
+cannot serve there: grad-enabled (training) attention (FA4's backward requires
+sm90+) and GQA attention (FA4's `pack_gqa` fails to JIT-compile below sm90).
+On sm90+ both run on FA4. If FA4 is unusable while `FASTVIDEO_FA4=1` is set,
+FastVideo fails loudly instead of silently falling back.
+
 ### FP4 Flash Attention 4 (Blackwell only)
 
 **`FLASH_ATTN`** with **`--nvfp4_fa4`**
@@ -81,7 +102,7 @@ See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040) and [flash-attention-
 #### Requirements
 
 - **GPU**: NVIDIA Blackwell (sm100a or sm103a) — B200, B300, GB200, GB300
-- **CUDA**: 12.8+
+- **CUDA**: 13.0+
 - **Python**: 3.10 or 3.11
 
 #### Installation
@@ -89,11 +110,14 @@ See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040) and [flash-attention-
 Install the FP4 flash attention kernel (without upgrading your existing torch):
 
 ```bash
-pip install --no-deps "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fp4#subdirectory=flash_attn/cute"
-pip install "nvidia-cutlass-dsl>=4.4.2" apache-tvm-ffi flashinfer-python
+# branch fix/cutlass-dsl-4.5 carries the cutlass-dsl 4.5 fix (cute.core.ThrMma
+# -> cute.ThrMma); switch back to @fp4 once hao-ai-lab/flash-attention-fp4#2 merges.
+pip install --no-deps "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fix/cutlass-dsl-4.5#subdirectory=flash_attn/cute"
+pip install "nvidia-cutlass-dsl>=4.5.2" apache-tvm-ffi flashinfer-python
 ```
 
-The `--no-deps` flag prevents upgrading torch/torchvision. The kernel requires torch >= 2.4 with CUDA 12.8+ support (already present in FastVideo's environment).
+The `--no-deps` flag prevents upgrading torch/torchvision. Use the supported
+PyTorch 2.12.0 and CUDA 13 environment for this kernel.
 
 #### Usage
 
@@ -121,6 +145,45 @@ gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
 - `use_fsdp_inference=True` is incompatible with the FP4 path (FSDP shards invalidate tensor pointers)
 - Per-call cosine similarity vs BF16: ~0.99 (slight quantization error accumulates over denoising steps)
 - Only supports `headdim >= 128`
+
+### NVFP4 + Attn-QAT (modified SageAttention3, Blackwell sm_120)
+
+**`ATTN_QAT_INFER`** with **`transformer_quant=nvfp4_qat`**
+
+Runs the DiT fully in 4-bit: NVFP4 linear layers (activations quantized on the
+fly) plus the modified SageAttention3 FP4 attention backend. This is the
+inference half of the Quantization-Aware Distillation (QAD) recipe and the path
+used for the RTX 5090 release.
+
+The `attn_qat_infer` kernel hard-gates on **sm_120 (consumer Blackwell / RTX
+5090)**; on other GPUs the backend logs a notice and falls back to Flash
+Attention. See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040).
+
+Enable both halves — attention via the env var, linear via `transformer_quant`:
+
+```python
+import os
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
+
+from fastvideo import VideoGenerator
+from fastvideo.layers.quantization import get_quantization_config
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    num_gpus=1,
+    # Wan-2.1 uses the nvfp4_qat config (NVFP4 is LTX2-specific). Pass an
+    # instance — the bare string is not resolved on the from_pretrained path.
+    transformer_quant=get_quantization_config("nvfp4_qat")(),
+    use_fsdp_inference=False,     # FSDP shards invalidate the FP4 tensor pointers
+)
+gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
+```
+
+Or run the example script:
+
+```bash
+python examples/inference/optimizations/nvfp4_qat_wan2_1_1_3b.py
+python examples/inference/optimizations/nvfp4_qat_wan2_1_1_3b.py --bf16  # baseline
+```
 
 ### Sliding Tile Attention (Archived)
 
@@ -168,7 +231,9 @@ python setup.py install  # or uv pip install -e .
 
 #### Installation
 
-Note that Sage Attention 3 requires `python>=3.13`, `torch>=2.8.0`, `CUDA >=12.8`. If you are using `uv` and using `torch==2.8.0` make sure that `sentencepiece==0.2.1` in the pyproject.toml file.
+Note that Sage Attention 3 requires `python>=3.13`, `torch>=2.8.0`, and CUDA 13.
+If you are using `uv` and `torch==2.8.0`, make sure that
+`sentencepiece==0.2.1` in the `pyproject.toml` file.
 
 To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repository to install the package from source.
 
@@ -177,6 +242,50 @@ To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repos
 These backends are model-specific and require the corresponding kernels and
 dependencies. Use the support matrix and model examples to confirm compatibility
 before enabling them.
+
+## FP8 Weight Quantization
+
+**`transformer_quant="FP8"`**
+
+Quantizes DiT linear layers (attention projections and FFN) to FP8 e4m3.
+
+On GPUs older than sm89, the FP8 matmul falls back to a bf16 dequant path
+automatically.
+
+### Requirements
+
+- **GPU**: sm89+ (H100, L40S, RTX 4090, or newer) for hardware FP8 compute
+- No additional packages required beyond the base FastVideo install
+
+### Usage
+
+```python
+from fastvideo import VideoGenerator
+from fastvideo.layers.quantization import get_quantization_config
+
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    # Pass an instance — the bare string is not resolved on the from_pretrained path.
+    transformer_quant=get_quantization_config("FP8")(),          # per-tensor (default)
+    # transformer_quant=get_quantization_config("FP8")(granularity="channel"),  # slower, higher accuracy
+)
+gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
+```
+
+Or run the example script:
+
+```bash
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py --granularity channel
+python examples/inference/optimizations/fp8_wan2_1_1_3b.py --bf16  # baseline
+```
+
+### Granularity
+
+| Mode | Weight scales | Activation scales | Speed | Accuracy |
+|------|--------------|-------------------|-------|----------|
+| `tensor` (default) | per-tensor | per-tensor | faster | lower |
+| `channel` | per-output-channel | per-token (rowwise) | slower | higher |
 
 <a id="torch-compile"></a>
 

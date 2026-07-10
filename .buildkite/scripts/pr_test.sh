@@ -76,9 +76,26 @@ EFFECTIVE_PR=${BUILDKITE_PULL_REQUEST:-false}
 if [ "$EFFECTIVE_PR" = "false" ] && [ -n "${PR_NUMBER:-}" ]; then
     EFFECTIVE_PR=$PR_NUMBER
 fi
-MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUILDKITE_PULL_REQUEST=$EFFECTIVE_PR BUILDKITE_BRANCH=${BUILDKITE_BRANCH:-} TEST_SCOPE=${TEST_SCOPE:-} IMAGE_VERSION=$IMAGE_VERSION"
+MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUILDKITE_PULL_REQUEST=$EFFECTIVE_PR BUILDKITE_BRANCH=${BUILDKITE_BRANCH:-} TEST_SCOPE=${TEST_SCOPE:-} BUILDKITE_BUILD_URL=${BUILDKITE_BUILD_URL:-} BUILDKITE_BUILD_ID=${BUILDKITE_BUILD_ID:-} BUILDKITE_JOB_ID=${BUILDKITE_JOB_ID:-} IMAGE_VERSION=$IMAGE_VERSION"
 
 POST_RUN_HOOK=""
+
+is_truthy() {
+    case "${1:-}" in
+        1|true|TRUE|yes|YES|on|ON) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+ssim_bootstrap_args() {
+    local title="${PR_TITLE:-}"
+    local message="${BUILDKITE_MESSAGE:-}"
+    if is_truthy "${FASTVIDEO_SSIM_BOOTSTRAP_MODE:-}" \
+        || [[ "$title" == *"[new-model]"* ]] \
+        || [[ "$message" == *"[new-model]"* ]]; then
+        printf ' --bootstrap-mode'
+    fi
+}
 
 upload_performance_artifacts() {
     SHORT_SHA=${BUILDKITE_COMMIT:0:7}
@@ -172,7 +189,12 @@ case "$TEST_TYPE" in
         ;;
     "ssim")
         log "Running SSIM tests..."
-        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_SSIM_TEST_FILE::run_ssim_tests"
+        SSIM_BOOTSTRAP_ARGS=$(ssim_bootstrap_args)
+        if [ -n "$SSIM_BOOTSTRAP_ARGS" ]; then
+            log "SSIM bootstrap mode enabled for new-model reference draft generation"
+        fi
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run "
+        MODAL_COMMAND+="$MODAL_SSIM_TEST_FILE::run_ssim_tests$SSIM_BOOTSTRAP_ARGS"
         ;;
     "training")
         log "Running training tests..."
@@ -218,6 +240,10 @@ case "$TEST_TYPE" in
     "train_framework")
         log "Running fastvideo.train framework tests..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_train_framework_tests"
+        ;;
+    "eval")
+        log "Running eval metric tests..."
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_eval_tests"
         ;;
     "lora_extraction")
         log "Running LoRA extraction tests..."

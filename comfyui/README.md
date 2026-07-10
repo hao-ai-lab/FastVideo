@@ -41,8 +41,10 @@ cp -r /path/to/FastVideo/comfyui /path/to/ComfyUI/custom_nodes/FastVideo
 Currently, the only dependency is `fastvideo`, which can be installed with `uv`.
 
 ```bash
-uv pip install fastvideo
+UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 ```
+
+Use `UV_TORCH_BACKEND=cu130` instead on CUDA 13.
 
 #### Install missing custom nodes:
 

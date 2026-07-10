@@ -28,34 +28,43 @@ from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 logger = init_logger(__name__)
 
 
-def _maybe_convert_model_to_nvfp4(model: nn.Module) -> None:
-    """Quantize NVFP4-tagged linear layers in-place after weights are loaded.
+def _maybe_quantize_model(model: nn.Module) -> None:
+    """Quantize NVFP4- or FP8-tagged linear layers in-place after weights are loaded.
 
     Walks the module tree once, looking for layers whose ``quant_method``
-    is an :class:`NVFP4QuantizeMethod` (attached at construction time by
-    :meth:`NVFP4Config.get_quant_method`). When at least one such layer
-    exists, calls :func:`convert_model_to_nvfp4` to register the
-    ``_nvfp4_weight*`` / ``_nvfp4_alpha`` / ``_weight_global_sf`` buffers
-    on each targeted layer.
+    is an :class:`NVFP4QuantizeMethod` or :class:`FP8QuantizeMethod` (attached
+    at construction time by the respective ``get_quant_method``). When at least
+    one such layer exists, calls the matching conversion function to register
+    quantized weight buffers on each targeted layer.
 
-    The walk returns on the first NVFP4 layer found so non-NVFP4 callers
-    pay only an ``isinstance`` check per module. flashinfer is imported
-    lazily inside :func:`convert_model_to_nvfp4` so this helper is a
-    no-op on hosts without the NVFP4 backend.
+    The walk returns on the first quantized layer found so unquantized callers
+    pay only an ``isinstance`` check per module. Both imports are deferred so
+    this is a no-op on hosts without the relevant backends.
     """
-    # Defer the import: nvfp4_config imports heavy diffusers /
-    # torch.distributed symbols at module-load time, and unconditional
-    # import would penalize every loader call regardless of whether
-    # NVFP4 is wired.
+    # Defer imports: these modules pull in heavy symbols at module-load time.
     from fastvideo.layers.quantization.nvfp4_config import (
         NVFP4QuantizeMethod, convert_model_to_nvfp4,
     )
+    from fastvideo.layers.quantization.nvfp4_qat_config import (
+        NVFP4QATQuantizeMethod, convert_model_to_fp4,
+    )
+    from fastvideo.layers.quantization.fp8_config import (
+        FP8QuantizeMethod, convert_model_to_fp8,
+    )
 
     for mod in model.modules():
-        if isinstance(getattr(mod, "quant_method", None),
-                      NVFP4QuantizeMethod):
+        qm = getattr(mod, "quant_method", None)
+        if isinstance(qm, NVFP4QuantizeMethod):
             logger.info("Converting loaded model weights for NVFP4 linear layers")
             convert_model_to_nvfp4(model)
+            return
+        if isinstance(qm, NVFP4QATQuantizeMethod):
+            logger.info("Converting loaded model weights for NVFP4-QAT linear layers")
+            convert_model_to_fp4(model)
+            return
+        if isinstance(qm, FP8QuantizeMethod):
+            logger.info("Converting loaded model weights for FP8 linear layers")
+            convert_model_to_fp8(model)
             return
 
 
@@ -189,14 +198,13 @@ def maybe_load_fsdp_model(
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
 
-    # NVFP4 weight prequantization. We detect by the registered
-    # ``quant_method`` on linear layers rather than by a separate flag —
-    # construction-time ``NVFP4Config.get_quant_method`` already attached
-    # ``NVFP4QuantizeMethod`` to every targeted layer, so the loader's
-    # responsibility is just to materialize the per-layer nvfp4 weight /
-    # scale buffers from the freshly-loaded bf16 weights. No-op when
-    # ``flashinfer`` is not installed (lazy import inside the helper).
-    _maybe_convert_model_to_nvfp4(model)
+    # Post-load weight quantization. We detect the active scheme by the
+    # ``quant_method`` attached to each linear layer at construction time
+    # (via ``QuantizationConfig.get_quant_method``). The loader's
+    # responsibility is just to materialize the quantized weight buffers
+    # from the freshly-loaded bf16 weights. No-op when no quantized layers
+    # are present (lazy imports inside the helper).
+    _maybe_quantize_model(model)
 
     compile_in_loader = enable_torch_compile and training_mode
     if compile_in_loader:
@@ -332,6 +340,7 @@ def load_model_from_full_model_state_dict(
         NotImplementedError: If got FSDP with more than 1D.
     """
     meta_sd = model.state_dict()
+    named_parameters = dict(model.named_parameters())
     sharded_sd = {}
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
         full_sd_iterator, param_names_mapping)  # type: ignore
@@ -363,8 +372,25 @@ def load_model_from_full_model_state_dict(
             )
         if not hasattr(meta_sharded_param, "device_mesh"):
             full_tensor = full_tensor.to(device=device, dtype=param_dtype)
-            # In cases where parts of the model aren't sharded, some parameters will be plain tensors
-            sharded_tensor = full_tensor
+            target_param = named_parameters.get(target_param_name)
+            weight_loader = getattr(target_param, "weight_loader", None)
+            # Gated on a shape mismatch: only fused/stacked params with a custom
+            # weight_loader (e.g. Qwen3's merged QKV/gate-up) take this path.
+            # Existing models whose unsharded params match the checkpoint shape
+            # fall through to the original `sharded_tensor = full_tensor` below.
+            if target_param is not None and callable(weight_loader) and tuple(target_param.shape) != tuple(
+                    full_tensor.shape):
+                loaded_param = nn.Parameter(torch.empty(tuple(target_param.shape),
+                                                        device=device,
+                                                        dtype=param_dtype),
+                                            requires_grad=False)
+                for attr_name, attr_value in vars(target_param).items():
+                    setattr(loaded_param, attr_name, attr_value)
+                weight_loader(loaded_param, full_tensor)
+                sharded_tensor = loaded_param.data
+            else:
+                # In cases where parts of the model aren't sharded, some parameters will be plain tensors.
+                sharded_tensor = full_tensor
         else:
             full_tensor = full_tensor.to(device=device, dtype=param_dtype)
             sharded_tensor = distribute_tensor(

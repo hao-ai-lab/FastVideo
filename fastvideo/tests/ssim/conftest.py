@@ -5,6 +5,7 @@ from fastvideo.tests.ssim.reference_utils import (
     get_output_quality_tier,
 )
 from fastvideo.tests.ssim.reference_videos_cli import (
+    BOOTSTRAP_ENV_KEY,
     HF_REPO_ENV_KEY,
     ensure_reference_videos_available,
 )
@@ -34,6 +35,12 @@ def pytest_addoption(parser):
         default=False,
         help="Skip auto-download of missing SSIM reference videos from HF.",
     )
+    parser.addoption(
+        "--ssim-bootstrap-mode",
+        action="store_true",
+        default=False,
+        help="Treat missing SSIM references as draft-reference bootstrap cases.",
+    )
 
 
 def pytest_configure(config):
@@ -43,6 +50,9 @@ def pytest_configure(config):
     repo_id = config.getoption("--ssim-reference-repo")
     if repo_id:
         os.environ[HF_REPO_ENV_KEY] = repo_id
+
+    if config.getoption("--ssim-bootstrap-mode"):
+        os.environ[BOOTSTRAP_ENV_KEY] = "1"
 
     skip_download = config.getoption("--skip-ssim-reference-download")
     skip_download = skip_download or os.environ.get(

@@ -852,15 +852,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             self.current_trainstep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
 
-            if (step >= self.training_args.ema_start_step) and \
-                    (self.generator_ema is None) and (self.training_args.ema_decay > 0):
-                self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
-                logger.info("Created generator EMA at step %s with decay=%s", step, self.training_args.ema_decay)
-
-                # Create EMA for transformer_2 if it exists
-                if self.transformer_2 is not None and self.generator_ema_2 is None:
-                    self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=self.training_args.ema_decay)
-                    logger.info("Created generator EMA_2 at step %s with decay=%s", step, self.training_args.ema_decay)
+            if step >= self.training_args.ema_start_step:
+                self._build_generator_emas(context=f"lazy @ step {step}")
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 training_batch = self.train_one_step(training_batch)
