@@ -161,11 +161,15 @@ def _clone_checkout(git_repo: str, git_commit: str) -> str:
 
 
 def _cache_install_output(cache_root: str) -> str:
+    # This smoke exercises the Modal volume cache specifically, so do not let
+    # a matching Docker-prebuilt wheel satisfy the miss/hit assertions.
+    disabled_prebuilt_info_path = f"{cache_root}/.docker-prebuilt-disabled.json"
     return _run_shell_capture(
         "source $HOME/.local/bin/env && "
         "source /opt/venv/bin/activate && "
         "python fastvideo/tests/modal/kernel_build_cache.py install "
-        f"--cache-root {shlex.quote(cache_root)}",
+        f"--cache-root {shlex.quote(cache_root)} "
+        f"--prebuilt-info-path {shlex.quote(disabled_prebuilt_info_path)}",
         cwd=REPO_DIR,
     )
 
