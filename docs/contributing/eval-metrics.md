@@ -2,7 +2,7 @@
 
 This guide is for contributors adding new evaluation metrics to
 FastVideo's eval suite. To run the existing metrics, see
-[`fastvideo/eval/README.md`](../../fastvideo/eval/README.md).
+[`fastvideo/eval/README.md`](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/eval/README.md).
 
 ## When to use this guide
 

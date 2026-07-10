@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from logging import Logger
-from typing import Iterator
 
 from fastvideo import VideoGenerator
+from fastvideo.tests.ssim.bootstrap_references import (
+    xfail_missing_reference_in_bootstrap_mode,
+)
 from fastvideo.tests.ssim.reference_utils import (
     build_generated_output_dir,
     build_reference_folder_path,
@@ -67,6 +70,12 @@ def _find_reference_video(reference_folder: str, prompt: str) -> str:
     raise FileNotFoundError("Reference video missing")
 
 
+def _remove_stale_generated_video(output_dir: str, output_video_name: str) -> None:
+    stale_path = os.path.join(output_dir, output_video_name)
+    if os.path.exists(stale_path):
+        os.remove(stale_path)
+
+
 def _assert_similarity(
     *,
     logger: Logger,
@@ -79,8 +88,14 @@ def _assert_similarity(
     model_id: str,
     attention_backend_name: str,
 ) -> None:
+    generated_video_path = os.path.join(output_dir, output_video_name)
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing: %s", reference_folder)
+        xfail_missing_reference_in_bootstrap_mode(
+            generated_artifact_path=generated_video_path,
+            reference_folder=reference_folder,
+            artifact_kind="video",
+        )
         error_msg = (
             f"Reference video folder does not exist: {reference_folder}\n"
             f"To download reference videos, run:\n"
@@ -96,9 +111,12 @@ def _assert_similarity(
             prompt,
             attention_backend_name,
         )
+        xfail_missing_reference_in_bootstrap_mode(
+            generated_artifact_path=generated_video_path,
+            reference_folder=reference_folder,
+            artifact_kind="video",
+        )
         raise error
-
-    generated_video_path = os.path.join(output_dir, output_video_name)
 
     logger.info(
         "Computing SSIM between %s and %s",
@@ -214,6 +232,7 @@ def run_text_to_video_similarity_test(
         )
         output_video_name = f"{prompt[:100].strip()}.mp4"
         os.makedirs(output_dir, exist_ok=True)
+        _remove_stale_generated_video(output_dir, output_video_name)
 
         params_map = select_ssim_params(
             default_params_map,
@@ -289,6 +308,7 @@ def run_image_to_video_similarity_test(
         )
         output_video_name = f"{prompt[:100].strip()}.mp4"
         os.makedirs(output_dir, exist_ok=True)
+        _remove_stale_generated_video(output_dir, output_video_name)
 
         params_map = select_ssim_params(
             default_params_map,

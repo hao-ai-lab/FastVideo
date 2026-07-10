@@ -1,0 +1,33 @@
+# LTX-2.3 distilled t2v — 8+3 two-stage at 512x768.
+#
+# Run:
+#   fastvideo generate --config examples/inference/ltx2_3/t2v_8s3_512x768.yaml
+#
+# Stage 1 denoises for 8 steps at half resolution; the latents are then
+# spatially upsampled and refined for 3 steps (refine only supports 2 or 3).
+# The refine upsampler auto-resolves from the model's `spatial_upscaler`.
+generator:
+  model_path: FastVideo/LTX-2.3-Distilled-Diffusers
+  engine:
+    num_gpus: 1
+  pipeline:
+    workload_type: t2v
+    preset_overrides:
+      refine:
+        enabled: true
+        num_inference_steps: 3
+        guidance_scale: 1.0
+        add_noise: true
+request:
+  prompt: >-
+    A cinematic drone shot flying over dramatic coastal cliffs at sunrise, golden light spilling across the water, gentle waves breaking on the rocks below, ultra-detailed, smooth camera motion.
+  sampling:
+    height: 512
+    width: 768
+    num_frames: 121
+    fps: 24
+    guidance_scale: 1.0
+    num_inference_steps: 8
+  output:
+    output_path: outputs/ltx2_3_t2v_8s3_512x768.mp4
+    save_video: true

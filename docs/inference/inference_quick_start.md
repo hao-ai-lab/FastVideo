@@ -6,7 +6,7 @@ This page contains step-by-step instructions to get you quickly started with vid
 
 - **OS**: Linux (Tested on Ubuntu 22.04+)
 - **Python**: 3.10-3.12
-- **CUDA**: 12.8
+- **CUDA**: 12.6 or 13.0
 - **GPU**: At least one NVIDIA GPU
 
 ## Installation
@@ -19,8 +19,10 @@ uv venv --python 3.12 --seed
 source .venv/bin/activate
 
 # Install FastVideo
-uv pip install fastvideo
+UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 ```
+
+Use `UV_TORCH_BACKEND=cu130` instead on CUDA 13.
 
 For advanced installation options, see the [Installation Guide](../getting_started/installation.md).
 

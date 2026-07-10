@@ -220,6 +220,16 @@ class StageValidators:
         return validator
 
     @staticmethod
+    def min_list_length(min_length: int) -> Callable[[Any], bool]:
+        """Return a validator that checks if a list has at least min_length items."""
+
+        def validator(value: Any) -> bool:
+            return StageValidators.list_min_length(value, min_length)
+
+        validator.__name__ = f"list_min_length_{min_length}"
+        return validator
+
+    @staticmethod
     def min_dims(min_dims: int) -> Callable[[Any], bool]:
         """Return a validator that checks if tensor has at least min_dims dimensions and no NaN values."""
 

@@ -1,0 +1,23 @@
+# Run with:
+#   FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA fastvideo generate --config scripts/inference/inference_flux2_klein.yaml
+generator:
+  model_path: black-forest-labs/FLUX.2-klein-4B
+  engine:
+    num_gpus: 1
+    offload:
+      dit: false
+      vae: false
+      pin_cpu_memory: false
+  pipeline:
+    workload_type: t2i
+request:
+  prompt: "a photo of a banana on a wooden table, studio lighting"
+  sampling:
+    seed: 0
+    num_frames: 1
+    height: 1024
+    width: 1024
+    num_inference_steps: 4
+    guidance_scale: 1.0
+  output:
+    output_path: outputs/flux2-klein/

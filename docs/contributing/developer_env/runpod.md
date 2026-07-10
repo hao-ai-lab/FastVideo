@@ -18,7 +18,8 @@ Make sure you're logged into the right RunPod account before spending credits.
 
 **2. Filter by CUDA version**
 
-Use "Additional Filters" to select CUDA 12.8.
+Use "Additional Filters" to select a CUDA version supported by the FastVideo
+template.
 
 ![RunPod CUDA selection](../../assets/images/runpod_cuda.png)
 
@@ -68,6 +69,10 @@ If you're setting up a pod from scratch instead of the FastVideo template, use t
 ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-latest
 ```
 
+This default tag uses CUDA 12.6.3 with the `cu126` PyTorch backend. Use
+`py3.12-cuda13.0.0-latest` instead when the pod specifically needs the CUDA 13
+and `cu130` image.
+
 And paste this as the Container Start Command to enable SSH ([RunPod docs](https://docs.runpod.io/pods/configuration/use-ssh)):
 
 ```bash
@@ -102,7 +107,8 @@ cd /FastVideo
 uv pip install -e ".[dev]"
 ```
 
-The Docker image already includes Flash Attention and most heavy dependencies, so this is fast.
+This preserves the PyTorch backend selected by the Docker image. The image also
+includes Flash Attention and most heavy dependencies, so this is fast.
 
 **Build the custom kernels (optional)**
 

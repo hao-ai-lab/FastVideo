@@ -18,20 +18,20 @@ What the script does
 --------------------
 1. Loads FastVideo/LTX-2.3-Distilled-Diffusers (8 denoise + 3 refine steps,
    CFG=1, no refine LoRA — the distilled production recipe).
-2. Compiles the DiT, text encoder, and VAE (fullgraph, max-autotune-no-
-   cudagraphs).
-3. Runs 2 warmup calls (untimed) + 2 measured calls. Two warmups are needed
-   even though distilled has no refine LoRA, because Inductor's per-shape
-   autotune for the first call still leaves a few cold guards on call 2;
-   the second warmup settles them. Skipping to a single warmup typically
-   inflates the first measured run by tens of seconds.
+2. Compiles the DiT, text encoder, and VAE (fullgraph, Inductor default
+   mode — autotune adds ~7 min cold-compile here with no measurable
+   e2e gain).
+3. Runs 2 warmup calls (untimed) + 2 measured calls. Two warmups are kept
+   as a safety net — the first call pays cold compile + first-shape guard
+   work, and a second warmup ensures any residual recompiles settle before
+   we measure.
 4. Prints a per-stage breakdown and an average over the measured runs.
 
 Hardware notes
 --------------
 - Single-GPU example; for multi-GPU sequence-parallel see the gradio demo
   under `examples/inference/gradio/local/gradio_local_demo_ltx2_3/`.
-- First-time compile + autotune takes ~10-30 min on H100 / GB200 (cached
+- First-time compile takes ~30-40 min on GB200 (~20 min on H100; cached
   in `$TORCHINDUCTOR_CACHE_DIR` afterwards). Subsequent invocations only
   pay the one-time process load + a few seconds of dynamo trace.
 - On GB200 / Blackwell, run with `env -u LD_LIBRARY_PATH ...` to avoid a
@@ -151,10 +151,13 @@ def main() -> None:
     print(f"i2v image:       {I2V_IMAGE}")
     print(f"Output dir:      {OUTPUT_DIR.resolve()}")
 
+    # mode="default" — Inductor's default schedule matches max-autotune on
+    # this pipeline (denoise/refine/decode all within ~5 ms, n=2) while
+    # saving ~7 min of cold compile on a single GB200.
     torch_compile_kwargs = {
         "backend": "inductor",
         "fullgraph": True,
-        "mode": "max-autotune-no-cudagraphs",
+        "mode": "default",
         "dynamic": False,
     }
 

@@ -55,6 +55,20 @@ class SageAttention3Impl(AttentionImpl):
         self.softmax_scale = softmax_scale
         self.dropout = extra_impl_args.get("dropout_p", 0.0)
 
+    def preprocess_qkv(
+        self,
+        qkv: torch.Tensor,
+        attn_metadata: AttentionMetadata,
+    ) -> torch.Tensor:
+        """Transpose stacked QKV from [3B, L, H, D] to [3B, H, L, D].
+
+        Single bulk permute+contiguous on the entire stacked tensor rather than
+        three separate transposed views for Q, K, V. The .contiguous() is
+        required: sageattn_blackwell's fake kernel returns empty_like(q), so the
+        op's output strides must match contiguous q under torch.compile.
+        """
+        return qkv.permute(0, 2, 1, 3).contiguous()
+
     def forward(
         self,
         query: torch.Tensor,
@@ -62,9 +76,15 @@ class SageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        query = query.transpose(1, 2)
-        key = key.transpose(1, 2)
-        value = value.transpose(1, 2)
+        """Call sageattn3_blackwell directly. Input is already [B, H, L, D]
+        and contiguous from preprocess_qkv."""
         output = sageattn3_blackwell(query, key, value, is_causal=self.causal)
-        output = output.transpose(1, 2)
         return output
+
+    def postprocess_output(
+        self,
+        output: torch.Tensor,
+        attn_metadata: AttentionMetadata,
+    ) -> torch.Tensor:
+        """Transpose output from [B, H, L, D] back to [B, L, H, D]."""
+        return output.permute(0, 2, 1, 3).contiguous()

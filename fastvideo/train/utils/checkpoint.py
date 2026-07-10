@@ -15,6 +15,13 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+    set_model_state_dict,
+)
+from torch.distributed.checkpoint.stateful import Stateful
+
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -129,6 +136,32 @@ class _RoleModuleContainer(torch.nn.Module):
         super().__init__()
         for name, module in modules.items():
             self.add_module(name, module)
+
+
+class _FullModelState(Stateful):
+    """DCP wrapper that saves frozen model parameters too.
+
+    The shared ``ModelWrapper`` intentionally filters to ``requires_grad``
+    parameters. Frozen-but-mutated roles (e.g. DiffusionNFT's old policy,
+    causal-CD's EMA target) must still be restored on resume, so they need
+    full model state.
+    """
+
+    def __init__(self, model: torch.nn.Module) -> None:
+        self.model = model
+
+    def state_dict(self) -> dict[str, Any]:
+        return get_model_state_dict(self.model)  # type: ignore[no-any-return]
+
+    def load_state_dict(
+        self,
+        state_dict: dict[str, Any],
+    ) -> None:
+        set_model_state_dict(
+            self.model,
+            model_state_dict=state_dict,
+            options=StateDictOptions(strict=False),
+        )
 
 
 class _CallbackStateWrapper:

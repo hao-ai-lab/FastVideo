@@ -19,6 +19,7 @@ if os.path.exists(COSMOS_PREDICT2_5_PATH) and COSMOS_PREDICT2_5_PATH not in sys.
 
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.tests.utils import skip_if_gated_repo_inaccessible
 from fastvideo.utils import maybe_download_model
 # Use Cosmos 2.5 specific config
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
@@ -43,7 +44,14 @@ CHECKPOINT_SUBDIR = "base/post-trained"
 CHECKPOINT_FILENAME = "81edfebe-bd6a-4039-8c1d-737df1a790bf_ema_bf16.pt"
 
 
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=None)
+def _resolve_model_path() -> str:
+    skip_if_gated_repo_inaccessible(BASE_MODEL_PATH,
+                                    test_name="Cosmos 2.5 transformer test",
+                                    allow_module_level=True)
+    return maybe_download_model(BASE_MODEL_PATH, local_dir=None)
+
+
+MODEL_PATH = _resolve_model_path()
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, CHECKPOINT_SUBDIR, "transformer")
 if not os.path.exists(TRANSFORMER_PATH):
     # Try without subdirectory
@@ -592,4 +600,3 @@ if __name__ == "__main__":
     # Run tests directly
     test_cosmos25_transformer()
     test_cosmos25_transformer_video()
-

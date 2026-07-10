@@ -1,0 +1,334 @@
+"""
+Fused Triton kernels for VSA compress (block mean) and topk mask construction.
+
+Replaces the multi-kernel PyTorch pipeline:
+  Original compress: .view() -> .float() -> .sum(dim=3) -> / vbs -> .to(bf16)
+  Original topk:     torch.topk() -> zeros() -> scatter_()
+
+With single-pass fused kernels:
+  fused_block_mean:  read bf16, accumulate fp32, div by vbs, write bf16
+  fused_topk_mask:   read scores, find k-th value, write bool mask
+"""
+
+import logging
+
+import torch
+import triton
+import triton.language as tl
+
+logger = logging.getLogger(__name__)
+
+
+@triton.jit
+def _fused_block_mean_kernel(
+    X_ptr,
+    Out_ptr,
+    VBS_ptr,
+    stride_x_bh,
+    stride_x_seq,
+    stride_o_bh,
+    stride_o_blk,
+    num_blocks,
+    BLOCK_ELEMENTS: tl.constexpr,
+    HEAD_DIM: tl.constexpr,
+    OUTPUT_DTYPE: tl.constexpr,
+):
+    """Fused block mean: one program computes mean of one block for one (b,h).
+
+    X is viewed as [B*H, num_blocks*BLOCK_ELEMENTS, HEAD_DIM] contiguous.
+    Out is [B*H, num_blocks, HEAD_DIM] contiguous.
+    2D load + parallel tl.sum reduction, accumulates in fp32.
+    """
+    block_idx = tl.program_id(0)
+    bh_idx = tl.program_id(1)
+
+    if block_idx >= num_blocks:
+        return
+
+    vbs = tl.load(VBS_ptr + block_idx).to(tl.float32)
+
+    x_base = X_ptr + bh_idx * stride_x_bh + block_idx * BLOCK_ELEMENTS * stride_x_seq
+
+    row_offsets = tl.arange(0, BLOCK_ELEMENTS)
+    dim_offsets = tl.arange(0, HEAD_DIM)
+    offsets = row_offsets[:, None] * stride_x_seq + dim_offsets[None, :]
+    block_data = tl.load(x_base + offsets).to(tl.float32)
+    acc = tl.sum(block_data, axis=0) / vbs
+
+    out_base = Out_ptr + bh_idx * stride_o_bh + block_idx * stride_o_blk + dim_offsets
+    tl.store(out_base, acc.to(OUTPUT_DTYPE))
+
+
+@triton.jit
+def _fused_block_mean_bwd_kernel(
+    GradOut_ptr,
+    GradX_ptr,
+    VBS_ptr,
+    stride_go_bh,
+    stride_go_blk,
+    stride_gx_bh,
+    stride_gx_seq,
+    num_blocks,
+    BLOCK_ELEMENTS: tl.constexpr,
+    HEAD_DIM: tl.constexpr,
+    OUTPUT_DTYPE: tl.constexpr,
+):
+    """Backward of block mean: broadcast grad_out / vbs to each token in the block.
+
+    Mirrors the forward kernel: one program per (block, bh).
+    GradOut is [B*H, num_blocks, HEAD_DIM].
+    GradX  is [B*H, num_blocks*BLOCK_ELEMENTS, HEAD_DIM].
+    2D store writes all BLOCK_ELEMENTS rows in parallel.
+    """
+    block_idx = tl.program_id(0)
+    bh_idx = tl.program_id(1)
+
+    if block_idx >= num_blocks:
+        return
+
+    vbs = tl.load(VBS_ptr + block_idx).to(tl.float32)
+
+    dim_offsets = tl.arange(0, HEAD_DIM)
+    go_base = GradOut_ptr + bh_idx * stride_go_bh + block_idx * stride_go_blk
+    grad_val = tl.load(go_base + dim_offsets).to(tl.float32) / vbs
+
+    row_offsets = tl.arange(0, BLOCK_ELEMENTS)
+    gx_base = GradX_ptr + bh_idx * stride_gx_bh + block_idx * BLOCK_ELEMENTS * stride_gx_seq
+    offsets = row_offsets[:, None] * stride_gx_seq + dim_offsets[None, :]
+    grad_2d = tl.broadcast_to(grad_val[None, :], [BLOCK_ELEMENTS, HEAD_DIM])
+    tl.store(gx_base + offsets, grad_2d.to(OUTPUT_DTYPE))
+
+
+_TORCH_TO_TRITON_DTYPE = {
+    torch.float16: tl.float16,
+    torch.bfloat16: tl.bfloat16,
+    torch.float32: tl.float32,
+}
+
+
+def _fused_block_mean_bwd(
+    grad_output: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+    block_elements: int,
+) -> torch.Tensor:
+    B, H, num_blocks, D = grad_output.shape
+    seq_len = num_blocks * block_elements
+
+    grad_x = torch.empty(B, H, seq_len, D, dtype=grad_output.dtype, device=grad_output.device)
+
+    go_flat = grad_output.contiguous().view(B * H, num_blocks, D)
+    gx_flat = grad_x.view(B * H, seq_len, D)
+
+    grid = (num_blocks, B * H)
+
+    _fused_block_mean_bwd_kernel[grid](
+        go_flat, gx_flat, variable_block_sizes,
+        go_flat.stride(0), go_flat.stride(1),
+        gx_flat.stride(0), gx_flat.stride(1),
+        num_blocks,
+        BLOCK_ELEMENTS=block_elements,
+        HEAD_DIM=D,
+        OUTPUT_DTYPE=_TORCH_TO_TRITON_DTYPE[grad_output.dtype],
+    )
+
+    return grad_x
+
+
+def _fused_block_mean_fwd(
+    x: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+    block_elements: int,
+) -> torch.Tensor:
+    B, H, seq_len, D = x.shape
+    num_blocks = seq_len // block_elements
+    assert seq_len % block_elements == 0
+
+    x = x.contiguous()
+    out = torch.empty(B, H, num_blocks, D, dtype=x.dtype, device=x.device)
+
+    x_flat = x.view(B * H, seq_len, D)
+    out_flat = out.view(B * H, num_blocks, D)
+
+    grid = (num_blocks, B * H)
+
+    _fused_block_mean_kernel[grid](
+        x_flat, out_flat, variable_block_sizes,
+        x_flat.stride(0), x_flat.stride(1),
+        out_flat.stride(0), out_flat.stride(1),
+        num_blocks,
+        BLOCK_ELEMENTS=block_elements,
+        HEAD_DIM=D,
+        OUTPUT_DTYPE=_TORCH_TO_TRITON_DTYPE[x.dtype],
+    )
+
+    return out
+
+
+class _FusedBlockMeanAutograd(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, x, variable_block_sizes, block_elements):
+        ctx.save_for_backward(variable_block_sizes)
+        ctx.block_elements = block_elements
+        return _fused_block_mean_fwd(x, variable_block_sizes, block_elements)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        variable_block_sizes, = ctx.saved_tensors
+        block_elements = ctx.block_elements
+        return _fused_block_mean_bwd(grad_output, variable_block_sizes, block_elements), None, None
+
+
+def fused_block_mean(
+    x: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+    block_elements: int,
+) -> torch.Tensor:
+    """Compute block-wise mean with fp32 accumulation, fused in one kernel.
+
+    Forward: fused Triton kernel (bf16 read → fp32 accumulate → div → bf16 write).
+    Backward: broadcasts grad_output / vbs back to each token position.
+
+    Args:
+        x: [B, H, seq_len, D] in bf16
+        variable_block_sizes: [num_blocks] number of valid tokens per block
+        block_elements: tokens per block (e.g. 64)
+
+    Returns:
+        [B, H, num_blocks, D] in bf16
+    """
+    return _FusedBlockMeanAutograd.apply(x, variable_block_sizes, block_elements)
+
+
+@triton.jit
+def _fused_topk_mask_kernel(
+    Scores_ptr,
+    Mask_ptr,
+    stride_s_bh,
+    stride_s_q,
+    stride_s_kv,
+    stride_m_bh,
+    stride_m_q,
+    stride_m_kv,
+    kv_blocks: tl.constexpr,
+    topk: tl.constexpr,
+    KV_BLOCK_SIZE: tl.constexpr,
+):
+    """Build topk boolean mask via randomized pivot selection (quickselect-style).
+
+    For each (b,h,q_block) row: find the k-th largest score using iterative
+    pivot-based partitioning, then build mask by comparing against threshold.
+
+    Grid: (num_q_blocks, B * H)
+    """
+    q_idx = tl.program_id(0)
+    bh_idx = tl.program_id(1)
+
+    kv_offsets = tl.arange(0, KV_BLOCK_SIZE)
+    score_base = Scores_ptr + bh_idx * stride_s_bh + q_idx * stride_s_q
+    mask_base = Mask_ptr + bh_idx * stride_m_bh + q_idx * stride_m_q
+
+    valid_mask = kv_offsets < kv_blocks
+    scores = tl.load(score_base + kv_offsets * stride_s_kv, mask=valid_mask, other=-float("inf"))
+    scores_f32 = scores.to(tl.float32)
+
+    # Binary search for threshold: find value T such that count(scores > T) <= topk
+    # and count(scores >= T) >= topk
+    # Exclude -inf from lo so the binary search can converge when masked
+    # scores are present (mid = (-inf + hi) * 0.5 = -inf would stall).
+    finite_mask = valid_mask & (scores_f32 > float("-inf"))
+    lo = tl.min(tl.where(finite_mask, scores_f32, float("inf")), axis=0)
+    hi = tl.max(tl.where(valid_mask, scores_f32, float("-inf")), axis=0)
+    # If all valid scores are -inf, lo > hi; threshold stays at -inf and
+    # the tie-breaking logic below selects the first topk positions.
+    lo = tl.minimum(lo, hi)
+
+    # 32 iterations of fp32 bisection give range-relative resolution (hi-lo)/2^32.
+    # For VSA's softmax-input scores (q_c@k_c/sqrt(d), O(1) magnitude, range < ~10),
+    # this resolves to ~2e-9, well below the bf16 ULP at that magnitude (~8e-3),
+    # so the threshold converges exactly to the k-th bf16 score value and the
+    # > / == comparisons below are exact.
+    for _i in range(32):
+        mid = (lo + hi) * 0.5
+        count_ge = tl.sum(((scores_f32 >= mid) & valid_mask).to(tl.int32), axis=0)
+        lo = tl.where(count_ge >= topk, mid, lo)
+        hi = tl.where(count_ge >= topk, hi, mid)
+
+    # lo is our threshold: count(scores >= lo) >= topk
+    threshold = lo
+    above_threshold = scores_f32 > threshold
+    at_threshold = scores_f32 == threshold
+    n_above = tl.sum(above_threshold.to(tl.int32), axis=0)
+    n_needed_at_thresh = topk - n_above
+
+    at_thresh_cumsum = tl.cumsum(at_threshold.to(tl.int32), axis=0)
+    at_thresh_selected = at_threshold & (at_thresh_cumsum <= n_needed_at_thresh)
+
+    final_mask = above_threshold | at_thresh_selected
+
+    tl.store(mask_base + kv_offsets * stride_m_kv, final_mask, mask=valid_mask)
+
+
+# Triton kernel loads the entire kv row into registers via tl.arange(0, KV_BLOCK_SIZE).
+# Each row spawns multiple same-sized register arrays (scores_f32, valid_mask,
+# above_threshold, at_threshold, cumsum, etc.).  GPU SMs have a fixed register file
+# (e.g. 65536 × 32-bit), so the maximum array length per program is bounded.
+# 4096 (2^12) is an empirical power-of-2 cap that avoids register spilling on
+# mainstream GPUs.  Beyond this the kernel either fails to compile or spills to
+# local memory with severe perf regression, so we fall back to torch.topk.
+MAX_KV_BLOCK_SIZE = 4096
+
+
+def _pytorch_topk_mask_fallback(
+    scores: torch.Tensor,
+    topk: int,
+) -> torch.Tensor:
+    topk_idx = torch.topk(scores, topk, dim=-1).indices
+    return torch.zeros_like(scores, dtype=torch.bool).scatter_(-1, topk_idx, True)
+
+
+def fused_topk_mask(
+    scores: torch.Tensor,
+    topk: int,
+) -> torch.Tensor:
+    """Build topk boolean mask from scores using fused Triton kernel.
+
+    Falls back to PyTorch when kv_blocks exceeds the Triton block size
+    limit (MAX_KV_BLOCK_SIZE) to avoid compilation failures.
+
+    Args:
+        scores: [B, H, q_blocks, kv_blocks] block-level attention scores
+        topk: number of top blocks to select per q-block
+
+    Returns:
+        mask: [B, H, q_blocks, kv_blocks] bool tensor with exactly topk True per row
+    """
+    B, H, q_blocks, kv_blocks = scores.shape
+    topk = min(topk, kv_blocks)
+
+    KV_BLOCK_SIZE = triton.next_power_of_2(kv_blocks)
+    if KV_BLOCK_SIZE > MAX_KV_BLOCK_SIZE:
+        logger.debug(
+            "fused_topk_mask: kv_blocks=%d exceeds Triton limit %d, "
+            "falling back to PyTorch topk (slower)",
+            kv_blocks, MAX_KV_BLOCK_SIZE,
+        )
+        return _pytorch_topk_mask_fallback(scores, topk)
+
+    mask = torch.zeros(B, H, q_blocks, kv_blocks, dtype=torch.bool, device=scores.device)
+
+    scores_flat = scores.contiguous().view(B * H, q_blocks, kv_blocks)
+    mask_flat = mask.view(B * H, q_blocks, kv_blocks)
+
+    grid = (q_blocks, B * H)
+
+    _fused_topk_mask_kernel[grid](
+        scores_flat, mask_flat,
+        scores_flat.stride(0), scores_flat.stride(1), scores_flat.stride(2),
+        mask_flat.stride(0), mask_flat.stride(1), mask_flat.stride(2),
+        kv_blocks=kv_blocks,
+        topk=topk,
+        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
+    )
+
+    return mask

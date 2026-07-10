@@ -27,6 +27,7 @@ def main():
 
 
     sampling_param = SamplingParam.from_pretrained(model_name)
+    sampling_param.num_frames = 81
 
     prompt = (
         "A neon-lit alley in futuristic Tokyo during a heavy rainstorm at night. The puddles reflect glowing signs in kanji, advertising ramen, karaoke, and VR arcades. A woman in a translucent raincoat walks briskly with an LED umbrella. Steam rises from a street food cart, and a cat darts across the screen. Raindrops are visible on the camera lens, creating a cinematic bokeh effect."
@@ -45,7 +46,7 @@ def main():
         "embodying the raw energy of the wild. Low angle, steady tracking shot, "
         "cinematic.")
     start_time = time.perf_counter()
-    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True)
+    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, num_frames=81)
     end_time = time.perf_counter()
     gen_time2 = end_time - start_time
 

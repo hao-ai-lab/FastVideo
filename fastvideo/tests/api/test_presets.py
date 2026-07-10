@@ -464,6 +464,18 @@ class TestCosmosPresets:
         assert len(presets) == 1
         assert presets[0].name == "cosmos25_predict2_2b"
 
+    def test_cosmos25_2b_path_resolves_to_preset(self) -> None:
+        """Regression: the Cosmos-Predict2.5 2B model path must select the
+        cosmos25 preset (guidance_scale=7.0), not fall back to the generic
+        default (guidance_scale=1.0) which produced blurry output.
+        """
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.api.sampling_param import SamplingParam
+        sp = SamplingParam.from_pretrained(
+            "KyleShao/Cosmos-Predict2.5-2B-Diffusers")
+        assert sp.guidance_scale == 7.0
+        assert sp.num_inference_steps == 35
+
     def test_cosmos_and_cosmos25_different_fps(self) -> None:
         import fastvideo.registry  # noqa: F401
         c = get_preset("cosmos_predict2_2b", "cosmos")

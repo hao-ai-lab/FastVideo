@@ -6,9 +6,43 @@ from fastvideo.logger import init_logger
 
 import numpy as np
 import torch
-from pytorch_msssim import ms_ssim, ssim
 
 logger = init_logger(__name__)
+
+
+def skip_if_gated_repo_inaccessible(repo_id: str,
+                                    *,
+                                    local_path: str | None = None,
+                                    test_name: str = "test",
+                                    allow_module_level: bool = False) -> None:
+    """Skip a test when ``repo_id`` is gated/private and the token lacks access.
+
+    Local weights win: when ``local_path`` already exists the check is skipped
+    entirely, so cached machines keep running offline. Transient hub failures
+    (offline, DNS, 429/5xx) do NOT skip either — the subsequent download will
+    serve from cache or fail loudly, preserving the CI failure signal. Only a
+    positively-identified authorization problem produces a skip.
+    """
+    import pytest
+
+    if local_path is not None and os.path.exists(local_path):
+        return
+
+    from huggingface_hub import HfApi
+    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
+
+    try:
+        HfApi().auth_check(repo_id)
+    except (GatedRepoError, RepositoryNotFoundError) as exc:
+        pytest.skip(
+            f"Skipping {test_name}: the configured HuggingFace token cannot "
+            f"access the gated repo {repo_id}: {exc}",
+            allow_module_level=allow_module_level,
+        )
+    except Exception as exc:  # noqa: BLE001 - hub unreachable, proxies, 5xx
+        logger.warning(
+            "Gated-repo access probe for %s failed (%s); proceeding — the "
+            "download will serve from cache or fail loudly.", repo_id, exc)
 
 
 def _read_video_frames(path: str) -> torch.Tensor:
@@ -52,6 +86,8 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
         video2_path: Path to the second video.
         use_ms_ssim: Whether to use Multi-Scale Structural Similarity(MS-SSIM) instead of SSIM.
     """
+    from pytorch_msssim import ms_ssim, ssim
+
     print(f"Computing SSIM between {video1_path} and {video2_path}...")
     if not os.path.exists(video1_path):
         raise FileNotFoundError(f"Video1 not found: {video1_path}")
