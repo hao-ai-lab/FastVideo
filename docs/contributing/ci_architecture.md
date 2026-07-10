@@ -125,6 +125,18 @@ it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 See [Performance Benchmarks](performance_benchmarks.md) for the performance
 lane's thresholds, rolling baseline, artifacts, and reseeding process.
 
+### Modal Pytest Reruns
+
+Modal pytest lanes install `pytest-rerunfailures` through the `test` extra.
+`fastvideo/tests/modal/pr_test.py` applies the shared retry policy through
+`PYTEST_ADDOPTS`, and `fastvideo/tests/modal/ssim_test.py` appends the same
+arguments to each SSIM subprocess.
+
+The policy reruns an individual pytest failure twice with a short delay, but
+only when the failure text matches the transient infrastructure regex in
+`fastvideo/tests/modal/pytest_retry.py`. Plain assertion and numerical parity
+failures are not matched by that policy and should fail without rerun.
+
 ## Slash Commands
 
 Slash commands are handled by `.github/workflows/ci-slash-commands.yml`.
@@ -239,7 +251,9 @@ All Buildkite test jobs go through `.buildkite/scripts/pr_test.sh`, which:
 3. Passes Buildkite metadata into the Modal container.
 4. Runs the selected test command from `fastvideo/tests/modal/pr_test.py` or
    `fastvideo/tests/modal/ssim_test.py`.
-5. Uploads performance artifacts for `TEST_TYPE=performance`.
+5. Applies the shared transient-only pytest rerun policy to Modal pytest
+   commands.
+6. Uploads performance artifacts for `TEST_TYPE=performance`.
 
 If you add a new CI test category:
 

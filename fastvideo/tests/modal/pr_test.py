@@ -1,5 +1,6 @@
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -194,6 +195,24 @@ def run_test(pytest_command: str):
     run_test_command(pytest_command, build_kernel=True)
 
 
+def _pytest_retry_setup_command() -> str:
+    addopts_statement = (
+        "import os, sys; "
+        "sys.path.insert(0, 'fastvideo/tests/modal'); "
+        "from pytest_retry import build_pytest_addopts; "
+        "print(build_pytest_addopts(os.environ.get('PYTEST_ADDOPTS', '')))"
+    )
+    describe_statement = (
+        "import sys; "
+        "sys.path.insert(0, 'fastvideo/tests/modal'); "
+        "from pytest_retry import describe_pytest_reruns; "
+        "print(describe_pytest_reruns())"
+    )
+    addopts_command = f"python -c {shlex.quote(addopts_statement)}"
+    describe_command = f"python -c {shlex.quote(describe_statement)}"
+    return f'export PYTEST_ADDOPTS="$({addopts_command})" &&\n    {describe_command} &&'
+
+
 def run_test_command(test_command: str,
                      build_kernel: bool,
                      install_command: str = 'uv pip install -e ".[test]"'):
@@ -232,6 +251,7 @@ def run_test_command(test_command: str,
     source /opt/venv/bin/activate &&
     cd /FastVideo &&
     {install_clause}
+    {_pytest_retry_setup_command()}
     {build_kernel_command}
     {test_command}
     """
