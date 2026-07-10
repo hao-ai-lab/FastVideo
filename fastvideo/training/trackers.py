@@ -305,6 +305,7 @@ class WandbTracker(BaseTracker):
         log_dir: str,
         *,
         config: dict[str, Any] | None = None,
+        entity: str | None = None,
         run_name: str | None = None,
     ) -> None:
         super().__init__()
@@ -315,6 +316,7 @@ class WandbTracker(BaseTracker):
 
         self._wandb = wandb
         self._run = wandb.init(
+            entity=entity,
             project=experiment_name,
             dir=log_dir,
             config=(_sanitize_wandb_config(config) if config is not None else None),
@@ -515,6 +517,7 @@ def initialize_trackers(
     experiment_name: str,
     config: dict[str, Any] | None,
     log_dir: str,
+    entity: str | None = None,
     run_name: str | None = None,
 ) -> BaseTracker:
     """Create tracker instances based on ``trackers`` configuration."""
@@ -538,6 +541,7 @@ def initialize_trackers(
                     experiment_name,
                     os.path.abspath(log_dir),
                     config=config,
+                    entity=entity,
                     run_name=run_name,
                 ))
         elif tracker_name == Trackers.SWANLAB.value:

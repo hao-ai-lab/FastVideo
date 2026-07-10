@@ -452,7 +452,7 @@ class MatrixGame2WanModel(BaseDiT):
             and len(encoder_hidden_states_image) > 0
         ):
             encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
+        elif not isinstance(encoder_hidden_states_image, torch.Tensor):
             encoder_hidden_states_image = None
 
         batch_size, num_channels, num_frames, height, width = (

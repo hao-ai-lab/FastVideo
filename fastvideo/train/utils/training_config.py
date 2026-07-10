@@ -22,7 +22,7 @@ class DistributedConfig:
 
 @dataclass(slots=True)
 class DataConfig:
-    data_path: str = ""
+    data_path: str | list[str] | dict[str, int] = ""
     preprocessed_data_type: str = "t2v"
     train_batch_size: int = 1
     dataloader_num_workers: int = 0
@@ -63,6 +63,7 @@ class CheckpointConfig:
 @dataclass(slots=True)
 class TrackerConfig:
     trackers: list[str] = field(default_factory=list)
+    entity: str = ""
     project_name: str = "fastvideo"
     run_name: str = ""
 

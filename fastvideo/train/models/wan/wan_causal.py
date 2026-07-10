@@ -129,6 +129,13 @@ class WanCausalModel(WanModel, CausalModelBase):
 
         if (self._should_snapshot_streaming_cache() and torch.is_grad_enabled()):
             kv_cache = self._snapshot_kv_cache_indices(kv_cache)
+            # The cross-attn cache is stateful inside the checkpointed block
+            # forward (is_init flip + k/v writes); a checkpoint recompute that
+            # sees the mutated dict skips the k/v projections and trips
+            # torch's saved-tensor-count check. Grad-enabled forwards
+            # recompute cross k/v instead, matching the legacy
+            # gradient_checkpointing branch of _forward_inference.
+            crossattn_cache = None
 
         model_kwargs: dict[str, Any] = {
             "kv_cache": kv_cache,
