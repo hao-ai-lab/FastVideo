@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
 DEFAULT_CACHE_ROOT = "/root/fastvideo-kernel-cache"
 DEFAULT_PREBUILT_INFO_PATH = "/opt/fastvideo-kernel-build-info.json"
 KERNEL_RELATIVE_DIR = "fastvideo-kernel"
@@ -163,6 +163,30 @@ def _torch_metadata() -> dict[str, str]:
         }
 
 
+def _compiler_libc_metadata() -> dict[str, object]:
+    return {
+        "environment": {
+            "cc": os.environ.get("CC", ""),
+            "cxx": os.environ.get("CXX", ""),
+        },
+        "compiler": {
+            "gcc_version": _run_optional(["gcc", "--version"]),
+            "gxx_version": _run_optional(["g++", "--version"]),
+            "cc_version": _run_optional(["cc", "--version"]),
+            "cxx_version": _run_optional(["c++", "--version"]),
+        },
+        "build_tools": {
+            "cmake_version": _run_optional(["cmake", "--version"]),
+            "ninja_version": _run_optional(["ninja", "--version"]),
+            "ld_version": _run_optional(["ld", "--version"]),
+        },
+        "libc": {
+            "platform_libc": list(platform.libc_ver()),
+            "ldd_version": _run_optional(["ldd", "--version"]),
+        },
+    }
+
+
 def _build_metadata(repo_root: Path) -> dict[str, object]:
     explicit_arch = os.environ.get("TORCH_CUDA_ARCH_LIST", "").strip()
     resolved_arch = explicit_arch or _detect_arch_from_torch()
@@ -188,6 +212,7 @@ def _build_metadata(repo_root: Path) -> dict[str, object]:
             "cudacxx": os.environ.get("CUDACXX", ""),
             "nvcc_version": _run_optional(["nvcc", "--version"]),
         },
+        "abi": _compiler_libc_metadata(),
         "build": cache_key_build,
     }
     metadata = {
@@ -269,10 +294,7 @@ def _store_cache_entry(cache_root: Path, metadata: dict[str, object], wheel: Pat
         raise RuntimeError(
             f"Cache entry {cache_entry} exists but does not contain a valid wheel for this build")
 
-    temp_entry = cache_root / f".{cache_key}.tmp-{os.getpid()}"
-    if temp_entry.exists():
-        shutil.rmtree(temp_entry)
-    temp_entry.mkdir(parents=True)
+    temp_entry = Path(tempfile.mkdtemp(prefix=f".{cache_key}.tmp-", dir=cache_root))
     shutil.copy2(wheel, temp_entry / wheel.name)
     stored_metadata = {
         **metadata,
@@ -289,6 +311,9 @@ def _store_cache_entry(cache_root: Path, metadata: dict[str, object], wheel: Pat
             _log(f"cache entry {cache_entry} was created concurrently; leaving existing entry in place")
             return cache_entry
         raise RuntimeError(f"Failed to store kernel cache entry at {cache_entry}") from error
+    if _cache_hit(cache_entry, cache_key) is None:
+        shutil.rmtree(cache_entry, ignore_errors=True)
+        raise RuntimeError(f"Stored kernel cache entry {cache_entry} could not be validated")
     return cache_entry
 
 

@@ -37,6 +37,14 @@ def _patch_stable_metadata(monkeypatch) -> None:
             "torch_file": "/opt/venv/lib/python3.10/site-packages/torch/__init__.py",
         },
     )
+    monkeypatch.setattr(
+        kernel_build_cache,
+        "_compiler_libc_metadata",
+        lambda: {
+            "compiler": {"gcc_version": "gcc 11.4.0"},
+            "libc": {"ldd_version": "ldd 2.35"},
+        },
+    )
     monkeypatch.setattr(kernel_build_cache, "_run_optional", lambda args, cwd=None: "nvcc 12.8")
 
 
@@ -57,6 +65,34 @@ def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, tmp_path) -> None
     assert explicit_hopper["build"]["torch_cuda_arch_list"] == "9.0a"
     assert detected_hopper["build"]["torch_cuda_arch_list"] == ""
     assert detected_l40s["cache_key"] != detected_hopper["cache_key"]
+
+
+def test_cache_key_changes_when_compiler_libc_metadata_changes(monkeypatch, tmp_path) -> None:
+    _patch_stable_metadata(monkeypatch)
+    monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "9.0a")
+
+    monkeypatch.setattr(
+        kernel_build_cache,
+        "_compiler_libc_metadata",
+        lambda: {
+            "compiler": {"gcc_version": "gcc 11.4.0"},
+            "libc": {"ldd_version": "ldd 2.35"},
+        },
+    )
+    gcc_11 = kernel_build_cache._build_metadata(tmp_path)
+
+    monkeypatch.setattr(
+        kernel_build_cache,
+        "_compiler_libc_metadata",
+        lambda: {
+            "compiler": {"gcc_version": "gcc 12.3.0"},
+            "libc": {"ldd_version": "ldd 2.36"},
+        },
+    )
+    gcc_12 = kernel_build_cache._build_metadata(tmp_path)
+
+    assert gcc_11["schema_version"] == 2
+    assert gcc_11["cache_key"] != gcc_12["cache_key"]
 
 
 def test_find_wheel_uses_fastvideo_kernel_wheel_patterns(tmp_path) -> None:
@@ -104,6 +140,55 @@ def test_store_cache_entry_handles_concurrent_rename_error(monkeypatch, tmp_path
     assert cache_entry == cache_root / "cache-key"
     assert rename_calls
     assert not list(cache_root.glob(".cache-key.tmp-*"))
+
+
+def test_store_cache_entry_uses_unique_temp_dir_without_deleting_existing_collision(monkeypatch, tmp_path) -> None:
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    wheel = tmp_path / "fastvideo_kernel-0.3.2-cp310-cp310-linux_x86_64.whl"
+    wheel.write_text("wheel")
+    metadata = {
+        "cache_key": "cache-key",
+        "schema_version": kernel_build_cache.CACHE_SCHEMA_VERSION,
+    }
+    existing_temp = cache_root / ".cache-key.tmp-123"
+    existing_temp.mkdir()
+    sentinel = existing_temp / "sentinel"
+    sentinel.write_text("owned by another writer")
+    monkeypatch.setattr(kernel_build_cache.os, "getpid", lambda: 123)
+
+    cache_entry = kernel_build_cache._store_cache_entry(cache_root, metadata, wheel)
+
+    assert cache_entry == cache_root / "cache-key"
+    assert sentinel.read_text() == "owned by another writer"
+    assert kernel_build_cache._cache_hit(cache_entry, "cache-key") == cache_entry / wheel.name
+
+
+def test_store_cache_entry_raises_when_renamed_entry_fails_validation(monkeypatch, tmp_path) -> None:
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    wheel = tmp_path / "fastvideo_kernel-0.3.2-cp310-cp310-linux_x86_64.whl"
+    wheel.write_text("wheel")
+    metadata = {
+        "cache_key": "cache-key",
+        "schema_version": kernel_build_cache.CACHE_SCHEMA_VERSION,
+    }
+    original_rename = Path.rename
+
+    def fake_rename(self, target):
+        original_rename(self, target)
+        (target / kernel_build_cache.METADATA_FILE).write_text(
+            json.dumps({
+                "cache_key": "other-key",
+                "schema_version": kernel_build_cache.CACHE_SCHEMA_VERSION,
+            }))
+
+    monkeypatch.setattr(Path, "rename", fake_rename)
+
+    with pytest.raises(RuntimeError, match="could not be validated"):
+        kernel_build_cache._store_cache_entry(cache_root, metadata, wheel)
+
+    assert not (cache_root / "cache-key").exists()
 
 
 def test_store_cache_entry_raises_when_rename_fails_without_valid_entry(monkeypatch, tmp_path) -> None:
