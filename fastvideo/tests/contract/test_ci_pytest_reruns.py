@@ -14,13 +14,13 @@ SSIM_TEST = MODAL_ROOT / "ssim_test.py"
 
 
 def test_pytest_rerunfailures_is_in_test_extra():
-    assert '"pytest-rerunfailures"' in PYPROJECT.read_text()
+    assert "pytest-rerunfailures" in PYPROJECT.read_text(encoding="utf-8")
 
 
 def test_modal_entrypoints_share_pytest_retry_policy():
-    retry_text = PYTEST_RETRY.read_text()
-    pr_text = PR_TEST.read_text()
-    ssim_text = SSIM_TEST.read_text()
+    retry_text = PYTEST_RETRY.read_text(encoding="utf-8")
+    pr_text = PR_TEST.read_text(encoding="utf-8")
+    ssim_text = SSIM_TEST.read_text(encoding="utf-8")
 
     assert "TRANSIENT_FAILURE_REGEX" in retry_text
     assert "--only-rerun" in retry_text
@@ -30,7 +30,7 @@ def test_modal_entrypoints_share_pytest_retry_policy():
 
 
 def test_retry_policy_excludes_plain_assertion_failures():
-    retry_text = PYTEST_RETRY.read_text()
+    retry_text = PYTEST_RETRY.read_text(encoding="utf-8")
 
     assert "AssertionError" not in retry_text
     assert "assert " not in retry_text
