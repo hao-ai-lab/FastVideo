@@ -820,6 +820,24 @@ class VAELoader(ComponentLoader):
                 vae.load_state_dict(sd, strict=False)
                 return vae.eval()
 
+            if class_name == "LingBotWorld2WanVAE":
+                dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+                config.pop("_class_name", None)
+                vae_config = fastvideo_args.pipeline_config.vae_config
+                vae_config.update_model_arch(config)
+                vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+                weight_path = os.path.join(model_path, "Wan2.1_VAE.pth")
+                if not os.path.exists(weight_path):
+                    raise FileNotFoundError(
+                        f"Missing LingBot World 2 VAE weights: {weight_path}"
+                    )
+                vae = vae_cls(
+                    vae_config,
+                    checkpoint_path=weight_path,
+                    dtype=dtype,
+                ).to(target_device)
+                return vae.eval()
+
             # LTX-2 uses CausalVideoAutoencoder with nested "vae" config
             if class_name == "CausalVideoAutoencoder" and "vae" in config:
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
