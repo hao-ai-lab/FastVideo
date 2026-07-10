@@ -61,6 +61,15 @@ def test_vision_dtype_accepts_parent_torch_dtype_object():
     assert model.dtype == torch.bfloat16
 
 
+def test_vision_dtype_strips_parent_dtype_string_whitespace():
+    model = Qwen2_5_VisionTransformerPretrainedModel(
+        _vision_config(),
+        parent_torch_dtype=" torch.bfloat16 ",
+    )
+
+    assert model.dtype == torch.bfloat16
+
+
 def test_vision_dtype_prefers_explicit_vision_dtype_over_parent_dtype():
     model = Qwen2_5_VisionTransformerPretrainedModel(
         _vision_config(torch_dtype="float16"),
