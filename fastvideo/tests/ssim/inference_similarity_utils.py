@@ -256,7 +256,7 @@ def run_text_to_video_similarity_test(
         )
         output_media_name = f"{prompt[:100].strip()}{media_extension}"
         os.makedirs(output_dir, exist_ok=True)
-        _remove_stale_generated_video(output_dir, output_video_name)
+        _remove_stale_generated_video(output_dir, output_media_name)
 
         params_map = select_ssim_params(
             default_params_map,
@@ -333,7 +333,7 @@ def run_image_to_video_similarity_test(
         )
         output_media_name = f"{prompt[:100].strip()}.mp4"
         os.makedirs(output_dir, exist_ok=True)
-        _remove_stale_generated_video(output_dir, output_video_name)
+        _remove_stale_generated_video(output_dir, output_media_name)
 
         params_map = select_ssim_params(
             default_params_map,
