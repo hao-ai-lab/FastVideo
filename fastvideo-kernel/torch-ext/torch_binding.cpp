@@ -46,9 +46,12 @@ torch::Tensor gemm_cuda(
 
 TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.def(
-      "sta_fwd(Tensor q, Tensor k, Tensor v, Tensor! out, int kernel_t_size, int kernel_h_size, "
+      // `out` is written in place and returned, so the return must be declared
+      // as the same alias set — otherwise torch.compile can reorder/eliminate
+      // the mutation and silently produce wrong results.
+      "sta_fwd(Tensor q, Tensor k, Tensor v, Tensor(a!) out, int kernel_t_size, int kernel_h_size, "
       "int kernel_w_size, int text_length, bool process_text, bool has_text, "
-      "int kernel_aspect_ratio_flag) -> Tensor");
+      "int kernel_aspect_ratio_flag) -> Tensor(a!)");
 #if defined(CUDA_KERNEL)
   ops.impl("sta_fwd", torch::kCUDA, &sta_forward);
 #endif
@@ -67,14 +70,16 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("block_sparse_bwd", torch::kCUDA, &block_sparse_attention_backward);
 #endif
 
-  ops.def("rms_norm_cuda(Tensor input, float eps, Tensor? weight=None, Tensor? output=None) -> Tensor");
+  // When `output` is provided it is written in place and aliased by the
+  // return value; the schema must say so for torch.compile correctness.
+  ops.def("rms_norm_cuda(Tensor input, float eps, Tensor? weight=None, Tensor(a!)? output=None) -> Tensor(a!)");
 #if defined(CUDA_KERNEL)
   ops.impl("rms_norm_cuda", torch::kCUDA, &rms_norm_cuda);
 #endif
 
   ops.def(
       "layer_norm_cuda(Tensor input, float eps, Tensor? weight=None, Tensor? bias=None, "
-      "Tensor? output=None) -> Tensor");
+      "Tensor(a!)? output=None) -> Tensor(a!)");
 #if defined(CUDA_KERNEL)
   ops.impl("layer_norm_cuda", torch::kCUDA, &layer_norm_cuda);
 #endif
@@ -84,7 +89,8 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("quant_cuda", torch::kCUDA, &quant_cuda);
 #endif
 
-  ops.def("gemm_cuda(Tensor a, Tensor a_scale, Tensor b, Tensor b_scale, Tensor! c) -> Tensor");
+  // `c` is the accumulator written in place and returned (same alias set).
+  ops.def("gemm_cuda(Tensor a, Tensor a_scale, Tensor b, Tensor b_scale, Tensor(a!) c) -> Tensor(a!)");
 #if defined(CUDA_KERNEL)
   ops.impl("gemm_cuda", torch::kCUDA, &gemm_cuda);
 #endif
