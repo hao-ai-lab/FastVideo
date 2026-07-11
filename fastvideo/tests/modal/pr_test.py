@@ -73,8 +73,10 @@ ci_env_secret = modal.Secret.from_dict({
     **({
         "UV_TORCH_BACKEND": uv_torch_backend_override
     } if uv_torch_backend_override else {}),
-    # FA4 is opt-in (FASTVIDEO_FA4); CI lanes keep it enabled to match the
-    # SSIM/perf baselines. Caller override wins.
+    # FA4 is opt-in (FASTVIDEO_FA4). Keep the default enabled for
+    # inference/perf parity; model-load and training lanes that do not exercise
+    # FA4 explicitly set FASTVIDEO_FA4=0 in their command strings below.
+    # Caller override wins.
     "FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1"),
 })
 
@@ -184,7 +186,8 @@ def run_vae_tests():
               volumes={"/root/data": model_vol})
 def run_transformer_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/transformers -vs"
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
+        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/transformers -vs"
     )
 
 
@@ -197,7 +200,8 @@ def run_transformer_tests():
               volumes={"/root/data": model_vol})
 def run_training_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/Vanilla -srP"
+        "export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && "
+        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/Vanilla -srP"
     )
 
 
@@ -210,7 +214,8 @@ def run_training_tests():
               volumes={"/root/data": model_vol})
 def run_training_lora_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/lora/test_lora_training.py -srP"
+        "export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && "
+        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/lora/test_lora_training.py -srP"
     )
 
 
@@ -220,7 +225,7 @@ def run_training_lora_tests():
               secrets=[wandb_secret, ci_env_secret])
 def run_training_tests_VSA():
     run_test(
-        "wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/VSA -srP"
+        "wandb login $WANDB_API_KEY && FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/VSA -srP"
     )
 
 
@@ -254,7 +259,7 @@ def run_inference_lora_tests():
 @app.function(gpu="L40S:2", image=image, timeout=900, secrets=[ci_env_secret])
 def run_distill_dmd_tests():
     run_test(
-        "pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
+        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
 
 
 @app.function(gpu="L40S:2",
@@ -263,7 +268,8 @@ def run_distill_dmd_tests():
               secrets=[wandb_secret, ci_env_secret])
 def run_self_forcing_tests():
     run_test(
-        "wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/self-forcing/test_self_forcing.py -vs"
+        "wandb login $WANDB_API_KEY && "
+        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/self-forcing/test_self_forcing.py -vs"
     )
 
 
@@ -323,7 +329,8 @@ def run_dreamverse_app_tests():
               volumes={"/root/data": model_vol})
 def run_train_framework_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs"
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
+        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs"
     )
 
 
@@ -349,7 +356,8 @@ def seed_grad_norm_references():
     the local command and the ``_DEVICE_MAPPINGS`` table.
     """
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && FASTVIDEO_GRADNORM_UPDATE=1 pytest ./fastvideo/tests/train/methods -vs -rs"
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
+        "FASTVIDEO_FA4=0 FASTVIDEO_GRADNORM_UPDATE=1 pytest ./fastvideo/tests/train/methods -vs -rs"
     )
 
 
