@@ -1,0 +1,9 @@
+id	condition	sink_size	local_attn_size	rope_cache_policy	lane	primary_contrast
+A01	sink0_local21_absolute	0	21	absolute	node0	A01-vs-A02: rope policy control
+A02	sink0_local21_relative	0	21	relativistic	node1	A01-vs-A02: rope policy control
+A03	sink1_local21_relative	1	21	relativistic	node0	A02-vs-A03: sink at local21
+A04	sink0_local6_relative	0	6	relativistic	node0	A02-vs-A04: local window at sink0
+A05	sink1_local6_relative	1	6	relativistic	node0	A04-vs-A05: sink at local6
+A06	sink0_local12_relative	0	12	relativistic	node1	A02-vs-A06: local window at sink0
+A07	sink1_local12_relative	1	12	relativistic	node1	A06-vs-A07: sink at local12
+A08	sink3_local12_relative	3	12	relativistic	node1	A06-vs-A07-vs-A08: sink size at local12

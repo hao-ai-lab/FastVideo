@@ -1,0 +1,74 @@
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanCausalModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.tfsft.TeacherForcingSFTMethod
+  chunk_size: 3
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: /mnt/lustre/vlm-k1kong/datasets/HD-Mixkit-Finetune-Wan/combined_parquet_dataset
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 21
+    num_height: 480
+    num_width: 832
+    num_frames: 81
+
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: __MAX_TRAIN_STEPS__
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: __CHECKPOINT_DIR__
+    training_state_checkpointing_steps: __CHECKPOINT_STEPS__
+    checkpoints_total_limit: 2
+
+  tracker:
+    trackers: [wandb]
+    project_name: __PROJECT_NAME__
+    run_name: __WANDB_RUN_NAME__
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    max_grad_norm: 1.0
+  validation:
+    pipeline_target: fastvideo.pipelines.basic.wan.wan_causal_pipeline.WanCausalPipeline
+    dataset_file: __VALIDATION_DATASET_FILE__
+    every_steps: __VALIDATION_EVERY_STEPS__
+    sampling_steps: [__VALIDATION_SAMPLING_STEPS__]
+    guidance_scale: 6.0
+    num_frames: 249
+    output_dir: __VALIDATION_DIR__
+    offload_training_state: true
+    unload_pipeline_after_validation: true
+
+pipeline:
+  flow_shift: 5
+  dit_config:
+    local_attn_size: __LOCAL_ATTN_SIZE__
+    sink_size: __SINK_SIZE__
+    rope_cache_policy: __ROPE_CACHE_POLICY__
+    causal_train_attention: triton

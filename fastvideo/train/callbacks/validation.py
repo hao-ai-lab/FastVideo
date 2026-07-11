@@ -1071,6 +1071,7 @@ class ValidationCallback(Callback):
             return self._pipeline
 
         tc = self.training_config
+        self._assert_validation_transformer_config(transformer)
         PipelineCls = resolve_target(self.pipeline_target)
         flow_shift = getattr(
             tc.pipeline_config,
@@ -1115,6 +1116,49 @@ class ValidationCallback(Callback):
 
         self._pipeline_key = key
         return self._pipeline
+
+    def _assert_validation_transformer_config(
+        self,
+        transformer: torch.nn.Module,
+    ) -> None:
+        """Ensure causal validation reuses the exact training attention setup."""
+        dit_config = self.training_config.pipeline_config.dit_config
+        fields = (
+            "local_attn_size",
+            "sink_size",
+            "rope_cache_policy",
+            "causal_train_attention",
+        )
+        runtime_values = {
+            field: getattr(transformer, field)
+            for field in fields
+            if hasattr(transformer, field)
+        }
+        if not runtime_values:
+            return
+
+        expected_values = {field: getattr(dit_config, field) for field in fields}
+        mismatches = {
+            field: (expected_values[field], runtime_values.get(field, "<missing>"))
+            for field in fields
+            if runtime_values.get(field, "<missing>") != expected_values[field]
+        }
+        if mismatches:
+            details = ", ".join(
+                f"{field}: config={expected!r}, transformer={runtime!r}"
+                for field, (expected, runtime) in mismatches.items()
+            )
+            raise ValueError(
+                "Validation transformer does not match the training causal "
+                f"attention config ({details})."
+            )
+
+        logger.info(
+            "Validation reuses training transformer config: "
+            "local_attn_size=%s, sink_size=%s, rope_cache_policy=%s, "
+            "causal_train_attention=%s",
+            *(runtime_values[field] for field in fields),
+        )
 
     # ----------------------------------------------------------
     # Batch preparation

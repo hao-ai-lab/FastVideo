@@ -165,6 +165,51 @@ class TestConstructor:
         assert cb.metrics_config.log_prefix == "custom/validation"
 
 
+class TestCausalTransformerConfig:
+
+    @staticmethod
+    def _configured_callback() -> ValidationCallback:
+        cb = _make_callback()
+        cb.training_config = SimpleNamespace(
+            pipeline_config=SimpleNamespace(
+                dit_config=SimpleNamespace(
+                    local_attn_size=6,
+                    sink_size=1,
+                    rope_cache_policy="relativistic",
+                    causal_train_attention="triton",
+                )
+            )
+        )
+        return cb
+
+    def test_matching_runtime_config_is_accepted(self) -> None:
+        cb = self._configured_callback()
+        transformer = SimpleNamespace(
+            local_attn_size=6,
+            sink_size=1,
+            rope_cache_policy="relativistic",
+            causal_train_attention="triton",
+        )
+
+        cb._assert_validation_transformer_config(transformer)  # type: ignore[arg-type]
+
+    def test_mismatched_runtime_config_is_rejected(self) -> None:
+        cb = self._configured_callback()
+        transformer = SimpleNamespace(
+            local_attn_size=6,
+            sink_size=0,
+            rope_cache_policy="absolute",
+            causal_train_attention="flex",
+        )
+
+        with pytest.raises(ValueError, match="sink_size.*rope_cache_policy.*causal_train_attention"):
+            cb._assert_validation_transformer_config(transformer)  # type: ignore[arg-type]
+
+    def test_non_causal_transformer_is_ignored(self) -> None:
+        cb = self._configured_callback()
+        cb._assert_validation_transformer_config(torch.nn.Linear(2, 2))
+
+
 # ---------------------------------------------------------------------------
 # B. on_validation_begin gating
 # ---------------------------------------------------------------------------
