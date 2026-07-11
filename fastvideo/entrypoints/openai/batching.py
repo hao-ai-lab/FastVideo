@@ -89,17 +89,17 @@ class VideoBatchScheduler:
         deadline = first.enqueue_time + delay_s
 
         while len(batch) < max_size:
-            if delay_s > 0:
-                timeout = deadline - time.perf_counter()
-                if timeout <= 0:
-                    break
+            timeout = deadline - time.perf_counter()
+            if timeout > 0:
                 try:
                     candidate = await asyncio.wait_for(self._get_next_job(), timeout=timeout)
                 except TimeoutError:
                     break
             else:
-                # delay=0 means "don't wait": greedily drain whatever is
-                # already queued so max_size still coalesces.
+                # delay=0 means "don't wait", and an already-expired deadline
+                # means the first job waited behind an in-flight generation:
+                # in both cases greedily drain whatever is already queued so
+                # max_size still coalesces instead of dispatching batches of 1.
                 if self._pending:
                     candidate = self._pending.popleft()
                 else:
