@@ -16,6 +16,11 @@ on:
         default: ""
         required: false
 
+# A Hub build takes hours; never race two publishes to the same repo.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   check-version-change:
     runs-on: ubuntu-latest
@@ -59,7 +64,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build kernel via HF Jobs and upload to hao-ai-lab/fastvideo-kernel
-        uses: huggingface/kernel-builder-job@main
+        # Pinned to a commit SHA: this third-party action receives HF_TOKEN.
+        uses: huggingface/kernel-builder-job@ee590cee1ff01e922310401f18d5554b8da448ac # main, 2026-06-03
         with:
           token: ${{ secrets.HF_TOKEN }}
           namespace: hao-ai-lab
