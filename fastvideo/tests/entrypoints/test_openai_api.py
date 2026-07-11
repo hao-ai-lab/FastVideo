@@ -54,7 +54,7 @@ def _batch_scheduler_args(**overrides):
         batching_max_size=2,
         batching_delay_ms=25.0,
         enable_batching_metrics=False,
-        pipeline_config=PipelineConfig(),
+        pipeline_config=PipelineConfig(supports_dynamic_batching=True),
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)

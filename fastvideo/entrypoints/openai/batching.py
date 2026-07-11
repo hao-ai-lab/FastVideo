@@ -41,6 +41,12 @@ class VideoBatchScheduler:
     async def start(self) -> None:
         if self._task is not None:
             return
+        pipeline_config = self._fastvideo_args.pipeline_config
+        if self.enabled and not pipeline_config.dynamic_batching_supported():
+            raise RuntimeError(
+                f"Pipeline config {type(pipeline_config).__name__} does not support dynamic request batching; "
+                "run with --batching-mode disabled, or use a pipeline that opts in via "
+                "supports_dynamic_batching=True (DMD/causal denoising variants are always excluded)")
         self._task = asyncio.create_task(self._run(), name="fastvideo-video-batch-scheduler")
         self._task.add_done_callback(self._on_run_done)
 

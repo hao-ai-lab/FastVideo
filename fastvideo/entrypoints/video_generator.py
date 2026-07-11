@@ -1147,6 +1147,13 @@ class VideoGenerator:
         if not self._dynamic_batching_enabled(fastvideo_args):
             return [result for item in work_items for result in run_group([item])]
 
+        pipeline_config = fastvideo_args.pipeline_config
+        if not pipeline_config.dynamic_batching_supported():
+            raise ValueError(
+                f"Dynamic batching is enabled but pipeline config {type(pipeline_config).__name__} does not "
+                "support merging requests; run with batching_mode='disabled', or use a pipeline that opts in "
+                "via supports_dynamic_batching=True (DMD/causal denoising variants are always excluded)")
+
         admission = BatchAdmissionController(fastvideo_args)
         results: list[dict[str, Any]] = []
         index = 0
