@@ -37,13 +37,32 @@ def parse_config(config_type: type[T], raw: Mapping[str, Any] | T) -> T:
     if not isinstance(raw, Mapping):
         raise ConfigValidationError("", f"expected mapping for {config_type.__name__}")
     parsed = _SchemaParser().parse_dataclass(config_type, raw, "")
+    # None is the schema-wide sentinel for "not specified, inherit the
+    # model preset", so an explicit YAML/JSON null must not bind as an
+    # explicit path — otherwise it would stomp preset values with None.
     if config_type is GenerationRequest:
-        return bind_generation_request_raw(parsed, raw)
+        return bind_generation_request_raw(parsed, drop_none_leaves(raw))
     if config_type is RunConfig:
-        return bind_run_config_raw(parsed, raw)
+        return bind_run_config_raw(parsed, drop_none_leaves(raw))
     if config_type is ServeConfig:
-        return bind_serve_config_raw(parsed, raw)
+        return bind_serve_config_raw(parsed, drop_none_leaves(raw))
     return parsed
+
+
+def drop_none_leaves(raw: Any) -> Any:
+    """Prune None leaves — and dicts emptied by the pruning — from a raw
+    config mapping, so they are never recorded as explicit paths."""
+    if not isinstance(raw, dict):
+        return raw
+    pruned: dict[str, Any] = {}
+    for key, value in raw.items():
+        if value is None:
+            continue
+        value = drop_none_leaves(value)
+        if isinstance(value, dict) and not value:
+            continue
+        pruned[key] = value
+    return pruned
 
 
 def config_to_dict(config: Any) -> Any:

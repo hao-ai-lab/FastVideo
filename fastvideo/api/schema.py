@@ -136,19 +136,27 @@ class InputConfig:
 
 @dataclass
 class SamplingConfig:
-    num_videos_per_prompt: int = 1
-    seed: int = 1024
-    num_frames: int = 125
-    height: int = 720
-    width: int = 1280
-    height_sr: int = 1072
-    width_sr: int = 1920
-    fps: int = 24
-    num_inference_steps: int = 50
-    num_inference_steps_sr: int = 50
-    guidance_scale: float = 1.0
+    """Sampling knobs for a generation request.
+
+    ``None`` means "not specified": the value is inherited from the
+    model's preset (``SamplingParam.from_pretrained``) at generate time.
+    Set a field to override the preset. There is deliberately no way to
+    express "explicitly the schema default" — pass the concrete value
+    you want instead.
+    """
+    num_videos_per_prompt: int | None = None
+    seed: int | None = None
+    num_frames: int | None = None
+    height: int | None = None
+    width: int | None = None
+    height_sr: int | None = None
+    width_sr: int | None = None
+    fps: int | None = None
+    num_inference_steps: int | None = None
+    num_inference_steps_sr: int | None = None
+    guidance_scale: float | None = None
     guidance_scale_2: float | None = None
-    guidance_rescale: float = 0.0
+    guidance_rescale: float | None = None
     true_cfg_scale: float | None = None
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
@@ -194,6 +202,8 @@ class GenerationPlan:
 class GenerationRequest:
     prompt: str | list[str] | None = None
     negative_prompt: str | None = None
+    """``None`` inherits the model preset's negative prompt; pass ``""``
+    to explicitly clear it."""
     inputs: InputConfig = field(default_factory=InputConfig)
     sampling: SamplingConfig = field(default_factory=SamplingConfig)
     runtime: RequestRuntimeConfig = field(default_factory=RequestRuntimeConfig)
@@ -261,9 +271,10 @@ class ServeConfig:
     the incoming body as the operator-pinned baseline.
 
     Important nuance: only fields the operator **explicitly wrote** in the
-    serve YAML/JSON count as defaults. Although the in-memory object is
-    fully populated (schema defaults fill every unset field), the merge
-    walks ``_fastvideo_explicit_paths`` — populated during parse — so
+    serve YAML/JSON count as defaults. Unset sampling fields stay ``None``
+    ("inherit the model preset"), other sections keep their schema
+    defaults in memory — but the merge walks ``_fastvideo_explicit_paths``
+    (populated during parse; explicit ``null`` is treated as unset), so
     unset fields are *not* forced onto requests. Per-request precedence:
 
         body (client-explicit) > default_request (operator-explicit)

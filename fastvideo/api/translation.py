@@ -26,7 +26,12 @@ from pathlib import Path
 from typing import Any
 
 from fastvideo.api.overrides import apply_overrides, normalize_overrides
-from fastvideo.api.parser import config_to_dict, load_raw_config, parse_config
+from fastvideo.api.parser import (
+    config_to_dict,
+    drop_none_leaves,
+    load_raw_config,
+    parse_config,
+)
 from fastvideo.api.request_metadata import (
     EXPLICIT_PATHS_ATTR,
     bind_generation_request_raw,
@@ -332,8 +337,12 @@ def normalize_generation_request(request: GenerationRequest | Mapping[str, Any],
 
     if not hasattr(normalized, EXPLICIT_PATHS_ATTR):
         # Request wasn't bound through the parser (e.g. constructed
-        # directly). Treat every currently-set field as explicit.
-        bind_generation_request_raw(normalized, _serialize_generation_request(normalized))
+        # directly). Bind only non-None leaves as explicit: None is the
+        # schema-wide sentinel for "not specified, inherit the model
+        # preset", so treating it as explicit would stomp preset values
+        # with schema defaults. (parse_config applies the same pruning
+        # to YAML/JSON nulls.)
+        bind_generation_request_raw(normalized, drop_none_leaves(_serialize_generation_request(normalized)))
     return normalized
 
 
@@ -382,14 +391,12 @@ def request_to_sampling_param(
     updates = explicit_request_updates(request)
 
     for key, value in updates.items():
+        if key == "return_state":
+            # Already translated to return_continuation_state above.
+            continue
         if hasattr(sampling_param, key):
             setattr(sampling_param, key, deepcopy(value))
         elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
-            continue
-        elif value == _SCHEMA_DEFAULT_UPDATES.get(key, _MISSING):
-            # Schema-default field that isn't on SamplingParam; tolerated
-            # because direct GenerationRequest(...) construction has no
-            # way to distinguish "user set" from "schema default".
             continue
         else:
             raise ValueError(f"Request field {key!r} is not supported by sampling params for {model_path}")
@@ -494,7 +501,9 @@ def explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
     This is what makes ``ServeConfig.default_request`` work as an
     operator-pinned baseline rather than a full override: a YAML with just
     ``sampling.seed: 42`` yields ``{"seed": 42}``, not the full sampling
-    config with its 15 schema defaults.
+    config. (Sampling fields default to ``None`` = "inherit the model
+    preset", so for directly-constructed requests only non-None leaves
+    are bound as explicit.)
 
     Precondition: the request must carry ``_fastvideo_explicit_paths`` —
     populated by :func:`fastvideo.api.parser.parse_config` or
@@ -596,8 +605,6 @@ def _flatten_stage_overrides(stage_overrides: Any) -> dict[str, Any]:
 def _serialize_generation_request(request: GenerationRequest) -> dict[str, Any]:
     return deepcopy(config_to_dict(request))
 
-
-_SCHEMA_DEFAULT_UPDATES = _extract_request_updates(config_to_dict(GenerationRequest()))
 
 _KNOWN_CONTINUATION_KINDS: set[str] = set()
 

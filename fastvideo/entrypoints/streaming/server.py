@@ -95,6 +95,19 @@ class ServerState:
     session_store: SessionStore
 
 
+def _validate_default_sampling_pins(serve_config: ServeConfig) -> None:
+    """The WS protocol consumes these before any model-preset resolution
+    happens (segment frames, MP4 encoder dims), so the operator must pin
+    them; SamplingConfig defaults them to None = "inherit preset", which
+    has no meaning at this layer."""
+    required = ("num_frames", "height", "width", "fps", "num_inference_steps")
+    missing = [name for name in required if getattr(serve_config.default_request.sampling, name) is None]
+    if missing:
+        raise ValueError("Streaming server requires explicit default_request.sampling values for: " +
+                         ", ".join(missing) + ". Set them in the serve config YAML "
+                         "(e.g. `default_request: {sampling: {num_frames: 121, ...}}`).")
+
+
 def build_app(
     serve_config: ServeConfig,
     generator: _GeneratorProto | None = None,
@@ -117,6 +130,8 @@ def build_app(
     streaming = serve_config.streaming
     if (generator is None) == (pool is None):
         raise ValueError("build_app requires exactly one of `generator` or `pool`")
+
+    _validate_default_sampling_pins(serve_config)
 
     store = session_store or InMemorySessionStore()
     if pool is None:
@@ -183,6 +198,8 @@ def run_server(serve_config: ServeConfig, *, generator: _GeneratorProto | None =
     if serve_config.streaming is None:
         raise ValueError("ServeConfig.streaming must be set to launch the streaming server; "
                          "got None. Add a `streaming:` block to your serve config.")
+    # Fail on config mistakes before paying the multi-minute model boot.
+    _validate_default_sampling_pins(serve_config)
 
     import uvicorn
 
@@ -490,7 +507,9 @@ def _build_generation_request(
     }
     request = GenerationRequest(
         prompt=message.prompt,
-        negative_prompt=message.negative_prompt or base.negative_prompt,
+        # None inherits (base, then model preset); an explicit "" from
+        # the client clears the negative prompt and must survive.
+        negative_prompt=(message.negative_prompt if message.negative_prompt is not None else base.negative_prompt),
         inputs=InputConfig(image_path=session.metadata.get("session_init_image"), ),
         sampling=SamplingConfig(**sampling_kwargs),
         output=OutputConfig(save_video=False, return_frames=True, return_state=True),

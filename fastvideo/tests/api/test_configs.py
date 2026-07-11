@@ -37,5 +37,6 @@ def test_serve_config_includes_server_and_default_request_defaults() -> None:
         "port": 8000,
         "output_dir": "outputs/",
     }
-    assert dumped["default_request"]["sampling"]["fps"] == 24
+    # Sampling fields default to None = "inherit the model preset".
+    assert dumped["default_request"]["sampling"]["fps"] is None
     assert dumped["default_request"]["runtime"]["enable_teacache"] is False

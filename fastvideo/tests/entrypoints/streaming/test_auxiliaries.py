@@ -224,6 +224,28 @@ class TestMockServer:
         app = build_mock_app()
         assert isinstance(app, FastAPI)
 
+    def test_build_app_rejects_unpinned_default_sampling(self):
+        import pytest
+
+        from fastvideo.entrypoints.streaming.mock_server import MockGenerator
+        from fastvideo.entrypoints.streaming.server import build_app
+        from fastvideo.api.schema import (
+            GeneratorConfig,
+            SamplingConfig,
+            ServeConfig,
+            StreamingConfig,
+        )
+
+        serve_config = ServeConfig(
+            generator=GeneratorConfig(model_path="/models/mock"),
+            streaming=StreamingConfig(),
+        )
+        # fps (among others) left None = "inherit preset" — meaningless to
+        # the WS encoder, so build_app must reject before serving.
+        serve_config.default_request.sampling = SamplingConfig(num_frames=24, height=256, width=256)
+        with pytest.raises(ValueError, match="fps"):
+            build_app(serve_config, MockGenerator())
+
     def test_mock_generator_produces_frames(self):
         from fastvideo.api.schema import GenerationRequest, SamplingConfig
         from fastvideo.entrypoints.streaming.mock_server import MockGenerator

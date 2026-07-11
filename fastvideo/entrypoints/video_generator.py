@@ -314,7 +314,12 @@ class VideoGenerator:
         import asyncio
 
         normalized = normalize_generation_request(request)
-        total_steps = max(1, normalized.sampling.num_inference_steps)
+        steps = normalized.sampling.num_inference_steps
+        if steps is None:
+            # Unset = inherit the model preset; resolve it here so the
+            # advertised total matches what the run will actually do.
+            steps = SamplingParam.from_pretrained(self.fastvideo_args.model_path).num_inference_steps
+        total_steps = max(1, steps or 1)
         yield VideoProgressEvent(step=0, total_steps=total_steps, stage="denoise")
 
         if log_queue:

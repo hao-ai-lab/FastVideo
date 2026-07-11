@@ -167,7 +167,9 @@ def prepare_generation_request(video_request: VideoGenerationRequest, image_path
     seed = (video_request.seed if not video_request.randomize_seed
             else torch.randint(0, SEED_RANGE_MAX, (1,)).item())
 
-    negative_prompt = video_request.negative_prompt if video_request.use_negative_prompt else None
+    # "" explicitly clears the model preset's negative prompt (None would
+    # inherit it, changing this demo's long-standing behavior).
+    negative_prompt = video_request.negative_prompt if video_request.use_negative_prompt else ""
 
     request = GenerationRequest(
         prompt=video_request.prompt,

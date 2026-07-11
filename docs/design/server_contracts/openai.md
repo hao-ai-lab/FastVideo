@@ -50,13 +50,15 @@ highest first:
 2. **`ServeConfig.default_request` (operator-explicit)** — projected via
    [`explicit_request_updates()`](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/api/translation.py);
    only fields the operator actually wrote into the YAML count as
-   defaults. Every other field inherits the schema default rather than
-   being pinned.
+   defaults (an explicit `null` counts as unset). Every other sampling
+   field stays `None` — "inherit the model preset" — and other sections
+   keep their schema defaults without being pinned.
 3. **Hardcoded fallback** — e.g. `fps = 24`.
 
-The gate matters: both surfaces carry schema defaults. Without
-`model_fields_set` / explicit-path tracking, schema defaults would
-masquerade as intent and silently shadow the other side.
+The gate matters: the Pydantic surface carries schema defaults and the
+dataclass surface carries non-None defaults outside `sampling`. Without
+`model_fields_set` / explicit-path tracking, defaults would masquerade
+as intent and silently shadow the other side.
 
 See [`video_api.py::_build_generation_kwargs`](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/entrypoints/openai/video_api.py)
 for the canonical implementation; the per-request assembly lives there,

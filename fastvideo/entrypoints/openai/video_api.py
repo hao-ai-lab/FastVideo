@@ -60,12 +60,13 @@ def _build_generation_kwargs(
          defaults on the dataclass are *not* treated as defaults here.
       3. Hardcoded fallback (e.g. ``fps=24`` when neither side set it).
 
-    Why gate on ``model_fields_set`` / explicit paths? Both the request
-    Pydantic model and the ``GenerationRequest`` dataclass carry schema
-    defaults (e.g. ``seed=1024``, ``num_frames=125``). Without the gate
-    those would masquerade as intent and shadow the other side — the
-    gate preserves "operator pinned it" vs. "dataclass happened to have
-    that default."
+    Why gate on ``model_fields_set`` / explicit paths? The request
+    Pydantic model carries schema defaults, and the ``GenerationRequest``
+    dataclass carries non-None defaults outside ``sampling`` (e.g.
+    ``output_path``; sampling fields default to None = "inherit the
+    model preset"). Without the gate those would masquerade as intent
+    and shadow the other side — the gate preserves "operator pinned it"
+    vs. "dataclass happened to have that default."
     """
     kwargs: dict[str, Any] = {}
     if default_request is not None:

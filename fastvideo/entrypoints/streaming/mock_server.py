@@ -48,10 +48,14 @@ class MockGenerator:
     def generate(self, request: GenerationRequest) -> dict[str, Any]:
         if self.sleep_ms:
             time.sleep(self.sleep_ms / 1000.0)
-        width = max(16, request.sampling.width)
-        height = max(16, request.sampling.height)
-        num_frames = max(1, request.sampling.num_frames)
-        frames = [_gradient_frame(height, width, idx, seed=request.sampling.seed) for idx in range(num_frames)]
+        # Requests carry None for unset sampling fields (normally resolved
+        # against the model preset); the mock has no model, so fall back
+        # to fixed values here.
+        width = max(16, request.sampling.width or 16)
+        height = max(16, request.sampling.height or 16)
+        num_frames = max(1, request.sampling.num_frames or 1)
+        seed = request.sampling.seed if request.sampling.seed is not None else 1024
+        frames = [_gradient_frame(height, width, idx, seed=seed) for idx in range(num_frames)]
         state = ContinuationState(
             kind="ltx2.v1",
             payload={
@@ -90,6 +94,9 @@ def build_mock_app(*, sleep_ms: float = 0.0):
         width=256,
         fps=24,
         num_inference_steps=1,
+        # The mock renders frames from the seed directly (no model, no
+        # preset resolution), so it must be concrete here.
+        seed=1024,
     )
     return build_app(serve_config, MockGenerator(sleep_ms=sleep_ms))
 

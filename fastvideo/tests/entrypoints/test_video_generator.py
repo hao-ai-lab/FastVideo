@@ -261,7 +261,7 @@ def test_generate_uses_typed_request_path(monkeypatch):
     assert result.video_path == "outputs/test.mp4"
 
 
-def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
+def test_generate_dataclass_request_inherits_preset_for_unset_fields(monkeypatch):
     generator = _new_runtime_video_generator()
     captured = {}
 
@@ -288,10 +288,17 @@ def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
         )
     )
 
-    assert captured["sampling_param"].negative_prompt is None
+    # Explicitly-set fields win; None (negative_prompt) inherits the
+    # model preset instead of stomping it with the schema default.
+    assert captured["sampling_param"].negative_prompt == "model default"
     assert captured["sampling_param"].num_frames == 125
     assert captured["sampling_param"].height == 720
     assert captured["sampling_param"].width == 1280
+
+    generator.generate(GenerationRequest(prompt="hello world", negative_prompt=""))
+    assert captured["sampling_param"].negative_prompt == ""
+    assert captured["sampling_param"].num_frames == 61
+    assert captured["sampling_param"].height == 448
 
 
 def test_generate_mapping_request_preserves_model_defaults_for_omitted_fields(
