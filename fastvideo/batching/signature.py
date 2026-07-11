@@ -20,6 +20,7 @@ _SIGNATURE_EXCLUDED_FIELDS = frozenset({
 
 _UNSUPPORTED_DYNAMIC_BATCH_FIELDS = frozenset({
     "image_path",
+    "latents",
     "pil_image",
     "video_path",
     "mouse_cond",
@@ -147,7 +148,11 @@ def _freeze_signature_value(value: Any) -> Any:
             (str(key), _freeze_signature_value(item)) for key, item in sorted(value.items(), key=lambda kv: str(kv[0])))
     if isinstance(value, list | tuple):
         return tuple(_freeze_signature_value(item) for item in value)
-    return repr(value)
+    # Unrecognized types (tensors, PIL images, ...) cannot be reliably compared
+    # by value — repr() truncates large tensors, so two different payloads can
+    # collide. Treat them as equal only when both requests hold the exact same
+    # object; anything else is conservatively incompatible.
+    return (type(value).__qualname__, id(value))
 
 
 def _is_present(value: Any) -> bool:
