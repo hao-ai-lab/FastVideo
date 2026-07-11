@@ -1,0 +1,226 @@
+# SPDX-License-Identifier: Apache-2.0
+"""CPU regression tests for the dynamic VideoBatchScheduler (no GPU needed)."""
+
+from __future__ import annotations
+
+import asyncio
+import threading
+from types import SimpleNamespace
+
+import pytest
+
+from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.pipelines.wan import (
+    FastWan2_1_T2V_480P_Config,
+    SelfForcingWanT2V480PConfig,
+    WanT2V480PConfig,
+)
+from fastvideo.entrypoints.openai.batching import VideoBatchScheduler
+
+
+class _FakeBatchGenerator:
+
+    def __init__(self):
+        self.calls: list[list[dict]] = []
+
+    def generate_video_batch(self, request_kwargs):
+        self.calls.append([dict(item) for item in request_kwargs])
+        return [{"prompts": item["prompt"], "video_path": item["output_path"]} for item in request_kwargs]
+
+
+class _BlockingFirstCallGenerator(_FakeBatchGenerator):
+    """Blocks the first generate_video_batch call until released.
+
+    Lets a test deterministically hold one generation "in flight" while more
+    requests queue up behind it.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self._first_call = True
+
+    def generate_video_batch(self, request_kwargs):
+        if self._first_call:
+            self._first_call = False
+            self.started.set()
+            assert self.release.wait(timeout=10)
+        return super().generate_video_batch(request_kwargs)
+
+
+def _batch_scheduler_args(**overrides):
+    defaults = dict(
+        model_path="test-model",
+        batching_mode="dynamic",
+        batching_max_size=2,
+        batching_delay_ms=25.0,
+        enable_batching_metrics=False,
+        pipeline_config=PipelineConfig(supports_dynamic_batching=True),
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def _job_kwargs(tmp_path, index: int) -> dict:
+    return {
+        "prompt": f"p{index}",
+        "height": 256,
+        "width": 256,
+        "num_frames": 1,
+        "num_inference_steps": 2,
+        "seed": index,
+        "output_path": str(tmp_path / f"video_{index}.mp4"),
+        "save_video": False,
+    }
+
+
+def test_expired_deadline_coalesces_jobs_queued_behind_inflight_generation(tmp_path):
+    """Jobs whose delay deadline expired while a generation was in flight must
+    still coalesce (greedy drain), not dispatch as batches of 1."""
+
+    async def run():
+        generator = _BlockingFirstCallGenerator()
+        scheduler = VideoBatchScheduler(generator, _batch_scheduler_args(batching_max_size=4, batching_delay_ms=25.0))
+        await scheduler.start()
+        try:
+            loop = asyncio.get_running_loop()
+            first = asyncio.ensure_future(scheduler.submit("req-1", _job_kwargs(tmp_path, 1)))
+            await asyncio.wait_for(loop.run_in_executor(None, generator.started.wait, 5), timeout=10)
+            rest = [asyncio.ensure_future(scheduler.submit(f"req-{i}", _job_kwargs(tmp_path, i))) for i in (2, 3, 4)]
+            # Let the in-queue jobs outlive the 25 ms batching window while the
+            # first generation is still blocking the scheduler.
+            await asyncio.sleep(0.1)
+            generator.release.set()
+            await asyncio.wait_for(asyncio.gather(first, *rest), timeout=10)
+        finally:
+            await scheduler.stop()
+        return [[item["prompt"] for item in call] for call in generator.calls]
+
+    assert asyncio.run(run()) == [["p1"], ["p2", "p3", "p4"]]
+
+
+def test_submit_after_stop_raises(tmp_path):
+
+    async def run():
+        scheduler = VideoBatchScheduler(_FakeBatchGenerator(), _batch_scheduler_args())
+        await scheduler.start()
+        await scheduler.stop()
+        with pytest.raises(RuntimeError, match="stopped"):
+            await scheduler.submit("req-1", _job_kwargs(tmp_path, 1))
+
+    asyncio.run(run())
+
+
+def test_stop_fails_jobs_still_queued_without_hanging(tmp_path):
+    """stop() during an in-flight generation must fail the still-queued jobs
+    instead of stranding their futures forever."""
+
+    async def run():
+        generator = _BlockingFirstCallGenerator()
+        scheduler = VideoBatchScheduler(generator, _batch_scheduler_args())
+        await scheduler.start()
+        loop = asyncio.get_running_loop()
+        first = asyncio.ensure_future(scheduler.submit("req-1", _job_kwargs(tmp_path, 1)))
+        await asyncio.wait_for(loop.run_in_executor(None, generator.started.wait, 5), timeout=10)
+        queued = [asyncio.ensure_future(scheduler.submit(f"req-{i}", _job_kwargs(tmp_path, i))) for i in (2, 3)]
+        await asyncio.sleep(0)  # let the queued submits enqueue
+        stop_task = asyncio.ensure_future(scheduler.stop())
+        await asyncio.sleep(0)  # let stop() mark the scheduler stopped
+        generator.release.set()
+
+        result = await asyncio.wait_for(first, timeout=10)
+        assert result["prompts"] == "p1"
+        for task in queued:
+            with pytest.raises(RuntimeError, match="stopped before dispatch"):
+                await asyncio.wait_for(task, timeout=10)
+        await asyncio.wait_for(stop_task, timeout=10)
+
+    asyncio.run(run())
+
+
+def test_dispatch_exception_fails_all_group_futures(tmp_path):
+
+    class _ExplodingGenerator:
+
+        def generate_video_batch(self, request_kwargs):
+            raise ValueError("generation exploded")
+
+    async def run():
+        scheduler = VideoBatchScheduler(_ExplodingGenerator(), _batch_scheduler_args())
+        await scheduler.start()
+        try:
+            return await asyncio.wait_for(
+                asyncio.gather(
+                    scheduler.submit("req-1", _job_kwargs(tmp_path, 1)),
+                    scheduler.submit("req-2", _job_kwargs(tmp_path, 2)),
+                    return_exceptions=True,
+                ),
+                timeout=10,
+            )
+        finally:
+            await scheduler.stop()
+
+    results = asyncio.run(run())
+
+    assert len(results) == 2
+    for result in results:
+        assert isinstance(result, ValueError)
+        assert "generation exploded" in str(result)
+
+
+def test_run_crash_fails_inflight_and_queued_futures(tmp_path):
+    """If the _run task ever dies, every waiting future must fail instead of
+    hanging, and later submits must be rejected."""
+
+    async def run():
+        scheduler = VideoBatchScheduler(_FakeBatchGenerator(), _batch_scheduler_args())
+
+        async def boom(first):
+            raise RuntimeError("kaboom")
+
+        scheduler._collect_batch = boom  # type: ignore[method-assign]
+        await scheduler.start()
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                scheduler.submit("req-1", _job_kwargs(tmp_path, 1)),
+                scheduler.submit("req-2", _job_kwargs(tmp_path, 2)),
+                return_exceptions=True,
+            ),
+            timeout=10,
+        )
+        with pytest.raises(RuntimeError, match="stopped"):
+            await scheduler.submit("req-3", _job_kwargs(tmp_path, 3))
+        return results
+
+    results = asyncio.run(run())
+
+    assert len(results) == 2
+    for result in results:
+        assert isinstance(result, RuntimeError)
+        assert "crashed" in str(result)
+
+
+def test_scheduler_start_rejects_pipeline_without_capability(tmp_path):
+
+    async def run():
+        scheduler = VideoBatchScheduler(
+            _FakeBatchGenerator(),
+            _batch_scheduler_args(pipeline_config=PipelineConfig()),
+        )
+        with pytest.raises(RuntimeError, match="does not support dynamic request batching"):
+            await scheduler.start()
+        assert scheduler._task is None
+
+    asyncio.run(run())
+
+
+def test_dynamic_batching_capability_gate_defaults():
+    # Default: every pipeline is excluded until its family opts in.
+    assert PipelineConfig().dynamic_batching_supported() is False
+    # The verified generic Wan denoising path opts in.
+    assert WanT2V480PConfig().dynamic_batching_supported() is True
+    # DMD and causal denoising variants are always vetoed (shared-RNG risk),
+    # even though they inherit the Wan opt-in flag.
+    assert FastWan2_1_T2V_480P_Config().dynamic_batching_supported() is False
+    assert SelfForcingWanT2V480PConfig().dynamic_batching_supported() is False
