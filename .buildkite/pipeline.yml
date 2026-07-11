@@ -481,6 +481,7 @@ steps:
                 - "fastvideo/layers/**"
                 - "fastvideo/worker/**"
                 - "fastvideo/entrypoints/**"
+                - "fastvideo/performance/**"
                 - "fastvideo/tests/performance/**"
                 - ".buildkite/performance-benchmarks/**"
                 - "pyproject.toml"
