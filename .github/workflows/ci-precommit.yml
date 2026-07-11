@@ -47,3 +47,6 @@ jobs:
     - uses: pre-commit/action@v3.0.1
       with:
         extra_args: --all-files --hook-stage manual
+    # After pre-commit so a self-test failure cannot mask lint failures.
+    - name: Full-suite gate self-test
+      run: bash .github/scripts/test_gate_full_suite.sh
