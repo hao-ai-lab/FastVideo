@@ -469,14 +469,7 @@ class VideoGenerator:
                 legacy_kwargs=kwargs,
             )
 
-            fastvideo_args = self.fastvideo_args
-            pipeline_overrides = request_to_pipeline_overrides(request)
-            if pipeline_overrides:
-                fastvideo_args = deepcopy(self.fastvideo_args)
-                for key, value in pipeline_overrides.items():
-                    if not hasattr(fastvideo_args.pipeline_config, key):
-                        raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
-                    setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+            fastvideo_args = self._resolve_request_fastvideo_args(request)
 
             resolved_sampling_param = request_to_sampling_param(
                 request,
@@ -579,18 +572,23 @@ class VideoGenerator:
 
         return self._generate_single_request(request)
 
+    def _resolve_request_fastvideo_args(self, request: GenerationRequest) -> FastVideoArgs:
+        """Return ``self.fastvideo_args``, deep-copied with the request's pipeline overrides applied (if any)."""
+        pipeline_overrides = request_to_pipeline_overrides(request)
+        if not pipeline_overrides:
+            return self.fastvideo_args
+        fastvideo_args = deepcopy(self.fastvideo_args)
+        for key, value in pipeline_overrides.items():
+            if not hasattr(fastvideo_args.pipeline_config, key):
+                raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
+            setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+        return fastvideo_args
+
     def _generate_single_request(
         self,
         request: GenerationRequest,
     ) -> GenerationResult | list[GenerationResult]:
-        fastvideo_args = self.fastvideo_args
-        pipeline_overrides = request_to_pipeline_overrides(request)
-        if pipeline_overrides:
-            fastvideo_args = deepcopy(self.fastvideo_args)
-            for key, value in pipeline_overrides.items():
-                if not hasattr(fastvideo_args.pipeline_config, key):
-                    raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
-                setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+        fastvideo_args = self._resolve_request_fastvideo_args(request)
 
         sampling_param = request_to_sampling_param(
             request,
@@ -867,6 +865,10 @@ class VideoGenerator:
             n_tokens=n_tokens,
             VSA_sparsity=fastvideo_args.VSA_sparsity,
         )
+        # Allow precomputed prompt_embeds (e.g. from diffusers) to skip text encoding
+        prompt_embeds = kwargs.get("prompt_embeds")
+        if prompt_embeds is not None:
+            batch.prompt_embeds = (list(prompt_embeds) if isinstance(prompt_embeds, list | tuple) else [prompt_embeds])
 
         extra_overrides = kwargs.get("_extra_overrides", {})
         for _ek, _ev in extra_overrides.items():
@@ -925,10 +927,20 @@ class VideoGenerator:
         output = output_batch.output
         if output is None:
             raise RuntimeError("Forward execution returned no output tensor.")
+
         fastvideo_args = work_item.fastvideo_args
         sampling_param = work_item.sampling_param
+        batch = work_item.batch
+        is_latent_output = fastvideo_args.output_type == "latent"
+        audio_only = bool(output_batch.extra.get("audio_only"))
+        needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
+
+        if not needs_frame_output or (audio_only and not batch.return_frames):
+            return torch.empty(0, device="cpu")
+        if audio_only or is_latent_output:
+            return output.cpu()
+
         latent_batch_size = _infer_latent_batch_size(work_item.batch)
-        skip_pixel_prealloc = fastvideo_args.output_type == "latent"
         expected_shape = (
             latent_batch_size,
             3,
@@ -936,8 +948,6 @@ class VideoGenerator:
             sampling_param.height,
             sampling_param.width,
         )
-        if skip_pixel_prealloc:
-            return output.cpu()
         samples = torch.empty(expected_shape, device="cpu", pin_memory=fastvideo_args.pin_cpu_memory)
         if output.shape == samples.shape:
             samples.copy_(output)
@@ -955,16 +965,18 @@ class VideoGenerator:
         batch = work_item.batch
         fastvideo_args = work_item.fastvideo_args
         output_path = work_item.output_path
-        samples = self._samples_from_output(work_item, output_batch)
-        logging_info = output_batch.logging_info
-
         is_latent_output = fastvideo_args.output_type == "latent"
         audio_only = bool(output_batch.extra.get("audio_only"))
+        needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
+        samples = self._samples_from_output(work_item, output_batch)
+        logging_info = output_batch.logging_info
 
         postprocess_start = time.perf_counter()
         frames: list[np.ndarray] | None
         if is_latent_output or audio_only:
-            frames = None if is_latent_output else []
+            frames = [] if audio_only and batch.return_frames else None
+        elif not needs_frame_output:
+            frames = None
         else:
             videos = rearrange(samples, "b c t h w -> t b c h w")
             frames = []
@@ -1049,6 +1061,11 @@ class VideoGenerator:
 
         e2e_time = time.perf_counter() - start_time
         logger.info("End-to-end latency: %.2f seconds", e2e_time)
+        output_size = _resolve_output_size(
+            samples,
+            (work_item.target_height, work_item.target_width, batch.num_frames),
+            pixel_output=not is_latent_output and not audio_only,
+        )
 
         return {
             "prompts": work_item.prompt,
@@ -1057,7 +1074,7 @@ class VideoGenerator:
             "audio": output_batch.extra.get("audio"),
             "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
             "ltx2_audio_latents": output_batch.extra.get("ltx2_audio_latents"),
-            "size": (work_item.target_height, work_item.target_width, batch.num_frames),
+            "size": output_size,
             "generation_time": gen_time,
             "e2e_latency": e2e_time,
             "logging_info": logging_info,
@@ -1219,277 +1236,16 @@ class VideoGenerator:
         if fastvideo_args is None:
             fastvideo_args = self.fastvideo_args
 
-        # Validate inputs
         if not isinstance(prompt, str):
             raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
-        prompt = prompt.strip()
-        sampling_param = deepcopy(sampling_param)
-        output_path = kwargs["output_path"]
-        prompt_embeds = kwargs.get("prompt_embeds")
-        sampling_param.prompt = prompt
-        # Process negative prompt
-        if sampling_param.negative_prompt is not None:
-            sampling_param.negative_prompt = sampling_param.negative_prompt.strip()
 
-        # Validate dimensions
-        if (sampling_param.height <= 0 or sampling_param.width <= 0 or sampling_param.num_frames <= 0):
-            raise ValueError(f"Height, width, and num_frames must be positive integers, got "
-                             f"height={sampling_param.height}, width={sampling_param.width}, "
-                             f"num_frames={sampling_param.num_frames}")
-
-        # Calculate sizes
-        target_height = align_to(sampling_param.height, 16)
-        target_width = align_to(sampling_param.width, 16)
-
-        # Calculate latent sizes
-        latents_size = [(sampling_param.num_frames - 1) // 4 + 1, sampling_param.height // 8, sampling_param.width // 8]
-        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-
-        # Log parameters
-        debug_str = f"""
-                      height: {target_height}
-                       width: {target_width}
-                video_length: {sampling_param.num_frames}
-                      prompt: {sampling_param.prompt}
-                      image_path: {sampling_param.image_path}
-                  neg_prompt: {sampling_param.negative_prompt}
-                        seed: {sampling_param.seed}
-                 infer_steps: {sampling_param.num_inference_steps}
-       num_videos_per_prompt: {sampling_param.num_videos_per_prompt}
-              guidance_scale: {sampling_param.guidance_scale}
-                    n_tokens: {n_tokens}
-                  flow_shift: {fastvideo_args.pipeline_config.flow_shift}
-     embedded_guidance_scale: {fastvideo_args.pipeline_config.embedded_cfg_scale}
-                  save_video: {sampling_param.save_video}
-                  output_path: {output_path}
-        """ # type: ignore[attr-defined]
-        logger.info(debug_str)
-
-        # Prepare batch
-        batch = ForwardBatch(
-            **shallow_asdict(sampling_param),
-            eta=0.0,
-            n_tokens=n_tokens,
-            VSA_sparsity=fastvideo_args.VSA_sparsity,
+        work_item = self._prepare_generation_work_item(
+            prompt=prompt,
+            sampling_param=sampling_param,
+            fastvideo_args=fastvideo_args,
+            **kwargs,
         )
-        # Allow precomputed prompt_embeds (e.g. from diffusers) to skip text encoding
-        if prompt_embeds is not None:
-            batch.prompt_embeds = (list(prompt_embeds) if isinstance(prompt_embeds, list | tuple) else [prompt_embeds])
-
-        extra_overrides = kwargs.pop("_extra_overrides", {})
-        for _ek, _ev in extra_overrides.items():
-            batch.extra[_ek] = _ev
-
-        # Run inference
-        start_time = time.perf_counter()
-
-        # Execute forward pass in a new thread for non-blocking tensor
-        # allocation. Capture thread exceptions so we can surface the true
-        # failure in the main thread instead of later hitting None outputs.
-        result_container = {"output_batch": ForwardBatch(data_type=batch.data_type)}
-        thread_error: dict[str, BaseException | None] = {"error": None}
-        thread_error_traceback: dict[str, str] = {"traceback": ""}
-
-        def execute_forward_thread():
-            import traceback
-            try:
-                result_container["output_batch"] = self.executor.execute_forward(batch, fastvideo_args)
-            except BaseException as error:  # noqa: BLE001
-                thread_error["error"] = error
-                thread_error_traceback["traceback"] = traceback.format_exc()
-
-        thread = threading.Thread(target=execute_forward_thread)
-        thread.start()
-        latent_batch_size = _infer_latent_batch_size(batch)
-        is_latent_output = fastvideo_args.output_type == "latent"
-        needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
-        needs_samples_buffer = batch.return_frames or needs_frame_output
-        # When ``output_type == "latent"`` the forward output has latent
-        # shape (e.g. ``[B, C_latent, T_latent, H_latent, W_latent]``)
-        # rather than the pre-allocation's pixel shape. Skip the pinned
-        # ~50 MB buffer entirely. Also skip it for metadata-only calls;
-        # neither the result nor save path will consume the decoded tensor.
-        # ``skip_pixel_prealloc`` also gates the slow-path warning.
-        skip_pixel_prealloc = is_latent_output or not needs_samples_buffer
-        if skip_pixel_prealloc:
-            samples = torch.empty(0, device='cpu')
-        else:
-            samples = torch.empty(
-                (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
-                device='cpu',
-                pin_memory=fastvideo_args.pin_cpu_memory)
-        thread.join()
-
-        if thread_error["error"] is not None:
-            raise RuntimeError("Forward execution thread failed.\n"
-                               f"{thread_error_traceback['traceback']}") from thread_error["error"]
-
-        output_batch = result_container["output_batch"]
-        if output_batch.output is None:
-            raise RuntimeError("Forward execution returned no output tensor. "
-                               "This usually means the executor/pipeline failed earlier.")
-
-        audio_only = bool(output_batch.extra.get("audio_only"))
-        if not needs_samples_buffer or (audio_only and not batch.return_frames):
-            # Metadata-only/audio-only request: keep the empty placeholder and
-            # avoid the decoded tensor D->H copy.
-            pass
-        elif audio_only:
-            # Audio-only return-frames requests expose the small placeholder
-            # without warning about expected video shape.
-            samples = output_batch.output.cpu()
-        elif output_batch.output.shape == samples.shape:
-            samples.copy_(output_batch.output)
-        else:
-            if not skip_pixel_prealloc:
-                logger.warning("Output shape %s does not match expected shape %s; use slow path",
-                               output_batch.output.shape, samples.shape)
-            samples = output_batch.output.cpu()
-        logging_info = output_batch.logging_info
-
-        gen_time = time.perf_counter() - start_time
-        logger.info("Generated successfully in %.2f seconds", gen_time)
-
-        # Three mutually-exclusive output modes determine whether (a) we
-        # build an RGB frame buffer and (b) what file we write to disk:
-        #
-        #   1. `output_type == "latent"` — VAE is bypassed in DecodingStage
-        #      and `samples` holds raw latents (arbitrary channel count).
-        #      The RGB grid / uint8 / mp4 / png pipeline below cannot
-        #      consume those, so we skip it entirely and let callers work
-        #      with the latent tensor directly via `result["samples"]`.
-        #   2. Audio-only workload — `samples` is a 1×3×1×8×8 placeholder
-        #      no caller will use; skip the grid loop and save a `.wav`.
-        #   3. Pixel video / image — the historical happy path.
-        # `GenerationResult.size` describes the produced media, not only the
-        # base-stage request. Refiner pipelines can change the final pixel
-        # dimensions, so derive this result metadata from the decoded output.
-        output_size = _resolve_output_size(
-            samples,
-            (target_height, target_width, batch.num_frames),
-            pixel_output=not is_latent_output and not audio_only,
-        )
-
-        postprocess_start = time.perf_counter()
-        frames: list[np.ndarray] | None
-        if is_latent_output or audio_only:
-            frames = [] if audio_only and batch.return_frames else None
-        elif not needs_frame_output:
-            frames = None
-        else:
-            videos = rearrange(samples, "b c t h w -> t b c h w")
-            frames = []
-            for x in videos:
-                x = torchvision.utils.make_grid(x, nrow=6)
-                x = x.permute(1, 2, 0).squeeze(-1)
-                x = (x * 255).to(torch.uint8)
-                frames.append(x.contiguous().cpu().numpy())
-        postprocess_time = time.perf_counter() - postprocess_start
-        logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
-        if logging_info is not None:
-            logging_info.add_stage_execution_time("PostDecodeFrameProcessStage", postprocess_time)
-
-        save_to_disk = batch.save_video and not is_latent_output
-        save_video_time = 0.0
-        audio_mux_time = 0.0
-        if save_to_disk:
-            if audio_only:
-                # Audio-only workload: write a standalone .wav rather than
-                # muxing the audio into a placeholder mp4 (which forces
-                # ffmpeg to round 8x8 placeholder frames up to 16x16).
-                output_path = self._rewrite_extension(output_path, ".wav")
-                save_start = time.perf_counter()
-                self._write_pcm_wav(
-                    output_path,
-                    output_batch.extra["audio"],
-                    int(output_batch.extra["audio_sample_rate"]),
-                )
-                save_video_time = time.perf_counter() - save_start
-                logger.info("Saved audio to %s", output_path)
-            elif self._is_image_workload():
-                # Image workloads (t2i, i2i, …): save the first frame as PNG.
-                assert frames is not None  # implied by save_to_disk and not audio_only
-                save_start = time.perf_counter()
-                imageio.imwrite(output_path, frames[0])
-                save_video_time = time.perf_counter() - save_start
-                logger.info("Saved image to %s", output_path)
-            else:
-                assert frames is not None  # implied by save_to_disk and not audio_only
-                audio = output_batch.extra.get("audio")
-                audio_sample_rate = output_batch.extra.get("audio_sample_rate")
-                if audio is not None and audio_sample_rate is not None:
-                    # Single-pass save path: encode video+audio once, avoiding
-                    # second-pass remux overhead. AudioMuxStage remains 0.0 on
-                    # success because audio is already present in the saved MP4.
-                    save_start = time.perf_counter()
-                    save_ok = self._save_video_with_audio_ffmpeg_pipe(
-                        output_path=output_path,
-                        frames=frames,
-                        fps=batch.fps,
-                        audio=audio,
-                        sample_rate=int(audio_sample_rate),
-                    )
-                    if not save_ok:
-                        logger.warning("ffmpeg pipe save failed; trying PyAV single-pass save.")
-                        save_ok = self._save_video_with_audio_single_pass(
-                            output_path=output_path,
-                            frames=frames,
-                            fps=batch.fps,
-                            audio=audio,
-                            sample_rate=int(audio_sample_rate),
-                        )
-                    save_video_time = time.perf_counter() - save_start
-                    if save_ok:
-                        audio_mux_time = 0.0
-                    else:
-                        logger.warning("Single-pass save failed; falling back to two-step save/mux.")
-                        save_start = time.perf_counter()
-                        imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
-                        save_video_time = time.perf_counter() - save_start
-                        mux_start = time.perf_counter()
-                        mux_ok = self._mux_audio(output_path, audio, int(audio_sample_rate))
-                        audio_mux_time = time.perf_counter() - mux_start
-                        if not mux_ok:
-                            logger.warning("Audio mux failed; saved video without audio.")
-                else:
-                    save_start = time.perf_counter()
-                    imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
-                    save_video_time = time.perf_counter() - save_start
-                    audio_mux_time = 0.0
-                logger.info("Saved video to %s", output_path)
-
-            logger.info("VideoSaveStage completed in %.3f s", save_video_time)
-            if logging_info is not None:
-                logging_info.add_stage_execution_time("VideoSaveStage", save_video_time)
-            logger.info("AudioMuxStage completed in %.3f s", audio_mux_time)
-            if logging_info is not None:
-                logging_info.add_stage_execution_time("AudioMuxStage", audio_mux_time)
-
-        e2e_time = time.perf_counter() - start_time
-        logger.info("End-to-end latency: %.2f seconds", e2e_time)
-
-        result: dict[str, Any] = {
-            "prompts": prompt,
-            "samples": samples if batch.return_frames else None,
-            "frames": frames if batch.return_frames else None,
-            # Audio is the primary output for audio workloads — return it
-            # whenever the pipeline produced one, regardless of
-            # `return_frames` (which gates the video-shaped buffers).
-            "audio": output_batch.extra.get("audio"),
-            "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
-            "ltx2_audio_latents": output_batch.extra.get("ltx2_audio_latents"),
-            "size": output_size,
-            "generation_time": gen_time,
-            "e2e_latency": e2e_time,
-            "logging_info": logging_info,
-            "trajectory": output_batch.trajectory_latents,
-            "trajectory_timesteps": output_batch.trajectory_timesteps,
-            "trajectory_decoded": output_batch.trajectory_decoded,
-            "video_path": output_path if save_to_disk else None,
-            "peak_memory_mb": output_batch.extra.get("peak_memory_mb"),
-        }
-
-        return result
+        return self._execute_single_work_item(work_item)
 
     @staticmethod
     def _wrap_legacy_result(
