@@ -53,5 +53,31 @@ def test_can_dynamic_batch_rejects_image_conditioning() -> None:
     assert result.reason == "image_path"
 
 
+def test_can_dynamic_batch_rejects_preset_latents() -> None:
+    first = _request()
+    second = _request(latents=object())
+
+    result = can_dynamic_batch(first, second)
+
+    assert result.can_batch is False
+    assert result.reason == "latents"
+
+
+def test_signature_treats_distinct_opaque_objects_as_incompatible() -> None:
+
+    class Opaque:
+        pass
+
+    first = _request("first")
+    second = _request("second")
+
+    distinct = can_dynamic_batch(first, second, base_extra={"foo": Opaque()}, candidate_extra={"foo": Opaque()})
+    assert distinct.can_batch is False
+
+    shared = Opaque()
+    same_object = can_dynamic_batch(first, second, base_extra={"foo": shared}, candidate_extra={"foo": shared})
+    assert same_object.can_batch is True
+
+
 def test_resolution_key_uses_generation_shape() -> None:
     assert resolution_key(_request(height=720, width=1280, num_frames=81)) == "720x1280x81"
