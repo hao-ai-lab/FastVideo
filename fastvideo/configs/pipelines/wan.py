@@ -59,6 +59,12 @@ class WanT2V480PConfig(PipelineConfig):
     vae_decode_precision: str = "bf16"
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
 
+    # The generic Wan denoising path is the only one verified for dynamic
+    # request batching (parity runs on Wan2.1-T2V). DMD/causal Wan variants
+    # inherit this flag but are vetoed by
+    # PipelineConfig.dynamic_batching_supported().
+    supports_dynamic_batching: bool = True
+
     # self-forcing params
     warp_denoising_step: bool = True
 

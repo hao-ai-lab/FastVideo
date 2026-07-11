@@ -57,7 +57,7 @@ def _batching_fastvideo_args(**overrides):
         output_type="latent",
         pin_cpu_memory=False,
         VSA_sparsity=0.0,
-        pipeline_config=PipelineConfig(),
+        pipeline_config=PipelineConfig(supports_dynamic_batching=True),
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
