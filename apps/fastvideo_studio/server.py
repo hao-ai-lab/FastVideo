@@ -32,6 +32,7 @@ from fastapi.responses import FileResponse
 
 from fastvideo.registry import (get_registered_model_paths, get_registered_models_with_workloads)
 from fastvideo_studio.database import Database, _get_db_path
+from fastvideo_studio.gpu import get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
                                      model_label)
@@ -93,6 +94,12 @@ def update_settings(settings: SettingsUpdate) -> dict[str, Any]:
         return database.get_settings()
     database.save_settings(updates)
     return database.get_settings()
+
+
+@app.get("/api/gpus")
+def list_gpus() -> dict[str, Any]:
+    """Return an NVML snapshot of every GPU on the API server host."""
+    return get_gpu_snapshot()
 
 
 @app.get("/api/models")

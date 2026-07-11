@@ -120,6 +120,12 @@ export default function PrimarySidebar({
             Gallery
           </Link>
           <Link
+            href="/gpus"
+            className={cn(TAB_BASE, pathname === '/gpus' && TAB_ACTIVE)}
+          >
+            GPUs
+          </Link>
+          <Link
             href="/settings"
             className={cn(TAB_BASE, pathname === '/settings' && TAB_ACTIVE)}
           >

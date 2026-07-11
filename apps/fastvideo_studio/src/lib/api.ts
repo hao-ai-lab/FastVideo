@@ -93,6 +93,23 @@ export interface Model {
 	type: string;
 }
 
+export interface GpuInfo {
+	index: number;
+	name: string;
+	utilization: number;
+	memory_used_mib: number;
+	memory_total_mib: number;
+	temperature_c: number | null;
+	power_watts: number | null;
+	power_limit_watts: number | null;
+}
+
+export interface GpuSnapshot {
+	available: boolean;
+	gpus: GpuInfo[];
+	error: string | null;
+}
+
 /**
  * Server-persisted settings: everything in DefaultOptions except
  * apiServerBaseUrl, which is purely local (per-browser).
@@ -173,6 +190,15 @@ export async function getModels(workloadType?: string): Promise<Model[]> {
 	const response = await fetch(url);
 	if (!response.ok) {
 		throw new Error("Failed to fetch models");
+	}
+	return response.json();
+}
+
+export async function getGpus(): Promise<GpuSnapshot> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/gpus`);
+	if (!response.ok) {
+		throw new Error("Failed to fetch GPU status");
 	}
 	return response.json();
 }

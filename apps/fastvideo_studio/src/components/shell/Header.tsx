@@ -11,6 +11,7 @@ const TAB_TITLES: Record<string, string> = {
   '/distillation': 'Jobs',
   '/datasets': 'Datasets',
   '/gallery': 'Gallery',
+  '/gpus': 'GPUs',
   '/settings': 'Settings',
 };
 

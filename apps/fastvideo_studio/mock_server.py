@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import random
 import shutil
 import subprocess
 import tempfile
@@ -381,6 +382,27 @@ def update_settings(settings: SettingsUpdate) -> dict[str, Any]:
 @app.get("/api/models")
 def list_models(workload_type: str | None = None) -> list[dict[str, Any]]:
     return _models_for(workload_type)
+
+
+# --- GPUs -------------------------------------------------------------------
+
+
+@app.get("/api/gpus")
+def list_gpus() -> dict[str, Any]:
+    """Two fake GPUs with slight per-request jitter so the page looks live."""
+    gpus = []
+    for index, (base_util, used_mib) in enumerate([(62, 61_440), (7, 4_096)]):
+        gpus.append({
+            "index": index,
+            "name": "NVIDIA Mock GPU 80GB",
+            "utilization": max(0, min(100, base_util + random.randint(-5, 5))),
+            "memory_used_mib": used_mib + random.randint(-256, 256),
+            "memory_total_mib": 81_920,
+            "temperature_c": 55 + random.randint(-3, 3),
+            "power_watts": 310.0 + random.randint(-20, 20),
+            "power_limit_watts": 700.0,
+        })
+    return {"available": True, "gpus": gpus, "error": None}
 
 
 # --- Uploads ----------------------------------------------------------------
