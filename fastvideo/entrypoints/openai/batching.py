@@ -42,6 +42,32 @@ class VideoBatchScheduler:
         if self._task is not None:
             return
         self._task = asyncio.create_task(self._run(), name="fastvideo-video-batch-scheduler")
+        self._task.add_done_callback(self._on_run_done)
+
+    def _on_run_done(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            exc: BaseException | None = asyncio.CancelledError()
+        else:
+            exc = task.exception()
+        if exc is None:
+            return
+        logger.error("Video batch scheduler task died; failing all pending requests", exc_info=exc)
+        self._stopped = True
+        self._drain_and_fail_waiting(RuntimeError(f"Video batch scheduler crashed and cannot dispatch: {exc!r}"))
+
+    def _drain_and_fail_waiting(self, error: BaseException) -> None:
+        """Fail every job still waiting in ``_pending`` or ``_queue``."""
+        while self._pending:
+            job = self._pending.popleft()
+            if not job.future.done():
+                job.future.set_exception(error)
+        while True:
+            try:
+                queued = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            if queued is not None and not queued.future.done():
+                queued.future.set_exception(error)
 
     async def stop(self) -> None:
         self._stopped = True
@@ -93,7 +119,9 @@ class VideoBatchScheduler:
             if timeout > 0:
                 try:
                     candidate = await asyncio.wait_for(self._get_next_job(), timeout=timeout)
-                except TimeoutError:
+                except (TimeoutError, asyncio.TimeoutError):
+                    # asyncio.TimeoutError is only aliased to the builtin on
+                    # Python 3.11+; catch both so 3.10 does not kill _run.
                     break
             else:
                 # delay=0 means "don't wait", and an already-expired deadline
