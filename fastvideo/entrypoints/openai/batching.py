@@ -182,7 +182,11 @@ class VideoBatchScheduler:
         try:
             base_sampling, base_extra = self._sampling_param_from_kwargs(base.kwargs)
             candidate_sampling, candidate_extra = self._sampling_param_from_kwargs(candidate.kwargs)
-        except Exception:
+        except Exception as exc:
+            # Deduplicated per message so a systematically broken probe (which
+            # silently disables batching) is visible without log spam.
+            logger.warning_once("Dynamic batch compatibility probe failed; treating requests as "
+                                f"incompatible (batching disabled for these requests): {exc!r}")
             return False
         return can_dynamic_batch(
             base_sampling,
