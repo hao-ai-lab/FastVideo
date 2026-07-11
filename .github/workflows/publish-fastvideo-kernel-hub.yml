@@ -1,18 +1,14 @@
 name: Publish FastVideo Kernel to Hugging Face Hub
 
+# Version-gated like the PyPI flow (publish-kernel.yml): a push to main only
+# publishes when the fastvideo-kernel version actually changes. Use
+# workflow_dispatch as the manual override.
 on:
   push:
     branches:
       - main
     paths:
-      - ".github/workflows/publish-fastvideo-kernel-hub.yml"
-      - "fastvideo-kernel/build.toml"
-      - "fastvideo-kernel/flake.nix"
-      - "fastvideo-kernel/CARD.md"
-      - "fastvideo-kernel/example.py"
-      - "fastvideo-kernel/torch-ext/**"
-      - "fastvideo-kernel/csrc/**"
-      - "fastvideo-kernel/include/**"
+      - "fastvideo-kernel/pyproject.toml"
   workflow_dispatch:
     inputs:
       branch:
@@ -21,7 +17,43 @@ on:
         required: false
 
 jobs:
+  check-version-change:
+    runs-on: ubuntu-latest
+    outputs:
+      version-changed: ${{ steps.check-version.outputs.changed }}
+      new-version: ${{ steps.check-version.outputs.new-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if version changed
+        id: check-version
+        run: |
+          cd fastvideo-kernel
+          # Get current commit's version from pyproject.toml
+          # Use ^ to match start of line to avoid matching minimum-version
+          NEW_VERSION=$(grep -oP '^version\s*=\s*"\K[^"]+' pyproject.toml)
+          echo "New version: $NEW_VERSION"
+
+          # Get previous version from git history
+          # Note: git show expects path relative to repo root
+          OLD_VERSION=$(git show HEAD~1:fastvideo-kernel/pyproject.toml | grep -oP '^version\s*=\s*"\K[^"]+' || echo "0.0.0")
+          echo "Old version: $OLD_VERSION"
+
+          if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
+            echo "Version changed from $OLD_VERSION to $NEW_VERSION"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "new-version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version did not change"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: check-version-change
+    if: ${{ needs.check-version-change.outputs.version-changed == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
