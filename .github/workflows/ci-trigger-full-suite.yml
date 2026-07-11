@@ -56,13 +56,14 @@ jobs:
       # authors cannot tamper with the gate script.
       - name: Checkout gate script
         if: steps.check.outputs.has_ready == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Wait for pre-commit and docs build
         if: steps.check.outputs.has_ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: bash .github/scripts/gate_full_suite.sh
 
       - name: Trigger Buildkite Full Suite
