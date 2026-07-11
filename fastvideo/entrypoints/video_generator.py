@@ -557,6 +557,8 @@ class VideoGenerator:
         if isinstance(request.prompt, list):
             if request.inputs.prompt_path is not None:
                 raise ValueError("request.prompt list cannot be combined with request.inputs.prompt_path")
+            if (self._dynamic_batching_enabled(self.fastvideo_args) and self.fastvideo_args.prompt_txt is None):
+                return self._generate_batched_typed_requests(request)
             results: list[GenerationResult] = []
             for index, single_request in enumerate(expand_request_prompt_batch(request)):
                 prompt = single_request.prompt
@@ -571,6 +573,41 @@ class VideoGenerator:
             return results
 
         return self._generate_single_request(request)
+
+    def _generate_batched_typed_requests(self, request: GenerationRequest) -> list[GenerationResult]:
+        """Route a typed prompt-list request through the dynamic-batching work-item path.
+
+        Expanded requests share every field except prompt/image_path/video_path
+        (none of which are pipeline overrides), so one resolved FastVideoArgs is
+        shared across items — merge compatibility requires identity.
+        """
+        single_requests = expand_request_prompt_batch(request)
+        fastvideo_args = self._resolve_request_fastvideo_args(request)
+        work_items: list[_GenerationWorkItem] = []
+        reserved_output_paths: set[str] = set()
+        for single_request in single_requests:
+            sampling_param = request_to_sampling_param(
+                single_request,
+                model_path=self.fastvideo_args.model_path,
+            )
+            output_path = self._prepare_output_path(sampling_param.output_path, single_request.prompt,
+                                                    reserved_output_paths)
+            work_items.append(
+                self._prepare_generation_work_item(
+                    prompt=single_request.prompt,
+                    sampling_param=sampling_param,
+                    fastvideo_args=fastvideo_args,
+                    output_path=output_path,
+                ))
+
+        results: list[GenerationResult] = []
+        for index, legacy_result in enumerate(self._generate_prepared_work_items(work_items)):
+            wrapped = GenerationResult.from_legacy_result(legacy_result)
+            wrapped.prompt_index = index
+            if wrapped.prompt is None:
+                wrapped.prompt = single_requests[index].prompt
+            results.append(wrapped)
+        return results
 
     def _resolve_request_fastvideo_args(self, request: GenerationRequest) -> FastVideoArgs:
         """Return ``self.fastvideo_args``, deep-copied with the request's pipeline overrides applied (if any)."""
