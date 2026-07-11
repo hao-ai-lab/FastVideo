@@ -33,6 +33,8 @@ src = [
   "csrc/turbodiffusion/norm/layernorm.cu",
   "csrc/turbodiffusion/quant/quant.cu",
 ]
+# Deliberately Hopper-only (sm_90a): the TK attention kernels here require
+# Hopper, unlike the multi-arch PyPI wheels (see .github/workflows/publish-kernel.yml).
 cuda-capabilities = ["9.0a"]
 cuda-flags = [
   "-DNDEBUG",
