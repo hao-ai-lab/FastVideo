@@ -101,8 +101,15 @@ class VideoBatchScheduler:
             job = await self._get_next_job()
             if job is None:
                 break
-            batch = await self._collect_batch(job)
-            await self._dispatch(batch)
+            try:
+                batch = await self._collect_batch(job)
+                await self._dispatch(batch)
+            except BaseException:
+                # The job was already popped off the queue; park it back in
+                # _pending so the crash drain in _on_run_done fails its future
+                # instead of leaving it hanging forever.
+                self._pending.append(job)
+                raise
 
         # Fail jobs stranded in _pending AND still sitting in _queue (e.g.
         # submitted while the final dispatch was in flight when stop() landed).
