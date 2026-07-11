@@ -99,6 +99,13 @@ status.
 Full Suite is also path-filtered. It validates broader behavior before Mergify
 can merge a PR.
 
+A `ready`-labeled PR does not hit Buildkite immediately:
+`ci-trigger-full-suite.yml` first runs `.github/scripts/gate_full_suite.sh`,
+which waits for the cheap Tier-1 checks (pre-commit, docs build) on the PR
+head. A red cheap check blocks the suite (fail closed; the next push re-arms
+it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
+`/test full` bypasses the gate.
+
 | Buildkite label | `TEST_TYPE` | Main watched paths |
 |---|---|---|
 | SSIM Tests | `ssim` | `fastvideo/**/*.py`, `pyproject.toml`, `docker/Dockerfile` |
