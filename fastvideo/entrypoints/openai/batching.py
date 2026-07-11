@@ -98,10 +98,9 @@ class VideoBatchScheduler:
             batch = await self._collect_batch(job)
             await self._dispatch(batch)
 
-        while self._pending:
-            pending = self._pending.popleft()
-            if not pending.future.done():
-                pending.future.set_exception(RuntimeError("Video batch scheduler stopped before dispatch"))
+        # Fail jobs stranded in _pending AND still sitting in _queue (e.g.
+        # submitted while the final dispatch was in flight when stop() landed).
+        self._drain_and_fail_waiting(RuntimeError("Video batch scheduler stopped before dispatch"))
 
     async def _get_next_job(self) -> _VideoBatchJob | None:
         if self._pending:
