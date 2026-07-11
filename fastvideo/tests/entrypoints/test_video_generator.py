@@ -10,6 +10,7 @@ from fastvideo.api import (
     GenerationResult,
     GeneratorConfig,
     InputConfig,
+    OutputConfig,
     SamplingConfig,
     load_run_config,
 )
@@ -689,6 +690,46 @@ def test_generate_batched_request_fans_out_media_inputs(monkeypatch):
         ("first prompt", "first.png", "first.mp4"),
         ("second prompt", "second.png", "second.mp4"),
     ]
+
+
+def test_generate_typed_prompt_list_routes_through_dynamic_batching(monkeypatch, tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = _batching_fastvideo_args()
+    _patch_sampling_param_from_pretrained(monkeypatch)
+    calls = []
+
+    def fake_device_memory(gpu_id):
+        return 48.0
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append(batch)
+        batch_size = len(batch.prompt) if isinstance(batch.prompt, list) else 1
+        output = torch.arange(batch_size * 4, dtype=torch.float32).reshape(batch_size, 4, 1, 1, 1)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(
+        "fastvideo.batching.admission.BatchAdmissionController._get_device_memory_gb",
+        staticmethod(fake_device_memory),
+    )
+    monkeypatch.setattr(generator, "_run_forward_batch", fake_run_forward)
+
+    results = generator.generate(
+        GenerationRequest(
+            prompt=["first prompt", "second prompt"],
+            sampling=SamplingConfig(num_frames=1, height=8, width=8),
+            output=OutputConfig(
+                output_path=str(tmp_path),
+                save_video=False,
+                return_frames=True,
+            ),
+        )
+    )
+
+    assert len(calls) == 1
+    assert calls[0].prompt == ["first prompt", "second prompt"]
+    assert [result.prompt for result in results] == ["first prompt", "second prompt"]
+    assert [result.prompt_index for result in results] == [0, 1]
+    assert all(isinstance(result, GenerationResult) for result in results)
 
 
 def test_generate_batched_request_rejects_mismatched_media_inputs(monkeypatch):
