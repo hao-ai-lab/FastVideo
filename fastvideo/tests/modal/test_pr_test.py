@@ -120,6 +120,13 @@ def test_checkout_repository_retries_clone_and_fetches_pr_ref(monkeypatch):
         ("/tmp/FastVideo", True),
     ]
     assert sleep_seconds == [5]
+    assert [kwargs for _, kwargs in commands] == [
+        {"cwd": "/", "check": False},
+        {"cwd": "/", "check": False},
+        {"cwd": "/tmp/FastVideo", "check": False},
+        {"cwd": "/tmp/FastVideo", "check": False},
+        {"cwd": "/tmp/FastVideo", "check": False},
+    ]
 
     fetch_command = commands[2][0]
     assert fetch_command[-2:] == [

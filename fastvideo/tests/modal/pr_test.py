@@ -109,11 +109,7 @@ def _run_git_with_retries(command: list[str],
         if cleanup_path is not None:
             shutil.rmtree(cleanup_path, ignore_errors=True)
 
-        result = subprocess.run(command,
-                                cwd=cwd,
-                                stdout=sys.stdout,
-                                stderr=sys.stderr,
-                                check=False)
+        result = subprocess.run(command, cwd=cwd, check=False)
         if result.returncode == 0:
             return
 
