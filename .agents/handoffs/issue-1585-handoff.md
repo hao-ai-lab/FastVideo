@@ -12,11 +12,11 @@
 - Created: `2026-07-11T08:05:13Z`
 - Updated: `2026-07-11T08:05:32Z`
 - Repository: `/home/sandbox/FastVideo`
-- Worktree: `/tmp/fastvideo-worktrees/issue-1585-fastcheck-lora-timeout`
+- Worktree: `/tmp/fastvideo-worktrees/issue_1585_fastcheck_lora_timeout`
 - Branch: `issue/1585-fastcheck-lora-timeout`
 - Base: `upstream/main` at `970409962f358afd529b969a378174c849665837`
 - Handoff: `.agents/handoffs/issue-1585-handoff.md`
-- Current stage: Stage 3, committed branch pending independent review
+- Current stage: Stage 3 complete; draft PR message ready and awaiting explicit Stage 4 direction
 - Stage 1 completed: `2026-07-12T05:33:57Z`
 - Implementation begun: yes; user approved Approach A on 2026-07-12
 
@@ -151,6 +151,65 @@
 - GPG verification: good signature from `Mac Lee <macthecadillac@gmail.com>`, signing subkey `C943F92E5C32D887`.
 - Push: successful to `origin/issue/1585-fastcheck-lora-timeout`.
 
+## Stage 3
+
+- Reviewer: `/root/review_issue_1585_round1`, prompted to use `review-code` on `macthecadillac/FastVideo` branch `issue/1585-fastcheck-lora-timeout` for `hao-ai-lab/FastVideo#1585` without modifying code or GitHub state.
+- Reviewed branch head: `a20a36f66` against upstream main `970409962`.
+- Finding: no actionable findings. The reviewer confirmed the one-line change directly addresses #1585, preserves the inner Modal timeout/direct wrapper/workload, and is not over-engineered.
+- Residual risk: the actual Buildkite Full Suite LoRA lane has not run, so queue-inclusive completion under 25 minutes is unverified; unusually long capacity queues could still exceed the new allowance.
+- Adjudicator/fixer: not spawned because there were no actionable findings to adjudicate.
+- Direct `pre-commit run --all-files` could not start because `pre-commit` was not installed on the host PATH.
+- Fallback `uv run --no-project --with pre-commit pre-commit run --all-files` ran the full hook list. All hooks passed except mypy, which failed before analysis with `issue-1585-fastcheck-lora-timeout is not a valid Python package name`.
+- The mypy failure was caused solely by the hyphenated worktree basename, not repository content.
+- Moved the same worktree with `git worktree move` to `/tmp/fastvideo-worktrees/issue_1585_fastcheck_lora_timeout`; branch and files are unchanged.
+
+- Reran `uv run --no-project --with pre-commit pre-commit run --all-files` from the underscore-only worktree.
+- Result: passed. YAPF, ruff, codespell, PyMarkdown, actionlint, mypy, filename checks, and suggestion all passed.
+- The Stage 3 pre-commit readiness gate is cleared. It must run again as the final Stage 4 gate before any draft PR creation.
+
+## Draft PR Message
+
+Title: `[ci]: extend LoRA training CI timeout`
+
+```markdown
+## Summary
+
+- increase the path-filtered Full Suite LoRA Training Tests Buildkite wrapper from 15 to 25 minutes
+- preserve the Modal function's 900-second runtime ceiling, the 90-minute direct-test wrapper, and the existing LoRA training/validation workload
+- provide queue, authentication, checkout, and container-setup headroom without weakening regression coverage
+
+Fixes #1585.
+
+## Validation
+
+- Modal L40S static pipeline validation through `fastvideo/tests/modal/launch_l40s_job.py` from branch `interleavethinker`
+  - App: https://modal.com/apps/hao-ai-lab/main/ap-yE0Sn5gHPdlCoaTinP7dns
+  - applied the local `.buildkite/pipeline.yml` patch
+  - parsed the pipeline with PyYAML
+  - confirmed the Full Suite LoRA timeout is 25 minutes and the direct-test timeout remains 90 minutes
+- `uv run --no-project --with pre-commit pre-commit run --all-files`
+  - all hooks passed
+
+## Review Loop
+
+- a fresh `review-code` sub-agent reviewed `macthecadillac/FastVideo` branch `issue/1585-fastcheck-lora-timeout` for issue #1585
+- no actionable findings were reported, so no adjudicator/fixer sub-agent was needed
+
+## GPU Memory Impact
+
+None. This changes only the Buildkite wall-clock allowance for one existing CI lane.
+
+## Remaining Risk
+
+The actual queue-inclusive Full Suite LoRA lane can only be validated after a PR exists. Capacity-dependent queue delays longer than the new 10-minute allowance could still exceed the outer timeout.
+
+# Checklist
+- [x] I ran pre-commit run --all-files and fixed all issues
+- [ ] I added or updated tests for my changes
+- [x] I updated documentation if needed
+- [x] I considered GPU memory impact of my changes
+```
+
 ## Stage 1 Persistence
 
 - Signed handoff commit: `77fa5d0605b0d1bd11366469add5eb0e83399656` (`[ci]: investigate LoRA training timeout (#1585)`).
@@ -160,5 +219,5 @@
 
 ## Next Steps
 
-1. Run a fresh `review-code` sub-agent on the committed branch and record its findings.
-2. Adjudicate any actionable findings independently, then run the pre-commit readiness gate.
+1. Rerun pre-commit after this final handoff edit, then commit with GPG signing and push.
+2. Present the complete Stage 3 result and draft PR message to the user without opening a PR.
