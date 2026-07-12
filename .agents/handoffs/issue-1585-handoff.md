@@ -16,7 +16,7 @@
 - Branch: `issue/1585-fastcheck-lora-timeout`
 - Base: `upstream/main` at `970409962f358afd529b969a378174c849665837`
 - Handoff: `.agents/handoffs/issue-1585-handoff.md`
-- Current stage: Stage 2 implementation and validation complete; pending signed commit and push
+- Current stage: Stage 3, committed branch pending independent review
 - Stage 1 completed: `2026-07-12T05:33:57Z`
 - Implementation begun: yes; user approved Approach A on 2026-07-12
 
@@ -147,6 +147,9 @@
 - Result: passed; logs printed `yaml parsed` and `validated LoRA timeout entries`.
 - The full LoRA GPU workload was not rerun because no runtime/model/test code changed and a Modal-only run cannot exercise the Buildkite outer clock. The definitive end-to-end check remains the Full Suite lane after PR creation.
 - `pre-commit run --all-files` remains pending for the Stage 3 readiness gate.
+- Signed implementation commit: `82ebb4237afa0a0eb2777c261c5d37be5e90748c` (`[ci]: extend LoRA training CI timeout (#1585)`).
+- GPG verification: good signature from `Mac Lee <macthecadillac@gmail.com>`, signing subkey `C943F92E5C32D887`.
+- Push: successful to `origin/issue/1585-fastcheck-lora-timeout`.
 
 ## Stage 1 Persistence
 
@@ -157,5 +160,5 @@
 
 ## Next Steps
 
-1. Commit the implementation and handoff with GPG signing, then push immediately.
-2. Run the required Stage 3 review/adjudication cycle and pre-commit readiness gate.
+1. Run a fresh `review-code` sub-agent on the committed branch and record its findings.
+2. Adjudicate any actionable findings independently, then run the pre-commit readiness gate.
