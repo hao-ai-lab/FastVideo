@@ -5,12 +5,12 @@
 - Issue: `hao-ai-lab/FastVideo#1584`
 - Title: `[CI] Modal checkout: full-clone HTTP/2 disconnects redden ~1 lane per run (exit 128)`
 - URL: https://github.com/hao-ai-lab/FastVideo/issues/1584
-- Stage: Stage 1, deep dive and plan
-- Implementation begun: no
+- Stage: Stage 2, implementation
+- Implementation begun: yes, 2026-07-12 UTC
 - Handoff: `.agents/handoffs/issue-1584-handoff.md`
 - Worktree: `/tmp/fastvideo-worktrees/issue-1584-modal-checkout`
 - Branch: `issue/1584-modal-checkout`
-- Base: `origin/main` at `19a51a1fe630bcbeaf9fb6d864ad5ed3f31a3536`
+- Base: `upstream/main` at `970409962f358afd529b969a378174c849665837`
 - Current upstream: `upstream/main` at `970409962f358afd529b969a378174c849665837`
 - Started: 2026-07-12 UTC
 
@@ -189,5 +189,55 @@ and maintenance cost are too high for the current defect.
 
 ## Open Questions
 
-- User selection of Approach A, B, C, or modified scope is required before
-  implementation. No technical blocker remains for the recommended Approach B.
+- None. The user approved the recommended targeted hardened checkout
+  (Approach B) on 2026-07-12 UTC.
+
+## Stage 2 Log
+
+- Re-checked the issue body, all comments, and the full open PR list before
+  editing. GitHub state and overlap findings were unchanged.
+- Rebased onto `upstream/main` at `970409962f358afd529b969a378174c849665837`.
+- Rewritten signed handoff commit: `69cff397b`; force-with-lease push succeeded.
+- Implemented the approved checkout hardening in
+  `fastvideo/tests/modal/pr_test.py`:
+  - structured subprocess arguments replace shell-interpolated Git commands;
+  - clone uses HTTP/1.1, depth 1, blob filtering, and no initial checkout;
+  - clone/fetch/checkout/submodule commands receive three bounded attempts;
+  - clone retries remove partial destination state before each attempt;
+  - PR refs and validated direct commit SHAs are fetched shallowly and checked
+    out detached.
+- Added `fastvideo/tests/modal/test_pr_test.py` with network-free coverage for
+  clone recovery, bounded exhaustion, cleanup, PR/direct target selection,
+  invalid Buildkite metadata, command flags, integration ordering, and shell
+  syntax for kernel/no-kernel setup variants.
+- Documentation remains unchanged because CI ownership and user-facing
+  operation are unchanged.
+- Modal validation attempts:
+  1. Run `ap-h1n0YPwdKyecf9Tum5s916` failed before pytest because
+     `--install-extra test` rebuilt the published `fastvideo-kernel==0.3.2`
+     source distribution, whose build could not find CUTLASS headers. This is
+     unrelated to the patch.
+  2. Run `ap-68WngBzUp8FpWiUyn6nuwB` failed before pytest because the
+     no-install command did not source the container environment and therefore
+     could not find `uv`.
+  3. Run `ap-zxlDxnUGusJblcrZ9BLvy8` reached the focused suite: 10 tests
+     passed and one test-only assertion failed because an empty string is
+     contained in every Python string. Production checkout cases passed.
+- Corrected the no-install assertion to check explicitly that
+  `uv pip install -e` is absent.
+- Focused Modal L40S rerun `ap-aN9NR47J2GNaavv3KaLcWH`: passed,
+  `11 passed in 0.06s`.
+- Live Modal L40S transfer smoke `ap-iuuYuWaVdIXfQahs54XpnU`: passed using
+  the exact production clone/fetch/checkout flags.
+  - Direct commit path checked out
+    `69cff397bce2699b1c7d25c018da7c07716eed36` from the pushed fork.
+  - PR path fetched `refs/pull/1581/head` from
+    `hao-ai-lab/FastVideo` and checked out
+    `603c7b0d1c662f3d17df749ccec332568297a839`, matching `ls-remote`.
+- Stage 2 validation is complete. No GPU model execution was needed, and the
+  change has no GPU memory impact.
+- Changed-file pre-commit command:
+  `uv run --no-project --with pre-commit pre-commit run --files .agents/handoffs/issue-1584-handoff.md fastvideo/tests/modal/pr_test.py fastvideo/tests/modal/test_pr_test.py`.
+  Result: filename check passed; all other hooks reported no files to check,
+  consistent with the repository's deliberate `fastvideo/tests/` and handoff
+  exclusions.
