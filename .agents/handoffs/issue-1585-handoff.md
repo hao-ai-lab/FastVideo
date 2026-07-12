@@ -132,7 +132,14 @@
 
 - User decision: approve the recommended minimal 25-minute outer-budget change, choose the static-contract variant, or direct a different approach.
 
+## Stage 1 Persistence
+
+- Signed handoff commit: `77fa5d0605b0d1bd11366469add5eb0e83399656` (`[ci]: investigate LoRA training timeout (#1585)`).
+- GPG verification: good signature from `Mac Lee <macthecadillac@gmail.com>`, signing subkey `C943F92E5C32D887`.
+- Push: successful to `origin/issue/1585-fastcheck-lora-timeout`; the branch now tracks the macthecadillac fork.
+- No PR was opened.
+
 ## Next Steps
 
-1. Sign, commit, and push this Stage 1 handoff.
-2. Present the Stage 1 report and wait for explicit user guidance before implementation.
+1. Present the Stage 1 report and wait for explicit user guidance before implementation.
+2. On approval, resume at Stage 2 from this worktree and re-check current GitHub state before editing.
