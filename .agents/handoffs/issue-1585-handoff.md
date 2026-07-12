@@ -16,9 +16,9 @@
 - Branch: `issue/1585-fastcheck-lora-timeout`
 - Base: `upstream/main` at `970409962f358afd529b969a378174c849665837`
 - Handoff: `.agents/handoffs/issue-1585-handoff.md`
-- Current stage: Stage 1 complete, awaiting user guidance
+- Current stage: Stage 2 implementation and validation complete; pending signed commit and push
 - Stage 1 completed: `2026-07-12T05:33:57Z`
-- Implementation begun: no; Stage 1 permits handoff edits only
+- Implementation begun: yes; user approved Approach A on 2026-07-12
 
 ## Stage 0
 
@@ -130,7 +130,23 @@
 
 ## Open Questions
 
-- User decision: approve the recommended minimal 25-minute outer-budget change, choose the static-contract variant, or direct a different approach.
+- None. The user approved the recommended minimal 25-minute outer-budget change and directed Stage 2 to begin.
+
+## Stage 2
+
+- Re-verified `gh` identity as `macthecadillac` before editing.
+- Re-read issue #1585 and its only comment; issue state and content were unchanged.
+- Re-checked the open PR list; no related issue #1585, LoRA timeout, or matching branch PR exists.
+- Selected scope: change only the path-filtered Full Suite LoRA Training Tests wrapper from `timeout 15m` to `timeout 25m`.
+- Explicit exclusions: no static contract test, workload reduction, Modal timeout change, direct-test timeout change, documentation change, or broad CI timeout audit.
+- Implemented `.buildkite/pipeline.yml`: changed only the Full Suite LoRA Training Tests wrapper from `timeout 15m` to `timeout 25m`.
+- Diff inspection confirmed the 90-minute direct-test wrapper, Modal `timeout=900`, LoRA smoke workload, tests, and docs are unchanged.
+- First Modal attempt used the `interleavethinker` launcher with the local pipeline patch, app `ap-xCNC5eCHkOQk2I7qHtXgvt`. The attached client stopped the app during repository cloning, before assertions ran; this attempt provided no validation result.
+- Retried detached through the `interleavethinker` launcher, app `ap-yE0Sn5gHPdlCoaTinP7dns`, FunctionCall `fc-01KXAGNTNXY8HY0165T4REYCDJ`.
+- Detached command parsed `.buildkite/pipeline.yml` with PyYAML and asserted the presence of `timeout 25m` and unchanged `timeout 90m` LoRA commands after applying the 547-byte local patch.
+- Result: passed; logs printed `yaml parsed` and `validated LoRA timeout entries`.
+- The full LoRA GPU workload was not rerun because no runtime/model/test code changed and a Modal-only run cannot exercise the Buildkite outer clock. The definitive end-to-end check remains the Full Suite lane after PR creation.
+- `pre-commit run --all-files` remains pending for the Stage 3 readiness gate.
 
 ## Stage 1 Persistence
 
@@ -141,5 +157,5 @@
 
 ## Next Steps
 
-1. Present the Stage 1 report and wait for explicit user guidance before implementation.
-2. On approval, resume at Stage 2 from this worktree and re-check current GitHub state before editing.
+1. Commit the implementation and handoff with GPG signing, then push immediately.
+2. Run the required Stage 3 review/adjudication cycle and pre-commit readiness gate.
