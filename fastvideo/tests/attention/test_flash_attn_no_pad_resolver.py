@@ -50,9 +50,10 @@ def test_resolver_skips_cute_without_opt_in(monkeypatch) -> None:
     monkeypatch.setattr(builtins, "__import__", spying_import)
 
     mod = _reload_resolver_module()
-    resolved = mod._resolve_flash_attn_varlen_func()
+    resolved, version = mod._resolve_flash_attn_varlen_func()
     assert resolved is not None
     assert resolved.__name__ == "flash_attn_varlen_func"
+    assert version in ("2", "3")
     assert "fastvideo.attention.utils.flash_attn_cute" not in attempted
 
 
@@ -92,9 +93,10 @@ def test_resolver_returns_flash_attn_when_interface_unavailable(monkeypatch) -> 
     monkeypatch.setattr(builtins, "__import__", patched_import)
 
     mod = _reload_resolver_module()
-    resolved = mod._resolve_flash_attn_varlen_func()
+    resolved, version = mod._resolve_flash_attn_varlen_func()
     assert resolved is not None
     assert resolved.__module__.startswith("flash_attn")
+    assert version == "2"
 
 
 def test_module_level_impl_is_resolver_output() -> None:
