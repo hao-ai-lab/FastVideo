@@ -39,6 +39,7 @@ def _full_config(torch_dtype):
         _attn_implementation="sdpa",
         rms_norm_eps=1e-6,
         max_position_embeddings=32,
+        rope_theta=1_000_000.0,
         rope_scaling=None,
     )
 
