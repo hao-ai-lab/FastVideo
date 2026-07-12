@@ -7,10 +7,10 @@
 - URL: https://github.com/hao-ai-lab/FastVideo/issues/1586
 - Handoff: `.agents/handoffs/issue-1586-handoff.md`
 - Branch: `issue/1586-vsa-h200-reference`
-- Worktree: `/tmp/fastvideo-worktrees/issue-1586-vsa-h200-reference`
+- Worktree: `/tmp/fastvideo-worktrees/issue_1586_vsa_h200_reference` (moved from the hyphenated path so mypy can derive a valid package name)
 - Base: `upstream/main` at `970409962f358afd529b969a378174c849665837`
 - Verified GitHub identity: `macthecadillac` via `gh api user --jq .login`
-- Current stage: Stage 2, implementing the user-approved fix
+- Current stage: Stage 3, review and adjudication
 - Implementation begun: yes, after user approval on 2026-07-12 UTC
 - Started/resumed: 2026-07-12 UTC; new investigation, no prior issue branch or handoff found
 
@@ -99,6 +99,14 @@ Recommended scope is a strict H100-only lane, removal of the known-bad H200 refe
 ## Validation Status
 
 - Local project tests: not run; prohibited by repository instructions.
+- Implementation commit: `3e197a93f08e980817aa9ef9632fb035de550b2c`, GPG signature verified as good for Mac Lee.
+- Push: `origin/issue/1586-vsa-h200-reference` advanced from `a8d06fb85` to `3e197a93f` successfully.
+- Stage 3 review target: `macthecadillac/FastVideo` branch `issue/1586-vsa-h200-reference`, issue `hao-ai-lab/FastVideo#1586`.
+- Review round 1: fresh sub-agent `/root/review_1586_round1` reviewed committed branch `3e197a93f` with the `review-code` skill.
+- Reviewer result: no actionable findings. It confirmed issue fit, strict H100 syntax, H100-only guard/reference, removal of all H200 consumers, contract coverage, clean diff, and valid signature.
+- Related branch result: the reviewed branch is the only `macthecadillac/FastVideo` branch matching 1586; no overlapping open upstream PR exists.
+- No adjudicator/fixer was spawned because the reviewer reported no actionable findings. The Stage 3 loop stops after round 1.
+
 - Modal client `1.5.3.dev1` was installed into the existing local virtualenv only to launch approved remote jobs; no repository dependency changed.
 - Contract attempt `ap-LmiMIuYSseXKJonBD2LLTC`: failed before pytest because unnecessary `uv pip install -e '.[test]'` tried to build the PyPI kernel sdist without CUTLASS headers.
 - Contract rerun `ap-dGXu4f3p0Bd5k1ICYiEYDX` through the `interleavethinker` launcher with `--install-extra none`: `4 passed in 0.03s` on Modal L40S.
@@ -113,10 +121,70 @@ Recommended scope is a strict H100-only lane, removal of the known-bad H200 refe
   - `train_loss`: 0.033021042466163664 <= 0.04
 - The temporary offline W&B changes were removed after validation. Production code remains online-W&B behavior.
 - `git diff --check`: passed.
-- Pre-commit: not yet run; Stage 3 requires `pre-commit run --all-files` before draft-PR readiness.
+- Final `pre-commit run --all-files` after recording the review and draft PR message: all hooks passed again.
+- First `pre-commit run --all-files`: all hooks except mypy passed; mypy exited before checking code because the hyphenated worktree basename was not a valid Python package name.
+- Worktree moved with `git worktree move` to `/tmp/fastvideo-worktrees/issue_1586_vsa_h200_reference` without changing branch or files.
+- Second `pre-commit run --all-files`: all hooks passed, including yapf, ruff, codespell, PyMarkdown, actionlint, mypy, filename checks, and suggestion.
+
+## Remaining Risk
+
+- The exact Buildkite wrapper with online W&B secrets was not run end to end because those CI credentials are unavailable locally. The affected secret, checkout, and online-summary wiring is unchanged by this branch.
+- The passing H100 `train_loss` difference was about 0.033 against a 0.04 threshold. This branch does not change that reference or tolerance.
+- Strict H100 allocation may wait longer during H100 capacity pressure, but it removes nondeterministic H200 substitution by design.
+
+## Draft PR Message
+
+Title: `[ci]: pin VSA training regression to H100`
+
+```markdown
+## Summary
+
+- request a strict two-GPU H100 allocation for the VSA training lane so Modal cannot upgrade it to H200
+- remove the anomalous H200 W&B reference and make the regression explicitly H100-only
+- add contract coverage that locks the Modal function to `H100!:2`
+
+Fixes #1586.
+
+## Problem
+
+Modal may automatically upgrade `gpu="H100:2"` requests to H200. The VSA training test then selected a checked-in H200 reference whose `grad_norm` was about 0.245, while current H100/H200 runs produce values around 1.2. The same commit therefore passed on H100 and failed on H200 depending on allocation.
+
+## Validation
+
+- Modal L40S contract test: `4 passed in 0.03s` (`ap-dGXu4f3p0Bd5k1ICYiEYDX`)
+- Modal 2x H100 VSA regression: `1 passed, 1 warning in 155.66s` (`ap-JYFvkbsICoWEeXD9ulz1bL`)
+- Both GPUs reported `NVIDIA H100 80GB HBM3`
+- Exact differences against the unchanged H100 reference:
+  - `avg_step_time`: 0.5718568257969423 (threshold 15)
+  - `grad_norm`: 0.11541739463806144 (threshold 0.5)
+  - `step_time`: 0.19428527497333903 (threshold 15)
+  - `train_loss`: 0.033021042466163664 (threshold 0.04)
+- `pre-commit run --all-files`: passed
+- Independent Stage 3 review: no actionable findings
+
+The credential-free Modal validation used W&B offline storage plus a temporary uncommitted summary reader. That adapter was removed after validation; production online-W&B behavior is unchanged.
+
+## GPU Memory Impact
+
+No expected change. The lane still uses two Hopper GPUs and the patch changes only allocation policy and test/reference selection. Strict H100 allocation can reduce scheduling flexibility but does not increase per-GPU memory use.
+
+## Remaining Risk
+
+- The Buildkite wrapper with online W&B secrets was not executed end to end because those CI credentials are unavailable locally; that wiring is unchanged.
+- The H100 `train_loss` result remains relatively close to its existing threshold, but neither the reference nor threshold changed.
+
+# Checklist
+- [x] I ran pre-commit run --all-files and fixed all issues
+- [x] I added or updated tests for my changes
+- [x] I updated documentation if needed
+- [x] I considered GPU memory impact of my changes
+For model/pipeline changes, also check:
+- [ ] I verified targeted Wan T2V SSIM regression tests pass on L40S
+- [ ] I updated the support matrix if adding a new model
+```
 
 ## Next Steps
 
-1. Inspect the final production diff and confirm no H200 reference remains.
-2. Create a focused GPG-signed implementation commit and push immediately.
-3. Start the required Stage 3 fresh review-code and independent adjudication loop.
+1. Commit and push the final handoff-only Stage 3 update with GPG signing.
+2. Present this complete Stage 3 summary and draft PR message to the user.
+3. Do not open a PR until the user explicitly requests Stage 4.
