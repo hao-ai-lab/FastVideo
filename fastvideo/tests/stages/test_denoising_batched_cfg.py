@@ -85,6 +85,7 @@ def _make_fastvideo_args(use_batched_cfg: bool) -> Any:
         pipeline_config=types.SimpleNamespace(
             embedded_cfg_scale=None,
             ti2v_task=False,
+            lucy_edit_task=False,
             vae_config=types.SimpleNamespace(arch_config=types.SimpleNamespace(scale_factor_temporal=1,
                                                                                scale_factor_spatial=1)),
             dit_config=types.SimpleNamespace(boundary_ratio=None,
@@ -125,7 +126,8 @@ def _make_stage() -> DenoisingStage:
     """Bypass ``__init__`` (which calls into ``get_attn_backend``) and
     set the fields ``forward`` actually reads."""
     stage = DenoisingStage.__new__(DenoisingStage)
-    torch.nn.Module.__init__(stage)
+    # DenoisingStage subclasses PipelineStage(ABC), not nn.Module, so there is
+    # no module machinery to initialize — plain attribute assignment is enough.
     stage.transformer = _StubTransformer()
     stage.transformer_2 = None
     stage.scheduler = _IdentityScheduler()
