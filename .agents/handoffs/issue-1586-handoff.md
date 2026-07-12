@@ -10,8 +10,8 @@
 - Worktree: `/tmp/fastvideo-worktrees/issue-1586-vsa-h200-reference`
 - Base: `upstream/main` at `970409962f358afd529b969a378174c849665837`
 - Verified GitHub identity: `macthecadillac` via `gh api user --jq .login`
-- Current stage: Stage 1, deep dive and plan
-- Implementation begun: no; Stage 1 permits only updates to this handoff
+- Current stage: Stage 2, implementing the user-approved fix
+- Implementation begun: yes, after user approval on 2026-07-12 UTC
 - Started/resumed: 2026-07-12 UTC; new investigation, no prior issue branch or handoff found
 
 ## Issue Snapshot
@@ -82,16 +82,41 @@ Recommended scope is a strict H100-only lane, removal of the known-bad H200 refe
 6. Keep the H100 reference unchanged if all current metrics pass. If H100 fails reproducibly, stop and report measurements before expanding scope into rebaselining.
 7. Commit with GPG signing, push immediately, then run the required Stage 3 review/adjudication loop. Run `pre-commit run --all-files` before any future draft PR, and never create a non-draft PR or alter existing draft status.
 
+## User-Selected Approach
+
+- On 2026-07-12 UTC, the user approved the recommended strict H100-only plan without changes.
+- The pre-edit GitHub re-check confirmed identity `macthecadillac`, issue #1586 remains open with no comments or assignees, and no open PR references or closes it.
+- Approved implementation scope: `H100!:2`, one H100 reference with a non-H100 guard, removal of the H200 reference, and focused Modal contract coverage.
+
+## Stage 2 Implementation
+
+- `fastvideo/tests/modal/pr_test.py`: changed the VSA Modal request from upgradeable `H100:2` to strict `H100!:2`.
+- `fastvideo/tests/training/VSA/test_training_loss_VSA.py`: uses the single H100 reference, prints the detected device, and rejects non-H100 execution.
+- `fastvideo/tests/training/VSA/h200_reference_wandb_summary_VSA.json`: deleted the anomalous and now-unsupported baseline.
+- `fastvideo/tests/contract/test_modal_fa4_policy.py`: added AST-based coverage that requires `run_training_tests_VSA` to contain exact `H100!:2` allocation.
+- The H100 reference and all numeric thresholds remain unchanged.
+
 ## Validation Status
 
 - Local project tests: not run; prohibited by repository instructions.
-- Modal jobs: not run; prohibited during Stage 1.
-- Pre-commit: not run; mandatory before any future draft PR creation.
-
-Pass criteria: production decorator is exactly `H100!:2`; the full test reports H100 and all four metrics pass existing thresholds; no path references the deleted H200 JSON; Stage 3 validation and review gates pass.
+- Modal client `1.5.3.dev1` was installed into the existing local virtualenv only to launch approved remote jobs; no repository dependency changed.
+- Contract attempt `ap-LmiMIuYSseXKJonBD2LLTC`: failed before pytest because unnecessary `uv pip install -e '.[test]'` tried to build the PyPI kernel sdist without CUTLASS headers.
+- Contract rerun `ap-dGXu4f3p0Bd5k1ICYiEYDX` through the `interleavethinker` launcher with `--install-extra none`: `4 passed in 0.03s` on Modal L40S.
+- First full H100 attempt `ap-KRnx9mY5ysvMWuNqe78jQv`: built the in-tree kernel for `sm_90a` and completed training on two `NVIDIA H100 80GB HBM3` GPUs. An offline-only W&B override produced metrics but no online `wandb-summary.json`, so the test failed only at summary-file lookup. Observed summary included `grad_norm=1.31636`, `step_time=0.79761`, and `avg_step_time=1.50003`.
+- W&B anonymous-online probe `ap-mQHl2AjMtJk6k0IekIzomm`: confirmed W&B 0.23.1 requires an API key and ignores anonymous mode.
+- Offline datastore probes `ap-6yCpeOUOwS5ZAShHhjLCOz` and `ap-4z7xgFGVq5gaLMC74MaA6w`: established that offline summary keys/values can be read from W&B's own protobuf datastore for validation only.
+- Final full H100 run `ap-JYFvkbsICoWEeXD9ulz1bL`: used a temporary, uncommitted offline-summary adapter, built the in-tree VSA kernel, ran on two actual H100 80GB GPUs, and passed `1 passed, 1 warning in 155.66s`.
+- Exact final differences versus the unchanged H100 reference:
+  - `avg_step_time`: 0.5718568257969423 <= 15
+  - `grad_norm`: 0.11541739463806144 <= 0.5
+  - `step_time`: 0.19428527497333903 <= 15
+  - `train_loss`: 0.033021042466163664 <= 0.04
+- The temporary offline W&B changes were removed after validation. Production code remains online-W&B behavior.
+- `git diff --check`: passed.
+- Pre-commit: not yet run; Stage 3 requires `pre-commit run --all-files` before draft-PR readiness.
 
 ## Next Steps
 
-1. Re-check GitHub issue/comment/open-PR state before ending Stage 1.
-2. Commit and push this Stage 1 handoff with GPG signing.
-3. Await user approval or alternate Stage 2 guidance; no implementation has begun.
+1. Inspect the final production diff and confirm no H200 reference remains.
+2. Create a focused GPG-signed implementation commit and push immediately.
+3. Start the required Stage 3 fresh review-code and independent adjudication loop.

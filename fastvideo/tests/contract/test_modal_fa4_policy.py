@@ -56,6 +56,11 @@ def test_performance_lane_classifies_pull_requests_before_main():
         "BUILDKITE_PULL_REQUEST") < function_strings.index("BUILDKITE_BRANCH")
 
 
+def test_vsa_training_lane_uses_strict_h100_pair():
+    function_strings = _function_strings(PR_TEST, "run_training_tests_VSA")
+    assert "H100!:2" in function_strings.splitlines()
+
+
 def test_pr_model_load_and_training_lanes_disable_fa4():
     lanes = {
         "run_transformer_tests": "pytest ./fastvideo/tests/transformers -vs",
