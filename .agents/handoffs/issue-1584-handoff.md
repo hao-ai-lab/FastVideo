@@ -5,10 +5,10 @@
 - Issue: `hao-ai-lab/FastVideo#1584`
 - Title: `[CI] Modal checkout: full-clone HTTP/2 disconnects redden ~1 lane per run (exit 128)`
 - URL: https://github.com/hao-ai-lab/FastVideo/issues/1584
-- Stage: Stage 2, implementation
+- Stage: Stage 3 complete, awaiting explicit draft PR creation direction
 - Implementation begun: yes, 2026-07-12 UTC
 - Handoff: `.agents/handoffs/issue-1584-handoff.md`
-- Worktree: `/tmp/fastvideo-worktrees/issue-1584-modal-checkout`
+- Worktree: `/tmp/fastvideo_worktrees/issue_1584_modal_checkout`
 - Branch: `issue/1584-modal-checkout`
 - Base: `upstream/main` at `970409962f358afd529b969a378174c849665837`
 - Current upstream: `upstream/main` at `970409962f358afd529b969a378174c849665837`
@@ -241,3 +241,89 @@ and maintenance cost are too high for the current defect.
   Result: filename check passed; all other hooks reported no files to check,
   consistent with the repository's deliberate `fastvideo/tests/` and handoff
   exclusions.
+- Signed implementation commit:
+  `5da7c0b2960939578e16c720cf14ee88b1719278`; push to
+  `origin/issue/1584-modal-checkout` succeeded.
+
+## Stage 3 Review And Adjudication
+
+- Full pre-commit attempt from the original hyphenated worktree path passed
+  every hook except mypy, which aborted before analysis because
+  `issue-1584-modal-checkout` is not a valid Python package name.
+- Moved the worktree to
+  `/tmp/fastvideo_worktrees/issue_1584_modal_checkout`.
+- Mandatory full gate:
+  `uv run --no-project --with pre-commit pre-commit run --all-files`.
+  Result: all hooks passed, including yapf, ruff, codespell, PyMarkdown,
+  actionlint, mypy, filename checks, and suggestion.
+- Reviewer sub-agent: `/root/review_1584_pass1`.
+  - Reviewed committed branch `5da7c0b29` with the `review-code` skill.
+  - Finding: no actionable issues.
+  - Issue fit: fully addresses `#1584`.
+  - Residual risk: repeated full Buildkite matrices have not measured the
+    stochastic failure rate.
+- Adjudicator/fixer sub-agent: `/root/adjudicate_1584_pass1`.
+  - Independently confirmed the reviewer's no-action result.
+  - Accepted no findings, rejected no findings, and made no code, commit,
+    push, handoff, or GitHub changes.
+  - Confirmed `5da7c0b29` is signed, pushed, and synchronized.
+- Review/adjudication loop stopped with no actionable findings and no code
+  changes.
+
+## Draft PR Message
+
+Title:
+
+`[ci]: harden Modal repository checkout`
+
+Body:
+
+### Summary
+
+- replace the Modal PR test harness's shell-interpolated full clone with a
+  structured checkout path;
+- force HTTP/1.1 and use shallow, blobless, no-checkout cloning;
+- retry clone, target fetch, detached checkout, and submodule update up to
+  three times, cleaning partial clone state before each clone attempt;
+- add focused network-free coverage for retry, cleanup, PR/direct targets,
+  invalid Buildkite metadata, integration ordering, and shell composition.
+
+Fixes #1584.
+
+### Validation
+
+- Modal L40S focused suite:
+  `pytest fastvideo/tests/modal/test_pr_test.py -q`
+  - Result: `11 passed in 0.06s`
+  - Run: https://modal.com/apps/hao-ai-lab/main/ap-aN9NR47J2GNaavv3KaLcWH
+- Modal L40S live transfer smoke:
+  - direct commit checkout matched `69cff397bce2699b1c7d25c018da7c07716eed36`;
+  - `refs/pull/1581/head` checkout matched
+    `603c7b0d1c662f3d17df749ccec332568297a839`;
+  - Run: https://modal.com/apps/hao-ai-lab/main/ap-iuuYuWaVdIXfQahs54XpnU
+- `uv run --no-project --with pre-commit pre-commit run --all-files`
+  - Result: passed.
+
+### Review Loop
+
+- `review-code` reviewed
+  `macthecadillac/FastVideo:issue/1584-modal-checkout` at `5da7c0b29` and
+  reported no actionable findings.
+- An independent adjudicator/fixer confirmed the no-action result and made no
+  changes.
+
+### GPU Memory Impact
+
+No GPU memory impact. The change affects repository transfer and checkout
+before tests start.
+
+### Remaining Risk
+
+The intermittent failure rate has not been measured across repeated full
+Buildkite matrices. Focused Modal tests and live direct/PR transfer smokes pass.
+
+# Checklist
+- [x] I ran pre-commit run --all-files and fixed all issues
+- [x] I added or updated tests for my changes
+- [x] I updated documentation if needed
+- [x] I considered GPU memory impact of my changes
