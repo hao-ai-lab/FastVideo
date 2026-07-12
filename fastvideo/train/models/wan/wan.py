@@ -399,8 +399,7 @@ class WanModel(ModelBase):
                 current_timestep=batch.timesteps,
                 attn_metadata=attn_metadata,
         ):
-            input_kwargs = (
-                self._build_distill_input_kwargs(noisy_latents, timestep, text_dict))
+            input_kwargs = (self._build_distill_input_kwargs(noisy_latents, timestep, text_dict))
             input_kwargs["r_timestep"] = r_timestep
             transformer = self._get_transformer(timestep)
             pred_velocity = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)

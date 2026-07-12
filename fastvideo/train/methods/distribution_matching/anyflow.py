@@ -45,21 +45,18 @@ class AnyFlowMethod(DMD2Method):
         super().__init__(cfg=cfg, role_models=role_models)
         mcfg = self.method_config
 
-        student_sample_steps = get_optional_int(
-            mcfg, "student_sample_steps", where="method.student_sample_steps")
+        student_sample_steps = get_optional_int(mcfg, "student_sample_steps", where="method.student_sample_steps")
         if student_sample_steps is None:
             student_sample_steps = 4
         if int(student_sample_steps) <= 0:
-            raise ValueError(
-                "method.student_sample_steps must be positive, "
-                f"got {student_sample_steps}")
+            raise ValueError("method.student_sample_steps must be positive, "
+                             f"got {student_sample_steps}")
         self._student_sample_steps = int(student_sample_steps)
 
         use_mean_velocity_raw = mcfg.get("use_mean_velocity", True)
         if not isinstance(use_mean_velocity_raw, bool):
-            raise ValueError(
-                "method.use_mean_velocity must be a bool, "
-                f"got {type(use_mean_velocity_raw).__name__}")
+            raise ValueError("method.use_mean_velocity must be a bool, "
+                             f"got {type(use_mean_velocity_raw).__name__}")
         self._use_mean_velocity = bool(use_mean_velocity_raw)
 
         # Optional pinned rollout schedule (descending, absolute t-units).
@@ -69,15 +66,13 @@ class AnyFlowMethod(DMD2Method):
             self._t_list_override: list[float] | None = None
         else:
             if not isinstance(raw_t_list, list) or not raw_t_list:
-                raise ValueError(
-                    "method.t_list_override must be a non-empty list of "
-                    f"floats when set, got {raw_t_list!r}")
+                raise ValueError("method.t_list_override must be a non-empty list of "
+                                 f"floats when set, got {raw_t_list!r}")
             t_list = [float(x) for x in raw_t_list]
             for i in range(len(t_list) - 1):
                 if t_list[i] < t_list[i + 1]:
-                    raise ValueError(
-                        "method.t_list_override must be descending, "
-                        f"got {t_list!r}")
+                    raise ValueError("method.t_list_override must be descending, "
+                                     f"got {t_list!r}")
             self._t_list_override = t_list
 
         # Scoring conditioning: AnyFlow scores against r=0 for the DMD branch.
@@ -85,15 +80,12 @@ class AnyFlowMethod(DMD2Method):
         try:
             self._dmd_score_r = float(score_r_raw)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "method.dmd_score_r_value must be numeric, "
-                f"got {score_r_raw!r}") from exc
+            raise ValueError("method.dmd_score_r_value must be numeric, "
+                             f"got {score_r_raw!r}") from exc
 
         # Optional teacher guidance scale for the DMD loss (carry over from
         # DMD2Method's behavior; default 1.0).
-        guidance = get_optional_float(
-            mcfg, "real_score_guidance_scale",
-            where="method.real_score_guidance_scale")
+        guidance = get_optional_float(mcfg, "real_score_guidance_scale", where="method.real_score_guidance_scale")
         self._real_score_guidance = float(guidance) if guidance is not None else 1.0
 
     # ------------------------------------------------------------------
@@ -110,8 +102,7 @@ class AnyFlowMethod(DMD2Method):
              with a final 0 boundary if the last entry isn't already 0.
         """
         if self._t_list_override is not None:
-            return torch.tensor(
-                self._t_list_override, device=device, dtype=torch.float32)
+            return torch.tensor(self._t_list_override, device=device, dtype=torch.float32)
 
         steps = self._get_denoising_step_list(device).to(dtype=torch.float32)
         if float(steps[-1].item()) != 0.0:
@@ -130,13 +121,13 @@ class AnyFlowMethod(DMD2Method):
         if num_steps <= 0:
             raise ValueError("num_steps must be positive")
         if dist.is_initialized() and dist.get_rank() != 0:
-            idx_tensor = torch.empty(
-                (1,), dtype=torch.long, device=device)
+            idx_tensor = torch.empty((1, ), dtype=torch.long, device=device)
         else:
-            idx_tensor = torch.randint(
-                0, num_steps, (1,),
-                device=device, dtype=torch.long,
-                generator=self.cuda_generator)
+            idx_tensor = torch.randint(0,
+                                       num_steps, (1, ),
+                                       device=device,
+                                       dtype=torch.long,
+                                       generator=self.cuda_generator)
         if dist.is_initialized():
             dist.broadcast(idx_tensor, src=0)
         return int(idx_tensor.item())
@@ -158,9 +149,8 @@ class AnyFlowMethod(DMD2Method):
         """
         latents = batch.latents
         if latents is None or latents.ndim != 5:
-            raise RuntimeError(
-                "AnyFlow on-policy rollout requires TrainingBatch.latents "
-                "of shape [B, T, C, H, W] for shape templating")
+            raise RuntimeError("AnyFlow on-policy rollout requires TrainingBatch.latents "
+                               "of shape [B, T, C, H, W] for shape templating")
         device = latents.device
         dtype = latents.dtype
 
@@ -168,25 +158,19 @@ class AnyFlowMethod(DMD2Method):
         num_entries = int(schedule.numel())
         num_steps = num_entries - 1
         if num_steps <= 0:
-            raise RuntimeError(
-                "rollout schedule must have at least two entries "
-                f"(got {num_entries})")
+            raise RuntimeError("rollout schedule must have at least two entries "
+                               f"(got {num_entries})")
         if num_steps > self._student_sample_steps:
             # Trim to the configured cap, keeping the last (=0) boundary.
-            schedule = torch.cat(
-                [schedule[: self._student_sample_steps], schedule[-1:]],
-                dim=0)
+            schedule = torch.cat([schedule[:self._student_sample_steps], schedule[-1:]], dim=0)
             num_steps = self._student_sample_steps
 
-        grad_step = self._broadcast_grad_step_index(
-            num_steps, device=device) if with_grad else -1
+        grad_step = self._broadcast_grad_step_index(num_steps, device=device) if with_grad else -1
 
         attn_kind: Literal["dense", "vsa"] = "vsa"
         n_train = float(self.student.num_train_timesteps)
 
-        x = torch.randn(
-            latents.shape, device=device, dtype=dtype,
-            generator=self.cuda_generator)
+        x = torch.randn(latents.shape, device=device, dtype=dtype, generator=self.cuda_generator)
         last_pred_x0: torch.Tensor | None = None
         batch_size = int(latents.shape[0])
 
@@ -198,7 +182,10 @@ class AnyFlowMethod(DMD2Method):
             enable_grad = bool(with_grad) and (i == grad_step)
             with torch.set_grad_enabled(enable_grad):
                 v = self.student.predict_velocity_with_r(
-                    x, t_cur, r, batch,
+                    x,
+                    t_cur,
+                    r,
+                    batch,
                     conditional=True,
                     cfg_uncond=self._cfg_uncond,
                     attn_kind=attn_kind,
@@ -218,6 +205,5 @@ class AnyFlowMethod(DMD2Method):
             last_pred_x0 = x
 
         if hasattr(batch, "dmd_latent_vis_dict"):
-            batch.dmd_latent_vis_dict["generator_timestep"] = (
-                schedule[-1].detach().clone())
+            batch.dmd_latent_vis_dict["generator_timestep"] = (schedule[-1].detach().clone())
         return last_pred_x0

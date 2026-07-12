@@ -24,7 +24,8 @@ commit ``549236a``.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any
+from collections.abc import Sequence
 
 import torch
 
@@ -65,12 +66,10 @@ def _sample_pair_timesteps(
     if batch_size <= 0:
         raise ValueError(f"batch_size must be positive, got {batch_size}")
     if diffusion_ratio < 0.0 or consistency_ratio < 0.0:
-        raise ValueError(
-            "diffusion_ratio and consistency_ratio must be non-negative")
+        raise ValueError("diffusion_ratio and consistency_ratio must be non-negative")
     if diffusion_ratio + consistency_ratio > 1.0:
-        raise ValueError(
-            "diffusion_ratio + consistency_ratio must be <= 1, "
-            f"got {diffusion_ratio} + {consistency_ratio}")
+        raise ValueError("diffusion_ratio + consistency_ratio must be <= 1, "
+                         f"got {diffusion_ratio} + {consistency_ratio}")
 
     u1 = torch.rand(batch_size, device=device, generator=generator)
     u2 = torch.rand(batch_size, device=device, generator=generator)
@@ -123,23 +122,18 @@ def _central_difference_dF_dt(
     if delta <= 0.0:
         raise ValueError(f"delta must be positive, got {delta}")
     if guidance_scale <= 0.0:
-        raise ValueError(
-            f"guidance_scale must be positive, got {guidance_scale}")
+        raise ValueError(f"guidance_scale must be positive, got {guidance_scale}")
 
     v_pred = noise - latents  # ground-truth flow velocity
     delta_x = delta / float(num_train_timesteps)
 
     t_plus = t + delta
     noisy_plus = noisy + v_pred * delta_x
-    f_plus = student.predict_velocity_with_r(
-        noisy_plus, t_plus, r, batch,
-        conditional=True, attn_kind=attn_kind)
+    f_plus = student.predict_velocity_with_r(noisy_plus, t_plus, r, batch, conditional=True, attn_kind=attn_kind)
 
     t_minus = t - delta
     noisy_minus = noisy - v_pred * delta_x
-    f_minus = student.predict_velocity_with_r(
-        noisy_minus, t_minus, r, batch,
-        conditional=True, attn_kind=attn_kind)
+    f_minus = student.predict_velocity_with_r(noisy_minus, t_minus, r, batch, conditional=True, attn_kind=attn_kind)
 
     return (f_plus - f_minus) / (2.0 * delta * guidance_scale)
 
@@ -162,23 +156,17 @@ class AnyFlowPretrainMethod(TrainingMethod):
         if "student" not in role_models:
             raise ValueError("AnyFlowPretrainMethod requires role 'student'")
         if not self.student._trainable:
-            raise ValueError(
-                "AnyFlowPretrainMethod requires student to be trainable")
+            raise ValueError("AnyFlowPretrainMethod requires student to be trainable")
 
         mcfg = self.method_config
         self._diffusion_ratio = float(
-            get_optional_float(
-                mcfg, "diffusion_ratio", where="method.diffusion_ratio")
-            or 0.5)
+            get_optional_float(mcfg, "diffusion_ratio", where="method.diffusion_ratio") or 0.5)
         self._consistency_ratio = float(
-            get_optional_float(
-                mcfg, "consistency_ratio", where="method.consistency_ratio")
-            or 0.25)
+            get_optional_float(mcfg, "consistency_ratio", where="method.consistency_ratio") or 0.25)
         if self._diffusion_ratio + self._consistency_ratio > 1.0:
-            raise ValueError(
-                "method.diffusion_ratio + method.consistency_ratio must "
-                f"be <= 1, got {self._diffusion_ratio} + "
-                f"{self._consistency_ratio}")
+            raise ValueError("method.diffusion_ratio + method.consistency_ratio must "
+                             f"be <= 1, got {self._diffusion_ratio} + "
+                             f"{self._consistency_ratio}")
 
         # δ: finite-difference step in absolute train-timestep units.
         epsilon = get_optional_int(mcfg, "epsilon", where="method.epsilon")
@@ -187,34 +175,27 @@ class AnyFlowPretrainMethod(TrainingMethod):
         # Loss weighting scheme (uniform / gaussian / beta08).
         raw_weight_type = mcfg.get("weight_type", "beta08")
         if not isinstance(raw_weight_type, str):
-            raise ValueError(
-                "method.weight_type must be a string, got "
-                f"{type(raw_weight_type).__name__}")
+            raise ValueError("method.weight_type must be a string, got "
+                             f"{type(raw_weight_type).__name__}")
         weight_type = raw_weight_type.strip().lower()
         if weight_type not in {"uniform", "gaussian", "beta08"}:
-            raise ValueError(
-                "method.weight_type must be one of "
-                "{uniform, gaussian, beta08}, "
-                f"got {raw_weight_type!r}")
+            raise ValueError("method.weight_type must be one of "
+                             "{uniform, gaussian, beta08}, "
+                             f"got {raw_weight_type!r}")
         self._weight_type = weight_type
 
         # Guidance fused into the training target (default 1.0 = unused).
-        fg = get_optional_float(
-            mcfg, "fuse_guidance_scale", where="method.fuse_guidance_scale")
+        fg = get_optional_float(mcfg, "fuse_guidance_scale", where="method.fuse_guidance_scale")
         self._fuse_guidance_scale = float(fg) if fg is not None else 1.0
         if self._fuse_guidance_scale <= 0.0:
-            raise ValueError(
-                "method.fuse_guidance_scale must be positive, "
-                f"got {self._fuse_guidance_scale}")
+            raise ValueError("method.fuse_guidance_scale must be positive, "
+                             f"got {self._fuse_guidance_scale}")
 
         # Flow-map scheduler — uses pipeline_config.flow_shift if present
         # and falls back to method.shift (and finally 1.0).
-        shift = float(
-            getattr(self.training_config.pipeline_config, "flow_shift", 0.0)
-            or 0.0)
+        shift = float(getattr(self.training_config.pipeline_config, "flow_shift", 0.0) or 0.0)
         if shift <= 0.0:
-            shift_override = get_optional_float(
-                mcfg, "shift", where="method.shift")
+            shift_override = get_optional_float(mcfg, "shift", where="method.shift")
             shift = float(shift_override) if shift_override is not None else 1.0
         self._shift = shift
 
@@ -266,10 +247,9 @@ class AnyFlowPretrainMethod(TrainingMethod):
         )
         latents = training_batch.latents  # [B, T, C, H, W] (post-permute in prepare_batch).
         if latents is None or latents.ndim != 5:
-            raise RuntimeError(
-                "AnyFlow pretrain expects TrainingBatch.latents of shape "
-                "[B, T, C, H, W] after prepare_batch; got "
-                f"{None if latents is None else tuple(latents.shape)}")
+            raise RuntimeError("AnyFlow pretrain expects TrainingBatch.latents of shape "
+                               "[B, T, C, H, W] after prepare_batch; got "
+                               f"{None if latents is None else tuple(latents.shape)}")
         device = latents.device
         dtype = latents.dtype
         batch_size = int(latents.shape[0])
@@ -307,7 +287,10 @@ class AnyFlowPretrainMethod(TrainingMethod):
 
         # Student velocity prediction at (t, r).
         noise_pred = self.student.predict_velocity_with_r(
-            noisy, t, r, training_batch,
+            noisy,
+            t,
+            r,
+            training_batch,
             conditional=True,
             attn_kind="dense",
         )
@@ -317,7 +300,10 @@ class AnyFlowPretrainMethod(TrainingMethod):
         if self._fuse_guidance_scale != 1.0:
             with torch.no_grad():
                 noise_pred_uncond = self.student.predict_velocity_with_r(
-                    noisy, t, r, training_batch,
+                    noisy,
+                    t,
+                    r,
+                    training_batch,
                     conditional=False,
                     attn_kind="dense",
                 )
@@ -348,8 +334,7 @@ class AnyFlowPretrainMethod(TrainingMethod):
         # so the non-diffusion branches stay on the same magnitude as the
         # diffusion branch (matches AnyFlow's stop-grad rescaling).
         per_sample = torch.mean(
-            ((noise_pred.float() - target.float()) ** 2).reshape(
-                batch_size, -1),
+            ((noise_pred.float() - target.float())**2).reshape(batch_size, -1),
             dim=-1,
         )
         weight = sched.get_train_weight(t, weight_type=self._weight_type)
@@ -374,8 +359,7 @@ class AnyFlowPretrainMethod(TrainingMethod):
         metrics: dict[str, LogScalar] = {
             "diffusion_fraction": float(is_diffusion.float().mean()),
             "consistency_fraction": float(is_consistency.float().mean()),
-            "scale_weight_mean": float(scale.mean()) if isinstance(
-                scale, torch.Tensor) else float(scale),
+            "scale_weight_mean": float(scale.mean()) if isinstance(scale, torch.Tensor) else float(scale),
         }
         outputs = {
             "student_ctx": (
@@ -396,8 +380,7 @@ class AnyFlowPretrainMethod(TrainingMethod):
         so attn metadata stays attached during gradient computation."""
         student_ctx = outputs.get("student_ctx")
         if student_ctx is None:
-            super().backward(
-                loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
+            super().backward(loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
             return
         self.student.backward(
             loss_map["total_loss"],
@@ -407,9 +390,7 @@ class AnyFlowPretrainMethod(TrainingMethod):
 
     def _init_optimizer_and_scheduler(self) -> None:
         tc = self.training_config
-        params = [
-            p for p in self.student.transformer.parameters() if p.requires_grad
-        ]
+        params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         (
             self._student_optimizer,
             self._student_lr_scheduler,
