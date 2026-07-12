@@ -133,6 +133,7 @@ surfaces:
       preprocess_text_funcs: "Internal text preprocessing hooks."
       postprocess_text_funcs: "Internal text postprocessing hooks."
       scheduler_step_in_fp32: "Runtime scheduler precision toggle; not part of the public typed inference API."
+      supports_dynamic_batching: "Per-pipeline-family capability flag for dynamic batching opt-in; not part of the public typed inference API."
 
   pipeline_config_extensions:
     preset_owned:
