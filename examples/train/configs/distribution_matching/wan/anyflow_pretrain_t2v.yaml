@@ -1,0 +1,83 @@
+# AnyFlow pretrain (flow-map central-difference) — Wan 2.1 T2V 1.3B.
+#
+# Stage 1 of the AnyFlow two-stage recipe. Trains the dual-timestep
+# u_θ(x_t, t, r) on the central-difference target so the same checkpoint
+# can be sampled at arbitrary NFE in the on-policy stage.
+#
+# Initialize from base Wan 2.1 T2V 1.3B. No teacher or critic at this
+# stage; AnyFlowPretrainMethod owns a single student + one optimizer.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.anyflow_pretrain.AnyFlowPretrainMethod
+  diffusion_ratio: 0.5
+  consistency_ratio: 0.25
+  epsilon: 5            # finite-difference step in absolute train-timestep units
+  weight_type: beta08   # per-timestep loss weight = t * sqrt(1 - t), renormalized
+  fuse_guidance_scale: 3.0
+  # shift is taken from pipeline.flow_shift below.
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: data/preprocessed
+    dataloader_num_workers: 4
+    train_batch_size: 4
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 21
+    num_height: 480
+    num_width: 832
+    num_frames: 81
+
+  optimizer:
+    learning_rate: 5.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 6000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wan2.1_anyflow_pretrain
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 3
+    resume_from_checkpoint: latest
+
+  tracker:
+    project_name: anyflow-wan
+    run_name: wan2.1_t2v_anyflow_pretrain
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+
+pipeline:
+  flow_shift: 5.0
+  dit_config:
+    # Enable AnyFlow dual-timestep conditioning. The student loads from
+    # base Wan 2.1 — its checkpoint has no delta_embedder weights, so they
+    # get initialized identically to time_embedder via deep-copy in
+    # WanTimeTextImageEmbedding.__init__.
+    r_embedder: true
+    r_embedder_fusion: gated
+    r_embedder_gate_value: 0.25
+    r_embedder_deltatime_type: r
