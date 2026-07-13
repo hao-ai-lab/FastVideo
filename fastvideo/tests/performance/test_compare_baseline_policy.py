@@ -755,7 +755,7 @@ def test_same_recipe_calibration_record_does_not_report_recipe_mismatch(monkeypa
     ) == []
 
 
-def test_prior_scheduled_main_calibration_record_can_report_recipe_mismatch(
+def test_main_recipe_mismatch_takes_precedence_over_static_regression(
     monkeypatch,
     tmp_path,
 ):
@@ -785,7 +785,14 @@ def test_prior_scheduled_main_calibration_record_can_report_recipe_mismatch(
         },
     )
     with open(results_dir / "perf_current.json", "w", encoding="utf-8") as f:
-        json.dump(_v2_raw_result(recipe_fingerprint="recipe-2"), f)
+        json.dump(
+            _v2_raw_result(
+                recipe_fingerprint="recipe-2",
+                avg_generation_time_s=20.0,
+                thresholds={"max_generation_time_s": 15.0},
+            ),
+            f,
+        )
 
     monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
     monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
@@ -803,6 +810,7 @@ def test_prior_scheduled_main_calibration_record_can_report_recipe_mismatch(
 
     assert normalized["comparison_status"] == compare_baseline.STATUS_RECIPE_MISMATCH
     assert "recipe-1" in normalized["comparison_status_reason"]
+    assert "fixed threshold" not in normalized["comparison_status_reason"]
 
 
 def test_prior_pr_calibration_record_does_not_report_recipe_mismatch(
@@ -1064,12 +1072,16 @@ def test_unattributed_performance_pytest_failure_reports_infra_error(monkeypatch
     assert "without an attributable static-threshold regression" in reason
 
 
-def test_main_partial_v2_identity_reports_infra_error(monkeypatch, tmp_path):
+def test_main_partial_v2_identity_takes_precedence_over_static_regression(monkeypatch, tmp_path):
     results_dir = tmp_path / "results"
     reports_dir = tmp_path / "reports"
     tracking_root = tmp_path / "tracking"
     results_dir.mkdir()
-    raw = _v2_raw_result(result_schema_version=2)
+    raw = _v2_raw_result(
+        result_schema_version=2,
+        avg_generation_time_s=20.0,
+        thresholds={"max_generation_time_s": 15.0},
+    )
     del raw["software_profile_id"]
     with open(results_dir / "perf_current.json", "w", encoding="utf-8") as f:
         json.dump(raw, f)
@@ -1091,6 +1103,7 @@ def test_main_partial_v2_identity_reports_infra_error(monkeypatch, tmp_path):
 
     assert normalized["comparison_status"] == compare_baseline.STATUS_INFRA_ERROR
     assert "software_profile_id" in normalized["comparison_status_reason"]
+    assert "fixed threshold" not in normalized["comparison_status_reason"]
     assert normalized["baseline_eligible"] is False
 
 

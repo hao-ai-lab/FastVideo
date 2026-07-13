@@ -445,6 +445,17 @@ def _evaluate_record_comparison(
     static_threshold_failures: list[str],
     unattributed_pytest_failure: bool,
 ) -> tuple[list[str], str, str]:
+    identity_filters = None
+    if _record_uses_v2_identity(record):
+        try:
+            identity_filters = _comparison_identity_filters(record)
+        except ValueError as exc:
+            failure = f"{record['model_id']} cannot compare v2 record: {exc}"
+            return [failure], STATUS_INFRA_ERROR, failure
+        if not baseline_records and recipe_mismatch_records:
+            failure = _recipe_mismatch_failure(record, recipe_mismatch_records)
+            return [failure], STATUS_RECIPE_MISMATCH, failure
+
     if static_threshold_failures:
         return static_threshold_failures, STATUS_REGRESSION, "; ".join(static_threshold_failures)
 
@@ -453,15 +464,7 @@ def _evaluate_record_comparison(
         return [failure], STATUS_INFRA_ERROR, failure
 
     if not baseline_records:
-        if _record_uses_v2_identity(record):
-            try:
-                identity_filters = _comparison_identity_filters(record)
-            except ValueError as exc:
-                failure = f"{record['model_id']} cannot compare v2 record: {exc}"
-                return [failure], STATUS_INFRA_ERROR, failure
-            if recipe_mismatch_records:
-                failure = _recipe_mismatch_failure(record, recipe_mismatch_records)
-                return [failure], STATUS_RECIPE_MISMATCH, failure
+        if identity_filters is not None:
             return [], STATUS_CALIBRATION_NEEDED, (
                 "No baseline found for exact comparable identity"
                 f"{_format_identity_filters(identity_filters)}"
