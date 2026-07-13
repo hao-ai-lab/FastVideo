@@ -15,8 +15,14 @@ class SDPABackend(AttentionBackend):
     accept_output_buffer: bool = True
 
     @staticmethod
-    def get_supported_head_sizes() -> list[int]:
-        return [32, 64, 96, 128, 160, 192, 224, 256]
+    def get_supported_head_sizes() -> list[int] | None:
+        # torch.nn.functional.scaled_dot_product_attention is head-size
+        # agnostic: the math backend handles any size and the fused kernels
+        # fall back internally when they cannot. The previous list
+        # ([32, 64, ..., 256]) was copied from FlashAttentionBackend in the
+        # v1 refactor (#270) and wrongly excluded sizes such as 80 (e.g.
+        # CLIP vision encoders). None means "no restriction".
+        return None
 
     @staticmethod
     def get_name() -> str:
