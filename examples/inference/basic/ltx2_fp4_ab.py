@@ -185,7 +185,9 @@ def main() -> None:
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("First validation entry is missing a usable caption")
 
-    num_runs = int(os.getenv("LTX2_NUM_RUNS", "4"))
+    # Default 2 warmup + 5 measured (mean), matching FastVideo's perf-benchmark
+    # convention (.buildkite/performance-benchmarks/tests/wan-t2v-1.3b.json).
+    num_runs = int(os.getenv("LTX2_NUM_RUNS", "7"))
     warmup_runs = int(os.getenv("LTX2_WARMUP_RUNS", "2"))
     avg_window = num_runs - warmup_runs
     measured_start_idx = max(warmup_runs, num_runs - avg_window)
