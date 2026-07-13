@@ -5,13 +5,10 @@ LTX-2 transformer implementation
 
 from dataclasses import dataclass, replace
 from enum import Enum
-import functools
 import math
 import os
 from pathlib import Path
 from typing import Any, Optional, Tuple, Callable
-
-import numpy as np
 
 import torch
 import torch.nn as nn
@@ -770,28 +767,29 @@ def _apply_ltx_split_rotary_emb(
     return output
 
 
-@functools.lru_cache(maxsize=5)
 def generate_ltx_freq_grid_np(
     positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
 ) -> torch.Tensor:
-    """Generate LTX-2 rotary frequencies with high-precision numpy."""
+    """Generate LTX-2 rotary frequencies with float64 precision.
+
+    Implemented in pure torch and free of Python memoization so it is suitable for callers that may be captured and reused by torch.compile.
+    """
     theta = positional_embedding_theta
     start = 1
     end = theta
     n_elem = 2 * positional_embedding_max_pos_count
-    pow_indices = np.power(
+    pow_indices = torch.pow(
         theta,
-        np.linspace(
-            np.log(start) / np.log(theta),
-            np.log(end) / np.log(theta),
+        torch.linspace(
+            math.log(start) / math.log(theta),
+            math.log(end) / math.log(theta),
             inner_dim // n_elem,
-            dtype=np.float64,
+            dtype=torch.float64,
         ),
     )
-    return torch.tensor(pow_indices * math.pi / 2, dtype=torch.float32)
+    return (pow_indices * math.pi / 2).to(dtype=torch.float32)
 
 
-@functools.lru_cache(maxsize=5)
 def generate_ltx_freq_grid_pytorch(
     positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
 ) -> torch.Tensor:
@@ -2065,20 +2063,26 @@ class BasicAVTransformerBlock(torch.nn.Module):
             """
             bsz = values.shape[0]
             keep = torch.ones((bsz, ), device=values.device, dtype=values.dtype)
-            if self.idx == self.stg_block_idx:
-                if torch.is_tensor(skip_flag):
-                    if skip_flag.ndim == 0:
-                        perturb = skip_flag.reshape(1).expand(bsz)
-                    else:
-                        if skip_flag.shape[0] != bsz:
-                            raise ValueError(
-                                "Per-sample STG mask batch size mismatch: "
-                                f"got {skip_flag.shape[0]}, expected {bsz}")
-                        perturb = skip_flag.reshape(bsz)
-                    keep = 1.0 - perturb.to(device=values.device,
-                                            dtype=values.dtype)
-                elif bool(skip_flag):
-                    keep.zero_()
+            # The ``idx == stg_block_idx`` gate lives in the eager
+            # ``_process_transformer_blocks`` caller, not here: reading the
+            # per-instance ``self.idx`` inside this compiled forward forces
+            # torch.compile to specialize a distinct graph per block (48x),
+            # blowing the Dynamo recompile limit and defeating regional
+            # compilation. The caller only passes a truthy ``skip_flag`` to the
+            # configured STG block, so applying it unconditionally here is
+            # equivalent while keeping the graph identical across all 48 blocks.
+            if torch.is_tensor(skip_flag):
+                if skip_flag.ndim == 0:
+                    perturb = skip_flag.reshape(1).expand(bsz)
+                else:
+                    if skip_flag.shape[0] != bsz:
+                        raise ValueError(
+                            "Per-sample STG mask batch size mismatch: "
+                            f"got {skip_flag.shape[0]}, expected {bsz}")
+                    perturb = skip_flag.reshape(bsz)
+                keep = 1.0 - perturb.to(device=values.device, dtype=values.dtype)
+            elif bool(skip_flag):
+                keep.zero_()
             return keep.view(bsz, *([1] * (values.ndim - 1)))
 
         if run_vx:
@@ -2656,8 +2660,10 @@ class LTXModel(torch.nn.Module):
         skip_audio_self_attn_block_set = set(skip_audio_self_attn_blocks or [])
 
         for idx, block in enumerate(self.transformer_blocks):
-            skip_v_sa = idx in skip_video_self_attn_block_set
-            skip_a_sa = idx in skip_audio_self_attn_block_set
+            # Preserve the original STG block condition in eager code so it does not introduce a block index guard in the compiled forward
+            is_stg_block = idx == block.stg_block_idx
+            skip_v_sa = is_stg_block and idx in skip_video_self_attn_block_set
+            skip_a_sa = is_stg_block and idx in skip_audio_self_attn_block_set
             video, audio = block(
                 video=video,
                 audio=audio,
@@ -2768,6 +2774,7 @@ class LTX2Transformer3DModel(BaseDiT):
     reverse_param_names_mapping = LTX2VideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = LTX2VideoConfig().lora_param_names_mapping
     _fsdp_shard_conditions = LTX2VideoConfig()._fsdp_shard_conditions
+    _compile_conditions = LTX2VideoConfig()._compile_conditions
 
     def __init__(self, config: LTX2VideoConfig, hf_config: dict[str, Any]):
         super().__init__(config=config, hf_config=hf_config)

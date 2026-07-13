@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 from collections.abc import Callable
 
 import torch
@@ -43,15 +42,17 @@ except ImportError:
     _flash_attn_2_func = None
     _flash_attn_2_varlen_func = None
 
+_IS_SM90_OR_NEWER = current_platform.has_device_capability(90)
+
 
 def _check_dropout(dropout_p: float) -> None:
     if dropout_p != 0.0:
         raise NotImplementedError(f"flash_attn.cute does not support dropout (got dropout_p={dropout_p})")
 
 
-@functools.cache
 def _sm90_or_newer() -> bool:
-    return current_platform.has_device_capability(90)
+    # compiled callers only read a boolean nstead of tracing through a memoized platform query.
+    return _IS_SM90_OR_NEWER
 
 
 def _use_fa2(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> bool:
