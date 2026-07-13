@@ -3,7 +3,9 @@
 
 import argparse
 import json
+import math
 import os
+import statistics
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -15,7 +17,8 @@ try:
         _comparison_identity_filters,
         _record_uses_v2_identity,
     )
-    from fastvideo.performance.hf_store import sanitize, upload_record
+    from fastvideo.performance.hf_store import safe_float, sanitize, upload_record
+    from fastvideo.performance.metric_policy import DEFAULT_METRIC_POLICIES
 except ImportError:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
     if repo_root not in sys.path:
@@ -26,9 +29,11 @@ except ImportError:
         _comparison_identity_filters,
         _record_uses_v2_identity,
     )
-    from fastvideo.performance.hf_store import sanitize, upload_record
+    from fastvideo.performance.hf_store import safe_float, sanitize, upload_record
+    from fastvideo.performance.metric_policy import DEFAULT_METRIC_POLICIES
 
 TRACKING_ROOT = os.environ.get("PERFORMANCE_TRACKING_ROOT", "/tmp/perf-tracking")
+DEFAULT_MAX_INTRA_BATCH_REGRESSION = 0.05
 _SOURCE_PROVENANCE_FIELDS = ("model_id", "commit_sha", "timestamp", "build_id", "job_id")
 
 
@@ -183,6 +188,57 @@ def _validate_same_identity(records: list[dict[str, Any]]) -> dict[str, str]:
     return first
 
 
+def _nonnegative_finite_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a number, got {value!r}") from exc
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("value must be a finite non-negative number")
+    return parsed
+
+
+def _validate_batch_consistency(
+    records: list[dict[str, Any]],
+    max_regression: float,
+) -> None:
+    print(f"Source batch consistency (maximum regression {max_regression * 100:.1f}%):")
+    failures = []
+    for policy in DEFAULT_METRIC_POLICIES:
+        values = [
+            (index, value)
+            for index, record in enumerate(records, start=1)
+            if (value := safe_float(record.get(policy.key))) is not None
+        ]
+        if len(values) < 2:
+            continue
+
+        batch_median = statistics.median(value for _, value in values)
+        if batch_median <= 0:
+            raise ValueError(f"cannot validate {policy.key} consistency against non-positive batch median")
+
+        regressions = []
+        for source_index, value in values:
+            if policy.lower_is_better:
+                regression = (value - batch_median) / batch_median
+            else:
+                regression = (batch_median - value) / batch_median
+            regressions.append((source_index, regression))
+            print(
+                f"  {policy.key} source={source_index} value={value:.6f} "
+                f"median={batch_median:.6f} regression={regression * 100:.1f}%")
+
+        worst_source, worst_regression = max(regressions, key=lambda item: item[1])
+        print(f"  {policy.key} worst regression: {worst_regression * 100:.1f}% (source={worst_source})")
+        if worst_regression > max_regression:
+            failures.append(
+                f"source artifact {worst_source} {policy.key} regresses by "
+                f"{worst_regression * 100:.1f}% against the batch median")
+
+    if failures:
+        raise ValueError("source batch exceeds maximum intra-batch regression: " + "; ".join(failures))
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Create reviewed baseline seed records from v2 CALIBRATION_NEEDED artifacts.",
@@ -205,6 +261,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Local performance tracking root to write seed records under.",
     )
     parser.add_argument(
+        "--max-intra-batch-regression",
+        type=_nonnegative_finite_float,
+        default=DEFAULT_MAX_INTRA_BATCH_REGRESSION,
+        help="Maximum regression of any source against the batch median (default: 0.05).",
+    )
+    parser.add_argument(
         "--operator",
         default=os.environ.get("USER"),
         help="Operator name recorded in seed provenance.",
@@ -224,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         _validate_calibration_source(source_record)
     _validate_unique_sources(args.source_results, source_records)
     identity = _validate_same_identity(source_records)
+    _validate_batch_consistency(source_records, args.max_intra_batch_regression)
     print("Seeding exact comparable identity:")
     for key, value in identity.items():
         print(f"  {key}: {value}")

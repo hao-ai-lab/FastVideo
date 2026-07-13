@@ -354,6 +354,7 @@ python fastvideo/tests/performance/seed_baseline.py \
   --source-result <normalized_perf_1.json> \
   --source-result <normalized_perf_2.json> \
   --intent-rationale "<intent_rationale>" \
+  --max-intra-batch-regression 0.05 \
   --tracking-root "${PERFORMANCE_TRACKING_ROOT}"
 ```
 

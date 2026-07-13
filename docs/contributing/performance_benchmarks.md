@@ -544,8 +544,11 @@ When the rolling-baseline phase runs, it emits:
 
 ## Troubleshooting
 
-**"No baseline for ... Initializing"** — first run for this comparison cohort.
-Run will pass and (if persisting) seed the first record.
+**`CALIBRATION_NEEDED` / "No baseline found for exact comparable identity"** —
+the v2 run passes, but its normalized record remains
+`baseline_eligible=false`. Review a successful scheduled-main full-suite
+normalized artifact, then seed the first baseline with
+`fastvideo/tests/performance/seed_baseline.py` as described above.
 
 **Persistent failure right after a torch / kernel / image upgrade** —
 genuine regression *or* baseline drift. Compare the failing normalized record
