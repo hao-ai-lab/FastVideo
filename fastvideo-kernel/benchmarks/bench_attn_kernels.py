@@ -1,35 +1,45 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Benchmark NVFP4 vs FP8 attention kernels: accuracy, TFLOPS, latency.
+"""Benchmark the four attention kernels: speed, accuracy, TFLOPS.
 
-Lanes (each skips cleanly, with a printed reason, where it cannot run):
+Lanes (each probes availability + arch gate and skips cleanly, with a
+printed reason, where it cannot run):
 
-  nvfp4_local       fastvideo-kernel/attn_qat_infer (local SageAttention3
-                    port, ``sageattn_blackwell``). Built for sm_120a only.
-  nvfp4_flashinfer  flashinfer.nvfp4_attention_sm120_quantize_qkv +
-                    nvfp4_attention_sm120_fwd. Compute capability 12.0 only,
-                    head_dim 64/128.
+  bf16_flash_attn / bf16_sdpa
+                    High-precision baseline: flash-attn (flash_attn_func)
+                    when importable, else torch SDPA — the lane name says
+                    which one is running. (Prefix follows --dtype.)
   fp8_sageattn      ``sageattention.sageattn`` — the attention op activated by
                     examples/inference/optimizations/fp8_wan2_1_1_3b.py
                     (PR #1496, FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN →
                     fastvideo/attention/backends/sage_attn.py). sageattn
                     auto-dispatches per-arch; on sm89+ it selects the
-                    qk-int8 / pv-fp8 CUDA kernels. Note: that script's *FP8
-                    weight* quantization (fastvideo.layers.quantization FP8 →
-                    torch._scaled_mm) applies to DiT linears, not attention,
-                    so it is out of scope here.
-  sdpa_<dtype>      torch SDPA in bf16/fp16 — latency/TFLOPS baseline.
+                    qk-int8 / pv-fp8 CUDA kernels.
+  nvfp4_local       fastvideo-kernel/attn_qat_infer (local SageAttention3
+                    port, ``sageattn_blackwell``). Built for sm_120a only.
+  nvfp4_flashinfer  flashinfer.nvfp4_attention_sm120_quantize_qkv +
+                    nvfp4_attention_sm120_fwd. Compute capability 12.0/12.1,
+                    head_dim 64/128.
 
 Accuracy for every lane is measured against an fp32 torch-SDPA ground truth
-computed on the same fixed-seed inputs (fp32 SDPA is accuracy-only and gets
-no speed row). Reported: cosine similarity, max abs err, mean abs err.
+(chunked over query length so the score matrix never materializes whole)
+computed on the same fixed-seed inputs. Reported: cosine similarity,
+max abs err, mean rel err.
+
+Inputs are BIASED by default: q and k get a nonzero mean shift (--bias, v
+stays zero-mean so a constant output offset doesn't inflate cosine
+similarity). Zero-mean randn is blind to mean-dependent quantization errors —
+the flashinfer per-block-mean qk-correction head-broadcast bug produces
+cos ~0.99 on zero-mean inputs but cos <0.5 at bias 1.0. Use
+--include-zeromean to also run the zero-mean rows for contrast.
 
 All lanes run at the [B, H, L, D] interface.
 
 Usage:
-  python bench_nvfp4_fp8_attention.py                       # default shapes
-  python bench_nvfp4_fp8_attention.py --causal --json out.json
-  python bench_nvfp4_fp8_attention.py --shapes-jsonl /tmp/attn_shapes.jsonl.pid1234
+  python bench_attn_kernels.py                          # default shapes
+  python bench_attn_kernels.py --shapes 1x12x32760x128,1x24x4096x64
+  python bench_attn_kernels.py --causal --json out.json
+  python bench_attn_kernels.py --shapes-jsonl /tmp/attn_shapes.jsonl.pid1234
       # shapes collected via FASTVIDEO_ATTN_SHAPE_LOG (fastvideo/attention/
       # shape_logger.py); recorded causal/dtype/sm_scale are honored.
 """
@@ -40,7 +50,6 @@ import argparse
 import dataclasses
 import inspect
 import json
-import math
 import statistics
 import sys
 from collections.abc import Callable
@@ -52,7 +61,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------
 # Pure helpers (CPU-unit-tested in fastvideo/tests/attention/
-# test_nvfp4_fp8_attention_bench.py) — keep them torch-free where possible.
+# test_attn_kernels_bench.py) — keep them torch-free where possible.
 # ---------------------------------------------------------------------------
 
 
@@ -89,6 +98,19 @@ def attn_tflops(shape: Shape, ms: float) -> float:
     if shape.causal:
         flops *= 0.5
     return flops / (ms * 1e9)
+
+
+def parse_shapes_cli(spec: str, causal: bool, dtype: str) -> list[Shape]:
+    """Parse --shapes 'BxHxLxD,BxHxLxD,...' (self-attention shapes)."""
+    shapes = []
+    for part in spec.split(","):
+        try:
+            b, h, length, d = (int(x) for x in part.lower().split("x"))
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(f"bad shape {part!r}, expected BxHxLxD") from e
+        shapes.append(Shape(batch=b, num_q_heads=h, num_kv_heads=h, seq_len_q=length,
+                            seq_len_kv=length, head_dim=d, causal=causal, dtype=dtype))
+    return shapes
 
 
 def parse_shapes_jsonl(paths: list[str], default_dtype: str) -> list[Shape]:
@@ -158,6 +180,17 @@ def skip_reason(spec: LaneSpec, shape: Shape, cap: tuple[int, int] | None,
     return None
 
 
+def shape_workspace_bytes(shape: Shape, dtype_bytes: int, ref_chunk: int) -> int:
+    """Rough peak device memory to bench one shape: q/k/v in the bench dtype,
+    their fp32 copies + fp32 reference output for the ground truth, and the
+    fp32 score-matrix chunk (x2 for the math-backend softmax temporary)."""
+    numel_q = shape.batch * shape.num_q_heads * shape.seq_len_q * shape.head_dim
+    numel_kv = shape.batch * shape.num_kv_heads * shape.seq_len_kv * shape.head_dim
+    lq = shape.seq_len_q if shape.causal else min(ref_chunk, shape.seq_len_q)
+    scores = shape.batch * shape.num_q_heads * lq * shape.seq_len_kv * 4
+    return (numel_q + 2 * numel_kv) * (dtype_bytes + 4) + numel_q * 4 + 2 * scores
+
+
 def format_table(headers: list[str], rows: list[list[str]]) -> str:
     """Aligned plain-text table (left-justified columns)."""
     cols = list(zip(headers, *rows)) if rows else [(h,) for h in headers]
@@ -176,6 +209,8 @@ def format_table(headers: list[str], rows: list[list[str]]) -> str:
 # ---------------------------------------------------------------------------
 
 AttnFn = Callable[[torch.Tensor, torch.Tensor, torch.Tensor, bool, float], torch.Tensor]
+
+_REF_CHUNK = 2048
 
 
 @dataclasses.dataclass
@@ -197,16 +232,51 @@ def _ref_sdpa_fp32(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bo
 
     Where flash/mem-efficient SDPA reject fp32 (e.g. SM121), torch falls back
     to the math backend, which materializes the full [B, H, Lq, Lkv] score
-    matrix -- ~274 GB for the 75600-token default shape (host OOM-kill on
+    matrix -- ~48 GiB for the 32760-token default shape (host OOM-kill on
     unified-memory devices like GB10). Non-causal attention is exact under
     query chunking; causal shapes stay unchunked (per-chunk is_causal would
     mis-align the mask), so they keep the old memory ceiling.
     """
-    chunk = 2048
-    if causal or q.shape[2] <= chunk:
+    if causal or q.shape[2] <= _REF_CHUNK:
         return _run_sdpa(q, k, v, causal, scale)
-    return torch.cat([_run_sdpa(q[:, :, i:i + chunk], k, v, False, scale)
-                      for i in range(0, q.shape[2], chunk)], dim=2)
+    return torch.cat([_run_sdpa(q[:, :, i:i + _REF_CHUNK], k, v, False, scale)
+                      for i in range(0, q.shape[2], _REF_CHUNK)], dim=2)
+
+
+def _load_baseline(dtype_tag: str) -> Lane:
+    """High-precision baseline: flash-attn when importable, else torch SDPA.
+
+    The lane name records which implementation is actually timed.
+    """
+    try:
+        from flash_attn import flash_attn_func  # noqa: PLC0415
+    except ImportError:
+        return Lane(LaneSpec(f"{dtype_tag}_sdpa"), _run_sdpa)
+
+    def fn(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool, scale: float) -> torch.Tensor:
+        # flash_attn_func takes [B, L, H, D]; only the head dim must be
+        # contiguous, so plain transposes are accepted without a copy.
+        out = flash_attn_func(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
+                              softmax_scale=scale, causal=causal)
+        return out.transpose(1, 2)
+
+    # flash-attn's fp16/bf16 kernels need sm80+.
+    return Lane(LaneSpec(f"{dtype_tag}_flash_attn", min_cap=(8, 0)), fn)
+
+
+def _load_fp8_sageattn() -> Lane:
+    # sageattn's fp8 (qk-int8 / pv-fp8) kernels need sm89+; the package
+    # dispatches per-arch internally.
+    spec = LaneSpec("fp8_sageattn", min_cap=(8, 9), same_heads=True)
+    try:
+        from sageattention import sageattn  # noqa: PLC0415
+    except ImportError as e:
+        return Lane(spec, None, f"sageattention not installed ({e})")
+
+    def fn(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool, scale: float) -> torch.Tensor:
+        return sageattn(q, k, v, tensor_layout="HND", is_causal=causal, sm_scale=scale)
+
+    return Lane(spec, fn)
 
 
 def _load_nvfp4_local(single_level_p_quant: bool) -> Lane:
@@ -261,27 +331,12 @@ def _load_nvfp4_flashinfer() -> Lane:
     return Lane(spec, fn)
 
 
-def _load_fp8_sageattn() -> Lane:
-    # sageattn's fp8 (qk-int8 / pv-fp8) kernels need sm89+; the package
-    # dispatches per-arch internally.
-    spec = LaneSpec("fp8_sageattn", min_cap=(8, 9), same_heads=True)
-    try:
-        from sageattention import sageattn  # noqa: PLC0415
-    except ImportError as e:
-        return Lane(spec, None, f"sageattention not installed ({e})")
-
-    def fn(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool, scale: float) -> torch.Tensor:
-        return sageattn(q, k, v, tensor_layout="HND", is_causal=causal, sm_scale=scale)
-
-    return Lane(spec, fn)
-
-
 def build_lanes(args: argparse.Namespace) -> list[Lane]:
     return [
+        _load_baseline(args.dtype),
+        _load_fp8_sageattn(),
         _load_nvfp4_local(single_level_p_quant=args.p_quant == "single"),
         _load_nvfp4_flashinfer(),
-        _load_fp8_sageattn(),
-        Lane(LaneSpec(f"sdpa_{args.dtype}"), _run_sdpa),
     ]
 
 
@@ -293,27 +348,37 @@ _DTYPES = {"torch.bfloat16": torch.bfloat16, "torch.float16": torch.float16,
            "bf16": torch.bfloat16, "fp16": torch.float16}
 
 
-def make_qkv(shape: Shape, seed: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def make_qkv(shape: Shape, seed: int, bias: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fixed-seed q/k/v; q and k get a +bias mean shift. v stays zero-mean so
+    a constant output offset doesn't inflate the cosine-similarity column."""
     gen = torch.Generator(device="cuda").manual_seed(seed)  # fixed seed per shape
     dtype = _DTYPES.get(shape.dtype, torch.bfloat16)
 
-    def rand(heads: int, seq: int) -> torch.Tensor:
-        return torch.randn(shape.batch, heads, seq, shape.head_dim,
-                           generator=gen, device="cuda", dtype=dtype)
+    def rand(heads: int, seq: int, shift: float) -> torch.Tensor:
+        t = torch.randn(shape.batch, heads, seq, shape.head_dim,
+                        generator=gen, device="cuda", dtype=dtype)
+        return t + shift if shift else t
 
-    return rand(shape.num_q_heads, shape.seq_len_q), rand(shape.num_kv_heads, shape.seq_len_kv), \
-        rand(shape.num_kv_heads, shape.seq_len_kv)
+    return (rand(shape.num_q_heads, shape.seq_len_q, bias),
+            rand(shape.num_kv_heads, shape.seq_len_kv, bias),
+            rand(shape.num_kv_heads, shape.seq_len_kv, 0.0))
 
 
 def accuracy_stats(out: torch.Tensor, ref: torch.Tensor) -> dict[str, float]:
     out = out.float()
     diff = (out - ref).abs()
     cos = torch.nn.functional.cosine_similarity(out.flatten(), ref.flatten(), dim=0)
-    return {"cos_sim": cos.item(), "max_abs_err": diff.max().item(), "mean_abs_err": diff.mean().item()}
+    return {
+        "cos_sim": cos.item(),
+        "max_abs_err": diff.max().item(),
+        # mean relative error: mean |out-ref| normalized by the reference's
+        # mean magnitude (elementwise |out-ref|/|ref| blows up near ref~0).
+        "mean_rel_err": (diff.mean() / ref.abs().mean().clamp_min(1e-12)).item(),
+    }
 
 
-def time_fn(fn: Callable[[], torch.Tensor], warmup: int, iters: int) -> float:
-    """Median CUDA-event latency in ms."""
+def time_fn(fn: Callable[[], torch.Tensor], warmup: int, iters: int) -> dict[str, float]:
+    """CUDA-event latency stats (ms) over `iters` timed calls."""
     for _ in range(warmup):
         fn()
     torch.cuda.synchronize()
@@ -326,21 +391,37 @@ def time_fn(fn: Callable[[], torch.Tensor], warmup: int, iters: int) -> float:
         end.record()
         torch.cuda.synchronize()
         times.append(start.elapsed_time(end))
-    return statistics.median(times)
+    return {"mean_ms": statistics.fmean(times), "std_ms": statistics.pstdev(times),
+            "median_ms": statistics.median(times)}
 
 
-def bench_shape(shape: Shape, lanes: list[Lane], cap: tuple[int, int] | None,
+def bench_shape(shape: Shape, bias: float, lanes: list[Lane], cap: tuple[int, int] | None,
                 args: argparse.Namespace) -> list[dict]:
+    dist = f"biased(+{bias:g})" if bias else "zeromean"
     results = []
     runnable = [(lane, skip_reason(lane.spec, shape, cap, lane.unavailable)) for lane in lanes]
-    q = k = v = ref = None
+
+    oom_reason = None
     if any(reason is None for _, reason in runnable):
-        q, k, v = make_qkv(shape, args.seed)
+        dtype_bytes = 2  # bf16/fp16
+        need = shape_workspace_bytes(shape, dtype_bytes, _REF_CHUNK)
+        free = torch.cuda.mem_get_info()[0]
+        if need > 0.9 * free:
+            oom_reason = (f"would OOM: needs ~{need / 2**30:.1f} GiB workspace, "
+                          f"{free / 2**30:.1f} GiB free")
+            print(f"  SKIP shape: {oom_reason}")
+
+    q = k = v = ref = None
+    if oom_reason is None and any(reason is None for _, reason in runnable):
+        q, k, v = make_qkv(shape, args.seed, bias)
         scale = shape.sm_scale or shape.head_dim**-0.5
         # fp32 SDPA ground truth (accuracy baseline only; never timed).
         ref = _ref_sdpa_fp32(q.float(), k.float(), v.float(), shape.causal, scale)
+
     for lane, reason in runnable:
-        rec: dict = {"shape": shape.label(), "lane": lane.spec.name, **dataclasses.asdict(shape)}
+        rec: dict = {"shape": shape.label(), "dist": dist, "lane": lane.spec.name,
+                     **dataclasses.asdict(shape)}
+        reason = reason or oom_reason
         if reason is not None:
             rec.update(status="skip", reason=reason)
             results.append(rec)
@@ -350,8 +431,9 @@ def bench_shape(shape: Shape, lanes: list[Lane], cap: tuple[int, int] | None,
             out = lane.fn(q, k, v, shape.causal, scale)
             rec.update(accuracy_stats(out, ref))
             del out
-            ms = time_fn(lambda: lane.fn(q, k, v, shape.causal, scale), args.warmup, args.iters)
-            rec.update(status="ok", median_ms=ms, tflops=attn_tflops(shape, ms))
+            rec.update(status="ok", **time_fn(lambda: lane.fn(q, k, v, shape.causal, scale),
+                                              args.warmup, args.iters))
+            rec["tflops"] = attn_tflops(shape, rec["mean_ms"])
         except Exception as e:  # lane failed at runtime: report, keep going
             rec.update(status="fail", reason=f"{type(e).__name__}: {e}")
         results.append(rec)
@@ -365,13 +447,15 @@ def bench_shape(shape: Shape, lanes: list[Lane], cap: tuple[int, int] | None,
 # CLI
 # ---------------------------------------------------------------------------
 
-# Wan2.1-1.3B DiT self-attention is 12 heads x head_dim 128; 81-frame video
-# gives latent grids 21x30x52 (480p) = 32760 tokens, 21x45x80 (720p) = 75600.
+# The real logged workload (FASTVIDEO_ATTN_SHAPE_LOG on 5090/GB10/GB200 runs of
+# Wan2.1-1.3B 480p, 81 frames: latent grid 21x30x52 = 32760 tokens, 12 heads x
+# head_dim 128, bf16, non-causal) plus a seq-len sweep at the same head
+# geometry. 32760 appears once (deduped).
 DEFAULT_SHAPE_DIMS = [
-    (1, 8, 512, 64),  # smoke
-    (1, 12, 1024, 128),  # smoke
-    (1, 12, 32760, 128),  # Wan2.1-1.3B 480p
-    (1, 12, 75600, 128),  # Wan2.1-1.3B 720p
+    (1, 12, 1024, 128),
+    (1, 12, 4096, 128),
+    (1, 12, 16384, 128),
+    (1, 12, 32760, 128),  # Wan2.1-1.3B 480p self-attention (the logged shape)
 ]
 
 
@@ -385,18 +469,25 @@ def default_shapes(causal: bool, dtype: str) -> list[Shape]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0],
                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    p.add_argument("--shapes", metavar="BxHxLxD,...",
+                   help="comma-separated self-attention shapes; replaces the default suite")
     p.add_argument("--shapes-jsonl", nargs="+", metavar="PATH",
                    help="attention shape log(s) written via FASTVIDEO_ATTN_SHAPE_LOG "
                    "(fastvideo/attention/shape_logger.py); replaces the default shapes")
     p.add_argument("--causal", action="store_true",
-                   help="run default shapes causally (jsonl shapes keep their recorded flag)")
+                   help="run --shapes/default shapes causally (jsonl shapes keep their recorded flag)")
     p.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16",
                    help="input dtype for default shapes / jsonl records without one")
+    p.add_argument("--bias", type=float, default=1.0,
+                   help="mean shift added to q and k (biased inputs expose mean-dependent "
+                   "quantization bugs that zero-mean randn hides)")
+    p.add_argument("--include-zeromean", action="store_true",
+                   help="additionally run every shape with zero-mean inputs for contrast")
     p.add_argument("--p-quant", choices=["single", "two"], default="single",
                    help="nvfp4_local P-matrix quantization: single-level or two-level "
                    "(sageattn_blackwell single_level_p_quant knob)")
     p.add_argument("--warmup", type=int, default=10, help="warmup iterations per lane")
-    p.add_argument("--iters", type=int, default=50, help="timed iterations per lane (median reported)")
+    p.add_argument("--iters", type=int, default=50, help="timed iterations per lane")
     p.add_argument("--seed", type=int, default=0, help="input seed (fixed per shape)")
     p.add_argument("--json", metavar="PATH", help="also dump results as JSON")
     return p.parse_args(argv)
@@ -409,11 +500,16 @@ def _fmt(rec: dict, key: str, spec: str) -> str:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     dtype_name = f"torch.{'bfloat16' if args.dtype == 'bf16' else 'float16'}"
-    shapes = (parse_shapes_jsonl(args.shapes_jsonl, dtype_name)
-              if args.shapes_jsonl else default_shapes(args.causal, dtype_name))
+    if args.shapes:
+        shapes = parse_shapes_cli(args.shapes, args.causal, dtype_name)
+    elif args.shapes_jsonl:
+        shapes = parse_shapes_jsonl(args.shapes_jsonl, dtype_name)
+    else:
+        shapes = default_shapes(args.causal, dtype_name)
 
     cap = None
-    meta: dict = {"torch": torch.__version__, "warmup": args.warmup, "iters": args.iters, "seed": args.seed}
+    meta: dict = {"torch": torch.__version__, "warmup": args.warmup, "iters": args.iters,
+                  "seed": args.seed, "bias": args.bias}
     if torch.cuda.is_available():
         cap = torch.cuda.get_device_capability(0)
         meta.update(device=torch.cuda.get_device_name(0), sm=f"{cap[0]}.{cap[1]}")
@@ -422,26 +518,30 @@ def main(argv: list[str] | None = None) -> None:
         print("No CUDA device: all lanes will be skipped (shape/skip dry run).")
 
     lanes = build_lanes(args)
+    biases = [args.bias] + ([0.0] if args.include_zeromean and args.bias else [])
     results = []
     for shape in shapes:
-        print(f"\n== {shape.label()}  dtype={shape.dtype} ==")
-        results.extend(bench_shape(shape, lanes, cap, args))
+        for bias in biases:
+            print(f"\n== {shape.label()}  dtype={shape.dtype}  bias={bias:g} ==")
+            results.extend(bench_shape(shape, bias, lanes, cap, args))
 
-    headers = ["shape", "lane", "status", "median_ms", "TFLOPS", "cos_sim", "max_abs_err", "mean_abs_err"]
+    headers = ["shape", "dist", "lane", "status", "mean_ms", "std_ms", "TFLOPS",
+               "cos_sim", "max_abs_err", "mean_rel_err"]
     rows = []
     for rec in results:
         status = rec["status"] if rec["status"] == "ok" else f"{rec['status']}: {rec['reason']}"
         rows.append([
-            rec["shape"], rec["lane"], status,
-            _fmt(rec, "median_ms", ".3f"),
+            rec["shape"], rec["dist"], rec["lane"], status,
+            _fmt(rec, "mean_ms", ".3f"),
+            _fmt(rec, "std_ms", ".3f"),
             _fmt(rec, "tflops", ".1f"),
             _fmt(rec, "cos_sim", ".6f"),
             _fmt(rec, "max_abs_err", ".4e"),
-            _fmt(rec, "mean_abs_err", ".4e"),
+            _fmt(rec, "mean_rel_err", ".4e"),
         ])
     print("\n" + format_table(headers, rows))
-    print("\nAccuracy is vs fp32 torch-SDPA ground truth on identical inputs "
-          "(fp32 SDPA itself is excluded from the speed columns).")
+    print("\nAccuracy is vs chunked fp32 torch-SDPA ground truth on identical inputs "
+          "(the fp32 reference itself is never timed).")
 
     if args.json:
         with open(args.json, "w") as f:

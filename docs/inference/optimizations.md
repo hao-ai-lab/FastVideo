@@ -286,10 +286,11 @@ Counts accumulate per shape; the file is flushed periodically and at exit.
 Hand the JSONL files to the kernel folks. The `SAGE_ATTN_THREE` backend records
 to the same log, so either implementation can be used for collection.
 
-A collected log can directly drive the NVFP4/FP8 attention kernel benchmark
-(per-shape accuracy, TFLOPS, and latency for the local SageAttention3 port,
-FlashInfer NVFP4, SageAttention FP8, and torch SDPA):
-`python fastvideo-kernel/benchmarks/bench_nvfp4_fp8_attention.py --shapes-jsonl /tmp/attn_shapes.jsonl.pid<N>`.
+A collected log can directly drive the unified attention kernel benchmark
+(per-shape latency, TFLOPS, and accuracy for the bf16 baseline
+(flash-attn/SDPA), SageAttention FP8, the local SageAttention3 port, and
+FlashInfer NVFP4):
+`python fastvideo-kernel/benchmarks/bench_attn_kernels.py --shapes-jsonl /tmp/attn_shapes.jsonl.pid<N>`.
 
 ### V-MoBA / SLA / SageSLA
 

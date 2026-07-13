@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU-only tests for the pure parts of
-fastvideo-kernel/benchmarks/bench_nvfp4_fp8_attention.py (flops formula,
-shapes-jsonl parsing, lane-skip logic, table formatting). GPU lanes are
-exercised manually on real hardware."""
+fastvideo-kernel/benchmarks/bench_attn_kernels.py (flops formula, shape
+parsing, lane-skip logic, table formatting). GPU lanes are exercised
+manually on real hardware."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-_SCRIPT = Path(__file__).resolve().parents[3] / "fastvideo-kernel" / "benchmarks" / "bench_nvfp4_fp8_attention.py"
+_SCRIPT = Path(__file__).resolve().parents[3] / "fastvideo-kernel" / "benchmarks" / "bench_attn_kernels.py"
 
-spec = importlib.util.spec_from_file_location("bench_nvfp4_fp8_attention", _SCRIPT)
+spec = importlib.util.spec_from_file_location("bench_attn_kernels", _SCRIPT)
 bench = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = bench  # dataclasses resolve annotations via sys.modules
 spec.loader.exec_module(bench)
@@ -97,8 +97,27 @@ def test_format_table_alignment():
 def test_cli_defaults_and_shapes():
     args = bench.parse_args([])
     assert (args.warmup, args.iters, args.p_quant) == (10, 50, "single")
+    assert args.bias == 1.0 and not args.include_zeromean  # biased inputs by default
     shapes = bench.default_shapes(causal=False, dtype="torch.bfloat16")
-    assert bench.Shape(1, 12, 12, 75600, 75600, 128, False) in shapes  # Wan2.1 720p
+    assert bench.Shape(1, 12, 12, 32760, 32760, 128, False) in shapes  # Wan2.1 480p
+    assert len(shapes) == len(set(shapes))  # sweep + logged shapes deduped
     with pytest.raises(SystemExit) as exc:
         bench.parse_args(["--help"])
     assert exc.value.code == 0
+
+
+def test_parse_shapes_cli():
+    shapes = bench.parse_shapes_cli("1x12x32760x128,2x24x512x64", causal=True,
+                                    dtype="torch.float16")
+    assert shapes == [
+        bench.Shape(1, 12, 12, 32760, 32760, 128, True, "torch.float16"),
+        bench.Shape(2, 24, 24, 512, 512, 64, True, "torch.float16"),
+    ]
+    with pytest.raises(Exception, match="BxHxLxD"):
+        bench.parse_shapes_cli("1x12x128", causal=False, dtype="torch.bfloat16")
+
+
+def test_shape_workspace_bytes_scales_with_seq():
+    small = bench.shape_workspace_bytes(_shape(seq_len_q=1024, seq_len_kv=1024), 2, 2048)
+    big = bench.shape_workspace_bytes(_shape(seq_len_q=32760, seq_len_kv=32760), 2, 2048)
+    assert big > small > 0
