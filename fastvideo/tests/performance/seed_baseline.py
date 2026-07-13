@@ -35,6 +35,7 @@ except ImportError:
 TRACKING_ROOT = os.environ.get("PERFORMANCE_TRACKING_ROOT", "/tmp/perf-tracking")
 DEFAULT_MAX_INTRA_BATCH_REGRESSION = 0.05
 _SOURCE_PROVENANCE_FIELDS = ("model_id", "commit_sha", "timestamp", "build_id", "job_id")
+_CORE_MEASUREMENT_FIELDS = frozenset({"latency", "throughput", "memory"})
 
 
 def _now_utc_iso() -> str:
@@ -96,9 +97,28 @@ def _truthy_pr_number(value: Any) -> bool:
     return bool(value and str(value) not in {"false", "0", "None", "none"})
 
 
+def _validate_source_measurements(record: dict[str, Any]) -> None:
+    for policy in DEFAULT_METRIC_POLICIES:
+        raw_value = record.get(policy.key)
+        if raw_value is None:
+            if policy.key in _CORE_MEASUREMENT_FIELDS:
+                raise ValueError(f"baseline seed records require a finite positive {policy.key} measurement")
+            continue
+
+        value = safe_float(raw_value)
+        if value is None or not math.isfinite(value):
+            raise ValueError(f"baseline seed records require a finite {policy.key} measurement")
+        if policy.key in _CORE_MEASUREMENT_FIELDS:
+            if value <= 0:
+                raise ValueError(f"baseline seed records require a positive {policy.key} measurement")
+        elif value < 0:
+            raise ValueError(f"baseline seed records require a non-negative {policy.key} measurement")
+
+
 def _validate_calibration_source(record: dict[str, Any]) -> None:
     _require_nonempty_string(record, "model_id")
     _source_identity(record)
+    _validate_source_measurements(record)
     if record.get("comparison_status") != STATUS_CALIBRATION_NEEDED:
         raise ValueError("baseline seeds require a CALIBRATION_NEEDED source artifact")
     if record.get("success") is not True:

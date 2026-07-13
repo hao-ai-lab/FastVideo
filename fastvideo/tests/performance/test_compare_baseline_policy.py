@@ -847,6 +847,77 @@ def test_baseline_seed_rejects_later_missing_model_id_before_persistence(monkeyp
     assert uploaded_records == []
 
 
+@pytest.mark.parametrize("valid_prefix", [False, True], ids=("single_source", "later_source"))
+@pytest.mark.parametrize(
+    ("metric", "invalid_value", "match"),
+    [
+        ("latency", None, "finite positive latency"),
+        ("throughput", None, "finite positive throughput"),
+        ("memory", None, "finite positive memory"),
+        ("latency", float("nan"), "finite latency"),
+        ("throughput", float("inf"), "finite throughput"),
+        ("memory", float("-inf"), "finite memory"),
+        ("text_encoder_time_s", float("nan"), "finite text_encoder_time_s"),
+        ("dit_time_s", float("inf"), "finite dit_time_s"),
+        ("vae_decode_time_s", -1.0, "non-negative vae_decode_time_s"),
+    ],
+)
+def test_baseline_seed_rejects_invalid_measurements_before_persistence(
+    monkeypatch,
+    tmp_path,
+    metric,
+    invalid_value,
+    match,
+    valid_prefix,
+):
+    valid_source = _v2_record()
+    valid_source.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "success": True,
+        "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "pr_number": "",
+    })
+    invalid_source = dict(valid_source)
+    invalid_source["timestamp"] = "2026-06-17T00:00:00+00:00"
+    if invalid_value is None:
+        invalid_source.pop(metric)
+    else:
+        invalid_source[metric] = invalid_value
+
+    sources = (valid_source, invalid_source) if valid_prefix else (invalid_source,)
+    source_paths = []
+    for index, source in enumerate(sources, start=1):
+        source_path = tmp_path / f"source_{index}.json"
+        source_path.write_text(json.dumps(source), encoding="utf-8")
+        source_paths.append(source_path)
+
+    tracking_root = tmp_path / "tracking"
+    uploaded_records = []
+    monkeypatch.setattr(
+        seed_baseline,
+        "upload_record",
+        lambda path, record, *, strict=False: uploaded_records.append((path, record)),
+    )
+
+    argv = []
+    for source_path in source_paths:
+        argv.extend(["--source-result", str(source_path)])
+    argv.extend([
+        "--intent-rationale",
+        "reviewed first v2 baseline",
+        "--tracking-root",
+        str(tracking_root),
+        "--upload",
+    ])
+    with pytest.raises(ValueError, match=match):
+        seed_baseline.main(argv)
+
+    assert not tracking_root.exists()
+    assert uploaded_records == []
+
+
 @pytest.mark.parametrize(
     ("metric", "divergent_value"),
     [
