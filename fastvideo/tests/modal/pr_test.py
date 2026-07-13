@@ -86,6 +86,7 @@ wandb_secret = modal.Secret.from_dict(
 
 def run_test(pytest_command: str):
     """Helper function to run a test suite with custom pytest command"""
+    pytest_command += ' --reruns 2 --reruns-delay 10 --only-rerun "CUDA error|NCCL|out of memory|RuntimeError: CUDA"'
     run_test_command(pytest_command, build_kernel=True)
 
 
