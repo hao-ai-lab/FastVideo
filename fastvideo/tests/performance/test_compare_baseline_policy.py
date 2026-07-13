@@ -887,6 +887,85 @@ def test_v2_identity_lookup_ignores_model_id_and_gpu_display_string(tmp_path):
     assert records == [baseline]
 
 
+def test_main_v2_identity_lookup_ignores_model_id_and_gpu_display_string(
+    monkeypatch,
+    tmp_path,
+):
+    tracking_root = tmp_path / "tracking"
+    results_dir = tmp_path / "results"
+    reports_dir = tmp_path / "reports"
+    results_dir.mkdir()
+    _write_record(
+        tracking_root,
+        "renamed-benchmark-id",
+        "baseline.json",
+        {
+            "model_id": "renamed-benchmark-id",
+            "gpu_type": "NVIDIA L40S PCIe",
+            "timestamp": "2026-06-15T00:00:00+00:00",
+            "success": True,
+            "baseline_eligible": True,
+            "latency": 10.0,
+            "workload_id": "wan-t2v",
+            "variant_id": "1.3b-sp2",
+            "benchmark_version": 2,
+            "recipe_fingerprint": "recipe-1",
+            "hardware_profile_id": "hw-l40s-2",
+            "software_profile_id": "sw-cuda",
+        },
+    )
+    with open(results_dir / "perf_current.json", "w", encoding="utf-8") as f:
+        json.dump(_v2_raw_result(), f)
+
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
+    monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
+    monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
+    monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
+    monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
+    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+
+    assert compare_baseline.main() == 0
+
+    artifacts = list((reports_dir / "results").glob("normalized_perf_*.json"))
+    assert len(artifacts) == 1
+    with open(artifacts[0], encoding="utf-8") as f:
+        normalized = json.load(f)
+
+    assert normalized["comparison_status"] == compare_baseline.STATUS_PASS
+    assert normalized["baseline_status"] == "compared"
+
+
+def test_main_partial_v2_identity_reports_infra_error(monkeypatch, tmp_path):
+    results_dir = tmp_path / "results"
+    reports_dir = tmp_path / "reports"
+    tracking_root = tmp_path / "tracking"
+    results_dir.mkdir()
+    raw = _v2_raw_result(result_schema_version=2)
+    del raw["software_profile_id"]
+    with open(results_dir / "perf_current.json", "w", encoding="utf-8") as f:
+        json.dump(raw, f)
+
+    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
+    monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
+    monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
+    monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
+    monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
+    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+
+    assert compare_baseline.main() == 1
+
+    artifacts = list((reports_dir / "results").glob("normalized_perf_*.json"))
+    assert len(artifacts) == 1
+    with open(artifacts[0], encoding="utf-8") as f:
+        normalized = json.load(f)
+
+    assert normalized["comparison_status"] == compare_baseline.STATUS_INFRA_ERROR
+    assert "software_profile_id" in normalized["comparison_status_reason"]
+    assert normalized["baseline_eligible"] is False
+
+
 def test_v2_identity_lookup_last_n_uses_timestamp_across_model_dirs(tmp_path):
     identity_fields = {
         "workload_id": "wan-t2v",
