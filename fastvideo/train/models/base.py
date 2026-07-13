@@ -126,8 +126,13 @@ class ModelBase(ABC):
         *,
         generator: torch.Generator,
         latents_source: Literal["data", "zeros"] = "data",
+        num_latent_t: int | None = None,
     ) -> TrainingBatch:
-        """Convert a dataloader batch into forward primitives."""
+        """Convert a dataloader batch into forward primitives.
+
+        ``num_latent_t`` may override the configured temporal length when
+        creating zero latents for sampling-only paths such as validation.
+        """
 
     @abstractmethod
     def add_noise(

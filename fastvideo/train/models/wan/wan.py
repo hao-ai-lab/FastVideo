@@ -235,6 +235,7 @@ class WanModel(ModelBase):
         *,
         generator: torch.Generator,
         latents_source: Literal["data", "zeros"] = "data",
+        num_latent_t: int | None = None,
     ) -> TrainingBatch:
         if self._requires_negative_conditioning:
             self.ensure_negative_conditioning()
@@ -250,6 +251,9 @@ class WanModel(ModelBase):
         infos = raw_batch.get("info_list")
 
         if latents_source == "zeros":
+            resolved_num_latent_t = tc.data.num_latent_t if num_latent_t is None else int(num_latent_t)
+            if resolved_num_latent_t <= 0:
+                raise ValueError("num_latent_t must be positive when creating zero latents")
             batch_size = encoder_hidden_states.shape[0]
             vae_config = (
                 tc.pipeline_config.vae_config.arch_config  # type: ignore[union-attr]
@@ -261,13 +265,15 @@ class WanModel(ModelBase):
             latents = torch.zeros(
                 batch_size,
                 num_channels,
-                tc.data.num_latent_t,
+                resolved_num_latent_t,
                 latent_height,
                 latent_width,
                 device=device,
                 dtype=dtype,
             )
         elif latents_source == "data":
+            if num_latent_t is not None:
+                raise ValueError("num_latent_t can only override latents_source='zeros'")
             if "vae_latent" not in raw_batch:
                 raise ValueError("vae_latent not found in batch "
                                  "and latents_source='data'")

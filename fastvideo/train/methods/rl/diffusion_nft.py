@@ -373,11 +373,7 @@ class DiffusionNFTMethod(TrainingMethod):
             batch_items = items[start:start + config.batch_size]
             raw_batch = self._collate_validation_rows([item[2] for item in batch_items])
             prompts = self._extract_prompts(raw_batch)
-            batch = self.student.prepare_batch(
-                raw_batch,
-                generator=prepare_generator,
-                latents_source="zeros",
-            )
+            batch = self._prepare_validation_batch(raw_batch, prepare_generator)
             sampling_result = self._validation_sampler.sample(
                 self.student,
                 batch,
@@ -428,6 +424,18 @@ class DiffusionNFTMethod(TrainingMethod):
             self._log_validation_samples(local_logs, iteration)
         self._log_progress(f"[DiffusionNFT] validation step {iteration}: finished")
         return metrics
+
+    def _prepare_validation_batch(
+        self,
+        raw_batch: dict[str, Any],
+        generator: torch.Generator,
+    ) -> TrainingBatch:
+        return self.student.prepare_batch(
+            raw_batch,
+            generator=generator,
+            latents_source="zeros",
+            num_latent_t=self._validation_config.num_latent_t,
+        )
 
     def _get_validation_items(self) -> list[tuple[int, bool, dict[str, Any]]]:
         if self._validation_items is not None:

@@ -257,11 +257,16 @@ def test_validation_shard_indices_are_stable_and_padded():
     assert rank1 == [(1, True), (3, True), (0, False)]
 
 
-def test_rl_validation_config_parses_video_fps():
-    config = RLValidationConfig.from_mapping({"fps": 16, "max_samples": 2})
+def test_rl_validation_config_parses_video_shape_and_fps():
+    config = RLValidationConfig.from_mapping({
+        "fps": 16,
+        "max_samples": 2,
+        "num_latent_t": 13,
+    })
 
     assert config.fps == 16
     assert config.max_samples == 2
+    assert config.num_latent_t == 13
 
 
 def test_distributed_k_repeat_indices_repeats_prompts_globally():

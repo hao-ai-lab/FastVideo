@@ -54,6 +54,7 @@ class MatrixGame2Model(WanModel):
         *,
         generator: torch.Generator,
         latents_source: Literal["data", "zeros"] = "data",
+        num_latent_t: int | None = None,
     ) -> TrainingBatch:
         assert self.training_config is not None
         tc = self.training_config
@@ -65,8 +66,16 @@ class MatrixGame2Model(WanModel):
         batch_size = self._infer_batch_size(raw_batch)
 
         if latents_source == "zeros":
-            latents = self._make_zero_latents(batch_size=batch_size)
+            resolved_num_latent_t = tc.data.num_latent_t if num_latent_t is None else int(num_latent_t)
+            if resolved_num_latent_t <= 0:
+                raise ValueError("num_latent_t must be positive when creating zero latents")
+            latents = self._make_zero_latents(
+                batch_size=batch_size,
+                num_latent_t=resolved_num_latent_t,
+            )
         elif latents_source == "data":
+            if num_latent_t is not None:
+                raise ValueError("num_latent_t can only override latents_source='zeros'")
             latents = raw_batch["vae_latent"][:, :, :tc.data.num_latent_t]
             latents = latents.to(device=device, dtype=dtype)
         else:
@@ -427,7 +436,12 @@ class MatrixGame2Model(WanModel):
             return int(raw_batch["clip_feature"].shape[0])
         raise ValueError("Unable to infer batch size from Matrix-Game 2.0 batch")
 
-    def _make_zero_latents(self, *, batch_size: int) -> torch.Tensor:
+    def _make_zero_latents(
+        self,
+        *,
+        batch_size: int,
+        num_latent_t: int,
+    ) -> torch.Tensor:
         assert self.training_config is not None
         vae_config = self.training_config.pipeline_config.vae_config.arch_config  # type: ignore[union-attr]
         num_channels = vae_config.z_dim
@@ -437,7 +451,7 @@ class MatrixGame2Model(WanModel):
         return torch.zeros(
             batch_size,
             num_channels,
-            self.training_config.data.num_latent_t,
+            num_latent_t,
             latent_height,
             latent_width,
             device=self.device,

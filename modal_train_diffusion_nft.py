@@ -46,6 +46,7 @@ DEFAULT_SAMPLE_GUIDANCE_SCALE = -1.0
 DEFAULT_VALIDATION_NUM_STEPS = 50
 DEFAULT_VALIDATION_NUM_PROMPTS = 16
 DEFAULT_VALIDATION_BATCH_SIZE = 4
+DEFAULT_VALIDATION_NUM_FRAMES = 0
 DEFAULT_NUM_FRAMES = 17
 DEFAULT_NUM_LATENT_T = 0
 DEFAULT_LOG_SAMPLE_MAX_VIDEOS = 16
@@ -157,6 +158,7 @@ def train(
     validation_num_steps: int = DEFAULT_VALIDATION_NUM_STEPS,
     validation_num_prompts: int = DEFAULT_VALIDATION_NUM_PROMPTS,
     validation_batch_size: int = DEFAULT_VALIDATION_BATCH_SIZE,
+    validation_num_frames: int = DEFAULT_VALIDATION_NUM_FRAMES,
     num_frames: int = DEFAULT_NUM_FRAMES,
     num_latent_t: int = DEFAULT_NUM_LATENT_T,
     log_sample_max_videos: int = DEFAULT_LOG_SAMPLE_MAX_VIDEOS,
@@ -187,6 +189,7 @@ def train(
     validation_num_steps = int(validation_num_steps)
     validation_num_prompts = int(validation_num_prompts)
     validation_batch_size = int(validation_batch_size)
+    validation_num_frames = int(validation_num_frames)
     if preprocess_batch_size <= 0:
         raise ValueError("--preprocess-batch-size must be positive")
     if learning_rate < 0.0 and learning_rate != DEFAULT_LEARNING_RATE:
@@ -206,6 +209,12 @@ def train(
         raise ValueError("--validation-num-prompts must be >= 0")
     if validation_batch_size < 0:
         raise ValueError("--validation-batch-size must be >= 0")
+    if validation_num_frames < 0:
+        raise ValueError("--validation-num-frames must be >= 0")
+    if validation_num_frames > 0 and (validation_num_frames - 1) % 4 != 0:
+        raise ValueError("Wan validation frame counts must satisfy "
+                         "num_frames = (num_latent_t - 1) * 4 + 1; "
+                         f"got {validation_num_frames}")
     if preprocess_num_gpus != 1:
         raise ValueError("FastVideo text preprocessing currently supports "
                          "--preprocess-num-gpus 1 only.")
@@ -311,6 +320,8 @@ def train(
     output_dir = summary["output_dir"]
     resolved_num_frames = int(summary["num_frames"])
     resolved_num_latent_t = int(summary["num_latent_t"])
+    resolved_validation_num_frames = validation_num_frames or resolved_num_frames
+    resolved_validation_num_latent_t = ((resolved_validation_num_frames - 1) // 4 + 1)
     cache_vol.commit()
     data_vol.commit()
 
@@ -331,6 +342,8 @@ def train(
         f"validation_num_steps={validation_num_steps if validation_num_steps > 0 else 'config'} "
         f"validation_num_prompts={validation_num_prompts if validation_num_prompts > 0 else 'config'} "
         f"validation_batch_size={validation_batch_size if validation_batch_size > 0 else 'config'} "
+        f"validation_num_frames={resolved_validation_num_frames} "
+        f"validation_num_latent_t={resolved_validation_num_latent_t} "
         f"num_frames={resolved_num_frames} "
         f"num_latent_t={resolved_num_latent_t} "
         f"log_sample_max_videos={log_sample_max_videos} "
@@ -382,6 +395,7 @@ def train(
         cmd.extend(["--method.validation.num_prompts", str(validation_num_prompts)])
     if validation_batch_size > 0:
         cmd.extend(["--method.validation.batch_size", str(validation_batch_size)])
+    cmd.extend(["--method.validation.num_latent_t", str(resolved_validation_num_latent_t)])
     if num_batches_per_epoch > 0:
         cmd.extend(["--method.num_batches_per_epoch", str(num_batches_per_epoch)])
 
@@ -414,6 +428,7 @@ def main(
     validation_num_steps: int = DEFAULT_VALIDATION_NUM_STEPS,
     validation_num_prompts: int = DEFAULT_VALIDATION_NUM_PROMPTS,
     validation_batch_size: int = DEFAULT_VALIDATION_BATCH_SIZE,
+    validation_num_frames: int = DEFAULT_VALIDATION_NUM_FRAMES,
     num_frames: int = DEFAULT_NUM_FRAMES,
     num_latent_t: int = DEFAULT_NUM_LATENT_T,
     log_sample_max_videos: int = DEFAULT_LOG_SAMPLE_MAX_VIDEOS,
@@ -439,6 +454,7 @@ def main(
         validation_num_steps=validation_num_steps,
         validation_num_prompts=validation_num_prompts,
         validation_batch_size=validation_batch_size,
+        validation_num_frames=validation_num_frames,
         num_frames=num_frames,
         num_latent_t=num_latent_t,
         log_sample_max_videos=log_sample_max_videos,

@@ -21,6 +21,7 @@ class RLValidationConfig:
     fps: int = 1
     seed: int = 42
     data_path: str | None = None
+    num_latent_t: int | None = None
     sampling: dict[str, Any] | None = None
 
     @classmethod
@@ -36,6 +37,11 @@ class RLValidationConfig:
         max_samples = raw.get("max_samples", None)
         if max_samples is not None:
             max_samples = max(0, int(max_samples))
+        num_latent_t = raw.get("num_latent_t", None)
+        if num_latent_t is not None:
+            num_latent_t = int(num_latent_t)
+            if num_latent_t <= 0:
+                raise ValueError("method.validation.num_latent_t must be positive when set")
         return cls(
             every_steps=max(0, int(raw.get("every_steps", 0) or 0)),
             num_steps=max(1, int(raw.get("num_steps", 40) or 40)),
@@ -46,6 +52,7 @@ class RLValidationConfig:
             fps=max(1, int(raw.get("fps", 1) or 1)),
             seed=int(raw.get("seed", 42) or 42),
             data_path=(None if data_path in (None, "") else str(data_path)),
+            num_latent_t=num_latent_t,
             sampling=(dict(sampling) if sampling is not None else None),
         )
 

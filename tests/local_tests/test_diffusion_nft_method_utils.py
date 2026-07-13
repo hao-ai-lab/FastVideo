@@ -33,6 +33,16 @@ class _FakeTracker:
         self.artifacts.append((artifacts, step))
 
 
+class _FakeValidationStudent:
+
+    def __init__(self):
+        self.kwargs = None
+
+    def prepare_batch(self, raw_batch, **kwargs):
+        self.kwargs = kwargs
+        return raw_batch
+
+
 def test_reward_diagnostic_metrics_match_per_prompt_groups():
     method = object.__new__(DiffusionNFTMethod)
     method._trained_prompt_hashes = set()
@@ -106,6 +116,23 @@ def test_log_validation_samples_caps_video_count_and_uses_configured_fps():
     assert tracker.videos[0]["fps"] == 16
     assert "first" in tracker.videos[0]["caption"]
     assert tracker.artifacts == [({"validation/videos": ["video-1"]}, 10)]
+
+
+def test_prepare_validation_batch_uses_validation_only_temporal_length():
+    method = object.__new__(DiffusionNFTMethod)
+    method.student = _FakeValidationStudent()
+    method._validation_config = SimpleNamespace(num_latent_t=13)
+    generator = torch.Generator().manual_seed(0)
+    raw_batch = {"prompt": ["test"]}
+
+    result = method._prepare_validation_batch(raw_batch, generator)
+
+    assert result is raw_batch
+    assert method.student.kwargs == {
+        "generator": generator,
+        "latents_source": "zeros",
+        "num_latent_t": 13,
+    }
 
 
 def test_num_train_timesteps_uses_explicit_schedule_length():
