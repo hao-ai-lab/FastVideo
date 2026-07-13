@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import copy
+
 from fastvideo.tests.performance import compare_baseline
 from fastvideo.tests.performance import test_inference_performance as perf
 
@@ -91,6 +93,33 @@ def test_performance_producer_emits_v2_identity_from_raw_result_shape(monkeypatc
     assert record["software_profile_id"] == perf.software_profile_id(record["software_profile"])
     assert len(record["recipe_fingerprint"]) == 64
     assert "output_path" not in record["recipe"]["generation_kwargs"]
+
+
+def test_display_benchmark_id_rename_preserves_producer_fingerprint_and_cohort(monkeypatch):
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN")
+    original = _benchmark_config()
+    renamed = copy.deepcopy(original)
+    renamed["benchmark_id"] = "wan-t2v-renamed-display-id"
+
+    def build_identity(cfg):
+        return perf._build_identity_fields(
+            cfg,
+            dict(cfg["init_kwargs"]),
+            "A cinematic video.",
+            {
+                "resolved_attention_backend": "FLASH_ATTN",
+                "resolved_model_revision": None,
+            },
+        )
+
+    original_identity = build_identity(original)
+    renamed_identity = build_identity(renamed)
+
+    assert original_identity["recipe"]["benchmark"]["benchmark_id"] == original["benchmark_id"]
+    assert renamed_identity["recipe"]["benchmark"]["benchmark_id"] == renamed["benchmark_id"]
+    assert original_identity["recipe_fingerprint"] == renamed_identity["recipe_fingerprint"]
+    assert compare_baseline._comparison_identity_filters(
+        original_identity) == compare_baseline._comparison_identity_filters(renamed_identity)
 
 
 def test_v2_identity_tolerates_null_run_config(monkeypatch):

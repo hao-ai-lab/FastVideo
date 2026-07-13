@@ -29,6 +29,7 @@ except ImportError:
     from fastvideo.performance.hf_store import sanitize, upload_record
 
 TRACKING_ROOT = os.environ.get("PERFORMANCE_TRACKING_ROOT", "/tmp/perf-tracking")
+_SOURCE_PROVENANCE_FIELDS = ("model_id", "commit_sha", "timestamp", "build_id", "job_id")
 
 
 def _now_utc_iso() -> str:
@@ -51,11 +52,47 @@ def _source_identity(record: dict[str, Any]) -> dict[str, str]:
     return _comparison_identity_filters(record)
 
 
+def _require_nonempty_string(record: dict[str, Any], field: str) -> str:
+    value = record.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"baseline seed records require a non-empty string {field}")
+    return value
+
+
+def _source_provenance_identity(record: dict[str, Any]) -> tuple[str, ...] | None:
+    identity = tuple(str(record.get(field) or "") for field in _SOURCE_PROVENANCE_FIELDS)
+    return identity if any(identity[1:]) else None
+
+
+def _validate_unique_sources(source_paths: list[str], records: list[dict[str, Any]]) -> None:
+    seen_paths: set[str] = set()
+    seen_contents: set[str] = set()
+    seen_provenance: set[tuple[str, ...]] = set()
+
+    for index, (source_path, record) in enumerate(zip(source_paths, records), start=1):
+        resolved_path = os.path.realpath(os.path.abspath(source_path))
+        if resolved_path in seen_paths:
+            raise ValueError(f"source artifact {index} duplicates a resolved source path")
+        seen_paths.add(resolved_path)
+
+        content_identity = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        if content_identity in seen_contents:
+            raise ValueError(f"source artifact {index} duplicates source content")
+        seen_contents.add(content_identity)
+
+        provenance_identity = _source_provenance_identity(record)
+        if provenance_identity is not None:
+            if provenance_identity in seen_provenance:
+                raise ValueError(f"source artifact {index} duplicates source provenance")
+            seen_provenance.add(provenance_identity)
+
+
 def _truthy_pr_number(value: Any) -> bool:
     return bool(value and str(value) not in {"false", "0", "None", "none"})
 
 
 def _validate_calibration_source(record: dict[str, Any]) -> None:
+    _require_nonempty_string(record, "model_id")
     _source_identity(record)
     if record.get("comparison_status") != STATUS_CALIBRATION_NEEDED:
         raise ValueError("baseline seeds require a CALIBRATION_NEEDED source artifact")
@@ -117,15 +154,24 @@ def write_seed_record(
     suffix: str | None = None,
 ) -> str:
     """Write *record* under the tracking root and return the local JSON path."""
-    model_dir = os.path.join(local_dir, sanitize(record["model_id"]))
-    os.makedirs(model_dir, exist_ok=True)
-
-    timestamp = sanitize(record["timestamp"])
-    commit = sanitize(record.get("commit_sha") or "unknown")
-    suffix_part = f"_{sanitize(suffix)}" if suffix else ""
-    out_path = os.path.join(model_dir, f"{timestamp}_{commit}_seed{suffix_part}.json")
+    out_path = _seed_record_path(local_dir, record, suffix=suffix)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     _write_json(out_path, record)
     return out_path
+
+
+def _seed_record_path(
+    local_dir: str,
+    record: dict[str, Any],
+    *,
+    suffix: str | None = None,
+) -> str:
+    model_id = _require_nonempty_string(record, "model_id")
+    timestamp = _require_nonempty_string(record, "timestamp")
+    model_dir = os.path.join(local_dir, sanitize(model_id))
+    commit = sanitize(record.get("commit_sha") or "unknown")
+    suffix_part = f"_{sanitize(suffix)}" if suffix else ""
+    return os.path.join(model_dir, f"{sanitize(timestamp)}_{commit}_seed{suffix_part}.json")
 
 
 def _validate_same_identity(records: list[dict[str, Any]]) -> dict[str, str]:
@@ -176,11 +222,13 @@ def main(argv: list[str] | None = None) -> int:
     source_records = [_load_json(path) for path in args.source_results]
     for source_record in source_records:
         _validate_calibration_source(source_record)
+    _validate_unique_sources(args.source_results, source_records)
     identity = _validate_same_identity(source_records)
     print("Seeding exact comparable identity:")
     for key, value in identity.items():
         print(f"  {key}: {value}")
 
+    prepared_seeds = []
     for index, (source_path, source_record) in enumerate(zip(args.source_results, source_records), start=1):
         seed_record = build_baseline_seed_record(
             source_record,
@@ -191,7 +239,11 @@ def main(argv: list[str] | None = None) -> int:
             batch_index=index,
         )
         suffix = f"{index:02d}" if len(source_records) > 1 else None
-        seed_path = write_seed_record(args.tracking_root, seed_record, suffix=suffix)
+        seed_path = _seed_record_path(args.tracking_root, seed_record, suffix=suffix)
+        prepared_seeds.append((seed_path, seed_record, suffix))
+
+    for seed_path, seed_record, suffix in prepared_seeds:
+        write_seed_record(args.tracking_root, seed_record, suffix=suffix)
         print(f"Prepared baseline seed: {seed_path}")
         if args.upload:
             upload_record(seed_path, seed_record, strict=True)

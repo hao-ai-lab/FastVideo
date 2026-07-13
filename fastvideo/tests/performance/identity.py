@@ -88,6 +88,12 @@ def recipe_fingerprint(recipe: Mapping[str, Any]) -> str:
         # Intentional backend changes are declared via requested_backend,
         # which stays in the hash.
         attention.pop("resolved_backend", None)
+    benchmark = pruned.get("benchmark")
+    if isinstance(benchmark, dict):
+        # benchmark_id names artifacts and storage directories, but is not one
+        # of the six v2 comparison fields. Keep it in the recipe for audit
+        # while allowing display-only renames to stay in the same cohort.
+        benchmark.pop("benchmark_id", None)
     return sha256_hexdigest(canonical_json(pruned))
 
 

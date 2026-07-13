@@ -766,6 +766,87 @@ def test_baseline_seed_validates_entire_batch_before_writing_or_uploading(monkey
     assert uploaded_records == []
 
 
+def test_baseline_seed_rejects_duplicate_sources_before_writing_or_uploading(monkeypatch, tmp_path):
+    source = _v2_record()
+    source.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "success": True,
+        "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "pr_number": "",
+    })
+    source_path = tmp_path / "source.json"
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    tracking_root = tmp_path / "tracking"
+    uploaded_records = []
+    monkeypatch.setattr(
+        seed_baseline,
+        "upload_record",
+        lambda path, record, *, strict=False: uploaded_records.append((path, record)),
+    )
+
+    with pytest.raises(ValueError, match="duplicates a resolved source path"):
+        seed_baseline.main([
+            "--source-result",
+            str(source_path),
+            "--source-result",
+            str(source_path),
+            "--intent-rationale",
+            "reviewed first v2 baseline",
+            "--tracking-root",
+            str(tracking_root),
+            "--upload",
+        ])
+
+    assert not tracking_root.exists()
+    assert uploaded_records == []
+
+
+def test_baseline_seed_rejects_later_missing_model_id_before_persistence(monkeypatch, tmp_path):
+    valid_source = _v2_record()
+    valid_source.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "success": True,
+        "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "pr_number": "",
+    })
+    invalid_source = dict(valid_source)
+    invalid_source.pop("model_id")
+    invalid_source["timestamp"] = "2026-06-17T00:00:00+00:00"
+    source_paths = []
+    for index, source in enumerate((valid_source, invalid_source), start=1):
+        source_path = tmp_path / f"source_{index}.json"
+        source_path.write_text(json.dumps(source), encoding="utf-8")
+        source_paths.append(source_path)
+
+    tracking_root = tmp_path / "tracking"
+    uploaded_records = []
+    monkeypatch.setattr(
+        seed_baseline,
+        "upload_record",
+        lambda path, record, *, strict=False: uploaded_records.append((path, record)),
+    )
+
+    with pytest.raises(ValueError, match="non-empty string model_id"):
+        seed_baseline.main([
+            "--source-result",
+            str(source_paths[0]),
+            "--source-result",
+            str(source_paths[1]),
+            "--intent-rationale",
+            "reviewed first v2 baseline",
+            "--tracking-root",
+            str(tracking_root),
+            "--upload",
+        ])
+
+    assert not tracking_root.exists()
+    assert uploaded_records == []
+
+
 def test_same_variant_changed_recipe_reports_recipe_mismatch(monkeypatch):
     monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
     record = _v2_record(recipe_fingerprint="recipe-2")
