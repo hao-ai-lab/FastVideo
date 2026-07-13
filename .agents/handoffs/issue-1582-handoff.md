@@ -103,3 +103,8 @@
 - GPU memory impact: none expected; the actual benchmark still requests two L40S GPUs, while behavior tests move to a separate or local path.
 - Mandatory future PR gate: `pre-commit run --all-files`; not run during Stage 1. The gate is not cleared.
 - Open decision: should moved performance behavior tests remain CI-backed through the unit lane (approach 2), or become truly local-only as the destination README currently specifies (approach 1)?
+
+## Durability
+
+- Stage 1 findings were committed with GPG signing in `1d5a69596` and pushed to `origin/issue/1582-perf-ci-local-tests-cleanup`.
+- Push verified at `2026-07-13T03:35:35Z`. No PR was created and no GitHub issue state was modified.
