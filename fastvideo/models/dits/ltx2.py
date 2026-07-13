@@ -72,8 +72,13 @@ def _rms_norm_dispatch(
     """Use QuACK RMSNorm only for LTX-2 refine stage, else Torch RMSNorm."""
     if _is_ltx2_refine_stage():
         return _quack_rmsnorm(x, weight=weight, eps=eps)
+    # Official LTX-2 runs the DiT natively in bf16 with no autocast, so its
+    # rms_norm outputs stay bf16 on every torch version. torch 2.12 added
+    # rms_norm to autocast's float32 cast policy, which under our
+    # autocast(bfloat16) forward returns float32 instead. Restore the input
+    # dtype to match the official numerics (and torch <= 2.11 behavior).
     return torch.nn.functional.rms_norm(
-        x, (x.shape[-1], ), weight=weight, eps=eps)
+        x, (x.shape[-1], ), weight=weight, eps=eps).to(x.dtype)
 
 
 class StageAwareRMSNorm(nn.RMSNorm):
