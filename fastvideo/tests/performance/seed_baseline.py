@@ -174,6 +174,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     source_records = [_load_json(path) for path in args.source_results]
+    for source_record in source_records:
+        _validate_calibration_source(source_record)
     identity = _validate_same_identity(source_records)
     print("Seeding exact comparable identity:")
     for key, value in identity.items():
