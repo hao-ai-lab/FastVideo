@@ -7,6 +7,7 @@ import torch
 
 import fastvideo.entrypoints.video_generator as video_generator_module
 from fastvideo.api import (
+    ConfigValidationError,
     GenerationRequest,
     GenerationResult,
     GeneratorConfig,
@@ -15,7 +16,7 @@ from fastvideo.api import (
     load_run_config,
 )
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.entrypoints.video_generator import VideoGenerator
+from fastvideo.entrypoints.video_generator import VideoGenerator, _resolve_output_size
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.worker.gpu_worker import Worker
@@ -139,6 +140,13 @@ def _single_video_generator(output_batch, fastvideo_args):
     generator.executor = SimpleNamespace(execute_forward=lambda batch, args: output_batch)
     generator.config = None
     return generator
+
+
+def test_resolve_output_size_uses_produced_pixel_geometry() -> None:
+    """Report refined dimensions instead of the base request geometry."""
+    samples = torch.empty(1, 3, 5, 64, 96)
+    assert _resolve_output_size(samples, (32, 48, 1), pixel_output=True) == (64, 96, 5)
+    assert _resolve_output_size(samples, (32, 48, 1), pixel_output=False) == (32, 48, 1)
 
 
 def test_prepare_output_path_file_sanitization(tmp_path):
@@ -532,6 +540,20 @@ def test_generate_uses_typed_request_path(monkeypatch):
     assert captured["sampling_param"].height == 480
     assert captured["sampling_param"].width == 832
     assert result.video_path == "outputs/test.mp4"
+
+
+def test_generate_rejects_stage_override_outside_registered_stage(monkeypatch) -> None:
+    """Validate typed stage overrides at the public generation entrypoint."""
+    generator = _new_runtime_video_generator()
+    monkeypatch.setattr(
+        "fastvideo.registry.get_preset_selection",
+        lambda _model_path: ("lingbot_video_moe_refiner_t2v", "lingbot_video"),
+    )
+    with pytest.raises(ConfigValidationError, match="stage_overrides.denoise.t_thresh"):
+        generator.generate({
+            "prompt": "hello world",
+            "stage_overrides": {"denoise": {"t_thresh": 0.7}},
+        })
 
 
 def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):

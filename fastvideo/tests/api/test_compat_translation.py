@@ -8,8 +8,11 @@ from __future__ import annotations
 from fastvideo.api.compat import (
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
+    request_to_sampling_param,
 )
-from fastvideo.api.schema import CompileConfig, GeneratorConfig
+from fastvideo.api.parser import parse_config
+from fastvideo.api.schema import CompileConfig, GenerationRequest, GeneratorConfig
+from fastvideo.api.sampling_param import SamplingParam
 
 
 class TestLegacyTorchCompileKwargsTranslation:
@@ -151,6 +154,21 @@ class TestLegacyTextEncoderCompileTranslation:
         )
         args = generator_config_to_fastvideo_args(config)
         assert "enable_torch_compile_text_encoder" not in args.kwargs
+
+
+def test_batch_cfg_typed_request_reaches_sampling_param(monkeypatch) -> None:
+    """Preserve explicit batched CFG through the canonical request adapter."""
+    monkeypatch.setattr(
+        SamplingParam,
+        "from_pretrained",
+        classmethod(lambda cls, model_path: cls()),
+    )
+    request = parse_config(
+        GenerationRequest,
+        {"prompt": "fox", "sampling": {"batch_cfg": True}},
+    )
+    sampling_param = request_to_sampling_param(request, model_path="test-model")
+    assert sampling_param.batch_cfg is True
 
 
 # -------------------------------------------------------------------

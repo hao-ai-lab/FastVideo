@@ -137,6 +137,17 @@ def maybe_load_fsdp_model(
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
+    dtype_selector = getattr(model, "_get_parameter_dtype", None)
+    has_mixed_parameter_dtypes = callable(dtype_selector) and any(
+        dtype_selector(name, default_dtype) != default_dtype
+        for name, _ in model.named_parameters()
+    )
+    if training_mode and has_mixed_parameter_dtypes:
+        raise NotImplementedError(
+            "FSDP training with model-selected mixed parameter dtypes requires "
+            "separate gradient synchronization for replicated parameters."
+        )
+
     # Check if we should use FSDP
     use_fsdp = training_mode or fsdp_inference
 
@@ -259,6 +270,21 @@ def shard_model(
         logger.warning("No FSDP shard conditions provided; nothing will be sharded.")
         return
 
+    default_param_dtype = getattr(mp_policy, "param_dtype", None)
+    dtype_selector = getattr(model, "_get_parameter_dtype", None)
+    ignored_params: set[nn.Parameter] = set()
+    if callable(dtype_selector) and default_param_dtype is not None:
+        ignored_params = {
+            parameter
+            for name, parameter in model.named_parameters()
+            if dtype_selector(name, default_param_dtype) != default_param_dtype
+        }
+    named_modules = list(model.named_modules())
+    ignored_params_by_module = {
+        id(module): ignored_params.intersection(set(module.parameters()))
+        for _, module in named_modules
+    }
+
     fsdp_kwargs = {
         "reshard_after_forward": reshard_after_forward,
         "mesh": mesh,
@@ -277,7 +303,7 @@ def shard_model(
         min_params = int(os.environ.get("FASTVIDEO_FSDP2_MIN_PARAMS", "10000000"))
         logger.info("Using size-based filtering with threshold: %.2fM", min_params / 1e6)
         
-        for n, m in reversed(list(model.named_modules())):
+        for n, m in reversed(named_modules):
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
                 # Count all parameters
                 param_count = sum(p.numel() for p in m.parameters(recurse=True))
@@ -290,13 +316,21 @@ def shard_model(
                 
                 # Shard this module
                 logger.info("Sharding module %s (%.2fM params)", n, param_count / 1e6)
-                fully_shard(m, **fsdp_kwargs)
+                module_kwargs = fsdp_kwargs
+                local_ignored_params = ignored_params_by_module[id(m)]
+                if local_ignored_params:
+                    module_kwargs = {**fsdp_kwargs, "ignored_params": local_ignored_params}
+                fully_shard(m, **module_kwargs)
                 num_layers_sharded += 1
     else:
         # Shard all modules matching conditions        
-        for n, m in reversed(list(model.named_modules())):
+        for n, m in reversed(named_modules):
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
-                fully_shard(m, **fsdp_kwargs)
+                module_kwargs = fsdp_kwargs
+                local_ignored_params = ignored_params_by_module[id(m)]
+                if local_ignored_params:
+                    module_kwargs = {**fsdp_kwargs, "ignored_params": local_ignored_params}
+                fully_shard(m, **module_kwargs)
                 num_layers_sharded += 1
         
         if num_layers_sharded == 0:
@@ -305,7 +339,10 @@ def shard_model(
             )
 
     # Finally shard the entire model to account for any stragglers
-    fully_shard(model, **fsdp_kwargs)
+    root_kwargs = fsdp_kwargs
+    if ignored_params:
+        root_kwargs = {**fsdp_kwargs, "ignored_params": ignored_params}
+    fully_shard(model, **root_kwargs)
 
 
 # TODO(PY): device mesh for cfg parallel
@@ -370,8 +407,12 @@ def load_model_from_full_model_state_dict(
             raise ValueError(
                 f"Parameter {target_param_name} not found in custom model state dict. The hf to custom mapping may be incorrect."
             )
+        target_dtype = param_dtype
+        dtype_selector = getattr(model, "_get_parameter_dtype", None)
+        if callable(dtype_selector):
+            target_dtype = dtype_selector(target_param_name, param_dtype)
         if not hasattr(meta_sharded_param, "device_mesh"):
-            full_tensor = full_tensor.to(device=device, dtype=param_dtype)
+            full_tensor = full_tensor.to(device=device, dtype=target_dtype)
             target_param = named_parameters.get(target_param_name)
             weight_loader = getattr(target_param, "weight_loader", None)
             # Gated on a shape mismatch: only fused/stacked params with a custom
@@ -382,7 +423,7 @@ def load_model_from_full_model_state_dict(
                     full_tensor.shape):
                 loaded_param = nn.Parameter(torch.empty(tuple(target_param.shape),
                                                         device=device,
-                                                        dtype=param_dtype),
+                                                        dtype=target_dtype),
                                             requires_grad=False)
                 for attr_name, attr_value in vars(target_param).items():
                     setattr(loaded_param, attr_name, attr_value)
@@ -392,7 +433,7 @@ def load_model_from_full_model_state_dict(
                 # In cases where parts of the model aren't sharded, some parameters will be plain tensors.
                 sharded_tensor = full_tensor
         else:
-            full_tensor = full_tensor.to(device=device, dtype=param_dtype)
+            full_tensor = full_tensor.to(device=device, dtype=target_dtype)
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,
@@ -420,16 +461,20 @@ def load_model_from_full_model_state_dict(
                 f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed."
             )
         meta_sharded_param = meta_sd.get(new_param_name)
+        target_dtype = param_dtype
+        dtype_selector = getattr(model, "_get_parameter_dtype", None)
+        if callable(dtype_selector):
+            target_dtype = dtype_selector(new_param_name, param_dtype)
         if not hasattr(meta_sharded_param, "device_mesh"):
             # Initialize with zeros
             sharded_tensor = torch.zeros_like(meta_sharded_param,
                                               device=device,
-                                              dtype=param_dtype)
+                                              dtype=target_dtype)
         else:
             # Initialize with zeros and distribute
             full_tensor = torch.zeros_like(meta_sharded_param,
                                            device=device,
-                                           dtype=param_dtype)
+                                           dtype=target_dtype)
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,

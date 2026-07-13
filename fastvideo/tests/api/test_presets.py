@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+import json
+
 import pytest
 
 from fastvideo.api.errors import ConfigValidationError
@@ -521,6 +523,96 @@ class TestSD35Presets:
         assert p.workload_type == "t2i"
         assert p.defaults["height"] == 512
         assert p.defaults["num_frames"] == 1
+
+
+# -------------------------------------------------------------------
+# LingBot-Video preset integration (Dense and MoE/refiner)
+# -------------------------------------------------------------------
+
+
+class TestLingBotVideoPresets:
+
+    @pytest.mark.parametrize(
+        ("directory_name", "pipeline_class", "expected_preset"),
+        (
+            ("arbitrary-layout-a", "LingBotVideoDensePipeline", "lingbot_video_dense_t2v"),
+            ("arbitrary-layout-b", "LingBotVideoMoePipeline", "lingbot_video_moe_refiner_t2v"),
+        ),
+    )
+    def test_local_layouts_select_one_variant(
+        self,
+        tmp_path,
+        caplog,
+        directory_name: str,
+        pipeline_class: str,
+        expected_preset: str,
+    ) -> None:
+        """Resolve canonical local Dense and MoE paths without detector overlap."""
+        from fastvideo.registry import get_preset_selection
+        model_dir = tmp_path / directory_name
+        model_dir.mkdir()
+        (model_dir / "transformer").mkdir()
+        (model_dir / "model_index.json").write_text(
+            json.dumps({"_class_name": pipeline_class, "_diffusers_version": "0.39.0"}),
+            encoding="utf-8",
+        )
+        assert get_preset_selection(str(model_dir)) == (expected_preset, "lingbot_video")
+        assert "Multiple models matched" not in caplog.text
+
+    def test_lingbot_video_presets_registered(self) -> None:
+        """Register both released LingBot-Video inference layouts."""
+        import fastvideo.registry  # noqa: F401
+        presets = get_presets_for_family("lingbot_video")
+        assert {preset.name for preset in presets} == {
+            "lingbot_video_dense_t2v",
+            "lingbot_video_moe_refiner_t2v",
+        }
+
+    def test_moe_refiner_defaults(self) -> None:
+        """Expose the official base and 1080p refiner sampling defaults."""
+        import fastvideo.registry  # noqa: F401
+        preset = get_preset("lingbot_video_moe_refiner_t2v", "lingbot_video")
+        expected = {
+            "height": 480,
+            "width": 832,
+            "height_sr": 1088,
+            "width_sr": 1920,
+            "num_frames": 121,
+            "num_inference_steps": 40,
+            "num_inference_steps_sr": 8,
+            "guidance_scale": 3.0,
+            "guidance_scale_2": 3.0,
+            "batch_cfg": True,
+            "t_thresh": 0.85,
+            "seed": 42,
+        }
+        assert {key: preset.defaults[key] for key in expected} == expected
+        assert preset.stage_defaults["refine"] == {
+            key: expected[key]
+            for key in ("height_sr", "width_sr", "num_inference_steps_sr", "guidance_scale_2", "t_thresh")
+        }
+
+    def test_moe_refiner_stage_schema_uses_sampling_fields(self) -> None:
+        """Accept only declared ``SamplingParam`` fields as stage overrides."""
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.api.sampling_param import SamplingParam
+        preset = get_preset("lingbot_video_moe_refiner_t2v", "lingbot_video")
+        sampling_fields = set(SamplingParam.__dataclass_fields__)
+        assert [(stage.name, stage.kind) for stage in preset.stage_schemas] == [
+            ("denoise", "denoising"),
+            ("refine", "refinement"),
+        ]
+        assert set(preset.defaults) <= sampling_fields
+        assert all(stage.allowed_overrides <= sampling_fields for stage in preset.stage_schemas)
+        validate_stage_overrides(
+            preset,
+            {
+                "denoise": {"num_inference_steps": 32, "guidance_scale": 2.5},
+                "refine": {"height_sr": 1088, "t_thresh": 0.8},
+            },
+        )
+        with pytest.raises(ConfigValidationError):
+            validate_stage_overrides(preset, {"refine": {"refiner_steps": 8}})
 
 
 # -------------------------------------------------------------------

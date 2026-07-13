@@ -29,6 +29,7 @@ from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyu
                                                    Hunyuan15SR1080PConfig)
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5I2VConfig, Kandinsky5T2VConfig
+from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.lingbotworld2 import LingBotWorld2CausalFastI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
@@ -520,6 +521,26 @@ def _register_configs() -> None:
         ],
         model_family="lingbotworld",
         default_preset="lingbotworld_i2v",
+    )
+    # LingBot-Video MoE T2V with the released second-stage refiner.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LingBotVideoT2VConfig,
+        workload_types=(WorkloadType.T2V,),
+        model_detectors=[lambda path: "lingbotvideomoepipeline" in path.lower()],
+        model_family="lingbot_video",
+        default_preset="lingbot_video_moe_refiner_t2v",
+        pipeline_cls_name="LingBotVideoPipeline",
+    )
+    # LingBot-Video Dense T2V
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LingBotVideoT2VConfig,
+        workload_types=(WorkloadType.T2V,),
+        model_detectors=[lambda path: "lingbotvideodensepipeline" in path.lower()],
+        model_family="lingbot_video",
+        default_preset="lingbot_video_dense_t2v",
+        pipeline_cls_name="LingBotVideoPipeline",
     )
 
     def _kandinsky5_detector(require: tuple[str, ...] = (), exclude: tuple[str, ...] = ()) -> Callable[[str], bool]:
@@ -1246,6 +1267,8 @@ def _register_presets() -> None:
         ALL_PRESETS as LINGBOTWORLD_PRESETS, )
     from fastvideo.pipelines.basic.lingbotworld2.presets import (
         ALL_PRESETS as LINGBOTWORLD2_PRESETS, )
+    from fastvideo.pipelines.basic.lingbot_video.presets import (
+        ALL_PRESETS as LINGBOT_VIDEO_PRESETS, )
     from fastvideo.pipelines.basic.longcat.presets import (
         ALL_PRESETS as LONGCAT_PRESETS, )
     from fastvideo.pipelines.basic.ltx2.presets import (
@@ -1277,6 +1300,7 @@ def _register_presets() -> None:
         HUNYUAN15_PRESETS,
         HYWORLD_PRESETS,
         KANDINSKY5_PRESETS,
+        LINGBOT_VIDEO_PRESETS,
         LINGBOTWORLD_PRESETS,
         LINGBOTWORLD2_PRESETS,
         LONGCAT_PRESETS,
