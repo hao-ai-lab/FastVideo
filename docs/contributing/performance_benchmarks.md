@@ -407,9 +407,11 @@ Current `perf_*.json` artifacts that lack the v2 comparison identity are
 normalized for reporting but skip rolling-baseline comparison and are not marked
 baseline eligible.
 
-New records compare only against the same `model_id`, `gpu_type`,
-`workload_id`, `variant_id`, `benchmark_version`, `recipe_fingerprint`,
-`hardware_profile_id`, and `software_profile_id` cohort.
+New v2 records compare only against the same `workload_id`, `variant_id`,
+`benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and
+`software_profile_id` cohort, independent of the legacy `model_id` directory
+and `gpu_type` display string. Legacy lookup remains scoped by `model_id` and
+`gpu_type`.
 `environment_metadata` and `environment_fingerprint` are audit data and are not
 part of the comparison key.
 The recipe prompt digests describe the prompts actually measured by the
@@ -438,7 +440,7 @@ FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 | `FASTVIDEO_FA4` | `0` | `test_inference_performance.py` | FlashAttention-4 toggle included in `software_profile_id`. |
 | `FASTVIDEO_PERFORMANCE_PROFILE_VERSION` | unset | `test_inference_performance.py` | Optional explicit software cohort/profile version included in `software_profile_id`. |
 | `IMAGE_VERSION` | unset | `test_inference_performance.py` | CI container image/profile version included in `software_profile_id` when available. |
-| `FASTVIDEO_CONTAINER_IMAGE_REF` | unset | `pr_test.py`, `launch_l40s_job.py`, `test_inference_performance.py` | Resolved CI container image ref or digest recorded in `software_profile` audit metadata when available. |
+| `FASTVIDEO_CONTAINER_IMAGE_REF` | unset | `pr_test.py`, `launch_l40s_job.py`, `test_inference_performance.py` | Resolved CI container image ref or digest recorded in `environment_metadata` for audit without changing `software_profile_id`. |
 | `FASTVIDEO_STAGE_LOGGING` | set by the pytest test | `test_inference_performance.py` | Enables pipeline stage timing capture for component metrics during benchmark runs. |
 
 ## CI integration

@@ -244,7 +244,8 @@ def _recipe_mismatch_records(
     return [
         item for item in cohort_records
         if _record_can_authorize_recipe_mismatch(item)
-        and _none_if_empty(item.get("recipe_fingerprint")) is not None
+        and item.get("recipe_fingerprint") is not None
+        and str(item.get("recipe_fingerprint")).strip()
         and str(item.get("recipe_fingerprint")) != current_recipe
     ]
 

@@ -32,6 +32,7 @@ _PROFILE_ENV_VARS = (
     "FASTVIDEO_ATTENTION_BACKEND",
     "IMAGE_VERSION",
     "UV_TORCH_BACKEND",
+    "FASTVIDEO_CONTAINER_IMAGE_REF",
 )
 _PACKAGE_DISTRIBUTIONS = {
     "fastvideo_kernel": ("fastvideo-kernel", "fastvideo_kernel"),

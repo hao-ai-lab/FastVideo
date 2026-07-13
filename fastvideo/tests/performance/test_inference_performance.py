@@ -7,11 +7,8 @@ per-device thresholds.  This test module auto-discovers all configs and
 parametrizes a single test function over them.
 """
 import glob
-import hashlib
 import json
 import os
-import platform
-import re
 import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -352,6 +349,16 @@ def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
     num_gpus = init_kwargs.get("num_gpus", run_config.get("required_gpus", 1))
     hw_profile = hardware_profile(num_gpus=num_gpus)
     sw_profile = software_profile()
+    sw_profile.update({
+        "attention_backend": os.environ.get("FASTVIDEO_ATTENTION_BACKEND") or "auto",
+        "flash_attention_4_enabled": os.environ.get("FASTVIDEO_FA4", "0") != "0",
+    })
+    performance_profile_version = os.environ.get("FASTVIDEO_PERFORMANCE_PROFILE_VERSION")
+    if performance_profile_version:
+        sw_profile["performance_profile_version"] = performance_profile_version
+    image_version = os.environ.get("IMAGE_VERSION")
+    if image_version:
+        sw_profile["container_image_version"] = image_version
     env_metadata = environment_metadata(
         hardware=hw_profile,
         software=sw_profile,
