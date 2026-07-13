@@ -82,9 +82,9 @@ fastvideo/performance/
 The HF dataset (`FastVideo/performance-tracking` by default) holds one
 normalized JSON per run. For v2 records, the rolling baseline is the median of
 the last 5 successful, baseline-eligible records in the same comparison cohort:
-`model_id`, `gpu_type`, `workload_id`, `variant_id`, `benchmark_version`,
-`recipe_fingerprint`, `hardware_profile_id`, and `software_profile_id`. PR and
-local records are visible in the dashboard but are not baseline eligible.
+`workload_id`, `variant_id`, `benchmark_version`, `recipe_fingerprint`,
+`hardware_profile_id`, and `software_profile_id`. PR and local records are
+visible in the dashboard but are not baseline eligible.
 
 ## Planned Coverage
 
@@ -164,12 +164,11 @@ headroom and almost never need touching.
 
 `compare_baseline.py` loads the last 5 successful, baseline-eligible records
 for the same comparison cohort from the HF dataset, computes the median for
-each available metric, and evaluates the current run with the metric's
-rolling regression policy. For v2 records, that cohort is `model_id`,
-`gpu_type`, `workload_id`, `variant_id`, `benchmark_version`,
-`recipe_fingerprint`, `hardware_profile_id`, and `software_profile_id`. For
-latency, memory, and component times, higher values are regressions. For
-throughput, lower values are regressions.
+each available metric, and evaluates the current run with the metric's rolling
+regression policy. For v2 records, that cohort is `workload_id`, `variant_id`,
+`benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and
+`software_profile_id`. For latency, memory, and component times, higher values
+are regressions. For throughput, lower values are regressions.
 
 A metric exceeds its rolling threshold when both of these are true:
 
@@ -195,7 +194,7 @@ Comparator summaries and normalized artifacts include an explicit
 | Status | Meaning | CI behavior |
 |---|---|---|
 | `PASS` | Comparable baseline exists and no gated metric regressed. Legacy records with no baseline also keep the historical initialization behavior. | Passes |
-| `REGRESSION` | Comparable baseline exists and at least one gated metric regressed. | Fails |
+| `REGRESSION` | The record exceeds one of its static thresholds or at least one gated metric regressed against a comparable baseline. | Fails |
 | `CALIBRATION_NEEDED` | A v2 record has no exact comparable baseline. | Passes, may upload when `PERF_UPLOAD_POLICY=pass`, never seeds a baseline |
 | `RECIPE_MISMATCH` | The same workload, variant, benchmark version, hardware profile, and software profile has trusted successful records under another recipe fingerprint. | Fails |
 | `INFRA_ERROR` | The comparator cannot safely classify the record, such as a v2 record missing required identity fields. | Fails |
@@ -432,7 +431,7 @@ FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 | `HF_API_KEY`, `HUGGINGFACE_HUB_TOKEN`, `HF_TOKEN` | unset | `fastvideo/performance/hf_store.py` | Required for upload or private dataset reads. |
 | `PERF_RUN_SOURCE` | inferred | `compare_baseline.py`, `test_inference_performance.py` | Source metadata for uploaded records: `pr`, `local`, `scheduled_main`, or `unknown`. |
 | `PERF_UPLOAD_POLICY` | `never` | `compare_baseline.py` | Upload policy: `never`, `pass`, or `always`. |
-| `PERF_PYTEST_RC` | unset | `compare_baseline.py` | Static-threshold pytest exit code, used so scheduled-main failures can be uploaded with `success=false`. |
+| `PERF_PYTEST_RC` | unset | `compare_baseline.py` | Performance pytest exit code. Measured static-threshold failures are attributed per record; otherwise a nonzero code reports an infrastructure error. |
 | `TEST_SCOPE` | unset | `compare_baseline.py` | CI context used to infer scheduled-main runs together with `BUILDKITE_BRANCH=main`. |
 | `BUILDKITE_BRANCH`, `BUILDKITE_COMMIT`, `BUILDKITE_PULL_REQUEST` | unset | `compare_baseline.py`, `test_inference_performance.py` | CI metadata stamped into records. |
 | `DASHBOARD_DAYS` | `30` | `dashboard.py` | Lookback window for the Plotly trend pages. |
@@ -456,9 +455,11 @@ Each performance build runs pytest first. PR and direct runs only continue to
 `compare_baseline.py` when that fixed-threshold phase passes; if pytest fails,
 Markdown summaries and normalized JSON artifacts are not emitted. Scheduled
 main runs set `PERF_UPLOAD_POLICY=always`, so they still run
-`compare_baseline.py` (with `PERF_PYTEST_RC` set) after a fixed-threshold
-failure. Those failed scheduled main runs emit summaries and normalized
-records, upload records with `success=false`, and are excluded from future
+`compare_baseline.py` (with `PERF_PYTEST_RC` set) after pytest fails. Each raw
+record is checked against its own static thresholds: a measured breach reports
+`REGRESSION`, while unaffected records retain their rolling-baseline status. A
+nonzero pytest exit with no attributable static-threshold breach reports
+`INFRA_ERROR`. Failed records have `success=false` and are excluded from future
 rolling baselines. The dashboard still runs best-effort for observability.
 When the rolling-baseline phase runs, it emits:
 

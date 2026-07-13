@@ -531,6 +531,7 @@ def test_exact_comparable_baseline_without_regression_reports_pass(monkeypatch):
         baseline_records,
         [],
         resolve_metric_policies(None),
+        [],
         False,
     )
 
@@ -549,6 +550,7 @@ def test_slower_gated_metric_reports_regression(monkeypatch):
         baseline_records,
         [],
         resolve_metric_policies(None),
+        [],
         False,
     )
 
@@ -567,6 +569,7 @@ def test_missing_exact_v2_baseline_reports_calibration_needed(monkeypatch):
         [],
         [],
         resolve_metric_policies(None),
+        [],
         False,
     )
 
@@ -729,6 +732,7 @@ def test_same_variant_changed_recipe_reports_recipe_mismatch(monkeypatch):
         [],
         recipe_mismatch_records,
         resolve_metric_policies(None),
+        [],
         False,
     )
 
@@ -954,6 +958,110 @@ def test_main_v2_identity_lookup_ignores_model_id_and_gpu_display_string(
 
     assert normalized["comparison_status"] == compare_baseline.STATUS_PASS
     assert normalized["baseline_status"] == "compared"
+
+
+def test_scheduled_main_static_regression_does_not_contaminate_passing_record(
+    monkeypatch,
+    tmp_path,
+):
+    tracking_root = tmp_path / "tracking"
+    results_dir = tmp_path / "results"
+    reports_dir = tmp_path / "reports"
+    results_dir.mkdir()
+
+    for benchmark_id, variant_id in (
+        ("regressed-benchmark", "regressed-variant"),
+        ("passing-benchmark", "passing-variant"),
+    ):
+        _write_record(
+            tracking_root,
+            benchmark_id,
+            "baseline.json",
+            {
+                "model_id": benchmark_id,
+                "gpu_type": "NVIDIA L40S",
+                "timestamp": "2026-06-15T00:00:00+00:00",
+                "success": True,
+                "baseline_eligible": True,
+                "latency": 10.0,
+                "throughput": 4.5,
+                "memory": 10000.0,
+                "workload_id": "wan-t2v",
+                "variant_id": variant_id,
+                "benchmark_version": 2,
+                "recipe_fingerprint": "recipe-1",
+                "hardware_profile_id": "hw-l40s-2",
+                "software_profile_id": "sw-cuda",
+            },
+        )
+
+    common_thresholds = {
+        "max_generation_time_s": 15.0,
+        "max_peak_memory_mb": 11000.0,
+    }
+    with open(results_dir / "perf_regressed.json", "w", encoding="utf-8") as f:
+        json.dump(
+            _v2_raw_result(
+                benchmark_id="regressed-benchmark",
+                variant_id="regressed-variant",
+                avg_generation_time_s=20.0,
+                thresholds=common_thresholds,
+            ),
+            f,
+        )
+    with open(results_dir / "perf_passing.json", "w", encoding="utf-8") as f:
+        json.dump(
+            _v2_raw_result(
+                benchmark_id="passing-benchmark",
+                variant_id="passing-variant",
+                thresholds=common_thresholds,
+            ),
+            f,
+        )
+
+    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+    monkeypatch.setenv("PERF_PYTEST_RC", "1")
+    monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
+    monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
+    monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
+    monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
+    monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
+
+    assert compare_baseline.main() == 1
+
+    normalized = {}
+    for artifact in (reports_dir / "results").glob("normalized_perf_*.json"):
+        with open(artifact, encoding="utf-8") as f:
+            record = json.load(f)
+        normalized[record["model_id"]] = record
+
+    assert normalized["regressed-benchmark"]["comparison_status"] == compare_baseline.STATUS_REGRESSION
+    assert "avg_generation_time_s exceeded fixed threshold" in normalized[
+        "regressed-benchmark"
+    ]["comparison_status_reason"]
+    assert normalized["regressed-benchmark"]["success"] is False
+    assert normalized["regressed-benchmark"]["baseline_eligible"] is False
+    assert normalized["passing-benchmark"]["comparison_status"] == compare_baseline.STATUS_PASS
+    assert normalized["passing-benchmark"]["success"] is True
+    assert normalized["passing-benchmark"]["baseline_eligible"] is True
+
+
+def test_unattributed_performance_pytest_failure_reports_infra_error(monkeypatch):
+    monkeypatch.setenv("PERF_PYTEST_RC", "2")
+    record = _v2_record()
+
+    failures, status, reason = compare_baseline._evaluate_record_comparison(
+        record,
+        [{"latency": 10.0}],
+        [],
+        resolve_metric_policies(None),
+        [],
+        True,
+    )
+
+    assert status == compare_baseline.STATUS_INFRA_ERROR
+    assert failures == [reason]
+    assert "without an attributable static-threshold regression" in reason
 
 
 def test_main_partial_v2_identity_reports_infra_error(monkeypatch, tmp_path):

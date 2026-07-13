@@ -96,6 +96,13 @@ STATUS_RECIPE_MISMATCH = "RECIPE_MISMATCH"
 STATUS_INFRA_ERROR = "INFRA_ERROR"
 # Reserved for the promoted-baseline workflow; never emitted here.
 STATUS_QUALITY_BLOCKED = "QUALITY_BLOCKED"
+STATIC_THRESHOLD_FIELDS = (
+    ("avg_generation_time_s", "max_generation_time_s"),
+    ("max_peak_memory_mb", "max_peak_memory_mb"),
+    ("text_encoder_time_s", "max_text_encoder_time_s"),
+    ("dit_time_s", "max_dit_time_s"),
+    ("vae_decode_time_s", "max_vae_decode_time_s"),
+)
 
 
 def _should_persist_tracking() -> bool:
@@ -148,7 +155,7 @@ def _upload_allowed(record: dict[str, Any]) -> bool:
     return False
 
 
-def _result_failed_static_thresholds() -> bool:
+def _performance_pytest_failed() -> bool:
     value = os.environ.get("PERF_PYTEST_RC", "")
     if not value:
         return False
@@ -390,8 +397,27 @@ def _check_regressions(
     return failures
 
 
-def _fixed_threshold_failure(record: dict[str, Any]) -> str:
-    return (f"{record['model_id']} fixed-threshold phase failed "
+def _fixed_threshold_failures(raw_result: dict[str, Any]) -> list[str]:
+    thresholds = raw_result.get("thresholds")
+    if not isinstance(thresholds, dict):
+        return []
+
+    failures = []
+    for result_key, threshold_key in STATIC_THRESHOLD_FIELDS:
+        current = safe_float(raw_result.get(result_key))
+        threshold = safe_float(thresholds.get(threshold_key))
+        if current is None or threshold is None or current <= threshold:
+            continue
+        failures.append(
+            f"{raw_result.get('benchmark_id', 'unknown')} {result_key} exceeded fixed threshold "
+            f"(current={current:.3f}, threshold={threshold:.3f})"
+        )
+    return failures
+
+
+def _pytest_infra_failure(record: dict[str, Any]) -> str:
+    return (f"{record['model_id']} performance pytest failed without an "
+            "attributable static-threshold regression "
             f"(PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')})")
 
 
@@ -416,10 +442,14 @@ def _evaluate_record_comparison(
     baseline_records: list[dict[str, Any]],
     recipe_mismatch_records: list[dict[str, Any]],
     metric_policies: tuple[MetricPolicy, ...],
-    static_threshold_failed: bool,
+    static_threshold_failures: list[str],
+    unattributed_pytest_failure: bool,
 ) -> tuple[list[str], str, str]:
-    if static_threshold_failed:
-        failure = _fixed_threshold_failure(record)
+    if static_threshold_failures:
+        return static_threshold_failures, STATUS_REGRESSION, "; ".join(static_threshold_failures)
+
+    if unattributed_pytest_failure:
+        failure = _pytest_infra_failure(record)
         return [failure], STATUS_INFRA_ERROR, failure
 
     if not baseline_records:
@@ -582,7 +612,7 @@ def _emit_markdown_summary(markdown: str, commit_sha: str) -> None:
 def main() -> int:
     persist_tracking = _should_persist_tracking()
     upload_policy = _normalized_upload_policy()
-    static_threshold_failed = _result_failed_static_thresholds()
+    performance_pytest_failed = _performance_pytest_failed()
 
     # Strict on upload-enabled runs: silent sync failure would make comparison
     # and upload state ambiguous.
@@ -593,6 +623,9 @@ def main() -> int:
         print(f"No performance result files found in {RESULTS_DIR}")
         return 0
 
+    static_threshold_failures = [_fixed_threshold_failures(raw) for raw in current_results]
+    unattributed_pytest_failure = performance_pytest_failed and not any(static_threshold_failures)
+
     all_failures: list[str] = []
     summary_rows: list[dict[str, Any]] = []
 
@@ -601,10 +634,15 @@ def main() -> int:
     else:
         print("Tracking persistence disabled: PERF_UPLOAD_POLICY=never")
 
-    if static_threshold_failed:
-        print(f"Static-threshold phase failed: PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')}")
+    if performance_pytest_failed:
+        if unattributed_pytest_failure:
+            print("Performance pytest failed without a measured static-threshold regression: "
+                  f"PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')}")
+        else:
+            print("Performance pytest failure attributed to per-record static thresholds: "
+                  f"PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')}")
 
-    for raw in current_results:
+    for raw, fixed_threshold_failures in zip(current_results, static_threshold_failures, strict=True):
         record = _normalize_record(raw)
         metric_policies = resolve_metric_policies(record.get("regression_thresholds"))
         identity_filters = _comparison_identity_filters_or_none(record)
@@ -642,7 +680,8 @@ def main() -> int:
                 baseline_records,
                 recipe_mismatch_records,
                 metric_policies,
-                static_threshold_failed,
+                fixed_threshold_failures,
+                unattributed_pytest_failure,
             )
         except Exception as exc:
             comparison_status = STATUS_INFRA_ERROR

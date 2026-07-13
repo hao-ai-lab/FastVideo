@@ -71,6 +71,7 @@ ci_env_secret = modal.Secret.from_dict({
     "BUILDKITE_JOB_ID": os.environ.get("BUILDKITE_JOB_ID", ""),
     "TEST_SCOPE": os.environ.get("TEST_SCOPE", ""),
     "IMAGE_VERSION": image_version,
+    "FASTVIDEO_CONTAINER_IMAGE_REF": image_ref,
     **({
         "UV_TORCH_BACKEND": uv_torch_backend_override
     } if uv_torch_backend_override else {}),
