@@ -72,7 +72,7 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
         else()
             # Best-effort probe of the visible GPU (mirrors build.sh detect_with_torch).
             execute_process(
-                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (12, 0)) else f'{mj}.{mn}')"
+                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (12, 0), (12, 1)) else f'{mj}.{mn}')"
                 OUTPUT_VARIABLE _FV_ARCH_LIST
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 RESULT_VARIABLE _fv_detect_rc
@@ -208,10 +208,13 @@ else()
         set(_WANTS_ATTN_QAT_INFER ON)
     elseif(FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER STREQUAL "AUTO")
         if(TORCH_CUDA_ARCH_LIST)
+            # Consumer/workstation Blackwell: sm_120a (RTX 5090 / PRO 6000) and
+            # sm_121a (DGX Spark GB10). The block-scaled FP4 MMA is valid on both
+            # (GB10-verified: cos ~0.98 vs bf16 SDPA across shapes).
             string(REGEX MATCH
-                "(^|[; ,])((12\\.0a)|(120a)|(sm_120a))([; ,]|$)"
-                _HAS_120A "${TORCH_CUDA_ARCH_LIST}")
-            if(_HAS_120A)
+                "(^|[; ,])((12\\.0a)|(120a)|(sm_120a)|(12\\.1a)|(121a)|(sm_121a))([; ,]|$)"
+                _HAS_BLACKWELL_FP4 "${TORCH_CUDA_ARCH_LIST}")
+            if(_HAS_BLACKWELL_FP4)
                 set(_WANTS_ATTN_QAT_INFER ON)
             endif()
         else()
@@ -243,7 +246,7 @@ else()
     else()
         message(STATUS
             "attn_qat_infer kernels: DISABLED "
-            "(requires CUDA 12.8+ and Blackwell sm_120a)")
+            "(requires CUDA 12.8+ and Blackwell sm_120a/sm_121a)")
     endif()
 endif()
 
@@ -253,12 +256,12 @@ set(BUILD_CXX_KERNELS ON)
 # ---------------------------------------------------------------------------
 # Per-arch split for the Blackwell FP4 (attn_qat_infer) build
 # ---------------------------------------------------------------------------
-# The FP4 kernels are sm_120a-only (they emit `cvt.e2m1x2` etc.), while the main
+# The FP4 kernels are Blackwell-only (sm_120a/sm_121a; they emit `cvt.e2m1x2` etc.), while the main
 # extension (Hopper-only TK + generic turbodiffusion) targets the full arch list.
 # find_package(Torch) injects ONE global -gencode list into CMAKE_CUDA_FLAGS that
 # forces every target onto every arch, so the FP4 sources also get the sm_90a pass
 # and ptxas rejects their Blackwell instructions. Strip that global list and drive
-# arch per target via CUDA_ARCHITECTURES instead (the fp4* targets pin 120a below;
+# arch per target via CUDA_ARCHITECTURES instead (the fp4* targets pin the Blackwell archs below;
 # the main extension gets the full list). Only do this for the FP4 build with an
 # explicit arch list, so the cu126 / local autodetect paths stay untouched.
 if(ENABLE_ATTN_QAT_INFER AND TORCH_CUDA_ARCH_LIST)
@@ -270,7 +273,7 @@ if(ENABLE_ATTN_QAT_INFER AND TORCH_CUDA_ARCH_LIST)
     set(FASTVIDEO_MAIN_CUDA_ARCHS "${TORCH_CUDA_ARCH_LIST}")
     string(REPLACE "sm_" "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
     string(REPLACE "." "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
-    message(STATUS "[per-arch] main extension archs=${FASTVIDEO_MAIN_CUDA_ARCHS}, fp4* archs=120a")
+    message(STATUS "[per-arch] main extension archs=${FASTVIDEO_MAIN_CUDA_ARCHS}, fp4* archs=sm_120a/sm_121a")
 endif()
 
 # Compiler flags
@@ -410,8 +413,18 @@ if(ENABLE_ATTN_QAT_INFER)
         $<$<COMPILE_LANGUAGE:CXX>:-O3 -std=c++17>
         $<$<COMPILE_LANGUAGE:CUDA>:${ATTN_QAT_INFER_CUDA_FLAGS}>
     )
+    # FP4 kernels target consumer/workstation Blackwell: sm_120a (RTX 5090 /
+    # PRO 6000) and sm_121a (DGX Spark GB10). sm_121a needs CUDA 13's ptxas
+    # (12.8 lacks it), so it is added only on CUDA >= 12.9 — pre-13 toolchains
+    # keep the original sm_120a-only build unchanged. sm_121a GB10-verified
+    # (cos ~0.98 vs bf16).
+    set(FASTVIDEO_FP4_CUDA_ARCHS "120a")
+    if(NOT CUDAToolkit_VERSION VERSION_LESS 12.9)
+        list(APPEND FASTVIDEO_FP4_CUDA_ARCHS "121a")
+    endif()
+    message(STATUS "fp4* CUDA architectures: ${FASTVIDEO_FP4_CUDA_ARCHS}")
     set_target_properties(fp4attn_cuda PROPERTIES
-        CUDA_ARCHITECTURES "120a"
+        CUDA_ARCHITECTURES "${FASTVIDEO_FP4_CUDA_ARCHS}"
         CXX_STANDARD 17
         CUDA_STANDARD 17
     )
@@ -427,7 +440,7 @@ if(ENABLE_ATTN_QAT_INFER)
         $<$<COMPILE_LANGUAGE:CUDA>:${ATTN_QAT_INFER_CUDA_FLAGS}>
     )
     set_target_properties(fp4quant_cuda PROPERTIES
-        CUDA_ARCHITECTURES "120a"
+        CUDA_ARCHITECTURES "${FASTVIDEO_FP4_CUDA_ARCHS}"
         CXX_STANDARD 17
         CUDA_STANDARD 17
     )
@@ -449,6 +462,6 @@ message(STATUS "host / backend:       ${CMAKE_SYSTEM_PROCESSOR} / ${GPU_BACKEND}
 message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
 message(STATUS "fastvideo_kernel_ops: ON  (turbodiffusion int8-gemm/quant/rmsnorm/layernorm, all listed archs)")
 message(STATUS "  + TK sta/block_sparse (sm_90a only):          ${ENABLE_TK_KERNELS}")
-message(STATUS "fp4attn/fp4quant (sm_120a only, CUDA >= 12.8):  ${ENABLE_ATTN_QAT_INFER}")
+message(STATUS "fp4attn/fp4quant (sm_120a/sm_121a, CUDA >= 12.8):  ${ENABLE_ATTN_QAT_INFER}")
 message(STATUS "Triton fallbacks ship in python/fastvideo_kernel/triton_kernels regardless.")
 message(STATUS "============================================================")
