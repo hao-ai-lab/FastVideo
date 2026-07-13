@@ -442,9 +442,15 @@ def _build_result_record(
     if isinstance(num_frames, (int, float)) and avg_time > 0:
         throughput_fps = num_frames / avg_time
 
+    result_schema_fields = (
+        {"result_schema_version": RESULT_SCHEMA_VERSION}
+        if _is_v2_config(cfg)
+        else {}
+    )
+
     return {
         "benchmark_id": cfg["benchmark_id"],
-        "result_schema_version": RESULT_SCHEMA_VERSION,
+        **result_schema_fields,
         "model_short_name": model_info.get("model_short_name", ""),
         "device": device_name,
         "num_gpus": init_kwargs.get("num_gpus", 1),

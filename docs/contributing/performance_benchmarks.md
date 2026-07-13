@@ -410,8 +410,9 @@ baseline eligible.
 New v2 records compare only against the same `workload_id`, `variant_id`,
 `benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and
 `software_profile_id` cohort, independent of the legacy `model_id` directory
-and `gpu_type` display string. Legacy lookup remains scoped by `model_id` and
-`gpu_type`.
+and `gpu_type` display string. Historical v1 records remain readable for
+reporting, but current legacy artifacts do not perform a `(model_id, gpu_type)`
+rolling comparison or seed new rolling baselines.
 `environment_metadata` and `environment_fingerprint` are audit data and are not
 part of the comparison key.
 The recipe prompt digests describe the prompts actually measured by the
@@ -517,9 +518,9 @@ When the rolling-baseline phase runs, it emits:
 2. The pytest test auto-discovers all configs — no test code needed. CI
    picks it up on the next `/test performance` run.
 
-3. Legacy benchmarks keep the historical initialization behavior: the first
-   persisted main-branch run with no HF history passes and seeds the rolling
-   baseline. V2 benchmarks with no exact comparable baseline report
+3. Legacy benchmarks are gated only by their static thresholds. Their current
+   records skip rolling-baseline comparison and are never baseline eligible.
+   V2 benchmarks with no exact comparable baseline report
    `CALIBRATION_NEEDED`; the record remains visible but does not become
    baseline eligible until a comparable scheduled-main full-suite run is
    reviewed and seeded with `fastvideo/tests/performance/seed_baseline.py`.

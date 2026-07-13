@@ -8,6 +8,7 @@ from fastvideo.tests.performance import test_inference_performance as perf_test
 def _benchmark_config():
     return {
         "benchmark_id": "wan-t2v-1.3b-2gpu",
+        "config_schema_version": perf_test.V2_CONFIG_SCHEMA_VERSION,
         "workload_id": "wan-t2v",
         "variant_id": "1.3b-sp2",
         "benchmark_version": 2,

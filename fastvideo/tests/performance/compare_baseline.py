@@ -24,7 +24,6 @@ from typing import Any
 try:
     from fastvideo.performance.hf_store import (
         load_records_for_identity,
-        load_records_for_model,
         safe_float,
         sanitize,
         sync_from_hf,
@@ -42,7 +41,6 @@ except ImportError:
         sys.path.insert(0, repo_root)
     from fastvideo.performance.hf_store import (
         load_records_for_identity,
-        load_records_for_model,
         safe_float,
         sanitize,
         sync_from_hf,

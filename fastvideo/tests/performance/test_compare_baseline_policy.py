@@ -6,6 +6,7 @@ import pytest
 
 from fastvideo.tests.performance import compare_baseline
 from fastvideo.tests.performance import seed_baseline
+from fastvideo.tests.performance import test_inference_performance as perf_test
 from fastvideo.performance.hf_store import (
     load_records_for_identity,
     load_records_for_model,
@@ -246,24 +247,41 @@ def test_main_writes_v1_current_artifact_without_comparison_identity(monkeypatch
     reports_dir = tmp_path / "reports"
     tracking_root = tmp_path / "tracking"
     results_dir.mkdir()
-    (results_dir / "perf_legacy.json").write_text(json.dumps(_raw_result()), encoding="utf-8")
-    uploaded_records = []
-
     monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
     monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+    raw_result = perf_test._build_result_record(
+        cfg={"benchmark_id": "wan-t2v-1.3b-2gpu"},
+        model_info={},
+        init_kwargs={},
+        gen_kwargs={},
+        num_warmup=1,
+        num_measure=1,
+        thresholds={},
+        times=[10.0],
+        peak_memories=[10000.0],
+        all_component_times=[],
+        prompt="A cinematic video.",
+        runtime_identity={},
+        device_name="NVIDIA L40S",
+        timestamp="2026-06-16T00:00:00+00:00",
+    )
+    assert "result_schema_version" not in raw_result
+    (results_dir / "perf_legacy.json").write_text(json.dumps(raw_result), encoding="utf-8")
+    uploaded_records = []
+
     monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
     monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
     monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
     monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "always")
     monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
 
-    def fail_load_records_for_model(*_args, **_kwargs):
+    def fail_load_records_for_identity(*_args, **_kwargs):
         raise AssertionError("legacy current records should skip v2 baseline lookup")
 
     def fake_upload_record(_path, record, *, strict=False):
         uploaded_records.append(record.copy())
 
-    monkeypatch.setattr(compare_baseline, "load_records_for_model", fail_load_records_for_model)
+    monkeypatch.setattr(compare_baseline, "load_records_for_identity", fail_load_records_for_identity)
     monkeypatch.setattr(compare_baseline, "upload_record", fake_upload_record)
 
     assert compare_baseline.main() == 0
@@ -276,6 +294,8 @@ def test_main_writes_v1_current_artifact_without_comparison_identity(monkeypatch
 
     normalized = json.loads(normalized_files[0].read_text(encoding="utf-8"))
     assert "result_schema_version" not in normalized
+    assert normalized["comparison_status"] == compare_baseline.STATUS_PASS
+    assert normalized["baseline_status"] == "skipped_missing_identity"
     assert normalized["success"] is True
     assert normalized["baseline_eligible"] is False
     assert len(uploaded_records) == 1
