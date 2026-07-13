@@ -4,7 +4,9 @@ Runs FastWan-QAD-1.3B-SA2 (a distilled Wan2.1-T2V-1.3B-Diffusers checkpoint) wit
 NVFP4QATConfig quantization. Uses the SAGE_ATTN attention backend.
 
 Requirements:
-    - GPU: sm89+ (H100, L40S, RTX 4090, Ada Lovelace, or newer)
+    - GPU (default NVFP4 mode): RTX 5090-class Blackwell (sm_120a). The NVFP4
+      linear path uses flashinfer's cutlass FP4 gemm, which has no fallback.
+    - GPU (--bf16 baseline): sm89+ (H100, L40S, RTX 4090, Ada Lovelace, or newer)
     - sageattention: pip install sageattention
     - TAEHV (optional): Follow install instructions at https://github.com/madebyollin/taehv
 
@@ -34,7 +36,7 @@ class TaehvDecoder:
     @torch.no_grad()
     def decode(self, latents: torch.Tensor):
         latents = latents.permute(0, 2, 1, 3, 4).to(self.device, self.dtype)
-        decoded = self.model.decode_video(latents, parallel=False, show_progress_bar=False)
+        decoded = self.model.decode_video(latents, parallel=True, show_progress_bar=False)
         frames = (decoded[0].clamp(0, 1) * 255).to(torch.uint8)
         return frames.permute(0, 2, 3, 1).cpu().numpy()
 
@@ -52,9 +54,14 @@ def main():
     parser.add_argument("--infer_steps", type=int, default=3)
     args = parser.parse_args()
 
+    from _qad_common import flashinfer_arch_list, require_fp4_capable_gpu
+
+    if not args.bf16:
+        require_fp4_capable_gpu()
+
     os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
     os.environ["FASTVIDEO_DISABLE_ATTENTION_COMPILE"] = "0"
-    os.environ["FLASHINFER_CUDA_ARCH_LIST"] = "12.0a"
+    os.environ.setdefault("FLASHINFER_CUDA_ARCH_LIST", flashinfer_arch_list())
 
     from fastvideo import VideoGenerator
     from fastvideo.configs.pipelines.base import PipelineConfig

@@ -6,6 +6,8 @@ FP8 e4m3 quantized DiT linear layers. Uses the SAGE_ATTN attention backend.
 Requirements:
     - GPU: sm89+ (H100, L40S, RTX 4090, Ada Lovelace, or newer)
       Falls back to a bf16 dequant path on older GPUs.
+    - sageattention: pip install sageattention (the script defaults to the
+      SAGE_ATTN attention backend)
     - TAEHV (optional): Follow install instructions at https://github.com/madebyollin/taehv
 
 Usage:
@@ -35,7 +37,7 @@ class TaehvDecoder:
     @torch.no_grad()
     def decode(self, latents: torch.Tensor):
         latents = latents.permute(0, 2, 1, 3, 4).to(self.device, self.dtype)
-        decoded = self.model.decode_video(latents, parallel=False, show_progress_bar=False)
+        decoded = self.model.decode_video(latents, parallel=True, show_progress_bar=False)
         frames = (decoded[0].clamp(0, 1) * 255).to(torch.uint8)
         return frames.permute(0, 2, 3, 1).cpu().numpy()
 

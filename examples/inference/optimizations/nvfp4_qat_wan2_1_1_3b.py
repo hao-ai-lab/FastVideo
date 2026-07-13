@@ -4,7 +4,11 @@ Runs FastWan-QAD-1.3B (a distilled Wan2.1-T2V-1.3B-Diffusers checkpoint) with
 NVFP4QATConfig quantization. Uses ATTN_QAT_INFER attention backend.
 
 Requirements:
-    - GPU: Blackwell (B200/B300, sm100a+) for the FP4 linear path
+    - GPU (default NVFP4 mode): RTX 5090-class Blackwell (sm_120a). The FP4
+      linear path uses flashinfer's sm_120a cubins, which do not run on
+      sm_100 (B200/B300), and the attn_qat_infer kernel hard-gates on sm_120.
+    - GPU (--bf16 baseline): any supported GPU (the ATTN_QAT_INFER backend
+      falls back to Flash Attention off sm_120).
     - TAEHV (optional): Follow install instructions at https://github.com/madebyollin/taehv
 
 Usage:
@@ -33,7 +37,7 @@ class TaehvDecoder:
     @torch.no_grad()
     def decode(self, latents: torch.Tensor):
         latents = latents.permute(0, 2, 1, 3, 4).to(self.device, self.dtype)
-        decoded = self.model.decode_video(latents, parallel=False, show_progress_bar=False)
+        decoded = self.model.decode_video(latents, parallel=True, show_progress_bar=False)
         frames = (decoded[0].clamp(0, 1) * 255).to(torch.uint8)
         return frames.permute(0, 2, 3, 1).cpu().numpy()
 
@@ -51,9 +55,14 @@ def main():
     parser.add_argument("--infer_steps", type=int, default=3)
     args = parser.parse_args()
 
+    from _qad_common import flashinfer_arch_list, require_fp4_capable_gpu
+
+    if not args.bf16:
+        require_fp4_capable_gpu()
+
     os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "ATTN_QAT_INFER")
     os.environ["FASTVIDEO_DISABLE_ATTENTION_COMPILE"] = "0"
-    os.environ["FLASHINFER_CUDA_ARCH_LIST"] = "12.0a"
+    os.environ.setdefault("FLASHINFER_CUDA_ARCH_LIST", flashinfer_arch_list())
 
     from fastvideo import VideoGenerator
     from fastvideo.configs.pipelines.base import PipelineConfig
