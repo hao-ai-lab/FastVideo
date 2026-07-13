@@ -48,6 +48,15 @@ def load_validation_entries(path: Path) -> list[dict]:
     raise ValueError(f"Unsupported validation format in {path}. Expected {{'data': [...]}}.")
 
 
+def _stages_of(logging_info):
+    """Per-stage timing map from a logging_info that may be a
+    PipelineLoggingInfo object or a plain dict (e.g. serialized results)."""
+    stages = getattr(logging_info, "stages", None)
+    if stages is None and isinstance(logging_info, dict):
+        stages = logging_info.get("stages")
+    return stages
+
+
 def print_stage_breakdown(
     result: dict,
     run_idx: int,
@@ -58,7 +67,7 @@ def print_stage_breakdown(
         print(f"[{run_idx}/{num_runs}] Stage breakdown unavailable: no logging_info")
         return None
 
-    stages = getattr(logging_info, "stages", None)
+    stages = _stages_of(logging_info)
     if not stages:
         print(f"[{run_idx}/{num_runs}] Stage breakdown unavailable: no stage timings")
         return None
@@ -80,7 +89,7 @@ def extract_sr_forward_latency(
     if logging_info is None:
         return None, [], []
 
-    stages = getattr(logging_info, "stages", None)
+    stages = _stages_of(logging_info)
     if not stages:
         return None, [], []
 
@@ -117,7 +126,7 @@ def collect_stage_times(
     logging_info = result.get("logging_info")
     if logging_info is None:
         return
-    stages = getattr(logging_info, "stages", None)
+    stages = _stages_of(logging_info)
     if not stages:
         return
     for stage_name, stage_metrics in stages.items():
@@ -189,8 +198,11 @@ def main() -> None:
     # convention (.buildkite/performance-benchmarks/tests/wan-t2v-1.3b.json).
     num_runs = int(os.getenv("LTX2_NUM_RUNS", "7"))
     warmup_runs = int(os.getenv("LTX2_WARMUP_RUNS", "2"))
-    avg_window = num_runs - warmup_runs
-    measured_start_idx = max(warmup_runs, num_runs - avg_window)
+    if warmup_runs >= num_runs:
+        raise ValueError(
+            f"LTX2_WARMUP_RUNS ({warmup_runs}) must be < LTX2_NUM_RUNS ({num_runs}); "
+            "otherwise there are no measured runs to average.")
+    measured_start_idx = warmup_runs
 
     model_root = maybe_download_model(MODEL_ID)
     refine_upsampler_path = resolve_refine_upsampler_path(model_root)
@@ -275,7 +287,7 @@ def main() -> None:
                 # image_path="examples/inference/basic/prompt1.png",
                 # ltx2_image_crf=0.0
             )
-            if os.environ.get("FASTVIDEO_STAGE_LOGGING") == "0":
+            if os.environ.get("FASTVIDEO_STAGE_LOGGING") == "0" and torch.cuda.is_available():
                 torch.cuda.synchronize()
 
             elapsed = result.get("generation_time") if isinstance(result, dict) else None
