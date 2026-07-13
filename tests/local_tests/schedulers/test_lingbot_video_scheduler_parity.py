@@ -9,10 +9,7 @@ scheduler under the released checkpoint configuration.
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 
-import pytest
 import torch
 from torch.testing import assert_close
 
@@ -22,18 +19,15 @@ from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
 from lingbot_video.scheduling_flow_unipc import (
     FlowUniPCMultistepScheduler as OfficialFlowUniPCMultistepScheduler,
 )
+from tests.local_tests.lingbot_video.hf_assets import OFFICIAL_DENSE, download_components
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_MODEL_PATH = REPO_ROOT / "checkpoints" / "lingbot-video" / "official" / "dense-1.3b"
 PARITY_SCOPE = "implementation_subcomponent"
 
 
 def _scheduler_kwargs() -> dict[str, object]:
     """Load the exact scheduler constructor arguments released with Dense."""
-    model_path = Path(os.environ.get("LINGBOT_VIDEO_DENSE_MODEL_PATH", DEFAULT_MODEL_PATH))
+    model_path = download_components(OFFICIAL_DENSE, "scheduler")
     config_path = model_path / "scheduler" / "scheduler_config.json"
-    if not config_path.exists():
-        pytest.skip(f"LingBot-Video scheduler config is unavailable: {config_path}")
     config = json.loads(config_path.read_text())
     return {key: value for key, value in config.items() if not key.startswith("_")}
 

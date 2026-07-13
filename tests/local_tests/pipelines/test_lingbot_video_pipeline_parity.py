@@ -6,18 +6,18 @@ from __future__ import annotations
 import gc
 import os
 from pathlib import Path
-import sys
 from typing import Any, cast
 
 import pytest
 import torch
 from torch.testing import assert_close
 
+from tests.local_tests.lingbot_video.hf_assets import (
+    FASTVIDEO_DENSE,
+    OFFICIAL_DENSE,
+    download_components,
+)
 
-WORKTREE = Path("/mnt/weka/shrd/wm/junda/fv-hub/fastvideo-port-lingbot-video")
-OFFICIAL_ROOT = WORKTREE / "checkpoints/lingbot-video/official/dense-1.3b"
-CONVERTED_ROOT = WORKTREE / "checkpoints/lingbot-video/converted/dense-1.3b"
-OFFICIAL_REF = Path("/mnt/weka/shrd/wm/junda/fv-hub/lingbot-video-reference")
 PROMPT = "A red fox runs through fresh snow at sunrise."
 NEGATIVE_PROMPT = '{"universal_negative": {"visual_quality": ["low quality", "blurry"]}}'
 HEIGHT = int(os.environ.get("LINGBOT_VIDEO_PARITY_HEIGHT", "32"))
@@ -54,10 +54,8 @@ def _require_gpu_test() -> None:
         pytest.skip(f"LingBot-Video pipeline parity requires {NUM_GPUS} CUDA devices")
 
 
-def _run_official(latents: torch.Tensor) -> torch.Tensor:
+def _run_official(latents: torch.Tensor, model_dir: Path) -> torch.Tensor:
     """Run the released production loader with the configured parity dimensions."""
-    if str(OFFICIAL_REF) not in sys.path:
-        sys.path.insert(0, str(OFFICIAL_REF))
     from lingbot_video.runner import _load_diffusers_pipe
 
     dtype_map = {
@@ -67,7 +65,7 @@ def _run_official(latents: torch.Tensor) -> torch.Tensor:
         "vae": torch.float32,
     }
     pipe = _load_diffusers_pipe(
-        OFFICIAL_ROOT,
+        model_dir,
         dtype_map,
         mode="t2v",
         transformer_subfolder="transformer",
@@ -96,12 +94,12 @@ def _run_official(latents: torch.Tensor) -> torch.Tensor:
         torch.cuda.empty_cache()
 
 
-def _run_fastvideo(latents: torch.Tensor) -> torch.Tensor:
+def _run_fastvideo(latents: torch.Tensor, model_dir: Path, output_dir: Path) -> torch.Tensor:
     """Run the converted native pipeline with the same prompt, seed, shape, and schedule."""
     from fastvideo import VideoGenerator
 
     generator = VideoGenerator.from_pretrained(
-        str(CONVERTED_ROOT),
+        str(model_dir),
         num_gpus=NUM_GPUS,
         sp_size=SP_SIZE,
         use_fsdp_inference=USE_FSDP,
@@ -122,7 +120,7 @@ def _run_fastvideo(latents: torch.Tensor) -> torch.Tensor:
         result = generator.generate_video(
             prompt=PROMPT,
             negative_prompt=NEGATIVE_PROMPT,
-            output_path=str(WORKTREE / "outputs/lingbot-video/parity"),
+            output_path=str(output_dir),
             save_video=False,
             return_frames=True,
             height=HEIGHT,
@@ -142,9 +140,25 @@ def _run_fastvideo(latents: torch.Tensor) -> torch.Tensor:
         generator.shutdown()
 
 
-def test_lingbot_video_latents_match() -> None:
+def test_lingbot_video_latents_match(tmp_path: Path) -> None:
     """Compare official and FastVideo latent outputs for the configured schedule."""
     _require_gpu_test()
+    official_root = download_components(
+        OFFICIAL_DENSE,
+        "scheduler",
+        "text_encoder",
+        "processor",
+        "transformer",
+        "vae",
+    )
+    fastvideo_root = download_components(
+        FASTVIDEO_DENSE,
+        "scheduler",
+        "text_encoder",
+        "tokenizer",
+        "transformer",
+        "vae",
+    )
     latents = torch.randn(
         (1, 16, (NUM_FRAMES - 1) // 4 + 1, HEIGHT // 8, WIDTH // 8),
         generator=torch.Generator(device="cpu").manual_seed(42),
@@ -162,8 +176,8 @@ def test_lingbot_video_latents_match() -> None:
         torch.backends.cuda.enable_mem_efficient_sdp(False)
         torch.backends.cuda.enable_math_sdp(True)
     try:
-        expected = _run_official(latents)
-        actual = _run_fastvideo(latents)
+        expected = _run_official(latents, official_root)
+        actual = _run_fastvideo(latents, fastvideo_root, tmp_path)
     finally:
         torch.backends.cuda.enable_cudnn_sdp(original_sdp_backends[0])
         torch.backends.cuda.enable_flash_sdp(original_sdp_backends[1])

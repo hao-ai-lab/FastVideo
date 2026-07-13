@@ -10,12 +10,10 @@ from typing import Any, cast
 import pytest
 import torch
 
-
-WORKTREE = Path("/mnt/weka/shrd/wm/junda/fv-hub/fastvideo-port-lingbot-video")
-MODEL_DIR = WORKTREE / "checkpoints/lingbot-video/converted/moe-30b-a3b"
+from tests.local_tests.lingbot_video.hf_assets import FASTVIDEO_MOE, download_components
 
 
-def test_lingbot_video_moe_refiner_pipeline_smoke() -> None:
+def test_lingbot_video_moe_refiner_pipeline_smoke(tmp_path: Path) -> None:
     """Run a tiny decoded base video through VAE re-encode and the second MoE DiT."""
     if os.environ.get("LINGBOT_VIDEO_RUN_REFINER_PIPELINE_TESTS") != "1":
         pytest.skip("Set LINGBOT_VIDEO_RUN_REFINER_PIPELINE_TESTS=1 on a scheduled H200 node.")
@@ -24,8 +22,17 @@ def test_lingbot_video_moe_refiner_pipeline_smoke() -> None:
         pytest.skip(f"LingBot-Video refiner smoke requires {required_gpus} CUDA devices.")
     from fastvideo import VideoGenerator
 
+    model_dir = download_components(
+        FASTVIDEO_MOE,
+        "scheduler",
+        "text_encoder",
+        "tokenizer",
+        "transformer",
+        "transformer_2",
+        "vae",
+    )
     generator = VideoGenerator.from_pretrained(
-        str(MODEL_DIR),
+        str(model_dir),
         num_gpus=required_gpus,
         sp_size=required_gpus,
         use_fsdp_inference=True,
@@ -39,7 +46,7 @@ def test_lingbot_video_moe_refiner_pipeline_smoke() -> None:
     try:
         result = generator.generate_video(
             prompt="A red fox runs through fresh snow at sunrise.",
-            output_path=str(WORKTREE / "outputs/lingbot-video/moe-refiner-smoke"),
+            output_path=str(tmp_path),
             save_video=False,
             return_frames=True,
             height=32,

@@ -562,11 +562,21 @@ class TestLingBotVideoPresets:
     def test_lingbot_video_presets_registered(self) -> None:
         """Register both released LingBot-Video inference layouts."""
         import fastvideo.registry  # noqa: F401
+        from fastvideo.registry import get_preset_selection
+
         presets = get_presets_for_family("lingbot_video")
         assert {preset.name for preset in presets} == {
             "lingbot_video_dense_t2v",
             "lingbot_video_moe_refiner_t2v",
         }
+        assert get_preset_selection("FastVideo/LingBot-Video-Dense-1.3B-Diffusers") == (
+            "lingbot_video_dense_t2v",
+            "lingbot_video",
+        )
+        assert get_preset_selection("FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers") == (
+            "lingbot_video_moe_refiner_t2v",
+            "lingbot_video",
+        )
 
     def test_moe_refiner_defaults(self) -> None:
         """Expose the official base and 1080p refiner sampling defaults."""

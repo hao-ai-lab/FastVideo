@@ -7,7 +7,6 @@ import gc
 import json
 import os
 from pathlib import Path
-import sys
 
 import pytest
 from safetensors import safe_open
@@ -15,6 +14,7 @@ import torch
 from torch.testing import assert_close
 
 from fastvideo.models.loader.fsdp_load import set_default_dtype
+from tests.local_tests.lingbot_video.hf_assets import OFFICIAL_MOE, download_patterns
 
 
 os.environ.setdefault("DIFFUSERS_ATTN_BACKEND", "native")
@@ -22,10 +22,6 @@ os.environ.setdefault("LINGBOT_MOE_EXPERT_BACKEND", "grouped_mm")
 os.environ.setdefault("LINGBOT_MOE_PAD_BACKEND", "loop")
 os.environ.setdefault("LINGBOT_MOE_REORDER_BACKEND", "sort")
 os.environ.setdefault("LINGBOT_MOE_RESTORE_BACKEND", "scatter")
-
-WORKTREE = Path("/mnt/weka/shrd/wm/junda/fv-hub/fastvideo-port-lingbot-video")
-OFFICIAL_REF_DIR = Path("/mnt/weka/shrd/wm/junda/fv-hub/lingbot-video-reference")
-TRANSFORMER_DIR = WORKTREE / "checkpoints/lingbot-video/official/moe-30b-a3b/transformer"
 
 
 def _block_kwargs(config: dict, layer_index: int = 0) -> dict:
@@ -52,9 +48,29 @@ def _block_kwargs(config: dict, layer_index: int = 0) -> dict:
     }
 
 
-def _load_block_state(layer_index: int = 0) -> dict[str, torch.Tensor]:
+def _download_transformer_for_block(layer_index: int = 0) -> Path:
+    """Download the config, index, and only the shards containing one block."""
+    metadata = (
+        "transformer/config.json",
+        "transformer/diffusion_pytorch_model.safetensors.index.json",
+    )
+    model_dir = download_patterns(OFFICIAL_MOE, *metadata)
+    index = json.loads((model_dir / metadata[1]).read_text())
+    prefix = f"blocks.{layer_index}."
+    shards = {shard for name, shard in index["weight_map"].items() if name.startswith(prefix)}
+    return (
+        download_patterns(
+            OFFICIAL_MOE,
+            *metadata,
+            *(f"transformer/{shard}" for shard in sorted(shards)),
+        )
+        / "transformer"
+    )
+
+
+def _load_block_state(transformer_dir: Path, layer_index: int = 0) -> dict[str, torch.Tensor]:
     """Read only one block's tensors from the indexed 30B checkpoint shards."""
-    index = json.loads((TRANSFORMER_DIR / "diffusion_pytorch_model.safetensors.index.json").read_text())
+    index = json.loads((transformer_dir / "diffusion_pytorch_model.safetensors.index.json").read_text())
     prefix = f"blocks.{layer_index}."
     keys_by_shard: dict[str, list[str]] = {}
     for name, shard_name in index["weight_map"].items():
@@ -62,7 +78,7 @@ def _load_block_state(layer_index: int = 0) -> dict[str, torch.Tensor]:
             keys_by_shard.setdefault(shard_name, []).append(name)
     state: dict[str, torch.Tensor] = {}
     for shard_name, names in keys_by_shard.items():
-        with safe_open(TRANSFORMER_DIR / shard_name, framework="pt", device="cpu") as shard:
+        with safe_open(transformer_dir / shard_name, framework="pt", device="cpu") as shard:
             for name in names:
                 state[name.removeprefix(prefix)] = shard.get_tensor(name)
     if not state:
@@ -96,13 +112,12 @@ def test_lingbot_video_moe_block_matches_official_checkpoint() -> None:
         pytest.skip("Set LINGBOT_VIDEO_RUN_GPU_TESTS=1 on a scheduled GPU node.")
     if not torch.cuda.is_available():
         pytest.skip("LingBot-Video MoE block parity requires CUDA.")
-    if str(OFFICIAL_REF_DIR) not in sys.path:
-        sys.path.insert(0, str(OFFICIAL_REF_DIR))
     from lingbot_video.transformer_lingbot_video import LingBotVideoBlock as OfficialBlock
     from fastvideo.models.dits.lingbot_video import LingBotVideoBlock as NativeBlock
 
-    config = json.loads((TRANSFORMER_DIR / "config.json").read_text())
-    state = _load_block_state()
+    transformer_dir = _download_transformer_for_block()
+    config = json.loads((transformer_dir / "config.json").read_text())
+    state = _load_block_state(transformer_dir)
     device = torch.device("cuda:0")
     torch.backends.cuda.enable_cudnn_sdp(False)
 

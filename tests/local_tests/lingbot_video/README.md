@@ -58,9 +58,8 @@ complete MoE/refiner test is a production smoke test.
 
 ## Setup: Required Workspace And Environment
 
-Complete the following steps in order before running the local tests. The tests
-use a directory named `fv-hub` as their shared workspace. The directory can live
-anywhere. Create it and record its absolute path in `FV_HUB`:
+Complete the following steps before running the local tests. The example uses a
+directory named `fv-hub`, but that directory can live anywhere:
 
 ```bash
 mkdir -p fv-hub
@@ -68,17 +67,14 @@ cd fv-hub
 export FV_HUB="$PWD"
 ```
 
-Run the remaining setup commands in the same shell so `FV_HUB` remains defined.
-Place the FastVideo worktree at
-`$FV_HUB/fastvideo-port-lingbot-video`; the steps below create the reference
-repository, virtual environment, and checkpoint directories beside or inside
-that worktree.
+Run the remaining commands in the same shell so `FV_HUB` remains defined. Place
+the FastVideo checkout being tested at
+`$FV_HUB/fastvideo-port-lingbot-video`.
 
 ### Step 1: Clone The Official Reference Implementation
 
-The parity tests compare FastVideo against official LingBot-Video code pinned to
-commit `a638721cf2271804d02738b69f2ad788c4a559fc`. If the reference directory is
-absent, clone it with:
+The parity tests import the official LingBot-Video implementation as the Python
+package `lingbot_video`. Clone the official repository at the validated commit:
 
 ```bash
 cd "$FV_HUB/fastvideo-port-lingbot-video"
@@ -92,10 +88,9 @@ python3 \
 ### Step 2: Prepare The Virtual Environment
 
 The validated environment used Python 3.12, PyTorch 2.11.0+cu128,
-Transformers 5.13.0, and Diffusers 0.39.0. Create the shared virtual environment
-if needed, then populate it with the normal FastVideo dependencies for the local
-platform. After those dependencies are installed, register both repositories
-without resolving or changing package versions:
+Transformers 5.13.0, and Diffusers 0.39.0. Create the virtual environment, install
+the normal FastVideo dependencies for the local platform, then register both
+checkouts without changing dependency versions:
 
 ```bash
 python3.12 -m venv "$FV_HUB/.venv"
@@ -107,68 +102,57 @@ $PY -m pip install --no-deps -e "$FV_HUB/lingbot-video-reference"
 ```
 
 The `--no-deps` commands do not populate an empty virtual environment; they only
-register the two local repositories after the FastVideo dependencies are
-available. Do not build FlashAttention as part of this setup.
+register the two checkouts after the FastVideo dependencies are available. The
+tests import the installed `lingbot_video` package; they do not modify
+`sys.path`. Do not build FlashAttention as part of this setup.
 
-### Step 3: Download The Official Checkpoints
+### Step 3: Configure The Hugging Face Cache
 
-Download both checkpoints at the exact revisions used by the parity tests:
+The tests download their required model components from public Hugging Face
+repositories after the corresponding opt-in test flag is set. No Hugging Face
+token and no manually converted checkpoint directory are required.
 
-```bash
-cd "$FV_HUB/fastvideo-port-lingbot-video"
-PY="$FV_HUB/.venv/bin/python"
+| Role                  | Repository                                                   | Pinned revision                            |
+| --------------------- | ------------------------------------------------------------ | ------------------------------------------ |
+| Official Dense        | `robbyant/lingbot-video-dense-1.3b`                          | `f9789a7d9b4772a47aba62d4eb5282ddefd1da21` |
+| FastVideo Dense       | `FastVideo/LingBot-Video-Dense-1.3B-Diffusers`               | `743ed04b96d77150d952eb08a59a56ee61b9bc95` |
+| Official MoE/refiner  | `robbyant/lingbot-video-moe-30b-a3b`                         | `f2e538f64afe00cc4ae674db2aeb52e2945edfd5` |
+| FastVideo MoE/refiner | `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers`              | `401dce84db5897cb950969e766410c8eadd4fbdf` |
 
-$PY .agents/skills/add-model-01-prep/scripts/download_hf_weights.py \
-  robbyant/lingbot-video-dense-1.3b \
-  checkpoints/lingbot-video/official/dense-1.3b \
-  --revision f9789a7d9b4772a47aba62d4eb5282ddefd1da21
-
-$PY .agents/skills/add-model-01-prep/scripts/download_hf_weights.py \
-  robbyant/lingbot-video-moe-30b-a3b \
-  checkpoints/lingbot-video/official/moe-30b-a3b \
-  --revision f2e538f64afe00cc4ae674db2aeb52e2945edfd5
-```
-
-Both Hugging Face model repositories are public, so these downloads do not
-require a token.
-
-### Step 4: Convert The Checkpoints For FastVideo
-
-Convert each official checkpoint into the component layout loaded by FastVideo:
+Keep the cache inside the shared `fv-hub` workspace by setting `HF_HOME` before
+running pytest:
 
 ```bash
-cd "$FV_HUB/fastvideo-port-lingbot-video"
-PY="$FV_HUB/.venv/bin/python"
-
-$PY scripts/checkpoint_conversion/lingbot_video_to_diffusers.py \
-  --src checkpoints/lingbot-video/official/dense-1.3b \
-  --dst checkpoints/lingbot-video/converted/dense-1.3b
-
-$PY scripts/checkpoint_conversion/lingbot_video_to_diffusers.py \
-  --src checkpoints/lingbot-video/official/moe-30b-a3b \
-  --dst checkpoints/lingbot-video/converted/moe-30b-a3b
+export HF_HOME="$FV_HUB/.cache/huggingface"
+mkdir -p "$HF_HOME"
 ```
 
-The conversion script leaves the official checkpoints unchanged. It reuses the
-released transformer, VAE, and scheduler tensors; converts the text-only
+The helper in `tests/local_tests/lingbot_video/hf_assets.py` pins the revisions
+above and requests only the components used by each test. A complete run of both
+MoE transformer variants and the refiner pipeline can retain roughly 260 GB of
+official and FastVideo weights in the shared cache.
+
+### Step 4: Understand Checkpoint Conversion
+
+Conversion is already reflected in the two public `FastVideo/*-Diffusers`
+repositories and is not a test setup step. Maintainers reproducing those
+packages can use
+`scripts/checkpoint_conversion/lingbot_video_to_diffusers.py`. The script keeps
+the released transformer, VAE, and scheduler tensors; converts the text-only
 Qwen3-VL weights to FastVideo's fused layout; and maps the official MoE
-`refiner/` directory to FastVideo's `transformer_2/` component.
+`refiner/` component to FastVideo's `transformer_2/` component.
 
 ### Setup Result
 
-| Purpose                 | Location relative to `$FV_HUB`                                                 |
-| ----------------------- | ------------------------------------------------------------------------------ |
-| FastVideo worktree      | `fastvideo-port-lingbot-video`                                                 |
-| Official implementation | `lingbot-video-reference`                                                      |
-| Python executable       | `.venv/bin/python`                                                             |
-| Official Dense weights  | `fastvideo-port-lingbot-video/checkpoints/lingbot-video/official/dense-1.3b`   |
-| Official MoE weights    | `fastvideo-port-lingbot-video/checkpoints/lingbot-video/official/moe-30b-a3b`  |
-| Converted Dense weights | `fastvideo-port-lingbot-video/checkpoints/lingbot-video/converted/dense-1.3b`  |
-| Converted MoE weights   | `fastvideo-port-lingbot-video/checkpoints/lingbot-video/converted/moe-30b-a3b` |
-
-Some parity test modules still contain legacy absolute path defaults. Until
-those tests are generalized, update their path constants to match `FV_HUB` when
-running outside the original validation workspace.
+| Purpose                       | Location or identifier                                         |
+| ----------------------------- | -------------------------------------------------------------- |
+| FastVideo checkout            | `$FV_HUB/fastvideo-port-lingbot-video`                         |
+| Official implementation       | `$FV_HUB/lingbot-video-reference` at the pinned commit         |
+| Python executable             | `$FV_HUB/.venv/bin/python`                                     |
+| Official Dense weights        | `robbyant/lingbot-video-dense-1.3b`                            |
+| Official MoE/refiner weights  | `robbyant/lingbot-video-moe-30b-a3b`                           |
+| FastVideo Dense weights       | `FastVideo/LingBot-Video-Dense-1.3B-Diffusers`                 |
+| FastVideo MoE/refiner weights | `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers`                |
 
 ### Compute Requirements For Tests
 
@@ -179,7 +163,7 @@ test instead of consuming a GPU accidentally.
 | Test group                         | Required compute                                                    |
 | ---------------------------------- | ------------------------------------------------------------------- |
 | Routing, layout, and refiner logic | CPU                                                                 |
-| Scheduler parity                   | CPU plus the official Dense scheduler files                         |
+| Scheduler parity                   | CPU; its small pinned scheduler component downloads automatically   |
 | Dense component and pipeline tests | 1 allocated CUDA GPU; prior acceptance runs used an H200            |
 | Dense sequence-parallel test       | 2 allocated CUDA GPUs                                               |
 | Full MoE DiT and base pipeline     | 1 H200; official and FastVideo models are loaded sequentially       |

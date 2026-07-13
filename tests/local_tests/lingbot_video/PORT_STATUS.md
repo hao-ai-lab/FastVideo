@@ -4,11 +4,10 @@
 
 - model_family: `lingbot_video`
 - workload_types: T2V first, then T2I and TI2V (`WorkloadType.I2V`)
-- official_ref: `https://github.com/robbyant/lingbot-video`
-- official_ref_dir: `/mnt/weka/shrd/wm/junda/fv-hub/lingbot-video-reference`
-- hf_weights_path: `robbyant/lingbot-video-dense-1.3b`; `robbyant/lingbot-video-moe-30b-a3b`
-- local_weights_dir: `checkpoints/lingbot-video/official`
-- source_layout: `official custom-code Diffusers; native FastVideo conversion required`
+- official_ref: `https://github.com/robbyant/lingbot-video` at `a638721cf2271804d02738b69f2ad788c4a559fc`
+- official_weights: `robbyant/lingbot-video-dense-1.3b`; `robbyant/lingbot-video-moe-30b-a3b`
+- fastvideo_weights: `FastVideo/LingBot-Video-Dense-1.3B-Diffusers`; `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers`
+- source_layout: `official custom-code Diffusers; converted FastVideo packages published on Hugging Face`
 - converted_model_index_classes: `LingBotVideoDensePipeline`; `LingBotVideoMoePipeline`
 - local_tests_readme: `tests/local_tests/lingbot_video/README.md`
 
@@ -17,7 +16,7 @@
 - phase: `t2v_complete`
 - status: `complete`
 - owner: `pipeline`
-- last_updated: `2026-07-11`
+- last_updated: `2026-07-13`
 
 ## Component Matrix
 
@@ -37,15 +36,16 @@
 
 The official checkpoints cannot be loaded directly by native FastVideo because
 their folder layout and text-encoder format are different. The conversion
-script creates FastVideo-compatible copies and does not modify the official
-downloads.
+script creates FastVideo-compatible packages and does not modify the official
+downloads. Local tests use the published packages below; developers do not need
+to run conversion before testing.
 
 - Script: `scripts/checkpoint_conversion/lingbot_video_to_diffusers.py`
 
-| Variant       | Input directory                                  | Output directory                                  |
-| ------------- | ------------------------------------------------ | ------------------------------------------------- |
-| Dense 1.3B    | `checkpoints/lingbot-video/official/dense-1.3b`  | `checkpoints/lingbot-video/converted/dense-1.3b`  |
-| MoE + refiner | `checkpoints/lingbot-video/official/moe-30b-a3b` | `checkpoints/lingbot-video/converted/moe-30b-a3b` |
+| Variant       | Official input repository                  | Published FastVideo repository                              |
+| ------------- | ------------------------------------------ | ----------------------------------------------------------- |
+| Dense 1.3B    | `robbyant/lingbot-video-dense-1.3b`        | `FastVideo/LingBot-Video-Dense-1.3B-Diffusers`              |
+| MoE + refiner | `robbyant/lingbot-video-moe-30b-a3b`       | `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers`             |
 
 What changes:
 
@@ -78,7 +78,7 @@ What does not change:
 
 Related files:
 
-- Converted package metadata: `checkpoints/lingbot-video/converted/*/model_index.json`
+- Published package metadata: each `FastVideo/*-Diffusers` repository's `model_index.json`
 - Dense key mappings: `checkpoints/lingbot-video/mapping/dense/`
 - Conversion layout test: `tests/local_tests/lingbot_video/test_conversion_layout.py`
 - Numerical loading and output checks: see **Validation Results** below.
@@ -232,12 +232,12 @@ NOTE: Component-level numerical parity was achieved. Full MoE/refiner end-to-end
 
 - Worktree base is `19a51a1fe630bcbeaf9fb6d864ad5ed3f31a3536` on branch `model/port-lingbot-video`.
 - Official source imports successfully in the shared venv with no dependency changes.
-- Dense 1.3B weights are present under `checkpoints/lingbot-video/official/dense-1.3b`.
+- Dense official and FastVideo weights are pinned in `tests/local_tests/lingbot_video/hf_assets.py`.
 - Dense DiT key manifests are under `checkpoints/lingbot-video/mapping/dense`; official and native surfaces both have 377 tensors with exact shapes.
 - Dense Qwen3-VL text-only native config/class and parity test are present; conversion filters `model.language_model.*` and fuses QKV and gate/up through the existing Qwen3 loader.
 - Scheduler, Dense DiT, VAE, text, and one/two-step sequential-CFG pipeline parity all pass without skips.
-- Both official `robbyant` model repositories require conversion before native FastVideo use.
-- Dense conversion is complete at `checkpoints/lingbot-video/converted/dense-1.3b`; its text surface has 290 fused tensors with exact native shapes, and its model index uses `_class_name: LingBotVideoDensePipeline`.
+- Both official `robbyant` model repositories require conversion before native FastVideo use; the public `FastVideo` repositories provide that converted layout.
+- Dense conversion is published at `FastVideo/LingBot-Video-Dense-1.3B-Diffusers`; its text surface has 290 fused tensors with exact native shapes, and its model index uses `_class_name: LingBotVideoDensePipeline`.
 - Production inference preserves the Dense checkpoint's mixed fp32/bf16 parameter policy. Nested FSDP inference passes, while mixed-dtype FSDP training is intentionally rejected because the replicated fp32 parameters would not have synchronized gradients.
 - Native batched CFG passes the non-FSDP and FSDP smoke tests. Official numerical parity covers sequential CFG; the smoke tests are not official batched-CFG parity evidence.
 - Sequence-parallel validation is complete: SP=1 Dense DiT and full-pipeline regressions are exact in Slurm `1859083`/`1859084`; two-GPU B=2 unequal-mask odd-padding coverage passes in Slurm `1859085` and the official CP-order rerun `1859097`; production batched-CFG smoke passes in Slurm `1859089`.
@@ -245,7 +245,7 @@ NOTE: Component-level numerical parity was achieved. Full MoE/refiner end-to-end
 - Canonical Dense final generation Slurm `1859166` produced a visually coherent 832x480, 121-frame, 24-FPS artifact in 330.31 seconds with a 26,738.52 MB rank-zero worker lifetime peak; its bytes exactly match Slurm `1859101`.
 - The corrected Dense benchmark is under `validation/lingbot-video/benchmarks/job-1859117`: native/official mean latency is 0.214387/0.201173 seconds; native steady/peak allocation is 977,264,128/977,289,728 bytes lower.
 - Nsight Systems artifacts are under `validation/lingbot-video/profiles/job-1859106`; launch and synchronization overhead dominate CUDA API time. Its pre-fix steady allocation is superseded by Slurm `1859117`.
-- MoE conversion is complete at `checkpoints/lingbot-video/converted/moe-30b-a3b`; official base and refiner shards map to native `transformer/` and `transformer_2/` with exact 977-key surfaces, and its model index uses `_class_name: LingBotVideoMoePipeline`.
+- MoE conversion is published at `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers`; official base and refiner shards map to native `transformer/` and `transformer_2/` with exact 977-key surfaces, and its model index uses `_class_name: LingBotVideoMoePipeline`.
 - Base and refiner 30.08B DiTs are exact across every block and final output in Slurm `1859114` and `1859145`. Production base-only and FSDP/SP=8 refiner smokes pass in Slurm `1859121` and `1859122`.
 - Canonical Slurm `1859167` completed a 1920x1088, 121-frame, 24-FPS generation in 341.71 FastVideo seconds with a 63,450.65 MB rank-zero worker lifetime peak. Its bytes match superseded Slurm `1859144`; visual review records blurred pillarbox-like side regions as an accepted composition caveat.
 - The final targeted CPU/API regression passed 127 tests with 3 expected GPU-gated skips; targeted Ruff and tracked/untracked whitespace validation pass.

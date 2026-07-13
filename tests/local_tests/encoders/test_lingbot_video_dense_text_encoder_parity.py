@@ -20,11 +20,13 @@ from fastvideo.models.encoders.lingbot_video import (
 )
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 from fastvideo.models.loader.utils import set_default_torch_dtype
+from tests.local_tests.lingbot_video.hf_assets import (
+    FASTVIDEO_DENSE,
+    OFFICIAL_DENSE,
+    download_components,
+)
 
 
-WORKTREE = Path("/mnt/weka/shrd/wm/junda/fv-hub/fastvideo-port-lingbot-video")
-CHECKPOINT = WORKTREE / "checkpoints/lingbot-video/official/dense-1.3b"
-CONVERTED = WORKTREE / "checkpoints/lingbot-video/converted/dense-1.3b"
 PROMPT_TEMPLATE = (
     "<|im_start|>system\nGiven a user input that may include a text prompt alone, "
     "a text prompt with an image reference, or a text prompt with a video reference "
@@ -49,17 +51,17 @@ def _require_gpu_test() -> torch.device:
     return torch.device("cuda")
 
 
-def _load_official(device: torch.device) -> Qwen3VLForConditionalGeneration:
+def _load_official(device: torch.device, checkpoint: Path) -> Qwen3VLForConditionalGeneration:
     """Load the released full Qwen3-VL wrapper used by the official pipeline."""
     return Qwen3VLForConditionalGeneration.from_pretrained(
-        CHECKPOINT / "text_encoder",
+        checkpoint / "text_encoder",
         dtype=torch.bfloat16,
         attn_implementation="sdpa",
         local_files_only=True,
     ).to(device).eval()
 
 
-def _load_native(device: torch.device) -> LingBotVideoQwen3VLTextModel:
+def _load_native(device: torch.device, checkpoint: Path) -> LingBotVideoQwen3VLTextModel:
     """Load converted fused tensors through FastVideo's production text loader."""
     args = SimpleNamespace(
         text_encoder_cpu_offload=True,
@@ -68,7 +70,7 @@ def _load_native(device: torch.device) -> LingBotVideoQwen3VLTextModel:
         pin_cpu_memory=False,
     )
     model = TextEncoderLoader().load_model(
-        str(CONVERTED / "text_encoder"),
+        str(checkpoint / "text_encoder"),
         LingBotVideoQwen3VLTextConfig(),
         device,
         args,
@@ -189,9 +191,11 @@ def test_lingbot_video_text_encoder_constructs_final_layers_once(monkeypatch: py
 def test_lingbot_video_dense_text_encoder_parity() -> None:
     """Compare official and native final hidden states with identical T2V tokens."""
     device = _require_gpu_test()
+    official_checkpoint = download_components(OFFICIAL_DENSE, "text_encoder", "processor")
+    fastvideo_checkpoint = download_components(FASTVIDEO_DENSE, "text_encoder")
     init_distributed_environment(world_size=1, rank=0, local_rank=0)
     initialize_model_parallel(tensor_model_parallel_size=1, sequence_model_parallel_size=1)
-    processor = AutoProcessor.from_pretrained(CHECKPOINT / "processor")
+    processor = AutoProcessor.from_pretrained(official_checkpoint / "processor")
     inputs = processor(
         text=[PROMPT_TEMPLATE.format("A red fox runs through fresh snow at sunrise.")],
         images=None,
@@ -202,8 +206,8 @@ def test_lingbot_video_dense_text_encoder_parity() -> None:
         padding="longest",
         return_tensors="pt",
     ).to(device)
-    official = _load_official(device)
-    native = _load_native(device)
+    official = _load_official(device, official_checkpoint)
+    native = _load_native(device, fastvideo_checkpoint)
     official_text_model = official.model.language_model
     official_intermediates, official_handles = _capture_intermediates(official_text_model)
     native_intermediates, native_handles = _capture_intermediates(native)

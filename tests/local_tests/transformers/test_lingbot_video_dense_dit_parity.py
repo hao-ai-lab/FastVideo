@@ -12,7 +12,6 @@ import importlib
 import json
 import os
 from pathlib import Path
-import sys
 from typing import Any
 
 import pytest
@@ -20,6 +19,11 @@ import torch
 from torch.testing import assert_close
 
 from fastvideo.models.loader.fsdp_load import maybe_load_fsdp_model
+from tests.local_tests.lingbot_video.hf_assets import (
+    FASTVIDEO_DENSE,
+    OFFICIAL_DENSE,
+    download_components,
+)
 
 
 os.environ.setdefault("MASTER_ADDR", "localhost")
@@ -29,20 +33,6 @@ os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 os.environ.setdefault("DIFFUSERS_ATTN_BACKEND", "native")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-OFFICIAL_REF_DIR = Path(
-    os.getenv(
-        "LINGBOT_VIDEO_OFFICIAL_REF_DIR",
-        "/mnt/weka/shrd/wm/junda/fv-hub/lingbot-video-reference",
-    )
-)
-OFFICIAL_MODEL_DIR = Path(
-    os.getenv(
-        "LINGBOT_VIDEO_DENSE_MODEL_DIR",
-        REPO_ROOT / "checkpoints" / "lingbot-video" / "official" / "dense-1.3b",
-    )
-)
-TRANSFORMER_DIR = OFFICIAL_MODEL_DIR / "transformer"
-CONVERTED_TRANSFORMER_DIR = REPO_ROOT / "checkpoints" / "lingbot-video" / "converted" / "dense-1.3b" / "transformer"
 FASTVIDEO_CONFIG_MODULE = "fastvideo.configs.models.dits.lingbot_video"
 FASTVIDEO_CONFIG_CLASS = "LingBotVideoConfig"
 FASTVIDEO_MODEL_MODULE = "fastvideo.models.dits.lingbot_video"
@@ -65,44 +55,41 @@ def _load_fastvideo_types_or_skip():
     return getattr(config_module, FASTVIDEO_CONFIG_CLASS), model_class
 
 
-def _require_official_assets() -> None:
-    """Fail clearly when the pinned reference checkout or Dense checkpoint is incomplete."""
+def _require_official_assets(model_dir: Path) -> None:
+    """Fail clearly when the pinned official Dense snapshot is incomplete."""
+    transformer_dir = model_dir / "transformer"
     required = (
-        OFFICIAL_REF_DIR / "lingbot_video" / "transformer_lingbot_video.py",
-        TRANSFORMER_DIR / "config.json",
-        TRANSFORMER_DIR / "diffusion_pytorch_model.safetensors",
+        transformer_dir / "config.json",
+        transformer_dir / "diffusion_pytorch_model.safetensors",
     )
     missing = [str(path) for path in required if not path.is_file()]
     assert not missing, f"Missing required official Dense DiT assets: {missing}"
 
 
-def _load_official_model(device: torch.device, dtype: torch.dtype) -> torch.nn.Module:
+def _load_official_model(model_dir: Path, device: torch.device, dtype: torch.dtype) -> torch.nn.Module:
     """Load the official Dense transformer through its production Diffusers path."""
-    _require_official_assets()
-    if str(OFFICIAL_REF_DIR) not in sys.path:
-        sys.path.insert(0, str(OFFICIAL_REF_DIR))
+    _require_official_assets(model_dir)
     from lingbot_video.transformer_lingbot_video import LingBotVideoTransformer3DModel
 
     model = LingBotVideoTransformer3DModel.from_pretrained(
-        str(OFFICIAL_MODEL_DIR),
+        str(model_dir),
         subfolder="transformer",
         torch_dtype=dtype,
     )
     return model.to(device=device).eval()
 
 
-def _load_fastvideo_model(device: torch.device, dtype: torch.dtype) -> torch.nn.Module:
+def _load_fastvideo_model(transformer_dir: Path, device: torch.device, dtype: torch.dtype) -> torch.nn.Module:
     """Load the native Dense DiT through the production mixed-precision loader."""
     FastVideoConfig, FastVideoModel = _load_fastvideo_types_or_skip()
-    _require_official_assets()
-    with (CONVERTED_TRANSFORMER_DIR / "config.json").open(encoding="utf-8") as file:
+    with (transformer_dir / "config.json").open(encoding="utf-8") as file:
         hf_config = json.load(file)
 
     config = FastVideoConfig()
     model = maybe_load_fsdp_model(
         model_cls=FastVideoModel,
         init_params={"config": config, "hf_config": hf_config},
-        weight_dir_list=[str(CONVERTED_TRANSFORMER_DIR / "diffusion_pytorch_model.safetensors")],
+        weight_dir_list=[str(transformer_dir / "diffusion_pytorch_model.safetensors")],
         device=device,
         hsdp_replicate_dim=1,
         hsdp_shard_dim=1,
@@ -218,9 +205,11 @@ def test_lingbot_video_dense_dit_outputs_match() -> None:
         pytest.skip("LingBot-Video Dense DiT parity requires CUDA.")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
+    official_model_dir = download_components(OFFICIAL_DENSE, "transformer")
+    fastvideo_model_dir = download_components(FASTVIDEO_DENSE, "transformer")
 
-    fastvideo = _load_fastvideo_model(device, dtype)
-    official = _load_official_model(device, dtype)
+    fastvideo = _load_fastvideo_model(fastvideo_model_dir / "transformer", device, dtype)
+    official = _load_official_model(official_model_dir, device, dtype)
     inputs = _make_inputs(device, dtype)
     official_intermediates, official_handles = _capture_intermediates(official)
     fastvideo_intermediates, fastvideo_handles = _capture_intermediates(fastvideo)

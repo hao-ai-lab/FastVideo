@@ -20,25 +20,19 @@ from torch.testing import assert_close
 
 from fastvideo.configs.models.vaes.wanvae import WanVAEConfig
 from fastvideo.models.vaes.wanvae import AutoencoderKLWan as FastVideoAutoencoderKLWan
+from tests.local_tests.lingbot_video.hf_assets import (
+    FASTVIDEO_DENSE,
+    OFFICIAL_DENSE,
+    download_components,
+)
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_MODEL_PATH = REPO_ROOT / "checkpoints" / "lingbot-video" / "official" / "dense-1.3b"
-CONVERTED_MODEL_PATH = REPO_ROOT / "checkpoints" / "lingbot-video" / "converted" / "dense-1.3b"
 PARITY_SCOPE = "implementation_subcomponent"
 
 
-def _model_path() -> Path:
-    """Resolve the pinned Dense model root used for the shared VAE."""
-    return Path(os.environ.get("LINGBOT_VIDEO_DENSE_MODEL_PATH", DEFAULT_MODEL_PATH))
-
-
-def _load_fastvideo_vae(device: torch.device) -> FastVideoAutoencoderKLWan:
+def _load_fastvideo_vae(vae_dir: Path, device: torch.device) -> FastVideoAutoencoderKLWan:
     """Strict-load the released VAE weights into FastVideo's native class."""
-    vae_dir = CONVERTED_MODEL_PATH / "vae"
     config_path = vae_dir / "config.json"
     weights_path = vae_dir / "diffusion_pytorch_model.safetensors"
-    if not config_path.exists() or not weights_path.exists():
-        pytest.skip(f"LingBot-Video VAE assets are unavailable: {vae_dir}")
     raw_config = json.loads(config_path.read_text())
     config = WanVAEConfig()
     config.update_model_arch({key: value for key, value in raw_config.items() if not key.startswith("_")})
@@ -55,9 +49,12 @@ def test_lingbot_video_vae_decode_matches_official() -> None:
     if os.environ.get("LINGBOT_VIDEO_RUN_GPU_TESTS") != "1":
         pytest.skip("Set LINGBOT_VIDEO_RUN_GPU_TESTS=1 on a scheduled GPU node.")
     device = torch.device("cuda:0")
-    vae_dir = _model_path() / "vae"
-    official = OfficialAutoencoderKLWan.from_pretrained(vae_dir, torch_dtype=torch.float32).to(device).eval()
-    fastvideo = _load_fastvideo_vae(device)
+    official_root = download_components(OFFICIAL_DENSE, "vae")
+    fastvideo_root = download_components(FASTVIDEO_DENSE, "vae")
+    official = OfficialAutoencoderKLWan.from_pretrained(
+        official_root / "vae", torch_dtype=torch.float32
+    ).to(device).eval()
+    fastvideo = _load_fastvideo_vae(fastvideo_root / "vae", device)
     generator = torch.Generator(device=device).manual_seed(42)
     latents = torch.randn((1, 16, 3, 8, 8), generator=generator, device=device, dtype=torch.float32)
     mean = torch.tensor(official.config.latents_mean, device=device).view(1, 16, 1, 1, 1)
@@ -76,9 +73,12 @@ def test_lingbot_video_vae_encode_mode_matches_official() -> None:
     if os.environ.get("LINGBOT_VIDEO_RUN_GPU_TESTS") != "1":
         pytest.skip("Set LINGBOT_VIDEO_RUN_GPU_TESTS=1 on a scheduled GPU node.")
     device = torch.device("cuda:0")
-    vae_dir = _model_path() / "vae"
-    official = OfficialAutoencoderKLWan.from_pretrained(vae_dir, torch_dtype=torch.float32).to(device).eval()
-    fastvideo = _load_fastvideo_vae(device)
+    official_root = download_components(OFFICIAL_DENSE, "vae")
+    fastvideo_root = download_components(FASTVIDEO_DENSE, "vae")
+    official = OfficialAutoencoderKLWan.from_pretrained(
+        official_root / "vae", torch_dtype=torch.float32
+    ).to(device).eval()
+    fastvideo = _load_fastvideo_vae(fastvideo_root / "vae", device)
     generator = torch.Generator(device=device).manual_seed(43)
     video = torch.randn((1, 3, 9, 64, 64), generator=generator, device=device, dtype=torch.float32)
 

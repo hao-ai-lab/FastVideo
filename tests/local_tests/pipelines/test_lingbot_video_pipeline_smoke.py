@@ -12,9 +12,7 @@ from typing import Any, cast
 import pytest
 import torch
 
-
-WORKTREE = Path(__file__).resolve().parents[3]
-MODEL_DIR = WORKTREE / "checkpoints/lingbot-video/converted/dense-1.3b"
+from tests.local_tests.lingbot_video.hf_assets import FASTVIDEO_DENSE, download_components
 
 
 def test_lingbot_video_pipeline_registry_and_preset(tmp_path: Path) -> None:
@@ -128,7 +126,7 @@ def test_lingbot_video_uses_released_vae_denormalization_arithmetic() -> None:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="real pipeline smoke requires CUDA")
-def test_lingbot_video_pipeline_load_generate_smoke() -> None:
+def test_lingbot_video_pipeline_load_generate_smoke(tmp_path: Path) -> None:
     """Load every converted component and run one tiny latent denoising step."""
     if os.environ.get("LINGBOT_VIDEO_RUN_GPU_TESTS") != "1":
         pytest.skip("set LINGBOT_VIDEO_RUN_GPU_TESTS=1 on an allocated GPU")
@@ -139,8 +137,16 @@ def test_lingbot_video_pipeline_load_generate_smoke() -> None:
     sp_size = int(os.environ.get("LINGBOT_VIDEO_SP_SIZE", "1"))
     if torch.cuda.device_count() < num_gpus:
         pytest.skip(f"LingBot-Video pipeline smoke requires {num_gpus} CUDA devices")
+    model_dir = download_components(
+        FASTVIDEO_DENSE,
+        "scheduler",
+        "text_encoder",
+        "tokenizer",
+        "transformer",
+        "vae",
+    )
     generator = VideoGenerator.from_pretrained(
-        str(MODEL_DIR),
+        str(model_dir),
         num_gpus=num_gpus,
         sp_size=sp_size,
         use_fsdp_inference=use_fsdp_inference,
@@ -154,7 +160,7 @@ def test_lingbot_video_pipeline_load_generate_smoke() -> None:
     try:
         result = generator.generate_video(
             prompt="A red fox runs through fresh snow at sunrise.",
-            output_path=str(WORKTREE / "outputs/lingbot-video/smoke"),
+            output_path=str(tmp_path),
             save_video=False,
             return_frames=True,
             height=32,

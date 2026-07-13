@@ -7,7 +7,6 @@ import gc
 import json
 import os
 from pathlib import Path
-import sys
 from typing import Any
 
 import pytest
@@ -17,6 +16,11 @@ from torch.testing import assert_close
 from fastvideo.configs.models.dits.lingbot_video import LingBotVideoConfig
 from fastvideo.models.dits.lingbot_video import LingBotVideoTransformer3DModel
 from fastvideo.models.loader.fsdp_load import maybe_load_fsdp_model
+from tests.local_tests.lingbot_video.hf_assets import (
+    FASTVIDEO_MOE,
+    OFFICIAL_MOE,
+    download_components,
+)
 
 
 os.environ.setdefault("MASTER_ADDR", "localhost")
@@ -29,15 +33,11 @@ os.environ.setdefault("LINGBOT_MOE_PAD_BACKEND", "loop")
 os.environ.setdefault("LINGBOT_MOE_REORDER_BACKEND", "sort")
 os.environ.setdefault("LINGBOT_MOE_RESTORE_BACKEND", "scatter")
 
-WORKTREE = Path("/mnt/weka/shrd/wm/junda/fv-hub/fastvideo-port-lingbot-video")
-OFFICIAL_REF_DIR = Path("/mnt/weka/shrd/wm/junda/fv-hub/lingbot-video-reference")
-OFFICIAL_MODEL_DIR = WORKTREE / "checkpoints/lingbot-video/official/moe-30b-a3b"
 PARITY_VARIANT = os.environ.get("LINGBOT_VIDEO_MOE_PARITY_VARIANT", "base")
 if PARITY_VARIANT not in {"base", "refiner"}:
     raise ValueError(f"Unsupported LingBot-Video MoE parity variant: {PARITY_VARIANT}")
 OFFICIAL_SUBFOLDER = "transformer" if PARITY_VARIANT == "base" else "refiner"
 NATIVE_SUBFOLDER = "transformer" if PARITY_VARIANT == "base" else "transformer_2"
-NATIVE_TRANSFORMER_DIR = WORKTREE / "checkpoints/lingbot-video/converted/moe-30b-a3b" / NATIVE_SUBFOLDER
 
 
 def _make_inputs(device: torch.device) -> dict[str, torch.Tensor | bool]:
@@ -86,24 +86,22 @@ def _run_model(model: torch.nn.Module, device: torch.device) -> tuple[torch.Tens
     return output.detach().float().cpu(), captured
 
 
-def _load_official(device: torch.device) -> torch.nn.Module:
+def _load_official(model_dir: Path, device: torch.device) -> torch.nn.Module:
     """Load the released MoE transformer through its official Diffusers class."""
-    if str(OFFICIAL_REF_DIR) not in sys.path:
-        sys.path.insert(0, str(OFFICIAL_REF_DIR))
     from lingbot_video.transformer_lingbot_video import LingBotVideoTransformer3DModel as OfficialModel
 
     model = OfficialModel.from_pretrained(
-        str(OFFICIAL_MODEL_DIR),
+        str(model_dir),
         subfolder=OFFICIAL_SUBFOLDER,
         torch_dtype=torch.bfloat16,
     )
     return model.to(device).eval()
 
 
-def _load_native(device: torch.device) -> torch.nn.Module:
+def _load_native(transformer_dir: Path, device: torch.device) -> torch.nn.Module:
     """Load the native MoE transformer with FastVideo's mixed-dtype production loader."""
-    hf_config = json.loads((NATIVE_TRANSFORMER_DIR / "config.json").read_text())
-    weight_files = sorted(str(path) for path in NATIVE_TRANSFORMER_DIR.glob("*.safetensors"))
+    hf_config = json.loads((transformer_dir / "config.json").read_text())
+    weight_files = sorted(str(path) for path in transformer_dir.glob("*.safetensors"))
     model = maybe_load_fsdp_model(
         model_cls=LingBotVideoTransformer3DModel,
         init_params={"config": LingBotVideoConfig(), "hf_config": hf_config},
@@ -149,8 +147,10 @@ def test_lingbot_video_moe_dit_matches_official_sequentially() -> None:
         pytest.skip("LingBot-Video MoE DiT parity requires CUDA.")
     device = torch.device("cuda:0")
     torch.backends.cuda.enable_cudnn_sdp(False)
+    official_model_dir = download_components(OFFICIAL_MOE, OFFICIAL_SUBFOLDER)
+    native_model_dir = download_components(FASTVIDEO_MOE, NATIVE_SUBFOLDER)
 
-    official = _load_official(device)
+    official = _load_official(official_model_dir, device)
     torch.cuda.reset_peak_memory_stats(device)
     official_output, official_blocks = _run_model(official, device)
     official_peak = torch.cuda.max_memory_allocated(device)
@@ -158,7 +158,7 @@ def test_lingbot_video_moe_dit_matches_official_sequentially() -> None:
     gc.collect()
     torch.cuda.empty_cache()
 
-    native = _load_native(device)
+    native = _load_native(native_model_dir / NATIVE_SUBFOLDER, device)
     torch.cuda.reset_peak_memory_stats(device)
     native_output, native_blocks = _run_model(native, device)
     native_peak = torch.cuda.max_memory_allocated(device)
