@@ -29,8 +29,8 @@ max abs err, mean rel err.
 Inputs are BIASED by default: q and k get a nonzero mean shift (--bias, v
 stays zero-mean so a constant output offset doesn't inflate cosine
 similarity). Zero-mean randn is blind to mean-dependent quantization errors —
-the flashinfer per-block-mean qk-correction head-broadcast bug produces
-cos ~0.99 on zero-mean inputs but cos <0.5 at bias 1.0. Use
+biased inputs caught flashinfer's former per-block-mean qk-correction bug
+(fixed by flashinfer#3838). Use
 --include-zeromean to also run the zero-mean rows for contrast.
 
 All lanes run at the [B, H, L, D] interface.
@@ -312,17 +312,6 @@ def _load_nvfp4_flashinfer() -> Lane:
 
     def fn(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool, scale: float) -> torch.Tensor:
         seq_len = q.shape[2]
-        # flashinfer's per-block-mean quantize (flashinfer#3897 _preprocess_qkv)
-        # materializes an fp32 [B, H, Lpad, Lpad] qk-correction matrix (48 GiB at
-        # L=32760, 274 GiB at L=75600). Preflight it so an oversized shape becomes
-        # a "fail" row instead of the host OOM-killer SIGKILLing the whole bench
-        # (observed on GB10 unified memory).
-        lpad = -(-seq_len // 128) * 128
-        need = 4 * q.shape[0] * q.shape[1] * lpad * lpad
-        free = torch.cuda.mem_get_info(q.device)[0]
-        if need > free:
-            raise RuntimeError(f"qk_correction workspace {need / 2**30:.0f} GiB exceeds "
-                               f"free device memory {free / 2**30:.0f} GiB")
         packed = nvfp4_attention_sm120_quantize_qkv(q, k, v, **quant_kwargs)
         out, _lse = nvfp4_attention_sm120_fwd(*packed, sm_scale=scale, causal=causal, out_dtype=q.dtype)
         # flashinfer pads seq_len to a multiple of 128; trim it back off.
