@@ -73,6 +73,10 @@ class Worker:
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
+        if not forward_batch.save_video and not forward_batch.return_frames:
+            # Drop the decoded tensor before multiprocessing or Ray transports
+            # the worker result back to the generator.
+            output_batch.output = torch.empty(0, device="cpu")
         return cast(ForwardBatch, output_batch)
 
     def shutdown(self) -> dict[str, Any]:
