@@ -132,9 +132,8 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         )
 
         hidden_states = outputs[0]
-        autocast_device = hidden_states.device.type
-        with torch.autocast(device_type=autocast_device, dtype=torch.float32, enabled=autocast_device != "cpu"):
-            logits = self.rm_head(hidden_states)
+        head_dtype = next(self.rm_head.parameters()).dtype
+        logits = self.rm_head(hidden_states.to(dtype=head_dtype))
 
         if input_ids is not None:
             batch_size = input_ids.shape[0]

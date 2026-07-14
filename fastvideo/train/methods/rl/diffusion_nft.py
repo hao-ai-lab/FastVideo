@@ -97,6 +97,9 @@ class DiffusionNFTMethod(TrainingMethod):
             raise ValueError("DiffusionNFTMethod requires role 'reference'")
         if not self.student._trainable:
             raise ValueError("DiffusionNFTMethod requires a trainable student")
+        if int(self.training_config.distributed.sp_size or 1) != 1:
+            raise ValueError("DiffusionNFTMethod does not yet support sequence parallelism; "
+                             "set training.distributed.sp_size to 1")
 
         self.old = role_models["old"]
         self.reference = role_models["reference"]

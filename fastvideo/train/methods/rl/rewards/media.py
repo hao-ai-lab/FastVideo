@@ -41,10 +41,10 @@ def media_to_uint8_array(media: torch.Tensor | np.ndarray) -> np.ndarray:
     elif media.ndim == 5:
         if media.shape[-1] in (1, 3):
             pass
-        elif media.shape[2] in (1, 3):
-            media = media.transpose(0, 1, 3, 4, 2)
         elif media.shape[1] in (1, 3):
             media = media.transpose(0, 2, 3, 4, 1)
+        elif media.shape[2] in (1, 3):
+            media = media.transpose(0, 1, 3, 4, 2)
     else:
         raise ValueError("media must have shape [B, C, H, W], [B, H, W, C], "
                          "[B, C, T, H, W], [B, T, C, H, W], or "

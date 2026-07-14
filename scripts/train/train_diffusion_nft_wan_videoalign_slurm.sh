@@ -178,6 +178,14 @@ CHECK_REWARDS="${CHECK_REWARDS:-1}"
 REWARD_DEVICE="${REWARD_DEVICE:-auto}"
 
 TOTAL_GPUS=$((NUM_NODES * NUM_GPUS))
+if (( SP_SIZE != 1 )); then
+    echo "DiffusionNFT currently requires SP_SIZE=1." >&2
+    exit 1
+fi
+if (( PREPROCESS_NUM_GPUS != 1 )); then
+    echo "DiffusionNFT text preprocessing currently requires PREPROCESS_NUM_GPUS=1." >&2
+    exit 1
+fi
 if (( HSDP_REPLICATE_DIM * HSDP_SHARD_DIM != TOTAL_GPUS )); then
     echo "Invalid HSDP mesh: HSDP_REPLICATE_DIM * HSDP_SHARD_DIM must equal total GPUs." >&2
     echo "Got ${HSDP_REPLICATE_DIM} * ${HSDP_SHARD_DIM} != ${TOTAL_GPUS}" >&2

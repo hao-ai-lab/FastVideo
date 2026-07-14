@@ -79,7 +79,8 @@ class SamplingConfig:
         num_steps = int(raw.get("num_steps", 25) or 25)
         if num_steps <= 0:
             raise ValueError("method.sampling.num_steps must be positive")
-        guidance_scale = float(raw.get("guidance_scale", 1.0) or 1.0)
+        raw_guidance_scale = raw.get("guidance_scale", 1.0)
+        guidance_scale = float(1.0 if raw_guidance_scale is None else raw_guidance_scale)
         if guidance_scale < 0.0:
             raise ValueError("method.sampling.guidance_scale must be non-negative")
         return cls(

@@ -136,6 +136,12 @@ def test_sampling_config_accepts_flow_unipc_and_rejects_explicit_timesteps():
         SamplingConfig.from_mapping({"scheduler": "flow_unipc", "timesteps": [1000, 500, 0]})
 
 
+def test_sampling_config_preserves_zero_guidance():
+    cfg = SamplingConfig.from_mapping({"guidance_scale": 0.0})
+
+    assert cfg.guidance_scale == 0.0
+
+
 def test_sampler_restores_original_batch_timestep_after_sampling():
     model = _FakeModel()
     sampler = DiffusionSampler(SamplingConfig(num_steps=2))
@@ -244,6 +250,9 @@ def test_diffusion_nft_video_config_uses_genrl_rewards_in_clean_layout():
     assert cfg.training.loop.gradient_accumulation_steps == 24
     assert cfg.training.data.num_latent_t == 20
     assert cfg.training.data.num_frames == 77
+    world_size = cfg.training.distributed.num_gpus // cfg.training.distributed.sp_size
+    assert world_size * cfg.method["sample_train_batch_size"] % cfg.method["num_video_per_prompt"] == 0
+    assert world_size * cfg.method["train_batch_size"] % cfg.method["num_video_per_prompt"] == 0
     assert "rl/reward/" not in raw_text
     assert "WanDMDPipeline" not in raw_text
     assert "solver" not in cfg.method["sampling"]

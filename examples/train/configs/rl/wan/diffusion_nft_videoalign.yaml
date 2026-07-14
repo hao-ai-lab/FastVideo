@@ -46,10 +46,10 @@ method:
     seed: 42
     data_path:
 
-  sample_train_batch_size: 1
-  train_batch_size: 1
+  sample_train_batch_size: 6
+  train_batch_size: 6
   num_batches_per_epoch: 24
-  num_video_per_prompt: 8
+  num_video_per_prompt: 24
   num_inner_epochs: 1
   timestep_fraction: 0.99
 
@@ -68,11 +68,11 @@ method:
 
 training:
   distributed:
-    num_gpus: 1
+    num_gpus: 4
     sp_size: 1
     tp_size: 1
     hsdp_replicate_dim: 1
-    hsdp_shard_dim: 1
+    hsdp_shard_dim: 4
 
   data:
     data_path: data/train_text_only_diffusion_nft_preprocessed

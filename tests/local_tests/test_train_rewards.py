@@ -94,6 +94,17 @@ def test_media_to_uint8_array_converts_video_tensor_to_nfhwc():
     assert array[..., 0].max() == 255
 
 
+@pytest.mark.parametrize("num_frames", [1, 3])
+def test_media_to_uint8_array_prefers_canonical_channel_axis(num_frames):
+    media = torch.zeros(2, 3, num_frames, 5, 6)
+    media[:, 0] = 1.0
+
+    array = media_to_uint8_array(media)
+
+    assert array.shape == (2, num_frames, 5, 6, 3)
+    assert array[..., 0].max() == 255
+
+
 def test_build_multi_reward_instantiates_debug_reward_without_device_arg():
     scorer = build_multi_reward_scorer({"mean_luminance": 1.0}, device="cpu")
 

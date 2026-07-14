@@ -433,6 +433,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.preprocess_num_gpus != 1:
+        raise ValueError("DiffusionNFT text preprocessing currently requires --preprocess-num-gpus 1")
     requested_num_latent_t = int(args.num_latent_t)
     derived_num_latent_t = derive_wan_num_latent_t(args.num_frames)
     if requested_num_latent_t <= 0:

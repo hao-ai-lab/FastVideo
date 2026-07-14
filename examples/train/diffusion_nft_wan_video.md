@@ -53,6 +53,8 @@ CLI flags if those assets already live somewhere else.
 ## 2. Launch Training
 
 ```bash
+DIFFUSION_NFT_ROOT=.cache/diffusion_nft/DiffusionNFT \
+VIDEOALIGN_CHECKPOINT_PATH=.cache/diffusion_nft/VideoReward \
 NUM_GPUS=4 bash examples/train/run.sh \
     outputs/diffusion_nft_run_configs/diffusion_nft_wan_run.yaml
 ```
@@ -92,6 +94,8 @@ the reward model ever sees them.
 For offline logging:
 
 ```bash
+DIFFUSION_NFT_ROOT=.cache/diffusion_nft/DiffusionNFT \
+VIDEOALIGN_CHECKPOINT_PATH=.cache/diffusion_nft/VideoReward \
 WANDB_MODE=offline NUM_GPUS=4 bash examples/train/run.sh \
     outputs/diffusion_nft_run_configs/diffusion_nft_wan_run.yaml
 ```

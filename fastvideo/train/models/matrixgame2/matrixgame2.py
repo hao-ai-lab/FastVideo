@@ -64,14 +64,15 @@ class MatrixGame2Model(WanModel):
         training_batch = TrainingBatch()
         infos = raw_batch.get("info_list")
         batch_size = self._infer_batch_size(raw_batch)
+        target_num_latent_t = int(tc.data.num_latent_t)
 
         if latents_source == "zeros":
-            resolved_num_latent_t = tc.data.num_latent_t if num_latent_t is None else int(num_latent_t)
-            if resolved_num_latent_t <= 0:
+            target_num_latent_t = target_num_latent_t if num_latent_t is None else int(num_latent_t)
+            if target_num_latent_t <= 0:
                 raise ValueError("num_latent_t must be positive when creating zero latents")
             latents = self._make_zero_latents(
                 batch_size=batch_size,
-                num_latent_t=resolved_num_latent_t,
+                num_latent_t=target_num_latent_t,
             )
         elif latents_source == "data":
             if num_latent_t is not None:
@@ -83,7 +84,15 @@ class MatrixGame2Model(WanModel):
 
         clip_feature = raw_batch["clip_feature"].to(device=device, dtype=dtype)
         first_frame_latent = raw_batch["first_frame_latent"]
-        first_frame_latent = first_frame_latent[:, :, :tc.data.num_latent_t]
+        if first_frame_latent.shape[2] < target_num_latent_t:
+            pad_shape = (*first_frame_latent.shape[:2], target_num_latent_t - first_frame_latent.shape[2],
+                         *first_frame_latent.shape[3:])
+            first_frame_latent = torch.cat(
+                [first_frame_latent, first_frame_latent.new_zeros(pad_shape)],
+                dim=2,
+            )
+        else:
+            first_frame_latent = first_frame_latent[:, :, :target_num_latent_t]
         first_frame_latent = first_frame_latent.to(device=device, dtype=dtype)
 
         pil_image = raw_batch.get("pil_image")
@@ -93,14 +102,14 @@ class MatrixGame2Model(WanModel):
         keyboard_cond = self._get_optional_action(
             raw_batch,
             key="keyboard_cond",
-            expected_frames=self._expected_action_frames(tc.data.num_latent_t),
+            expected_frames=self._expected_action_frames(target_num_latent_t),
             expected_dim=self._expected_action_dim("keyboard"),
             dtype=dtype,
         )
         mouse_cond = self._get_optional_action(
             raw_batch,
             key="mouse_cond",
-            expected_frames=self._expected_action_frames(tc.data.num_latent_t),
+            expected_frames=self._expected_action_frames(target_num_latent_t),
             expected_dim=self._expected_action_dim("mouse"),
             dtype=dtype,
         )
