@@ -38,6 +38,32 @@ def test_execute_forward_preserves_missing_metadata_only_output():
     assert result.output is None
 
 
+def test_execute_forward_drops_save_only_latent_output():
+    output = torch.ones((1, 16, 1, 2, 2))
+    output_batch = ForwardBatch(data_type="video", output=output)
+    worker = _worker_returning(output_batch)
+    request_batch = ForwardBatch(data_type="video", save_video=True, return_frames=False)
+
+    result = worker.execute_forward(request_batch, FastVideoArgs(model_path="test", output_type="latent"))
+
+    assert result.output is not None
+    assert result.output.device.type == "cpu"
+    assert result.output.numel() == 0
+
+
+def test_execute_forward_drops_save_only_audio_placeholder():
+    output = torch.ones((1, 3, 1, 8, 8))
+    output_batch = ForwardBatch(data_type="audio", output=output, extra={"audio_only": True})
+    worker = _worker_returning(output_batch)
+    request_batch = ForwardBatch(data_type="audio", save_video=True, return_frames=False)
+
+    result = worker.execute_forward(request_batch, FastVideoArgs(model_path="test"))
+
+    assert result.output is not None
+    assert result.output.device.type == "cpu"
+    assert result.output.numel() == 0
+
+
 @pytest.mark.parametrize(
     ("save_video", "return_frames"),
     [
