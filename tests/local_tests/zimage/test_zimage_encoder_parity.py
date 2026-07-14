@@ -53,6 +53,7 @@ from fastvideo.distributed.parallel_state import cleanup_dist_env_and_memory, ma
 from fastvideo.layers.quantization.absmax_fp8 import AbsMaxFP8MergedParameter
 from fastvideo.models.encoders.qwen3 import Qwen3ForCausalLM
 from fastvideo.models.loader.component_loader import TextEncoderLoader
+from fastvideo.models.loader.utils import set_default_torch_dtype
 from fastvideo.models.registry import ModelRegistry
 
 PARITY_SCOPE = "both"
@@ -261,10 +262,20 @@ def _print_diag(label: str, ref: torch.Tensor, fv: torch.Tensor) -> torch.Tensor
     return diff
 
 
-def test_qwen3_production_loader_uses_body_only_model_and_honors_cpu_offload(
+@pytest.mark.parametrize(
+    ("cpu_offload", "target_device", "expected_device"),
+    [
+        (True, torch.device("cuda"), torch.device("cpu")),
+        (False, torch.device("meta"), torch.device("meta")),
+    ],
+)
+def test_qwen3_production_loader_avoids_device_context_and_honors_placement(
     monkeypatch: pytest.MonkeyPatch,
+    cpu_offload: bool,
+    target_device: torch.device,
+    expected_device: torch.device,
 ):
-    """The production passthrough must avoid the LM head and preserve CPU placement."""
+    """HF loading stays ambient while final placement honors target/offload."""
     import fastvideo.platforms as platforms
 
     placements: list[torch.device] = []
@@ -280,8 +291,12 @@ def test_qwen3_production_loader_uses_body_only_model_and_honors_cpu_offload(
 
     fake_model = FakeHFModel()
 
+    ambient_device = torch.empty(0).device
+    default_devices: list[torch.device] = []
+
     def fake_auto_model_from_pretrained(*args, **kwargs):
         auto_model_calls.append(kwargs)
+        default_devices.append(torch.empty(0).device)
         return fake_model
 
     def fail_causal_lm_from_pretrained(*args, **kwargs):
@@ -318,8 +333,8 @@ def test_qwen3_production_loader_uses_body_only_model_and_honors_cpu_offload(
     loaded = TextEncoderLoader().load_model(
         "unused-by-mock",
         config,
-        torch.device("cuda"),
-        _loader_args(cpu_offload=True),
+        target_device,
+        _loader_args(cpu_offload=cpu_offload),
         dtype="fp32",
         use_text_encoder_override=True,
     )
@@ -330,8 +345,19 @@ def test_qwen3_production_loader_uses_body_only_model_and_honors_cpu_offload(
         "torch_dtype": torch.float32,
         "low_cpu_mem_usage": True,
     }]
-    assert placements == [torch.device("cpu")]
-    assert loaded._fastvideo_input_device == torch.device("cpu")
+    assert default_devices == [ambient_device]
+    assert placements == [expected_device]
+    assert loaded._fastvideo_input_device == expected_device
+
+
+def test_set_default_torch_dtype_restores_after_exception():
+    original = torch.get_default_dtype()
+
+    with pytest.raises(RuntimeError, match="expected failure"):
+        with set_default_torch_dtype(torch.bfloat16):
+            raise RuntimeError("expected failure")
+
+    assert torch.get_default_dtype() == original
 
 
 @pytest.mark.parametrize("checkpoint_prefix", ["", "model."])
