@@ -20,6 +20,9 @@ from fastvideo.performance.metric_policy import resolve_metric_policies
 
 @pytest.fixture(autouse=True)
 def _stub_seed_baseline_remote_sync(monkeypatch):
+    monkeypatch.delenv("BUILDKITE_BUILD_ID", raising=False)
+    monkeypatch.delenv("BUILDKITE_JOB_ID", raising=False)
+
     def sync(local_dir, *, strict=False, revision=None):
         assert strict is True
         os.makedirs(local_dir, exist_ok=True)
