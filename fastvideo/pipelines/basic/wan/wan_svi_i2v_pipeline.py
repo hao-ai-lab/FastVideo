@@ -60,10 +60,8 @@ def _resolve_clip_prompts(
         return [prompt] * num_clips
 
     if len(clip_prompts) != num_clips:
-        raise ValueError(
-            f"svi_clip_prompts must contain exactly svi_num_clips entries "
-            f"({num_clips}), but got {len(clip_prompts)}"
-        )
+        raise ValueError(f"svi_clip_prompts must contain exactly svi_num_clips entries "
+                         f"({num_clips}), but got {len(clip_prompts)}")
     if any(not isinstance(item, str) or not item.strip() for item in clip_prompts):
         raise ValueError("svi_clip_prompts entries must be non-empty strings")
     return list(clip_prompts)
