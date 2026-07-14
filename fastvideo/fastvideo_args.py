@@ -753,6 +753,9 @@ class FastVideoArgs:
                           WorkloadType), f"Workload type must be a WorkloadType enum, got {type(self.workload_type)}"
         assert self.workload_type in WorkloadType.choices(), f"Invalid workload type: {self.workload_type}"
 
+        from fastvideo.registry import validate_model_workload_support
+        validate_model_workload_support(self.model_path, self.workload_type)
+
         if self.mode in [ExecutionMode.DISTILLATION, ExecutionMode.FINETUNING] and self.inference_mode:
             logger.warning("Mode is 'training' but inference_mode is True. Setting inference_mode to False.")
             self.inference_mode = False

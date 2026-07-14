@@ -3,10 +3,12 @@ import torch.nn as nn
 
 import pytest
 
+from fastvideo.attention.selector import global_force_attn_backend_context_manager
 from fastvideo.configs.pipelines.wan import (
     FastWan2_2_TI2V_5B_Config,
     FastWan2_2_TI2V_5B_FullAttn_Config,
 )
+from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.models.dits import wanvideo as wanvideo_module
 from fastvideo.models.dits.wanvideo import (
     WanTransformerBlock,
@@ -61,6 +63,22 @@ def test_fastwan_fullattn_config_is_dense_t2v_only(monkeypatch: pytest.MonkeyPat
     config.check_pipeline_config()
 
 
+def test_fastwan_fullattn_fastvideo_args_accepts_t2v_workload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FASTVIDEO_ATTENTION_BACKEND", raising=False)
+
+    args = FastVideoArgs.from_kwargs(model_path=FULLATTN_MODEL_ID, workload_type="t2v")
+
+    assert args.workload_type is WorkloadType.T2V
+    assert isinstance(args.pipeline_config, FastWan2_2_TI2V_5B_FullAttn_Config)
+
+
+def test_fastwan_fullattn_fastvideo_args_rejects_i2v_workload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FASTVIDEO_ATTENTION_BACKEND", raising=False)
+
+    with pytest.raises(ValueError, match="does not support workload type 'i2v'.*t2v"):
+        FastVideoArgs.from_kwargs(model_path=FULLATTN_MODEL_ID, workload_type="i2v")
+
+
 def test_fastwan_fullattn_config_rejects_vsa_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
 
@@ -75,21 +93,27 @@ def test_wan_block_selection_rejects_vsa_for_fullattn(monkeypatch: pytest.Monkey
         _select_wan_transformer_block(FastWan2_2_TI2V_5B_FullAttn_Config().dit_config)
 
 
-def test_wan_block_selection_rejects_vsa_with_missing_backend_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
-    config = FastWan2_2_TI2V_5B_FullAttn_Config().dit_config
-    config._supported_attention_backends = None  # type: ignore[assignment]
-
-    with pytest.raises(ValueError, match="VIDEO_SPARSE_ATTN.*FullAttn"):
-        _select_wan_transformer_block(config)
-
-
 def test_wan_block_selection_preserves_existing_vsa_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
     assert _select_wan_transformer_block(FastWan2_2_TI2V_5B_Config().dit_config) is WanTransformerBlock_VSA
 
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
     assert _select_wan_transformer_block(FastWan2_2_TI2V_5B_Config().dit_config) is WanTransformerBlock
+
+
+def test_wan_block_selection_honors_global_vsa_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FASTVIDEO_ATTENTION_BACKEND", raising=False)
+
+    with global_force_attn_backend_context_manager(AttentionBackendEnum.VIDEO_SPARSE_ATTN):
+        assert _select_wan_transformer_block(FastWan2_2_TI2V_5B_Config().dit_config) is WanTransformerBlock_VSA
+
+
+def test_wan_block_selection_prefers_global_force_over_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+
+    with global_force_attn_backend_context_manager(AttentionBackendEnum.TORCH_SDPA):
+        assert _select_wan_transformer_block(FastWan2_2_TI2V_5B_Config().dit_config) is WanTransformerBlock
+        assert _select_wan_transformer_block(FastWan2_2_TI2V_5B_FullAttn_Config().dit_config) is WanTransformerBlock
 
 
 def test_wan_transformer_uses_config_supported_backends(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -7,9 +7,9 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
                                  LocalAttention)
+from fastvideo.attention.selector import get_effective_attn_backend_override
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
@@ -608,12 +608,11 @@ class WanTransformerBlock_VSA(nn.Module):
 
 
 def _select_wan_transformer_block(config: WanVideoConfig) -> type[nn.Module]:
-    attn_backend = envs.FASTVIDEO_ATTENTION_BACKEND
-    if attn_backend == "VIDEO_SPARSE_ATTN":
-        supported_backends = config._supported_attention_backends or ()
-        if AttentionBackendEnum.VIDEO_SPARSE_ATTN not in supported_backends:
-            raise ValueError("FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN requires a Wan VSA checkpoint/config, "
-                             "but this Wan config does not support VIDEO_SPARSE_ATTN. "
+    attn_backend = get_effective_attn_backend_override()
+    if attn_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+        if AttentionBackendEnum.VIDEO_SPARSE_ATTN not in config._supported_attention_backends:
+            raise ValueError("VIDEO_SPARSE_ATTN requires a Wan VSA checkpoint/config, but this Wan config does not "
+                             "support VIDEO_SPARSE_ATTN. "
                              "For FastWan2.2-TI2V-5B-FullAttn-Diffusers, unset FASTVIDEO_ATTENTION_BACKEND or use "
                              "a dense backend such as FLASH_ATTN or TORCH_SDPA.")
         return WanTransformerBlock_VSA
