@@ -17,6 +17,9 @@ from fastvideo.api import (
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import WorkloadType
+from fastvideo.pipelines import ForwardBatch
+from fastvideo.worker.gpu_worker import Worker
+from fastvideo.worker.ray_distributed_executor import RayDistributedExecutor
 
 
 def _new_video_generator() -> VideoGenerator:
@@ -345,6 +348,63 @@ def test_generate_single_video_audio_only_save_skips_placeholder_materialization
     assert result["audio"] is audio
     assert result["audio_sample_rate"] == 44100
     assert result["video_path"] == str(tmp_path / "audio.wav")
+
+
+def test_generate_single_video_ray_audio_only_save_preserves_worker_metadata(monkeypatch, tmp_path):
+    audio = torch.zeros((16,), dtype=torch.float32)
+    worker_output = ForwardBatch(
+        data_type="audio",
+        output=torch.ones((1, 3, 1, 8, 8)),
+        extra={
+            "audio_only": True,
+            "audio": audio,
+            "audio_sample_rate": 44100,
+        },
+    )
+    worker = Worker.__new__(Worker)
+    worker.fastvideo_args = SimpleNamespace()
+    worker.pipeline = SimpleNamespace(forward=lambda batch, args: worker_output)
+
+    monkeypatch.setattr(RayDistributedExecutor, "__abstractmethods__", frozenset())
+    executor = RayDistributedExecutor.__new__(RayDistributedExecutor)
+    executor.shutdown = lambda: None
+
+    def collective_rpc(method, *, kwargs, **_):
+        assert method == "execute_forward"
+        return [worker.execute_forward(**kwargs)]
+
+    executor.collective_rpc = collective_rpc
+    fastvideo_args = _single_video_args()
+    generator = _new_video_generator()
+    generator.fastvideo_args = fastvideo_args
+    generator.executor = executor
+    generator.config = None
+    written = {}
+
+    def fake_write_pcm_wav(path, samples, sample_rate):
+        written.update(path=path, samples=samples, sample_rate=sample_rate)
+
+    monkeypatch.setattr(generator, "_write_pcm_wav", fake_write_pcm_wav)
+    sampling_param = _small_sampling_param(save_video=True, return_frames=False)
+    sampling_param.data_type = "audio"
+
+    result = generator._generate_single_video(
+        prompt="audio only",
+        sampling_param=sampling_param,
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "audio.mp4"),
+    )
+
+    assert worker_output.output is not None
+    assert worker_output.output.numel() == 0
+    assert result["samples"] is None
+    assert result["frames"] is None
+    assert result["audio"] is audio
+    assert result["audio_sample_rate"] == 44100
+    assert result["video_path"] == str(tmp_path / "audio.wav")
+    assert written["path"] == str(tmp_path / "audio.wav")
+    assert written["samples"] is audio
+    assert written["sample_rate"] == 44100
 
 
 def test_generate_single_video_latent_metadata_skips_cpu_materialization(tmp_path):
