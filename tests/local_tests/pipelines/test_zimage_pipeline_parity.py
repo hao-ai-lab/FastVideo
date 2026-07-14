@@ -8,6 +8,7 @@ import importlib
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -78,10 +79,18 @@ def _stage_args(*, output_type: str = "pil") -> SimpleNamespace:
 
 def test_zimage_native_default_stage_math(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exercise the pinned native 1-step formulas without model assets."""
+    autocast_calls: list[dict[str, object]] = []
+
+    @contextmanager
+    def record_autocast(**kwargs):
+        autocast_calls.append(kwargs)
+        yield
+
     monkeypatch.setattr(
         "fastvideo.pipelines.basic.zimage.stages.get_local_torch_device",
         lambda: torch.device("cpu"),
     )
+    monkeypatch.setattr("fastvideo.pipelines.basic.zimage.stages.torch.autocast", record_autocast)
     args = _stage_args()
     transformer = _ConstantTransformer()
     scheduler = FlowMatchEulerDiscreteScheduler(shift=3.0)
@@ -113,6 +122,7 @@ def test_zimage_native_default_stage_math(monkeypatch: pytest.MonkeyPatch) -> No
     assert scheduler.config.use_reference_discrete_timesteps is True
 
     ZImageDenoisingStage(transformer, scheduler).forward(batch, args)
+    assert autocast_calls == [{"device_type": "cpu", "enabled": False}]
     assert_close(batch.latents, torch.ones_like(batch.latents))
     _, encoded, normalized_timestep = transformer.calls[0]
     assert encoded[0].shape == (2, 8)
@@ -244,15 +254,12 @@ def test_zimage_pipeline_latents_match_pinned_native_repo(tmp_path: Path) -> Non
     pipeline_module, utils_module = _import_reference_modules()
     prompt = "Young Chinese woman in red Hanfu, intricate embroidery."
 
-    flash_enabled = torch.backends.cuda.flash_sdp_enabled()
-    memory_efficient_enabled = torch.backends.cuda.mem_efficient_sdp_enabled()
-    math_enabled = torch.backends.cuda.math_sdp_enabled()
     previous_fastvideo_backend = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
     try:
-        torch.backends.cuda.enable_flash_sdp(False)
-        torch.backends.cuda.enable_mem_efficient_sdp(False)
-        torch.backends.cuda.enable_math_sdp(True)
-        utils_module.set_attention_backend("_native_math")
+        # Exercise the shared PyTorch SDPA path with each process's native
+        # kernel selection; the official and FastVideo implementations both
+        # pass the same padding mask into scaled_dot_product_attention.
+        utils_module.set_attention_backend(None)
         components = utils_module.load_from_local_dir(
             MODEL_DIR,
             device="cuda",
@@ -311,11 +318,10 @@ def test_zimage_pipeline_latents_match_pinned_native_repo(tmp_path: Path) -> Non
             generator.shutdown()
         actual = result["samples"].squeeze(2).float()
         assert actual.shape == reference.shape
+        diff = (actual - reference).abs()
+        print(f"Z-Image pipeline latent parity: max={diff.max():.6f}, mean={diff.mean():.6f}")
         assert_close(actual, reference, atol=1e-2, rtol=1e-2)
     finally:
-        torch.backends.cuda.enable_flash_sdp(flash_enabled)
-        torch.backends.cuda.enable_mem_efficient_sdp(memory_efficient_enabled)
-        torch.backends.cuda.enable_math_sdp(math_enabled)
         if previous_fastvideo_backend is None:
             os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
         else:

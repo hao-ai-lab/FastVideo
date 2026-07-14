@@ -220,8 +220,6 @@ class ZImageDenoisingStage(PipelineStage):
 
         device = get_local_torch_device()
         target_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
-        autocast_enabled = (target_dtype != torch.float32 and device.type == "cuda"
-                            and not fastvideo_args.disable_autocast)
         batch_size = latents.shape[0]
 
         for index, timestep_value in enumerate(batch.timesteps):
@@ -250,8 +248,7 @@ class ZImageDenoisingStage(PipelineStage):
             with (
                     torch.autocast(
                         device_type=device.type,
-                        dtype=target_dtype,
-                        enabled=autocast_enabled,
+                        enabled=False,
                     ),
                     trace_step(index),
                     set_forward_context(
