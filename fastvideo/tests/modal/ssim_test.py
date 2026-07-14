@@ -79,6 +79,18 @@ RAW_GENERATED_VOLUME_ROOT = "ssim_generated_videos"
 DEFAULT_OUTPUT_QUALITY_TIER = "default"
 FULL_OUTPUT_QUALITY_TIER = "full_quality"
 MODAL_DEVICE_REFERENCE_FOLDER = "L40S_reference_videos"
+GENERATED_ARTIFACT_EXTENSIONS = (
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".mkv",
+    ".webm",
+    ".flv",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".pt",
+)
 SSIM_COMMON_KWARGS = dict(
     image=image,
     timeout=5400,
@@ -277,11 +289,11 @@ def _print_local_reference_copy_command(quality_tier: str) -> None:
     )
 
 
-def _count_video_files(root: str) -> int:
+def _count_generated_artifacts(root: str) -> int:
     count = 0
     for current_root, _, filenames in os.walk(root):
         for filename in filenames:
-            if filename.lower().endswith((".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")):
+            if filename.lower().endswith(GENERATED_ARTIFACT_EXTENSIONS):
                 count += 1
     return count
 
@@ -316,8 +328,11 @@ def _sync_generated_videos_to_volume(
     shutil.copytree(generated_root, absolute_dst)
     model_vol.commit()
 
-    num_videos = _count_video_files(absolute_dst)
-    print(f"Raw generated videos exported to Modal volume path: {relative_dst} ({num_videos} video files).")
+    num_artifacts = _count_generated_artifacts(absolute_dst)
+    print(
+        f"Raw generated artifacts exported to Modal volume path: "
+        f"{relative_dst} ({num_artifacts} artifact files)."
+    )
     print(
         "Download command:\n"
         f"  modal volume get hf-model-weights {relative_dst} "
@@ -1002,7 +1017,7 @@ def run_ssim_tests(
             quality_tier=quality_tier,
         )
         print(
-            "Raw generated videos will be saved to Modal volume path: "
+            "Raw generated artifacts will be saved to Modal volume path: "
             f"{generated_volume_path}"
         )
     else:
@@ -1042,7 +1057,7 @@ def run_ssim_tests(
         )
         local_download_dir = _build_local_generated_download_dir(quality_tier)
         print(
-            "To download raw generated videos locally, run:\n"
+            "To download raw generated artifacts locally, run:\n"
             f"  modal volume get hf-model-weights {download_src} "
             f"{local_download_dir}"
         )

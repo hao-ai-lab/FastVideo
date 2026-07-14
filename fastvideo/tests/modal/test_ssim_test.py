@@ -99,3 +99,11 @@ def test_spawn_ssim_task_passes_hf_api_key_to_pytest_env(monkeypatch, tmp_path):
     assert env["FASTVIDEO_SSIM_MODEL_ID"] == "model-a"
     assert running_task.process.__class__ is FakeProcess
     running_task.log_handle.close()
+
+
+def test_count_generated_artifacts_includes_images(monkeypatch, tmp_path):
+    module = _load_ssim_test_module(monkeypatch)
+    for filename in ("sample.mp4", "sample.png", "sample.jpg", "sample.jpeg", "sample.pt", "metrics.json"):
+        (tmp_path / filename).write_text(filename, encoding="utf-8")
+
+    assert module._count_generated_artifacts(str(tmp_path)) == 5

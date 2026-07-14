@@ -13,12 +13,13 @@ from pathlib import Path
 
 
 VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg")
 # Additional artefact types stored under the same reference folders. Latent
 # tensors (`.pt`) back the latent-slice regression tests used by flaky
 # pixel-space models (e.g. LTX-2 distilled). Keeping them in the same upload
 # flow means seeding a new test only requires one HF round-trip.
 LATENT_EXTENSIONS = (".pt",)
-REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + LATENT_EXTENSIONS
+REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS + LATENT_EXTENSIONS
 HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
 HF_REPO_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO"
 HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE"
@@ -51,10 +52,10 @@ def _default_repo_type() -> str:
 
 
 def _iter_reference_files(root: Path) -> Iterable[Path]:
-    """Yield video and latent (.pt) references under `root`.
+    """Yield video, image, and latent references under `root`.
 
     Used by copy-local and the "has local references" marker probe so that
-    latent-only tests (no mp4) still satisfy readiness checks.
+    image- and latent-only tests still satisfy readiness checks.
     """
     for path in root.rglob("*"):
         if path.is_file() and path.suffix.lower() in REFERENCE_EXTENSIONS:
@@ -824,7 +825,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             reference_dir=reference_dir,
             dry_run=args.dry_run,
         )
-        print(f"Done. {'Would copy' if args.dry_run else 'Copied'} {copied} video files.")
+        print(f"Done. {'Would copy' if args.dry_run else 'Copied'} {copied} reference files.")
         if not args.dry_run and copied > 0:
             marker = (
                 _ssim_dir() / REFERENCE_VIDEOS_DIRNAME / args.quality_tier / f".download_complete_{args.quality_tier}"

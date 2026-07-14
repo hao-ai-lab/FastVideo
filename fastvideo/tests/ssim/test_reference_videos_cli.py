@@ -55,6 +55,46 @@ def _fake_hf(monkeypatch):
     )
 
 
+def test_image_references_are_copied_ready_and_uploaded(tmp_path):
+    generated_dir = tmp_path / "generated"
+    generated_backend_dir = generated_dir / "model-a" / "flash"
+    generated_backend_dir.mkdir(parents=True)
+    for filename in ("sample.png", "sample.jpg", "sample.jpeg", "ignored.json"):
+        (generated_backend_dir / filename).write_text(filename, encoding="utf-8")
+
+    ssim_dir = tmp_path / "ssim"
+    reference_dir = (
+        ssim_dir
+        / "reference_videos"
+        / "default"
+        / "L40S_reference_videos"
+    )
+
+    copied = reference_videos_cli.copy_generated_to_reference(
+        generated_dir=generated_dir,
+        reference_dir=reference_dir,
+    )
+
+    assert copied == 3
+    assert not (reference_dir / "model-a" / "flash" / "ignored.json").exists()
+    (reference_dir.parent / ".download_complete_default").touch()
+    assert reference_videos_cli._has_local_reference_videos(ssim_dir, "default")
+
+    reference_videos_cli.upload_reference_videos(
+        repo_id="FastVideo/ssim-reference-videos",
+        repo_type="dataset",
+        reference_dirs_by_tier=[("default", reference_dir)],
+        token="hf_token",
+        private=False,
+        model_id="model-a",
+    )
+    uploaded_folder = Path(_FakeHfApi.instances[-1].uploaded_folders[0]["folder_path"])
+    assert all(
+        (uploaded_folder / "flash" / filename).exists()
+        for filename in ("sample.png", "sample.jpg", "sample.jpeg")
+    )
+
+
 def test_upload_draft_reference_artifact_uses_drafts_prefix(tmp_path):
     ssim_dir = tmp_path / "ssim"
     generated = (

@@ -1,17 +1,20 @@
-The reference videos are used as part of e2e SSIM regression tests.
+Reference media are used as part of e2e SSIM regression tests.
 Wan inference coverage now lives in `test_wan_t2v_similarity.py` and
 `test_wan_i2v_similarity.py` alongside the other model-specific SSIM files.
-These tests compare newly generated videos against references to detect quality
+These tests compare newly generated videos or images against references to detect quality
 regressions.
 
 reference layout:
 - `reference_videos/default/<GPU>_reference_videos/<model>/<backend>/...`
 - `reference_videos/full_quality/<GPU>_reference_videos/<model>/<backend>/...`
 
+Reference artifacts may be videos, images (`.png`, `.jpg`, `.jpeg`), or latent
+bundles (`.pt`).
+
 `A40_reference_videos` are generated on A40s and so on. (legacy default layout
 `<ssim_dir>/<GPU>_reference_videos/...` is still read as fallback.)
 
-Before SSIM tests run, missing reference videos are auto-downloaded from a
+Before SSIM tests run, missing reference artifacts are auto-downloaded from a
 public HF repo (configured by `FASTVIDEO_SSIM_REFERENCE_HF_REPO`, default:
 `FastVideo/ssim-reference-videos`).
 
@@ -43,7 +46,7 @@ to skip auto-download of missing refs:
 to bootstrap draft refs for a new model:
 `pytest fastvideo/tests/ssim/ -vs --ssim-bootstrap-mode`
 
-generated videos are written under:
+generated artifacts are written under:
 - default params: `generated_videos/default/<GPU>_reference_videos/<model_id>/<ATTENTION_BACKEND>/`
 - full-quality params: `generated_videos/full_quality/<GPU>_reference_videos/<model_id>/<ATTENTION_BACKEND>/`
 
@@ -86,7 +89,7 @@ Normal SSIM runs are strict: missing references fail the test. For a new model
 PR, add `[new-model]` to the PR title or set `FASTVIDEO_SSIM_BOOTSTRAP_MODE=1`
 for the Buildkite job. CI then passes `--ssim-bootstrap-mode` to pytest.
 
-In bootstrap mode, a missing pixel `.mp4` or latent `.pt` reference is treated
+In bootstrap mode, a missing pixel `.mp4`/`.png`/`.jpg`/`.jpeg` or latent `.pt` reference is treated
 as an expected draft-reference case after the generated artifact has been
 written. The test uploads that generated artifact to the HF reference repo under
 `drafts/...` and marks the case `xfail`. Bootstrap mode does not weaken normal
