@@ -99,7 +99,13 @@ def get_attn_backend(
     | None = None,
     default_backend: AttentionBackendEnum | None = None,
 ) -> type[AttentionBackend]:
-    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends, default_backend)
+    return _cached_get_attn_backend(
+        head_size,
+        dtype,
+        supported_attention_backends,
+        default_backend,
+        get_effective_attn_backend_override(),
+    )
 
 
 @cache
@@ -109,6 +115,7 @@ def _cached_get_attn_backend(
     supported_attention_backends: tuple[AttentionBackendEnum, ...]
     | None = None,
     default_backend: AttentionBackendEnum | None = None,
+    selected_backend: AttentionBackendEnum | None = None,
 ) -> type[AttentionBackend]:
     # Check whether a particular choice of backend was
     # previously forced.
@@ -117,7 +124,6 @@ def _cached_get_attn_backend(
     # ENVIRONMENT VARIABLE.
     if not supported_attention_backends:
         raise ValueError("supported_attention_backends is empty")
-    selected_backend = get_effective_attn_backend_override()
 
     # Layer-level default (e.g. a checkpoint that requires a specific sparse
     # backend). Lower precedence than the global force and the env var, so

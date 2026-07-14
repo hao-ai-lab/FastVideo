@@ -3,7 +3,10 @@ import torch.nn as nn
 
 import pytest
 
-from fastvideo.attention.selector import global_force_attn_backend_context_manager
+from fastvideo.attention.selector import (
+    _cached_get_attn_backend,
+    global_force_attn_backend_context_manager,
+)
 from fastvideo.configs.pipelines.wan import (
     FastWan2_2_TI2V_5B_Config,
     FastWan2_2_TI2V_5B_FullAttn_Config,
@@ -25,6 +28,63 @@ from fastvideo.registry import (
 FULLATTN_MODEL_ID = "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers"
 FULLATTN_SHORT_NAME = "FastWan2.2-TI2V-5B-FullAttn-Diffusers"
 FASTWAN_TI2V_MODEL_ID = "FastVideo/FastWan2.2-TI2V-5B-Diffusers"
+
+
+class _FakeAttentionImpl:
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    def forward(self, *args, **kwargs):
+        raise AssertionError("fake attention backend should not run")
+
+
+class _FakeSDPABackend:
+
+    @staticmethod
+    def get_name() -> str:
+        return "TORCH_SDPA"
+
+    @staticmethod
+    def get_impl_cls() -> type[_FakeAttentionImpl]:
+        return _FakeAttentionImpl
+
+
+class _FakeVSABackend:
+
+    @staticmethod
+    def get_name() -> str:
+        return "VIDEO_SPARSE_ATTN"
+
+    @staticmethod
+    def get_impl_cls() -> type[_FakeAttentionImpl]:
+        return _FakeAttentionImpl
+
+
+def _fake_get_attn_backend_cls(
+    selected_backend: AttentionBackendEnum | None,
+    head_size: int,
+    dtype: object,
+) -> str:
+    if selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+        return f"{__name__}._FakeVSABackend"
+    return f"{__name__}._FakeSDPABackend"
+
+
+def _build_wan_block(
+    block_cls: type[nn.Module],
+    supported_attention_backends: tuple[AttentionBackendEnum, ...],
+) -> nn.Module:
+    return block_cls(
+        dim=4,
+        ffn_dim=8,
+        num_heads=1,
+        qk_norm="rms_norm_across_heads",
+        cross_attn_norm=True,
+        eps=1e-6,
+        supported_attention_backends=supported_attention_backends,
+        prefix="test",
+    )
 
 
 def _workloads_for(model_id: str) -> list[str]:
@@ -134,6 +194,33 @@ def test_wan_block_selection_prefers_global_force_over_env(monkeypatch: pytest.M
     with global_force_attn_backend_context_manager(AttentionBackendEnum.TORCH_SDPA):
         assert _select_wan_transformer_block(FastWan2_2_TI2V_5B_Config().dit_config) is WanTransformerBlock
         assert _select_wan_transformer_block(FastWan2_2_TI2V_5B_FullAttn_Config().dit_config) is WanTransformerBlock
+
+
+def test_wan_attention_backend_tracks_global_override_after_cache_warm(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastvideo.platforms import current_platform
+
+    monkeypatch.delenv("FASTVIDEO_ATTENTION_BACKEND", raising=False)
+    monkeypatch.setattr(current_platform, "get_attn_backend_cls", _fake_get_attn_backend_cls)
+    _cached_get_attn_backend.cache_clear()
+    config = FastWan2_2_TI2V_5B_Config().dit_config
+
+    try:
+        with global_force_attn_backend_context_manager(AttentionBackendEnum.VIDEO_SPARSE_ATTN):
+            block_cls = _select_wan_transformer_block(config)
+            vsa_block = _build_wan_block(block_cls, config._supported_attention_backends)
+
+        assert block_cls is WanTransformerBlock_VSA
+        assert vsa_block.attn1.backend is AttentionBackendEnum.VIDEO_SPARSE_ATTN
+
+        with global_force_attn_backend_context_manager(AttentionBackendEnum.TORCH_SDPA):
+            block_cls = _select_wan_transformer_block(config)
+            dense_block = _build_wan_block(block_cls, config._supported_attention_backends)
+
+        assert block_cls is WanTransformerBlock
+        assert dense_block.attn1.backend is AttentionBackendEnum.TORCH_SDPA
+    finally:
+        _cached_get_attn_backend.cache_clear()
 
 
 def test_wan_transformer_uses_config_supported_backends(monkeypatch: pytest.MonkeyPatch) -> None:
