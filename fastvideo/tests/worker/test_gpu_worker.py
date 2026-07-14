@@ -28,6 +28,16 @@ def test_execute_forward_drops_metadata_only_output_before_transport():
     assert result.output.numel() == 0
 
 
+def test_execute_forward_preserves_missing_metadata_only_output():
+    output_batch = ForwardBatch(data_type="video", output=None)
+    worker = _worker_returning(output_batch)
+    request_batch = ForwardBatch(data_type="video", save_video=False, return_frames=False)
+
+    result = worker.execute_forward(request_batch, FastVideoArgs(model_path="test"))
+
+    assert result.output is None
+
+
 @pytest.mark.parametrize(
     ("save_video", "return_frames"),
     [
