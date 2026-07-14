@@ -79,6 +79,7 @@ def test_same_config_produces_same_recipe_fingerprint():
 def test_recipe_includes_first_class_benchmark_identity():
     recipe = build_recipe_from_benchmark_config(_benchmark_config())
 
+    assert recipe["recipe_schema_version"] == identity_module.RECIPE_SCHEMA_VERSION == 2
     assert recipe["benchmark"] == {
         "benchmark_id": "wan-t2v-1.3b-2gpu",
         "workload_id": "wan-t2v",

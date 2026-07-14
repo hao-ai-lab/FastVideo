@@ -17,7 +17,7 @@ from typing import Any
 
 import torch
 
-RECIPE_SCHEMA_VERSION = 1
+RECIPE_SCHEMA_VERSION = 2
 PROFILE_ID_LENGTH = 16
 _PATH_EXCLUDED_GENERATION_KEYS = {"output_path", "output_video_name"}
 _PROMPT_KEYS = {"prompt", "negative_prompt", "neg_prompt"}
