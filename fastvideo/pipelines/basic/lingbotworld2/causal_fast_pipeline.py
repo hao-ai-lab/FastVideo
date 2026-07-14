@@ -20,8 +20,7 @@ from fastvideo.models.dits.lingbotworld2.cam_utils import (
     interpolate_camera_poses,
 )
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler,
-)
+    FlowUniPCMultistepScheduler, )
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import (
@@ -82,15 +81,12 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
         head_dim = self.transformer.dim // self.transformer.num_heads
         num_heads = self.transformer.num_heads // get_sp_world_size()
         shape = [batch_size, kv_size, num_heads, head_dim]
-        return [
-            {
-                "k": torch.zeros(shape, dtype=dtype, device=device),
-                "v": torch.zeros(shape, dtype=dtype, device=device),
-                "global_end_index": torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index": torch.tensor([0], dtype=torch.long, device=device),
-            }
-            for _ in range(self.transformer.num_layers)
-        ]
+        return [{
+            "k": torch.zeros(shape, dtype=dtype, device=device),
+            "v": torch.zeros(shape, dtype=dtype, device=device),
+            "global_end_index": torch.tensor([0], dtype=torch.long, device=device),
+            "local_end_index": torch.tensor([0], dtype=torch.long, device=device),
+        } for _ in range(self.transformer.num_layers)]
 
     def _initialize_crossattn_cache(
         self,
@@ -102,14 +98,11 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
         """Allocate per-block text cross-attention KV cache tensors."""
         head_dim = self.transformer.dim // self.transformer.num_heads
         shape = [batch_size, max_sequence_length, self.transformer.num_heads, head_dim]
-        return [
-            {
-                "k": torch.zeros(shape, dtype=dtype, device=device),
-                "v": torch.zeros(shape, dtype=dtype, device=device),
-                "is_init": torch.tensor([0], dtype=torch.bool, device=device),
-            }
-            for _ in range(self.transformer.num_layers)
-        ]
+        return [{
+            "k": torch.zeros(shape, dtype=dtype, device=device),
+            "v": torch.zeros(shape, dtype=dtype, device=device),
+            "is_init": torch.tensor([0], dtype=torch.bool, device=device),
+        } for _ in range(self.transformer.num_layers)]
 
     @staticmethod
     def _prompt_context(batch: ForwardBatch, device: torch.device) -> list[torch.Tensor]:
@@ -217,7 +210,8 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
         if not bool(getattr(self.vae, "handles_latent_denorm", False)):
             if hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None:
                 latent_condition -= self.vae.shift_factor.to(latent_condition.device, latent_condition.dtype)
-            latent_condition = latent_condition * self.vae.scaling_factor.to(latent_condition.device, latent_condition.dtype)
+            latent_condition = latent_condition * self.vae.scaling_factor.to(latent_condition.device,
+                                                                             latent_condition.dtype)
         if fastvideo_args.vae_cpu_offload:
             self.vae.to("cpu")
         return torch.concat([mask, latent_condition[0]], dim=0)
@@ -278,7 +272,8 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
             torch.bfloat16,
             device,
         )
-        y = self._encode_condition_video(img, h, w, frames, mask, fastvideo_args).to(device=device, dtype=torch.bfloat16)
+        y = self._encode_condition_video(img, h, w, frames, mask, fastvideo_args).to(device=device,
+                                                                                     dtype=torch.bfloat16)
 
         transformer_dtype = torch.bfloat16
         frame_seqlen = int(noise.shape[-2] * noise.shape[-1] // 4)
@@ -292,7 +287,7 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
         latents_chunk = noise.split(chunk_size, dim=1)
         condition_chunk = y.split(chunk_size, dim=1)
         c2ws_plucker_emb_chunk = c2ws_plucker_emb.split(chunk_size, dim=2)
-        max_seq_len = int(math.ceil((chunk_size * lat_h * lat_w // 4)))
+        max_seq_len = int(math.ceil(chunk_size * lat_h * lat_w // 4))
 
         with torch.amp.autocast("cuda", dtype=transformer_dtype):
             for chunk_id, current_latent in enumerate(latents_chunk):

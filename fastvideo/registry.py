@@ -497,8 +497,10 @@ def _register_configs() -> None:
         hf_model_paths=[
             "robbyant/lingbot-world-v2-14b-causal-fast",
         ],
-        model_detectors=[lambda path: ("lingbot-world-v2-14b-causal-fast" in path.lower()
-                                       or "lingbotworld2causalfastpipeline" in path.lower())],
+        model_detectors=[
+            lambda path:
+            ("lingbot-world-v2-14b-causal-fast" in path.lower() or "lingbotworld2causalfastpipeline" in path.lower())
+        ],
         model_family="lingbotworld2",
         default_preset="lingbotworld2_causal_fast_i2v",
     )
@@ -511,9 +513,10 @@ def _register_configs() -> None:
         hf_model_paths=[
             "FastVideo/LingBot-World-Base-Cam-Diffusers",
         ],
-        model_detectors=[lambda path: (("lingbotworld" in path.lower() or "lingbot-world" in path.lower())
-                                       and "causal-fast" not in path.lower()
-                                       and "causalfast" not in path.lower())],
+        model_detectors=[
+            lambda path: (("lingbotworld" in path.lower() or "lingbot-world" in path.lower()) and "causal-fast" not in
+                          path.lower() and "causalfast" not in path.lower())
+        ],
         model_family="lingbotworld",
         default_preset="lingbotworld_i2v",
     )

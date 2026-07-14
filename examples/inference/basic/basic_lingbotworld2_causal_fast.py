@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Run LingBot World 2 14B causal-fast I2V generation with FastVideo."""
 
+import os
 from pathlib import Path
 
 from fastvideo import VideoGenerator
@@ -14,7 +15,7 @@ OUTPUT_PATH = REPO_ROOT / "outputs" / "lingbotworld2_causal_fast.mp4"
 def main() -> None:
     """Load the native FastVideo LingBot World 2 causal-fast pipeline and generate one video."""
     generator = VideoGenerator.from_pretrained(
-        "/mnt/weka/shrd/wm/junda/fv-hub/lingbot-world-v2/ckpts/lingbot-world-v2-14b-causal-fast-fastvideo",
+        os.environ["LINGBOTWORLD2_MODEL_PATH"],
         num_gpus=8,
         sp_size=8,
         hsdp_shard_dim=8,
@@ -30,6 +31,7 @@ def main() -> None:
     try:
         generator.generate_video(
             "A serene lakeside scene with a lone tree standing in calm water, surrounded by distant snow-capped mountains under a bright blue sky with drifting white clouds; gentle ripples reflect the tree and sky, creating a tranquil, meditative atmosphere.",
+            image_path=str(DATASET_DIR / "image.jpg"),
             action_path=str(DATASET_DIR),
             output_path=str(OUTPUT_PATH),
             save_video=True,
