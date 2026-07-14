@@ -277,6 +277,14 @@ def validate_model_workload_support(model_path: str, workload_type: WorkloadType
     _check_config_info_workload_support(model_path, config_info, workload_type)
 
 
+def get_model_workload_types(model_path: str) -> tuple[WorkloadType, ...]:
+    """Return registered workload types for a model path without downloading."""
+    config_info = _get_registered_config_info(model_path)
+    if config_info is None:
+        return ()
+    return config_info.workload_types
+
+
 def _register_configs() -> None:
     # LTX-2 (distilled) — registered FIRST so its detector wins over
     # the base detector when both fire. The detector loop in

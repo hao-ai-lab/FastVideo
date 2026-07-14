@@ -39,6 +39,7 @@ def _make_training_args(
         pipeline_config.dit_precision = tc.dit_precision
     return TrainingArgs(
         model_path=model_path,
+        workload_type=tc.workload_type,
         mode=ExecutionMode.DISTILLATION,
         inference_mode=False,
         pipeline_config=pipeline_config,

@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 
+from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.train.utils.training_config import (
     CheckpointConfig,
@@ -314,6 +315,29 @@ def _apply_training_dit_arch_overrides(pipeline_config: Any, overrides: dict[str
         arch_config.__post_init__()
 
 
+def _parse_training_workload_type(t: dict[str, Any], model_path: str) -> WorkloadType:
+    raw = t.get("workload_type")
+    if raw is None:
+        from fastvideo.registry import get_model_workload_types
+
+        workload_types: tuple[WorkloadType, ...] = get_model_workload_types(model_path) if model_path else ()
+        if len(workload_types) == 1:
+            return workload_types[0]
+        return WorkloadType.T2V
+
+    if isinstance(raw, WorkloadType):
+        return raw
+    valid_choices = ", ".join(WorkloadType.choices())
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("training.workload_type must be one of "
+                         f"{valid_choices}, got {raw!r}")
+    try:
+        return WorkloadType.from_string(raw)
+    except ValueError as error:
+        raise ValueError("training.workload_type must be one of "
+                         f"{valid_choices}, got {raw!r}") from error
+
+
 def _build_training_config(
     t: dict[str, Any],
     *,
@@ -342,6 +366,8 @@ def _build_training_config(
             init_from = student_cfg.get("init_from")
             if init_from is not None:
                 model_path = str(init_from)
+
+    workload_type = _parse_training_workload_type(t, model_path)
 
     raw_data_path = da.get("data_path", "") or ""
     data_path: str | list[str] | dict[str, int]
@@ -418,6 +444,7 @@ def _build_training_config(
         ),
         pipeline_config=pipeline_config,
         model_path=model_path,
+        workload_type=workload_type,
         dit_precision=str(t.get("dit_precision", "fp32") or "fp32"),
     )
 
