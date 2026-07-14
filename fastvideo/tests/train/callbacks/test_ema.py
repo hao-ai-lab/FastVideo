@@ -9,13 +9,13 @@ falls through to raw tensors for non-DTensor inputs.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 import torch
 
 from fastvideo.train.callbacks.ema import EMACallback
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,9 +89,7 @@ class TestOnTrainingStepEnd:
     def test_no_op_before_train_start(self) -> None:
         cb = EMACallback()
         # student_ema is None until on_train_start.
-        cb.on_training_step_end(
-            _Method(transformer=None), loss_dict={}, iteration=0
-        )
+        cb.on_training_step_end(_Method(transformer=None), loss_dict={}, iteration=0)
         assert not cb._ema_started
 
     def test_skipped_until_start_iter(self) -> None:
@@ -103,9 +101,7 @@ class TestOnTrainingStepEnd:
         with torch.no_grad():
             transformer.weight.fill_(7.0)
 
-        cb.on_training_step_end(
-            _Method(transformer), loss_dict={}, iteration=5
-        )
+        cb.on_training_step_end(_Method(transformer), loss_dict={}, iteration=5)
         # Below start_iter: shadow is untouched, _ema_started False.
         assert not cb._ema_started
         assert torch.allclose(
@@ -122,9 +118,7 @@ class TestOnTrainingStepEnd:
         with torch.no_grad():
             transformer.weight.fill_(5.0)
 
-        cb.on_training_step_end(
-            _Method(transformer), loss_dict={}, iteration=10
-        )
+        cb.on_training_step_end(_Method(transformer), loss_dict={}, iteration=10)
         # First active step: shadow is re-initialized from the
         # current transformer (5.0) and *then* update() applies decay
         # against the same value, so shadow stays at 5.0.
@@ -140,16 +134,12 @@ class TestOnTrainingStepEnd:
         cb.on_train_start(_Method(transformer), iteration=0)
 
         # Step 0: re-init at 2.0, then update against 2.0 → still 2.0.
-        cb.on_training_step_end(
-            _Method(transformer), loss_dict={}, iteration=0
-        )
+        cb.on_training_step_end(_Method(transformer), loss_dict={}, iteration=0)
         # Step 1: drift transformer to 12.0, expect
         # shadow = 0.9 * 2.0 + 0.1 * 12.0 = 3.0.
         with torch.no_grad():
             transformer.weight.fill_(12.0)
-        cb.on_training_step_end(
-            _Method(transformer), loss_dict={}, iteration=1
-        )
+        cb.on_training_step_end(_Method(transformer), loss_dict={}, iteration=1)
         assert torch.allclose(
             cb.student_ema.shadow["weight"],
             torch.full((2, 4), 3.0),
@@ -164,10 +154,7 @@ class TestOnTrainingStepEnd:
         cb.on_train_start(method, iteration=0)
         cb.on_training_step_end(method, loss_dict={}, iteration=0)
 
-        assert any(
-            payload.get("ema/decay") == 0.99 and step == 0
-            for payload, step in tracker.entries
-        )
+        assert any(payload.get("ema/decay") == 0.99 and step == 0 for payload, step in tracker.entries)
 
 
 # ---------------------------------------------------------------------------
@@ -183,9 +170,7 @@ class TestEmaContext:
         # No on_train_start → student_ema is None.
         with cb.ema_context(transformer) as t:
             assert t is transformer
-            assert torch.allclose(
-                t.weight, torch.full((2, 4), 3.0)
-            )
+            assert torch.allclose(t.weight, torch.full((2, 4), 3.0))
 
     def test_swaps_weights_then_restores(self) -> None:
         transformer = _tiny_transformer(fill=1.0)
@@ -203,9 +188,7 @@ class TestEmaContext:
         with cb.ema_context(transformer) as t:
             assert torch.allclose(t.weight, torch.full((2, 4), 1.0))
 
-        assert torch.allclose(
-            transformer.weight, torch.full((2, 4), 9.0)
-        )
+        assert torch.allclose(transformer.weight, torch.full((2, 4), 9.0))
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +202,7 @@ class TestStateDict:
         cb = EMACallback()
         assert cb.state_dict() == {}
 
-    def test_round_trip_preserves_shadow_and_started_flag(self) -> None:
+    def test_state_dict_only_contains_dcp_safe_metadata(self) -> None:
         transformer = _tiny_transformer(fill=4.0)
         cb = EMACallback(decay=0.5, start_iter=0)
         method = _Method(transformer)
@@ -227,24 +210,53 @@ class TestStateDict:
         cb.on_training_step_end(method, loss_dict={}, iteration=0)
 
         state = cb.state_dict()
-        assert "student_ema" in state
-        assert state["ema_started"] is True
+        assert state == {"ema_started": True}
 
-        # Build a fresh callback and load.
+    def test_checkpoint_hooks_round_trip_rank_local_shadow(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        transformer = _tiny_transformer(fill=4.0)
+        cb = EMACallback(decay=0.5, start_iter=0)
+        method = _Method(transformer)
+        cb.on_train_start(method, iteration=0)
+        cb.on_training_step_end(method, loss_dict={}, iteration=0)
+        expected = cb.student_ema.shadow["weight"].clone()
+
+        consolidated: list[tuple[int, str]] = []
+
+        def fake_consolidate(ema, module, rank, save_dir, base_name):
+            consolidated.append((rank, base_name))
+
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.ema."
+            "save_consolidated_local_shard_ema_safetensors",
+            fake_consolidate,
+        )
+        cb.on_checkpoint_save(method, tmp_path, iteration=10)
+        assert (tmp_path / "ema" / "local_shards" / "rank-0.pt").is_file()
+        assert consolidated == [(0, "student")]
+
         fresh = EMACallback(decay=0.5, start_iter=0)
-        fresh.on_train_start(_Method(_tiny_transformer(fill=0.0)),
-                             iteration=0)
-        # Sanity: fresh shadow != saved shadow before load.
-        assert not torch.allclose(
-            fresh.student_ema.shadow["weight"],
-            cb.student_ema.shadow["weight"],
-        )
-        fresh.load_state_dict(state)
+        fresh_method = _Method(_tiny_transformer(fill=0.0))
+        fresh.on_train_start(fresh_method, iteration=0)
+        fresh.load_state_dict(cb.state_dict())
+        fresh.on_checkpoint_load(fresh_method, tmp_path, iteration=10)
         assert fresh._ema_started is True
-        assert torch.allclose(
-            fresh.student_ema.shadow["weight"],
-            cb.student_ema.shadow["weight"],
-        )
+        assert torch.allclose(fresh.student_ema.shadow["weight"], expected)
+
+    def test_legacy_started_checkpoint_has_clear_error(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        method = _Method(_tiny_transformer())
+        cb = EMACallback()
+        cb.on_train_start(method, iteration=0)
+        cb.load_state_dict({"ema_started": True})
+
+        with pytest.raises(RuntimeError, match="predates the consolidated EMA"):
+            cb.on_checkpoint_load(method, tmp_path, iteration=10)
 
     def test_load_without_student_ema_only_sets_flag(self) -> None:
         cb = EMACallback()

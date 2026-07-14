@@ -7,6 +7,7 @@ Adapted from FastGen's callback pattern to FastVideo's types.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from fastvideo.logger import init_logger
@@ -83,6 +84,22 @@ class Callback:
     def on_train_end(
         self,
         method: TrainingMethod,
+        iteration: int = 0,
+    ) -> None:
+        pass
+
+    def on_checkpoint_save(
+        self,
+        method: TrainingMethod,
+        checkpoint_dir: Path,
+        iteration: int = 0,
+    ) -> None:
+        pass
+
+    def on_checkpoint_load(
+        self,
+        method: TrainingMethod,
+        checkpoint_dir: Path,
         iteration: int = 0,
     ) -> None:
         pass

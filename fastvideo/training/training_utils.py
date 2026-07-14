@@ -1116,21 +1116,46 @@ def _consolidate_local_shard_ema_and_save_safetensors(
     base_name: str,
 ) -> None:
     try:
-        # Temporarily apply EMA to the live (sharded) module and gather full CPU state on rank 0
-        with ema.apply_to_model(module):
-            cpu_state_full = gather_state_dict_on_cpu_rank0(module, device=None)
-        if rank == 0:
-            ema_dir = os.path.join(save_dir, "ema")
-            os.makedirs(ema_dir, exist_ok=True)
-            output_path = os.path.join(ema_dir, f"{base_name}.safetensors")
-            _save_full_ema_safetensors_from_state(cpu_state_full, module.reverse_param_names_mapping, output_path)
-            logger.info("rank: %s, saved consolidated %s EMA (from local_shard) as safetensors to %s",
-                        rank,
-                        base_name,
-                        output_path,
-                        local_main_process_only=False)
+        save_consolidated_local_shard_ema_safetensors(
+            ema,
+            module,
+            rank,
+            save_dir,
+            base_name,
+        )
     except Exception as ce:
         logger.warning("rank: %s, failed consolidating %s EMA (local_shard): %s", rank, base_name, str(ce))
+
+
+def save_consolidated_local_shard_ema_safetensors(
+    ema: "EMA_FSDP",
+    module,
+    rank: int,
+    save_dir: str,
+    base_name: str,
+) -> None:
+    """Collectively save local-shard EMA as one HF-format safetensors file."""
+    with ema.apply_to_model(module):
+        cpu_state_full = gather_state_dict_on_cpu_rank0(module, device=None)
+    if rank != 0:
+        return
+
+    ema_dir = os.path.join(save_dir, "ema")
+    os.makedirs(ema_dir, exist_ok=True)
+    output_path = os.path.join(ema_dir, f"{base_name}.safetensors")
+    reverse_mapping = getattr(module, "reverse_param_names_mapping", {})
+    _save_full_ema_safetensors_from_state(
+        cpu_state_full,
+        reverse_mapping,
+        output_path,
+    )
+    logger.info(
+        "rank: %s, saved consolidated %s EMA (from local_shard) as safetensors to %s",
+        rank,
+        base_name,
+        output_path,
+        local_main_process_only=False,
+    )
 
 
 def shift_timestep(timestep: torch.Tensor, shift: float, num_train_timestep: float) -> torch.Tensor:

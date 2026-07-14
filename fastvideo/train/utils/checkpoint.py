@@ -244,6 +244,8 @@ class CheckpointManager:
         save_steps = int(self.config.save_steps or 0)
         if save_steps <= 0:
             return
+        if self._last_saved_step == step:
+            return
         self.save(step)
 
     def save(self, step: int) -> None:
@@ -259,6 +261,14 @@ class CheckpointManager:
             )
             self._write_metadata(checkpoint_dir, step)
         dcp.save(states, checkpoint_id=str(dcp_dir))
+        _barrier()
+
+        if self._callbacks is not None:
+            self._callbacks.on_checkpoint_save(
+                self.method,
+                checkpoint_dir=checkpoint_dir,
+                iteration=step,
+            )
         _barrier()
 
         # Save RNG state AFTER dcp.save so it captures the
@@ -378,6 +388,12 @@ class CheckpointManager:
         states = self._build_states()
         logger.info("Loading Phase 2 checkpoint from %s", resolved)
         dcp.load(states, checkpoint_id=str(resolved / "dcp"))
+        if self._callbacks is not None:
+            self._callbacks.on_checkpoint_load(
+                self.method,
+                checkpoint_dir=resolved,
+                iteration=step,
+            )
         _barrier()
         logger.info("Checkpoint loaded; resuming from step=%s", step)
         return step

@@ -9,14 +9,20 @@ lives under ``callbacks.ema`` in the YAML file.
 from __future__ import annotations
 
 import contextlib
+import os
 from collections.abc import Generator
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 import torch
+import torch.distributed as dist
 
 from fastvideo.logger import init_logger
 from fastvideo.train.callbacks.callback import Callback
-from fastvideo.training.training_utils import EMA_FSDP
+from fastvideo.training.training_utils import (
+    EMA_FSDP,
+    save_consolidated_local_shard_ema_safetensors,
+)
 
 if TYPE_CHECKING:
     from fastvideo.train.methods.base import TrainingMethod
@@ -140,7 +146,6 @@ class EMACallback(Callback):
         if self.student_ema is None:
             return {}
         return {
-            "student_ema": self.student_ema.state_dict(),
             "ema_started": self._ema_started,
         }
 
@@ -148,7 +153,74 @@ class EMACallback(Callback):
         self,
         state_dict: dict[str, Any],
     ) -> None:
-        ema_state = state_dict.get("student_ema")
-        if (ema_state is not None and self.student_ema is not None):
-            self.student_ema.load_state_dict(ema_state)
         self._ema_started = bool(state_dict.get("ema_started", False), )
+
+    def on_checkpoint_save(
+        self,
+        method: TrainingMethod,
+        checkpoint_dir: Path,
+        iteration: int = 0,
+    ) -> None:
+        if self.student_ema is None or not self._ema_started:
+            return
+
+        rank = int(dist.get_rank()) if dist.is_initialized() else 0
+        world_size = (int(dist.get_world_size()) if dist.is_initialized() else 1)
+        shard_dir = checkpoint_dir / "ema" / "local_shards"
+        shard_dir.mkdir(parents=True, exist_ok=True)
+        shard_path = shard_dir / f"rank-{rank}.pt"
+        temp_path = shard_path.with_suffix(".pt.tmp")
+        torch.save(
+            {
+                "version": 1,
+                "rank": rank,
+                "world_size": world_size,
+                "student_ema": self.student_ema.state_dict(),
+            },
+            temp_path,
+        )
+        os.replace(temp_path, shard_path)
+
+        save_consolidated_local_shard_ema_safetensors(
+            self.student_ema,
+            method.student.transformer,
+            rank,
+            str(checkpoint_dir),
+            "student",
+        )
+
+    def on_checkpoint_load(
+        self,
+        method: TrainingMethod,
+        checkpoint_dir: Path,
+        iteration: int = 0,
+    ) -> None:
+        if not self._ema_started:
+            return
+        if self.student_ema is None:
+            raise RuntimeError("EMA is active in the checkpoint but was not initialized")
+
+        rank = int(dist.get_rank()) if dist.is_initialized() else 0
+        world_size = (int(dist.get_world_size()) if dist.is_initialized() else 1)
+        shard_path = checkpoint_dir / "ema" / "local_shards" / f"rank-{rank}.pt"
+        if not shard_path.is_file():
+            raise RuntimeError("Checkpoint EMA cannot be resumed: missing rank-local EMA "
+                               f"state at {shard_path}. This checkpoint predates the "
+                               "consolidated EMA format; its DCP callback tensors contain "
+                               "incomplete rank-local shards and cannot be reconstructed "
+                               "losslessly.")
+
+        payload = torch.load(
+            shard_path,
+            map_location="cpu",
+            weights_only=True,
+        )
+        saved_world_size = int(payload.get("world_size", -1))
+        if saved_world_size != world_size:
+            raise RuntimeError("EMA checkpoint topology mismatch: "
+                               f"saved world_size={saved_world_size}, current world_size={world_size}.")
+        ema_state = payload.get("student_ema")
+        if not isinstance(ema_state, dict):
+            raise RuntimeError(f"Invalid EMA shard payload: {shard_path}")
+        self.student_ema.load_state_dict(ema_state)
+        logger.info("Restored rank-local EMA state from %s", shard_path)

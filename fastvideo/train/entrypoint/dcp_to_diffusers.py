@@ -51,6 +51,57 @@ def _ensure_distributed() -> None:
         os.environ.setdefault(key, default)
 
 
+def _export_consolidated_ema(
+    *,
+    ema_path: str,
+    base_model_path: str,
+    output_dir: str,
+    overwrite: bool = False,
+) -> str:
+    """Build a diffusers directory using a checkpoint's full EMA weights."""
+    import shutil
+    from pathlib import Path
+
+    from fastvideo.utils import maybe_download_model
+
+    src_ema = Path(ema_path).resolve()
+    if not src_ema.is_file():
+        raise FileNotFoundError("Consolidated student EMA is missing from this checkpoint: "
+                                f"{src_ema}. Legacy checkpoints only contain incomplete "
+                                "rank-local EMA callback tensors and cannot export exact EMA weights.")
+
+    local_base = Path(maybe_download_model(str(base_model_path))).resolve()
+    dst = Path(os.path.expanduser(str(output_dir))).resolve()
+    if dst.exists():
+        if overwrite:
+            shutil.rmtree(dst, ignore_errors=True)
+        else:
+            raise FileExistsError(f"Refusing to overwrite existing directory: {dst}. "
+                                  "Pass --overwrite to replace it.")
+
+    def _copy_or_link(src: str, dest: str) -> None:
+        try:
+            os.link(src, dest)
+        except OSError:
+            shutil.copy2(src, dest)
+
+    shutil.copytree(
+        local_base,
+        dst,
+        symlinks=True,
+        copy_function=_copy_or_link,
+    )
+    transformer_dir = dst / "transformer"
+    if not transformer_dir.is_dir():
+        raise FileNotFoundError(f"Base model is missing transformer component: {transformer_dir}")
+    for pattern in ("*.safetensors", "*.bin", "*.index.json"):
+        for path in transformer_dir.glob(pattern):
+            path.unlink(missing_ok=True)
+    shutil.copy2(src_ema, transformer_dir / "model.safetensors")
+    logger.info("Exported consolidated student EMA to %s", dst)
+    return str(dst)
+
+
 def _save_role_pretrained(
     *,
     role: str,
@@ -247,6 +298,20 @@ def convert(
 
     tc = cfg.training
 
+    base_model_path = str(tc.model_path)
+    if not base_model_path:
+        raise ValueError("Cannot determine base_model_path from "
+                         "config. Ensure models.student.init_from "
+                         "is set.")
+
+    if role == "student_ema":
+        return _export_consolidated_ema(
+            ema_path=str(resolved / "ema" / "student.safetensors"),
+            base_model_path=base_model_path,
+            output_dir=output_dir,
+            overwrite=overwrite,
+        )
+
     # -- Init distributed (1 GPU is enough; DCP reshards) --
     maybe_init_distributed_environment_and_model_parallel(
         tp_size=1,
@@ -273,11 +338,6 @@ def convert(
 
     # -- Export to diffusers format --
     model = method._role_models[role]
-    base_model_path = str(tc.model_path)
-    if not base_model_path:
-        raise ValueError("Cannot determine base_model_path from "
-                         "config. Ensure models.student.init_from "
-                         "is set.")
 
     logger.info(
         "Exporting role=%s to %s (base=%s)",
@@ -394,7 +454,8 @@ def main() -> None:
         "--role",
         type=str,
         default="student",
-        help="Role to export (default: student).",
+        help=("Role to export (default: student). Use student_ema to export "
+              "the exact EMA weights used by validation."),
     )
     parser.add_argument(
         "--overwrite",

@@ -24,7 +24,6 @@ from fastvideo.train.utils.checkpoint import (
     _resolve_resume_checkpoint,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -163,8 +162,7 @@ def test_find_latest_skips_non_checkpoint_dirs(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_latest_with_no_checkpoints_returns_none(
-        tmp_path: Path) -> None:
+def test_resolve_latest_with_no_checkpoints_returns_none(tmp_path: Path) -> None:
     out = tmp_path / "outputs"
     out.mkdir()
     assert _resolve_resume_checkpoint("latest", output_dir=str(out)) is None
@@ -180,8 +178,7 @@ def test_resolve_latest_returns_latest_checkpoint(tmp_path: Path) -> None:
 
 def test_resolve_explicit_checkpoint_dir(tmp_path: Path) -> None:
     ckpt = _make_checkpoint_dir(tmp_path, 42)
-    resolved = _resolve_resume_checkpoint(str(ckpt),
-                                          output_dir=str(tmp_path))
+    resolved = _resolve_resume_checkpoint(str(ckpt), output_dir=str(tmp_path))
     assert resolved is not None
     assert resolved.name == "checkpoint-42"
 
@@ -189,8 +186,7 @@ def test_resolve_explicit_checkpoint_dir(tmp_path: Path) -> None:
 def test_resolve_dcp_subdir_returns_parent_checkpoint(tmp_path: Path) -> None:
     ckpt = _make_checkpoint_dir(tmp_path, 42)
     dcp_path = ckpt / "dcp"
-    resolved = _resolve_resume_checkpoint(str(dcp_path),
-                                          output_dir=str(tmp_path))
+    resolved = _resolve_resume_checkpoint(str(dcp_path), output_dir=str(tmp_path))
     assert resolved is not None
     assert resolved.name == "checkpoint-42"
 
@@ -207,8 +203,7 @@ def test_resolve_output_dir_returns_latest(tmp_path: Path) -> None:
 
 def test_resolve_nonexistent_path_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        _resolve_resume_checkpoint(str(tmp_path / "missing"),
-                                   output_dir=str(tmp_path))
+        _resolve_resume_checkpoint(str(tmp_path / "missing"), output_dir=str(tmp_path))
 
 
 def test_resolve_checkpoint_without_dcp_raises(tmp_path: Path) -> None:
@@ -358,3 +353,11 @@ def test_maybe_save_triggers_on_each_interval(tmp_path: Path) -> None:
     for step in range(1, 41):
         mgr.maybe_save(step=step)
     assert calls == [10, 20, 30, 40]
+
+
+def test_save_final_skips_step_already_saved(tmp_path: Path) -> None:
+    mgr = _make_manager(tmp_path, save_steps=10)
+    calls = _record_save_calls(mgr)
+    mgr.maybe_save(step=20)
+    mgr.save_final(step=20)
+    assert calls == [20]
