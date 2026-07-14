@@ -17,7 +17,7 @@ try:
         _comparison_identity_filters,
         _record_uses_v2_identity,
     )
-    from fastvideo.performance.hf_store import safe_float, sanitize
+    from fastvideo.performance.hf_store import load_records_for_identity, safe_float, sanitize
     from fastvideo.performance.metric_policy import DEFAULT_METRIC_POLICIES
 except ImportError:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
@@ -29,12 +29,13 @@ except ImportError:
         _comparison_identity_filters,
         _record_uses_v2_identity,
     )
-    from fastvideo.performance.hf_store import safe_float, sanitize
+    from fastvideo.performance.hf_store import load_records_for_identity, safe_float, sanitize
     from fastvideo.performance.metric_policy import DEFAULT_METRIC_POLICIES
 
 TRACKING_ROOT = os.environ.get("PERFORMANCE_TRACKING_ROOT", "/tmp/perf-tracking")
+STAGING_ROOT = os.environ.get("PERFORMANCE_RESEED_STAGING_ROOT", "/tmp/performance_reseed_prepared")
 DEFAULT_MAX_INTRA_BATCH_REGRESSION = 0.05
-_SOURCE_PROVENANCE_FIELDS = ("model_id", "commit_sha", "timestamp", "build_id", "job_id")
+_SOURCE_PROVENANCE_FIELDS = ("commit_sha", "timestamp", "build_id", "job_id")
 _CORE_MEASUREMENT_FIELDS = frozenset({"latency", "throughput", "memory"})
 
 
@@ -67,7 +68,7 @@ def _require_nonempty_string(record: dict[str, Any], field: str) -> str:
 
 def _source_provenance_identity(record: dict[str, Any]) -> tuple[str, ...] | None:
     identity = tuple(str(record.get(field) or "") for field in _SOURCE_PROVENANCE_FIELDS)
-    return identity if any(identity[1:]) else None
+    return identity if any(identity) else None
 
 
 def _validate_unique_sources(source_paths: list[str], records: list[dict[str, Any]]) -> None:
@@ -178,7 +179,7 @@ def write_seed_record(
     *,
     suffix: str | None = None,
 ) -> str:
-    """Write *record* under the tracking root and return the local JSON path."""
+    """Write *record* under the staging root and return the local JSON path."""
     out_path = _seed_record_path(local_dir, record, suffix=suffix)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     _write_json(out_path, record)
@@ -206,6 +207,46 @@ def _validate_same_identity(records: list[dict[str, Any]]) -> dict[str, str]:
         if identity != first:
             raise ValueError(f"source artifact {index} does not match the first exact comparable identity")
     return first
+
+
+def _validate_separate_roots(tracking_root: str, staging_root: str) -> None:
+    tracking_root = os.path.realpath(os.path.abspath(tracking_root))
+    staging_root = os.path.realpath(os.path.abspath(staging_root))
+    try:
+        common_root = os.path.commonpath((tracking_root, staging_root))
+    except ValueError:
+        return
+    if common_root in {tracking_root, staging_root}:
+        raise ValueError("baseline seed staging and canonical tracking roots must be separate and non-nested")
+
+
+def _validate_first_seed_state(
+    tracking_root: str,
+    staging_root: str,
+    identity: dict[str, str],
+) -> None:
+    if load_records_for_identity(
+        tracking_root,
+        identity,
+        last_n=1,
+        successful_only=True,
+        baseline_eligible_only=True,
+    ):
+        raise ValueError(
+            "exact comparable identity already has a baseline-eligible record; "
+            "the CALIBRATION_NEEDED source artifact is stale"
+        )
+    if load_records_for_identity(
+        staging_root,
+        identity,
+        last_n=1,
+        successful_only=True,
+        baseline_eligible_only=True,
+    ):
+        raise ValueError(
+            "exact comparable identity already has a prepared baseline seed in staging; "
+            "reuse or remove it instead of preparing a replay"
+        )
 
 
 def _order_sources_by_timestamp(
@@ -306,7 +347,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--tracking-root",
         default=TRACKING_ROOT,
-        help="Local performance tracking root to write seed records under.",
+        help="Previously synchronized canonical tracking root, read-only during preparation.",
+    )
+    parser.add_argument(
+        "--staging-root",
+        default=STAGING_ROOT,
+        help="Separate local root for prepared seed records.",
     )
     parser.add_argument(
         "--max-intra-batch-regression",
@@ -324,11 +370,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    _validate_separate_roots(args.tracking_root, args.staging_root)
     source_records = [_load_json(path) for path in args.source_results]
     for source_record in source_records:
         _validate_calibration_source(source_record)
     _validate_unique_sources(args.source_results, source_records)
     identity = _validate_same_identity(source_records)
+    _validate_first_seed_state(args.tracking_root, args.staging_root, identity)
     _validate_batch_consistency(source_records, args.max_intra_batch_regression)
     ordered_sources = _order_sources_by_timestamp(args.source_results, source_records)
     print("Seeding exact comparable identity:")
@@ -346,11 +394,11 @@ def main(argv: list[str] | None = None) -> int:
             batch_index=index,
         )
         suffix = f"{index:02d}" if len(source_records) > 1 else None
-        seed_path = _seed_record_path(args.tracking_root, seed_record, suffix=suffix)
+        seed_path = _seed_record_path(args.staging_root, seed_record, suffix=suffix)
         prepared_seeds.append((seed_path, seed_record, suffix))
 
     for seed_path, seed_record, suffix in prepared_seeds:
-        write_seed_record(args.tracking_root, seed_record, suffix=suffix)
+        write_seed_record(args.staging_root, seed_record, suffix=suffix)
         print(f"Prepared baseline seed: {seed_path}")
 
     return 0

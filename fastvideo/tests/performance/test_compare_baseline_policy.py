@@ -694,6 +694,18 @@ def test_baseline_seed_rejects_mixed_exact_identities(monkeypatch):
         seed_baseline._validate_same_identity([first, second])
 
 
+def test_baseline_seed_duplicate_provenance_ignores_model_id(tmp_path):
+    first = _v2_record()
+    renamed = dict(first)
+    renamed["model_id"] = "renamed-display-id"
+
+    with pytest.raises(ValueError, match="duplicates source provenance"):
+        seed_baseline._validate_unique_sources(
+            [str(tmp_path / "first.json"), str(tmp_path / "renamed.json")],
+            [first, renamed],
+        )
+
+
 def test_baseline_seed_cli_rejects_direct_upload():
     with pytest.raises(SystemExit):
         seed_baseline._parse_args([
@@ -726,6 +738,7 @@ def test_baseline_seed_orders_sources_by_original_timestamp(monkeypatch, tmp_pat
     seed_timestamps = iter(f"2026-07-01T00:00:{second:02d}+00:00" for second in range(1, 7))
     monkeypatch.setattr(seed_baseline, "_now_utc_iso", lambda: next(seed_timestamps))
     tracking_root = tmp_path / "tracking"
+    staging_root = tmp_path / "staging"
     argv = []
     for source_path in source_paths:
         argv.extend(["--source-result", str(source_path)])
@@ -734,12 +747,14 @@ def test_baseline_seed_orders_sources_by_original_timestamp(monkeypatch, tmp_pat
         "reviewed first v2 baseline",
         "--tracking-root",
         str(tracking_root),
+        "--staging-root",
+        str(staging_root),
     ])
 
     assert seed_baseline.main(argv) == 0
 
     last_five = load_records_for_identity(
-        str(tracking_root),
+        str(staging_root),
         compare_baseline._comparison_identity_filters(source_records[0]),
         last_n=5,
         successful_only=True,
@@ -748,6 +763,83 @@ def test_baseline_seed_orders_sources_by_original_timestamp(monkeypatch, tmp_pat
     assert [record["baseline_seed_source_timestamp"] for record in last_five] == [
         f"2026-06-{day:02d}T00:00:00+00:00" for day in range(2, 7)
     ]
+    assert not tracking_root.exists()
+
+
+def test_baseline_seed_rejects_existing_eligible_identity(tmp_path):
+    source = _v2_record()
+    source.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "success": True,
+        "baseline_eligible": False,
+        "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "pr_number": "",
+    })
+    source_path = tmp_path / "source.json"
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    existing = dict(source)
+    existing.update({
+        "comparison_status": compare_baseline.STATUS_PASS,
+        "baseline_eligible": True,
+    })
+    tracking_root = tmp_path / "tracking"
+    staging_root = tmp_path / "staging"
+    _write_record(tracking_root, existing["model_id"], "existing.json", existing)
+
+    with pytest.raises(ValueError, match="already has a baseline-eligible record"):
+        seed_baseline.main([
+            "--source-result",
+            str(source_path),
+            "--intent-rationale",
+            "stale first seed",
+            "--tracking-root",
+            str(tracking_root),
+            "--staging-root",
+            str(staging_root),
+        ])
+
+    assert not staging_root.exists()
+
+
+def test_baseline_seed_rejects_cross_invocation_replay(tmp_path):
+    source = _v2_record()
+    source.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "success": True,
+        "baseline_eligible": False,
+        "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "pr_number": "",
+    })
+    source_path = tmp_path / "source.json"
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    tracking_root = tmp_path / "tracking"
+    staging_root = tmp_path / "staging"
+    argv = [
+        "--source-result",
+        str(source_path),
+        "--intent-rationale",
+        "reviewed first v2 baseline",
+        "--tracking-root",
+        str(tracking_root),
+        "--staging-root",
+        str(staging_root),
+    ]
+
+    assert seed_baseline.main(argv) == 0
+    with pytest.raises(ValueError, match="already has a prepared baseline seed"):
+        seed_baseline.main(argv)
+
+    assert len(list(staging_root.rglob("*.json"))) == 1
+
+
+def test_baseline_seed_requires_separate_staging_root(tmp_path):
+    tracking_root = tmp_path / "tracking"
+    with pytest.raises(ValueError, match="separate and non-nested"):
+        seed_baseline._validate_separate_roots(str(tracking_root), str(tracking_root / "staging"))
 
 
 def test_baseline_seed_orders_invalid_timestamps_last_and_warns(capsys):
@@ -964,6 +1056,7 @@ def test_baseline_seed_rejects_inconsistent_batch_before_persistence(
         source_paths.append(source_path)
 
     tracking_root = tmp_path / "tracking"
+    staging_root = tmp_path / "staging"
     with pytest.raises(ValueError, match=rf"source artifact 2 {metric} regresses"):
         seed_baseline.main([
             "--source-result",
@@ -974,6 +1067,8 @@ def test_baseline_seed_rejects_inconsistent_batch_before_persistence(
             "reviewed first v2 baseline",
             "--tracking-root",
             str(tracking_root),
+            "--staging-root",
+            str(staging_root),
             "--max-intra-batch-regression",
             "0.05",
         ])

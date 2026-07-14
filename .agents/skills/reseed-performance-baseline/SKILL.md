@@ -83,6 +83,9 @@ Hardcoded defaults:
   supported by the code, but use the default unless the user explicitly asks).
 - Local sync root: `/tmp/perf-tracking` (`PERFORMANCE_TRACKING_ROOT` override
   is supported).
+- Prepared-record staging root: `/tmp/performance_reseed_prepared`
+  (`PERFORMANCE_RESEED_STAGING_ROOT` override is supported). Keep it separate
+  and non-nested from the sync root.
 - Backup root: `/tmp/performance_reseed_backup`.
 - Download scratch root for source artifact URLs: `/tmp/performance_reseed_source`.
 - Baseline window: last 5 `success=true`, `baseline_eligible=true` records
@@ -355,11 +358,19 @@ python fastvideo/tests/performance/seed_baseline.py \
   --source-result <normalized_perf_2.json> \
   --intent-rationale "<intent_rationale>" \
   --max-intra-batch-regression 0.05 \
-  --tracking-root "${PERFORMANCE_TRACKING_ROOT}"
+  --tracking-root "${PERFORMANCE_TRACKING_ROOT}" \
+  --staging-root "${PERFORMANCE_RESEED_STAGING_ROOT:-/tmp/performance_reseed_prepared}"
 ```
 
 The utility is prepare-only and intentionally has no upload option. Upload the
 scoped records only after the separate confirmation in step 6.
+
+The utility treats `PERFORMANCE_TRACKING_ROOT` as a read-only canonical mirror
+and writes only under the separate staging root. Before writing, it stops if
+the exact identity already has a successful baseline-eligible record in the
+canonical mirror (the calibration artifact is stale) or a prepared seed in the
+staging root (the operation is a replay). Keep the same staging root until the
+operation is uploaded or explicitly cleaned up.
 
 If the prepared seed records look correct, upload only those scoped records in
 step 7. Do not rerun the utility with a different source list after approval.
@@ -468,7 +479,7 @@ Prefer uploading new accepted seed records so failed history remains visible.
 Print:
 
 - Backup directory path under `/tmp`.
-- Prepared local record paths under `PERFORMANCE_TRACKING_ROOT`.
+- Prepared local record paths under `PERFORMANCE_RESEED_STAGING_ROOT`.
 - HF paths that will receive the new records.
 - Old rolling medians.
 - Source batch medians, source batch spread, reseed count, and candidate
@@ -517,9 +528,13 @@ distinguish an accepted baseline shift from a hidden regression.
 After the upload is verified, ask whether the user wants to clear temporary
 local state. Explain what each directory is for:
 
-- `PERFORMANCE_TRACKING_ROOT`, usually `/tmp/perf-tracking`: local synced
-  mirror of `FastVideo/performance-tracking` plus the prepared local seed
-  records used for scoped upload.
+- `PERFORMANCE_TRACKING_ROOT`, usually `/tmp/perf-tracking`: read-only local
+  synced mirror of `FastVideo/performance-tracking` used to prove the target
+  does not already have an eligible baseline.
+- `PERFORMANCE_RESEED_STAGING_ROOT`, usually
+  `/tmp/performance_reseed_prepared`: prepared local seed records used for the
+  scoped upload. Keeping this separate prevents aborted preparations from
+  appearing in later baseline reads.
 - `/tmp/performance_reseed_backup/<...>`: local backup of the target model's
   pre-reseed HF history plus `PROVENANCE.txt`, kept so a bad reseed can be
   audited or corrected.
@@ -529,14 +544,17 @@ local state. Explain what each directory is for:
 Ask:
 
 > Reseed succeeded. Do you want me to delete the local temp tracking mirror,
-> source downloads, and reseed backup under `/tmp`? These files are local
-> safety/audit artifacts only; HF already has the uploaded records.
+> this reseed's prepared staging records, source downloads, and reseed backup
+> under `/tmp`? These files are local safety/audit artifacts only; HF already
+> has the uploaded records.
 >
 > Reply `cleanup reseed temp` to delete them, anything else to keep them.
 
 Do not delete anything unless the user replies exactly
 `cleanup reseed temp`. If cleanup is requested, remove only the specific
-directories created for this reseed. Never remove unrelated `/tmp` contents.
+directories and prepared record paths created for this reseed. Do not remove
+the shared staging root when it contains other records, and never remove
+unrelated `/tmp` contents.
 
 ## Failure modes and handling
 
@@ -555,14 +573,21 @@ directories created for this reseed. Never remove unrelated `/tmp` contents.
   those measurements into the baseline, so they must be reviewed first.
 - **HF sync fails.** Stop for destructive reseeds. A stale or empty sync can
   make the old baseline look missing.
+- **The exact v2 identity already has an eligible baseline.** Stop. The
+  `CALIBRATION_NEEDED` artifact is stale; use the reviewed baseline-shift path
+  instead of the first-seed utility.
+- **The staging root already has a prepared seed for the exact identity.**
+  Stop and reuse, upload, or explicitly clean that preparation. Do not prepare
+  another copy of the same measurement.
 - **Candidate still violates fixed thresholds.** Report that this skill only
   handles the rolling HF baseline; update benchmark JSON thresholds in code
   review if maintainers accept the new absolute limit.
 - **The user aborts at either confirmation.** Leave the backup and prepared
   records on disk. Nothing should be uploaded.
-- **The user declines cleanup.** Keep `/tmp/perf-tracking`, the source
-  download directory if any, and `/tmp/performance_reseed_backup/<...>` in
-  place for audit/debugging.
+- **The user declines cleanup.** Keep `/tmp/perf-tracking`, the prepared seed
+  records under `/tmp/performance_reseed_prepared`, the source download
+  directory if any, and `/tmp/performance_reseed_backup/<...>` in place for
+  audit/debugging.
 - **A bad seed was uploaded.** Use the backup and HF history to identify the
   uploaded file, then remove or supersede it with an explicitly reviewed
   corrective record. Do not silently rewrite unrelated history.
@@ -587,3 +612,4 @@ directories created for this reseed. Never remove unrelated `/tmp` contents.
 | 2026-05-03 | Initial version. Sister workflow to `reseed-ssim-references`, scoped to one performance `(model_id, gpu_type)` baseline seed with backup, confirmation, provenance, and `success=true` upload. |
 | 2026-05-03 | Previous policy: replicate one approved shifted source result into 3 success records by default, or 5 only when explicitly requested. Add provenance marker for replicated-source reseeds. Superseded by the 2026-05-08 dynamic multi-source policy. |
 | 2026-05-08 | Replace fixed 3/5 replication with dynamic multi-source reseeding: upload one seed record per reviewed source JSON, validate intra-batch consistency, move backup/source scratch under `/tmp`, and ask whether to clean temp state after successful upload. |
+| 2026-07-13 | Keep first-v2-seed preparation outside the canonical mirror and reject stale or replayed calibration seeds. |
