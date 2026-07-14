@@ -219,10 +219,10 @@ def _record_uses_v2_identity(record: dict[str, Any]) -> bool:
 
 
 def _recipe_cohort_filters(record: dict[str, Any]) -> dict[str, str]:
+    identity = _comparison_identity_filters(record)
     return {
-        key: value
-        for key, value in _comparison_identity_filters(record).items()
-        if key != "recipe_fingerprint"
+        key: identity[key]
+        for key in ("workload_id", "variant_id", "benchmark_version")
     }
 
 

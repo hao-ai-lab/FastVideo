@@ -1449,6 +1449,21 @@ def test_load_records_filters_same_variant_changed_recipe(tmp_path):
     assert len(mismatch_records) == 1
 
 
+def test_recipe_mismatch_cohort_spans_hardware_and_software_profiles():
+    filters = compare_baseline._recipe_cohort_filters(
+        _v2_record(
+            recipe_fingerprint="recipe-2",
+            hardware_profile_id="hw-new",
+            software_profile_id="sw-new",
+        ))
+
+    assert filters == {
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": "2",
+    }
+
+
 def test_legacy_record_lookup_still_uses_model_and_gpu(tmp_path):
     model_id = "wan-t2v-1.3b-2gpu"
     model_dir = tmp_path / sanitize(model_id)
