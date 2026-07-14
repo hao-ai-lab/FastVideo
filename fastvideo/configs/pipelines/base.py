@@ -233,7 +233,7 @@ class PipelineConfig:
             raise ValueError("model_path is required in kwargs")
 
         # 1. Get the pipeline config class from the registry
-        pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
+        pipeline_config_cls = get_pipeline_config_cls_from_name(model_path, kwargs.get("workload_type"))
 
         # 2. Instantiate PipelineConfig
         if pipeline_config_cls is None:

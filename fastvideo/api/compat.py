@@ -353,11 +353,13 @@ def request_to_sampling_param(
     request: GenerationRequest,
     *,
     model_path: str,
+    workload_type: Any | None = None,
 ) -> SamplingParam:
+    """Translate one request using the preset for its model and workload."""
     if request.plan is not None:
         raise NotImplementedError("GenerationRequest.plan is not wired into VideoGenerator yet")
 
-    sampling_param = SamplingParam.from_pretrained(model_path)
+    sampling_param = SamplingParam.from_pretrained(model_path, workload_type)
     if request.state is not None:
         _validate_continuation_state(request.state)
         sampling_param.continuation_state = request.state

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Import, registry, stage-contract, and optional real Dense T2V smoke tests."""
+"""Import, registry, stage-contract, and optional real LingBot-Video smoke tests."""
 
 from __future__ import annotations
 
@@ -18,10 +18,12 @@ from tests.local_tests.lingbot_video.hf_assets import FASTVIDEO_DENSE, download_
 def test_lingbot_video_pipeline_registry_and_preset(tmp_path: Path) -> None:
     """Verify exact class resolution, required modules, config, and official defaults."""
     from fastvideo.api.presets import get_preset
-    from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
+    from fastvideo.configs.models.encoders.lingbot_video import LingBotVideoQwen3VLConfig
+    from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig, LingBotVideoTI2VConfig
     from fastvideo.fastvideo_args import WorkloadType
     from fastvideo.pipelines.basic.lingbot_video.lingbot_video_pipeline import (
         EntryClass,
+        LingBotVideoImageToVideoPipeline,
         LingBotVideoPipeline,
     )
     from fastvideo.registry import get_model_info, get_preset_selection
@@ -31,7 +33,7 @@ def test_lingbot_video_pipeline_registry_and_preset(tmp_path: Path) -> None:
         "_class_name": "LingBotVideoDensePipeline",
         "_diffusers_version": "0.39.0",
         "scheduler": ["diffusers", "FlowUniPCMultistepScheduler"],
-        "text_encoder": ["transformers", "LingBotVideoQwen3VLTextModel"],
+        "text_encoder": ["transformers", "LingBotVideoQwen3VLModel"],
         "tokenizer": ["transformers", "Qwen3VLProcessor"],
         "transformer": ["diffusers", "LingBotVideoTransformer3DModel"],
         "vae": ["diffusers", "AutoencoderKLWan"],
@@ -41,7 +43,7 @@ def test_lingbot_video_pipeline_registry_and_preset(tmp_path: Path) -> None:
         (model_dir / component).mkdir()
     (model_dir / "model_index.json").write_text(json.dumps(model_index), encoding="utf-8")
     assert model_index["_class_name"] == "LingBotVideoDensePipeline"
-    assert EntryClass is LingBotVideoPipeline
+    assert EntryClass == [LingBotVideoPipeline, LingBotVideoImageToVideoPipeline]
     assert set(model_index) >= set(LingBotVideoPipeline._required_config_modules)
     preset_name, family = get_preset_selection(str(model_dir))
     assert (preset_name, family) == ("lingbot_video_dense_t2v", "lingbot_video")
@@ -60,6 +62,10 @@ def test_lingbot_video_pipeline_registry_and_preset(tmp_path: Path) -> None:
     info = get_model_info(str(model_dir), workload_type=WorkloadType.T2V)
     assert info.pipeline_cls is LingBotVideoPipeline
     assert info.pipeline_config_cls is LingBotVideoT2VConfig
+    assert isinstance(LingBotVideoT2VConfig().text_encoder_configs[0], LingBotVideoQwen3VLConfig)
+    i2v_info = get_model_info(str(model_dir), workload_type=WorkloadType.I2V)
+    assert i2v_info.pipeline_cls is LingBotVideoImageToVideoPipeline
+    assert i2v_info.pipeline_config_cls is LingBotVideoTI2VConfig
 
 
 def test_lingbot_video_prompt_crop_contract() -> None:
@@ -81,6 +87,27 @@ def test_lingbot_video_prompt_crop_contract() -> None:
     assert torch.equal(embeds, hidden[:, 140:144])
 
 
+def test_lingbot_video_tokenizer_loader_uses_multimodal_processor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Load the required Qwen3-VL processor even without processor_config.json."""
+    from fastvideo.configs.pipelines.lingbot_video import LingBotVideoTI2VConfig
+    from fastvideo.models.loader import component_loader
+
+    expected = object()
+    monkeypatch.setattr(
+        component_loader.AutoProcessor,
+        "from_pretrained",
+        lambda *args, **kwargs: expected,
+    )
+    args = SimpleNamespace(
+        pipeline_config=LingBotVideoTI2VConfig(),
+        trust_remote_code=False,
+    )
+    assert component_loader.TokenizerLoader().load(str(tmp_path), args) is expected
+
+
 def test_lingbot_video_latent_geometry_and_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Validate 4n+1 frames, multiples of 16, and fp32 latent geometry."""
     from fastvideo.pipelines.basic.lingbot_video import stages
@@ -90,6 +117,7 @@ def test_lingbot_video_latent_geometry_and_validation(monkeypatch: pytest.Monkey
     transformer = SimpleNamespace(num_channels_latents=16)
     stage = stages.LingBotVideoLatentPreparationStage(transformer)
     supplied = torch.zeros(1, 16, 3, 8, 10, dtype=torch.bfloat16)
+    condition = torch.full((1, 16, 1, 8, 10), 0.25, dtype=torch.float32)
     batch = ForwardBatch(
         data_type="video",
         prompt="fox",
@@ -97,10 +125,48 @@ def test_lingbot_video_latent_geometry_and_validation(monkeypatch: pytest.Monkey
         height=64,
         width=80,
         latents=supplied,
+        image_latent=condition,
     )
     result = stage.forward(batch, cast(Any, SimpleNamespace()))
     assert result.raw_latent_shape == (1, 16, 3, 8, 10)
     assert result.latents is not None and result.latents.dtype == torch.float32
+    assert torch.equal(result.latents[:, :, :1], condition)
+
+
+def test_lingbot_video_image_latent_stage_accepts_native_vae_distribution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Consume FastVideo's direct posterior return instead of requiring a wrapper."""
+    from fastvideo.pipelines.basic.lingbot_video import stages
+    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+
+    class DirectDistribution:
+        """Expose the native Wan VAE sample contract used by the stage."""
+
+        def sample(self, generator: torch.Generator) -> torch.Tensor:
+            del generator
+            return torch.full((1, 16, 1, 2, 2), 0.5)
+
+    class NativeVAE:
+        """Return the posterior directly, as FastVideo's Wan VAE does."""
+
+        config = SimpleNamespace(latents_mean=[0.0] * 16, latents_std=[1.0] * 16)
+
+        def encode(self, _pixels: torch.Tensor) -> DirectDistribution:
+            return DirectDistribution()
+
+    monkeypatch.setattr(stages, "get_local_torch_device", lambda: torch.device("cpu"))
+    batch = ForwardBatch(
+        data_type="video",
+        preprocessed_image=torch.zeros(1, 3, 1, 16, 16),
+        generator=torch.Generator().manual_seed(42),
+    )
+    result = stages.LingBotVideoImageLatentPreparationStage(NativeVAE()).forward(
+        batch,
+        cast(Any, SimpleNamespace(vae_cpu_offload=False)),
+    )
+    assert result.image_latent is not None
+    assert torch.equal(result.image_latent, torch.full((1, 16, 1, 2, 2), 0.5))
 
 
 def test_lingbot_video_uses_released_vae_denormalization_arithmetic() -> None:
