@@ -335,7 +335,7 @@ class Qwen3ForCausalLM(TextEncoder):
         return AutoModel.from_pretrained(
             model_path,
             local_files_only=True,
-            torch_dtype=dtype,
+            dtype=dtype,
             low_cpu_mem_usage=True,
         ).eval().to(device)
 

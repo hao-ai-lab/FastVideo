@@ -342,7 +342,7 @@ def test_qwen3_production_loader_avoids_device_context_and_honors_placement(
     assert loaded is fake_model
     assert auto_model_calls == [{
         "local_files_only": True,
-        "torch_dtype": torch.float32,
+        "dtype": torch.float32,
         "low_cpu_mem_usage": True,
     }]
     assert default_devices == [ambient_device]
@@ -547,7 +547,7 @@ def test_zimage_qwen3_encoder_parity_forward(dtype: torch.dtype):
         trust_remote_code=True,
         dtype=dtype,
         low_cpu_mem_usage=True,
-    ).eval().to(device=device, dtype=dtype)
+    ).eval().to(device=device)
 
     with torch.no_grad():
         ref_out = ref(
@@ -698,7 +698,7 @@ def test_zimage_qwen3_encoder_per_layer_bf16_diagnostic():
         trust_remote_code=True,
         dtype=dtype,
         low_cpu_mem_usage=True,
-    ).eval().to(device=device, dtype=dtype)
+    ).eval().to(device=device)
 
     with torch.no_grad():
         ref_out = ref(
