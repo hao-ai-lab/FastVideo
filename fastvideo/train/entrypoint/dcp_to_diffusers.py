@@ -269,7 +269,13 @@ def convert(
         "Loading DCP checkpoint from %s",
         resolved,
     )
-    dcp.load(states, checkpoint_id=str(dcp_dir))
+    # allow_partial_load=True skips missing optimizer keys — some come up on runs
+    # with frozen params (WANTRACK_FREEZE_HEAD=1) where the optimizer doesn't write
+    # state for non-trainable weights. We only care about the MODEL weights for export,
+    # not the optimizer state.
+    from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
+    dcp.load(states, checkpoint_id=str(dcp_dir),
+             planner=DefaultLoadPlanner(allow_partial_load=True))
 
     # -- Export to diffusers format --
     model = method._role_models[role]

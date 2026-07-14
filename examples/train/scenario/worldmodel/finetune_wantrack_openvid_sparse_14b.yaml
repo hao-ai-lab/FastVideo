@@ -1,0 +1,83 @@
+# MotionStream-style INITIAL teacher training on OpenVid-1M bidir set — Wan2.1-I2V-14B-720P.
+# Same recipe/data as the 1.3B run (finetune_wantrack_openvid_sparse_1p3b.yaml): sparse point
+# conditioning (WANTRACK_* env at launch), lr 1e-5, global bs 128, 480x832, 24fps, 121f,
+# flow_shift 6, bf16 DiT. SHARES the same combined_parquet_dataset (VAE/T5/CLIP identical
+# across Wan2.1 sizes). Plain I2V init (no control warm-start) -> track channels start at zero.
+# 8 nodes x 4 GPU = 32 GPUs; FSDP shards the 14B within each node (shard_dim 4) and replicates
+# across nodes (replicate 8). grad_accum 4 -> global bs 128.
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
+    init_from: /mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_nobias_init
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  model_path: /mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_nobias_init
+  dit_precision: bf16
+
+  distributed:
+    num_gpus: 32          # overridden by run_slurm.sh to nodes*NUM_GPUS
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 8 # replicate across the 8 nodes
+    hsdp_shard_dim: 4     # shard the 14B within each node over NVLink (8*4 = 32)
+
+  data:
+    data_path: /mnt/lustre/vlm-s4duan/openvid_1m/combined_parquet_dataset
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 480
+    num_width: 832
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 4800            # MotionStream stage-1 (=4.8K); 14B is slow — resumable, stop when good
+    gradient_accumulation_steps: 4   # 1 * 4 * 32 gpus = 128 global
+
+  checkpoint:
+    output_dir: /mnt/lustre/vlm-s4duan/openvid_bidir_14b_out
+    training_state_checkpointing_steps: 100
+    checkpoints_total_limit: 3
+    resume_from_checkpoint: latest
+
+  tracker:
+    trackers: [wandb]
+    project_name: wantrack-bidir
+    run_name: openvid-bidir-14b-sparse-stage1
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  track_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    every_steps: 400
+    num_val_samples: 4
+    val_data_path: /mnt/lustre/vlm-s4duan/val_examples_mixed/combined_parquet_dataset   # fixed car+dog synth clips
+    num_inference_steps: 30
+    guidance_scale: 3.0
+    motion_guidance_scale: 1.5
+    fps: 24
+    grid_stride: 3
+    tail: 12
+    validate_at_start: true
+    seed: 1000
+
+pipeline:
+  flow_shift: 6

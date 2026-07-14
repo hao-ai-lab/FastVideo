@@ -123,16 +123,14 @@ def convert_names(src: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
 
 
 def build_track_encoder_state() -> dict[str, torch.Tensor]:
-    """temporal_conv (default init) + proj (ZERO). Zero proj is safe here -- see TRACK_CONFIG."""
-    temporal_conv = nn.Conv3d(ID_DIM, TRACK_CHANNELS, kernel_size=(VAE_T_COMP, 1, 1), stride=(VAE_T_COMP, 1, 1))
-    proj = nn.Conv3d(TRACK_CHANNELS, TRACK_CHANNELS, kernel_size=1)
-    nn.init.zeros_(proj.weight)
-    nn.init.zeros_(proj.bias)
+    """temporal_conv (default init) + proj (ZERO or default per TRACK_CONFIG['zero_init_head'])."""
+    temporal_conv = nn.Conv3d(ID_DIM, TRACK_CHANNELS, kernel_size=(VAE_T_COMP, 1, 1), stride=(VAE_T_COMP, 1, 1), bias=False)
+    proj = nn.Conv3d(TRACK_CHANNELS, TRACK_CHANNELS, kernel_size=1, bias=False)
+    if TRACK_CONFIG.get("zero_init_head", True):
+        nn.init.zeros_(proj.weight)
     return {
         "track_encoder.temporal_conv.weight": temporal_conv.weight.detach().clone(),
-        "track_encoder.temporal_conv.bias": temporal_conv.bias.detach().clone(),
         "track_encoder.proj.weight": proj.weight.detach().clone(),
-        "track_encoder.proj.bias": proj.bias.detach().clone(),
     }
 
 
@@ -159,7 +157,18 @@ def main() -> None:
     p.add_argument("--control-ckpt", required=True,
                    help="alibaba-pai Wan2.1-Fun-1.3B-Control diffusion_pytorch_model.safetensors (VideoX-Fun fmt).")
     p.add_argument("--out", required=True, help="Output WanTrack(Control) init dir.")
+    p.add_argument("--id-dim", type=int, default=None,
+                   help="Override track_encoder id_dim (default TRACK_CONFIG value, currently 128).")
+    p.add_argument("--zero-init-head", action="store_true", default=None,
+                   help="Force zero-init the track_encoder.proj head.")
+    p.add_argument("--no-zero-init-head", action="store_true", default=None,
+                   help="Force NON-zero (random) init the track_encoder.proj head.")
     args = p.parse_args()
+    global ID_DIM
+    if args.id_dim is not None:
+        ID_DIM = int(args.id_dim); TRACK_CONFIG["id_dim"] = ID_DIM
+    if args.no_zero_init_head: TRACK_CONFIG["zero_init_head"] = False
+    elif args.zero_init_head:  TRACK_CONFIG["zero_init_head"] = True
 
     base = Path(args.inp_base)
     out = Path(args.out)

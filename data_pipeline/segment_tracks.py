@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stage 0d: segment frame-0 (FastSAM) and label each CoTracker grid point by object.
+"""Stage 0d: segment frame-0 (SAM2.1-b+ by default; --model to switch) and label each
+CoTracker grid point by object.
 
 Adds an ``object_ids`` array ([N] int, -1 = background/none) to each tracks ``.npz``,
 so the trainer's object-coverage sampling can guarantee >=1 track per object. A grid
@@ -74,7 +75,11 @@ def main() -> None:
     p.add_argument("--videos-subdir", type=str, default="videos")
     p.add_argument("--tracks-subdir", type=str, default="tracks")
     p.add_argument("--manifest", type=str, default="videos2caption.json")
-    p.add_argument("--model", type=str, default="FastSAM-s.pt")
+    p.add_argument("--model", type=str, default="sam2.1_b.pt",
+                   help="ultralytics weight; FastSAM-*.pt use the FastSAM loader, everything else "
+                        "(sam2.1_b.pt, sam2.1_l.pt, sam_b.pt, mobile_sam.pt, ...) use the SAM loader")
+    p.add_argument("--weights-dir", type=str, default="/mnt/lustre/vlm-s4duan/models/seg",
+                   help="dir holding cached weights; falls back to auto-download if missing")
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument("--imgsz", type=int, default=1024)
     p.add_argument("--conf", type=float, default=0.4)
@@ -87,8 +92,12 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=None)
     args = p.parse_args()
 
-    from ultralytics import FastSAM
-    model = FastSAM(args.model)
+    # FastSAM-*.pt -> FastSAM loader; everything else (SAM/SAM2/SAM2.1/MobileSAM) -> SAM loader.
+    # Both expose the same no-prompt "everything" call used below.
+    from ultralytics import FastSAM, SAM
+    wp = Path(args.weights_dir) / args.model
+    weight = str(wp) if wp.exists() else args.model
+    model = (FastSAM if Path(args.model).name.lower().startswith("fastsam") else SAM)(weight)
 
     manifest_path = args.data_dir / args.manifest
     items = json.loads(manifest_path.read_text()) if manifest_path.exists() else []

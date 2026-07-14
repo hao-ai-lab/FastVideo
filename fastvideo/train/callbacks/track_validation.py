@@ -113,9 +113,13 @@ class TrackValidationCallback(Callback):
         seed: int = 0,
         paired_no_track: bool = True,
         motion_guidance_scale: float = 1.0,
+        val_data_path: str | None = None,
     ) -> None:
         self.every_steps = int(every_steps)
         self.num_val_samples = int(num_val_samples)
+        # Optional dedicated parquet for validation samples (fixed hand-picked clips);
+        # falls back to the training data_path when None.
+        self.val_data_path = str(val_data_path) if val_data_path else None
         self.num_inference_steps = int(num_inference_steps)
         # ``guidance_scale`` is TEXT CFG (v_uncond + s_text*(v_text - v_uncond)); at 1.0 == disabled.
         # ``motion_guidance_scale`` is MotionStream MOTION CFG on top of that (s_motion*(v_full - v_text)).
@@ -180,7 +184,7 @@ class TrackValidationCallback(Callback):
         from fastvideo.dataset.utils import collate_rows_from_parquet_schema
 
         tc = self.training_config
-        data_path = str(tc.data.data_path)
+        data_path = self.val_data_path or str(tc.data.data_path)
         files = sorted(glob.glob(os.path.join(data_path, "**", "*.parquet"), recursive=True))
         if not files:
             raise FileNotFoundError(f"no parquet under {data_path}")

@@ -551,8 +551,20 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
             before_count, after_count)
 
     def __iter__(self):
-        """Iterate through processed data items."""
-        for idx in range(len(self.processed_batches)):
+        """Iterate through processed data items.
+
+        Shard across DataLoader workers: with num_workers>1, worker w takes every
+        num_workers-th item (offset w). Without this, each worker re-iterates the
+        WHOLE range(len) and every item is processed num_workers times -> duplicate
+        encode work + duplicate parquet rows. (decode/transform in _get_item is the
+        heavy part, so sharding it across workers overlaps decode with GPU encode.)"""
+        worker_info = torch.utils.data.get_worker_info()
+        n = len(self.processed_batches)
+        if worker_info is None:
+            indices = range(n)
+        else:
+            indices = range(worker_info.id, n, worker_info.num_workers)
+        for idx in indices:
             yield self._get_item(idx)
 
     def __len__(self):

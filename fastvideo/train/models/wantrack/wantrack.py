@@ -61,21 +61,35 @@ class WanTrackModel(WanModel):
     def on_train_start(self) -> None:
         # Optional experiment: re-init the (checkpoint zero-conv) track-head proj to a non-zero
         # Conv3d init at runtime (WANTRACK_NONZERO_INIT=1), so tracks carry a signal from step 0.
-        # Done here (post-load, post-FSDP) so it overrides the checkpoint's zero proj WITHOUT
-        # rewriting the checkpoint file (a load/save round-trip corrupts the other weights).
-        if os.getenv("WANTRACK_NONZERO_INIT", "0") in ("0", "false", "False"):
-            return
-        import torch.nn as nn
-        tenc = getattr(getattr(self, "transformer", None), "track_encoder", None)
-        if tenc is None:
-            logger.warning("[WANTRACK] WANTRACK_NONZERO_INIT set but no track_encoder found; skipping")
-            return
-        with torch.no_grad():
-            wl = tenc.proj.weight.to_local() if hasattr(tenc.proj.weight, "to_local") else tenc.proj.weight
-            bl = tenc.proj.bias.to_local() if hasattr(tenc.proj.bias, "to_local") else tenc.proj.bias
-            nn.init.kaiming_uniform_(wl, a=5**0.5)  # default Conv3d init (non-zero)
-            nn.init.zeros_(bl)
-            logger.info("[WANTRACK] re-inited track_encoder.proj to NON-ZERO (norm=%.4f)", float(wl.float().norm()))
+        if os.getenv("WANTRACK_NONZERO_INIT", "0") not in ("0", "false", "False"):
+            import torch.nn as nn
+            tenc = getattr(getattr(self, "transformer", None), "track_encoder", None)
+            if tenc is None:
+                logger.warning("[WANTRACK] WANTRACK_NONZERO_INIT set but no track_encoder found; skipping")
+            else:
+                with torch.no_grad():
+                    wl = tenc.proj.weight.to_local() if hasattr(tenc.proj.weight, "to_local") else tenc.proj.weight
+                    bl = tenc.proj.bias.to_local() if hasattr(tenc.proj.bias, "to_local") else tenc.proj.bias
+                    nn.init.kaiming_uniform_(wl, a=5**0.5)
+                    nn.init.zeros_(bl)
+                    logger.info("[WANTRACK] re-inited track_encoder.proj to NON-ZERO (norm=%.4f)",
+                                float(wl.float().norm()))
+
+        # MotionStream stage-2 knob: freeze the track_encoder head after initial training,
+        # matching "The track head remains frozen after initial training as it already operates
+        # chunk-wise" (2511.01266). Set WANTRACK_FREEZE_HEAD=1 to freeze track_encoder.proj +
+        # track_encoder.temporal_conv. Empirically the head plateaus by step ~4700 in our runs
+        # (Δrel/100 steps ≈ 0.000 %), so freezing is safe.
+        if os.getenv("WANTRACK_FREEZE_HEAD", "0") not in ("0", "false", "False"):
+            tenc = getattr(getattr(self, "transformer", None), "track_encoder", None)
+            if tenc is None:
+                logger.warning("[WANTRACK] WANTRACK_FREEZE_HEAD set but no track_encoder found; skipping")
+            else:
+                n_frozen = 0
+                for name, p in tenc.named_parameters(recurse=True):
+                    p.requires_grad_(False)
+                    n_frozen += p.numel()
+                logger.info("[WANTRACK] FROZE track_encoder head (%d params requires_grad=False)", n_frozen)
 
     # ------------------------------------------------------------------
     # MotionStream train-time augmentations (in-wrapper; no trainer changes).
@@ -86,6 +100,7 @@ class WanTrackModel(WanModel):
     #   WANTRACK_PMASK          per-frame temporal-mask probability (MotionStream 0.2)
     #   WANTRACK_MOTION_DROP    prob of dropping all motion (CFG ∅_motion)
     #   WANTRACK_TEXT_DROP      prob of zeroing the text embedding (CFG ∅_text)
+    #   WANTRACK_TRACK_DROP     per-track dropout prob after sparse/dense sampling (>=1 kept)
     # ------------------------------------------------------------------
     def _init_track_aug(self) -> None:
         # Track sampling is ON by default, MotionStream-style: a random 1000-2500 subset
@@ -107,6 +122,11 @@ class WanTrackModel(WanModel):
         # CFG dropout (ours, not MotionStream) -> default OFF; enables motion/text CFG when >0.
         self._aug_motion_drop = float(os.getenv("WANTRACK_MOTION_DROP", "0.0"))
         self._aug_text_drop = float(os.getenv("WANTRACK_TEXT_DROP", "0.0"))
+        # Per-track dropout (ours, for sparse conditioning). After sparse/dense sampling, each
+        # kept track is independently dropped with probability WANTRACK_TRACK_DROP. Trains the
+        # model to handle "some foreground objects have no track" at inference (user draws a
+        # few traces but the frame has many objects).  Always keeps >=1 track.
+        self._aug_track_drop = float(os.getenv("WANTRACK_TRACK_DROP", "0.0"))
         # SPARSE MODE (Yongqi/labmate recipe): if WANTRACK_SPARSE=1, ignore MIN/MAX and instead
         # keep exactly `1 per SAM object + WANTRACK_EXTRA_RANDOM background points`. The extras
         # are drawn UNIFORMLY (mode="random") or by lowrank informativeness weight (mode="weighted").
@@ -236,6 +256,27 @@ class WanTrackModel(WanModel):
                 if nu > 0:
                     keep[torch.multinomial(ua, nu, replacement=False, generator=gen_b)] = 1.0
                 vis[b] = vis[b] * keep.to(device=device, dtype=vis.dtype).unsqueeze(0)
+
+        # Per-track dropout: independently drop entire tracks with prob track_drop, applied
+        # to the sparse/dense-sampled subset. Trains "some foreground objects have no track"
+        # (varying track counts) to match user inference where only a few traces are drawn.
+        # Guard: always keep >=1 track (else use WANTRACK_MOTION_DROP for the CFG-null case).
+        if self._aug_track_drop > 0.0:
+            for b in range(B):
+                gen_b = torch.Generator(device=gdev).manual_seed(int(sample_seeds[b])) \
+                    if sample_seeds is not None else generator
+                kept = vis[b].amax(dim=0).to(gdev) > 0.5  # [N] which tracks are still on
+                n_kept = int(kept.sum().item())
+                if n_kept <= 1:
+                    continue
+                drop = (torch.rand(N, generator=gen_b, device=gdev) < self._aug_track_drop) & kept
+                # if we would drop everything, spare one at random
+                if int((kept & ~drop).sum().item()) == 0:
+                    kept_idxs = kept.nonzero(as_tuple=True)[0]
+                    spare = kept_idxs[torch.randint(0, kept_idxs.shape[0], (1, ),
+                                                    generator=gen_b, device=gdev).item()]
+                    drop[spare] = False
+                vis[b] = vis[b] * (~drop).to(device=device, dtype=vis.dtype).unsqueeze(0)
 
         # Stochastic CONTIGUOUS-chunk masking (MotionStream mid-frame chunks): zero L-frame
         # blocks with prob pmask -- simulates the user releasing control for a stretch.

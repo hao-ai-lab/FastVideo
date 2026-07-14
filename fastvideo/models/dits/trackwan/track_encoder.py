@@ -62,17 +62,21 @@ class TrackEncoder(nn.Module):
         self.max_track_id = max_track_id
 
         # Track head: 4x temporal compression followed by a 1x1x1 conv (MotionStream).
-        # bias=False is LOAD-BEARING: the paper's Eq. 1 says c_m is nonzero ONLY at track cells.
+        # bias=False (default) is LOAD-BEARING: the paper's Eq. 1 says c_m is nonzero ONLY at track cells.
         # With bias=True, empty spatial cells get the bias broadcast to every location, turning
         # the sparse track signal into a dense (bias + sparse-signal) tensor — with-track and
         # no-track differ only at ~3% of cells, so the model learns to ignore the sparse part
         # and rely on the bias / I2V shortcut.
+        # ``TRACKWAN_TRACK_BIAS=1`` env override re-enables bias for A/B experiments (early runs
+        # used bias=True). Any bias tensor is loaded from the checkpoint if present, else zero-init.
+        import os as _os
+        _use_bias = _os.getenv("TRACKWAN_TRACK_BIAS", "0") not in ("0", "false", "False")
         self.temporal_conv = nn.Conv3d(id_dim,
                                        track_channels,
                                        kernel_size=(vae_temporal_compression, 1, 1),
                                        stride=(vae_temporal_compression, 1, 1),
-                                       bias=False)
-        self.proj = nn.Conv3d(track_channels, track_channels, kernel_size=1, bias=False)
+                                       bias=_use_bias)
+        self.proj = nn.Conv3d(track_channels, track_channels, kernel_size=1, bias=_use_bias)
         if zero_init:
             # Legacy ControlNet-style zero-init; MotionStream explicitly avoids ControlNet
             # architecture, so this defaults off. Kept for backward compat with older checkpoints.

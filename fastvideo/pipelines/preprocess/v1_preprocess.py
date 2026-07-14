@@ -31,7 +31,7 @@ def main(args) -> None:
     kwargs: dict[str, Any] = ({
         "text_encoder_cpu_offload": False
     } if args.preprocess_task == "text_only" else {
-        "vae_precision": "fp32"
+        "vae_precision": args.vae_precision
     })
     pipeline_config.update_config_from_dict(kwargs)
 
@@ -129,6 +129,8 @@ if __name__ == "__main__":
             "matrixgame_ode_trajectory",
         ],
         help="Type of preprocessing task to run")
+    parser.add_argument("--vae_precision", type=str, default="fp32", choices=["fp32", "bf16", "fp16"],
+                        help="VAE encode precision for latents (fp32 default; bf16 is ~2x faster and plenty for latents)")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
     parser.add_argument("--text_max_length", type=int, default=256)

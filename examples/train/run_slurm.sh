@@ -59,6 +59,7 @@ SBATCH_ARGS=(
     --output="${OUTPUT_DIR}/${JOB_NAME}_%j.out"
     --error="${OUTPUT_DIR}/${JOB_NAME}_%j.err"
     --exclusive
+    --requeue
 )
 
 if [[ -n "${EXCLUDE}" ]]; then

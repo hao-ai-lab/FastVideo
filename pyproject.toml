@@ -67,7 +67,9 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.2.6",
+    # NOTE(local): relaxed from ==0.2.6 — the PyPI sdist is x86-only and won't
+    # compile on aarch64; we build the local kernel (0.3.0, sm_100a) instead.
+    "fastvideo-kernel",
     "wheel",
 
     # Training Dependencies

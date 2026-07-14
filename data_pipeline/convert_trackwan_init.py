@@ -68,23 +68,30 @@ def build_track_encoder_state() -> dict[str, torch.Tensor]:
     gradient is gated by the other being nonzero -> both stay exactly 0 forever and the
     track pathway never learns (observed: proj & patch-embed[36:52] frozen at 0.0 after
     4000 steps). So leave proj at its default Conv init here."""
-    temporal_conv = nn.Conv3d(ID_DIM, TRACK_CHANNELS, kernel_size=(VAE_T_COMP, 1, 1), stride=(VAE_T_COMP, 1, 1))
-    proj = nn.Conv3d(TRACK_CHANNELS, TRACK_CHANNELS, kernel_size=1)  # default init (NOT zero) -> breaks the deadlock
+    # NOTE(local): TrackEncoder builds BOTH convs with bias=False (load-bearing in the
+    # model — see dits/trackwan/track_encoder.py). Match that exactly: bias-free convs,
+    # emit only the .weight keys (no spurious .bias params that the model has no home for).
+    temporal_conv = nn.Conv3d(ID_DIM, TRACK_CHANNELS, kernel_size=(VAE_T_COMP, 1, 1), stride=(VAE_T_COMP, 1, 1), bias=False)
+    proj = nn.Conv3d(TRACK_CHANNELS, TRACK_CHANNELS, kernel_size=1, bias=False)  # default init (NOT zero) -> breaks the deadlock
     return {
         "track_encoder.temporal_conv.weight": temporal_conv.weight.detach().clone(),
-        "track_encoder.temporal_conv.bias": temporal_conv.bias.detach().clone(),
         "track_encoder.proj.weight": proj.weight.detach().clone(),
-        "track_encoder.proj.bias": proj.bias.detach().clone(),
     }
 
 
 def main() -> None:
+    global ID_DIM
     p = argparse.ArgumentParser()
     p.add_argument("--base",
                    required=True,
                    help="Base Wan I2V (e.g. Wan2.1-Fun-1.3B-InP) or T2V diffusers model dir (with transformer/).")
     p.add_argument("--out", required=True, help="Output model dir for the WanTrack init.")
+    p.add_argument("--id-dim", type=int, default=ID_DIM,
+                   help="sinusoidal track-id posemb dim (MotionStream d; 64 for d64 init, default 128)")
     args = p.parse_args()
+
+    ID_DIM = args.id_dim
+    TRACK_CONFIG["id_dim"] = args.id_dim
 
     base = Path(args.base)
     out = Path(args.out)

@@ -1,0 +1,85 @@
+# MotionStream-style INITIAL teacher training (stage 1) on the full OpenVid-1M bidir set.
+# Recipe: sparse point conditioning (1-per-SAM-object + extras) from run c0xyfg57
+# (synth-sparse-random, d64_nobias init) but with MotionStream stage-1 hparams:
+# batch size 128, lr 1e-5, 480p (480x832), 24fps, 121f. NO stochastic track masking,
+# NO fixed/overfit sampling (set via WANTRACK_* env at launch — see run_openvid_bidir_slurm.sh).
+# num_gpus + hsdp dims below assume 4 nodes x 4 GPU = 16 GPUs (grad_accum 8 -> global bs 128).
+# Runs CONCURRENTLY with the 14B run (8 nodes) = 12 nodes total <= 14 usable. The small 1.3B
+# gets fewer nodes; grad_accum keeps global bs at 128 regardless of GPU count.
+# DiT runs bf16 (fp32 full-scale would be ~70h; verified 1-GPU fp32 ~11s/it in smoke).
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
+    init_from: /mnt/lustre/vlm-s4duan/exports/merged_bias_ckpt4800
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  model_path: /mnt/lustre/vlm-s4duan/exports/merged_bias_ckpt4800
+  dit_precision: bf16     # fp32 was ~11s/it on 1 GPU (=~70h full); bf16 for throughput
+
+  distributed:
+    num_gpus: 16          # overridden by run_slurm.sh to nodes*NUM_GPUS
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 4 # replicate across the 4 nodes
+    hsdp_shard_dim: 4     # shard within each node over NVLink (4*4 = 16)
+
+  data:
+    data_path: /mnt/lustre/vlm-s4duan/openvid_1m/combined_parquet_dataset
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 480
+    num_width: 832
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 5.0e-5     # MotionStream teacher stage-2
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 400             # stage-2v2: hi-LR (5e-5) real replacement of stage-2
+    gradient_accumulation_steps: 8   # 1 (per-gpu) * 8 * 16 gpus = 128 global
+
+  checkpoint:
+    output_dir: /mnt/lustre/vlm-s4duan/openvid_bidir_1p3b_stage2v2_out
+    training_state_checkpointing_steps: 50   # ~40min backstop vs the ~80min cordon cycle
+    checkpoints_total_limit: 9
+    resume_from_checkpoint: null
+
+  tracker:
+    trackers: [wandb]
+    project_name: wantrack-bidir
+    run_name: openvid-bidir-1p3b-stage2v2-hilr
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  track_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    every_steps: 250
+    num_val_samples: 4
+    val_data_path: /mnt/lustre/vlm-s4duan/val_examples_mixed/combined_parquet_dataset   # fixed car+dog synth clips
+    num_inference_steps: 30
+    guidance_scale: 3.0
+    motion_guidance_scale: 1.5
+    fps: 24
+    grid_stride: 3
+    tail: 12
+    validate_at_start: true
+    seed: 1000
+
+pipeline:
+  flow_shift: 6
