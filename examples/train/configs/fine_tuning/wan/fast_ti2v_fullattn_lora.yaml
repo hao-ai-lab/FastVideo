@@ -1,11 +1,11 @@
-# FastWan 2.2 TI2V 5B FullAttn LoRA finetune with VSA.
+# FastWan 2.2 5B FullAttn LoRA finetune.
 #
 # Notes:
-# - This model still uses T2V-style preprocessed parquet data in the new
-#   training stack.
-# - Validation/inference should use WanPipeline rather than the I2V pipeline;
-#   TI2V behavior is activated by the model pipeline config and the provided
-#   video_path / image_path from validation data.
+# - FastWan FullAttn checkpoints use dense attention. Keep training.vsa.sparsity
+#   at 0.0 and run validation/inference with a dense backend such as FLASH_ATTN
+#   or TORCH_SDPA.
+# - This debug config keeps the existing crush-smol parquet recipe. Update the
+#   data and validation paths before using it for a production run.
 
 models:
   student:
@@ -21,7 +21,6 @@ models:
         - to_k
         - to_v
         - to_out
-        - to_gate_compress
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
@@ -59,20 +58,20 @@ training:
     gradient_accumulation_steps: 5
 
   checkpoint:
-    output_dir: outputs/fast_wan_ti2v_fullattn_lora_vsa
+    output_dir: outputs/fast_wan_ti2v_fullattn_lora
     training_state_checkpointing_steps: 5
     checkpoints_total_limit: 2
     resume_from_checkpoint: null
 
   tracker:
     project_name: fastvideo
-    run_name: fast_wan_ti2v_fullattn_lora_vsa
+    run_name: fast_wan_ti2v_fullattn_lora
 
   model:
     enable_gradient_checkpointing_type: full
 
   vsa:
-    sparsity: 0.8
+    sparsity: 0.0
 
 callbacks:
   grad_clip:

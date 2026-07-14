@@ -13,11 +13,20 @@ We provide two distilled models:
 Both models are trained on **61×448×832** resolution but support generating videos with **any resolution** (1.3B  model mainly support 480P, 14B model support 480P and 720P, quality may degrade for different resolutions).
 
 ## ⚙️ Inference
-First install [VSA](../attention/vsa/index.md). Set `MODEL_BASE` to your own model path and run:
+
+For VSA-distilled Wan2.1 models, first install [VSA](../attention/vsa/index.md). Run a VSA DMD config with
+the sparse attention backend:
 
 ```bash
 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN \
   fastvideo generate --config scripts/inference/inference_wan_VSA_DMD_1_3B.yaml
+```
+
+For the FastWan2.2 FullAttn checkpoint, use dense attention:
+
+```bash
+FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN \
+  fastvideo generate --config scripts/inference/inference_wan_FullAttn_DMD_5B_720P.yaml
 ```
 
 ## 🗂️ Dataset
