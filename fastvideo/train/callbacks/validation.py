@@ -1176,6 +1176,15 @@ class ValidationCallback(Callback):
             VSA_sparsity=tc.vsa_sparsity,
             timesteps=sampling_timesteps_tensor,
         )
+        # shallow_asdict(sampling_param) copies list-typed fields by
+        # reference. sampling_param is cached and reused across every
+        # validation sample/step, so without this reset every ForwardBatch
+        # would share (and keep appending to) the same
+        # prompt_attention_mask/negative_attention_mask list forever --
+        # index [0] would then hold the *first-ever* validation sample's
+        # mask instead of the current one, mismatching prompt_embeds.
+        batch.prompt_attention_mask = []
+        batch.negative_attention_mask = []
         batch._inference_args = inference_args  # type: ignore[attr-defined]
 
         # Conditionally set I2V fields.

@@ -101,10 +101,15 @@ def _save_role_pretrained(
                                       "Pass --overwrite to replace it.")
 
         def _copy_or_link(src: str, dest: str) -> None:
+            # Resolve symlinks ourselves: os.link's follow_symlinks=True
+            # default isn't honored on all filesystems (e.g. some
+            # network/overlay mounts), which can silently hard-link to
+            # the symlink itself instead of its target.
+            real_src = os.path.realpath(src)
             try:
-                os.link(src, dest)
+                os.link(real_src, dest)
             except OSError:
-                shutil.copy2(src, dest)
+                shutil.copy2(real_src, dest)
 
         logger.info(
             "Creating pretrained export dir at %s "
@@ -115,7 +120,7 @@ def _save_role_pretrained(
         shutil.copytree(
             local_base,
             dst,
-            symlinks=True,
+            symlinks=False,
             copy_function=_copy_or_link,
         )
 

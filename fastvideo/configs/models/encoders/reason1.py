@@ -7,6 +7,18 @@ from typing import Any
 from fastvideo.configs.models.encoders.base import TextEncoderArchConfig, TextEncoderConfig
 
 
+def _is_transformer_layer(n: str, m) -> bool:
+    return "layers" in n and n.split(".")[-1].isdigit()
+
+
+def _is_embeddings(n: str, m) -> bool:
+    return n.endswith("embed_tokens")
+
+
+def _is_final_norm(n: str, m) -> bool:
+    return n.endswith("norm")
+
+
 @dataclass
 class Reason1ArchConfig(TextEncoderArchConfig):
     """Architecture settings (defaults match Qwen2.5-VL-7B-Instruct)."""
@@ -61,6 +73,8 @@ class Reason1ArchConfig(TextEncoderArchConfig):
 
     torch_dtype: str = "bfloat16"
     _attn_implementation: str = "flash_attention_2"
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_norm])
 
 
 @dataclass

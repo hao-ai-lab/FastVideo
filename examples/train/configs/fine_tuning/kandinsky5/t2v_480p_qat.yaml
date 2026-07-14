@@ -1,0 +1,85 @@
+# Kandinsky5 T2V 480p stage-1 QAT finetune config.
+#
+# QAT here means attention-only fake-quant during training: launch with
+# FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN set (see finetune_qat.sh), which
+# routes Kandinsky5's dense/local attention through the fake-quantized
+# straight-through-estimator kernel. No weight quantization happens during
+# training; that's applied post-hoc at inference time via the nvfp4_qat/FP8
+# quant configs (see the stage-2 config and README for that step).
+#
+# Scope: T2V, 480p only, dense/local attention only -- NABLA sparse attention
+# is never engaged by Kandinsky5Model at this resolution.
+#
+# Data must be preprocessed with Kandinsky5's VAE (shared with HunyuanVideo)
+# + dual text encoders (Qwen/Reason1 + CLIP) into parquet format before
+# training. See fastvideo/pipelines/preprocess/preprocess_kandinsky5_overfit.py.
+
+models:
+  student:
+    _target_: fastvideo.train.models.kandinsky5.Kandinsky5Model
+    init_from: kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: data/kandinsky5_overfit_preprocessed
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.1
+    seed: 1000
+    num_latent_t: 31
+    num_height: 512
+    num_width: 768
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 5.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 1.0e-4
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 2000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/kandinsky5_t2v_qat_finetune
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 3
+    resume_from_checkpoint: latest
+
+  tracker:
+    project_name: fastvideo_kandinsky5
+    run_name: kandinsky5_t2v_qat_finetune
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.kandinsky5.kandinsky5_pipeline.Kandinsky5T2VPipeline
+    dataset_file: data/kandinsky5_overfit_preprocessed/validation_prompts.json
+    every_steps: 250
+    # Cut way down from 50 while shaking out validation-path bugs -- at
+    # 512x768x121 each step is ~30s, so 50 steps/sample x 6 samples/rank
+    # was ~2.5h per validation round. Bump back to 50 for real runs.
+    sampling_steps: [25]
+    guidance_scale: 6.0
+
+pipeline:
+  flow_shift: 5
