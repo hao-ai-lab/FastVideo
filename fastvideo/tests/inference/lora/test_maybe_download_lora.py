@@ -2,9 +2,12 @@
 """Path-routing tests for fastvideo.utils.maybe_download_lora."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import huggingface_hub
 
 import fastvideo.utils as fv_utils
+from fastvideo.pipelines.lora_pipeline import _normalize_lora_key
 from fastvideo.utils import maybe_download_lora
 
 
@@ -18,12 +21,26 @@ def test_triple_slash_downloads_single_file(monkeypatch):
 
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_hf_hub_download)
 
+    lock_events: list[str] = []
+
+    @contextmanager
+    def fake_lock(path):
+        lock_events.append(f"enter:{path}")
+        yield
+        lock_events.append(f"exit:{path}")
+
+    monkeypatch.setattr(fv_utils, "get_lock", fake_lock)
+
     result = maybe_download_lora("vita-video-gen/svi-model/version-1.0/svi-shot.safetensors")
 
     assert len(calls) == 1
     assert calls[0]["repo_id"] == "vita-video-gen/svi-model"
     assert calls[0]["filename"] == "version-1.0/svi-shot.safetensors"
     assert result == "/cache/vita-video-gen/svi-model/version-1.0/svi-shot.safetensors"
+    assert lock_events == [
+        "enter:vita-video-gen/svi-model/version-1.0/svi-shot.safetensors",
+        "exit:vita-video-gen/svi-model/version-1.0/svi-shot.safetensors",
+    ]
 
 
 def test_triple_slash_keeps_only_first_two_segments_as_repo(monkeypatch):
@@ -71,3 +88,18 @@ def test_plain_repo_id_falls_through_to_repo_download(monkeypatch):
     result = maybe_download_lora("org/repo")
 
     assert result == "/cache/org/repo/adapter.safetensors"
+
+
+def test_normalize_lora_key_only_strips_peft_default_adapter_segment():
+    assert _normalize_lora_key("pipe.dit.blocks.0.attn.lora_A.default.weight") == (
+        "blocks.0.attn.lora_A"
+    )
+    assert _normalize_lora_key("blocks.default.attn.lora_A.weight") == (
+        "blocks.default.attn.lora_A"
+    )
+
+
+def test_normalize_lora_key_only_strips_pipe_dit_prefix():
+    assert _normalize_lora_key("module.pipe.dit.attn.lora_B.weight") == (
+        "module.pipe.dit.attn.lora_B"
+    )

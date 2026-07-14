@@ -111,6 +111,7 @@ class SamplingParam:
     svi_ref_pad_cfg: bool = False  # widens y-mask to len(first_frames) instead of {first frame only}
     svi_num_clips: int = 1  # >1 enables motion-frame chaining
     svi_num_motion_frames: int = 1  # tail frames carried from clip K to clip K+1 (1=Shot/Tom, 5=Film)
+    svi_clip_prompts: list[str] | None = None  # optional one-to-one prompt list for multi-clip generation
 
     # LTX-2 multi-modal CFG and STG.
     # Class-level defaults match the *distilled* LTX-2 schedule

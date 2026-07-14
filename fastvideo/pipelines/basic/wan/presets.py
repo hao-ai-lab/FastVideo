@@ -139,6 +139,7 @@ WAN_SVI_I2V_14B_480P = InferencePreset(
         "svi_num_clips": 1,
         "svi_num_motion_frames": 1,
         "svi_ref_pad_num": -1,
+        "svi_clip_prompts": None,
     },
 )
 

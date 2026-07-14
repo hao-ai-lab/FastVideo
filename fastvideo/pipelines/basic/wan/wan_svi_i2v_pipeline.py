@@ -48,6 +48,34 @@ def _stitch_clip_outputs(clip_outputs: list[torch.Tensor], num_motion: int) -> t
     return torch.cat(concatenated, dim=2)
 
 
+def _resolve_clip_prompts(
+    prompt: str | list[str] | None,
+    clip_prompts: list[str] | None,
+    num_clips: int,
+) -> list[str]:
+    """Return exactly one non-empty prompt per generated clip."""
+    if clip_prompts is None:
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("SVI requires a non-empty primary prompt")
+        return [prompt] * num_clips
+
+    if len(clip_prompts) != num_clips:
+        raise ValueError(
+            f"svi_clip_prompts must contain exactly svi_num_clips entries "
+            f"({num_clips}), but got {len(clip_prompts)}"
+        )
+    if any(not isinstance(item, str) or not item.strip() for item in clip_prompts):
+        raise ValueError("svi_clip_prompts entries must be non-empty strings")
+    return list(clip_prompts)
+
+
+def _clip_seed(seed: int | None, clip_idx: int) -> int:
+    """Match the SVI reference by varying diffusion noise per clip."""
+    if seed is None:
+        raise ValueError("SVI requires a seed")
+    return int(seed) + clip_idx
+
+
 class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
     """
     Pipeline for Stable-Video-Infinity multi-clip I2V generation on Wan 2.1.
@@ -55,7 +83,11 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=5.0)
+        flow_shift = fastvideo_args.pipeline_config.flow_shift
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
+            num_train_timesteps=1000,
+            shift=5.0 if flow_shift is None else flow_shift,
+        )
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
         self.add_stage(
@@ -105,19 +137,13 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
             self.post_init()
 
         n_steps = int(batch.num_inference_steps)
-        batch.sigmas = torch.linspace(1.0, 0.0, n_steps + 1)[:-1].tolist()
+        if batch.sigmas is None:
+            batch.sigmas = torch.linspace(1.0, 0.0, n_steps + 1)[:-1].tolist()
 
         num_clips = max(1, int(batch.svi_num_clips or 1))
         num_motion = max(1, int(batch.svi_num_motion_frames or 1))
 
-        if isinstance(batch.prompt, list):
-            prompts: list[str | None] = list(batch.prompt)
-        else:
-            prompts = [batch.prompt]
-        if len(prompts) < num_clips:
-            prompts = prompts + [prompts[-1]] * (num_clips - len(prompts))
-        elif len(prompts) > num_clips:
-            prompts = prompts[:num_clips]
+        prompts = _resolve_clip_prompts(batch.prompt, batch.svi_clip_prompts, num_clips)
 
         if num_clips == 1:
             batch.prompt = prompts[0]
@@ -140,7 +166,8 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
             clip_batch = dataclasses.replace(
                 batch,
                 prompt=prompts[clip_idx],
-                pil_image=motion_frames[0],
+                seed=_clip_seed(batch.seed, clip_idx),
+                pil_image=motion_frames[-1],
                 # Clear image_path so per-clip InputValidationStage does not
                 # reload the original ref and clobber motion_frames[0].
                 image_path=None,
@@ -168,7 +195,13 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
 
             assert clip_batch.output is not None
             clip_outputs.append(clip_batch.output)
-            logger.info("SVI clip %d/%d generated, frames shape=%s", clip_idx + 1, num_clips, clip_batch.output.shape)
+            logger.info(
+                "SVI clip %d/%d generated with seed=%d, frames shape=%s",
+                clip_idx + 1,
+                num_clips,
+                clip_batch.seed,
+                clip_batch.output.shape,
+            )
 
             if clip_idx + 1 < num_clips:
                 tail = clip_batch.output[0, :, -num_motion:, :, :]

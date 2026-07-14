@@ -600,7 +600,8 @@ def maybe_download_lora(model_name_or_path: str, local_dir: str | None = None, d
         from huggingface_hub import hf_hub_download
         repo_id = "/".join(parts[:2])
         filename = "/".join(parts[2:])
-        return hf_hub_download(repo_id=repo_id, filename=filename, local_dir=local_dir)
+        with get_lock(model_name_or_path):
+            return hf_hub_download(repo_id=repo_id, filename=filename, local_dir=local_dir)
 
     local_path = maybe_download_model(model_name_or_path, local_dir, download)
     weight_name = _best_guess_weight_name(model_name_or_path, file_extension=".safetensors")

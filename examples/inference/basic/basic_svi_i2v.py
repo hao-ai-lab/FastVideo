@@ -2,7 +2,7 @@ from fastvideo import VideoGenerator
 
 # Available variants: "shot", "film", "tom"
 # Each variant uses a different LoRA + motion-frame conditioning:
-#   - shot: 1 motion frame + reference-frame padding (single-prompt demo)
+#   - shot: 1 motion frame + reference-frame padding
 #   - film: 5 motion frames + zero padding (multi-prompt long-story continuity)
 #   - tom:  1 motion frame + reference-frame padding (cartoon style)
 MODEL_VARIANT = "shot"
@@ -12,8 +12,13 @@ VARIANT_CONFIG = {
         "lora_path": "vita-video-gen/svi-model/version-1.0/svi-shot.safetensors",
         "image_url":
         "https://raw.githubusercontent.com/vita-epfl/Stable-Video-Infinity/main/data/toy_test/shot/frame.jpg",
-        "prompt": ("A sleek white motor yacht speeds across the turquoise blue sea, "
-                   "leaving a dramatic wake of white foam behind it under a clear blue sky."),
+        "prompts": [
+            ("A sleek white motor yacht speeds across the turquoise blue sea, "
+             "leaving a dramatic wake of white foam behind it under a clear blue sky."),
+            ("The camera follows the same white yacht from behind as it continues across "
+             "the turquoise sea, its foamy wake widening under the clear sky."),
+        ],
+        "num_clips": 2,
         "num_motion_frames": 1,
         "ref_pad_num": -1,
     },
@@ -21,8 +26,13 @@ VARIANT_CONFIG = {
         "lora_path": "vita-video-gen/svi-model/version-1.0/svi-film.safetensors",
         "image_url":
         "https://raw.githubusercontent.com/vita-epfl/Stable-Video-Infinity/main/data/toy_test/film/frame.jpg",
-        "prompt": ("A Siamese kitten rests snugly inside a straw hat, its head slightly tilted "
-                   "as it gazes curiously to the side."),
+        "prompts": [
+            ("A Siamese kitten rests snugly inside a straw hat, its head slightly tilted "
+             "as it gazes curiously to the side."),
+            ("The same Siamese kitten slowly lifts its head from the straw hat and looks "
+             "toward the camera while the warm room remains unchanged."),
+        ],
+        "num_clips": 2,
         "num_motion_frames": 5,
         "ref_pad_num": 0,
     },
@@ -30,9 +40,14 @@ VARIANT_CONFIG = {
         "lora_path": "vita-video-gen/svi-model/version-1.0/svi-tom.safetensors",
         "image_url":
         "https://raw.githubusercontent.com/vita-epfl/Stable-Video-Infinity/main/data/toy_test/tom/frame.png",
-        "prompt": ("A static shot of the bright 1950s kitchen, turquoise cabinets and a chrome "
-                   "sink glinting; Tom cat hovers over the counter, yellow eyes narrowed, while "
-                   "Jerry mouse stands defiantly in a tiny milk puddle near a stack of purple plates."),
+        "prompts": [
+            ("A static shot of the bright 1950s kitchen, turquoise cabinets and a chrome "
+             "sink glinting; Tom cat hovers over the counter, yellow eyes narrowed, while "
+             "Jerry mouse stands defiantly in a tiny milk puddle near a stack of purple plates."),
+            ("In the same bright 1950s kitchen, Tom leans closer across the counter while Jerry "
+             "holds his ground beside the purple plates, preserving the cartoon style."),
+        ],
+        "num_clips": 2,
         "num_motion_frames": 1,
         "ref_pad_num": -1,
     },
@@ -58,7 +73,7 @@ def main():
     )
 
     generator.generate_video(
-        prompt=config["prompt"],
+        prompt=config["prompts"][0],
         image_path=config["image_url"],
         output_path=OUTPUT_PATH,
         save_video=True,
@@ -69,7 +84,8 @@ def main():
         guidance_scale=5.0,
         seed=42,
         # SVI motion-frame knobs vary per variant; num_clips>1 enables motion-frame chaining.
-        svi_num_clips=1,
+        svi_num_clips=config["num_clips"],
+        svi_clip_prompts=config["prompts"],
         svi_num_motion_frames=config["num_motion_frames"],
         svi_ref_pad_num=config["ref_pad_num"],
     )
