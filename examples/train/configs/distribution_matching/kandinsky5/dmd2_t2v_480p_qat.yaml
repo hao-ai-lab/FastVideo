@@ -1,0 +1,105 @@
+# DMD2 QAT-aware distillation: Kandinsky5 T2V Lite, 480p (teacher many-step
+# -> student 4-step), continuing from a stage-1 Attn-QAT finetune checkpoint.
+#
+# - Teacher: frozen, full-precision Kandinsky5 (loaded from the stage-1 QAT
+#   checkpoint's base weights, or the original pretrained checkpoint --
+#   the _loading_teacher_critic_model gate in component_loader.py masks
+#   quant_config and FASTVIDEO_ATTENTION_BACKEND for teacher/critic
+#   regardless, so they always run full precision / dense attention).
+# - Student: trainable, initialized from the stage-1 QAT finetune checkpoint.
+# - Critic:  trainable, initialized from the same checkpoint as the student.
+# - Validation: 4-step sampling via Kandinsky5DMDPipeline.
+#
+# Launch with FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN set (student only;
+# teacher/critic are masked to dense automatically) so the student continues
+# learning to absorb fake-quantized attention error during distillation.
+#
+# Scope: T2V, 480p only, dense/local attention only.
+
+models:
+  student:
+    _target_: fastvideo.train.models.kandinsky5.Kandinsky5Model
+    init_from: outputs/kandinsky5_t2v_qat_finetune/checkpoint-1000-diffusers
+    trainable: true
+  teacher:
+    _target_: fastvideo.train.models.kandinsky5.Kandinsky5Model
+    init_from: outputs/kandinsky5_t2v_qat_finetune/checkpoint-1000-diffusers
+    trainable: false
+    disable_custom_init_weights: true
+  critic:
+    _target_: fastvideo.train.models.kandinsky5.Kandinsky5Model
+    init_from: outputs/kandinsky5_t2v_qat_finetune/checkpoint-1000-diffusers
+    trainable: true
+    disable_custom_init_weights: true
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.dmd2.DMD2Method
+  rollout_mode: simulate
+  generator_update_interval: 5
+  real_score_guidance_scale: 4.5
+  dmd_denoising_steps: [1000, 750, 500, 250]
+
+  # Critic optimizer (required -- no fallback to training.optimizer)
+  fake_score_learning_rate: 8.0e-6
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: data/kandinsky5_overfit_preprocessed
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 512
+    num_width: 768
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 4000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/kandinsky5_t2v_dmd2_4steps_qat
+    training_state_checkpointing_steps: 20
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: distillation_kandinsky5
+    run_name: kandinsky5_t2v_dmd2_4steps_qat
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    max_grad_norm: 1.0
+  validation:
+    pipeline_target: fastvideo.pipelines.basic.kandinsky5.kandinsky5_dmd_pipeline.Kandinsky5DMDPipeline
+    dataset_file: data/kandinsky5_overfit_preprocessed/validation_prompts.json
+    every_steps: 50
+    sampling_steps: [4]
+    sampling_timesteps: [1000, 750, 500, 250]
+    guidance_scale: 6.0
+  ema:
+    _target_: fastvideo.train.callbacks.ema.EMACallback
+    decay: 0.98
+    start_iter: 0
+
+pipeline:
+  flow_shift: 5
