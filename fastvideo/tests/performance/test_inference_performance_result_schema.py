@@ -162,12 +162,24 @@ def test_resolve_num_gpus_uses_one_count_and_rejects_conflicts():
         {"required_gpus": 2},
         "wan-t2v-1.3b-2gpu",
     ) == 2
+    assert perf_test._resolve_num_gpus(
+        {"tp_size": 2},
+        {},
+        "wan-t2v-1.3b-tp2",
+    ) == 2
 
     with pytest.raises(ValueError, match="must match"):
         perf_test._resolve_num_gpus(
             {"num_gpus": 1},
             {"required_gpus": 2},
             "wan-t2v-1.3b-2gpu",
+        )
+
+    with pytest.raises(ValueError, match=r"at least max\(tp_size, sp_size\)"):
+        perf_test._resolve_num_gpus(
+            {"num_gpus": 1, "tp_size": 2},
+            {"required_gpus": 1},
+            "wan-t2v-1.3b-tp2",
         )
 
 

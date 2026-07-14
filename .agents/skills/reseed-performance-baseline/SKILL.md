@@ -365,11 +365,14 @@ python fastvideo/tests/performance/seed_baseline.py \
 The utility is prepare-only and intentionally has no upload option. Upload the
 scoped records only after the separate confirmation in step 6.
 
-The utility treats `PERFORMANCE_TRACKING_ROOT` as a read-only canonical mirror
-and writes only under the separate staging root. Before writing, it stops if
-the exact identity already has a successful baseline-eligible record in the
-canonical mirror (the calibration artifact is stale) or a prepared seed in the
-staging root (the operation is a replay). Keep the same staging root until the
+The utility validates against an isolated fresh HF snapshot and leaves
+`PERFORMANCE_TRACKING_ROOT` untouched; that argument only proves the staging
+root is separate from the operator's tracking mirror. Before writing, it stops
+if the exact identity already has a successful baseline-eligible record or if
+the workload/variant/version already trusts another recipe. It atomically
+reserves the exact identity and writes a digest-protected upload manifest bound
+to the current HF endpoint, repository id, and repository type. Keep the
+prepared records, manifest, source files, and reservation unchanged until the
 operation is uploaded or explicitly cleaned up.
 
 If the prepared seed records look correct, upload only those scoped records in
@@ -480,6 +483,7 @@ Print:
 
 - Backup directory path under `/tmp`.
 - Prepared local record paths under `PERFORMANCE_RESEED_STAGING_ROOT`.
+- Prepared upload-manifest path under the identity reservation.
 - HF paths that will receive the new records.
 - Old rolling medians.
 - Source batch medians, source batch spread, reseed count, and candidate
@@ -491,22 +495,36 @@ prepared records plus backup on disk.
 
 ### 7. Upload only the scoped records
 
-Use the shared storage helper so the path and repo type match CI:
+For a first v2 calibration seed, use the manifest uploader after the user
+replies exactly `upload`:
 
-```python
-from fastvideo.performance.hf_store import upload_record
-
-upload_record("<local_record_path>", record, strict=True)
+```bash
+python -c 'from fastvideo.tests.performance.seed_baseline import upload_prepared_seed_manifest; print(upload_prepared_seed_manifest("<prepared_manifest>"))'
 ```
 
-Run it once per prepared record. Each upload goes to:
+The uploader verifies the source and prepared-record digests, pins and scans
+the current HF revision, rechecks exact-identity and recipe-cohort conflicts,
+and writes the entire batch in one commit whose `parent_commit` must still be
+current. A concurrent Hub update makes the commit fail. Do not retry
+automatically: preserve staging, refresh/review remote state, and request a new
+explicit `upload` after the conflict is understood. Each record goes to:
 
 ```text
 FastVideo/performance-tracking/<sanitize(model_id)>/<record_filename>.json
 ```
 
-Never bulk upload the whole tracking root. Never modify another model's
-directory in the same operation.
+Never call `upload_record()` once per first-seed record: that can partially
+land the batch and has no compare-and-swap guard.
+
+For a legacy reseed or an accepted v2 baseline shift, the first-seed manifest
+validator does not apply because an eligible baseline already exists. Upload
+only the individually reviewed records prepared in step 5 with the shared
+`upload_record(local_path, record, strict=True)` helper. Stop on the first
+failure and report exactly which records reached HF; do not silently rerun or
+replicate the remainder.
+
+Never bulk upload the tracking or staging root, and never modify another
+model's directory in the same operation.
 
 ### 8. Report outcome and offer cleanup
 
@@ -529,12 +547,13 @@ After the upload is verified, ask whether the user wants to clear temporary
 local state. Explain what each directory is for:
 
 - `PERFORMANCE_TRACKING_ROOT`, usually `/tmp/perf-tracking`: read-only local
-  synced mirror of `FastVideo/performance-tracking` used to prove the target
-  does not already have an eligible baseline.
+  synced mirror used for operator review and reporting. First-v2 preparation
+  independently proves remote state from a fresh temporary HF snapshot.
 - `PERFORMANCE_RESEED_STAGING_ROOT`, usually
   `/tmp/performance_reseed_prepared`: prepared local seed records used for the
-  scoped upload. Keeping this separate prevents aborted preparations from
-  appearing in later baseline reads.
+  scoped upload, plus the identity reservation and digest manifest. Keeping
+  this separate prevents aborted preparations from appearing in later
+  baseline reads.
 - `/tmp/performance_reseed_backup/<...>`: local backup of the target model's
   pre-reseed HF history plus `PROVENANCE.txt`, kept so a bad reseed can be
   audited or corrected.
@@ -553,8 +572,9 @@ Ask:
 Do not delete anything unless the user replies exactly
 `cleanup reseed temp`. If cleanup is requested, remove only the specific
 directories and prepared record paths created for this reseed. Do not remove
-the shared staging root when it contains other records, and never remove
-unrelated `/tmp` contents.
+the shared staging root when it contains other records. Remove this operation's
+identity reservation only with its prepared records and manifest, and never
+remove unrelated `/tmp` contents.
 
 ## Failure modes and handling
 
@@ -576,9 +596,15 @@ unrelated `/tmp` contents.
 - **The exact v2 identity already has an eligible baseline.** Stop. The
   `CALIBRATION_NEEDED` artifact is stale; use the reviewed baseline-shift path
   instead of the first-seed utility.
+- **The workload/variant/version trusts another recipe.** Stop. The source is
+  stale relative to the current recipe cohort and must not bypass
+  `RECIPE_MISMATCH` by creating a second trusted recipe.
 - **The staging root already has a prepared seed for the exact identity.**
   Stop and reuse, upload, or explicitly clean that preparation. Do not prepare
   another copy of the same measurement.
+- **The conditional Hub commit loses its parent race.** Stop without retrying.
+  Keep the preparation, refresh and review the new remote state, then request
+  a new explicit `upload` only if the seed is still valid.
 - **Candidate still violates fixed thresholds.** Report that this skill only
   handles the rolling HF baseline; update benchmark JSON thresholds in code
   review if maintainers accept the new absolute limit.
@@ -598,8 +624,9 @@ unrelated `/tmp` contents.
   intentional baseline replacement.
 - `fastvideo/tests/performance/compare_baseline.py` — normalization, rolling
   median comparison, and persistence rules.
-- `fastvideo/performance/hf_store.py` — HF sync, record loading,
-  `sanitize()`, and `upload_record()`.
+- `fastvideo/performance/hf_store.py` — HF sync and record loading helpers.
+- `fastvideo/tests/performance/seed_baseline.py` — first-seed preparation,
+  staging reservation, manifest validation, and conditional batch upload.
 - `fastvideo/tests/performance/test_inference_performance.py` — source result
   JSON schema.
 - `.buildkite/performance-benchmarks/tests/*.json` — fixed absolute benchmark
@@ -612,4 +639,4 @@ unrelated `/tmp` contents.
 | 2026-05-03 | Initial version. Sister workflow to `reseed-ssim-references`, scoped to one performance `(model_id, gpu_type)` baseline seed with backup, confirmation, provenance, and `success=true` upload. |
 | 2026-05-03 | Previous policy: replicate one approved shifted source result into 3 success records by default, or 5 only when explicitly requested. Add provenance marker for replicated-source reseeds. Superseded by the 2026-05-08 dynamic multi-source policy. |
 | 2026-05-08 | Replace fixed 3/5 replication with dynamic multi-source reseeding: upload one seed record per reviewed source JSON, validate intra-batch consistency, move backup/source scratch under `/tmp`, and ask whether to clean temp state after successful upload. |
-| 2026-07-13 | Keep first-v2-seed preparation outside the canonical mirror and reject stale or replayed calibration seeds. |
+| 2026-07-13 | Keep first-v2-seed preparation outside the canonical mirror, reserve staging identities atomically, reject stale or replayed calibration seeds, and upload reviewed manifests with a single parent-guarded Hub commit. |

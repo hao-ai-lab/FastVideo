@@ -433,7 +433,7 @@ def _recipe_mismatch_failure(
     suffix = f"; existing recipe_fingerprint values: {', '.join(seen)}" if seen else ""
     return (f"{record['model_id']} recipe_fingerprint={record.get('recipe_fingerprint')} "
             "does not match baseline records for the same workload, variant, "
-            "benchmark version, hardware profile, and software profile"
+            "and benchmark version across hardware and software profiles"
             f"{suffix}")
 
 

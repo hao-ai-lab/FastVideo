@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 
+from fastvideo.performance import hf_store
 from fastvideo.tests.performance import compare_baseline
 from fastvideo.tests.performance import seed_baseline
 from fastvideo.tests.performance import test_inference_performance as perf_test
@@ -13,6 +16,16 @@ from fastvideo.performance.hf_store import (
     sanitize,
 )
 from fastvideo.performance.metric_policy import resolve_metric_policies
+
+
+@pytest.fixture(autouse=True)
+def _stub_seed_baseline_remote_sync(monkeypatch):
+    def sync(local_dir, *, strict=False, revision=None):
+        assert strict is True
+        os.makedirs(local_dir, exist_ok=True)
+        return local_dir
+
+    monkeypatch.setattr(seed_baseline, "sync_from_hf", sync)
 
 
 def _raw_result():
@@ -31,6 +44,7 @@ def _raw_result():
 def _v2_raw_result(**overrides):
     raw = _raw_result()
     raw.update({
+        "result_schema_version": 2,
         "workload_id": "wan-t2v",
         "variant_id": "1.3b-sp2",
         "benchmark_version": 2,
@@ -51,6 +65,63 @@ def _write_record(root, model_id, filename, record):
     model_dir.mkdir(parents=True, exist_ok=True)
     with open(model_dir / filename, "w", encoding="utf-8") as f:
         json.dump(record, f)
+
+
+def _prepare_single_seed(tmp_path):
+    source = _v2_record()
+    source.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "success": True,
+        "baseline_eligible": False,
+        "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "pr_number": "",
+    })
+    source_path = tmp_path / "source.json"
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    tracking_root = tmp_path / "tracking"
+    staging_root = tmp_path / "staging"
+    assert seed_baseline.main([
+        "--source-result",
+        str(source_path),
+        "--intent-rationale",
+        "reviewed first v2 baseline",
+        "--tracking-root",
+        str(tracking_root),
+        "--staging-root",
+        str(staging_root),
+    ]) == 0
+    manifests = list(staging_root.glob(".seed-reservations/*/manifest"))
+    assert len(manifests) == 1
+    return manifests[0]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("", "_"), (".", "_."), ("..", "_.."), (".hidden", "_.hidden")],
+)
+def test_sanitize_never_returns_a_special_path_component(value, expected):
+    assert sanitize(value) == expected
+
+
+def test_sync_marker_reuse_requires_the_exact_revision(tmp_path):
+    marker = tmp_path / hf_store.SYNC_MARKER
+    marker.write_text(json.dumps({
+        "endpoint": hf_store.ENDPOINT,
+        "repo_id": hf_store.HF_REPO_ID,
+        "revision": "pinned-old-revision",
+    }), encoding="utf-8")
+
+    assert hf_store._sync_marker_matches_request(str(marker), "pinned-old-revision") is True
+    assert hf_store._sync_marker_matches_request(str(marker), None) is False
+
+    marker.write_text(json.dumps({
+        "endpoint": "https://different.example",
+        "repo_id": hf_store.HF_REPO_ID,
+        "revision": "pinned-old-revision",
+    }), encoding="utf-8")
+    assert hf_store._sync_marker_matches_request(str(marker), "pinned-old-revision") is False
 
 
 def test_detect_run_source_prefers_explicit_env(monkeypatch):
@@ -680,6 +751,30 @@ def test_baseline_seed_rejects_untrusted_calibration_sources(monkeypatch, overri
         )
 
 
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"result_schema_version": 1}, "normalized v2"),
+        ({"baseline_eligible": True}, "baseline_eligible=false"),
+    ],
+)
+def test_baseline_seed_rejects_invalid_calibration_schema(overrides, match):
+    record = _v2_record()
+    record.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "success": True,
+        "baseline_eligible": False,
+        "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "pr_number": "",
+        **overrides,
+    })
+
+    with pytest.raises(ValueError, match=match):
+        seed_baseline.build_baseline_seed_record(record, reason="invalid source")
+
+
 def test_baseline_seed_rejects_mixed_exact_identities(monkeypatch):
     monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
     first = _v2_record()
@@ -703,6 +798,19 @@ def test_baseline_seed_duplicate_provenance_ignores_model_id(tmp_path):
         seed_baseline._validate_unique_sources(
             [str(tmp_path / "first.json"), str(tmp_path / "renamed.json")],
             [first, renamed],
+        )
+
+
+def test_baseline_seed_duplicate_provenance_prefers_job_id(tmp_path):
+    first = _v2_record()
+    first["job_id"] = "job-1"
+    copied = dict(first)
+    copied["timestamp"] = "2026-06-17T00:00:00+00:00"
+
+    with pytest.raises(ValueError, match="duplicates source provenance"):
+        seed_baseline._validate_unique_sources(
+            [str(tmp_path / "first.json"), str(tmp_path / "copied.json")],
+            [first, copied],
         )
 
 
@@ -753,20 +861,21 @@ def test_baseline_seed_orders_sources_by_original_timestamp(monkeypatch, tmp_pat
 
     assert seed_baseline.main(argv) == 0
 
-    last_five = load_records_for_identity(
-        str(staging_root),
-        compare_baseline._comparison_identity_filters(source_records[0]),
-        last_n=5,
-        successful_only=True,
-        baseline_eligible_only=True,
-    )
+    manifest_path = next(staging_root.glob(".seed-reservations/*/manifest"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    prepared = [
+        json.loads(Path(entry["path"]).read_text(encoding="utf-8"))
+        for entry in manifest["prepared_records"]
+    ]
+    last_five = prepared[-5:]
     assert [record["baseline_seed_source_timestamp"] for record in last_five] == [
         f"2026-06-{day:02d}T00:00:00+00:00" for day in range(2, 7)
     ]
     assert not tracking_root.exists()
+    assert len(list(staging_root.glob(".seed-reservations/*/manifest"))) == 1
 
 
-def test_baseline_seed_rejects_existing_eligible_identity(tmp_path):
+def test_baseline_seed_rejects_existing_eligible_identity(monkeypatch, tmp_path):
     source = _v2_record()
     source.update({
         "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
@@ -786,7 +895,13 @@ def test_baseline_seed_rejects_existing_eligible_identity(tmp_path):
     })
     tracking_root = tmp_path / "tracking"
     staging_root = tmp_path / "staging"
-    _write_record(tracking_root, existing["model_id"], "existing.json", existing)
+    def sync(local_dir, *, strict=False, revision=None):
+        assert strict is True
+        assert revision is None
+        _write_record(Path(local_dir), existing["model_id"], "existing.json", existing)
+        return local_dir
+
+    monkeypatch.setattr(seed_baseline, "sync_from_hf", sync)
 
     with pytest.raises(ValueError, match="already has a baseline-eligible record"):
         seed_baseline.main([
@@ -801,6 +916,53 @@ def test_baseline_seed_rejects_existing_eligible_identity(tmp_path):
         ])
 
     assert not staging_root.exists()
+    assert not tracking_root.exists()
+
+
+def test_baseline_seed_rejects_trusted_different_recipe(monkeypatch, tmp_path):
+    source = _v2_record(recipe_fingerprint="recipe-old")
+    source.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "success": True,
+        "baseline_eligible": False,
+        "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "pr_number": "",
+    })
+    source_path = tmp_path / "source.json"
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    trusted = dict(source)
+    trusted.update({
+        "model_id": "renamed-benchmark",
+        "recipe_fingerprint": "recipe-current",
+        "hardware_profile_id": "hw-other",
+        "software_profile_id": "sw-other",
+    })
+    tracking_root = tmp_path / "tracking"
+    staging_root = tmp_path / "staging"
+    def sync(local_dir, *, strict=False, revision=None):
+        assert strict is True
+        assert revision is None
+        _write_record(Path(local_dir), trusted["model_id"], "trusted.json", trusted)
+        return local_dir
+
+    monkeypatch.setattr(seed_baseline, "sync_from_hf", sync)
+
+    with pytest.raises(ValueError, match="trusted records for another recipe"):
+        seed_baseline.main([
+            "--source-result",
+            str(source_path),
+            "--intent-rationale",
+            "stale first seed",
+            "--tracking-root",
+            str(tracking_root),
+            "--staging-root",
+            str(staging_root),
+        ])
+
+    assert not staging_root.exists()
+    assert not tracking_root.exists()
 
 
 def test_baseline_seed_rejects_cross_invocation_replay(tmp_path):
@@ -830,7 +992,7 @@ def test_baseline_seed_rejects_cross_invocation_replay(tmp_path):
     ]
 
     assert seed_baseline.main(argv) == 0
-    with pytest.raises(ValueError, match="already has a prepared baseline seed"):
+    with pytest.raises(ValueError, match="already has a reservation"):
         seed_baseline.main(argv)
 
     assert len(list(staging_root.rglob("*.json"))) == 1
@@ -840,6 +1002,180 @@ def test_baseline_seed_requires_separate_staging_root(tmp_path):
     tracking_root = tmp_path / "tracking"
     with pytest.raises(ValueError, match="separate and non-nested"):
         seed_baseline._validate_separate_roots(str(tracking_root), str(tracking_root / "staging"))
+
+
+def test_baseline_seed_reservation_is_atomic(tmp_path):
+    identity = compare_baseline._comparison_identity_filters(_v2_record())
+
+    reservation = seed_baseline._reserve_staging_identity(str(tmp_path), identity)
+
+    assert os.path.isdir(reservation)
+    with pytest.raises(ValueError, match="already has a reservation"):
+        seed_baseline._reserve_staging_identity(str(tmp_path), identity)
+
+
+def test_baseline_seed_releases_nested_reservation_after_late_failure(monkeypatch, tmp_path):
+    source = _v2_record()
+    source.update({
+        "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+        "success": True,
+        "baseline_eligible": False,
+        "run_source": "scheduled_main",
+        "branch": "main",
+        "test_scope": "full",
+        "pr_number": "",
+    })
+    source_path = tmp_path / "source.json"
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    tracking_root = tmp_path / "tracking"
+    staging_root = tmp_path / "staging"
+    argv = [
+        "--source-result",
+        str(source_path),
+        "--intent-rationale",
+        "reviewed first v2 baseline",
+        "--tracking-root",
+        str(tracking_root),
+        "--staging-root",
+        str(staging_root),
+    ]
+    write_manifest = seed_baseline._write_preparation_manifest
+
+    def fail_once(*_args, **_kwargs):
+        monkeypatch.setattr(seed_baseline, "_write_preparation_manifest", write_manifest)
+        raise ValueError("source changed during manifest creation")
+
+    monkeypatch.setattr(seed_baseline, "_write_preparation_manifest", fail_once)
+
+    with pytest.raises(ValueError, match="source changed"):
+        seed_baseline.main(argv)
+
+    assert not list(staging_root.glob(".seed-reservations/*"))
+    assert seed_baseline.main(argv) == 0
+
+
+def test_baseline_seed_upload_is_one_conditional_commit(monkeypatch, tmp_path):
+    manifest_path = _prepare_single_seed(tmp_path)
+    calls = {}
+
+    class FakeApi:
+        def __init__(self, token):
+            assert token == "hf-test"
+
+        def repo_info(self, **kwargs):
+            calls["repo_info"] = kwargs
+            return type("RepoInfo", (), {"sha": "a" * 40})()
+
+        def create_commit(self, **kwargs):
+            calls["create_commit"] = kwargs
+            return type("CommitInfo", (), {"oid": "b" * 40})()
+
+    monkeypatch.setattr(seed_baseline, "resolve_hf_token", lambda: "hf-test")
+    monkeypatch.setattr(seed_baseline, "HfApi", FakeApi)
+
+    commit_id = seed_baseline.upload_prepared_seed_manifest(str(manifest_path))
+
+    assert commit_id == "b" * 40
+    assert calls["repo_info"]["revision"] == "main"
+    commit_call = calls["create_commit"]
+    assert commit_call["parent_commit"] == "a" * 40
+    assert commit_call["revision"] == "main"
+    assert commit_call["create_pr"] is False
+    assert len(commit_call["operations"]) == 1
+    assert isinstance(commit_call["operations"][0].path_or_fileobj, bytes)
+    assert (manifest_path.parent / "uploaded").is_file()
+
+
+def test_baseline_seed_upload_rejects_repository_drift(monkeypatch, tmp_path):
+    manifest_path = _prepare_single_seed(tmp_path)
+    monkeypatch.setattr(seed_baseline, "HF_REPO_ID", "Different/performance-tracking")
+
+    with pytest.raises(ValueError, match="repository does not match"):
+        seed_baseline.upload_prepared_seed_manifest(str(manifest_path))
+
+
+def test_baseline_seed_upload_rejects_record_outside_reservation(tmp_path):
+    manifest_path = _prepare_single_seed(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entry = manifest["prepared_records"][0]
+    original = Path(entry["path"])
+    outside = Path(manifest["staging_root"]) / "outside" / original.name
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(original.read_bytes())
+    entry["path"] = str(outside)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="outside its identity reservation"):
+        seed_baseline.upload_prepared_seed_manifest(str(manifest_path))
+
+
+def test_baseline_seed_upload_rechecks_remote_state(monkeypatch, tmp_path):
+    manifest_path = _prepare_single_seed(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    prepared_path = manifest["prepared_records"][0]["path"]
+    existing = json.loads(Path(prepared_path).read_text(encoding="utf-8"))
+
+    def sync(local_dir, *, strict=False, revision=None):
+        assert strict is True
+        assert revision == "a" * 40
+        _write_record(
+            Path(local_dir),
+            existing["model_id"],
+            "already-seeded.json",
+            existing,
+        )
+        return local_dir
+
+    class FakeApi:
+        def __init__(self, token):
+            assert token == "hf-test"
+
+        def repo_info(self, **_kwargs):
+            return type("RepoInfo", (), {"sha": "a" * 40})()
+
+        def create_commit(self, **_kwargs):
+            raise AssertionError("remote conflict must block the commit")
+
+    monkeypatch.setattr(seed_baseline, "resolve_hf_token", lambda: "hf-test")
+    monkeypatch.setattr(seed_baseline, "HfApi", FakeApi)
+    monkeypatch.setattr(seed_baseline, "sync_from_hf", sync)
+
+    with pytest.raises(ValueError, match="remote tracking history already has"):
+        seed_baseline.upload_prepared_seed_manifest(str(manifest_path))
+
+
+def test_baseline_seed_upload_preserves_manifest_on_cas_failure(monkeypatch, tmp_path):
+    manifest_path = _prepare_single_seed(tmp_path)
+
+    class FakeApi:
+        def __init__(self, token):
+            assert token == "hf-test"
+
+        def repo_info(self, **_kwargs):
+            return type("RepoInfo", (), {"sha": "a" * 40})()
+
+        def create_commit(self, **_kwargs):
+            raise RuntimeError("parent commit changed")
+
+    monkeypatch.setattr(seed_baseline, "resolve_hf_token", lambda: "hf-test")
+    monkeypatch.setattr(seed_baseline, "HfApi", FakeApi)
+
+    with pytest.raises(RuntimeError, match="parent commit changed"):
+        seed_baseline.upload_prepared_seed_manifest(str(manifest_path))
+
+    assert manifest_path.is_file()
+    assert not (manifest_path.parent / "uploaded").exists()
+
+
+def test_baseline_seed_upload_rejects_staged_mutation(tmp_path):
+    manifest_path = _prepare_single_seed(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    prepared_path = manifest["prepared_records"][0]["path"]
+    with open(prepared_path, "a", encoding="utf-8") as f:
+        f.write("\n")
+
+    with pytest.raises(ValueError, match="changed after review"):
+        seed_baseline.upload_prepared_seed_manifest(str(manifest_path))
 
 
 def test_baseline_seed_orders_invalid_timestamps_last_and_warns(capsys):
@@ -967,6 +1303,7 @@ def test_baseline_seed_rejects_later_missing_model_id_before_persistence(tmp_pat
     ("metric", "invalid_value", "match"),
     [
         ("latency", None, "finite positive latency"),
+        ("latency", True, "finite latency"),
         ("throughput", None, "finite positive throughput"),
         ("memory", None, "finite positive memory"),
         ("latency", float("nan"), "finite latency"),
@@ -1136,8 +1473,8 @@ def test_main_recipe_mismatch_takes_precedence_over_static_regression(
             "variant_id": "1.3b-sp2",
             "benchmark_version": 2,
             "recipe_fingerprint": "recipe-1",
-            "hardware_profile_id": "hw-l40s-2",
-            "software_profile_id": "sw-cuda",
+            "hardware_profile_id": "hw-prior-profile",
+            "software_profile_id": "sw-prior-profile",
         },
     )
     with open(results_dir / "perf_current.json", "w", encoding="utf-8") as f:

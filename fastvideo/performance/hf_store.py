@@ -18,6 +18,7 @@ from typing import Any
 
 import pandas as pd
 from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub.constants import ENDPOINT
 
 # ---------------------------------------------------------------------------
 # Configuration — read once at import time, shared across both consumers
@@ -35,7 +36,8 @@ SYNC_REUSE_TTL_SECONDS = int(os.environ.get("PERFORMANCE_TRACKING_SYNC_REUSE_TTL
 
 def sanitize(value: str) -> str:
     """Return a filesystem- and HF-path-safe version of *value*."""
-    return re.sub(r"[^A-Za-z0-9._-]", "_", value)
+    sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", value)
+    return f"_{sanitized}" if not sanitized or sanitized.startswith(".") else sanitized
 
 
 def safe_float(value: Any) -> float | None:
@@ -108,11 +110,23 @@ def _sync_marker_is_fresh(marker_path: str) -> bool:
     return age.total_seconds() <= SYNC_REUSE_TTL_SECONDS
 
 
+def _sync_marker_matches_request(marker_path: str, revision: str | None) -> bool:
+    try:
+        with open(marker_path, encoding="utf-8") as marker:
+            marker_data = json.load(marker)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if marker_data.get("endpoint") != ENDPOINT or marker_data.get("repo_id") != HF_REPO_ID:
+        return False
+    return marker_data.get("revision") == revision
+
+
 def sync_from_hf(
     local_dir: str,
     *,
     strict: bool = False,
     reuse_existing: bool = False,
+    revision: str | None = None,
 ) -> str:
     """Download the HF dataset repo snapshot to *local_dir*.
 
@@ -129,14 +143,18 @@ def sync_from_hf(
     snapshot checks when compare and dashboard scripts run sequentially in the
     same CI job, without silently reusing stale data in persistent local or
     long-lived runner environments.
+
+    Pass ``revision`` to pin the snapshot to a previously read Hub commit. This
+    is used by conditional writers that must validate one exact remote state
+    before committing with that revision as their parent.
     """
     marker_path = _sync_marker_path(local_dir)
     if reuse_existing and os.path.exists(marker_path):
-        if _sync_marker_is_fresh(marker_path):
+        if _sync_marker_is_fresh(marker_path) and _sync_marker_matches_request(marker_path, revision):
             print(f"hf_store: reusing existing sync at {local_dir}")
             return local_dir
         os.remove(marker_path)
-        print(f"hf_store: existing sync at {local_dir} is stale; refreshing")
+        print(f"hf_store: existing sync at {local_dir} is stale or mismatched; refreshing")
 
     if not reuse_existing and os.path.exists(marker_path):
         os.remove(marker_path)
@@ -156,13 +174,17 @@ def sync_from_hf(
             local_dir=local_dir,
             token=resolve_hf_token(),
             allow_patterns="*.json",
+            revision=revision,
         )
         os.makedirs(local_dir, exist_ok=True)
         with open(marker_path, "w", encoding="utf-8") as marker:
-            json.dump({
-                "repo_id": HF_REPO_ID,
-                "synced_at": datetime.now(timezone.utc).isoformat(),
-            }, marker)
+            json.dump(
+                {
+                    "endpoint": ENDPOINT,
+                    "repo_id": HF_REPO_ID,
+                    "synced_at": datetime.now(timezone.utc).isoformat(),
+                    "revision": revision,
+                }, marker)
     except Exception as exc:
         if strict:
             raise

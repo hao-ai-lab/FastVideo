@@ -196,7 +196,7 @@ Comparator summaries and normalized artifacts include an explicit
 | `PASS` | Comparable baseline exists and no gated metric regressed. Legacy records with no baseline also keep the historical initialization behavior. | Passes |
 | `REGRESSION` | The record exceeds one of its static thresholds or at least one gated metric regressed against a comparable baseline. | Fails |
 | `CALIBRATION_NEEDED` | A v2 record has no exact comparable baseline. | Passes, may upload when `PERF_UPLOAD_POLICY=pass`, never seeds a baseline |
-| `RECIPE_MISMATCH` | The same workload, variant, benchmark version, hardware profile, and software profile has trusted successful records under another recipe fingerprint. | Fails |
+| `RECIPE_MISMATCH` | The same workload, variant, and benchmark version has trusted successful records under another recipe fingerprint, including records from other hardware or software profiles. | Fails |
 | `INFRA_ERROR` | The comparator cannot safely classify the record, such as a v2 record missing required identity fields. | Fails |
 
 `QUALITY_BLOCKED` is reserved for a future variant-promotion workflow and is
@@ -210,10 +210,11 @@ When the baseline shifts for a legitimate reason (torch upgrade, kernel
 change, etc.) and CI starts failing, use the
 [`reseed-performance-baseline`](https://github.com/hao-ai-lab/FastVideo/blob/main/.agents/skills/reseed-performance-baseline/SKILL.md)
 agent skill to advance the rolling median. To approve the first baseline for
-a new v2 exact identity, use `fastvideo/tests/performance/seed_baseline.py`
-from a reviewed scheduled-main full-suite `CALIBRATION_NEEDED` normalized
-artifact; it writes an explicit `baseline_eligible=true` seed record with the
-same six identity fields.
+a new v2 exact identity, follow that skill with a reviewed scheduled-main
+full-suite `CALIBRATION_NEEDED` normalized artifact. Its prepare step uses
+`fastvideo/tests/performance/seed_baseline.py`; after a separate human gate,
+the skill rechecks the current HF revision and conditionally uploads the whole
+seed batch in one commit.
 
 ## Schemas
 
@@ -229,7 +230,7 @@ configs and remain loadable. New or migrated configs should use
   "config_schema_version": 2,
   "workload_id": "wan-t2v",
   "variant_id": "1.3b-sp2",
-  "benchmark_version": 2
+  "benchmark_version": 3
 }
 ```
 
@@ -247,9 +248,9 @@ identity fields make the measured workload explicit:
 If a config declares `config_schema_version: 2`, loading fails clearly when any
 required v2 identity field is missing. If v2 identity or metadata fields are
 added without `config_schema_version: 2`, loading also fails so partial
-migrations do not silently run as v1 configs. Optional v2 metadata fields such
-as `metric_threshold_policy` and `quality_metadata` must be JSON objects when
-present. (`recipe` is emitted by the harness and is not config-declarable.)
+migrations do not silently run as v1 configs. Optional v2 `quality_metadata`
+and the v1/v2 `regression_thresholds` policy must be JSON objects when present.
+(`recipe` is emitted by the harness and is not config-declarable.)
 
 V2 records compare only within their exact identity cohort. A record that opens
 a new cohort is marked `baseline_status: "initialized_new_cohort"` and
@@ -261,6 +262,13 @@ baseline eligible); only static thresholds gate them. Metric-specific threshold
 policies are active. `QUALITY_BLOCKED` remains reserved for future variant
 promotion policy.
 
+The shipped Wan benchmark uses `benchmark_version: 3` because recipe schema 2
+changed the recipe fingerprint by removing the legacy `benchmark_id` display
+name. This intentionally opens a new comparison cohort: after deployment, a
+reviewed scheduled-main full-suite `CALIBRATION_NEEDED` artifact must be seeded
+once before rolling regression gating resumes for that exact identity. Static
+thresholds remain active during calibration.
+
 ### Raw record (`results/perf_*.json`)
 
 Written by `test_inference_performance.py`. One file per benchmark run.
@@ -271,7 +279,7 @@ Written by `test_inference_performance.py`. One file per benchmark run.
   "result_schema_version": 2,
   "workload_id": "wan-t2v",
   "variant_id": "1.3b-sp2",
-  "benchmark_version": 2,
+  "benchmark_version": 3,
   "model_short_name": "Wan2.1-T2V-1.3B-Diffusers",
   "device": "NVIDIA L40S",
   "num_gpus": 2,
@@ -310,12 +318,12 @@ Written by `test_inference_performance.py`. One file per benchmark run.
   "dit_time_s": 8.437,
   "vae_decode_time_s": 3.208,
   "recipe": {
-    "recipe_schema_version": 1,
+    "recipe_schema_version": 2,
     "benchmark": {
       "benchmark_id": "wan-t2v-1.3b-2gpu",
       "workload_id": "wan-t2v",
       "variant_id": "1.3b-sp2",
-      "benchmark_version": 2
+      "benchmark_version": 3
     },
     "model": { "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" },
     "init_kwargs": { "num_gpus": 2, "sp_size": 2, "tp_size": 1 },
@@ -367,7 +375,7 @@ result, used as the rolling-baseline source of truth.
   "result_schema_version": 2,
   "workload_id": "wan-t2v",
   "variant_id": "1.3b-sp2",
-  "benchmark_version": 2,
+  "benchmark_version": 3,
   "timestamp": "2026-05-08T22:00:00+00:00",
   "commit_sha": "<full sha>",
   "gpu_type": "NVIDIA L40S",
@@ -535,7 +543,8 @@ When the rolling-baseline phase runs, it emits:
    V2 benchmarks with no exact comparable baseline report
    `CALIBRATION_NEEDED`; the record remains visible but does not become
    baseline eligible until a comparable scheduled-main full-suite run is
-   reviewed and seeded with `fastvideo/tests/performance/seed_baseline.py`.
+   reviewed and seeded through the prepare, review, and conditional-upload
+   steps in the `reseed-performance-baseline` skill.
 
 4. If the benchmark targets a GPU not currently in `thresholds`, either add
    that GPU as a key or rely on the `default` block. Note that `default` is
@@ -558,8 +567,9 @@ When the rolling-baseline phase runs, it emits:
 **`CALIBRATION_NEEDED` / "No baseline found for exact comparable identity"** —
 the v2 run passes, but its normalized record remains
 `baseline_eligible=false`. Review a successful scheduled-main full-suite
-normalized artifact, then seed the first baseline with
-`fastvideo/tests/performance/seed_baseline.py` as described above.
+normalized artifact, then follow the `reseed-performance-baseline` skill. The
+utility only prepares a digest-protected manifest; the separately confirmed
+upload rechecks remote state and commits the batch atomically.
 
 **Persistent failure right after a torch / kernel / image upgrade** —
 genuine regression *or* baseline drift. Compare the failing normalized record

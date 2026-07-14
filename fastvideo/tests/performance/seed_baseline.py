@@ -2,22 +2,36 @@
 """Prepare reviewed v2 calibration artifacts as baseline seed records."""
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import statistics
 import sys
+import tempfile
 from datetime import datetime, timezone
 from typing import Any
+
+from huggingface_hub import CommitOperationAdd, HfApi
+from huggingface_hub.constants import ENDPOINT
 
 try:
     from fastvideo.tests.performance.compare_baseline import (
         STATUS_CALIBRATION_NEEDED,
         STATUS_PASS,
         _comparison_identity_filters,
+        _recipe_cohort_filters,
+        _recipe_mismatch_records,
         _record_uses_v2_identity,
     )
-    from fastvideo.performance.hf_store import load_records_for_identity, safe_float, sanitize
+    from fastvideo.performance.hf_store import (
+        HF_REPO_ID,
+        load_records_for_identity,
+        resolve_hf_token,
+        safe_float,
+        sanitize,
+        sync_from_hf,
+    )
     from fastvideo.performance.metric_policy import DEFAULT_METRIC_POLICIES
 except ImportError:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
@@ -27,15 +41,23 @@ except ImportError:
         STATUS_CALIBRATION_NEEDED,
         STATUS_PASS,
         _comparison_identity_filters,
+        _recipe_cohort_filters,
+        _recipe_mismatch_records,
         _record_uses_v2_identity,
     )
-    from fastvideo.performance.hf_store import load_records_for_identity, safe_float, sanitize
+    from fastvideo.performance.hf_store import (
+        HF_REPO_ID,
+        load_records_for_identity,
+        resolve_hf_token,
+        safe_float,
+        sanitize,
+        sync_from_hf,
+    )
     from fastvideo.performance.metric_policy import DEFAULT_METRIC_POLICIES
 
 TRACKING_ROOT = os.environ.get("PERFORMANCE_TRACKING_ROOT", "/tmp/perf-tracking")
 STAGING_ROOT = os.environ.get("PERFORMANCE_RESEED_STAGING_ROOT", "/tmp/performance_reseed_prepared")
 DEFAULT_MAX_INTRA_BATCH_REGRESSION = 0.05
-_SOURCE_PROVENANCE_FIELDS = ("commit_sha", "timestamp", "build_id", "job_id")
 _CORE_MEASUREMENT_FIELDS = frozenset({"latency", "throughput", "memory"})
 
 
@@ -53,6 +75,14 @@ def _write_json(path: str, payload: dict[str, Any]) -> None:
         json.dump(payload, f, indent=2)
 
 
+def _file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _source_identity(record: dict[str, Any]) -> dict[str, str]:
     if not _record_uses_v2_identity(record):
         raise ValueError("baseline seeds require a v2 record with exact comparable identity fields")
@@ -67,8 +97,17 @@ def _require_nonempty_string(record: dict[str, Any], field: str) -> str:
 
 
 def _source_provenance_identity(record: dict[str, Any]) -> tuple[str, ...] | None:
-    identity = tuple(str(record.get(field) or "") for field in _SOURCE_PROVENANCE_FIELDS)
-    return identity if any(identity) else None
+    job_id = str(record.get("job_id") or "")
+    if job_id:
+        return ("job_id", job_id)
+    build_id = str(record.get("build_id") or "")
+    if build_id:
+        return ("build_id", build_id)
+    commit_sha = str(record.get("commit_sha") or "")
+    timestamp = str(record.get("timestamp") or "")
+    if commit_sha or timestamp:
+        return ("commit_timestamp", commit_sha, timestamp)
+    return None
 
 
 def _validate_unique_sources(source_paths: list[str], records: list[dict[str, Any]]) -> None:
@@ -106,7 +145,7 @@ def _validate_source_measurements(record: dict[str, Any]) -> None:
                 raise ValueError(f"baseline seed records require a finite positive {policy.key} measurement")
             continue
 
-        value = safe_float(raw_value)
+        value = None if isinstance(raw_value, bool) else safe_float(raw_value)
         if value is None or not math.isfinite(value):
             raise ValueError(f"baseline seed records require a finite {policy.key} measurement")
         if policy.key in _CORE_MEASUREMENT_FIELDS:
@@ -120,10 +159,14 @@ def _validate_calibration_source(record: dict[str, Any]) -> None:
     _require_nonempty_string(record, "model_id")
     _source_identity(record)
     _validate_source_measurements(record)
+    if record.get("result_schema_version") != 2:
+        raise ValueError("baseline seeds require a normalized v2 source artifact")
     if record.get("comparison_status") != STATUS_CALIBRATION_NEEDED:
         raise ValueError("baseline seeds require a CALIBRATION_NEEDED source artifact")
     if record.get("success") is not True:
         raise ValueError("baseline seeds require a successful source artifact")
+    if record.get("baseline_eligible") is not False:
+        raise ValueError("baseline seeds require a baseline_eligible=false source artifact")
     if record.get("run_source") != "scheduled_main":
         raise ValueError("baseline seeds require a scheduled_main source artifact")
     if _truthy_pr_number(record.get("pr_number")):
@@ -220,33 +263,317 @@ def _validate_separate_roots(tracking_root: str, staging_root: str) -> None:
         raise ValueError("baseline seed staging and canonical tracking roots must be separate and non-nested")
 
 
-def _validate_first_seed_state(
-    tracking_root: str,
-    staging_root: str,
-    identity: dict[str, str],
+def _validate_no_existing_seed(
+    records_root: str,
+    record: dict[str, Any],
+    *,
+    source: str,
 ) -> None:
+    identity = _source_identity(record)
     if load_records_for_identity(
-        tracking_root,
+        records_root,
         identity,
         last_n=1,
         successful_only=True,
         baseline_eligible_only=True,
     ):
         raise ValueError(
-            "exact comparable identity already has a baseline-eligible record; "
+            f"{source} already has a baseline-eligible record for the exact comparable identity; "
             "the CALIBRATION_NEEDED source artifact is stale"
         )
-    if load_records_for_identity(
-        staging_root,
-        identity,
-        last_n=1,
+
+    cohort_records = load_records_for_identity(
+        records_root,
+        _recipe_cohort_filters(record),
         successful_only=True,
-        baseline_eligible_only=True,
-    ):
+    )
+    mismatches = _recipe_mismatch_records(record, cohort_records)
+    if mismatches:
+        recipes = sorted({str(item["recipe_fingerprint"]) for item in mismatches})
         raise ValueError(
-            "exact comparable identity already has a prepared baseline seed in staging; "
-            "reuse or remove it instead of preparing a replay"
+            f"{source} already has trusted records for another recipe in this workload, "
+            f"variant, and benchmark version: {', '.join(recipes)}"
         )
+
+
+def _repository_descriptor() -> dict[str, str]:
+    return {
+        "endpoint": ENDPOINT,
+        "repo_id": HF_REPO_ID,
+        "repo_type": "dataset",
+    }
+
+
+def _reservation_path(staging_root: str, identity: dict[str, str]) -> str:
+    payload = json.dumps({
+        "identity": identity,
+        "repository": _repository_descriptor(),
+    }, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return os.path.join(staging_root, ".seed-reservations", digest)
+
+
+def _reserve_staging_identity(staging_root: str, identity: dict[str, str]) -> str:
+    reservation = _reservation_path(staging_root, identity)
+    os.makedirs(os.path.dirname(reservation), exist_ok=True)
+    try:
+        os.mkdir(reservation, 0o700)
+    except FileExistsError as exc:
+        raise ValueError(
+            "staging already has a reservation for the exact comparable identity; "
+            "reuse or explicitly clean the existing preparation"
+        ) from exc
+    return reservation
+
+
+def _release_failed_reservation(reservation: str, prepared_paths: list[str]) -> None:
+    reservation = os.path.realpath(os.path.abspath(reservation))
+    prepared_dirs: set[str] = set()
+    for path in prepared_paths:
+        path = os.path.realpath(os.path.abspath(path))
+        if os.path.commonpath((reservation, path)) != reservation:
+            continue
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        prepared_dirs.add(os.path.dirname(path))
+    for name in ("manifest", "manifest.tmp"):
+        try:
+            os.unlink(os.path.join(reservation, name))
+        except FileNotFoundError:
+            pass
+    for directory in sorted(prepared_dirs, key=len, reverse=True):
+        try:
+            os.rmdir(directory)
+        except OSError:
+            pass
+    try:
+        os.rmdir(reservation)
+    except OSError:
+        pass
+
+
+def _write_preparation_manifest(
+    reservation: str,
+    staging_root: str,
+    identity: dict[str, str],
+    source_paths: list[str],
+    source_records: list[dict[str, Any]],
+    prepared_paths: list[str],
+) -> str:
+    manifest_path = os.path.join(reservation, "manifest")
+    temp_path = f"{manifest_path}.tmp"
+    source_manifest_entries = []
+    for path, expected_record in zip(source_paths, source_records, strict=True):
+        with open(path, "rb") as f:
+            blob = f.read()
+        if json.loads(blob) != expected_record:
+            raise ValueError(f"source record changed during preparation: {path}")
+        source_manifest_entries.append({
+            "path": os.path.realpath(os.path.abspath(path)),
+            "sha256": hashlib.sha256(blob).hexdigest(),
+        })
+    manifest = {
+        "manifest_schema_version": 1,
+        "repository": _repository_descriptor(),
+        "identity": identity,
+        "recipe_cohort": {
+            key: identity[key]
+            for key in ("workload_id", "variant_id", "benchmark_version")
+        },
+        "staging_root": os.path.realpath(os.path.abspath(staging_root)),
+        "source_records": source_manifest_entries,
+        "prepared_records": [{
+            "path": os.path.realpath(os.path.abspath(path)),
+            "sha256": _file_sha256(path),
+        } for path in prepared_paths],
+    }
+    _write_json(temp_path, manifest)
+    os.replace(temp_path, manifest_path)
+    return manifest_path
+
+
+def _validate_prepared_seed(record: dict[str, Any]) -> None:
+    _source_identity(record)
+    _require_nonempty_string(record, "model_id")
+    _validate_source_measurements(record)
+    if record.get("baseline_seed") is not True:
+        raise ValueError("prepared records must have baseline_seed=true")
+    if record.get("success") is not True or record.get("baseline_eligible") is not True:
+        raise ValueError("prepared records must be successful and baseline eligible")
+    if record.get("comparison_status") != STATUS_PASS:
+        raise ValueError("prepared records must have comparison_status=PASS")
+    if record.get("baseline_seed_source_status") != STATUS_CALIBRATION_NEEDED:
+        raise ValueError("prepared records must retain CALIBRATION_NEEDED source provenance")
+    if not str(record.get("baseline_seed_reason") or "").strip():
+        raise ValueError("prepared records must retain a non-empty approval rationale")
+    if (
+        record.get("baseline_seed_source_success") is not True
+        or record.get("baseline_seed_source_run_source") != "scheduled_main"
+        or record.get("baseline_seed_source_branch") != "main"
+        or record.get("baseline_seed_source_test_scope") != "full"
+        or _truthy_pr_number(record.get("baseline_seed_source_pr_number"))
+    ):
+        raise ValueError("prepared records must retain trusted scheduled-main source provenance")
+
+
+def upload_prepared_seed_manifest(manifest_path: str) -> str:
+    """Conditionally upload one reviewed manifest in a single Hub commit."""
+    manifest_path = os.path.realpath(os.path.abspath(manifest_path))
+    manifest = _load_json(manifest_path)
+    if manifest.get("manifest_schema_version") != 1:
+        raise ValueError("unsupported or missing prepared-seed manifest schema")
+    expected_repository = _repository_descriptor()
+    if manifest.get("repository") != expected_repository:
+        raise ValueError("prepared-seed manifest repository does not match the configured Hub destination")
+
+    manifest_staging_root = manifest.get("staging_root")
+    if not isinstance(manifest_staging_root, str) or not manifest_staging_root:
+        raise ValueError("prepared-seed manifest is missing its staging root")
+    staging_root = os.path.realpath(os.path.abspath(manifest_staging_root))
+    source_entries = manifest.get("source_records")
+    if not isinstance(source_entries, list) or not source_entries:
+        raise ValueError("prepared-seed manifest must retain its reviewed source records")
+    source_paths: list[str] = []
+    source_records: list[dict[str, Any]] = []
+    for entry in source_entries:
+        if not isinstance(entry, dict):
+            raise ValueError("prepared-seed manifest source entries must be objects")
+        path = os.path.realpath(os.path.abspath(str(entry.get("path") or "")))
+        with open(path, "rb") as f:
+            blob = f.read()
+        if hashlib.sha256(blob).hexdigest() != entry.get("sha256"):
+            raise ValueError(f"source record changed after review: {path}")
+        record = json.loads(blob)
+        if not isinstance(record, dict):
+            raise ValueError(f"source record must contain a JSON object: {path}")
+        _validate_calibration_source(record)
+        source_paths.append(path)
+        source_records.append(record)
+    _validate_unique_sources(source_paths, source_records)
+    source_identity = _validate_same_identity(source_records)
+    reservation = _reservation_path(staging_root, source_identity)
+    if os.path.dirname(manifest_path) != reservation:
+        raise ValueError("prepared-seed manifest is outside its identity reservation")
+
+    prepared_entries = manifest.get("prepared_records")
+    if not isinstance(prepared_entries, list) or not prepared_entries:
+        raise ValueError("prepared-seed manifest must contain at least one record")
+
+    prepared_paths: list[str] = []
+    prepared_blobs: list[bytes] = []
+    records: list[dict[str, Any]] = []
+    for entry in prepared_entries:
+        if not isinstance(entry, dict):
+            raise ValueError("prepared-seed manifest record entries must be objects")
+        path = os.path.realpath(os.path.abspath(str(entry.get("path") or "")))
+        if os.path.commonpath((reservation, path)) != reservation:
+            raise ValueError(f"prepared record is outside its identity reservation: {path}")
+        with open(path, "rb") as f:
+            blob = f.read()
+        if hashlib.sha256(blob).hexdigest() != entry.get("sha256"):
+            raise ValueError(f"prepared record changed after review: {path}")
+        record = json.loads(blob)
+        if not isinstance(record, dict):
+            raise ValueError(f"prepared record must contain a JSON object: {path}")
+        prepared_paths.append(path)
+        prepared_blobs.append(blob)
+        records.append(record)
+
+    for record in records:
+        _validate_prepared_seed(record)
+    if len(set(prepared_paths)) != len(prepared_paths):
+        raise ValueError("prepared-seed manifest repeats a prepared record path")
+    identity = _validate_same_identity(records)
+    if source_identity != identity:
+        raise ValueError("prepared records do not match their reviewed source identity")
+    if manifest.get("identity") != identity:
+        raise ValueError("prepared records no longer match the manifest identity")
+    if manifest.get("recipe_cohort") != _recipe_cohort_filters(records[0]):
+        raise ValueError("prepared records no longer match the manifest recipe cohort")
+
+    batch_size = len(records)
+    if len(source_records) != batch_size:
+        raise ValueError("prepared-seed manifest source and prepared batch sizes differ")
+    if len({str(record.get("baseline_seed_reason")) for record in records}) != 1:
+        raise ValueError("prepared records have inconsistent approval rationales")
+    raw_batch_indices = [record.get("baseline_seed_batch_index") for record in records]
+    if any(record.get("baseline_seed_batch_size") != batch_size for record in records):
+        raise ValueError("prepared records have inconsistent baseline seed batch sizes")
+    if any(isinstance(index, bool) or not isinstance(index, int) for index in raw_batch_indices):
+        raise ValueError("prepared records have invalid baseline seed batch indices")
+    batch_indices = sorted(raw_batch_indices)
+    if batch_indices != list(range(1, batch_size + 1)):
+        raise ValueError("prepared records have inconsistent baseline seed batch indices")
+    for path, record in zip(prepared_paths, records, strict=True):
+        index = record["baseline_seed_batch_index"]
+        suffix = f"{index:02d}" if batch_size > 1 else None
+        if path != _seed_record_path(reservation, record, suffix=suffix):
+            raise ValueError(f"prepared record path does not match its reserved identity: {path}")
+
+    ordered_sources = _order_sources_by_timestamp(source_paths, source_records)
+    records_by_index = sorted(records, key=lambda record: record["baseline_seed_batch_index"])
+    for index, ((source_path, source_record), record) in enumerate(
+        zip(ordered_sources, records_by_index, strict=True),
+        start=1,
+    ):
+        expected = build_baseline_seed_record(
+            source_record,
+            reason=str(record["baseline_seed_reason"]),
+            source_result=source_path,
+            operator=record.get("baseline_seed_operator"),
+            timestamp=str(record["timestamp"]),
+            batch_size=batch_size,
+            batch_index=index,
+        )
+        if record != expected:
+            raise ValueError(f"prepared record {index} no longer matches its reviewed source")
+
+    token = resolve_hf_token()
+    if not token:
+        raise RuntimeError("a Hugging Face write token is required to upload baseline seeds")
+    api = HfApi(token=token)
+    repo_info = api.repo_info(repo_id=HF_REPO_ID, repo_type="dataset", revision="main")
+    parent_commit = getattr(repo_info, "sha", None)
+    if not parent_commit:
+        raise RuntimeError("could not resolve the current performance-tracking repository revision")
+
+    operations = []
+    with tempfile.TemporaryDirectory(prefix="performance-seed-remote-") as remote_root:
+        sync_from_hf(remote_root, strict=True, revision=parent_commit)
+        _validate_no_existing_seed(remote_root, records[0], source="remote tracking history")
+
+        seen_destinations: set[str] = set()
+        for path, blob, record in zip(prepared_paths, prepared_blobs, records, strict=True):
+            destination = f"{sanitize(record['model_id'])}/{os.path.basename(path)}"
+            if destination in seen_destinations:
+                raise ValueError(f"prepared records collide at Hub path {destination}")
+            if os.path.exists(os.path.join(remote_root, destination)):
+                raise ValueError(f"Hub path already exists: {destination}")
+            seen_destinations.add(destination)
+            operations.append(CommitOperationAdd(path_in_repo=destination, path_or_fileobj=blob))
+
+    commit = api.create_commit(
+        repo_id=HF_REPO_ID,
+        repo_type="dataset",
+        revision="main",
+        parent_commit=parent_commit,
+        create_pr=False,
+        operations=operations,
+        commit_message=f"Perf: seed {records[0]['model_id']} baseline",
+    )
+
+    commit_id = getattr(commit, "oid", None) or getattr(commit, "commit_id", None)
+    commit_id = str(commit_id or commit)
+    try:
+        _write_json(os.path.join(os.path.dirname(manifest_path), "uploaded"), {
+            "commit_id": commit_id,
+            "parent_commit": parent_commit,
+        })
+    except OSError as exc:
+        print(f"Warning: seed commit {commit_id} succeeded but local upload marker failed: {exc}")
+    return commit_id
 
 
 def _order_sources_by_timestamp(
@@ -347,7 +674,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--tracking-root",
         default=TRACKING_ROOT,
-        help="Previously synchronized canonical tracking root, read-only during preparation.",
+        help=(
+            "Operator tracking-mirror path used only to enforce staging separation; "
+            "remote validation uses a fresh temporary snapshot."
+        ),
     )
     parser.add_argument(
         "--staging-root",
@@ -376,30 +706,52 @@ def main(argv: list[str] | None = None) -> int:
         _validate_calibration_source(source_record)
     _validate_unique_sources(args.source_results, source_records)
     identity = _validate_same_identity(source_records)
-    _validate_first_seed_state(args.tracking_root, args.staging_root, identity)
+    with tempfile.TemporaryDirectory(prefix="performance-seed-prepare-remote-") as remote_root:
+        sync_from_hf(remote_root, strict=True)
+        _validate_no_existing_seed(remote_root, source_records[0], source="remote tracking history")
+    _validate_no_existing_seed(args.staging_root, source_records[0], source="local staging")
     _validate_batch_consistency(source_records, args.max_intra_batch_regression)
     ordered_sources = _order_sources_by_timestamp(args.source_results, source_records)
     print("Seeding exact comparable identity:")
     for key, value in identity.items():
         print(f"  {key}: {value}")
 
-    prepared_seeds = []
+    seed_records = []
     for index, (source_path, source_record) in enumerate(ordered_sources, start=1):
         seed_record = build_baseline_seed_record(
             source_record,
             reason=args.intent_rationale,
-            source_result=source_path,
+            source_result=os.path.realpath(os.path.abspath(source_path)),
             operator=args.operator,
             batch_size=len(source_records),
             batch_index=index,
         )
         suffix = f"{index:02d}" if len(source_records) > 1 else None
-        seed_path = _seed_record_path(args.staging_root, seed_record, suffix=suffix)
-        prepared_seeds.append((seed_path, seed_record, suffix))
+        seed_records.append((seed_record, suffix))
 
-    for seed_path, seed_record, suffix in prepared_seeds:
-        write_seed_record(args.staging_root, seed_record, suffix=suffix)
-        print(f"Prepared baseline seed: {seed_path}")
+    reservation = _reserve_staging_identity(args.staging_root, identity)
+    prepared_seeds = [
+        (_seed_record_path(reservation, seed_record, suffix=suffix), seed_record, suffix)
+        for seed_record, suffix in seed_records
+    ]
+    prepared_paths = [seed_path for seed_path, _seed_record, _suffix in prepared_seeds]
+    try:
+        for seed_path, seed_record, suffix in prepared_seeds:
+            write_seed_record(reservation, seed_record, suffix=suffix)
+            print(f"Prepared baseline seed: {seed_path}")
+        manifest_path = _write_preparation_manifest(
+            reservation,
+            args.staging_root,
+            identity,
+            args.source_results,
+            source_records,
+            prepared_paths,
+        )
+    except Exception:
+        _release_failed_reservation(reservation, prepared_paths)
+        raise
+    print(f"Reserved exact identity in staging: {reservation}")
+    print(f"Prepared upload manifest: {manifest_path}")
 
     return 0
 

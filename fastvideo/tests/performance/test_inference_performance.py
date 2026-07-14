@@ -52,9 +52,9 @@ V2_REQUIRED_IDENTITY_FIELDS = (
 # declaring it now fails validation loudly instead of being silently
 # overwritten by the generated one.
 V2_OPTIONAL_METADATA_FIELDS = (
-    "metric_threshold_policy",
     "quality_metadata",
 )
+COMMON_OBJECT_FIELDS = ("regression_thresholds",)
 RESULT_SCHEMA_VERSION = 2
 VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
 OPTIONAL_RESULT_METADATA_FIELDS = ("quality_metadata", "variant_metadata")
@@ -95,6 +95,10 @@ def _validate_benchmark_config(cfg, path="<memory>"):
     missing_common = [field for field in ("benchmark_id",) if field not in cfg]
     if missing_common:
         raise ValueError(f"{path}: missing required benchmark config fields: {', '.join(missing_common)}")
+
+    for field in COMMON_OBJECT_FIELDS:
+        if field in cfg and not isinstance(cfg[field], Mapping):
+            raise ValueError(f"{path}: benchmark config field {field!r} must be an object")
 
     schema_version = cfg.get("config_schema_version")
     if schema_version is None:
@@ -259,6 +263,14 @@ def _resolve_num_gpus(
         if value is not None and (
                 isinstance(value, bool) or not isinstance(value, int) or value < 1):
             raise ValueError(f"{benchmark_id}: {field} must be a positive integer")
+    parallel_sizes = []
+    for field in ("tp_size", "sp_size"):
+        value = init_kwargs.get(field)
+        if value is None or value == -1:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f"{benchmark_id}: init_kwargs.{field} must be -1 or a positive integer")
+        parallel_sizes.append(value)
     if (
         init_num_gpus is not None
         and required_gpus is not None
@@ -267,7 +279,13 @@ def _resolve_num_gpus(
         raise ValueError(
             f"{benchmark_id}: init_kwargs.num_gpus ({init_num_gpus}) must match "
             f"run_config.required_gpus ({required_gpus})")
-    return init_num_gpus or required_gpus or 1
+    declared_num_gpus = init_num_gpus or required_gpus
+    parallel_num_gpus = max(parallel_sizes, default=1)
+    if declared_num_gpus is not None and declared_num_gpus < parallel_num_gpus:
+        raise ValueError(
+            f"{benchmark_id}: declared GPU count ({declared_num_gpus}) must be at least "
+            f"max(tp_size, sp_size) ({parallel_num_gpus})")
+    return declared_num_gpus or parallel_num_gpus
 
 
 def _write_results(results):
