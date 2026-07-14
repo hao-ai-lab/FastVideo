@@ -136,7 +136,11 @@ class FlashInferSageAttention3Impl(AttentionImpl):
 
         if _can_use_flashinfer(q, k, v, self.dropout):
             seq_len = q.shape[2]
-            packed = nvfp4_attention_sm120_quantize_qkv(q.contiguous(), k.contiguous(), v.contiguous())
+            # FlashInfer computes qk_correction with an fp32 matmul and its
+            # forward requires that tensor to remain fp32. Ambient pipeline
+            # autocast would otherwise downcast the matmul result to bf16.
+            with torch.autocast(device_type=q.device.type, enabled=False):
+                packed = nvfp4_attention_sm120_quantize_qkv(q.contiguous(), k.contiguous(), v.contiguous())
             output, _ = nvfp4_attention_sm120_fwd(*packed,
                                                   sm_scale=self.softmax_scale,
                                                   causal=self.causal,

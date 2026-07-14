@@ -14,6 +14,7 @@ import math
 import pytest
 import torch
 
+from fastvideo.attention.backends import flashinfer_sageattn3 as flashinfer_backend
 from fastvideo.attention.backends.flashinfer_sageattn3 import (FlashInferSageAttention3Backend,
                                                                FlashInferSageAttention3Impl)
 from fastvideo.attention.selector import backend_name_to_enum
@@ -89,3 +90,33 @@ def test_fallback_forward_gqa():
     ref = _manual_attention(q.transpose(1, 2), k_rep.transpose(1, 2), v_rep.transpose(1, 2), scale,
                             causal=False).transpose(1, 2)
     torch.testing.assert_close(out, ref, rtol=1e-4, atol=1e-4)
+
+
+def test_flashinfer_quantize_disables_ambient_autocast(monkeypatch):
+    """Keep FlashInfer's qk_correction fp32 inside the bf16 pipeline context."""
+    correction_dtype = None
+
+    def fake_quantize(q, k, v):
+        nonlocal correction_dtype
+        correction = torch.matmul(q.float(), k.float().transpose(-2, -1))
+        correction_dtype = correction.dtype
+        return q, k, v, q, k, v, correction
+
+    def fake_forward(q, _k, _v, _qs, _ks, _vs, correction, **_kwargs):
+        assert correction.dtype == torch.float32
+        return q, None
+
+    monkeypatch.setattr(flashinfer_backend, "_can_use_flashinfer", lambda *_args: True)
+    monkeypatch.setattr(flashinfer_backend, "nvfp4_attention_sm120_quantize_qkv", fake_quantize)
+    monkeypatch.setattr(flashinfer_backend, "nvfp4_attention_sm120_fwd", fake_forward)
+
+    impl = FlashInferSageAttention3Impl(num_heads=2,
+                                        head_size=64,
+                                        causal=False,
+                                        softmax_scale=1 / math.sqrt(64))
+    q = torch.randn(1, 8, 2, 64)
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        out = impl.forward(q, q, q, attn_metadata=None)
+
+    assert correction_dtype == torch.float32
+    assert out.shape == q.shape
