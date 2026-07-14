@@ -64,6 +64,7 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
 # Text-to-image DiT models (2D image generation)
 _TEXT_TO_IMAGE_DIT_MODELS = {
     "GlmImageTransformer2DModel": ("dits", "glm_image", "GlmImageTransformer2DModel"),
+    "ZImageTransformer2DModel": ("dits", "zimage", "ZImageTransformer2DModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
