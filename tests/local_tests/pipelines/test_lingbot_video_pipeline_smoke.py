@@ -75,7 +75,7 @@ def test_lingbot_video_prompt_crop_contract() -> None:
     assert "<|im_start|>user\nfox<|im_end|>" in preprocess_lingbot_video_prompt("fox")
     hidden = torch.arange(146 * 2, dtype=torch.float32).reshape(1, 146, 2)
     mask = torch.cat((torch.ones(1, 144), torch.zeros(1, 2)), dim=1)
-    embeds, cropped_mask = postprocess_lingbot_video_text(BaseEncoderOutput(hidden_states=(hidden,)), mask)
+    embeds, cropped_mask = postprocess_lingbot_video_text(BaseEncoderOutput(hidden_states=(hidden, )), mask)
     assert embeds.shape == (1, 4, 2)
     assert cropped_mask.shape == (1, 4)
     assert torch.equal(embeds, hidden[:, 140:144])
@@ -108,9 +108,7 @@ def test_lingbot_video_uses_released_vae_denormalization_arithmetic() -> None:
     from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
     from fastvideo.pipelines.stages.decoding import DecodingStage
 
-    vae = SimpleNamespace(
-        config=SimpleNamespace(latents_mean=(-0.7571,), latents_std=(2.8184,)),
-    )
+    vae = SimpleNamespace(config=SimpleNamespace(latents_mean=(-0.7571, ), latents_std=(2.8184, )), )
     stage = DecodingStage(vae)
     latents = torch.tensor([[[[[-0.7278813123703003]]]]], dtype=torch.float32)
     mean = torch.tensor(vae.config.latents_mean).view(1, -1, 1, 1, 1)

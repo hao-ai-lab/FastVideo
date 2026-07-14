@@ -77,16 +77,10 @@ class LingBotVideoQwen3VLAttention(Qwen3Attention):
             ).transpose(1, 2)
         else:
             groups = self.num_heads // self.num_kv_heads
-            key = (
-                key[:, :, :, None, :]
-                .expand(-1, -1, -1, groups, -1)
-                .reshape(batch_size, sequence_length, self.num_heads, self.head_dim)
-            )
-            value = (
-                value[:, :, :, None, :]
-                .expand(-1, -1, -1, groups, -1)
-                .reshape(batch_size, sequence_length, self.num_heads, self.head_dim)
-            )
+            key = (key[:, :, :, None, :].expand(-1, -1, -1, groups, -1).reshape(batch_size, sequence_length,
+                                                                                self.num_heads, self.head_dim))
+            value = (value[:, :, :, None, :].expand(-1, -1, -1, groups, -1).reshape(batch_size, sequence_length,
+                                                                                    self.num_heads, self.head_dim))
             causal_mask = torch.ones(sequence_length, sequence_length, device=query.device, dtype=torch.bool).tril()
             key_mask = attention_mask.to(device=query.device, dtype=torch.bool)
             sdpa_mask = causal_mask[None, None, :, :] & key_mask[:, None, None, :]
@@ -176,8 +170,7 @@ class LingBotVideoQwen3VLTextModel(Qwen3ForCausalLM):
         )
         self.layers = nn.ModuleList(
             LingBotVideoQwen3VLDecoderLayer(config, prefix=f"{config.prefix}.layers.{index}")
-            for index in range(config.num_hidden_layers)
-        )
+            for index in range(config.num_hidden_layers))
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
@@ -191,9 +184,8 @@ class LingBotVideoQwen3VLTextModel(Qwen3ForCausalLM):
     ) -> BaseEncoderOutput:
         """Run explicit Qwen3-VL layers and return the requested hidden-state tuple."""
         del kwargs
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
+        output_hidden_states = (output_hidden_states
+                                if output_hidden_states is not None else self.config.output_hidden_states)
         if inputs_embeds is None:
             if input_ids is None:
                 raise ValueError("input_ids or inputs_embeds is required")
@@ -207,11 +199,11 @@ class LingBotVideoQwen3VLTextModel(Qwen3ForCausalLM):
         all_hidden_states: tuple[torch.Tensor, ...] | None = () if output_hidden_states else None
         for layer in self.layers:
             if all_hidden_states is not None:
-                all_hidden_states += (hidden_states,)
+                all_hidden_states += (hidden_states, )
             hidden_states = layer(position_ids, hidden_states, attention_mask)
         hidden_states = self.norm(hidden_states)
         if all_hidden_states is not None:
-            all_hidden_states += (hidden_states,)
+            all_hidden_states += (hidden_states, )
         return BaseEncoderOutput(
             last_hidden_state=hidden_states,
             hidden_states=all_hidden_states,
@@ -220,11 +212,9 @@ class LingBotVideoQwen3VLTextModel(Qwen3ForCausalLM):
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         """Accept either official compound keys or converted native keys."""
         prefix = "model.language_model."
-        language_weights = (
-            (name[len(prefix) :] if name.startswith(prefix) else name, tensor)
-            for name, tensor in weights
-            if name.startswith(prefix) or not name.startswith(("model.", "lm_head."))
-        )
+        language_weights = ((name[len(prefix):] if name.startswith(prefix) else name, tensor)
+                            for name, tensor in weights
+                            if name.startswith(prefix) or not name.startswith(("model.", "lm_head.")))
         return super().load_weights(language_weights)
 
 

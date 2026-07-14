@@ -11,9 +11,11 @@ from fastvideo.configs.models.dits.lingbot_video import LingBotVideoConfig
 from fastvideo.models.dits.lingbot_video import (
     LingBotVideoBlock,
     LingBotVideoMLP,
+    LingBotVideoRotaryEmbedding,
     LingBotVideoRouter,
     LingBotVideoSparseMoeBlock,
     LingBotVideoTransformer3DModel,
+    _make_joint_position_ids,
 )
 from fastvideo.models.loader.fsdp_load import set_default_dtype
 
@@ -69,12 +71,42 @@ def test_sparse_restore_uses_fp32_weighted_sum() -> None:
     sorted_positions = torch.tensor([0, 2, 1, 3])
     sorted_scores = torch.tensor([0.25, 0.5, 0.75, 0.5])
 
-    restored = LingBotVideoSparseMoeBlock._restore_tokens(
-        expert_output, sorted_positions, sorted_scores, num_tokens=2, top_k=2
-    )
+    restored = LingBotVideoSparseMoeBlock._restore_tokens(expert_output,
+                                                          sorted_positions,
+                                                          sorted_scores,
+                                                          num_tokens=2,
+                                                          top_k=2)
 
     assert restored.dtype == torch.bfloat16
     assert_close(restored.float(), torch.tensor([[2.5, 3.5], [20.0, 30.0]]))
+
+
+def test_grouped_expert_padding_preserves_segments() -> None:
+    """Build aligned expert segments without per-expert device scalar reads."""
+    tokens = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+    counts = torch.tensor([2, 0, 1], dtype=torch.int64)
+
+    input_shape, padded, indices, aligned_counts = LingBotVideoSparseMoeBlock._pad_grouped_tokens(tokens,
+                                                                                                  counts,
+                                                                                                  align=2)
+
+    assert input_shape == torch.Size((4, 4))
+    assert torch.equal(aligned_counts, torch.tensor([2, 2, 2], dtype=torch.int32))
+    assert torch.equal(indices[:6], torch.tensor([0, 1, 3, 3, 2, 3]))
+    assert_close(padded[:6], torch.vstack((tokens[:2], torch.zeros(2, 4), tokens[2:], torch.zeros(1, 4))))
+
+
+def test_rotary_precomputed_maxima_matches_tensor_reduction() -> None:
+    """Use known grid maxima without changing the gathered rotary frequencies."""
+    positions = _make_joint_position_ids(3, 2, 2, 2, torch.device("cpu"))
+    dynamic = LingBotVideoRotaryEmbedding((2, 2, 2), (2, 1, 1), 256.0)
+    precomputed = LingBotVideoRotaryEmbedding((2, 2, 2), (2, 1, 1), 256.0)
+
+    expected = dynamic(positions)
+    actual = precomputed(positions, maxima=(5, 1, 1))
+
+    assert torch.equal(actual, expected)
+    assert precomputed.axes_lens == dynamic.axes_lens
 
 
 def test_sparse_moe_cpu_fallback_matches_direct_expert_sum() -> None:
@@ -185,7 +217,7 @@ def test_released_moe_meta_state_names_shapes_and_dtype_policy() -> None:
     state = model.state_dict()
 
     assert state["blocks.0.ffn.router.weight"].shape == (128, 2048)
-    assert state["blocks.0.ffn.router.e_score_correction_bias"].shape == (128,)
+    assert state["blocks.0.ffn.router.e_score_correction_bias"].shape == (128, )
     assert state["blocks.0.ffn.experts.w1"].shape == (128, 768, 2048)
     assert state["blocks.0.ffn.experts.w2"].shape == (128, 2048, 768)
     assert state["blocks.0.ffn.experts.w3"].shape == (128, 768, 2048)

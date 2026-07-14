@@ -14,11 +14,9 @@ import torch
 from torch.testing import assert_close
 
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler as FastVideoFlowUniPCMultistepScheduler,
-)
+    FlowUniPCMultistepScheduler as FastVideoFlowUniPCMultistepScheduler, )
 from lingbot_video.scheduling_flow_unipc import (
-    FlowUniPCMultistepScheduler as OfficialFlowUniPCMultistepScheduler,
-)
+    FlowUniPCMultistepScheduler as OfficialFlowUniPCMultistepScheduler, )
 from tests.local_tests.lingbot_video.hf_assets import OFFICIAL_DENSE, download_components
 
 PARITY_SCOPE = "implementation_subcomponent"
@@ -60,10 +58,7 @@ def test_lingbot_video_scheduler_multistep_outputs_match() -> None:
     for index in range(4):
         model_generator = torch.Generator(device="cpu").manual_seed(100 + index)
         model_output = torch.randn(official_sample.shape, generator=model_generator)
-        official_sample = official.step(
-            model_output, official.timesteps[index], official_sample, return_dict=False
-        )[0]
-        fastvideo_sample = fastvideo.step(
-            model_output, fastvideo.timesteps[index], fastvideo_sample, return_dict=False
-        )[0]
+        official_sample = official.step(model_output, official.timesteps[index], official_sample, return_dict=False)[0]
+        fastvideo_sample = fastvideo.step(model_output, fastvideo.timesteps[index], fastvideo_sample,
+                                          return_dict=False)[0]
         assert_close(fastvideo_sample, official_sample, atol=0, rtol=0)

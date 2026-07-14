@@ -25,7 +25,6 @@ from tests.local_tests.lingbot_video.hf_assets import (
     download_components,
 )
 
-
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29519")
 os.environ.setdefault("DISABLE_SP", "1")
@@ -88,7 +87,10 @@ def _load_fastvideo_model(transformer_dir: Path, device: torch.device, dtype: to
     config = FastVideoConfig()
     model = maybe_load_fsdp_model(
         model_cls=FastVideoModel,
-        init_params={"config": config, "hf_config": hf_config},
+        init_params={
+            "config": config,
+            "hf_config": hf_config
+        },
         weight_dir_list=[str(transformer_dir / "diffusion_pytorch_model.safetensors")],
         device=device,
         hsdp_replicate_dim=1,
@@ -163,6 +165,7 @@ def _capture_intermediates(model: torch.nn.Module) -> tuple[dict[str, torch.Tens
     )
 
     def save(name: str):
+
         def hook(_module, _inputs, output):
             tensor = output[0] if isinstance(output, tuple) else output
             if torch.is_tensor(tensor):
@@ -191,8 +194,7 @@ def _report_first_intermediate_drift(official: dict[str, torch.Tensor], fastvide
         drift = (actual - expected).abs()
         if drift.max().item() > 1e-3:
             print(
-                f"first_intermediate_drift={name} max_abs={drift.max().item():.8f} mean_abs={drift.mean().item():.8f}"
-            )
+                f"first_intermediate_drift={name} max_abs={drift.max().item():.8f} mean_abs={drift.mean().item():.8f}")
             return
     print("first_intermediate_drift=not_found")
 
@@ -222,11 +224,9 @@ def test_lingbot_video_dense_dit_outputs_match() -> None:
     difference = (official_output - fastvideo_output).abs()
     official_abs_mean = official_output.abs().mean()
     abs_mean_drift = (fastvideo_output.abs().mean() - official_abs_mean).abs()
-    print(
-        f"official_abs_mean={official_abs_mean.item():.6f} "
-        f"fastvideo_abs_mean={fastvideo_output.abs().mean().item():.6f} "
-        f"diff_max={difference.max().item():.6f} diff_mean={difference.mean().item():.6f}"
-    )
+    print(f"official_abs_mean={official_abs_mean.item():.6f} "
+          f"fastvideo_abs_mean={fastvideo_output.abs().mean().item():.6f} "
+          f"diff_max={difference.max().item():.6f} diff_mean={difference.mean().item():.6f}")
     _report_first_intermediate_drift(official_intermediates, fastvideo_intermediates)
 
     assert abs_mean_drift <= official_abs_mean * 0.05

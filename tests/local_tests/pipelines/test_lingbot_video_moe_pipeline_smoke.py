@@ -14,7 +14,7 @@ from tests.local_tests.lingbot_video.hf_assets import FASTVIDEO_MOE, materialize
 
 
 def test_lingbot_video_moe_base_pipeline_smoke(tmp_path: Path) -> None:
-    """Load one 30B MoE DiT and run one sequential-CFG latent step on an H200."""
+    """Run two batched-CFG steps over two temporal latent frames with the 30B MoE."""
     if os.environ.get("LINGBOT_VIDEO_RUN_MOE_PIPELINE_TESTS") != "1":
         pytest.skip("Set LINGBOT_VIDEO_RUN_MOE_PIPELINE_TESTS=1 on a scheduled H200.")
     if not torch.cuda.is_available():
@@ -51,15 +51,15 @@ def test_lingbot_video_moe_base_pipeline_smoke(tmp_path: Path) -> None:
             return_frames=True,
             height=32,
             width=32,
-            num_frames=1,
-            num_inference_steps=1,
+            num_frames=5,
+            num_inference_steps=2,
             guidance_scale=3.0,
-            batch_cfg=False,
+            batch_cfg=True,
             seed=42,
         )
     finally:
         generator.shutdown()
     samples = cast(dict[str, Any], result)["samples"]
     assert torch.is_tensor(samples)
-    assert tuple(samples.shape) == (1, 16, 1, 4, 4)
+    assert tuple(samples.shape) == (1, 16, 2, 4, 4)
     assert torch.isfinite(samples).all()

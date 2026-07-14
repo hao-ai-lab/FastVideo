@@ -22,7 +22,6 @@ from fastvideo.distributed import (
 )
 from fastvideo.models.dits.lingbot_video import LingBotVideoTransformer3DModel
 
-
 SP_WORLD_SIZE = 2
 SEED = 20260711
 
@@ -162,11 +161,9 @@ def _run_torchrun(script_path: Path, mode: str, nproc_per_node: int, output_path
     environment["FASTVIDEO_ATTENTION_BACKEND"] = "TORCH_SDPA"
     process = subprocess.run(command, capture_output=True, text=True, env=environment)
     if process.returncode != 0:
-        raise RuntimeError(
-            f"{mode} worker failed with code {process.returncode}\n"
-            f"STDOUT:\n{process.stdout}\n"
-            f"STDERR:\n{process.stderr}"
-        )
+        raise RuntimeError(f"{mode} worker failed with code {process.returncode}\n"
+                           f"STDOUT:\n{process.stdout}\n"
+                           f"STDERR:\n{process.stderr}")
 
 
 def test_sp_forward_matches_single_rank(tmp_path: Path) -> None:

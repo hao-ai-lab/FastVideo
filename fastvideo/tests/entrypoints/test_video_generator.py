@@ -82,6 +82,7 @@ def _patch_fastvideo_args_from_kwargs(monkeypatch):
 
 
 def _patch_sampling_param_from_pretrained(monkeypatch):
+
     def fake_from_pretrained(cls, model_path):
         return cls()
 
@@ -531,8 +532,7 @@ def test_generate_uses_typed_request_path(monkeypatch):
         GenerationRequest(
             prompt="hello world",
             sampling=SamplingConfig(num_frames=81, height=480, width=832),
-        )
-    )
+        ))
 
     assert isinstance(result, GenerationResult)
     assert captured["prompt"] == "hello world"
@@ -552,7 +552,11 @@ def test_generate_rejects_stage_override_outside_registered_stage(monkeypatch) -
     with pytest.raises(ConfigValidationError, match="stage_overrides.denoise.t_thresh"):
         generator.generate({
             "prompt": "hello world",
-            "stage_overrides": {"denoise": {"t_thresh": 0.7}},
+            "stage_overrides": {
+                "denoise": {
+                    "t_thresh": 0.7
+                }
+            },
         })
 
 
@@ -580,8 +584,7 @@ def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
             prompt="hello world",
             negative_prompt=None,
             sampling=SamplingConfig(num_frames=125, height=720, width=1280),
-        )
-    )
+        ))
 
     assert captured["sampling_param"].negative_prompt is None
     assert captured["sampling_param"].num_frames == 125
@@ -589,9 +592,7 @@ def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
     assert captured["sampling_param"].width == 1280
 
 
-def test_generate_mapping_request_preserves_model_defaults_for_omitted_fields(
-    monkeypatch,
-):
+def test_generate_mapping_request_preserves_model_defaults_for_omitted_fields(monkeypatch, ):
     generator = _new_runtime_video_generator()
     captured = {}
 
@@ -612,11 +613,9 @@ def test_generate_mapping_request_preserves_model_defaults_for_omitted_fields(
     monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
     monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
 
-    generator.generate(
-        {
-            "prompt": "hello world",
-        }
-    )
+    generator.generate({
+        "prompt": "hello world",
+    })
 
     assert captured["sampling_param"].negative_prompt == "model default"
     assert captured["sampling_param"].num_frames == 61
@@ -808,16 +807,16 @@ def test_generate_batch_prompt_file_returns_typed_results(tmp_path, monkeypatch)
 
     monkeypatch.setattr(generator, "_generate_single_video", fake_generate_single_video)
 
-    results = generator.generate(
-        {
-            "inputs": {"prompt_path": str(prompt_file)},
-            "output": {
-                "output_path": str(output_dir),
-                "save_video": False,
-                "return_frames": False,
-            },
-        }
-    )
+    results = generator.generate({
+        "inputs": {
+            "prompt_path": str(prompt_file)
+        },
+        "output": {
+            "output_path": str(output_dir),
+            "save_video": False,
+            "return_frames": False,
+        },
+    })
 
     assert isinstance(results, list)
     assert [result.prompt for result in results] == ["first prompt", "second prompt"]
@@ -843,8 +842,7 @@ def test_generate_batched_request_fans_out_media_inputs(monkeypatch):
                 image_path=["first.png", "second.png"],
                 video_path=["first.mp4", "second.mp4"],
             ),
-        )
-    )
+        ))
 
     assert [result.prompt for result in results] == ["first prompt", "second prompt"]
     assert captured == [
@@ -862,5 +860,4 @@ def test_generate_batched_request_rejects_mismatched_media_inputs(monkeypatch):
             GenerationRequest(
                 prompt=["first prompt", "second prompt"],
                 inputs=InputConfig(image_path=["first.png"]),
-            )
-        )
+            ))

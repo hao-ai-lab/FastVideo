@@ -186,7 +186,7 @@ original-versus-FastVideo numerical parity tests.
 | I008 | benchmark | text      | high     | Temporary Qwen replacement retained 300 unreachable parameters totaling 7,424,306,688 bytes. | Slurm `1859109`: native steady allocation was 18,747,731,456 bytes, 6,451,255,808 above official. | encoder    | resolved | Construct final layers directly; Slurm `1859117` native steady allocation is 11,319,211,520 bytes, 977,264,128 below official. |
 | I009 | registry  | discovery | low      | One shared model-index identity made converted local MoE discovery ambiguous.                | Pre-fix jobs `1859121`/`1859122` logged both registry IDs.                                        | registry   | resolved | Emit distinct Dense/MoE `_class_name` identities and map both to the shared native runtime.                                    |
 | I010 | refiner   | workflow  | low      | Official CLI round-trips base pixels through MP4 before refinement.                          | `lingbot_video/runner.py` saves, reloads, then VAE-encodes.                                       | pipeline   | accepted | Native composition refines the decoded tensor in memory; document that pixels need not match.                                  |
-| I011 | final     | visual    | low      | Canonical MoE/refiner output has pronounced blurred pillarbox-like side regions.             | Slurm `1859167` contact sheet; bytes match Slurm `1859144`.                                       | model      | accepted | Record the composition caveat; geometry, decode, stability, and component correctness pass.                                    |
+| I011 | final     | visual    | low      | Canonical MoE/refiner output has pronounced blurred pillarbox-like side regions.             | Slurm `1859167` contact sheet; bytes match Slurm `1859144`.                                       | model      | open     | Attach paired official/native outputs and add a quality regression or obtain an approved deferral.                              |
 
 > FastVideo disables PyTorch’s cuDNN attention backend during CUDA-platform initialization, while the original implementation may leave it enabled. The two implementations therefore used different bfloat16 attention kernels during the initial pipeline comparison,
 > creating small rounding differences. The parity test now applies the same backend settings to both implementations and restores the previous process settings afterward.
@@ -247,10 +247,11 @@ NOTE: Component-level numerical parity was achieved. Full MoE/refiner end-to-end
 - Nsight Systems artifacts are under `validation/lingbot-video/profiles/job-1859106`; launch and synchronization overhead dominate CUDA API time. Its pre-fix steady allocation is superseded by Slurm `1859117`.
 - MoE conversion is published at `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers`; official base and refiner shards map to native `transformer/` and `transformer_2/` with exact 977-key surfaces, and its model index uses `_class_name: LingBotVideoMoePipeline`.
 - Base and refiner 30.08B DiTs are exact across every block and final output in Slurm `1859114` and `1859145`. Production base-only and FSDP/SP=8 refiner smokes pass in Slurm `1859121` and `1859122`.
-- Canonical Slurm `1859167` completed a 1920x1088, 121-frame, 24-FPS generation in 341.71 FastVideo seconds with a 63,450.65 MB rank-zero worker lifetime peak. Its bytes match superseded Slurm `1859144`; visual review records blurred pillarbox-like side regions as an accepted composition caveat.
+- Canonical Slurm `1859167` completed a 1920x1088, 121-frame, 24-FPS generation in 341.71 FastVideo seconds with a 63,450.65 MB rank-zero worker lifetime peak. Its bytes match superseded Slurm `1859144`; paired official/native quality evidence is still required for the blurred side regions.
 - The final targeted CPU/API regression passed 127 tests with 3 expected GPU-gated skips; targeted Ruff and tracked/untracked whitespace validation pass.
 
 ## Remaining T2V Gates
 
-- None.
+- Attach reviewer-visible official and FastVideo comparison videos.
+- Add a paired MoE/refiner quality regression or record an explicitly approved deferral.
 - T2I/TI2V and Qwen3-VL vision conditioning remain outside the completed T2V scope.

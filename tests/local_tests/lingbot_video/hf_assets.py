@@ -40,13 +40,11 @@ def download_patterns(model: HubModel, *patterns: str) -> Path:
     """Download selected files from one pinned snapshot and return its root."""
     if not patterns:
         raise ValueError("at least one Hugging Face allow-pattern is required")
-    return Path(
-        snapshot_download(
-            repo_id=model.repo_id,
-            revision=model.revision,
-            allow_patterns=list(patterns),
-        )
-    )
+    return Path(snapshot_download(
+        repo_id=model.repo_id,
+        revision=model.revision,
+        allow_patterns=list(patterns),
+    ))
 
 
 def download_components(model: HubModel, *components: str) -> Path:
@@ -70,12 +68,7 @@ def materialize_component_view(
     filtered_index = {
         key: value
         for key, value in model_index.items()
-        if not (
-            isinstance(value, list)
-            and value
-            and value[0] is not None
-            and key not in selected
-        )
+        if not (isinstance(value, list) and value and value[0] is not None and key not in selected)
     }
     destination.mkdir(parents=True)
     (destination / "model_index.json").write_text(

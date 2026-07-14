@@ -79,9 +79,7 @@ def test_lingbot_video_refiner_sigmas_match_released_schedule() -> None:
     np.testing.assert_array_equal(actual, expected)
 
 
-def test_lingbot_video_refiner_preparation_resizes_encodes_and_noises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_lingbot_video_refiner_preparation_resizes_encodes_and_noises(monkeypatch: pytest.MonkeyPatch, ) -> None:
     """Exercise pixel resize, VAE normalization, seeded noise, and scheduler setup."""
     from fastvideo.pipelines.basic.lingbot_video import stages
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -117,7 +115,7 @@ def test_lingbot_video_refiner_preparation_resizes_encodes_and_noises(
     expected_noise = torch.randn(result.raw_latent_shape, generator=torch.Generator().manual_seed(42))
     torch.testing.assert_close(result.latents, expected_noise * 0.85)
     assert scheduler.shift == 1.0
-    assert scheduler.sigmas is not None and scheduler.sigmas.shape == (8,)
+    assert scheduler.sigmas is not None and scheduler.sigmas.shape == (8, )
     assert result.extra["lingbot_video_base_shape"] == (1, 3, 5, 16, 32)
     assert vae.last_device == torch.device("cpu")
 
@@ -153,10 +151,63 @@ def test_lingbot_video_refiner_uses_zero_cloned_null_condition() -> None:
     torch.testing.assert_close(base_mask, prompt_mask)
 
 
-def test_lingbot_video_pipeline_loads_refiner_and_vae_encoder(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Require transformer_2 and the VAE encoder only for a declared refiner layout."""
+def test_lingbot_video_sequential_cfg_prepares_negative_once(monkeypatch: pytest.MonkeyPatch, ) -> None:
+    """Reuse the invariant negative condition across all denoising steps."""
+    from fastvideo.pipelines.basic.lingbot_video import stages
+    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+
+    class _ZeroTransformer(torch.nn.Module):
+        """Return a zero prediction while exposing one parameter dtype."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.zeros(()))
+
+        def forward(self, hidden_states, *_args, **_kwargs):
+            """Match the DiT tuple return contract."""
+            return (torch.zeros_like(hidden_states), )
+
+    class _IdentityScheduler:
+        """Keep the latent unchanged across the focused CFG test."""
+
+        def step(self, _prediction, _timestep, latents, **_kwargs):
+            """Match the scheduler tuple return contract."""
+            return (latents, )
+
+    monkeypatch.setattr(stages, "get_local_torch_device", lambda: torch.device("cpu"))
+    stage = stages.LingBotVideoDenoisingStage(_ZeroTransformer(), _IdentityScheduler())
+    original = stage._negative_condition
+    calls = 0
+
+    def counted_negative(*args, **kwargs):
+        """Count condition preparation while preserving its output."""
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(stage, "_negative_condition", counted_negative)
+    batch = ForwardBatch(
+        data_type="video",
+        latents=torch.zeros(1, 1, 1, 1, 1),
+        timesteps=torch.tensor([1000.0, 500.0]),
+        prompt_embeds=[torch.ones(1, 2, 3)],
+        prompt_attention_mask=[torch.ones(1, 2, dtype=torch.long)],
+        negative_prompt_embeds=[torch.zeros(1, 2, 3)],
+        negative_attention_mask=[torch.ones(1, 2, dtype=torch.long)],
+        guidance_scale=3.0,
+        batch_cfg=False,
+    )
+
+    stage.forward(batch, cast(Any, SimpleNamespace()))
+
+    assert calls == 1
+
+
+def test_lingbot_video_pipeline_loads_refiner_and_vae_encoder(monkeypatch: pytest.MonkeyPatch, ) -> None:
+    """Honor typed refiner opt-out while loading the optional second transformer."""
+    from fastvideo import fastvideo_args as fva
+    from fastvideo.api.compat import generator_config_to_fastvideo_args
+    from fastvideo.api.schema import GeneratorConfig
     from fastvideo.pipelines import ComposedPipelineBase
     from fastvideo.pipelines.basic.lingbot_video.lingbot_video_pipeline import LingBotVideoPipeline
 
@@ -184,13 +235,12 @@ def test_lingbot_video_pipeline_loads_refiner_and_vae_encoder(
     base_pipe.model_path = "/model"
     monkeypatch.setattr(base_pipe, "_load_config", lambda _path: {"transformer_2": ["diffusers", "model"]})
     base_vae_config = SimpleNamespace(load_encoder=False)
-    base_args = cast(
-        Any,
-        SimpleNamespace(
-            refine_enabled=False,
-            pipeline_config=SimpleNamespace(vae_config=base_vae_config),
-        ),
-    )
+    monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", lambda **kwargs: SimpleNamespace(**kwargs))
+    config = GeneratorConfig(model_path="/model")
+    config.pipeline.preset_overrides = {"refine": {"enabled": False}}
+    base_args = generator_config_to_fastvideo_args(config)
+    base_args.pipeline_config = SimpleNamespace(vae_config=base_vae_config)
     base_modules = base_pipe.load_modules(base_args)
+    assert base_args.refine_enabled is False
     assert "transformer_2" not in base_modules
     assert base_vae_config.load_encoder is False

@@ -174,8 +174,7 @@ class DecodingStage(PipelineStage):
 
         # The released LingBot decoder enters Wan VAE in channels-last-3d
         # layout; matching that boundary avoids selecting a different Conv3d path.
-        if (type(fastvideo_args.pipeline_config).__name__.startswith("LingBotVideo")
-                and latents.ndim == 5):
+        if (type(fastvideo_args.pipeline_config).__name__.startswith("LingBotVideo") and latents.ndim == 5):
             latents = latents.contiguous(memory_format=torch.channels_last_3d)
 
         # Decode latents

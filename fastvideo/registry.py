@@ -526,7 +526,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=LingBotVideoT2VConfig,
-        workload_types=(WorkloadType.T2V,),
+        workload_types=(WorkloadType.T2V, ),
         hf_model_paths=["FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers"],
         model_detectors=[lambda path: "lingbotvideomoepipeline" in path.lower()],
         model_family="lingbot_video",
@@ -537,7 +537,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=LingBotVideoT2VConfig,
-        workload_types=(WorkloadType.T2V,),
+        workload_types=(WorkloadType.T2V, ),
         hf_model_paths=["FastVideo/LingBot-Video-Dense-1.3B-Diffusers"],
         model_detectors=[lambda path: "lingbotvideodensepipeline" in path.lower()],
         model_family="lingbot_video",

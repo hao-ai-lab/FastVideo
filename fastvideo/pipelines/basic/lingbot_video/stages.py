@@ -13,7 +13,6 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 
-
 LINGBOT_VIDEO_REFINER_TAIL_STEPS = 2
 
 
@@ -287,6 +286,10 @@ class LingBotVideoDenoisingStage(PipelineStage):
         condition, condition_mask = self._prepare_conditions(batch, transformer_dtype, device)
         latents = batch.latents.to(device=device, dtype=torch.float32)
         do_cfg = self._uses_cfg(batch)
+        negative = negative_mask = None
+        if do_cfg and not batch.batch_cfg:
+            negative, negative_mask = self._negative_condition(batch, condition, condition_mask, transformer_dtype,
+                                                               device)
         trajectory: list[torch.Tensor] = []
         trajectory_timesteps: list[torch.Tensor] = []
         for timestep in batch.timesteps:
@@ -308,17 +311,10 @@ class LingBotVideoDenoisingStage(PipelineStage):
                 if batch.batch_cfg:
                     conditional, unconditional = prediction.chunk(2, dim=0)
                 else:
-                    prompt = batch.prompt_embeds[0].to(device=device, dtype=transformer_dtype)
-                    if batch.prompt_attention_mask is None or not batch.prompt_attention_mask:
-                        raise ValueError("LingBot-Video requires a prompt attention mask")
-                    prompt_mask = batch.prompt_attention_mask[0].to(device=device)
-                    negative, negative_mask = self._negative_condition(
-                        batch, prompt, prompt_mask, transformer_dtype, device
-                    )
                     with torch.autocast(
-                        device_type=device.type,
-                        dtype=transformer_dtype,
-                        enabled=autocast_enabled,
+                            device_type=device.type,
+                            dtype=transformer_dtype,
+                            enabled=autocast_enabled,
                     ):
                         unconditional = self.transformer(
                             latents,

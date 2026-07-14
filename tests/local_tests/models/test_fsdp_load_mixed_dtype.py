@@ -9,7 +9,12 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp import MixedPrecisionPolicy
 
 from fastvideo.distributed.parallel_state import init_distributed_environment
-from fastvideo.models.loader.fsdp_load import load_model_from_full_model_state_dict, shard_model
+from fastvideo.models.dits.lingbot_video import LingBotVideoRouter
+from fastvideo.models.loader.fsdp_load import (
+    load_model_from_full_model_state_dict,
+    maybe_load_fsdp_model,
+    shard_model,
+)
 
 
 class _MixedDtypeModel(torch.nn.Module):
@@ -57,6 +62,18 @@ class _NestedMixedDtypeModel(torch.nn.Module):
         return hidden_states * self.root_bulk + self.root_sensitive.to(hidden_states.dtype)
 
 
+class _RouterBufferModel(torch.nn.Module):
+    """Wrap the released router to exercise its persistent correction buffer."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.router = LingBotVideoRouter(2, 3, 1, "sigmoid", True, None, None, 1.0)
+
+    def _get_parameter_dtype(self, name: str, default_dtype: torch.dtype) -> torch.dtype:
+        """Keep the released router state in fp32."""
+        return torch.float32 if "router" in name else default_dtype
+
+
 def test_full_state_dict_loader_honors_model_parameter_dtypes() -> None:
     """Load exact fp32 values for selected tensors while casting ordinary weights."""
     model = _MixedDtypeModel()
@@ -76,6 +93,46 @@ def test_full_state_dict_loader_honors_model_parameter_dtypes() -> None:
     assert model.sensitive.dtype == torch.float32
     torch.testing.assert_close(model.bulk, bulk.to(torch.bfloat16))
     torch.testing.assert_close(model.sensitive, sensitive)
+
+
+def test_full_state_dict_loader_preserves_router_bias_buffer() -> None:
+    """Keep the MoE correction bias registered as a non-trainable buffer."""
+    model = _RouterBufferModel()
+    weight = torch.arange(6, dtype=torch.float32).reshape(3, 2)
+    bias = torch.tensor([0.1, 0.2, 0.3], dtype=torch.float32)
+
+    incompatible = load_model_from_full_model_state_dict(
+        model,
+        iter((("router.weight", weight), ("router.e_score_correction_bias", bias))),
+        device=torch.device("cpu"),
+        param_dtype=torch.bfloat16,
+        strict=True,
+        param_names_mapping=lambda name: (name, None, None),
+    )
+
+    assert incompatible.missing_keys == []
+    assert incompatible.unexpected_keys == []
+    assert "router.e_score_correction_bias" in dict(model.named_buffers())
+    assert "router.e_score_correction_bias" not in dict(model.named_parameters())
+    torch.testing.assert_close(model.router.e_score_correction_bias, bias)
+
+
+def test_training_rejection_uses_fsdp_parameter_dtype() -> None:
+    """Reject replicated fp32 training state when construction defaults to fp32."""
+    with pytest.raises(NotImplementedError, match="separate gradient synchronization"):
+        maybe_load_fsdp_model(
+            model_cls=_MixedDtypeModel,
+            init_params={},
+            weight_dir_list=[],
+            device=torch.device("cpu"),
+            hsdp_replicate_dim=1,
+            hsdp_shard_dim=1,
+            default_dtype=torch.float32,
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+            training_mode=True,
+            pin_cpu_memory=False,
+        )
 
 
 def test_nested_fsdp_ignores_selected_fp32_parameters() -> None:

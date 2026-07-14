@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 import torch
-from torch.testing import assert_close
 from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
 from fastvideo.configs.models.encoders.lingbot_video import LingBotVideoQwen3VLTextConfig
@@ -26,20 +25,17 @@ from tests.local_tests.lingbot_video.hf_assets import (
     download_components,
 )
 
-
-PROMPT_TEMPLATE = (
-    "<|im_start|>system\nGiven a user input that may include a text prompt alone, "
-    "a text prompt with an image reference, or a text prompt with a video reference "
-    'or a video reference alone, generate an "Enhanced prompt" that provides detailed '
-    "visual descriptions suitable for video generation. Evaluate the level of detail "
-    "in the user's input: if it is simple, enrich it by adding specifics about colors, "
-    "shapes, sizes, textures, lighting, motion dynamics, camera movement, temporal "
-    "progression, and spatial relationships to create vivid, concrete, and temporally "
-    "coherent scenes to create vivid and concrete scenes. Please generate only the "
-    "enhanced description for the prompt below and avoid including any additional "
-    "commentary or evaluations:<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n"
-    "<|im_start|>assistant\n"
-)
+PROMPT_TEMPLATE = ("<|im_start|>system\nGiven a user input that may include a text prompt alone, "
+                   "a text prompt with an image reference, or a text prompt with a video reference "
+                   'or a video reference alone, generate an "Enhanced prompt" that provides detailed '
+                   "visual descriptions suitable for video generation. Evaluate the level of detail "
+                   "in the user's input: if it is simple, enrich it by adding specifics about colors, "
+                   "shapes, sizes, textures, lighting, motion dynamics, camera movement, temporal "
+                   "progression, and spatial relationships to create vivid, concrete, and temporally "
+                   "coherent scenes to create vivid and concrete scenes. Please generate only the "
+                   "enhanced description for the prompt below and avoid including any additional "
+                   "commentary or evaluations:<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n"
+                   "<|im_start|>assistant\n")
 
 
 def _require_gpu_test() -> torch.device:
@@ -96,6 +92,7 @@ def _capture_intermediates(model: torch.nn.Module) -> tuple[dict[str, torch.Tens
     )
 
     def save(name: str):
+
         def hook(_module, _inputs, output):
             if name.count(".") == 1 and name.startswith("layers.") and isinstance(output, tuple):
                 tensor = output[0] if output[1] is None else output[0] + output[1]
@@ -122,8 +119,7 @@ def _report_first_intermediate_drift(official: dict[str, torch.Tensor], native: 
         drift = (actual - expected).abs()
         if drift.max().item() > 1e-3:
             print(
-                f"first_intermediate_drift={name} max_abs={drift.max().item():.8f} mean_abs={drift.mean().item():.8f}"
-            )
+                f"first_intermediate_drift={name} max_abs={drift.max().item():.8f} mean_abs={drift.mean().item():.8f}")
             return
     print("first_intermediate_drift=not_found")
 
@@ -155,14 +151,14 @@ def test_lingbot_video_text_encoder_constructs_final_layers_once(monkeypatch: py
     monkeypatch.setattr(qwen3.Qwen3Attention, "__init__", record_attention_type)
     config = LingBotVideoQwen3VLTextConfig()
     for name, value in {
-        "vocab_size": 32,
-        "hidden_size": 16,
-        "intermediate_size": 32,
-        "num_hidden_layers": 2,
-        "num_attention_heads": 2,
-        "num_key_value_heads": 1,
-        "head_dim": 8,
-        "max_position_embeddings": 32,
+            "vocab_size": 32,
+            "hidden_size": 16,
+            "intermediate_size": 32,
+            "num_hidden_layers": 2,
+            "num_attention_heads": 2,
+            "num_key_value_heads": 1,
+            "head_dim": 8,
+            "max_position_embeddings": 32,
     }.items():
         setattr(config.arch_config, name, value)
     with set_default_torch_dtype(torch.bfloat16), torch.device("meta"):
@@ -178,9 +174,10 @@ def test_lingbot_video_text_encoder_constructs_final_layers_once(monkeypatch: py
         "input_layernorm.weight",
         "post_attention_layernorm.weight",
     }
-    expected_names = {"embed_tokens.weight", "norm.weight"} | {
-        f"layers.{index}.{name}" for index in range(2) for name in layer_parameter_names
-    }
+    expected_names = {"embed_tokens.weight", "norm.weight"
+                      } | {f"layers.{index}.{name}"
+                           for index in range(2)
+                           for name in layer_parameter_names}
     assert set(model.state_dict()) == expected_names
     assert all(parameter.dtype == torch.bfloat16 for parameter in model.parameters())
     assert all(isinstance(layer, LingBotVideoQwen3VLDecoderLayer) for layer in model.layers)
@@ -229,5 +226,4 @@ def test_lingbot_video_dense_text_encoder_parity() -> None:
     drift = (actual.float() - expected.float()).abs()
     print(f"max_abs={drift.max().item():.8f} mean_abs={drift.mean().item():.8f}")
     _report_first_intermediate_drift(official_intermediates, native_intermediates)
-    assert drift.mean().item() <= 5e-3
-    assert_close(actual.float(), expected.float(), atol=5e-2, rtol=5e-2)
+    assert torch.equal(actual, expected)

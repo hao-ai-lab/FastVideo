@@ -51,9 +51,8 @@ def test_lingbot_video_vae_decode_matches_official() -> None:
     device = torch.device("cuda:0")
     official_root = download_components(OFFICIAL_DENSE, "vae")
     fastvideo_root = download_components(FASTVIDEO_DENSE, "vae")
-    official = OfficialAutoencoderKLWan.from_pretrained(
-        official_root / "vae", torch_dtype=torch.float32
-    ).to(device).eval()
+    official = OfficialAutoencoderKLWan.from_pretrained(official_root / "vae",
+                                                        torch_dtype=torch.float32).to(device).eval()
     fastvideo = _load_fastvideo_vae(fastvideo_root / "vae", device)
     generator = torch.Generator(device=device).manual_seed(42)
     latents = torch.randn((1, 16, 3, 8, 8), generator=generator, device=device, dtype=torch.float32)
@@ -75,9 +74,8 @@ def test_lingbot_video_vae_encode_mode_matches_official() -> None:
     device = torch.device("cuda:0")
     official_root = download_components(OFFICIAL_DENSE, "vae")
     fastvideo_root = download_components(FASTVIDEO_DENSE, "vae")
-    official = OfficialAutoencoderKLWan.from_pretrained(
-        official_root / "vae", torch_dtype=torch.float32
-    ).to(device).eval()
+    official = OfficialAutoencoderKLWan.from_pretrained(official_root / "vae",
+                                                        torch_dtype=torch.float32).to(device).eval()
     fastvideo = _load_fastvideo_vae(fastvideo_root / "vae", device)
     generator = torch.Generator(device=device).manual_seed(43)
     video = torch.randn((1, 3, 9, 64, 64), generator=generator, device=device, dtype=torch.float32)

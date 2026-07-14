@@ -22,7 +22,6 @@ from tests.local_tests.lingbot_video.hf_assets import (
     download_components,
 )
 
-
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29529")
 os.environ.setdefault("DISABLE_SP", "1")
@@ -46,9 +45,7 @@ def _make_inputs(device: torch.device) -> dict[str, torch.Tensor | bool]:
     return {
         "hidden_states": torch.randn(1, 16, 1, 4, 4, generator=generator).to(device),
         "timestep": torch.tensor([500.0], device=device),
-        "encoder_hidden_states": torch.randn(1, 22, 2560, generator=generator).to(
-            device=device, dtype=torch.bfloat16
-        ),
+        "encoder_hidden_states": torch.randn(1, 22, 2560, generator=generator).to(device=device, dtype=torch.bfloat16),
         "encoder_attention_mask": torch.ones(1, 22, device=device, dtype=torch.long),
         "return_dict": False,
     }
@@ -60,6 +57,7 @@ def _capture_blocks(model: torch.nn.Module) -> tuple[dict[str, torch.Tensor], li
     handles: list[Any] = []
 
     def save(name: str):
+
         def hook(_module, _inputs, output):
             tensor = output[0] if isinstance(output, tuple) else output
             captured[name] = tensor.detach().float().cpu()
@@ -104,7 +102,10 @@ def _load_native(transformer_dir: Path, device: torch.device) -> torch.nn.Module
     weight_files = sorted(str(path) for path in transformer_dir.glob("*.safetensors"))
     model = maybe_load_fsdp_model(
         model_cls=LingBotVideoTransformer3DModel,
-        init_params={"config": LingBotVideoConfig(), "hf_config": hf_config},
+        init_params={
+            "config": LingBotVideoConfig(),
+            "hf_config": hf_config
+        },
         weight_dir_list=weight_files,
         device=device,
         hsdp_replicate_dim=1,
@@ -123,18 +124,14 @@ def _load_native(transformer_dir: Path, device: torch.device) -> torch.nn.Module
     return model
 
 
-def _report_first_block_drift(
-    official: dict[str, torch.Tensor], native: dict[str, torch.Tensor]
-) -> None:
+def _report_first_block_drift(official: dict[str, torch.Tensor], native: dict[str, torch.Tensor]) -> None:
     """Print the first block with nonzero drift in execution order."""
     for name, expected in official.items():
         actual = native[name]
         difference = (actual - expected).abs()
         if difference.max().item() != 0.0:
-            print(
-                f"first_block_drift={name} max_abs={difference.max().item():.8f} "
-                f"mean_abs={difference.mean().item():.8f}"
-            )
+            print(f"first_block_drift={name} max_abs={difference.max().item():.8f} "
+                  f"mean_abs={difference.mean().item():.8f}")
             return
     print("first_block_drift=not_found")
 
@@ -163,10 +160,8 @@ def test_lingbot_video_moe_dit_matches_official_sequentially() -> None:
     native_output, native_blocks = _run_model(native, device)
     native_peak = torch.cuda.max_memory_allocated(device)
     difference = (native_output - official_output).abs()
-    print(
-        f"variant={PARITY_VARIANT} diff_max={difference.max().item():.8f} "
-        f"diff_mean={difference.mean().item():.8f} "
-        f"official_peak_bytes={official_peak} native_peak_bytes={native_peak}"
-    )
+    print(f"variant={PARITY_VARIANT} diff_max={difference.max().item():.8f} "
+          f"diff_mean={difference.mean().item():.8f} "
+          f"official_peak_bytes={official_peak} native_peak_bytes={native_peak}")
     _report_first_block_drift(official_blocks, native_blocks)
     assert_close(native_output, official_output, atol=0.0, rtol=0.0)

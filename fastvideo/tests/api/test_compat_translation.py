@@ -38,8 +38,7 @@ class TestCompileConfigRoundTrip:
         _stub_fastvideo_args_from_kwargs(monkeypatch)
         config = GeneratorConfig(
             model_path="/models/ltx2",
-            engine=_engine_with_compile(
-                CompileConfig(enabled=True, backend="inductor", fullgraph=True)),
+            engine=_engine_with_compile(CompileConfig(enabled=True, backend="inductor", fullgraph=True)),
         )
         args = generator_config_to_fastvideo_args(config)
         assert args.kwargs["enable_torch_compile"] is True
@@ -56,13 +55,17 @@ class TestCompileConfigRoundTrip:
                 CompileConfig(
                     enabled=True,
                     mode="reduce-overhead",
-                    extras={"options": {"triton.cudagraphs": False}},
+                    extras={"options": {
+                        "triton.cudagraphs": False
+                    }},
                 )),
         )
         args = generator_config_to_fastvideo_args(config)
         assert args.kwargs["torch_compile_kwargs"] == {
             "mode": "reduce-overhead",
-            "options": {"triton.cudagraphs": False},
+            "options": {
+                "triton.cudagraphs": False
+            },
         }
 
     def test_none_fields_suppressed(self, monkeypatch) -> None:
@@ -140,8 +143,7 @@ class TestLegacyTextEncoderCompileTranslation:
         _stub_fastvideo_args_from_kwargs(monkeypatch)
         config = GeneratorConfig(
             model_path="/models/ltx2",
-            engine=_engine_with_compile(
-                CompileConfig(text_encoder_enabled=True)),
+            engine=_engine_with_compile(CompileConfig(text_encoder_enabled=True)),
         )
         args = generator_config_to_fastvideo_args(config)
         assert args.kwargs["enable_torch_compile_text_encoder"] is True
@@ -165,7 +167,12 @@ def test_batch_cfg_typed_request_reaches_sampling_param(monkeypatch) -> None:
     )
     request = parse_config(
         GenerationRequest,
-        {"prompt": "fox", "sampling": {"batch_cfg": True}},
+        {
+            "prompt": "fox",
+            "sampling": {
+                "batch_cfg": True
+            }
+        },
     )
     sampling_param = request_to_sampling_param(request, model_path="test-model")
     assert sampling_param.batch_cfg is True

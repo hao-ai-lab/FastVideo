@@ -16,7 +16,6 @@ from torch.testing import assert_close
 from fastvideo.models.loader.fsdp_load import set_default_dtype
 from tests.local_tests.lingbot_video.hf_assets import OFFICIAL_MOE, download_patterns
 
-
 os.environ.setdefault("DIFFUSERS_ATTN_BACKEND", "native")
 os.environ.setdefault("LINGBOT_MOE_EXPERT_BACKEND", "grouped_mm")
 os.environ.setdefault("LINGBOT_MOE_PAD_BACKEND", "loop")
@@ -58,14 +57,11 @@ def _download_transformer_for_block(layer_index: int = 0) -> Path:
     index = json.loads((model_dir / metadata[1]).read_text())
     prefix = f"blocks.{layer_index}."
     shards = {shard for name, shard in index["weight_map"].items() if name.startswith(prefix)}
-    return (
-        download_patterns(
-            OFFICIAL_MOE,
-            *metadata,
-            *(f"transformer/{shard}" for shard in sorted(shards)),
-        )
-        / "transformer"
-    )
+    return (download_patterns(
+        OFFICIAL_MOE,
+        *metadata,
+        *(f"transformer/{shard}" for shard in sorted(shards)),
+    ) / "transformer")
 
 
 def _load_block_state(transformer_dir: Path, layer_index: int = 0) -> dict[str, torch.Tensor]:
@@ -89,9 +85,8 @@ def _load_block_state(transformer_dir: Path, layer_index: int = 0) -> dict[str, 
 def _make_block_inputs(device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Create deterministic mixed-precision block inputs and complex rotary phases."""
     generator = torch.Generator(device="cpu").manual_seed(20260711)
-    hidden_states = torch.randn(1, 17, 2048, generator=generator, dtype=torch.float32).to(
-        device=device, dtype=torch.bfloat16
-    )
+    hidden_states = torch.randn(1, 17, 2048, generator=generator, dtype=torch.float32).to(device=device,
+                                                                                          dtype=torch.bfloat16)
     temb6 = torch.randn(17, 6 * 2048, generator=generator, dtype=torch.float32).to(device)
     phases = torch.randn(1, 17, 64, generator=generator, dtype=torch.float32).to(device)
     rotary = torch.polar(torch.ones_like(phases), phases).to(torch.complex64)

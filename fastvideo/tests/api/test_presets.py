@@ -16,10 +16,10 @@ from fastvideo.api.presets import (
     validate_stage_overrides,
 )
 
-
 # -------------------------------------------------------------------
 # Fixtures
 # -------------------------------------------------------------------
+
 
 @pytest.fixture()
 def _isolated_registry():
@@ -51,11 +51,11 @@ _NO_OVERRIDES_STAGE = PresetStageSpec(
 
 
 def _make_preset(
-    name: str = "test_preset",
-    version: int = 1,
-    model_family: str = "test",
-    stage_schemas: tuple[PresetStageSpec, ...] = (_SIMPLE_STAGE, ),
-    **kwargs,
+        name: str = "test_preset",
+        version: int = 1,
+        model_family: str = "test",
+        stage_schemas: tuple[PresetStageSpec, ...] = (_SIMPLE_STAGE, ),
+        **kwargs,
 ) -> InferencePreset:
     return InferencePreset(
         name=name,
@@ -114,8 +114,7 @@ class TestRegistration:
     def test_get_presets_for_family(self) -> None:
         register_preset(_make_preset(name="a"))
         register_preset(_make_preset(name="b"))
-        register_preset(_make_preset(
-            name="c", model_family="other"))
+        register_preset(_make_preset(name="c", model_family="other"))
         result = get_presets_for_family("test")
         assert {p.name for p in result} == {"a", "b"}
 
@@ -135,14 +134,11 @@ class TestStageNameValidation:
 
     def test_valid_stage_name_passes(self) -> None:
         preset = _make_preset(stage_schemas=(_SIMPLE_STAGE, _SR_STAGE))
-        validate_stage_names(
-            preset, {"denoise": {}, "sr": {}})
+        validate_stage_names(preset, {"denoise": {}, "sr": {}})
 
     def test_unknown_stage_name_raises(self) -> None:
         preset = _make_preset(stage_schemas=(_SIMPLE_STAGE, ))
-        with pytest.raises(
-            ConfigValidationError, match="stage_overrides.bogus"
-        ):
+        with pytest.raises(ConfigValidationError, match="stage_overrides.bogus"):
             validate_stage_names(preset, {"bogus": {}})
 
     def test_empty_overrides_passes(self) -> None:
@@ -150,11 +146,8 @@ class TestStageNameValidation:
         validate_stage_names(preset, {})
 
     def test_error_lists_valid_stages(self) -> None:
-        preset = _make_preset(
-            stage_schemas=(_SIMPLE_STAGE, _SR_STAGE))
-        with pytest.raises(
-            ConfigValidationError, match="'denoise'"
-        ):
+        preset = _make_preset(stage_schemas=(_SIMPLE_STAGE, _SR_STAGE))
+        with pytest.raises(ConfigValidationError, match="'denoise'"):
             validate_stage_names(preset, {"nope": {}})
 
 
@@ -169,29 +162,35 @@ class TestStageOverrideValidation:
         preset = _make_preset(stage_schemas=(_SIMPLE_STAGE, ))
         validate_stage_overrides(
             preset,
-            {"denoise": {"num_inference_steps": 25}},
+            {"denoise": {
+                "num_inference_steps": 25
+            }},
         )
 
     def test_disallowed_override_raises(self) -> None:
         preset = _make_preset(stage_schemas=(_SIMPLE_STAGE, ))
         with pytest.raises(
-            ConfigValidationError,
-            match="stage_overrides.denoise.height",
+                ConfigValidationError,
+                match="stage_overrides.denoise.height",
         ):
             validate_stage_overrides(
                 preset,
-                {"denoise": {"height": 720}},
+                {"denoise": {
+                    "height": 720
+                }},
             )
 
     def test_override_on_stage_with_no_allowed_raises(self) -> None:
         preset = _make_preset(stage_schemas=(_NO_OVERRIDES_STAGE, ))
         with pytest.raises(
-            ConfigValidationError,
-            match="does not accept overrides",
+                ConfigValidationError,
+                match="does not accept overrides",
         ):
             validate_stage_overrides(
                 preset,
-                {"encode": {"some_key": 1}},
+                {"encode": {
+                    "some_key": 1
+                }},
             )
 
     def test_empty_override_on_no_allowed_passes(self) -> None:
@@ -201,23 +200,21 @@ class TestStageOverrideValidation:
     def test_non_mapping_override_raises(self) -> None:
         preset = _make_preset(stage_schemas=(_SIMPLE_STAGE, ))
         with pytest.raises(ConfigValidationError, match="mapping"):
-            validate_stage_overrides(
-                preset, {"denoise": "not a dict"})
+            validate_stage_overrides(preset, {"denoise": "not a dict"})
 
     def test_unknown_stage_still_caught(self) -> None:
         preset = _make_preset(stage_schemas=(_SIMPLE_STAGE, ))
         with pytest.raises(ConfigValidationError, match="unknown"):
-            validate_stage_overrides(
-                preset, {"missing_stage": {"a": 1}})
+            validate_stage_overrides(preset, {"missing_stage": {"a": 1}})
 
     def test_error_lists_allowed_overrides(self) -> None:
         preset = _make_preset(stage_schemas=(_SIMPLE_STAGE, ))
-        with pytest.raises(
-            ConfigValidationError, match="guidance_scale"
-        ):
+        with pytest.raises(ConfigValidationError, match="guidance_scale"):
             validate_stage_overrides(
                 preset,
-                {"denoise": {"bad_key": 1}},
+                {"denoise": {
+                    "bad_key": 1
+                }},
             )
 
 
@@ -230,15 +227,13 @@ class TestValidatePresetSelection:
 
     @pytest.mark.usefixtures("_isolated_registry")
     def test_none_preset_returns_none(self) -> None:
-        assert validate_preset_selection(
-            None, "test") is None
+        assert validate_preset_selection(None, "test") is None
 
     @pytest.mark.usefixtures("_isolated_registry")
     def test_valid_preset_resolves(self) -> None:
         p = _make_preset()
         register_preset(p)
-        result = validate_preset_selection(
-            "test_preset", "test")
+        result = validate_preset_selection("test_preset", "test")
         assert result is p
 
     @pytest.mark.usefixtures("_isolated_registry")
@@ -248,7 +243,9 @@ class TestValidatePresetSelection:
         result = validate_preset_selection(
             "test_preset",
             "test",
-            stage_overrides={"denoise": {"guidance_scale": 2.0}},
+            stage_overrides={"denoise": {
+                "guidance_scale": 2.0
+            }},
         )
         assert result is p
 
@@ -264,7 +261,9 @@ class TestValidatePresetSelection:
             validate_preset_selection(
                 "test_preset",
                 "test",
-                stage_overrides={"denoise": {"bad": 1}},
+                stage_overrides={"denoise": {
+                    "bad": 1
+                }},
             )
 
 
@@ -309,19 +308,22 @@ class TestWanPresets:
         # Valid override.
         validate_stage_overrides(
             preset,
-            {"denoise": {"num_inference_steps": 25}},
+            {"denoise": {
+                "num_inference_steps": 25
+            }},
         )
         # Invalid override key.
         with pytest.raises(ConfigValidationError):
             validate_stage_overrides(
                 preset,
-                {"denoise": {"height": 1080}},
+                {"denoise": {
+                    "height": 1080
+                }},
             )
 
     def test_wan_model_family_in_registry(self) -> None:
         from fastvideo.registry import get_model_family
-        family = get_model_family(
-            "Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+        family = get_model_family("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
         assert family == "wan"
 
 
@@ -371,22 +373,17 @@ class TestLtx2Presets:
     def test_ltx2_two_stage_refine_overrides_valid(self) -> None:
         import fastvideo.registry  # noqa: F401
         p = get_preset("ltx2_two_stage", "ltx2")
-        validate_stage_overrides(
-            p, {"refine": {"num_inference_steps": 3}})
-        validate_stage_overrides(
-            p, {"refine": {"guidance_scale": 1.0}})
-        validate_stage_overrides(
-            p, {"refine": {"image_crf": 18}})
-        validate_stage_overrides(
-            p, {"refine": {"video_position_offset_sec": 2.5}})
+        validate_stage_overrides(p, {"refine": {"num_inference_steps": 3}})
+        validate_stage_overrides(p, {"refine": {"guidance_scale": 1.0}})
+        validate_stage_overrides(p, {"refine": {"image_crf": 18}})
+        validate_stage_overrides(p, {"refine": {"video_position_offset_sec": 2.5}})
 
     def test_ltx2_two_stage_rejects_unknown_refine_override(self) -> None:
         import fastvideo.registry  # noqa: F401
         from fastvideo.api.errors import ConfigValidationError
         p = get_preset("ltx2_two_stage", "ltx2")
         with pytest.raises(ConfigValidationError):
-            validate_stage_overrides(
-                p, {"refine": {"bogus_field": 1}})
+            validate_stage_overrides(p, {"refine": {"bogus_field": 1}})
 
 
 # -------------------------------------------------------------------
@@ -439,12 +436,10 @@ class TestHunyuan15Presets:
         import fastvideo.registry  # noqa: F401
         p = get_preset("hunyuan15_sr_1080p", "hunyuan15")
         # Valid: override sr num_inference_steps.
-        validate_stage_overrides(
-            p, {"sr": {"num_inference_steps": 12}})
+        validate_stage_overrides(p, {"sr": {"num_inference_steps": 12}})
         # Invalid: height not in sr allowed_overrides.
         with pytest.raises(ConfigValidationError):
-            validate_stage_overrides(
-                p, {"sr": {"height": 1080}})
+            validate_stage_overrides(p, {"sr": {"height": 1080}})
 
 
 # -------------------------------------------------------------------
@@ -473,8 +468,7 @@ class TestCosmosPresets:
         """
         import fastvideo.registry  # noqa: F401
         from fastvideo.api.sampling_param import SamplingParam
-        sp = SamplingParam.from_pretrained(
-            "KyleShao/Cosmos-Predict2.5-2B-Diffusers")
+        sp = SamplingParam.from_pretrained("KyleShao/Cosmos-Predict2.5-2B-Diffusers")
         assert sp.guidance_scale == 7.0
         assert sp.num_inference_steps == 35
 
@@ -553,7 +547,10 @@ class TestLingBotVideoPresets:
         model_dir.mkdir()
         (model_dir / "transformer").mkdir()
         (model_dir / "model_index.json").write_text(
-            json.dumps({"_class_name": pipeline_class, "_diffusers_version": "0.39.0"}),
+            json.dumps({
+                "_class_name": pipeline_class,
+                "_diffusers_version": "0.39.0"
+            }),
             encoding="utf-8",
         )
         assert get_preset_selection(str(model_dir)) == (expected_preset, "lingbot_video")
@@ -565,10 +562,11 @@ class TestLingBotVideoPresets:
         from fastvideo.registry import get_preset_selection
 
         presets = get_presets_for_family("lingbot_video")
-        assert {preset.name for preset in presets} == {
-            "lingbot_video_dense_t2v",
-            "lingbot_video_moe_refiner_t2v",
-        }
+        assert {preset.name
+                for preset in presets} == {
+                    "lingbot_video_dense_t2v",
+                    "lingbot_video_moe_refiner_t2v",
+                }
         assert get_preset_selection("FastVideo/LingBot-Video-Dense-1.3B-Diffusers") == (
             "lingbot_video_dense_t2v",
             "lingbot_video",
@@ -617,8 +615,14 @@ class TestLingBotVideoPresets:
         validate_stage_overrides(
             preset,
             {
-                "denoise": {"num_inference_steps": 32, "guidance_scale": 2.5},
-                "refine": {"height_sr": 1088, "t_thresh": 0.8},
+                "denoise": {
+                    "num_inference_steps": 32,
+                    "guidance_scale": 2.5
+                },
+                "refine": {
+                    "height_sr": 1088,
+                    "t_thresh": 0.8
+                },
             },
         )
         with pytest.raises(ConfigValidationError):
@@ -642,11 +646,9 @@ class TestLingBotWorldPresets:
     def test_lingbotworld_override_validation(self) -> None:
         import fastvideo.registry  # noqa: F401
         p = get_preset("lingbotworld_i2v", "lingbotworld")
-        validate_stage_overrides(
-            p, {"denoise": {"boundary_ratio": 0.95}})
+        validate_stage_overrides(p, {"denoise": {"boundary_ratio": 0.95}})
         with pytest.raises(ConfigValidationError):
-            validate_stage_overrides(
-                p, {"denoise": {"height": 720}})
+            validate_stage_overrides(p, {"denoise": {"height": 720}})
 
 
 # -------------------------------------------------------------------
@@ -685,9 +687,7 @@ class TestSinglePresetFamilies:
         import fastvideo.registry  # noqa: F401
         presets = get_presets_for_family("longcat")
         names = {p.name for p in presets}
-        assert names == {
-            "longcat_t2v", "longcat_i2v", "longcat_vc"
-        }
+        assert names == {"longcat_t2v", "longcat_i2v", "longcat_vc"}
 
 
 # -------------------------------------------------------------------
@@ -730,12 +730,10 @@ class TestPresetDefaultTypes:
         import fastvideo.registry  # noqa: F401
         from fastvideo.api.presets import _PRESET_REGISTRY
         offenders = [
-            f"{preset.model_family}/{preset.name}"
-            for preset in _PRESET_REGISTRY.values()
+            f"{preset.model_family}/{preset.name}" for preset in _PRESET_REGISTRY.values()
             if preset.defaults.get("negative_prompt", "") is None
         ]
-        assert not offenders, (
-            "These presets set negative_prompt=None, which violates "
-            "SamplingParam.negative_prompt's typed str contract and "
-            "crashes the CFG path in text_encoding. Use \"\" instead:\n"
-            + "\n".join(f"  - {p}" for p in offenders))
+        assert not offenders, ("These presets set negative_prompt=None, which violates "
+                               "SamplingParam.negative_prompt's typed str contract and "
+                               "crashes the CFG path in text_encoding. Use \"\" instead:\n" +
+                               "\n".join(f"  - {p}" for p in offenders))

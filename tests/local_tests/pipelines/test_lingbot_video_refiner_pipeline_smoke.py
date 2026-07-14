@@ -14,7 +14,7 @@ from tests.local_tests.lingbot_video.hf_assets import FASTVIDEO_MOE, download_co
 
 
 def test_lingbot_video_moe_refiner_pipeline_smoke(tmp_path: Path) -> None:
-    """Run a tiny decoded base video through VAE re-encode and the second MoE DiT."""
+    """Run two base/refiner steps over a five-frame VAE handoff with both MoE DiTs."""
     if os.environ.get("LINGBOT_VIDEO_RUN_REFINER_PIPELINE_TESTS") != "1":
         pytest.skip("Set LINGBOT_VIDEO_RUN_REFINER_PIPELINE_TESTS=1 on a scheduled H200 node.")
     required_gpus = int(os.environ.get("LINGBOT_VIDEO_REFINER_NUM_GPUS", "8"))
@@ -53,18 +53,18 @@ def test_lingbot_video_moe_refiner_pipeline_smoke(tmp_path: Path) -> None:
             width=32,
             height_sr=64,
             width_sr=64,
-            num_frames=1,
-            num_inference_steps=1,
-            num_inference_steps_sr=1,
+            num_frames=5,
+            num_inference_steps=2,
+            num_inference_steps_sr=2,
             guidance_scale=3.0,
             guidance_scale_2=3.0,
             t_thresh=0.85,
-            batch_cfg=False,
+            batch_cfg=True,
             seed=42,
         )
     finally:
         generator.shutdown()
     samples = cast(dict[str, Any], result)["samples"]
     assert torch.is_tensor(samples)
-    assert tuple(samples.shape) == (1, 3, 1, 64, 64)
+    assert tuple(samples.shape) == (1, 3, 5, 64, 64)
     assert torch.isfinite(samples).all()
