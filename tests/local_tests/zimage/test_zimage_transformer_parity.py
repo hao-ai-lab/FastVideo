@@ -151,6 +151,11 @@ def _state_shapes(model: torch.nn.Module) -> dict[str, tuple[int, ...]]:
 
 
 def test_zimage_transformer_production_meta_key_surface(reference_transformer_cls):
+    from fastvideo.models.registry import ModelRegistry
+
+    model_cls, _ = ModelRegistry.resolve_model_cls("ZImageTransformer2DModel")
+    assert model_cls is ZImageTransformer2DModel
+
     with torch.device("meta"):
         reference = reference_transformer_cls(**PRODUCTION_CONFIG)
         fastvideo = _build_fastvideo(PRODUCTION_CONFIG)
