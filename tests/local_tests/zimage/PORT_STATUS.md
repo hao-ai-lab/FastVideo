@@ -92,6 +92,7 @@ intermediate size 9728, 32 attention heads, 8 KV heads, and head dimension
 
 | ID | Phase | Decision Type | Question | Recommended Option | Status | Resolution |
 |---|---|---|---|---|---|---|
+| E001 | Phase 6 | cost | Approve one standard 8-hour 4×GB200 hold to run the complete pinned component and real-weight transformer parity suite at the current PR #1339 head? | Approve model/r9; treat every skip as missing evidence and do not proceed to pipeline work until all required rows pass non-skip. | pending | Awaiting model/r9; excludes Modal, SSIM seeding/upload, and merge. |
 
 ## Decisions
 
