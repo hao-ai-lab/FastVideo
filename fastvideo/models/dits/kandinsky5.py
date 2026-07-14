@@ -10,12 +10,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.attention import LocalAttention
+from fastvideo.attention.backends.nabla import CAN_USE_FLEX_ATTN, flex_attention, nablaT_v2
 from fastvideo.configs.models.dits import Kandinsky5VideoConfig
 from fastvideo.layers.layernorm import LayerNormScaleShift
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
+from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
+
+logger = init_logger(__name__)
+
+if not CAN_USE_FLEX_ATTN:
+    logger.warning("torch.nn.attention.flex_attention is unavailable in this PyTorch build; "
+                   "Kandinsky5 NABLA sparse attention (Pro checkpoints) cannot be used.")
 
 FRACTAL_PIXEL_SIZE = 8
 _ARCH_CONFIG_DEFAULTS = Kandinsky5VideoConfig().arch_config
@@ -263,10 +271,9 @@ class Kandinsky5Modulation(nn.Module):
 
 
 def _apply_rotary(x: torch.Tensor, rope: torch.Tensor) -> torch.Tensor:
-    orig_dtype = x.dtype
     x_ = x.reshape(*x.shape[:-1], -1, 1, 2).to(torch.float32)
     x_out = (rope * x_).sum(dim=-1)
-    return x_out.reshape(*x.shape).to(orig_dtype)
+    return x_out.reshape(*x.shape).to(x.dtype)
 
 
 class Kandinsky5Attention(nn.Module):
@@ -277,6 +284,7 @@ class Kandinsky5Attention(nn.Module):
         head_dim: int,
         supported_attention_backends: tuple[AttentionBackendEnum, ...] | None,
         prefix: str = "",
+        use_nabla: bool = False,
     ):
         super().__init__()
         assert num_channels % head_dim == 0
@@ -306,6 +314,17 @@ class Kandinsky5Attention(nn.Module):
             causal=False,
             supported_attention_backends=supported_attention_backends,
         )
+        # NABLA checkpoints get a second attention layer whose backend defaults
+        # to NABLA_ATTN; FASTVIDEO_ATTENTION_BACKEND still overrides it.
+        self.nabla_attention = None
+        if use_nabla:
+            self.nabla_attention = LocalAttention(
+                num_heads=self.num_heads,
+                head_size=head_dim,
+                causal=False,
+                supported_attention_backends=supported_attention_backends,
+                default_backend=AttentionBackendEnum.NABLA_ATTN,
+            )
 
     def forward(
         self,
@@ -339,27 +358,54 @@ class Kandinsky5Attention(nn.Module):
             key = _apply_rotary(key, rotary_emb).type_as(key)
 
         if sparse_params is not None:
-            raise NotImplementedError(
-                "Sparse attention is not yet supported for Kandinsky5 in FastVideo."
-            )
+            if self.nabla_attention is None:
+                raise RuntimeError("sparse_params passed to an attention layer built without use_nabla; "
+                                   "this checkpoint/config combination is inconsistent.")
+            try:
+                # Backend impl reads sta_mask/P from the forward-context
+                # attention metadata built by the denoising stage.
+                hidden_states = self.nabla_attention(query, key, value)
+            except AssertionError as exc:
+                # Standalone parity tests call the model without a pipeline
+                # forward context; run the NABLA kernel directly.
+                if "Forward context is not set" not in str(exc):
+                    raise
+                attn_mask = nablaT_v2(query, key, sparse_params["sta_mask"], thr=sparse_params["P"])
+                hidden_states = flex_attention(
+                    query=query.transpose(1, 2),
+                    key=key.transpose(1, 2),
+                    value=value.transpose(1, 2),
+                    block_mask=attn_mask,
+                ).transpose(1, 2)
+        else:
+            try:
+                hidden_states = self.local_attention(query, key, value)
 
-        try:
-            hidden_states = self.local_attention(query, key, value)
-        except AssertionError as exc:
-            # LocalAttention requires pipeline forward context. Standalone
-            # parity tests call the model directly, so fallback to Torch SDPA.
-            if "Forward context is not set" not in str(exc):
-                raise
-            query = query.transpose(1, 2)
-            key = key.transpose(1, 2)
-            value = value.transpose(1, 2)
-            hidden_states = F.scaled_dot_product_attention(query,
-                                                           key,
-                                                           value,
-                                                           attn_mask=None,
-                                                           is_causal=False)
-            hidden_states = hidden_states.transpose(1, 2)
-        hidden_states = hidden_states.flatten(2)
+            except AssertionError as exc:
+                # LocalAttention requires pipeline forward context. Standalone
+                # parity tests call the model directly, so fallback to Torch SDPA.
+                if "Forward context is not set" not in str(exc):
+                    raise
+
+                query_shape = query.shape[:-2]
+                key_shape = key.shape[:-2]
+                query = query.reshape(query_shape[0], -1, self.num_heads,
+                                      query.shape[-1]).transpose(1, 2)
+                key = key.reshape(key_shape[0], -1, self.num_heads,
+                                  key.shape[-1]).transpose(1, 2)
+                value = value.reshape(key_shape[0], -1, self.num_heads,
+                                      value.shape[-1]).transpose(1, 2)
+                hidden_states = F.scaled_dot_product_attention(
+                    query,
+                    key,
+                    value,
+                    attn_mask=None,
+                    is_causal=False,
+                )
+                hidden_states = hidden_states.transpose(1, 2).reshape(
+                    *query_shape, self.num_heads, -1)
+                
+        hidden_states = hidden_states.flatten(-2, -1)
 
         hidden_states, _ = self.out_layer(hidden_states)
         return hidden_states
@@ -476,7 +522,8 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
                  head_dim: int,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
-                 prefix: str = ""):
+                 prefix: str = "",
+                 use_nabla: bool = False):
         super().__init__()
         self.visual_modulation = Kandinsky5Modulation(time_dim, model_dim, 9)
 
@@ -491,7 +538,8 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
             model_dim,
             head_dim,
             supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.self_attention")
+            prefix=f"{prefix}.self_attention",
+            use_nabla=use_nabla)
 
         self.cross_attention_norm = LayerNormScaleShift(
             model_dim,
@@ -624,7 +672,8 @@ class Kandinsky5Transformer3DModel(BaseDiT):
                                               arch.ff_dim,
                                               head_dim,
                                               self._supported_attention_backends,
-                                              prefix=f"{config.prefix}.visual_transformer_blocks.{i}")
+                                              prefix=f"{config.prefix}.visual_transformer_blocks.{i}",
+                                              use_nabla=arch.attention_type == "nabla")
             for i in range(arch.num_visual_blocks)
         ])
 
@@ -694,6 +743,7 @@ class Kandinsky5Transformer3DModel(BaseDiT):
                                                   scale_factor)
         to_fractal = sparse_params[
             "to_fractal"] if sparse_params is not None else False
+        
         visual_embed, visual_rope = fractal_flatten(visual_embed, visual_rope,
                                                     visual_shape,
                                                     block_mask=to_fractal)
@@ -724,6 +774,7 @@ class Kandinsky5Transformer3DModel(BaseDiT):
 
         if return_dict:
             return Kandinsky5TransformerOutput(sample=x)
+        
         return x
 
     def materialize_non_persistent_buffers(self, device: torch.device,

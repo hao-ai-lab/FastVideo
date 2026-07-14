@@ -20,6 +20,7 @@ from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
     Cosmos25_14BConfig,
 )
+from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BARPipelineConfig, DreamXWorld5BCamPipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.gen3c import Gen3CConfig
@@ -27,9 +28,14 @@ from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyu
                                                    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
                                                    Hunyuan15SR1080PConfig)
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
+from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5I2VConfig, Kandinsky5T2VConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
+from fastvideo.configs.pipelines.flux_2 import (
+    Flux2KleinPipelineConfig,
+    Flux2PipelineConfig,
+)
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
@@ -40,6 +46,7 @@ from fastvideo.configs.pipelines.turbodiffusion import (
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
     FastWan2_2_TI2V_5B_Config,
+    LucyEditDevConfig,
     SelfForcingWan2_2_T2V480PConfig,
     SelfForcingWanT2V480PConfig,
     WANV2VConfig,
@@ -51,11 +58,14 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V480PConfig,
     WanT2V720PConfig,
 )
+from fastvideo.configs.pipelines.glm_image import GlmImageConfig
+from fastvideo.configs.pipelines.flux import FluxPipelineConfig
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
+from fastvideo.api.flux import FluxSamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
@@ -112,6 +122,10 @@ class ConfigInfo:
     workload_types: tuple[WorkloadType, ...]
     model_family: str | None = None
     default_preset: str | None = None
+    # When set, overrides the model_index `_class_name` for pipeline resolution.
+    # Lets a model family map to a specific pipeline class by path/detector
+    # (e.g. a T2V and I2V checkpoint that share a `_class_name`).
+    pipeline_cls_name: str | None = None
 
 
 # The central registry mapping a model name to its configuration information
@@ -132,6 +146,7 @@ def register_configs(
     model_detectors: list[Callable[[str], bool]] | None = None,
     model_family: str | None = None,
     default_preset: str | None = None,
+    pipeline_cls_name: str | None = None,
 ) -> None:
     """Register config classes for a model family.
 
@@ -146,6 +161,7 @@ def register_configs(
         workload_types=workload_types,
         model_family=model_family,
         default_preset=default_preset,
+        pipeline_cls_name=pipeline_cls_name,
     )
 
     if hf_model_paths:
@@ -289,8 +305,8 @@ def _register_configs() -> None:
     # ship `model.safetensors` as a single monolithic checkpoint with
     # no per-component subfolders our standard loader can consume. See
     # `scripts/checkpoint_conversion/stable_audio_to_diffusers.py`.
-    # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28); using
-    # T2V as the placeholder until the enum is extended.
+    # NOTE: WorkloadType has no T2A variant yet; use T2V as the
+    # compatibility placeholder until the enum is extended.
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=StableAudioT2AConfig,
@@ -322,6 +338,45 @@ def _register_configs() -> None:
         ],
         model_family="stable_audio",
         default_preset="stable_audio_open_small",
+    )
+
+    def _is_flux2_klein(path: str) -> bool:
+        path_lower = path.lower()
+        return "flux.2-klein" in path_lower or "flux2-klein" in path_lower or "flux2klein" in path_lower
+
+    def _is_flux2_full(path: str) -> bool:
+        path_lower = path.lower()
+        is_flux2 = "flux.2" in path_lower or "flux2" in path_lower or "flux_2" in path_lower or "flux-2" in path_lower
+        return is_flux2 and "klein" not in path_lower
+
+    # Flux2 Klein (distilled, 4-step, no guidance)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Flux2KleinPipelineConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=[
+            "black-forest-labs/FLUX.2-klein-4B",
+            "black-forest-labs/FLUX.2-klein-9B",
+        ],
+        model_detectors=[
+            _is_flux2_klein,
+        ],
+        model_family="flux2",
+        default_preset="flux2_klein_4b",
+    )
+    # Flux2 (full, Mistral3 text encoder, embedded guidance)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Flux2PipelineConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=[
+            "black-forest-labs/FLUX.2-dev",
+        ],
+        model_detectors=[
+            _is_flux2_full,
+        ],
+        model_family="flux2",
+        default_preset="flux2_dev",
     )
 
     # Hunyuan 1.5 (specific)
@@ -446,18 +501,174 @@ def _register_configs() -> None:
         default_preset="lingbotworld_i2v",
     )
 
+    def _kandinsky5_detector(require: tuple[str, ...] = (), exclude: tuple[str, ...] = ()) -> Callable[[str], bool]:
+
+        def detect(path: str) -> bool:
+            path_lower = path.lower()
+            if "kandinsky5" not in path_lower and "kandinsky-5" not in path_lower:
+                return False
+            return (all(token in path_lower for token in require) and not any(token in path_lower for token in exclude))
+
+        return detect
+
+    # t2v/i2v exclude each other so a checkpoint stored under a directory
+    # containing the other token (e.g. ~/i2v_experiments/kandinsky5-t2v-ft)
+    # falls through to the model_index _class_name fallback detectors below
+    # instead of being misrouted.
+    _is_kandinsky5_t2v = _kandinsky5_detector(require=("t2v", ), exclude=("i2v", ))
+    _is_kandinsky5_i2v = _kandinsky5_detector(require=("i2v", ), exclude=("t2v", ))
+    _is_kandinsky5_t2v_lite = _kandinsky5_detector(require=("t2v", "lite"), exclude=("i2v", "distilled"))
+    _is_kandinsky5_t2v_pro = _kandinsky5_detector(require=("t2v", "pro"), exclude=("i2v", "distilled"))
+    _is_kandinsky5_t2v_lite_distilled = _kandinsky5_detector(require=("t2v", "lite", "distilled"), exclude=("i2v", ))
+    _is_kandinsky5_t2v_pro_distilled = _kandinsky5_detector(require=("t2v", "pro", "distilled"), exclude=("i2v", ))
+    _is_kandinsky5_i2v_lite = _kandinsky5_detector(require=("i2v", "lite"), exclude=("t2v", "distilled"))
+    _is_kandinsky5_i2v_pro = _kandinsky5_detector(require=("i2v", "pro"), exclude=("t2v", "distilled"))
+    _is_kandinsky5_i2v_lite_distilled = _kandinsky5_detector(require=("i2v", "lite", "distilled"), exclude=("t2v", ))
+    _is_kandinsky5_i2v_pro_distilled = _kandinsky5_detector(require=("i2v", "pro", "distilled"), exclude=("t2v", ))
+
     # Kandinsky5 Lite T2V
     register_configs(
         sampling_param_cls=None,
-        pipeline_config_cls=PipelineConfig,
+        pipeline_config_cls=Kandinsky5T2VConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
         ],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5")),
+            _is_kandinsky5_t2v_lite,
         ],
         model_family="kandinsky5",
+        default_preset="kandinsky5_t2v_lite_5s",
+        pipeline_cls_name="Kandinsky5T2VPipeline",
+    )
+
+    # Kandinsky5 Pro T2V
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5T2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-5.0-T2V-Pro-sft-5s-Diffusers",
+        ],
+        model_detectors=[
+            _is_kandinsky5_t2v_pro,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_t2v_pro_5s",
+    )
+
+    # Kandinsky5 Lite T2V Distilled
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5T2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-5.0-T2V-Lite-distilled16steps-5s-Diffusers",
+        ],
+        model_detectors=[
+            _is_kandinsky5_t2v_lite_distilled,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_t2v_lite_distilled_5s",
+    )
+
+    # Kandinsky5 Pro T2V Distilled
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5T2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-5.0-T2V-Pro-distilled-5s-Diffusers",
+        ],
+        model_detectors=[
+            _is_kandinsky5_t2v_pro_distilled,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_t2v_pro_distilled_5s",
+    )
+
+    # Kandinsky5 Lite I2V
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5I2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=["kandinskylab/Kandinsky-5.0-I2V-Lite-5s-Diffusers"],
+        model_detectors=[
+            _is_kandinsky5_i2v_lite,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_i2v_lite_5s",
+        pipeline_cls_name="Kandinsky5I2VPipeline",
+    )
+
+    # Kandinsky5 Pro I2V
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5I2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=["kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers"],
+        model_detectors=[
+            _is_kandinsky5_i2v_pro,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_i2v_pro_5s",
+    )
+
+    # Kandinsky5 Pro I2V Distilled
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5I2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=["kandinskylab/Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers"],
+        model_detectors=[
+            _is_kandinsky5_i2v_pro_distilled,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_i2v_pro_distilled_5s",
+    )
+
+    # Kandinsky5 Lite I2V Distilled (no official hub repo yet; local
+    # conversions get distilled sampling defaults instead of the sft ones the
+    # fallback would apply).
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5I2VConfig,
+        workload_types=(),
+        model_detectors=[
+            _is_kandinsky5_i2v_lite_distilled,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_i2v_lite_distilled_5s",
+        pipeline_cls_name="Kandinsky5I2VPipeline",
+    )
+
+    # Kandinsky5 fallbacks — registered AFTER the variant detectors so those
+    # win first-match. Catch checkpoints the variant detectors cannot resolve:
+    # token-less local paths matched via the model_index _class_name
+    # ("kandinsky5t2vpipeline" carries no lite/pro marker), variant combos
+    # without a dedicated entry (e.g. I2V Lite distilled), and t2v+i2v
+    # ambiguous paths resolved by the checkpoint's _class_name.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5T2VConfig,
+        workload_types=(),
+        model_detectors=[
+            _is_kandinsky5_t2v,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_t2v_lite_5s",
+        pipeline_cls_name="Kandinsky5T2VPipeline",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5I2VConfig,
+        workload_types=(),
+        model_detectors=[
+            _is_kandinsky5_i2v,
+        ],
+        model_family="kandinsky5",
+        default_preset="kandinsky5_i2v_lite_5s",
+        pipeline_cls_name="Kandinsky5I2VPipeline",
     )
 
     # LongCat (T2V, I2V, VC use same config; workload varies by path)
@@ -506,10 +717,16 @@ def _register_configs() -> None:
             "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
             "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
-            # Legacy HF paths (kept for backward compat — pre-rename names):
+            # Legacy HF paths (kept for backward compat - pre-rename names):
             "FastVideo/Matrix-Game-2.0-Base-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
+            # Zelda World Model
+            "mignonjia/mg_longtuning_distilled_zelda",  # distilled using streaming long tuning which init from mg_sf_distilled_zelda_1k_steps
+            "mignonjia/mg_sf_distilled_zelda_1k_steps",  # distilled using self forcing for 1k steps
+            "mignonjia/mg_sf_distilled_zelda",  # distilled using self forcing for 3k steps
+            "mignonjia/mg_causal_zelda",
+            "mignonjia/mg_bidirectional_zelda",
         ],
         model_detectors=[
             lambda path: any(token in path.lower() for token in (
@@ -571,6 +788,8 @@ def _register_configs() -> None:
                 "cosmos-predict2.5",
             )) and "14b" not in path.lower(),
         ],
+        model_family="cosmos25",
+        default_preset="cosmos25_predict2_2b",
     )
 
     # Cosmos 2.5 (14B)
@@ -727,6 +946,40 @@ def _register_configs() -> None:
         model_family="wan",
         default_preset="wan_2_2_ti2v_5b",
     )
+
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=DreamXWorld5BCamPipelineConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/DreamX-World-5B-Cam-Diffusers",
+        ],
+        model_detectors=[
+            # Mutually exclusive with the AR detector below: Cam requires an
+            # explicit "cam" marker so hyphenated AR local paths (e.g.
+            # /ckpts/dreamx-world-5b-converted) don't first-match here —
+            # detector resolution is first-match in registration order.
+            lambda path:
+            ("dreamx-world" in path.lower() and "cam" in path.lower()) or "dreamxworldpipeline" in path.lower()
+        ],
+        model_family="dreamx_world",
+        default_preset="dreamx_world_5b_cam",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=DreamXWorld5BARPipelineConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/DreamX-World-5B-Diffusers",
+        ],
+        model_detectors=[
+            lambda path:
+            ("dreamx-world-5b" in path.lower() and "cam" not in path.lower()) or "dreamxworldarpipeline" in path.lower(
+            )
+        ],
+        model_family="dreamx_world",
+        default_preset="dreamx_world_5b_ar",
+    )
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=FastWan2_2_TI2V_5B_Config,
@@ -737,6 +990,18 @@ def _register_configs() -> None:
         ],
         model_family="wan",
         default_preset="fast_wan_2_2_ti2v_5b",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LucyEditDevConfig,
+        workload_types=(),
+        hf_model_paths=[
+            "decart-ai/Lucy-Edit-Dev",
+            "decart-ai/Lucy-Edit-1.1-Dev",
+        ],
+        model_detectors=[lambda path: "lucy-edit" in path.lower()],
+        model_family="wan",
+        default_preset="lucy_edit_dev",
     )
     register_configs(
         sampling_param_cls=None,
@@ -812,6 +1077,33 @@ def _register_configs() -> None:
         default_preset="sd35_medium",
     )
 
+    # GLM-Image
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=GlmImageConfig,
+        hf_model_paths=[
+            "zai-org/GLM-Image",
+        ],
+        model_detectors=[lambda path: "glmimage" in path.lower() or "glm-image" in path.lower()],
+        workload_types=(WorkloadType.T2I, ),
+        model_family="glm_image",
+    )
+
+    # FLUX.1-dev (Diffusers)
+    register_configs(
+        sampling_param_cls=FluxSamplingParam,
+        pipeline_config_cls=FluxPipelineConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=[
+            "black-forest-labs/FLUX.1-dev",
+        ],
+        model_detectors=[
+            lambda path: "fluxpipeline" in path,
+            lambda path: "flux.1-dev" in path or "flux_1_dev" in path,
+            lambda path: "/flux/" in path or path.endswith("/flux"),
+        ],
+    )
+
 
 # --- Part 3: Main Resolver ---
 
@@ -840,15 +1132,28 @@ def get_model_info(
     if workload_type is None:
         workload_type = WorkloadType.T2V
 
-    if os.path.exists(model_path):
-        config = verify_model_config_and_directory(model_path)
-    else:
-        config = maybe_download_model_index(model_path)
+    config_info = _get_config_info(model_path, raise_on_missing=True)
+    assert config_info is not None, "config_info must be resolved"
 
-    pipeline_name = config.get("_class_name")
     if override_pipeline_cls_name:
-        logger.info("Overriding pipeline class name from %s to %s", pipeline_name, override_pipeline_cls_name)
-        pipeline_name = override_pipeline_cls_name
+        # Explicit override: skip config resolution entirely so checkpoints
+        # without a diffusers model_index.json keep working (and no download
+        # is triggered just to log the replaced name).
+        pipeline_name: str | None = override_pipeline_cls_name
+        logger.info("Using override pipeline class name %s", pipeline_name)
+    else:
+        if os.path.exists(model_path):
+            config = verify_model_config_and_directory(model_path)
+        else:
+            config = maybe_download_model_index(model_path)
+
+        pipeline_name = config.get("_class_name")
+        if config_info.pipeline_cls_name is not None:
+            # The resolved (path/detector-based) config pins the pipeline class,
+            # e.g. an I2V checkpoint whose `_class_name` would otherwise resolve
+            # to the T2V pipeline.
+            logger.info("Pinning pipeline class name from %s to %s", pipeline_name, config_info.pipeline_cls_name)
+            pipeline_name = config_info.pipeline_cls_name
 
     if pipeline_name is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
@@ -856,9 +1161,6 @@ def get_model_info(
 
     pipeline_registry = get_pipeline_registry(pipeline_type)
     pipeline_cls = pipeline_registry.resolve_pipeline_cls(pipeline_name, pipeline_type, workload_type)
-
-    config_info = _get_config_info(model_path, raise_on_missing=True)
-    assert config_info is not None, "config_info must be resolved"
 
     sampling_param_cls = config_info.sampling_param_cls or SamplingParam
 
@@ -892,6 +1194,8 @@ def _register_presets() -> None:
     from fastvideo.api.presets import register_preset
     from fastvideo.pipelines.basic.cosmos.presets import (
         ALL_PRESETS as COSMOS_PRESETS, )
+    from fastvideo.pipelines.basic.dreamx_world.presets import (
+        ALL_PRESETS as DREAMX_WORLD_PRESETS, )
     from fastvideo.pipelines.basic.gamecraft.presets import (
         ALL_PRESETS as GAMECRAFT_PRESETS, )
     from fastvideo.pipelines.basic.gen3c.presets import (
@@ -902,6 +1206,8 @@ def _register_presets() -> None:
         ALL_PRESETS as HUNYUAN15_PRESETS, )
     from fastvideo.pipelines.basic.hyworld.presets import (
         ALL_PRESETS as HYWORLD_PRESETS, )
+    from fastvideo.pipelines.basic.kandinsky5.presets import (
+        ALL_PRESETS as KANDINSKY5_PRESETS, )
     from fastvideo.pipelines.basic.lingbotworld.presets import (
         ALL_PRESETS as LINGBOTWORLD_PRESETS, )
     from fastvideo.pipelines.basic.longcat.presets import (
@@ -920,14 +1226,19 @@ def _register_presets() -> None:
         ALL_PRESETS as TURBODIFFUSION_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
         ALL_PRESETS as WAN_PRESETS, )
+    from fastvideo.pipelines.basic.flux_2.presets import (
+        ALL_PRESETS as FLUX2_PRESETS, )
 
     all_preset_groups = (
         COSMOS_PRESETS,
+        DREAMX_WORLD_PRESETS,
+        FLUX2_PRESETS,
         GAMECRAFT_PRESETS,
         GEN3C_PRESETS,
         HUNYUAN_PRESETS,
         HUNYUAN15_PRESETS,
         HYWORLD_PRESETS,
+        KANDINSKY5_PRESETS,
         LINGBOTWORLD_PRESETS,
         LONGCAT_PRESETS,
         LTX2_PRESETS,

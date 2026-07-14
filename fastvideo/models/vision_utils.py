@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import io
 import os
 import tempfile
+import time
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -15,6 +17,10 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from packaging import version
+
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 if version.parse(version.parse(
         PIL.__version__).base_version) >= version.parse("9.1.0"):
@@ -89,6 +95,39 @@ def normalize(images: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     return 2.0 * images - 1.0
 
 
+def _fetch_image_bytes(url: str,
+                       attempts: int = 3,
+                       timeout: float = 30.0) -> bytes:
+    """Download ``url`` fully, retrying transient network errors.
+
+    Reads the whole body via ``response.content`` instead of handing PIL a
+    ``.raw`` stream: a connection dropped mid-body (e.g. an HF-CDN
+    ``IncompleteRead``) then fails here, where it can be retried, instead of
+    surfacing as a truncated image inside PIL.
+    """
+    for attempt in range(attempts):
+        try:
+            response = requests.get(url, timeout=timeout)
+            response.raise_for_status()
+            return response.content
+        except requests.RequestException as e:
+            status = getattr(getattr(e, "response", None), "status_code",
+                             None)
+            # Permanent client errors (4xx except 408/429) won't heal on
+            # retry — fail fast.
+            if (status is not None and 400 <= status < 500
+                    and status not in (408, 429)):
+                raise
+            if attempt == attempts - 1:
+                raise
+            backoff = 2**attempt
+            logger.warning(
+                "Failed to download image %s (attempt %d/%d): %s. "
+                "Retrying in %ds.", url, attempt + 1, attempts, e, backoff)
+            time.sleep(backoff)
+    raise AssertionError("unreachable")
+
+
 # adapted from diffusers.utils import load_image
 def load_image(
     image: str | PIL.Image.Image,
@@ -110,7 +149,7 @@ def load_image(
     """
     if isinstance(image, str):
         if image.startswith("http://") or image.startswith("https://"):
-            image = PIL.Image.open(requests.get(image, stream=True).raw)
+            image = PIL.Image.open(io.BytesIO(_fetch_image_bytes(image)))
         elif os.path.isfile(image):
             image = PIL.Image.open(image)
         else:

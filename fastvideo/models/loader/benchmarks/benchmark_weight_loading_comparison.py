@@ -42,7 +42,7 @@ def load_independent(files: list[str], device: str):
     """Before-PR behavior: every rank reads every tensor from disk to GPU."""
     for st_file in files:
         with safe_open(st_file, framework="pt", device=device) as f:
-            for name in f:
+            for name in f.keys():  # noqa: SIM118
                 param = f.get_tensor(name)
                 yield name, param
 
@@ -54,7 +54,7 @@ def load_broadcast(files: list[str], device: str, node_group,
     handles = []
     for st_file in files:
         with safe_open(st_file, framework="pt", device=device) as f:
-            for name in f:
+            for name in f.keys():  # noqa: SIM118
                 if local_rank == 0:
                     param = f.get_tensor(name)
                 else:

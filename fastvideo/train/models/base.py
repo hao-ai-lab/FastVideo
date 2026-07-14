@@ -91,6 +91,17 @@ class ModelBase(ABC):
     def on_train_start(self) -> None:  # noqa: B027
         """Called once before the training loop begins."""
 
+    def decode_latents(
+        self,
+        latents_b_t_c_h_w: torch.Tensor,
+    ) -> torch.Tensor:
+        """Decode ``[B, T, C, H, W]`` latents to ``[B, C, T, H, W]`` media.
+
+        RL reward methods call this hook instead of reaching into
+        model-specific VAE normalization details.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not implement decode_latents()")
+
     # ------------------------------------------------------------------
     # Timestep helpers
     # ------------------------------------------------------------------

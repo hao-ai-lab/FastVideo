@@ -29,6 +29,10 @@ class SamplingParam:
     # Video inputs
     video_path: str | None = None
 
+    # Optional pre-generated diffusion latents. Used by parity/debug harnesses
+    # and advanced callers that need deterministic latent reuse.
+    latents: Any | None = None
+
     # Action control inputs (Matrix-Game)
     mouse_cond: Any | None = None  # Shape: (B, T, 2)
     keyboard_cond: Any | None = None  # Shape: (B, T, K)
@@ -64,6 +68,7 @@ class SamplingParam:
     # Text inputs
     prompt: str | list[str] | None = None
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+    max_sequence_length: int | None = None
     prompt_path: str | None = None
     output_path: str = "outputs/"
     output_video_name: str | None = None
@@ -85,6 +90,10 @@ class SamplingParam:
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
     guidance_scale_2: float | None = None
+    # Embedded guidance (FLUX): do not treat ``guidance_scale > 1`` as classic CFG.
+    use_embedded_guidance: bool = False
+    # Diffusers-style true CFG for FLUX when > 1 (requires negative prompt encoding).
+    true_cfg_scale: float = 1.0
     guidance_rescale: float = 0.0
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
@@ -325,6 +334,18 @@ class SamplingParam:
             type=float,
             default=SamplingParam.guidance_rescale,
             help="Guidance rescale factor",
+        )
+        parser.add_argument(
+            "--use-embedded-guidance",
+            action="store_true",
+            default=SamplingParam.use_embedded_guidance,
+            help="Use embedded guidance scale (FLUX-style) instead of classic CFG",
+        )
+        parser.add_argument(
+            "--true-cfg-scale",
+            type=float,
+            default=SamplingParam.true_cfg_scale,
+            help="True CFG scale for FLUX when > 1 (requires negative prompt encoding)",
         )
         parser.add_argument(
             "--boundary-ratio",

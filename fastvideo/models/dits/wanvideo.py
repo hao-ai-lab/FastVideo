@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import copy
 import math
 from typing import Any
 
@@ -26,6 +27,7 @@ from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum, current_platform
+from fastvideo.layers.quantization import QuantizationConfig
 
 from fastvideo.distributed.parallel_state import get_sp_world_size
 
@@ -58,6 +60,11 @@ class WanTimeTextImageEmbedding(nn.Module):
         time_freq_dim: int,
         text_embed_dim: int,
         image_embed_dim: int | None = None,
+        *,
+        r_embedder: bool = False,
+        r_embedder_fusion: str = "additive",
+        r_embedder_gate_value: float = 0.25,
+        r_embedder_deltatime_type: str = "r",
     ):
         super().__init__()
 
@@ -76,14 +83,57 @@ class WanTimeTextImageEmbedding(nn.Module):
         if image_embed_dim is not None:
             self.image_embedder = WanImageEmbedding(image_embed_dim, dim)
 
+        # AnyFlow dual-timestep support. When r_embedder is False the forward
+        # path bypasses delta_embedder entirely and the output is byte-identical
+        # to the legacy single-timestep implementation.
+        self._r_embedder_enabled = bool(r_embedder)
+        self._r_embedder_fusion = r_embedder_fusion
+        self._r_embedder_deltatime_type = r_embedder_deltatime_type
+        if self._r_embedder_enabled:
+            if r_embedder_fusion not in ("additive", "gated"):
+                raise ValueError(
+                    "r_embedder_fusion must be one of {additive, gated}, "
+                    f"got {r_embedder_fusion!r}")
+            if r_embedder_deltatime_type not in ("r", "t-r"):
+                raise ValueError(
+                    "r_embedder_deltatime_type must be one of {r, t-r}, "
+                    f"got {r_embedder_deltatime_type!r}")
+            # Deep-copy preserves identical initialization with time_embedder,
+            # matching AnyFlow reference setup_flowmap_model() behavior.
+            self.delta_embedder = copy.deepcopy(self.time_embedder)
+            # Non-persistent buffer — gate is a hyperparameter, not learned.
+            self.register_buffer(
+                "_r_embedder_gate",
+                torch.tensor(float(r_embedder_gate_value)),
+                persistent=False,
+            )
+        else:
+            self.delta_embedder = None
+
     def forward(
         self,
         timestep: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         encoder_hidden_states_image: torch.Tensor | None = None,
         timestep_seq_len: int | None = None,
+        r_timestep: torch.Tensor | None = None,
     ):
         temb = self.time_embedder(timestep, timestep_seq_len)
+
+        if self._r_embedder_enabled and r_timestep is not None:
+            assert self.delta_embedder is not None
+            if self._r_embedder_deltatime_type == "r":
+                delta_input = r_timestep
+            else:
+                delta_input = timestep - r_timestep
+            delta_emb = self.delta_embedder(delta_input, timestep_seq_len)
+            gate = self._r_embedder_gate
+            if self._r_embedder_fusion == "gated":
+                temb = (1.0 - gate) * temb + gate * delta_emb
+            else:
+                # Additive (additional channel, no convex blend).
+                temb = temb + gate * delta_emb
+
         timestep_proj = self.time_modulation(temb)
 
         if self.text_embedder is not None:
@@ -106,7 +156,9 @@ class WanSelfAttention(nn.Module):
                  window_size=(-1, -1),
                  qk_norm=True,
                  eps=1e-6,
-                 parallel_attention=False) -> None:
+                 parallel_attention=False,
+                 quant_config: QuantizationConfig | None = None,
+                 prefix: str = "") -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -118,10 +170,10 @@ class WanSelfAttention(nn.Module):
         self.parallel_attention = parallel_attention
 
         # layers
-        self.to_q = ReplicatedLinear(dim, dim)
-        self.to_k = ReplicatedLinear(dim, dim)
-        self.to_v = ReplicatedLinear(dim, dim)
-        self.to_out = ReplicatedLinear(dim, dim)
+        self.to_q = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.to_q")
+        self.to_k = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.to_k")
+        self.to_v = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.to_v")
+        self.to_out = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.to_out")
         self.norm_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
@@ -194,13 +246,15 @@ class WanI2VCrossAttention(WanSelfAttention):
         qk_norm=True,
         eps=1e-6,
         supported_attention_backends: tuple[AttentionBackendEnum, ...]
-        | None = None
+        | None = None,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
     ) -> None:
         super().__init__(dim, num_heads, window_size, qk_norm, eps,
-                         supported_attention_backends)
+                         supported_attention_backends, quant_config=quant_config, prefix=prefix)
 
-        self.add_k_proj = ReplicatedLinear(dim, dim)
-        self.add_v_proj = ReplicatedLinear(dim, dim)
+        self.add_k_proj = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.add_k_proj")
+        self.add_v_proj = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.add_v_proj")
         self.norm_added_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_added_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
@@ -246,16 +300,17 @@ class WanTransformerBlock(nn.Module):
                  added_kv_proj_dim: int | None = None,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
+                 quant_config: QuantizationConfig | None = None,
                  prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
-        self.to_q = ReplicatedLinear(dim, dim, bias=True)
-        self.to_k = ReplicatedLinear(dim, dim, bias=True)
-        self.to_v = ReplicatedLinear(dim, dim, bias=True)
+        self.to_q = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_q")
+        self.to_k = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_k")
+        self.to_v = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_v")
 
-        self.to_out = ReplicatedLinear(dim, dim, bias=True)
+        self.to_out = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_out")
         self.attn1 = DistributedAttention(
             num_heads=num_heads,
             head_size=dim // num_heads,
@@ -290,13 +345,17 @@ class WanTransformerBlock(nn.Module):
             self.attn2 = WanI2VCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
-                                              eps=eps)
+                                              eps=eps,
+                                              quant_config=quant_config,
+                                              prefix=f"{prefix}.attn2")
         else:
             # T2V
             self.attn2 = WanT2VCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
-                                              eps=eps)
+                                              eps=eps,
+                                              quant_config=quant_config,
+                                              prefix=f"{prefix}.attn2")
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -306,7 +365,7 @@ class WanTransformerBlock(nn.Module):
             compute_dtype=torch.float32)
 
         # 3. Feed-forward
-        self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
+        self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
         self.mlp_residual = ScaleResidual()
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
@@ -406,17 +465,17 @@ class WanTransformerBlock_VSA(nn.Module):
                  added_kv_proj_dim: int | None = None,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
+                 quant_config: QuantizationConfig | None = None,
                  prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
-        self.to_q = ReplicatedLinear(dim, dim, bias=True)
-        self.to_k = ReplicatedLinear(dim, dim, bias=True)
-        self.to_v = ReplicatedLinear(dim, dim, bias=True)
-        self.to_gate_compress = ReplicatedLinear(dim, dim, bias=True)
-
-        self.to_out = ReplicatedLinear(dim, dim, bias=True)
+        self.to_q = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_q")
+        self.to_k = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_k")
+        self.to_v = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_v")
+        self.to_gate_compress = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_gate_compress")
+        self.to_out = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_out")
         self.attn1 = DistributedAttention_VSA(
             num_heads=num_heads,
             head_size=dim // num_heads,
@@ -451,13 +510,17 @@ class WanTransformerBlock_VSA(nn.Module):
             self.attn2 = WanI2VCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
-                                              eps=eps)
+                                              eps=eps,
+                                              quant_config=quant_config,
+                                              prefix=f"{prefix}.attn2")
         else:
             # T2V
             self.attn2 = WanT2VCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
-                                              eps=eps)
+                                              eps=eps,
+                                              quant_config=quant_config,
+                                              prefix=f"{prefix}.attn2")
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -467,7 +530,7 @@ class WanTransformerBlock_VSA(nn.Module):
             compute_dtype=torch.float32)
 
         # 3. Feed-forward
-        self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
+        self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
         self.mlp_residual = ScaleResidual()
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
@@ -556,6 +619,7 @@ class WanTransformer3DModel(BaseDiT):
     def __init__(self, config: WanVideoConfig, hf_config: dict[str,
                                                                Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
+        self.quant_config = config.quant_config
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
         self.hidden_size = config.hidden_size
@@ -580,6 +644,10 @@ class WanTransformer3DModel(BaseDiT):
             time_freq_dim=config.freq_dim,
             text_embed_dim=config.text_dim,
             image_embed_dim=config.image_dim,
+            r_embedder=config.r_embedder,
+            r_embedder_fusion=config.r_embedder_fusion,
+            r_embedder_gate_value=config.r_embedder_gate_value,
+            r_embedder_deltatime_type=config.r_embedder_deltatime_type,
         )
 
         # 3. Transformer blocks
@@ -594,6 +662,7 @@ class WanTransformer3DModel(BaseDiT):
                               config.eps,
                               config.added_kv_proj_dim,
                               self._supported_attention_backends,
+                              quant_config=config.quant_config,
                               prefix=f"{config.prefix}.blocks.{i}")
             for i in range(config.num_layers)
         ])
@@ -620,6 +689,7 @@ class WanTransformer3DModel(BaseDiT):
                 encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
                 | None = None,
                 guidance=None,
+                r_timestep: torch.Tensor | None = None,
                 **kwargs) -> torch.Tensor:
         orig_dtype = hidden_states.dtype
         if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
@@ -668,8 +738,17 @@ class WanTransformer3DModel(BaseDiT):
         else:
             ts_seq_len = None
 
+        # AnyFlow dual-timestep — match timestep's flattening so embedder
+        # sees aligned shapes.
+        if r_timestep is not None and r_timestep.dim() == 2:
+            r_timestep = r_timestep.flatten()
+
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
-            timestep, encoder_hidden_states, encoder_hidden_states_image, timestep_seq_len=ts_seq_len)
+            timestep,
+            encoder_hidden_states,
+            encoder_hidden_states_image,
+            timestep_seq_len=ts_seq_len,
+            r_timestep=r_timestep)
         if ts_seq_len is not None:
             # batch_size, seq_len, 6, inner_dim
             timestep_proj = timestep_proj.unflatten(2, (6, -1))

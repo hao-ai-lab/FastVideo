@@ -2,8 +2,9 @@
 
 In-process evaluation suite for video generations. Includes pixel
 metrics (SSIM, PSNR, LPIPS), Fréchet Video Distance (FVD), optical-flow
-comparisons, the full VBench suite, Physics-IQ, audio metrics, and a
-VLM scorer behind a single registry-driven API.
+comparisons, the full VBench suite, Physics-IQ, audio metrics, an
+absolute VLM scorer (`videoscore2`), and a pairwise VLM judge
+(`judge.third_person_separation`) — all behind a single registry-driven API.
 
 ## Install
 
@@ -18,10 +19,7 @@ VLM scorer behind a single registry-driven API.
 
 `[eval-audio]` covers every `audio.*` metric. ImageBind
 (`facebookresearch/ImageBind`, CC BY-NC-SA 4.0) is git-sourced via
-`[tool.uv.sources]` rather than vendored. `torchaudio` at the cu128
-wheel is pulled transitively by `audiobox_aesthetics`; on cu128 hosts
-using raw `pip`, install `torchaudio` from
-`https://download.pytorch.org/whl/cu128` first.
+`[tool.uv.sources]` rather than vendored.
 
 `[eval-fast-decode]` is opt-in. It pulls `decord`, which is faster than
 the default PyAV decoder but has no aarch64 wheels and is effectively
@@ -124,6 +122,44 @@ to run a subset of the Evaluator's registered metrics on this batch
 (useful for scoring different corpora with different metric subsets in
 successive calls without burning model loads).
 
+### Training-time validation metrics
+
+The modular trainer can score validation videos during training through
+`callbacks.validation.metrics`. Each distributed rank that writes local
+validation videos also runs its local metrics on `cuda:<local_rank>`;
+rank 0 only merges scalar summaries and logs artifacts.
+
+```yaml
+callbacks:
+  validation:
+    pipeline_target: fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline.MatrixGame2CausalDMDPipeline
+    dataset_file: examples/distill/MatrixGame2.0/validation.json
+    sampling_steps: [4]
+    metrics:
+      enabled: true
+      names:
+        - vbench.imaging_quality
+        - vbench.aesthetic_quality
+        - optical_flow.synthetic_optical_flow
+        - common.fvd
+      skip_missing_deps: true
+      strict: false
+      unload_after_validation: true
+
+      # `synthetic_optical_flow` also needs actions in the validation
+      # manifest (`action_path`) plus a repo-local calibration file.
+      calibration_path: assets/eval/worldmodel_synthetic_flow_calibration.json
+```
+
+Metric summaries are written under
+`<output_dir>/eval/step_<step>/inference_steps_<n>_rank_<rank>.json` and
+scalar means are logged with the `metrics/validation/...` prefix.
+Install `fastvideo[eval]` for optical-flow dependencies such as
+`ptlflow`; VBench metrics use the pinned submodule under
+`fastvideo/third_party/eval/vbench`. FVD uses `ref_video` entries from
+the validation manifest when present, or the standard
+`FASTVIDEO_FVD_REF_FEATURES` / eval-cache reference feature path.
+
 ### CLI
 
 ```bash
@@ -159,6 +195,7 @@ fastvideo/
 │       ├── audio/                 # clap_score, audiobox_aesthetics, kl_divergence,
 │       │                          # frechet_distance, wer, desync, imagebind_score
 │       ├── videoscore2/           # VideoScore-2 (Qwen2.5-VL)
+│       ├── judge/                 # pairwise VLM judges (third_person_separation)
 │       ├── physics_iq/            # PhysicsIQ + sub-metrics
 │       └── vbench/                # adapter: sys.path bootstrap + shims
 │           ├── __init__.py
@@ -313,9 +350,41 @@ to control read/write behavior. The example script
 `examples/inference/eval/eval_fvd.py` demonstrates the full
 two-directory workflow.
 
+## `judge.third_person_separation` — pairwise VLM judge
+
+A **preference** metric (a judge, not an absolute score), and the suite's first
+remote-API one. For each pair the judge (Gemini) sees the shared first frame and
+two rollouts — a candidate and a reference model under the same control signal —
+and picks the one that better separates the third-person CHARACTER (foreground)
+from the BACKGROUND. The corpus score is the candidate's win-rate, excluding
+ties. Set-vs-set, motion-first; it reads native mp4s, so samples carry path
+strings, not decoded tensors.
+
+```bash
+uv pip install -e .[eval-judge]      # opt-in: needs network + an API key
+export GEMINI_API_KEY=...            # or GOOGLE_API_KEY, or ~/.gemini_token
+```
+
+```python
+from fastvideo.eval import create_evaluator
+
+ev = create_evaluator(metrics=["judge.third_person_separation"], device="cpu")
+result = ev.evaluate(samples=[
+    {"video_path": "cand/000.mp4", "reference_path": "base/000.mp4",
+     "image_path": "frames/000.png", "text_prompt": "W: moves forward", "action": "W"},
+    # ... more pairs ...
+]).corpus["judge.third_person_separation"]
+result.score    # candidate win-rate excl. ties; result.details has the breakdown
+```
+
+Only `video_path`/`reference_path` are required; `image_path`/`text_prompt`/
+`action` are optional. Verdicts are cached under `${FASTVIDEO_EVAL_CACHE}/eval/judge/`.
+The judge separates best when the control yields genuine parallax (e.g.
+translation); rigid whole-frame motion (e.g. pure camera rotation) is harder. To
+sweep several baselines into a table, see
+`examples/inference/eval/eval_third_person_separation.py`.
+
 ## Out of scope (follow-up PRs)
 
 - **MIND** metrics. Depend on a separate `vipe` upstream submodule.
 - **VBench-2.0**. Sibling vbench2 package; needs its own port.
-- **Training-time eval callback** (`EvalCallback`) and the
-  `RolloutEvaluator` helper.

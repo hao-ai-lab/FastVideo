@@ -50,8 +50,6 @@ Each skill lives in its own directory under `.agents/skills/`:
 └── assets/           # Optional: templates, resources
 ```
 
-After creating a new skill, add an entry to `.agents/skills/index.jsonl`:
-
-```json
-{"name": "<skill-name>", "description": "<description>", "path": "<skill-name>/SKILL.md", "status": "draft", "trust": "low"}
-```
+Skill discovery is directory-based; no hand-maintained registry entry is
+required. Run `.agents/scripts/sync-skills.sh` if a local Claude Code checkout
+needs refreshed `.claude/skills/` symlinks.

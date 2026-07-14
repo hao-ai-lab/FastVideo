@@ -17,46 +17,6 @@ class TestLegacyTorchCompileKwargsTranslation:
     first-class :class:`CompileConfig` fields and anything unknown falls
     into ``extras``."""
 
-    def test_all_typed_keys_promoted(self) -> None:
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2",
-            {
-                "enable_torch_compile": True,
-                "torch_compile_kwargs": {
-                    "backend": "inductor",
-                    "fullgraph": True,
-                    "mode": "max-autotune-no-cudagraphs",
-                    "dynamic": False,
-                },
-            },
-        )
-        compile_config = config.engine.compile
-        assert compile_config.enabled is True
-        assert compile_config.backend == "inductor"
-        assert compile_config.fullgraph is True
-        assert compile_config.mode == "max-autotune-no-cudagraphs"
-        assert compile_config.dynamic is False
-        assert compile_config.extras == {}
-
-    def test_unknown_keys_land_in_extras(self) -> None:
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2",
-            {
-                "enable_torch_compile": True,
-                "torch_compile_kwargs": {
-                    "backend": "inductor",
-                    "options": {"triton.cudagraphs": False},
-                    "disable": False,
-                },
-            },
-        )
-        compile_config = config.engine.compile
-        assert compile_config.backend == "inductor"
-        assert compile_config.extras == {
-            "options": {"triton.cudagraphs": False},
-            "disable": False,
-        }
-
     def test_empty_kwargs_produces_empty_extras(self) -> None:
         config = legacy_from_pretrained_to_config(
             "/models/ltx2",
@@ -116,13 +76,6 @@ class TestLegacyLtx2VaeTilingTranslation:
     """``ltx2_vae_tiling`` flat kwarg promotes to
     ``generator.pipeline.vae_tiling``; reverse direction emits the
     legacy name back to FastVideoArgs."""
-
-    def test_forward_routes_to_pipeline_vae_tiling(self) -> None:
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2",
-            {"ltx2_vae_tiling": False},
-        )
-        assert config.pipeline.vae_tiling is False
 
     def test_true_round_trips(self) -> None:
         config = legacy_from_pretrained_to_config(

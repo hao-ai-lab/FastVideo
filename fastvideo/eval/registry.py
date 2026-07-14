@@ -85,6 +85,8 @@ def _extra_for(metric_name: str) -> str:
         return "eval-physics-iq"
     if metric_name.startswith("audio."):
         return "eval-audio"
+    if metric_name.startswith("judge."):
+        return "eval-judge"
     return "eval"
 
 

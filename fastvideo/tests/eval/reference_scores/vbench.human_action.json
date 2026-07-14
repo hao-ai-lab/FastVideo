@@ -1,0 +1,9 @@
+{
+  "metric": "vbench.human_action",
+  "score": null,
+  "details": {
+    "skipped": "upstream UMT (vbench/third_party/umt/datasets/mae.py) imports decord unconditionally; no aarch64 decord wheel. Also: our CI asset prompt is not a Kinetics-400 action label, so the score would be meaningless.",
+    "upstream": "Vchitect/VBench (UMT ViT-L/16)",
+    "deferred_to_stage": 2
+  }
+}

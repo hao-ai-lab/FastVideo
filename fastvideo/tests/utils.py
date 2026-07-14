@@ -6,9 +6,43 @@ from fastvideo.logger import init_logger
 
 import numpy as np
 import torch
-from pytorch_msssim import ms_ssim, ssim
 
 logger = init_logger(__name__)
+
+
+def skip_if_gated_repo_inaccessible(repo_id: str,
+                                    *,
+                                    local_path: str | None = None,
+                                    test_name: str = "test",
+                                    allow_module_level: bool = False) -> None:
+    """Skip a test when ``repo_id`` is gated/private and the token lacks access.
+
+    Local weights win: when ``local_path`` already exists the check is skipped
+    entirely, so cached machines keep running offline. Transient hub failures
+    (offline, DNS, 429/5xx) do NOT skip either — the subsequent download will
+    serve from cache or fail loudly, preserving the CI failure signal. Only a
+    positively-identified authorization problem produces a skip.
+    """
+    import pytest
+
+    if local_path is not None and os.path.exists(local_path):
+        return
+
+    from huggingface_hub import HfApi
+    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
+
+    try:
+        HfApi().auth_check(repo_id)
+    except (GatedRepoError, RepositoryNotFoundError) as exc:
+        pytest.skip(
+            f"Skipping {test_name}: the configured HuggingFace token cannot "
+            f"access the gated repo {repo_id}: {exc}",
+            allow_module_level=allow_module_level,
+        )
+    except Exception as exc:  # noqa: BLE001 - hub unreachable, proxies, 5xx
+        logger.warning(
+            "Gated-repo access probe for %s failed (%s); proceeding — the "
+            "download will serve from cache or fail loudly.", repo_id, exc)
 
 
 def _read_video_frames(path: str) -> torch.Tensor:
@@ -43,23 +77,44 @@ def _read_video_frames(path: str) -> torch.Tensor:
     return torch.stack(frames)
 
 
+def _read_image_as_single_frame_video(path: str) -> torch.Tensor:
+    """Read one image as a single-frame ``(1, C, H, W)`` uint8 tensor."""
+    from torchvision.io import read_image
+
+    img = read_image(path)
+    return img.unsqueeze(0)
+
+
+def _read_visual_frames(path: str) -> torch.Tensor:
+    """Read a video or a single image as ``(T, C, H, W)`` uint8."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in {".png", ".jpg", ".jpeg", ".webp"}:
+        return _read_image_as_single_frame_video(path)
+    return _read_video_frames(path)
+
+
 def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
     """
-    Compute SSIM between two videos.
+    Compute SSIM between two videos or single-frame image files.
+
+    Image paths (``.png``, ``.jpg``, ``.jpeg``, ``.webp``) are treated as
+    one-frame clips so T2I SSIM can share the same MS-SSIM path as video.
 
     Args:
-        video1_path: Path to the first video.
-        video2_path: Path to the second video.
+        video1_path: Path to the first video or image.
+        video2_path: Path to the second video or image.
         use_ms_ssim: Whether to use Multi-Scale Structural Similarity(MS-SSIM) instead of SSIM.
     """
+    from pytorch_msssim import ms_ssim, ssim
+
     print(f"Computing SSIM between {video1_path} and {video2_path}...")
     if not os.path.exists(video1_path):
         raise FileNotFoundError(f"Video1 not found: {video1_path}")
     if not os.path.exists(video2_path):
         raise FileNotFoundError(f"Video2 not found: {video2_path}")
 
-    frames1 = _read_video_frames(video1_path)
-    frames2 = _read_video_frames(video2_path)
+    frames1 = _read_visual_frames(video1_path)
+    frames2 = _read_visual_frames(video2_path)
 
     # Ensure same number of frames
     min_frames = min(frames1.shape[0], frames2.shape[0])
