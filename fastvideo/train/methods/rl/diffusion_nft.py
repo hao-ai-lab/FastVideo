@@ -139,11 +139,10 @@ class DiffusionNFTMethod(TrainingMethod):
 
         reward_fn = self.method_config.get("reward_fn", None)
         self._reward_fn_config, reward_backend = normalize_reward_weights(reward_fn)
-        self._reward_backend = str(
-            self.method_config.get(
-                "reward_backend",
-                reward_backend or "auto",
-            ) or "auto").strip().lower()
+        self._reward_backend = str(self.method_config.get(
+            "reward_backend",
+            reward_backend or "auto",
+        ) or "auto").strip().lower()
         if self._reward_backend not in {"auto", "diffusion_nft", "genrl"}:
             raise ValueError("method.reward_backend must be one of auto, diffusion_nft, "
                              f"or genrl, got {self._reward_backend!r}")

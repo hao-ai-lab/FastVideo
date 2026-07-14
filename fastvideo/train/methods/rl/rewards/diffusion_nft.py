@@ -17,9 +17,7 @@ import torch
 from fastvideo.train.methods.rl.rewards.media import media_to_uint8_array
 
 
-def normalize_reward_weights(
-    reward_config: Any,
-) -> tuple[dict[str, float], str | None]:
+def normalize_reward_weights(reward_config: Any, ) -> tuple[dict[str, float], str | None]:
     """Accept flat or DiffusionNFT-style nested reward mappings."""
     backend = None
     raw_rewards = reward_config

@@ -45,8 +45,8 @@ def _remap_qwen2vl_state_dict_keys(state_dict: dict[str, Any]) -> dict[str, Any]
             key = f"model.language_model.{key[len('model.'):]}"
         key = key.replace("base_model.model.visual.", "base_model.model.model.visual.", 1)
         key = key.replace("base_model.model.model.layers.", "base_model.model.model.language_model.layers.", 1)
-        key = key.replace("base_model.model.model.embed_tokens.",
-                          "base_model.model.model.language_model.embed_tokens.", 1)
+        key = key.replace("base_model.model.model.embed_tokens.", "base_model.model.model.language_model.embed_tokens.",
+                          1)
         key = key.replace("base_model.model.model.norm.", "base_model.model.model.language_model.norm.", 1)
         remapped[key] = value
     return remapped
@@ -193,8 +193,8 @@ def _patch_videoalign_modules() -> Any:
 def _patch_videoalign_runtime_model(model: Any) -> None:
     for candidate in _walk_model_graph(model):
         language_model = getattr(candidate, "language_model", None)
-        if language_model is not None and not hasattr(candidate, "embed_tokens") and hasattr(language_model,
-                                                                                            "embed_tokens"):
+        if language_model is not None and not hasattr(candidate, "embed_tokens") and hasattr(
+                language_model, "embed_tokens"):
             candidate.embed_tokens = language_model.embed_tokens
 
 

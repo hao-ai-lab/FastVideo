@@ -200,8 +200,7 @@ def train(
         raise ValueError("--num-batches-per-epoch must be >= 0")
     if sample_flow_shift < 0.0 and sample_flow_shift != DEFAULT_SAMPLE_FLOW_SHIFT:
         raise ValueError("--sample-flow-shift must be >= 0")
-    if (sample_guidance_scale < 0.0
-            and sample_guidance_scale != DEFAULT_SAMPLE_GUIDANCE_SCALE):
+    if (sample_guidance_scale < 0.0 and sample_guidance_scale != DEFAULT_SAMPLE_GUIDANCE_SCALE):
         raise ValueError("--sample-guidance-scale must be >= 0")
     if validation_num_steps < 0:
         raise ValueError("--validation-num-steps must be >= 0")
@@ -219,10 +218,9 @@ def train(
         raise ValueError("FastVideo text preprocessing currently supports "
                          "--preprocess-num-gpus 1 only.")
     if DEFAULT_HSDP_REPLICATE_DIM * DEFAULT_HSDP_SHARD_DIM != DEFAULT_NUM_GPUS:
-        raise ValueError(
-            "Invalid HSDP mesh: replicate_dim * shard_dim must equal "
-            f"num_gpus ({DEFAULT_HSDP_REPLICATE_DIM} * "
-            f"{DEFAULT_HSDP_SHARD_DIM} != {DEFAULT_NUM_GPUS}).")
+        raise ValueError("Invalid HSDP mesh: replicate_dim * shard_dim must equal "
+                         f"num_gpus ({DEFAULT_HSDP_REPLICATE_DIM} * "
+                         f"{DEFAULT_HSDP_SHARD_DIM} != {DEFAULT_NUM_GPUS}).")
     if (DEFAULT_NUM_GPUS * collection_batch_size) % num_samples_per_prompt != 0:
         raise ValueError("DiffusionNFT K-repeat sampling requires "
                          "num_gpus * collection_batch_size to be divisible by "
