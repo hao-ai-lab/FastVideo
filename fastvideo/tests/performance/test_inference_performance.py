@@ -245,6 +245,31 @@ def _validate_run_counts(run_config: Mapping[str, Any], benchmark_id: str) -> tu
     return num_warmup, num_measure
 
 
+def _resolve_num_gpus(
+    init_kwargs: Mapping[str, Any],
+    run_config: Mapping[str, Any],
+    benchmark_id: str,
+) -> int:
+    init_num_gpus = init_kwargs.get("num_gpus")
+    required_gpus = run_config.get("required_gpus")
+    for field, value in (
+        ("init_kwargs.num_gpus", init_num_gpus),
+        ("run_config.required_gpus", required_gpus),
+    ):
+        if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1):
+            raise ValueError(f"{benchmark_id}: {field} must be a positive integer")
+    if (
+        init_num_gpus is not None
+        and required_gpus is not None
+        and init_num_gpus != required_gpus
+    ):
+        raise ValueError(
+            f"{benchmark_id}: init_kwargs.num_gpus ({init_num_gpus}) must match "
+            f"run_config.required_gpus ({required_gpus})")
+    return init_num_gpus or required_gpus or 1
+
+
 def _write_results(results):
     """Write JSON results to the results directory."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -339,14 +364,19 @@ def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
     # identity fields, so v2 records always get the full identity block.
     if cfg.get("config_schema_version") is None:
         return {}
+    run_config = cfg.get("run_config") or {}
+    num_gpus = _resolve_num_gpus(init_kwargs, run_config, cfg["benchmark_id"])
+    recipe_cfg = dict(cfg)
+    recipe_cfg["init_kwargs"] = {
+        **dict(init_kwargs),
+        "num_gpus": num_gpus,
+    }
     recipe = build_recipe_from_benchmark_config(
-        cfg,
+        recipe_cfg,
         resolved_attention_backend=runtime_identity.get("resolved_attention_backend"),
         resolved_model_revision=runtime_identity.get("resolved_model_revision"),
         measured_prompts=[prompt],
     )
-    run_config = cfg.get("run_config") or {}
-    num_gpus = init_kwargs.get("num_gpus", run_config.get("required_gpus", 1))
     hw_profile = hardware_profile(num_gpus=num_gpus)
     sw_profile = software_profile()
     sw_profile.update({
@@ -435,6 +465,7 @@ def _build_result_record(
 ) -> dict[str, Any]:
     if not times or not peak_memories:
         raise ValueError("Cannot build a performance result record without measurement runs")
+    num_gpus = _resolve_num_gpus(init_kwargs, cfg.get("run_config") or {}, cfg["benchmark_id"])
     avg_time = sum(times) / len(times)
     max_peak_memory = max(peak_memories)
     num_frames = gen_kwargs.get("num_frames")
@@ -453,7 +484,7 @@ def _build_result_record(
         **result_schema_fields,
         "model_short_name": model_info.get("model_short_name", ""),
         "device": device_name,
-        "num_gpus": init_kwargs.get("num_gpus", 1),
+        "num_gpus": num_gpus,
         "num_warmup_runs": num_warmup,
         "num_measurement_runs": num_measure,
         "avg_generation_time_s": round(avg_time, 3),
@@ -481,13 +512,15 @@ def _build_result_record(
 
 def _run_benchmark(cfg):
     run_config = cfg.get("run_config") or {}
-    required_gpus = run_config.get("required_gpus", 1)
-    available = torch.cuda.device_count()
-    if available < required_gpus:
-        pytest.skip(f"Need {required_gpus} GPUs, only {available} available")
-
     model_info = cfg["model"]
     init_kwargs = dict(cfg.get("init_kwargs", {}))
+    num_gpus = _resolve_num_gpus(init_kwargs, run_config, cfg["benchmark_id"])
+    init_kwargs["num_gpus"] = num_gpus
+
+    available = torch.cuda.device_count()
+    if available < num_gpus:
+        pytest.skip(f"Need {num_gpus} GPUs, only {available} available")
+
     gen_kwargs = dict(cfg.get("generation_kwargs", {}))
     prompts = cfg.get("test_prompts", ["A cinematic video."])
     prompt = prompts[0]

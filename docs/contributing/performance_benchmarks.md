@@ -233,10 +233,10 @@ configs and remain loadable. New or migrated configs should use
 }
 ```
 
-`benchmark_id` is still required in this phase because raw artifact names,
-generated-video directories, normalized record paths, and the current rolling
-baseline comparator still depend on it. The v2 identity fields are config
-metadata that make the measured workload explicit:
+`benchmark_id` is still required because raw artifact names, generated-video
+directories, normalized record paths, and legacy storage directories depend on
+it. The v2 comparator does not use it as part of the comparison cohort. The v2
+identity fields make the measured workload explicit:
 
 | Field | Purpose |
 |---|---|
@@ -247,20 +247,19 @@ metadata that make the measured workload explicit:
 If a config declares `config_schema_version: 2`, loading fails clearly when any
 required v2 identity field is missing. If v2 identity or metadata fields are
 added without `config_schema_version: 2`, loading also fails so partial
-migrations do not silently run as v1 configs. Optional v2 metadata fields
-reserved for follow-up work, such as `metric_threshold_policy` and
-`quality_metadata`, must be JSON objects when present. (`recipe` is emitted
-by the harness and is not config-declarable.)
+migrations do not silently run as v1 configs. Optional v2 metadata fields such
+as `metric_threshold_policy` and `quality_metadata` must be JSON objects when
+present. (`recipe` is emitted by the harness and is not config-declarable.)
 
-Recipe fingerprinting, hardware/software profile IDs, exact-identity
-comparison, and dashboard cohort grouping land with this change: v2 records
-compare only within their identity cohort, and a record that opens a NEW
-cohort is marked `baseline_status: "initialized_new_cohort"` (regression
-gating starts once that cohort accumulates history). Legacy v1 configs still
+V2 records compare only within their exact identity cohort. A record that opens
+a new cohort is marked `baseline_status: "initialized_new_cohort"` and
+`comparison_status: "CALIBRATION_NEEDED"`; it remains ineligible until a
+reviewed scheduled-main artifact is seeded explicitly. Legacy v1 configs still
 run and are normalized for reporting, but their records skip rolling-baseline
 comparison entirely (`baseline_status: "skipped_missing_identity"`, never
-baseline eligible); only static thresholds gate them. Metric-specific
-threshold policies and promoted baselines remain separate follow-ups.
+baseline eligible); only static thresholds gate them. Metric-specific threshold
+policies are active. `QUALITY_BLOCKED` remains reserved for future variant
+promotion policy.
 
 ### Raw record (`results/perf_*.json`)
 
@@ -336,6 +335,9 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     "python": "3.12",
     "pytorch": "2.12",
     "cuda": "13.0",
+    "attention_backend": "FLASH_ATTN",
+    "flash_attention_4_enabled": true,
+    "container_image_version": "py3.12-cuda13.0.0",
     "packages": {
       "fastvideo_kernel": "0.3.2",
       "flashinfer": "0.2.11",
@@ -344,7 +346,12 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     }
   },
   "software_profile_id": "sw-<sha256-prefix>",
-  "environment_metadata": { "env": { "IMAGE_VERSION": "py3.12-cuda13.0.0" } },
+  "environment_metadata": {
+    "env": {
+      "IMAGE_VERSION": "py3.12-cuda13.0.0",
+      "FASTVIDEO_CONTAINER_IMAGE_REF": "ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-cuda13.0.0@sha256:<digest>"
+    }
+  },
   "environment_fingerprint": "env-<sha256-prefix>"
 }
 ```
@@ -389,6 +396,10 @@ result, used as the rolling-baseline source of truth.
   "build_id": "<buildkite-build-id>",
   "job_id": "<buildkite-job-id>",
   "quality_metadata": { "quality_status": "canonical" },
+  "baseline_status": "compared",
+  "comparison_status": "PASS",
+  "comparison_status_reason": "Comparable baseline found with no gated regressions",
+  "baseline_eligible": false,
   "success": true
 }
 ```

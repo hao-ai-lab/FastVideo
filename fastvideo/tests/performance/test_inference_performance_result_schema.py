@@ -156,6 +156,21 @@ def test_validate_run_counts_returns_defaults():
     assert perf_test._validate_run_counts({}, "wan-t2v-1.3b-2gpu") == (1, 3)
 
 
+def test_resolve_num_gpus_uses_one_count_and_rejects_conflicts():
+    assert perf_test._resolve_num_gpus(
+        {},
+        {"required_gpus": 2},
+        "wan-t2v-1.3b-2gpu",
+    ) == 2
+
+    with pytest.raises(ValueError, match="must match"):
+        perf_test._resolve_num_gpus(
+            {"num_gpus": 1},
+            {"required_gpus": 2},
+            "wan-t2v-1.3b-2gpu",
+        )
+
+
 def test_build_result_record_rejects_empty_measurements(monkeypatch):
     monkeypatch.setattr(perf_test, "_build_identity_fields", lambda *_args: _identity_fields())
 

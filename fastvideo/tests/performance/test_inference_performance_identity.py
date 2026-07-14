@@ -141,6 +141,26 @@ def test_v2_identity_tolerates_null_run_config(monkeypatch):
     assert identity_fields["hardware_profile"]["gpu_count"] == 2
 
 
+def test_effective_gpu_count_is_recorded_in_recipe_and_hardware(monkeypatch):
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN")
+    cfg = _benchmark_config()
+    del cfg["init_kwargs"]["num_gpus"]
+    init_kwargs = dict(cfg["init_kwargs"])
+
+    identity_fields = perf._build_identity_fields(
+        cfg,
+        init_kwargs,
+        "A cinematic video.",
+        {
+            "resolved_attention_backend": "FLASH_ATTN",
+            "resolved_model_revision": None,
+        },
+    )
+
+    assert identity_fields["recipe"]["init_kwargs"]["num_gpus"] == 2
+    assert identity_fields["hardware_profile"]["gpu_count"] == 2
+
+
 def test_producer_tracks_runtime_software_identity_and_container_audit(monkeypatch):
     base_profile = {
         "python": "3.12",
