@@ -49,6 +49,7 @@ class WanCausalModel(WanModel, CausalModelBase):
         transformer_override_safetensor: str
         | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
+        num_frames_per_block: int | None = None,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -61,6 +62,16 @@ class WanCausalModel(WanModel, CausalModelBase):
             lora=lora,
         )
         self._streaming_caches: (dict[tuple[int, str], _StreamingCaches]) = {}
+
+        if num_frames_per_block is not None:
+            num_frames_per_block = int(num_frames_per_block)
+            if not 1 <= num_frames_per_block <= 3:
+                # Same bound as CausalWanTransformer3DModel's config path
+                # (assert num_frame_per_block <= 3); this override must not
+                # bypass it.
+                raise ValueError("num_frames_per_block must be between 1 and 3, "
+                                 f"got {num_frames_per_block}")
+            self.transformer.num_frame_per_block = num_frames_per_block
 
     # --- CausalModelBase override: clear_caches ---
     def clear_caches(
@@ -118,6 +129,13 @@ class WanCausalModel(WanModel, CausalModelBase):
 
         if (self._should_snapshot_streaming_cache() and torch.is_grad_enabled()):
             kv_cache = self._snapshot_kv_cache_indices(kv_cache)
+            # The cross-attn cache is stateful inside the checkpointed block
+            # forward (is_init flip + k/v writes); a checkpoint recompute that
+            # sees the mutated dict skips the k/v projections and trips
+            # torch's saved-tensor-count check. Grad-enabled forwards
+            # recompute cross k/v instead, matching the legacy
+            # gradient_checkpointing branch of _forward_inference.
+            crossattn_cache = None
 
         model_kwargs: dict[str, Any] = {
             "kv_cache": kv_cache,
@@ -128,7 +146,9 @@ class WanCausalModel(WanModel, CausalModelBase):
         }
 
         device_type = self.device.type
-        dtype = noisy_latents.dtype
+        dtype = self._get_training_dtype()
+        if noisy_latents.is_floating_point():
+            noisy_latents = noisy_latents.to(dtype=dtype)
 
         if conditional:
             text_dict = batch.conditional_dict

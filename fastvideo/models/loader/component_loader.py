@@ -95,6 +95,8 @@ class ComponentLoader(ABC):
             "image_processor": (ImageProcessorLoader, "transformers"),
             "feature_extractor": (ImageProcessorLoader, "transformers"),
             "image_encoder": (ImageEncoderLoader, "transformers"),
+            "vision_language_encoder": (VisionLanguageEncoderLoader, "transformers"),
+            "processor": (ProcessorLoader, "transformers"),
             "upsampler": (UpsamplerLoader, "diffusers"),
             "upsampler_2": (UpsamplerLoader, "diffusers"),
             # Stable Audio's `StableAudioMultiConditioner` bundles T5 +
@@ -320,6 +322,19 @@ class TextEncoderLoader(ComponentLoader):
                 f"text encoder index {idx} out of range for text_encoder_configs (len={len(encoder_configs)}), model_path={model_path}"
             )
         encoder_config = encoder_configs[idx]
+        if (
+            model_config.get("architectures") == ["CLIPModel"]
+            and isinstance(model_config.get("text_config"), dict)
+        ):
+            valid_arch_fields = {
+                f.name for f in dataclasses.fields(encoder_config.arch_config)
+            }
+            model_config = {
+                key: value
+                for key, value in deepcopy(model_config["text_config"]).items()
+                if key in valid_arch_fields
+            }
+            model_config["architectures"] = ["CLIPTextModel"]
         encoder_config.update_model_arch(model_config)
         if idx < 0 or idx >= len(encoder_precisions):
             raise IndexError(
@@ -404,7 +419,9 @@ class TextEncoderLoader(ComponentLoader):
             else:
                 loaded_weights: set[str] = model.load_weights(
                     self._get_all_weights(
-                        model, model_path, to_cpu=use_cpu_offload
+                        model,
+                        model_path,
+                        to_cpu=fastvideo_args.text_encoder_cpu_offload,
                     )
                 )  # type: ignore
 
@@ -506,6 +523,39 @@ class ImageEncoderLoader(TextEncoderLoader):
             fastvideo_args,
             fastvideo_args.pipeline_config.image_encoder_precision,
         )
+
+
+class VisionLanguageEncoderLoader(ComponentLoader):
+    """Loader for vision-language autoregressive encoders."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        from fastvideo.distributed.parallel_state import get_local_torch_device
+        from fastvideo.models.encoders.glm_image_ar_loader import (
+            GlmImageARLoader)
+
+        logger.info("Loading vision-language encoder from %s", model_path)
+        target_device = get_local_torch_device()
+        loader = GlmImageARLoader(
+            model_path,
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=fastvideo_args.trust_remote_code,
+        ).to(target_device).eval()
+        return loader
+
+
+class ProcessorLoader(ComponentLoader):
+    """Loader for HF processors that pair with vision-language encoders."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        from transformers import AutoProcessor
+
+        logger.info("Loading processor from %s", model_path)
+        processor = AutoProcessor.from_pretrained(
+            model_path,
+            trust_remote_code=fastvideo_args.trust_remote_code,
+        )
+        logger.info("Loaded processor: %s", processor.__class__.__name__)
+        return processor
 
 
 class ImageProcessorLoader(ComponentLoader):
@@ -942,6 +992,20 @@ class TransformerLoader(ComponentLoader):
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
 
+        # Generator-only QAT for DMD distillation: the teacher (real_score) and
+        # critic (fake_score) transformers load with this flag set and must stay
+        # full precision. Drop the nvfp4_qat quant from their copied config, and
+        # mask the global ATTN_QAT_TRAIN env so their attention falls back to dense
+        # (the backend is read globally at build time). The generator loads without
+        # the flag and keeps both.
+        _qat_generator_only = hasattr(fastvideo_args, "_loading_teacher_critic_model")
+        _qat_prev_attn_env = None
+        if _qat_generator_only:
+            dit_config.quant_config = None
+            from fastvideo.attention.selector import _cached_get_attn_backend
+            _qat_prev_attn_env = os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
+            _cached_get_attn_backend.cache_clear()
+
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files
@@ -1027,6 +1091,12 @@ class TransformerLoader(ComponentLoader):
             enable_torch_compile=fastvideo_args.enable_torch_compile,
             torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
         )
+
+        if _qat_generator_only:
+            from fastvideo.attention.selector import _cached_get_attn_backend
+            if _qat_prev_attn_env is not None:
+                os.environ["FASTVIDEO_ATTENTION_BACKEND"] = _qat_prev_attn_env
+            _cached_get_attn_backend.cache_clear()
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)

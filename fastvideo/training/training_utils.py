@@ -1694,7 +1694,7 @@ class EMA_FSDP:
                     if p_local.numel() == 0:
                         # Nothing to swap on this rank for this param
                         continue
-                    self.saved[name] = p_local.clone().to(device=p_local.device, dtype=p_local.dtype)
+                    self.saved[name] = p_local.clone().to("cpu")
                     if name in self.ema.shadow:
                         ema_cpu = self.ema.shadow[name]
                         if ema_cpu.numel() != p_local.numel():
@@ -1714,7 +1714,7 @@ class EMA_FSDP:
                         saved_local = self.saved[name]
                         if saved_local.numel() != p_local.numel():
                             continue
-                        p_local.copy_(saved_local)
+                        p_local.copy_(saved_local.to(dtype=p_local.dtype, device=p_local.device))
             self.saved.clear()
             return False
 

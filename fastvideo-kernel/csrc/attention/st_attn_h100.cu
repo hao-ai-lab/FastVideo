@@ -63,10 +63,23 @@ template<int D> struct fwd_globals {
 };
 
 
+// ThunderKittens kernels below use Hopper `wgmma`/TMA (sm_90a). In the multi-arch
+// cu130 wheel they are also fed the sm_120a device pass, where ptxas rejects those
+// instructions, so compile the kernel body only on sm_90a and emit an empty stub
+// for every other device pass. __CUDA_ARCH_FEAT_SM90_ALL is defined only when the
+// device pass targets sm_90a (same flag CUTLASS uses); non-Hopper GPUs pick a
+// non-TK attention backend at runtime.
+#if !defined(__CUDA_ARCH__) || defined(__CUDA_ARCH_FEAT_SM90_ALL)
+#define FASTVIDEO_TK_HOPPER 1  // host pass or sm_90a device pass -> real body
+#else
+#define FASTVIDEO_TK_HOPPER 0  // any non-sm_90a device pass -> empty stub
+#endif
+
 template<int D, bool is_causal, bool text_q, bool text_kv, int DT, int DH, int DW, int CT, int CH, int CW>
 __global__  __launch_bounds__((NUM_WORKERS)*kittens::WARP_THREADS, 1)
 void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
-    extern __shared__ int __shm[]; 
+#if FASTVIDEO_TK_HOPPER
+    extern __shared__ int __shm[];
     tma_swizzle_allocator al((int*)&__shm[0]);
     int warpid = kittens::warpid(), warpgroupid = warpid/kittens::WARPGROUP_WARPS;
 
@@ -358,6 +371,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
         }
         tma::store_async_wait();
     }
+#endif  // FASTVIDEO_TK_HOPPER
 }
 
 

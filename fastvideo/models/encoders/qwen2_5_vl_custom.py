@@ -75,6 +75,25 @@ if not is_flash_attn_2_available():
 
 logger = logging.get_logger(__name__)
 
+
+def _resolve_torch_dtype(dtype, default: torch.dtype = torch.float32) -> torch.dtype:
+    if isinstance(dtype, torch.dtype):
+        return dtype
+    if isinstance(dtype, str):
+        normalized = dtype.strip().removeprefix("torch.").lower()
+        return {
+            "bfloat16": torch.bfloat16,
+            "bf16": torch.bfloat16,
+            "float16": torch.float16,
+            "fp16": torch.float16,
+            "half": torch.float16,
+            "float32": torch.float32,
+            "fp32": torch.float32,
+            "float": torch.float32,
+        }.get(normalized, default)
+    return default
+
+
 class Qwen2_5_VLMLP(nn.Module):
     def __init__(self, config, bias: bool = False):
         super().__init__()
@@ -304,10 +323,13 @@ class Qwen2_5_VisionTransformerPretrainedModel(nn.Module):
     config_class = Qwen2_5_VLVisionConfig
     _no_split_modules = ["Qwen2_5_VLVisionBlock"]
 
-    def __init__(self, config) -> None:
+    def __init__(self, config, parent_torch_dtype=None) -> None:
         super().__init__()
 
-        self.dtype = torch.bfloat16 if config.torch_dtype == "bfloat16" else torch.float32
+        config_torch_dtype = getattr(config, "torch_dtype", None)
+        self.dtype = _resolve_torch_dtype(
+            config_torch_dtype if config_torch_dtype is not None else parent_torch_dtype
+        )
 
         self.spatial_merge_size = config.spatial_merge_size
         self.patch_size = config.patch_size
@@ -467,6 +489,18 @@ class Qwen2_5_VisionTransformerPretrainedModel(nn.Module):
         return hidden_states
 
 
+def _compute_default_rope_parameters(config, device=None, seq_len=None, **kwargs):
+    # transformers>=5 removes the "default" entry from ROPE_INIT_FUNCTIONS and
+    # moves rope_theta inside rope_parameters; replicate the 4.x default init.
+    rope_params = getattr(config, "rope_parameters", None) or getattr(config, "rope_scaling", None) or {}
+    base = rope_params.get("rope_theta", getattr(config, "rope_theta", 10000.0))
+    head_dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
+    partial_rotary_factor = getattr(config, "partial_rotary_factor", 1.0)
+    dim = int(head_dim * partial_rotary_factor)
+    inv_freq = 1.0 / (base**(torch.arange(0, dim, 2, dtype=torch.int64).float().to(device) / dim))
+    return inv_freq, 1.0
+
+
 class Qwen2_5_VLRotaryEmbedding(nn.Module):
     def __init__(self, config: Qwen2_5_VLConfig, device=None):
         super().__init__()
@@ -479,7 +513,14 @@ class Qwen2_5_VLRotaryEmbedding(nn.Module):
         self.original_max_seq_len = config.max_position_embeddings
 
         self.config = config
-        self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
+        if self.rope_type in ROPE_INIT_FUNCTIONS:
+            self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
+        elif self.rope_type == "default":
+            # transformers>=5 drops the "default" entry from ROPE_INIT_FUNCTIONS.
+            self.rope_init_fn = _compute_default_rope_parameters
+        else:
+            raise KeyError(f"Unsupported rope_type '{self.rope_type}'; available: "
+                           f"{['default', *ROPE_INIT_FUNCTIONS]}")
 
         inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
@@ -948,6 +989,16 @@ QWEN2_5_VL_ATTENTION_CLASSES = {
 # If FlashAttention2 is not available, transparently fall back to SDPA.
 if not is_flash_attn_2_available():
     QWEN2_5_VL_ATTENTION_CLASSES["flash_attention_2"] = Qwen2_5_VLSdpaAttention
+else:
+    # transformers>=5 only resolves the flash-attn functions when the model
+    # preloads them via its attention interface; this module bypasses
+    # PreTrainedModel, so _flash_attention_forward(implementation=None) raises
+    # unless we preload here.
+    try:
+        from transformers.modeling_flash_attention_utils import lazy_import_flash_attention
+        lazy_import_flash_attention("flash_attention_2")
+    except (ImportError, ValueError):
+        QWEN2_5_VL_ATTENTION_CLASSES["flash_attention_2"] = Qwen2_5_VLSdpaAttention
     
 class Qwen2_5_VLDecoderLayer(nn.Module):
     def __init__(self, config: Qwen2_5_VLConfig, layer_idx: int):
@@ -1035,7 +1086,7 @@ class Qwen2_5_VLModel(nn.Module):
     def __init__(self, config: Qwen2_5_VLConfig):
         super().__init__()
         self.config = config
-        self.padding_idx = config.pad_token_id
+        self.padding_idx = getattr(config, "pad_token_id", None)
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
@@ -1408,6 +1459,18 @@ class Qwen2_5_VLCausalLMOutputWithPast(ModelOutput):
     rope_deltas: Optional[torch.LongTensor] = None
 
 
+def _flatten_text_config(config):
+    # transformers>=5 stops forwarding text-model attributes (hidden_size,
+    # vocab_size, rope_scaling, ...) from the composite Qwen2_5_VLConfig to
+    # config.text_config; this module reads them from the top level.
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        for key, value in text_config.to_dict().items():
+            if not hasattr(config, key):
+                setattr(config, key, value)
+    return config
+
+
 class Qwen2_5_VLForConditionalGenerationSimple(nn.Module):
     _tied_weights_keys = ["lm_head.weight"]
     config_class = Qwen2_5_VLConfig
@@ -1415,8 +1478,12 @@ class Qwen2_5_VLForConditionalGenerationSimple(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        config = _flatten_text_config(config)
         self.config = config
-        self.visual = Qwen2_5_VisionTransformerPretrainedModel(config.vision_config)
+        self.visual = Qwen2_5_VisionTransformerPretrainedModel(
+            config.vision_config,
+            parent_torch_dtype=getattr(config, "torch_dtype", None),
+        )
 
         self.model = Qwen2_5_VLModel(config)
         self.vocab_size = config.vocab_size

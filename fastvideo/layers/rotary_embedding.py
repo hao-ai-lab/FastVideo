@@ -295,6 +295,7 @@ def get_1d_rotary_pos_embed(
     interpolation_factor: float = 1.0,
     dtype: torch.dtype = torch.float32,
     use_real: bool = True,
+    freqs_dtype: torch.dtype | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Precompute the frequency tensor for complex exponential (cis) with given dimensions.
@@ -319,12 +320,16 @@ def get_1d_rotary_pos_embed(
     if isinstance(pos, int):
         pos = torch.arange(pos).float()
 
+    # freqs_dtype is an alias for dtype (Diffusers-compatible calling convention).
+    if freqs_dtype is not None:
+        dtype = freqs_dtype
+
     # proposed by reddit user bloc97, to rescale rotary embeddings to longer sequence length without fine-tuning
     # has some connection to NTK literature
     if theta_rescale_factor != 1.0:
         theta *= theta_rescale_factor**(dim / (dim - 2))
 
-    freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].to(dtype) / dim))  # [D/2]
+    freqs = 1.0 / (theta**(torch.arange(0, dim, 2, device=pos.device)[:(dim // 2)].to(dtype) / dim))  # [D/2]
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
     freqs_cos = freqs.cos()  # [S, D/2]
     freqs_sin = freqs.sin()  # [S, D/2]
@@ -445,6 +450,21 @@ def get_nd_rotary_pos_embed(
     return cos, sin
 
 
+_ROTARY_POS_EMBED_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
+# Bound the table cache so long-running servers / causal models (which vary
+# start_frame per frame) cannot grow it without limit; entries are large float64
+# tensors. Least-recently-used eviction keeps the active resolution(s) hot while
+# capping memory.
+_ROTARY_POS_EMBED_CACHE_MAXSIZE = 16
+
+
+def _hashable(value: Any) -> Any:
+    """Return a hashable view of a scalar or sequence for use in a cache key."""
+    if isinstance(value, list | tuple):
+        return tuple(value)
+    return value
+
+
 def get_rotary_pos_embed(
     rope_sizes,
     hidden_size,
@@ -495,6 +515,31 @@ def get_rotary_pos_embed(
         sp_rank = 0
         sp_world_size = 1
 
+    # Memoize on every output-affecting argument; the table is constant across
+    # denoising steps, so this avoids recomputing the float64 cos/sin tables.
+    cache_key = (
+        _hashable(rope_sizes),
+        tuple(rope_dim_list),
+        rope_theta,
+        _hashable(theta_rescale_factor),
+        _hashable(interpolation_factor),
+        shard_dim,
+        sp_rank,
+        sp_world_size,
+        dtype,
+        start_frame,
+        use_real,
+    )
+    cached = _ROTARY_POS_EMBED_CACHE.get(cache_key)
+    if cached is not None:
+        # Move to most-recently-used position so the active table is not evicted
+        # when several resolutions / buckets share the process (LRU recency).
+        # Pop with a default: a concurrent eviction between the get() above and
+        # here would otherwise raise KeyError on the hit path.
+        if _ROTARY_POS_EMBED_CACHE.pop(cache_key, None) is not None:
+            _ROTARY_POS_EMBED_CACHE[cache_key] = cached
+        return cached
+
     freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
         rope_dim_list,
         rope_sizes,
@@ -508,6 +553,14 @@ def get_rotary_pos_embed(
         start_frame=start_frame,
         use_real=use_real,
     )
+    # The returned tensors are shared cache entries: callers must never mutate
+    # them in place. Note .to(device) is an identity alias when the tensor is
+    # already on the target device (e.g. CPU runs), so it does NOT guarantee a
+    # copy — treat the tables as read-only and copy before any in-place op.
+    # Reached only on a miss, so evict the least-recently-used entry at capacity.
+    if len(_ROTARY_POS_EMBED_CACHE) >= _ROTARY_POS_EMBED_CACHE_MAXSIZE:
+        _ROTARY_POS_EMBED_CACHE.pop(next(iter(_ROTARY_POS_EMBED_CACHE)))
+    _ROTARY_POS_EMBED_CACHE[cache_key] = (freqs_cos, freqs_sin)
     return freqs_cos, freqs_sin
 
 

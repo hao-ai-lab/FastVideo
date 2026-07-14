@@ -28,6 +28,7 @@ class DecodingStage(PipelineStage):
     This stage handles the decoding of latent representations into the final
     output format (e.g., pixel values).
     """
+    performance_component_metric = "vae_decode_time_s"
 
     def __init__(self, vae, pipeline=None) -> None:
         self.vae: ParallelTiledVAE = vae
@@ -136,8 +137,10 @@ class DecodingStage(PipelineStage):
         self.vae = self.vae.to(get_local_torch_device())
         latents = latents.to(get_local_torch_device())
 
-        # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        # Setup VAE precision (decode-only override falls back to vae_precision)
+        decode_precision = (fastvideo_args.pipeline_config.vae_decode_precision
+                            or fastvideo_args.pipeline_config.vae_precision)
+        vae_dtype = PRECISION_TO_TYPE[decode_precision]
         vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Flux2: skip denormalize on packed latents; BN denorm runs below instead
@@ -201,8 +204,10 @@ class DecodingStage(PipelineStage):
         self.vae = self.vae.to(get_local_torch_device())
         latents = latents.to(get_local_torch_device())
 
-        # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        # Setup VAE precision (decode-only override falls back to vae_precision)
+        decode_precision = (fastvideo_args.pipeline_config.vae_decode_precision
+                            or fastvideo_args.pipeline_config.vae_precision)
+        vae_dtype = PRECISION_TO_TYPE[decode_precision]
         vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         latents = self._denormalize_latents(latents)

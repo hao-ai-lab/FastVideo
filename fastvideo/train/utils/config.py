@@ -343,6 +343,21 @@ def _build_training_config(
             if init_from is not None:
                 model_path = str(init_from)
 
+    raw_data_path = da.get("data_path", "") or ""
+    data_path: str | list[str] | dict[str, int]
+    if isinstance(raw_data_path, dict):
+        data_path = {str(path): int(repeat) for path, repeat in raw_data_path.items()}
+    elif isinstance(raw_data_path, list | tuple):
+        data_path = [str(path) for path in raw_data_path]
+    else:
+        data_path = str(raw_data_path)
+
+    preprocessed_data_type = str(da.get("preprocessed_data_type", "t2v") or "t2v").strip().lower()
+    if preprocessed_data_type not in {"t2v", "text_only"}:
+        raise ValueError("training.data.preprocessed_data_type must be one of "
+                         "{'t2v', 'text_only'}, got "
+                         f"{preprocessed_data_type!r}")
+
     return TrainingConfig(
         distributed=DistributedConfig(
             num_gpus=num_gpus,
@@ -353,7 +368,8 @@ def _build_training_config(
             pin_cpu_memory=bool(d.get("pin_cpu_memory", False)),
         ),
         data=DataConfig(
-            data_path=str(da.get("data_path", "") or ""),
+            data_path=data_path,
+            preprocessed_data_type=preprocessed_data_type,
             train_batch_size=int(da.get("train_batch_size", 1) or 1),
             dataloader_num_workers=int(da.get("dataloader_num_workers", 0) or 0),
             training_cfg_rate=float(da.get("training_cfg_rate", 0.0) or 0.0),
@@ -385,10 +401,12 @@ def _build_training_config(
         ),
         tracker=TrackerConfig(
             trackers=list(tr.get("trackers", []) or []),
+            entity=str(tr.get("entity", "") or ""),
             project_name=str(tr.get("project_name", "fastvideo") or "fastvideo"),
             run_name=str(tr.get("run_name", "") or ""),
         ),
         vsa_sparsity=float(vs.get("sparsity", 0.0) or 0.0),
+        vsa_cache_tile_buf=bool(vs.get("cache_tile_buf", False) or False),
         model=ModelTrainingConfig(
             weighting_scheme=str(m.get("weighting_scheme", "uniform") or "uniform"),
             logit_mean=float(m.get("logit_mean", 0.0) or 0.0),

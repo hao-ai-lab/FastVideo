@@ -11,6 +11,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
+from fastvideo.tests.utils import skip_if_gated_repo_inaccessible
 from fastvideo.utils import maybe_download_model
 from fastvideo.configs.models.dits import CosmosVideoConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -25,18 +26,12 @@ BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Video2World"
 
 
 def _resolve_model_path() -> str:
-    try:
-        return maybe_download_model(
-            BASE_MODEL_PATH,
-            local_dir=os.path.join("data", BASE_MODEL_PATH),
-        )
-    except ValueError as exc:
-        pytest.skip(
-            "Skipping Cosmos transformer test because the configured "
-            "HuggingFace token cannot access the gated Cosmos weights: "
-            f"{exc}",
-            allow_module_level=True,
-        )
+    local_dir = os.path.join("data", BASE_MODEL_PATH)
+    skip_if_gated_repo_inaccessible(BASE_MODEL_PATH,
+                                    local_path=local_dir,
+                                    test_name="Cosmos transformer test",
+                                    allow_module_level=True)
+    return maybe_download_model(BASE_MODEL_PATH, local_dir=local_dir)
 
 
 MODEL_PATH = _resolve_model_path()

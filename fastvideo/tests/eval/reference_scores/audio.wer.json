@@ -1,0 +1,12 @@
+{
+  "metric": "audio.wer",
+  "score": 0.0,
+  "details": {
+    "transcription": "thats it dads lost it and weve lost dad stop being so dramatic jess",
+    "reference_text": "thats it dads lost it and weve lost dad stop being so dramatic jess",
+    "asr_backend": "whisper",
+    "model_name": "whisper-base",
+    "upstream": "openai/whisper",
+    "asset_video": "fastvideo/tests/eval/asset/ltx2.mp4"
+  }
+}

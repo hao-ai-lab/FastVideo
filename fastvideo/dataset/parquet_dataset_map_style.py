@@ -2,6 +2,7 @@
 import os
 import pickle
 import random
+from collections.abc import Sequence
 from typing import Any
 
 import pyarrow as pa
@@ -94,8 +95,56 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         return len(self.sp_group_local_indices) // self.batch_size
 
 
-def get_parquet_files_and_length(path: str):
-    dataset_root = os.path.realpath(os.path.expanduser(path))
+def _parse_data_path_specs(path: str | Sequence[str] | dict[str, int]) -> list[tuple[str, int]]:
+    """Parse one or more dataset roots with old-framework repeat counts."""
+    if isinstance(path, dict):
+        return [
+            (str(root), int(repeat))
+            for root, repeat in path.items()
+            if int(repeat) > 0
+        ]
+    if isinstance(path, Sequence) and not isinstance(path, str):
+        return [(str(root), 1) for root in path]
+
+    specs: list[tuple[str, int]] = []
+    for part in str(path).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            dir_path, count_str = part.rsplit(":", 1)
+            count = int(count_str)
+        else:
+            dir_path, count = part, 1
+        if count > 0:
+            specs.append((dir_path.strip(), count))
+    return specs
+
+
+def get_parquet_files_and_length(path: str | Sequence[str] | dict[str, int]):
+    specs = _parse_data_path_specs(path)
+    if len(specs) != 1 or specs[0][1] != 1:
+        all_file_names: list[str] = []
+        all_lengths: list[int] = []
+        for root, repeat in specs:
+            file_names, lengths = get_parquet_files_and_length(str(root))
+            for _ in range(repeat):
+                all_file_names.extend(file_names)
+                all_lengths.extend(lengths)
+        if not all_file_names:
+            raise FileNotFoundError(
+                "No parquet files found under dataset paths: "
+                f"{path}. "
+                "Please verify these paths point to preprocessed parquet data."
+            )
+        file_lengths = sorted(
+            zip(all_file_names, all_lengths, strict=True),
+            key=lambda x: x[0],
+        )
+        file_names_sorted, lengths_sorted = zip(*file_lengths, strict=True)
+        return file_names_sorted, lengths_sorted
+
+    dataset_root = os.path.realpath(os.path.expanduser(specs[0][0]))
     # Check if cached info exists
     cache_dir = os.path.join(dataset_root, "map_style_cache")
     cache_file = os.path.join(cache_dir, "file_info.pkl")
@@ -268,7 +317,7 @@ class LatentsParquetMapStyleDataset(Dataset):
 
     def __init__(
         self,
-        path: str,
+        path: str | Sequence[str] | dict[str, int],
         batch_size: int,
         parquet_schema: pa.Schema,
         cfg_rate: float = 0.0,
@@ -357,7 +406,6 @@ class LatentsParquetMapStyleDataset(Dataset):
 
     def __len__(self):
         return sum(self.lengths)
-
 
 # ────────────────────────────────────────────────────────────────────────────
 # 3.  Loader helper – everything else stays just like your original trainer

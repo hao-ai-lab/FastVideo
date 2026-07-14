@@ -1,0 +1,116 @@
+# DiffusionNFT multi-reward single-frame RL: Wan 2.1 T2V 1.3B on text-only PickScore prompts.
+#
+# Single-frame RL is represented as a one-latent-frame Wan run:
+#   num_latent_t: 1
+#   num_frames: 1
+#
+# The method trains the full transformer (no LoRA) and keeps an old-policy
+# transformer plus a frozen reference transformer, matching the non-LoRA
+# DiffusionNFT loss path.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+  old:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+  reference:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+
+method:
+  _target_: fastvideo.train.methods.rl.diffusion_nft.DiffusionNFTMethod
+  reward_fn:
+    pickscore: 1.0
+    clipscore: 1.0
+
+  sampling:
+    num_steps: 25
+    scheduler: flow_match_euler
+    trajectory: ode
+    flow_shift: inherit
+
+  validation:
+    every_steps: 10
+    num_steps: 40
+    num_prompts: 16
+    batch_size: 16
+    log_samples: true
+    seed: 42
+    # Null reuses training.data.data_path. Override this with a held-out
+    # preprocessed parquet path when one is available.
+    data_path:
+
+  # DiffusionNFT sd3_multi_reward on 4 GPUs resolves to per-GPU sample batch
+  # size 6, 48 sample batches per outer epoch, and grad accumulation 48.
+  sample_train_batch_size: 6
+  train_batch_size: 6
+  num_batches_per_epoch: 48
+  num_video_per_prompt: 24
+  num_inner_epochs: 1
+  timestep_fraction: 0.99
+
+  beta: 0.1
+  kl_beta: 0.0001
+  decay_type: 1
+  adv_mode: all
+  adv_clip_max: 5
+  max_grad_norm: 1.0
+  ema:
+    enabled: true
+    decay: 0.9
+    update_after_step: 0
+    validation: true
+  terminal_progress: true
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: data/pickscore_text_only_preprocessed
+    preprocessed_data_type: text_only
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 1
+    num_height: 448
+    num_width: 832
+    num_frames: 1
+
+  optimizer:
+    learning_rate: 3.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.0001
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 100000
+    gradient_accumulation_steps: 48
+
+  checkpoint:
+    output_dir: outputs/wan2.1_diffusion_nft_pick_clip
+    training_state_checkpointing_steps: 30
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: diffusion_nft_wan
+    run_name: wan2.1_diffusion_nft_pick_clip
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+pipeline:
+  flow_shift: 8

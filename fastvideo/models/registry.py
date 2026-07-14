@@ -11,7 +11,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Set
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import cache, lru_cache
 from typing import NoReturn, TypeVar, cast
 
 import cloudpickle
@@ -32,6 +32,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "HYWorldTransformer3DModel":
     ("dits", "hyworld", "HYWorldTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
+    "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
+    "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
     "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
@@ -49,6 +51,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
 _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
+    "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
+    "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "MatrixGame2WanModel": ("dits", "matrixgame2", "MatrixGame2WanModel"),
     "CausalMatrixGame2WanModel": ("dits", "matrixgame2", "CausalMatrixGame2WanModel"),
@@ -56,6 +60,11 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     "MatrixGameWanModel": ("dits", "matrixgame2", "MatrixGame2WanModel"),
     "CausalMatrixGameWanModel": ("dits", "matrixgame2", "CausalMatrixGame2WanModel"),
     "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
+}
+
+# Text-to-image DiT models (2D image generation)
+_TEXT_TO_IMAGE_DIT_MODELS = {
+    "GlmImageTransformer2DModel": ("dits", "glm_image", "GlmImageTransformer2DModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
@@ -133,6 +142,7 @@ _UPSAMPLERS = {
 _LEGACY_FAST_VIDEO_MODELS = {
     **_TEXT_TO_VIDEO_DIT_MODELS,
     **_IMAGE_TO_VIDEO_DIT_MODELS,
+    **_TEXT_TO_IMAGE_DIT_MODELS,
     **_TEXT_ENCODER_MODELS,
     **_IMAGE_ENCODER_MODELS,
     **_VAE_MODELS,
@@ -144,7 +154,7 @@ _LEGACY_FAST_VIDEO_MODELS = {
 MODELS_PATH = os.path.dirname(__file__)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _discover_and_register_models() -> dict[str, tuple[str, str, str]]:
     discovered_models: dict[str, tuple[str, str, str]] = {}
     for root, dirs, files in os.walk(MODELS_PATH):
@@ -159,7 +169,7 @@ def _discover_and_register_models() -> dict[str, tuple[str, str, str]]:
 
             filepath = os.path.join(root, filename)
             try:
-                with open(filepath, "r", encoding="utf-8") as f:
+                with open(filepath, encoding="utf-8") as f:
                     source = f.read()
                 tree = ast.parse(source, filename=filename)
 

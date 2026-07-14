@@ -47,7 +47,16 @@ class WanT2V480PConfig(PipelineConfig):
 
     # Precision for each component
     precision: str = "bf16"
+    # Keep the VAE *encode* in fp32: for I2V/causal Wan variants the image/video
+    # VAE encode seeds the denoising trajectory, and bf16 there shifts the output
+    # (e.g. Matrix-Game-2.0 SSIM 0.98 -> 0.76). Decode is output-only, so we lower
+    # just the decode below.
     vae_precision: str = "fp32"
+    # bf16 VAE *decode* is effectively lossless (MS-SSIM 0.9999 vs fp32 on an
+    # identical latent) and faster; the same AutoencoderKLWan already runs bf16
+    # in Cosmos-Predict2.5 and fp16 in Cosmos. Inherited by all Wan variants
+    # (incl. I2V/causal) — decode-only, so encode trajectories are untouched.
+    vae_decode_precision: str = "bf16"
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
 
     # self-forcing params

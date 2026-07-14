@@ -1,0 +1,38 @@
+# LTX-2.3 distilled i2v — 5+2 two-stage at 1024x1536.
+#
+# Run:
+#   fastvideo generate --config examples/inference/ltx2_3/i2v_5s2_1024x1536.yaml
+#
+# Stage 1 denoises for 5 steps at half resolution; the latents are then
+# spatially upsampled and refined for 2 steps (refine only supports 2 or 3).
+# The refine upsampler auto-resolves from the model's `spatial_upscaler`.
+generator:
+  model_path: FastVideo/LTX-2.3-Distilled-Diffusers
+  engine:
+    num_gpus: 1
+  pipeline:
+    workload_type: i2v
+    preset_overrides:
+      refine:
+        enabled: true
+        num_inference_steps: 2
+        guidance_scale: 1.0
+        add_noise: true
+request:
+  prompt: >-
+    The subject slowly turns toward the camera with a soft, natural expression, hair and clothing swaying gently, shallow depth of field, subtle cinematic motion.
+  sampling:
+    height: 1024
+    width: 1536
+    num_frames: 121
+    fps: 24
+    guidance_scale: 1.0
+    num_inference_steps: 5
+  # i2v conditioning — replace the path with your own first-frame image.
+  extensions:
+    ltx2_images:
+      - ["/path/to/your/first_frame.jpg", 0, 1.0]
+    ltx2_image_crf: 0.0
+  output:
+    output_path: outputs/ltx2_3_i2v_5s2_1024x1536.mp4
+    save_video: true

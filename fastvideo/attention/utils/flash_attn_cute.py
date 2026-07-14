@@ -1,16 +1,78 @@
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
+
 import torch
+
+from fastvideo.logger import init_logger
+from fastvideo.platforms import current_platform
+
+logger = init_logger(__name__)
+
 if torch.cuda.is_available():
-    from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
+    try:
+        from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
+    except ImportError:
+        # flash_attn.cute (FA4) is simply not installed -- expected on builds
+        # without it; callers handle the ImportError (the FASTVIDEO_FA4 gate in
+        # flash_attn.py raises, the FP4 probe treats FA4 as unavailable).
+        raise
+    except Exception as e:
+        # flash_attn.cute IS installed but failed to import -- almost always an
+        # nvidia-cutlass-dsl (CuTe DSL) version skew, e.g. "module
+        # 'cutlass.cute.core' has no attribute 'ThrMma'" (an AttributeError, not
+        # ImportError). This is fixable by pinning a compatible
+        # nvidia-cutlass-dsl, so warn loudly, then re-raise as ImportError so
+        # callers can handle it uniformly.
+        logger.warning(
+            "flash_attn.cute (FA4) is installed but failed to import (%r). "
+            "This is usually an nvidia-cutlass-dsl version mismatch -- pin a "
+            "compatible nvidia-cutlass-dsl to restore FA4.", e)
+        raise ImportError(f"flash_attn.cute (FA4) import failed: {e!r}") from e
 else:
     # This error will be caught in flash_attn.py or flash_attn_no_pad.py
     raise ImportError("flash_attn.cute is only available on CUDA devices; this error must be handled internally")
+
+try:
+    # FA2 serves the calls FA4 cute cannot on pre-sm90 GPUs (backward, GQA).
+    # Optional so FA4-only installs can still import this module.
+    from flash_attn import flash_attn_func as _flash_attn_2_func
+    from flash_attn import flash_attn_varlen_func as _flash_attn_2_varlen_func
+except ImportError:
+    _flash_attn_2_func = None
+    _flash_attn_2_varlen_func = None
 
 
 def _check_dropout(dropout_p: float) -> None:
     if dropout_p != 0.0:
         raise NotImplementedError(f"flash_attn.cute does not support dropout (got dropout_p={dropout_p})")
+
+
+@functools.cache
+def _sm90_or_newer() -> bool:
+    return current_platform.has_device_capability(90)
+
+
+def _use_fa2(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> bool:
+    if _sm90_or_newer():
+        return False
+    # Pre-sm90 FA4 cute limitations, both served by FA2 (deterministic
+    # capability gate, not a runtime fallback):
+    #   * the backward asserts sm90+ (L40S/sm_89 dies on its arch check);
+    #   * GQA fails CuTeDSL JIT in pack_gqa ("ValueError: Operation creation
+    #     failed", observed on sm_89 with HunyuanGameCraft/LTX2).
+    if q.shape[-2] != k.shape[-2]:
+        return True
+    return torch.is_grad_enabled() and any(t.requires_grad for t in (q, k, v))
+
+
+def _fa2_or_raise(fa2_func: Callable | None) -> Callable:
+    if fa2_func is None:
+        raise RuntimeError("this attention call cannot run on FA4 cute below sm90 (its backward and "
+                           "GQA support require sm90+) and flash-attn 2, which serves it there, is "
+                           "not installed.")
+    return fa2_func
 
 
 @torch.library.custom_op(
@@ -26,6 +88,9 @@ def _flash_attn_cute_forward(
     causal: bool,
     deterministic: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    # _flash_attn_fwd returns (out, lse) on its empty-sequence early path but
+    # (out, lse, p, row_max) on the main path at the pinned FA4 cute ref; take
+    # the first two so both arities work.
     out, lse = _flash_attn_fwd(
         q,
         k,
@@ -37,7 +102,7 @@ def _flash_attn_cute_forward(
         softcap=0.0,
         num_splits=1,
         pack_gqa=None,
-    )
+    )[:2]
     return out, lse
 
 
@@ -129,7 +194,7 @@ def _flash_attn_cute_varlen_forward(
         softcap=0.0,
         num_splits=1,
         pack_gqa=None,
-    )
+    )[:2]
     return out, lse
 
 
@@ -222,6 +287,16 @@ def flash_attn_func(
     deterministic: bool = False,
 ) -> torch.Tensor:
     """Only returns the output, not the lse."""
+    if _use_fa2(q, k, v):
+        return _fa2_or_raise(_flash_attn_2_func)(
+            q,
+            k,
+            v,
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            deterministic=deterministic,
+        )
     _check_dropout(dropout_p)
     out, _ = torch.ops.fastvideo._flash_attn_cute_forward(q, k, v, softmax_scale, causal, deterministic)
     return out
@@ -250,7 +325,7 @@ def _flash_attn_cute_fp4_forward(
     softmax_scale: float | None,
     causal: bool,
 ) -> torch.Tensor:
-    out, _ = _flash_attn_fwd(
+    out = _flash_attn_fwd(
         q,
         k,
         v,
@@ -263,7 +338,7 @@ def _flash_attn_cute_fp4_forward(
         pack_gqa=None,
         mSFQ=sfq,
         mSFK=sfk,
-    )
+    )[0]
     return out
 
 
@@ -311,6 +386,20 @@ def flash_attn_varlen_func(
     deterministic: bool = False,
 ) -> torch.Tensor:
     """Only returns the output, not the lse."""
+    if _use_fa2(q, k, v):
+        return _fa2_or_raise(_flash_attn_2_varlen_func)(
+            q,
+            k,
+            v,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            deterministic=deterministic,
+        )
     _check_dropout(dropout_p)
     out, _ = torch.ops.fastvideo._flash_attn_cute_varlen_forward(
         q,

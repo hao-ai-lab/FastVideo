@@ -55,6 +55,8 @@ class DMD2Method(TrainingMethod):
             raise ValueError("DMD2Method requires critic to be trainable")
         self._cfg_uncond = self._parse_cfg_uncond()
         self._rollout_mode = self._parse_rollout_mode()
+        self._validate_preprocessed_data_type()
+        self._configure_student_negative_conditioning()
         self._denoising_step_list: torch.Tensor | None = (None)
 
         # Initialize preprocessors on student.
@@ -206,6 +208,13 @@ class DMD2Method(TrainingMethod):
         return targets
 
     def _parse_rollout_mode(self, ) -> Literal["simulate", "data_latent"]:
+        """Parse how DMD2 obtains the latent point used for rollout.
+
+        ``simulate`` starts from fresh noise and lets the student create an
+        artificial latent trajectory, so it can run with text-only data.
+        ``data_latent`` starts from preprocessed VAE latents and perturbs them
+        at a sampled denoising timestep.
+        """
         raw = self.method_config.get("rollout_mode", None)
         if raw is None:
             raise ValueError("method_config.rollout_mode must be set "
@@ -222,6 +231,34 @@ class DMD2Method(TrainingMethod):
         raise ValueError("method_config.rollout_mode must be one of "
                          "{simulate, data_latent}, got "
                          f"{raw!r}")
+
+    def _validate_preprocessed_data_type(self) -> None:
+        data_type = str(getattr(
+            self.training_config.data,
+            "preprocessed_data_type",
+            "t2v",
+        )).strip().lower()
+        if data_type == "text_only" and self._rollout_mode != "simulate":
+            raise ValueError("training.data.preprocessed_data_type='text_only' "
+                             "requires method.rollout_mode='simulate'; "
+                             "data_latent rollout requires vae_latent data.")
+
+    def _uses_negative_prompt_conditioning(self) -> bool:
+        if self._cfg_uncond is None:
+            return True
+        text_policy = self._cfg_uncond.get("text", None)
+        if text_policy is None:
+            return True
+        return str(text_policy).strip().lower() == "negative_prompt"
+
+    def _configure_student_negative_conditioning(self) -> None:
+        setter = getattr(
+            self.student,
+            "set_requires_negative_conditioning",
+            None,
+        )
+        if setter is not None:
+            setter(self._uses_negative_prompt_conditioning())
 
     def _parse_cfg_uncond(self, ) -> dict[str, Any] | None:
         raw = self.method_config.get("cfg_uncond", None)

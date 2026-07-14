@@ -34,6 +34,7 @@ class PipelineStage(ABC):
     composed with other stages to create a complete pipeline. Each stage is responsible
     for a specific part of the process, such as prompt encoding, latent preparation, etc.
     """
+    performance_component_metric: str | None = None
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """
@@ -155,6 +156,9 @@ class PipelineStage(ABC):
                 logger.info("[%s] Execution completed in %s ms", stage_name, execution_time * 1000)
                 batch.logging_info.add_stage_execution_time(stage_key, execution_time)
                 batch.logging_info.add_stage_metric(stage_key, "stage_class", stage_class_name)
+                component_metric = self.performance_component_metric
+                if component_metric is not None:
+                    batch.logging_info.add_stage_metric(stage_key, "component_metric", component_metric)
             except Exception as e:
                 torch.cuda.synchronize()
                 execution_time = time.perf_counter() - start_time
