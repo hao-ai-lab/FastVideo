@@ -1,20 +1,24 @@
 ---
 name: seed-ssim-references
-description: Seed HF reference artefacts for a single newly-added SSIM test (pixel `.mp4` for `run_text_to_video_similarity_test`-style tests, or latent `.pt` for `run_text_to_latent_similarity_test`-style tests). Runs the test on Modal L40S, downloads the generated artefacts via `modal volume get`, pauses for the user to verify (visual eyeball for mp4, numerics dump for pt), then uploads only that test's files to `FastVideo/ssim-reference-videos`. Use when a new `fastvideo/tests/ssim/test_*_similarity.py` has just been added and has no references on HF yet.
+description: Seed HF reference artefacts for a single newly-added SSIM test (pixel video/image or latent `.pt`). Runs the test on Modal L40S, downloads the generated artefacts via `modal volume get`, pauses for the user to verify (visual review for videos/images, numerics dump for pt), then uploads only that test's files to `FastVideo/ssim-reference-videos`. Use when a new `fastvideo/tests/ssim/test_*_similarity.py` has just been added and has no references on HF yet.
 ---
 
-# Seed SSIM Reference Artefacts (mp4 or pt)
+# Seed SSIM Reference Artefacts (video, image, or pt)
 
 ## Purpose
 
 A brand-new SSIM test in `fastvideo/tests/ssim/` fails forever until its
 reference artefacts exist on the HF dataset
-(`FastVideo/ssim-reference-videos`). The dataset hosts two kinds of artefacts
+(`FastVideo/ssim-reference-videos`). The dataset hosts three kinds of artefacts
 side-by-side per `(model_id, backend, prompt)`:
 
 - **`.mp4`** — pixel ground-truth for tests that call
   `run_text_to_video_similarity_test` / `run_image_to_video_similarity_test`
-  in `inference_similarity_utils.py`. Compared via SSIM.
+  in `inference_similarity_utils.py` with the default media extension.
+  Compared via SSIM.
+- **`.png` / `.jpg` / `.jpeg`** — pixel ground-truth for image-generation
+  tests that call `run_text_to_video_similarity_test` with the matching
+  `media_extension`. Compared via SSIM.
 - **`.pt`** — pre-VAE latent bundle (fp16 full latent + fp32 slice +
   metadata + `slice_spec` + `format_version`) for tests that call
   `run_text_to_latent_similarity_test` in `latent_similarity_utils.py`.
@@ -22,11 +26,12 @@ side-by-side per `(model_id, backend, prompt)`:
 
 This skill:
 
-1. Detects which artefact type the test produces (pixel vs latent).
+1. Detects which artefact type the test produces (video, image, or latent).
 2. Runs the test on Modal's L40S pool to generate the artefacts.
 3. Downloads them to the local repo via `modal volume get`.
 4. Pauses so the user can verify quality:
-   - **mp4**: visual eyeball in a video player.
+   - **video**: visual eyeball in a video player.
+   - **image**: visual eyeball in an image viewer.
    - **pt**: numerics dump (shape, slice stats, NaN/Inf check, metadata).
 5. Uploads only the new test's files to HF, with a guard that refuses to
    overwrite anything already present.
@@ -67,8 +72,8 @@ Everything else is fixed:
   seeded by this skill.
 - HF repo: `FastVideo/ssim-reference-videos` (dataset).
 - Multi-model test files: all model ids in `*_MODEL_TO_PARAMS` are seeded
-  together; the Modal run produces one mp4 per (model, prompt, backend) and
-  the upload scopes by `--model-id`, looping if there is more than one.
+  together; the Modal run produces one artefact per (model, prompt, backend)
+  and the upload scopes by `--model-id`, looping if there is more than one.
 
 ## Prerequisites
 
@@ -77,7 +82,7 @@ The user has confirmed:
 - `modal` CLI authenticated.
 - `HF_API_KEY` (or `HUGGINGFACE_HUB_TOKEN` / `HF_TOKEN`) exported with write
   access to `FastVideo/ssim-reference-videos`.
-- The test file runs locally end-to-end (generates an mp4; SSIM assertion
+- The test file runs locally end-to-end (generates its declared artefact; SSIM assertion
   failure due to missing reference is expected and fine).
 
 Fail fast if the token env var is missing.
@@ -100,16 +105,22 @@ Detect artefact type by inspecting the file's imports / helper call:
 - **latent** (`.pt`) — file imports `run_text_to_latent_similarity_test`
   from `fastvideo.tests.ssim.latent_similarity_utils` (or any other helper
   that ends with `_latent_similarity_test`).
-- **pixel** (`.mp4`) — file imports
+- **image** (`.png`, `.jpg`, or `.jpeg`) — a pixel helper call resolves
+  `media_extension` to one of those image suffixes. For example, Z-Image calls
+  `run_text_to_video_similarity_test(..., media_extension=".png")`.
+- **video** (`.mp4` by default) — file imports
   `run_text_to_video_similarity_test` / `run_image_to_video_similarity_test`
-  from `fastvideo.tests.ssim.inference_similarity_utils`, OR uses the
-  legacy custom-inline helper pattern (see `test_gamecraft`,
-  `test_longcat`, etc.). Default to pixel when both heuristics fail.
+  from `fastvideo.tests.ssim.inference_similarity_utils` without an image
+  `media_extension`, OR uses the legacy custom-inline helper pattern (see
+  `test_gamecraft`, `test_longcat`, etc.). Default to video when all
+  heuristics fail.
 
-Record `ARTEFACT_TYPE ∈ {pixel, latent}` for use in step 4. Steps 2, 3, 5,
+Record `ARTEFACT_TYPE ∈ {video, image, latent}` for use in step 4. Steps 2, 3, 5,
 and 6 are artefact-type-agnostic — `_iter_reference_files`,
 `copy_generated_to_reference`, and `upload_reference_videos` already walk
-both `.mp4` and `.pt` (see `reference_videos_cli.py`).
+videos, images, and `.pt` bundles (see `REFERENCE_EXTENSIONS` in
+`reference_videos_cli.py`). The Modal exporter likewise counts all three via
+`GENERATED_ARTIFACT_EXTENSIONS` before copying the whole generated tree.
 
 If either check fails, stop and tell the user what's wrong.
 
@@ -166,10 +177,10 @@ Flag rationale:
 - `--skip-reference-download`: no refs exist yet, so conftest must not try to
   pull them.
 - `--no-fail-fast`: lets the test finish generation before `_assert_similarity`
-  raises `FileNotFoundError: Reference video folder does not exist`. The
-  expected failure is what we want — the mp4 has already been written.
+  raises for the missing reference. The expected failure is what we want —
+  the generated artefact has already been written.
 - `--sync-generated-to-volume` + `--generated-volume-subdir`: copies the
-  generated mp4s to the `hf-model-weights` Modal volume under
+  generated artefacts to the `hf-model-weights` Modal volume under
   `ssim_generated_videos/default/<SUBDIR>/generated_videos/` so we can pull
   them locally.
 
@@ -177,7 +188,7 @@ The Modal run will end with a nonzero exit (expected) and print a
 `modal volume get hf-model-weights ssim_generated_videos/default/<SUBDIR>/generated_videos ./generated_videos_modal/default`
 command. Capture that `<SUBDIR>` — you need it for step 3.
 
-### 3. Download generated videos locally
+### 3. Download generated artefacts locally
 
 ```bash
 modal volume get --force hf-model-weights \
@@ -189,8 +200,8 @@ modal volume get --force hf-model-weights \
 already exists; without it, `modal volume get` errors with `[Errno 21] Is a
 directory`. Safe to pass on the first run too.
 
-After this, the mp4s live at
-`./generated_videos_modal/default/generated_videos/L40S_reference_videos/<model_id>/<backend>/<prompt>.mp4`.
+After this, the artefacts live at
+`./generated_videos_modal/default/generated_videos/L40S_reference_videos/<model_id>/<backend>/<prompt>.<ext>`.
 The extra `generated_videos/` level comes from the volume layout in
 `_sync_generated_videos_to_volume` (`ssim_test.py`) — the command copies
 `<repo>/fastvideo/tests/ssim/generated_videos/<tier>` to
@@ -201,10 +212,15 @@ get` preserves that trailing `generated_videos/` segment.
 
 Type-aware verification.
 
-**For `ARTEFACT_TYPE = pixel`** — list the downloaded mp4s and ask the user to
+**For `ARTEFACT_TYPE = video`** — list the downloaded videos and ask the user to
 open them in a video player:
 
 > "Generated videos downloaded to `./generated_videos_modal/default/generated_videos/L40S_reference_videos/`. Please open them and confirm the quality looks correct. Reply **`upload`** to continue, or anything else to abort."
+
+**For `ARTEFACT_TYPE = image`** — list the downloaded `.png` / `.jpg` /
+`.jpeg` files and ask the user to open them in an image viewer:
+
+> "Generated images downloaded to `./generated_videos_modal/default/generated_videos/L40S_reference_videos/`. Please open them and confirm the quality looks correct. Reply **`upload`** to continue, or anything else to abort."
 
 **For `ARTEFACT_TYPE = latent`** — `.pt` files are not human-watchable. Print
 a numerics dump for each `.pt` so the user can sanity-check shape, distribution,
@@ -250,8 +266,9 @@ everything on disk so they can inspect further — no cleanup.
 
 ### 5. Copy into the local reference layout
 
-Scoped copy — only the new test's artefacts. Single command works for both
-artefact types because `_iter_reference_files` walks `.mp4` and `.pt`:
+Scoped copy — only the new test's artefacts. One command works for all three
+artefact types because `_iter_reference_files` walks video, image, and latent
+extensions:
 
 ```bash
 python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
@@ -261,12 +278,13 @@ python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
 ```
 
 (The `--generated-dir` points at the device-folder root inside the
-downloaded tree; `copy-local` walks all `<model>/<backend>/*.{mp4,pt}`
+downloaded tree; `copy-local` walks all supported reference extensions
 underneath it. Since the Modal run was scoped to a single test file via
 `--test-files`, only that test's model(s) are present — so the copy is
 implicitly per-test.)
 
-Result for pixel: `fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos/<model_id>/<backend>/<prompt>.mp4`.
+Result for video: `fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos/<model_id>/<backend>/<prompt>.mp4`.
+Result for image: same path with `.png`, `.jpg`, or `.jpeg` extension.
 Result for latent: same path with `.pt` extension.
 
 ### 6. Upload to HF — scoped per model_id, with overwrite guard
@@ -307,7 +325,7 @@ it will auto-download the refs they just uploaded.
 - **Modal run fails before generation.** No artefacts on the volume — nothing
   to download. Fix the test locally (`pytest fastvideo/tests/ssim/<test_file>`)
   and retry from step 2.
-- **`./generated_videos_modal/default/L40S_reference_videos/` missing after
+- **`./generated_videos_modal/default/generated_videos/L40S_reference_videos/` missing after
   `modal volume get`.** The run didn't produce artefacts (most likely the
   test crashed before writing, or `REQUIRED_GPUS` exceeded the partition
   capacity — see Modal logs).
@@ -340,14 +358,14 @@ it will auto-download the refs they just uploaded.
 - The overwrite guard in `reference_videos_cli.py upload` is default-on
   specifically because this skill exists. Re-seeding is a distinct operation
   that requires explicit `--force`.
-- Both artefact types share the same Modal flow: the orchestrator sets
+- All three artefact types share the same Modal flow: the orchestrator sets
   `--skip-reference-download` + `--no-fail-fast`, runs pytest, the test's
-  helper writes the artefact (`.mp4` via `imageio` for pixel,
+  helper writes the artefact (`.mp4` / `.png` / `.jpg` / `.jpeg` for pixel,
   `save_latent_reference` → `torch.save` for latent) BEFORE the
   missing-reference assertion raises. `_sync_generated_videos_to_volume` in
   `ssim_test.py` does a `shutil.copytree` of the whole `generated_videos/`
-  tree, picking up `.mp4`, `.pt`, and the `*_ssim.json` / `*_latent.json`
-  metric files alongside.
+  tree. Its artifact count recognizes videos, images, and `.pt` bundles; JSON
+  metric files are copied alongside but are not prepared as references.
 
 ## References
 
@@ -357,7 +375,7 @@ it will auto-download the refs they just uploaded.
 - `fastvideo/tests/ssim/reference_videos_cli.py` — `copy-local`, `upload`
   (with `--model-id`, `--force`), `download`, `ensure` subcommands.
   Extension allowlist is `REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS +
-  LATENT_EXTENSIONS` (`.pt`).
+  IMAGE_EXTENSIONS + LATENT_EXTENSIONS`.
 - `fastvideo/tests/ssim/README.md` — reference layout, HF repo conventions.
 - `fastvideo/tests/ssim/inference_similarity_utils.py` — pixel helpers
   (`run_text_to_video_similarity_test`,
@@ -376,3 +394,4 @@ it will auto-download the refs they just uploaded.
 | 2026-04-21 | Rewrite: single-test scope, explicit user-review pause, per-`model_id` upload, HF overwrite guard. Dropped `scripts/seed_ssim.sh`. |
 | 2026-04-21 | Post-first-run fixes: `modal volume get` needs `--force` when parent exists; download tree has an extra `generated_videos/` level so `--generated-dir` must reflect it. |
 | 2026-05-01 | Latent (`*.pt`) artefact support: artefact-type detection in step 1, type-aware verification (visual eyeball for mp4, numerics dump for pt) in step 4, FSDP+inference_mode failure-mode added, design notes for the unified Modal flow. Triggered by PR #1253 (LTX-2 latent migration + Stable Audio latent test). |
+| 2026-07-13 | Image (`.png`, `.jpg`, `.jpeg`) artefact support: image-aware detection and preview guidance, plus current Modal export and reference CLI extension coverage. |
