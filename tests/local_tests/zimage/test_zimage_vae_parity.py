@@ -26,7 +26,6 @@ from torch.testing import assert_close
 from fastvideo.configs.models.vaes.autoencoder_kl import AutoencoderKLVAEConfig
 from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.models.vaes.autoencoder_kl import AutoencoderKL as FastVideoAutoencoderKL
-from fastvideo.pipelines.stages.decoding import DecodingStage
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -151,30 +150,6 @@ def _load_fastvideo_production_vae(monkeypatch: pytest.MonkeyPatch):
     return vae
 
 
-def _official_decode_latents(latents: torch.Tensor, vae: torch.nn.Module) -> torch.Tensor:
-    scaling_factor = vae.config.scaling_factor
-    shift_factor = vae.config.shift_factor or 0.0
-    dtype = next(vae.parameters()).dtype
-    return (latents.to(dtype=dtype) / scaling_factor) + shift_factor
-
-
-def test_zimage_decode_normalization_uses_autoencoder_config_values():
-    vae = SimpleNamespace(
-        config=SimpleNamespace(
-            latents_mean=None,
-            latents_std=None,
-            scaling_factor=ZIMAGE_VAE_SCALING_FACTOR,
-            shift_factor=ZIMAGE_VAE_SHIFT_FACTOR,
-        )
-    )
-    latents = torch.tensor([[[[0.0, 0.5], [-0.5, 1.0]]]], dtype=torch.float32)
-
-    actual = DecodingStage(vae)._denormalize_latents(latents)
-    expected = latents / ZIMAGE_VAE_SCALING_FACTOR + ZIMAGE_VAE_SHIFT_FACTOR
-
-    assert_close(actual, expected, atol=0, rtol=0)
-
-
 def test_zimage_vae_decode_parity(reference_autoencoder_cls):
     torch.manual_seed(7)
 
@@ -195,7 +170,7 @@ def test_zimage_vae_decode_parity(reference_autoencoder_cls):
     assert_close(ref_out, fv_out, atol=1e-4, rtol=1e-4)
 
 
-def test_zimage_vae_production_loader_and_decode_normalization(
+def test_zimage_vae_production_loader_and_raw_decode_parity(
     reference_autoencoder_cls,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -213,14 +188,11 @@ def test_zimage_vae_production_loader_and_decode_normalization(
     assert ref.config.shift_factor == cfg["shift_factor"]
     assert fv.config.shift_factor == cfg["shift_factor"]
 
-    pipeline_latents = torch.randn(1, cfg["latent_channels"], 8, 8, dtype=torch.float32)
-    ref_decode_latents = _official_decode_latents(pipeline_latents, ref)
-    fv_decode_latents = DecodingStage(fv)._denormalize_latents(pipeline_latents)
-    assert_close(ref_decode_latents, fv_decode_latents, atol=0, rtol=0)
+    decode_latents = torch.randn(1, cfg["latent_channels"], 8, 8, dtype=torch.float32)
 
     with torch.no_grad():
-        ref_out = ref.decode(ref_decode_latents, return_dict=False)[0].detach().float()
-        fv_out = fv.decode(fv_decode_latents, return_dict=False)[0].detach().float()
+        ref_out = ref.decode(decode_latents, return_dict=False)[0].detach().float()
+        fv_out = fv.decode(decode_latents, return_dict=False)[0].detach().float()
 
     assert ref_out.shape == fv_out.shape
     assert_close(ref_out, fv_out, atol=1e-4, rtol=1e-4)

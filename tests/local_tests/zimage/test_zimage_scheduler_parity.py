@@ -172,7 +172,10 @@ def test_scheduler_positional_args_keep_existing_bindings_and_default_schedule()
     assert scheduler.config.use_reference_discrete_timesteps is False
 
     scheduler.set_timesteps(num_inference_steps=8, device="cpu")
-    assert_close(scheduler.sigmas[-2], torch.tensor(scheduler.sigma_min))
+    assert_close(
+        scheduler.sigmas[-2],
+        torch.tensor(scheduler.sigma_min, dtype=torch.float32),
+    )
 
 
 def test_scheduler_honors_explicit_zero_sigma_min():
@@ -183,7 +186,10 @@ def test_scheduler_honors_explicit_zero_sigma_min():
 
     assert scheduler.sigma_min == 0.0
     scheduler.set_timesteps(num_inference_steps=8, device="cpu")
-    assert_close(scheduler.timesteps[-1], torch.tensor(125.0))
+    assert_close(
+        scheduler.timesteps[-1],
+        torch.tensor(125.0, dtype=torch.float32),
+    )
 
 
 def test_reference_schedule_preserves_float64_linspace_rounding():
