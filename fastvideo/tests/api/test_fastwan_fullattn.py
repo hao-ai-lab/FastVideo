@@ -72,6 +72,26 @@ def test_fastwan_fullattn_fastvideo_args_accepts_t2v_workload(monkeypatch: pytes
     assert isinstance(args.pipeline_config, FastWan2_2_TI2V_5B_FullAttn_Config)
 
 
+def test_fastwan_fullattn_fastvideo_args_prefers_global_dense_over_env_vsa(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+
+    with global_force_attn_backend_context_manager(AttentionBackendEnum.TORCH_SDPA):
+        args = FastVideoArgs.from_kwargs(model_path=FULLATTN_MODEL_ID, workload_type="t2v")
+
+    assert args.workload_type is WorkloadType.T2V
+    assert isinstance(args.pipeline_config, FastWan2_2_TI2V_5B_FullAttn_Config)
+
+
+def test_fastwan_fullattn_fastvideo_args_rejects_global_vsa_when_env_unset(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FASTVIDEO_ATTENTION_BACKEND", raising=False)
+
+    with global_force_attn_backend_context_manager(AttentionBackendEnum.VIDEO_SPARSE_ATTN):
+        with pytest.raises(ValueError, match="FullAttn.*VIDEO_SPARSE_ATTN"):
+            FastVideoArgs.from_kwargs(model_path=FULLATTN_MODEL_ID, workload_type="t2v")
+
+
 def test_fastwan_fullattn_fastvideo_args_rejects_i2v_workload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FASTVIDEO_ATTENTION_BACKEND", raising=False)
 

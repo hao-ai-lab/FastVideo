@@ -298,8 +298,8 @@ class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
     def check_pipeline_config(self) -> None:
         super().check_pipeline_config()
 
-        from fastvideo import envs
-        if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+        from fastvideo.attention.selector import get_effective_attn_backend_override
+        if get_effective_attn_backend_override() == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             raise ValueError("FastWan2.2-TI2V-5B-FullAttn-Diffusers is a dense FullAttn T2V-only checkpoint "
                              "and does not support FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN. "
                              "Unset FASTVIDEO_ATTENTION_BACKEND or use a dense backend such as FLASH_ATTN or "
