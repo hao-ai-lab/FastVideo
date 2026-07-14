@@ -171,6 +171,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
             "sampling": {
                 "num_videos_per_prompt": 1,
                 "seed": 1024,
+                "max_sequence_length": None,
                 "num_frames": 16,
                 "height": 720,
                 "width": 1280,
@@ -181,6 +182,8 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "num_inference_steps_sr": 50,
                 "guidance_scale": 1.0,
                 "guidance_scale_2": None,
+                "cfg_normalization": False,
+                "cfg_truncation": 1.0,
                 "guidance_rescale": 0.0,
                 "true_cfg_scale": None,
                 "use_embedded_guidance": None,
