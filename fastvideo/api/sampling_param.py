@@ -90,6 +90,11 @@ class SamplingParam:
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
     guidance_scale_2: float | None = None
+    # Z-Image CFG controls. ``cfg_normalization=True`` caps the guided
+    # prediction norm at the positive-prediction norm; ``cfg_truncation``
+    # disables CFG above the normalized-noise threshold.
+    cfg_normalization: bool = False
+    cfg_truncation: float | None = 1.0
     # Embedded guidance (FLUX): do not treat ``guidance_scale > 1`` as classic CFG.
     use_embedded_guidance: bool = False
     # Diffusers-style true CFG for FLUX when > 1 (requires negative prompt encoding).
@@ -322,6 +327,18 @@ class SamplingParam:
             type=float,
             default=SamplingParam.guidance_scale,
             help="Classifier-free guidance scale",
+        )
+        parser.add_argument(
+            "--cfg-normalization",
+            action=StoreBoolean,
+            default=SamplingParam.cfg_normalization,
+            help="Cap Z-Image CFG prediction norm to the positive-prediction norm",
+        )
+        parser.add_argument(
+            "--cfg-truncation",
+            type=float,
+            default=SamplingParam.cfg_truncation,
+            help="Disable Z-Image CFG above this normalized-noise threshold",
         )
         parser.add_argument(
             "--guidance-rescale",

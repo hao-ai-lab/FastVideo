@@ -1,17 +1,22 @@
 # Z-Image Local Tests
 
-Local-only component coverage for the `zimage` FastVideo port (`T2I`,
-Z-Image-Turbo only). Coverage includes the Qwen3 text encoder, tokenizer,
-AutoencoderKL VAE, FlowMatchEulerDiscreteScheduler, and a native
-`ZImageTransformer2DModel`. Pipeline wiring, pipeline parity, examples, and
-image-quality regression remain out of scope.
+Local component coverage and Phase 7 handoff for the `zimage` FastVideo port
+(`T2I`, Z-Image-Turbo only). The same PR is authorized to carry the components,
+FastVideo-native `ZImagePipeline`, example, pipeline parity, SSIM test, and L40S
+reference seed. The native pipeline surface and 8-step 1024x1024 PNG SSIM test
+are implemented; full GPU parity and reference generation are still pending.
 
-> **Status:** DRAFT port, in progress. The pinned official-source GB200 run now
-> passes the scheduler, tokenizer, VAE, bf16 encoder, and real-weight transformer
-> gates. The only unresolved component assertion is the fp32 native encoder's
-> small accumulated tail at `hidden_states[-2]`; its tolerance decision is in
-> maintainer packet `model/r10`. A complete non-skip rerun at the resulting exact
-> PR head is still required. See
+> **Status:** DRAFT port, Phase 7 implementation/verification in progress with
+> Phase 6 exact-head closure I012 still open. The required production text
+> encoder is the official-loader-compatible Transformers `AutoModel` path, which
+> matched an independently materialized reference exactly. The pinned GB200 run
+> also passes the scheduler, tokenizer, VAE, and real-weight transformer gates.
+> The separate FastVideo-native Qwen fp32 tail is an optional implementation
+> quality decision in `model/r10`, not the text encoder loaded by the pipeline.
+> Hardware-free pipeline surface and stage-contract checks pass. A complete
+> required-component non-skip rerun at the resulting exact PR head and pinned
+> native full GPU pipeline parity are still required; no GPU parity or seed
+> result is claimed yet. See
 > [`PORT_STATUS.md`](./PORT_STATUS.md) for the live state.
 
 ## Reference assets and scope
@@ -20,7 +25,9 @@ image-quality regression remain out of scope.
 |---|---|
 | Model family / variant | `zimage` / `Z-Image-Turbo` |
 | Workload | `T2I` |
-| Component scope | text encoder, tokenizer, VAE, scheduler, native transformer |
+| PR scope | required components, native pipeline, example/parity, SSIM test, and L40S seed |
+| Required component scope | production `AutoModel` text encoder, tokenizer, VAE, scheduler, native transformer |
+| Additional quality scope | direct FastVideo-native Qwen parity (`model/r10`; not used by the pipeline loader) |
 | Official reference | `https://github.com/Tongyi-MAI/Z-Image` |
 | Local reference dir | `<repo_root>/Z-Image/src` |
 | Official commit | `26f23eda626ffadda020b04ff79488e1d72004cd` |
@@ -83,7 +90,7 @@ Do not change core dependency versions (`torch`, `diffusers`, `transformers`,
 dependency_changes: none
 official_env_status: official source pinned and imported; GB200 component validation run completed
 private_dep_stubs: none
-blocked_on: model/r10 fp32 encoder tolerance decision, then one exact-head full-suite rerun
+blocked_on: one complete exact-head non-skip rerun of every required production component row
 ```
 
 ## Run the tests
@@ -97,8 +104,31 @@ pytest tests/local_tests/zimage/ -v -s
 | Scheduler ([`test_zimage_scheduler_parity.py`](./test_zimage_scheduler_parity.py)) | `implementation_subcomponent`; exact official `sigma_min=0.0` plus `use_reference_discrete_timesteps=True`; positional/default-path regressions remain asset-free | PINNED GB200 PASS (5 passed) |
 | Tokenizer ([`test_zimage_tokenizer_parity.py`](./test_zimage_tokenizer_parity.py)) | `production_loader`; exact `apply_chat_template(tokenize=False, add_generation_prompt=True, enable_thinking=True)` and `max_length=512`; absence of `apply_chat_template` is a failure, not a skip | PINNED GB200 PASS (2 passed) |
 | VAE ([`test_zimage_vae_parity.py`](./test_zimage_vae_parity.py)) | `both`; direct raw decode plus production `VAELoader`, config values, and raw decode | PINNED GB200 PASS (2 passed) |
-| Text encoder ([`test_zimage_encoder_parity.py`](./test_zimage_encoder_parity.py)) | `both`; independent Transformers `AutoModel` materialization of the official loader contract, body-only production loader, and FastVideo-native implementation; fp32/bf16 output checks plus fused/split/quant-scale strictness | PRODUCTION EXACT + BF16 PASS; FP32 PRE-NORM TOLERANCE DECISION PENDING (`model/r10`) |
+| Production text encoder ([`test_zimage_encoder_parity.py`](./test_zimage_encoder_parity.py)) | `production_loader`; `TextEncoderLoader` materializes a body-only Transformers `AutoModel` matching official `src/utils/loader.py`; required by the pipeline | PINNED GB200 PASS (reference/production outputs exact) |
+| Native Qwen quality ([`test_zimage_encoder_parity.py`](./test_zimage_encoder_parity.py)) | `implementation_subcomponent`; direct FastVideo-native construction, strict loading, and fp32/bf16 diagnostics; not loaded by the pipeline | BF16 PASS; FP32 PRE-NORM QUALITY DECISION PENDING (`model/r10`) |
 | Transformer ([`test_zimage_transformer_parity.py`](./test_zimage_transformer_parity.py)) | `both`; pinned production meta key/shape surface, additive-mask attention parity, deterministic tiny CPU full-forward parity, explicit `sp_size=1` guard, and real-weight production-loader/full-forward parity | PINNED GB200 PASS (5 passed; real-weight full forward exact) |
+
+## Pinned official pipeline context
+
+| Field | Contract |
+|---|---|
+| Oracle | `Tongyi-MAI/Z-Image@26f23eda626ffadda020b04ff79488e1d72004cd`, `src/zimage/pipeline.py::generate` and `src/config/inference.py`; never Diffusers |
+| Pipeline/modules | `_class_name=ZImagePipeline`; `transformer`, `vae`, `text_encoder`, `tokenizer`, `scheduler` |
+| Inputs/outputs | text-to-image prompt with optional negative prompt; PIL images by default or latents when requested |
+| Official defaults | `1024x1024`, `num_inference_steps=8`, `guidance_scale=0.0`, `cfg_truncation=1.0`, `max_sequence_length=512` |
+| Reproducible RNG | `torch.Generator("cuda").manual_seed(42)`; `generate()` accepts the generator rather than fixing a seed internally |
+| Scheduler | `use_reference_discrete_timesteps=True`, runtime `sigma_min=0.0`, and the endpoint-preserving `num_steps + 1` schedule with the final zero-timestep DiT call skipped |
+| Decode | apply `(latents / 0.3611) + 0.1159` before official VAE decode |
+| FastVideo status | Native pipeline/config/preset/registry/example and the PNG SSIM test are implemented. Hardware-free surface and stage-contract checks pass. Pinned native full GPU pipeline parity and the L40S seed have not run. |
+
+## Pipeline and quality verification
+
+| Scope | Command | Status |
+|---|---|---|
+| Hardware-free pipeline surface | `pytest tests/local_tests/pipelines/test_zimage_pipeline_smoke.py::test_zimage_typed_surface_preflight -v` | PASS |
+| Hardware-free native stage contract | `pytest tests/local_tests/pipelines/test_zimage_pipeline_parity.py::test_zimage_native_default_stage_math -v` | PASS |
+| Pinned native full GPU pipeline parity | `ZIMAGE_REFERENCE_REPO=<pinned-clone> ZIMAGE_MODEL_DIR=<pinned-weights> DISABLE_SP=1 pytest tests/local_tests/pipelines/test_zimage_pipeline_parity.py::test_zimage_pipeline_latents_match_pinned_native_repo -v -s` | NOT RUN |
+| 8-step 1024x1024 PNG SSIM | `pytest fastvideo/tests/ssim/test_zimage_similarity.py -v -s` | TEST IMPLEMENTED; L40S REFERENCE NOT GENERATED OR UPLOADED |
 
 ## Component contracts
 
@@ -124,8 +154,8 @@ pytest tests/local_tests/zimage/ -v -s
   hidden-state entries in this contract (embedding/intermediate entries plus the
   final normalized state).
 - `TextEncoderConfig.chat_template_enable_thinking` is keyword-only and defaults
-  to `False` for existing model families. A future Z-Image pipeline config must
-  opt in with `True`.
+  to `False` for existing model families. The Z-Image pipeline config opts in
+  with `True`.
 
 ### VAE
 
@@ -133,20 +163,19 @@ The test covers both direct implementation parity and production `VAELoader`
 resolution/strict loading, confirms the official config's scaling/shift values,
 and compares raw decode outputs. The official pipeline's
 `(latents / 0.3611) + 0.1159` transformation is pipeline behavior, so it remains
-a Phase 7 Z-Image pipeline-stage and pipeline-parity requirement. This
-component-only PR explicitly accepts the
+a Phase 7 Z-Image pipeline-stage and pipeline-parity requirement. This port
+reuses the
 existing shared `fastvideo.models.vaes.autoencoder_kl.AutoencoderKL` wrapper,
 which subclasses Diffusers `AutoencoderKL`, as a narrowly scoped exception to
 the native-component boundary. That runtime inheritance does not make Diffusers
 the reference implementation: parity is against pinned
 `Tongyi-MAI/Z-Image/src/zimage/autoencoder.py`. This is not precedent for the
-future transformer or full Z-Image pipeline, and the exception must be revisited
-if that scope grows.
+transformer or pipeline implementation.
 
 ### Scheduler
 
 The pinned official pipeline mutates `scheduler.sigma_min = 0.0` before building
-its `num_steps + 1` schedule. A future Z-Image pipeline config must set both
+its `num_steps + 1` schedule. The Z-Image pipeline applies both
 `use_reference_discrete_timesteps=True` and `sigma_min=0.0`; the published
 `scheduler_config.json` alone does not encode the complete runtime contract.
 
@@ -166,10 +195,11 @@ its `num_steps + 1` schedule. A future Z-Image pipeline config must set both
 
 ## Remaining work
 
-- Resolve `model/r10`, which asks whether the traced Z-Image-only native encoder
-  fp32 `atol` may move from `1e-4` to `2e-4` while retaining `rtol=1e-4` and all
-  other gates.
-- Run the entire component suite non-skip in a clean worktree at the resulting
-  exact PR head; the earlier full run preceded the loader/oracle corrections.
-- Add the Z-Image pipeline/config/preset/registry/example, pipeline parity, and
-  image-quality regression after all component gates pass.
+- Run every required production component row non-skip in a clean worktree at
+  the exact PR head; the earlier full run preceded the loader/oracle corrections.
+- Run the pinned native full GPU pipeline parity and basic example against the
+  immutable official source and weights.
+- Generate the implemented 8-step 1024x1024 PNG test's L40S reference and attach
+  it for author eyeballing before any HF upload.
+- Resolve `model/r10` separately for the optional native-Qwen fp32 quality row;
+  do not change its tolerance without that verdict.
