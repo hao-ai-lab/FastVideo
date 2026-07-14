@@ -358,6 +358,9 @@ python fastvideo/tests/performance/seed_baseline.py \
   --tracking-root "${PERFORMANCE_TRACKING_ROOT}"
 ```
 
+The utility is prepare-only and intentionally has no upload option. Upload the
+scoped records only after the separate confirmation in step 6.
+
 If the prepared seed records look correct, upload only those scoped records in
 step 7. Do not rerun the utility with a different source list after approval.
 

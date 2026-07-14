@@ -17,7 +17,7 @@ try:
         _comparison_identity_filters,
         _record_uses_v2_identity,
     )
-    from fastvideo.performance.hf_store import safe_float, sanitize, upload_record
+    from fastvideo.performance.hf_store import safe_float, sanitize
     from fastvideo.performance.metric_policy import DEFAULT_METRIC_POLICIES
 except ImportError:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
@@ -29,7 +29,7 @@ except ImportError:
         _comparison_identity_filters,
         _record_uses_v2_identity,
     )
-    from fastvideo.performance.hf_store import safe_float, sanitize, upload_record
+    from fastvideo.performance.hf_store import safe_float, sanitize
     from fastvideo.performance.metric_policy import DEFAULT_METRIC_POLICIES
 
 TRACKING_ROOT = os.environ.get("PERFORMANCE_TRACKING_ROOT", "/tmp/perf-tracking")
@@ -208,6 +208,34 @@ def _validate_same_identity(records: list[dict[str, Any]]) -> dict[str, str]:
     return first
 
 
+def _order_sources_by_timestamp(
+    source_paths: list[str],
+    records: list[dict[str, Any]],
+) -> list[tuple[str, dict[str, Any]]]:
+    timestamped = []
+    undated = []
+    for index, (source_path, record) in enumerate(zip(source_paths, records), start=1):
+        try:
+            timestamp = datetime.fromisoformat(str(record.get("timestamp")))
+        except (TypeError, ValueError):
+            timestamp = None
+
+        if timestamp is None:
+            print(
+                f"Warning: source artifact {index} has a missing or unparsable timestamp; "
+                "preserving its input order after timestamped sources."
+            )
+            undated.append((source_path, record))
+            continue
+
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        timestamped.append((timestamp, index, source_path, record))
+
+    timestamped.sort(key=lambda item: (item[0], item[1]))
+    return [(source_path, record) for _, _, source_path, record in timestamped] + undated
+
+
 def _nonnegative_finite_float(value: str) -> float:
     try:
         parsed = float(value)
@@ -291,11 +319,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=os.environ.get("USER"),
         help="Operator name recorded in seed provenance.",
     )
-    parser.add_argument(
-        "--upload",
-        action="store_true",
-        help="Upload prepared seed records to the configured HF performance tracking dataset.",
-    )
     return parser.parse_args(argv)
 
 
@@ -307,12 +330,13 @@ def main(argv: list[str] | None = None) -> int:
     _validate_unique_sources(args.source_results, source_records)
     identity = _validate_same_identity(source_records)
     _validate_batch_consistency(source_records, args.max_intra_batch_regression)
+    ordered_sources = _order_sources_by_timestamp(args.source_results, source_records)
     print("Seeding exact comparable identity:")
     for key, value in identity.items():
         print(f"  {key}: {value}")
 
     prepared_seeds = []
-    for index, (source_path, source_record) in enumerate(zip(args.source_results, source_records), start=1):
+    for index, (source_path, source_record) in enumerate(ordered_sources, start=1):
         seed_record = build_baseline_seed_record(
             source_record,
             reason=args.intent_rationale,
@@ -328,8 +352,6 @@ def main(argv: list[str] | None = None) -> int:
     for seed_path, seed_record, suffix in prepared_seeds:
         write_seed_record(args.tracking_root, seed_record, suffix=suffix)
         print(f"Prepared baseline seed: {seed_path}")
-        if args.upload:
-            upload_record(seed_path, seed_record, strict=True)
 
     return 0
 

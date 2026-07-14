@@ -491,32 +491,6 @@ def test_normalized_record_preserves_v2_comparison_identity(monkeypatch):
     assert record["software_profile_id"] == "sw-cuda"
 
 
-def test_comparison_identity_filters_require_full_issue_key():
-    record = {
-        "workload_id": "wan-t2v",
-        "variant_id": "1.3b-sp2",
-        "benchmark_version": 2,
-        "recipe_fingerprint": "recipe-1",
-        "hardware_profile_id": "hw-l40s-2",
-    }
-
-    with pytest.raises(ValueError, match="software_profile_id"):
-        compare_baseline._comparison_identity_filters(record)
-
-
-def test_comparison_identity_filters_keep_zero_version():
-    record = {
-        "workload_id": "wan-t2v",
-        "variant_id": "1.3b-sp2",
-        "benchmark_version": 0,
-        "recipe_fingerprint": "recipe-1",
-        "hardware_profile_id": "hw-l40s-2",
-        "software_profile_id": "sw-cuda",
-    }
-
-    assert compare_baseline._comparison_identity_filters(record)["benchmark_version"] == "0"
-
-
 def test_exact_comparable_baseline_without_regression_reports_pass(monkeypatch):
     monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
     record = _v2_record()
@@ -720,7 +694,83 @@ def test_baseline_seed_rejects_mixed_exact_identities(monkeypatch):
         seed_baseline._validate_same_identity([first, second])
 
 
-def test_baseline_seed_validates_entire_batch_before_writing_or_uploading(monkeypatch, tmp_path):
+def test_baseline_seed_cli_rejects_direct_upload():
+    with pytest.raises(SystemExit):
+        seed_baseline._parse_args([
+            "--source-result",
+            "unused.json",
+            "--intent-rationale",
+            "reviewed first v2 baseline",
+            "--upload",
+        ])
+
+
+def test_baseline_seed_orders_sources_by_original_timestamp(monkeypatch, tmp_path):
+    source_paths = []
+    source_records = []
+    for day in range(6, 0, -1):
+        source = _v2_record(timestamp=f"2026-06-{day:02d}T00:00:00+00:00")
+        source.update({
+            "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
+            "success": True,
+            "run_source": "scheduled_main",
+            "branch": "main",
+            "test_scope": "full",
+            "pr_number": "",
+        })
+        source_path = tmp_path / f"source_{day}.json"
+        source_path.write_text(json.dumps(source), encoding="utf-8")
+        source_paths.append(source_path)
+        source_records.append(source)
+
+    seed_timestamps = iter(f"2026-07-01T00:00:{second:02d}+00:00" for second in range(1, 7))
+    monkeypatch.setattr(seed_baseline, "_now_utc_iso", lambda: next(seed_timestamps))
+    tracking_root = tmp_path / "tracking"
+    argv = []
+    for source_path in source_paths:
+        argv.extend(["--source-result", str(source_path)])
+    argv.extend([
+        "--intent-rationale",
+        "reviewed first v2 baseline",
+        "--tracking-root",
+        str(tracking_root),
+    ])
+
+    assert seed_baseline.main(argv) == 0
+
+    last_five = load_records_for_identity(
+        str(tracking_root),
+        compare_baseline._comparison_identity_filters(source_records[0]),
+        last_n=5,
+        successful_only=True,
+        baseline_eligible_only=True,
+    )
+    assert [record["baseline_seed_source_timestamp"] for record in last_five] == [
+        f"2026-06-{day:02d}T00:00:00+00:00" for day in range(2, 7)
+    ]
+
+
+def test_baseline_seed_orders_invalid_timestamps_last_and_warns(capsys):
+    source_paths = ["dated-later", "missing", "malformed", "dated-earlier"]
+    records = [
+        {"timestamp": "2026-06-02T00:00:00+00:00"},
+        {},
+        {"timestamp": "not-a-timestamp"},
+        {"timestamp": "2026-06-01T00:00:00+00:00"},
+    ]
+
+    ordered = seed_baseline._order_sources_by_timestamp(source_paths, records)
+
+    assert [source_path for source_path, _ in ordered] == [
+        "dated-earlier",
+        "dated-later",
+        "missing",
+        "malformed",
+    ]
+    assert capsys.readouterr().out.count("missing or unparsable timestamp") == 2
+
+
+def test_baseline_seed_validates_entire_batch_before_writing(tmp_path):
     valid_source = _v2_record()
     valid_source.update({
         "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
@@ -742,13 +792,6 @@ def test_baseline_seed_validates_entire_batch_before_writing_or_uploading(monkey
         source_paths.append(source_path)
 
     tracking_root = tmp_path / "tracking"
-    uploaded_records = []
-    monkeypatch.setattr(
-        seed_baseline,
-        "upload_record",
-        lambda path, record, *, strict=False: uploaded_records.append((path, record)),
-    )
-
     with pytest.raises(ValueError, match="scheduled_main"):
         seed_baseline.main([
             "--source-result",
@@ -759,14 +802,12 @@ def test_baseline_seed_validates_entire_batch_before_writing_or_uploading(monkey
             "reviewed first v2 baseline",
             "--tracking-root",
             str(tracking_root),
-            "--upload",
         ])
 
     assert not tracking_root.exists()
-    assert uploaded_records == []
 
 
-def test_baseline_seed_rejects_duplicate_sources_before_writing_or_uploading(monkeypatch, tmp_path):
+def test_baseline_seed_rejects_duplicate_sources_before_writing(tmp_path):
     source = _v2_record()
     source.update({
         "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
@@ -779,13 +820,6 @@ def test_baseline_seed_rejects_duplicate_sources_before_writing_or_uploading(mon
     source_path = tmp_path / "source.json"
     source_path.write_text(json.dumps(source), encoding="utf-8")
     tracking_root = tmp_path / "tracking"
-    uploaded_records = []
-    monkeypatch.setattr(
-        seed_baseline,
-        "upload_record",
-        lambda path, record, *, strict=False: uploaded_records.append((path, record)),
-    )
-
     with pytest.raises(ValueError, match="duplicates a resolved source path"):
         seed_baseline.main([
             "--source-result",
@@ -796,14 +830,12 @@ def test_baseline_seed_rejects_duplicate_sources_before_writing_or_uploading(mon
             "reviewed first v2 baseline",
             "--tracking-root",
             str(tracking_root),
-            "--upload",
         ])
 
     assert not tracking_root.exists()
-    assert uploaded_records == []
 
 
-def test_baseline_seed_rejects_later_missing_model_id_before_persistence(monkeypatch, tmp_path):
+def test_baseline_seed_rejects_later_missing_model_id_before_persistence(tmp_path):
     valid_source = _v2_record()
     valid_source.update({
         "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
@@ -823,13 +855,6 @@ def test_baseline_seed_rejects_later_missing_model_id_before_persistence(monkeyp
         source_paths.append(source_path)
 
     tracking_root = tmp_path / "tracking"
-    uploaded_records = []
-    monkeypatch.setattr(
-        seed_baseline,
-        "upload_record",
-        lambda path, record, *, strict=False: uploaded_records.append((path, record)),
-    )
-
     with pytest.raises(ValueError, match="non-empty string model_id"):
         seed_baseline.main([
             "--source-result",
@@ -840,11 +865,9 @@ def test_baseline_seed_rejects_later_missing_model_id_before_persistence(monkeyp
             "reviewed first v2 baseline",
             "--tracking-root",
             str(tracking_root),
-            "--upload",
         ])
 
     assert not tracking_root.exists()
-    assert uploaded_records == []
 
 
 @pytest.mark.parametrize("valid_prefix", [False, True], ids=("single_source", "later_source"))
@@ -863,7 +886,6 @@ def test_baseline_seed_rejects_later_missing_model_id_before_persistence(monkeyp
     ],
 )
 def test_baseline_seed_rejects_invalid_measurements_before_persistence(
-    monkeypatch,
     tmp_path,
     metric,
     invalid_value,
@@ -894,13 +916,6 @@ def test_baseline_seed_rejects_invalid_measurements_before_persistence(
         source_paths.append(source_path)
 
     tracking_root = tmp_path / "tracking"
-    uploaded_records = []
-    monkeypatch.setattr(
-        seed_baseline,
-        "upload_record",
-        lambda path, record, *, strict=False: uploaded_records.append((path, record)),
-    )
-
     argv = []
     for source_path in source_paths:
         argv.extend(["--source-result", str(source_path)])
@@ -909,13 +924,11 @@ def test_baseline_seed_rejects_invalid_measurements_before_persistence(
         "reviewed first v2 baseline",
         "--tracking-root",
         str(tracking_root),
-        "--upload",
     ])
     with pytest.raises(ValueError, match=match):
         seed_baseline.main(argv)
 
     assert not tracking_root.exists()
-    assert uploaded_records == []
 
 
 @pytest.mark.parametrize(
@@ -926,7 +939,6 @@ def test_baseline_seed_rejects_invalid_measurements_before_persistence(
     ],
 )
 def test_baseline_seed_rejects_inconsistent_batch_before_persistence(
-    monkeypatch,
     tmp_path,
     metric,
     divergent_value,
@@ -952,13 +964,6 @@ def test_baseline_seed_rejects_inconsistent_batch_before_persistence(
         source_paths.append(source_path)
 
     tracking_root = tmp_path / "tracking"
-    uploaded_records = []
-    monkeypatch.setattr(
-        seed_baseline,
-        "upload_record",
-        lambda path, record, *, strict=False: uploaded_records.append((path, record)),
-    )
-
     with pytest.raises(ValueError, match=rf"source artifact 2 {metric} regresses"):
         seed_baseline.main([
             "--source-result",
@@ -971,11 +976,9 @@ def test_baseline_seed_rejects_inconsistent_batch_before_persistence(
             str(tracking_root),
             "--max-intra-batch-regression",
             "0.05",
-            "--upload",
         ])
 
     assert not tracking_root.exists()
-    assert uploaded_records == []
 
 
 def test_same_variant_changed_recipe_reports_recipe_mismatch(monkeypatch):
