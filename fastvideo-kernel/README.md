@@ -10,7 +10,7 @@ Compiled CUDA extensions (CMake, see the build summary printed at the end of eve
 |---|---|---|---|---|
 | `fastvideo_kernel._C.fastvideo_kernel_ops` | TurboDiffusion INT8 GEMM, quant, RMSNorm, LayerNorm | `csrc/turbodiffusion/` | every arch in `TORCH_CUDA_ARCH_LIST` | always built |
 | same extension, optional part | ThunderKittens sliding-tile attention (`sta_fwd`) and VSA block-sparse (`block_sparse_fwd/bwd`) | `csrc/attention/*_h100.cu` | Hopper `sm_90a` only | `FASTVIDEO_KERNEL_BUILD_TK` (AUTO = ON iff `9.0a` is in the arch list; always OFF on aarch64 hosts — TK headers don't compile there) |
-| `fp4attn_cuda`, `fp4quant_cuda` | FP4 attention + quantization ("attn_qat_infer", modified SageAttention3) | `attn_qat_infer/` | consumer Blackwell `sm_120a` only, CUDA ≥ 12.8 | `FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER` (AUTO = ON iff `12.0a` is in the arch list) |
+| `fp4attn_cuda`, `fp4quant_cuda` | FP4 attention + quantization ("attn_qat_infer", modified SageAttention3) | `attn_qat_infer/` | consumer/workstation Blackwell `sm_120a` (CUDA ≥ 12.8) + `sm_121a` (DGX Spark GB10; CUDA ≥ 13) | `FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER` (AUTO = ON iff `12.0a` or `12.1a` is in the arch list) |
 
 Runtime-JIT kernels (no build step, ship in every wheel/image):
 
@@ -26,7 +26,7 @@ Runtime-JIT kernels (no build step, ship in every wheel/image):
 |---|---|---|---|---|---|
 | PyPI wheels (`.github/workflows/publish-kernel.yml`) | version bump in `fastvideo-kernel/pyproject.toml` on main, or manual dispatch | x86_64 cu126 | `9.0a` | ON | — (CUDA < 12.8) |
 | | | x86_64 cu130 | `9.0a;12.0a` | ON | ON |
-| | | aarch64 cu130 | `10.0a;12.0a` | — | ON |
+| | | aarch64 cu130 | `10.0a;12.0a;12.1a` | — | ON |
 | Docker images `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev` (`.github/workflows/infra-build-image.yml`) | `docker/Dockerfile` changes on main, or manual dispatch | amd64 cuda12.6.3 + cuda13.0.0 | `9.0a` | ON | — |
 | | | arm64 cuda12.6.3 (GH200) | `9.0a` | — (aarch64) | — |
 | | | arm64 cuda13.0.0 (GB10 / DGX Spark) | `12.1` | — | — |

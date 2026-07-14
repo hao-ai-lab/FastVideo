@@ -174,7 +174,7 @@ jobs:
           # the main extension for the full arch list. CMAKE_BUILD_PARALLEL_LEVEL caps
           # Ninja so heavy CUTLASS/TK template TUs don't OOM the 16 GB runner (exit 143).
           if [ "${{ matrix.platform.arch }}" = "aarch64" ]; then
-            export TORCH_CUDA_ARCH_LIST="10.0a;12.0a"
+            export TORCH_CUDA_ARCH_LIST="10.0a;12.0a;12.1a"
             export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=OFF -DFASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER=ON"
             export CMAKE_BUILD_PARALLEL_LEVEL=1
           elif [ "${{ matrix.torch-cuda.torch-cuda-short }}" = "cu130" ]; then

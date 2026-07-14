@@ -273,7 +273,15 @@ if(ENABLE_ATTN_QAT_INFER AND TORCH_CUDA_ARCH_LIST)
     set(FASTVIDEO_MAIN_CUDA_ARCHS "${TORCH_CUDA_ARCH_LIST}")
     string(REPLACE "sm_" "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
     string(REPLACE "." "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
-    message(STATUS "[per-arch] main extension archs=${FASTVIDEO_MAIN_CUDA_ARCHS}, fp4* archs=sm_120a/sm_121a")
+    # sm_121a needs CUDA 13's ptxas. On older toolchains, downgrade any requested
+    # 121a to 120a for the *main* extension too (not just the fp4* targets below),
+    # so a CUDA-12.x build with 12.1a in the arch list doesn't fail to compile —
+    # sm_120a PTX forward-JITs to sm_121 at runtime.
+    if(CUDAToolkit_VERSION VERSION_LESS 13.0)
+        string(REPLACE "121a" "120a" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
+        list(REMOVE_DUPLICATES FASTVIDEO_MAIN_CUDA_ARCHS)
+    endif()
+    message(STATUS "[per-arch] main extension archs=${FASTVIDEO_MAIN_CUDA_ARCHS}, fp4* archs set per-target below")
 endif()
 
 # Compiler flags
@@ -415,11 +423,11 @@ if(ENABLE_ATTN_QAT_INFER)
     )
     # FP4 kernels target consumer/workstation Blackwell: sm_120a (RTX 5090 /
     # PRO 6000) and sm_121a (DGX Spark GB10). sm_121a needs CUDA 13's ptxas
-    # (12.8 lacks it), so it is added only on CUDA >= 12.9 — pre-13 toolchains
-    # keep the original sm_120a-only build unchanged. sm_121a GB10-verified
-    # (cos ~0.98 vs bf16).
+    # (CUDA 12.x lacks it), so it is added only on CUDA >= 13.0 — older
+    # toolchains keep the original sm_120a-only build unchanged. sm_121a
+    # GB10-verified (cos ~0.98 vs bf16).
     set(FASTVIDEO_FP4_CUDA_ARCHS "120a")
-    if(NOT CUDAToolkit_VERSION VERSION_LESS 12.9)
+    if(NOT CUDAToolkit_VERSION VERSION_LESS 13.0)
         list(APPEND FASTVIDEO_FP4_CUDA_ARCHS "121a")
     endif()
     message(STATUS "fp4* CUDA architectures: ${FASTVIDEO_FP4_CUDA_ARCHS}")
