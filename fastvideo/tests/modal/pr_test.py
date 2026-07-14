@@ -65,6 +65,7 @@ ci_env_secret = modal.Secret.from_dict({
     "BUILDKITE_COMMIT": os.environ.get("BUILDKITE_COMMIT", ""),
     "BUILDKITE_PULL_REQUEST": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
     "BUILDKITE_BRANCH": os.environ.get("BUILDKITE_BRANCH", ""),
+    "BUILDKITE_SOURCE": os.environ.get("BUILDKITE_SOURCE", ""),
     "BUILDKITE_BUILD_URL": os.environ.get("BUILDKITE_BUILD_URL", ""),
     "BUILDKITE_BUILD_ID": os.environ.get("BUILDKITE_BUILD_ID", ""),
     "BUILDKITE_JOB_ID": os.environ.get("BUILDKITE_JOB_ID", ""),
@@ -408,7 +409,10 @@ def run_performance_tests():
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
         "hf auth login --token $HF_API_KEY && "
-        "if [ \"${BUILDKITE_BRANCH:-}\" = 'main' ] && [ \"${TEST_SCOPE:-}\" = 'full' ]; then "
+        "if [ \"${BUILDKITE_SOURCE:-}\" = 'schedule' ] && [ \"${BUILDKITE_BRANCH:-}\" = 'main' ]; then "
+        "export PERF_RUN_SOURCE='scheduled_main'; "
+        "export PERF_UPLOAD_POLICY='always'; "
+        "elif [ \"${BUILDKITE_BRANCH:-}\" = 'main' ] && [ \"${TEST_SCOPE:-}\" = 'full' ]; then "
         "export PERF_RUN_SOURCE='scheduled_main'; "
         "export PERF_UPLOAD_POLICY='always'; "
         "elif [ -n \"${BUILDKITE_PULL_REQUEST:-}\" ] && [ \"${BUILDKITE_PULL_REQUEST:-false}\" != 'false' ]; then "
