@@ -50,6 +50,11 @@ def _load_official_cache_classes():
     sub.__package__ = pkg
     sys.modules[f"{pkg}.before_denoise"] = sub
     spec.loader.exec_module(sub)
+    # This parity test only exercises the KV ring update and discards the
+    # returned attention mask. Avoid coupling it to the installed torch
+    # version's private BlockMask constructor (the official code currently
+    # requires torch>=2.9, while FastVideo also supports older torch builds).
+    sub.make_block_mask = lambda *_args, **_kwargs: None
     from tensordict import TensorDict
     return sub.LayerKVCache, TensorDict
 

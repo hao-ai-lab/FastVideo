@@ -131,6 +131,21 @@ surfaces:
 
   pipeline_config_extensions:
     preset_owned:
+      base_fps:
+        sources:
+          - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
+      bf16_denoise:
+        sources:
+          - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
+      disable_latent_norm:
+        sources:
+          - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
+      n_buttons:
+        sources:
+          - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
+      scheduler_sigmas:
+        sources:
+          - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
       flux2_text_encoder_type:
         sources:
           - fastvideo.configs.pipelines.flux_2.Flux2PipelineConfig
