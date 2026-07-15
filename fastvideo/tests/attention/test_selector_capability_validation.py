@@ -60,7 +60,7 @@ class _FallbackBackend(_RestrictedBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "SDPA"
+        return "TORCH_SDPA"
 
 
 @pytest.fixture(autouse=True)
@@ -86,6 +86,13 @@ def test_explicitly_selected_incompatible_backend_raises(monkeypatch):
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", AttentionBackendEnum.FLASH_ATTN.name)
     with pytest.raises(ValueError, match="head_size"):
         selector.get_attn_backend(96, torch.float16, SUPPORTED_BACKENDS)
+
+
+def test_explicitly_selected_incompatible_sdpa_backend_raises(monkeypatch):
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", AttentionBackendEnum.TORCH_SDPA.name)
+    monkeypatch.setattr(selector, "resolve_obj_by_qualname", {"RESTRICTED": _FallbackBackend}.__getitem__)
+    with pytest.raises(ValueError, match="head_size"):
+        selector.get_attn_backend(96, torch.float16, (AttentionBackendEnum.TORCH_SDPA, ))
 
 
 def test_auto_selected_incompatible_backend_warns_once():
@@ -129,7 +136,7 @@ def test_pinned_backend_platform_fallback_warns_instead_of_raising(monkeypatch):
     assert first is _FallbackBackend
     assert second is _FallbackBackend
     mock_warn.assert_called_once()
-    assert "SDPA" in mock_warn.call_args.args
+    assert "TORCH_SDPA" in mock_warn.call_args.args
 
 
 def test_pin_outside_layer_supported_set_falls_back_with_warning(monkeypatch):

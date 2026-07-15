@@ -84,15 +84,18 @@ def test_fastwan_2_2_fullattn_hf_ids_resolve_dense_config(model_id: str) -> None
     assert get_pipeline_config_cls_from_name(model_id) is FastWan2_2_TI2V_5B_FullAttn_Config
 
 
-def _write_minimal_wan_dmd_repo(model_dir: Path) -> None:
+def _write_minimal_wan_dmd_repo(model_dir: Path, *, expand_timesteps: bool | None = None) -> None:
     model_dir.mkdir(parents=True)
     (model_dir / "transformer").mkdir()
+    model_index = {
+        "_class_name": "WanDMDPipeline",
+        "_diffusers_version": "0.35.0.dev0",
+        "transformer": ["diffusers", "WanTransformer3DModel"],
+    }
+    if expand_timesteps is not None:
+        model_index["expand_timesteps"] = expand_timesteps
     (model_dir / "model_index.json").write_text(
-        json.dumps({
-            "_class_name": "WanDMDPipeline",
-            "_diffusers_version": "0.35.0.dev0",
-            "transformer": ["diffusers", "WanTransformer3DModel"],
-        }),
+        json.dumps(model_index),
         encoding="utf-8",
     )
 
@@ -102,16 +105,26 @@ def _write_minimal_wan_dmd_repo(model_dir: Path) -> None:
     [
         Path("models--FastVideo--FastWan2.2-TI2V-5B-FullAttn-Diffusers") / "snapshots" / "deadbeef",
         Path("models--FastVideo--FastWan2.2-TI2V-5B-Diffusers") / "snapshots" / "deadbeef",
+        Path("renamed-checkpoint"),
     ],
 )
 def test_fastwan_2_2_fullattn_local_path_resolves_dense_config(tmp_path: Path,
                                                                relative_model_path: Path) -> None:
     model_dir = tmp_path / relative_model_path
-    _write_minimal_wan_dmd_repo(model_dir)
+    _write_minimal_wan_dmd_repo(model_dir, expand_timesteps=True)
 
     resolved_cls = get_pipeline_config_cls_from_name(str(model_dir))
 
     assert resolved_cls is FastWan2_2_TI2V_5B_FullAttn_Config
+
+
+def test_fastwan_2_2_sparse_local_path_stays_on_sparse_config(tmp_path: Path) -> None:
+    model_dir = tmp_path / "renamed-sparse-checkpoint"
+    _write_minimal_wan_dmd_repo(model_dir)
+
+    resolved_cls = get_pipeline_config_cls_from_name(str(model_dir))
+
+    assert resolved_cls is FastWan2_1_T2V_480P_Config
 
 
 def test_fastwan_2_2_fullattn_rejects_vsa_before_block_construction():

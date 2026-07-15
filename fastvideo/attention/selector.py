@@ -196,10 +196,7 @@ def _cached_get_attn_backend(
     # resolution, since this function is cached.
     incompatibility = backend.validate_compatibility(head_size, dtype)
     if incompatibility is not None:
-        # SDPABackend reports "SDPA" for AttentionBackendEnum.TORCH_SDPA.
-        pinned_name = None if selected_backend is None else (
-            "SDPA" if selected_backend is AttentionBackendEnum.TORCH_SDPA else selected_backend.name)
-        if selected_backend is not None and backend.get_name() == pinned_name:
+        if selected_backend is not None and backend.get_name() == selected_backend.name:
             raise ValueError(f"Attention backend {selected_backend.name} was explicitly selected but is incompatible "
                              f"with this layer: {incompatibility}. Select a compatible backend or unset "
                              "FASTVIDEO_ATTENTION_BACKEND.")
