@@ -318,7 +318,7 @@ The reusable implementation lives in
 | `fastvideo/tests/modal/ssim_test.py` | Modal functions and partitioning for SSIM |
 | `.buildkite/performance-benchmarks/tests/*.json` | Performance benchmark configs and thresholds |
 | `.github/workflows/infra-docs.yml` | Docs build and GitHub Pages deploy |
-| `.github/workflows/infra-build-image.yml` | Automatic CUDA and manual Docker image builds |
+| `.github/workflows/infra-build-image.yml` | Automatic CUDA matrix and manual Docker image builds |
 | `.github/workflows/publish-fastvideo.yml` | FastVideo PyPI publishing |
 | `.github/workflows/publish-kernel.yml` | FastVideo kernel PyPI publishing |
 | `.github/workflows/publish-comfyui.yml` | ComfyUI registry publishing |
