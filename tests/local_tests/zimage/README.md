@@ -5,17 +5,18 @@ Local component coverage and quality handoff for the `zimage` FastVideo port
 FastVideo-native `ZImagePipeline`, example, pipeline parity, SSIM test, and L40S
 reference seed. The native pipeline surface and 8-step 1024x1024 PNG SSIM test
 are implemented. Native one-step GPU parity is bit-exact, and the L40S candidate
-has been generated; only its author-approved HF upload remains.
+has been published to `FastVideo/ssim-reference-videos`.
 
-> **Status:** Implementation complete, Phase 10 quality regression at the
-> required reference-review/upload gate. The
+> **Status:** Implementation and quality-reference seeding complete; Phase 11
+> final handoff. The
 > Phase 6 exact-head closure is complete: the full pinned component suite passed
 > 34/34 with no skips on GB200 at `f310aacb1`. The required production text
 > encoder is the official-loader-compatible Transformers `AutoModel` path, which
 > matches an independently materialized reference exactly. Scheduler, tokenizer,
 > VAE, native Qwen fp32/bf16, and the 6.15B real-weight transformer all pass.
-> Native one-step pipeline parity is bit-exact on RTX 5090, and the 1024x1024
-> L40S candidate generated at inference head `9a6dbcadc` is staged for author review. See
+> Native one-step pipeline parity is bit-exact on RTX 5090. The reviewed
+> 1024x1024 L40S PNG generated at inference head `9a6dbcadc` is published at
+> dataset revision `7b27d00004b723ef0cf4923e77ae57128573f01c`. See
 > [`PORT_STATUS.md`](./PORT_STATUS.md) for the live state.
 
 ## Reference assets and scope
@@ -89,7 +90,7 @@ Do not change core dependency versions (`torch`, `diffusers`, `transformers`,
 dependency_changes: none
 official_env_status: official source pinned and imported; GB200 component validation run completed
 private_dep_stubs: none
-blocked_on: author approval in model/r12 before the staged L40S PNG is uploaded to HF
+blocked_on: repo-wide full-suite/SSIM launch gate and PR review; model implementation work is complete
 ```
 
 ## Run the tests
@@ -118,7 +119,7 @@ pytest tests/local_tests/zimage/ -v -s
 | Reproducible RNG | `torch.Generator("cuda").manual_seed(42)`; `generate()` accepts the generator rather than fixing a seed internally |
 | Scheduler | `use_reference_discrete_timesteps=True`, runtime `sigma_min=0.0`, and the endpoint-preserving `num_steps + 1` schedule with the final zero-timestep DiT call skipped |
 | Decode | apply `(latents / 0.3611) + 0.1159` before official VAE decode |
-| FastVideo status | Native pipeline/config/preset/registry/example and PNG SSIM test are implemented. One-step RTX 5090 parity is bit-exact; the L40S candidate generated at `9a6dbcadc` awaits HF-upload approval. Later changes affect only API inventory/tests/docs. |
+| FastVideo status | Native pipeline/config/preset/registry/example and PNG SSIM test are implemented. One-step RTX 5090 parity is bit-exact; the reviewed L40S PNG generated at `9a6dbcadc` is published at dataset revision `7b27d000...f01c`. Later PR changes affect only tests/docs. |
 
 ## Pipeline and quality verification
 
@@ -127,7 +128,7 @@ pytest tests/local_tests/zimage/ -v -s
 | Hardware-free pipeline surface | `pytest tests/local_tests/pipelines/test_zimage_pipeline_smoke.py::test_zimage_typed_surface_preflight -v` | PASS |
 | Hardware-free native stage contract | `pytest tests/local_tests/pipelines/test_zimage_pipeline_parity.py::test_zimage_native_default_stage_math -v` | PASS |
 | Pinned native full GPU pipeline parity | `ZIMAGE_REFERENCE_REPO=<pinned-clone> ZIMAGE_MODEL_DIR=<pinned-weights> DISABLE_SP=1 pytest tests/local_tests/pipelines/test_zimage_pipeline_parity.py::test_zimage_pipeline_latents_match_pinned_native_repo -v -s` | PASS on RTX 5090; one-step latents bit-exact (`max=0`, `mean=0`) |
-| 8-step 1024x1024 PNG SSIM | `pytest fastvideo/tests/ssim/test_zimage_similarity.py -v -s` | L40S candidate generated at inference head `9a6dbcadc`; HF reference upload pending author review (`model/r12`) |
+| 8-step 1024x1024 PNG SSIM | `pytest fastvideo/tests/ssim/test_zimage_similarity.py -v -s` | Reviewed L40S PNG uploaded; remote SHA-256 `6c2be648...f7a6`; end-to-end SSIM CI pending |
 
 ## Component contracts
 
@@ -194,6 +195,6 @@ its `num_steps + 1` schedule. The Z-Image pipeline applies both
 
 ## Remaining work
 
-- Obtain the author's `model/r12` visual approval before uploading only the
-  staged `Tongyi-MAI__Z-Image-Turbo/TORCH_SDPA/*.png` reference subtree.
-- Keep HF upload and merge as separate author-gated actions.
+- Run the end-to-end SSIM/full suite after the external-fork documentation
+  approval gate permits the repo-wide launcher.
+- Keep PR approval and merge separate from the completed reference upload.

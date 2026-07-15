@@ -21,9 +21,9 @@ intermediate size 9728, 32 attention heads, 8 KV heads, and head dimension
 
 ## Current Phase
 
-- phase: Phase 10 (quality regression), mandatory author visual/upload gate; Phase 6 closure complete
-- status: human_gate
-- owner: author/release
+- phase: Phase 11 (post-parity review and handoff); quality reference published
+- status: external_ci_gate
+- owner: infra/reviewer
 - last_updated: 2026-07-15
 
 ## Pinned Official Pipeline Context
@@ -42,7 +42,7 @@ intermediate size 9728, 32 attention heads, 8 KV heads, and head dimension
 - decode_contract: apply `(latents / 0.3611) + 0.1159` before official VAE decode
 - implementation_status: native pipeline/config/preset/registry/example and the 8-step 1024x1024 PNG SSIM test are
   implemented; one-step native GPU parity is bit-exact; the L40S candidate generated at inference head `9a6dbcadc`
-  is staged, and its HF upload remains author-gated
+  was author-approved and published at dataset revision `7b27d00004b723ef0cf4923e77ae57128573f01c`
 
 ## Component Matrix
 
@@ -54,7 +54,7 @@ intermediate size 9728, 32 attention heads, 8 KV heads, and head dimension
 | VAE | vae | reused with accepted wrapper exception | Pinned official `src/zimage/autoencoder.py`; raw decode is the component boundary | Existing Diffusers-backed `fastvideo.models.vaes.autoencoder_kl.AutoencoderKL` through production `VAELoader`, plus direct raw-decode coverage | DONE | not_needed | PINNED GB200 PASS (2 passed) | none |
 | Scheduler | scheduler | reused with Z-Image extension | Pinned official `src/zimage/scheduler.py`; official pipeline sets `sigma_min=0.0` | `FlowMatchEulerDiscreteScheduler(use_reference_discrete_timesteps=True, sigma_min=0.0)` | DONE | not_needed | PINNED GB200 PASS (5 passed) | none |
 | Transformer (`ZImageTransformer2DModel`) | dit | native port | Pinned official `src/zimage/transformer.py`; HF `transformer/` supplies weights only | `fastvideo.models.dits.zimage.ZImageTransformer2DModel` through `TransformerLoader` | DONE | not_needed; exact 521-key surface | PINNED GB200 PASS (5 passed; real-weight full forward exact) | none |
-| Pipeline | pipeline | native same-PR implementation | Pinned official `src/zimage/pipeline.py::generate` | FastVideo `ZImagePipeline` plus config/preset/registry/example/parity | DONE | not_needed | RTX 5090 ONE-STEP LATENTS BIT-EXACT; L40S 8-STEP GENERATION PASS | I005 (upload gate only) |
+| Pipeline | pipeline | native same-PR implementation | Pinned official `src/zimage/pipeline.py::generate` | FastVideo `ZImagePipeline` plus config/preset/registry/example/parity | DONE | not_needed | RTX 5090 ONE-STEP LATENTS BIT-EXACT; L40S REFERENCE PUBLISHED | I005 (CI verification only) |
 
 ## Conversion State
 
@@ -88,7 +88,7 @@ intermediate size 9728, 32 attention heads, 8 KV heads, and head dimension
 | Pipeline typed surface | `pytest tests/local_tests/pipelines/test_zimage_pipeline_smoke.py::test_zimage_typed_surface_preflight -v` | PASS, hardware-free, 2026-07-14 | Covers exact `EntryClass`, config, preset, registry, model detection, and official defaults. |
 | Native stage contract | `pytest tests/local_tests/pipelines/test_zimage_pipeline_parity.py::test_zimage_native_default_stage_math -v` | PASS, hardware-free, 2026-07-14 | Covers conditioning trim, endpoint-preserving timestep setup, denoising sign/timestep math, and VAE scale/shift. |
 | Full pipeline parity | `ZIMAGE_REFERENCE_REPO=<pinned-clone> ZIMAGE_MODEL_DIR=<pinned-weights> DISABLE_SP=1 pytest tests/local_tests/pipelines/test_zimage_pipeline_parity.py::test_zimage_pipeline_latents_match_pinned_native_repo -v -s` | PASS, RTX 5090, `fec2baa6c` | Real FastVideo one-step latents match pinned native Tongyi exactly (`max=0`, `mean=0`). Later commits through `f310aacb1` change only API inventory/tests, not inference math. |
-| PNG SSIM quality | `pytest fastvideo/tests/ssim/test_zimage_similarity.py -v -s` | L40S CANDIDATE GENERATED; HF UPLOAD PENDING | Generated at then-live inference head `9a6dbcadc`: 1024x1024 RGB PNG, seed 42, SHA-256 `6c2be648...f7a6`; staged in `model/r12` for author review. |
+| PNG SSIM quality | `pytest fastvideo/tests/ssim/test_zimage_similarity.py -v -s` | L40S REFERENCE UPLOADED; END-TO-END SSIM CI PENDING | Dataset revision `7b27d00004b723ef0cf4923e77ae57128573f01c`; remote SHA-256 `6c2be648...f7a6`; upload scoped to `Tongyi-MAI__Z-Image-Turbo/TORCH_SDPA`. |
 
 ## Open Questions
 
@@ -107,7 +107,7 @@ intermediate size 9728, 32 attention heads, 8 KV heads, and head dimension
 | I002 | Phase 7 | scheduler/pipeline | high | Published `scheduler_config.json` omits the reference-schedule flag and official zero endpoint. | The native stage applies both values; hardware-free stage coverage and pinned native GPU parity pass. | pipeline | resolved | The Z-Image pipeline applies `use_reference_discrete_timesteps=True` and `sigma_min=0.0`; one-step latents match official Tongyi exactly. |
 | I003 | Phase 6 | tokenizer/text_encoder | medium | Prompt formatting and target length previously differed from the official call. | Pinned source uses thinking chat template, 512 tokens, and `hidden_states[-2]`. | parity | resolved | Corrected behavior passed the pinned GB200 run. |
 | I004 | Phase 4 | transformer | high | `ZImageTransformer2DModel` was not ported. | Native config/model/registry and deterministic parity test now exist. | port | resolved | Production meta surface matches all 521 pinned HF keys; tiny full-forward parity passes exactly. |
-| I005 | Phase 10 | pipeline/quality | high | Review and publish the staged L40S PNG candidate. | Native pipeline parity is bit-exact; 8-step L40S generation completed at inference head `9a6dbcadc`, and the candidate is attached in `model/r12`. Later changes affect only API inventory/tests/docs. | author | human_gate | Upload only after the author replies `upload`; merge is a separate gate. |
+| I005 | Phase 10 | pipeline/quality | high | Verify the published L40S PNG through end-to-end SSIM CI. | Author approved the reviewed candidate; the guarded upload published exactly one file at dataset revision `7b27d000...f01c`, and remote bytes match SHA-256 `6c2be648...f7a6`. | infra | external_ci_gate | Reference publication is resolved. The full-suite launcher remains blocked by the external-fork documentation workflow's `action_required` state; merge is separate. |
 | I006 | Phase 6 | text_encoder | high | HF passthrough loading inherited an ambient target-device context, and the earlier test harness incorrectly cast float32 RoPE buffers during bf16 placement. | HF loading now occurs outside the ambient context; typed load is followed by device-only movement, matching official `src/utils/loader.py`; production/independent outputs match exactly. | encoder | resolved | Hardware-free placement/default-dtype tests and the pinned GB200 production path pass. |
 | I007 | Phase 6 | text_encoder | high | Lenient native loading could miss one fused source shard or an auxiliary quantization scale. | Loader completeness covers every destination, required split shard, exact fused destination, and mapped scale parameter. | encoder | resolved | Strictness regressions and pinned checkpoint loading pass. |
 | I008 | Phase 6 | vae | medium | Direct decode alone did not cover production registry/config/device/strict-load behavior; the shared target is a runtime Diffusers wrapper. | VAE parity now covers direct raw decode and production `VAELoader` against official `src/zimage/autoencoder.py`. | parity | resolved | Pinned GB200 subset passed 2/2. The wrapper is an implementation exception, not the oracle; official latent normalization remains Phase 7 pipeline scope. |
@@ -127,8 +127,9 @@ intermediate size 9728, 32 attention heads, 8 KV heads, and head dimension
 
 | Date | Decision | Rationale | Impact |
 |---|---|---|---|
+| 2026-07-15 | Publish the visually approved L40S PNG reference to `FastVideo/ssim-reference-videos`. | The author confirmed the staged image looks good and explicitly requested the HF upload. | Guarded no-force upload added one Z-Image PNG at dataset revision `7b27d000...f01c`; remote bytes match the reviewed artifact. |
 | 2026-07-15 | Accept the traced Z-Image-only native encoder fp32 absolute tolerance of `2e-4` while retaining `rtol=1e-4`. | Exact tracing showed gradual fused/split-kernel accumulation rather than a semantic break; the largest failing absolute tail was `1.686811e-4`. | One test constant changed. The full pinned suite passed 34/34; production equality, bf16 thresholds, strict loading, and official Tongyi oracle are unchanged. |
-| 2026-07-14 | Carry the native FastVideo pipeline, example/parity, SSIM test, and L40S seed workflow on PR #1339. | The author explicitly requested the pipeline and quality regression on the same PR rather than a follow-up. | Implementation, component closure, native GPU parity, and candidate generation are complete; only the author-gated HF upload remains. Later commits do not change inference math. |
+| 2026-07-14 | Carry the native FastVideo pipeline, example/parity, SSIM test, and L40S seed workflow on PR #1339. | The author explicitly requested the pipeline and quality regression on the same PR rather than a follow-up. | Implementation, component closure, native GPU parity, and reference publication are complete. Later commits do not change inference math. |
 | 2026-07-14 | Treat the exact production `AutoModel` loader as the required pipeline text encoder and direct native-Qwen parity as a separate quality row. | `TextEncoderLoader` calls `Qwen3ForCausalLM.from_pretrained_local`, which returns body-only Transformers `AutoModel`; the pipeline does not direct-construct FastVideo-native Qwen. | The production component is exact. The separately approved native-Qwen tolerance changed no production math. |
 | 2026-07-13 | Use pinned `Tongyi-MAI/Z-Image@26f23eda...` as the implementation oracle; treat HF subfolders only as weight/config assets. | The official repo defines transformer, VAE, scheduler, pipeline, and loader semantics. A runtime component may inherit Diffusers without making Diffusers the reference. | Tests verify official clone SHA/import origin; docs distinguish the oracle from storage/runtime implementation details. |
 | 2026-07-13 | Keep official latent scale/shift application out of the VAE component assertion. | `(latents / 0.3611) + 0.1159` is pipeline-stage behavior, while VAE component parity compares raw decode and production loading. | The Z-Image stage implements the exact formula; pinned native GPU parity passed. |
@@ -155,5 +156,7 @@ intermediate size 9728, 32 attention heads, 8 KV heads, and head dimension
 - I012 is closed by the exact-head 34/34 non-skip GB200 run at `f310aacb1`.
 - Native pipeline/config/preset/registry/example, parity tests, and the 8-step
   1024x1024 PNG SSIM test are implemented. Native RTX 5090 one-step parity is
-  bit-exact, and the L40S candidate generated at `9a6dbcadc` is attached in `model/r12`.
-- Do not upload the staged L40S reference until the author replies `upload`.
+  bit-exact. The reviewed L40S PNG is live at dataset revision
+  `7b27d00004b723ef0cf4923e77ae57128573f01c` with matching remote bytes.
+- End-to-end SSIM/full-suite execution remains an infra/reviewer gate; reference
+  publication does not authorize PR approval or merge.
