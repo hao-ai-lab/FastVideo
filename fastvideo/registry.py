@@ -45,7 +45,7 @@ from fastvideo.configs.pipelines.turbodiffusion import (
 )
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
-    FastWan2_2_TI2V_5B_Config,
+    FastWan2_2_TI2V_5B_FullAttn_Config,
     LucyEditDevConfig,
     SelfForcingWan2_2_T2V480PConfig,
     SelfForcingWanT2V480PConfig,
@@ -137,6 +137,9 @@ _MODEL_HF_PATH_TO_NAME: dict[str, str] = {}
 # Detectors to identify model families from paths or class names
 _MODEL_NAME_DETECTORS: list[tuple[str, Callable[[str], bool]]] = []
 
+# Detectors to identify model families from model_index.json metadata
+_MODEL_INDEX_DETECTORS: list[tuple[str, Callable[[dict[str, Any]], bool]]] = []
+
 
 def register_configs(
     sampling_param_cls: type[SamplingParam] | None,
@@ -144,6 +147,7 @@ def register_configs(
     workload_types: tuple[WorkloadType, ...],
     hf_model_paths: list[str] | None = None,
     model_detectors: list[Callable[[str], bool]] | None = None,
+    model_index_detector: Callable[[dict[str, Any]], bool] | None = None,
     model_family: str | None = None,
     default_preset: str | None = None,
     pipeline_cls_name: str | None = None,
@@ -174,6 +178,9 @@ def register_configs(
     if model_detectors:
         for detector in model_detectors:
             _MODEL_NAME_DETECTORS.append((model_id, detector))
+
+    if model_index_detector:
+        _MODEL_INDEX_DETECTORS.append((model_id, model_index_detector))
 
 
 def get_model_short_name(model_id: str) -> str:
@@ -209,13 +216,18 @@ def _get_config_info(
     else:
         config = maybe_download_model_index(model_path)
 
-    pipeline_name = config.get("_class_name", "").lower()
-
     matched_model_names: list[str] = []
-    for model_id, detector in _MODEL_NAME_DETECTORS:
-        if detector(model_path.lower()) or detector(pipeline_name):
-            logger.debug("Matched model name '%s' using a registered detector.", model_id)
+    for model_id, index_detector in _MODEL_INDEX_DETECTORS:
+        if index_detector(config):
+            logger.debug("Matched model name '%s' using model index metadata.", model_id)
             matched_model_names.append(model_id)
+
+    if not matched_model_names:
+        pipeline_name = config.get("_class_name", "").lower()
+        for model_id, name_detector in _MODEL_NAME_DETECTORS:
+            if name_detector(model_path.lower()) or name_detector(pipeline_name):
+                logger.debug("Matched model name '%s' using a registered detector.", model_id)
+                matched_model_names.append(model_id)
 
     if matched_model_names:
         if len(matched_model_names) > 1:
@@ -924,6 +936,22 @@ def _register_configs() -> None:
         model_family="wan",
         default_preset="wan_fun_1_3b_control",
     )
+    # Register the dense FullAttn variant before the generic WanDMDPipeline
+    # detector below. Its model index is the reliable discriminator for local
+    # checkpoints whose directory name does not preserve the Hugging Face slug.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=FastWan2_2_TI2V_5B_FullAttn_Config,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=[
+            "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
+            "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
+        ],
+        model_index_detector=lambda config: config.get("_class_name", "").lower() == "wandmdpipeline" and config.get(
+            "expand_timesteps") is True,
+        model_family="wan",
+        default_preset="fast_wan_2_2_ti2v_5b",
+    )
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=FastWan2_1_T2V_480P_Config,
@@ -979,17 +1007,6 @@ def _register_configs() -> None:
         ],
         model_family="dreamx_world",
         default_preset="dreamx_world_5b_ar",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=FastWan2_2_TI2V_5B_Config,
-        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
-        hf_model_paths=[
-            "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
-            "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
-        ],
-        model_family="wan",
-        default_preset="fast_wan_2_2_ti2v_5b",
     )
     register_configs(
         sampling_param_cls=None,

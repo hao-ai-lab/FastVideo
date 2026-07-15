@@ -69,6 +69,7 @@ def global_force_attn_backend(attn_backend: AttentionBackendEnum | None) -> None
     '''
     global forced_attn_backend
     forced_attn_backend = attn_backend
+    _cached_get_attn_backend.cache_clear()
 
 
 def get_global_forced_attn_backend() -> AttentionBackendEnum | None:
@@ -79,6 +80,63 @@ def get_global_forced_attn_backend() -> AttentionBackendEnum | None:
     return forced_attn_backend
 
 
+def get_selected_attn_backend() -> AttentionBackendEnum | None:
+    '''
+    The attention backend selected before any per-layer filtering.
+
+    A global force (see `global_force_attn_backend`) takes precedence over the
+    `FASTVIDEO_ATTENTION_BACKEND` env var; returns None when neither is set
+    (automatic selection). This is the single source of the force-over-env
+    precedence rule, shared by `_cached_get_attn_backend` and
+    `check_attn_backend_requirement`.
+    '''
+    forced_backend = get_global_forced_attn_backend()
+    if forced_backend is not None:
+        return forced_backend
+    backend_by_env_var = envs.FASTVIDEO_ATTENTION_BACKEND
+    return backend_name_to_enum(backend_by_env_var) if backend_by_env_var is not None else None
+
+
+def check_attn_backend_requirement(
+    required_backend: AttentionBackendEnum | None,
+    *,
+    model_name: str = "This model",
+) -> AttentionBackendEnum | None:
+    '''
+    Resolve the selected attention backend, enforcing a model's hard requirement.
+
+    Some model families are only numerically correct with a specific backend
+    (e.g. FastWan is sparse-distilled with VSA and produces wrong outputs
+    otherwise). Rather than silently forcing the backend -- which would only
+    reach some construction sites and leave others (e.g. the denoising stage)
+    resolving a different backend -- we require the user to select it explicitly
+    and fail loudly otherwise, mirroring how the platform layer hard-fails on
+    missing explicitly-requested backends.
+
+    Arguments:
+
+    * required_backend: backend the model requires, or None for no requirement
+    * model_name: name used in the error message
+
+    Returns:
+
+    * the selected attention backend (`get_selected_attn_backend`), or None if
+      unset and unrequired
+
+    Raises:
+
+    * ValueError if `required_backend` is set but is not the selected backend
+    '''
+    selected_backend = get_selected_attn_backend()
+    if required_backend is not None and selected_backend != required_backend:
+        selected_name = selected_backend.name if selected_backend is not None else "unset"
+        raise ValueError(f"{model_name} requires the {required_backend.name} attention backend, but the effective "
+                         f"FASTVIDEO_ATTENTION_BACKEND is {selected_name}. This checkpoint is only correct with "
+                         f"{required_backend.name}; set FASTVIDEO_ATTENTION_BACKEND={required_backend.name} before "
+                         f"loading the model.")
+    return selected_backend
+
+
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
@@ -86,33 +144,23 @@ def get_attn_backend(
     | None = None,
     default_backend: AttentionBackendEnum | None = None,
 ) -> type[AttentionBackend]:
-    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends, default_backend)
+    # Resolve the global force / environment override before entering the
+    # cached function so backend changes participate in the cache key. This
+    # also validates the environment on every lookup, including cache hits.
+    selected_backend = get_selected_attn_backend()
+    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends, selected_backend, default_backend)
 
 
 @cache
 def _cached_get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: tuple[AttentionBackendEnum, ...]
-    | None = None,
+    supported_attention_backends: tuple[AttentionBackendEnum, ...] | None,
+    selected_backend: AttentionBackendEnum | None,
     default_backend: AttentionBackendEnum | None = None,
 ) -> type[AttentionBackend]:
-    # Check whether a particular choice of backend was
-    # previously forced.
-    #
-    # THIS SELECTION OVERRIDES THE FASTVIDEO_ATTENTION_BACKEND
-    # ENVIRONMENT VARIABLE.
     if not supported_attention_backends:
         raise ValueError("supported_attention_backends is empty")
-    selected_backend = None
-    backend_by_global_setting: AttentionBackendEnum | None = (get_global_forced_attn_backend())
-    if backend_by_global_setting is not None:
-        selected_backend = backend_by_global_setting
-    else:
-        # Check the environment variable and override if specified
-        backend_by_env_var: str | None = envs.FASTVIDEO_ATTENTION_BACKEND
-        if backend_by_env_var is not None:
-            selected_backend = backend_name_to_enum(backend_by_env_var)
 
     # Layer-level default (e.g. a checkpoint that requires a specific sparse
     # backend). Lower precedence than the global force and the env var, so
@@ -135,7 +183,26 @@ def _cached_get_attn_backend(
     attention_cls = current_platform.get_attn_backend_cls(selected_backend, head_size, dtype)
     if not attention_cls:
         raise ValueError(f"Invalid attention backend for {current_platform.device_name}")
-    return cast(type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
+    backend = cast(type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
+
+    # Validate the resolved backend against its self-described capabilities
+    # (see AttentionBackend.validate_compatibility, #1254). An explicit
+    # selection hard-fails only when it was actually honored: resolution can
+    # substitute a fallback for the selected backend (e.g. a FLASH_ATTN pin on
+    # a CLIP layer whose head size only SDPA serves -- see
+    # CudaPlatformBase.get_attn_backend_cls -- or a pin outside the layer's
+    # supported set above). Such a layer never participated in the pin, so its
+    # fallback degrades to the auto-selection warning -- emitted once per
+    # resolution, since this function is cached.
+    incompatibility = backend.validate_compatibility(head_size, dtype)
+    if incompatibility is not None:
+        if selected_backend is not None and backend.get_name() == selected_backend.name:
+            raise ValueError(f"Attention backend {selected_backend.name} was explicitly selected but is incompatible "
+                             f"with this layer: {incompatibility}. Select a compatible backend or unset "
+                             "FASTVIDEO_ATTENTION_BACKEND.")
+        logger.warning("Resolved attention backend %s may be incompatible with this layer: %s", backend.get_name(),
+                       incompatibility)
+    return backend
 
 
 @contextmanager

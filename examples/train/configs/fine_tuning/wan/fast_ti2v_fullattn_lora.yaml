@@ -1,6 +1,8 @@
-# FastWan 2.2 TI2V 5B FullAttn LoRA finetune with VSA.
+# FastWan 2.2 TI2V 5B FullAttn LoRA finetune with dense attention.
 #
 # Notes:
+# - The FullAttn checkpoint has no VSA gate-compression weights. Train its
+#   dense attention projections without enabling VIDEO_SPARSE_ATTN.
 # - This model still uses T2V-style preprocessed parquet data in the new
 #   training stack.
 # - Validation/inference should use WanPipeline rather than the I2V pipeline;
@@ -21,7 +23,6 @@ models:
         - to_k
         - to_v
         - to_out
-        - to_gate_compress
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
@@ -59,20 +60,17 @@ training:
     gradient_accumulation_steps: 5
 
   checkpoint:
-    output_dir: outputs/fast_wan_ti2v_fullattn_lora_vsa
+    output_dir: outputs/fast_wan_ti2v_fullattn_lora
     training_state_checkpointing_steps: 5
     checkpoints_total_limit: 2
     resume_from_checkpoint: null
 
   tracker:
     project_name: fastvideo
-    run_name: fast_wan_ti2v_fullattn_lora_vsa
+    run_name: fast_wan_ti2v_fullattn_lora
 
   model:
     enable_gradient_checkpointing_type: full
-
-  vsa:
-    sparsity: 0.8
 
 callbacks:
   grad_clip:

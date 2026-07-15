@@ -24,6 +24,11 @@ class SDPABackend(AttentionBackend):
         # CLIP vision encoders). None means "no restriction".
         return None
 
+    @classmethod
+    def get_supported_dtypes(cls) -> tuple[torch.dtype, ...]:
+        # torch.nn.functional.scaled_dot_product_attention also runs in fp32.
+        return (torch.float16, torch.bfloat16, torch.float32)
+
     @staticmethod
     def get_name() -> str:
         return "TORCH_SDPA"

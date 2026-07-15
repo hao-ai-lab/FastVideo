@@ -119,6 +119,12 @@ class VideoSparseAttentionBackend(AttentionBackend):
     def get_supported_head_sizes() -> list[int]:
         return [64, 128]
 
+    @classmethod
+    def supports_attention_mask(cls) -> bool:
+        # VSA imposes its own tiled sparsity pattern; it does not consume a
+        # general dense attention mask.
+        return False
+
     @staticmethod
     def get_name() -> str:
         return "VIDEO_SPARSE_ATTN"
