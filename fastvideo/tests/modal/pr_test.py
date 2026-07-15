@@ -71,6 +71,15 @@ ci_env_secret = modal.Secret.from_dict({
     "BUILDKITE_JOB_ID": os.environ.get("BUILDKITE_JOB_ID", ""),
     "TEST_SCOPE": os.environ.get("TEST_SCOPE", ""),
     "IMAGE_VERSION": image_version,
+    "FASTVIDEO_CONTAINER_IMAGE_REF": image_ref,
+    **{
+        key: os.environ[key]
+        for key in (
+            "FASTVIDEO_ATTENTION_BACKEND",
+            "FASTVIDEO_PERFORMANCE_PROFILE_VERSION",
+        )
+        if os.environ.get(key)
+    },
     **({
         "UV_TORCH_BACKEND": uv_torch_backend_override
     } if uv_torch_backend_override else {}),
@@ -409,12 +418,12 @@ def run_performance_tests():
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
         "hf auth login --token $HF_API_KEY && "
-        "if [ \"${BUILDKITE_BRANCH:-}\" = 'main' ] && ( [ \"${BUILDKITE_SOURCE:-}\" = 'schedule' ] || [ \"${TEST_SCOPE:-}\" = 'full' ] ); then "
-        "export PERF_RUN_SOURCE='scheduled_main'; "
-        "export PERF_UPLOAD_POLICY='always'; "
-        "elif [ -n \"${BUILDKITE_PULL_REQUEST:-}\" ] && [ \"${BUILDKITE_PULL_REQUEST:-false}\" != 'false' ]; then "
+        "if [ -n \"${BUILDKITE_PULL_REQUEST:-}\" ] && [ \"${BUILDKITE_PULL_REQUEST:-false}\" != 'false' ]; then "
         "export PERF_RUN_SOURCE='pr'; "
         "export PERF_UPLOAD_POLICY='pass'; "
+        "elif [ \"${BUILDKITE_BRANCH:-}\" = 'main' ] && ( [ \"${BUILDKITE_SOURCE:-}\" = 'schedule' ] || [ \"${TEST_SCOPE:-}\" = 'full' ] ); then "
+        "export PERF_RUN_SOURCE='scheduled_main'; "
+        "export PERF_UPLOAD_POLICY='always'; "
         "elif [ \"${TEST_SCOPE:-}\" = 'direct' ]; then "
         "export PERF_RUN_SOURCE='unknown'; "
         "export PERF_UPLOAD_POLICY='pass'; "

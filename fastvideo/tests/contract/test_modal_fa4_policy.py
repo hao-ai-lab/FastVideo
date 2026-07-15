@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Guard the Modal FA4 defaults that keep CI lanes on their intended backend.
+"""Guard Modal runtime policies that keep CI lanes on their intended backend.
 
 Pure text/AST analysis: no fastvideo imports, no torch, no Modal client.
 """
@@ -38,6 +38,22 @@ def test_generic_l40s_launcher_defaults_fa4_off():
 def test_ssim_launcher_keeps_fa4_enabled_by_default():
     source = SSIM_TEST.read_text(encoding="utf-8")
     assert '"FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1")' in source
+
+
+def test_performance_identity_env_reaches_modal_runtime():
+    pr_source = PR_TEST.read_text(encoding="utf-8")
+    launch_source = LAUNCH_L40S_JOB.read_text(encoding="utf-8")
+    runtime_secret = pr_source.split("ci_env_secret =", 1)[1].split("hf_secret =", 1)[0]
+
+    for key in ("FASTVIDEO_ATTENTION_BACKEND", "FASTVIDEO_PERFORMANCE_PROFILE_VERSION"):
+        assert key in runtime_secret
+    assert "FASTVIDEO_PERFORMANCE_PROFILE_VERSION" in launch_source.split(".env({", 1)[1]
+
+
+def test_performance_lane_classifies_pull_requests_before_main():
+    function_strings = _function_strings(PR_TEST, "run_performance_tests")
+    assert function_strings.index(
+        "BUILDKITE_PULL_REQUEST") < function_strings.index("BUILDKITE_BRANCH")
 
 
 def test_pr_model_load_and_training_lanes_disable_fa4():

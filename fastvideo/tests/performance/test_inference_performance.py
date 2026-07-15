@@ -52,9 +52,9 @@ V2_REQUIRED_IDENTITY_FIELDS = (
 # declaring it now fails validation loudly instead of being silently
 # overwritten by the generated one.
 V2_OPTIONAL_METADATA_FIELDS = (
-    "metric_threshold_policy",
     "quality_metadata",
 )
+COMMON_OBJECT_FIELDS = ("regression_thresholds",)
 RESULT_SCHEMA_VERSION = 2
 VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
 OPTIONAL_RESULT_METADATA_FIELDS = ("quality_metadata", "variant_metadata")
@@ -95,6 +95,10 @@ def _validate_benchmark_config(cfg, path="<memory>"):
     missing_common = [field for field in ("benchmark_id",) if field not in cfg]
     if missing_common:
         raise ValueError(f"{path}: missing required benchmark config fields: {', '.join(missing_common)}")
+
+    for field in COMMON_OBJECT_FIELDS:
+        if field in cfg and not isinstance(cfg[field], Mapping):
+            raise ValueError(f"{path}: benchmark config field {field!r} must be an object")
 
     schema_version = cfg.get("config_schema_version")
     if schema_version is None:
@@ -245,6 +249,45 @@ def _validate_run_counts(run_config: Mapping[str, Any], benchmark_id: str) -> tu
     return num_warmup, num_measure
 
 
+def _resolve_num_gpus(
+    init_kwargs: Mapping[str, Any],
+    run_config: Mapping[str, Any],
+    benchmark_id: str,
+) -> int:
+    init_num_gpus = init_kwargs.get("num_gpus")
+    required_gpus = run_config.get("required_gpus")
+    for field, value in (
+        ("init_kwargs.num_gpus", init_num_gpus),
+        ("run_config.required_gpus", required_gpus),
+    ):
+        if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1):
+            raise ValueError(f"{benchmark_id}: {field} must be a positive integer")
+    parallel_sizes = []
+    for field in ("tp_size", "sp_size"):
+        value = init_kwargs.get(field)
+        if value is None or value == -1:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f"{benchmark_id}: init_kwargs.{field} must be -1 or a positive integer")
+        parallel_sizes.append(value)
+    if (
+        init_num_gpus is not None
+        and required_gpus is not None
+        and init_num_gpus != required_gpus
+    ):
+        raise ValueError(
+            f"{benchmark_id}: init_kwargs.num_gpus ({init_num_gpus}) must match "
+            f"run_config.required_gpus ({required_gpus})")
+    declared_num_gpus = init_num_gpus or required_gpus
+    parallel_num_gpus = max(parallel_sizes, default=1)
+    if declared_num_gpus is not None and declared_num_gpus < parallel_num_gpus:
+        raise ValueError(
+            f"{benchmark_id}: declared GPU count ({declared_num_gpus}) must be at least "
+            f"max(tp_size, sp_size) ({parallel_num_gpus})")
+    return declared_num_gpus or parallel_num_gpus
+
+
 def _write_results(results):
     """Write JSON results to the results directory."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -339,15 +382,31 @@ def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
     # identity fields, so v2 records always get the full identity block.
     if cfg.get("config_schema_version") is None:
         return {}
+    run_config = cfg.get("run_config") or {}
+    num_gpus = _resolve_num_gpus(init_kwargs, run_config, cfg["benchmark_id"])
+    recipe_cfg = dict(cfg)
+    recipe_cfg["init_kwargs"] = {
+        **dict(init_kwargs),
+        "num_gpus": num_gpus,
+    }
     recipe = build_recipe_from_benchmark_config(
-        cfg,
+        recipe_cfg,
         resolved_attention_backend=runtime_identity.get("resolved_attention_backend"),
         resolved_model_revision=runtime_identity.get("resolved_model_revision"),
         measured_prompts=[prompt],
     )
-    num_gpus = init_kwargs.get("num_gpus", cfg.get("run_config", {}).get("required_gpus", 1))
     hw_profile = hardware_profile(num_gpus=num_gpus)
     sw_profile = software_profile()
+    sw_profile.update({
+        "attention_backend": os.environ.get("FASTVIDEO_ATTENTION_BACKEND") or "auto",
+        "flash_attention_4_enabled": os.environ.get("FASTVIDEO_FA4", "0") != "0",
+    })
+    performance_profile_version = os.environ.get("FASTVIDEO_PERFORMANCE_PROFILE_VERSION")
+    if performance_profile_version:
+        sw_profile["performance_profile_version"] = performance_profile_version
+    image_version = os.environ.get("IMAGE_VERSION")
+    if image_version:
+        sw_profile["container_image_version"] = image_version
     env_metadata = environment_metadata(
         hardware=hw_profile,
         software=sw_profile,
@@ -424,6 +483,7 @@ def _build_result_record(
 ) -> dict[str, Any]:
     if not times or not peak_memories:
         raise ValueError("Cannot build a performance result record without measurement runs")
+    num_gpus = _resolve_num_gpus(init_kwargs, cfg.get("run_config") or {}, cfg["benchmark_id"])
     avg_time = sum(times) / len(times)
     max_peak_memory = max(peak_memories)
     num_frames = gen_kwargs.get("num_frames")
@@ -431,12 +491,18 @@ def _build_result_record(
     if isinstance(num_frames, (int, float)) and avg_time > 0:
         throughput_fps = num_frames / avg_time
 
+    result_schema_fields = (
+        {"result_schema_version": RESULT_SCHEMA_VERSION}
+        if _is_v2_config(cfg)
+        else {}
+    )
+
     return {
         "benchmark_id": cfg["benchmark_id"],
-        "result_schema_version": RESULT_SCHEMA_VERSION,
+        **result_schema_fields,
         "model_short_name": model_info.get("model_short_name", ""),
         "device": device_name,
-        "num_gpus": init_kwargs.get("num_gpus", 1),
+        "num_gpus": num_gpus,
         "num_warmup_runs": num_warmup,
         "num_measurement_runs": num_measure,
         "avg_generation_time_s": round(avg_time, 3),
@@ -463,14 +529,16 @@ def _build_result_record(
 # -- Test -------------------------------------------------------------------
 
 def _run_benchmark(cfg):
-    run_config = cfg.get("run_config", {})
-    required_gpus = run_config.get("required_gpus", 1)
-    available = torch.cuda.device_count()
-    if available < required_gpus:
-        pytest.skip(f"Need {required_gpus} GPUs, only {available} available")
-
+    run_config = cfg.get("run_config") or {}
     model_info = cfg["model"]
     init_kwargs = dict(cfg.get("init_kwargs", {}))
+    num_gpus = _resolve_num_gpus(init_kwargs, run_config, cfg["benchmark_id"])
+    init_kwargs["num_gpus"] = num_gpus
+
+    available = torch.cuda.device_count()
+    if available < num_gpus:
+        pytest.skip(f"Need {num_gpus} GPUs, only {available} available")
+
     gen_kwargs = dict(cfg.get("generation_kwargs", {}))
     prompts = cfg.get("test_prompts", ["A cinematic video."])
     prompt = prompts[0]

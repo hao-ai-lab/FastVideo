@@ -8,6 +8,7 @@ from fastvideo.tests.performance import test_inference_performance as perf_test
 def _benchmark_config():
     return {
         "benchmark_id": "wan-t2v-1.3b-2gpu",
+        "config_schema_version": perf_test.V2_CONFIG_SCHEMA_VERSION,
         "workload_id": "wan-t2v",
         "variant_id": "1.3b-sp2",
         "benchmark_version": 2,
@@ -153,6 +154,33 @@ def test_validate_run_counts_rejects_negative_warmup_runs():
 
 def test_validate_run_counts_returns_defaults():
     assert perf_test._validate_run_counts({}, "wan-t2v-1.3b-2gpu") == (1, 3)
+
+
+def test_resolve_num_gpus_uses_one_count_and_rejects_conflicts():
+    assert perf_test._resolve_num_gpus(
+        {},
+        {"required_gpus": 2},
+        "wan-t2v-1.3b-2gpu",
+    ) == 2
+    assert perf_test._resolve_num_gpus(
+        {"tp_size": 2},
+        {},
+        "wan-t2v-1.3b-tp2",
+    ) == 2
+
+    with pytest.raises(ValueError, match="must match"):
+        perf_test._resolve_num_gpus(
+            {"num_gpus": 1},
+            {"required_gpus": 2},
+            "wan-t2v-1.3b-2gpu",
+        )
+
+    with pytest.raises(ValueError, match=r"at least max\(tp_size, sp_size\)"):
+        perf_test._resolve_num_gpus(
+            {"num_gpus": 1, "tp_size": 2},
+            {"required_gpus": 1},
+            "wan-t2v-1.3b-tp2",
+        )
 
 
 def test_build_result_record_rejects_empty_measurements(monkeypatch):

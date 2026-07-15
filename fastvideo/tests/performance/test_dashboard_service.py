@@ -290,6 +290,103 @@ def test_build_latest_summary_keeps_variant_versions_separate():
     assert version_2_row["metrics"]["latency"]["baseline"] == 20.0
 
 
+def test_v2_dashboard_cohort_spans_display_name_changes():
+    identity = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "recipe-a",
+        "hardware_profile_id": "hw-l40s",
+        "software_profile_id": "sw-cu130",
+    }
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            model_id="old-display-name",
+            gpu_type="NVIDIA L40S old label",
+            run_source="scheduled_main",
+            baseline_eligible=True,
+            **identity,
+        ),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            11.0,
+            9.0,
+            model_id="new-display-name",
+            gpu_type="NVIDIA L40S",
+            **identity,
+        ),
+    ]
+
+    rows = build_latest_summary(records)
+    trends = build_trends(records)
+
+    assert len(rows) == 1
+    assert rows[0]["model_id"] == "new-display-name"
+    assert rows[0]["gpu_type"] == "NVIDIA L40S"
+    assert rows[0]["baseline_n"] == 1
+    assert rows[0]["metrics"]["latency"]["baseline"] == 10.0
+    assert len(trends) == 1
+    assert trends[0]["model_id"] == "new-display-name"
+    assert len(trends[0]["points"]) == 2
+
+
+def test_legacy_dashboard_cohorts_still_use_model_and_gpu():
+    records = [
+        _record("2026-01-01T00:00:00+00:00", "a" * 40, 10.0, 10.0, model_id="wan"),
+        _record("2026-01-02T00:00:00+00:00", "b" * 40, 20.0, 5.0, model_id="ltx"),
+    ]
+
+    rows = build_latest_summary(records)
+    trends = build_trends(records)
+
+    assert {row["model_id"] for row in rows} == {"wan", "ltx"}
+    assert len(trends) == 2
+
+
+def test_partial_v2_identity_does_not_cross_model_or_gpu():
+    partial_identity = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+    }
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            model_id="wan",
+            gpu_type="NVIDIA L40S",
+            **partial_identity,
+        ),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            20.0,
+            5.0,
+            model_id="ltx",
+            gpu_type="NVIDIA H100",
+            **partial_identity,
+        ),
+    ]
+
+    rows = build_latest_summary(records)
+    trends = build_trends(records)
+
+    assert {(row["model_id"], row["gpu_type"]) for row in rows} == {
+        ("wan", "NVIDIA L40S"),
+        ("ltx", "NVIDIA H100"),
+    }
+    assert len(trends) == 2
+
+
 def test_dashboard_identity_preserves_zero_benchmark_version():
     records = [
         _record(
