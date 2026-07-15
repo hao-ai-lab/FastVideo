@@ -10,7 +10,10 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 from tqdm.auto import tqdm
 
+import fastvideo.envs as envs
+from fastvideo.attention import LocalAttention
 from fastvideo.attention.backends.nabla import NablaAttentionMetadataBuilder
+from fastvideo.attention.selector import backend_name_to_enum
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -27,6 +30,7 @@ from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
@@ -169,6 +173,96 @@ class Kandinsky5DenoisingStage(PipelineStage):
         seq_len = int(mask.sum(1).max().item())
         return torch.arange(seq_len, device=device)
 
+    # Backends whose selection is all-or-nothing: fastvideo.platforms.cuda
+    # raises ImportError immediately if the kernel isn't available, rather
+    # than the generic "requested backend unsupported by this layer, falling
+    # back to automatic selection" path _cached_get_attn_backend takes for
+    # most other backend names (see fastvideo/attention/selector.py). Both
+    # values are also always in Kandinsky5ArchConfig's
+    # _supported_attention_backends, so that generic fallback never applies
+    # to them here. That combination makes an exact backend match a safe,
+    # false-positive-free signal *only* for these two -- any other
+    # FASTVIDEO_ATTENTION_BACKEND value (e.g. a backend meant for a
+    # different model family sharing the same process/env var) can
+    # legitimately resolve to something other than what was requested.
+    _STRICT_BACKENDS = frozenset({
+        AttentionBackendEnum.ATTN_QAT_TRAIN,
+        AttentionBackendEnum.ATTN_QAT_INFER,
+    })
+
+    def _assert_local_attention_backend_engaged(self) -> None:
+        """Guard against ``LocalAttention`` silently falling back to SDPA.
+
+        ``Kandinsky5Attention.forward`` catches the ``AssertionError``
+        ``LocalAttention`` raises when no pipeline forward context is set and
+        falls back to plain ``F.scaled_dot_product_attention`` -- silently
+        skipping whichever kernel ``FASTVIDEO_ATTENTION_BACKEND`` requested
+        (the fake-quantized ``ATTN_QAT_TRAIN``/``ATTN_QAT_INFER`` kernels).
+        ``LocalAttention.backend`` is resolved once at module construction,
+        independent of whether a forward context is later set, so this only
+        catches a backend that failed to resolve to what the env var
+        requested -- it does not prove forward context was present for a
+        given forward call. Pair it with always wrapping the actual
+        transformer call in ``set_forward_context`` (see the denoising loops
+        below), which is what prevents the runtime fallback.
+
+        Scoped to ``_STRICT_BACKENDS``: other backend names can legitimately
+        differ from what ``LocalAttention.backend`` resolved to (silent,
+        logged, intentional fallback when unsupported by this layer -- see
+        ``_STRICT_BACKENDS``'s comment), so asserting on those would flag
+        expected behavior as a bug.
+        """
+        backend_env = envs.FASTVIDEO_ATTENTION_BACKEND
+        if not backend_env:
+            return
+        expected = backend_name_to_enum(backend_env)
+        if expected is None or expected not in self._STRICT_BACKENDS:
+            return
+        for module in self.transformer.modules():
+            if isinstance(module, LocalAttention):
+                assert module.backend == expected, (
+                    f"Kandinsky5 local attention resolved to backend {module.backend}, expected "
+                    f"{expected} from FASTVIDEO_ATTENTION_BACKEND={backend_env}. This likely means "
+                    "LocalAttention's missing-forward-context guard silently fell back to SDPA.")
+                return
+
+    def _resolve_target_dtype(self, fastvideo_args: FastVideoArgs) -> torch.dtype:
+        """Resolve the transformer's actual compute dtype.
+
+        Trust ``pipeline_config.dit_precision`` directly for a normal,
+        non-FSDP load -- ``TransformerLoader.load()`` asserts every
+        parameter matches it exactly (``fastvideo/models/loader/
+        component_loader.py``), so this holds for standalone T2V/I2V
+        inference regardless of which precision (including fp32) was
+        requested.
+
+        FSDP2-wrapped modules are the one case where that assertion doesn't
+        carry forward: ``maybe_load_fsdp_model`` hardcodes its
+        ``MixedPrecisionPolicy`` to ``param_dtype=torch.bfloat16`` for every
+        FSDP-wrapped load, independent of ``dit_precision`` -- this covers
+        both the live transformer ``ValidationCallback`` reuses from
+        training (whose ``pipeline_config.dit_precision`` reflects the
+        fp32 master-weight load dtype, not the actual bf16 compute dtype)
+        and multi-GPU ``use_fsdp_inference=True`` runs. Detect the real
+        compute dtype from the parameters only in that case, mirroring the
+        Cosmos 2.5 denoising stage.
+        """
+        declared_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
+        try:
+            from torch.distributed.fsdp import FSDPModule
+        except Exception:  # pragma: no cover - FSDP not always available
+            return declared_dtype
+
+        if not isinstance(self.transformer, FSDPModule):
+            return declared_dtype
+
+        target_dtype = torch.bfloat16  # safe default
+        for p in self.transformer.parameters():
+            if p.dtype != torch.float32:
+                target_dtype = p.dtype
+                break
+        return target_dtype
+
     @staticmethod
     def fast_sta_nabla(
         T: int,
@@ -270,20 +364,10 @@ class Kandinsky5DenoisingStage(PipelineStage):
             loader = TransformerLoader()
             self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
             fastvideo_args.model_loaded["transformer"] = True
+        self._assert_local_attention_backend_engaged()
 
         device = get_local_torch_device()
-        # FSDP-wrapped models (e.g. the live transformer reused by
-        # ValidationCallback during training) may have their true compute
-        # dtype disagree with pipeline_config.dit_precision -- the training
-        # config forces dit_precision to "fp32" (master-weight load dtype)
-        # even though the actual FSDP2 mixed-precision policy runs the model
-        # in bf16. Detect the real weight dtype instead, mirroring the
-        # Cosmos 2.5 denoising stage.
-        target_dtype = torch.bfloat16  # safe default
-        for p in self.transformer.parameters():
-            if p.dtype != torch.float32:
-                target_dtype = p.dtype
-                break
+        target_dtype = self._resolve_target_dtype(fastvideo_args)
         autocast_enabled = target_dtype != torch.float32 and not fastvideo_args.disable_autocast
         latents = batch.latents
         num_channels = getattr(
@@ -444,15 +528,10 @@ class Kandinsky5DmdDenoisingStage(Kandinsky5DenoisingStage):
             loader = TransformerLoader()
             self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
             fastvideo_args.model_loaded["transformer"] = True
+        self._assert_local_attention_backend_engaged()
 
         device = get_local_torch_device()
-        # See the parent stage's forward() for why this can't be
-        # PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision].
-        target_dtype = torch.bfloat16  # safe default
-        for p in self.transformer.parameters():
-            if p.dtype != torch.float32:
-                target_dtype = p.dtype
-                break
+        target_dtype = self._resolve_target_dtype(fastvideo_args)
         autocast_enabled = target_dtype != torch.float32 and not fastvideo_args.disable_autocast
         latents = batch.latents
         num_channels = getattr(
@@ -499,9 +578,18 @@ class Kandinsky5DmdDenoisingStage(Kandinsky5DenoisingStage):
                     continue
 
                 t_expand = timestep.unsqueeze(0).repeat(latents.shape[0]).to(device=device, dtype=target_dtype)
+                attn_metadata = None
+                if sparse_params is not None:
+                    attn_metadata = NablaAttentionMetadataBuilder().build(
+                        current_timestep=i,
+                        sta_mask=sparse_params["sta_mask"],
+                        P=sparse_params["P"],
+                        visual_shape=sparse_params["visual_shape"],
+                    )
                 autocast_ctx = (torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled)
                                 if device.type == "cuda" else contextlib.nullcontext())
-                with autocast_ctx:
+                with set_forward_context(current_timestep=i, attn_metadata=attn_metadata,
+                                         forward_batch=batch), autocast_ctx:
                     pred_velocity = self.transformer(
                         hidden_states=latents.to(dtype=target_dtype),
                         encoder_hidden_states=prompt_embeds,

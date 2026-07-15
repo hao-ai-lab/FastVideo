@@ -49,6 +49,14 @@ KANDINSKY5_OVERFIT_DATA_DIR = DATA_DIR / "kandinsky5_overfit"
 PREPROCESSED_DIR = DATA_DIR / "kandinsky5_overfit_preprocessed"
 STAGE1_OUTPUT_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage1"
 STAGE2_OUTPUT_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage2"
+# Kept out of STAGE1_OUTPUT_DIR: that directory is scanned with
+# glob("checkpoint-*") below to find the latest raw DCP checkpoint, and a
+# "checkpoint-<N>-diffusers" export dir sitting alongside "checkpoint-<N>"
+# would also match that pattern -- on a rerun that doesn't start from a
+# clean data/ dir, it would sort after "checkpoint-<N>" and get picked as
+# stage1_ckpt instead, feeding an already-exported diffusers directory back
+# into dcp_to_diffusers as if it were a DCP checkpoint.
+STAGE1_DIFFUSERS_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage1_diffusers"
 
 STAGE1_CONFIG = (REPO_ROOT / "examples" / "train" / "configs" / "fine_tuning" / "kandinsky5" /
                  "t2v_480p_qat.yaml")
@@ -101,6 +109,29 @@ def _run_preprocessing() -> None:
     subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
 
 
+def _export_dcp_to_diffusers(checkpoint_dir: Path, output_dir: Path) -> None:
+    """Convert a stage-1 DCP checkpoint to a diffusers-style directory.
+
+    Stage 2's ``models.*.init_from`` (like real-training YAML configs, see
+    ``dmd2_t2v_480p_qat.yaml``) expects a diffusers model directory
+    (``model_index.json`` + component subfolders), not the raw
+    ``checkpoint-N`` DCP layout ``CheckpointManager`` writes (``dcp/`` +
+    metadata/RNG state only). ``--verify`` strictly reloads the exported
+    transformer immediately so a key-mapping bug fails here, at the export
+    boundary, rather than deep inside the stage-2 launch below.
+    """
+    cmd = [
+        sys.executable, "-m",
+        "fastvideo.train.entrypoint.dcp_to_diffusers",
+        "--checkpoint", str(checkpoint_dir),
+        "--output-dir", str(output_dir),
+        "--role", "student",
+        "--overwrite",
+        "--verify",
+    ]
+    subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
+
+
 def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_overrides: list[str],
               env_overrides: dict[str, str]) -> None:
     cmd = [
@@ -109,7 +140,7 @@ def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_ov
         "--nproc_per_node", NUM_GPUS,
         "-m", "fastvideo.train.entrypoint.train",
         "--config", str(config),
-        "--training.data.data_path", str(PREPROCESSED_DIR / "combined_parquet_dataset"),
+        "--training.data.data_path", str(PREPROCESSED_DIR),
         "--training.distributed.num_gpus", NUM_GPUS,
         "--training.distributed.hsdp_shard_dim", NUM_GPUS,
         "--training.loop.max_train_steps", str(max_train_steps),
@@ -145,16 +176,21 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
         f"no stage-1 checkpoint produced under {STAGE1_OUTPUT_DIR}")
 
     stage1_checkpoints = sorted(STAGE1_OUTPUT_DIR.glob("checkpoint-*"))
-    stage1_ckpt = str(stage1_checkpoints[-1])
+    stage1_ckpt = stage1_checkpoints[-1]
+
+    stage1_diffusers_dir = STAGE1_DIFFUSERS_DIR / stage1_ckpt.name
+    _export_dcp_to_diffusers(stage1_ckpt, stage1_diffusers_dir)
+    assert (stage1_diffusers_dir / "model_index.json").exists(), (
+        f"dcp_to_diffusers export did not produce a diffusers model dir at {stage1_diffusers_dir}")
 
     _run_stage(
         STAGE2_CONFIG,
         STAGE2_OUTPUT_DIR,
         max_train_steps=3,
         extra_overrides=[
-            "--models.student.init_from", stage1_ckpt,
-            "--models.teacher.init_from", stage1_ckpt,
-            "--models.critic.init_from", stage1_ckpt,
+            "--models.student.init_from", str(stage1_diffusers_dir),
+            "--models.teacher.init_from", str(stage1_diffusers_dir),
+            "--models.critic.init_from", str(stage1_diffusers_dir),
         ],
         env_overrides={"FASTVIDEO_ATTENTION_BACKEND": "ATTN_QAT_TRAIN"},
     )

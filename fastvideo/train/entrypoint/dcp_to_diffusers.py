@@ -20,6 +20,10 @@ The checkpoint must contain ``metadata.json`` (written by
 ``CheckpointManager``).  If the checkpoint predates metadata
 support, pass ``--config`` explicitly to provide the training
 YAML.
+
+Pass ``--verify`` to strictly reload the exported transformer immediately
+after writing it, so a key-mapping bug fails here instead of deep inside a
+later training/inference launch that loads the exported directory.
 """
 
 from __future__ import annotations
@@ -200,6 +204,27 @@ def _save_role_pretrained(
     return str(dst)
 
 
+def _strict_reload_verify(*, output_dir: str, training_config: Any) -> None:
+    """Reload the just-exported transformer from disk and fail loudly on
+    any key mismatch.
+
+    ``TransformerLoader.load()`` already loads strictly (``strict=True``)
+    for every non-Cosmos25 model, so this doesn't add leniency -- it moves
+    the failure to right after export, with a clear "the export is broken"
+    error, instead of surfacing deep inside a later training/inference
+    launch that happens to load this directory.
+    """
+    from fastvideo.train.utils.moduleloader import load_module_from_path
+
+    logger.info("Verifying export: strictly reloading transformer from %s", output_dir)
+    load_module_from_path(
+        model_path=output_dir,
+        module_type="transformer",
+        training_config=training_config,
+    )
+    logger.info("Strict reload verification passed.")
+
+
 def convert(
     *,
     checkpoint_dir: str,
@@ -207,6 +232,7 @@ def convert(
     config_path: str | None = None,
     role: str = "student",
     overwrite: bool = False,
+    verify: bool = False,
 ) -> str:
     """Load a DCP checkpoint and export as a diffusers model.
 
@@ -298,6 +324,10 @@ def convert(
         model=model,
     )
     logger.info("Export complete: %s", result)
+
+    if verify:
+        _strict_reload_verify(output_dir=result, training_config=tc)
+
     return result
 
 
@@ -406,6 +436,13 @@ def main() -> None:
         action="store_true",
         help="Overwrite output-dir if it exists.",
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help=("After exporting, strictly reload the transformer from "
+              "the exported directory to catch key-mapping bugs "
+              "immediately."),
+    )
     args = parser.parse_args(sys.argv[1:])
 
     convert(
@@ -414,6 +451,7 @@ def main() -> None:
         config_path=args.config,
         role=args.role,
         overwrite=args.overwrite,
+        verify=args.verify,
     )
 
 

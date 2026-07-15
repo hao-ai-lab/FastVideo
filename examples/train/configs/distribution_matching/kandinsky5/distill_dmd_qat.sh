@@ -9,8 +9,20 @@
 # Kandinsky5-specific handling needed).
 #
 # Run examples/train/configs/fine_tuning/kandinsky5/finetune_qat.sh (stage 1)
-# first and point models.student/teacher/critic.init_from in
-# dmd2_t2v_480p_qat.yaml at that checkpoint before launching this script.
+# first. Its checkpoint-N/ is a raw DCP checkpoint (dcp/ + metadata/RNG
+# state only) -- models.student/teacher/critic.init_from need a diffusers
+# model directory (model_index.json + component subfolders), so convert it
+# first:
+#
+#   python -m fastvideo.train.entrypoint.dcp_to_diffusers \
+#       --checkpoint outputs/kandinsky5_t2v_qat_finetune/checkpoint-<N> \
+#       --output-dir outputs/kandinsky5_t2v_qat_finetune/checkpoint-<N>-diffusers \
+#       --role student --verify
+#
+# then point models.student/teacher/critic.init_from in dmd2_t2v_480p_qat.yaml
+# at that exported checkpoint-<N>-diffusers directory (all three roles use
+# the same weights; teacher/critic full-precision masking happens at load
+# time, not by pointing at a different export) before launching this script.
 set -euo pipefail
 
 export FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN
