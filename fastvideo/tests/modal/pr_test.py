@@ -383,6 +383,7 @@ def run_unit_test():
         "./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/worker/ "
         "./fastvideo/tests/training/test_trackers.py "
         "./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py "
+        "./fastvideo/tests/attention/test_attn_qat_infer_capability.py "
         "./fastvideo/tests/modal/test_kernel_build_cache.py ./fastvideo/tests/modal/test_pr_test.py "
         "./fastvideo/tests/modal/test_ssim_test.py "
         "--ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py "
