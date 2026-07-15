@@ -44,6 +44,7 @@ find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 # ---------------------------------------------------------------------------
 if(NOT GPU_BACKEND STREQUAL "ROCM")
     if(DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+        set(TORCH_CUDA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
         message(STATUS "CUDA arch: TORCH_CUDA_ARCH_LIST=$ENV{TORCH_CUDA_ARCH_LIST} (from environment)")
     elseif(TORCH_CUDA_ARCH_LIST)
         set(ENV{TORCH_CUDA_ARCH_LIST} "${TORCH_CUDA_ARCH_LIST}")
@@ -52,14 +53,14 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
         set(_FV_ARCH_LIST "")
         if(_FASTVIDEO_USER_CUDA_ARCH)
             # Caller pinned -DCMAKE_CUDA_ARCHITECTURES (which torch ignores); translate it
-            # to the TORCH_CUDA_ARCH_LIST spelling: "121" -> "12.1", "90a" -> "9.0a".
+            # to the TORCH_CUDA_ARCH_LIST spelling: "121a" -> "12.1a", "90a" -> "9.0a".
             # Only numeric spellings translate; keywords like "native"/"all" would
             # otherwise be mangled into nonsense ("nativ.e").
             foreach(_fv_arch IN LISTS _FASTVIDEO_USER_CUDA_ARCH)
                 if(NOT _fv_arch MATCHES "^[0-9]+[af]?$")
                     message(FATAL_ERROR
                         "fastvideo-kernel: CMAKE_CUDA_ARCHITECTURES='${_fv_arch}' is not "
-                        "supported. Use a numeric arch (e.g. 90a, 121), set "
+                        "supported. Use a numeric arch (e.g. 90a, 121a), set "
                         "TORCH_CUDA_ARCH_LIST directly (e.g. 9.0a), or unset both to "
                         "auto-detect from the visible GPU.")
                 endif()
@@ -93,13 +94,25 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
                 "fastvideo-kernel: could not determine the target CUDA architecture.\n"
                 "Refusing to let torch auto-detect an arch that may not run on this GPU. "
                 "Fix with one of:\n"
-                "  - set TORCH_CUDA_ARCH_LIST (e.g. 12.1, or 9.0a for Hopper), or\n"
-                "  - pass -DCMAKE_CUDA_ARCHITECTURES=<arch> (e.g. 121), or\n"
+                "  - set TORCH_CUDA_ARCH_LIST (e.g. 12.1a, or 9.0a for Hopper), or\n"
+                "  - pass -DCMAKE_CUDA_ARCHITECTURES=<arch> (e.g. 121a), or\n"
                 "  - build where the target GPU is visible to torch.\n"
                 "Note: 'pip/uv pip install' builds under build isolation, which hides the "
                 "GPU; set TORCH_CUDA_ARCH_LIST or add --no-build-isolation. "
                 "fastvideo-kernel/build.sh sets all of this for you.")
         endif()
+    endif()
+
+    string(REGEX MATCH "(^|[; ,])((12\\.0a)|(120a)|(sm_120a))([; ,]|$)"
+        _FV_HAS_120A "${TORCH_CUDA_ARCH_LIST}")
+    string(REGEX MATCH "(^|[; ,])((12\\.1a)|(121a)|(sm_121a))([; ,]|$)"
+        _FV_HAS_121A "${TORCH_CUDA_ARCH_LIST}")
+    if(_FV_HAS_121A AND CUDAToolkit_VERSION VERSION_LESS 13.0)
+        message(FATAL_ERROR
+            "fastvideo-kernel: sm_121a requires CUDA Toolkit 13.0+, but found "
+            "${CUDAToolkit_VERSION}. Architecture-specific sm_120a code is not "
+            "compatible with sm_121; use CUDA 13 or remove 12.1a from "
+            "TORCH_CUDA_ARCH_LIST.")
     endif()
 endif()
 
@@ -208,13 +221,7 @@ else()
         set(_WANTS_ATTN_QAT_INFER ON)
     elseif(FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER STREQUAL "AUTO")
         if(TORCH_CUDA_ARCH_LIST)
-            # Consumer/workstation Blackwell: sm_120a (RTX 5090 / PRO 6000) and
-            # sm_121a (DGX Spark GB10). The block-scaled FP4 MMA is valid on both
-            # (GB10-verified: cos ~0.98 vs bf16 SDPA across shapes).
-            string(REGEX MATCH
-                "(^|[; ,])((12\\.0a)|(120a)|(sm_120a)|(12\\.1a)|(121a)|(sm_121a))([; ,]|$)"
-                _HAS_BLACKWELL_FP4 "${TORCH_CUDA_ARCH_LIST}")
-            if(_HAS_BLACKWELL_FP4)
+            if(_FV_HAS_120A OR _FV_HAS_121A)
                 set(_WANTS_ATTN_QAT_INFER ON)
             endif()
         else()
@@ -242,6 +249,18 @@ else()
     endif()
 
     if(ENABLE_ATTN_QAT_INFER)
+        set(FASTVIDEO_FP4_CUDA_ARCHS "")
+        if(_FV_HAS_120A)
+            list(APPEND FASTVIDEO_FP4_CUDA_ARCHS "120a")
+        endif()
+        if(_FV_HAS_121A)
+            list(APPEND FASTVIDEO_FP4_CUDA_ARCHS "121a")
+        endif()
+        if(NOT FASTVIDEO_FP4_CUDA_ARCHS)
+            message(FATAL_ERROR
+                "FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER=ON requires 12.0a or "
+                "12.1a in TORCH_CUDA_ARCH_LIST; got '${TORCH_CUDA_ARCH_LIST}'.")
+        endif()
         message(STATUS "attn_qat_infer kernels: ENABLED")
     else()
         message(STATUS
@@ -273,14 +292,6 @@ if(ENABLE_ATTN_QAT_INFER AND TORCH_CUDA_ARCH_LIST)
     set(FASTVIDEO_MAIN_CUDA_ARCHS "${TORCH_CUDA_ARCH_LIST}")
     string(REPLACE "sm_" "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
     string(REPLACE "." "" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
-    # sm_121a needs CUDA 13's ptxas. On older toolchains, downgrade any requested
-    # 121a to 120a for the *main* extension too (not just the fp4* targets below),
-    # so a CUDA-12.x build with 12.1a in the arch list doesn't fail to compile —
-    # sm_120a PTX forward-JITs to sm_121 at runtime.
-    if(CUDAToolkit_VERSION VERSION_LESS 13.0)
-        string(REPLACE "121a" "120a" FASTVIDEO_MAIN_CUDA_ARCHS "${FASTVIDEO_MAIN_CUDA_ARCHS}")
-        list(REMOVE_DUPLICATES FASTVIDEO_MAIN_CUDA_ARCHS)
-    endif()
     message(STATUS "[per-arch] main extension archs=${FASTVIDEO_MAIN_CUDA_ARCHS}, fp4* archs set per-target below")
 endif()
 
@@ -421,15 +432,8 @@ if(ENABLE_ATTN_QAT_INFER)
         $<$<COMPILE_LANGUAGE:CXX>:-O3 -std=c++17>
         $<$<COMPILE_LANGUAGE:CUDA>:${ATTN_QAT_INFER_CUDA_FLAGS}>
     )
-    # FP4 kernels target consumer/workstation Blackwell: sm_120a (RTX 5090 /
-    # PRO 6000) and sm_121a (DGX Spark GB10). sm_121a needs CUDA 13's ptxas
-    # (CUDA 12.x lacks it), so it is added only on CUDA >= 13.0 — older
-    # toolchains keep the original sm_120a-only build unchanged. sm_121a
-    # GB10-verified (cos ~0.98 vs bf16).
-    set(FASTVIDEO_FP4_CUDA_ARCHS "120a")
-    if(NOT CUDAToolkit_VERSION VERSION_LESS 13.0)
-        list(APPEND FASTVIDEO_FP4_CUDA_ARCHS "121a")
-    endif()
+    # Compile only the FP4 architectures requested by the caller. The large
+    # template translation units use 8-12 GiB each, so an extra target matters.
     message(STATUS "fp4* CUDA architectures: ${FASTVIDEO_FP4_CUDA_ARCHS}")
     set_target_properties(fp4attn_cuda PROPERTIES
         CUDA_ARCHITECTURES "${FASTVIDEO_FP4_CUDA_ARCHS}"
@@ -470,6 +474,6 @@ message(STATUS "host / backend:       ${CMAKE_SYSTEM_PROCESSOR} / ${GPU_BACKEND}
 message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
 message(STATUS "fastvideo_kernel_ops: ON  (turbodiffusion int8-gemm/quant/rmsnorm/layernorm, all listed archs)")
 message(STATUS "  + TK sta/block_sparse (sm_90a only):          ${ENABLE_TK_KERNELS}")
-message(STATUS "fp4attn/fp4quant (sm_120a/sm_121a, CUDA >= 12.8):  ${ENABLE_ATTN_QAT_INFER}")
+message(STATUS "fp4attn/fp4quant (sm_120a CUDA >= 12.8; sm_121a CUDA >= 13):  ${ENABLE_ATTN_QAT_INFER}")
 message(STATUS "Triton fallbacks ship in python/fastvideo_kernel/triton_kernels regardless.")
 message(STATUS "============================================================")

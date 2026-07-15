@@ -67,7 +67,7 @@ jobs:
             - os: ubuntu-22.04
               arch: x86_64
               wheel-plat: manylinux_2_35_x86_64
-          # aarch64 is Blackwell (GB200 sm_100a + DGX Spark / consumer sm_120a), not
+          # aarch64 is Blackwell (GB200 sm_100a + sm_120a + DGX Spark sm_121a), not
           # Hopper, and Blackwell needs CUDA >= 12.8 — so only the cu130 leg applies.
           # Added via include so x86 keeps cu126 + cu130 while aarch64 stays cu130-only.
           include:
@@ -163,15 +163,16 @@ jobs:
           cd fastvideo-kernel
           git submodule update --init --recursive  # Ensure ThunderKittens submodule is initialized
           # Release builds run on GPU-less runners, so set kernels + arch explicitly:
-          #   * aarch64 = Blackwell (GB200 sm_100a + DGX Spark/consumer sm_120a), NOT
-          #     Hopper, so TK (sm_90a wgmma) is OFF. The C++ FP4 (attn_qat_infer, SM120)
-          #     covers sm_120a; turbodiffusion covers sm_100a+sm_120a. The sm_100 FP4
-          #     forward is the FA4 CuTe DSL path in the fastvideo package (PR #1221),
+          #   * aarch64 = Blackwell (GB200 sm_100a + sm_120a + DGX Spark sm_121a), NOT
+          #     Hopper, so TK (sm_90a wgmma) is OFF. The C++ FP4 (attn_qat_infer)
+          #     covers sm_120a+sm_121a; turbodiffusion covers every listed arch. The
+          #     sm_100 FP4 forward is the FA4 CuTe DSL path in the fastvideo package (PR #1221),
           #     JIT-compiled at runtime — not built into this wheel.
           #   * x86_64 cu130 = Hopper TK + consumer Blackwell sm_120a FP4.
           #   * x86_64 cu126 = Hopper TK only (older drivers; CUDA < 12.8 has no FP4).
-          # The per-arch split in CMakeLists pins the FP4 targets to sm_120a and builds
-          # the main extension for the full arch list. CMAKE_BUILD_PARALLEL_LEVEL caps
+          # The per-arch split in CMakeLists pins the FP4 targets to requested
+          # sm_120a/sm_121a and builds the main extension for the full arch list.
+          # CMAKE_BUILD_PARALLEL_LEVEL caps
           # Ninja so heavy CUTLASS/TK template TUs don't OOM the 16 GB runner (exit 143).
           if [ "${{ matrix.platform.arch }}" = "aarch64" ]; then
             export TORCH_CUDA_ARCH_LIST="10.0a;12.0a;12.1a"
@@ -243,7 +244,8 @@ jobs:
       - name: Download PyPI wheels
         # Publish the cu130 (CUDA 13) wheels to PyPI for both architectures:
         #   x86_64  — Hopper sm_90a TK + consumer Blackwell sm_120a FP4
-        #   aarch64 — Blackwell: turbodiffusion (sm_100a/sm_120a) + C++ FP4 (sm_120a);
+        #   aarch64 — Blackwell: turbodiffusion (sm_100a/sm_120a/sm_121a)
+        #             + C++ FP4 (sm_120a/sm_121a);
         #             no TK (Hopper). sm_100 FP4 forward is the FA4 CuTe DSL path in the
         #             fastvideo package (#1221), shipped/JIT separately.
         # The x86_64 cu126 wheel stays available as a build artifact / GitHub-release asset.
