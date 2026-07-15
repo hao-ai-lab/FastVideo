@@ -916,8 +916,7 @@ class SVIImageVAEEncodingStage(ImageVAEEncodingStage):
 
         condition_frames = [
             self.preprocess(frame, vae_scale_factor=vae_scale, height=height,
-                            width=width).to(device=device, dtype=torch.float32).unsqueeze(2)
-            for frame in first_frames
+                            width=width).to(device=device, dtype=torch.float32).unsqueeze(2) for frame in first_frames
         ]
         vae_input_condition = torch.cat(condition_frames, dim=2)
 
