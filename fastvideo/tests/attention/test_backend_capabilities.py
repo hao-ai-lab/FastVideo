@@ -91,7 +91,7 @@ def test_varlen_requirement_reports_reason():
 
 
 def test_real_backends_declare_capabilities():
-    # Backends that ship head-size lists should expose them through the hook.
+    # SDPA declares unrestricted head sizes and its broader dtype support.
     from fastvideo.attention.backends.sdpa import SDPABackend
-    assert SDPABackend.get_supported_head_sizes() is not None
+    assert SDPABackend.get_supported_head_sizes() is None
     assert torch.float32 in SDPABackend.get_supported_dtypes()
