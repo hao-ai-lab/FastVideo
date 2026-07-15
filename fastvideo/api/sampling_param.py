@@ -36,6 +36,7 @@ class SamplingParam:
     # Action control inputs (Matrix-Game)
     mouse_cond: Any | None = None  # Shape: (B, T, 2)
     keyboard_cond: Any | None = None  # Shape: (B, T, K)
+    scroll_cond: Any | None = None  # Shape: (B, T, 1)
     grid_sizes: Any | None = None  # Shape: (3,) [F,H,W]
 
     # Camera control inputs (HYWorld)

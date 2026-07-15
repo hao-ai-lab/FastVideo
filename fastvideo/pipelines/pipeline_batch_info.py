@@ -133,6 +133,7 @@ class ForwardBatch:
     # Action control inputs (Matrix-Game)
     mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
     keyboard_cond: torch.Tensor | None = None  # Shape: (B, T, K)
+    scroll_cond: torch.Tensor | None = None  # Shape: (B, T, 1)
     grid_sizes: torch.Tensor | None = None  # Shape: (3,) [F,H,W]
     num_iterations: int | None = None
     use_base_model: bool = False

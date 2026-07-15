@@ -110,8 +110,15 @@ class Worker:
         self.pipeline.streaming_reset(forward_batch, self.fastvideo_args)
         return {"status": "reset_complete"}
 
-    def execute_streaming_step(self, keyboard_action: torch.Tensor, mouse_action: torch.Tensor) -> ForwardBatch:
-        return self.pipeline.streaming_step(keyboard_action, mouse_action)
+    def execute_streaming_step(
+        self,
+        keyboard_action: torch.Tensor,
+        mouse_action: torch.Tensor,
+        scroll_action: torch.Tensor | None = None,
+    ) -> ForwardBatch:
+        if scroll_action is None:
+            return self.pipeline.streaming_step(keyboard_action, mouse_action)
+        return self.pipeline.streaming_step(keyboard_action, mouse_action, scroll_action)
 
     def execute_streaming_clear(self) -> dict[str, Any]:
         self.pipeline.streaming_clear()

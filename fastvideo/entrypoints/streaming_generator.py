@@ -173,19 +173,28 @@ class StreamingVideoGenerator(VideoGenerator):
         else:
             self.executor.execute_streaming_reset(self.batch, fastvideo_args)
 
-    def step(self, keyboard_cond: torch.Tensor, mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
+    def step(
+        self,
+        keyboard_cond: torch.Tensor,
+        mouse_cond: torch.Tensor,
+        scroll_cond: torch.Tensor | None = None,
+    ) -> tuple[list[np.ndarray], Future | None]:
         if self.batch is None:
             raise RuntimeError("Call reset() before step()")
 
         if self._use_queue_mode and self.executor._streaming_enabled:
-            self.executor.submit_step(keyboard_cond, mouse_cond)
+            self.executor.submit_step(keyboard_cond, mouse_cond, scroll_cond)
             result = self.executor.wait_result()
             if result.error:
                 raise result.error
             output_batch = result.output_batch
         else:
             # Fallback to RPC-based
-            output_batch = self.executor.execute_streaming_step(keyboard_action=keyboard_cond, mouse_action=mouse_cond)
+            output_batch = self.executor.execute_streaming_step(
+                keyboard_action=keyboard_cond,
+                mouse_action=mouse_cond,
+                scroll_action=scroll_cond,
+            )
 
         frames = self._process_output_batch(output_batch)
         block_future = None
@@ -198,13 +207,17 @@ class StreamingVideoGenerator(VideoGenerator):
 
         return frames, block_future
 
-    async def step_async(self, keyboard_cond: torch.Tensor,
-                         mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
+    async def step_async(
+        self,
+        keyboard_cond: torch.Tensor,
+        mouse_cond: torch.Tensor,
+        scroll_cond: torch.Tensor | None = None,
+    ) -> tuple[list[np.ndarray], Future | None]:
         if self.batch is None:
             raise RuntimeError("Call reset() before step_async()")
 
         if self._use_queue_mode and self.executor._streaming_enabled:
-            self.executor.submit_step(keyboard_cond, mouse_cond)
+            self.executor.submit_step(keyboard_cond, mouse_cond, scroll_cond)
 
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, self.executor.wait_result)
@@ -217,6 +230,7 @@ class StreamingVideoGenerator(VideoGenerator):
             output_batch = await self.executor.execute_streaming_step_async(
                 keyboard_action=keyboard_cond,
                 mouse_action=mouse_cond,
+                scroll_action=scroll_cond,
             )
 
         frames = self._process_output_batch(output_batch)

@@ -436,6 +436,7 @@ def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
         sampling_param=None,
         mouse_cond=None,
         keyboard_cond=None,
+        scroll_cond=None,
         grid_sizes=None,
         **kwargs,
     ):
@@ -443,6 +444,7 @@ def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
         captured["sampling_param"] = sampling_param
         captured["mouse_cond"] = mouse_cond
         captured["keyboard_cond"] = keyboard_cond
+        captured["scroll_cond"] = scroll_cond
         captured["grid_sizes"] = grid_sizes
         captured["kwargs"] = kwargs
         return {"prompts": prompt, "video_path": "outputs/test.mp4"}
@@ -455,6 +457,7 @@ def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
             num_frames=49,
             output_path="outputs/legacy",
             save_video=False,
+            scroll_cond="scroll-token",
             log_queue="queue-token",
         )
 
@@ -462,6 +465,7 @@ def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
     assert captured["sampling_param"].num_frames == 49
     assert captured["sampling_param"].output_path == "outputs/legacy"
     assert captured["sampling_param"].save_video is False
+    assert captured["sampling_param"].scroll_cond == "scroll-token"
     assert result["video_path"] == "outputs/test.mp4"
 
 

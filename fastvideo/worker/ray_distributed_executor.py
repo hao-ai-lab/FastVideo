@@ -267,20 +267,32 @@ class RayDistributedExecutor(Executor):
         )
         return responses[0]
 
-    def execute_streaming_step(self, keyboard_action=None, mouse_action=None) -> ForwardBatch:
+    def execute_streaming_step(
+        self,
+        keyboard_action=None,
+        mouse_action=None,
+        scroll_action=None,
+    ) -> ForwardBatch:
         responses: list[ForwardBatch] = self.collective_rpc(
             "execute_streaming_step",
             kwargs={
                 "keyboard_action": keyboard_action,
                 "mouse_action": mouse_action,
+                "scroll_action": scroll_action,
             },
         )
         return responses[0]
 
-    async def execute_streaming_step_async(self, keyboard_action=None, mouse_action=None) -> ForwardBatch:
+    async def execute_streaming_step_async(
+        self,
+        keyboard_action=None,
+        mouse_action=None,
+        scroll_action=None,
+    ) -> ForwardBatch:
         kwargs = {
             "keyboard_action": keyboard_action,
             "mouse_action": mouse_action,
+            "scroll_action": scroll_action,
         }
         futures = [w.execute_method.remote("execute_streaming_step", **kwargs) for w in self.workers]
         responses = await asyncio.gather(*futures)

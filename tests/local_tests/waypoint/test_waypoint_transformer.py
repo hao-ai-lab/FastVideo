@@ -1,191 +1,186 @@
 # SPDX-License-Identifier: Apache-2.0
-"""
-Structural parity test for the Waypoint-1-Small transformer.
+"""Structural and numerical parity for Waypoint-1-Small."""
 
-Loads the official checkpoint into FastVideo's ``WaypointWorldModel`` with
-``strict=True`` to prove the architecture (key names and tensor shapes) matches
-the published weights exactly, and runs a forward pass for output validity.
-
-Run with:
-    pytest tests/local_tests/waypoint/test_waypoint_transformer.py -v
-
-Requires the model weights (set ``WAYPOINT_MODEL_PATH`` to override):
-    - models/Waypoint-1-Small-Diffusers/transformer/diffusion_pytorch_model.safetensors
-"""
-
+import importlib
+import importlib.util
+import json
 import os
+import re
+import sys
+import types
+
 import pytest
 import torch
+from safetensors.torch import load_file
 
 from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.forward_context import set_forward_context
 
-# Skip if weights not available
-WEIGHTS_PATH = os.environ.get("WAYPOINT_MODEL_PATH",
-                              "models/Waypoint-1-Small-Diffusers")
-SKIP_REASON = f"Waypoint weights not found at {WEIGHTS_PATH}"
+MODEL_ROOT = os.environ.get(
+    "WAYPOINT_MODEL_PATH", "models/Waypoint-1-Small-Diffusers"
+)
+OFFICIAL_ROOT = os.environ.get(
+    "WAYPOINT_OVERWORLD_PATH", "models/Waypoint-1-Small"
+)
+WEIGHTS = os.path.join(
+    MODEL_ROOT, "transformer", "diffusion_pytorch_model.safetensors"
+)
 
 
-def weights_available():
-    """Check if Waypoint weights are downloaded."""
-    transformer_path = os.path.join(WEIGHTS_PATH, "transformer", "diffusion_pytorch_model.safetensors")
-    return os.path.exists(transformer_path)
+def _require_assets() -> None:
+    if not os.path.isfile(WEIGHTS):
+        pytest.skip(f"Waypoint weights not found at {WEIGHTS}")
+    if not os.path.isfile(os.path.join(OFFICIAL_ROOT, "transformer", "model.py")):
+        pytest.skip(f"Official Waypoint source not found at {OFFICIAL_ROOT}")
 
 
-@pytest.fixture
-def waypoint_config():
-    """Create Waypoint config matching official model."""
-    from fastvideo.configs.models.dits.waypoint_transformer import WaypointArchConfig
-    return WaypointArchConfig()
+def _remap_weights(config) -> dict[str, torch.Tensor]:
+    state = {}
+    for key, value in load_file(WEIGHTS).items():
+        for pattern, replacement in config.param_names_mapping.items():
+            key = re.sub(pattern, replacement, key)
+        state[key] = value
+    return state
 
 
-@pytest.fixture
-def device():
-    """Get available device."""
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
+def _official_components():
+    pytest.importorskip("tensordict")
+    package = "waypoint_official_transformer_parity"
+    root = types.ModuleType(package)
+    root.__path__ = [OFFICIAL_ROOT]
+    root.__package__ = package
+    sys.modules[package] = root
+
+    model_module = importlib.import_module(f"{package}.transformer.model")
+    source = os.path.join(OFFICIAL_ROOT, "before_denoise.py")
+    spec = importlib.util.spec_from_file_location(f"{package}.before_denoise", source)
+    cache_module = importlib.util.module_from_spec(spec)
+    cache_module.__package__ = package
+    sys.modules[spec.name] = cache_module
+    spec.loader.exec_module(cache_module)
+
+    from torch.nn.attention.flex_attention import create_block_mask
+
+    def make_block_mask(query_length, kv_length, written):
+        def mask_mod(batch, head, query_index, kv_index):
+            return written[kv_index]
+
+        return create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=query_length,
+            KV_LEN=kv_length,
+            device=written.device,
+            _compile=False,
+        )
+
+    cache_module.make_block_mask = make_block_mask
+    return model_module.WorldModel, cache_module.StaticKVCache
 
 
-@pytest.mark.skipif(not weights_available(), reason=SKIP_REASON)
-class TestWaypointTransformerParity:
-    """Test parity between FastVideo and official Waypoint implementation."""
-    
-    def test_weight_loading(self, waypoint_config, device):
-        """Official checkpoint loads into the native model with strict=True.
-
-        Applies the config's ``param_names_mapping`` (the same checkpoint->FastVideo
-        key remap the production loader uses, e.g. mlp.fc1->mlp.fc_in) so this is a
-        true structural-parity assertion on key names and tensor shapes.
-        """
-        import re
-
-        import safetensors.torch as st
-        from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel
-
-        weights_file = os.path.join(WEIGHTS_PATH, "transformer", "diffusion_pytorch_model.safetensors")
-        official_state_dict = st.load_file(weights_file)
-
-        mapping = waypoint_config.param_names_mapping
-        remapped = {}
-        for key, tensor in official_state_dict.items():
-            new_key = key
-            for pat, repl in mapping.items():
-                new_key = re.sub(pat, repl, new_key)
-            remapped[new_key] = tensor
-
-        model = WaypointWorldModel(waypoint_config)
-        fastvideo_keys = set(model.state_dict().keys())
-        official_keys = set(remapped.keys())
-        missing = official_keys - fastvideo_keys
-        unexpected = fastvideo_keys - official_keys
-        print(f"\nOfficial keys: {len(official_keys)}  FastVideo keys: {len(fastvideo_keys)}")
-        print(f"missing (in ckpt, not model): {sorted(missing)[:8]}")
-        print(f"unexpected (in model, not ckpt): {sorted(unexpected)[:8]}")
-
-        model.load_state_dict(remapped, strict=True)
-        print("\n✓ Official weights loaded with strict=True after param_names_mapping.")
-    
-    def test_forward_pass(self, waypoint_config, device, distributed_setup):
-        """Test that forward pass runs without errors.
-        
-        Uses distributed_setup fixture to initialize distributed environment (SP=1).
-        """
-        import safetensors.torch as st
-        from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel
-        from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput
-        
-        # Load model
-        weights_file = os.path.join(WEIGHTS_PATH, "transformer", "diffusion_pytorch_model.safetensors")
-        official_state_dict = st.load_file(weights_file)
-        
-        model = WaypointWorldModel(waypoint_config)
-        
-        # Try to load weights (may fail initially - that's okay for this test)
-        try:
-            model.load_state_dict(official_state_dict, strict=False)
-        except Exception as e:
-            print(f"Warning: Could not load weights: {e}")
-        
-        model = model.to(device=device, dtype=torch.bfloat16)
-        model.eval()
-        
-        # Create dummy inputs
-        B, N, C, H, W = 1, 1, 16, 32, 32  # Single frame, 32x32 latent
-        
-        x = torch.randn(B, N, C, H, W, device=device, dtype=torch.bfloat16)
-        sigma = torch.tensor([[0.5]], device=device, dtype=torch.bfloat16)
-        frame_timestamp = torch.tensor([[0]], device=device, dtype=torch.long)
-        
-        # Prompt embedding (T5-XXL style)
-        prompt_emb = torch.randn(B, 128, 2048, device=device, dtype=torch.bfloat16)
-        prompt_pad_mask = torch.ones(B, 128, device=device, dtype=torch.bool)
-        
-        # Control inputs
-        ctrl = CtrlInput(button={48, 42}, mouse=(0.1, 0.2), scroll=0.0)
-        mouse, button, scroll = ctrl.to_tensors(device, torch.bfloat16, n_buttons=256)
-        
-        # Forward pass with forward context (required for attention layers)
-        attn_metadata = SDPAMetadata(current_timestep=0, attn_mask=None)
-        with torch.no_grad(), set_forward_context(
-            current_timestep=0,
-            attn_metadata=attn_metadata,
-            forward_batch=None,
-        ):
-            try:
-                output = model(
-                    x=x,
-                    sigma=sigma,
-                    frame_timestamp=frame_timestamp,
-                    prompt_emb=prompt_emb,
-                    prompt_pad_mask=prompt_pad_mask,
-                    mouse=mouse,
-                    button=button,
-                    scroll=scroll,
-                )
-                print(f"\n✓ Forward pass successful!")
-                print(f"  Input shape: {x.shape}")
-                print(f"  Output shape: {output.shape}")
-                assert output.shape == x.shape, f"Output shape mismatch: {output.shape} vs {x.shape}"
-            except Exception as e:
-                print(f"\n✗ Forward pass failed: {e}")
-                raise
-
-
-@pytest.mark.skipif(not weights_available(), reason=SKIP_REASON)
-def test_key_comparison():
-    """Quick test to compare checkpoint keys with model keys."""
-    import safetensors.torch as st
+def test_official_checkpoint_loads_strictly():
+    _require_assets()
     from fastvideo.configs.models.dits.waypoint_transformer import WaypointArchConfig
     from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel
-    
-    # Load official keys
-    weights_file = os.path.join(WEIGHTS_PATH, "transformer", "diffusion_pytorch_model.safetensors")
-    official_keys = sorted(st.load_file(weights_file).keys())
-    
-    # Get FastVideo model keys
+
     config = WaypointArchConfig()
     model = WaypointWorldModel(config)
-    fastvideo_keys = sorted(model.state_dict().keys())
-    
-    print(f"\n{'Official Key':<60} | {'FastVideo Key':<60}")
-    print("-" * 125)
-    
-    max_show = 50
-    for i, (ok, fk) in enumerate(zip(official_keys[:max_show], fastvideo_keys[:max_show])):
-        match = "✓" if ok == fk else "✗"
-        print(f"{match} {ok:<58} | {fk:<58}")
-    
-    if len(official_keys) > max_show:
-        print(f"... and {len(official_keys) - max_show} more keys")
+    state = _remap_weights(config)
+    assert len(state) == 366
+    model.load_state_dict(state, strict=True)
 
 
-if __name__ == "__main__":
-    # Run quick key comparison
-    if weights_available():
-        test_key_comparison()
-    else:
-        print(f"Weights not found at {WEIGHTS_PATH}")
-        print("Download with:")
-        print(f"  python scripts/huggingface/download_hf.py --repo_id Overworld/Waypoint-1-Small --local_dir {WEIGHTS_PATH} --repo_type model")
+def test_meta_noise_frequency_is_materialized():
+    from fastvideo.configs.models.dits.waypoint_transformer import WaypointArchConfig
+    from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel
 
+    with torch.device("meta"):
+        model = WaypointWorldModel(WaypointArchConfig())
+    assert model.denoise_step_emb.freq.is_meta
+
+    model.materialize_non_persistent_buffers(torch.device("cpu"))
+
+    assert model.denoise_step_emb.freq.device.type == "cpu"
+    assert model.denoise_step_emb.freq.dtype == torch.float32
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_single_frame_matches_official(distributed_setup):
+    _require_assets()
+    from fastvideo.configs.models.dits.waypoint_transformer import WaypointArchConfig
+    from fastvideo.models.dits.waypoint_transformer import (
+        WaypointKVCache,
+        WaypointWorldModel,
+    )
+
+    device = torch.device("cuda")
+    dtype = torch.float32
+    config = WaypointArchConfig()
+    raw_state = load_file(WEIGHTS)
+
+    OfficialModel, OfficialCache = _official_components()
+    with open(
+        os.path.join(OFFICIAL_ROOT, "transformer", "config.json"),
+        encoding="utf-8",
+    ) as file:
+        official_config = json.load(file)
+    for key in ("_class_name", "_diffusers_version", "auto_map"):
+        official_config.pop(key, None)
+
+    official = OfficialModel(**official_config)
+    official.load_state_dict(raw_state, strict=True)
+    official = official.to(device=device, dtype=dtype).eval()
+    native = WaypointWorldModel(config)
+    native.load_state_dict(_remap_weights(config), strict=True)
+    native = native.to(device=device, dtype=dtype).eval()
+    native.denoise_step_emb.to(dtype=torch.float32)
+
+    generator = torch.Generator(device=device).manual_seed(123)
+    inputs = {
+        "x": torch.randn(
+            1, 1, 16, 32, 32, device=device, dtype=dtype, generator=generator
+        ),
+        "sigma": torch.tensor([[0.729332447052002]], device=device, dtype=dtype),
+        "frame_timestamp": torch.zeros(1, 1, device=device, dtype=torch.long),
+        "prompt_emb": torch.randn(
+            1, 32, 2048, device=device, dtype=dtype, generator=generator
+        ),
+        "prompt_pad_mask": torch.zeros(1, 32, device=device, dtype=torch.bool),
+        "mouse": torch.tensor([[[0.25, -0.5]]], device=device, dtype=dtype),
+        "button": torch.zeros(1, 1, 256, device=device, dtype=dtype),
+        "scroll": torch.ones(1, 1, 1, device=device, dtype=dtype),
+    }
+    inputs["button"][0, 0, 17] = 1
+
+    official_cache = OfficialCache(official.config, 1, dtype).to(device)
+    native_cache = WaypointKVCache(config, 1, dtype).to(device)
+    metadata = SDPAMetadata(current_timestep=0, attn_mask=None)
+    expected = inputs.pop("x")
+    actual = expected.clone()
+    sigmas = torch.tensor(config.scheduler_sigmas, device=device, dtype=dtype)
+    with torch.no_grad(), set_forward_context(
+        current_timestep=0,
+        attn_metadata=metadata,
+        forward_batch=None,
+    ):
+        for sigma, next_sigma in zip(sigmas[:-1], sigmas[1:]):
+            inputs["sigma"] = sigma.expand(1, 1)
+            expected_velocity = official(
+                x=expected, **inputs, kv_cache=official_cache
+            )
+            actual_velocity = native(x=actual, **inputs, kv_cache=native_cache)
+            expected = expected + (next_sigma - sigma) * expected_velocity
+            actual = actual + (next_sigma - sigma) * actual_velocity
+
+    absolute_error = (actual - expected).abs()
+    cosine = torch.nn.functional.cosine_similarity(
+        actual.flatten().float(), expected.flatten().float(), dim=0
+    )
+    print(
+        f"mean_abs={absolute_error.mean().item():.8f} "
+        f"max_abs={absolute_error.max().item():.8f} cosine={cosine.item():.8f}"
+    )
+    assert absolute_error.mean() < 0.002
+    assert absolute_error.max() < 0.03
+    assert cosine > 0.99999

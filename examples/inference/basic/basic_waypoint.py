@@ -1,20 +1,14 @@
-from fastvideo import VideoGenerator
-
 import torch
 
-# Waypoint-1-Small: 2.3B interactive world model from Overworld.
-# Generates 60fps video conditioned on text + controller inputs.
+from fastvideo import VideoGenerator
+
 MODEL_PATH = "FastVideo/Waypoint-1-Small-Diffusers"
-
-# Owl-Control keycodes: W=17 (forward), A=30, S=31, D=32, Space=57
 KEY_FORWARD = 17
-
 OUTPUT_PATH = "video_samples_waypoint"
 
 
-def main():
-    # Match ``WaypointSamplingParam`` (``fastvideo/api/waypoint.py``):
-    # 360x640 @ 60fps, 240 frames ~= 4s. Raise KV cache for long autoregressive runs.
+def main() -> None:
+    """Generate a four-second forward-moving gameplay clip."""
     num_frames = 240
     generator = VideoGenerator.from_pretrained(
         MODEL_PATH,
@@ -29,11 +23,13 @@ def main():
     keyboard_cond = torch.zeros((num_frames, 256))
     keyboard_cond[:, KEY_FORWARD] = 1.0
     mouse_cond = torch.zeros((num_frames, 2))
+    scroll_cond = torch.zeros(num_frames)
 
     generator.generate_video(
         prompt="A first-person gameplay video exploring a stylized world.",
         mouse_cond=mouse_cond.unsqueeze(0),
         keyboard_cond=keyboard_cond.unsqueeze(0),
+        scroll_cond=scroll_cond.unsqueeze(0),
         num_frames=num_frames,
         height=360,
         width=640,

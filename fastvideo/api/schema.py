@@ -128,6 +128,7 @@ class InputConfig:
     pose: str | None = None
     mouse_cond: Any | None = None
     keyboard_cond: Any | None = None
+    scroll_cond: Any | None = None
     grid_sizes: Any | None = None
     c2ws_plucker_emb: Any | None = None
     refine_from: str | None = None

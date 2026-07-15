@@ -325,6 +325,7 @@ def legacy_generate_call_to_request(
     *,
     mouse_cond: Any | None = None,
     keyboard_cond: Any | None = None,
+    scroll_cond: Any | None = None,
     grid_sizes: Any | None = None,
     legacy_kwargs: Mapping[str, Any] | None = None,
 ) -> GenerationRequest:
@@ -339,6 +340,8 @@ def legacy_generate_call_to_request(
         raw.setdefault("inputs", {})["mouse_cond"] = mouse_cond
     if keyboard_cond is not None:
         raw.setdefault("inputs", {})["keyboard_cond"] = keyboard_cond
+    if scroll_cond is not None:
+        raw.setdefault("inputs", {})["scroll_cond"] = scroll_cond
     if grid_sizes is not None:
         raw.setdefault("inputs", {})["grid_sizes"] = grid_sizes
 

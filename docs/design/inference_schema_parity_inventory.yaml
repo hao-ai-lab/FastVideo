@@ -134,12 +134,6 @@ surfaces:
       base_fps:
         sources:
           - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
-      bf16_denoise:
-        sources:
-          - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
-      disable_latent_norm:
-        sources:
-          - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
       n_buttons:
         sources:
           - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
@@ -450,6 +444,7 @@ surfaces:
       video_path: request.inputs.video_path
       mouse_cond: request.inputs.mouse_cond
       keyboard_cond: request.inputs.keyboard_cond
+      scroll_cond: request.inputs.scroll_cond
       grid_sizes: request.inputs.grid_sizes
       pose: request.inputs.pose
       c2ws_plucker_emb: request.inputs.c2ws_plucker_emb

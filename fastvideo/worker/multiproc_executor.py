@@ -60,6 +60,7 @@ class StreamingTask:
     # For STEP tasks:
     keyboard_action: torch.Tensor | None = None
     mouse_action: torch.Tensor | None = None
+    scroll_action: torch.Tensor | None = None
     # For RESET tasks:
     batch: ForwardBatch | None = None
     fastvideo_args: FastVideoArgs | None = None
@@ -152,19 +153,31 @@ class MultiprocExecutor(Executor):
                                         })
         return responses[0]
 
-    def execute_streaming_step(self, keyboard_action: Any, mouse_action: Any) -> ForwardBatch:
+    def execute_streaming_step(
+        self,
+        keyboard_action: Any,
+        mouse_action: Any,
+        scroll_action: Any = None,
+    ) -> ForwardBatch:
         responses = self.collective_rpc("execute_streaming_step",
                                         kwargs={
                                             "keyboard_action": keyboard_action,
                                             "mouse_action": mouse_action,
+                                            "scroll_action": scroll_action,
                                         })
         return responses[0]
 
-    async def execute_streaming_step_async(self, keyboard_action: Any, mouse_action: Any) -> ForwardBatch:
+    async def execute_streaming_step_async(
+        self,
+        keyboard_action: Any,
+        mouse_action: Any,
+        scroll_action: Any = None,
+    ) -> ForwardBatch:
         responses = await self.collective_rpc_async("execute_streaming_step",
                                                     kwargs={
                                                         "keyboard_action": keyboard_action,
                                                         "mouse_action": mouse_action,
+                                                        "scroll_action": scroll_action,
                                                     })
         return responses[0]
 
@@ -201,7 +214,12 @@ class MultiprocExecutor(Executor):
                 fastvideo_args=fastvideo_args,
             ))
 
-    def submit_step(self, keyboard_action: torch.Tensor | None, mouse_action: torch.Tensor | None) -> None:
+    def submit_step(
+        self,
+        keyboard_action: torch.Tensor | None,
+        mouse_action: torch.Tensor | None,
+        scroll_action: torch.Tensor | None = None,
+    ) -> None:
         if not self._streaming_enabled:
             raise RuntimeError("Streaming mode not enabled. Call enable_streaming() first.")
 
@@ -210,6 +228,7 @@ class MultiprocExecutor(Executor):
                 task_type=StreamingTaskType.STEP,
                 keyboard_action=keyboard_action,
                 mouse_action=mouse_action,
+                scroll_action=scroll_action,
             ))
 
     def submit_clear(self) -> None:
@@ -590,7 +609,7 @@ class WorkerMultiprocProc:
             traceback = get_exception_traceback()
             logger.error("Worker %d hit an exception: %s", rank, traceback)
             if parent_process:
-                parent_process.send_signal(signal.SIGQUIT)
+                parent_process.send_signal(getattr(signal, "SIGQUIT", signal.SIGTERM))
 
         finally:
             if ready_pipe is not None:
@@ -739,7 +758,11 @@ class WorkerMultiprocProc:
                         self.streaming_output_queue.put(StreamingResult(task_type=StreamingTaskType.RESET, error=e))
                 elif task.task_type == StreamingTaskType.STEP:
                     try:
-                        batch = self.worker.execute_streaming_step(task.keyboard_action, task.mouse_action)
+                        batch = self.worker.execute_streaming_step(
+                            task.keyboard_action,
+                            task.mouse_action,
+                            task.scroll_action,
+                        )
                         self.streaming_output_queue.put(
                             StreamingResult(task_type=StreamingTaskType.STEP, output_batch=batch))
                     except Exception as e:

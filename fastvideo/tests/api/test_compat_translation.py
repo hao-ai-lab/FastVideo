@@ -7,9 +7,23 @@ from __future__ import annotations
 
 from fastvideo.api.compat import (
     generator_config_to_fastvideo_args,
+    legacy_generate_call_to_request,
     legacy_from_pretrained_to_config,
 )
 from fastvideo.api.schema import CompileConfig, GeneratorConfig
+
+
+def test_waypoint_controls_reach_typed_inputs() -> None:
+    request = legacy_generate_call_to_request(
+        "prompt",
+        None,
+        mouse_cond="mouse",
+        keyboard_cond="keyboard",
+        scroll_cond="scroll",
+    )
+    assert request.inputs.mouse_cond == "mouse"
+    assert request.inputs.keyboard_cond == "keyboard"
+    assert request.inputs.scroll_cond == "scroll"
 
 
 class TestLegacyTorchCompileKwargsTranslation:
