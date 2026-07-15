@@ -1,6 +1,11 @@
 # DMD2 QAT-aware distillation: Kandinsky5 T2V Lite, 480p (teacher many-step
 # -> student 4-step), continuing from a stage-1 Attn-QAT finetune checkpoint.
 #
+# init_from below must be a diffusers model directory (model_index.json +
+# component subfolders), not the raw checkpoint-N/ stage 1 writes (dcp/ +
+# metadata/RNG state only). Convert with fastvideo.train.entrypoint.dcp_to_diffusers
+# first -- see distill_dmd_qat.sh's header for the exact command.
+#
 # - Teacher: frozen, full-precision Kandinsky5 (loaded from the stage-1 QAT
 #   checkpoint's base weights, or the original pretrained checkpoint --
 #   the _loading_teacher_critic_model gate in component_loader.py masks

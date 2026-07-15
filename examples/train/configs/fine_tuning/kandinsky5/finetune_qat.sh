@@ -15,6 +15,12 @@
 #
 # Data: preprocess with fastvideo/pipelines/preprocess/preprocess_kandinsky5_overfit.py
 # (or an equivalent parquet dataset matching pyarrow_schema_t2v) first.
+#
+# Next: this writes a raw DCP checkpoint (checkpoint-N/dcp + metadata/RNG
+# state), not something stage 2 can load directly. Convert it with
+# fastvideo.train.entrypoint.dcp_to_diffusers before running
+# ../../distribution_matching/kandinsky5/distill_dmd_qat.sh -- see that
+# script's header for the exact command.
 set -euo pipefail
 
 export FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN   # <-- enables Attn-QAT training
