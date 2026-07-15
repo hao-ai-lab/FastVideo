@@ -129,7 +129,7 @@ def ensure_videoalign_checkpoint(path: Path) -> None:
         from huggingface_hub import snapshot_download
     except ImportError as exc:
         raise ImportError(f"huggingface_hub is required to download {VIDEO_REWARD_REPO}. "
-                          "Install examples/train/requirements-diffusion-nft.txt and rerun.") from exc
+                          "Install FastVideo's declared dependencies and rerun.") from exc
     snapshot_download(
         repo_id=VIDEO_REWARD_REPO,
         repo_type="model",

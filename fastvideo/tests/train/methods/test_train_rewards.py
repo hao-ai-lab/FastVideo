@@ -121,3 +121,61 @@ def test_multi_reward_validates_score_shape():
 
     with pytest.raises(ValueError, match="must return shape"):
         scorer(torch.zeros(2, 3, 4, 5, 6), ["a", "b"])
+
+
+@pytest.mark.parametrize(
+    "reward_model_path",
+    [
+        "HPSv3/hpsv3/model/reward_model.py",
+        "VideoAlign/reward_model.py",
+    ],
+)
+def test_qwen_reward_models_delegate_multimodal_forward(reward_model_path):
+    from importlib import util
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    path = Path(__file__).resolve().parents[4] / "fastvideo/third_party/rl_rewards" / reward_model_path
+    spec = util.spec_from_file_location(f"test_{path.parent.name}_reward_model", path)
+    assert spec is not None and spec.loader is not None
+    module = util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    class Backbone:
+
+        def __call__(self, **kwargs):
+            self.kwargs = kwargs
+            return (torch.arange(6, dtype=torch.float32).reshape(2, 3, 1), )
+
+    backbone = Backbone()
+    reward_head = torch.nn.Linear(1, 1, bias=False)
+    with torch.no_grad():
+        reward_head.weight.fill_(1.0)
+    reward_model = SimpleNamespace(
+        config=SimpleNamespace(
+            output_attentions=False,
+            output_hidden_states=False,
+            use_return_dict=True,
+            pad_token_id=0,
+        ),
+        model=backbone,
+        rm_head=reward_head,
+        reward_token="last",
+        special_token_ids=None,
+    )
+    input_ids = torch.tensor([[5, 6, 0], [7, 8, 9]])
+    pixel_values = torch.ones(1)
+    mm_token_type_ids = torch.ones_like(input_ids)
+
+    result = module.Qwen2VLRewardModelBT.forward(
+        reward_model,
+        input_ids=input_ids,
+        pixel_values=pixel_values,
+        mm_token_type_ids=mm_token_type_ids,
+    )
+
+    assert backbone.kwargs["input_ids"] is input_ids
+    assert backbone.kwargs["pixel_values"] is pixel_values
+    assert backbone.kwargs["mm_token_type_ids"] is mm_token_type_ids
+    assert backbone.kwargs["return_dict"] is True
+    torch.testing.assert_close(result["logits"], torch.tensor([[1.0], [5.0]]))

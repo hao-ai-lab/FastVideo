@@ -6,11 +6,10 @@ tracked commands.
 
 ## 1. Prepare Prompts, Rewards, Parquet, and Run Config
 
-Install the reward-stack pins after installing FastVideo:
+Install FastVideo with a supported PyTorch backend:
 
 ```bash
-uv pip install -e .
-uv pip install -r examples/train/requirements-diffusion-nft.txt
+UV_TORCH_BACKEND=cu126 uv pip install -e .
 ```
 
 ```bash

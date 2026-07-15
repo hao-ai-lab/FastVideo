@@ -131,8 +131,7 @@ elif [[ -n "${CONDA_ROOT:-}" ]]; then
 fi
 
 if [[ "${INSTALL_DEPS:-0}" == "1" ]]; then
-    uv pip install --prerelease=allow -e .
-    uv pip install --prerelease=allow -r examples/train/requirements-diffusion-nft.txt
+    UV_TORCH_BACKEND="${UV_TORCH_BACKEND:-cu126}" uv pip install --prerelease=allow -e .
 fi
 
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%d_%H%M%S)}"
@@ -203,7 +202,7 @@ fi
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export WANDB_MODE="${WANDB_MODE:-online}"
 export WANDB_BASE_URL="${WANDB_BASE_URL:-https://api.wandb.ai}"
-export FASTVIDEO_ATTENTION_BACKEND="${FASTVIDEO_ATTENTION_BACKEND:-FLASH_ATTN}"
+export FASTVIDEO_ATTENTION_BACKEND="${FASTVIDEO_ATTENTION_BACKEND:-TORCH_SDPA}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/triton_cache_diffusion_nft_wan_${SLURM_JOB_ID:-manual}}"
 export HF_HOME="${HF_HOME:-${CACHE_ROOT}/huggingface}"

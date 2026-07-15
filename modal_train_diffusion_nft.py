@@ -79,7 +79,7 @@ runs_vol = modal.Volume.from_name("fastvideo-runs")
 cache_vol = modal.Volume.from_name("fastvideo-cache")
 
 image = (modal.Image.from_registry(
-    "nvidia/cuda:12.8.1-devel-ubuntu22.04",
+    "nvidia/cuda:13.0.0-cudnn-devel-ubuntu22.04",
     add_python="3.12",
 ).entrypoint([]).apt_install(
     "git",
@@ -96,24 +96,31 @@ image = (modal.Image.from_registry(
     copy=True,
     ignore=MODAL_CONTEXT_IGNORE,
 ).run_commands(
-    "cd /root/FastVideo && uv pip install --system --prerelease=allow -e .",
-    "uv pip install --system --prerelease=allow "
-    "--index-url https://download.pytorch.org/whl/cu128 "
-    "--upgrade torch torchvision torchaudio",
+    "cd /root/FastVideo && UV_TORCH_BACKEND=cu130 "
+    "uv pip install --system --prerelease=allow -e .",
     "uv pip install --system --no-cache-dir "
     "https://github.com/mjun0812/flash-attention-prebuild-wheels/"
-    "releases/download/v0.7.16/"
-    "flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl",
-    "cd /root/FastVideo && uv pip install --system "
-    "-r examples/train/requirements-diffusion-nft.txt",
-    "python -c 'import flash_attn; print(\"flash_attn ok\")'",
+    "releases/download/v0.9.17/"
+    "flash_attn-2.8.3+cu130torch2.12-cp312-cp312-linux_x86_64.whl",
+    "uv pip check --system",
+    "python -c 'import flash_attn, torch; "
+    "assert torch.__version__.split(\"+\")[0] == \"2.12.0\"; "
+    "assert torch.version.cuda == \"13.0\"; "
+    "print(torch.__version__, torch.version.cuda, flash_attn.__version__)'",
     "python -c 'import cv2, imageio; print(\"video io ok\")'",
     "python -c 'import cloudpickle, pyarrow, torchdata; "
     "print(\"training deps ok\")'",
-    "python -c 'import datasets, peft, qwen_vl_utils, "
-    "safetensors, timm; "
+    "python -c 'import datasets, peft, safetensors, timm; "
     "from transformers import Qwen2VLForConditionalGeneration; "
     "print(\"reward deps ok\")'",
+    "cd /root/FastVideo && python -c '"
+    "from fastvideo.train.methods.rl.rewards.hpsv3 import "
+    "_patch_hpsv3_state_dict_loader, _patch_transformers_video_input_alias; "
+    "_patch_transformers_video_input_alias(); "
+    "_patch_hpsv3_state_dict_loader(); "
+    "from fastvideo.train.methods.rl.rewards.videoalign import "
+    "_patch_videoalign_modules; _patch_videoalign_modules(); "
+    "print(\"reward runtimes ok\")'",
 ).env({
     "WANDB_MODE": "online",
     "WANDB_ENTITY": WANDB_ENTITY,
@@ -236,6 +243,15 @@ def train(
 
     output_dir = (f"{OUTPUT_DIR_BASE}_"
                   f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}")
+    subprocess.run([
+        sys.executable,
+        "-c",
+        "import torch; from flash_attn import flash_attn_func; "
+        "q = torch.randn((1, 128, 8, 64), device='cuda', dtype=torch.bfloat16, requires_grad=True); "
+        "flash_attn_func(q, q, q).sum().backward(); "
+        "print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name())",
+    ],
+                   check=True)
     prep_cmd = [
         "python",
         "examples/train/prepare_diffusion_nft_assets.py",

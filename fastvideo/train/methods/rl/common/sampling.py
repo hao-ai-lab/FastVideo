@@ -7,6 +7,7 @@ import copy
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import numpy as np
 import torch
 
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
@@ -188,7 +189,7 @@ class DiffusionSampler:
             kwargs["timesteps"] = self.config.timesteps
             kwargs["num_inference_steps"] = len(self.config.timesteps)
         if self.config.sigmas is not None:
-            kwargs["sigmas"] = self.config.sigmas
+            kwargs["sigmas"] = np.asarray(self.config.sigmas)
             kwargs["num_inference_steps"] = len(self.config.sigmas)
         if "num_inference_steps" not in kwargs:
             kwargs["num_inference_steps"] = self.config.num_steps

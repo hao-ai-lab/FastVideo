@@ -237,8 +237,8 @@ def _get_inferencer(
 
 def _convert_to_grayscale(frames: np.ndarray) -> np.ndarray:
     if frames.ndim == 4 and frames.shape[-1] == 3:
-        gray = np.mean(frames, axis=-1, keepdims=True)
-        return np.repeat(gray.astype(np.uint8), 3, axis=-1)
+        gray = np.rint(frames @ np.array([0.299, 0.587, 0.114]))
+        return np.repeat(gray.astype(np.uint8)[..., np.newaxis], 3, axis=-1)
     return frames
 
 
@@ -293,17 +293,9 @@ class VideoAlignMotionQualityScorer(_VideoAlignScorer):
     def _frames(self, frames: np.ndarray) -> np.ndarray:
         return _convert_to_grayscale(frames)
 
-    def _prompt(self, prompts, index: int) -> str:
-        del prompts, index
-        return ""
-
 
 class VideoAlignVisualQualityScorer(_VideoAlignScorer):
     score_key = "VQ"
-
-    def _prompt(self, prompts, index: int) -> str:
-        del prompts, index
-        return ""
 
 
 class VideoAlignTextAlignmentScorer(_VideoAlignScorer):
