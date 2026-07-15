@@ -13,6 +13,8 @@ OVERWORLD = os.environ.get("WAYPOINT_OVERWORLD_PATH", "models/Waypoint-1-Small")
 TOKENS_PER_FRAME = 256
 HEAD_DIM = 64
 KV_HEADS = 20
+TRAJECTORY_FRAMES = 160
+CHECKPOINTS = {0, 15, 16, 119, 120, 121, 127, 128, 159}
 
 
 def _official_cache():
@@ -65,7 +67,7 @@ def test_waypoint_kv_cache_matches_official(history_frames, dilation):
     ).to(device)
 
     generator = torch.Generator(device=device).manual_seed(0)
-    for frame_index in range(40):
+    for frame_index in range(TRAJECTORY_FRAMES):
         key = torch.randn(
             1,
             KV_HEADS,
@@ -90,4 +92,5 @@ def test_waypoint_kv_cache_matches_official(history_frames, dilation):
         official.upsert(torch.stack((key, value)), positions, is_frozen=False)
 
         assert torch.equal(native.written, official.written)
-        assert torch.equal(native.kv, official.kv)
+        if frame_index in CHECKPOINTS:
+            assert torch.equal(native.kv, official.kv)

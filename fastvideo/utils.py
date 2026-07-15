@@ -765,7 +765,7 @@ def kill_itself_when_parent_died() -> None:
     import platform
     if platform.system() == "Linux":
         libc = ctypes.CDLL("libc.so.6")
-        libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+        libc.prctl(PR_SET_PDEATHSIG, getattr(signal, "SIGKILL", signal.SIGTERM))
     # elif platform.system() == "Darwin":
     #     libc = ctypes.CDLL("libc.dylib")
     #     logger.warning("kill_itself_when_parent_died is only supported in linux.")

@@ -1,128 +1,56 @@
-# Waypoint-1-Small Pipeline
+# Waypoint-1-Small
 
-This directory contains the FastVideo implementation of the [Overworld Waypoint-1-Small](https://huggingface.co/Overworld/Waypoint-1-Small) interactive world model.
+FastVideo supports [Overworld Waypoint-1-Small](https://huggingface.co/Overworld/Waypoint-1-Small), a text- and control-conditioned autoregressive world model. It produces 360×640 frames for 60 FPS playback.
 
-## Overview
+## Basic inference
 
-Waypoint-1-Small is a 2.3 billion parameter control-and-text-conditioned causal diffusion model designed for real-time world generation. It generates video frames at 60 FPS at 360p resolution, conditioned on:
+Run [`examples/inference/basic/basic_waypoint.py`](../../../../examples/inference/basic/basic_waypoint.py) for one-shot generation through `VideoGenerator`.
 
-- **Text prompts**: Describes the scene or world to generate
-- **Controller inputs**: Mouse velocity, keyboard buttons, and scroll wheel
-
-## Architecture
-
-The model consists of:
-
-1. **Transformer (WaypointWorldModel)**: A 22-layer DiT with:
-   - 2560 hidden dimension
-   - 40 attention heads (20 KV heads with GQA)
-   - Causal attention for autoregressive generation
-   - Local/global attention windows for efficiency
-   - Control conditioning via MLP fusion
-
-2. **VAE (WorldEngineVAE)**: native FastVideo DCAE-based encoder/decoder
-   (`fastvideo/models/vaes/world_engine_vae.py`)
-   - 16 latent channels
-   - 16x spatial downsampling
-
-3. **Text Encoder**: UMT5-XL from Google
-   - 2048-dimensional embeddings
-   - Multilingual support
-
-## Usage
-
-### Basic Streaming Inference
+## Streaming inference
 
 ```python
-from fastvideo.pipelines.basic.waypoint import WaypointPipeline
-from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput
+import torch
 
-# Initialize pipeline
-pipeline = WaypointPipeline.from_pretrained(
+from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
+
+generator = StreamingVideoGenerator.from_pretrained(
     "FastVideo/Waypoint-1-Small-Diffusers",
-    device="cuda",
-    torch_dtype=torch.bfloat16,
+    num_gpus=1,
+    use_fsdp_inference=False,
+    dit_cpu_offload=True,
+    vae_cpu_offload=False,
+    text_encoder_cpu_offload=True,
+    pin_cpu_memory=True,
+)
+generator.reset(
+    prompt="A first-person view walking through a medieval village.",
+    num_frames=240,
+    height=360,
+    width=640,
+    output_path="waypoint.mp4",
 )
 
-# Reset with a prompt
-batch = ForwardBatch(prompt="A medieval castle on a hill")
-pipeline.streaming_reset(batch, fastvideo_args)
+keyboard = torch.zeros(1, 16, 256)
+keyboard[:, :, 17] = 1  # W
+mouse = torch.zeros(1, 16, 2)
+scroll = torch.zeros(1, 16)
 
-# Generate frames with control inputs
-ctrl = CtrlInput(
-    button={17, 32},  # W + D keys
-    mouse=(0.5, 0.0),  # Move mouse right
-    scroll=0,
-)
-result = pipeline.streaming_step(ctrl, fastvideo_args)
-frames = result.output
-
-# Clean up
-pipeline.streaming_clear()
+frames, _ = generator.step(keyboard, mouse, scroll)
+generator.finalize()
+generator.shutdown()
 ```
 
-### Control Input Format
+The control shapes are:
 
-The `CtrlInput` dataclass accepts:
+- `keyboard_cond`: `[batch, frames, 256]`
+- `mouse_cond`: `[batch, frames, 2]`
+- `scroll_cond`: `[batch, frames]` or `[batch, frames, 1]`; values are reduced to their sign
 
-- `button`: Set of pressed button IDs (0-255) using Owl-Control keycodes
-- `mouse`: Tuple of (x, y) mouse velocity as floats
-- `scroll`: Scroll wheel value (-1, 0, or 1)
+An optional `image_path` passed to `reset` seeds the first cache frame. Waypoint uses the fixed sigma schedule `[1.0, 0.8611363, 0.7293324, 0.3207127, 0.0]`.
 
-Common keycodes:
+## Validation
 
-| Key | Keycode |
-|-----|---------|
-| W   | 17      |
-| A   | 30      |
-| S   | 31      |
-| D   | 32      |
-| Space | 57    |
-| Left Mouse | 0 |
-| Right Mouse | 1 |
-
-## Configuration
-
-The pipeline is configured via `WaypointT2VConfig`:
-
-```python
-from fastvideo.configs.pipelines.waypoint import WaypointT2VConfig
-
-config = WaypointT2VConfig(
-    is_causal=True,        # Autoregressive generation
-    base_fps=60,           # Native frame rate
-    n_buttons=256,         # Number of button inputs
-    scheduler_sigmas=[     # Fixed denoising schedule
-        1.0, 0.861, 0.729, 0.321, 0.0
-    ],
-)
-```
-
-## Files
-
-- `waypoint_pipeline.py`: Main pipeline implementation with streaming interface
-- `__init__.py`: Module exports
-
-## Related Files
-
-- `fastvideo/models/dits/waypoint_transformer.py`: Transformer implementation
-- `fastvideo/configs/models/dits/waypoint_transformer.py`: Transformer config
-- `fastvideo/models/vaes/world_engine_vae.py`: Native WorldEngineVAE implementation
-- `fastvideo/configs/models/vaes/world_engine_vae.py`: VAE config
-- `fastvideo/configs/pipelines/waypoint.py`: Pipeline config
-- `fastvideo/api/waypoint.py`: Sampling parameters (`WaypointSamplingParam`)
-- `tests/local_tests/waypoint/test_waypoint_transformer.py`: Transformer parity test
-- `tests/local_tests/vaes/test_world_engine_vae_parity.py`: VAE parity test
-- `tests/local_tests/pipelines/test_waypoint_pipeline_smoke.py`: Pipeline tests
-- `examples/inference/basic/basic_waypoint.py`: Example script
-
-## Hardware Requirements
-
-- **Minimum**: NVIDIA GPU with 24GB VRAM (e.g., RTX 4090)
-- **Recommended**: NVIDIA GPU with 80GB VRAM (e.g., A100/H100) for full-speed inference
-
-## References
-
-- [Hugging Face Model Card](https://huggingface.co/Overworld/Waypoint-1-Small)
-- [World Engine Repository](https://github.com/Overworldai/world_engine)
-- [Overworld Website](https://www.overworld.ai/)
+- `tests/local_tests/waypoint/test_waypoint_transformer.py`: official checkpoint and autoregressive trajectory parity
+- `tests/local_tests/waypoint/test_waypoint_kv_cache_parity.py`: local/global ring-cache parity
+- `tests/local_tests/vaes/test_world_engine_vae_parity.py`: VAE parity
+- `tests/local_tests/pipelines/test_waypoint_pipeline_smoke.py`: pipeline and control routing
