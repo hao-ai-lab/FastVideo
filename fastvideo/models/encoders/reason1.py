@@ -41,8 +41,15 @@ def _normalize_chat_template_ids(tokenizer_output) -> list[int]:
         input_ids = tokenizer_output
     if hasattr(input_ids, "tolist"):
         input_ids = input_ids.tolist()
-    if (isinstance(input_ids, list) and len(input_ids) == 1
-            and isinstance(input_ids[0], list)):
+    if isinstance(input_ids, list) and input_ids and isinstance(input_ids[0], list):
+        # A nested list is a batch dimension. We tokenize one conversation at a
+        # time, so batch size 1 is the only shape we can unambiguously flatten;
+        # fail loudly on anything else rather than return a nested list that
+        # violates this helper's flat-``list[int]`` contract downstream.
+        if len(input_ids) != 1:
+            raise RuntimeError(
+                f"Unexpected batched chat_template output: batch={len(input_ids)} "
+                f"type={type(tokenizer_output)}")
         input_ids = input_ids[0]
     if not isinstance(input_ids, list):
         raise RuntimeError(
