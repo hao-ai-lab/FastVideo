@@ -62,6 +62,21 @@ def test_unexpected_type_raises():
         _normalize_chat_template_ids(object())
 
 
+@pytest.mark.parametrize(
+    "batched",
+    [
+        [[10, 11], [12, 13]],                          # nested list, batch 2
+        {"input_ids": [[10, 11], [12, 13]]},           # mapping w/ batched ids
+        _BatchEncodingLike({"input_ids": _FakeTensor([[10, 11], [12, 13]])}),
+    ],
+)
+def test_batch_gt_one_raises_instead_of_returning_nested(batched):
+    # The helper only unwraps batch size 1; a real batch must fail loudly rather
+    # than silently return a nested list that breaks downstream padding.
+    with pytest.raises(RuntimeError, match="Unexpected batched chat_template output"):
+        _normalize_chat_template_ids(batched)
+
+
 def test_real_batch_encoding_if_available():
     # Belt-and-suspenders: exercise the actual transformers BatchEncoding when present.
     pytest.importorskip("transformers")
