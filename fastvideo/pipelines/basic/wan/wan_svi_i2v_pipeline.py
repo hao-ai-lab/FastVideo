@@ -28,7 +28,7 @@ logger = init_logger(__name__)
 
 def _tensor_to_pil_list(frames: torch.Tensor) -> list[PIL.Image.Image]:
     """Convert a video tensor to a list of PIL frames."""
-    arr = (frames.detach().to(torch.float32).cpu().clamp(0, 1) * 255.0).round().to(torch.uint8)
+    arr = (frames.detach().to(torch.float32).cpu().clamp(0, 1) * 255.0).to(torch.uint8)
     arr = arr.permute(1, 2, 3, 0).numpy()
     return [PIL.Image.fromarray(a) for a in arr]
 
@@ -41,11 +41,9 @@ def _validate_multiclip_frames(num_motion: int, num_frames: int) -> None:
 
 
 def _stitch_clip_outputs(clip_outputs: list[torch.Tensor], num_motion: int) -> torch.Tensor:
-    """Concat per-clip (B,C,T,H,W) videos on time, dropping each follow-up's leading num_motion frames."""
-    concatenated = [clip_outputs[0]]
-    for video in clip_outputs[1:]:
-        concatenated.append(video[:, :, num_motion:, :, :])
-    return torch.cat(concatenated, dim=2)
+    """Stitch clips using the SVI overlap convention."""
+    clips = [video[:, :, :-num_motion] for video in clip_outputs[:-1]]
+    return torch.cat([*clips, clip_outputs[-1]], dim=2)
 
 
 def _resolve_clip_prompts(
@@ -67,11 +65,11 @@ def _resolve_clip_prompts(
     return list(clip_prompts)
 
 
-def _clip_seed(seed: int | None, clip_idx: int) -> int:
+def _clip_seed(seed: int | None, clip_idx: int, seed_stride: int) -> int:
     """Match the SVI reference by varying diffusion noise per clip."""
     if seed is None:
         raise ValueError("SVI requires a seed")
-    return int(seed) + clip_idx
+    return int(seed) + clip_idx * seed_stride
 
 
 class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
@@ -81,10 +79,9 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
-        flow_shift = fastvideo_args.pipeline_config.flow_shift
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
             num_train_timesteps=1000,
-            shift=5.0 if flow_shift is None else flow_shift,
+            shift=fastvideo_args.pipeline_config.flow_shift,
         )
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
@@ -140,34 +137,28 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
 
         num_clips = max(1, int(batch.svi_num_clips or 1))
         num_motion = max(1, int(batch.svi_num_motion_frames or 1))
+        seed_stride = int(batch.svi_seed_stride)
 
         prompts = _resolve_clip_prompts(batch.prompt, batch.svi_clip_prompts, num_clips)
-
-        if num_clips == 1:
-            batch.prompt = prompts[0]
-            for stage in self.stages:
-                batch = stage(batch, fastvideo_args)
-            return batch
-
         num_frames = int(batch.num_frames) if batch.num_frames is not None else 0
-        _validate_multiclip_frames(num_motion, num_frames)
+        if num_clips > 1:
+            _validate_multiclip_frames(num_motion, num_frames)
 
-        # Multi-clip needs the reference image up front to construct motion frames
-        # for clip 0. Run InputValidationStage now to resolve image_path -> pil_image.
+        # Resolve image_path before constructing the first motion window.
         self.input_validation_stage(batch, fastvideo_args)
         assert isinstance(batch.pil_image, PIL.Image.Image)
-        random_ref = batch.svi_random_ref_frame or batch.pil_image
-        motion_frames: list[PIL.Image.Image] = (batch.svi_first_frames or [batch.pil_image])
+        assert isinstance(batch.height, int) and isinstance(batch.width, int)
+        reference_frame = batch.pil_image.resize((batch.width, batch.height))
+        random_ref = batch.svi_random_ref_frame or reference_frame
+        motion_frames = batch.svi_first_frames or [reference_frame]
 
         clip_outputs: list[torch.Tensor] = []
         for clip_idx in range(num_clips):
             clip_batch = dataclasses.replace(
                 batch,
                 prompt=prompts[clip_idx],
-                seed=_clip_seed(batch.seed, clip_idx),
-                pil_image=motion_frames[-1],
-                # Clear image_path so per-clip InputValidationStage does not
-                # reload the original ref and clobber motion_frames[0].
+                seed=_clip_seed(batch.seed, clip_idx, seed_stride),
+                pil_image=motion_frames[0],
                 image_path=None,
                 svi_first_frames=motion_frames,
                 svi_random_ref_frame=random_ref,

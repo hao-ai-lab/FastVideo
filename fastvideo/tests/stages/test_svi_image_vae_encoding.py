@@ -90,7 +90,7 @@ class _CaptureVAE:
         w_lat = x.shape[4] // self.spatial_compression_ratio
         latent = torch.zeros(x.shape[0], 16, t_lat, h_lat, w_lat, device=x.device, dtype=torch.float32)
         out = MagicMock()
-        out.sample = lambda _g: latent
+        out.sample = lambda _g: latent + 1
         out.mode = lambda: latent
         return out
 
@@ -166,3 +166,4 @@ def test_pre_vae_parity(num_motion: int, ref_pad_num: int, ref_pad_cfg: bool):
     actual_msk = batch.image_latent[0, :4].cpu()
     assert actual_msk.shape == expected_msk.shape
     torch.testing.assert_close(actual_msk, expected_msk, atol=0.0, rtol=0.0)
+    assert torch.count_nonzero(batch.image_latent[:, 4:]) == 0

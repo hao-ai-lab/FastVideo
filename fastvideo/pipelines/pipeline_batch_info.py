@@ -162,6 +162,7 @@ class ForwardBatch:
     svi_ref_pad_cfg: bool = False  # widens y-mask to len(first_frames) instead of frame 0 only
     svi_num_clips: int = 1  # >1 enables motion-frame chaining
     svi_num_motion_frames: int = 1  # Tail frames carried clip K -> K+1 (1=Shot/Tom, 5=Film)
+    svi_seed_stride: int = 42
     svi_clip_prompts: list[str] | None = None  # One prompt per clip; primary prompt is reused when omitted
 
     # Latent dimensions

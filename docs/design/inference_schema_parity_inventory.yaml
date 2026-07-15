@@ -480,6 +480,7 @@ surfaces:
       svi_ref_pad_cfg: request.extensions.svi.ref_pad_cfg
       svi_num_clips: request.extensions.svi.num_clips
       svi_num_motion_frames: request.extensions.svi.num_motion_frames
+      svi_seed_stride: request.extensions.svi.seed_stride
       svi_clip_prompts: request.extensions.svi.clip_prompts
       prompt_attention_mask: request.extensions.hyworld.prompt_attention_mask
       negative_attention_mask: request.extensions.hyworld.negative_attention_mask

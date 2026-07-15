@@ -902,7 +902,6 @@ class SVIImageVAEEncodingStage(ImageVAEEncodingStage):
         latent_width = width // vae_scale
         temporal_compression = self.vae.temporal_compression_ratio
 
-        # 1) Mask. (1, T, H/8, W/8) -> reshape -> (4, T_lat, H/8, W/8).
         msk = torch.ones(1, num_frames, latent_height, latent_width, device=device, dtype=torch.float32)
         if ref_pad_cfg:
             msk[:, num_condition_frames:] = 0
@@ -915,50 +914,31 @@ class SVIImageVAEEncodingStage(ImageVAEEncodingStage):
         msk = msk.view(1, msk.shape[1] // temporal_compression, temporal_compression, latent_height, latent_width)
         msk = msk.transpose(1, 2)[0]  # (4, T_lat, H/8, W/8)
 
-        # 2) Condition frames as (1, 3, num_condition_frames, H, W).
-        condition_frames: list[torch.Tensor] = []
-        for frame in first_frames:
-            t = self.preprocess(frame, vae_scale_factor=vae_scale, height=height, width=width).to(device=device,
-                                                                                                  dtype=torch.float32)
-            # preprocess returns (1, 3, H, W); make it (1, 3, 1, H, W) for the temporal cat.
-            condition_frames.append(t.unsqueeze(2))
-        vae_input_condition = torch.cat(condition_frames, dim=2)  # (1, 3, num_cond, H, W)
+        condition_frames = [
+            self.preprocess(frame, vae_scale_factor=vae_scale, height=height,
+                            width=width).to(device=device, dtype=torch.float32).unsqueeze(2)
+            for frame in first_frames
+        ]
+        vae_input_condition = torch.cat(condition_frames, dim=2)
 
-        # 3) Padding frames as (1, 3, remaining_frames, H, W).
-        if remaining_frames == 0:
-            vae_input_pad = torch.empty(
-                vae_input_condition.shape[0],
-                vae_input_condition.shape[1],
-                0,
-                height,
-                width,
-                device=device,
-                dtype=torch.float32,
-            )
-        elif ref_pad_num == 0:
-            vae_input_pad = vae_input_condition.new_zeros(vae_input_condition.shape[0], vae_input_condition.shape[1],
-                                                          remaining_frames, height, width)
-        elif ref_pad_num == -1:
-            ref_t = self.preprocess(random_ref_frame, vae_scale_factor=vae_scale, height=height,
-                                    width=width).to(device=device, dtype=torch.float32).unsqueeze(2)
-            vae_input_pad = ref_t.repeat(1, 1, remaining_frames, 1, 1)
-        elif ref_pad_num > 0:
-            ref_t = self.preprocess(random_ref_frame, vae_scale_factor=vae_scale, height=height,
-                                    width=width).to(device=device, dtype=torch.float32).unsqueeze(2)
-            ref_pad = ref_t.repeat(1, 1, min(ref_pad_num, remaining_frames), 1, 1)
-            if remaining_frames > ref_pad_num:
-                zero_pad = ref_t.new_zeros(ref_t.shape[0], ref_t.shape[1], remaining_frames - ref_pad_num, height,
-                                           width)
-                vae_input_pad = torch.cat([ref_pad, zero_pad], dim=2)
-            else:
-                vae_input_pad = ref_pad
-        else:
+        if ref_pad_num < -1:
             raise ValueError(f"Unsupported ref_pad_num={ref_pad_num} (expected -1, 0, or positive int)")
+        vae_input_pad = vae_input_condition.new_zeros(
+            vae_input_condition.shape[0],
+            vae_input_condition.shape[1],
+            remaining_frames,
+            height,
+            width,
+        )
+        if ref_pad_num != 0 and remaining_frames:
+            pad_count = remaining_frames if ref_pad_num == -1 else min(ref_pad_num, remaining_frames)
+            ref = self.preprocess(random_ref_frame, vae_scale_factor=vae_scale, height=height,
+                                  width=width).to(device=device, dtype=torch.float32).unsqueeze(2)
+            vae_input_pad[:, :, :pad_count] = ref
 
         video_condition = torch.cat([vae_input_condition, vae_input_pad], dim=2)
         assert video_condition.shape[2] == num_frames, video_condition.shape
 
-        # 4) VAE encode (autocast handling mirrors parent stage).
         vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
         vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
@@ -970,7 +950,7 @@ class SVIImageVAEEncodingStage(ImageVAEEncodingStage):
 
         if batch.generator is None:
             raise ValueError("Generator must be provided")
-        latent = self.retrieve_latents(encoder_output, batch.generator)
+        latent = self.retrieve_latents(encoder_output, batch.generator, sample_mode="argmax")
 
         if hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None:
             shift = self.vae.shift_factor
@@ -983,9 +963,8 @@ class SVIImageVAEEncodingStage(ImageVAEEncodingStage):
             scaling = scaling.to(latent.device, latent.dtype)
         latent = latent * scaling
 
-        # 5) y = concat(mask, latent) along channel dim. latent is (1, 16, T_lat, H_lat, W_lat).
         mask_batched = msk.unsqueeze(0).to(latent.device, latent.dtype)
-        batch.image_latent = torch.concat([mask_batched, latent], dim=1)  # (1, 20, T_lat, H_lat, W_lat)
+        batch.image_latent = torch.concat([mask_batched, latent], dim=1)
 
         if hasattr(self, "maybe_free_model_hooks"):
             self.maybe_free_model_hooks()
