@@ -146,7 +146,7 @@ class CudaPlatformBase(Platform):
             if is_attn_qat_infer_available():
                 logger.info("Using Attn-QAT inference (modified SageAttention3 FP4) backend.")
                 return "fastvideo.attention.backends.attn_qat_infer.AttnQatInferBackend"
-            logger.info("Attn-QAT inference kernel is not built. Fall back to Flash Attention.")
+            logger.info("Attn-QAT inference is unavailable on this GPU or not built. Fall back to Flash Attention.")
         elif selected_backend == AttentionBackendEnum.ATTN_QAT_TRAIN:
             from fastvideo.attention.backends.attn_qat_train import (  # noqa: F401
                 AttnQatTrainBackend, is_attn_qat_train_available)

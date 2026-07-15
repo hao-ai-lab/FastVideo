@@ -5,7 +5,7 @@ Correctness tests for the sageattn_blackwell (ATTN_QAT_INFER) FP4 inference kern
 Compares causal and non-causal outputs against a naive float32 reference to verify
 that the V-row permutation in scaled_fp4_quant_trans_kernel is correct (or absent).
 
-Requires a Blackwell GPU (sm_120a) and fp4attn_cuda / fp4quant_cuda extensions built
+Requires a Blackwell GPU (sm_120a or sm_121a) and fp4attn_cuda / fp4quant_cuda extensions built
 via `cd fastvideo-kernel && ./build.sh`.
 
 Run from the fastvideo-kernel directory:
@@ -23,9 +23,9 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-# The FP4 extensions are only compiled under the sm_120a (Blackwell) arch
+# The FP4 extensions are only compiled under the sm_120a/sm_121a arch
 # gate; on other GPUs the api import below would die at collection time.
-pytest.importorskip("fp4attn_cuda", reason="ATTN_QAT_INFER FP4 kernels require a sm_120a build")
+pytest.importorskip("fp4attn_cuda", reason="ATTN_QAT_INFER FP4 kernels require a sm_120a/sm_121a build")
 
 from attn_qat_infer.api import sageattn_blackwell
 
@@ -124,6 +124,23 @@ def test_accuracy_sdpa(causal: bool, B: int, H: int, L: int, D: int):
     label = "causal" if causal else "non-causal"
     print(f"  [{label}] B={B} H={H} L={L} D={D} — cos_sim={cos:.6f}")
     assert cos >= 0.97, f"({label}) B={B} H={H} L={L} D={D} cos_sim={cos:.4f} < 0.97"
+
+
+@pytest.mark.parametrize(
+    "q_len,kv_len",
+    [(384, 512), (384, 257)],
+    ids=["wan_t2v_cross_attention", "wan_i2v_image_cross_attention"],
+)
+def test_cross_attention_unequal_sequence_lengths(q_len: int, kv_len: int):
+    """Wan cross-attention keeps video queries separate from text/image keys."""
+    torch.manual_seed(42)
+    q = torch.randn(1, 4, q_len, 128, dtype=torch.bfloat16, device=DEVICE)
+    k = torch.randn(1, 4, kv_len, 128, dtype=torch.bfloat16, device=DEVICE)
+    v = torch.randn(1, 4, kv_len, 128, dtype=torch.bfloat16, device=DEVICE)
+    ref = reference_sdpa(q, k, v, is_causal=False)
+    out = sageattn_blackwell(q.clone(), k.clone(), v.clone(), is_causal=False)
+    cos = cosine_similarity(out, ref)
+    assert cos >= 0.97, f"q_len={q_len} kv_len={kv_len} cos_sim={cos:.4f} < 0.97"
 
 
 if __name__ == "__main__":

@@ -51,7 +51,8 @@ def _get_attn_qat_infer() -> Callable[..., torch.Tensor] | None:
 
 
 def is_attn_qat_infer_available() -> bool:
-    return _get_attn_qat_infer() is not None
+    return (torch.cuda.is_available() and torch.cuda.get_device_capability() in ((12, 0), (12, 1))
+            and _get_attn_qat_infer() is not None)
 
 
 class AttnQatInferBackend(AttentionBackend):

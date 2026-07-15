@@ -123,15 +123,34 @@ if [ "${GPU_BACKEND}" = "CUDA" ]; then
 
     # Respect explicit overrides.
     if [ -z "${TORCH_CUDA_ARCH_LIST:-}" ]; then
-        if [ "${cc_major}" = "9" ] && [ "${cc_minor}" = "0" ]; then
-            export TORCH_CUDA_ARCH_LIST="9.0a"
-        elif [ "${cc_major}" = "12" ] && [ "${cc_minor}" = "0" ]; then
-            # Blackwell sm_120 needs the arch-conditional 'a' suffix so CMake's
-            # AUTO gate (matches 12.0a/120a/sm_120a) builds the attn_qat_infer
-            # (modified SageAttention3 FP4) kernels instead of silently skipping.
-            export TORCH_CUDA_ARCH_LIST="12.0a"
-        else
-            export TORCH_CUDA_ARCH_LIST="${cc_major}.${cc_minor}"
+        case "${cc_major}.${cc_minor}" in
+            9.0|12.0|12.1)
+                # Architecture-specific instructions require the `a` target.
+                export TORCH_CUDA_ARCH_LIST="${cc_major}.${cc_minor}a"
+                ;;
+            *)
+                export TORCH_CUDA_ARCH_LIST="${cc_major}.${cc_minor}"
+                ;;
+        esac
+    fi
+
+    if [[ "${TORCH_CUDA_ARCH_LIST}" =~ (^|[\;,[:space:]])(12\.1a|121a|sm_121a)([\;,[:space:]]|$) ]]; then
+        cuda_compiler="${CUDACXX:-}"
+        if [ -z "${cuda_compiler}" ] && [ -n "${CUDA_HOME:-}" ] && [ -x "${CUDA_HOME}/bin/nvcc" ]; then
+            cuda_compiler="${CUDA_HOME}/bin/nvcc"
+        fi
+        if [ -z "${cuda_compiler}" ]; then
+            cuda_compiler="$(command -v nvcc || true)"
+        fi
+        if [ -z "${cuda_compiler}" ]; then
+            echo "ERROR: sm_121a requires CUDA Toolkit 13.0+, but nvcc was not found." >&2
+            echo "       Set CUDACXX or CUDA_HOME to a CUDA 13 toolkit." >&2
+            exit 1
+        fi
+        cuda_major="$("${cuda_compiler}" --version 2>/dev/null | sed -n 's/.*release \([0-9][0-9]*\)\..*/\1/p' | tail -n 1)"
+        if [[ ! "${cuda_major}" =~ ^[0-9]+$ ]] || (( cuda_major < 13 )); then
+            echo "ERROR: sm_121a requires CUDA Toolkit 13.0+; ${cuda_compiler} reports CUDA ${cuda_major:-unknown}." >&2
+            exit 1
         fi
     fi
 
