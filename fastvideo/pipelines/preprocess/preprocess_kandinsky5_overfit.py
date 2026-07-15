@@ -100,6 +100,29 @@ def load_video(path: str, num_frames: int, height: int, width: int) -> torch.Ten
     return video
 
 
+def get_caption(item: dict) -> str:
+    """Extract a caption from one ``videos2caption.json`` entry.
+
+    The documented schema (``docs/training/data_preprocess.md``) stores
+    ``cap`` as a plain string; some producers (e.g. this repo's own e2e
+    test fixtures, mirroring ``preprocess_hunyuan_overfit.py``) instead
+    store a non-empty list of caption variants and use the first one.
+    Indexing unconditionally with ``item["cap"][0]`` silently takes the
+    first *character* of a string caption instead of erroring, so accept
+    and validate both forms explicitly here.
+    """
+    cap = item.get("cap")
+    if isinstance(cap, str):
+        if not cap:
+            raise ValueError(f"Empty 'cap' string for entry: {item}")
+        return cap
+    if isinstance(cap, list):
+        if not cap or not isinstance(cap[0], str) or not cap[0]:
+            raise ValueError(f"'cap' list must be non-empty with a non-empty first string, got: {item}")
+        return cap[0]
+    raise ValueError(f"'cap' must be a string or a list of strings, got {type(cap).__name__}: {item}")
+
+
 def main() -> None:
     # FastVideo's native text-encoder layers (e.g. CLIPAttention's
     # QKVParallelLinear) are tensor-parallel-aware and assert the TP process
@@ -145,6 +168,12 @@ def main() -> None:
     ).to(device).eval()
     qwen_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
     qwen_tok_kwargs = dict(pipeline_config.text_encoder_configs[0].tokenizer_kwargs)
+    # TextEncodingStage overrides max_length from pipeline_config.text_encoder_max_lengths
+    # at runtime (fastvideo/pipelines/stages/text_encoding.py) -- Reason1Config's static
+    # tokenizer_kwargs default (text_len=512) doesn't account for the 129-token Kandinsky
+    # system template ENCODE_START_IDX strips off afterwards, so mirror the runtime value
+    # here or training conditions on fewer caption tokens than inference does.
+    qwen_tok_kwargs["max_length"] = pipeline_config.text_encoder_max_lengths[0]
 
     print("Loading CLIP text encoder...")
     clip_enc = TextEncoderLoader().load(
@@ -153,12 +182,13 @@ def main() -> None:
     ).to(device).eval()
     clip_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer_2"))
     clip_tok_kwargs = dict(pipeline_config.text_encoder_configs[1].tokenizer_kwargs)
+    clip_tok_kwargs["max_length"] = pipeline_config.text_encoder_max_lengths[1]
 
     # --- Process each video ---
     records = []
     for item in caption_data:
         video_name = item["path"]
-        caption = item["cap"][0]
+        caption = get_caption(item)
         video_path = os.path.join(DATA_DIR, "videos", video_name)
 
         print(f"\nProcessing: {video_name}")
@@ -243,7 +273,7 @@ def main() -> None:
     # Write validation prompts for callback.
     # Wrap in "data" key -- ValidationDataset expects field="data".
     # Use "caption" field -- ValidationDataset aliases it to "prompt".
-    val_prompts = {"data": [{"caption": item["cap"][0]} for item in caption_data]}
+    val_prompts = {"data": [{"caption": get_caption(item)} for item in caption_data]}
     val_path = os.path.join(OUTPUT_DIR, "validation_prompts.json")
     with open(val_path, "w") as f:
         json.dump(val_prompts, f, indent=2)
