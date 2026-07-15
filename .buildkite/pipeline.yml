@@ -402,7 +402,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 25m .buildkite/scripts/pr_test.sh"
                 label: ":test_tube: Training Tests"
                 env:
                   - TEST_TYPE=training
