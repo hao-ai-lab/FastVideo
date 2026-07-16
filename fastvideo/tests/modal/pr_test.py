@@ -24,8 +24,6 @@ except ModuleNotFoundError:
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
-KERNEL_CACHE_VOLUME_PATH = "/root/fastvideo-kernel-cache"
-kernel_cache_vol = modal.Volume.from_name("fastvideo-kernel-build-cache", create_if_missing=True)
 image_version = os.getenv("IMAGE_VERSION", "latest")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 image_ref = resolve_image_ref(image_tag)
@@ -191,12 +189,6 @@ def _checkout_repository(git_repo: str,
         cwd=repo_root)
 
 
-def _with_kernel_cache_volume(volumes: dict[str, modal.Volume] | None = None):
-    merged_volumes = dict(volumes or {})
-    merged_volumes[KERNEL_CACHE_VOLUME_PATH] = kernel_cache_vol
-    return merged_volumes
-
-
 def run_test(pytest_command: str):
     """Helper function to run a test suite with custom pytest command"""
     run_test_command(pytest_command, build_kernel=True)
@@ -218,7 +210,6 @@ def run_test_command(test_command: str,
     that manage their own installs.
     """
     import os
-    import shlex
     import subprocess
     import sys
 
@@ -240,9 +231,7 @@ def run_test_command(test_command: str,
     if install_command:
         setup_steps.append(install_command)
     if build_kernel:
-        setup_steps.append(
-            "python fastvideo/tests/modal/kernel_build_cache.py install --cache-root "
-            + shlex.quote(KERNEL_CACHE_VOLUME_PATH))
+        setup_steps.append("python fastvideo/tests/modal/kernel_build_cache.py install")
     setup_command = " &&\n    ".join(setup_steps)
 
     setup_result = subprocess.run(["/bin/bash", "-c", setup_command],
@@ -253,12 +242,6 @@ def run_test_command(test_command: str,
         raise RuntimeError(
             f"Setup command failed with exit code {setup_result.returncode}")
 
-    if build_kernel:
-        print("Committing fastvideo-kernel build cache volume", flush=True)
-        try:
-            kernel_cache_vol.commit()
-        except Exception as error:
-            print(f"WARNING: failed to commit fastvideo-kernel build cache volume: {error}", flush=True)
 
     command = " &&\n    ".join([
         "source $HOME/.local/bin/env",
@@ -280,7 +263,7 @@ def run_test_command(test_command: str,
               image=image,
               timeout=1200,
               secrets=[hf_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume({"/root/data": model_vol}))
+              volumes={"/root/data": model_vol})
 def run_encoder_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/encoders -vs"
@@ -291,7 +274,7 @@ def run_encoder_tests():
               image=image,
               timeout=1200,
               secrets=[hf_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume({"/root/data": model_vol}))
+              volumes={"/root/data": model_vol})
 def run_vae_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/vaes -vs"
@@ -302,7 +285,7 @@ def run_vae_tests():
               image=image,
               timeout=900,
               secrets=[hf_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume({"/root/data": model_vol}))
+              volumes={"/root/data": model_vol})
 def run_transformer_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
@@ -316,7 +299,7 @@ def run_transformer_tests():
               image=image,
               timeout=900,
               secrets=[wandb_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume({"/root/data": model_vol}))
+              volumes={"/root/data": model_vol})
 def run_training_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && "
@@ -330,7 +313,7 @@ def run_training_tests():
               image=image,
               timeout=900,
               secrets=[wandb_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume({"/root/data": model_vol}))
+              volumes={"/root/data": model_vol})
 def run_training_lora_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && "
@@ -341,15 +324,14 @@ def run_training_lora_tests():
 @app.function(gpu="H100!:2",
               image=image,
               timeout=900,
-              secrets=[wandb_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume())
+              secrets=[wandb_secret, ci_env_secret])
 def run_training_tests_VSA():
     run_test(
         "wandb login $WANDB_API_KEY && FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/VSA -srP"
     )
 
 
-@app.function(gpu="H100:1", image=image, timeout=900, secrets=[ci_env_secret], volumes=_with_kernel_cache_volume())
+@app.function(gpu="H100:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_kernel_tests():
     run_test("pytest fastvideo-kernel/tests/ -vs")
 
@@ -364,19 +346,19 @@ def run_kernel_tests():
 #     run_test("pytest fastvideo-kernel/tests/test_vmoba_correctness.py")
 
 
-@app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret], volumes=_with_kernel_cache_volume())
+@app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_inference_tests_vmoba():
     run_test('python fastvideo/tests/inference/vmoba/test_vmoba_inference.py')
 
 
-@app.function(gpu="L40S:1", image=image, timeout=1200, secrets=[ci_env_secret], volumes=_with_kernel_cache_volume())
+@app.function(gpu="L40S:1", image=image, timeout=1200, secrets=[ci_env_secret])
 def run_inference_lora_tests():
     run_test(
         "pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs"
     )
 
 
-@app.function(gpu="L40S:2", image=image, timeout=900, secrets=[ci_env_secret], volumes=_with_kernel_cache_volume())
+@app.function(gpu="L40S:2", image=image, timeout=900, secrets=[ci_env_secret])
 def run_distill_dmd_tests():
     run_test(
         "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
@@ -385,8 +367,7 @@ def run_distill_dmd_tests():
 @app.function(gpu="L40S:2",
               image=image,
               timeout=900,
-              secrets=[wandb_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume())
+              secrets=[wandb_secret, ci_env_secret])
 def run_self_forcing_tests():
     run_test(
         "wandb login $WANDB_API_KEY && "
@@ -394,14 +375,16 @@ def run_self_forcing_tests():
     )
 
 
-@app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret], volumes=_with_kernel_cache_volume())
+@app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_unit_test():
     run_test(
         "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
         "./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ "
         "./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/worker/ "
         "./fastvideo/tests/training/test_trackers.py "
-        "./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py ./fastvideo/tests/modal/test_pr_test.py "
+        "./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py "
+        "./fastvideo/tests/modal/test_kernel_build_cache.py ./fastvideo/tests/modal/test_pr_test.py "
+        "./fastvideo/tests/modal/test_ssim_test.py "
         "--ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py "
         "--ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs"
     )
@@ -453,7 +436,7 @@ def run_dreamverse_app_tests():
               image=image,
               timeout=1800,
               secrets=[hf_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume({"/root/data": model_vol}))
+              volumes={"/root/data": model_vol})
 def run_train_framework_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
@@ -465,7 +448,7 @@ def run_train_framework_tests():
               image=image,
               timeout=1800,
               secrets=[hf_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume({"/root/data": model_vol}))
+              volumes={"/root/data": model_vol})
 def seed_grad_norm_references():
     """Record the per-method grad-norm reference for the **CI GPU (L40S only)**.
 
@@ -492,7 +475,7 @@ def seed_grad_norm_references():
               image=image,
               timeout=3600,
               secrets=[hf_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume({"/root/data": model_vol}))
+              volumes={"/root/data": model_vol})
 def run_eval_tests():
     # Eval metric regression: drives the high-level fastvideo.eval API on a
     # fixed asset and asserts each score matches the upstream reference number
@@ -514,8 +497,7 @@ def run_eval_tests():
 @app.function(gpu="L40S:1",
               image=image,
               timeout=3600,
-              secrets=[hf_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume())
+              secrets=[hf_secret, ci_env_secret])
 def run_lora_extraction_tests():
     run_test(
         "hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/lora_extraction/test_lora_extraction.py"
@@ -528,7 +510,7 @@ def run_lora_extraction_tests():
               image=image,
               timeout=1800,
               secrets=[hf_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume({"/root/data": model_vol}))
+              volumes={"/root/data": model_vol})
 def run_performance_tests():
     # PR/direct records are uploaded only on pass; scheduled main uploads pass
     # and fail so the dashboard records every canonical baseline attempt.
@@ -570,7 +552,7 @@ def run_performance_tests():
               image=image,
               timeout=1800,
               secrets=[hf_secret, ci_env_secret],
-              volumes=_with_kernel_cache_volume({"/root/data": model_vol}))
+              volumes={"/root/data": model_vol})
 def run_api_server_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/entrypoints/test_openai_api_integration.py -vs"

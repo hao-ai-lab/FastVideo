@@ -36,7 +36,7 @@ app = modal.App("fastvideo-kernel-cache-smoke")
 
 REPO_DIR = "/FastVideo"
 KERNEL_CACHE_VOLUME_PATH = "/root/fastvideo-kernel-cache"
-KERNEL_CACHE_VOLUME_NAME = "fastvideo-kernel-build-cache"
+KERNEL_CACHE_VOLUME_NAME = "fastvideo-kernel-build-cache-smoke-v3"
 IMAGE_VERSION = os.getenv("IMAGE_VERSION", "latest")
 IMAGE_TAG = os.environ.get(
     "FASTVIDEO_MODAL_IMAGE",
@@ -65,16 +65,21 @@ image = (
     .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
     .env({
         "PATH": "/root/.cargo/bin:$PATH",
-        "FASTVIDEO_KERNEL_CACHE_ROOT": KERNEL_CACHE_VOLUME_PATH,
         **({"UV_TORCH_BACKEND": uv_torch_backend_override} if uv_torch_backend_override else {}),
     })
 )
 
-COMMON_KWARGS = dict(
+PRODUCER_KWARGS = dict(
     gpu="L40S:1",
     image=image,
     timeout=5400,
     volumes={KERNEL_CACHE_VOLUME_PATH: kernel_cache_vol},
+)
+CONSUMER_KWARGS = dict(
+    gpu="L40S:1",
+    image=image,
+    timeout=5400,
+    volumes={KERNEL_CACHE_VOLUME_PATH: kernel_cache_vol.with_mount_options(read_only=True)},
 )
 
 
@@ -160,14 +165,14 @@ def _clone_checkout(git_repo: str, git_commit: str) -> str:
     return _run(["git", "rev-parse", "HEAD"], cwd=REPO_DIR)
 
 
-def _cache_install_output(cache_root: str) -> str:
+def _cache_command_output(command: str, cache_root: str) -> str:
     # This smoke exercises the Modal volume cache specifically, so do not let
     # a matching Docker-prebuilt wheel satisfy the miss/hit assertions.
     disabled_prebuilt_info_path = f"{cache_root}/.docker-prebuilt-disabled.json"
     return _run_shell_capture(
         "source $HOME/.local/bin/env && "
         "source /opt/venv/bin/activate && "
-        "python fastvideo/tests/modal/kernel_build_cache.py install "
+        f"python fastvideo/tests/modal/kernel_build_cache.py {shlex.quote(command)} "
         f"--cache-root {shlex.quote(cache_root)} "
         f"--prebuilt-info-path {shlex.quote(disabled_prebuilt_info_path)}",
         cwd=REPO_DIR,
@@ -184,10 +189,10 @@ def _assert_not_in_output(output: str, needle: str) -> None:
         raise RuntimeError(f"Expected output not to contain {needle!r}")
 
 
-@app.function(**COMMON_KWARGS)
+@app.function(**PRODUCER_KWARGS)
 def build_and_store_cache(git_repo: str, git_commit: str, cache_root: str) -> dict[str, Any]:
     checked_out_commit = _clone_checkout(git_repo, git_commit)
-    output = _cache_install_output(cache_root)
+    output = _cache_command_output("produce", cache_root)
     _assert_in_output(output, "cache miss:")
     _assert_in_output(output, "./build.sh --wheel-dir")
     _assert_in_output(output, "stored wheel cache entry:")
@@ -201,10 +206,10 @@ def build_and_store_cache(git_repo: str, git_commit: str, cache_root: str) -> di
     }
 
 
-@app.function(**COMMON_KWARGS)
+@app.function(**CONSUMER_KWARGS)
 def verify_cache_hit(git_repo: str, git_commit: str, cache_root: str) -> dict[str, Any]:
     checked_out_commit = _clone_checkout(git_repo, git_commit)
-    output = _cache_install_output(cache_root)
+    output = _cache_command_output("install", cache_root)
     _assert_in_output(output, "cache hit:")
     _assert_not_in_output(output, "cache miss:")
     _assert_not_in_output(output, "./build.sh --wheel-dir")

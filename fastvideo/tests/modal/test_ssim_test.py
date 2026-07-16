@@ -99,3 +99,36 @@ def test_spawn_ssim_task_passes_hf_api_key_to_pytest_env(monkeypatch, tmp_path):
     assert env["FASTVIDEO_SSIM_MODEL_ID"] == "model-a"
     assert running_task.process.__class__ is FakeProcess
     running_task.log_handle.close()
+
+
+def test_prepare_workspace_uses_nonshared_kernel_install(monkeypatch):
+    module = _load_ssim_test_module(monkeypatch)
+    captured = {}
+    task = module.SSIMTask(
+        task_id=0,
+        test_file="fastvideo/tests/ssim/test_example.py",
+        required_gpus=1,
+    )
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(module, "_discover_ssim_tasks", lambda *_args, **_kwargs: [task])
+
+    repo_root, tasks = module._prepare_ssim_workspace(
+        git_repo="https://example.com/FastVideo.git",
+        git_commit="0123456789abcdef",
+        pr_number="false",
+        hf_api_key="hf_test_token",
+    )
+
+    setup_command = captured["args"][2]
+    assert "kernel_build_cache.py install" in setup_command
+    assert "--cache-root" not in setup_command
+    assert repo_root == "/FastVideo"
+    assert tasks == [task]
+    assert module.SSIM_COMMON_KWARGS["volumes"] == {"/root/data": module.model_vol}
+    assert not hasattr(module, "kernel_cache_vol")

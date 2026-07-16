@@ -282,31 +282,42 @@ def test_run_test_command_composes_valid_post_checkout_shell(
         real_run(["/bin/bash", "-n"], input=shell_command, text=True, check=True)
 
 
-def test_run_test_command_commits_kernel_cache_before_tests(monkeypatch):
+def test_run_test_command_uses_nonshared_kernel_install_before_tests(monkeypatch):
     module = _load_pr_test_module(monkeypatch)
-    events = []
-
-    class FakeKernelCacheVolume:
-
-        def commit(self):
-            events.append(("commit", None))
+    commands = []
 
     def fake_run(args, **_kwargs):
-        events.append(("run", args[-1]))
+        commands.append(args[-1])
         return types.SimpleNamespace(returncode=0)
 
     monkeypatch.setenv("BUILDKITE_REPO", "https://example.com/FastVideo.git")
     monkeypatch.setenv("BUILDKITE_COMMIT", "0123456789abcdef")
     monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "false")
-    monkeypatch.setattr(module, "kernel_cache_vol", FakeKernelCacheVolume())
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     module.run_test_command("pytest fastvideo/tests/api -q", build_kernel=True)
 
-    assert [event for event, _ in events] == ["run", "commit", "run"]
-    setup_command = events[0][1]
-    test_command = events[2][1]
+    assert len(commands) == 2
+    setup_command, test_command = commands
     assert "kernel_build_cache.py install" in setup_command
+    assert "--cache-root" not in setup_command
     assert "pytest fastvideo/tests/api -q" not in setup_command
     assert "kernel_build_cache.py install" not in test_command
     assert "pytest fastvideo/tests/api -q" in test_command
+    assert not hasattr(module, "kernel_cache_vol")
+
+
+def test_run_unit_test_collects_modal_cache_runner_tests(monkeypatch):
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+    monkeypatch.setattr(module, "run_test", commands.append)
+
+    module.run_unit_test()
+
+    assert len(commands) == 1
+    for test_path in (
+        "./fastvideo/tests/modal/test_kernel_build_cache.py",
+        "./fastvideo/tests/modal/test_pr_test.py",
+        "./fastvideo/tests/modal/test_ssim_test.py",
+    ):
+        assert test_path in commands[0]
