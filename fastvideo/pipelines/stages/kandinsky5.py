@@ -31,7 +31,7 @@ from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.utils import PRECISION_TO_TYPE
+from fastvideo.utils import PRECISION_TO_TYPE, get_mixed_precision_state
 
 logger = init_logger(__name__)
 
@@ -174,20 +174,27 @@ class Kandinsky5DenoisingStage(PipelineStage):
         return torch.arange(seq_len, device=device)
 
     # Backends whose selection is all-or-nothing: fastvideo.platforms.cuda
-    # raises ImportError immediately if the kernel isn't available, rather
-    # than the generic "requested backend unsupported by this layer, falling
-    # back to automatic selection" path _cached_get_attn_backend takes for
-    # most other backend names (see fastvideo/attention/selector.py). Both
-    # values are also always in Kandinsky5ArchConfig's
+    # raises ImportError immediately if the ATTN_QAT_TRAIN kernel isn't
+    # available (training must never silently de-quantize), rather than the
+    # generic "requested backend unsupported by this layer, falling back to
+    # automatic selection" path _cached_get_attn_backend takes for most
+    # other backend names (see fastvideo/attention/selector.py).
+    # ATTN_QAT_TRAIN is also always in Kandinsky5ArchConfig's
     # _supported_attention_backends, so that generic fallback never applies
-    # to them here. That combination makes an exact backend match a safe,
-    # false-positive-free signal *only* for these two -- any other
-    # FASTVIDEO_ATTENTION_BACKEND value (e.g. a backend meant for a
-    # different model family sharing the same process/env var) can
-    # legitimately resolve to something other than what was requested.
+    # to it here. That combination makes an exact backend match a safe,
+    # false-positive-free signal *only* for ATTN_QAT_TRAIN.
+    # ATTN_QAT_INFER must NOT be in this set: fastvideo.platforms.cuda
+    # deliberately resolves it to FlashAttention when the sm_120 kernel
+    # isn't built, and the QAD recipe README documents that fallback ("on
+    # other GPUs the attention falls back to a supported dense backend
+    # while the FP4 linear layers still run") -- asserting an exact match
+    # would abort inference on every non-sm_120 machine relying on it.
+    # Any other FASTVIDEO_ATTENTION_BACKEND value (e.g. a backend meant for
+    # a different model family sharing the same process/env var) can
+    # likewise legitimately resolve to something other than what was
+    # requested.
     _STRICT_BACKENDS = frozenset({
         AttentionBackendEnum.ATTN_QAT_TRAIN,
-        AttentionBackendEnum.ATTN_QAT_INFER,
     })
 
     def _assert_local_attention_backend_engaged(self) -> None:
@@ -197,7 +204,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
         ``LocalAttention`` raises when no pipeline forward context is set and
         falls back to plain ``F.scaled_dot_product_attention`` -- silently
         skipping whichever kernel ``FASTVIDEO_ATTENTION_BACKEND`` requested
-        (the fake-quantized ``ATTN_QAT_TRAIN``/``ATTN_QAT_INFER`` kernels).
+        (the fake-quantized ``ATTN_QAT_TRAIN`` kernel).
         ``LocalAttention.backend`` is resolved once at module construction,
         independent of whether a forward context is later set, so this only
         catches a backend that failed to resolve to what the env var
@@ -206,9 +213,10 @@ class Kandinsky5DenoisingStage(PipelineStage):
         transformer call in ``set_forward_context`` (see the denoising loops
         below), which is what prevents the runtime fallback.
 
-        Scoped to ``_STRICT_BACKENDS``: other backend names can legitimately
-        differ from what ``LocalAttention.backend`` resolved to (silent,
-        logged, intentional fallback when unsupported by this layer -- see
+        Scoped to ``_STRICT_BACKENDS``: other backend names -- including
+        ``ATTN_QAT_INFER``, whose FlashAttention fallback on non-sm_120
+        GPUs is documented, intentional behavior -- can legitimately differ
+        from what ``LocalAttention.backend`` resolved to (see
         ``_STRICT_BACKENDS``'s comment), so asserting on those would flag
         expected behavior as a bug.
         """
@@ -238,14 +246,24 @@ class Kandinsky5DenoisingStage(PipelineStage):
 
         FSDP2-wrapped modules are the one case where that assertion doesn't
         carry forward: ``maybe_load_fsdp_model`` hardcodes its
-        ``MixedPrecisionPolicy`` to ``param_dtype=torch.bfloat16`` for every
-        FSDP-wrapped load, independent of ``dit_precision`` -- this covers
-        both the live transformer ``ValidationCallback`` reuses from
-        training (whose ``pipeline_config.dit_precision`` reflects the
-        fp32 master-weight load dtype, not the actual bf16 compute dtype)
-        and multi-GPU ``use_fsdp_inference=True`` runs. Detect the real
-        compute dtype from the parameters only in that case, mirroring the
-        Cosmos 2.5 denoising stage.
+        ``MixedPrecisionPolicy`` to ``param_dtype=torch.bfloat16`` (with
+        ``cast_forward_inputs=False``) for every FSDP-wrapped load,
+        independent of ``dit_precision`` -- this covers both the live
+        transformer ``ValidationCallback`` reuses from training (whose
+        ``pipeline_config.dit_precision`` reflects the fp32 master-weight
+        load dtype, not the actual bf16 compute dtype) and multi-GPU
+        ``use_fsdp_inference=True`` runs.
+
+        For that FSDP case, read the policy itself
+        (``set_mixed_precision_policy`` records it right before
+        ``maybe_load_fsdp_model`` shards -- every FSDP wrap in this repo
+        goes through that path), NOT the parameter storage dtypes:
+        FSDP2 computes in the policy's ``param_dtype`` regardless of what
+        dtype the parameters are stored/loaded in, so e.g. an fp16-loaded
+        FSDP model still runs its forward in bf16 -- scanning parameters
+        would resolve fp16 and, with ``cast_forward_inputs=False`` and
+        autocast keyed off the wrong dtype, hand bf16-computing modules
+        fp16 inputs.
         """
         declared_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
         try:
@@ -256,12 +274,13 @@ class Kandinsky5DenoisingStage(PipelineStage):
         if not isinstance(self.transformer, FSDPModule):
             return declared_dtype
 
-        target_dtype = torch.bfloat16  # safe default
-        for p in self.transformer.parameters():
-            if p.dtype != torch.float32:
-                target_dtype = p.dtype
-                break
-        return target_dtype
+        try:
+            policy_dtype = get_mixed_precision_state().param_dtype
+        except ValueError:
+            policy_dtype = None
+        # bf16 mirrors maybe_load_fsdp_model's hardcoded param_dtype if the
+        # (thread-local) policy state is somehow unset here.
+        return policy_dtype if policy_dtype is not None else torch.bfloat16
 
     @staticmethod
     def fast_sta_nabla(
