@@ -251,11 +251,10 @@ class Database:
                 sp_size, negative_prompt,
                 data_path, max_train_steps, train_batch_size, learning_rate,
                 num_latent_t, validation_dataset_file, lora_rank,
-                ltx2_first_frame_conditioning_p,
                 dmd_use_vsa, dmd_vsa_sparsity, dmd_denoising_steps,
-                min_timestep_ratio, max_timestep_ratio, real_score_guidance_scale,
+                real_score_guidance_scale,
                 generator_update_interval, real_score_model_path, fake_score_model_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
@@ -297,12 +296,9 @@ class Database:
                 job.get("num_latent_t", 20),
                 job.get("validation_dataset_file", ""),
                 job.get("lora_rank", 32),
-                job.get("ltx2_first_frame_conditioning_p"),
                 1 if job.get("dmd_use_vsa") else 0,
                 job.get("dmd_vsa_sparsity", 0.8),
                 job.get("dmd_denoising_steps", "1000,757,522"),
-                job.get("min_timestep_ratio", 0.02),
-                job.get("max_timestep_ratio", 0.98),
                 job.get("real_score_guidance_scale", 3.5),
                 job.get("generator_update_interval", 5),
                 job.get("real_score_model_path", ""),
@@ -401,24 +397,6 @@ class Database:
         for file_name, caption in captions.items():
             self.upsert_dataset_caption(dataset_id, file_name, caption)
 
-    def update_dataset(self, dataset_id: str, updates: dict[str, Any]) -> None:
-        """Update dataset fields. Only provided keys are updated."""
-        if not updates:
-            return
-        allowed: set[str] = set()
-        cols = []
-        vals = []
-        for k, v in updates.items():
-            if k in allowed:
-                cols.append(f"{k} = ?")
-                vals.append(v)
-        if not cols:
-            return
-        vals.append(dataset_id)
-        sql = f"UPDATE datasets SET {', '.join(cols)} WHERE id = ?"
-        self._execute(sql, tuple(vals))
-        self._commit()
-
     def delete_dataset(self, dataset_id: str) -> bool:
         """Delete a dataset. Returns True if a row was deleted."""
         cur = self._execute("DELETE FROM datasets WHERE id = ?", (dataset_id, ))
@@ -443,7 +421,7 @@ class Database:
         cur = self._execute("SELECT * FROM settings WHERE id = 1")
         row = cur.fetchone()
         if not row:
-            return _default_settings_dict()
+            return default_settings_dict()
         t2v = ((row["default_model_id_t2v"] or row["default_model_id"] or "") if "default_model_id_t2v" in row else
                (row["default_model_id"] or ""))
         i2v = ((row["default_model_id_i2v"] or "") if "default_model_id_i2v" in row else "")
@@ -557,8 +535,6 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     }
     float_defaults = {
         "dmd_vsa_sparsity": 0.8,
-        "min_timestep_ratio": 0.02,
-        "max_timestep_ratio": 0.98,
         "real_score_guidance_scale": 3.5,
     }
     result = {
@@ -625,7 +601,7 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     return result
 
 
-def _default_settings_dict() -> dict[str, Any]:
+def default_settings_dict() -> dict[str, Any]:
     """Return default settings as API-style dict."""
     return {
         "defaultModelId": DEFAULT_SETTINGS["default_model_id"],

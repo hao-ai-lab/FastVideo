@@ -23,12 +23,13 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+import yaml
+
 from fastvideo.utils import get_mp_context
 from fastvideo_studio.database import Database
 from fastvideo_studio.training_config import (
-    build_training_args,
+    build_training_config,
     get_training_env,
-    get_training_module_info,
 )
 
 logger = logging.getLogger("fastvideo.studio.job_runner")
@@ -160,13 +161,10 @@ class Job:
     num_latent_t: int = 20
     validation_dataset_file: str = ""
     lora_rank: int = 32
-    ltx2_first_frame_conditioning_p: float | None = None
     # DMD options
     dmd_use_vsa: bool = False
     dmd_vsa_sparsity: float = 0.8
     dmd_denoising_steps: str = "1000,757,522"
-    min_timestep_ratio: float = 0.02
-    max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
     generator_update_interval: int = 5
     real_score_model_path: str = ""
@@ -221,12 +219,9 @@ class Job:
             "num_width": self.width,
             "validation_dataset_file": self.validation_dataset_file,
             "lora_rank": self.lora_rank,
-            "ltx2_first_frame_conditioning_p": self.ltx2_first_frame_conditioning_p,
             "dmd_use_vsa": self.dmd_use_vsa,
             "dmd_vsa_sparsity": self.dmd_vsa_sparsity,
             "dmd_denoising_steps": self.dmd_denoising_steps,
-            "min_timestep_ratio": self.min_timestep_ratio,
-            "max_timestep_ratio": self.max_timestep_ratio,
             "real_score_guidance_scale": self.real_score_guidance_scale,
             "generator_update_interval": self.generator_update_interval,
             "real_score_model_path": self.real_score_model_path or "",
@@ -330,12 +325,9 @@ class JobRunner:
                     num_latent_t=row.get("num_latent_t", 20),
                     validation_dataset_file=row.get("validation_dataset_file", "") or "",
                     lora_rank=row.get("lora_rank", 32),
-                    ltx2_first_frame_conditioning_p=row.get("ltx2_first_frame_conditioning_p"),
                     dmd_use_vsa=row.get("dmd_use_vsa", False),
                     dmd_vsa_sparsity=float(row.get("dmd_vsa_sparsity", 0.8)),
                     dmd_denoising_steps=row.get("dmd_denoising_steps", "1000,757,522") or "1000,757,522",
-                    min_timestep_ratio=float(row.get("min_timestep_ratio", 0.02)),
-                    max_timestep_ratio=float(row.get("max_timestep_ratio", 0.98)),
                     real_score_guidance_scale=float(row.get("real_score_guidance_scale", 3.5)),
                     generator_update_interval=int(row.get("generator_update_interval", 5)),
                     real_score_model_path=row.get("real_score_model_path", "") or "",
@@ -412,12 +404,9 @@ class JobRunner:
         num_latent_t: int = 20,
         validation_dataset_file: str = "",
         lora_rank: int = 32,
-        ltx2_first_frame_conditioning_p: float | None = None,
         dmd_use_vsa: bool = False,
         dmd_vsa_sparsity: float = 0.8,
         dmd_denoising_steps: str = "1000,757,522",
-        min_timestep_ratio: float = 0.02,
-        max_timestep_ratio: float = 0.98,
         real_score_guidance_scale: float = 3.5,
         generator_update_interval: int = 5,
         real_score_model_path: str = "",
@@ -457,12 +446,9 @@ class JobRunner:
             num_latent_t=num_latent_t,
             validation_dataset_file=validation_dataset_file or "",
             lora_rank=lora_rank,
-            ltx2_first_frame_conditioning_p=ltx2_first_frame_conditioning_p,
             dmd_use_vsa=dmd_use_vsa,
             dmd_vsa_sparsity=dmd_vsa_sparsity,
             dmd_denoising_steps=dmd_denoising_steps,
-            min_timestep_ratio=min_timestep_ratio,
-            max_timestep_ratio=max_timestep_ratio,
             real_score_guidance_scale=real_score_guidance_scale,
             generator_update_interval=generator_update_interval,
             real_score_model_path=real_score_model_path or "",
@@ -733,46 +719,23 @@ class JobRunner:
             self._save_job(job)
             return
 
-        module_info = get_training_module_info(job.workload_type, job.model_id)
-        if not module_info:
+        env = os.environ.copy()
+        env.update(get_training_env())
+
+        try:
+            # Job.to_dict() carries every key the config builder reads
+            # (extra keys are ignored by its .get() lookups).
+            train_config = build_training_config(job.to_dict(), job_output_dir)
+        except ValueError as exc:
             job.status = JobStatus.FAILED
-            job.error = f"Unknown workload type: {job.workload_type}"
+            job.error = str(exc)
             job.finished_at = time.time()
             self._save_job(job)
             return
 
-        module_path, _pipeline_workload, use_vsa, _is_lora = module_info
-        dmd_use_vsa = (job.workload_type.startswith("dmd_") and getattr(job, "dmd_use_vsa", False))
-        env = os.environ.copy()
-        env.update(get_training_env(use_vsa or dmd_use_vsa))
-
-        job_dict = {
-            "model_id": job.model_id,
-            "data_path": job.data_path,
-            "workload_type": job.workload_type,
-            "num_gpus": job.num_gpus,
-            "max_train_steps": job.max_train_steps,
-            "train_batch_size": job.train_batch_size,
-            "learning_rate": job.learning_rate,
-            "num_latent_t": job.num_latent_t,
-            "num_height": job.height,
-            "num_width": job.width,
-            "num_frames": job.num_frames,
-            "validation_dataset_file": job.validation_dataset_file,
-            "lora_rank": job.lora_rank,
-            "ltx2_first_frame_conditioning_p": job.ltx2_first_frame_conditioning_p,
-        }
-        if job.workload_type.startswith("dmd_") or job.workload_type.startswith("self_forcing_"):
-            job_dict["dmd_use_vsa"] = getattr(job, "dmd_use_vsa", False)
-            job_dict["dmd_vsa_sparsity"] = getattr(job, "dmd_vsa_sparsity", 0.8)
-            job_dict["dmd_denoising_steps"] = getattr(job, "dmd_denoising_steps", "1000,757,522")
-            job_dict["min_timestep_ratio"] = getattr(job, "min_timestep_ratio", 0.02)
-            job_dict["max_timestep_ratio"] = getattr(job, "max_timestep_ratio", 0.98)
-            job_dict["real_score_guidance_scale"] = getattr(job, "real_score_guidance_scale", 3.5)
-            job_dict["generator_update_interval"] = getattr(job, "generator_update_interval", 5)
-            job_dict["real_score_model_path"] = (getattr(job, "real_score_model_path", "") or job.model_id)
-            job_dict["fake_score_model_path"] = (getattr(job, "fake_score_model_path", "") or job.model_id)
-        train_args = build_training_args(job_dict, job_output_dir)
+        config_path = os.path.join(job_output_dir, "train_config.yaml")
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(train_config, f, sort_keys=False)
 
         repo_root = Path(__file__).resolve().parent.parent
         torchrun_cmd = [
@@ -783,9 +746,12 @@ class JobRunner:
             str(job.num_gpus),
             "--nnodes",
             "1",
-            str(repo_root / module_path),
-        ] + train_args
-        buf.write(f"Starting training: {' '.join(torchrun_cmd[:12])}...")
+            "-m",
+            "fastvideo.train.entrypoint.train",
+            "--config",
+            config_path,
+        ]
+        buf.write(f"Starting training: {' '.join(torchrun_cmd)}")
         buf.phase = "starting"
 
         try:
@@ -825,12 +791,21 @@ class JobRunner:
                 job._process.wait()
                 exit_code = job._process.returncode or 0
 
-            if exit_code == 0:
+            if job._stop_event.is_set():
+                # Terminated by stop_job() without the reader loop observing the
+                # flag (e.g. the process died between log lines).
+                job.status = JobStatus.STOPPED
+                buf.phase = "stopped"
+            elif exit_code == 0:
                 job.status = JobStatus.COMPLETED
                 buf.progress = 100.0
                 buf.phase = "done"
-                # Training outputs checkpoints, not video
-                ckpt_dirs = sorted(Path(job_output_dir).glob("checkpoint-*"))
+                # Training outputs checkpoints, not video. Sort by step number,
+                # not lexically ("checkpoint-1000" < "checkpoint-500" as strings).
+                ckpt_dirs = sorted(
+                    Path(job_output_dir).glob("checkpoint-*"),
+                    key=lambda p: int(m.group(1)) if (m := re.fullmatch(r"checkpoint-(\d+)", p.name)) else -1,
+                )
                 if ckpt_dirs:
                     job.output_path = str(ckpt_dirs[-1])
             else:

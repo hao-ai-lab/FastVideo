@@ -17,7 +17,6 @@ class CreateJobRequest(BaseModel):
     num_latent_t: int = 20
     validation_dataset_file: str = ""
     lora_rank: int = 32
-    ltx2_first_frame_conditioning_p: float | None = None
     negative_prompt: str = ""
     num_inference_steps: int = 50
     num_frames: int = 81
@@ -41,8 +40,6 @@ class CreateJobRequest(BaseModel):
     dmd_use_vsa: bool = False
     dmd_vsa_sparsity: float = 0.8
     dmd_denoising_steps: str = "1000,757,522"
-    min_timestep_ratio: float = 0.02
-    max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
     generator_update_interval: int = 5
     real_score_model_path: str = ""
