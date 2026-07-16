@@ -81,6 +81,7 @@ Common model parameters:
 | `disable_custom_init_weights` | `false` | Skip custom weight initialization (use for teacher/critic) |
 | `flow_shift` | `3.0` | Timestep shifting factor |
 | `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"` or `null`) |
+| `attention_backend` | `null` | Optional role-local backend for Wan models (for example `ATTN_QAT_TRAIN`); overrides the process default only while this role's transformer is built |
 
 Which roles are needed depends on the training method:
 
@@ -298,6 +299,8 @@ method:
 | `dmd_denoising_steps` | *(required)* | Timestep schedule for student rollout |
 | `generator_update_interval` | `1` | Update student every N critic steps |
 | `real_score_guidance_scale` | `1.0` | CFG scale for teacher predictions |
+| `min_timestep_ratio` | `0.0` | Lower bound for randomly sampled teacher/critic score timesteps |
+| `max_timestep_ratio` | `1.0` | Upper bound for randomly sampled teacher/critic score timesteps |
 | `fake_score_learning_rate` | *(required)* | Critic optimizer learning rate |
 | `fake_score_betas` | *(required)* | Critic optimizer Adam betas |
 | `fake_score_lr_scheduler` | *(required)* | Critic LR scheduler type |

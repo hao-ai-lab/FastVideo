@@ -32,6 +32,27 @@ def backend_name_to_enum(backend_name: str) -> AttentionBackendEnum | None:
           None
 
 
+def coerce_attn_backend(attn_backend: AttentionBackendEnum | str | None, ) -> AttentionBackendEnum | None:
+    """Normalize an explicit backend selection.
+
+    Environment-variable parsing remains permissive via
+    :func:`backend_name_to_enum`, but typed/config-driven call sites should
+    fail fast on typos instead of silently falling back to another backend.
+    """
+    if attn_backend is None or isinstance(attn_backend, AttentionBackendEnum):
+        return attn_backend
+    if not isinstance(attn_backend, str) or not attn_backend.strip():
+        raise ValueError("attention backend must be a non-empty string, "
+                         f"an AttentionBackendEnum, or None; got {attn_backend!r}")
+
+    backend_name = attn_backend.strip().upper()
+    backend = backend_name_to_enum(backend_name)
+    if backend is None:
+        raise ValueError(f"Unknown attention backend {attn_backend!r}. "
+                         f"Expected one of {sorted(AttentionBackendEnum.__members__)}")
+    return backend
+
+
 def get_env_variable_attn_backend() -> AttentionBackendEnum | None:
     '''
     Get the backend override specified by the FastVideo attention
@@ -69,6 +90,11 @@ def global_force_attn_backend(attn_backend: AttentionBackendEnum | None) -> None
     '''
     global forced_attn_backend
     forced_attn_backend = attn_backend
+    # Backend selection is cached by tensor shape/dtype, while the global
+    # override is intentionally not part of that cache key. Invalidate cached
+    # resolutions whenever the override changes so independently constructed
+    # role models can bind different attention implementations.
+    _cached_get_attn_backend.cache_clear()
 
 
 def get_global_forced_attn_backend() -> AttentionBackendEnum | None:

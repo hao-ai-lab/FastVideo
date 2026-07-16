@@ -25,6 +25,7 @@ models:
     disable_custom_init_weights: false                # default: false
     flow_shift: 3.0                                   # default: 3.0
     enable_gradient_checkpointing_type: null           # default: null (falls back to training.model)
+    attention_backend: null                            # default: null (global/default); role-local when set
 
   teacher:
     _target_: fastvideo.train.models.wan.WanModel
@@ -52,6 +53,8 @@ method:
   rollout_mode: simulate              # required: "simulate" or "data_latent"
   generator_update_interval: 5        # default: 1
   dmd_denoising_steps: [1000, 750, 500, 250]  # SDE timestep schedule
+  min_timestep_ratio: 0.0            # score-model timestep lower bound
+  max_timestep_ratio: 1.0            # score-model timestep upper bound
 
   # Critic optimizer (all required — no fallback)
   fake_score_learning_rate: 8.0e-6

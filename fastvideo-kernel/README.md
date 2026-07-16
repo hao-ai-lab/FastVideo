@@ -108,6 +108,20 @@ out = moba_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k, ...)
 
 ## Benchmark
 
+### Attn-QAT training
+
+The default shape matches one sequence-parallel rank of the 4-GPU
+Wan2.1-T2V-1.3B MixKit recipe (`B=1, H=3, L=31200, D=128`):
+
+```bash
+cd fastvideo-kernel
+python benchmarks/benchmark_attn_qat_train.py
+```
+
+The benchmark reports both conventional attention FLOPs and the extra matrix
+multiplications executed by the QAT straight-through path. Override
+`--peak-tflops` when running on a GPU other than RTX 5090.
+
 ### VSA (block-sparse) TFLOPs
 
 After building/installing `fastvideo-kernel`, run:

@@ -24,6 +24,10 @@ def is_blackwell():
     return is_cuda() and torch.cuda.get_device_capability()[0] == 10
 
 
+def is_consumer_blackwell():
+    return is_cuda() and torch.cuda.get_device_capability()[0] == 12
+
+
 def is_hopper():
     return is_cuda() and torch.cuda.get_device_capability()[0] == 9
 
@@ -47,7 +51,8 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid,
                     IS_QAT: tl.constexpr,
                     fake_quant_P: tl.constexpr = True,
                     two_level_quant_P: tl.constexpr = False,
-                    use_global_sf_P: tl.constexpr = True):
+                    use_global_sf_P: tl.constexpr = True,
+                    JOIN_QAT_PV: tl.constexpr = False):
     # range of values handled by this stage (kv blocks)
     if STAGE == 1:
         lo, hi = 0, start_m * BLOCK_M
@@ -113,10 +118,19 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid,
             v = desc_v.load([offsetv_y, 0])
             v = tl.where(kv_valid[:, None], v, 0.0)
         p = p.to(dtype)
-        # note that this non transposed v for FP8 is only supported on Blackwell
-        acc = tl.dot(p, v.to(dtype), acc)
-        if IS_QAT:
-            high_prec_acc = tl.dot(high_prec_p, v, high_prec_acc)
+        # Keep the quantized and STE paths in one tensor-core operation. They
+        # share V, so joining along M avoids issuing two small, independent
+        # dot operations for every KV tile.
+        if IS_QAT and JOIN_QAT_PV:
+            joined_p = tl.join(p, high_prec_p).permute(2, 0, 1).reshape([2 * BLOCK_M, BLOCK_N])
+            joined_acc = tl.join(acc, high_prec_acc).permute(2, 0, 1).reshape([2 * BLOCK_M, HEAD_DIM])
+            joined_acc = tl.dot(joined_p, v.to(dtype), joined_acc)
+            acc, high_prec_acc = joined_acc.reshape([2, BLOCK_M, HEAD_DIM]).permute(1, 2, 0).split()
+        else:
+            # note that this non transposed v for FP8 is only supported on Blackwell
+            acc = tl.dot(p, v.to(dtype), acc)
+            if IS_QAT:
+                high_prec_acc = tl.dot(high_prec_p, v, high_prec_acc)
         # update m_i and l_i
         # place this at the end of the loop to reduce register pressure
         l_i = l_i * alpha + l_ij
@@ -204,6 +218,7 @@ def _attn_fwd(sm_scale, M,
               fake_quant_P: tl.constexpr = True,
               two_level_quant_P: tl.constexpr = False,
               use_global_sf_P: tl.constexpr = True,
+              JOIN_QAT_PV: tl.constexpr = False,
               ):
     dtype = tl.float8e5 if FP8_OUTPUT else tl.bfloat16
     tl.static_assert(BLOCK_N <= HEAD_DIM)
@@ -268,7 +283,7 @@ def _attn_fwd(sm_scale, M,
             offset_y_kv, dtype, start_m, qk_scale,
             BLOCK_M, HEAD_DIM, BLOCK_N,
             4 - STAGE, offs_m, offs_n, N_CTX_KV,
-            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P, two_level_quant_P, use_global_sf_P
+            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P, two_level_quant_P, use_global_sf_P, JOIN_QAT_PV
         )
     # stage 2: on-band
     if STAGE & 2:
@@ -278,7 +293,7 @@ def _attn_fwd(sm_scale, M,
             offset_y_kv, dtype, start_m, qk_scale,
             BLOCK_M, HEAD_DIM, BLOCK_N,
             2, offs_m, offs_n, N_CTX_KV,
-            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P, two_level_quant_P, use_global_sf_P
+            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P, two_level_quant_P, use_global_sf_P, JOIN_QAT_PV
         )
     # epilogue
     m_i += tl.math.log2(l_i)
@@ -835,6 +850,12 @@ class _attention(torch.autograd.Function):
         assert HEAD_DIM_Q == HEAD_DIM_K and HEAD_DIM_K == HEAD_DIM_V
         assert HEAD_DIM_K in {16, 32, 64, 128, 256}
 
+        # Triton 3.7's NVWS pass aborts for this kernel on sm_120. Keep the
+        # architecture guard next to the kernel so direct callers and the
+        # FastVideo backend follow the same supported path.
+        consumer_blackwell = is_consumer_blackwell()
+        warp_specialize = warp_specialize and not consumer_blackwell
+
         # Support different sequence lengths for q and k/v (needed for cross attention)
         N_CTX_Q = q.shape[2]  # Query sequence length
         N_CTX_KV = k.shape[2]  # Key/Value sequence length (may differ from query)
@@ -995,6 +1016,7 @@ class _attention(torch.autograd.Function):
             fake_quant_P=fake_quant_P,
             two_level_quant_P=two_level_quant_P,
             use_global_sf_P=use_global_sf_P,
+            JOIN_QAT_PV=consumer_blackwell,
             num_warps=4,
             num_stages=2,
             **extra_kern_args
@@ -1032,7 +1054,10 @@ class _attention(torch.autograd.Function):
         N_CTX_KV = k.shape[2]
         assert k.shape[2] == v.shape[2], "k and v must have the same sequence length"
         PRE_BLOCK = 128
-        NUM_STAGES = 3
+        # Long video sequences are occupancy-bound on consumer Blackwell: a
+        # third software-pipeline stage consumes shared memory without hiding
+        # additional latency. Shorter sequences retain the deeper pipeline.
+        NUM_STAGES = 2 if is_consumer_blackwell() and max(N_CTX_Q, N_CTX_KV) >= 8192 else 3
         NUM_WARPS = 4
         BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 32, 32, 32
         if not ctx.use_qat_qkv_backward:
