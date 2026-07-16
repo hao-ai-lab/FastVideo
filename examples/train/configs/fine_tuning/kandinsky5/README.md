@@ -66,28 +66,34 @@ Stage 1 writes a raw DCP checkpoint (`checkpoint-<N>/dcp` + metadata/RNG
 state) under `training.checkpoint.output_dir`
 (`outputs/kandinsky5_t2v_qat_finetune/` by default) -- `models.*.init_from`
 needs a diffusers model directory instead (`model_index.json` + component
-subfolders), so convert it first:
+subfolders). Pass the stage-1 checkpoint to the launcher, which performs
+the conversion and injects the export into all three `init_from` overrides:
+
+```bash
+bash examples/train/configs/distribution_matching/kandinsky5/distill_dmd_qat.sh \
+    outputs/kandinsky5_t2v_qat_finetune/checkpoint-<N>
+```
+
+Under the hood it runs exactly:
 
 ```bash
 python -m fastvideo.train.entrypoint.dcp_to_diffusers \
     --checkpoint outputs/kandinsky5_t2v_qat_finetune/checkpoint-<N> \
     --output-dir outputs/kandinsky5_t2v_qat_finetune/checkpoint-<N>-diffusers \
-    --role student --verify
+    --role student --overwrite --verify
 ```
+
+then launches `dmd2_t2v_480p_qat.yaml` with
+`--models.student/teacher/critic.init_from` all pointing at the export.
+(Passing an already-exported diffusers directory to the launcher skips the
+conversion and uses it directly.)
 
 `--role student` exports the trained transformer weights (the only role
 that matters here: student/teacher/critic in stage 2 all load from the same
 checkpoint, and `_loading_teacher_critic_model` handles the full-precision
 masking for teacher/critic at load time, not at export time). `--verify`
 strictly reloads the exported transformer immediately, so a key-mapping bug
-fails here instead of deep inside the stage-2 launch below. Then point
-`models.student/teacher/critic.init_from` in `dmd2_t2v_480p_qat.yaml` at
-that `checkpoint-<N>-diffusers` directory (already the placeholder value in
-the checked-in config) and launch:
-
-```bash
-bash examples/train/configs/distribution_matching/kandinsky5/distill_dmd_qat.sh
-```
+fails here instead of deep inside the stage-2 launch.
 
 Only the student is quantized (Attn-QAT); the teacher and critic stay full
 precision / dense attention. This is enforced in the loader
@@ -98,6 +104,19 @@ reaches only the student, with no per-model flags or Kandinsky5-specific
 handling. Validation runs the distilled student through
 `Kandinsky5DMDPipeline` at the step counts configured in
 `callbacks.validation.sampling_steps`.
+
+## Export the stage-2 student for inference
+
+Stage 2 writes raw DCP checkpoints too, so the distilled student must be
+exported the same way stage 1 was before anything can load it -- the
+`path/to/kandinsky5_dmd_checkpoint` used below is exactly this export:
+
+```bash
+python -m fastvideo.train.entrypoint.dcp_to_diffusers \
+    --checkpoint outputs/kandinsky5_t2v_dmd2_4steps_qat/checkpoint-<N> \
+    --output-dir outputs/kandinsky5_t2v_dmd2_4steps_qat/checkpoint-<N>-diffusers \
+    --role student --verify
+```
 
 ## Inference (NVFP4 / FP8 weight quantization)
 
@@ -161,8 +180,19 @@ to a supported dense backend while the FP4 linear layers still run.
   documented workaround above), plus `Kandinsky5DMDConfig`'s
   `dmd_denoising_steps` default.
 - `fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py` -- a few
-  steps of both training stages on a single synthetic sample, including the
-  `dcp_to_diffusers --verify` conversion between them (the same command
-  documented above). No golden reference video exists yet (unlike the Wan
-  e2e test); once a real training run is available, snapshot one and add an
-  SSIM assertion to match.
+  steps of both training stages on a single synthetic sample, exercising the
+  whole recipe end to end: the `dcp_to_diffusers --verify` conversion
+  between the stages AND of the final stage-2 student, then reloading that
+  export through the documented `Kandinsky5DMDPipeline` /
+  `Kandinsky5DMDConfig` override, generating deterministically (fixed
+  seed), and comparing MS-SSIM against a committed reference video. The
+  test fails (does not skip) if the reference is missing; record it once on
+  a sanctioned GPU box with `KANDINSKY5_E2E_WRITE_REFERENCE=1`, review the
+  written video, and commit it (see the test's module docstring). Nightly
+  tests are not collected per-PR (`fastvideo/tests/contract/
+  test_ci_test_collection.py` allowlists the directory), so run it
+  explicitly:
+
+  ```bash
+  pytest fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py -vs
+  ```

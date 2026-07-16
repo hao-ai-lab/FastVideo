@@ -87,6 +87,13 @@ def load_video(path: str, num_frames: int, height: int, width: int) -> torch.Ten
         frames.append(frame)
     cap.release()
 
+    if not frames:
+        # Without this, the repeat-last-frame fill below raises an opaque
+        # IndexError on frames[-1]; cv2.VideoCapture doesn't raise on a
+        # missing/corrupt file, it just decodes nothing.
+        raise ValueError(f"Could not decode any frames from video {path!r} -- "
+                         "the file is missing, empty, or not readable by OpenCV.")
+
     if len(frames) < num_frames:
         # Repeat last frame to fill
         while len(frames) < num_frames:
@@ -134,9 +141,16 @@ def main() -> None:
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Load captions
-    with open(os.path.join(DATA_DIR, "videos2caption.json")) as f:
+    # Load captions. Validate up front (before spending minutes loading the
+    # VAE + two text encoders): an empty/malformed manifest would otherwise
+    # only surface as an IndexError on records[0] at parquet-write time.
+    manifest_path = os.path.join(DATA_DIR, "videos2caption.json")
+    with open(manifest_path) as f:
         caption_data = json.load(f)
+    if not isinstance(caption_data, list) or not caption_data:
+        raise ValueError(f"Manifest {manifest_path} must be a non-empty JSON list of "
+                         f"{{'path', 'cap'}} entries, got: {type(caption_data).__name__} "
+                         f"with {len(caption_data) if isinstance(caption_data, list) else 'n/a'} entries")
 
     pipeline_config = Kandinsky5T2VConfig()
     # Kandinsky5T2VConfig.__post_init__ sets load_encoder=False by default --

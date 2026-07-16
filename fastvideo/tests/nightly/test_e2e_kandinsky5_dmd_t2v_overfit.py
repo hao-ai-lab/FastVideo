@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Single-sample overfit / small end-to-end run for Kandinsky5 QAD:
 stage-1 Attn-QAT finetune -> stage-2 QAT-aware DMD distillation, on the
-new ``fastvideo/train/`` stack.
+new ``fastvideo/train/`` stack -- validated all the way to the public
+inference artifact this recipe exists to produce.
 
 Unlike ``test_e2e_dmd_t2v_crush_smol.py`` (which drives the legacy
 ``fastvideo/training/wan_distillation_pipeline.py`` CLI), this drives the
@@ -12,12 +13,34 @@ YAML configs used for real training
 with a handful of steps and dotted-key overrides pointing at a tiny local
 dataset -- mirroring how a real run would be launched, just shrunk down.
 
-No golden reference video exists yet for Kandinsky5 (unlike the Wan test,
-which compares against a checked-in reference_video). This test only
-asserts the run completes, loss stays finite, and expected checkpoint /
-validation-video artifacts are produced. Once a real training run is
-available, snapshot a reference video and add an SSIM assertion here to
-match the Wan test's rigor.
+The full validated chain, each arrow a hard assertion:
+
+  synthetic clip -> preprocess -> stage-1 train -> stage-1 DCP
+    -> dcp_to_diffusers --verify (strict reload)
+    -> stage-2 train (student/teacher/critic init_from that export)
+    -> stage-2 student DCP -> dcp_to_diffusers --verify (strict reload)
+    -> VideoGenerator.from_pretrained(export,
+           override_pipeline_cls_name="Kandinsky5DMDPipeline",
+           pipeline_config=Kandinsky5DMDConfig())   # the documented recipe
+    -> deterministic (fixed-seed) 4-step generation
+    -> degeneracy checks + MS-SSIM against the committed reference video.
+
+Every input AND output root (raw clip, parquet, both stage output dirs,
+both diffusers exports, generated video dir) is deleted up front, and
+``training.checkpoint.resume_from_checkpoint`` is explicitly disabled for
+both stages: the stage-1 YAML defaults to ``resume_from_checkpoint:
+latest``, so a rerun over a dirty ``data/`` dir could otherwise no-op from
+an old checkpoint and go green on stale artifacts.
+
+Reference bootstrap: the committed reference
+(``reference_video_kandinsky5_dmd_v0.mp4`` next to this file) is produced
+by running this test once on a sanctioned GPU box with
+``KANDINSKY5_E2E_WRITE_REFERENCE=1``, reviewing the written video by eye,
+and committing it. Until that reference exists the test FAILS (it does not
+skip) -- an artifact-existence-only pass is exactly the false-green this
+oracle exists to prevent. Run it with::
+
+    pytest fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py -vs
 
 The single training sample is a synthesized noise clip (not a downloaded
 dataset): the exact directory/manifest layout of external raw-video HF
@@ -42,6 +65,7 @@ import numpy as np
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+THIS_FILE = Path(__file__).resolve()
 
 NUM_GPUS = os.environ.get("KANDINSKY5_E2E_NUM_GPUS", "1")
 DATA_DIR = Path("data")
@@ -49,19 +73,55 @@ KANDINSKY5_OVERFIT_DATA_DIR = DATA_DIR / "kandinsky5_overfit"
 PREPROCESSED_DIR = DATA_DIR / "kandinsky5_overfit_preprocessed"
 STAGE1_OUTPUT_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage1"
 STAGE2_OUTPUT_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage2"
-# Kept out of STAGE1_OUTPUT_DIR: that directory is scanned with
+# Kept out of STAGE{1,2}_OUTPUT_DIR: those directories are scanned with
 # glob("checkpoint-*") below to find the latest raw DCP checkpoint, and a
 # "checkpoint-<N>-diffusers" export dir sitting alongside "checkpoint-<N>"
 # would also match that pattern -- on a rerun that doesn't start from a
 # clean data/ dir, it would sort after "checkpoint-<N>" and get picked as
-# stage1_ckpt instead, feeding an already-exported diffusers directory back
-# into dcp_to_diffusers as if it were a DCP checkpoint.
+# the checkpoint instead, feeding an already-exported diffusers directory
+# back into dcp_to_diffusers as if it were a DCP checkpoint.
 STAGE1_DIFFUSERS_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage1_diffusers"
+STAGE2_DIFFUSERS_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage2_diffusers"
+GENERATED_VIDEO_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_generated"
 
 STAGE1_CONFIG = (REPO_ROOT / "examples" / "train" / "configs" / "fine_tuning" / "kandinsky5" /
                  "t2v_480p_qat.yaml")
 STAGE2_CONFIG = (REPO_ROOT / "examples" / "train" / "configs" / "distribution_matching" / "kandinsky5" /
                  "dmd2_t2v_480p_qat.yaml")
+
+# Deterministic-generation oracle. The reference is generated once (see the
+# module docstring's bootstrap procedure), reviewed by a human, and
+# committed next to this file -- mirroring reference_video_1_sample_v0.mp4
+# in the Wan e2e test.
+REFERENCE_VIDEO = THIS_FILE.parent / "reference_video_kandinsky5_dmd_v0.mp4"
+WRITE_REFERENCE_ENV = "KANDINSKY5_E2E_WRITE_REFERENCE"
+GENERATION_PROMPT = "a synthetic test clip of random noise"
+GENERATION_SEED = 42
+# Floor calibrated conservatively (matches the Wan e2e test's 0.5 bar, but
+# on the mean rather than the max). Tighten upward once a few recorded
+# nightly runs establish the actual cross-run variance.
+MIN_MEAN_MS_SSIM = 0.5
+
+
+def _clean_previous_artifacts() -> None:
+    """Delete every input and output root a previous run could have left.
+
+    Outputs matter as much as inputs: stage 1's YAML defaults to
+    ``resume_from_checkpoint: latest``, and the final assertions glob for
+    checkpoints/videos -- stale files from an earlier run could satisfy
+    them without this run doing any work.
+    """
+    for stale_dir in (
+            KANDINSKY5_OVERFIT_DATA_DIR,
+            PREPROCESSED_DIR,
+            STAGE1_OUTPUT_DIR,
+            STAGE2_OUTPUT_DIR,
+            STAGE1_DIFFUSERS_DIR,
+            STAGE2_DIFFUSERS_DIR,
+            GENERATED_VIDEO_DIR,
+    ):
+        if stale_dir.exists():
+            shutil.rmtree(stale_dir)
 
 
 def _synthesize_single_sample() -> None:
@@ -71,10 +131,6 @@ def _synthesize_single_sample() -> None:
     Matches KANDINSKY5_T2V_LITE_5S's native preset (512x768, 121 frames,
     24fps -- see preprocess_kandinsky5_overfit.py's own constants).
     """
-    if PREPROCESSED_DIR.exists():
-        shutil.rmtree(PREPROCESSED_DIR)
-    if KANDINSKY5_OVERFIT_DATA_DIR.exists():
-        shutil.rmtree(KANDINSKY5_OVERFIT_DATA_DIR)
     videos_dir = KANDINSKY5_OVERFIT_DATA_DIR / "videos"
     videos_dir.mkdir(parents=True, exist_ok=True)
 
@@ -85,6 +141,10 @@ def _synthesize_single_sample() -> None:
         24.0,
         (768, 512),
     )
+    if not writer.isOpened():
+        raise RuntimeError(
+            f"cv2.VideoWriter failed to open {video_path} (mp4v codec unavailable?) -- "
+            "the fixture clip would be empty and preprocessing would fail on it.")
     rng = np.random.default_rng(0)
     for _ in range(121):
         frame = rng.integers(0, 256, size=(512, 768, 3), dtype=np.uint8)
@@ -94,7 +154,7 @@ def _synthesize_single_sample() -> None:
     with open(KANDINSKY5_OVERFIT_DATA_DIR / "videos2caption.json", "w") as f:
         json.dump([{
             "path": "sample_0.mp4",
-            "cap": ["a synthetic test clip of random noise"],
+            "cap": [GENERATION_PROMPT],
         }], f)
 
 
@@ -110,15 +170,16 @@ def _run_preprocessing() -> None:
 
 
 def _export_dcp_to_diffusers(checkpoint_dir: Path, output_dir: Path) -> None:
-    """Convert a stage-1 DCP checkpoint to a diffusers-style directory.
+    """Convert a stage's DCP checkpoint to a diffusers-style directory.
 
-    Stage 2's ``models.*.init_from`` (like real-training YAML configs, see
-    ``dmd2_t2v_480p_qat.yaml``) expects a diffusers model directory
-    (``model_index.json`` + component subfolders), not the raw
-    ``checkpoint-N`` DCP layout ``CheckpointManager`` writes (``dcp/`` +
-    metadata/RNG state only). ``--verify`` strictly reloads the exported
-    transformer immediately so a key-mapping bug fails here, at the export
-    boundary, rather than deep inside the stage-2 launch below.
+    ``models.*.init_from`` / ``VideoGenerator.from_pretrained`` (like real
+    training YAML configs, see ``dmd2_t2v_480p_qat.yaml``) expect a
+    diffusers model directory (``model_index.json`` + component
+    subfolders), not the raw ``checkpoint-N`` DCP layout
+    ``CheckpointManager`` writes (``dcp/`` + metadata/RNG state only).
+    ``--verify`` strictly reloads the exported transformer immediately so a
+    key-mapping bug fails here, at the export boundary, rather than deep
+    inside the next launch that loads the directory.
     """
     cmd = [
         sys.executable, "-m",
@@ -130,6 +191,12 @@ def _export_dcp_to_diffusers(checkpoint_dir: Path, output_dir: Path) -> None:
         "--verify",
     ]
     subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
+
+
+def _latest_checkpoint(output_dir: Path) -> Path:
+    checkpoints = sorted(output_dir.glob("checkpoint-*"))
+    assert checkpoints, f"no checkpoint produced under {output_dir}"
+    return checkpoints[-1]
 
 
 def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_overrides: list[str],
@@ -146,6 +213,12 @@ def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_ov
         "--training.loop.max_train_steps", str(max_train_steps),
         "--training.checkpoint.output_dir", str(output_dir),
         "--training.checkpoint.training_state_checkpointing_steps", str(max_train_steps),
+        # Explicitly disable resume for BOTH stages, even though
+        # _clean_previous_artifacts() already removed the output dirs: the
+        # stage-1 YAML defaults to resume_from_checkpoint: latest, and this
+        # test's correctness must not silently depend on that default (or a
+        # partially-failed cleanup) ever changing.
+        "--training.checkpoint.resume_from_checkpoint", "none",
         "--callbacks.validation.every_steps", str(max_train_steps),
         "--callbacks.validation.dataset_file", str(PREPROCESSED_DIR / "validation_prompts.json"),
         *extra_overrides,
@@ -155,6 +228,115 @@ def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_ov
     subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=True)
 
 
+def _generate_from_export(export_dir: Path, output_dir: Path) -> Path:
+    """Deterministically generate one video from an exported student via
+    the documented DMD inference path, in a fresh subprocess.
+
+    A subprocess (re-running this file with ``--generate``, see
+    ``__main__``) keeps VideoGenerator's distributed/CUDA init isolated
+    from the two torchrun stages that already ran from this test process.
+    FASTVIDEO_ATTENTION_BACKEND is removed from the child env: generation
+    must exercise the default dense-attention inference path the README
+    documents for non-sm_120 GPUs, not inherit a QAT training backend.
+    """
+    env = dict(os.environ)
+    env.pop("FASTVIDEO_ATTENTION_BACKEND", None)
+    cmd = [
+        sys.executable,
+        str(THIS_FILE), "--generate",
+        str(export_dir),
+        str(output_dir),
+    ]
+    subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=True)
+
+    videos = sorted(Path(output_dir).glob("**/*.mp4"))
+    assert len(videos) == 1, (
+        f"expected exactly one generated video under {output_dir}, found {videos}")
+    return videos[0]
+
+
+def _generate_main(export_dir: str, output_dir: str) -> None:
+    """Subprocess body for _generate_from_export.
+
+    This is the exact inference recipe the QAD README documents for a
+    stage-2 export (minus the optional NVFP4/FP8 weight quantization,
+    which needs flashinfer + sm_120 hardware): the export's
+    model_index.json still names the base T2V pipeline, so
+    override_pipeline_cls_name + Kandinsky5DMDConfig are required to get
+    the 4-step re-noise sampler -- see
+    fastvideo/tests/api/test_kandinsky5_dmd_pipeline_resolution.py.
+    """
+    from fastvideo import VideoGenerator
+    from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5DMDConfig
+
+    generator = VideoGenerator.from_pretrained(
+        export_dir,
+        num_gpus=1,
+        override_pipeline_cls_name="Kandinsky5DMDPipeline",
+        pipeline_config=Kandinsky5DMDConfig(),
+        use_fsdp_inference=False,
+    )
+    generator.generate_video(
+        GENERATION_PROMPT,
+        output_path=output_dir,
+        save_video=True,
+        seed=GENERATION_SEED,
+        height=512,
+        width=768,
+        num_frames=121,
+    )
+
+
+def _assert_video_not_degenerate(video_path: Path) -> None:
+    """Cheap referee that needs no reference: a NaN training run or a
+    broken decode path produces an unreadable, empty, or constant
+    (all-black) clip."""
+    cap = cv2.VideoCapture(str(video_path))
+    frames = []
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+    cap.release()
+    assert frames, f"generated video {video_path} decoded to zero frames"
+    stacked = np.stack(frames)
+    assert stacked.std() > 1.0, (
+        f"generated video {video_path} is (near-)constant -- "
+        "degenerate output from a NaN/collapsed run")
+
+
+def _assert_matches_reference(video_path: Path) -> None:
+    if not REFERENCE_VIDEO.exists():
+        if os.environ.get(WRITE_REFERENCE_ENV) == "1":
+            shutil.copy2(video_path, REFERENCE_VIDEO)
+            print(f"\nWrote new reference video to {REFERENCE_VIDEO} -- "
+                  "review it by eye and commit it. This bootstrap run "
+                  "compares the video against itself (SSIM=1) below.")
+        else:
+            pytest.fail(
+                f"reference video missing at {REFERENCE_VIDEO}. This test "
+                "must not pass on artifact existence alone -- run once on a "
+                f"sanctioned GPU box with {WRITE_REFERENCE_ENV}=1, review "
+                "the written video, and commit it (see module docstring).")
+
+    from fastvideo.tests.utils import compute_video_ssim_torchvision
+
+    mean_ssim, min_ssim, max_ssim = compute_video_ssim_torchvision(
+        str(REFERENCE_VIDEO),
+        str(video_path),
+        use_ms_ssim=True,
+    )
+    print("\n===== MS-SSIM vs committed Kandinsky5 DMD reference =====")
+    print(f"Mean MS-SSIM: {mean_ssim:.4f}")
+    print(f"Min MS-SSIM: {min_ssim:.4f}")
+    print(f"Max MS-SSIM: {max_ssim:.4f}")
+    assert mean_ssim >= MIN_MEAN_MS_SSIM, (
+        f"mean MS-SSIM {mean_ssim:.4f} below {MIN_MEAN_MS_SSIM} -- the exported/reloaded "
+        "stage-2 student no longer generates what the reviewed reference recorded "
+        "(wrong weight remap, re-noise schedule, or attention path?)")
+
+
 @pytest.mark.nightly
 def test_e2e_kandinsky5_dmd_overfit_single_sample():
     if not STAGE1_CONFIG.exists() or not STAGE2_CONFIG.exists():
@@ -162,6 +344,7 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
 
     os.environ.setdefault("WANDB_MODE", "offline")
 
+    _clean_previous_artifacts()
     _synthesize_single_sample()
     _run_preprocessing()
 
@@ -172,11 +355,7 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
         extra_overrides=[],
         env_overrides={"FASTVIDEO_ATTENTION_BACKEND": "ATTN_QAT_TRAIN"},
     )
-    assert any(STAGE1_OUTPUT_DIR.glob("checkpoint-*")), (
-        f"no stage-1 checkpoint produced under {STAGE1_OUTPUT_DIR}")
-
-    stage1_checkpoints = sorted(STAGE1_OUTPUT_DIR.glob("checkpoint-*"))
-    stage1_ckpt = stage1_checkpoints[-1]
+    stage1_ckpt = _latest_checkpoint(STAGE1_OUTPUT_DIR)
 
     stage1_diffusers_dir = STAGE1_DIFFUSERS_DIR / stage1_ckpt.name
     _export_dcp_to_diffusers(stage1_ckpt, stage1_diffusers_dir)
@@ -194,11 +373,25 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
         ],
         env_overrides={"FASTVIDEO_ATTENTION_BACKEND": "ATTN_QAT_TRAIN"},
     )
-    assert any(STAGE2_OUTPUT_DIR.glob("checkpoint-*")), (
-        f"no stage-2 checkpoint produced under {STAGE2_OUTPUT_DIR}")
     assert any(STAGE2_OUTPUT_DIR.glob("*.mp4")), (
         f"no stage-2 validation video produced under {STAGE2_OUTPUT_DIR}")
 
+    # The actual deliverable of this recipe is the exported stage-2
+    # student: export it, strict-reload it (--verify), then instantiate it
+    # through the documented Kandinsky5DMDPipeline override and generate.
+    stage2_ckpt = _latest_checkpoint(STAGE2_OUTPUT_DIR)
+    stage2_diffusers_dir = STAGE2_DIFFUSERS_DIR / stage2_ckpt.name
+    _export_dcp_to_diffusers(stage2_ckpt, stage2_diffusers_dir)
+    assert (stage2_diffusers_dir / "model_index.json").exists(), (
+        f"dcp_to_diffusers export did not produce a diffusers model dir at {stage2_diffusers_dir}")
+
+    generated_video = _generate_from_export(stage2_diffusers_dir, GENERATED_VIDEO_DIR)
+    _assert_video_not_degenerate(generated_video)
+    _assert_matches_reference(generated_video)
+
 
 if __name__ == "__main__":
-    test_e2e_kandinsky5_dmd_overfit_single_sample()
+    if len(sys.argv) >= 2 and sys.argv[1] == "--generate":
+        _generate_main(sys.argv[2], sys.argv[3])
+    else:
+        test_e2e_kandinsky5_dmd_overfit_single_sample()

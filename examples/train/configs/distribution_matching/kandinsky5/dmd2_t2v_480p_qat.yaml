@@ -3,8 +3,11 @@
 #
 # init_from below must be a diffusers model directory (model_index.json +
 # component subfolders), not the raw checkpoint-N/ stage 1 writes (dcp/ +
-# metadata/RNG state only). Convert with fastvideo.train.entrypoint.dcp_to_diffusers
-# first -- see distill_dmd_qat.sh's header for the exact command.
+# metadata/RNG state only). Launching via distill_dmd_qat.sh handles this:
+# it runs fastvideo.train.entrypoint.dcp_to_diffusers (--verify) on the
+# stage-1 checkpoint you pass it and overrides all three init_from values
+# with the export -- the placeholder paths below only apply when launching
+# the YAML directly.
 #
 # - Teacher: frozen, full-precision Kandinsky5 (loaded from the stage-1 QAT
 #   checkpoint's base weights, or the original pretrained checkpoint --
