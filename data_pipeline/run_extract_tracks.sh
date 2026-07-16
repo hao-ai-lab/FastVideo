@@ -13,6 +13,7 @@ echo "[track] launching $WORLD_SIZE workers... logging to $LOG_FILE"
 for RANK in $(seq 0 $((WORLD_SIZE - 1))); do
     CUDA_VISIBLE_DEVICES=$RANK python -u data_pipeline/extract_tracks.py \
         --data-dir $DATA_DIR \
+        --videos-subdir roundtrip_videos \
         --grid-size 50 \
         --device cuda \
         --detect-entries \

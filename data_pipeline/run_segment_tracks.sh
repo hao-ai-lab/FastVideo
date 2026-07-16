@@ -14,8 +14,9 @@ echo "[seg] launching $WORLD_SIZE workers... logging to $LOG_FILE"
 for RANK in $(seq 0 $((WORLD_SIZE - 1))); do
     CUDA_VISIBLE_DEVICES=$RANK python -u data_pipeline/segment_tracks.py \
         --data-dir $DATA_DIR \
+        --videos-subdir roundtrip_videos \
         --conf 0.75 --iou 0.9 --imgsz 1024 \
-        --vis-override-every 1 --force --viz \
+        --vis-override-every 3 --viz \
         --rank $RANK --world-size $WORLD_SIZE \
         "$@" \
         >> $LOG_FILE 2>&1 &
