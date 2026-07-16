@@ -24,6 +24,10 @@ def _record(recipe_fingerprint="recipe-a", software_profile_id="sw-a", **overrid
         "text_encoder_time_s": 2.0,
         "dit_time_s": 8.0,
         "vae_decode_time_s": 3.0,
+        "result_schema_version": 2,
+        "baseline_status": "compared",
+        "comparison_status": "PASS",
+        "comparison_status_reason": "Comparable baseline found",
     }
     record.update(overrides)
     return record
@@ -73,10 +77,32 @@ def test_group_data_fills_legacy_cohort_columns():
     ])
 
     groups = list(dashboard.group_data(df))
+    figs, _skipped_metrics = dashboard.build_plots(df)
 
     assert len(groups) == 2
     assert {key[1] for key, _group in groups} == {"legacy-wan", "legacy-ltx"}
     assert all(key[3:] == ("", "", "", "", "", "") for key, _group in groups)
+    assert {key[0] for key, _group in groups} == {"legacy_v1"}
+    assert all("Legacy v1" in fig.layout.title.text for fig in figs)
+    assert all("legacy / legacy" not in fig.layout.title.text for fig in figs)
+
+
+def test_group_data_separates_empty_v2_identity_from_legacy_v1():
+    empty_identity = {key: "" for key in dashboard.COMPARISON_COHORT_KEYS}
+    df = pd.DataFrame([
+        _record(result_schema_version="", **empty_identity),
+        _record(
+            timestamp="2026-01-02T00:00:00+00:00",
+            commit_sha="b" * 40,
+            result_schema_version=2,
+            **empty_identity,
+        ),
+    ])
+
+    groups = list(dashboard.group_data(df))
+
+    assert len(groups) == 2
+    assert {key[0] for key, _group in groups} == {"legacy_v1", "invalid_v2"}
 
 
 def test_group_data_keeps_partial_v2_identity_scoped_by_display_metadata():
@@ -95,12 +121,16 @@ def test_group_data_keeps_partial_v2_identity_scoped_by_display_metadata():
     ])
 
     groups = list(dashboard.group_data(df))
+    figs, _skipped_metrics = dashboard.build_plots(df)
 
     assert len(groups) == 2
     assert {(key[1], key[2]) for key, _group in groups} == {
         ("wan", "NVIDIA L40S"),
         ("ltx", "NVIDIA H100"),
     }
+    assert {key[0] for key, _group in groups} == {"invalid_v2"}
+    assert all("Invalid v2:" in fig.layout.title.text for fig in figs)
+    assert all("Legacy v1" not in fig.layout.title.text for fig in figs)
 
 
 def test_build_plots_labels_distinct_cohorts():
@@ -116,6 +146,17 @@ def test_build_plots_labels_distinct_cohorts():
     assert skipped_metrics == []
     assert any("recipe recipe-a | hw-l40s | sw-a" in title for title in titles)
     assert any("recipe recipe-b | hw-l40s | sw-b" in title for title in titles)
+
+
+def test_build_plots_includes_comparison_status_hover_data():
+    figs, _skipped_metrics = dashboard.build_plots(pd.DataFrame([_record()]))
+
+    hover_template = figs[0].data[0].hovertemplate
+
+    assert "cohort_kind=" in hover_template
+    assert "comparison_status=" in hover_template
+    assert "comparison_status_reason=" in hover_template
+    assert "baseline_status=" in hover_template
 
 
 def test_skipped_metric_table_includes_cohort_identity():

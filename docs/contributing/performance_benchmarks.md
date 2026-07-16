@@ -424,6 +424,13 @@ main/full-suite uploads and remain eligible for rolling baselines.
 Current `perf_*.json` artifacts that lack the v2 comparison identity are
 normalized for reporting but skip rolling-baseline comparison and are not marked
 baseline eligible.
+Dashboard reports keep historical v1 records readable by grouping them under
+the explicit `Legacy v1` label by `(model_id, gpu_type)`. Complete v2 cohorts
+remain separate and use the six-field comparison identity. Records that claim
+or partially use v2 identity without all required fields are labeled
+`Invalid v2` and remain scoped by their display metadata and available identity
+fields. Stored comparison status, comparison reason, and baseline status are
+shown when present; old records remain readable when those fields are absent.
 
 New v2 records compare only against the same `workload_id`, `variant_id`,
 `benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and
@@ -487,7 +494,9 @@ When the rolling-baseline phase runs, it emits:
   per-benchmark row with current vs. baseline values for latency, throughput,
   memory, text encoder time, DiT time, and VAE decode time.
 * **Plotly dashboard** — `dashboard_<sha>_<ts>.html` showing time-series for
-  each metric grouped by comparison cohort.
+  each metric grouped by comparison cohort. Chart titles distinguish
+  `Legacy v1` and incomplete `Invalid v2` records, and point hover data includes
+  stored comparison and baseline status metadata.
 * **Normalized records** — `normalized_perf_*.json`, one per benchmark.
   Useful as input to the
   [`reseed-performance-baseline`](https://github.com/hao-ai-lab/FastVideo/blob/main/.agents/skills/reseed-performance-baseline/SKILL.md)

@@ -347,6 +347,34 @@ def test_legacy_dashboard_cohorts_still_use_model_and_gpu():
 
     assert {row["model_id"] for row in rows} == {"wan", "ltx"}
     assert len(trends) == 2
+    assert {row["cohort_kind"] for row in rows} == {"legacy_v1"}
+    assert {trend["cohort_kind"] for trend in trends} == {"legacy_v1"}
+
+
+def test_empty_v2_identity_does_not_merge_with_legacy_v1():
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+        ),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            11.0,
+            9.0,
+            result_schema_version=2,
+        ),
+    ]
+
+    rows = build_latest_summary(records)
+    trends = build_trends(records)
+
+    assert len(rows) == 2
+    assert len(trends) == 2
+    assert {row["cohort_kind"] for row in rows} == {"legacy_v1", "invalid_v2"}
+    assert {trend["cohort_kind"] for trend in trends} == {"legacy_v1", "invalid_v2"}
 
 
 def test_partial_v2_identity_does_not_cross_model_or_gpu():
@@ -385,6 +413,8 @@ def test_partial_v2_identity_does_not_cross_model_or_gpu():
         ("ltx", "NVIDIA H100"),
     }
     assert len(trends) == 2
+    assert {row["cohort_kind"] for row in rows} == {"invalid_v2"}
+    assert {trend["cohort_kind"] for trend in trends} == {"invalid_v2"}
 
 
 def test_dashboard_identity_preserves_zero_benchmark_version():
@@ -434,9 +464,60 @@ def test_dashboard_identity_preserves_zero_benchmark_version():
     assert version_zero_row["baseline_n"] == 1
     assert version_zero_row["metrics"]["latency"]["baseline"] == 10.0
     assert legacy_row["baseline_n"] == 0
+    assert version_zero_row["cohort_kind"] == "v2"
+    assert legacy_row["cohort_kind"] == "legacy_v1"
     assert len(trends) == 2
     assert version_zero_trend["points"][0]["benchmark_version"] == 0
     assert legacy_trend["points"][0]["benchmark_version"] == ""
+    assert version_zero_trend["cohort_kind"] == "v2"
+    assert legacy_trend["cohort_kind"] == "legacy_v1"
+
+
+def test_dashboard_propagates_comparison_status_metadata():
+    identity = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "recipe-a",
+        "hardware_profile_id": "hw-l40s",
+        "software_profile_id": "sw-cu130",
+    }
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+            comparison_status="PASS",
+            comparison_status_reason="Comparable baseline found",
+            baseline_status="compared",
+            **identity,
+        ),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            11.0,
+            9.0,
+            comparison_status="CALIBRATION_NEEDED",
+            comparison_status_reason="No seeded baseline exists",
+            baseline_status="initialized_new_cohort",
+            **identity,
+        ),
+    ]
+
+    row = build_latest_summary(records)[0]
+    trend = build_trends(records)[0]
+
+    assert row["cohort_kind"] == "v2"
+    assert row["result_schema_version"] == 2
+    assert row["comparison_status"] == "CALIBRATION_NEEDED"
+    assert row["comparison_status_reason"] == "No seeded baseline exists"
+    assert row["baseline_status"] == "initialized_new_cohort"
+    assert trend["comparison_status"] == "CALIBRATION_NEEDED"
+    assert trend["points"][0]["comparison_status"] == "PASS"
+    assert trend["points"][0]["baseline_status"] == "compared"
+    assert trend["points"][1]["comparison_status_reason"] == "No seeded baseline exists"
 
 
 def test_filter_records_and_trends_preserve_metric_points():
@@ -479,6 +560,11 @@ def test_trends_include_source_metadata_with_legacy_defaults():
     assert trends[0]["points"][0]["build_url"] == "https://buildkite.example/build"
     assert trends[0]["points"][1]["run_source"] == "unknown"
     assert trends[0]["points"][1]["baseline_eligible"] is True
+    assert trends[0]["cohort_kind"] == "legacy_v1"
+    assert trends[0]["comparison_status"] == ""
+    assert trends[0]["points"][1]["result_schema_version"] == ""
+    assert trends[0]["points"][1]["baseline_status"] == ""
+    assert trends[0]["points"][1]["comparison_status_reason"] == ""
 
 
 def test_hf_token_resolution_accepts_standard_env_names(monkeypatch):

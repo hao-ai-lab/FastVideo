@@ -5,13 +5,13 @@
 - Issue: #1535, "[ci] Dashboard Grouping And Legacy V1"
 - Issue URL: https://github.com/hao-ai-lab/FastVideo/issues/1535
 - Repo: hao-ai-lab/FastVideo
-- Worktree: /tmp/fastvideo-worktrees/issue-1535-ci-dashboard-grouping-legacy-v1
+- Worktree: /tmp/fastvideo-worktrees/issue_1535_ci_dashboard_grouping_legacy_v1
 - Branch: issue/1535-ci-dashboard-grouping-legacy-v1
-- Base: upstream/main at 9d909f5f0457ac91f489d5fc8000931f042b72ce
+- Base: upstream/main at 1c04ace57351f7340e8d1a2e8b8f62180856ed16
 - Handoff path: .agents/handoffs/issue-1535-handoff.md
-- Current stage: Stage 2 - implementing approved Approach 3
-- Implementation begun: yes (handoff/rebase preparation only; product edits pending)
-- Last updated: 2026-07-16 11:59:41 UTC
+- Current stage: Stage 2 - validation complete, signed commit blocked on OpenPGP card
+- Implementation begun: yes; product code, tests, and docs are modified
+- Last updated: 2026-07-16 13:13:20 UTC
 
 ## Authentication And Sandbox Notes
 
@@ -317,7 +317,7 @@ notes above remain useful for reconstructing why the branch originally waited.
   issue title and documentation terminology.
 - User selected Alternative 3 and explicitly directed Stage 2 to begin.
 
-+## Stage 2 Start - 2026-07-16
+## Stage 2 Start - 2026-07-16
 
 - Selected scope: scoped dashboard completion from the refreshed Stage 1 plan.
 - Re-verified gh identity as macthecadillac.
@@ -328,12 +328,156 @@ notes above remain useful for reconstructing why the branch originally waited.
   commenter-proposed fix appeared.
 - Re-checked the full open PR list and ran a focused overlap search for #1535,
   Legacy v1, and dashboard comparison-status work. No overlapping PR exists.
-- Next action: rebase this handoff-only branch onto current upstream/main with
-  GPG-signed rewritten commits, push with lease, then inspect and edit the
-  post-rebase files named in the approved plan.
-- Product code/docs have not yet been modified in Stage 2. No local tests or
-  Modal jobs have run.
+- Rebased all six handoff-only commits onto current upstream/main with
+  `git rebase --gpg-sign upstream/main`; the rebase completed without conflict.
+- Force-pushed safely with lease. Rewritten branch head `c90e8d4dc` has a valid
+  GPG signature and matches the remote issue branch.
+- Implementation is complete for the approved Approach 3 scope.
+- Backend service changes:
+  - classify dashboard records as `v2`, `legacy_v1`, or `invalid_v2`;
+  - keep true legacy and incomplete/empty-identity v2 records in distinct groups;
+  - expose `cohort_kind`, schema version, comparison status/reason, and baseline
+    status on summary rows, trend groups, and individual trend points.
+- Plotly dashboard changes:
+  - use the same three cohort kinds for grouping;
+  - render true historical records as `Legacy v1`;
+  - render incomplete v2 identity as `Invalid v2` with missing fields explicit;
+  - include canonical comparison and baseline metadata in point hover data.
+- React dashboard changes:
+  - type the new API metadata;
+  - show canonical comparison status/reason in the latest table and trend details;
+  - label legacy and invalid-v2 cohorts explicitly;
+  - keep stored success and recomputed metric status as separate existing context.
+- Regression coverage now checks API propagation, legacy labels, incomplete-v2
+  labels, status hover metadata, and separation of a schema-v2 record with no
+  identity fields from a true v1 record in both dashboard paths.
+- Updated the app README and performance benchmark guide with durable cohort and
+  status-display behavior.
+- Files modified:
+  - `fastvideo/performance_dashboard/service.py`
+  - `fastvideo/tests/performance/dashboard.py`
+  - `fastvideo/tests/performance/test_dashboard_service.py`
+  - `fastvideo/tests/performance/test_dashboard_api.py`
+  - `fastvideo/tests/performance/test_dashboard_plotly.py`
+  - `apps/performance_dashboard/frontend/src/api.ts`
+  - `apps/performance_dashboard/frontend/src/App.tsx`
+  - `apps/performance_dashboard/frontend/src/styles.css`
+  - `apps/performance_dashboard/README.md`
+  - `docs/contributing/performance_benchmarks.md`
+- Diff audit: `git diff --check` passes.
+- Validation has not started. Per repository rules, no project tests were run
+  locally.
+- Next action: use the Modal L40S launcher to run the three focused dashboard
+  test modules and the React production build.
 
+
+
+### Stage 2 Validation Attempts - 2026-07-16
+
+- Two local launcher invocations failed before contacting Modal:
+  - the active `python -m modal` environment did not have the `modal` module;
+  - the checked-in `.venv/bin/modal` wrapper has a stale macOS shebang and its
+    Python symlink target is absent.
+- `uvx modal` successfully provided Modal client 1.5.2.
+- Modal app run:
+  `https://modal.com/apps/hao-ai-lab/main/ap-1fQ4Wlz7ipObKXauUk5Te9`.
+- The L40S job cloned pushed commit `c90e8d4dc` and successfully applied the
+  35,061-byte local product patch.
+- The job failed before tests or the frontend build started while
+  `uv pip install -e '.[dev]'` built `fastvideo-kernel==0.3.2`. NVCC could not
+  find `cutlass/cutlass.h` in the package source. This is an environment
+  preparation failure and provides no pass/fail evidence for the issue patch.
+- Next attempt will use the same patch and validation command with
+  `--install-extra none` so the dev image's preinstalled environment is used.
+
+- Retry app run:
+  `https://modal.com/apps/hao-ai-lab/main/ap-WVEPBtVH9U5lVyzj6g6hCV`.
+- With `--install-extra none`, pytest started but collection stopped because
+  Plotly is not installed in the dev image. No tests executed and the frontend
+  build did not start.
+- Next attempt will install only the missing pure-Python `plotly` dependency in
+  the remote command, avoiding the failing editable install and kernel rebuild.
+
+- Minimal-dependency retry app run:
+  `https://modal.com/apps/hao-ai-lab/main/ap-B2p3dAhpqUyo9a2ex6vWuJ`.
+- The command failed before dependency installation because the no-install path
+  did not source `$HOME/.local/bin/env`, leaving `uv` off `PATH`.
+- Next retry will explicitly source the uv and `/opt/venv` environments before
+  installing Plotly and running the unchanged validation targets.
+
+- Corrected environment app run:
+  `https://modal.com/apps/hao-ai-lab/main/ap-AaiY6iFeMcMYDmRd99S3j7`.
+- Focused validation passed on L40S:
+  `33 passed in 3.70s` for the service, API, and Plotly dashboard test modules.
+- The frontend command then failed before dependency installation because the
+  dev image does not include `npm`. The Python result remains valid.
+- Next action: run the frontend build as a separate Modal command after
+  installing Node.js/npm in the remote container.
+
+- Frontend-only app run:
+  `https://modal.com/apps/hao-ai-lab/main/ap-bYHteg3bqc2ACWt8Fg20wq`.
+- Ubuntu installed Node 12.22.9 and npm 8.5.1. `npm ci` succeeded, but
+  project dependencies require newer engines and TypeScript failed to parse on
+  Node 12. This is an environment-version failure, not a source diagnostic.
+- Next retry will use an official Node 22 binary, which satisfies the lockfile's
+  Vite and React plugin engine requirements.
+
+- Final frontend app run:
+  `https://modal.com/apps/hao-ai-lab/main/ap-jLICJdc09AXtDcp2kYH9RY`.
+- Downloaded official Node `v22.17.1` with npm `10.9.2`, satisfying the
+  frontend engine requirements.
+- `npm ci` installed 69 packages, audited 70, and reported zero
+  vulnerabilities.
+- `npm run build` passed (`tsc && node scripts/build.mjs`).
+- Stage 2 validation is complete. No GPU model inference, SSIM run, or memory
+  benchmark is needed because the change is limited to dashboard data
+  transformation, display, tests, and documentation.
+- Next action: run targeted pre-commit checks, create a focused GPG-signed
+
+- Targeted pre-commit attempt:
+  - plain `pre-commit` was not installed on `PATH`;
+  - `uvx pre-commit run --files <changed paths>` passed yapf, Ruff, codespell,
+    PyMarkdown, filename checks, and the suggestion hook;
+  - mypy exited before analysis with
+    `issue-1535-ci-dashboard-grouping-legacy-v1 is not a valid Python package name`.
+- The repository root contains `__init__.py`, so mypy treats the worktree
+  basename as a package; the hyphens make that name invalid.
+- Next action: move the issue worktree to an underscore-only basename, update
+  this handoff path, and rerun the exact targeted hook command.
+
+- Moved the active worktree successfully with `git worktree move` to
+  `/tmp/fastvideo-worktrees/issue_1535_ci_dashboard_grouping_legacy_v1`.
+
+- Reran the exact targeted hook command through `uvx pre-commit` after the
+  worktree move. Yapf, Ruff, codespell, PyMarkdown, mypy, filename checks, and
+  the suggestion hook all passed; actionlint correctly skipped because no
+  workflow file changed.
+- Final `git diff --check` passed.
+- GPG commit signing is configured with key
+
+- First commit attempt failed before creating a commit. GPG found the configured
+  secret key but canceled signing because the non-TTY process could not complete
+  pinentry. The index remains staged.
+- The secret key fingerprint is present. Next attempt will keep signing enabled
+  and run the same commit in a PTY with `GPG_TTY=/dev/tty`; signing will not be
+  bypassed.
+
+- PTY commit retry with `GPG_TTY=/dev/tty` also failed before creating a
+  commit; signing was canceled by the GPG agent.
+- The configured key's usable signing subkey
+  `99C0619273F09B8BF8F3AC64C943F92E5C32D887` is hardware-backed on OpenPGP
+  card serial `0006 23528969`. `gpg --card-status` currently reports
+  `No such device`; the other signing subkeys have no local secret material.
+- The six rebased branch commits were signed successfully with that same
+  hardware subkey at 12:03 UTC, confirming configuration is otherwise valid.
+- No unsigned commit will be created. The configured card must be
+  reconnected/unlocked and touched before Stage 2 can commit/push and Stage 3
+  can begin. Full pre-commit will run while waiting.
+
+- Required full gate passed:
+  `uvx pre-commit run --all-files` passed yapf, Ruff, codespell, PyMarkdown,
+  actionlint, mypy, filename checks, and the suggestion hook.
+- A follow-up `gpg --card-status` still reports the hardware card unavailable
 ## Commits And Pushes
 
 - `56f9e3e092838bc18137209110232b0b995cabf6` - signed handoff-only commit `[misc]: add issue 1535 handoff`, pushed to `origin/issue/1535-ci-dashboard-grouping-legacy-v1`.
