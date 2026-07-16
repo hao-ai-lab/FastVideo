@@ -132,10 +132,16 @@ Modal pytest lanes install `pytest-rerunfailures` through the `test` extra.
 `PYTEST_ADDOPTS`, and `fastvideo/tests/modal/ssim_test.py` appends the same
 arguments to each SSIM subprocess.
 
-The policy reruns an individual pytest failure twice with a short delay, but
-only when the failure text matches the transient infrastructure regex in
-`fastvideo/tests/modal/pytest_retry.py`. Plain assertion and numerical parity
-failures are not matched by that policy and should fail without rerun.
+The policy reruns an individual pytest failure twice with a short delay only
+when pytest receives a failure report whose text matches the infrastructure
+regex in `fastvideo/tests/modal/pytest_retry.py`. Rerun attempts retain their
+tracebacks even when a later attempt passes. Plain, nonmatching assertion and
+numerical parity failures fail without rerun; a deterministic failure whose
+message matches the regex can still be rerun.
+
+Process termination, Modal worker or container loss, and preemption do not
+produce a pytest failure report for this policy to inspect. Modal and Buildkite
+own recovery for those failures at the function and job layers.
 
 ## Slash Commands
 
@@ -251,7 +257,7 @@ All Buildkite test jobs go through `.buildkite/scripts/pr_test.sh`, which:
 3. Passes Buildkite metadata into the Modal container.
 4. Runs the selected test command from `fastvideo/tests/modal/pr_test.py` or
    `fastvideo/tests/modal/ssim_test.py`.
-5. Applies the shared transient-only pytest rerun policy to Modal pytest
+5. Applies the shared infrastructure-pattern pytest rerun policy to Modal pytest
    commands.
 6. Uploads performance artifacts for `TEST_TYPE=performance`.
 
