@@ -9,9 +9,9 @@
 - Branch: issue/1535-ci-dashboard-grouping-legacy-v1
 - Base: upstream/main at 9d909f5f0457ac91f489d5fc8000931f042b72ce
 - Handoff path: .agents/handoffs/issue-1535-handoff.md
-- Current stage: Stage 1 complete - awaiting user guidance
-- Implementation begun: no
-- Last updated: 2026-07-16 10:05:54 UTC
+- Current stage: Stage 2 - implementing approved Approach 3
+- Implementation begun: yes (handoff/rebase preparation only; product edits pending)
+- Last updated: 2026-07-16 11:59:41 UTC
 
 ## Authentication And Sandbox Notes
 
@@ -315,8 +315,24 @@ notes above remain useful for reconstructing why the branch originally waited.
 - No dependency or technical question currently blocks Stage 2.
 - Recommended wording is Legacy v1; it is explicit, durable, and matches the
   issue title and documentation terminology.
-- Await user approval of Alternative 3, selection of another alternative, or
-  changes to the plan. No implementation has been performed.
+- User selected Alternative 3 and explicitly directed Stage 2 to begin.
+
++## Stage 2 Start - 2026-07-16
+
+- Selected scope: scoped dashboard completion from the refreshed Stage 1 plan.
+- Re-verified gh identity as macthecadillac.
+- Re-fetched origin and upstream; upstream/main remains at
+  1c04ace57351f7340e8d1a2e8b8f62180856ed16.
+- Re-read issue #1535 and its only comment immediately before editing. The
+  issue remains open and assigned to macthecadillac; no scope change or new
+  commenter-proposed fix appeared.
+- Re-checked the full open PR list and ran a focused overlap search for #1535,
+  Legacy v1, and dashboard comparison-status work. No overlapping PR exists.
+- Next action: rebase this handoff-only branch onto current upstream/main with
+  GPG-signed rewritten commits, push with lease, then inspect and edit the
+  post-rebase files named in the approved plan.
+- Product code/docs have not yet been modified in Stage 2. No local tests or
+  Modal jobs have run.
 
 ## Commits And Pushes
 
