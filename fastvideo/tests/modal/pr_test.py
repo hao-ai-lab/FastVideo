@@ -229,7 +229,7 @@ def run_training_lora_tests():
     )
 
 
-@app.function(gpu="H100:2",
+@app.function(gpu="H100!:2",
               image=image,
               timeout=900,
               secrets=[wandb_secret, ci_env_secret])
