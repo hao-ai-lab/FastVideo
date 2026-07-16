@@ -30,6 +30,7 @@ def build_pytest_rerun_args() -> list[str]:
         str(PYTEST_RERUNS),
         "--reruns-delay",
         str(PYTEST_RERUNS_DELAY_SECONDS),
+        "--rerun-show-tracebacks",
         "--only-rerun",
         TRANSIENT_FAILURE_REGEX,
     ]

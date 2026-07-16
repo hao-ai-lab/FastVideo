@@ -101,8 +101,6 @@ steps:
             limit: 3
           - exit_status: -1
             limit: 2
-          - exit_status: 1
-            limit: 2
       agents:
         queue: "default"
     - label: ":test_tube: LoRA Inference Tests"
@@ -169,8 +167,6 @@ steps:
             limit: 3
           - exit_status: -1
             limit: 2
-          - exit_status: 1
-            limit: 2
       agents:
         queue: "default"
     - label: ":test_tube: Training Tests VSA"
@@ -181,8 +177,6 @@ steps:
           - exit_status: 128
             limit: 3
           - exit_status: -1
-            limit: 2
-          - exit_status: 1
             limit: 2
       agents:
         queue: "default"
@@ -363,10 +357,6 @@ steps:
                 label: ":bar_chart: SSIM Tests"
                 env:
                   - TEST_TYPE=ssim
-                retry:
-                  automatic:
-                    - exit_status: 1
-                      limit: 2
                 agents:
                   queue: "default"
             - path:
@@ -442,10 +432,6 @@ steps:
                 label: ":test_tube: LoRA Training Tests"
                 env:
                   - TEST_TYPE=training_lora
-                retry:
-                  automatic:
-                    - exit_status: 1
-                      limit: 2
                 agents:
                   queue: "default"
             - path:
@@ -458,10 +444,6 @@ steps:
                 label: ":test_tube: Training Tests VSA"
                 env:
                   - TEST_TYPE=training_vsa
-                retry:
-                  automatic:
-                    - exit_status: 1
-                      limit: 2
                 agents:
                   queue: "default"
             - path:
