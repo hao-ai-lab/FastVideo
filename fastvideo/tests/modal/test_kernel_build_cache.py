@@ -60,6 +60,19 @@ def _write_cache_entry(cache_root: Path, cache_key: str, *, payload: str = "payl
     return cache_entry
 
 
+def _write_prebuilt_artifact(prebuilt_root: Path, name: str, cache_key: str) -> Path:
+    artifact_dir = prebuilt_root / name
+    artifact_dir.mkdir(parents=True)
+    wheel = _write_wheel(artifact_dir / WHEEL_NAME)
+    payload = {
+        **_metadata(cache_key),
+        "artifact": kernel_build_cache._wheel_artifact(wheel),
+        "wheel_path": str(wheel),
+    }
+    (artifact_dir / kernel_build_cache.METADATA_FILE).write_text(json.dumps(payload), encoding="utf-8")
+    return wheel
+
+
 def _patch_stable_metadata(monkeypatch) -> None:
     for name in (
         "GPU_BACKEND",
@@ -316,6 +329,31 @@ def test_consumer_falls_back_when_cached_install_fails(monkeypatch, tmp_path) ->
     kernel_build_cache.install_cached_or_build(tmp_path, cache_root, tmp_path / "missing-prebuilt.json")
 
     assert built == [True]
+
+
+def test_normal_l40s_pr_ssim_install_uses_docker_prebuilt_without_build(monkeypatch, tmp_path, capsys) -> None:
+    prebuilt_root = tmp_path / "prebuilt"
+    _write_prebuilt_artifact(prebuilt_root, "9.0a", "hopper-key")
+    l40s_wheel = _write_prebuilt_artifact(prebuilt_root, "8.9", "l40s-key")
+    installed = []
+    monkeypatch.setattr(kernel_build_cache, "_build_metadata", lambda repo_root: _metadata("l40s-key"))
+    monkeypatch.setattr(kernel_build_cache, "_install_wheel", installed.append)
+    monkeypatch.setattr(
+        kernel_build_cache,
+        "_build_and_install_local",
+        lambda repo_root, metadata: pytest.fail("L40S prebuilt hit unexpectedly called build.sh"),
+    )
+
+    kernel_build_cache.install_cached_or_build(
+        tmp_path,
+        cache_root=None,
+        prebuilt_info_path=prebuilt_root,
+    )
+
+    output = capsys.readouterr().out
+    assert installed == [l40s_wheel]
+    assert "Docker-prebuilt cache hit for key l40s-key" in output
+    assert "build.sh" not in output
 
 
 def test_prebuilt_requires_validated_artifact(monkeypatch, tmp_path) -> None:

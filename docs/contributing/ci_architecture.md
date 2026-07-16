@@ -281,6 +281,12 @@ then publishes one multi-platform manifest per CUDA version. CUDA 12.6 owns the
 unparameterized `docker/Dockerfile` build defaults, which remain CUDA 13 and
 `cu130`.
 
+Published amd64 development images keep their configured Hopper kernel wheel
+installed and also carry an immutable SM89 wheel under
+`/opt/fastvideo-kernel-prebuilt`. Modal PR and SSIM jobs select the exact
+source, ABI, and GPU-architecture match from that directory, so L40S jobs reuse
+the trusted image artifact while kernel-changing PRs still build locally.
+
 The optional Dreamverse matrix builds backend and UI images for CUDA 12.6 and
 CUDA 13 on `amd64`. Dreamverse remains `amd64`-only because its FA4 dependency
 stack is not yet validated on ARM64.

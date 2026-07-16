@@ -24,8 +24,9 @@ from pathlib import Path
 
 
 CACHE_SCHEMA_VERSION = 3
-DEFAULT_PREBUILT_INFO_PATH = "/opt/fastvideo-kernel-build-info.json"
+DEFAULT_PREBUILT_INFO_PATH = "/opt/fastvideo-kernel-prebuilt"
 KERNEL_RELATIVE_DIR = "fastvideo-kernel"
+DEFAULT_BUILD_INFO_OUTPUT = "/opt/fastvideo-kernel-prebuilt/default/metadata.json"
 METADATA_FILE = "metadata.json"
 EXPECTED_DISTRIBUTION = "fastvideo-kernel"
 
@@ -372,26 +373,35 @@ def _cache_entry_wheel(cache_entry: Path, cache_key: str) -> tuple[Path | None, 
     return _validated_payload_wheel(metadata, wheel, cache_key)
 
 
+def _prebuilt_metadata_paths(prebuilt_info_path: Path) -> list[Path]:
+    if prebuilt_info_path.is_dir() and not prebuilt_info_path.is_symlink():
+        return sorted(prebuilt_info_path.glob(f"*/{METADATA_FILE}"))
+    if prebuilt_info_path.exists() or prebuilt_info_path.is_symlink():
+        return [prebuilt_info_path]
+    return []
+
+
 def _try_install_prebuilt(metadata: dict[str, object], prebuilt_info_path: Path) -> bool:
     cache_key = str(metadata["cache_key"])
-    if not prebuilt_info_path.exists():
-        return False
-    prebuilt, reason = _load_metadata(prebuilt_info_path)
-    if prebuilt is None:
-        _log(f"Docker-prebuilt kernel metadata is invalid at {prebuilt_info_path}: {reason}")
-        return False
-    wheel_path = Path(str(prebuilt.get("wheel_path", "")))
-    wheel, reason = _validated_payload_wheel(prebuilt, wheel_path, cache_key)
-    if wheel is None:
-        _log(f"Docker-prebuilt kernel artifact rejected at {prebuilt_info_path}: {reason}")
-        return False
-    try:
-        _log(f"using Docker-prebuilt kernel wheel for cache key {cache_key}")
-        _install_wheel(wheel)
-    except (FileNotFoundError, OSError, subprocess.CalledProcessError) as error:
-        _log(f"Docker-prebuilt kernel installation failed: {error}; falling back")
-        return False
-    return True
+    for metadata_path in _prebuilt_metadata_paths(prebuilt_info_path):
+        prebuilt, reason = _load_metadata(metadata_path)
+        if prebuilt is None:
+            _log(f"Docker-prebuilt kernel metadata is invalid at {metadata_path}: {reason}")
+            continue
+        wheel_path = Path(str(prebuilt.get("wheel_path", "")))
+        wheel, reason = _validated_payload_wheel(prebuilt, wheel_path, cache_key)
+        if wheel is None:
+            _log(f"Docker-prebuilt kernel artifact rejected at {metadata_path}: {reason}")
+            continue
+        try:
+            _log(f"Docker-prebuilt cache hit for key {cache_key}: {wheel}")
+            _install_wheel(wheel)
+        except (FileNotFoundError, OSError, subprocess.CalledProcessError) as error:
+            _log(f"Docker-prebuilt kernel installation failed: {error}; falling back")
+            return False
+        return True
+    _log(f"Docker-prebuilt cache miss for key {cache_key}")
+    return False
 
 
 def _store_cache_entry(cache_root: Path, metadata: dict[str, object], wheel: Path) -> Path:
@@ -535,7 +545,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prebuilt-info-path",
                         default=os.environ.get("FASTVIDEO_KERNEL_PREBUILT_INFO", DEFAULT_PREBUILT_INFO_PATH))
     parser.add_argument("--wheel-dir", default="")
-    parser.add_argument("--output", default=DEFAULT_PREBUILT_INFO_PATH)
+    parser.add_argument("--output", default=DEFAULT_BUILD_INFO_OUTPUT)
     return parser.parse_args()
 
 
