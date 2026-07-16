@@ -377,6 +377,32 @@ def test_empty_v2_identity_does_not_merge_with_legacy_v1():
     assert {trend["cohort_kind"] for trend in trends} == {"legacy_v1", "invalid_v2"}
 
 
+def test_present_blank_v2_identity_does_not_merge_with_legacy_v1():
+    records = [
+        _record(
+            "2026-01-01T00:00:00+00:00",
+            "a" * 40,
+            10.0,
+            10.0,
+        ),
+        _record(
+            "2026-01-02T00:00:00+00:00",
+            "b" * 40,
+            11.0,
+            9.0,
+            workload_id="",
+        ),
+    ]
+
+    rows = build_latest_summary(records)
+    trends = build_trends(records)
+
+    assert len(rows) == 2
+    assert len(trends) == 2
+    assert {row["cohort_kind"] for row in rows} == {"legacy_v1", "invalid_v2"}
+    assert {trend["cohort_kind"] for trend in trends} == {"legacy_v1", "invalid_v2"}
+
+
 def test_partial_v2_identity_does_not_cross_model_or_gpu():
     partial_identity = {
         "result_schema_version": 2,

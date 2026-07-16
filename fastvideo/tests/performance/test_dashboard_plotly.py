@@ -87,16 +87,23 @@ def test_group_data_fills_legacy_cohort_columns():
     assert all("legacy / legacy" not in fig.layout.title.text for fig in figs)
 
 
-def test_group_data_separates_empty_v2_identity_from_legacy_v1():
-    empty_identity = {key: "" for key in dashboard.COMPARISON_COHORT_KEYS}
+def test_group_data_treats_present_blank_identity_as_invalid_v2():
+    legacy_record = {
+        "model_id": "wan-t2v-1.3b-2gpu",
+        "gpu_type": "NVIDIA L40S",
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "commit_sha": "a" * 40,
+        "config_id": "aaaaaaa",
+        "latency": 10.0,
+    }
     df = pd.DataFrame([
-        _record(result_schema_version="", **empty_identity),
-        _record(
-            timestamp="2026-01-02T00:00:00+00:00",
-            commit_sha="b" * 40,
-            result_schema_version=2,
-            **empty_identity,
-        ),
+        legacy_record,
+        {
+            **legacy_record,
+            "timestamp": "2026-01-02T00:00:00+00:00",
+            "commit_sha": "b" * 40,
+            "workload_id": "",
+        },
     ])
 
     groups = list(dashboard.group_data(df))

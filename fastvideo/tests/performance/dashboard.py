@@ -72,7 +72,29 @@ def _has_complete_v2_identity(record: object) -> bool:
 
 def _uses_v2_identity(record: object) -> bool:
     return _cohort_value(record.get("result_schema_version")) == "2" or any(
-        _cohort_value(record.get(key)) for key in COMPARISON_COHORT_KEYS)
+        key in record for key in COMPARISON_COHORT_KEYS)
+
+
+def _dataframe_value_is_missing(value: object) -> bool:
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _dataframe_uses_v2_identity(record: object) -> bool:
+    if _cohort_value(record.get("result_schema_version")) == "2":
+        return True
+    return any(key in record and not _dataframe_value_is_missing(record.get(key))
+               for key in COMPARISON_COHORT_KEYS)
+
+
+def _dataframe_cohort_kind(record: object) -> str:
+    if _has_complete_v2_identity(record):
+        return "v2"
+    if _dataframe_uses_v2_identity(record):
+        return "invalid_v2"
+    return "legacy_v1"
 
 
 def _cohort_kind(record: object) -> str:
@@ -119,11 +141,11 @@ def _group_record(record: object) -> dict[str, str]:
 
 def _dashboard_frame(df: pd.DataFrame) -> pd.DataFrame:
     dashboard_df = df.copy()
+    dashboard_df["cohort_kind"] = dashboard_df.apply(_dataframe_cohort_kind, axis=1)
     for key in ("model_id", "gpu_type", *COMPARISON_COHORT_KEYS, *DASHBOARD_METADATA_KEYS):
         if key not in dashboard_df.columns:
             dashboard_df[key] = ""
         dashboard_df[key] = dashboard_df[key].map(_cohort_value)
-    dashboard_df["cohort_kind"] = dashboard_df.apply(_cohort_kind, axis=1)
     uses_v2_identity = dashboard_df["cohort_kind"] == "v2"
     dashboard_df["_cohort_model_id"] = dashboard_df["model_id"].where(~uses_v2_identity, "")
     dashboard_df["_cohort_gpu_type"] = dashboard_df["gpu_type"].where(~uses_v2_identity, "")
