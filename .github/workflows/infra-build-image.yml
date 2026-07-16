@@ -13,16 +13,23 @@ on:
         required: false
         default: false
         type: boolean
-  # Auto-rebuild the CUDA images when their Dockerfile changes on main. The CUDA
-  # matrix is the only lane that builds from docker/Dockerfile, so a path-scoped
-  # push trigger is a sufficient change detector on its own -- no separate
-  # detect-changes/paths-filter job is needed now that there is a single
-  # in-scope Dockerfile. Dreamverse (apps/dreamverse/docker/Dockerfile) and the
-  # rocm Dockerfile stay manual-dispatch only.
+  # Auto-rebuild the CUDA images when a repository-controlled image input
+  # changes on main. This includes the trusted SM89 kernel artifact's source,
+  # metadata/key helper, ABI dependency metadata, and build orchestration.
+  # Dreamverse (apps/dreamverse/docker/Dockerfile) and the ROCm Dockerfile stay
+  # manual-dispatch only.
   push:
     branches: [main]
     paths:
+      - '.dockerignore'
+      - '.github/workflows/_template-build-image.yml'
+      - '.github/workflows/infra-build-image.yml'
+      - '.gitmodules'
       - 'docker/Dockerfile'
+      - 'docker/uv-excludes'
+      - 'fastvideo-kernel/**'
+      - 'fastvideo/tests/modal/kernel_build_cache.py'
+      - 'pyproject.toml'
 
 
 permissions:
@@ -50,7 +57,7 @@ jobs:
   # 2.8.3 comes from the architecture-specific prebuilt releases.
   build-cuda-images:
     # Runs on a manual dispatch when build_cuda_matrix is set, or automatically
-    # on a push that changed docker/Dockerfile (inputs are null on push). The
+    # on an in-scope main push (inputs are null on push). The
     # repository guard keeps fork syncs from auto-building; manual dispatch
     # still works in forks.
     if: ${{ (github.event_name == 'push' && github.repository == 'hao-ai-lab/FastVideo') || github.event.inputs.build_cuda_matrix == 'true' }}

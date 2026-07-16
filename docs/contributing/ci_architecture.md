@@ -270,22 +270,26 @@ The docs job:
 ### Docker Images
 
 `.github/workflows/infra-build-image.yml` supports manual `workflow_dispatch`
-runs and automatically rebuilds the CUDA matrix when `docker/Dockerfile`
-changes on `main` in the canonical repository. Manual runs let maintainers
-choose which image families to build. The `fastvideo-dev` matrix builds Python
-3.12 images for CUDA 12.6 and CUDA 13 on native `amd64` and `arm64` runners,
-then publishes one multi-platform manifest per CUDA version. CUDA 12.6 owns the
-`py3.12-latest` and global `latest` tags, as well as the explicit
-`py3.12-cuda12.6.3-latest` alias. CUDA 13 is published under the explicit
-`py3.12-cuda13.0.0-latest` tag. This publication policy does not change the
-unparameterized `docker/Dockerfile` build defaults, which remain CUDA 13 and
-`cu130`.
+runs and automatically rebuilds the CUDA matrix when a repository-controlled
+image input changes on `main` in the canonical repository. Those inputs include
+the CUDA Dockerfile and reusable workflow, dependency metadata, Docker context
+policy, `fastvideo-kernel/**`, and the kernel artifact metadata/key helper.
+Manual runs let maintainers choose which image families to build. The
+`fastvideo-dev` matrix builds Python 3.12 images for CUDA 12.6 and CUDA 13 on
+native `amd64` and `arm64` runners, then publishes one multi-platform manifest
+per CUDA version. CUDA 12.6 owns the `py3.12-latest` and global `latest` tags, as
+well as the explicit `py3.12-cuda12.6.3-latest` alias. CUDA 13 is published under
+the explicit `py3.12-cuda13.0.0-latest` tag. This publication policy does not
+change the unparameterized `docker/Dockerfile` build defaults, which remain CUDA
+13 and `cu130`.
 
 Published amd64 development images keep their configured Hopper kernel wheel
 installed and also carry an immutable SM89 wheel under
 `/opt/fastvideo-kernel-prebuilt`. Modal PR and SSIM jobs select the exact
 source, ABI, and GPU-architecture match from that directory, so L40S jobs reuse
-the trusted image artifact while kernel-changing PRs still build locally.
+the trusted image artifact while kernel-changing PRs still build locally. Once
+a kernel or artifact-key change reaches `main`, the image workflow republishes
+the matching trusted artifact before later jobs consume the updated image tag.
 
 The optional Dreamverse matrix builds backend and UI images for CUDA 12.6 and
 CUDA 13 on `amd64`. Dreamverse remains `amd64`-only because its FA4 dependency

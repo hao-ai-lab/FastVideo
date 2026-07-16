@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 def _load_kernel_build_cache():
@@ -23,7 +24,19 @@ def _load_kernel_build_cache():
 
 
 kernel_build_cache = _load_kernel_build_cache()
+REPO_ROOT = Path(__file__).resolve().parents[3]
 WHEEL_NAME = "fastvideo_kernel-0.3.2-py3-none-any.whl"
+TRUSTED_KERNEL_IMAGE_INPUTS = {
+    ".dockerignore",
+    ".github/workflows/_template-build-image.yml",
+    ".github/workflows/infra-build-image.yml",
+    ".gitmodules",
+    "docker/Dockerfile",
+    "docker/uv-excludes",
+    "fastvideo-kernel/**",
+    "fastvideo/tests/modal/kernel_build_cache.py",
+    "pyproject.toml",
+}
 
 
 def _write_wheel(path: Path, *, distribution: str = "fastvideo-kernel", payload: str = "payload") -> Path:
@@ -116,6 +129,23 @@ def _patch_stable_metadata(monkeypatch) -> None:
             "version": f"{default_command} 12.8",
         },
     )
+
+
+def test_kernel_only_main_change_republishes_trusted_l40s_artifact() -> None:
+    workflow = yaml.load(
+        (REPO_ROOT / ".github/workflows/infra-build-image.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    push = workflow["on"]["push"]
+
+    assert push["branches"] == ["main"]
+    assert TRUSTED_KERNEL_IMAGE_INPUTS <= set(push["paths"])
+    assert "github.event_name == 'push'" in workflow["jobs"]["build-cuda-images"]["if"]
+
+    dockerfile = (REPO_ROOT / "docker/Dockerfile").read_text(encoding="utf-8")
+    assert 'l40s_wheel_dir="${FASTVIDEO_KERNEL_PREBUILT_DIR}/8.9"' in dockerfile
+    assert 'export TORCH_CUDA_ARCH_LIST=8.9' in dockerfile
+    assert '--output "${l40s_wheel_dir}/metadata.json"' in dockerfile
 
 
 def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, tmp_path) -> None:
