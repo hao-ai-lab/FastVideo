@@ -11,7 +11,9 @@ on:
       - 'requirements-mkdocs.txt'
       - 'scripts/check_docs_links.py'
       - '.github/workflows/infra-docs.yml'
-  pull_request:
+  # Run the trusted base-branch workflow so fork PRs can be skipped without
+  # waiting for maintainer approval.
+  pull_request_target:
     branches: [ main ]
     paths:
       - 'docs/**'
@@ -24,21 +26,19 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
 
 jobs:
   build:
+    # MkDocs executes repository code; only trusted same-repository PRs run it.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -52,6 +52,7 @@ jobs:
         run: uv pip install --system -r requirements-mkdocs.txt
 
       - name: Setup Pages
+        if: github.event_name == 'push'
         uses: actions/configure-pages@v4
 
       - name: Build documentation
@@ -61,17 +62,22 @@ jobs:
         run: python scripts/check_docs_links.py
 
       - name: Upload artifact
+        if: github.event_name == 'push'
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./site
 
   deploy:
+    permissions:
+      pages: write
+      id-token: write
+    concurrency: pages
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push'
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
