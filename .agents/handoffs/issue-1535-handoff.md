@@ -11,7 +11,7 @@
 - Handoff path: .agents/handoffs/issue-1535-handoff.md
 - Current stage: Stage 1 complete - awaiting user guidance
 - Implementation begun: no
-- Last updated: 2026-07-06 03:49:21 UTC
+- Last updated: 2026-07-16 10:05:54 UTC
 
 ## Authentication And Sandbox Notes
 
@@ -28,6 +28,26 @@
   - `git worktree add -b issue/1535-ci-dashboard-grouping-legacy-v1 /tmp/fastvideo-worktrees/issue-1535-ci-dashboard-grouping-legacy-v1 upstream/main`
 - Root `AGENTS.md` read in the issue worktree before writing this handoff.
 - Searched `.agents/lessons` for `dashboard|grouping|legacy|ci|v1|performance`; only model-port and Dreamverse CI lessons matched, with no directly applicable lesson identified yet.
+
+### 2026-07-16 Resume Refresh
+
+- Re-fetched `origin` and `upstream`; verified the local issue branch matches
+  `origin/issue/1535-ci-dashboard-grouping-legacy-v1` exactly.
+- Recreated the missing dedicated worktree at
+  `/tmp/fastvideo-worktrees/issue-1535-ci-dashboard-grouping-legacy-v1` and
+  resumed from this tracked handoff at Stage 1 complete / awaiting guidance.
+- Re-verified `gh` identity as `macthecadillac`.
+- Re-read issue #1535 and its only comment. The issue remains open, is now
+  assigned to `macthecadillac`, and has no new commenter-proposed fix.
+- Re-checked open PRs and searched for direct references to #1535; no open PR
+  currently covers or closes the issue, and no PR exists for this branch.
+- Dependency status changed materially since the original investigation:
+  - #1546 merged on 2026-07-07 as `1ee11e08d` and closed #1530.
+  - #1551 merged on 2026-07-09 as `afb4f7d3c` and closed #1531.
+  - #1560 merged on 2026-07-15 as `a25385614` and closed #1532.
+- Therefore the prior wait-or-stack question is obsolete. Stage 2 can rebase
+  this branch onto current `upstream/main` and implement only the legacy/v1
+  dashboard gap after confirming the exact behavior of the merged stack.
 
 ## GitHub Context
 
@@ -149,6 +169,154 @@
 
 1. Present Stage 1 report to the user.
 2. Wait for user guidance before implementation. No implementation has been performed.
+
+## 2026-07-16 Refreshed Stage 1 Conclusion
+
+This section supersedes the earlier alternatives, recommendation, open
+questions, and next steps where dependency state has changed. The historical
+notes above remain useful for reconstructing why the branch originally waited.
+
+### Current Upstream Revision And Searches
+
+- Inspected upstream/main at
+  1c04ace57351f7340e8d1a2e8b8f62180856ed16 after fetching upstream.
+- Read the current root guidance, fastvideo/AGENTS.md, and
+  fastvideo/tests/AGENTS.md; no narrower guidance exists for the dashboard
+  service or React app.
+- Re-read apps/performance_dashboard/README.md and the schemas, legacy
+  compatibility, CI integration, and troubleshooting sections of
+  docs/contributing/performance_benchmarks.md.
+- Inspected current implementations and focused tests in:
+  - fastvideo/performance_dashboard/service.py
+  - fastvideo/performance_dashboard/api.py
+  - fastvideo/tests/performance/dashboard.py
+  - fastvideo/tests/performance/test_dashboard_service.py
+  - fastvideo/tests/performance/test_dashboard_api.py
+  - fastvideo/tests/performance/test_dashboard_plotly.py
+  - apps/performance_dashboard/frontend/src/api.ts
+  - apps/performance_dashboard/frontend/src/App.tsx
+- Searched all current and closed PRs/issues for 1535, Legacy v1, legacy/v1,
+  and dashboard comparison-status work. No overlapping PR or duplicate issue
+  was found.
+- Read merged PR #1560's body, comments, and reviews to confirm its dashboard
+  changes were cohort-parity work and did not intentionally add status display.
+
+### Refreshed Code Findings
+
+- Full v2 cohort grouping is already merged and correct in both dashboard
+  paths. The service's comparison_cohort_key and Plotly dashboard's
+  _dashboard_frame use all six identity fields for complete v2 records,
+  independent of display-only model_id/gpu_type.
+- Legacy records with no complete v2 identity are keyed separately under
+  (model_id, gpu_type) and cannot merge into a complete v2 cohort. Partial v2
+  identities also remain scoped by model/GPU and their present identity values,
+  preventing unrelated invalid records from coalescing.
+- Existing tests cover full-cohort separation, variant/benchmark-version
+  separation, software/recipe separation, display-name changes, legacy
+  model/GPU grouping, and v1/v2 separation including benchmark version zero.
+- The merged comparator emits canonical comparison_status values PASS,
+  REGRESSION, CALIBRATION_NEEDED, RECIPE_MISMATCH, and INFRA_ERROR, plus
+  comparison_status_reason. Legacy records skip rolling comparison with
+  baseline_status=skipped_missing_identity; partial v2 identities are invalid
+  and become infrastructure errors.
+- No dashboard service, API, Plotly, or React code reads or displays
+  comparison_status, comparison_status_reason, or baseline_status. Summary and
+  trend transforms currently drop all three fields. The React UI shows only
+  stored boolean success and a locally recomputed pass/fail value, so
+  calibration, recipe mismatch, and infrastructure failure are visually
+  indistinguishable despite the issue's explicit status-label criterion.
+- True legacy cohorts currently render as legacy / legacy / legacy with
+  recipe legacy | legacy | legacy. They are separated correctly, but this is
+  less readable than one explicit Legacy v1 label and does not clearly
+  distinguish old v1 history from an invalid partial-v2 record.
+- The issue is therefore still valid but narrower than originally reported:
+  grouping behavior is already present; explicit legacy presentation and
+  canonical status visibility remain.
+- This is dashboard/data presentation only. No model behavior, GPU memory,
+  performance benchmark semantics, or comparator policy should change.
+
+### Refreshed Alternatives
+
+1. Close as already implemented
+   - Treat merged #1546/#1560 grouping and the repeated legacy placeholders as
+     sufficient.
+   - Lowest code risk, but leaves the explicit status-label criterion unmet and
+     historical v1 presentation ambiguous. Not recommended.
+2. Legacy-label-only patch
+   - Render all-empty historical cohorts as Legacy v1 in Plotly and React, with
+     focused v1/v2 separation and label tests.
+   - Matches the issue comment's narrow wording, but still hides the canonical
+     calibration/mismatch/regression statuses required by the issue body.
+3. Scoped dashboard completion (recommended)
+   - Keep the merged grouping and comparator unchanged; add explicit cohort
+     presentation metadata plus pass-through of the canonical stored status,
+     reason, and baseline status to dashboard summaries/trends and both visual
+     surfaces.
+   - Slightly broader than a label-only patch, but it directly closes every
+     remaining acceptance criterion without duplicating or altering comparator
+     logic.
+
+### Refreshed Recommended Plan
+
+1. Rebase the issue branch onto current upstream/main with signed rewritten
+   commits, preserving the tracked handoff and the branch's dedicated worktree.
+2. In fastvideo/performance_dashboard/service.py, expose dashboard metadata
+   derived from each normalized record:
+   - a stable cohort kind/display label that distinguishes complete v2,
+     historical v1, and invalid/incomplete v2 presentation without changing
+     the existing grouping key;
+   - result_schema_version, baseline_status, comparison_status, and
+     comparison_status_reason, with neutral empty defaults for old historical
+     records that predate those fields.
+   Propagate it to latest-summary rows, trend groups where appropriate, and
+   every trend point.
+3. In apps/performance_dashboard/frontend/src/api.ts and App.tsx, type and
+   render the canonical status. Use one explicit Legacy v1 cohort label for
+   true v1 history, keep partial-v2 identity visible as invalid/incomplete
+   rather than mislabeling it as v1, and show status reasons in the latest row
+   and trend point detail without removing the existing stored/recomputed
+   context.
+4. In fastvideo/tests/performance/dashboard.py, use the same explicit legacy
+   title and include canonical status/reason in Plotly hover data when present,
+   while defaulting missing fields so old records remain renderable.
+5. Add focused service/API/Plotly coverage for:
+   - a true v1 record and a complete v2 record sharing model/GPU remain separate;
+   - true v1 output is labeled Legacy v1;
+   - invalid partial-v2 data is not labeled as v1;
+   - status, reason, and baseline status survive summary/trend transforms and
+     API serialization;
+   - old historical records missing status fields still render safely.
+   Retain the already-merged variant and software-profile separation tests.
+6. Update apps/performance_dashboard/README.md and the durable dashboard/legacy
+   paragraphs in docs/contributing/performance_benchmarks.md to state the
+   visible v1 treatment and canonical status behavior.
+
+### Refreshed Validation Plan
+
+- Do not run project tests locally.
+- Run focused validation on Modal L40S through
+  fastvideo/tests/modal/launch_l40s_job.py from branch interleavethinker:
+  pytest fastvideo/tests/performance/test_dashboard_service.py fastvideo/tests/performance/test_dashboard_api.py fastvideo/tests/performance/test_dashboard_plotly.py -q.
+- Run the React production build in an approved environment after frontend type
+  changes: npm run build from apps/performance_dashboard/frontend.
+- Inspect the dashboard at desktop and mobile widths to confirm the added status
+  and legacy labels do not overflow the existing dense table/cards.
+- Run pre-commit run --all-files before presenting PR readiness and again as
+  the mandatory Stage 4 pre-PR gate. Fix every failure before any draft PR.
+- Pass criteria: all focused tests pass; frontend build succeeds; v1/v2 are
+  separate; true v1 is explicitly labeled; canonical status/reason are visible;
+  historical records without new fields remain renderable.
+- No SSIM or model GPU run is warranted; GPU memory impact is none.
+- Any new PR must be draft-only and existing PR draft status must never be
+  changed.
+
+### Refreshed Open Questions And Next Decision
+
+- No dependency or technical question currently blocks Stage 2.
+- Recommended wording is Legacy v1; it is explicit, durable, and matches the
+  issue title and documentation terminology.
+- Await user approval of Alternative 3, selection of another alternative, or
+  changes to the plan. No implementation has been performed.
 
 ## Commits And Pushes
 
