@@ -9,9 +9,9 @@
 - Branch: issue/1535-ci-dashboard-grouping-legacy-v1
 - Base: upstream/main at 1c04ace57351f7340e8d1a2e8b8f62180856ed16
 - Handoff path: .agents/handoffs/issue-1535-handoff.md
-- Current stage: Stage 2 - validation complete, signed commit blocked on OpenPGP card
+- Current stage: Stage 3 - implementation committed/pushed, review pending
 - Implementation begun: yes; product code, tests, and docs are modified
-- Last updated: 2026-07-16 13:13:20 UTC
+- Last updated: 2026-07-16 13:15:03 UTC
 
 ## Authentication And Sandbox Notes
 
@@ -477,11 +477,25 @@ notes above remain useful for reconstructing why the branch originally waited.
 - Required full gate passed:
   `uvx pre-commit run --all-files` passed yapf, Ruff, codespell, PyMarkdown,
   actionlint, mypy, filename checks, and the suggestion hook.
-- A follow-up `gpg --card-status` still reports the hardware card unavailable
+- A follow-up `gpg --card-status` still reported the hardware card
+  unavailable (`Forbidden`) before the final commit attempt.
+- A final PTY signing attempt succeeded after the card was made available.
+- Signed implementation commit:
+  `0917257ecde6765bad9dee678bda10d2dcc822f4`,
+  `[bugfix]: clarify dashboard cohort status (#1535)`.
+- Verified a good signature from the configured hardware-backed subkey
+  `99C0619273F09B8BF8F3AC64C943F92E5C32D887`.
+- Pushed successfully to
+  `origin/issue/1535-ci-dashboard-grouping-legacy-v1`; local and remote heads
+  match exactly.
+- Next action: checkpoint this handoff, then spawn the required fresh
+  `review-code` sub-agent on the committed branch.
+
 ## Commits And Pushes
 
 - `56f9e3e092838bc18137209110232b0b995cabf6` - signed handoff-only commit `[misc]: add issue 1535 handoff`, pushed to `origin/issue/1535-ci-dashboard-grouping-legacy-v1`.
 - `aecb30397` - signed handoff status update `[misc]: record issue 1535 handoff status`, pushed to `origin/issue/1535-ci-dashboard-grouping-legacy-v1`.
 - `d03ad18b6` - signed handoff clarification `[misc]: clarify issue 1535 handoff status`, pushed to the issue branch.
 - `c36543a28` - signed Stage 1 refresh `[misc]: refresh issue 1535 investigation`, pushed to the issue branch on 2026-07-16.
+- `0917257ecde6765bad9dee678bda10d2dcc822f4` - signed implementation commit `[bugfix]: clarify dashboard cohort status (#1535)`, pushed to the issue branch on 2026-07-16.
 - Handoff remains active and should not be removed until Stage 4 immediately before creating any draft PR.
