@@ -27,17 +27,15 @@ export default function JobDetailsSidebar({
   const [isLoading, setIsLoading] = React.useState(false);
   const [logs, setLogs] = React.useState('');
 
-  // Race-guard refs (mirror the Svelte original): the cursor + accumulated
-  // text live here so in-flight polls don't read stale React state, and
-  // pollingLock prevents overlapping fetches. Do NOT swap these for effect
-  // deps — they must update synchronously, outside React's render cycle.
-  // The log is one growing string (amortized O(new) appends), not an array
-  // re-copied and re-joined on every poll tick.
+  // Race-guard ref (mirrors the Svelte original): the cursor + accumulated
+  // text live here so in-flight polls don't read stale React state. Do NOT
+  // swap these for effect deps — they must update synchronously, outside
+  // React's render cycle. The log is one growing string (amortized O(new)
+  // appends), not an array re-copied and re-joined on every poll tick.
   const stateRef = React.useRef<{ text: string; logAfter: number }>({
     text: '',
     logAfter: 0,
   });
-  const pollingLock = React.useRef(false);
   const previousJobId = React.useRef<string | null>(null);
   const previousStatus = React.useRef<string | null>(null);
   const consoleRef = React.useRef<HTMLPreElement | null>(null);
@@ -90,10 +88,13 @@ export default function JobDetailsSidebar({
     const shouldPoll = job.status === 'running' || job.status === 'pending';
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     let mounted = true;
+    // Effect-local lock so this job's first fetch is never blocked by a
+    // previous job's in-flight poll (stale writes are dropped via `mounted`).
+    let locked = false;
 
     async function pollLogs() {
-      if (!mounted || pollingLock.current) return;
-      pollingLock.current = true;
+      if (!mounted || locked) return;
+      locked = true;
       try {
         const logData = await getJobLogs(job.id, stateRef.current.logAfter);
         if (mounted && logData.lines.length > 0) {
@@ -107,7 +108,7 @@ export default function JobDetailsSidebar({
       } catch (e) {
         console.error('Failed to fetch logs:', e);
       } finally {
-        pollingLock.current = false;
+        locked = false;
       }
     }
 

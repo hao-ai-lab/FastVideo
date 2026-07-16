@@ -34,8 +34,11 @@ export default defineConfig({
     : [
         {
           command: `PYTHONPATH=.. python -m fastvideo_studio.mock_server --port ${MOCK_API_PORT}`,
-          url: `http://127.0.0.1:${MOCK_API_PORT}/api/models`,
-          reuseExistingServer: true,
+          // Probe the mock-only sentinel, not /api/models (which a real server
+          // also serves), so a real backend on this port is never mistaken for
+          // the mock. Always boot a fresh mock in CI.
+          url: `http://127.0.0.1:${MOCK_API_PORT}/api/__mock__`,
+          reuseExistingServer: !process.env.CI,
           timeout: 120_000,
         },
         {

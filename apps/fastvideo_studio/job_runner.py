@@ -791,12 +791,21 @@ class JobRunner:
                 job._process.wait()
                 exit_code = job._process.returncode or 0
 
-            if exit_code == 0:
+            if job._stop_event.is_set():
+                # Terminated by stop_job() without the reader loop observing the
+                # flag (e.g. the process died between log lines).
+                job.status = JobStatus.STOPPED
+                buf.phase = "stopped"
+            elif exit_code == 0:
                 job.status = JobStatus.COMPLETED
                 buf.progress = 100.0
                 buf.phase = "done"
-                # Training outputs checkpoints, not video
-                ckpt_dirs = sorted(Path(job_output_dir).glob("checkpoint-*"))
+                # Training outputs checkpoints, not video. Sort by step number,
+                # not lexically ("checkpoint-1000" < "checkpoint-500" as strings).
+                ckpt_dirs = sorted(
+                    Path(job_output_dir).glob("checkpoint-*"),
+                    key=lambda p: int(m.group(1)) if (m := re.fullmatch(r"checkpoint-(\d+)", p.name)) else -1,
+                )
                 if ckpt_dirs:
                     job.output_path = str(ckpt_dirs[-1])
             else:

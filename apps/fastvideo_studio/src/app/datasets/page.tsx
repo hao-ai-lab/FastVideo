@@ -21,13 +21,18 @@ import {
 
 export default function DatasetsPage() {
   const [datasets, setDatasets] = React.useState<Dataset[]>([]);
+  const [error, setError] = React.useState<string | null>(null);
   const { open } = useStore(createDatasetModalStore);
 
   const fetchDatasets = React.useCallback(async () => {
     try {
       setDatasets(await getDatasets());
+      setError(null);
     } catch (err) {
       console.error('Failed to fetch datasets:', err);
+      // Distinguish an API outage from a genuinely empty list, so the user
+      // isn't told they have no datasets when the server is unreachable.
+      setError(err instanceof Error ? err.message : 'Failed to load datasets');
     }
   }, []);
 
@@ -48,7 +53,9 @@ export default function DatasetsPage() {
       <main className="mx-auto flex w-full max-w-[850px] flex-col gap-6 px-4 pb-12">
         <Card className="p-6">
           <div>
-            {datasets.length === 0 ? (
+            {error ? (
+              <p className="py-8 text-center text-destructive">{error}</p>
+            ) : datasets.length === 0 ? (
               <p className="py-8 text-center text-muted-foreground">
                 No datasets yet.
               </p>

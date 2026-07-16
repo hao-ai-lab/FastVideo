@@ -138,7 +138,8 @@ describe('CreateJobModal', () => {
     expect(payload).toMatchObject({
       workload_type: 'dmd_t2v',
       job_type: 'distillation',
-      data_path: 'My Dataset',
+      // The dataset id is sent; the backend resolves it to the on-disk dir.
+      data_path: 'ds1',
       lora_rank: 32,
       // DMD-specific fields added to CreateJobRequest for this modal.
       dmd_use_vsa: false,

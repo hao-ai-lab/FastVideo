@@ -15,7 +15,7 @@ with ffmpeg and cached.
 
 Usage (from the ``apps/`` directory)::
 
-    PYTHONPATH=.. python -m fastvideo_studio.mock_server --port 8189
+    PYTHONPATH=.. python -m fastvideo_studio.mock_server --port 8190
 """
 
 from __future__ import annotations
@@ -359,6 +359,15 @@ app.add_middleware(
 
 _seed()
 
+
+@app.get("/api/__mock__")
+def mock_sentinel() -> dict[str, bool]:
+    """Mock-only marker so the e2e suite can prove it isn't hitting a real
+    backend before running its mutating specs (the real server has no such
+    route)."""
+    return {"mock": True}
+
+
 # --- Settings ---------------------------------------------------------------
 
 
@@ -640,7 +649,8 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="FastVideo Studio mock API server")
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8189, help="Port number (default: 8189)")
+    # Default off the real server's 8189 so the mock never shadows a real API.
+    parser.add_argument("--port", type=int, default=8190, help="Port number (default: 8190)")
     args = parser.parse_args()
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

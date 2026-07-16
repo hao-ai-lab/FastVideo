@@ -167,6 +167,18 @@ export default function DatasetSidebar({
     }
   }
 
+  // When the visible grid doesn't overflow (a wide/tall sidebar can fit the
+  // first page without a scrollbar), no scroll event ever fires — so top up
+  // visibleCount until it overflows or every file is shown. Re-runs on resize
+  // (width) and after each page grows, otherwise files 25..N are unreachable.
+  React.useEffect(() => {
+    if (isLoading || visibleCount >= fileNames.length) return;
+    const el = scrollRef.current;
+    if (el && el.scrollHeight <= el.clientHeight) {
+      setVisibleCount((c) => Math.min(c + PAGE_SIZE, fileNames.length));
+    }
+  }, [visibleCount, fileNames.length, isLoading, width]);
+
   const markThumbLoaded = React.useCallback((fileName: string) => {
     setThumbLoaded((prev) =>
       prev[fileName] ? prev : { ...prev, [fileName]: true },

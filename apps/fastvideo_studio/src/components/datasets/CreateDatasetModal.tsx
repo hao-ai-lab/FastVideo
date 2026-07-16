@@ -63,6 +63,10 @@ export default function CreateDatasetModal({
   const [captionsTxtFileName, setCaptionsTxtFileName] = React.useState<
     string | null
   >(null);
+  // Bumped on every new media selection and on reset/clear; an in-flight
+  // upload whose generation no longer matches is discarded, so a superseded or
+  // abandoned upload can't repopulate/overwrite state.
+  const uploadGeneration = React.useRef(0);
 
   const txtCaptionMap = React.useMemo(() => {
     if (!captionsTxtLines || fileNames.length === 0) return null;
@@ -99,6 +103,7 @@ export default function CreateDatasetModal({
   }, [captionFormat, captionsTxtLines, fileNames, videosTxtLines]);
 
   function resetState() {
+    uploadGeneration.current += 1;
     setName('');
     setRawPath('');
     setFileNames([]);
@@ -119,6 +124,7 @@ export default function CreateDatasetModal({
   }
 
   async function handleMediaChange(files: File[]) {
+    const gen = (uploadGeneration.current += 1);
     setValidationError(null);
     if (files.length === 0) {
       setRawPath('');
@@ -128,17 +134,19 @@ export default function CreateDatasetModal({
     setIsUploading(true);
     try {
       const res = await uploadRawDataset(files);
+      if (gen !== uploadGeneration.current) return; // superseded or abandoned
       setRawPath(res.path);
       setFileNames(res.file_names);
       if (res.file_names.length === 0) {
         setValidationError(`No video files found. Allowed: ${ALLOWED_VIDEO_EXT}`);
       }
     } catch (err) {
+      if (gen !== uploadGeneration.current) return;
       setRawPath('');
       setFileNames([]);
       setValidationError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
-      setIsUploading(false);
+      if (gen === uploadGeneration.current) setIsUploading(false);
     }
   }
 
@@ -344,6 +352,7 @@ export default function CreateDatasetModal({
               }
               onFiles={handleMediaChange}
               onClear={() => {
+                uploadGeneration.current += 1;
                 setRawPath('');
                 setFileNames([]);
                 setCaptionMap(null);

@@ -56,7 +56,9 @@ def _job(workload_type: str, **overrides: Any) -> dict[str, Any]:
 @pytest.mark.parametrize("workload_type", sorted(SUPPORTED_WORKLOADS))
 def test_config_round_trips_through_train_schema(workload_type: str, tmp_path: Path) -> None:
     """The generated config must parse with the real fastvideo/train loader."""
-    from fastvideo.train.utils.config import load_run_config
+    # The loader transitively imports torch; skip (don't fail) where it's absent.
+    config_mod = pytest.importorskip("fastvideo.train.utils.config")
+    load_run_config = config_mod.load_run_config
 
     config = build_training_config(_job(workload_type), str(tmp_path / "out"))
     path = tmp_path / "run.yaml"
@@ -68,6 +70,10 @@ def test_config_round_trips_through_train_schema(workload_type: str, tmp_path: P
     assert cfg.training.data.data_path == "outputs/datasets/my_dataset"
     assert cfg.training.loop.max_train_steps == 1234
     assert cfg.training.optimizer.learning_rate == pytest.approx(5e-5)
+    if workload_type == "vsa_t2v":
+        # Guards against training.vsa.sparsity schema drift (the loader
+        # silently drops a mis-keyed sparsity value).
+        assert cfg.training.vsa_sparsity == pytest.approx(0.8)
     assert cfg.training.checkpoint.output_dir == str(tmp_path / "out")
     # model_path derives from models.student.init_from.
     assert cfg.training.model_path == WAN
@@ -80,14 +86,14 @@ def test_finetune_uses_finetune_method() -> None:
     assert config["method"]["_target_"].endswith("FineTuneMethod")
     assert config["models"]["student"]["_target_"].endswith(".WanModel")
     assert "teacher" not in config["models"]
-    assert config["training"]["vsa_sparsity"] == 0.0
+    assert config["training"]["vsa"]["sparsity"] == 0.0
     assert config["training"]["data"]["training_cfg_rate"] == 0.1
 
 
 def test_vsa_finetune_sets_sparsity() -> None:
     config = build_training_config(_job("vsa_t2v"), "out")
     assert config["method"]["_target_"].endswith("FineTuneMethod")
-    assert config["training"]["vsa_sparsity"] == 0.8
+    assert config["training"]["vsa"]["sparsity"] == 0.8
 
 
 def test_lora_adds_lora_block() -> None:
@@ -126,7 +132,7 @@ def test_dmd_builds_three_role_models_and_method_knobs() -> None:
 def test_dmd_vsa_maps_to_training_vsa_sparsity() -> None:
     config = build_training_config(
         _job("dmd_t2v", dmd_use_vsa=True, dmd_vsa_sparsity=0.9), "out")
-    assert config["training"]["vsa_sparsity"] == 0.9
+    assert config["training"]["vsa"]["sparsity"] == 0.9
 
 
 def test_self_forcing_uses_causal_student_and_rollout_knobs() -> None:

@@ -397,24 +397,6 @@ class Database:
         for file_name, caption in captions.items():
             self.upsert_dataset_caption(dataset_id, file_name, caption)
 
-    def update_dataset(self, dataset_id: str, updates: dict[str, Any]) -> None:
-        """Update dataset fields. Only provided keys are updated."""
-        if not updates:
-            return
-        allowed: set[str] = set()
-        cols = []
-        vals = []
-        for k, v in updates.items():
-            if k in allowed:
-                cols.append(f"{k} = ?")
-                vals.append(v)
-        if not cols:
-            return
-        vals.append(dataset_id)
-        sql = f"UPDATE datasets SET {', '.join(cols)} WHERE id = ?"
-        self._execute(sql, tuple(vals))
-        self._commit()
-
     def delete_dataset(self, dataset_id: str) -> bool:
         """Delete a dataset. Returns True if a row was deleted."""
         cur = self._execute("DELETE FROM datasets WHERE id = ?", (dataset_id, ))

@@ -25,7 +25,9 @@ export function getApiBaseUrl(): string {
 			const raw = window.localStorage.getItem(STORAGE_KEY);
 			if (raw !== cachedRaw) {
 				cachedRaw = raw;
-				cachedConfigured = loadDefaultOptions().apiServerBaseUrl.trim();
+				cachedConfigured = stripTrailingSlash(
+					loadDefaultOptions().apiServerBaseUrl.trim(),
+				);
 			}
 			if (cachedConfigured) return cachedConfigured;
 		} catch {
@@ -37,7 +39,14 @@ export function getApiBaseUrl(): string {
 	const fromEnv = process.env.NEXT_PUBLIC_API_BASE_URL;
 	const apiUrl =
 		typeof fromEnv === "string" && fromEnv ? fromEnv : DEFAULT_API_BASE_URL;
-	return apiUrl;
+	return stripTrailingSlash(apiUrl);
+}
+
+// The base URL is used as a prefix in `${base}/jobs` template strings, so a
+// trailing slash (a natural thing to paste into Settings) would produce `//`
+// and 404 every request.
+function stripTrailingSlash(url: string): string {
+	return url.replace(/\/+$/, "");
 }
 
 /** Full URL for streaming a job's video/image output (for &lt;video&gt; or &lt;img&gt; src). */
@@ -90,7 +99,6 @@ export interface CreateJobRequest {
 export interface Model {
 	id: string;
 	label: string;
-	type: string;
 }
 
 export interface GpuInfo {

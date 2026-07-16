@@ -148,10 +148,17 @@ export default function GpuGrid() {
   }
 
   return (
-    <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-      {snapshot.gpus.map((gpu) => (
-        <GpuCard key={gpu.index} gpu={gpu} />
-      ))}
+    <div className="flex flex-col gap-4">
+      {fetchError && (
+        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
+          Lost contact with the API server — showing the last known values.
+        </p>
+      )}
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+        {snapshot.gpus.map((gpu) => (
+          <GpuCard key={gpu.index} gpu={gpu} />
+        ))}
+      </div>
     </div>
   );
 }

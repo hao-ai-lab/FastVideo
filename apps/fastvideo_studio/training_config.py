@@ -203,7 +203,11 @@ def _training_section(job: dict[str, Any], workload_type: str, output_dir: str) 
         "tracker": {
             "project_name": "fastvideo_ui_training",
         },
-        "vsa_sparsity": vsa_sparsity,
+        # The trainer reads sparsity from training.vsa.sparsity; a flat
+        # training.vsa_sparsity key is silently dropped by the config loader.
+        "vsa": {
+            "sparsity": vsa_sparsity,
+        },
         "model": {
             "enable_gradient_checkpointing_type": "full",
         },

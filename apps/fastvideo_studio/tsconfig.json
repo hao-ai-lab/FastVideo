@@ -32,6 +32,10 @@
     "next-env.d.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
+    "e2e/**/*.ts",
+    "playwright.config.ts",
+    "vitest.config.ts",
+    "next.config.ts",
     ".next/types/**/*.ts"
   ],
   "exclude": [

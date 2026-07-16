@@ -158,9 +158,13 @@ export default function CreateJobModal({
   // Load the models available for this workload.
   React.useEffect(() => {
     if (!isOpen) return;
+    // Ignore a superseded response so a slow fetch for a previous workload
+    // can't overwrite the current workload's model list/selection.
+    let stale = false;
     setIsLoadingModels(true);
     getModels(inferenceWorkload)
       .then((list) => {
+        if (stale) return;
         setModels(list);
         const ids = list.map((m) => m.id);
         const opts = defaultOptionsStore.get().options;
@@ -175,8 +179,15 @@ export default function CreateJobModal({
           setFakeScoreModelPath(chosen);
         }
       })
-      .catch((e) => console.error('Failed to load models:', e))
-      .finally(() => setIsLoadingModels(false));
+      .catch((e) => {
+        if (!stale) console.error('Failed to load models:', e);
+      })
+      .finally(() => {
+        if (!stale) setIsLoadingModels(false);
+      });
+    return () => {
+      stale = true;
+    };
   }, [isOpen, inferenceWorkload, workloadType]);
 
   // Training jobs need a dataset; load the ready datasets when relevant.
@@ -219,9 +230,8 @@ export default function CreateJobModal({
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (isInference && workloadType === 'i2v' && !imagePath) return;
-    const effectiveDataPath = selectedDatasetId
-      ? (readyDatasets.find((d) => d.id === selectedDatasetId)?.name ?? '')
-      : '';
+    // Send the dataset id; the backend resolves it to the on-disk media dir.
+    const effectiveDataPath = selectedDatasetId ?? '';
     if (!isInference && !selectedDatasetId) return;
     // `lora_t2v` jobs are persisted with a dedicated backend job_type that the
     // front-end JobType enum does not model; cast to keep payload parity.
@@ -266,11 +276,7 @@ export default function CreateJobModal({
               train_batch_size: trainBatchSize,
               learning_rate: learningRate,
               num_latent_t: numLatentT,
-              validation_dataset_file: selectedValidationDatasetId
-                ? (readyDatasets.find(
-                    (d) => d.id === selectedValidationDatasetId,
-                  )?.name ?? '') || undefined
-                : undefined,
+              validation_dataset_file: selectedValidationDatasetId || undefined,
               lora_rank: loraRank,
               ...(workloadType === 'dmd_t2v'
                 ? {

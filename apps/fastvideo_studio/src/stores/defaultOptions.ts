@@ -13,6 +13,10 @@ export interface DefaultOptionsState {
   options: DefaultOptions;
 }
 
+// Keys the user has edited locally. A slow initDefaultOptions() GET must not
+// clobber an edit the user made while that fetch was in flight.
+const dirtyKeys = new Set<keyof DefaultOptions>();
+
 export const defaultOptionsStore = createManagedStore<DefaultOptionsState>(
   { options: loadDefaultOptions() },
   // Server prerender and the hydration render must use the same deterministic
@@ -27,10 +31,16 @@ export function initDefaultOptions(): void {
       // Merge server settings into existing local options, but keep
       // apiServerBaseUrl purely local (do not let the server overwrite it).
       defaultOptionsStore.update((prev) => {
+        // User edits made while this fetch was in flight win over the server.
+        const dirtyOverrides: Record<string, unknown> = {};
+        dirtyKeys.forEach((k) => {
+          dirtyOverrides[k] = prev.options[k];
+        });
         const merged: DefaultOptions = {
           ...DEFAULT_OPTIONS,
           ...prev.options,
           ...opts,
+          ...dirtyOverrides,
           apiServerBaseUrl: prev.options.apiServerBaseUrl,
         };
         saveDefaultOptions(merged);
@@ -47,6 +57,7 @@ export function updateOption<K extends keyof DefaultOptions>(
   key: K,
   value: DefaultOptions[K],
 ): void {
+  dirtyKeys.add(key);
   defaultOptionsStore.update((prev) => {
     const next = { ...prev.options, [key]: value };
     // API Server Base URL is a purely local (per-browser) setting.
@@ -63,6 +74,8 @@ export function updateOption<K extends keyof DefaultOptions>(
 }
 
 export function resetToDefaults(): void {
+  // A reset intentionally discards local edits, so drop their dirty marks.
+  dirtyKeys.clear();
   // apiServerBaseUrl is a purely local (per-browser) setting: keep the user's
   // value across a reset and never send it to the backend.
   const { apiServerBaseUrl: _local, ...serverDefaults } = DEFAULT_OPTIONS;
