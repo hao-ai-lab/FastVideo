@@ -10,10 +10,11 @@ references ``action_path``).
 Tracks are stored in ORIGINAL video pixel coordinates. The full 2500-point grid + visibility
 are kept; the trainer samples 1-200 points per step.
 
-If ``--detect-entries`` is set, FastSAM detects objects entering after frame 0. For each
-entry event at frame T_entry a second CoTracker pass runs the full grid from T_entry. Grid
-points landing on the new object replace dead background slots (those permanently occluded
-from T_entry onwards), keeping N = grid_size^2 throughout.
+If ``--detect-entries`` is set, FastSAM detects objects entering after frame 0 (frames are
+segmented in batched forwards). Grid points landing on each new object are tracked from its
+entry frame T_entry — all entry events share a single extra CoTracker pass (chunked if the
+combined query count exceeds grid_size^2) — and replace dead background slots (those
+permanently occluded from T_entry onwards), keeping N = grid_size^2 throughout.
 
 Run on a GPU node (never the login node), e.g.:
 
@@ -64,6 +65,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sam-conf", type=float, default=0.75)
     p.add_argument("--sam-iou", type=float, default=0.9)
     p.add_argument("--sam-imgsz", type=int, default=1024)
+    p.add_argument("--sam-batch", type=int, default=16,
+                   help="Frames per batched FastSAM forward during entry detection.")
+    p.add_argument("--amp", action="store_true",
+                   help="Run CoTracker under bf16 autocast (~1.5-2x faster, slightly different coords).")
     p.add_argument("--entry-sample-every", type=int, default=5,
                    help="Check for new objects every N frames.")
     p.add_argument("--entry-new-area", type=float, default=0.3,
@@ -110,8 +115,8 @@ def read_video(path: Path) -> tuple[torch.Tensor, int, int]:
 
 
 @torch.no_grad()
-def track_one(model, video: torch.Tensor, grid_size: int, downscale: float, device: str
-              ) -> tuple[np.ndarray, np.ndarray]:
+def track_one(model, video: torch.Tensor, grid_size: int, downscale: float, device: str,
+              amp: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """Return tracks (T,N,2) in original pixel coords and visibility (T,N)."""
     _, t, c, h, w = video.shape
     track_video = video
@@ -121,7 +126,8 @@ def track_one(model, video: torch.Tensor, grid_size: int, downscale: float, devi
     else:
         sh, sw = h, w
 
-    pred_tracks, pred_vis = model(track_video.to(device), grid_size=grid_size)
+    with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp and device.startswith("cuda")):
+        pred_tracks, pred_vis = model(track_video.to(device), grid_size=grid_size)
     tracks = pred_tracks[0].float().cpu().numpy()
     vis = pred_vis[0].cpu().numpy()
 
@@ -133,7 +139,7 @@ def track_one(model, video: torch.Tensor, grid_size: int, downscale: float, devi
 
 @torch.no_grad()
 def track_with_queries(model, video: torch.Tensor, queries_txy: np.ndarray, downscale: float,
-                       device: str, H: int, W: int) -> tuple[np.ndarray, np.ndarray]:
+                       device: str, H: int, W: int, amp: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """Track explicit query points. queries_txy: [K,3] as (t, x, y) in original pixel coords."""
     track_video = video
     sh, sw = H, W
@@ -146,7 +152,8 @@ def track_with_queries(model, video: torch.Tensor, queries_txy: np.ndarray, down
         q[:, 2] *= sh / float(H)
 
     q_tensor = torch.from_numpy(q).unsqueeze(0).to(device)  # [1, K, 3]
-    pred_tracks, pred_vis = model(track_video.to(device), queries=q_tensor)
+    with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp and device.startswith("cuda")):
+        pred_tracks, pred_vis = model(track_video.to(device), queries=q_tensor)
     tracks = pred_tracks[0].float().cpu().numpy()
     vis = pred_vis[0].cpu().numpy()
 
@@ -166,21 +173,26 @@ def make_grid_queries(grid_size: int, H: int, W: int, frame_t: int) -> np.ndarra
 
 
 
-def fastsam_masks(sam_model, frame_rgb: np.ndarray, conf: float, iou: float, imgsz: int,
-                  H: int, W: int) -> np.ndarray:
-    """Run FastSAM on a uint8 HxWx3 RGB frame, return bool masks [M,H,W]."""
-    res = sam_model(frame_rgb, device="cuda", retina_masks=True,
-                    imgsz=imgsz, conf=conf, iou=iou, verbose=False)
-    if not res or res[0].masks is None:
-        return np.zeros((0, H, W), bool)
-    masks = res[0].masks.data.cpu().numpy().astype(bool)
-    if masks.shape[0] and masks.shape[1:] != (H, W):
-        import cv2
-        masks = np.stack([
-            cv2.resize(m.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST).astype(bool)
-            for m in masks
-        ])
-    return masks
+def fastsam_masks_batch(sam_model, frames_rgb: list[np.ndarray], conf: float, iou: float,
+                        imgsz: int, H: int, W: int, batch: int = 16) -> list[np.ndarray]:
+    """Run FastSAM on uint8 HxWx3 RGB frames in batched forwards, return bool masks [M,H,W] per frame."""
+    out: list[np.ndarray] = []
+    for s in range(0, len(frames_rgb), max(1, batch)):
+        res = sam_model(frames_rgb[s:s + max(1, batch)], device="cuda", retina_masks=True,
+                        imgsz=imgsz, conf=conf, iou=iou, verbose=False)
+        for r in res:
+            if r.masks is None:
+                out.append(np.zeros((0, H, W), bool))
+                continue
+            masks = r.masks.data.cpu().numpy().astype(bool)
+            if masks.shape[0] and masks.shape[1:] != (H, W):
+                import cv2
+                masks = np.stack([
+                    cv2.resize(m.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST).astype(bool)
+                    for m in masks
+                ])
+            out.append(masks)
+    return out
 
 
 def max_iou_with_set(mask: np.ndarray, others: np.ndarray) -> float:
@@ -194,7 +206,8 @@ def max_iou_with_set(mask: np.ndarray, others: np.ndarray) -> float:
 
 def detect_entry_events(video: torch.Tensor, sam_model, H: int, W: int, conf: float, iou: float,
                         imgsz: int, sample_every: int, new_area_thresh: float,
-                        min_area_frac: float) -> tuple[dict[int, np.ndarray], np.ndarray]:
+                        min_area_frac: float, sam_batch: int = 16
+                        ) -> tuple[dict[int, np.ndarray], np.ndarray]:
     """Return ({frame_t: new_masks [M,H,W]}, masks0_union [H,W]) for frames where new
     regions appear that weren't covered by any frame-0 mask.
 
@@ -205,8 +218,12 @@ def detect_entry_events(video: torch.Tensor, sam_model, H: int, W: int, conf: fl
     T = video.shape[1]
     min_area_px = int(min_area_frac * H * W)
 
-    frame0 = video[0, 0].permute(1, 2, 0).numpy().astype(np.uint8)
-    masks0 = fastsam_masks(sam_model, frame0, conf, iou, imgsz, H, W)
+    # One batched FastSAM sweep over frame 0 + all sampled frames (the per-frame
+    # mask filtering below is sequential, but the model forwards are independent).
+    sample_ts = list(range(sample_every, T, sample_every))
+    frames = [video[0, t].permute(1, 2, 0).numpy().astype(np.uint8) for t in [0, *sample_ts]]
+    all_masks = fastsam_masks_batch(sam_model, frames, conf, iou, imgsz, H, W, batch=sam_batch)
+    masks0 = all_masks[0]
     # Exclude large background masks (table surface, floor, walls) from masks0_union.
     # Only object-sized masks define "known territory" — background covers the whole frame
     # and would suppress detection of the ball moving to a new position on that surface.
@@ -222,9 +239,7 @@ def detect_entry_events(video: torch.Tensor, sam_model, H: int, W: int, conf: fl
     claimed_new = np.zeros((H, W), bool)
 
     entry_events: dict[int, np.ndarray] = {}
-    for frame_t in range(sample_every, T, sample_every):
-        frame = video[0, frame_t].permute(1, 2, 0).numpy().astype(np.uint8)
-        masks_t = fastsam_masks(sam_model, frame, conf, iou, imgsz, H, W)
+    for frame_t, masks_t in zip(sample_ts, all_masks[1:]):
         if masks_t.shape[0] == 0:
             continue
 
@@ -309,7 +324,7 @@ def main() -> None:
         if out_path.exists() and not args.force:
             continue
         video, h, w = read_video(vpath)
-        tracks, vis = track_one(cotracker, video, args.grid_size, args.downscale, args.device)
+        tracks, vis = track_one(cotracker, video, args.grid_size, args.downscale, args.device, amp=args.amp)
 
         n_replaced = 0
         if sam_model is not None:
@@ -319,52 +334,72 @@ def main() -> None:
                 sample_every=args.entry_sample_every,
                 new_area_thresh=args.entry_new_area,
                 min_area_frac=args.entry_min_area,
+                sam_batch=args.sam_batch,
             )
+
+            # Build queries for all (entry frame, mask) pairs at once: only grid points
+            # landing inside each new region are tracked, instead of a full grid_size^2
+            # pass per mask. Groups keep disjoint column ranges [qa, qb) in the batch.
+            groups: list[tuple[int, int, np.ndarray, np.ndarray, int, int]] = []
+            q_parts: list[np.ndarray] = []
+            n_q = 0
             for frame_t, new_masks in sorted(entry_events.items()):
+                grid_q = make_grid_queries(args.grid_size, h, w, frame_t)
+                gxi = np.clip(grid_q[:, 1].round().astype(int), 0, w - 1)
+                gyi = np.clip(grid_q[:, 2].round().astype(int), 0, h - 1)
                 for mi, new_mask in enumerate(new_masks):
                     new_region = new_mask & ~masks0_union
+                    q = grid_q[new_region[gyi, gxi]]
+                    groups.append((frame_t, mi, new_mask, new_region, n_q, n_q + len(q)))
+                    q_parts.append(q)
+                    n_q += len(q)
 
-                    # Covered slots: original frame-0 grid points whose position at
-                    # T_entry falls inside the new object's region.
-                    orig_xi = np.clip(tracks[frame_t, :, 0].round().astype(int), 0, w - 1)
-                    orig_yi = np.clip(tracks[frame_t, :, 1].round().astype(int), 0, h - 1)
-                    covered_dst = np.where(new_region[orig_yi, orig_xi])[0]
-                    dead_dst = covered_dst if covered_dst.size > 0 else \
-                        np.where((~vis[frame_t:].astype(bool)).all(axis=0))[0]
-                    if dead_dst.size == 0:
-                        continue
+            e_tracks = e_vis = None
+            if n_q > 0:
+                all_q = np.concatenate(q_parts, axis=0)
+                max_q = args.grid_size * args.grid_size  # bound memory to the main pass
+                et_parts, ev_parts = [], []
+                for s in range(0, n_q, max_q):
+                    ct, cv = track_with_queries(
+                        cotracker, video, all_q[s:s + max_q], args.downscale,
+                        args.device, h, w, amp=args.amp)
+                    et_parts.append(ct)
+                    ev_parts.append(cv)
+                e_tracks = np.concatenate(et_parts, axis=1)
+                e_vis = np.concatenate(ev_parts, axis=1)
 
-                    # Run full grid from T_entry — same density as frame-0 grid.
-                    queries_txy = make_grid_queries(args.grid_size, h, w, frame_t)
-                    e_tracks, e_vis = track_with_queries(
-                        cotracker, video, queries_txy, args.downscale, args.device, h, w)
-                    e_vis[:frame_t] = False  # object didn't exist before entry frame
+            for frame_t, mi, new_mask, new_region, qa, qb in groups:
+                # Covered slots: original frame-0 grid points whose position at
+                # T_entry falls inside the new object's region.
+                orig_xi = np.clip(tracks[frame_t, :, 0].round().astype(int), 0, w - 1)
+                orig_yi = np.clip(tracks[frame_t, :, 1].round().astype(int), 0, h - 1)
+                covered_dst = np.where(new_region[orig_yi, orig_xi])[0]
+                dead_dst = covered_dst if covered_dst.size > 0 else \
+                    np.where((~vis[frame_t:].astype(bool)).all(axis=0))[0]
+                if dead_dst.size == 0:
+                    continue
 
-                    pts = e_tracks[frame_t]
-                    xi = np.clip(pts[:, 0].round().astype(int), 0, w - 1)
-                    yi = np.clip(pts[:, 1].round().astype(int), 0, h - 1)
-                    object_src = np.where(new_region[yi, xi])[0]
-
-                    n = min(len(object_src), len(dead_dst))
-                    if n > 0:
-                        dst = dead_dst[:n]
-                        src = object_src[:n]
-                        tracks[:, dst] = e_tracks[:, src]
-                        vis[:, dst] = e_vis[:, src]
-                        # CoTracker can mark points invisible even at their query frame
-                        # when the object is entering from the edge. Force vis=True at
-                        # T_entry so segment_tracks sees these as first-visible there.
-                        vis[frame_t, dst] = True
-                        n_replaced += n
-                    if args.verbose:
-                        mask_area = int(new_mask.sum())
-                        new_region_area = int(new_region.sum())
-                        vis_at_entry = int(vis[frame_t, dst].sum()) if n > 0 else 0
-                        print(f"  [entry] t={frame_t} mask#{mi}: area={mask_area}px "
-                              f"new_region={new_region_area}px "
-                              f"object_src={len(object_src)} covered_dst={len(covered_dst)} "
-                              f"dead_dst={len(dead_dst)} -> replacing {n}, "
-                              f"vis[{frame_t}, dst].sum()={vis_at_entry}", flush=True)
+                n_src = qb - qa
+                n = min(n_src, len(dead_dst))
+                if n > 0:
+                    e_vis[:frame_t, qa:qb] = False  # object didn't exist before entry frame
+                    dst = dead_dst[:n]
+                    tracks[:, dst] = e_tracks[:, qa:qa + n]
+                    vis[:, dst] = e_vis[:, qa:qa + n]
+                    # CoTracker can mark points invisible even at their query frame
+                    # when the object is entering from the edge. Force vis=True at
+                    # T_entry so segment_tracks sees these as first-visible there.
+                    vis[frame_t, dst] = True
+                    n_replaced += n
+                if args.verbose:
+                    mask_area = int(new_mask.sum())
+                    new_region_area = int(new_region.sum())
+                    vis_at_entry = int(vis[frame_t, dst].sum()) if n > 0 else 0
+                    print(f"  [entry] t={frame_t} mask#{mi}: area={mask_area}px "
+                          f"new_region={new_region_area}px "
+                          f"object_src={n_src} covered_dst={len(covered_dst)} "
+                          f"dead_dst={len(dead_dst)} -> replacing {n}, "
+                          f"vis[{frame_t}, dst].sum()={vis_at_entry}", flush=True)
 
             frames_str = ",".join(str(t) for t in sorted(entry_events)) if entry_events else "none"
             print(f"[track] [{k}/{len(videos)}] {vpath.name}: "

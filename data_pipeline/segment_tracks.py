@@ -80,21 +80,6 @@ def render_seg_viz(frame: np.ndarray, masks: np.ndarray, out_path: Path) -> None
     imageio.imwrite(str(out_path), img)
 
 
-def read_frame(path: str, idx: int) -> np.ndarray:
-    """Read a single frame by index, return HxWx3 uint8."""
-    try:
-        from decord import VideoReader, cpu
-        vr = VideoReader(path, ctx=cpu(0))
-        return vr[idx].asnumpy()
-    except Exception:  # noqa: BLE001
-        import av
-        c = av.open(path)
-        for i, f in enumerate(c.decode(video=0)):
-            if i == idx:
-                return f.to_ndarray(format="rgb24")
-    raise RuntimeError(f"could not read frame {idx} from {path}")
-
-
 def object_ids_for_points(masks: np.ndarray, pts_xy: np.ndarray, H: int, W: int) -> np.ndarray:
     """masks [M,H,W] bool, pts_xy [N,2] px -> object id per point (-1 none), smallest mask wins."""
     N = pts_xy.shape[0]
@@ -113,11 +98,11 @@ def object_ids_for_points(masks: np.ndarray, pts_xy: np.ndarray, H: int, W: int)
     return oid
 
 
-def extract_masks(res, H: int, W: int, min_area_frac: float, max_masks: int) -> np.ndarray:
-    """Pull masks out of a FastSAM result, resize if needed, and apply filtering."""
+def extract_masks(result, H: int, W: int, min_area_frac: float, max_masks: int) -> np.ndarray:
+    """Pull masks out of a single FastSAM Result, resize if needed, and apply filtering."""
     masks = np.zeros((0, H, W), bool)
-    if res and res[0].masks is not None:
-        masks = res[0].masks.data.cpu().numpy().astype(bool)
+    if result is not None and result.masks is not None:
+        masks = result.masks.data.cpu().numpy().astype(bool)
         if masks.shape[0] and masks.shape[1:] != (H, W):
             import cv2
             masks = np.stack([
@@ -132,6 +117,20 @@ def extract_masks(res, H: int, W: int, min_area_frac: float, max_masks: int) -> 
         if max_masks and masks.shape[0] > max_masks:
             masks = masks[np.argsort(-areas)[:max_masks]]
     return masks
+
+
+def masks_for_frames(model, frames: np.ndarray, frame_ts: list[int], cache: dict[int, np.ndarray],
+                     args) -> dict[int, np.ndarray]:
+    """Segment the requested frames in batched FastSAM forwards, filling/reusing `cache`."""
+    todo = [t for t in frame_ts if t not in cache]
+    for s in range(0, len(todo), max(1, args.sam_batch)):
+        chunk = todo[s:s + max(1, args.sam_batch)]
+        res = model([frames[t] for t in chunk], device=args.device, retina_masks=True,
+                    imgsz=args.imgsz, conf=args.conf, iou=args.iou, verbose=False)
+        for t, r in zip(chunk, res):
+            cache[t] = extract_masks(r, frames.shape[1], frames.shape[2],
+                                     args.min_area_frac, args.max_masks)
+    return cache
 
 
 def assign_object_ids_multiframe(
@@ -191,6 +190,8 @@ def main() -> None:
     p.add_argument("--imgsz", type=int, default=1024)
     p.add_argument("--conf", type=float, default=0.4)
     p.add_argument("--iou", type=float, default=0.9)
+    p.add_argument("--sam-batch", type=int, default=16,
+                   help="Frames per batched FastSAM forward.")
     p.add_argument("--min-area-frac", type=float, default=0.0,
                    help="drop masks smaller than this fraction of the frame")
     p.add_argument("--max-masks", type=int, default=0, help="keep only the N largest masks (0 = keep all)")
@@ -238,6 +239,9 @@ def main() -> None:
         vis = d["visibility"].astype(bool)         # [T,N]
         H, W = int(d["height"]), int(d["width"])
 
+        # Decode the video once; frames are reused for segmentation, vis override, and viz.
+        frames = read_all_frames(str(vpath))
+
         # Per-point first-visible frame; -1 for points CoTracker never marks visible
         ever_visible = vis.any(axis=0)                                          # [N]
         first_visible = np.where(ever_visible, np.argmax(vis, axis=0), -1)     # [N]
@@ -247,15 +251,12 @@ def main() -> None:
             fv_counts = {f: int((first_visible == f).sum()) for f in unique_frames}
             print(f"  [seg] first_visible frames: {fv_counts}", flush=True)
 
-        # Run FastSAM on each unique first-visible frame
-        frame_masks: dict[int, np.ndarray] = {}
-        for frame_t in unique_frames:
-            frame = read_frame(str(vpath), frame_t)
-            res = model(frame, device=args.device, retina_masks=True,
-                        imgsz=args.imgsz, conf=args.conf, iou=args.iou, verbose=False)
-            masks = extract_masks(res, H, W, args.min_area_frac, args.max_masks)
-            frame_masks[frame_t] = masks
-            if args.verbose:
+        # Run FastSAM on each unique first-visible frame (batched)
+        mask_cache: dict[int, np.ndarray] = {}
+        masks_for_frames(model, frames, unique_frames, mask_cache, args)
+        frame_masks = {frame_t: mask_cache[frame_t] for frame_t in unique_frames}
+        if args.verbose:
+            for frame_t, masks in frame_masks.items():
                 areas = masks.reshape(masks.shape[0], -1).sum(1).tolist() if masks.shape[0] else []
                 print(f"  [seg] frame {frame_t}: {masks.shape[0]} masks, areas={[int(a) for a in areas]}", flush=True)
 
@@ -274,11 +275,10 @@ def main() -> None:
         if args.vis_override_every > 0 and (oid >= 0).any():
             T = tracks.shape[0]
             object_pts = np.where(oid >= 0)[0]
-            for frame_t in range(0, T, args.vis_override_every):
-                frame = read_frame(str(vpath), frame_t)
-                res = model(frame, device=args.device, retina_masks=True,
-                            imgsz=args.imgsz, conf=args.conf, iou=args.iou, verbose=False)
-                masks = extract_masks(res, H, W, args.min_area_frac, args.max_masks)
+            override_ts = list(range(0, T, args.vis_override_every))
+            masks_for_frames(model, frames, override_ts, mask_cache, args)
+            for frame_t in override_ts:
+                masks = mask_cache[frame_t]
                 if masks.shape[0] == 0:
                     continue
                 pts = tracks[frame_t, object_pts]                              # [K,2]
@@ -292,13 +292,12 @@ def main() -> None:
             # Fill gaps between True frames caused by the sampling interval.
             # If vis is True at frame T and True again at T+k (k <= override_every),
             # the frames in between should also be True — the object didn't disappear.
-            for pt_idx in object_pts:
-                last_true = -1
-                for t in range(T):
-                    if vis[t, pt_idx]:
-                        if last_true >= 0 and (t - last_true) <= args.vis_override_every:
-                            vis[last_true:t, pt_idx] = True
-                        last_true = t
+            V = vis[:, object_pts]                                             # [T,K]
+            t_idx = np.arange(T)[:, None]
+            prev = np.maximum.accumulate(np.where(V, t_idx, -1), axis=0)
+            nxt = np.minimum.accumulate(np.where(V, t_idx, 2 * T)[::-1], axis=0)[::-1]
+            fill = (~V) & (prev >= 0) & (nxt < T) & ((nxt - prev) <= args.vis_override_every)
+            vis[:, object_pts] = V | fill
 
             d["visibility"] = vis
 
@@ -310,18 +309,16 @@ def main() -> None:
         tmp.replace(npz_path)
         n_ok += 1
         if args.viz:
-            frames = read_all_frames(str(vpath))[:tracks.shape[0]]
-            T_v = frames.shape[0]
             stem_dir = Path(args.viz_dir) / vpath.stem
             stem_dir.mkdir(parents=True, exist_ok=True)
-            render_viz(frames, tracks, vis, oid, stem_dir / "tracks.mp4",
+            render_viz(frames[:tracks.shape[0]], tracks, vis, oid, stem_dir / "tracks.mp4",
                        fps=int(item.get("fps", 24)))
-            for label, fidx in [("000", 0), ("mid", T_v // 2), ("last", T_v - 1)]:
-                frame = frames[fidx]
-                res = model(frame, device=args.device, retina_masks=True,
-                            imgsz=args.imgsz, conf=args.conf, iou=args.iou, verbose=False)
-                fmasks = extract_masks(res, H, W, args.min_area_frac, args.max_masks)
-                render_seg_viz(frame, fmasks, stem_dir / f"seg_frame{label}.jpg")
+            # for label, fidx in [("000", 0), ("mid", T_v // 2), ("last", T_v - 1)]:
+            #     frame = frames[fidx]
+            #     res = model(frame, device=args.device, retina_masks=True,
+            #                 imgsz=args.imgsz, conf=args.conf, iou=args.iou, verbose=False)
+            #     fmasks = extract_masks(res, H, W, args.min_area_frac, args.max_masks)
+            #     render_seg_viz(frame, fmasks, stem_dir / f"seg_frame{label}.jpg")
             print(f"  viz -> {stem_dir}/", flush=True)
 
         cov = int((oid >= 0).sum())

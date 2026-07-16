@@ -72,9 +72,10 @@ class WanTrackModel(WanModel):
             return
         with torch.no_grad():
             wl = tenc.proj.weight.to_local() if hasattr(tenc.proj.weight, "to_local") else tenc.proj.weight
-            bl = tenc.proj.bias.to_local() if hasattr(tenc.proj.bias, "to_local") else tenc.proj.bias
             nn.init.kaiming_uniform_(wl, a=5**0.5)  # default Conv3d init (non-zero)
-            nn.init.zeros_(bl)
+            if tenc.proj.bias is not None:
+                bl = tenc.proj.bias.to_local() if hasattr(tenc.proj.bias, "to_local") else tenc.proj.bias
+                nn.init.zeros_(bl)
             logger.info("[WANTRACK] re-inited track_encoder.proj to NON-ZERO (norm=%.4f)", float(wl.float().norm()))
 
     # ------------------------------------------------------------------
@@ -165,7 +166,7 @@ class WanTrackModel(WanModel):
             for b in range(B):
                 gen_b = torch.Generator(device=gdev).manual_seed(int(sample_seeds[b])) \
                     if sample_seeds is not None else generator
-                valid = (track_visibility[b, 0].to(gdev) > 0.5).float()
+                valid = (track_visibility[b].to(gdev).amax(dim=0) > 0.5).float()
                 keep = torch.zeros(N, device=gdev)
                 ob = oids[b].to(gdev)
                 for oid in torch.unique(ob):
@@ -200,7 +201,7 @@ class WanTrackModel(WanModel):
                 hi = min(self._aug_max_points, N)
                 lo = min(self._aug_min_points, hi)
                 k = int(torch.randint(lo, hi + 1, (1, ), generator=gen_b, device=gdev).item())
-                valid = (track_visibility[b, 0].to(gdev) > 0.5).float()  # only frame-0-visible are valid queries
+                valid = (track_visibility[b].to(gdev).amax(dim=0) > 0.5).float()  # ever-visible points are valid queries
                 if tw is not None:
                     w = (0.05 + self._aug_diversity * tw[b]) * valid  # informativeness (low-rank) weight
                 else:

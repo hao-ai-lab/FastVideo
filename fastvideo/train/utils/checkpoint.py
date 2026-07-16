@@ -15,6 +15,9 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint.api import CheckpointException
+from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
+
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -344,7 +347,25 @@ class CheckpointManager:
 
         states = self._build_states()
         logger.info("Loading Phase 2 checkpoint from %s", resolved)
-        dcp.load(states, checkpoint_id=str(resolved / "dcp"))
+        try:
+            dcp.load(states, checkpoint_id=str(resolved / "dcp"))
+        except CheckpointException as e:
+            # seed_optimizer_state_for_resume seeds Adam state for every trainable
+            # param, but the save only contains state for params that actually
+            # received grads. Params whose branch never ran (e.g. an unused
+            # image_embedder) are therefore missing from the checkpoint. For those
+            # keys the seeded zero state is exactly what a fresh optimizer would
+            # hold, so a partial load is correct. Only optimizer keys get this
+            # treatment — a missing model weight key still raises.
+            if "Missing key in checkpoint state_dict: optimizers." not in str(e):
+                raise
+            logger.warning(
+                "Checkpoint lacks optimizer state for some trainable params "
+                "(no grads before save); retrying with allow_partial_load. "
+                "Missing entries keep their seeded zero state.")
+            dcp.load(states,
+                     checkpoint_id=str(resolved / "dcp"),
+                     planner=DefaultLoadPlanner(allow_partial_load=True))
         _barrier()
         logger.info("Checkpoint loaded; resuming from step=%s", step)
         return step

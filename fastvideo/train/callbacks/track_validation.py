@@ -113,9 +113,11 @@ class TrackValidationCallback(Callback):
         seed: int = 0,
         paired_no_track: bool = True,
         motion_guidance_scale: float = 1.0,
+        val_sample_indices: list[int] | None = None,
     ) -> None:
         self.every_steps = int(every_steps)
-        self.num_val_samples = int(num_val_samples)
+        self.val_sample_indices: list[int] | None = [int(i) for i in val_sample_indices] if val_sample_indices is not None else None
+        self.num_val_samples = len(self.val_sample_indices) if self.val_sample_indices is not None else int(num_val_samples)
         self.num_inference_steps = int(num_inference_steps)
         # ``guidance_scale`` is TEXT CFG (v_uncond + s_text*(v_text - v_uncond)); at 1.0 == disabled.
         # ``motion_guidance_scale`` is MotionStream MOTION CFG on top of that (s_motion*(v_full - v_text)).
@@ -185,13 +187,15 @@ class TrackValidationCallback(Callback):
         if not files:
             raise FileNotFoundError(f"no parquet under {data_path}")
 
-        rows: list[dict[str, Any]] = []
+        all_rows: list[dict[str, Any]] = []
         for f in files:
             tbl = pq.read_table(f)
-            rows.extend(tbl.to_pylist())
-            if len(rows) >= self.num_val_samples:
-                break
-        rows = rows[:self.num_val_samples]
+            all_rows.extend(tbl.to_pylist())
+
+        if self.val_sample_indices is not None:
+            rows = [all_rows[i] for i in self.val_sample_indices]
+        else:
+            rows = all_rows[:self.num_val_samples]
 
         text_len = int(tc.pipeline_config.text_encoder_configs[0].arch_config.text_len)
         batch = collate_rows_from_parquet_schema(rows,
@@ -241,15 +245,21 @@ class TrackValidationCallback(Callback):
             gen_logs: list[Any] = []
             notrack_logs: list[Any] = []
             nomocfg_logs: list[Any] = []
+            adv_logs: list[Any] = []
             ref_logs: list[Any] = []
             for i, s in enumerate(self._samples):
                 # Apply the SAME training-time sampler so the model sees the sampled subset
                 # (not the full 2500 grid) and the overlay shows those sampled points.
                 tp_s, tv_s = self._sampled_tracks(student, s)
+
+                # _sample() must run on ALL ranks because the transformer is FSDP-wrapped and
+                # requires all-gather collectives across ranks. VAE decode and everything after
+                # it is rank-0 only -- doing it on all ranks wastes 4x memory for no benefit and
+                # causes OOM crashes mid-validation.
                 gen_latents = self._sample(student, transformer, s, tp_s, tv_s)  # [1,16,T,H,W] normalized
-                gen_px = student.decode_latents(gen_latents.permute(0, 2, 1, 3, 4))[0]  # [3,T,H,W] in [0,1]
-                gen_frames = self._overlay_tracks(gen_px, s, tp_s, tv_s)
                 if self._is_main:
+                    gen_px = student.decode_latents(gen_latents.permute(0, 2, 1, 3, 4))[0]  # [3,T,H,W] in [0,1]
+                    gen_frames = self._overlay_tracks(gen_px, s, tp_s, tv_s)
                     fn = os.path.join(out_dir, f"step{step:06d}_sample{i}_gen.mp4")
                     imageio.mimsave(fn, gen_frames, fps=self.fps, macro_block_size=1)
                     art = self.tracker.video(fn, caption=f"[{step}] WITH-track {s['caption'][:110]}")
@@ -261,9 +271,9 @@ class TrackValidationCallback(Callback):
                 # much of the "gen" quality comes from motion CFG amplification vs the base model.
                 if self.paired_no_track:
                     nm_latents = self._sample(student, transformer, s, tp_s, tv_s, motion_cfg=False)
-                    nm_px = student.decode_latents(nm_latents.permute(0, 2, 1, 3, 4))[0]
-                    nm_frames = self._overlay_tracks(nm_px, s, tp_s, tv_s)
                     if self._is_main:
+                        nm_px = student.decode_latents(nm_latents.permute(0, 2, 1, 3, 4))[0]
+                        nm_frames = self._overlay_tracks(nm_px, s, tp_s, tv_s)
                         fn_nm = os.path.join(out_dir, f"step{step:06d}_sample{i}_nomotioncfg.mp4")
                         imageio.mimsave(fn_nm, nm_frames, fps=self.fps, macro_block_size=1)
                         art = self.tracker.video(fn_nm,
@@ -276,14 +286,28 @@ class TrackValidationCallback(Callback):
                 # matches the with-track video, the model is ignoring the tracks.
                 if self.paired_no_track:
                     nt_latents = self._sample(student, transformer, s, None, None)
-                    nt_px = student.decode_latents(nt_latents.permute(0, 2, 1, 3, 4))[0]
-                    nt_frames = self._overlay_tracks(nt_px, s, tp_s, tv_s)
                     if self._is_main:
+                        nt_px = student.decode_latents(nt_latents.permute(0, 2, 1, 3, 4))[0]
+                        nt_frames = self._overlay_tracks(nt_px, s, tp_s, tv_s)
                         fn_nt = os.path.join(out_dir, f"step{step:06d}_sample{i}_notrack.mp4")
                         imageio.mimsave(fn_nt, nt_frames, fps=self.fps, macro_block_size=1)
                         art = self.tracker.video(fn_nt, caption=f"[{step}] NO-track {s['caption'][:110]}")
                         if art is not None:
                             notrack_logs.append(art)
+
+                # ADVERSARIAL TRACK: same conditioning but motion negated around frame-0 position.
+                # If the model actually follows tracks, the generated motion should flip direction.
+                if self.paired_no_track:
+                    tp_adv, tv_adv = self._adversarial_tracks(tp_s, tv_s)
+                    adv_latents = self._sample(student, transformer, s, tp_adv, tv_adv)
+                    if self._is_main:
+                        adv_px = student.decode_latents(adv_latents.permute(0, 2, 1, 3, 4))[0]
+                        adv_frames = self._overlay_tracks(adv_px, s, tp_adv, tv_adv)
+                        fn_adv = os.path.join(out_dir, f"step{step:06d}_sample{i}_adversarial.mp4")
+                        imageio.mimsave(fn_adv, adv_frames, fps=self.fps, macro_block_size=1)
+                        art = self.tracker.video(fn_adv, caption=f"[{step}] ADVERSARIAL-track {s['caption'][:100]}")
+                        if art is not None:
+                            adv_logs.append(art)
 
                 # One-time ground-truth reference (VAE round-trip + same sampled tracks).
                 if not self._ref_logged and self._is_main:
@@ -301,15 +325,27 @@ class TrackValidationCallback(Callback):
                     logs["track_val/no_motion_cfg"] = nomocfg_logs
                 if notrack_logs:
                     logs["track_val/no_track"] = notrack_logs
+                if adv_logs:
+                    logs["track_val/adversarial_track"] = adv_logs
                 if ref_logs and not self._ref_logged:
                     logs["track_val/reference_gt"] = ref_logs
                 self.tracker.log_artifacts(logs, step)
                 self._ref_logged = True
-                logger.info("TrackValidation: logged %d gen + %d nomocfg + %d no-track videos at step %d",
-                            len(gen_logs), len(nomocfg_logs), len(notrack_logs), step)
+                logger.info("TrackValidation: logged %d gen + %d nomocfg + %d no-track + %d adversarial videos at step %d",
+                            len(gen_logs), len(nomocfg_logs), len(notrack_logs), len(adv_logs), step)
         finally:
             if was_training:
                 transformer.train()
+
+    def _adversarial_tracks(self, tp: torch.Tensor, tv: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Flip x coordinates: tp_adv[..., 0] = 1 - tp[..., 0].
+
+        Reflects all track positions horizontally across the frame center.
+        Visibility is preserved so the model sees the same temporal pattern but mirrored motion.
+        """
+        tp_adv = tp.clone()
+        tp_adv[..., 0] = (1.0 - tp[..., 0]).clamp(0.0, 1.0)
+        return tp_adv, tv
 
     def _sampled_tracks(self, student: Any, s: dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
         """Run the training-time track sampler (_augment_tracks) on this val sample, deterministically

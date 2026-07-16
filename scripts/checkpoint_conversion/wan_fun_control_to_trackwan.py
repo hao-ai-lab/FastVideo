@@ -123,16 +123,17 @@ def convert_names(src: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
 
 
 def build_track_encoder_state() -> dict[str, torch.Tensor]:
-    """temporal_conv (default init) + proj (ZERO). Zero proj is safe here -- see TRACK_CONFIG."""
-    temporal_conv = nn.Conv3d(ID_DIM, TRACK_CHANNELS, kernel_size=(VAE_T_COMP, 1, 1), stride=(VAE_T_COMP, 1, 1))
-    proj = nn.Conv3d(TRACK_CHANNELS, TRACK_CHANNELS, kernel_size=1)
+    """temporal_conv (default init) + proj (ZERO). Zero proj is safe here -- see TRACK_CONFIG.
+
+    bias=False matches TrackEncoder exactly; a bias here would cause a key-not-found crash at load.
+    """
+    temporal_conv = nn.Conv3d(ID_DIM, TRACK_CHANNELS, kernel_size=(VAE_T_COMP, 1, 1), stride=(VAE_T_COMP, 1, 1),
+                              bias=False)
+    proj = nn.Conv3d(TRACK_CHANNELS, TRACK_CHANNELS, kernel_size=1, bias=False)
     nn.init.zeros_(proj.weight)
-    nn.init.zeros_(proj.bias)
     return {
         "track_encoder.temporal_conv.weight": temporal_conv.weight.detach().clone(),
-        "track_encoder.temporal_conv.bias": temporal_conv.bias.detach().clone(),
         "track_encoder.proj.weight": proj.weight.detach().clone(),
-        "track_encoder.proj.bias": proj.bias.detach().clone(),
     }
 
 
@@ -211,9 +212,10 @@ def main() -> None:
         conv[k] = v.to(dtype)
     print(f"[convert] patch_embedding -> {tuple(conv['patch_embedding.weight'].shape)}; +4 track_encoder tensors")
 
-    # 6) Symlink every base entry except transformer/.
+    # 6) Symlink every base entry except transformer/ and model_index.json.
+    # model_index.json is written explicitly below with the correct class name.
     for entry in os.listdir(base):
-        if entry == "transformer":
+        if entry in ("transformer", "model_index.json"):
             continue
         src = (base / entry).resolve()
         dst = out / entry
@@ -223,6 +225,22 @@ def main() -> None:
             else:
                 dst.unlink()
         os.symlink(src, dst)
+
+    # Write model_index.json with WanImageToVideoPipeline so the FastVideo
+    # registry can resolve this checkpoint (the Fun-InP base uses
+    # WanGameActionImageToVideoPipeline which is not registered for preprocess).
+    model_index = {
+        "_class_name": "WanImageToVideoPipeline",
+        "_diffusers_version": "0.33.0.dev0",
+        "image_encoder": ["transformers", "CLIPVisionModelWithProjection"],
+        "image_processor": ["transformers", "CLIPImageProcessor"],
+        "scheduler": ["diffusers", "UniPCMultistepScheduler"],
+        "text_encoder": ["transformers", "UMT5EncoderModel"],
+        "tokenizer": ["transformers", "T5TokenizerFast"],
+        "transformer": ["diffusers", "WanTransformer3DModel"],
+        "vae": ["diffusers", "AutoencoderKLWan"],
+    }
+    (out / "model_index.json").write_text(json.dumps(model_index, indent=2))
 
     # 7) Write transformer config (Fun-InP diffusers arch == Fun-Control arch) + our fields.
     tdir = out / "transformer"
