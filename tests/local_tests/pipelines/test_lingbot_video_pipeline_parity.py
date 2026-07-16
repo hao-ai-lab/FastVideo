@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import gc
+import json
 import os
 from pathlib import Path
 from typing import Any, cast
@@ -20,8 +21,7 @@ from tests.local_tests.lingbot_video.hf_assets import (
     materialize_component_view,
 )
 
-PROMPT = "A red fox runs through fresh snow at sunrise."
-NEGATIVE_PROMPT = '{"universal_negative": {"visual_quality": ["low quality", "blurry"]}}'
+PROMPT_PATH = Path(__file__).parents[1] / "lingbot_video" / "t2v_example_1_prompt.json"
 HEIGHT = int(os.environ.get("LINGBOT_VIDEO_PARITY_HEIGHT", "32"))
 WIDTH = int(os.environ.get("LINGBOT_VIDEO_PARITY_WIDTH", "32"))
 NUM_FRAMES = int(os.environ.get("LINGBOT_VIDEO_PARITY_NUM_FRAMES", "1"))
@@ -34,8 +34,18 @@ PARITY_VARIANT = os.environ.get("LINGBOT_VIDEO_PARITY_VARIANT", "dense")
 BATCH_CFG = os.environ.get("LINGBOT_VIDEO_PARITY_BATCH_CFG") == "1"
 PARITY_OUTPUT_TYPE = os.environ.get("LINGBOT_VIDEO_PARITY_OUTPUT_TYPE", "latent")
 DETERMINISTIC = os.environ.get("LINGBOT_VIDEO_PARITY_DETERMINISTIC") == "1"
+BATCH_CFG_MIN_SSIM = 0.78
 BATCH_CFG_PIXEL_MAX_ABS = 3e-3
 BATCH_CFG_PIXEL_MEAN_ABS = 6e-4
+
+
+def _load_structured_prompt() -> str:
+    """Load the released LingBot T2V example in the format expected by Qwen3-VL."""
+    sample = json.loads(PROMPT_PATH.read_text(encoding="utf-8"))
+    return str(sample["caption"]["comprehensive_description"])
+
+
+PROMPT = _load_structured_prompt()
 
 
 def _as_channel_first_tensor(value: Any) -> torch.Tensor:
@@ -80,8 +90,28 @@ def _require_gpu_test() -> None:
         pytest.skip(f"LingBot-Video pipeline parity requires {NUM_GPUS} CUDA devices")
 
 
-def _run_official(latents: torch.Tensor, model_dir: Path) -> tuple[torch.Tensor, bool]:
+def _mean_frame_ssim(actual: torch.Tensor, expected: torch.Tensor) -> float:
+    """Measure visible frame similarity without introducing MP4 encoding loss."""
+    from pytorch_msssim import ssim
+
+    actual_frames = actual.permute(0, 2, 1, 3, 4).flatten(0, 1).clamp(0, 1)
+    expected_frames = expected.permute(0, 2, 1, 3, 4).flatten(0, 1).clamp(0, 1)
+    scores = []
+    for start in range(0, actual_frames.shape[0], 8):
+        frame_slice = slice(start, start + 8)
+        scores.append(
+            ssim(
+                actual_frames[frame_slice].cuda(),
+                expected_frames[frame_slice].cuda(),
+                data_range=1.0,
+                size_average=False,
+            ).cpu())
+    return torch.cat(scores).mean().item()
+
+
+def _run_official(latents: torch.Tensor, model_dir: Path) -> tuple[torch.Tensor, bool, str]:
     """Run the released production loader with the configured parity dimensions."""
+    from lingbot_video.pipeline_lingbot_video import DEFAULT_NEGATIVE_PROMPT
     from lingbot_video.runner import _load_diffusers_pipe
     from lingbot_video.transformer_lingbot_video import flash_attn_varlen_func_v3
 
@@ -104,7 +134,7 @@ def _run_official(latents: torch.Tensor, model_dir: Path) -> tuple[torch.Tensor,
         with torch.inference_mode():
             output = pipe(
                 prompt=PROMPT,
-                negative_prompt=NEGATIVE_PROMPT,
+                negative_prompt=DEFAULT_NEGATIVE_PROMPT,
                 height=HEIGHT,
                 width=WIDTH,
                 num_frames=NUM_FRAMES,
@@ -117,14 +147,19 @@ def _run_official(latents: torch.Tensor, model_dir: Path) -> tuple[torch.Tensor,
                 batch_cfg=official_batch_cfg,
                 return_dict=True,
             )
-        return _as_channel_first_tensor(output.frames), official_batch_cfg
+        return _as_channel_first_tensor(output.frames), official_batch_cfg, DEFAULT_NEGATIVE_PROMPT
     finally:
         del pipe
         gc.collect()
         torch.cuda.empty_cache()
 
 
-def _run_fastvideo(latents: torch.Tensor, model_dir: Path, output_dir: Path) -> torch.Tensor:
+def _run_fastvideo(
+    latents: torch.Tensor,
+    model_dir: Path,
+    output_dir: Path,
+    negative_prompt: str,
+) -> torch.Tensor:
     """Run the converted native pipeline with the same prompt, seed, shape, and schedule."""
     from fastvideo import VideoGenerator
 
@@ -156,7 +191,7 @@ def _run_fastvideo(latents: torch.Tensor, model_dir: Path, output_dir: Path) -> 
                 assert backend["math"] is True
         result = generator.generate_video(
             prompt=PROMPT,
-            negative_prompt=NEGATIVE_PROMPT,
+            negative_prompt=negative_prompt,
             output_path=str(output_dir),
             save_video=False,
             return_frames=True,
@@ -242,8 +277,8 @@ def test_lingbot_video_pipeline_matches(tmp_path: Path) -> None:
         torch.backends.cuda.enable_mem_efficient_sdp(False)
         torch.backends.cuda.enable_math_sdp(True)
     try:
-        expected, official_batch_cfg = _run_official(latents, official_root)
-        actual = _run_fastvideo(latents, fastvideo_root, tmp_path)
+        expected, official_batch_cfg, negative_prompt = _run_official(latents, official_root)
+        actual = _run_fastvideo(latents, fastvideo_root, tmp_path, negative_prompt)
     finally:
         torch.backends.cuda.enable_cudnn_sdp(original_sdp_backends[0])
         torch.backends.cuda.enable_flash_sdp(original_sdp_backends[1])
@@ -256,10 +291,17 @@ def test_lingbot_video_pipeline_matches(tmp_path: Path) -> None:
     assert actual.shape == expected.shape
     drift = (actual - expected).abs()
     print(f"pipeline_max_abs={drift.max().item():.8f} pipeline_mean_abs={drift.mean().item():.8f}")
-    if BATCH_CFG and not official_batch_cfg:
-        if PARITY_OUTPUT_TYPE != "np" or not FORCE_MATH_SDPA:
-            raise ValueError("the dependency-free batched-CFG semantic gate requires decoded pixels and math SDPA")
-        assert drift.max().item() <= BATCH_CFG_PIXEL_MAX_ABS
-        assert drift.mean().item() <= BATCH_CFG_PIXEL_MEAN_ABS
-    else:
+    if not BATCH_CFG:
         assert torch.equal(actual, expected)
+        return
+    if PARITY_OUTPUT_TYPE != "np":
+        raise ValueError("the batched-CFG semantic gate requires decoded pixels")
+    if official_batch_cfg:
+        mean_ssim = _mean_frame_ssim(actual, expected)
+        print(f"pipeline_mean_ssim={mean_ssim:.8f}")
+        assert mean_ssim >= BATCH_CFG_MIN_SSIM
+        return
+    if not FORCE_MATH_SDPA:
+        raise ValueError("the dependency-free batched-CFG semantic gate requires math SDPA")
+    assert drift.max().item() <= BATCH_CFG_PIXEL_MAX_ABS
+    assert drift.mean().item() <= BATCH_CFG_PIXEL_MEAN_ABS

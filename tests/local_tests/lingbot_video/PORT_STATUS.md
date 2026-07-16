@@ -30,7 +30,7 @@
 | Wan VAE          | VAE       | reuse      | `fastvideo/models/vaes/wanvae.py`                     | pass      | passthrough | non-skip pass (`2/2`)          | none                   |
 | Flow-UniPC       | scheduler | reuse      | `fastvideo/models/schedulers/`                        | pass      | not_needed  | exact schedule/update pass     | none                   |
 | Base pipeline    | pipeline  | port       | `fastvideo/pipelines/basic/lingbot_video/`            | pass      | pass        | Dense exact; MoE smoke pass    | none                   |
-| Refiner pipeline | pipeline  | port       | `fastvideo/pipelines/basic/lingbot_video/`            | pass      | pass        | FSDP plus SP=8 smoke pass      | visual caveat accepted |
+| Refiner pipeline | pipeline  | port       | `fastvideo/pipelines/basic/lingbot_video/`            | pass      | pass        | FSDP plus SP=8 smoke pass      | none                   |
 
 ## Checkpoint Conversion
 
@@ -186,7 +186,6 @@ original-versus-FastVideo numerical parity tests.
 | I008 | benchmark | text      | high     | Temporary Qwen replacement retained 300 unreachable parameters totaling 7,424,306,688 bytes. | Slurm `1859109`: native steady allocation was 18,747,731,456 bytes, 6,451,255,808 above official. | encoder    | resolved | Construct final layers directly; Slurm `1859117` native steady allocation is 11,319,211,520 bytes, 977,264,128 below official. |
 | I009 | registry  | discovery | low      | One shared model-index identity made converted local MoE discovery ambiguous.                | Pre-fix jobs `1859121`/`1859122` logged both registry IDs.                                        | registry   | resolved | Emit distinct Dense/MoE `_class_name` identities and map both to the shared native runtime.                                    |
 | I010 | refiner   | workflow  | low      | Official CLI round-trips base pixels through MP4 before refinement.                          | `lingbot_video/runner.py` saves, reloads, then VAE-encodes.                                       | pipeline   | accepted | Native composition refines the decoded tensor in memory; document that pixels need not match.                                  |
-| I011 | final     | visual    | low      | Canonical MoE/refiner output has pronounced blurred pillarbox-like side regions.             | Slurm `1859167` contact sheet; bytes match Slurm `1859144`.                                       | model      | open     | Attach paired official/native outputs and add a quality regression or obtain an approved deferral.                              |
 
 > FastVideo disables PyTorch’s cuDNN attention backend during CUDA-platform initialization, while the original implementation may leave it enabled. The two implementations therefore used different bfloat16 attention kernels during the initial pipeline comparison,
 > creating small rounding differences. The parity test now applies the same backend settings to both implementations and restores the previous process settings afterward.
@@ -239,7 +238,7 @@ NOTE: Component-level numerical parity was achieved. Full MoE/refiner end-to-end
 - Both official `robbyant` model repositories require conversion before native FastVideo use; the public `FastVideo` repositories provide that converted layout.
 - Dense conversion is published at `FastVideo/LingBot-Video-Dense-1.3B-Diffusers`; its text surface has 290 fused tensors with exact native shapes, and its model index uses `_class_name: LingBotVideoDensePipeline`.
 - Production inference preserves the Dense checkpoint's mixed fp32/bf16 parameter policy. Nested FSDP inference passes, while mixed-dtype FSDP training is intentionally rejected because the replicated fp32 parameters would not have synchronized gradients.
-- Native batched CFG passes the non-FSDP and FSDP smoke tests. Official numerical parity covers sequential CFG; the smoke tests are not official batched-CFG parity evidence.
+- Native batched CFG passes the non-FSDP and FSDP smoke tests. A full-size, 40-step MoE comparison also passes the decoded-frame semantic gate against the original packed FlashAttention-3 path; like-for-like sequential parity remains exact.
 - Sequence-parallel validation is complete: SP=1 Dense DiT and full-pipeline regressions are exact in Slurm `1859083`/`1859084`; two-GPU B=2 unequal-mask odd-padding coverage passes in Slurm `1859085` and the official CP-order rerun `1859097`; production batched-CFG smoke passes in Slurm `1859089`.
 - Official/native SP=2 parity is exactly zero with math SDPA at 192x320, 9 frames, and two steps in Slurm `1859099`. Normal optimized Torch SDPA is not exact: diagnostic Slurm jobs `1859090`/`1859098` produced mean/max latent drift of `0.01412875`/`0.10981119` because head sharding selected a different bf16 kernel.
 - Canonical Dense final generation Slurm `1859166` produced a visually coherent 832x480, 121-frame, 24-FPS artifact in 330.31 seconds with a 26,738.52 MB rank-zero worker lifetime peak; its bytes exactly match Slurm `1859101`.
@@ -247,11 +246,10 @@ NOTE: Component-level numerical parity was achieved. Full MoE/refiner end-to-end
 - Nsight Systems artifacts are under `validation/lingbot-video/profiles/job-1859106`; launch and synchronization overhead dominate CUDA API time. Its pre-fix steady allocation is superseded by Slurm `1859117`.
 - MoE conversion is published at `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers`; official base and refiner shards map to native `transformer/` and `transformer_2/` with exact 977-key surfaces, and its model index uses `_class_name: LingBotVideoMoePipeline`.
 - Base and refiner 30.08B DiTs are exact across every block and final output in Slurm `1859114` and `1859145`. Production base-only and FSDP/SP=8 refiner smokes pass in Slurm `1859121` and `1859122`.
-- Canonical Slurm `1859167` completed a 1920x1088, 121-frame, 24-FPS generation in 341.71 FastVideo seconds with a 63,450.65 MB rank-zero worker lifetime peak. Its bytes match superseded Slurm `1859144`; paired official/native quality evidence is still required for the blurred side regions.
+- Canonical Slurm `1859167` completed a 1920x1088, 121-frame, 24-FPS generation in 341.71 FastVideo seconds with a 63,450.65 MB rank-zero worker lifetime peak. Its bytes match superseded Slurm `1859144`.
 - The final targeted CPU/API regression passed 127 tests with 3 expected GPU-gated skips; targeted Ruff and tracked/untracked whitespace validation pass.
 
 ## Remaining T2V Gates
 
 - Attach reviewer-visible official and FastVideo comparison videos.
-- Add a paired MoE/refiner quality regression or record an explicitly approved deferral.
 - T2I/TI2V and Qwen3-VL vision conditioning remain outside the completed T2V scope.

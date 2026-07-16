@@ -27,19 +27,19 @@ Comparing official Lingbot-Video impl vs. FastVideo impl.
 | MoE transformer block        | Official versus FastVideo real-checkpoint block comparison | Exact parity                                |
 | MoE base transformer         | Full 48-block sequential comparison                        | Exact parity                                |
 | MoE refiner transformer      | Full 48-block sequential comparison                        | Exact parity                                |
-| Dense production pipeline    | Batched-CFG decoded-pixel semantic comparison              | Passes with max absolute drift below 0.003  |
+| MoE production pipeline      | Full-size, 40-step batched-CFG frame comparison            | Mean SSIM exceeds 0.78                      |
 | MoE base pipeline parity     | Full-size, 40-step sequential-CFG decoded-pixel comparison | Exact parity                                |
 | MoE base pipeline            | Batched CFG over five frames and two denoising steps       | Pass                                        |
 | MoE plus refiner pipeline    | Five-frame, two-step base-to-refiner handoff               | Pass                                        |
 | Final generated MP4          | Production generation and decode                           | Generation pass; no exact end-to-end parity |
 | T2I, TI2V, and vision branch | Not implemented by this T2V port                           | Outside current scope                       |
 
-The original repository's batched classifier-free guidance (CFG) path requires
-an optional FlashAttention-3 variable-length kernel. Without that kernel, the
-Dense pipeline test uses the original sequential-CFG output as the numerical
-oracle and compares it with FastVideo's batched-CFG output. This semantic check
-uses deterministic math SDPA and allows at most 0.003 absolute decoded-pixel
-drift; like-for-like component parity remains bit-exact.
+The production batched classifier-free guidance (CFG) comparison uses the
+original repository's packed FlashAttention-3 path and FastVideo's padded Torch
+SDPA path. Because those kernels have different bfloat16 rounding, this test
+compares decoded frames with a mean SSIM threshold of 0.78 instead of requiring
+identical pixels. Like-for-like sequential component and pipeline parity remains
+bit-exact.
 
 ### One NOTE:
 Parity is established by pairing the official and FastVideo implementations of
@@ -259,25 +259,31 @@ sequence-parallel comparison. With optimized SDPA, head sharding can select a
 different bf16 attention kernel; that kernel-choice difference creates small
 numerical drift even when the sequence-parallel data movement is correct.
 
-Run the dependency-free Dense batched-CFG semantic gate with:
+Run the full-size MoE batched-CFG semantic gate with:
 
 ```bash
 LINGBOT_VIDEO_RUN_GPU_TESTS=1 \
-LINGBOT_VIDEO_PARITY_VARIANT=dense \
+LINGBOT_VIDEO_PARITY_VARIANT=moe \
 LINGBOT_VIDEO_PARITY_BATCH_CFG=1 \
+LINGBOT_VIDEO_PARITY_HEIGHT=480 \
+LINGBOT_VIDEO_PARITY_WIDTH=832 \
+LINGBOT_VIDEO_PARITY_NUM_FRAMES=121 \
+LINGBOT_VIDEO_PARITY_NUM_INFERENCE_STEPS=40 \
 LINGBOT_VIDEO_PARITY_OUTPUT_TYPE=np \
 LINGBOT_VIDEO_PARITY_DETERMINISTIC=1 \
-LINGBOT_VIDEO_PARITY_FORCE_MATH_SDPA=1 \
   $PY -m pytest -v -s \
   tests/local_tests/pipelines/test_lingbot_video_pipeline_parity.py
 ```
 
 The original repository implements batched CFG with the optional
 `flash_attn_interface.flash_attn_varlen_func` kernel. When that kernel is
-available, both sides run batched CFG. When it is unavailable, the test prints
-the reason and uses the original repository's sequential-CFG result as the
-numerical oracle while FastVideo still runs batched CFG. This fallback exists
-only in the parity test; it does not change either production pipeline.
+available, both sides run batched CFG and the test compares decoded frames with
+SSIM. When it is unavailable, the test prints the reason and uses the original
+repository's sequential-CFG result as the numerical oracle while FastVideo
+still runs batched CFG; that dependency-free fallback requires
+`LINGBOT_VIDEO_PARITY_FORCE_MATH_SDPA=1` and uses tight pixel-drift thresholds.
+The fallback exists only in the parity test and does not change either
+production pipeline.
 
 For a bit-exact, full-size MoE base comparison, keep both sides on sequential
 CFG:
