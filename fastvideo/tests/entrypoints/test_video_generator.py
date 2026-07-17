@@ -1,6 +1,7 @@
 import os
-from types import SimpleNamespace
+import threading
 import warnings
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -272,6 +273,48 @@ def test_generate_single_video_metadata_only_skips_output_materialization(monkey
     assert result["video_path"] is None
     assert result["peak_memory_mb"] == 42.0
     assert empty_calls == [((0,), {"device": "cpu"})]
+
+
+def test_run_forward_batch_overlaps_pixel_allocation_with_forward(monkeypatch):
+    generator = _new_video_generator()
+    forward_started = threading.Event()
+    allocation_started = threading.Event()
+    expected_shape = (1, 3, 2, 16, 16)
+
+    def execute_forward(batch, fastvideo_args):
+        forward_started.set()
+        assert allocation_started.wait(timeout=5)
+        return ForwardBatch(data_type=batch.data_type, output=torch.ones(expected_shape))
+
+    generator.executor = SimpleNamespace(execute_forward=execute_forward)
+    real_empty = video_generator_module.torch.empty
+
+    def track_empty(shape, *args, **kwargs):
+        if shape == expected_shape:
+            assert forward_started.wait(timeout=5)
+            allocation_started.set()
+        return real_empty(shape, *args, **kwargs)
+
+    monkeypatch.setattr(video_generator_module.torch, "empty", track_empty)
+    batch = ForwardBatch(
+        data_type="video",
+        prompt="overlap",
+        height=16,
+        width=16,
+        num_frames=2,
+        save_video=False,
+        return_frames=True,
+    )
+
+    output_batch, _, _ = generator._run_forward_batch(
+        batch,
+        _single_video_args(),
+    )
+
+    assert allocation_started.is_set()
+    assert output_batch.output is not None
+    assert output_batch.output.shape == expected_shape
+    assert output_batch.output.device.type == "cpu"
 
 
 def test_generate_single_video_return_frames_still_materializes_output(tmp_path):

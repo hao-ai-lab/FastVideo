@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -65,11 +66,11 @@ class BatchingRule:
             model=_optional_str(data.get("model")),
             model_contains=_optional_str(data.get("model_contains")),
             resolution=_optional_str(data.get("resolution")),
-            device_memory_gb_min=_optional_float(data.get("device_memory_gb_min")),
-            device_memory_gb_max=_optional_float(data.get("device_memory_gb_max")),
+            device_memory_gb_min=_optional_float(data.get("device_memory_gb_min"), field_name="device_memory_gb_min"),
+            device_memory_gb_max=_optional_float(data.get("device_memory_gb_max"), field_name="device_memory_gb_max"),
             offload=_optional_bool(data.get("offload")),
-            max_batch_size=int(data["max_batch_size"]),
-            max_cost=_optional_float(data.get("max_cost")),
+            max_batch_size=_exact_int(data["max_batch_size"], field_name="max_batch_size"),
+            max_cost=_optional_float(data.get("max_cost"), field_name="max_cost"),
             source=source,
         )
         rule.validate()
@@ -82,8 +83,19 @@ class BatchingRule:
             raise ValueError("batching config rule requires model or model_contains")
         if self.max_batch_size < 1:
             raise ValueError("batching config rule max_batch_size must be >= 1")
-        if self.max_cost is not None and self.max_cost <= 0.0:
-            raise ValueError("batching config rule max_cost must be > 0")
+        if self.max_cost is not None:
+            if not math.isfinite(self.max_cost):
+                raise ValueError("batching config rule max_cost must be finite")
+            if self.max_cost <= 0.0:
+                raise ValueError("batching config rule max_cost must be > 0")
+        for field_name, value in (
+            ("device_memory_gb_min", self.device_memory_gb_min),
+            ("device_memory_gb_max", self.device_memory_gb_max),
+        ):
+            if value is not None and not math.isfinite(value):
+                raise ValueError(f"batching config rule {field_name} must be finite")
+            if value is not None and value < 0.0:
+                raise ValueError(f"batching config rule {field_name} must be >= 0")
         if (self.device_memory_gb_min is not None and self.device_memory_gb_max is not None
                 and self.device_memory_gb_min > self.device_memory_gb_max):
             raise ValueError("batching config rule device_memory_gb_min must be <= device_memory_gb_max")
@@ -249,10 +261,21 @@ def _optional_str(value: Any) -> str | None:
     return str(value)
 
 
-def _optional_float(value: Any) -> float | None:
+def _exact_int(value: Any, *, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"batching config rule {field_name} must be an integer")
+    return value
+
+
+def _optional_float(value: Any, *, field_name: str) -> float | None:
     if value is None:
         return None
-    return float(value)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"batching config rule {field_name} must be a number")
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"batching config rule {field_name} must be finite")
+    return parsed
 
 
 def _optional_bool(value: Any) -> bool | None:

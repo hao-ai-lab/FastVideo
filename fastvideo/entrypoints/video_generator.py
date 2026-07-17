@@ -947,9 +947,33 @@ class VideoGenerator:
                 thread_error["error"] = error
                 thread_error_traceback["traceback"] = traceback.format_exc()
 
+        is_latent_output = fastvideo_args.output_type == "latent"
+        needs_pixel_output = batch.return_frames or (batch.save_video and not is_latent_output)
+        expected_shape: tuple[int, ...] | None = None
+        if needs_pixel_output and not is_latent_output:
+            if not isinstance(batch.height, int) or not isinstance(batch.width, int) or not isinstance(
+                    batch.num_frames, int):
+                raise ValueError("Pixel output dimensions must be scalar integers")
+            expected_shape = (
+                _infer_latent_batch_size(batch),
+                3,
+                batch.num_frames,
+                batch.height,
+                batch.width,
+            )
+
         thread = threading.Thread(target=execute_forward_thread)
+        samples: torch.Tensor | None = None
         thread.start()
-        thread.join()
+        try:
+            if expected_shape is not None:
+                samples = torch.empty(
+                    expected_shape,
+                    device="cpu",
+                    pin_memory=fastvideo_args.pin_cpu_memory,
+                )
+        finally:
+            thread.join()
 
         if thread_error["error"] is not None:
             raise RuntimeError("Forward execution thread failed.\n"
@@ -959,6 +983,18 @@ class VideoGenerator:
         if output_batch.output is None:
             raise RuntimeError("Forward execution returned no output tensor. "
                                "This usually means the executor/pipeline failed earlier.")
+
+        if samples is not None and not output_batch.extra.get("audio_only"):
+            if output_batch.output.shape == samples.shape:
+                samples.copy_(output_batch.output)
+                output_batch.output = samples
+            else:
+                logger.warning(
+                    "Output shape %s does not match expected shape %s; use slow path",
+                    output_batch.output.shape,
+                    samples.shape,
+                )
+                output_batch.output = output_batch.output.cpu()
 
         gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
@@ -983,6 +1019,8 @@ class VideoGenerator:
         if not needs_frame_output or (audio_only and not batch.return_frames):
             return torch.empty(0, device="cpu")
         if audio_only or is_latent_output:
+            return output.cpu()
+        if output.device.type == "cpu":
             return output.cpu()
 
         latent_batch_size = _infer_latent_batch_size(work_item.batch)

@@ -247,6 +247,44 @@ def test_run_crash_fails_inflight_and_queued_futures(tmp_path):
         assert "crashed" in str(result)
 
 
+def test_dispatch_cancellation_fails_every_collected_future(tmp_path):
+
+    async def run():
+        scheduler = VideoBatchScheduler(_FakeBatchGenerator(), _batch_scheduler_args())
+        dispatch_started = asyncio.Event()
+        dispatched_prompts = []
+
+        async def block_dispatch(batch):
+            dispatched_prompts.extend(job.kwargs["prompt"] for job in batch)
+            dispatch_started.set()
+            await asyncio.Event().wait()
+
+        scheduler._dispatch = block_dispatch  # type: ignore[method-assign]
+        await scheduler.start()
+        submitted = [
+            asyncio.ensure_future(scheduler.submit(f"req-{index}", _job_kwargs(tmp_path, index)))
+            for index in (1, 2)
+        ]
+        await asyncio.wait_for(dispatch_started.wait(), timeout=10)
+        assert scheduler._task is not None
+        scheduler._task.cancel()
+
+        results = await asyncio.wait_for(
+            asyncio.gather(*submitted, return_exceptions=True),
+            timeout=10,
+        )
+        await scheduler.stop()
+        return dispatched_prompts, results
+
+    dispatched_prompts, results = asyncio.run(run())
+
+    assert dispatched_prompts == ["p1", "p2"]
+    assert len(results) == 2
+    for result in results:
+        assert isinstance(result, RuntimeError)
+        assert "crashed" in str(result)
+
+
 def test_scheduler_start_rejects_pipeline_without_capability(tmp_path):
 
     async def run():

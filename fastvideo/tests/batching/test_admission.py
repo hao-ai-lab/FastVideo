@@ -47,6 +47,62 @@ def test_batching_rule_parses_numeric_bool_values(value, expected) -> None:
     assert rule.offload is expected
 
 
+@pytest.mark.parametrize("value", [True, False, 2.0, 2.5, "2"])
+def test_batching_rule_requires_exact_integer_max_batch_size(value) -> None:
+    with pytest.raises(ValueError, match="max_batch_size must be an integer"):
+        BatchingRule.from_dict(
+            {
+                "model_contains": "wan",
+                "max_batch_size": value,
+            },
+            source="unit",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("max_cost", float("nan")),
+        ("max_cost", float("inf")),
+        ("device_memory_gb_min", float("-inf")),
+        ("device_memory_gb_max", float("nan")),
+    ],
+)
+def test_batching_rule_rejects_non_finite_limits(field_name, value) -> None:
+    data = {
+        "model_contains": "wan",
+        "max_batch_size": 2,
+        field_name: value,
+    }
+
+    with pytest.raises(ValueError, match=rf"{field_name} must be finite"):
+        BatchingRule.from_dict(data, source="unit")
+
+
+@pytest.mark.parametrize("field_name", ["device_memory_gb_min", "device_memory_gb_max"])
+def test_batching_rule_rejects_negative_memory_limits(field_name) -> None:
+    data = {
+        "model_contains": "wan",
+        "max_batch_size": 2,
+        field_name: -1,
+    }
+
+    with pytest.raises(ValueError, match=rf"{field_name} must be >= 0"):
+        BatchingRule.from_dict(data, source="unit")
+
+
+@pytest.mark.parametrize("field_name", ["max_cost", "device_memory_gb_min", "device_memory_gb_max"])
+def test_batching_rule_rejects_boolean_float_limits(field_name) -> None:
+    data = {
+        "model_contains": "wan",
+        "max_batch_size": 2,
+        field_name: True,
+    }
+
+    with pytest.raises(ValueError, match=rf"{field_name} must be a number"):
+        BatchingRule.from_dict(data, source="unit")
+
+
 def test_load_batching_config_supports_mapping_form(tmp_path) -> None:
     path = tmp_path / "batching.json"
     path.write_text(
