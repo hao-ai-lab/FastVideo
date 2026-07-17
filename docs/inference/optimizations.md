@@ -18,6 +18,8 @@ This page describes the various options for speeding up generation times in Fast
 
 - [torch.compile](#torch-compile)
 
+- [Dynamic Request Batching](#dynamic-request-batching)
+
 ## Attention Backends
 
 ### Available Backends
@@ -386,6 +388,46 @@ print(f"compiled steady-state: {time.perf_counter() - t0:.2f}s")
 
 See `examples/inference/optimizations/torch_compile_example.py` for a
 baseline-vs-compile A/B with the warmup correctly excluded.
+
+## Dynamic Request Batching
+
+Dynamic request batching combines adjacent compatible text-to-video requests
+into one pipeline forward. It is opt-in and is currently supported only by
+pipeline configurations that explicitly enable dynamic batching, including the
+standard Wan denoising path. DMD, causal denoising, and requests with different
+generation shapes or conditioning inputs run separately.
+
+```python
+from fastvideo import VideoGenerator
+
+generator = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    batching_mode="dynamic",
+    batching_max_size=4,
+    batching_delay_ms=10.0,
+)
+```
+
+`batching_max_size` is a hard user limit. GPU memory use grows with the
+admitted batch, so start with a conservative value. A JSON `batching_config`
+can impose lower model-, resolution-, memory-, or cost-specific limits. The
+configuration is parsed and validated when the generator starts.
+
+Each request keeps its own seed and initial noise. The generated latent is not
+guaranteed to be bit-identical to a sequential run, however: BF16 operations
+and GPU kernels may use batch-size-dependent execution paths. Consequently,
+the same seed can produce a slightly different result depending on which other
+requests are admitted at the same time. Use `batching_mode="disabled"` when
+strict seed-for-seed reproducibility across server load is required.
+
+Prompt files and the OpenAI-compatible server isolate failures after a merged
+forward fails by retrying each request separately. This preserves successful
+results, but a failed merged attempt can increase latency for that group.
+
+Dynamic batching with `batching_max_size=1` behaves sequentially and logs a
+warning. `num_videos_per_prompt` values greater than 1 are not currently
+supported because the denoising prompt embeddings are not expanded to match
+the additional latents.
 
 ## Benchmarking different optimizations
 

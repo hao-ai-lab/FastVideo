@@ -196,6 +196,10 @@ case "$TEST_TYPE" in
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run "
         MODAL_COMMAND+="$MODAL_SSIM_TEST_FILE::run_ssim_tests$SSIM_BOOTSTRAP_ARGS"
         ;;
+    "dynamic_batching_parity")
+        log "Running dynamic batching parity gate..."
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_dynamic_batching_parity"
+        ;;
     "training")
         log "Running training tests..."
         MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests"

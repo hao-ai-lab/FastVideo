@@ -63,6 +63,25 @@ def test_load_batching_config_supports_mapping_form(tmp_path) -> None:
     assert rules[0].max_cost == 9.0
 
 
+def test_load_batching_config_rejects_non_list_rules(tmp_path) -> None:
+    path = tmp_path / "batching.json"
+    path.write_text('{"schema_version": 1, "rules": {"model": "wan"}}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="rules must be a list"):
+        load_batching_config(str(path))
+
+
+def test_load_batching_config_rejects_unused_calibration_field(tmp_path) -> None:
+    path = tmp_path / "batching.json"
+    path.write_text(
+        '{"rules": [{"model": "wan", "max_batch_size": 2, "calibration": "unimplemented"}]}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="unknown key.*calibration"):
+        load_batching_config(str(path))
+
+
 def test_admission_controller_applies_user_and_config_caps(tmp_path, monkeypatch) -> None:
     path = tmp_path / "batching.json"
     path.write_text(
@@ -87,3 +106,5 @@ def test_admission_controller_applies_user_and_config_caps(tmp_path, monkeypatch
     assert controller.enabled is True
     assert controller.max_admissible_batch_size(request) == 3
     assert controller.batch_is_full([request, request, request]) is True
+    assert controller.reject_reason_for_candidate([request, request, request], request) == "config_cap:3"
+    assert controller.reject_reason_for_candidate([request, request], request) is None

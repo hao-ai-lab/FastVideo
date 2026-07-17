@@ -44,6 +44,20 @@ except ImportError:
 logger = init_logger(__name__)
 
 
+def _validate_denoising_batch_size(
+    latents: torch.Tensor,
+    prompt_embeds: list[Any],
+    *,
+    name: str,
+) -> None:
+    latent_batch_size = latents.shape[0]
+    prompt_batch_size = prompt_embeds[0].shape[0]
+    if latent_batch_size != prompt_batch_size:
+        raise ValueError(
+            f"Denoising batch size mismatch: latents have batch size {latent_batch_size}, but {name} have "
+            f"batch size {prompt_batch_size}. num_videos_per_prompt values greater than 1 are not supported.")
+
+
 class DenoisingStage(PipelineStage):
     """
     Stage for running the denoising loop in diffusion pipelines.
@@ -228,6 +242,7 @@ class DenoisingStage(PipelineStage):
         else:
             prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
+        _validate_denoising_batch_size(latents, prompt_embeds, name="prompt embeddings")
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
@@ -239,6 +254,7 @@ class DenoisingStage(PipelineStage):
             else:
                 neg_prompt_embeds = batch.negative_prompt_embeds
             assert not torch.isnan(neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
+            _validate_denoising_batch_size(latents, neg_prompt_embeds, name="negative prompt embeddings")
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
         boundary_ratio = fastvideo_args.pipeline_config.dit_config.boundary_ratio

@@ -105,6 +105,17 @@ steps:
             limit: 2
       agents:
         queue: "default"
+    - label: ":bar_chart: Dynamic Batching Parity"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "dynamic_batching_parity"
+      command: "timeout 45m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
     - label: ":test_tube: LoRA Inference Tests"
       if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_lora"
       command: "timeout 90m .buildkite/scripts/pr_test.sh"
@@ -312,6 +323,29 @@ steps:
                 agents:
                   queue: "default"
             - path:
+                - "fastvideo/batching/**"
+                - "fastvideo/configs/pipelines/**"
+                - "fastvideo/entrypoints/video_generator.py"
+                - "fastvideo/entrypoints/openai/**"
+                - "fastvideo/pipelines/stages/input_validation.py"
+                - "fastvideo/pipelines/stages/text_encoding.py"
+                - "fastvideo/pipelines/stages/latent_preparation.py"
+                - "fastvideo/pipelines/stages/denoising.py"
+                - "fastvideo/tests/batching/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile"
+              config:
+                command: "timeout 45m .buildkite/scripts/pr_test.sh"
+                label: ":microscope: Dynamic Batching Parity"
+                env:
+                  - TEST_TYPE=dynamic_batching_parity
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 1
+                agents:
+                  queue: "default"
+            - path:
                 - "fastvideo/**"
                 - ".buildkite/**"
                 - ".github/**"
@@ -367,6 +401,29 @@ steps:
                   automatic:
                     - exit_status: 1
                       limit: 2
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/batching/**"
+                - "fastvideo/configs/pipelines/**"
+                - "fastvideo/entrypoints/video_generator.py"
+                - "fastvideo/entrypoints/openai/**"
+                - "fastvideo/pipelines/stages/input_validation.py"
+                - "fastvideo/pipelines/stages/text_encoding.py"
+                - "fastvideo/pipelines/stages/latent_preparation.py"
+                - "fastvideo/pipelines/stages/denoising.py"
+                - "fastvideo/tests/batching/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile"
+              config:
+                command: "timeout 45m .buildkite/scripts/pr_test.sh"
+                label: ":bar_chart: Dynamic Batching Parity"
+                env:
+                  - TEST_TYPE=dynamic_batching_parity
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 1
                 agents:
                   queue: "default"
             - path:

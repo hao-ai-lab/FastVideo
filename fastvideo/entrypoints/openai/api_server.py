@@ -77,15 +77,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         default_request=default_request,
         video_batch_scheduler=video_batch_scheduler,
     )
-
-    yield  # server is running
-
-    logger.info("Shutting down — releasing model resources ...")
-    if video_batch_scheduler is not None:
-        await video_batch_scheduler.stop()
-    generator.shutdown()
-    clear_state()
-    logger.info("Shutdown complete.")
+    try:
+        yield  # server is running
+    finally:
+        logger.info("Shutting down — releasing model resources ...")
+        try:
+            if video_batch_scheduler is not None:
+                await video_batch_scheduler.stop()
+        finally:
+            try:
+                generator.shutdown()
+            finally:
+                clear_state()
+        logger.info("Shutdown complete.")
 
 
 def create_app(

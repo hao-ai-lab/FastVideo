@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from fastvideo.entrypoints.openai import api_server
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.entrypoints.openai.batching import VideoBatchScheduler, _VideoBatchJob
 from fastvideo.api.parser import parse_config
@@ -190,6 +191,54 @@ def test_video_batch_scheduler_requeues_incompatible_pending_job_at_front(tmp_pa
 
     assert batch_ids == ["req-1"]
     assert pending_ids == ["req-2", "req-3"]
+
+
+def test_lifespan_releases_generator_and_state_when_scheduler_stop_fails(monkeypatch):
+    calls = []
+
+    class _Generator:
+
+        def shutdown(self):
+            calls.append("generator.shutdown")
+
+    class _Scheduler:
+
+        async def start(self):
+            calls.append("scheduler.start")
+
+        async def stop(self):
+            calls.append("scheduler.stop")
+            raise RuntimeError("scheduler stop failed")
+
+    generator = _Generator()
+    scheduler = _Scheduler()
+    args = _batch_scheduler_args()
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            fastvideo_args=args,
+            output_dir="outputs",
+            default_request=None,
+        ))
+    monkeypatch.setattr(api_server.VideoGenerator, "from_fastvideo_args", lambda _args: generator)
+    monkeypatch.setattr(api_server, "VideoBatchScheduler", lambda _generator, _args: scheduler)
+    monkeypatch.setattr(api_server, "set_state", lambda *args, **kwargs: calls.append("set_state"))
+    monkeypatch.setattr(api_server, "clear_state", lambda: calls.append("clear_state"))
+
+    async def run():
+        context = api_server.lifespan(app)
+        await context.__aenter__()
+        with pytest.raises(RuntimeError, match="scheduler stop failed"):
+            await context.__aexit__(None, None, None)
+
+    asyncio.run(run())
+
+    assert calls == [
+        "scheduler.start",
+        "set_state",
+        "scheduler.stop",
+        "generator.shutdown",
+        "clear_state",
+    ]
 
 
 # ---------------------------------------------------------------------------

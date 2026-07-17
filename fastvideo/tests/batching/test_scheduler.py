@@ -143,14 +143,19 @@ def test_dispatch_exception_fails_all_group_futures(tmp_path):
 
     class _ExplodingGenerator:
 
+        def __init__(self):
+            self.calls = []
+
         def generate_video_batch(self, request_kwargs):
+            self.calls.append([item["prompt"] for item in request_kwargs])
             raise ValueError("generation exploded")
 
     async def run():
-        scheduler = VideoBatchScheduler(_ExplodingGenerator(), _batch_scheduler_args())
+        generator = _ExplodingGenerator()
+        scheduler = VideoBatchScheduler(generator, _batch_scheduler_args())
         await scheduler.start()
         try:
-            return await asyncio.wait_for(
+            results = await asyncio.wait_for(
                 asyncio.gather(
                     scheduler.submit("req-1", _job_kwargs(tmp_path, 1)),
                     scheduler.submit("req-2", _job_kwargs(tmp_path, 2)),
@@ -160,13 +165,52 @@ def test_dispatch_exception_fails_all_group_futures(tmp_path):
             )
         finally:
             await scheduler.stop()
+        return results, generator.calls
 
-    results = asyncio.run(run())
+    results, calls = asyncio.run(run())
 
+    assert calls == [["p1", "p2"], ["p1"], ["p2"]]
     assert len(results) == 2
     for result in results:
         assert isinstance(result, ValueError)
         assert "generation exploded" in str(result)
+
+
+def test_dispatch_exception_retries_group_and_preserves_successful_requests(tmp_path):
+
+    class _PartiallyExplodingGenerator(_FakeBatchGenerator):
+
+        def generate_video_batch(self, request_kwargs):
+            self.calls.append([dict(item) for item in request_kwargs])
+            if len(request_kwargs) > 1:
+                raise RuntimeError("merged generation failed")
+            if request_kwargs[0]["prompt"] == "p2":
+                raise ValueError("bad second request")
+            return [{"prompts": request_kwargs[0]["prompt"]}]
+
+    async def run():
+        generator = _PartiallyExplodingGenerator()
+        scheduler = VideoBatchScheduler(generator, _batch_scheduler_args())
+        await scheduler.start()
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    scheduler.submit("req-1", _job_kwargs(tmp_path, 1)),
+                    scheduler.submit("req-2", _job_kwargs(tmp_path, 2)),
+                    return_exceptions=True,
+                ),
+                timeout=10,
+            )
+        finally:
+            await scheduler.stop()
+        return results, [[item["prompt"] for item in call] for call in generator.calls]
+
+    results, calls = asyncio.run(run())
+
+    assert calls == [["p1", "p2"], ["p1"], ["p2"]]
+    assert results[0] == {"prompts": "p1"}
+    assert isinstance(results[1], ValueError)
+    assert "bad second request" in str(results[1])
 
 
 def test_run_crash_fails_inflight_and_queued_futures(tmp_path):
@@ -191,6 +235,8 @@ def test_run_crash_fails_inflight_and_queued_futures(tmp_path):
         )
         with pytest.raises(RuntimeError, match="stopped"):
             await scheduler.submit("req-3", _job_kwargs(tmp_path, 3))
+        await scheduler.stop()
+        assert scheduler._task is None
         return results
 
     results = asyncio.run(run())

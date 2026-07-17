@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from difflib import get_close_matches
 from typing import Any
@@ -23,7 +24,6 @@ _BATCHING_RULE_KEYS = frozenset({
     "offload",
     "max_batch_size",
     "max_cost",
-    "calibration",
 })
 
 
@@ -118,13 +118,13 @@ class BatchingRule:
 
 class BatchAdmissionController:
 
-    def __init__(self, fastvideo_args: FastVideoArgs, *, gpu_id: int = 0):
+    def __init__(self, fastvideo_args: FastVideoArgs, *, gpu_id: int = 0, rules: Sequence[BatchingRule] | None = None):
         self._mode = fastvideo_args.batching_mode
         self._user_max_batch_size = max(1, int(fastvideo_args.batching_max_size))
         self._model_path = fastvideo_args.model_path
         self._offload = bool(fastvideo_args.dit_cpu_offload or fastvideo_args.dit_layerwise_offload)
         self._device_memory_gb = self._get_device_memory_gb(gpu_id)
-        self._rules = load_batching_config(fastvideo_args.batching_config)
+        self._rules = list(rules) if rules is not None else load_batching_config(fastvideo_args.batching_config)
         self._pipeline_config = fastvideo_args.pipeline_config
 
         if self.enabled:
@@ -138,6 +138,10 @@ class BatchAdmissionController:
     @property
     def enabled(self) -> bool:
         return self._mode == "dynamic" and self._user_max_batch_size > 1
+
+    @property
+    def rules(self) -> tuple[BatchingRule, ...]:
+        return tuple(self._rules)
 
     def reject_reason_for_candidate(self, current_requests: list[Any], candidate_request: Any) -> str | None:
         if not self.enabled:
@@ -230,8 +234,11 @@ def load_batching_config(path: str | None) -> list[BatchingRule]:
 def _config_entries(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, dict) and payload.get("schema_version") not in (None, 1):
         raise ValueError("batching config schema_version must be 1")
-    if isinstance(payload, dict) and isinstance(payload.get("rules"), list):
-        return payload["rules"]
+    if isinstance(payload, dict) and "rules" in payload:
+        rules = payload["rules"]
+        if not isinstance(rules, list):
+            raise ValueError("batching config rules must be a list")
+        return rules
     if isinstance(payload, list):
         return payload
     if isinstance(payload, dict):

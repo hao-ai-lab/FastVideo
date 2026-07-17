@@ -103,6 +103,25 @@ def _tensor_metrics(sequential: list[dict[str, Any]], dynamic: list[dict[str, An
     }
 
 
+def _parity_gate(
+    metrics: dict[str, Any],
+    *,
+    max_abs_diff: float,
+    max_mean_abs_diff: float,
+) -> dict[str, Any]:
+    failures = []
+    if metrics["max_abs_diff"] > max_abs_diff:
+        failures.append(f"max_abs_diff {metrics['max_abs_diff']:.6g} exceeds {max_abs_diff:.6g}")
+    if metrics["mean_abs_diff"] > max_mean_abs_diff:
+        failures.append(f"mean_abs_diff {metrics['mean_abs_diff']:.6g} exceeds {max_mean_abs_diff:.6g}")
+    return {
+        "passed": not failures,
+        "max_abs_diff": max_abs_diff,
+        "max_mean_abs_diff": max_mean_abs_diff,
+        "failures": failures,
+    }
+
+
 def run_parity(args: argparse.Namespace) -> dict[str, Any]:
     generator = VideoGenerator.from_pretrained(args.model_path, **_build_init_kwargs(args, dynamic=True))
     try:
@@ -126,6 +145,11 @@ def run_parity(args: argparse.Namespace) -> dict[str, Any]:
         "dynamic_time_s": dynamic_s,
         "speedup": sequential_s / dynamic_s if dynamic_s > 0 else None,
         "tensor_metrics": metrics,
+        "parity_gate": _parity_gate(
+            metrics,
+            max_abs_diff=args.max_abs_diff,
+            max_mean_abs_diff=args.max_mean_abs_diff,
+        ),
     }
 
 
@@ -176,6 +200,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default="/tmp/fastvideo_dynamic_batching")
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--prompts", nargs="+", default=list(DEFAULT_PROMPTS))
+    parser.add_argument("--max-abs-diff", type=float, default=0.25)
+    parser.add_argument("--max-mean-abs-diff", type=float, default=0.02)
     return parser.parse_args()
 
 
@@ -192,6 +218,8 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps(result, indent=2))
+    if args.mode == "parity" and not result["parity_gate"]["passed"]:
+        raise AssertionError("Dynamic batching parity gate failed: " + "; ".join(result["parity_gate"]["failures"]))
 
 
 if __name__ == "__main__":

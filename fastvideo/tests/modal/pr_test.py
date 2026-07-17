@@ -375,6 +375,18 @@ def run_unit_test():
     )
 
 
+@app.function(gpu="L40S:1",
+              image=image,
+              timeout=1800,
+              secrets=[hf_secret, ci_env_secret],
+              volumes={"/root/data": model_vol})
+def run_dynamic_batching_parity():
+    run_test(
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
+        "python ./fastvideo/tests/batching/run_dynamic_batching_parity.py --mode parity "
+        "--output-json /tmp/dynamic_batching_parity.json")
+
+
 # TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?
 @app.function(gpu="L40S:1",
               image=dreamverse_image,

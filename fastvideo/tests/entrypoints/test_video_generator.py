@@ -487,6 +487,8 @@ def test_generate_prepared_work_items_merges_compatible_latent_requests(monkeypa
     assert calls[0].seeds == [11, 22]
     assert [result["prompts"] for result in results] == ["one", "two"]
     assert [result["samples"].shape for result in results] == [(1, 4, 1, 1, 1), (1, 4, 1, 1, 1)]
+    assert results[0]["samples"].flatten().tolist() == [0.0, 1.0, 2.0, 3.0]
+    assert results[1]["samples"].flatten().tolist() == [4.0, 5.0, 6.0, 7.0]
 
 
 def test_generate_prepared_work_items_falls_back_for_incompatible_requests(monkeypatch, tmp_path):
@@ -512,6 +514,101 @@ def test_generate_prepared_work_items_falls_back_for_incompatible_requests(monke
 
     assert len(calls) == 2
     assert all(isinstance(call.prompt, str) for call in calls)
+    assert [result["prompts"] for result in results] == ["one", "two"]
+
+
+def test_generate_prepared_work_items_retries_failed_group_per_prompt(monkeypatch, tmp_path):
+    vg = _new_video_generator()
+    vg.fastvideo_args = _batching_fastvideo_args()
+    calls = []
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append(batch.prompt)
+        if isinstance(batch.prompt, list):
+            raise RuntimeError("merged generation failed")
+        if batch.prompt == "two":
+            raise ValueError("bad second prompt")
+        output = torch.arange(4, dtype=torch.float32).reshape(1, 4, 1, 1, 1)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(vg, "_run_forward_batch", fake_run_forward)
+    params = [
+        SamplingParam(prompt="one", height=8, width=8, num_frames=1, return_frames=True, save_video=False),
+        SamplingParam(prompt="two", height=8, width=8, num_frames=1, return_frames=True, save_video=False),
+    ]
+    work_items = [
+        vg._prepare_generation_work_item(
+            param.prompt,
+            param,
+            vg.fastvideo_args,
+            output_path=str(tmp_path / f"{param.prompt}.mp4"),
+        ) for param in params
+    ]
+
+    results = vg._generate_prepared_work_items(work_items, tolerate_failures=True)
+
+    assert calls == [["one", "two"], "one", "two"]
+    assert results[0]["prompts"] == "one"
+    assert results[0]["samples"].flatten().tolist() == [0.0, 1.0, 2.0, 3.0]
+    assert results[1] == {"error": "bad second prompt", "prompt": "two"}
+
+
+def test_video_generator_validates_batching_config_before_executor_start(tmp_path):
+    config_path = tmp_path / "batching.json"
+    config_path.write_text('{"rules": {"model": "test-model"}}', encoding="utf-8")
+    executor_started = False
+
+    class _Executor:
+
+        def __init__(self, *args, **kwargs):
+            nonlocal executor_started
+            executor_started = True
+
+    with pytest.raises(ValueError, match="rules must be a list"):
+        VideoGenerator(_batching_fastvideo_args(batching_config=str(config_path)), _Executor, log_stats=False)
+    assert executor_started is False
+
+
+def test_generate_prepared_work_items_uses_startup_cached_admission_config(monkeypatch, tmp_path):
+    config_path = tmp_path / "batching.json"
+    config_path.write_text(
+        '{"rules": [{"model": "test-model", "max_batch_size": 1}]}',
+        encoding="utf-8",
+    )
+
+    class _Executor:
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    args = _batching_fastvideo_args(batching_config=str(config_path))
+    generator = VideoGenerator(args, _Executor, log_stats=False)
+    config_path.unlink()
+    request_args = _batching_fastvideo_args(batching_config=str(config_path))
+    calls = []
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append(batch.prompt)
+        output = torch.zeros((1, 4, 1, 1, 1), dtype=torch.float32)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(generator, "_run_forward_batch", fake_run_forward)
+    params = [
+        SamplingParam(prompt="one", height=8, width=8, num_frames=1, return_frames=True, save_video=False),
+        SamplingParam(prompt="two", height=8, width=8, num_frames=1, return_frames=True, save_video=False),
+    ]
+    work_items = [
+        generator._prepare_generation_work_item(
+            param.prompt,
+            param,
+            request_args,
+            output_path=str(tmp_path / f"{param.prompt}.mp4"),
+        ) for param in params
+    ]
+
+    results = generator._generate_prepared_work_items(work_items)
+
+    assert calls == ["one", "two"]
     assert [result["prompts"] for result in results] == ["one", "two"]
 
 
@@ -953,6 +1050,40 @@ def test_generate_batch_prompt_file_returns_typed_results(tmp_path, monkeypatch)
     assert [result.prompt for result in results] == ["first prompt", "second prompt"]
     assert [result.prompt_index for result in results] == [0, 1]
     assert captured_prompts == ["first prompt", "second prompt"]
+
+
+def test_generate_prompt_file_clears_source_path_and_batches_prompts(monkeypatch, tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = _batching_fastvideo_args()
+    prompt_file = tmp_path / "prompts.txt"
+    prompt_file.write_text("first prompt\nsecond prompt\n", encoding="utf-8")
+    calls = []
+
+    def fake_run_forward(batch, fastvideo_args):
+        calls.append(batch)
+        output = torch.arange(8, dtype=torch.float32).reshape(2, 4, 1, 1, 1)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    monkeypatch.setattr(generator, "_run_forward_batch", fake_run_forward)
+    sampling_param = SamplingParam(
+        prompt_path=str(prompt_file),
+        output_path=str(tmp_path / "outputs"),
+        height=8,
+        width=8,
+        num_frames=1,
+        return_frames=True,
+        save_video=False,
+    )
+
+    results = generator._generate_video_impl(
+        sampling_param=sampling_param,
+        fastvideo_args=generator.fastvideo_args,
+    )
+
+    assert len(calls) == 1
+    assert calls[0].prompt == ["first prompt", "second prompt"]
+    assert [result["prompt"] for result in results] == ["first prompt", "second prompt"]
+    assert sampling_param.prompt_path == str(prompt_file)
 
 
 def test_generate_batched_request_fans_out_media_inputs(monkeypatch):

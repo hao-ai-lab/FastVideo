@@ -192,6 +192,12 @@ class VideoGenerator:
         """
         self.config: GeneratorConfig | None = None
         self.fastvideo_args = fastvideo_args
+        self._batch_admission_controller = BatchAdmissionController(fastvideo_args)
+        if fastvideo_args.batching_mode == "dynamic" and fastvideo_args.batching_max_size <= 1:
+            logger.warning(
+                "Dynamic batching is configured with batching_max_size=%d; requests will run sequentially.",
+                fastvideo_args.batching_max_size,
+            )
         self.executor = executor_class(fastvideo_args, log_queue=log_queue)
 
     @classmethod
@@ -686,6 +692,8 @@ class VideoGenerator:
             if not prompts:
                 raise ValueError(f"No prompts found in file: {prompt_txt_path}")
 
+            sampling_param = deepcopy(sampling_param)
+            sampling_param.prompt_path = None
             logger.info("Found %d prompts in %s", len(prompts), prompt_txt_path)
 
             if self._dynamic_batching_enabled(fastvideo_args):
@@ -1228,9 +1236,22 @@ class VideoGenerator:
             try:
                 return self._run_work_item_group(group)
             except Exception as e:
-                logger.error("Failed to generate videos for batched prompts %s: %s",
-                             [item.prompt[:100] for item in group], e)
-                return [{"error": str(e), "prompt": item.prompt} for item in group]
+                if len(group) == 1:
+                    logger.error("Failed to generate video for prompt %s: %s", group[0].prompt[:100], e)
+                    return [{"error": str(e), "prompt": group[0].prompt}]
+                logger.warning(
+                    "Merged prompt batch failed; retrying %d prompts individually: %s",
+                    len(group),
+                    e,
+                )
+                results = []
+                for item in group:
+                    try:
+                        results.append(self._execute_single_work_item(item))
+                    except Exception as item_error:
+                        logger.error("Failed to generate video for prompt %s: %s", item.prompt[:100], item_error)
+                        results.append({"error": str(item_error), "prompt": item.prompt})
+                return results
 
         fastvideo_args = work_items[0].fastvideo_args
         if not self._dynamic_batching_enabled(fastvideo_args):
@@ -1243,7 +1264,15 @@ class VideoGenerator:
                 "support merging requests; run with batching_mode='disabled', or use a pipeline that opts in "
                 "via supports_dynamic_batching=True (DMD/causal denoising variants are always excluded)")
 
-        admission = BatchAdmissionController(fastvideo_args)
+        admission = getattr(self, "_batch_admission_controller", None)
+        if admission is None or fastvideo_args is not getattr(self, "fastvideo_args", None):
+            cached_rules = None
+            startup_admission = getattr(self, "_batch_admission_controller", None)
+            if startup_admission is not None:
+                cached_rules = startup_admission.rules
+            # Per-request pipeline overrides need their own cost estimator,
+            # but reuse the configuration parsed at generator startup.
+            admission = BatchAdmissionController(fastvideo_args, rules=cached_rules)
         results: list[dict[str, Any]] = []
         index = 0
         while index < len(work_items):

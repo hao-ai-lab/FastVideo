@@ -79,8 +79,13 @@ class VideoBatchScheduler:
         self._stopped = True
         await self._queue.put(None)
         if self._task is not None:
-            await self._task
-            self._task = None
+            try:
+                await self._task
+            except (Exception, asyncio.CancelledError):
+                # _on_run_done already logged the crash and failed queued jobs.
+                pass
+            finally:
+                self._task = None
 
     async def submit(self, request_id: str, kwargs: dict[str, Any]) -> Any:
         if self._stopped:
@@ -175,21 +180,44 @@ class VideoBatchScheduler:
                 lambda: self._generator.generate_video_batch([job.kwargs for job in batch]),
             )
         except Exception as exc:
-            for job in batch:
-                if not job.future.done():
-                    job.future.set_exception(exc)
+            await self._handle_batch_failure(batch, exc)
             return
 
         if len(results) != len(batch):
             error = RuntimeError(f"Video batch returned {len(results)} results for {len(batch)} requests")
-            for job in batch:
-                if not job.future.done():
-                    job.future.set_exception(error)
+            await self._handle_batch_failure(batch, error)
             return
 
         for job, result in zip(batch, results, strict=True):
             if not job.future.done():
                 job.future.set_result(result)
+
+    async def _handle_batch_failure(self, batch: list[_VideoBatchJob], error: Exception) -> None:
+        if len(batch) == 1:
+            if not batch[0].future.done():
+                batch[0].future.set_exception(error)
+            return
+
+        logger.warning(
+            "Merged video batch failed; retrying %d requests individually: %s",
+            len(batch),
+            error,
+        )
+        loop = asyncio.get_running_loop()
+        for job in batch:
+            try:
+                results = await loop.run_in_executor(
+                    None,
+                    lambda job=job: self._generator.generate_video_batch([job.kwargs]),
+                )
+                if len(results) != 1:
+                    raise RuntimeError(f"Single video request returned {len(results)} results")
+            except Exception as item_error:
+                if not job.future.done():
+                    job.future.set_exception(item_error)
+            else:
+                if not job.future.done():
+                    job.future.set_result(results[0])
 
     def _jobs_are_compatible(self, base: _VideoBatchJob, candidate: _VideoBatchJob) -> bool:
         try:

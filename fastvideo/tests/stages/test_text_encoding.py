@@ -225,6 +225,7 @@ def test_encode_prompt_list_individually_pads_variable_length_embeds_and_audio()
         fastvideo_args,
         encoder_index=[0],
         return_attention_mask=True,
+        max_length=4,
     )
 
     assert embeds[0].shape == (2, 4, 3)
