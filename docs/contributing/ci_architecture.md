@@ -84,7 +84,7 @@ status.
 | VAE Tests | `vae` | `fastvideo/models/vaes/**`, `fastvideo/models/loader/**`, `fastvideo/tests/vaes/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Kernel Tests | `kernel_tests` | `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile` |
-| Dynamic Batching Parity | `dynamic_batching_parity` | Batching, pipeline config, API config carriers, generator/OpenAI entrypoints, batch-aware stages, and batching tests |
+| Dynamic Batching Parity | `dynamic_batching_parity` | CI runner chain, batching/API config, generator/OpenAI entrypoints, shared and Wan inference paths, and batching tests |
 | Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile` |
 | DreamVerse App Tests | `dreamverse_app` | `apps/dreamverse/**`, `pyproject.toml` |
 
@@ -110,7 +110,7 @@ it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 | Buildkite label | `TEST_TYPE` | Main watched paths |
 |---|---|---|
 | SSIM Tests | `ssim` | `fastvideo/**/*.py`, `pyproject.toml`, `docker/Dockerfile` |
-| Dynamic Batching Parity | `dynamic_batching_parity` | Batching, pipeline config, API config carriers, generator/OpenAI entrypoints, batch-aware stages, and batching tests |
+| Dynamic Batching Parity | `dynamic_batching_parity` | CI runner chain, batching/API config, generator/OpenAI entrypoints, shared and Wan inference paths, and batching tests |
 | LoRA Inference Tests | `inference_lora` | LoRA tests, loader, transformer tests, pipelines, LoRA layers |
 | LoRA Extraction Tests | `lora_extraction` | LoRA extraction scripts/tests, loader, training utilities, LoRA layers |
 | Training Tests | `training` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile` |
@@ -127,7 +127,9 @@ it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 Dynamic Batching Parity runs a two-L40S Wan sequence-parallel comparison with
 preset CFG/negative prompting, decoded pixel output, and saved-file checks. It
 runs as a path-filtered Fastcheck job, a path-filtered Full Suite job, and the
-direct `/test dynamic-batching-parity` command.
+direct `/test dynamic-batching-parity` command. The direct command replaces the
+Fastcheck parity context; rerun `/test full` when the Full Suite parity context
+fails.
 
 See [Performance Benchmarks](performance_benchmarks.md) for the performance
 lane's thresholds, rolling baseline, artifacts, and reseeding process.

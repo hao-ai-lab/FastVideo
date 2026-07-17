@@ -90,6 +90,17 @@ steps:
             limit: 2
       agents:
         queue: "default"
+    - label: ":microscope: Dynamic Batching Parity"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "dynamic_batching_parity"
+      command: "timeout 45m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
 
   # --- Full-suite-scope direct tests ---
     - label: ":bar_chart: SSIM Tests"
@@ -102,17 +113,6 @@ steps:
           - exit_status: -1
             limit: 2
           - exit_status: 1
-            limit: 2
-      agents:
-        queue: "default"
-    - label: ":bar_chart: Dynamic Batching Parity"
-      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "dynamic_batching_parity"
-      command: "timeout 45m .buildkite/scripts/pr_test.sh"
-      retry:
-        automatic:
-          - exit_status: 128
-            limit: 3
-          - exit_status: -1
             limit: 2
       agents:
         queue: "default"
@@ -323,21 +323,30 @@ steps:
                 agents:
                   queue: "default"
             - path:
+                - ".buildkite/pipeline.yml"
+                - ".buildkite/scripts/pr_test.sh"
                 - "fastvideo/batching/**"
-                - "fastvideo/configs/pipelines/**"
-                - "fastvideo/api/schema.py"
-                - "fastvideo/api/compat.py"
-                - "fastvideo/api/sampling_param.py"
+                - "fastvideo/api/**"
+                - "fastvideo/attention/**"
+                - "fastvideo/configs/**"
+                - "fastvideo/distributed/**"
                 - "fastvideo/fastvideo_args.py"
                 - "fastvideo/entrypoints/video_generator.py"
                 - "fastvideo/entrypoints/openai/**"
-                - "fastvideo/pipelines/pipeline_batch_info.py"
-                - "fastvideo/pipelines/stages/input_validation.py"
-                - "fastvideo/pipelines/stages/text_encoding.py"
-                - "fastvideo/pipelines/stages/latent_preparation.py"
-                - "fastvideo/pipelines/stages/denoising.py"
-                - "fastvideo/pipelines/stages/decoding.py"
+                - "fastvideo/hooks/**"
+                - "fastvideo/layers/**"
+                - "fastvideo/models/**"
+                - "fastvideo/pipelines/**"
+                - "fastvideo/platforms/**"
+                - "fastvideo/registry.py"
                 - "fastvideo/tests/batching/**"
+                - "fastvideo/tests/modal/modal_image_utils.py"
+                - "fastvideo/tests/modal/pr_test.py"
+                - "fastvideo/worker/**"
+                - "fastvideo/envs.py"
+                - "fastvideo/logger.py"
+                - "fastvideo/profiler.py"
+                - "fastvideo/utils.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile"
               config:
@@ -410,21 +419,30 @@ steps:
                 agents:
                   queue: "default"
             - path:
+                - ".buildkite/pipeline.yml"
+                - ".buildkite/scripts/pr_test.sh"
                 - "fastvideo/batching/**"
-                - "fastvideo/configs/pipelines/**"
-                - "fastvideo/api/schema.py"
-                - "fastvideo/api/compat.py"
-                - "fastvideo/api/sampling_param.py"
+                - "fastvideo/api/**"
+                - "fastvideo/attention/**"
+                - "fastvideo/configs/**"
+                - "fastvideo/distributed/**"
                 - "fastvideo/fastvideo_args.py"
                 - "fastvideo/entrypoints/video_generator.py"
                 - "fastvideo/entrypoints/openai/**"
-                - "fastvideo/pipelines/pipeline_batch_info.py"
-                - "fastvideo/pipelines/stages/input_validation.py"
-                - "fastvideo/pipelines/stages/text_encoding.py"
-                - "fastvideo/pipelines/stages/latent_preparation.py"
-                - "fastvideo/pipelines/stages/denoising.py"
-                - "fastvideo/pipelines/stages/decoding.py"
+                - "fastvideo/hooks/**"
+                - "fastvideo/layers/**"
+                - "fastvideo/models/**"
+                - "fastvideo/pipelines/**"
+                - "fastvideo/platforms/**"
+                - "fastvideo/registry.py"
                 - "fastvideo/tests/batching/**"
+                - "fastvideo/tests/modal/modal_image_utils.py"
+                - "fastvideo/tests/modal/pr_test.py"
+                - "fastvideo/worker/**"
+                - "fastvideo/envs.py"
+                - "fastvideo/logger.py"
+                - "fastvideo/profiler.py"
+                - "fastvideo/utils.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile"
               config:
