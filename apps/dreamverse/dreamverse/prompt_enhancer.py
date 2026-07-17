@@ -313,6 +313,33 @@ def _extract_content_or_empty(response_json: dict[str, Any]) -> str:
         return ""
 
 
+def _find_balanced_object_end(text: str, start: int) -> int:
+    """Return the index just past the brace-balanced span opening at
+    ``text[start] == '{'``, honoring JSON string literals and escapes, or -1
+    if the braces never balance (i.e. the object was truncated)."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return -1
+
+
 def _parse_json_response(content: str) -> dict[str, Any]:
     text = content.strip()
     if not text:
@@ -348,13 +375,22 @@ def _parse_json_response(content: str) -> dict[str, Any]:
     # models emit draft JSON mid-reasoning; the final answer is always last.
     decoder = json.JSONDecoder()
     last_parsed: dict[str, Any] | None = None
-    for idx, char in enumerate(text):
-        if char != "{":
-            continue
+    pos = 0
+    while (idx := text.find("{", pos)) != -1:
         try:
-            parsed, _ = decoder.raw_decode(text[idx:])
+            parsed, consumed = decoder.raw_decode(text[idx:])
         except json.JSONDecodeError:
+            # Skip the whole failed object rather than rescanning inside it:
+            # fragments nested in a malformed or truncated (finish_reason=
+            # length) object must not override an earlier complete object.
+            span_end = _find_balanced_object_end(text, idx)
+            if span_end == -1:
+                break
+            pos = span_end
             continue
+        # Skip past the consumed span so nested braces inside a decoded
+        # object are not re-parsed as standalone objects.
+        pos = idx + consumed
         if isinstance(parsed, dict):
             last_parsed = parsed
 
@@ -389,7 +425,7 @@ def _format_locked_segments(locked_segments: list[str]) -> str:
 
 class PromptEnhancer:
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.provider = PROMPT_PROVIDER
         self.provider_label = _resolve_provider_label(PROMPT_PROVIDER)
         self.api_key = PROMPT_API_KEY
@@ -1425,14 +1461,12 @@ class PromptEnhancer:
             locked_text = _format_locked_segments(locked_segments_clean)
             request_system_prompt = self.enhance_system_prompt
             user_payload = {
-                "request": (
-                    "<locked_segments>\n"
-                    f"{locked_text}\n"
-                    "</locked_segments>\n\n"
-                    f"<conditioning_prompt>{cleaned}</conditioning_prompt>\n\n"
-                    f"Write exactly one new segment ({next_segment_key}) "
-                    "continuing from the locked segments."
-                ),
+                "request": ("<locked_segments>\n"
+                            f"{locked_text}\n"
+                            "</locked_segments>\n\n"
+                            f"<conditioning_prompt>{cleaned}</conditioning_prompt>\n\n"
+                            f"Write exactly one new segment ({next_segment_key}) "
+                            "continuing from the locked segments."),
             }
 
         t0 = time.perf_counter()

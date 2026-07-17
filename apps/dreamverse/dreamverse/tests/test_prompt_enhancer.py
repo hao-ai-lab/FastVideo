@@ -6,6 +6,7 @@ import os
 import re
 import time
 
+import pytest
 
 os.environ.setdefault("CEREBRAS_API_KEY", "dummy")
 os.environ.setdefault("GROQ_API_KEY", "dummy")
@@ -203,6 +204,59 @@ def test_parse_json_response_extracts_first_embedded_object():
         "Model output:\n{\"segment_prompts\":[\"A\",\"B\"]}\n(complete)"
     )
     assert parsed == {"segment_prompts": ["A", "B"]}
+
+
+def test_parse_json_response_returns_outer_object_not_nested_value():
+    parsed = _parse_json_response(
+        "Final answer: {\"next_prompt\": \"a scene\", \"style\": {\"mood\": \"noir\"}} done."
+    )
+    assert parsed == {"next_prompt": "a scene", "style": {"mood": "noir"}}
+
+
+def test_parse_json_response_returns_last_of_multiple_objects():
+    parsed = _parse_json_response(
+        "Draft: {\"next_prompt\": \"draft\"}\nRefined: {\"next_prompt\": \"final\"}"
+    )
+    assert parsed == {"next_prompt": "final"}
+
+
+def test_parse_json_response_ignores_fragments_of_truncated_trailing_object():
+    # finish_reason=length cut the refined object short; the complete draft must
+    # win over a nested fragment of the truncated object.
+    parsed = _parse_json_response(
+        '{"next_prompt": "draft"} refined: {"next_prompt": "final", "style": {"mood": "noir"}'
+    )
+    assert parsed == {"next_prompt": "draft"}
+
+
+def test_parse_json_response_ignores_fragments_of_mid_string_truncated_object():
+    # Unterminated-string truncation reports the error at the opening quote,
+    # not end-of-text; nested fragments still must not win over the draft.
+    parsed = _parse_json_response(
+        '{"next_prompt": "draft"} refined: {"style": {"mood": "noir"}, "next_prompt": "cut off'
+    )
+    assert parsed == {"next_prompt": "draft"}
+
+
+def test_parse_json_response_ignores_fragments_of_malformed_object_with_trailing_prose():
+    parsed = _parse_json_response(
+        '{"next_prompt": "draft"} {"final": {"mood": "noir"}, "x": 1 and then some prose'
+    )
+    assert parsed == {"next_prompt": "draft"}
+
+
+def test_parse_json_response_raises_when_only_object_is_truncated():
+    with pytest.raises(ValueError):
+        _parse_json_response('{"style": {"mood": "noir"}, "next_prompt": "cut off')
+
+
+def test_parse_json_response_returns_outer_rollout_dict():
+    parsed = _parse_json_response(
+        "{\"rollout\": {\"segment_prompts\": [{\"prompt\": \"a\"}, {\"prompt\": \"b\"}]}}"
+    )
+    assert parsed == {
+        "rollout": {"segment_prompts": [{"prompt": "a"}, {"prompt": "b"}]}
+    }
 
 
 def test_load_prompt_required_falls_back_to_default_path(tmp_path):
