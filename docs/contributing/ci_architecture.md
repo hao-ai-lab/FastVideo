@@ -85,6 +85,7 @@ status.
 | Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Kernel Tests | `kernel_tests` | `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Preprocessing Tests | `preprocessing` | Preprocessing pipelines/workflows, Parquet schema/writer, the integration test, and its CI entrypoints |
 | DreamVerse App Tests | `dreamverse_app` | `apps/dreamverse/**`, `pyproject.toml` |
 
 ### Tier 3: Full Suite
@@ -147,6 +148,7 @@ Valid direct test names:
 | `/test transformer` | `transformer` |
 | `/test kernel` | `kernel_tests` |
 | `/test unit` | `unit_test` |
+| `/test preprocessing` | `preprocessing` |
 | `/test dreamverse` | `dreamverse_app` |
 | `/test ssim` | `ssim` |
 | `/test training` | `training` |
