@@ -68,6 +68,7 @@ except ImportError:
 
 logger = init_logger(__name__)
 _FFMPEG_ENCODER_OPTION_CACHE: dict[tuple[str, str, str], bool] = {}
+_UMASK_LOCK = threading.Lock()
 
 _BATCH_EXTRA_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "ltx2_audio_latents",
@@ -1447,9 +1448,12 @@ class VideoGenerator:
         try:
             output_mode = stat.S_IMODE(os.stat(output_path).st_mode)
         except FileNotFoundError:
-            current_umask = os.umask(0)
-            os.umask(current_umask)
-            output_mode = 0o666 & ~current_umask
+            with _UMASK_LOCK:
+                current_umask = os.umask(0)
+                try:
+                    output_mode = 0o666 & ~current_umask
+                finally:
+                    os.umask(current_umask)
         fd, temporary_path = tempfile.mkstemp(
             dir=output_dir,
             prefix=f".{stem}.",
