@@ -61,13 +61,12 @@ NUM_GPUS=4 bash .../mixkit/finetune_qat.sh data/HD-Mixkit-Finetune-Wan/combined_
 ```
 
 `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN` keeps the fake-quantized Triton
-forward (straight-through estimator) and routes its backward through the
-separately distributed `qat_attn` package. FastVideo automatically finds an
-importable package or a sibling `nvfp4_qat_attn` checkout; set
-`QAT_ATTN_REPO=/absolute/path/to/nvfp4_qat_attn` for another layout. Its kernel
-source is not part of the FastVideo distribution. The external backward
-currently requires SM100, head dimension 128, non-causal MHA, equal query/KV
-sequence lengths, and sequence lengths divisible by 16.
+forward and backward (straight-through estimator). Both kernels ship in
+`fastvideo-kernel`: SM100 automatically uses the optimized Triton path for the
+production non-causal, head-dimension-128 configuration, while SM120 GPUs such
+as RTX 5090 keep using the previous Triton path. The script defaults
+`FASTVIDEO_ATTN_QAT_FWD_EXACT_M=0` for throughput; set it to `1` to reproduce
+the previous forward softmax statistic and bitwise-compatible `dV`.
 
 ## Train stage 2 (QAT DMD distillation to 3 steps)
 

@@ -9,7 +9,7 @@ cd "${REPO_ROOT}"
 DATA_DIR=${1:-data/HD-Mixkit-Finetune-Wan/combined_parquet_dataset}
 NUM_GPUS=${NUM_GPUS:-4}
 export NUM_GPUS
-export QAT_ATTN_FWD_EXACT_M=${QAT_ATTN_FWD_EXACT_M:-0}
+export FASTVIDEO_ATTN_QAT_FWD_EXACT_M=${FASTVIDEO_ATTN_QAT_FWD_EXACT_M:-0}
 
 bash "${REPO_ROOT}/examples/train/run.sh" \
     "${SCRIPT_DIR}/stage1_attn_qat_finetune.yaml" \

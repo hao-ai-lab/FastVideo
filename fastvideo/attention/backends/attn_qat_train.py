@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib
-import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -19,72 +18,17 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 _project_root = Path(__file__).resolve().parent.parent.parent.parent
-_kernel_root = _project_root / "fastvideo-kernel"
-_kernel_python_root = _kernel_root / "python"
+_kernel_python_root = _project_root / "fastvideo-kernel" / "python"
 _attn_qat_train_attention: Callable[..., torch.Tensor] | None = None
 _attn_qat_train_import_attempted = False
 _attn_qat_train_import_error: ImportError | None = None
 
 
-def _configured_external_qat_repo() -> Path | None:
-    """Validate an explicit external-kernel source checkout, if configured."""
-    configured_repo = os.environ.get("QAT_ATTN_REPO")
-    if not configured_repo:
-        return None
-
-    candidate = Path(configured_repo).expanduser().resolve()
-    if not (candidate / "qat_attn" / "__init__.py").is_file():
-        raise ImportError(
-            f"QAT_ATTN_REPO={configured_repo!r} is not an nvfp4_qat_attn repository; "
-            f"expected {candidate / 'qat_attn' / '__init__.py'}")
-    return candidate
-
-
-def _sibling_external_qat_repo() -> Path | None:
-    """Return the conventional sibling source checkout when it exists."""
-    candidate = (_project_root.parent / "nvfp4_qat_attn").resolve()
-    if (candidate / "qat_attn" / "__init__.py").is_file():
-        return candidate
-    return None
-
-
-def _prepend_import_path(path: Path) -> None:
-    path_str = str(path)
-    if path_str not in sys.path:
-        sys.path.insert(0, path_str)
-
-
 def _ensure_kernel_paths() -> None:
-    for path in (_project_root, _kernel_root, _kernel_python_root):
+    for path in (_project_root, _kernel_python_root):
         path_str = str(path)
         if path_str not in sys.path:
             sys.path.insert(0, path_str)
-
-
-def _import_external_qat():
-    """Import qat_attn, using source checkouts without masking import bugs.
-
-    An explicit checkout wins. Otherwise an importable installation is used,
-    and the conventional sibling checkout is only added when the top-level
-    package itself is absent. A missing dependency *inside* qat_attn is allowed
-    to propagate instead of being mistaken for a missing top-level package.
-    """
-    configured_repo = _configured_external_qat_repo()
-    if configured_repo is not None:
-        _prepend_import_path(configured_repo)
-        return importlib.import_module("qat_attn"), configured_repo
-
-    try:
-        return importlib.import_module("qat_attn"), None
-    except ModuleNotFoundError as exc:
-        if exc.name != "qat_attn":
-            raise
-
-    sibling_repo = _sibling_external_qat_repo()
-    if sibling_repo is None:
-        raise ModuleNotFoundError("No module named 'qat_attn'", name="qat_attn")
-    _prepend_import_path(sibling_repo)
-    return importlib.import_module("qat_attn"), sibling_repo
 
 
 def _get_attn_qat_train_attention() -> Callable[..., torch.Tensor] | None:
@@ -100,11 +44,8 @@ def _get_attn_qat_train_attention() -> Callable[..., torch.Tensor] | None:
 
     try:
         triton_qat = importlib.import_module("fastvideo_kernel.triton_kernels.attn_qat_train")
-        external_qat, external_qat_repo = _import_external_qat()
-        external_qat.patch_fastvideo(triton_qat._attention)
         _attn_qat_train_attention = triton_qat.attention
-        source = getattr(external_qat, "__file__", None) or external_qat_repo or "the active Python environment"
-        logger.info("ATTN_QAT_TRAIN loaded optimized qat_attn from %s", source)
+        logger.info("ATTN_QAT_TRAIN loaded FastVideo's architecture-optimized Triton kernel")
     except ImportError as exc:
         _attn_qat_train_import_error = exc
         _attn_qat_train_attention = None
@@ -124,12 +65,8 @@ def attn_qat_train(q_BLHD: torch.Tensor,
     attention = _get_attn_qat_train_attention()
     if attention is None:
         detail = f" Original import error: {_attn_qat_train_import_error}" if _attn_qat_train_import_error else ""
-        expected_repo = _project_root.parent / "nvfp4_qat_attn"
-        raise ImportError(
-            "ATTN_QAT_TRAIN requires both fastvideo-kernel and the separately distributed qat_attn package. "
-            f"Place nvfp4_qat_attn next to FastVideo at {expected_repo}, set "
-            "QAT_ATTN_REPO=/absolute/path/to/nvfp4_qat_attn, or install qat_attn in the FastVideo environment."
-            f"{detail}")
+        raise ImportError("ATTN_QAT_TRAIN requires FastVideo's fastvideo-kernel package. Install it or make "
+                          f"fastvideo-kernel/python importable.{detail}")
 
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()

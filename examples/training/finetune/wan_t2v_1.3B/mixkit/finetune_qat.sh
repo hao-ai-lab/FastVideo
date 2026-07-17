@@ -4,20 +4,21 @@
 #
 # The 4-bit attention path is selected by env var:
 # FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN keeps the fake-quantized Triton
-# forward and uses the separately installed qat_attn package for backward, so
-# the DiT learns to absorb FP4 attention error instead of fighting it.
+# forward and backward, so the DiT learns to absorb FP4 attention error instead
+# of fighting it. SM100 selects the optimized kernels; RTX 5090 keeps the
+# previous Triton implementation.
 #
 # Data: run download_mixkit_data.sh first (preprocessed Parquet).
 #
 # Verified end-to-end on Blackwell (GB200/sm_100): the ATTN_QAT_TRAIN backend is
 # selected (not a fallback), forward+backward run, loss/grad are healthy, and
-# validation generates videos. The external backward currently requires SM100.
+# validation generates videos.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../../.." && pwd)"
 export PYTHONPATH="${REPO_ROOT}/fastvideo-kernel/python${PYTHONPATH:+:${PYTHONPATH}}"
 export FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN   # <-- enables Attn-QAT training
-export QAT_ATTN_FWD_EXACT_M=${QAT_ATTN_FWD_EXACT_M:-0}
+export FASTVIDEO_ATTN_QAT_FWD_EXACT_M=${FASTVIDEO_ATTN_QAT_FWD_EXACT_M:-0}
 export WANDB_MODE=${WANDB_MODE:-online}
 export TOKENIZERS_PARALLELISM=false
 

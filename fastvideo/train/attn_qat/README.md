@@ -78,34 +78,33 @@ The attention training kernel is required when the QAT transformer is built.
 `ATTN_QAT_TRAIN` refuses to silently fall back when that kernel is unavailable,
 because doing so would turn the run into non-QAT training.
 
-## Optimized kernel auto-discovery
+## Architecture-specific Triton kernels
 
-The `ATTN_QAT_TRAIN` backend patches FastVideo's Triton attention automatically
-with the optimized `qat_attn` forward and backward. No manual `PYTHONPATH` or
-Python patch call is needed. FastVideo resolves the package in this order:
+The `ATTN_QAT_TRAIN` forward and backward kernels live in
+`fastvideo-kernel/python/fastvideo_kernel/triton_kernels/attn_qat_train.py` and
+need no runtime patching. FastVideo selects the implementation at each call:
 
-1. the source checkout named by `QAT_ATTN_REPO`;
-2. an installed/importable `qat_attn` package in the active Python environment;
-   and
-3. a sibling checkout at `../nvfp4_qat_attn`.
+- SM100 (`compute capability 10.0`) uses the optimized Triton forward and the
+  split 64x64 Triton backward for the production non-causal, head-dimension-128
+  QAT configuration when the KV sequence length is a multiple of 16.
+- SM120 (including RTX 5090) and every unsupported configuration continue to
+  use the previous Triton implementation.
 
-With the standard sibling layout, stage 1 is therefore a single command:
+Stage 1 is therefore a single command:
 
 ```bash
 cd /path/to/FastVideo
 NUM_GPUS=4 bash examples/train/scenario/qad_wan2_1_mixkit/run_stage1.sh
 ```
 
-For another layout, point at the repository root in the same command:
+The SM100 controls are:
 
-```bash
-QAT_ATTN_REPO=/path/to/nvfp4_qat_attn NUM_GPUS=4 \
-  bash examples/train/scenario/qad_wan2_1_mixkit/run_stage1.sh
-```
+- `FASTVIDEO_ATTN_QAT_FWD_MODE=fast|balanced|reference` (default: `fast`);
+- `FASTVIDEO_ATTN_QAT_FWD_EXACT_M=0` (default) maximizes throughput; set it to
+  `1` to recompute the reference-order statistic and keep `dV` bitwise
+  compatible; and
+- `FASTVIDEO_ATTN_QAT_SM100_OPTIMIZED=0`, a debugging switch that forces the
+  previous forward and backward.
 
-The optimized production defaults are `QAT_ATTN_FWD_MODE=fast`, exact forward
-softmax statistics (`QAT_ATTN_FWD_EXACT_M=1`), and the faster nondeterministic
-backward (`QAT_ATTN_DETERMINISTIC=0`). Set `QAT_ATTN_FWD_EXACT_M=0` only when
-maximum forward throughput is more important than bitwise `dV` parity with the
-reference kernel. The first backward invocation JIT-compiles and caches the
-standalone CUDA extension and kernel; later runs reuse those caches.
+Triton JIT-compiles a configuration on its first invocation and reuses the
+cache afterward.
