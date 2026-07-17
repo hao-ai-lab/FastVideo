@@ -55,6 +55,13 @@ Speed knobs: `--sam-batch 16` (frames per batched FastSAM forward, default 16) a
 adopting). Entry events now share one extra CoTracker pass (queries filtered to the new-object
 regions) instead of a full 2500-point pass per mask.
 
+**Fused mode:** `--segment` (with `--vis-override-every 3`) runs Stage 4 inside this pass —
+object IDs, vis override, and track weights — reusing the decoded video and the entry-detection
+FastSAM masks, so Stage 4 does not need to run at all. Same results as the standalone stage
+(shared implementation). `--viz`/`--viz-dir` render the same overlay mp4s as standalone Stage 4
+(slow — skip for large-scale runs); `--min-area-frac`/`--max-masks` remain standalone-only.
+Benchmark it with `FUSED=1 bash data_pipeline/benchmark_tracks.sh` (add `VIZ=1` for renders).
+
 Single-GPU alternative:
 
 ```bash

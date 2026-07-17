@@ -160,6 +160,75 @@ def assign_object_ids_multiframe(
     return oid
 
 
+def segment_tracks_arrays(tracks: np.ndarray, vis: np.ndarray, H: int, W: int, get_masks,
+                          vis_override_every: int, verbose: bool = False
+                          ) -> tuple[np.ndarray, int, np.ndarray, np.ndarray, int, list[int]]:
+    """Core of Stage 4: object IDs from first-visible frames, vis override, low-rank weights.
+
+    Shared by segment_tracks.py and extract_tracks.py --segment (fused mode) so both paths
+    produce identical results. ``get_masks(frame_ts)`` must return {frame_t: masks [M,H,W] bool}.
+    tracks: [T,N,2] px. vis: [T,N] bool, updated in place by the override sweep.
+    Returns (object_ids, n_objects, vis, track_weights, n_overrides, unique_frames).
+    """
+    T = tracks.shape[0]
+    # Per-point first-visible frame; -1 for points CoTracker never marks visible
+    ever_visible = vis.any(axis=0)                                          # [N]
+    first_visible = np.where(ever_visible, np.argmax(vis, axis=0), -1)     # [N]
+    unique_frames = sorted(set(first_visible[ever_visible].tolist()))
+
+    if verbose:
+        fv_counts = {f: int((first_visible == f).sum()) for f in unique_frames}
+        print(f"  [seg] first_visible frames: {fv_counts}", flush=True)
+
+    # FastSAM masks for each unique first-visible frame
+    frame_masks = get_masks(unique_frames)
+    if verbose:
+        for frame_t, masks in frame_masks.items():
+            areas = masks.reshape(masks.shape[0], -1).sum(1).tolist() if masks.shape[0] else []
+            print(f"  [seg] frame {frame_t}: {masks.shape[0]} masks, areas={[int(a) for a in areas]}", flush=True)
+
+    oid = assign_object_ids_multiframe(frame_masks, first_visible, tracks, H, W)
+    n_objects = int(np.unique(oid[oid >= 0]).shape[0]) if (oid >= 0).any() else 0
+
+    if verbose:
+        for frame_t in unique_frames:
+            pt_sel = first_visible == frame_t
+            labeled = int((oid[pt_sel] >= 0).sum())
+            print(f"  [seg] frame {frame_t}: {pt_sel.sum()} pts, {labeled} got oid>=0", flush=True)
+
+    # Vis override: run FastSAM every N frames and set vis=True for object points
+    # that fall inside any mask — fixes CoTracker vis=0 on edge-of-frame objects.
+    n_overrides = 0
+    if vis_override_every > 0 and (oid >= 0).any():
+        object_pts = np.where(oid >= 0)[0]
+        override_ts = list(range(0, T, vis_override_every))
+        override_masks = get_masks(override_ts)
+        for frame_t in override_ts:
+            masks = override_masks[frame_t]
+            if masks.shape[0] == 0:
+                continue
+            pts = tracks[frame_t, object_pts]                              # [K,2]
+            xi = np.clip(pts[:, 0].round().astype(int), 0, W - 1)
+            yi = np.clip(pts[:, 1].round().astype(int), 0, H - 1)
+            in_any_mask = masks[:, yi, xi].any(axis=0)                    # [K] bool
+            newly_visible = in_any_mask & ~vis[frame_t, object_pts]
+            vis[frame_t, object_pts] |= in_any_mask
+            n_overrides += int(newly_visible.sum())
+
+        # Fill gaps between True frames caused by the sampling interval.
+        # If vis is True at frame T and True again at T+k (k <= override_every),
+        # the frames in between should also be True — the object didn't disappear.
+        V = vis[:, object_pts]                                             # [T,K]
+        t_idx = np.arange(T)[:, None]
+        prev = np.maximum.accumulate(np.where(V, t_idx, -1), axis=0)
+        nxt = np.minimum.accumulate(np.where(V, t_idx, 2 * T)[::-1], axis=0)[::-1]
+        fill = (~V) & (prev >= 0) & (nxt < T) & ((nxt - prev) <= vis_override_every)
+        vis[:, object_pts] = V | fill
+
+    weights = lowrank_track_weights(tracks)
+    return oid.astype(np.int64), n_objects, vis, weights, n_overrides, unique_frames
+
+
 def lowrank_track_weights(tracks: np.ndarray, rank: int = 3, pct: float = 97.0) -> np.ndarray:
     """Per-point sampling weight in [0,1] = percentile-normalized low-rank motion residual.
 
@@ -241,69 +310,20 @@ def main() -> None:
 
         # Decode the video once; frames are reused for segmentation, vis override, and viz.
         frames = read_all_frames(str(vpath))
-
-        # Per-point first-visible frame; -1 for points CoTracker never marks visible
-        ever_visible = vis.any(axis=0)                                          # [N]
-        first_visible = np.where(ever_visible, np.argmax(vis, axis=0), -1)     # [N]
-        unique_frames = sorted(set(first_visible[ever_visible].tolist()))
-
-        if args.verbose:
-            fv_counts = {f: int((first_visible == f).sum()) for f in unique_frames}
-            print(f"  [seg] first_visible frames: {fv_counts}", flush=True)
-
-        # Run FastSAM on each unique first-visible frame (batched)
         mask_cache: dict[int, np.ndarray] = {}
-        masks_for_frames(model, frames, unique_frames, mask_cache, args)
-        frame_masks = {frame_t: mask_cache[frame_t] for frame_t in unique_frames}
-        if args.verbose:
-            for frame_t, masks in frame_masks.items():
-                areas = masks.reshape(masks.shape[0], -1).sum(1).tolist() if masks.shape[0] else []
-                print(f"  [seg] frame {frame_t}: {masks.shape[0]} masks, areas={[int(a) for a in areas]}", flush=True)
 
-        oid = assign_object_ids_multiframe(frame_masks, first_visible, tracks, H, W)
-        n_objects = int(np.unique(oid[oid >= 0]).shape[0]) if (oid >= 0).any() else 0
+        def get_masks(frame_ts: list[int], _frames=frames, _cache=mask_cache) -> dict[int, np.ndarray]:
+            masks_for_frames(model, _frames, frame_ts, _cache, args)
+            return {t: _cache[t] for t in frame_ts}
 
-        if args.verbose:
-            for frame_t in unique_frames:
-                pt_sel = first_visible == frame_t
-                labeled = int((oid[pt_sel] >= 0).sum())
-                print(f"  [seg] frame {frame_t}: {pt_sel.sum()} pts, {labeled} got oid>=0", flush=True)
+        oid, n_objects, vis, weights, n_overrides, unique_frames = segment_tracks_arrays(
+            tracks, vis, H, W, get_masks, args.vis_override_every, verbose=args.verbose)
 
-        # Vis override: run FastSAM every N frames and set vis=True for object points
-        # that fall inside any mask — fixes CoTracker vis=0 on edge-of-frame objects.
-        n_overrides = 0
-        if args.vis_override_every > 0 and (oid >= 0).any():
-            T = tracks.shape[0]
-            object_pts = np.where(oid >= 0)[0]
-            override_ts = list(range(0, T, args.vis_override_every))
-            masks_for_frames(model, frames, override_ts, mask_cache, args)
-            for frame_t in override_ts:
-                masks = mask_cache[frame_t]
-                if masks.shape[0] == 0:
-                    continue
-                pts = tracks[frame_t, object_pts]                              # [K,2]
-                xi = np.clip(pts[:, 0].round().astype(int), 0, W - 1)
-                yi = np.clip(pts[:, 1].round().astype(int), 0, H - 1)
-                in_any_mask = masks[:, yi, xi].any(axis=0)                    # [K] bool
-                newly_visible = in_any_mask & ~vis[frame_t, object_pts]
-                vis[frame_t, object_pts] |= in_any_mask
-                n_overrides += int(newly_visible.sum())
-
-            # Fill gaps between True frames caused by the sampling interval.
-            # If vis is True at frame T and True again at T+k (k <= override_every),
-            # the frames in between should also be True — the object didn't disappear.
-            V = vis[:, object_pts]                                             # [T,K]
-            t_idx = np.arange(T)[:, None]
-            prev = np.maximum.accumulate(np.where(V, t_idx, -1), axis=0)
-            nxt = np.minimum.accumulate(np.where(V, t_idx, 2 * T)[::-1], axis=0)[::-1]
-            fill = (~V) & (prev >= 0) & (nxt < T) & ((nxt - prev) <= args.vis_override_every)
-            vis[:, object_pts] = V | fill
-
+        if args.vis_override_every > 0:
             d["visibility"] = vis
-
-        d["object_ids"] = oid.astype(np.int64)
+        d["object_ids"] = oid
         d["n_objects"] = np.int64(n_objects)
-        d["track_weights"] = lowrank_track_weights(tracks)
+        d["track_weights"] = weights
         tmp = npz_path.with_suffix(".tmp.npz")
         np.savez(tmp, **d)
         tmp.replace(npz_path)

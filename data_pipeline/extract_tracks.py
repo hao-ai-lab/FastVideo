@@ -69,6 +69,19 @@ def parse_args() -> argparse.Namespace:
                    help="Frames per batched FastSAM forward during entry detection.")
     p.add_argument("--amp", action="store_true",
                    help="Run CoTracker under bf16 autocast (~1.5-2x faster, slightly different coords).")
+    # Fused Stage 4
+    p.add_argument("--segment", action="store_true",
+                   help="Fused Stage 4: also compute object_ids/n_objects/track_weights and the "
+                        "vis-override sweep in this pass, reusing the decoded video and the "
+                        "entry-detection FastSAM masks. Uses --sam-conf/--sam-iou/--sam-imgsz; "
+                        "masks are unfiltered (no min-area-frac/max-masks).")
+    p.add_argument("--vis-override-every", type=int, default=3,
+                   help="(with --segment) run FastSAM every N frames and set vis=True for object "
+                        "points inside masks; 0 disables.")
+    p.add_argument("--viz", action="store_true",
+                   help="(with --segment) render a track-overlay mp4 after each video.")
+    p.add_argument("--viz-dir", type=str, default=None,
+                   help="Output directory for viz mp4s (default: <data-dir>/viz).")
     p.add_argument("--entry-sample-every", type=int, default=5,
                    help="Check for new objects every N frames.")
     p.add_argument("--entry-new-area", type=float, default=0.3,
@@ -76,7 +89,10 @@ def parse_args() -> argparse.Namespace:
                         "is not covered by any frame-0 mask (catches partially-entering objects).")
     p.add_argument("--entry-min-area", type=float, default=0.005,
                    help="Min area fraction for a new-object mask to be considered.")
-    return p.parse_args()
+    args = p.parse_args()
+    if args.viz and not args.segment:
+        p.error("--viz requires --segment (object IDs are needed for the overlay)")
+    return args
 
 
 def load_cotracker(model_name: str, device: str):
@@ -207,9 +223,10 @@ def max_iou_with_set(mask: np.ndarray, others: np.ndarray) -> float:
 def detect_entry_events(video: torch.Tensor, sam_model, H: int, W: int, conf: float, iou: float,
                         imgsz: int, sample_every: int, new_area_thresh: float,
                         min_area_frac: float, sam_batch: int = 16
-                        ) -> tuple[dict[int, np.ndarray], np.ndarray]:
-    """Return ({frame_t: new_masks [M,H,W]}, masks0_union [H,W]) for frames where new
-    regions appear that weren't covered by any frame-0 mask.
+                        ) -> tuple[dict[int, np.ndarray], np.ndarray, dict[int, np.ndarray]]:
+    """Return ({frame_t: new_masks [M,H,W]}, masks0_union [H,W], {frame_t: all masks}) for
+    frames where new regions appear that weren't covered by any frame-0 mask. The third
+    element caches every segmented frame's raw masks for reuse by the fused --segment pass.
 
     Uses new-area fraction rather than IOU so partially-entering objects (partially visible
     at frame 0, more visible later) are correctly detected: only the newly visible region
@@ -223,6 +240,7 @@ def detect_entry_events(video: torch.Tensor, sam_model, H: int, W: int, conf: fl
     sample_ts = list(range(sample_every, T, sample_every))
     frames = [video[0, t].permute(1, 2, 0).numpy().astype(np.uint8) for t in [0, *sample_ts]]
     all_masks = fastsam_masks_batch(sam_model, frames, conf, iou, imgsz, H, W, batch=sam_batch)
+    masks_by_frame = dict(zip([0, *sample_ts], all_masks))
     masks0 = all_masks[0]
     # Exclude large background masks (table surface, floor, walls) from masks0_union.
     # Only object-sized masks define "known territory" — background covers the whole frame
@@ -269,7 +287,7 @@ def detect_entry_events(video: torch.Tensor, sam_model, H: int, W: int, conf: fl
         if new_masks:
             entry_events[frame_t] = np.stack(new_masks)
 
-    return entry_events, masks0_union
+    return entry_events, masks0_union, masks_by_frame
 
 
 def patch_manifest(manifest_path: Path, stem_to_points: dict[str, Path]) -> int:
@@ -311,11 +329,17 @@ def main() -> None:
     print(f"[track] loaded {args.model}; {len(videos)} videos, grid={args.grid_size}x{args.grid_size}", flush=True)
 
     sam_model = None
-    if args.detect_entries:
+    if args.detect_entries or args.segment:
         from ultralytics import FastSAM
         sam_model = FastSAM(args.sam_model)
-        print(f"[track] entry detection enabled: sam={args.sam_model}, "
+        print(f"[track] entries={args.detect_entries} segment={args.segment}: sam={args.sam_model}, "
               f"conf={args.sam_conf}, every={args.entry_sample_every}f", flush=True)
+
+    stem_to_fps: dict[str, float] = {}
+    if args.viz:
+        mpath = args.data_dir / args.manifest
+        items = json.loads(mpath.read_text()) if mpath.exists() else []
+        stem_to_fps = {Path(it.get("path", "")).stem: it.get("fps", 24) for it in items}
 
     stem_to_points: dict[str, Path] = {}
     for k, vpath in enumerate(videos, 1):
@@ -327,8 +351,9 @@ def main() -> None:
         tracks, vis = track_one(cotracker, video, args.grid_size, args.downscale, args.device, amp=args.amp)
 
         n_replaced = 0
-        if sam_model is not None:
-            entry_events, masks0_union = detect_entry_events(
+        masks_cache: dict[int, np.ndarray] = {}
+        if args.detect_entries:
+            entry_events, masks0_union, masks_cache = detect_entry_events(
                 video, sam_model, h, w,
                 conf=args.sam_conf, iou=args.sam_iou, imgsz=args.sam_imgsz,
                 sample_every=args.entry_sample_every,
@@ -406,11 +431,45 @@ def main() -> None:
                   f"{len(entry_events)} entry event(s) at frames [{frames_str}], "
                   f"{n_replaced} slots replaced", flush=True)
 
+        # Fused Stage 4: object IDs + vis override + track weights, reusing the decoded
+        # video and any masks already computed by entry detection.
+        seg_extra: dict[str, np.ndarray] = {}
+        if args.segment:
+            import segment_tracks as seg
+
+            def get_masks(frame_ts: list[int], _video=video, _cache=masks_cache,
+                          _h=h, _w=w) -> dict[int, np.ndarray]:
+                missing = [t for t in frame_ts if t not in _cache]
+                if missing:
+                    frames_np = [_video[0, t].permute(1, 2, 0).numpy().astype(np.uint8) for t in missing]
+                    new_masks = fastsam_masks_batch(sam_model, frames_np, args.sam_conf, args.sam_iou,
+                                                    args.sam_imgsz, _h, _w, batch=args.sam_batch)
+                    _cache.update(zip(missing, new_masks))
+                return {t: _cache[t] for t in frame_ts}
+
+            vis = vis.astype(bool)
+            oid, n_objects, vis, weights, n_overrides, uframes = seg.segment_tracks_arrays(
+                tracks, vis, h, w, get_masks, args.vis_override_every, verbose=args.verbose)
+            seg_extra = dict(object_ids=oid, n_objects=np.int64(n_objects), track_weights=weights)
+            print(f"[track] [{k}/{len(videos)}] {vpath.name} seg: {n_objects} objs across "
+                  f"{len(uframes)} frames, {int((oid >= 0).sum())}/{oid.shape[0]} pts labeled, "
+                  f"{n_overrides} vis overrides", flush=True)
+
+            if args.viz:
+                viz_dir = Path(args.viz_dir) if args.viz_dir else (args.data_dir / "viz")
+                stem_dir = viz_dir / vpath.stem
+                stem_dir.mkdir(parents=True, exist_ok=True)
+                frames_np = video[0].permute(0, 2, 3, 1).numpy().astype(np.uint8)  # [T,H,W,3]
+                seg.render_viz(frames_np[:tracks.shape[0]], tracks, vis, oid, stem_dir / "tracks.mp4",
+                               fps=int(stem_to_fps.get(vpath.stem, 24)))
+                print(f"  viz -> {stem_dir}/", flush=True)
+
         tmp = out_path.with_name(out_path.stem + ".tmp.npz")
         np.savez(
             tmp, tracks=tracks, visibility=vis,
             grid_size=args.grid_size, height=h, width=w,
             num_frames=tracks.shape[0],
+            **seg_extra,
         )
         tmp.replace(out_path)
         print(f"[track] [{k}/{len(videos)}] {vpath.name} -> {out_path.name} "
