@@ -3,7 +3,7 @@ set -euo pipefail
 CONDITION="${1:?A12/A13/A14/A15}"
 RUN_ROOT="${2:?prepared condition run root}"
 BASE_PORT="${3:-29800}"
-REPO="${REPO:-/mnt/nfs/vlm-k1kong/FastVideo-openvid-a12-a15-plan-20260717}"
+REPO="${REPO:-/mnt/nfs/vlm-k1kong/FastVideo-openvid-a12-a15-final-20260717}"
 ENV_DIR="${ENV_DIR:-/mnt/nfs/vlm-k1kong/envs/fastvideo}"
 : "${WANDB_API_KEY:?export WANDB_API_KEY at launch time}"
 export REPO ENV_DIR CONDITION RUN_ROOT
@@ -20,7 +20,12 @@ run_stage() {
 }
 export_stage() {
   local stage="$1" final="$2" role="${3:-student}"
-  if [[ -s "$RUN_ROOT/export/$stage/transformer/model.safetensors" ]]; then
+  local checkpoint="$RUN_ROOT/$stage/checkpoints/checkpoint-$final"
+  local marker="$RUN_ROOT/export/$stage/.source_checkpoint_fingerprint"
+  local current
+  current="$(find "$checkpoint" -type f -printf '%P:%s:%T@\n' | LC_ALL=C sort | sha256sum | awk '{print $1}')"
+  if [[ -s "$RUN_ROOT/export/$stage/transformer/model.safetensors" ]] &&
+     [[ "$(cat "$marker" 2>/dev/null || true)" == "$current" ]]; then
     echo "$CONDITION $stage export already complete; skipping"
     return
   fi
@@ -29,12 +34,19 @@ export_stage() {
     --checkpoint "$RUN_ROOT/$stage/checkpoints/checkpoint-$final" \
     --output-dir "$RUN_ROOT/export/$stage" --overwrite \
     2>&1 | tee "$RUN_ROOT/$stage/logs/export.log"
+  printf '%s\n' "$current" > "$marker"
 }
 
 printf 'running\n' > "$RUN_ROOT/state/status"; date -Is > "$RUN_ROOT/state/started_at"
 run_stage tf 3000 "$((BASE_PORT + 1))"; export_stage tf 3000 student
 run_stage cd 2000 "$((BASE_PORT + 2))"; export_stage cd 2000 student
 run_stage sf 1000 "$((BASE_PORT + 3))"; export_stage sf 1000 student_ema
-sha256sum "$RUN_ROOT/sf/checkpoints/checkpoint-1000/ema/student.safetensors" \
-  "$RUN_ROOT/export/sf/transformer/model.safetensors" > "$RUN_ROOT/state/ema_sha256.txt"
+ema_hash="$(sha256sum "$RUN_ROOT/sf/checkpoints/checkpoint-1000/ema/student.safetensors" | awk '{print $1}')"
+export_hash="$(sha256sum "$RUN_ROOT/export/sf/transformer/model.safetensors" | awk '{print $1}')"
+printf 'checkpoint_ema %s\nexported_ema %s\n' "$ema_hash" "$export_hash" \
+  > "$RUN_ROOT/state/ema_sha256.txt"
+if [[ "$ema_hash" != "$export_hash" ]]; then
+  printf 'failed_ema_hash_mismatch\n' > "$RUN_ROOT/state/status"
+  exit 1
+fi
 printf 'completed\n' > "$RUN_ROOT/state/status"; date -Is > "$RUN_ROOT/state/finished_at"

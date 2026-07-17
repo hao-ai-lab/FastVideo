@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 : "${RUN_ROOT:?}" "${STAGE:?}" "${MASTER_PORT:?}" "${WANDB_API_KEY:?}"
-REPO="${REPO:-/mnt/nfs/vlm-k1kong/FastVideo-openvid-a12-a15-plan-20260717}"
+REPO="${REPO:-/mnt/nfs/vlm-k1kong/FastVideo-openvid-a12-a15-final-20260717}"
 ENV_DIR="${ENV_DIR:-/mnt/nfs/vlm-k1kong/envs/fastvideo}"
-REQUIRED_ANCESTOR="5ce164972619c408245267d11d4495145ba2dbfe"
+REQUIRED_ANCESTOR="30fcfae6578e2f5776d86cafe807f4a58722e26e"
 STAGE_DIR="$RUN_ROOT/$STAGE"
 CONFIG="$STAGE_DIR/config/run.yaml"
 STATE="$STAGE_DIR/state"

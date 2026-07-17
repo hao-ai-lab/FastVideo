@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import argparse
 import copy
-import os
 from pathlib import Path
 
 import yaml
 
 
 DATA_PATH = "/mnt/lustre/vlm-s4duan/openvid_1m/combined_parquet_dataset"
+STREAMING_MANIFEST_PATH = "/mnt/lustre/vlm-k1kong/dataset-index/openvid/streaming-t2v-v2.json"
 MODEL_ID = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 TEACHER_ID = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
-REQUIRED_ANCESTOR = "5ce164972619c408245267d11d4495145ba2dbfe"
+REQUIRED_ANCESTOR = "30fcfae6578e2f5776d86cafe807f4a58722e26e"
 
 CONDITIONS = {
     "A12": {"sink": 1, "local": 6, "rope": "relativistic", "framewise": False},
@@ -32,14 +32,21 @@ def training(stage_dir: str, *, steps: int, keep: int) -> dict:
         },
         "data": {
             "data_path": DATA_PATH,
+            "dataloader_type": "streaming",
+            "streaming_manifest_path": STREAMING_MANIFEST_PATH,
+            "streaming_read_batch_size": 2,
+            "streaming_shuffle_row_groups": True,
             "dataloader_num_workers": 0,
             "train_batch_size": 2,
             "training_cfg_rate": 0.0,
             "seed": 1000,
-            "num_latent_t": 31,
+            # The source tensor has T=31.  Crop its tail deterministically so
+            # chunk-3 TF/CD/SF all use exactly ten aligned blocks.  Keeping
+            # T=31 would make TF/CD [3x10,1] but SF [4,3x9].
+            "num_latent_t": 30,
             "num_height": 480,
             "num_width": 832,
-            "num_frames": 121,
+            "num_frames": 117,
         },
         "optimizer": {
             "learning_rate": 2.0e-6,
@@ -103,9 +110,8 @@ def causal_role(*, trainable: bool, override: str | None, framewise: bool) -> di
 
 def configs(run_root: str, condition: str, spec: dict, repo: str) -> dict[str, dict]:
     framewise = bool(spec["framewise"])
-    tag = (
-        f"{condition}_sink{spec['sink']}_local{spec['local']}_{spec['rope']}"
-        + ("_framewise" if framewise else "_chunk3")
+    tag = f"{condition}_sink{spec['sink']}_local{spec['local']}_{spec['rope']}" + (
+        "_framewise" if framewise else "_chunk3"
     )
     pipeline = {
         "flow_shift": 5,
@@ -211,13 +217,13 @@ def configs(run_root: str, condition: str, spec: dict, repo: str) -> dict[str, d
     sf["training"]["tracker"]["run_name"] = f"{tag}_sf1k_from_cd2k_openvid_gbs64"
 
     for config in (tf, cd, sf):
-        config["callbacks"]["validation"]["dataset_file"] = config["callbacks"]["validation"][
-            "dataset_file"
-        ].replace("__REPO__", repo)
+        config["callbacks"]["validation"]["dataset_file"] = config["callbacks"]["validation"]["dataset_file"].replace(
+            "__REPO__", repo
+        )
     return {"tf": tf, "cd": cd, "sf": sf}
 
 
-TRAIN_STAGE = r'''#!/usr/bin/env bash
+TRAIN_STAGE = r"""#!/usr/bin/env bash
 set -euo pipefail
 : "${RUN_ROOT:?}" "${STAGE:?}" "${MASTER_PORT:?}" "${WANDB_API_KEY:?}"
 REPO="${REPO:-__REPO__}"
@@ -266,10 +272,10 @@ cd "$REPO"; set +e; "${cmd[@]}" 2>&1 | tee -a "$LOG"; rc=${PIPESTATUS[0]}; set -
 printf '%s\n' "$rc" > "$STATE/exit_code"; date -Is > "$STATE/finished_at"
 if [[ "$rc" -eq 0 ]]; then printf 'completed\n' > "$STATE/status"; else printf 'failed\n' > "$STATE/status"; fi
 exit "$rc"
-'''
+"""
 
 
-QUEUE = r'''#!/usr/bin/env bash
+QUEUE = r"""#!/usr/bin/env bash
 set -euo pipefail
 CONDITION="${1:?A12/A13/A14/A15}"
 RUN_ROOT="${2:?prepared condition run root}"
@@ -291,7 +297,12 @@ run_stage() {
 }
 export_stage() {
   local stage="$1" final="$2" role="${3:-student}"
-  if [[ -s "$RUN_ROOT/export/$stage/transformer/model.safetensors" ]]; then
+  local checkpoint="$RUN_ROOT/$stage/checkpoints/checkpoint-$final"
+  local marker="$RUN_ROOT/export/$stage/.source_checkpoint_fingerprint"
+  local current
+  current="$(find "$checkpoint" -type f -printf '%P:%s:%T@\n' | LC_ALL=C sort | sha256sum | awk '{print $1}')"
+  if [[ -s "$RUN_ROOT/export/$stage/transformer/model.safetensors" ]] &&
+     [[ "$(cat "$marker" 2>/dev/null || true)" == "$current" ]]; then
     echo "$CONDITION $stage export already complete; skipping"
     return
   fi
@@ -300,26 +311,33 @@ export_stage() {
     --checkpoint "$RUN_ROOT/$stage/checkpoints/checkpoint-$final" \
     --output-dir "$RUN_ROOT/export/$stage" --overwrite \
     2>&1 | tee "$RUN_ROOT/$stage/logs/export.log"
+  printf '%s\n' "$current" > "$marker"
 }
 
 printf 'running\n' > "$RUN_ROOT/state/status"; date -Is > "$RUN_ROOT/state/started_at"
 run_stage tf 3000 "$((BASE_PORT + 1))"; export_stage tf 3000 student
 run_stage cd 2000 "$((BASE_PORT + 2))"; export_stage cd 2000 student
 run_stage sf 1000 "$((BASE_PORT + 3))"; export_stage sf 1000 student_ema
-sha256sum "$RUN_ROOT/sf/checkpoints/checkpoint-1000/ema/student.safetensors" \
-  "$RUN_ROOT/export/sf/transformer/model.safetensors" > "$RUN_ROOT/state/ema_sha256.txt"
+ema_hash="$(sha256sum "$RUN_ROOT/sf/checkpoints/checkpoint-1000/ema/student.safetensors" | awk '{print $1}')"
+export_hash="$(sha256sum "$RUN_ROOT/export/sf/transformer/model.safetensors" | awk '{print $1}')"
+printf 'checkpoint_ema %s\nexported_ema %s\n' "$ema_hash" "$export_hash" \
+  > "$RUN_ROOT/state/ema_sha256.txt"
+if [[ "$ema_hash" != "$export_hash" ]]; then
+  printf 'failed_ema_hash_mismatch\n' > "$RUN_ROOT/state/status"
+  exit 1
+fi
 printf 'completed\n' > "$RUN_ROOT/state/status"; date -Is > "$RUN_ROOT/state/finished_at"
-'''
+"""
 
 
-SEQUENCE = r'''#!/usr/bin/env bash
+SEQUENCE = r"""#!/usr/bin/env bash
 set -euo pipefail
 ROOT="${1:?prepared experiment root}"
 : "${WANDB_API_KEY:?export WANDB_API_KEY at launch time}"
 for condition in A12 A13 A14 A15; do
   bash "$ROOT/scripts/run_condition.sh" "$condition" "$ROOT/$condition" "$((29800 + 10#${condition#A} * 10))"
 done
-'''
+"""
 
 
 README = """# OpenVid causal A12-A15 plan (NOT STARTED)
@@ -331,9 +349,19 @@ Data source: `{data}` (4494 parquet files, about 5.5 TiB). It is owned by
 `vlm-s4duan`; filesystem read permission exists, but obtain the owner's consent
 before launching and coordinate I/O. Do not write into that directory.
 
+The opt-in streaming loader projects only the 15 T2V columns, reads each
+assigned row group sequentially, and stores its JSON manifest at
+`{manifest}` in user-owned Lustre. It uses zero DataLoader workers and never
+writes a cache or index into the shared source tree.
+
 All stages use 4 GPUs, microbatch 2/rank, gradient accumulation 8, hence global
 batch = 2 * 4 * 8 = 64. `dataloader_num_workers=0` limits shared-memory and
 Lustre prefetch pressure.
+
+All four conditions train on the first 30 of the source's 31 latent frames
+(`117` raw frames). This makes chunk-3 TF, CD, and SF use ten identical
+3-latent blocks and removes a known T=31 remainder-partition mismatch. A15 is
+also cropped to T=30 so framewise vs chunk-3 remains a length-matched ablation.
 
 A15 "framewise" means `num_frames_per_block=1` on every causal role, plus
 `method.chunk_size=1` in TF and SF. Causal CD has no independent-frame timestep
@@ -403,7 +431,12 @@ def main() -> None:
     (experiment_root / "scripts/run_all_sequential.sh").write_text(SEQUENCE, encoding="utf-8")
     for path in (experiment_root / "scripts").glob("*.sh"):
         path.chmod(0o755)
-    readme = README.format(commit=REQUIRED_ANCESTOR, data=DATA_PATH, root=root)
+    readme = README.format(
+        commit=REQUIRED_ANCESTOR,
+        data=DATA_PATH,
+        manifest=STREAMING_MANIFEST_PATH,
+        root=root,
+    )
     (config_root / "README.md").write_text(readme, encoding="utf-8")
     (experiment_root / "README.md").write_text(readme, encoding="utf-8")
     (experiment_root / "READY_NOT_STARTED").write_text("prepared; training not launched\n", encoding="utf-8")

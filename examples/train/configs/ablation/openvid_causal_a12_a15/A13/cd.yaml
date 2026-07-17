@@ -3,17 +3,17 @@ models:
     _target_: fastvideo.train.models.wan.WanCausalModel
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
-    transformer_override_safetensor: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/prepared_20260717/A13/export/tf/transformer/model.safetensors
+    transformer_override_safetensor: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/20260717_014659_openvid_a12_a15/A13/export/tf/transformer/model.safetensors
   teacher:
     _target_: fastvideo.train.models.wan.WanCausalModel
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: false
-    transformer_override_safetensor: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/prepared_20260717/A13/export/tf/transformer/model.safetensors
+    transformer_override_safetensor: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/20260717_014659_openvid_a12_a15/A13/export/tf/transformer/model.safetensors
   ema:
     _target_: fastvideo.train.models.wan.WanCausalModel
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: false
-    transformer_override_safetensor: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/prepared_20260717/A13/export/tf/transformer/model.safetensors
+    transformer_override_safetensor: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/20260717_014659_openvid_a12_a15/A13/export/tf/transformer/model.safetensors
 method:
   _target_: fastvideo.train.methods.consistency_model.causal_cd.CausalConsistencyDistillationMethod
   discrete_cd_N: 48
@@ -29,14 +29,18 @@ training:
     hsdp_shard_dim: 4
   data:
     data_path: /mnt/lustre/vlm-s4duan/openvid_1m/combined_parquet_dataset
+    dataloader_type: streaming
+    streaming_manifest_path: /mnt/lustre/vlm-k1kong/dataset-index/openvid/streaming-t2v-v2.json
+    streaming_read_batch_size: 2
+    streaming_shuffle_row_groups: true
     dataloader_num_workers: 0
     train_batch_size: 2
     training_cfg_rate: 0.0
     seed: 1000
-    num_latent_t: 31
+    num_latent_t: 30
     num_height: 480
     num_width: 832
-    num_frames: 121
+    num_frames: 117
   optimizer:
     learning_rate: 2.0e-06
     betas:
@@ -49,7 +53,7 @@ training:
     max_train_steps: 2000
     gradient_accumulation_steps: 8
   checkpoint:
-    output_dir: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/prepared_20260717/A13/cd/checkpoints
+    output_dir: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/20260717_014659_openvid_a12_a15/A13/cd/checkpoints
     training_state_checkpointing_steps: 1000
     checkpoints_total_limit: 2
   tracker:
@@ -64,13 +68,13 @@ callbacks:
     max_grad_norm: 1.0
   validation:
     pipeline_target: fastvideo.pipelines.basic.wan.wan_causal_pipeline.WanCausalPipeline
-    dataset_file: /mnt/nfs/vlm-k1kong/FastVideo-openvid-a12-a15-plan-20260717/examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
+    dataset_file: /mnt/nfs/vlm-k1kong/FastVideo-openvid-a12-a15-final-20260717/examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
     every_steps: 200
     sampling_steps:
     - 4
     guidance_scale: 3.0
     num_frames: 249
-    output_dir: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/prepared_20260717/A13/cd/validation
+    output_dir: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/20260717_014659_openvid_a12_a15/A13/cd/validation
     offload_training_state: true
     unload_pipeline_after_validation: true
 pipeline:
