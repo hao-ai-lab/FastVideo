@@ -17,6 +17,7 @@ DEFAULT_PROMPTS = (
     "A small robot sketches a city skyline at sunrise, cinematic lighting.",
     "A glass teapot steams on a wooden table while rain falls outside.",
 )
+_TAIL_FRACTION = 0.001
 
 
 def _build_init_kwargs(args: argparse.Namespace, *, dynamic: bool) -> dict[str, Any]:
@@ -118,11 +119,14 @@ def _tensor_metrics(
             diff = (seq - dyn).abs()
             max_abs_diff = float(diff.max().item())
             mean_abs_diff = float(diff.mean().item())
+            tail_count = max(1, math.ceil(diff.numel() * _TAIL_FRACTION))
+            tail_mean_abs_diff = float(diff.flatten().topk(tail_count, sorted=False).values.mean().item())
             allclose_atol_1e_5 = bool(torch.allclose(seq, dyn, atol=1e-5, rtol=1e-5))
             allclose_atol_1e_4 = bool(torch.allclose(seq, dyn, atol=1e-4, rtol=1e-4))
         else:
             max_abs_diff = math.nan
             mean_abs_diff = math.nan
+            tail_mean_abs_diff = math.nan
             allclose_atol_1e_5 = False
             allclose_atol_1e_4 = False
         seq_prompt = seq_result.get("prompts")
@@ -142,13 +146,16 @@ def _tensor_metrics(
             "dynamic_finite": bool(torch.isfinite(dyn).all().item()),
             "max_abs_diff": max_abs_diff,
             "mean_abs_diff": mean_abs_diff,
+            "tail_mean_abs_diff": tail_mean_abs_diff,
             "allclose_atol_1e_5": allclose_atol_1e_5,
             "allclose_atol_1e_4": allclose_atol_1e_4,
         })
     return {
         "per_request": per_request,
+        "tail_fraction": _TAIL_FRACTION,
         "max_abs_diff": max(item["max_abs_diff"] for item in per_request),
         "mean_abs_diff": sum(item["mean_abs_diff"] for item in per_request) / len(per_request),
+        "tail_mean_abs_diff": max(item["tail_mean_abs_diff"] for item in per_request),
         "all_finite": all(item["sequential_finite"] and item["dynamic_finite"] for item in per_request),
         "allclose_atol_1e_5": all(item["allclose_atol_1e_5"] for item in per_request),
         "allclose_atol_1e_4": all(item["allclose_atol_1e_4"] for item in per_request),
@@ -159,10 +166,11 @@ def _parity_gate(
     metrics: dict[str, Any],
     *,
     max_mean_abs_diff: float,
+    max_tail_mean_abs_diff: float,
 ) -> dict[str, Any]:
     # Elementwise maxima are noisy BF16 outliers across equivalent L40S runs.
-    # Keep max_abs_diff in tensor_metrics for diagnosis and gate each request's
-    # stable mean, whose original 0.02 bound did not need post-hoc widening.
+    # The top-0.1% mean bounds localized corruption without letting one outlier
+    # control the gate, while the whole-tensor mean catches broad drift.
     failures = []
     can_apply_tolerance = True
     for item in metrics["per_request"]:
@@ -181,12 +189,12 @@ def _parity_gate(
         if not item["dynamic_finite"]:
             failures.append(f"request {index} dynamic output contains non-finite values")
             can_apply_tolerance = False
-        for metric_name in ("max_abs_diff", "mean_abs_diff"):
+        for metric_name in ("max_abs_diff", "mean_abs_diff", "tail_mean_abs_diff"):
             metric_value = item[metric_name]
             if not math.isfinite(metric_value):
                 failures.append(f"request {index} {metric_name} is non-finite: {metric_value!r}")
                 can_apply_tolerance = False
-    for metric_name in ("max_abs_diff", "mean_abs_diff"):
+    for metric_name in ("max_abs_diff", "mean_abs_diff", "tail_mean_abs_diff"):
         metric_value = metrics[metric_name]
         if not math.isfinite(metric_value):
             failures.append(f"aggregate {metric_name} is non-finite: {metric_value!r}")
@@ -194,15 +202,23 @@ def _parity_gate(
     if not math.isfinite(max_mean_abs_diff):
         failures.append(f"max_mean_abs_diff must be finite, got {max_mean_abs_diff!r}")
         can_apply_tolerance = False
+    if not math.isfinite(max_tail_mean_abs_diff):
+        failures.append(f"max_tail_mean_abs_diff must be finite, got {max_tail_mean_abs_diff!r}")
+        can_apply_tolerance = False
     if can_apply_tolerance:
         for item in metrics["per_request"]:
             if item["mean_abs_diff"] > max_mean_abs_diff:
                 failures.append(
                     f"request {item['index']} mean_abs_diff {item['mean_abs_diff']:.6g} exceeds "
                     f"{max_mean_abs_diff:.6g}")
+            if item["tail_mean_abs_diff"] > max_tail_mean_abs_diff:
+                failures.append(
+                    f"request {item['index']} tail_mean_abs_diff {item['tail_mean_abs_diff']:.6g} exceeds "
+                    f"{max_tail_mean_abs_diff:.6g}")
     return {
         "passed": not failures,
         "max_mean_abs_diff": max_mean_abs_diff,
+        "max_tail_mean_abs_diff": max_tail_mean_abs_diff,
         "failures": failures,
     }
 
@@ -265,6 +281,7 @@ def run_parity(args: argparse.Namespace) -> dict[str, Any]:
         "parity_gate": _parity_gate(
             metrics,
             max_mean_abs_diff=args.max_mean_abs_diff,
+            max_tail_mean_abs_diff=args.max_tail_mean_abs_diff,
         ),
         "saved_outputs": saved_outputs,
     }
@@ -320,6 +337,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--prompts", nargs="+", default=list(DEFAULT_PROMPTS))
     parser.add_argument("--max-mean-abs-diff", type=float, default=0.02)
+    parser.add_argument("--max-tail-mean-abs-diff", type=float, default=0.30)
     return parser.parse_args()
 
 
