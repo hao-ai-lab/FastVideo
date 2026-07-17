@@ -51,8 +51,9 @@ class SamplingParam:
     gt_latents: Any | None = None  # Ground truth latents [B, 16, T, H, W]
     conditioning_mask: Any | None = None  # Mask [B, 1, T, H, W]
 
-    # Camera control inputs (LingBotWorld)
+    # Camera control inputs (LingBotWorld and LingBotWorld2)
     c2ws_plucker_emb: Any | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
+    action_path: str | None = None  # Directory containing poses.npy and intrinsics.npy
 
     # Refine inputs (LongCat 480p->720p upscaling)
     # Path-based refine (load stage1 video from disk, e.g. MP4)

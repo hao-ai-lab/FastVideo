@@ -450,6 +450,7 @@ surfaces:
       grid_sizes: request.inputs.grid_sizes
       pose: request.inputs.pose
       c2ws_plucker_emb: request.inputs.c2ws_plucker_emb
+      action_path: request.inputs.action_path
       refine_from: request.inputs.refine_from
       stage1_video: request.inputs.stage1_video
       prompt: request.prompt

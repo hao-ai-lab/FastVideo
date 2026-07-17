@@ -147,8 +147,9 @@ class ForwardBatch:
     camera_trajectory: str | None = None  # Camera trajectory file/identifier
     action_list: list[str] | None = None  # List of actions (e.g., ['forward', 'left'])
     action_speed_list: list[float] | None = None  # Speed for each action
-    # Camera control inputs (LingBotWorld)
+    # Camera control inputs (LingBotWorld and LingBotWorld2)
     c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
+    action_path: str | None = None  # Directory containing poses.npy and intrinsics.npy
 
     # Camera control inputs (GEN3C)
     trajectory_type: str | None = None
