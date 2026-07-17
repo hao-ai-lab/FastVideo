@@ -108,6 +108,7 @@ export async function applyNormalizedSocketEvent(event: any, context: any): Prom
 			if (!uiStore.get().simpleMode && sessionStore.get().manualContinuationMode) {
 				sessionStore.patch({
 					waitingForSegmentPrompt: true,
+					generatingNextScene: false,
 					sessionNotice: "Couldn't continue from that prompt — try rephrasing the next scene.",
 				});
 			}
@@ -255,7 +256,7 @@ export async function applyNormalizedSocketEvent(event: any, context: any): Prom
 
 		case "prompt/sources_blocked":
 			if (sessionStore.get().manualContinuationMode) {
-				sessionStore.patch({ waitingForSegmentPrompt: true, autoExtensionTimeoutHint: "" });
+				sessionStore.patch({ waitingForSegmentPrompt: true, generatingNextScene: false, autoExtensionTimeoutHint: "" });
 			} else {
 				sessionStore.patch({
 					autoExtensionTimeoutHint: uiStore.get().simpleMode ? "" : "blocked on user input, increase prompt count for smoother experience",
@@ -264,13 +265,22 @@ export async function applyNormalizedSocketEvent(event: any, context: any): Prom
 			return;
 
 		case "prompt/sources_resumed":
+			sessionStore.patch({
+				autoExtensionTimeoutHint: "",
+				waitingForSegmentPrompt: false,
+				// A real prompt was just selected for the next segment; media arriving
+				// (stream/media_init) clears this again.
+				...(sessionStore.get().manualContinuationMode ? { generatingNextScene: true } : {}),
+			});
+			return;
+
 		case "session/auto_extension_updated":
+			// Deliberately does NOT touch generatingNextScene: toggling auto extension
+			// starts no generation.
 			sessionStore.patch({ autoExtensionTimeoutHint: "", waitingForSegmentPrompt: false });
-			if (event.type === "session/auto_extension_updated") {
-				console.log("[AutoExtensionUpdated]", {
-					enabled: sessionStore.get().autoExtensionEnabled,
-				});
-			}
+			console.log("[AutoExtensionUpdated]", {
+				enabled: sessionStore.get().autoExtensionEnabled,
+			});
 			return;
 
 		case "segment/step_complete":
@@ -292,6 +302,7 @@ export async function applyNormalizedSocketEvent(event: any, context: any): Prom
 				projectResetPending: false,
 				sessionExpired: true,
 				sessionNotice: "",
+				generatingNextScene: false,
 			});
 			console.log("Session timed out");
 			clearCountdownInterval();
@@ -369,6 +380,8 @@ export async function applyNormalizedSocketEvent(event: any, context: any): Prom
 			return;
 
 		case "stream/media_init":
+			// Segment media is arriving — the "Generating next scene" phase is over.
+			sessionStore.patch({ generatingNextScene: false });
 			streamStore.patch({
 				mediaAppendError: null,
 				loadingAnimation: streamStore.get().avPlaybackStarted ? streamStore.get().loadingAnimation : true,
@@ -486,12 +499,20 @@ export async function applyNormalizedSocketEvent(event: any, context: any): Prom
 			sessionStore.patch({
 				generationCapReached: false,
 				sessionNotice: "",
+				generatingNextScene: false,
 			});
 			await finalizeStreamCompletion();
 			return;
 
 		case "session/error": {
 			const errorMessage = resolveSessionErrorMessage(payload);
+			if (payload?.prompt_id) {
+				// Prompt-scoped error (e.g. safety-blocked): the prompt produced no
+				// segment, so drop it from the steering scene list.
+				rewriteStore.trackPromptEvent(payload.prompt_id, {
+					steeringFailed: true,
+				});
+			}
 			sessionStore.patch({
 				generationCapReached: false,
 				preservePlaybackOnClose: false,
@@ -500,7 +521,7 @@ export async function applyNormalizedSocketEvent(event: any, context: any): Prom
 				// Steering: a blocked/failed prompt produced no segment and the backend won't re-emit
 				// prompt_sources_blocked, so recover the "describe the next scene" state ourselves.
 				...(!uiStore.get().simpleMode && sessionStore.get().manualContinuationMode
-					? { waitingForSegmentPrompt: true }
+					? { waitingForSegmentPrompt: true, generatingNextScene: false }
 					: {}),
 			});
 			rewriteStore.patch({

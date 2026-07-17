@@ -26,6 +26,7 @@ export interface SessionState {
   projectResetPending: boolean;
   manualContinuationMode: boolean;
   waitingForSegmentPrompt: boolean;
+  generatingNextScene: boolean;
 }
 
 const DEFAULT_SESSION_STATE: SessionState = {
@@ -55,6 +56,8 @@ const DEFAULT_SESSION_STATE: SessionState = {
   // auto-rollout mode and no UI selector, so this stays true throughout.
   manualContinuationMode: true,
   waitingForSegmentPrompt: false,
+  // True from scene submit / prompt selection until the segment's media arrives.
+  generatingNextScene: false,
 };
 
 export type SessionStore = ManagedStore<SessionState> & {

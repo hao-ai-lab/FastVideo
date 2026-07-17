@@ -9,6 +9,9 @@ import SpeechToTextButton from "@/components/SpeechToTextButton";
 import { cn } from "@/lib/utils";
 
 const PROMPT_MAX_LENGTH = 500;
+// Must match backend session_init_image.py: MAX_SESSION_INIT_IMAGE_BYTES / SUPPORTED_SESSION_INIT_IMAGE_MIME_TYPES.
+const IMAGE_MAX_BYTES = 15 * 1024 * 1024;
+const IMAGE_ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 interface Props {
 	sessionStarted?: boolean;
@@ -71,14 +74,28 @@ export default function ChatBar({
 }: Props) {
 	const [sttBusy, setSttBusy] = useState(false);
 	const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+	const [imageError, setImageError] = useState("");
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const processImageFile = useCallback((file: File) => {
-		if (!file.type.startsWith("image/")) return;
+		if (!IMAGE_ALLOWED_TYPES.includes(file.type)) {
+			setImageError("Unsupported image type. Use a PNG, JPEG, or WebP image.");
+			return;
+		}
+		if (file.size > IMAGE_MAX_BYTES) {
+			setImageError("Image is too large. The maximum size is 15MB.");
+			return;
+		}
 		const reader = new FileReader();
 		reader.onload = (e) => {
 			const dataUrl = e.target?.result as string;
-			if (dataUrl) onImageUpload(dataUrl, file.type, file.name);
+			if (dataUrl) {
+				setImageError("");
+				onImageUpload(dataUrl, file.type, file.name);
+			}
+		};
+		reader.onerror = () => {
+			setImageError("Could not read the image file. Please try again.");
 		};
 		reader.readAsDataURL(file);
 	}, [onImageUpload]);
@@ -381,11 +398,17 @@ export default function ChatBar({
 			)}
 
 
+			{!sessionStarted && imageError && (
+				<div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-2.5 text-center text-xs text-rose-700 dark:text-rose-300">
+					{imageError}
+				</div>
+			)}
+
 			{!sessionStarted && initialImageDataUrl && (
 				<div className="flex items-center gap-2 rounded-2xl border border-input bg-card/65 px-3 py-2">
 					<img src={initialImageDataUrl} alt="Initial frame" className="h-12 w-12 rounded-lg object-cover" />
 					<span className="flex-1 truncate text-xs text-muted-foreground">Starting image set</span>
-					<button type="button" onClick={onImageClear} className="text-muted-foreground hover:text-foreground transition-colors">
+					<button type="button" onClick={() => { setImageError(""); onImageClear(); }} className="text-muted-foreground hover:text-foreground transition-colors">
 						<X className="size-4" />
 					</button>
 				</div>
@@ -394,7 +417,7 @@ export default function ChatBar({
 			<input
 				ref={fileInputRef}
 				type="file"
-				accept="image/png,image/jpeg,image/webp"
+				accept={IMAGE_ALLOWED_TYPES.join(",")}
 				className="hidden"
 				onChange={(e) => { const f = e.target.files?.[0]; if (f) processImageFile(f); e.target.value = ""; }}
 			/>

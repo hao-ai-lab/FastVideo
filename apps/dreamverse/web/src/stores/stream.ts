@@ -1,5 +1,18 @@
 import { createManagedStore, type ManagedStore } from "./createManagedStore";
 
+// Prompt-history sources driven by the user's own submissions. Curated (non-user)
+// entries — e.g. a preset's opening scene — feed the steering scene list and are
+// exempt from the history cap so Scene 1 survives long sessions.
+export const USER_PROMPT_SOURCES = new Set([
+	"user_raw",
+	"user",
+	"user_enhanced",
+	"user_rewrite",
+	"user_enhancement_failed",
+]);
+
+const PROMPT_HISTORY_CAP = 120;
+
 export interface StreamState {
 	playingSeedPromptIndex: number | null;
 	generatingSeedPromptIndex: number | null;
@@ -159,10 +172,14 @@ export function createStreamStore(initialState: Partial<StreamState> = {}): Stre
 					loopIteration: typeof loopIteration === "number" ? loopIteration : null,
 				};
 
+				const nextHistory = [entry, ...state.promptHistory];
 				return {
 					...state,
 					promptHistoryCounter: nextCounter,
-					promptHistory: [entry, ...state.promptHistory].slice(0, 120),
+					promptHistory: nextHistory.length > PROMPT_HISTORY_CAP
+						? nextHistory.filter((item, index) =>
+							index < PROMPT_HISTORY_CAP || !USER_PROMPT_SOURCES.has(String(item.source || "")))
+						: nextHistory,
 					selectedHistoryId: state.selectedHistoryId || (entry.id as string),
 				};
 			});

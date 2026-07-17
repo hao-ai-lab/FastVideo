@@ -22,6 +22,7 @@ interface VideoPlayerProps {
 	defaultMuted?: boolean;
 	rewritePending?: boolean;
 	waitingForSegmentPrompt?: boolean;
+	generatingNextScene?: boolean;
 	onPlaying?: () => void;
 	onDownload?: () => void;
 }
@@ -59,6 +60,7 @@ export default function VideoPlayer({
 	defaultMuted = true,
 	rewritePending = false,
 	waitingForSegmentPrompt = false,
+	generatingNextScene = false,
 	onPlaying = () => {},
 	onDownload,
 }: VideoPlayerProps) {
@@ -94,11 +96,12 @@ export default function VideoPlayer({
 	// segment is still PLAYING (it generates ahead). Only surface the "Segment complete"
 	// overlay once the playhead actually reaches the end of the buffered segment.
 	const [playbackReachedEnd, setPlaybackReachedEnd] = useState(false);
-	// Steering mode: when the user submits the next scene, "waiting" flips off and the
-	// segment is generated (a few seconds of latency) before frames stream. Show a
-	// "Generating next scene…" indicator across that gap so the frozen frame isn't silent.
+	// Steering mode: when the user submits the next scene, the segment is generated
+	// (a few seconds of latency) before frames stream. Show a "Generating next scene…"
+	// indicator across that gap so the frozen frame isn't silent. Driven by the explicit
+	// generatingNextScene state (set on scene submit / prompt selection), never inferred
+	// from waitingForSegmentPrompt edges.
 	const [generatingNext, setGeneratingNext] = useState(false);
-	const prevWaitingRef = useRef(false);
 	// End of the buffered timeline captured the moment generation starts; the freshly
 	// generated segment extends the buffer past this, which is how we know it landed.
 	const genBoundaryRef = useRef(0);
@@ -150,28 +153,25 @@ export default function VideoPlayer({
 	}, [waitingForSegmentPrompt, generatingNext]);
 
 	useEffect(() => {
-		const wasWaiting = prevWaitingRef.current;
-		prevWaitingRef.current = waitingForSegmentPrompt;
-		if (waitingForSegmentPrompt) {
-			// Back to waiting (next segment finished and is awaiting another prompt).
+		if (waitingForSegmentPrompt || !sessionStarted) {
+			// Back to waiting (or session over): nothing is generating.
 			setGeneratingNext(false);
 			return;
 		}
-		if (wasWaiting && sessionStarted) {
-			// Snapshot the current end of the buffered timeline; the generated segment will
-			// extend the buffer past this boundary.
-			const el = liveVideoEl.current;
-			let boundary = el?.currentTime ?? 0;
-			try {
-				const b = el?.buffered;
-				if (b && b.length) boundary = Math.max(boundary, b.end(b.length - 1));
-			} catch {
-				/* buffered access can throw mid-append */
-			}
-			genBoundaryRef.current = boundary;
-			setGeneratingNext(true);
+		if (!generatingNextScene) return;
+		// Snapshot the current end of the buffered timeline; the generated segment will
+		// extend the buffer past this boundary.
+		const el = liveVideoEl.current;
+		let boundary = el?.currentTime ?? 0;
+		try {
+			const b = el?.buffered;
+			if (b && b.length) boundary = Math.max(boundary, b.end(b.length - 1));
+		} catch {
+			/* buffered access can throw mid-append */
 		}
-	}, [waitingForSegmentPrompt, sessionStarted]);
+		genBoundaryRef.current = boundary;
+		setGeneratingNext(true);
+	}, [generatingNextScene, waitingForSegmentPrompt, sessionStarted]);
 
 	useEffect(() => {
 		if (!generatingNext) return;

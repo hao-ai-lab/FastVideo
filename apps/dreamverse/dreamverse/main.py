@@ -206,7 +206,9 @@ def cli() -> None:
     args = parser.parse_args()
 
     _install_heartbeat_log_filter()
-    uvicorn.run(app, host=args.host, port=args.port)
+    # A 15MB init image (session_init_image.MAX_SESSION_INIT_IMAGE_BYTES) is ~20MB
+    # as a base64 ws message, above uvicorn's default 16MiB frame cap.
+    uvicorn.run(app, host=args.host, port=args.port, ws_max_size=32 * 1024 * 1024)
 
 
 if __name__ == "__main__":

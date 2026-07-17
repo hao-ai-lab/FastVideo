@@ -290,6 +290,152 @@ def test_mock_server_supports_initial_custom_rollout_prompt():
         mock_server.LATENCY_MS = old_latency_ms
 
 
+def test_mock_server_manual_mode_streams_initial_prompt_without_rewrite_or_cap():
+    old_segment_bytes = mock_server.MOCK_SEGMENT_BYTES
+    old_latency_ms = mock_server.LATENCY_MS
+    old_generation_segment_cap = mock_server.GENERATION_SEGMENT_CAP
+    try:
+        mock_server.MOCK_SEGMENT_BYTES = b"mock-fmp4-bytes"
+        mock_server.LATENCY_MS = 1
+        mock_server.GENERATION_SEGMENT_CAP = 1
+
+        ws = _FakeWebSocket(
+            [
+                (
+                    0.0,
+                    {
+                        "type": "session_init_v2",
+                        "preset_id": "custom_editable",
+                        "preset_label": "Custom rollout",
+                        "curated_prompts": [],
+                        "initial_rollout_prompt": "A drone skims a neon canyon",
+                        "initial_rollout_prompt_id": "steer-prompt-1",
+                        "manual_continuation_mode": True,
+                        "enhancement_enabled": True,
+                        "auto_extension_enabled": False,
+                        "loop_generation_enabled": False,
+                    },
+                ),
+                (
+                    0.08,
+                    {
+                        "type": "append_prompt",
+                        "prompt": "The drone dives toward the river",
+                        "prompt_id": "steer-prompt-2",
+                    },
+                ),
+                (0.30, {"type": "leave"}),
+            ]
+        )
+
+        asyncio.run(mock_server.websocket_endpoint(ws))
+
+        message_types = [payload["type"] for payload in ws.sent_json]
+        assert "rewrite_seed_prompts_started" not in message_types
+        assert "rewrite_seed_prompts_complete" not in message_types
+        assert "ltx2_stream_start" in message_types
+        # cap=1 must not stop a manual-mode session after the first segment
+        assert "ltx2_stream_complete" not in message_types
+
+        prompt_ready_events = [
+            payload for payload in ws.sent_json if payload["type"] == "prompt_ready"
+        ]
+        assert [payload["prompt_id"] for payload in prompt_ready_events] == [
+            "steer-prompt-1",
+            "steer-prompt-2",
+        ]
+
+        segment_start_events = [
+            payload
+            for payload in ws.sent_json
+            if payload["type"] == "ltx2_segment_start"
+        ]
+        assert [payload["prompt"] for payload in segment_start_events] == [
+            "A drone skims a neon canyon",
+            "The drone dives toward the river",
+        ]
+        segment_source_events = [
+            payload
+            for payload in ws.sent_json
+            if payload["type"] == "segment_prompt_source"
+        ]
+        assert [payload["prompt_id"] for payload in segment_source_events] == [
+            "steer-prompt-1",
+            "steer-prompt-2",
+        ]
+    finally:
+        mock_server.MOCK_SEGMENT_BYTES = old_segment_bytes
+        mock_server.LATENCY_MS = old_latency_ms
+        mock_server.GENERATION_SEGMENT_CAP = old_generation_segment_cap
+
+
+def test_mock_server_project_init_manual_mode_streams_initial_prompt():
+    old_segment_bytes = mock_server.MOCK_SEGMENT_BYTES
+    old_latency_ms = mock_server.LATENCY_MS
+    try:
+        mock_server.MOCK_SEGMENT_BYTES = b"mock-fmp4-bytes"
+        mock_server.LATENCY_MS = 1
+
+        ws = _FakeWebSocket(
+            [
+                (
+                    0.0,
+                    {
+                        "type": "session_init_v2",
+                        "preset_id": "test_preset",
+                        "curated_prompts": ["segment one"],
+                        "enhancement_enabled": True,
+                        "auto_extension_enabled": False,
+                        "loop_generation_enabled": False,
+                    },
+                ),
+                (0.05, {"type": "end_project_keep_session"}),
+                (
+                    0.15,
+                    {
+                        "type": "project_init_v1",
+                        "preset_id": "custom_editable",
+                        "preset_label": "Custom rollout",
+                        "curated_prompts": [],
+                        "initial_rollout_prompt": "A drone skims a neon canyon",
+                        "initial_rollout_prompt_id": "steer-prompt-1",
+                        "manual_continuation_mode": True,
+                        "enhancement_enabled": True,
+                        "auto_extension_enabled": False,
+                        "loop_generation_enabled": False,
+                    },
+                ),
+                (0.45, {"type": "leave"}),
+            ]
+        )
+
+        asyncio.run(mock_server.websocket_endpoint(ws))
+
+        message_types = [payload["type"] for payload in ws.sent_json]
+        assert "project_idle" in message_types
+        project_idle_index = message_types.index("project_idle")
+        # manual-mode restart must not run the rewrite rollout
+        assert "rewrite_seed_prompts_started" not in message_types[project_idle_index:]
+        assert "ltx2_stream_start" in message_types[project_idle_index:]
+
+        prompt_ready_events = [
+            payload for payload in ws.sent_json if payload["type"] == "prompt_ready"
+        ]
+        assert [payload["prompt_id"] for payload in prompt_ready_events] == [
+            "steer-prompt-1",
+        ]
+
+        segment_start_events = [
+            payload
+            for payload in ws.sent_json
+            if payload["type"] == "ltx2_segment_start"
+        ]
+        assert segment_start_events[-1]["prompt"] == "A drone skims a neon canyon"
+    finally:
+        mock_server.MOCK_SEGMENT_BYTES = old_segment_bytes
+        mock_server.LATENCY_MS = old_latency_ms
+
+
 def test_mock_server_can_start_new_project_without_reconnecting():
     old_segment_bytes = mock_server.MOCK_SEGMENT_BYTES
     old_latency_ms = mock_server.LATENCY_MS

@@ -16,5 +16,19 @@ export function prependPromptEvent(
   events: Record<string, any>[],
   event: Record<string, any>,
 ): Record<string, any>[] {
-  return [event, ...events].slice(0, MAX_PROMPT_EVENTS);
+  const next = [event, ...events];
+  if (next.length <= MAX_PROMPT_EVENTS) {
+    return next;
+  }
+  // Steering scene events (steeringUserPrompt) are exempt from the cap: the
+  // scene list is derived from them and must stay complete and stably numbered
+  // for long sessions. Only the oldest non-scene events are dropped.
+  let nonSceneKept = 0;
+  return next.filter((e) => {
+    if (e?.steeringUserPrompt) {
+      return true;
+    }
+    nonSceneKept += 1;
+    return nonSceneKept <= MAX_PROMPT_EVENTS;
+  });
 }

@@ -30,11 +30,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from dreamverse._deps import require_dreamverse_runtime_deps
-from dreamverse.config import FRONTEND_STATIC_DIR_CANDIDATES, GENERATION_SEGMENT_CAP
+from dreamverse.config import FRONTEND_STATIC_DIR_CANDIDATES, GENERATION_SEGMENT_CAP, SESSION_TIMEOUT_SECONDS
 from dreamverse.session_init_image import cleanup_session_init_image, persist_session_init_image
+from dreamverse.utils import _resolve_generation_segment_cap
 
 LATENCY_MS = 200
-SESSION_TIMEOUT_SECONDS = 300
 MOCK_FRAME_WIDTH = 640
 MOCK_FRAME_HEIGHT = 352
 MOCK_FPS = 24
@@ -334,6 +334,7 @@ async def websocket_endpoint(websocket: WebSocket):
         auto_extension_enabled = bool(init_data.get("auto_extension_enabled", False))
         loop_generation_enabled = bool(init_data.get("loop_generation_enabled", False))
         single_clip_mode = bool(init_data.get("single_clip_mode", False))
+        manual_continuation_mode = bool(init_data.get("manual_continuation_mode", False))
         generation_paused = False
 
         if init_type == "session_init_v2":
@@ -344,7 +345,8 @@ async def websocket_endpoint(websocket: WebSocket):
             incoming_prompts = []
 
         curated_prompts = [prompt.strip() for prompt in incoming_prompts if isinstance(prompt, str) and prompt.strip()]
-        generation_paused = bool(initial_rollout_prompt and not single_clip_mode and len(curated_prompts) == 0)
+        generation_paused = bool(not manual_continuation_mode and initial_rollout_prompt and not single_clip_mode
+                                 and len(curated_prompts) == 0)
 
         try:
             session_init_image = persist_session_init_image(init_data.get("initial_image"))
@@ -373,7 +375,10 @@ async def websocket_endpoint(websocket: WebSocket):
         prompt_sources_blocked = False
         pending_seed_reset = False
         pending_seed_reset_reason = ""
-        pending_simple_submission: PromptSubmission | None = None
+        pending_simple_submission: PromptSubmission | None = (PromptSubmission(
+            prompt_id=str(init_data.get("initial_rollout_prompt_id") or uuid.uuid4()),
+            raw_prompt=initial_rollout_prompt,
+        ) if manual_continuation_mode and initial_rollout_prompt else None)
         single_clip_waiting_for_request = False
         rollout_waiting_for_rewrite = False
         initial_rollout_waiting_for_rewrite = generation_paused
@@ -393,14 +398,26 @@ async def websocket_endpoint(websocket: WebSocket):
 
         async def send_stream_start(seed_reason: str) -> None:
             await ws_send_json({
-                "type": "ltx2_stream_start",
-                "total_segments": len(curated_prompts),
-                "preset_id": preset_id,
-                "stream_mode": "av_fmp4",
-                "live_mode": True,
-                "loop_generation_enabled": loop_generation_enabled,
-                "loop_iteration": loop_iteration,
-                "generation_segment_cap": 0,
+                "type":
+                "ltx2_stream_start",
+                "total_segments":
+                len(curated_prompts),
+                "preset_id":
+                preset_id,
+                "stream_mode":
+                "av_fmp4",
+                "live_mode":
+                True,
+                "loop_generation_enabled":
+                loop_generation_enabled,
+                "loop_iteration":
+                loop_iteration,
+                "generation_segment_cap":
+                _resolve_generation_segment_cap(
+                    single_clip_mode=single_clip_mode,
+                    cap=GENERATION_SEGMENT_CAP,
+                    manual_continuation_mode=manual_continuation_mode,
+                ),
             })
             if seed_reason == "init":
                 await ws_send_json({
@@ -493,6 +510,7 @@ async def websocket_endpoint(websocket: WebSocket):
             nonlocal auto_extension_enabled
             nonlocal loop_generation_enabled
             nonlocal single_clip_mode
+            nonlocal manual_continuation_mode
             nonlocal generation_paused
             nonlocal seed_prompt_memory
             nonlocal curated_prompts
@@ -537,6 +555,7 @@ async def websocket_endpoint(websocket: WebSocket):
             auto_extension_enabled = bool(payload.get("auto_extension_enabled", False))
             loop_generation_enabled = bool(payload.get("loop_generation_enabled", False))
             single_clip_mode = bool(payload.get("single_clip_mode", False))
+            manual_continuation_mode = bool(payload.get("manual_continuation_mode", False))
 
             seed_prompt_memory = list(next_curated_prompts)
             curated_prompts = list(seed_prompt_memory)
@@ -544,10 +563,14 @@ async def websocket_endpoint(websocket: WebSocket):
             segment_idx = 0
             pending_seed_reset = False
             pending_seed_reset_reason = ""
-            pending_simple_submission = None
+            pending_simple_submission = (PromptSubmission(
+                prompt_id=str(payload.get("initial_rollout_prompt_id") or uuid.uuid4()),
+                raw_prompt=initial_rollout_prompt,
+            ) if manual_continuation_mode and initial_rollout_prompt else None)
             single_clip_waiting_for_request = False
             rollout_waiting_for_rewrite = False
-            generation_paused = bool(initial_rollout_prompt and not single_clip_mode and len(curated_prompts) == 0)
+            generation_paused = bool(not manual_continuation_mode and initial_rollout_prompt and not single_clip_mode
+                                     and len(curated_prompts) == 0)
             initial_rollout_waiting_for_rewrite = generation_paused
             rewrite_restart_pending = False
             loop_iteration = 0
@@ -968,10 +991,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     project_stream_started = True
                     await send_stream_start(pending_seed_reset_reason)
                     pending_seed_reset_reason = ""
-                    if pending_simple_submission is not None:
-                        submission = pending_simple_submission
-                        pending_simple_submission = None
-                        await promote_submission_to_ready(submission)
+
+                if pending_simple_submission is not None:
+                    submission = pending_simple_submission
+                    pending_simple_submission = None
+                    await promote_submission_to_ready(submission)
 
                 if generation_paused:
                     await asyncio.sleep(0.05)
@@ -981,8 +1005,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     await asyncio.sleep(0.05)
                     continue
 
-                if (not single_clip_mode and not rollout_waiting_for_rewrite and GENERATION_SEGMENT_CAP > 0
-                        and segment_idx >= GENERATION_SEGMENT_CAP):
+                if (not single_clip_mode and not manual_continuation_mode and not rollout_waiting_for_rewrite
+                        and GENERATION_SEGMENT_CAP > 0 and segment_idx >= GENERATION_SEGMENT_CAP):
                     rollout_waiting_for_rewrite = True
                     loop_generation_enabled = False
                     project_stream_started = False
@@ -1217,7 +1241,9 @@ def cli() -> None:
     print(f"Starting mock server with {LATENCY_MS}ms latency on port {args.port}")
 
     _install_heartbeat_log_filter()
-    uvicorn.run(app, host="0.0.0.0", port=args.port)
+    # A 15MB init image (session_init_image.MAX_SESSION_INIT_IMAGE_BYTES) is ~20MB
+    # as a base64 ws message, above uvicorn's default 16MiB frame cap.
+    uvicorn.run(app, host="0.0.0.0", port=args.port, ws_max_size=32 * 1024 * 1024)
 
 
 if __name__ == "__main__":

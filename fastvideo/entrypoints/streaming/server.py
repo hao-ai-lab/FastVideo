@@ -191,10 +191,13 @@ def run_server(serve_config: ServeConfig, *, generator: _GeneratorProto | None =
 
         generator = VideoGenerator.from_pretrained(config=serve_config.generator)
     app = build_app(serve_config, generator)
+    # A 15MB init image is ~20MB as a base64 ws message, above uvicorn's
+    # default 16MiB frame cap.
     uvicorn.run(
         app,
         host=serve_config.server.host,
         port=serve_config.server.port,
+        ws_max_size=32 * 1024 * 1024,
     )
 
 

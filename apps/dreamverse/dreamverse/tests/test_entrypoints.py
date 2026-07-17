@@ -75,12 +75,13 @@ def _run_cli(module, monkeypatch, argv: list[str]) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
     uvicorn_stub = types.ModuleType("uvicorn")
 
-    def run(app, host: str, port: int) -> None:
+    def run(app, host: str, port: int, **kwargs) -> None:
         calls.append(
             {
                 "app": app,
                 "host": host,
                 "port": port,
+                **kwargs,
             }
         )
 
@@ -104,6 +105,7 @@ def test_server_cli_defaults_to_local_web_port(monkeypatch):
             "app": server_main.app,
             "host": "0.0.0.0",
             "port": 8009,
+            "ws_max_size": 32 * 1024 * 1024,
         }
     ]
 
@@ -121,6 +123,7 @@ def test_server_cli_allows_explicit_host_and_port(monkeypatch):
             "app": server_main.app,
             "host": "127.0.0.1",
             "port": 8123,
+            "ws_max_size": 32 * 1024 * 1024,
         }
     ]
 
@@ -147,6 +150,7 @@ def test_mock_server_cli_defaults_to_local_web_port(monkeypatch):
             "app": mock_server.app,
             "host": "0.0.0.0",
             "port": 8009,
+            "ws_max_size": 32 * 1024 * 1024,
         }
     ]
 
@@ -166,6 +170,7 @@ def test_mock_server_cli_updates_latency(monkeypatch):
                 "app": mock_server.app,
                 "host": "0.0.0.0",
                 "port": 8111,
+                "ws_max_size": 32 * 1024 * 1024,
             }
         ]
         assert mock_server.LATENCY_MS == 321

@@ -31,7 +31,7 @@ import { applyNormalizedSocketEvent } from "@/lib/ws/reducer";
 import { createPromptWindowStore } from "@/stores/promptWindow";
 import { createRewriteStore } from "@/stores/rewrite";
 import { createSessionStore } from "@/stores/session";
-import { createStreamStore } from "@/stores/stream";
+import { createStreamStore, USER_PROMPT_SOURCES } from "@/stores/stream";
 import { createUiStore } from "@/stores/ui";
 import { Button } from "@/components/ui/button";
 
@@ -253,6 +253,7 @@ export default function Page() {
 		sessionExpired,
 		projectResetPending,
 		waitingForSegmentPrompt,
+		generatingNextScene,
 	} = sessionState;
 
 	const {
@@ -327,6 +328,10 @@ export default function Page() {
 	const [ttffValueMs, setTtffValueMs] = useState<number | null>(null);
 	const ttffIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const pendingInitialPromptRef = useRef("");
+	// Prompt id the opening scene is recorded under; sent as initial_rollout_prompt_id
+	// so the backend's pre-seeded opening PromptSubmission emits status updates
+	// (prompt_enhancing/prompt_ready/prompt_fallback_used) against the same id.
+	const pendingInitialPromptIdRef = useRef("");
 	const [initialImageDataUrl, setInitialImageDataUrl] = useState("");
 	const lastArchivedReplayKeyRef = useRef("");
 	const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -427,6 +432,11 @@ export default function Page() {
 			if (String(e?.source || "") === "user_rewrite" && typeof e?.text === "string" && e.text.trim()) {
 				return e.text.trim();
 			}
+			// Steering opening: the backend overwrites text/source with the enhanced
+			// prompt once ready, so fall back to the stable rawText record.
+			if (e?.steeringUserPrompt && typeof e?.rawText === "string" && e.rawText.trim()) {
+				return e.rawText.trim();
+			}
 		}
 		return "Untitled project";
 	}, [selectedPreset, promptEvents]);
@@ -457,11 +467,10 @@ export default function Page() {
 			.map((e) => ({ id: e.promptId, prompt: e.rawText as string }));
 		const scenes: Record<string, any>[] = [];
 		// Preset opening segments: curated seeds with no user prompt of their own.
-		const userSources = new Set(["user_raw", "user", "user_enhanced", "user_rewrite", "user_enhancement_failed"]);
 		const curatedHists = (promptHistory as Record<string, any>[])
 			.slice()
 			.reverse() // oldest first
-			.filter((h) => !userSources.has(String(h?.source || "")) && typeof h?.prompt === "string" && (h.prompt as string).trim());
+			.filter((h) => !USER_PROMPT_SOURCES.has(String(h?.source || "")) && typeof h?.prompt === "string" && (h.prompt as string).trim());
 		scenes.push(...curatedHists.map((h) => ({ id: h.id || "scene_open", prompt: h.prompt })));
 		scenes.push(...userScenes);
 		return scenes;
@@ -1515,7 +1524,14 @@ export default function Page() {
 			activeClipId: shouldUseArchivedPlaybackFallback() ? streamStore.get().activeClipId : "",
 			activePlaybackStartTime: shouldUseArchivedPlaybackFallback() ? streamStore.get().activePlaybackStartTime : 0,
 		});
-		sessionStore.patch({ livePromptDraft: "", waitingForSegmentPrompt: false, sessionNotice: "" });
+		sessionStore.patch({
+			livePromptDraft: "",
+			waitingForSegmentPrompt: false,
+			sessionNotice: "",
+			// Light the "Generating next scene" overlay immediately on a real submit;
+			// stream/media_init (or a fallback/error) clears it.
+			...(inManualMode ? { generatingNextScene: true } : {}),
+		});
 	}
 
 	function setLivePromptRewriteMode(enabled: boolean) {
@@ -1775,6 +1791,7 @@ export default function Page() {
 			projectResetPending: false,
 			manualContinuationMode: true,
 			waitingForSegmentPrompt: false,
+			generatingNextScene: false,
 		});
 		rewriteStore.resetSessionState();
 		streamStore.resetSessionState();
@@ -1787,6 +1804,7 @@ export default function Page() {
 	function resetToProjectLobbyState() {
 		setVideoMuted(true);
 		pendingInitialPromptRef.current = "";
+		pendingInitialPromptIdRef.current = "";
 		sessionStore.patch({
 			sessionStarted: false,
 			livePromptDraft: "",
@@ -1802,6 +1820,7 @@ export default function Page() {
 			projectResetPending: false,
 			manualContinuationMode: true,
 			waitingForSegmentPrompt: false,
+			generatingNextScene: false,
 		});
 		rewriteStore.resetSessionState();
 		streamStore.resetSessionState();
@@ -1827,6 +1846,9 @@ export default function Page() {
 			preset_label: getInitialPresetLabel(),
 			curated_prompts: segmentPrompts,
 			initial_rollout_prompt: normalizeInitialPrompt(pendingInitialPromptRef.current),
+			// Ties the backend's pre-seeded opening PromptSubmission to the prompt event
+			// recorded in beginProjectLocally so its status updates land on that record.
+			initial_rollout_prompt_id: pendingInitialPromptIdRef.current,
 			initial_image: initialImageDataUrl
 				? { data_url: initialImageDataUrl, mime_type: initialImageDataUrl.split(";")[0].split(":")[1] || "image/png", name: "upload.png" }
 				: null,
@@ -2034,6 +2056,7 @@ export default function Page() {
 			projectResetPending: false,
 			manualContinuationMode: nextManualContinuationMode,
 			waitingForSegmentPrompt: false,
+			generatingNextScene: false,
 		});
 		resetPlaybackState();
 		streamStore.patch({
@@ -2047,9 +2070,10 @@ export default function Page() {
 			selectedHistoryId: "",
 		});
 		rewriteStore.resetSessionState();
+		pendingInitialPromptIdRef.current = initialPrompt ? makePromptId() : "";
 		if (initialPrompt) {
 			addPromptEvent({
-				promptId: makePromptId(),
+				promptId: pendingInitialPromptIdRef.current,
 				status: "rewrite_requested",
 				source: "user_rewrite",
 				text: initialPrompt,
@@ -2798,6 +2822,7 @@ export default function Page() {
 									defaultMuted={videoMuted}
 									canDownload={canDownloadVideo}
 									waitingForSegmentPrompt={waitingForSegmentPrompt as boolean}
+									generatingNextScene={generatingNextScene as boolean}
 									onPlaying={markFirstFrameRendered}
 									onDownload={handleDownloadVideo}
 								/>

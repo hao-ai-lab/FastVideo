@@ -20,6 +20,7 @@ from __future__ import annotations
 # mypy: ignore-errors
 
 import asyncio
+import os
 import time
 import uuid
 from typing import TYPE_CHECKING
@@ -51,6 +52,14 @@ if TYPE_CHECKING:
     from dreamverse.session_logger import SessionEventLogger
     from dreamverse.prompt_enhancer import PromptEnhancer
     from dreamverse.prompt_safety import PromptSafetyFilter
+
+# Optional append-only log of every generated segment prompt; unset disables it.
+SEGMENT_PROMPT_LOG_PATH = os.environ.get("DREAMVERSE_SEGMENT_PROMPT_LOG", "")
+
+
+def _append_segment_prompt_log(path: str, text: str) -> None:
+    with open(path, "a") as f:
+        f.write(text)
 
 
 class SessionController:
@@ -283,6 +292,9 @@ class SessionController:
             # Session queues and mutable state.
             raw_prompt_queue: asyncio.Queue[PromptSubmission] = asyncio.Queue()
             ready_prompt_queue: asyncio.Queue[ReadyPrompt] = asyncio.Queue()
+            # Submissions dequeued by prompt_worker_loop but not yet resolved; while
+            # non-zero the prompt sources are busy, not drained.
+            prompt_enhancement_inflight = 0
 
             curated_idx = 0
             segment_idx = 0
@@ -299,8 +311,10 @@ class SessionController:
             pending_reset_conditioning = False
             loop_iteration = 0 if generation_paused else 1
             force_curated_restart_segment = False
+            # The frontend records the opening scene under this id; reuse it so
+            # prompt lifecycle events for the opening prompt reach that record.
             pending_simple_prompt_submission: PromptSubmission | None = (PromptSubmission(
-                prompt_id=str(uuid.uuid4()),
+                prompt_id=str(init_data.get("initial_rollout_prompt_id") or uuid.uuid4()),
                 raw_prompt=initial_rollout_prompt,
                 created_at_s=time.time(),
             ) if manual_continuation_mode and initial_rollout_prompt else None)
@@ -312,6 +326,7 @@ class SessionController:
             project_active = True
             project_stream_started = False
             pending_project_end = False
+            segment_prompt_log_warned = False
 
             def replace_session_init_image(initial_image_payload: object) -> None:
                 nonlocal session_init_image
@@ -540,7 +555,7 @@ class SessionController:
                 auto_extension_blocked_segment_idx = None
                 prompt_sources_drained_logged = False
                 pending_simple_prompt_submission = (PromptSubmission(
-                    prompt_id=str(uuid.uuid4()),
+                    prompt_id=str(payload.get("initial_rollout_prompt_id") or uuid.uuid4()),
                     raw_prompt=initial_rollout_prompt,
                     created_at_s=time.time(),
                 ) if manual_continuation_mode and initial_rollout_prompt else None)
@@ -1020,11 +1035,9 @@ class SessionController:
                         continue
 
             async def prompt_worker_loop():
-                while not stop_event.is_set():
-                    try:
-                        submission = await asyncio.wait_for(raw_prompt_queue.get(), timeout=0.1)
-                    except asyncio.TimeoutError:
-                        continue
+                nonlocal prompt_enhancement_inflight
+
+                async def process_submission(submission: PromptSubmission) -> None:
                     _main_print("INFO", f"Received user prompt for enhancement: {submission.raw_prompt}")
                     prompt_id = submission.prompt_id
                     raw_prompt = submission.raw_prompt
@@ -1047,8 +1060,9 @@ class SessionController:
                         await ws_send_json({
                             "type": "error",
                             "message": blocked_raw_prompt_error,
+                            "prompt_id": prompt_id,
                         })
-                        continue
+                        return
                     await log_event(
                         "enhance_request",
                         {
@@ -1108,8 +1122,9 @@ class SessionController:
                             await ws_send_json({
                                 "type": "error",
                                 "message": blocked_final_prompt_error,
+                                "prompt_id": prompt_id,
                             })
-                            continue
+                            return
                         if result.fallback_used or not final_prompt:
                             source = "user_enhancement_failed"
                             _main_print(
@@ -1128,7 +1143,7 @@ class SessionController:
                             })
                             # Enhancement is strict JSON-only; do not enqueue raw
                             # prompt when enhancement fails.
-                            continue
+                            return
                         else:
                             source = "user_enhanced"
                             await ws_send_json({
@@ -1164,6 +1179,21 @@ class SessionController:
                             "source": "user_raw",
                             "latency_ms": 0.0,
                         })
+
+                while not stop_event.is_set():
+                    try:
+                        submission = raw_prompt_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        await asyncio.sleep(0.1)
+                        continue
+                    # Dequeue and increment without an await in between so the
+                    # generation loop never sees an empty queue with zero in flight
+                    # while this submission is still being enhanced.
+                    prompt_enhancement_inflight += 1
+                    try:
+                        await process_submission(submission)
+                    finally:
+                        prompt_enhancement_inflight -= 1
 
             def queue_snapshot() -> dict[str, object]:
                 return {
@@ -1562,7 +1592,10 @@ class SessionController:
                     if single_clip_mode:
                         await asyncio.sleep(PROMPT_AUTO_SLEEP_MS / 1000.0)
                         continue
-                    if not prompt_sources_drained_logged:
+                    # A raw submission still queued or being enhanced will produce a
+                    # ready prompt shortly; that is not a drained/blocked state.
+                    enhancement_pending = (raw_prompt_queue.qsize() > 0 or prompt_enhancement_inflight > 0)
+                    if not prompt_sources_drained_logged and not enhancement_pending:
                         snapshot = queue_snapshot()
                         _main_print(
                             "WARN",
@@ -1601,8 +1634,7 @@ class SessionController:
                 total_segments_hint = max(segment_idx, len(curated_prompts))
                 prompt = selected.prompt
                 locked_segment_prompts.append(prompt)
-                try:
-                    _log_path = "/home/hal-kevin/FastVideo/apps/dreamverse/scripts/segment_prompts.log"
+                if SEGMENT_PROMPT_LOG_PATH:
                     _ts = time.strftime("%Y-%m-%d %H:%M:%S")
                     _lines = [
                         f"\n=== Segment {segment_idx} [{_ts}] source={selected.source} client={client_id[:8]} ===",
@@ -1610,10 +1642,16 @@ class SessionController:
                     if selected.raw_prompt and selected.raw_prompt != prompt:
                         _lines.append(f"User:     {selected.raw_prompt}")
                     _lines.append(f"Rewritten: {prompt}")
-                    with open(_log_path, "a") as _f:
-                        _f.write("\n".join(_lines) + "\n")
-                except Exception:
-                    pass
+                    try:
+                        await asyncio.to_thread(_append_segment_prompt_log, SEGMENT_PROMPT_LOG_PATH,
+                                                "\n".join(_lines) + "\n")
+                    except Exception as exc:
+                        if not segment_prompt_log_warned:
+                            segment_prompt_log_warned = True
+                            _main_print(
+                                "WARN",
+                                f"Failed to write segment prompt log {SEGMENT_PROMPT_LOG_PATH}: {exc}",
+                            )
                 if (auto_extension_blocked_segment_idx is not None
                         and auto_extension_blocked_segment_idx <= segment_idx):
                     auto_extension_blocked_segment_idx = None
