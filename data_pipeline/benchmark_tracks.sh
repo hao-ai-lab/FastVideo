@@ -21,6 +21,8 @@ GPUS=${GPUS:-0,1,2,3}
 LIMIT=${LIMIT:-}
 VIZ=${VIZ:-0}    # 0 = lean run (production-like for large-scale), 1 = render overlay mp4s
 FUSED=${FUSED:-0}  # 1 = single fused pass (extract_tracks --segment); stage 4 not run
+AMP=${AMP:-0}      # 1 = bf16 autocast for CoTracker (--amp)
+COMPILE=${COMPILE:-0}  # 1 = torch.compile the main CoTracker pass (--compile)
 
 cd "$(dirname "$0")/.."
 IFS=',' read -ra GPU_ARR <<< "$GPUS"
@@ -37,6 +39,15 @@ if [[ "$FUSED" == "1" ]]; then
     FUSED_ARGS=(--segment --vis-override-every 3)
     [[ "$VIZ" == "1" ]] && FUSED_ARGS+=("${VIZ_ARGS[@]}")
 fi
+SPEED_ARGS=()
+[[ "$AMP" == "1" ]] && SPEED_ARGS+=(--amp)
+if [[ "$COMPILE" == "1" ]]; then
+    SPEED_ARGS+=(--compile)
+    # Persist compile artifacts in $HOME (default /tmp/torchinductor_* is wiped by
+    # reboots/tmp-cleaners), so repeat runs start warm instead of recompiling.
+    export TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR:-$HOME/.cache/torchinductor}
+    export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-$HOME/.cache/triton}
+fi
 
 # --- setup: symlink source videos, copy manifest without points_path -------------
 mkdir -p "$OUT_DIR"
@@ -49,7 +60,8 @@ for it in items:
 json.dump(items, open(sys.argv[2], "w"), indent=2)
 print(f"[bench] manifest: {len(items)} items -> {sys.argv[2]}")
 PY
-rm -rf "$OUT_DIR/bench_tracks" "$OUT_DIR/bench_viz"
+rm -rf "$OUT_DIR/bench_tracks"
+[[ "$VIZ" == "1" ]] && rm -rf "$OUT_DIR/bench_viz"
 : > "$LOG"
 
 N_VIDEOS=$(ls "$OUT_DIR"/bench_videos/*.mp4 | wc -l)
@@ -82,6 +94,7 @@ for i in "${!GPU_ARR[@]}"; do
         --sam-conf 0.75 --sam-iou 0.9 --sam-imgsz 1024 \
         --entry-sample-every 2 --entry-min-area 0.001 --entry-new-area 0.5 \
         "${FUSED_ARGS[@]}" \
+        "${SPEED_ARGS[@]}" \
         --force \
         --rank "$i" --world-size "$WORLD_SIZE" \
         "${LIMIT_ARGS[@]}" \
@@ -122,7 +135,7 @@ fi
 
 # --- summary ----------------------------------------------------------------------
 {
-    echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') UTC  commit=$COMMIT  gpus=$GPUS  videos=$N_VIDEOS  viz=$VIZ  fused=$FUSED ==="
+    echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') UTC  commit=$COMMIT  gpus=$GPUS  videos=$N_VIDEOS  viz=$VIZ  fused=$FUSED  amp=$AMP  compile=$COMPILE ==="
     awk -v s3="$S3" -v s4="$S4" -v w="$WORLD_SIZE" -v n="$N_VIDEOS" -v fused="$FUSED" 'BEGIN {
         label = (fused == "1") ? "stage 3+4 (fused):" : "stage 3 (extract):"
         printf "%s %5ds total  %6.1fs/video/worker  %5.1f videos/min\n", label, s3, s3*w/n, 60*n/s3

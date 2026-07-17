@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -69,6 +71,12 @@ def parse_args() -> argparse.Namespace:
                    help="Frames per batched FastSAM forward during entry detection.")
     p.add_argument("--amp", action="store_true",
                    help="Run CoTracker under bf16 autocast (~1.5-2x faster, slightly different coords).")
+    p.add_argument("--compile", action="store_true",
+                   help="torch.compile the main CoTracker pass (fixed shape; compiled once per worker). "
+                        "The variable-size entry pass stays eager to avoid recompiles.")
+    p.add_argument("--prefetch", type=int, default=2,
+                   help="Decode up to N videos ahead on a background thread so the GPU never waits "
+                        "on video decode (0 = disable).")
     # Fused Stage 4
     p.add_argument("--segment", action="store_true",
                    help="Fused Stage 4: also compute object_ids/n_objects/track_weights and the "
@@ -290,6 +298,33 @@ def detect_entry_events(video: torch.Tensor, sam_model, H: int, W: int, conf: fl
     return entry_events, masks0_union, masks_by_frame
 
 
+def decoded_videos(todo: list[tuple[int, Path, Path]], prefetch: int):
+    """Yield (k, vpath, out_path, video, h, w), decoding up to `prefetch` videos ahead
+    on a background thread (decord/av release the GIL, so decode overlaps GPU compute)."""
+    if prefetch <= 0:
+        for k, vpath, out_path in todo:
+            yield (k, vpath, out_path, *read_video(vpath))
+        return
+
+    q: queue.Queue = queue.Queue(maxsize=prefetch)
+
+    def producer() -> None:
+        for k, vpath, out_path in todo:
+            try:
+                payload = read_video(vpath)
+            except Exception as e:  # noqa: BLE001
+                payload = e
+            q.put((k, vpath, out_path, payload))
+        q.put(None)
+
+    threading.Thread(target=producer, daemon=True).start()
+    while (item := q.get()) is not None:
+        k, vpath, out_path, payload = item
+        if isinstance(payload, Exception):
+            raise RuntimeError(f"decode failed for {vpath}") from payload
+        yield (k, vpath, out_path, *payload)
+
+
 def patch_manifest(manifest_path: Path, stem_to_points: dict[str, Path]) -> int:
     if not manifest_path.exists():
         return 0
@@ -326,7 +361,11 @@ def main() -> None:
         return
 
     cotracker = load_cotracker(args.model, args.device)
-    print(f"[track] loaded {args.model}; {len(videos)} videos, grid={args.grid_size}x{args.grid_size}", flush=True)
+    # Compile only the fixed-shape main pass; entry-pass query counts vary per video and
+    # would recompile every time, so track_with_queries keeps the eager model.
+    cotracker_main = torch.compile(cotracker) if args.compile else cotracker
+    print(f"[track] loaded {args.model}; {len(videos)} videos, grid={args.grid_size}x{args.grid_size}"
+          f"{' (compiled main pass)' if args.compile else ''}", flush=True)
 
     sam_model = None
     if args.detect_entries or args.segment:
@@ -342,13 +381,16 @@ def main() -> None:
         stem_to_fps = {Path(it.get("path", "")).stem: it.get("fps", 24) for it in items}
 
     stem_to_points: dict[str, Path] = {}
+    todo: list[tuple[int, Path, Path]] = []
     for k, vpath in enumerate(videos, 1):
         out_path = out_dir / f"{vpath.stem}.npz"
         stem_to_points[vpath.stem] = out_path
         if out_path.exists() and not args.force:
             continue
-        video, h, w = read_video(vpath)
-        tracks, vis = track_one(cotracker, video, args.grid_size, args.downscale, args.device, amp=args.amp)
+        todo.append((k, vpath, out_path))
+
+    for k, vpath, out_path, video, h, w in decoded_videos(todo, args.prefetch):
+        tracks, vis = track_one(cotracker_main, video, args.grid_size, args.downscale, args.device, amp=args.amp)
 
         n_replaced = 0
         masks_cache: dict[int, np.ndarray] = {}
