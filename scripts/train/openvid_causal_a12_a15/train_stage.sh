@@ -3,7 +3,7 @@ set -euo pipefail
 : "${RUN_ROOT:?}" "${STAGE:?}" "${MASTER_PORT:?}" "${WANDB_API_KEY:?}"
 REPO="${REPO:-/mnt/nfs/vlm-k1kong/FastVideo-openvid-a12-a15-final-20260717}"
 ENV_DIR="${ENV_DIR:-/mnt/nfs/vlm-k1kong/envs/fastvideo}"
-REQUIRED_ANCESTOR="30fcfae6578e2f5776d86cafe807f4a58722e26e"
+REQUIRED_ANCESTOR="30ada30e4c6b05aa68cd1eb8940a34d149457147"
 STAGE_DIR="$RUN_ROOT/$STAGE"
 CONFIG="$STAGE_DIR/config/run.yaml"
 STATE="$STAGE_DIR/state"
@@ -28,6 +28,38 @@ export TOKENIZERS_PARALLELISM=false FASTVIDEO_DIST_TIMEOUT_MINUTES=120
 export TORCH_NCCL_BLOCKING_WAIT=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONUNBUFFERED=1 VIRTUAL_ENV="$ENV_DIR" PATH="$ENV_DIR/bin:$PATH" PYTHONPATH="$REPO"
 mkdir -p "$TRITON_CACHE_DIR" "$TORCHINDUCTOR_CACHE_DIR"
+
+"$ENV_DIR/bin/python" - "$CONFIG" <<'PY'
+from __future__ import annotations
+
+import sys
+
+from fastvideo.train.utils.config import load_run_config
+
+
+config_path = sys.argv[1]
+data = load_run_config(config_path).training.data
+expected = {
+    "data_path": "/mnt/lustre/vlm-s4duan/openvid_1m/combined_parquet_dataset",
+    "dataloader_type": "streaming",
+    "streaming_manifest_path": "/mnt/lustre/vlm-k1kong/dataset-index/openvid/streaming-t2v-v2.json",
+    "streaming_read_batch_size": 2,
+    "streaming_shuffle_row_groups": True,
+    "dataloader_num_workers": 0,
+}
+actual = {name: getattr(data, name) for name in expected}
+errors = [
+    f"{name}: expected {value!r}, got {actual[name]!r}"
+    for name, value in expected.items()
+    if actual[name] != value
+]
+if errors:
+    raise SystemExit(
+        "OpenVid streaming config preflight failed for "
+        f"{config_path}: " + "; ".join(errors)
+    )
+print(f"OpenVid streaming config preflight passed: {config_path}")
+PY
 
 if [[ -s "$STATE/wandb_run_id" ]]; then
   export WANDB_RUN_ID="$(<"$STATE/wandb_run_id")"

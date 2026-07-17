@@ -1,6 +1,6 @@
 # OpenVid causal A12-A15 plan (NOT STARTED)
 
-Prepared from commit `30fcfae6578e2f5776d86cafe807f4a58722e26e`. This directory contains configuration only;
+Prepared from commit `30ada30e4c6b05aa68cd1eb8940a34d149457147`. This directory contains configuration only;
 no training command was launched.
 
 Data source: `/mnt/lustre/vlm-s4duan/openvid_1m/combined_parquet_dataset` (4494 parquet files, about 5.5 TiB). It is owned by

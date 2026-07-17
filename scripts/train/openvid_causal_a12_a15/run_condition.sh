@@ -22,8 +22,12 @@ export_stage() {
   local stage="$1" final="$2" role="${3:-student}"
   local checkpoint="$RUN_ROOT/$stage/checkpoints/checkpoint-$final"
   local marker="$RUN_ROOT/export/$stage/.source_checkpoint_fingerprint"
-  local current
-  current="$(find "$checkpoint" -type f -printf '%P:%s:%T@\n' | LC_ALL=C sort | sha256sum | awk '{print $1}')"
+  local checkpoint_hash config_hash git_head current
+  checkpoint_hash="$(find "$checkpoint" -type f -printf '%P:%s:%T@\n' | LC_ALL=C sort | sha256sum | awk '{print $1}')"
+  config_hash="$(sha256sum "$RUN_ROOT/$stage/config/run.yaml" | awk '{print $1}')"
+  git_head="$(git -C "$REPO" rev-parse HEAD)"
+  current="$(printf 'git_head=%s\nrole=%s\nconfig_sha256=%s\ncheckpoint_metadata=%s\n' \
+    "$git_head" "$role" "$config_hash" "$checkpoint_hash" | sha256sum | awk '{print $1}')"
   if [[ -s "$RUN_ROOT/export/$stage/transformer/model.safetensors" ]] &&
      [[ "$(cat "$marker" 2>/dev/null || true)" == "$current" ]]; then
     echo "$CONDITION $stage export already complete; skipping"
@@ -36,6 +40,20 @@ export_stage() {
     2>&1 | tee "$RUN_ROOT/$stage/logs/export.log"
   printf '%s\n' "$current" > "$marker"
 }
+
+mkdir -p "$RUN_ROOT/state"
+on_exit() {
+  local rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    local current_status
+    current_status="$(cat "$RUN_ROOT/state/status" 2>/dev/null || true)"
+    if [[ "$current_status" != failed* ]]; then
+      printf 'failed\n' > "$RUN_ROOT/state/status"
+    fi
+    date -Is > "$RUN_ROOT/state/finished_at"
+  fi
+}
+trap on_exit EXIT
 
 printf 'running\n' > "$RUN_ROOT/state/status"; date -Is > "$RUN_ROOT/state/started_at"
 run_stage tf 3000 "$((BASE_PORT + 1))"; export_stage tf 3000 student
