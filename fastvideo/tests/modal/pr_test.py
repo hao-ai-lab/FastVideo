@@ -1,5 +1,9 @@
 import os
+import re
+import shutil
+import subprocess
 import sys
+import time
 
 import modal
 
@@ -65,11 +69,21 @@ ci_env_secret = modal.Secret.from_dict({
     "BUILDKITE_COMMIT": os.environ.get("BUILDKITE_COMMIT", ""),
     "BUILDKITE_PULL_REQUEST": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
     "BUILDKITE_BRANCH": os.environ.get("BUILDKITE_BRANCH", ""),
+    "BUILDKITE_SOURCE": os.environ.get("BUILDKITE_SOURCE", ""),
     "BUILDKITE_BUILD_URL": os.environ.get("BUILDKITE_BUILD_URL", ""),
     "BUILDKITE_BUILD_ID": os.environ.get("BUILDKITE_BUILD_ID", ""),
     "BUILDKITE_JOB_ID": os.environ.get("BUILDKITE_JOB_ID", ""),
     "TEST_SCOPE": os.environ.get("TEST_SCOPE", ""),
     "IMAGE_VERSION": image_version,
+    "FASTVIDEO_CONTAINER_IMAGE_REF": image_ref,
+    **{
+        key: os.environ[key]
+        for key in (
+            "FASTVIDEO_ATTENTION_BACKEND",
+            "FASTVIDEO_PERFORMANCE_PROFILE_VERSION",
+        )
+        if os.environ.get(key)
+    },
     **({
         "UV_TORCH_BACKEND": uv_torch_backend_override
     } if uv_torch_backend_override else {}),
@@ -84,6 +98,95 @@ hf_secret = modal.Secret.from_dict(
     {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
 wandb_secret = modal.Secret.from_dict(
     {"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})
+
+
+def _run_git_with_retries(command: list[str],
+                          *,
+                          cwd: str,
+                          cleanup_path: str | None = None) -> None:
+    last_returncode = 1
+    for attempt in range(1, 4):
+        if cleanup_path is not None:
+            shutil.rmtree(cleanup_path, ignore_errors=True)
+
+        result = subprocess.run(command, cwd=cwd, check=False)
+        if result.returncode == 0:
+            return
+
+        last_returncode = result.returncode
+        if attempt < 3:
+            sleep_seconds = 5 * attempt
+            print(
+                f"Git command failed (attempt {attempt}/3, exit {last_returncode}); "
+                f"retrying in {sleep_seconds}s",
+                flush=True)
+            time.sleep(sleep_seconds)
+
+    raise RuntimeError(
+        f"Git command failed after 3 attempts with exit code {last_returncode}: "
+        + " ".join(command))
+
+
+def _checkout_repository(git_repo: str,
+                         git_commit: str,
+                         pr_number: str | None,
+                         repo_root: str = "/FastVideo") -> None:
+    if not git_repo or git_repo.startswith("-"):
+        raise RuntimeError("BUILDKITE_REPO must be a non-empty repository URL.")
+
+    if pr_number and pr_number != "false":
+        try:
+            pr_id = int(pr_number)
+        except ValueError as error:
+            raise RuntimeError(
+                f"Invalid BUILDKITE_PULL_REQUEST value: {pr_number}") from error
+        if pr_id <= 0:
+            raise RuntimeError(
+                f"Invalid BUILDKITE_PULL_REQUEST value: {pr_number}")
+        target = f"refs/pull/{pr_id}/head"
+        print(f"Using PR ref for checkout: {target}")
+    else:
+        if not git_commit or re.fullmatch(r"[0-9a-fA-F]{7,64}",
+                                          git_commit) is None:
+            raise RuntimeError(
+                f"Invalid BUILDKITE_COMMIT value: {git_commit}")
+        target = git_commit
+        print(f"Using direct commit checkout: {target}")
+
+    clone_command = [
+        "git",
+        "-c",
+        "http.version=HTTP/1.1",
+        "clone",
+        "--config",
+        "http.version=HTTP/1.1",
+        "--depth=1",
+        "--filter=blob:none",
+        "--no-checkout",
+        git_repo,
+        repo_root,
+    ]
+    _run_git_with_retries(clone_command,
+                          cwd="/",
+                          cleanup_path=repo_root)
+
+    git_prefix = ["git", "-c", "http.version=HTTP/1.1"]
+    _run_git_with_retries(
+        git_prefix + [
+            "fetch",
+            "--prune",
+            "--no-tags",
+            "--depth=1",
+            "--filter=blob:none",
+            "origin",
+            target,
+        ],
+        cwd=repo_root)
+    _run_git_with_retries(
+        git_prefix + ["checkout", "--detach", "FETCH_HEAD"], cwd=repo_root)
+    _run_git_with_retries(
+        git_prefix + ["submodule", "update", "--init", "--recursive"],
+        cwd=repo_root)
 
 
 def run_test(pytest_command: str):
@@ -106,26 +209,15 @@ def run_test_command(test_command: str,
     lane would then test stale kernels. Pass install_command="" for commands
     that manage their own installs.
     """
-    import subprocess
-    import sys
-    import os
-
-    git_repo = os.environ.get("BUILDKITE_REPO")
-    git_commit = os.environ.get("BUILDKITE_COMMIT")
+    git_repo = os.environ.get("BUILDKITE_REPO", "")
+    git_commit = os.environ.get("BUILDKITE_COMMIT", "")
     pr_number = os.environ.get("BUILDKITE_PULL_REQUEST")
 
     print(f"Cloning repository: {git_repo}")
     print(f"Target commit: {git_commit}")
     if pr_number:
         print(f"PR number: {pr_number}")
-
-    # For PRs (including forks), use GitHub's PR refs to get the correct commit
-    if pr_number and pr_number != "false":
-        checkout_command = f"git fetch --prune origin refs/pull/{pr_number}/head && git checkout FETCH_HEAD"
-        print(f"Using PR ref for checkout: {checkout_command}")
-    else:
-        checkout_command = f"git checkout {git_commit}"
-        print(f"Using direct commit checkout: {checkout_command}")
+    _checkout_repository(git_repo, git_commit, pr_number)
 
     build_kernel_command = """
     cd fastvideo-kernel &&
@@ -138,10 +230,7 @@ def run_test_command(test_command: str,
     command = f"""
     source $HOME/.local/bin/env &&
     source /opt/venv/bin/activate &&
-    git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
-    {checkout_command} &&
-    git submodule update --init --recursive &&
     {install_clause}
     {build_kernel_command}
     {test_command}
@@ -219,7 +308,7 @@ def run_training_lora_tests():
     )
 
 
-@app.function(gpu="H100:2",
+@app.function(gpu="H100!:2",
               image=image,
               timeout=900,
               secrets=[wandb_secret, ci_env_secret])
@@ -276,7 +365,13 @@ def run_self_forcing_tests():
 @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_unit_test():
     run_test(
-        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ ./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/training/test_trackers.py ./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py --ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py --ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs"
+        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
+        "./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ "
+        "./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/worker/ "
+        "./fastvideo/tests/training/test_trackers.py "
+        "./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py ./fastvideo/tests/modal/test_pr_test.py "
+        "--ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py "
+        "--ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs"
     )
 
 
@@ -408,12 +503,12 @@ def run_performance_tests():
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
         "hf auth login --token $HF_API_KEY && "
-        "if [ \"${BUILDKITE_BRANCH:-}\" = 'main' ] && [ \"${TEST_SCOPE:-}\" = 'full' ]; then "
-        "export PERF_RUN_SOURCE='scheduled_main'; "
-        "export PERF_UPLOAD_POLICY='always'; "
-        "elif [ -n \"${BUILDKITE_PULL_REQUEST:-}\" ] && [ \"${BUILDKITE_PULL_REQUEST:-false}\" != 'false' ]; then "
+        "if [ -n \"${BUILDKITE_PULL_REQUEST:-}\" ] && [ \"${BUILDKITE_PULL_REQUEST:-false}\" != 'false' ]; then "
         "export PERF_RUN_SOURCE='pr'; "
         "export PERF_UPLOAD_POLICY='pass'; "
+        "elif [ \"${BUILDKITE_BRANCH:-}\" = 'main' ] && ( [ \"${BUILDKITE_SOURCE:-}\" = 'schedule' ] || [ \"${TEST_SCOPE:-}\" = 'full' ] ); then "
+        "export PERF_RUN_SOURCE='scheduled_main'; "
+        "export PERF_UPLOAD_POLICY='always'; "
         "elif [ \"${TEST_SCOPE:-}\" = 'direct' ]; then "
         "export PERF_RUN_SOURCE='unknown'; "
         "export PERF_UPLOAD_POLICY='pass'; "

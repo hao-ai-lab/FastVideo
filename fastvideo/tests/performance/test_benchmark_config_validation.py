@@ -102,15 +102,22 @@ def test_partial_v2_identity_requires_schema_version():
 
 
 def test_optional_v2_metadata_fields_must_be_objects():
-    cfg = {
-        "benchmark_id": "wan-t2v-1.3b-2gpu",
-        "config_schema_version": 2,
-        "workload_id": "wan-t2v",
-        "variant_id": "1.3b-sp2",
-        "benchmark_version": 2,
-        "quality_metadata": ["not", "an", "object"],
-    }
+    cfg = _v2_config()
+    cfg["quality_metadata"] = ["not", "an", "object"]
 
     expected = "wan.json: optional v2 metadata field 'quality_metadata' must be an object"
     with pytest.raises(ValueError, match=expected):
         _validate_benchmark_config(cfg, "wan.json")
+
+
+def test_regression_thresholds_validate_without_forcing_v2_schema():
+    cfg = {
+        "benchmark_id": "legacy-benchmark",
+        "regression_thresholds": {"latency": {"threshold_percent": 0.1}},
+    }
+
+    _validate_benchmark_config(cfg, "legacy.json")
+
+    cfg["regression_thresholds"] = []
+    with pytest.raises(ValueError, match="benchmark config field 'regression_thresholds' must be an object"):
+        _validate_benchmark_config(cfg, "legacy.json")

@@ -1,30 +1,52 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { env } from "$env/dynamic/public";
-import type { Job, JobType } from "$lib/types";
+import {
+	STORAGE_KEY,
+	loadDefaultOptions,
+	type DefaultOptions,
+} from "./defaultOptions";
+import type { Job, JobType } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8189/api";
 
+// getApiBaseUrl runs on every request and in render paths (media URL
+// builders), so cache the configured URL keyed on the raw stored options
+// string instead of re-parsing the options JSON each call.
+let cachedRaw: string | null = null;
+let cachedConfigured = "";
+
 export function getApiBaseUrl(): string {
-	// 1) Check user-configured value from local storage (Settings page)
+	// 1) Check user-configured value from the persisted options (Settings
+	// page). The settings sync persists the full options object, so the key
+	// holds an empty string until the user sets a URL — treat that as unset
+	// and fall through to the env/default below.
 	if (typeof window !== "undefined") {
 		try {
-			const stored = window.localStorage.getItem("fastvideo-default-options");
-			if (stored) {
-				const parsed = JSON.parse(stored) as { apiServerBaseUrl?: string };
-				return parsed.apiServerBaseUrl!.trim();
+			const raw = window.localStorage.getItem(STORAGE_KEY);
+			if (raw !== cachedRaw) {
+				cachedRaw = raw;
+				cachedConfigured = stripTrailingSlash(
+					loadDefaultOptions().apiServerBaseUrl.trim(),
+				);
 			}
+			if (cachedConfigured) return cachedConfigured;
 		} catch {
-			// Ignore storage / JSON errors and fall back to env/default
+			// Ignore storage errors and fall back to env/default
 		}
 	}
 
 	// 2) Fall back to env var if set, then hardcoded default
+	const fromEnv = process.env.NEXT_PUBLIC_API_BASE_URL;
 	const apiUrl =
-		typeof env.PUBLIC_API_BASE_URL === "string" && env.PUBLIC_API_BASE_URL
-			? env.PUBLIC_API_BASE_URL
-			: DEFAULT_API_BASE_URL;
-	return apiUrl;
+		typeof fromEnv === "string" && fromEnv ? fromEnv : DEFAULT_API_BASE_URL;
+	return stripTrailingSlash(apiUrl);
+}
+
+// The base URL is used as a prefix in `${base}/jobs` template strings, so a
+// trailing slash (a natural thing to paste into Settings) would produce `//`
+// and 404 every request.
+function stripTrailingSlash(url: string): string {
+	return url.replace(/\/+$/, "");
 }
 
 /** Full URL for streaming a job's video/image output (for &lt;video&gt; or &lt;img&gt; src). */
@@ -64,40 +86,43 @@ export interface CreateJobRequest {
 	vsa_sparsity?: number;
 	tp_size?: number;
 	sp_size?: number;
+	// DMD distillation extras (sent by CreateJobModal)
+	dmd_use_vsa?: boolean;
+	dmd_vsa_sparsity?: number;
+	dmd_denoising_steps?: string;
+	real_score_guidance_scale?: number;
+	generator_update_interval?: number;
+	real_score_model_path?: string;
+	fake_score_model_path?: string;
 }
 
 export interface Model {
 	id: string;
 	label: string;
-	type: string;
 }
 
-export interface Settings {
-	defaultModelId: string;
-	defaultModelIdT2v: string;
-	defaultModelIdI2v: string;
-	defaultModelIdT2i: string;
-	numInferenceSteps: number;
-	numFrames: number;
-	height: number;
-	width: number;
-	guidanceScale: number;
-	guidanceRescale: number;
-	fps: number;
-	seed: number;
-	numGpus: number;
-	ditCpuOffload: boolean;
-	textEncoderCpuOffload: boolean;
-	vaeCpuOffload: boolean;
-	imageEncoderCpuOffload: boolean;
-	useFsdpInference: boolean;
-	enableTorchCompile: boolean;
-	vsaSparsity: number;
-	tpSize: number;
-	spSize: number;
-	autoStartJob: boolean;
-	datasetUploadPath: string;
+export interface GpuInfo {
+	index: number;
+	name: string;
+	utilization: number;
+	memory_used_mib: number;
+	memory_total_mib: number;
+	temperature_c: number | null;
+	power_watts: number | null;
+	power_limit_watts: number | null;
 }
+
+export interface GpuSnapshot {
+	available: boolean;
+	gpus: GpuInfo[];
+	error: string | null;
+}
+
+/**
+ * Server-persisted settings: everything in DefaultOptions except
+ * apiServerBaseUrl, which is purely local (per-browser).
+ */
+export type Settings = Omit<DefaultOptions, "apiServerBaseUrl">;
 
 // MARK: - API Functions
 
@@ -177,6 +202,15 @@ export async function getModels(workloadType?: string): Promise<Model[]> {
 	return response.json();
 }
 
+export async function getGpus(): Promise<GpuSnapshot> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/gpus`);
+	if (!response.ok) {
+		throw new Error("Failed to fetch GPU status");
+	}
+	return response.json();
+}
+
 export async function getJobsList(jobType?: JobType): Promise<Job[]> {
 	const baseApiUrl = getApiBaseUrl();
 	const url = jobType
@@ -200,15 +234,6 @@ export async function createJob(job: CreateJobRequest): Promise<Job> {
 	});
 	if (!response.ok) {
 		throw new Error("Failed to create job");
-	}
-	return response.json();
-}
-
-export async function getJobDetails(id: string): Promise<Job> {
-	const baseApiUrl = getApiBaseUrl();
-	const response = await fetch(`${baseApiUrl}/jobs/${id}`);
-	if (!response.ok) {
-		throw new Error("Failed to fetch job");
 	}
 	return response.json();
 }
@@ -322,15 +347,6 @@ export async function getDatasets(): Promise<Dataset[]> {
 	const response = await fetch(`${baseApiUrl}/datasets`);
 	if (!response.ok) {
 		throw new Error("Failed to fetch datasets");
-	}
-	return response.json();
-}
-
-export async function getDataset(id: string): Promise<Dataset> {
-	const baseApiUrl = getApiBaseUrl();
-	const response = await fetch(`${baseApiUrl}/datasets/${id}`);
-	if (!response.ok) {
-		throw new Error("Failed to fetch dataset");
 	}
 	return response.json();
 }

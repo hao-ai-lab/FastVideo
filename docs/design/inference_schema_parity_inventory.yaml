@@ -333,15 +333,25 @@ surfaces:
       use_distill:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
       scheduler_arch:
-        sources: [fastvideo.configs.pipelines.sd35.SD35Config]
+        sources:
+          - fastvideo.configs.pipelines.sd35.SD35Config
+          - fastvideo.configs.pipelines.zimage.ZImagePipelineConfig
       text_encoder_archs:
-        sources: [fastvideo.configs.pipelines.sd35.SD35Config]
+        sources:
+          - fastvideo.configs.pipelines.sd35.SD35Config
+          - fastvideo.configs.pipelines.zimage.ZImagePipelineConfig
       tokenizer_archs:
-        sources: [fastvideo.configs.pipelines.sd35.SD35Config]
+        sources:
+          - fastvideo.configs.pipelines.sd35.SD35Config
+          - fastvideo.configs.pipelines.zimage.ZImagePipelineConfig
       transformer_arch:
-        sources: [fastvideo.configs.pipelines.sd35.SD35Config]
+        sources:
+          - fastvideo.configs.pipelines.sd35.SD35Config
+          - fastvideo.configs.pipelines.zimage.ZImagePipelineConfig
       vae_arch:
-        sources: [fastvideo.configs.pipelines.sd35.SD35Config]
+        sources:
+          - fastvideo.configs.pipelines.sd35.SD35Config
+          - fastvideo.configs.pipelines.zimage.ZImagePipelineConfig
       expand_timesteps:
         sources:
           - fastvideo.configs.pipelines.wan.FastWan2_2_TI2V_5B_Config
@@ -421,6 +431,8 @@ surfaces:
       frame_receptive_field: "MagiHuman internal data-proxy receptive-field setting."
       image_conditioning: "MagiHuman preset variant marker for reference-image conditioning."
       ref_audio_offset: "MagiHuman internal data-proxy audio alignment offset."
+      scheduler_sigma_min: "Z-Image scheduler parity invariant; not part of the public typed inference API."
+      scheduler_use_reference_discrete_timesteps: "Z-Image scheduler parity invariant; not part of the public typed inference API."
       sr_local_attn_layers: "MagiHuman SR internal sparse-attention layer selection."
       text_offset: "MagiHuman internal data-proxy text alignment offset."
       vae_stride: "MagiHuman internal VAE/data-proxy stride setting."
@@ -448,6 +460,7 @@ surfaces:
       output_video_name: request.output.output_video_name
       num_videos_per_prompt: request.sampling.num_videos_per_prompt
       seed: request.sampling.seed
+      max_sequence_length: request.sampling.max_sequence_length
       num_frames: request.sampling.num_frames
       height: request.sampling.height
       width: request.sampling.width
@@ -458,6 +471,8 @@ surfaces:
       num_inference_steps_sr: request.sampling.num_inference_steps_sr
       guidance_scale: request.sampling.guidance_scale
       guidance_scale_2: request.sampling.guidance_scale_2
+      cfg_normalization: request.sampling.cfg_normalization
+      cfg_truncation: request.sampling.cfg_truncation
       guidance_rescale: request.sampling.guidance_rescale
       use_embedded_guidance: request.sampling.use_embedded_guidance
       true_cfg_scale: request.sampling.true_cfg_scale
@@ -509,7 +524,6 @@ surfaces:
     internal_only:
       data_type: "Derived from the request shape and not a public input."
       latents: "Pre-generated diffusion latents supplied by parity/debug harnesses; not a public input."
-      max_sequence_length: "Model-specific text-encoder sequence cap; not part of the public typed inference API."
 
   sampling_param_extensions: {}
 

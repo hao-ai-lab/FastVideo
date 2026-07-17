@@ -56,7 +56,7 @@ export const DEFAULT_OPTIONS: DefaultOptions = {
 	datasetUploadPath: "",
 };
 
-const STORAGE_KEY = "fastvideo-default-options";
+export const STORAGE_KEY = "fastvideo-default-options";
 
 export type WorkloadType = "t2v" | "i2v" | "t2i";
 

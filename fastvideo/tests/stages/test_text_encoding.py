@@ -2,6 +2,7 @@ import torch
 import types
 import pytest
 
+from fastvideo.configs.models.encoders.clip import CLIPTextArchConfig, CLIPTextConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.configs.pipelines.base import PipelineConfig
@@ -13,6 +14,9 @@ class TensorDict(dict):
         return TensorDict({k: v.to(device) for k, v in self.items()})
 
 class FakeTokenizer:
+    def __init__(self):
+        self.last_chat_template_kwargs = None
+
     def __call__(self, texts, **kwargs):
         B = len(texts)
         seq_len = int(kwargs.get("max_length", 4))
@@ -20,6 +24,10 @@ class FakeTokenizer:
             "input_ids": torch.arange(B * seq_len).view(B, seq_len),
             "attention_mask": torch.ones(B, seq_len, dtype=torch.long),
         })
+
+    def apply_chat_template(self, messages, **kwargs):
+        self.last_chat_template_kwargs = kwargs
+        return "formatted prompt"
 
 
 class FakeChatTokenizer:
@@ -40,17 +48,22 @@ class FakeChatTokenizer:
             "attention_mask": torch.ones(B, seq_len, dtype=torch.long),
         })
 
-
 class FakeTextEncoder(torch.nn.Module):
     def __init__(self, hidden_size=8):
         super().__init__()
         self.hidden_size = hidden_size
+        self.last_input_device = None
         self.last_output_hidden_states = None
 
     def forward(self, input_ids, attention_mask, output_hidden_states=False):
+        self.last_input_device = input_ids.device
         self.last_output_hidden_states = bool(output_hidden_states)
         B, T = input_ids.shape
-        last_hidden_state = torch.arange(B * T * self.hidden_size, dtype=torch.float32).view(B, T, self.hidden_size)
+        last_hidden_state = torch.arange(
+            B * T * self.hidden_size,
+            dtype=torch.float32,
+            device=input_ids.device,
+        ).view(B, T, self.hidden_size)
         hidden_states = (last_hidden_state, ) if output_hidden_states else None
         return types.SimpleNamespace(last_hidden_state=last_hidden_state,
                                      hidden_states=hidden_states)
@@ -213,3 +226,104 @@ def test_chat_list_preprocess_output_is_not_stripped():
         {"role": "user", "content": "a robotic arm welding a metal structure"},
     ]]
     assert tokenizer.last_kwargs["return_tensors"] == "pt"
+
+
+def test_chat_template_thinking_is_keyword_only_and_preserves_subclass_positions():
+    arch = CLIPTextArchConfig()
+    config = CLIPTextConfig(
+        arch,
+        "legacy-prefix",
+        None,
+        None,
+        False,
+        False,
+        7,
+        False,
+        True,
+        False,
+    )
+
+    assert config.num_hidden_layers_override == 7
+    assert config.require_post_norm is False
+    assert config.enable_scale is True
+    assert config.is_causal is False
+    assert config.chat_template_enable_thinking is False
+
+    configured = CLIPTextConfig(chat_template_enable_thinking=True)
+    assert configured.chat_template_enable_thinking is True
+
+    with pytest.raises(TypeError):
+        CLIPTextConfig(
+            arch,
+            "legacy-prefix",
+            None,
+            None,
+            False,
+            False,
+            7,
+            False,
+            True,
+            False,
+            True,
+        )
+
+
+@pytest.mark.parametrize("enable_thinking", [False, True])
+def test_encode_text_forwards_chat_template_thinking_config(enable_thinking):
+    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[0]
+    encoder_config.is_chat_model = True
+    encoder_config.chat_template_enable_thinking = enable_thinking
+
+    stage = make_stage(num_encoders=1, hidden_size=hidden)
+    stage.encode_text("a", fastvideo_args, encoder_index=[0])
+
+    assert stage.tokenizers[0].last_chat_template_kwargs == {
+        "tokenize": False,
+        "add_generation_prompt": True,
+        "enable_thinking": enable_thinking,
+    }
+
+
+def test_encode_text_uses_hf_passthrough_input_device(monkeypatch):
+    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    stage = make_stage(num_encoders=1, hidden_size=hidden)
+    stage.text_encoders[0]._fastvideo_input_device = torch.device("cpu")
+
+    monkeypatch.setattr(
+        "fastvideo.pipelines.stages.text_encoding.get_local_torch_device",
+        lambda: torch.device("meta"),
+    )
+
+    batch = ForwardBatch(
+        data_type="video",
+        prompt="a",
+        do_classifier_free_guidance=False,
+        prompt_embeds=[],
+        negative_prompt_embeds=None,
+        prompt_attention_mask=[],
+        negative_attention_mask=None,
+    )
+    output = stage.forward(batch, fastvideo_args)
+
+    # The marker governs where the encoder *receives* its tokens...
+    assert stage.text_encoders[0].last_input_device == torch.device("cpu")
+    # ...while the stage still normalizes the embeds it returns onto the
+    # caller's target device.
+    assert output.prompt_embeds[0].device.type == "meta"
+
+
+def test_encode_text_explicit_device_overrides_hf_passthrough_marker():
+    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    stage = make_stage(num_encoders=1, hidden_size=hidden)
+    stage.text_encoders[0]._fastvideo_input_device = torch.device("cpu")
+
+    output = stage.encode_text(
+        "a",
+        fastvideo_args,
+        encoder_index=[0],
+        device=torch.device("meta"),
+    )
+
+    assert stage.text_encoders[0].last_input_device == torch.device("meta")
+    assert output[0].device.type == "meta"

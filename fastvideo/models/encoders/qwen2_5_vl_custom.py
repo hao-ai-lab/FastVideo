@@ -75,6 +75,25 @@ if not is_flash_attn_2_available():
 
 logger = logging.get_logger(__name__)
 
+
+def _resolve_torch_dtype(dtype, default: torch.dtype = torch.float32) -> torch.dtype:
+    if isinstance(dtype, torch.dtype):
+        return dtype
+    if isinstance(dtype, str):
+        normalized = dtype.strip().removeprefix("torch.").lower()
+        return {
+            "bfloat16": torch.bfloat16,
+            "bf16": torch.bfloat16,
+            "float16": torch.float16,
+            "fp16": torch.float16,
+            "half": torch.float16,
+            "float32": torch.float32,
+            "fp32": torch.float32,
+            "float": torch.float32,
+        }.get(normalized, default)
+    return default
+
+
 class Qwen2_5_VLMLP(nn.Module):
     def __init__(self, config, bias: bool = False):
         super().__init__()
@@ -304,10 +323,13 @@ class Qwen2_5_VisionTransformerPretrainedModel(nn.Module):
     config_class = Qwen2_5_VLVisionConfig
     _no_split_modules = ["Qwen2_5_VLVisionBlock"]
 
-    def __init__(self, config) -> None:
+    def __init__(self, config, parent_torch_dtype=None) -> None:
         super().__init__()
 
-        self.dtype = torch.bfloat16 if config.torch_dtype == "bfloat16" else torch.float32
+        config_torch_dtype = getattr(config, "torch_dtype", None)
+        self.dtype = _resolve_torch_dtype(
+            config_torch_dtype if config_torch_dtype is not None else parent_torch_dtype
+        )
 
         self.spatial_merge_size = config.spatial_merge_size
         self.patch_size = config.patch_size
@@ -1458,7 +1480,10 @@ class Qwen2_5_VLForConditionalGenerationSimple(nn.Module):
         super().__init__()
         config = _flatten_text_config(config)
         self.config = config
-        self.visual = Qwen2_5_VisionTransformerPretrainedModel(config.vision_config)
+        self.visual = Qwen2_5_VisionTransformerPretrainedModel(
+            config.vision_config,
+            parent_torch_dtype=getattr(config, "torch_dtype", None),
+        )
 
         self.model = Qwen2_5_VLModel(config)
         self.vocab_size = config.vocab_size

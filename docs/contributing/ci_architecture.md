@@ -255,9 +255,10 @@ If you add a new CI test category:
 
 ### Documentation
 
-`.github/workflows/infra-docs.yml` builds documentation for PRs that touch
-`docs/**`, `mkdocs.yml`, `requirements-mkdocs.txt`, or the workflow itself. On
-pushes to `main`, it also deploys the built site to GitHub Pages.
+`.github/workflows/infra-docs.yml` builds documentation for same-repository PRs
+that touch `docs/**`, `mkdocs.yml`, `requirements-mkdocs.txt`, or the workflow
+itself. Fork PRs skip this executable build instead of waiting for maintainer
+approval. On pushes to `main`, it also deploys the built site to GitHub Pages.
 
 The docs job:
 
@@ -268,15 +269,17 @@ The docs job:
 
 ### Docker Images
 
-`.github/workflows/infra-build-image.yml` is a manual `workflow_dispatch`
-workflow. Maintainers choose which image families to build. The
-`fastvideo-dev` matrix builds Python 3.12 images for CUDA 12.6 and CUDA 13 on
-native `amd64` and `arm64` runners, then publishes one multi-platform manifest
-per CUDA version. CUDA 12.6 owns the `py3.12-latest` and global `latest` tags,
-as well as the explicit `py3.12-cuda12.6.3-latest` alias. CUDA 13 is published
-under the explicit `py3.12-cuda13.0.0-latest` tag. This publication policy does
-not change the unparameterized `docker/Dockerfile` build defaults, which remain
-CUDA 13 and `cu130`.
+`.github/workflows/infra-build-image.yml` supports manual `workflow_dispatch`
+runs and automatically rebuilds the CUDA matrix when `docker/Dockerfile`
+changes on `main` in the canonical repository. Manual runs let maintainers
+choose which image families to build. The `fastvideo-dev` matrix builds Python
+3.12 images for CUDA 12.6 and CUDA 13 on native `amd64` and `arm64` runners,
+then publishes one multi-platform manifest per CUDA version. CUDA 12.6 owns the
+`py3.12-latest` and global `latest` tags, as well as the explicit
+`py3.12-cuda12.6.3-latest` alias. CUDA 13 is published under the explicit
+`py3.12-cuda13.0.0-latest` tag. This publication policy does not change the
+unparameterized `docker/Dockerfile` build defaults, which remain CUDA 13 and
+`cu130`.
 
 The optional Dreamverse matrix builds backend and UI images for CUDA 12.6 and
 CUDA 13 on `amd64`. Dreamverse remains `amd64`-only because its FA4 dependency
@@ -316,7 +319,7 @@ The reusable implementation lives in
 | `fastvideo/tests/modal/ssim_test.py` | Modal functions and partitioning for SSIM |
 | `.buildkite/performance-benchmarks/tests/*.json` | Performance benchmark configs and thresholds |
 | `.github/workflows/infra-docs.yml` | Docs build and GitHub Pages deploy |
-| `.github/workflows/infra-build-image.yml` | Manual Docker image builds |
+| `.github/workflows/infra-build-image.yml` | Automatic CUDA matrix and manual Docker image builds |
 | `.github/workflows/publish-fastvideo.yml` | FastVideo PyPI publishing |
 | `.github/workflows/publish-kernel.yml` | FastVideo kernel PyPI publishing |
 | `.github/workflows/publish-comfyui.yml` | ComfyUI registry publishing |

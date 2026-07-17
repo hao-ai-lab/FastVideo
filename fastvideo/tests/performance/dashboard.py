@@ -37,7 +37,7 @@ COMPARISON_COHORT_KEYS = (
     "hardware_profile_id",
     "software_profile_id",
 )
-GROUP_KEYS = ("model_id", "gpu_type", *COMPARISON_COHORT_KEYS)
+GROUP_KEYS = ("_cohort_schema", "_cohort_model_id", "_cohort_gpu_type", *COMPARISON_COHORT_KEYS)
 
 
 def _cohort_value(value: object) -> str:
@@ -62,35 +62,43 @@ def _short_value(value: object) -> str:
     return text[:12]
 
 
-def _cohort_title(group_key: tuple[object, ...]) -> str:
-    workload = _display_value(group_key[2])
-    variant = _display_value(group_key[3])
-    version = _display_value(group_key[4])
+def _cohort_title(record: object) -> str:
+    workload = _display_value(record.get("workload_id"))
+    variant = _display_value(record.get("variant_id"))
+    version = _display_value(record.get("benchmark_version"))
     version_label = version if version == "legacy" else f"v{version}"
     return f"{workload} / {variant} / {version_label}"
 
 
-def _cohort_detail(group_key: tuple[object, ...]) -> str:
+def _cohort_detail(record: object) -> str:
     return " | ".join((
-        f"recipe {_short_value(group_key[5])}",
-        _short_value(group_key[6]),
-        _short_value(group_key[7]),
+        f"recipe {_short_value(record.get('recipe_fingerprint'))}",
+        _short_value(record.get("hardware_profile_id")),
+        _short_value(record.get("software_profile_id")),
     ))
 
 
-def _group_record(group_key: tuple[object, ...]) -> dict[str, str]:
+def _group_record(record: object) -> dict[str, str]:
     return {
-        key: _cohort_value(value)
-        for key, value in zip(GROUP_KEYS, group_key)
+        key: _cohort_value(record.get(key))
+        for key in ("model_id", "gpu_type", *COMPARISON_COHORT_KEYS)
     }
+
+
+def _has_complete_v2_identity(record: object) -> bool:
+    return all(_cohort_value(record.get(key)) for key in COMPARISON_COHORT_KEYS)
 
 
 def _dashboard_frame(df: pd.DataFrame) -> pd.DataFrame:
     dashboard_df = df.copy()
-    for key in GROUP_KEYS:
+    for key in ("model_id", "gpu_type", *COMPARISON_COHORT_KEYS):
         if key not in dashboard_df.columns:
             dashboard_df[key] = ""
         dashboard_df[key] = dashboard_df[key].map(_cohort_value)
+    uses_v2_identity = dashboard_df.apply(_has_complete_v2_identity, axis=1)
+    dashboard_df["_cohort_schema"] = uses_v2_identity.map({True: "v2", False: "legacy"})
+    dashboard_df["_cohort_model_id"] = dashboard_df["model_id"].where(~uses_v2_identity, "")
+    dashboard_df["_cohort_gpu_type"] = dashboard_df["gpu_type"].where(~uses_v2_identity, "")
     return dashboard_df
 
 # -----------------------------
@@ -107,12 +115,14 @@ def build_plots(df: pd.DataFrame) -> tuple[list, list[dict[str, object]]]:
     figs = []
     skipped_metrics: list[dict[str, object]] = []
 
-    for group_key, g in group_data(df):
-        model_id, gpu_type = group_key[:2]
-        group_record = _group_record(group_key)
-        cohort_title = _cohort_title(group_key)
-        cohort_detail = _cohort_detail(group_key)
+    for _group_key, g in group_data(df):
         g = g.sort_values("timestamp")
+        display_record = g.iloc[-1]
+        model_id = display_record["model_id"]
+        gpu_type = display_record["gpu_type"]
+        group_record = _group_record(display_record)
+        cohort_title = _cohort_title(display_record)
+        cohort_detail = _cohort_detail(display_record)
 
         # One chart per metric so the y-axes aren't on wildly different scales
         for metric in METRICS:
@@ -146,7 +156,7 @@ def build_plots(df: pd.DataFrame) -> tuple[list, list[dict[str, object]]]:
                 x="timestamp",
                 y=metric,
                 markers=True,
-                hover_data=["config_id", "commit_sha", *COMPARISON_COHORT_KEYS],
+                hover_data=["model_id", "gpu_type", "config_id", "commit_sha", *COMPARISON_COHORT_KEYS],
                 title=f"{model_id} | {gpu_type} | {cohort_title} | {cohort_detail} | {metric}",
                 labels={"timestamp": "Time", metric: metric},
             )

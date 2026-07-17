@@ -17,7 +17,7 @@ from typing import Any
 
 import torch
 
-RECIPE_SCHEMA_VERSION = 1
+RECIPE_SCHEMA_VERSION = 2
 PROFILE_ID_LENGTH = 16
 _PATH_EXCLUDED_GENERATION_KEYS = {"output_path", "output_video_name"}
 _PROMPT_KEYS = {"prompt", "negative_prompt", "neg_prompt"}
@@ -32,6 +32,7 @@ _PROFILE_ENV_VARS = (
     "FASTVIDEO_ATTENTION_BACKEND",
     "IMAGE_VERSION",
     "UV_TORCH_BACKEND",
+    "FASTVIDEO_CONTAINER_IMAGE_REF",
 )
 _PACKAGE_DISTRIBUTIONS = {
     "fastvideo_kernel": ("fastvideo-kernel", "fastvideo_kernel"),
@@ -87,6 +88,12 @@ def recipe_fingerprint(recipe: Mapping[str, Any]) -> str:
         # Intentional backend changes are declared via requested_backend,
         # which stays in the hash.
         attention.pop("resolved_backend", None)
+    benchmark = pruned.get("benchmark")
+    if isinstance(benchmark, dict):
+        # benchmark_id names artifacts and storage directories, but is not one
+        # of the six v2 comparison fields. Keep it in the recipe for audit
+        # while allowing display-only renames to stay in the same cohort.
+        benchmark.pop("benchmark_id", None)
     return sha256_hexdigest(canonical_json(pruned))
 
 

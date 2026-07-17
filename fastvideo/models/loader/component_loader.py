@@ -391,18 +391,22 @@ class TextEncoderLoader(ComponentLoader):
             model_config.quant_config = quant_cls()
 
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
-            with target_device:
-                architectures = getattr(model_config, "architectures", [])
-                model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
-                if getattr(model_cls, "supports_hf_from_pretrained", False):
-                    model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
-                        model_path,
-                        model_config,  # type: ignore[arg-type]
-                        dtype=PRECISION_TO_TYPE[dtype],
-                        device=target_device,
-                    )
-                    return model.eval()
+            architectures = getattr(model_config, "architectures", [])
+            model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
+            if getattr(model_cls, "supports_hf_from_pretrained", False):
+                model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
+                    model_path,
+                    model_config,  # type: ignore[arg-type]
+                    dtype=PRECISION_TO_TYPE[dtype],
+                    device=target_device,
+                )
+                # HF passthrough encoders return before FastVideo's FSDP
+                # wrapping path, so the text stage needs their placement to
+                # put token tensors on the same device.
+                model._fastvideo_input_device = target_device
+                return model.eval()
 
+            with target_device:
                 model = model_cls(model_config)  # type: ignore
 
             weights_to_load = {name for name, _ in model.named_parameters()}

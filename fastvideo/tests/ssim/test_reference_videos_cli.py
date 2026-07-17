@@ -44,6 +44,22 @@ def _fake_snapshot_download(*, allow_patterns, cache_dir, **_kwargs):
     return str(snapshot_root)
 
 
+def test_png_references_are_copied_and_mark_local_cache_ready(tmp_path):
+    generated_dir = tmp_path / "generated"
+    generated = generated_dir / "model-a" / "flash" / "sample.png"
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"image")
+    reference_dir = tmp_path / "reference_videos" / "default" / "L40S_reference_videos"
+
+    assert reference_videos_cli.copy_generated_to_reference(
+        generated_dir,
+        reference_dir,
+    ) == 1
+    marker = reference_dir.parent / ".download_complete_default"
+    marker.touch()
+    assert reference_videos_cli._has_local_reference_videos(tmp_path, "default")
+
+
 @pytest.fixture(autouse=True)
 def _fake_hf(monkeypatch):
     _FakeHfApi.instances = []

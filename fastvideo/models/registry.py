@@ -74,6 +74,7 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
 # Text-to-image DiT models (2D image generation)
 _TEXT_TO_IMAGE_DIT_MODELS = {
     "GlmImageTransformer2DModel": ("dits", "glm_image", "GlmImageTransformer2DModel"),
+    "ZImageTransformer2DModel": ("dits", "zimage", "ZImageTransformer2DModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
@@ -89,6 +90,9 @@ _TEXT_ENCODER_MODELS = {
     "Reason1TextEncoder": ("encoders", "reason1", "Reason1TextEncoder"),
     "Qwen2_5_VLForConditionalGeneration":
     ("encoders", "reason1", "Reason1TextEncoder"),
+    # Z-Image-Turbo's text_encoder/config.json declares architecture
+    # "Qwen3Model"; route it to the shared Qwen3 encoder (added for Flux2 Klein).
+    "Qwen3Model": ("encoders", "qwen3", "Qwen3ForCausalLM"),
     "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
     "Qwen3ForCausalLM": ("encoders", "qwen3", "Qwen3ForCausalLM"),
     "Mistral3ForConditionalGeneration":
