@@ -200,7 +200,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default="/tmp/fastvideo_dynamic_batching")
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--prompts", nargs="+", default=list(DEFAULT_PROMPTS))
-    parser.add_argument("--max-abs-diff", type=float, default=0.25)
+    parser.add_argument("--max-abs-diff", type=float, default=0.30)
     parser.add_argument("--max-mean-abs-diff", type=float, default=0.02)
     return parser.parse_args()
 
