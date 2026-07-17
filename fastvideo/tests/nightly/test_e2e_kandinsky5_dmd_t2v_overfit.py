@@ -36,9 +36,15 @@ Reference bootstrap: the committed reference
 (``reference_video_kandinsky5_dmd_v0.mp4`` next to this file) is produced
 by running this test once on a sanctioned GPU box with
 ``KANDINSKY5_E2E_WRITE_REFERENCE=1``, reviewing the written video by eye,
-and committing it. Until that reference exists the test FAILS (it does not
-skip) -- an artifact-existence-only pass is exactly the false-green this
-oracle exists to prevent. Run it with::
+and committing it. Review bar: expect blurry-but-structured content
+loosely matching the prompt (4-step no-CFG sampling of near-base weights
+cannot look good) -- soft shapes, warm sunflower-ish colors, motion.
+Uniform grey static, solid black, or hard garbage blocks mean a broken
+pipeline: do NOT commit such a reference (probe the export with the plain
+50-step ``Kandinsky5T2VPipeline`` to isolate weights-path vs sampler
+problems). Until a reference exists the test FAILS (it does not skip) --
+an artifact-existence-only pass is exactly the false-green this oracle
+exists to prevent. Run it with::
 
     pytest fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py -vs
 
@@ -95,7 +101,16 @@ STAGE2_CONFIG = (REPO_ROOT / "examples" / "train" / "configs" / "distribution_ma
 # in the Wan e2e test.
 REFERENCE_VIDEO = THIS_FILE.parent / "reference_video_kandinsky5_dmd_v0.mp4"
 WRITE_REFERENCE_ENV = "KANDINSKY5_E2E_WRITE_REFERENCE"
-GENERATION_PROMPT = "a synthetic test clip of random noise"
+# Deliberately semantic even though the training clip is random noise: the
+# caption's relation to the clip content is irrelevant for plumbing, but
+# the caption doubles as the generation prompt, and a semantic prompt makes
+# the reference video human-reviewable (blurry-but-structured output from
+# 4-step sampling of near-base weights). An earlier "random noise" caption
+# produced a grey-static reference that was visually indistinguishable
+# from a broken pipeline AND decorrelates across runs, making the SSIM
+# oracle both unreviewable and potentially flaky.
+GENERATION_PROMPT = ("A curious raccoon peers through a vibrant field of yellow sunflowers, "
+                     "soft natural light filtering through the petals, mid-shot")
 GENERATION_SEED = 42
 # Floor calibrated conservatively (matches the Wan e2e test's 0.5 bar, but
 # on the mean rather than the max). Tighten upward once a few recorded
@@ -352,7 +367,19 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
         STAGE1_CONFIG,
         STAGE1_OUTPUT_DIR,
         max_train_steps=3,
-        extra_overrides=[],
+        extra_overrides=[
+            # The recipe's full 5e-5 is calibrated for a real dataset; 3
+            # steps of it toward this test's random-noise clip measurably
+            # degrades the model -- empirically enough to collapse the
+            # fragile 4-step no-CFG DMD sampling below into grey static
+            # (50-step T2V sampling of the same export still recovered).
+            # A tiny LR keeps the full optimizer/backward path exercised
+            # while the final generation stays structured: reviewable by
+            # eye at bootstrap, and stable across runs for the SSIM oracle
+            # (noise output decorrelates under any training
+            # nondeterminism; structured output does not).
+            "--training.optimizer.learning_rate", "1e-6",
+        ],
         env_overrides={"FASTVIDEO_ATTENTION_BACKEND": "ATTN_QAT_TRAIN"},
     )
     stage1_ckpt = _latest_checkpoint(STAGE1_OUTPUT_DIR)
