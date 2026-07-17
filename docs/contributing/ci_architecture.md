@@ -255,10 +255,9 @@ If you add a new CI test category:
 
 ### Documentation
 
-`.github/workflows/infra-docs.yml` builds documentation for same-repository PRs
-that touch `docs/**`, `mkdocs.yml`, `requirements-mkdocs.txt`, or the workflow
-itself. Fork PRs skip this executable build instead of waiting for maintainer
-approval. On pushes to `main`, it also deploys the built site to GitHub Pages.
+`.github/workflows/infra-docs.yml` builds documentation for PRs that touch
+`docs/**`, `mkdocs.yml`, `requirements-mkdocs.txt`, or the workflow itself. On
+pushes to `main`, it also deploys the built site to GitHub Pages.
 
 The docs job:
 
