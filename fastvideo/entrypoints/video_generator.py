@@ -491,7 +491,12 @@ class VideoGenerator:
             if log_queue:
                 self.executor.clear_log_queue()
 
-    def generate_video_batch(self, request_kwargs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def generate_video_batch(
+        self,
+        request_kwargs: list[dict[str, Any]],
+        *,
+        _capture_postprocess_errors: bool = False,
+    ) -> list[dict[str, Any]]:
         """Generate multiple legacy video requests, batching compatible items."""
         work_items: list[_GenerationWorkItem] = []
         reserved_output_paths: set[str] = set()
@@ -553,7 +558,10 @@ class VideoGenerator:
                     _extra_overrides=extra_overrides,
                 ))
 
-        return self._generate_prepared_work_items(work_items)
+        return self._generate_prepared_work_items(
+            work_items,
+            capture_postprocess_errors=_capture_postprocess_errors,
+        )
 
     def _generate_request_impl(
         self,
@@ -1101,7 +1109,7 @@ class VideoGenerator:
             elif self._is_image_workload():
                 assert frames is not None
                 save_start = time.perf_counter()
-                imageio.imwrite(output_path, frames[0])
+                self._write_image_atomic(output_path, frames[0])
                 save_video_time = time.perf_counter() - save_start
                 logger.info("Saved image to %s", output_path)
             else:
@@ -1132,7 +1140,7 @@ class VideoGenerator:
                     else:
                         logger.warning("Single-pass save failed; falling back to two-step save/mux.")
                         save_start = time.perf_counter()
-                        imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                        self._write_video_atomic(output_path, frames, batch.fps)
                         save_video_time = time.perf_counter() - save_start
                         mux_start = time.perf_counter()
                         mux_ok = self._mux_audio(output_path, audio, int(audio_sample_rate))
@@ -1141,7 +1149,7 @@ class VideoGenerator:
                             logger.warning("Audio mux failed; saved video without audio.")
                 else:
                     save_start = time.perf_counter()
-                    imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                    self._write_video_atomic(output_path, frames, batch.fps)
                     save_video_time = time.perf_counter() - save_start
                     audio_mux_time = 0.0
                 logger.info("Saved video to %s", output_path)
@@ -1250,24 +1258,37 @@ class VideoGenerator:
         current_requests = [item.sampling_param for item in current_group]
         return admission.reject_reason_for_candidate(current_requests, candidate.sampling_param)
 
-    def _run_work_item_group(self, group: list[_GenerationWorkItem]) -> list[dict[str, Any]]:
+    def _run_work_item_group(
+        self,
+        group: list[_GenerationWorkItem],
+        *,
+        capture_postprocess_errors: bool = False,
+    ) -> list[dict[str, Any]]:
         if len(group) == 1:
             return [self._execute_single_work_item(group[0])]
         merged = self._merge_work_items(group)
         output_batch, gen_time, start_time = self._run_forward_batch(merged.batch, merged.fastvideo_args)
-        return [
-            self._postprocess_generation_output(
-                item,
-                self._split_output_batch(output_batch, index=item_index, batch_size=len(group)),
-                gen_time,
-                start_time,
-            ) for item_index, item in enumerate(group)
-        ]
+        results: list[dict[str, Any]] = []
+        for item_index, item in enumerate(group):
+            try:
+                result = self._postprocess_generation_output(
+                    item,
+                    self._split_output_batch(output_batch, index=item_index, batch_size=len(group)),
+                    gen_time,
+                    start_time,
+                )
+            except Exception as error:
+                if not capture_postprocess_errors:
+                    raise
+                result = {"_postprocess_error": error}
+            results.append(result)
+        return results
 
     def _generate_prepared_work_items(
         self,
         work_items: list[_GenerationWorkItem],
         tolerate_failures: bool = False,
+        capture_postprocess_errors: bool = False,
     ) -> list[dict[str, Any]]:
         """Execute prepared work items, batching compatible neighbors.
 
@@ -1281,7 +1302,10 @@ class VideoGenerator:
 
         def run_group(group: list[_GenerationWorkItem]) -> list[dict[str, Any]]:
             if not tolerate_failures:
-                return self._run_work_item_group(group)
+                return self._run_work_item_group(
+                    group,
+                    capture_postprocess_errors=capture_postprocess_errors,
+                )
             try:
                 return self._run_work_item_group(group)
             except Exception as e:
@@ -1415,6 +1439,38 @@ class VideoGenerator:
         audio_int16 = (audio_np * 32767.0).astype(np.int16)
         return audio_int16, audio_int16.shape[1]
 
+    @staticmethod
+    def _temporary_output_path(output_path: str) -> str:
+        output_dir = os.path.dirname(os.path.abspath(output_path))
+        stem, suffix = os.path.splitext(os.path.basename(output_path))
+        fd, temporary_path = tempfile.mkstemp(
+            dir=output_dir,
+            prefix=f".{stem}.",
+            suffix=suffix,
+        )
+        os.close(fd)
+        return temporary_path
+
+    @classmethod
+    def _write_image_atomic(cls, output_path: str, frame: np.ndarray) -> None:
+        temporary_path = cls._temporary_output_path(output_path)
+        try:
+            imageio.imwrite(temporary_path, frame)
+            os.replace(temporary_path, output_path)
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
+
+    @classmethod
+    def _write_video_atomic(cls, output_path: str, frames: list[np.ndarray], fps: int) -> None:
+        temporary_path = cls._temporary_output_path(output_path)
+        try:
+            imageio.mimsave(temporary_path, frames, fps=fps, format="mp4")
+            os.replace(temporary_path, output_path)
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
+
     @classmethod
     def _write_pcm_wav(
         cls,
@@ -1425,11 +1481,17 @@ class VideoGenerator:
         """Write 16-bit PCM WAV; returns the channel count."""
         import wave
         audio_int16, num_channels = cls._audio_to_int16(audio)
-        with wave.open(wav_path, "wb") as f:
-            f.setnchannels(num_channels)
-            f.setsampwidth(2)
-            f.setframerate(sample_rate)
-            f.writeframes(audio_int16.tobytes())
+        temporary_path = cls._temporary_output_path(wav_path)
+        try:
+            with wave.open(temporary_path, "wb") as f:
+                f.setnchannels(num_channels)
+                f.setsampwidth(2)
+                f.setframerate(sample_rate)
+                f.writeframes(audio_int16.tobytes())
+            os.replace(temporary_path, wav_path)
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
         return num_channels
 
     @classmethod
@@ -1451,11 +1513,12 @@ class VideoGenerator:
         if not frames:
             return False
 
+        temporary_path = cls._temporary_output_path(output_path)
         output = None
         try:
             audio_int16, num_channels = cls._audio_to_int16(audio)
             layout = "stereo" if num_channels == 2 else "mono"
-            output = av.open(output_path, mode="w")
+            output = av.open(temporary_path, mode="w")
             video_stream = output.add_stream("libx264", rate=fps)
             video_stream.width = int(frames[0].shape[1])
             video_stream.height = int(frames[0].shape[0])
@@ -1491,6 +1554,7 @@ class VideoGenerator:
                 output.mux(packet)
 
             output.close()
+            os.replace(temporary_path, output_path)
             return True
         except Exception as e:
             logger.warning("Single-pass video+audio save failed: %s", e)
@@ -1498,6 +1562,9 @@ class VideoGenerator:
                 with suppress(Exception):
                     output.close()
             return False
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
 
     @staticmethod
     def _ffmpeg_encoder_supports_option(ffmpeg_bin: str, codec: str, option_name: str) -> bool:
@@ -1552,6 +1619,7 @@ class VideoGenerator:
         width = int(frames[0].shape[1])
         codec = os.getenv("FASTVIDEO_VIDEO_CODEC", "libx264")
 
+        temporary_path = cls._temporary_output_path(output_path)
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 wav_path = os.path.join(tmpdir, "audio.wav")
@@ -1605,7 +1673,7 @@ class VideoGenerator:
                     "-shortest",
                     "-movflags",
                     "+faststart",
-                    output_path,
+                    temporary_path,
                 ]
 
                 proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -1628,6 +1696,7 @@ class VideoGenerator:
                     if rc != 0:
                         logger.warning("ffmpeg pipe save failed with return code %d", rc)
                         return False
+                    os.replace(temporary_path, output_path)
                     return True
                 except Exception:
                     proc.kill()
@@ -1636,6 +1705,9 @@ class VideoGenerator:
         except Exception as e:
             logger.warning("ffmpeg pipe save failed: %s", e)
             return False
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
 
     @classmethod
     def _mux_audio(
@@ -1653,7 +1725,7 @@ class VideoGenerator:
             return False
 
         try:
-            with tempfile.TemporaryDirectory() as tmpdir:
+            with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(video_path))) as tmpdir:
                 out_path = os.path.join(tmpdir, "muxed.mp4")
                 wav_path = os.path.join(tmpdir, "audio.wav")
 
@@ -1699,7 +1771,7 @@ class VideoGenerator:
                 input_video.close()
                 input_audio.close()
                 output.close()
-                shutil.move(out_path, video_path)
+                os.replace(out_path, video_path)
             return True
         except Exception as e:
             logger.warning("Audio mux failed: %s", e)

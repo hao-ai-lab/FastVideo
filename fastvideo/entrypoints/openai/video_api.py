@@ -181,6 +181,9 @@ async def _run_generation(request_id: str, kwargs: dict[str, Any]) -> None:
             peak_mem = result.get("peak_memory_mb")
             if peak_mem is not None:
                 update["peak_memory_mb"] = peak_mem
+            video_path = result.get("video_path")
+            if video_path is not None:
+                update["file_path"] = video_path
 
         await VIDEO_STORE.update_fields(request_id, update)
         logger.info("Video %s completed in %.2fs", request_id, elapsed)

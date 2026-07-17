@@ -124,9 +124,10 @@ it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 | Train Framework Tests | `train_framework` | `fastvideo/train/**`, train model/method tests, model loader, DiTs |
 | Eval Metrics Tests | `eval` | `fastvideo/eval/**`, `fastvideo/tests/eval/**`, `pyproject.toml`, `docker/Dockerfile` |
 
-Dynamic Batching Parity runs the same L40S latent comparison as a path-filtered
-Fastcheck job, a path-filtered Full Suite job, and the direct
-`/test dynamic-batching-parity` command.
+Dynamic Batching Parity runs a two-L40S Wan sequence-parallel comparison with
+preset CFG/negative prompting, decoded pixel output, and saved-file checks. It
+runs as a path-filtered Fastcheck job, a path-filtered Full Suite job, and the
+direct `/test dynamic-batching-parity` command.
 
 See [Performance Benchmarks](performance_benchmarks.md) for the performance
 lane's thresholds, rolling baseline, artifacts, and reseeding process.

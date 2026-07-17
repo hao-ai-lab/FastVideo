@@ -348,6 +348,8 @@ def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_p
         saved["frame_count"] = len(frames)
         saved["fps"] = fps
         saved["format"] = format
+        with open(path, "wb") as output_file:
+            output_file.write(b"video")
 
     monkeypatch.setattr(video_generator_module.imageio, "mimsave", fake_mimsave)
 
@@ -362,12 +364,31 @@ def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_p
     assert result["samples"] is None
     assert result["frames"] is None
     assert result["video_path"] == output_path
-    assert saved == {
-        "path": output_path,
-        "frame_count": 2,
-        "fps": 8,
-        "format": "mp4",
-    }
+    assert saved["frame_count"] == 2
+    assert saved["fps"] == 8
+    assert saved["format"] == "mp4"
+    assert saved["path"] != output_path
+    assert os.path.dirname(saved["path"]) == str(tmp_path)
+    with open(output_path, "rb") as output_file:
+        assert output_file.read() == b"video"
+
+
+
+def test_write_video_atomic_removes_partial_temporary_file_on_failure(monkeypatch, tmp_path):
+    output_path = str(tmp_path / "broken.mp4")
+
+    def fail_after_partial_write(path, frames, *, fps, format):
+        with open(path, "wb") as output_file:
+            output_file.write(b"partial")
+        raise OSError("encoder failed")
+
+    monkeypatch.setattr(video_generator_module.imageio, "mimsave", fail_after_partial_write)
+
+    with pytest.raises(OSError, match="encoder failed"):
+        VideoGenerator._write_video_atomic(output_path, [torch.zeros((1, 1)).numpy()], 8)
+
+    assert not os.path.exists(output_path)
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_generate_single_video_audio_only_metadata_returns_audio_without_frames(tmp_path):
@@ -631,6 +652,48 @@ def test_generate_prepared_work_items_retries_failed_group_per_prompt(monkeypatc
     assert results[0]["prompts"] == "one"
     assert results[0]["samples"].flatten().tolist() == [0.0, 1.0, 2.0, 3.0]
     assert results[1] == {"error": "bad second prompt", "prompt": "two"}
+
+
+def test_run_work_item_group_captures_postprocess_errors_per_item(monkeypatch, tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = _batching_fastvideo_args()
+
+    def fake_run_forward(batch, fastvideo_args):
+        output = torch.zeros((2, 4, 1, 1, 1), dtype=torch.float32)
+        return ForwardBatch(data_type=batch.data_type, output=output), 0.5, 10.0
+
+    def fake_postprocess(work_item, output_batch, gen_time, start_time):
+        if work_item.prompt == "two":
+            raise OSError("second save failed")
+        return {
+            "prompts": work_item.prompt,
+            "video_path": work_item.output_path,
+        }
+
+    monkeypatch.setattr(generator, "_run_forward_batch", fake_run_forward)
+    monkeypatch.setattr(generator, "_postprocess_generation_output", fake_postprocess)
+    params = [
+        SamplingParam(prompt="one", height=8, width=8, num_frames=1, save_video=True),
+        SamplingParam(prompt="two", height=8, width=8, num_frames=1, save_video=True),
+    ]
+    work_items = [
+        generator._prepare_generation_work_item(
+            param.prompt,
+            param,
+            generator.fastvideo_args,
+            output_path=str(tmp_path / f"{param.prompt}.mp4"),
+        ) for param in params
+    ]
+
+    results = generator._run_work_item_group(
+        work_items,
+        capture_postprocess_errors=True,
+    )
+
+    assert results[0]["prompts"] == "one"
+    assert results[0]["video_path"] == str(tmp_path / "one.mp4")
+    assert isinstance(results[1]["_postprocess_error"], OSError)
+    assert str(results[1]["_postprocess_error"]) == "second save failed"
 
 
 def test_video_generator_validates_batching_config_before_executor_start(tmp_path):

@@ -132,6 +132,19 @@ def test_parity_gate_rejects_decoded_shape_and_prompt_mapping_mismatch() -> None
     assert any("output shape mismatch" in failure for failure in gate["failures"])
 
 
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_parity_gate_rejects_non_finite_aggregate_metrics(bad_value: float) -> None:
+    metrics = _valid_metrics()
+    metrics["max_abs_diff"] = bad_value
+    metrics["mean_abs_diff"] = bad_value
+
+    gate = _parity_gate(metrics, max_mean_abs_diff=0.02)
+
+    assert gate["passed"] is False
+    assert any("aggregate max_abs_diff is non-finite" in failure for failure in gate["failures"])
+    assert any("aggregate mean_abs_diff is non-finite" in failure for failure in gate["failures"])
+
+
 def _parity_args():
     return SimpleNamespace(
         batch_size=2,

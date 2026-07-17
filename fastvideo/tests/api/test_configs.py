@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+import pytest
+
 from fastvideo.api import (
     BatchingConfig,
     GenerationRequest,
@@ -8,10 +10,26 @@ from fastvideo.api import (
     ServeConfig,
     config_to_dict,
 )
+from fastvideo.fastvideo_args import FastVideoArgs
 
 
 def test_batching_config_is_available_from_public_api() -> None:
     assert BatchingConfig().mode == "disabled"
+
+
+@pytest.mark.parametrize("delay_ms", [float("nan"), float("inf"), float("-inf"), -1.0])
+def test_batching_config_rejects_non_finite_or_negative_delay(delay_ms) -> None:
+    with pytest.raises(ValueError, match="delay_ms must be finite and >= 0"):
+        BatchingConfig(delay_ms=delay_ms)
+
+
+@pytest.mark.parametrize("delay_ms", [float("nan"), float("inf"), float("-inf"), -1.0])
+def test_fastvideo_args_rejects_non_finite_or_negative_batching_delay(delay_ms) -> None:
+    with pytest.raises(ValueError, match="batching_delay_ms must be finite and >= 0"):
+        FastVideoArgs(
+            model_path="test-model",
+            batching_delay_ms=delay_ms,
+        )
 
 
 def test_run_config_roundtrip_preserves_nested_defaults() -> None:

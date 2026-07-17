@@ -33,7 +33,7 @@ class _FakeBatchGenerator:
     def __init__(self):
         self.calls = []
 
-    def generate_video_batch(self, request_kwargs):
+    def generate_video_batch(self, request_kwargs, *, _capture_postprocess_errors=False):
         self.calls.append([dict(item) for item in request_kwargs])
         return [{"prompts": item["prompt"], "video_path": item["output_path"]} for item in request_kwargs]
 
@@ -752,3 +752,36 @@ class TestProtocolModels:
                 id="a"), VideoResponse(id="b")])
         assert len(resp.data) == 2
         assert resp.object == "list"
+
+
+def test_run_generation_updates_store_with_successful_result_path(monkeypatch, tmp_path):
+    from fastvideo.entrypoints.openai import video_api
+
+    updates = []
+
+    class _Store:
+
+        async def update_fields(self, request_id, update):
+            updates.append((request_id, update))
+
+    class _Generator:
+
+        def generate_video(self, **kwargs):
+            return {
+                "generation_time": 1.25,
+                "video_path": str(tmp_path / "request_1.mp4"),
+            }
+
+    monkeypatch.setattr(video_api, "VIDEO_STORE", _Store())
+    monkeypatch.setattr(video_api, "get_generator", lambda: _Generator())
+    monkeypatch.setattr(video_api, "get_video_batch_scheduler", lambda: None)
+
+    asyncio.run(video_api._run_generation("request", {"output_path": str(tmp_path / "request.mp4")}))
+
+    assert updates == [("request", {
+        "status": "completed",
+        "progress": 100,
+        "completed_at": updates[0][1]["completed_at"],
+        "inference_time_s": 1.25,
+        "file_path": str(tmp_path / "request_1.mp4"),
+    })]

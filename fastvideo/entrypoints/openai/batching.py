@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
+from fastvideo.api.compat import (
+    legacy_generate_call_to_request,
+    request_to_pipeline_overrides,
+    request_to_sampling_param,
+)
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.batching.signature import can_dynamic_batch
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -179,7 +184,8 @@ class VideoBatchScheduler:
         try:
             results = await loop.run_in_executor(
                 None,
-                lambda: self._generator.generate_video_batch([job.kwargs for job in batch]),
+                partial(self._generator.generate_video_batch, [job.kwargs for job in batch],
+                        _capture_postprocess_errors=True),
             )
         except Exception as exc:
             await self._handle_batch_failure(batch, exc)
@@ -190,18 +196,36 @@ class VideoBatchScheduler:
             await self._handle_batch_failure(batch, error)
             return
 
+        failed_postprocessing: list[tuple[_VideoBatchJob, Exception]] = []
         for job, result in zip(batch, results, strict=True):
+            postprocess_error = result.get("_postprocess_error") if isinstance(result, dict) else None
+            if isinstance(postprocess_error, Exception):
+                failed_postprocessing.append((job, postprocess_error))
+                continue
             if not job.future.done():
                 job.future.set_result(result)
+        if failed_postprocessing:
+            jobs = [job for job, _error in failed_postprocessing]
+            errors = "; ".join(str(error) for _job, error in failed_postprocessing)
+            await self._retry_jobs_individually(
+                jobs,
+                RuntimeError(f"Per-request postprocessing failed: {errors}"),
+            )
 
     async def _handle_batch_failure(self, batch: list[_VideoBatchJob], error: Exception) -> None:
         if len(batch) == 1:
             if not batch[0].future.done():
                 batch[0].future.set_exception(error)
             return
+        await self._retry_jobs_individually(batch, error)
 
+    async def _retry_jobs_individually(
+        self,
+        batch: list[_VideoBatchJob],
+        error: Exception,
+    ) -> None:
         logger.warning(
-            "Merged video batch failed; retrying %d requests individually: %s",
+            "Video batch failed; retrying %d requests individually: %s",
             len(batch),
             error,
         )
@@ -246,7 +270,7 @@ class VideoBatchScheduler:
         return compatibility.can_batch
 
     def _sampling_param_from_kwargs(self, kwargs: dict[str, Any]) -> tuple[SamplingParam, dict[str, Any]]:
-        sampling_param = SamplingParam.from_pretrained(self._fastvideo_args.model_path)
+        base_sampling_param = SamplingParam.from_pretrained(self._fastvideo_args.model_path)
         updates = dict(kwargs)
         prompt = updates.pop("prompt", None)
         extra: dict[str, Any] = {}
@@ -259,6 +283,18 @@ class VideoBatchScheduler:
         ):
             if key in updates:
                 extra[key] = updates.pop(key)
-        sampling_param.update(updates)
-        sampling_param.prompt = prompt
+
+        request = legacy_generate_call_to_request(
+            prompt,
+            base_sampling_param,
+            legacy_kwargs=updates,
+        )
+        sampling_param = request_to_sampling_param(
+            request,
+            model_path=self._fastvideo_args.model_path,
+        )
+        sampling_param.prompt = request.prompt
+        pipeline_overrides = request_to_pipeline_overrides(request)
+        if pipeline_overrides:
+            extra["pipeline_overrides"] = pipeline_overrides
         return sampling_param, extra

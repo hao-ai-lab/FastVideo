@@ -231,13 +231,14 @@ class TestBatchingTranslation:
         monkeypatch.setattr(
             PipelineConfig, "from_kwargs", classmethod(lambda cls, kwargs: cls()))
 
+        batching = BatchingConfig(
+            mode="dynamic",
+            max_size=2,
+        )
+        batching.delay_ms = delay_ms
         config = GeneratorConfig(
             model_path="/models/wan",
-            engine=_engine_with_batching(BatchingConfig(
-                mode="dynamic",
-                max_size=2,
-                delay_ms=delay_ms,
-            )),
+            engine=_engine_with_batching(batching),
         )
 
         with pytest.raises(ValueError, match="batching_delay_ms must be finite and >= 0"):

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -78,6 +79,10 @@ class BatchingConfig:
     delay_ms: float = 0.0
     config_path: str | None = None
     enable_metrics: bool = False
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.delay_ms) or self.delay_ms < 0:
+            raise ValueError("batching delay_ms must be finite and >= 0")
 
 
 @dataclass

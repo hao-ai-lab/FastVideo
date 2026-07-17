@@ -37,20 +37,22 @@ def _build_init_kwargs(args: argparse.Namespace, *, dynamic: bool) -> dict[str, 
 
 
 def _request_kwargs(args: argparse.Namespace, prompt_index: int) -> dict[str, Any]:
-    return {
+    request = {
         "prompt": args.prompts[prompt_index],
         "height": args.height,
         "width": args.width,
         "num_frames": args.num_frames,
         "num_inference_steps": args.num_inference_steps,
-        "guidance_scale": args.guidance_scale,
         "embedded_cfg_scale": args.embedded_cfg_scale,
         "seed": args.seed + prompt_index,
         "fps": 24,
-        "save_video": False,
+        "save_video": getattr(args, "save_video", False),
         "return_frames": True,
         "output_path": str(Path(args.output_dir) / f"request_{prompt_index}.mp4"),
     }
+    if args.guidance_scale is not None:
+        request["guidance_scale"] = args.guidance_scale
+    return request
 
 
 def _sync() -> None:
@@ -147,6 +149,7 @@ def _tensor_metrics(
         "per_request": per_request,
         "max_abs_diff": max(item["max_abs_diff"] for item in per_request),
         "mean_abs_diff": sum(item["mean_abs_diff"] for item in per_request) / len(per_request),
+        "all_finite": all(item["sequential_finite"] and item["dynamic_finite"] for item in per_request),
         "allclose_atol_1e_5": all(item["allclose_atol_1e_5"] for item in per_request),
         "allclose_atol_1e_4": all(item["allclose_atol_1e_4"] for item in per_request),
     }
@@ -200,6 +203,19 @@ def _parity_gate(
     }
 
 
+def _validate_saved_outputs(results: list[dict[str, Any]], *, mode: str) -> list[str]:
+    paths = []
+    for index, result in enumerate(results):
+        value = result.get("video_path")
+        if not isinstance(value, str):
+            raise AssertionError(f"{mode} request {index} did not return a saved video path")
+        path = Path(value)
+        if not path.is_file() or path.stat().st_size == 0:
+            raise AssertionError(f"{mode} request {index} did not produce a non-empty video: {path}")
+        paths.append(str(path))
+    return paths
+
+
 def run_parity(args: argparse.Namespace) -> dict[str, Any]:
     generator = VideoGenerator.from_pretrained(args.model_path, **_build_init_kwargs(args, dynamic=True))
     try:
@@ -220,6 +236,10 @@ def run_parity(args: argparse.Namespace) -> dict[str, Any]:
             expected_prompts=args.prompts[:args.batch_size],
             expected_shape=expected_shape,
         )
+        saved_outputs: dict[str, list[str]] = {}
+        if args.save_video:
+            saved_outputs["sequential"] = _validate_saved_outputs(sequential, mode="sequential")
+            saved_outputs["dynamic"] = _validate_saved_outputs(dynamic, mode="dynamic")
     finally:
         generator.shutdown()
     return {
@@ -242,6 +262,7 @@ def run_parity(args: argparse.Namespace) -> dict[str, Any]:
             metrics,
             max_mean_abs_diff=args.max_mean_abs_diff,
         ),
+        "saved_outputs": saved_outputs,
     }
 
 
@@ -283,7 +304,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--num-frames", type=int, default=9)
     parser.add_argument("--num-inference-steps", type=int, default=2)
-    parser.add_argument("--guidance-scale", type=float, default=1.0)
+    parser.add_argument("--guidance-scale", type=float)
     parser.add_argument("--embedded-cfg-scale", type=float, default=6.0)
     parser.add_argument("--flow-shift", type=float, default=7.0)
     parser.add_argument("--seed", type=int, default=1024)
@@ -291,6 +312,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup-runs", type=int, default=1)
     parser.add_argument("--measurement-runs", type=int, default=3)
     parser.add_argument("--output-dir", default="/tmp/fastvideo_dynamic_batching")
+    parser.add_argument("--save-video", action="store_true")
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--prompts", nargs="+", default=list(DEFAULT_PROMPTS))
     parser.add_argument("--max-mean-abs-diff", type=float, default=0.02)

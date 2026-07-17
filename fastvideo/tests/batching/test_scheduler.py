@@ -24,7 +24,7 @@ class _FakeBatchGenerator:
     def __init__(self):
         self.calls: list[list[dict]] = []
 
-    def generate_video_batch(self, request_kwargs):
+    def generate_video_batch(self, request_kwargs, *, _capture_postprocess_errors=False):
         self.calls.append([dict(item) for item in request_kwargs])
         return [{"prompts": item["prompt"], "video_path": item["output_path"]} for item in request_kwargs]
 
@@ -42,12 +42,12 @@ class _BlockingFirstCallGenerator(_FakeBatchGenerator):
         self.release = threading.Event()
         self._first_call = True
 
-    def generate_video_batch(self, request_kwargs):
+    def generate_video_batch(self, request_kwargs, *, _capture_postprocess_errors=False):
         if self._first_call:
             self._first_call = False
             self.started.set()
             assert self.release.wait(timeout=10)
-        return super().generate_video_batch(request_kwargs)
+        return super().generate_video_batch(request_kwargs, _capture_postprocess_errors=_capture_postprocess_errors)
 
 
 def _batch_scheduler_args(**overrides):
@@ -147,7 +147,7 @@ def test_dispatch_exception_fails_all_group_futures(tmp_path):
         def __init__(self):
             self.calls = []
 
-        def generate_video_batch(self, request_kwargs):
+        def generate_video_batch(self, request_kwargs, *, _capture_postprocess_errors=False):
             self.calls.append([item["prompt"] for item in request_kwargs])
             raise ValueError("generation exploded")
 
@@ -181,7 +181,7 @@ def test_dispatch_exception_retries_group_and_preserves_successful_requests(tmp_
 
     class _PartiallyExplodingGenerator(_FakeBatchGenerator):
 
-        def generate_video_batch(self, request_kwargs):
+        def generate_video_batch(self, request_kwargs, *, _capture_postprocess_errors=False):
             self.calls.append([dict(item) for item in request_kwargs])
             if len(request_kwargs) > 1:
                 raise RuntimeError("merged generation failed")
@@ -341,3 +341,60 @@ def test_scheduler_metrics_report_compatibility_rejection_reason(monkeypatch, tm
         "Dynamic batch candidate rejected: request_id=%s reason=%s",
         ("req-2", "sampling_params.guidance_scale"),
     )]
+
+
+def test_scheduler_batches_matching_pipeline_overrides_and_separates_mismatches(tmp_path):
+    scheduler = VideoBatchScheduler(_FakeBatchGenerator(), _batch_scheduler_args())
+    first_kwargs = _job_kwargs(tmp_path, 1)
+    first_kwargs["embedded_cfg_scale"] = 7.5
+    matching_kwargs = _job_kwargs(tmp_path, 2)
+    matching_kwargs["embedded_cfg_scale"] = 7.5
+    mismatched_kwargs = _job_kwargs(tmp_path, 3)
+    mismatched_kwargs["embedded_cfg_scale"] = 6.0
+
+    first = SimpleNamespace(request_id="req-1", kwargs=first_kwargs)
+    matching = SimpleNamespace(request_id="req-2", kwargs=matching_kwargs)
+    mismatched = SimpleNamespace(request_id="req-3", kwargs=mismatched_kwargs)
+
+    assert scheduler._jobs_are_compatible(first, matching) is True
+    assert scheduler._jobs_are_compatible(first, mismatched) is False
+
+
+def test_scheduler_retries_only_failed_postprocess_item(tmp_path):
+
+    class _PartialPostprocessGenerator:
+
+        def __init__(self):
+            self.calls = []
+
+        def generate_video_batch(self, request_kwargs, *, _capture_postprocess_errors=False):
+            prompts = [item["prompt"] for item in request_kwargs]
+            self.calls.append(prompts)
+            if len(request_kwargs) > 1:
+                assert _capture_postprocess_errors is True
+                return [
+                    {
+                        "prompts": prompts[0],
+                        "video_path": "first-batched.mp4",
+                    },
+                    {"_postprocess_error": OSError("second save failed")},
+                ]
+            return [{"prompts": prompts[0], "video_path": "second-retry.mp4"}]
+
+    async def run():
+        generator = _PartialPostprocessGenerator()
+        scheduler = VideoBatchScheduler(generator, _batch_scheduler_args())
+        await scheduler.start()
+        try:
+            results = await asyncio.gather(
+                scheduler.submit("req-1", _job_kwargs(tmp_path, 1)),
+                scheduler.submit("req-2", _job_kwargs(tmp_path, 2)),
+            )
+        finally:
+            await scheduler.stop()
+        return generator.calls, results
+
+    calls, results = asyncio.run(run())
+
+    assert calls == [["p1", "p2"], ["p2"]]
+    assert [result["video_path"] for result in results] == ["first-batched.mp4", "second-retry.mp4"]
