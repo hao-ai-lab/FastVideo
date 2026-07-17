@@ -52,7 +52,7 @@ for the full parameter reference.
 ## Train (QAT finetune)
 
 With the data in place, run the quantization-aware finetune. The 4-bit attention
-path is **config-driven** — selected purely by an env var, no monkey-patching:
+path is **config-driven** and selected by an environment variable:
 
 ```bash
 bash examples/training/finetune/wan_t2v_1.3B/mixkit/finetune_qat.sh
@@ -60,10 +60,13 @@ bash examples/training/finetune/wan_t2v_1.3B/mixkit/finetune_qat.sh
 NUM_GPUS=4 bash .../mixkit/finetune_qat.sh data/HD-Mixkit-Finetune-Wan/combined_parquet_dataset/
 ```
 
-`FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN` routes attention through the
-fake-quantized Triton kernel (straight-through estimator), so the DiT learns to
-absorb FP4 attention error. This kernel is Triton, so it runs on both `sm_100`
-(B200/GB200) and `sm_120` (RTX 5090).
+`FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN` keeps the fake-quantized Triton
+forward (straight-through estimator) and routes its backward through the
+separately distributed `qat_attn` package. Install that package in the
+FastVideo environment before starting training; its kernel source is not part
+of the FastVideo distribution. The external backward currently requires
+SM100, head dimension 128, non-causal MHA, equal query/KV sequence lengths,
+and sequence lengths divisible by 128.
 
 ## Train stage 2 (QAT DMD distillation to 3 steps)
 
@@ -71,8 +74,8 @@ Distill the QAT-finetuned generator down to **3 sampling steps**. Only the
 generator is quantized (Attn-QAT); the teacher (`real_score`) and critic
 (`fake_score`) stay full precision. This is enforced in the loader
 (`component_loader.py`, via the `_loading_teacher_critic_model` flag), so the
-same global `ATTN_QAT_TRAIN` env reaches **only** the generator — no per-model
-flags or monkey-patching.
+same global `ATTN_QAT_TRAIN` env reaches **only** the generator, with no
+per-model flags.
 
 ```bash
 # generator init = the stage-1 finetune checkpoint

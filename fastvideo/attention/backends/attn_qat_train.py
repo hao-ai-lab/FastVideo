@@ -22,6 +22,7 @@ _kernel_root = _project_root / "fastvideo-kernel"
 _kernel_python_root = _kernel_root / "python"
 _attn_qat_train_attention: Callable[..., torch.Tensor] | None = None
 _attn_qat_train_import_attempted = False
+_attn_qat_train_import_error: ImportError | None = None
 
 
 def _ensure_kernel_paths() -> None:
@@ -34,6 +35,7 @@ def _ensure_kernel_paths() -> None:
 def _get_attn_qat_train_attention() -> Callable[..., torch.Tensor] | None:
     global _attn_qat_train_attention
     global _attn_qat_train_import_attempted
+    global _attn_qat_train_import_error
 
     if _attn_qat_train_import_attempted:
         return _attn_qat_train_attention
@@ -42,8 +44,12 @@ def _get_attn_qat_train_attention() -> Callable[..., torch.Tensor] | None:
     _ensure_kernel_paths()
 
     try:
-        _attn_qat_train_attention = importlib.import_module("fastvideo_kernel.triton_kernels.attn_qat_train").attention
-    except ImportError:
+        triton_qat = importlib.import_module("fastvideo_kernel.triton_kernels.attn_qat_train")
+        external_qat = importlib.import_module("qat_attn")
+        external_qat.patch_fastvideo(triton_qat._attention)
+        _attn_qat_train_attention = triton_qat.attention
+    except ImportError as exc:
+        _attn_qat_train_import_error = exc
         _attn_qat_train_attention = None
 
     return _attn_qat_train_attention
@@ -60,8 +66,10 @@ def attn_qat_train(q_BLHD: torch.Tensor,
                    sm_scale: float | None = None) -> torch.Tensor:
     attention = _get_attn_qat_train_attention()
     if attention is None:
-        raise ImportError("fastvideo_kernel.triton_kernels.attn_qat_train is not available. "
-                          "Please ensure the FastVideo kernel package is installed.")
+        detail = f" Original import error: {_attn_qat_train_import_error}" if _attn_qat_train_import_error else ""
+        raise ImportError("ATTN_QAT_TRAIN requires both fastvideo-kernel and the separately distributed "
+                          "qat_attn package. Install both packages in the FastVideo environment before "
+                          f"selecting this backend.{detail}")
 
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -110,7 +118,7 @@ class AttnQatTrainBackend(AttentionBackend):
 
     @staticmethod
     def get_supported_head_sizes() -> list[int]:
-        return [64, 96, 128, 160, 192, 224, 256]
+        return [128]
 
     @staticmethod
     def get_name() -> str:

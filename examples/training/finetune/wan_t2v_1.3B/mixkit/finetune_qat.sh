@@ -2,17 +2,16 @@
 # QAD recipe — quantization-aware finetune of Wan2.1-T2V-1.3B with fake-quant
 # (Attn-QAT) attention.
 #
-# The 4-bit attention path is selected purely by env var (config-driven, no
-# monkey-patching): FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN routes attention
-# through the fake-quantized Triton kernel (straight-through estimator), so the
-# DiT learns to absorb FP4 attention error instead of fighting it.
+# The 4-bit attention path is selected by env var:
+# FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN keeps the fake-quantized Triton
+# forward and uses the separately installed qat_attn package for backward, so
+# the DiT learns to absorb FP4 attention error instead of fighting it.
 #
 # Data: run download_mixkit_data.sh first (preprocessed Parquet).
 #
 # Verified end-to-end on Blackwell (GB200/sm_100): the ATTN_QAT_TRAIN backend is
 # selected (not a fallback), forward+backward run, loss/grad are healthy, and
-# validation generates videos. The kernel is Triton so it runs on sm_100 and
-# sm_120 alike (the FP4 inference kernel, by contrast, is sm_120-only).
+# validation generates videos. The external backward currently requires SM100.
 set -euo pipefail
 
 export FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN   # <-- enables Attn-QAT training
