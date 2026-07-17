@@ -363,6 +363,7 @@ class VideoGenerator:
         # Action control inputs (Matrix-Game)
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
+        scroll_cond: torch.Tensor | None = None,
         grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
         | None = None,
         **kwargs,
@@ -412,6 +413,7 @@ class VideoGenerator:
                 sampling_param,
                 mouse_cond=mouse_cond,
                 keyboard_cond=keyboard_cond,
+                scroll_cond=scroll_cond,
                 grid_sizes=grid_sizes,
                 legacy_kwargs=kwargs,
             )
@@ -491,6 +493,7 @@ class VideoGenerator:
         sampling_param: SamplingParam | None = None,
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
+        scroll_cond: torch.Tensor | None = None,
         grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
         | None = None,
         fastvideo_args: FastVideoArgs | None = None,
@@ -509,6 +512,8 @@ class VideoGenerator:
             kwargs['mouse_cond'] = mouse_cond
         if keyboard_cond is not None:
             kwargs['keyboard_cond'] = keyboard_cond
+        if scroll_cond is not None:
+            kwargs['scroll_cond'] = scroll_cond
         if grid_sizes is not None:
             kwargs['grid_sizes'] = grid_sizes
 

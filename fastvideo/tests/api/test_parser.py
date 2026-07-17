@@ -163,6 +163,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "pose": None,
                 "mouse_cond": None,
                 "keyboard_cond": None,
+                "scroll_cond": None,
                 "grid_sizes": None,
                 "c2ws_plucker_emb": None,
                 "refine_from": None,

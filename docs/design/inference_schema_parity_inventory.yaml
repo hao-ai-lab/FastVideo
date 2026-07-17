@@ -131,6 +131,15 @@ surfaces:
 
   pipeline_config_extensions:
     preset_owned:
+      base_fps:
+        sources:
+          - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
+      n_buttons:
+        sources:
+          - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
+      scheduler_sigmas:
+        sources:
+          - fastvideo.configs.pipelines.waypoint.WaypointT2VConfig
       flux2_text_encoder_type:
         sources:
           - fastvideo.configs.pipelines.flux_2.Flux2PipelineConfig
@@ -435,6 +444,7 @@ surfaces:
       video_path: request.inputs.video_path
       mouse_cond: request.inputs.mouse_cond
       keyboard_cond: request.inputs.keyboard_cond
+      scroll_cond: request.inputs.scroll_cond
       grid_sizes: request.inputs.grid_sizes
       pose: request.inputs.pose
       c2ws_plucker_emb: request.inputs.c2ws_plucker_emb
