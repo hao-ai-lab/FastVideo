@@ -5,6 +5,7 @@ import asyncio
 import time
 from collections import deque
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from fastvideo.api.sampling_param import SamplingParam
@@ -208,7 +209,7 @@ class VideoBatchScheduler:
             try:
                 results = await loop.run_in_executor(
                     None,
-                    lambda: self._generator.generate_video_batch([job.kwargs]),
+                    partial(self._generator.generate_video_batch, [job.kwargs]),
                 )
                 if len(results) != 1:
                     raise RuntimeError(f"Single video request returned {len(results)} results")
