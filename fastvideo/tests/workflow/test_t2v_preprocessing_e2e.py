@@ -59,8 +59,6 @@ def test_t2v_preprocessing_writes_valid_parquet(tmp_path: Path) -> None:
             "preprocess",
             "--workload-type",
             "t2v",
-            "--preprocess.video-loader-type",
-            "torchvision",
             "--preprocess.dataset-type",
             "merged",
             "--preprocess.dataset-path",
