@@ -41,15 +41,16 @@ def parquet_root(tmp_path: Path) -> Path:
     root = tmp_path / "shared-read-only-dataset"
     root.mkdir()
     schema = pyarrow_schema_t2v.append(pa.field("unused_large_column", pa.binary()))
-    pq.write_table(pa.Table.from_pylist([_row(i) for i in range(12)], schema=schema),
-                   root / "part-0.parquet", row_group_size=3)
-    pq.write_table(pa.Table.from_pylist([_row(i) for i in range(12, 24)], schema=schema),
-                   root / "part-1.parquet", row_group_size=3)
+    pq.write_table(
+        pa.Table.from_pylist([_row(i) for i in range(12)], schema=schema), root / "part-0.parquet", row_group_size=3
+    )
+    pq.write_table(
+        pa.Table.from_pylist([_row(i) for i in range(12, 24)], schema=schema), root / "part-1.parquet", row_group_size=3
+    )
     return root
 
 
-def _patch_dist(monkeypatch: pytest.MonkeyPatch, rank: int = 0,
-                world_size: int = 1, sp_size: int = 1) -> None:
+def _patch_dist(monkeypatch: pytest.MonkeyPatch, rank: int = 0, world_size: int = 1, sp_size: int = 1) -> None:
     monkeypatch.setattr(streaming.dist, "is_initialized", lambda: True)
     monkeypatch.setattr(streaming, "get_world_rank", lambda: rank)
     monkeypatch.setattr(streaming, "get_world_size", lambda: world_size)
@@ -72,7 +73,8 @@ def _dataset(parquet_root: Path, cache_root: Path, **kwargs):
 
 
 def test_workers_zero_projects_columns_and_writes_json_manifest(
-        parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _patch_dist(monkeypatch)
     recorded_columns = []
     original = pq.ParquetFile.iter_batches
@@ -95,7 +97,8 @@ def test_workers_zero_projects_columns_and_writes_json_manifest(
 
 
 def test_state_dict_resumes_at_exact_next_batch(
-        parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _patch_dist(monkeypatch)
     first_dataset = _dataset(parquet_root, tmp_path / "owned-cache")
     iterator = iter(first_dataset)
@@ -110,7 +113,8 @@ def test_state_dict_resumes_at_exact_next_batch(
 
 
 def test_odd_row_group_tails_are_carried_into_next_group(
-        parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _patch_dist(monkeypatch)
     dataset = _dataset(parquet_root, tmp_path / "owned-cache")
     ids = [item["id"] for batch in dataset for item in batch["info_list"]]
@@ -118,14 +122,13 @@ def test_odd_row_group_tails_are_carried_into_next_group(
 
 
 def test_dp_sp_shards_are_identical_within_sp_and_disjoint_across_dp(
-        parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ids_by_rank = {}
     for rank in range(4):
         _patch_dist(monkeypatch, rank=rank, world_size=4, sp_size=2)
         dataset = _dataset(parquet_root, tmp_path / "owned-cache")
-        ids_by_rank[rank] = {
-            item["id"] for batch in dataset for item in batch["info_list"]
-        }
+        ids_by_rank[rank] = {item["id"] for batch in dataset for item in batch["info_list"]}
     assert ids_by_rank[0] == ids_by_rank[1]
     assert ids_by_rank[2] == ids_by_rank[3]
     assert ids_by_rank[0].isdisjoint(ids_by_rank[2])
@@ -133,27 +136,26 @@ def test_dp_sp_shards_are_identical_within_sp_and_disjoint_across_dp(
 
 
 def test_equal_number_of_row_groups_and_dp_shards_stays_nonempty(
-        parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ids_by_rank = []
     for rank in range(4):
         _patch_dist(monkeypatch, rank=rank, world_size=4, sp_size=1)
         dataset = _dataset(parquet_root, tmp_path / "owned-cache")
-        ids_by_rank.append({
-            item["id"] for batch in dataset for item in batch["info_list"]
-        })
+        ids_by_rank.append({item["id"] for batch in dataset for item in batch["info_list"]})
     assert all(ids for ids in ids_by_rank)
     assert len(set().union(*ids_by_rank)) == 24
 
 
-def test_manifest_must_not_be_written_inside_dataset(
-        parquet_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_manifest_must_not_be_written_inside_dataset(parquet_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_dist(monkeypatch)
     with pytest.raises(ValueError, match="outside the read-only dataset"):
         _dataset(parquet_root, parquet_root / "cache")
 
 
 def test_stateful_dataloader_restores_dataset_cursor(
-        parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _, loader = streaming.build_parquet_streaming_style_dataloader(
         path=str(parquet_root),
         batch_size=2,
@@ -182,3 +184,30 @@ def test_stateful_dataloader_restores_dataset_cursor(
     resumed.load_state_dict(state)
     actual = next(iter(resumed))["info_list"]
     assert [item["id"] for item in actual] == [item["id"] for item in expected]
+
+
+def test_resume_rejects_changed_topology(parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_dist(monkeypatch)
+    dataset = _dataset(parquet_root, tmp_path / "owned-cache")
+    next(iter(dataset))
+    state = dataset.state_dict()
+    state["topology"]["batch_size"] = 99
+
+    resumed = _dataset(parquet_root, tmp_path / "owned-cache")
+    with pytest.raises(ValueError, match="topology or sampling config changed"):
+        resumed.load_state_dict(state)
+
+
+def test_manifest_is_rebuilt_when_source_file_changes(
+    parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_dist(monkeypatch)
+    dataset = _dataset(parquet_root, tmp_path / "owned-cache")
+    old_fingerprint = dataset.manifest_fingerprint
+    source_file = parquet_root / "part-1.parquet"
+    table = pq.read_table(source_file)
+    pq.write_table(table, source_file, row_group_size=2)
+
+    refreshed = _dataset(parquet_root, tmp_path / "owned-cache")
+    assert refreshed.manifest_fingerprint != old_fingerprint
+    assert refreshed.manifest["total_rows"] == 24

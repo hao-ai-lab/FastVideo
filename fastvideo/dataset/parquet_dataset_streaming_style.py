@@ -8,14 +8,12 @@ the requested T2V columns, and consumes each assigned row group sequentially.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
 import random
 import tempfile
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
@@ -25,13 +23,13 @@ from torch.utils.data import IterableDataset, get_worker_info
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.dataset.utils import collate_rows_from_parquet_schema
-from fastvideo.distributed import (get_sp_world_size, get_world_rank,
-                                   get_world_size)
+from fastvideo.distributed import get_sp_world_size, get_world_rank, get_world_size
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-_MANIFEST_VERSION = 1
+_MANIFEST_VERSION = 2
+_STATE_VERSION = 2
 
 
 def _barrier() -> None:
@@ -47,14 +45,52 @@ def _assert_user_owned_manifest(dataset_root: str, manifest_path: str) -> None:
     manifest_parent = _real(os.path.dirname(manifest_path) or ".")
     if os.path.commonpath([dataset_root, manifest_parent]) == dataset_root:
         raise ValueError(
-            "streaming_manifest_path must be outside the read-only dataset "
-            f"root ({dataset_root}); got {manifest_path}")
+            f"streaming_manifest_path must be outside the read-only dataset root ({dataset_root}); got {manifest_path}"
+        )
 
 
 def _manifest_fingerprint(row_groups: list[dict[str, Any]]) -> str:
-    payload = json.dumps(row_groups, sort_keys=True,
-                         separators=(",", ":")).encode("utf-8")
+    payload = json.dumps(row_groups, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _manifest_file_path(dataset_root: str, relative_path: str) -> str:
+    file_path = _real(os.path.join(dataset_root, relative_path))
+    if os.path.commonpath([dataset_root, file_path]) != dataset_root:
+        raise ValueError(f"Manifest file escapes dataset root: {relative_path!r}")
+    return file_path
+
+
+def _manifest_matches_source(
+    dataset_root: str,
+    manifest: dict[str, Any],
+) -> bool:
+    """Validate cached metadata without reopening every Parquet footer."""
+    row_groups = manifest.get("row_groups")
+    if not isinstance(row_groups, list) or not row_groups:
+        return False
+    expected_sample_start = 0
+    stats: dict[str, os.stat_result] = {}
+    try:
+        for item in row_groups:
+            relative_path = str(item["file"])
+            rows = int(item["rows"])
+            row_group = int(item["row_group"])
+            sample_start = int(item["sample_start"])
+            if rows <= 0 or row_group < 0 or sample_start != expected_sample_start:
+                return False
+            expected_sample_start += rows
+            if relative_path not in stats:
+                file_path = _manifest_file_path(dataset_root, relative_path)
+                stats[relative_path] = os.stat(file_path)
+            stat = stats[relative_path]
+            if int(item["file_size"]) != stat.st_size or int(item["file_mtime_ns"]) != stat.st_mtime_ns:
+                return False
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+    return int(manifest.get("total_rows", -1)) == expected_sample_start and manifest.get(
+        "fingerprint"
+    ) == _manifest_fingerprint(row_groups)
 
 
 def _scan_manifest(dataset_root: str, columns: tuple[str, ...]) -> dict[str, Any]:
@@ -65,27 +101,29 @@ def _scan_manifest(dataset_root: str, columns: tuple[str, ...]) -> dict[str, Any
                 parquet_files.append(_real(os.path.join(root, name)))
     parquet_files.sort()
     if not parquet_files:
-        raise FileNotFoundError(
-            f"No parquet files found under dataset path: {dataset_root}")
+        raise FileNotFoundError(f"No parquet files found under dataset path: {dataset_root}")
 
     row_groups: list[dict[str, Any]] = []
     sample_start = 0
     for file_path in parquet_files:
+        file_stat = os.stat(file_path)
         parquet_file = pq.ParquetFile(file_path)
         missing = sorted(set(columns) - set(parquet_file.schema_arrow.names))
         if missing:
-            raise ValueError(
-                f"Parquet file {file_path} is missing projected T2V columns: "
-                f"{missing}")
+            raise ValueError(f"Parquet file {file_path} is missing projected T2V columns: {missing}")
         relative_path = os.path.relpath(file_path, dataset_root)
         for row_group_index in range(parquet_file.num_row_groups):
             rows = parquet_file.metadata.row_group(row_group_index).num_rows
-            row_groups.append({
-                "file": relative_path,
-                "row_group": row_group_index,
-                "rows": rows,
-                "sample_start": sample_start,
-            })
+            row_groups.append(
+                {
+                    "file": relative_path,
+                    "row_group": row_group_index,
+                    "rows": rows,
+                    "sample_start": sample_start,
+                    "file_size": file_stat.st_size,
+                    "file_mtime_ns": file_stat.st_mtime_ns,
+                }
+            )
             sample_start += rows
 
     return {
@@ -101,8 +139,7 @@ def _scan_manifest(dataset_root: str, columns: tuple[str, ...]) -> dict[str, Any
 def _write_json_atomic(path: str, payload: dict[str, Any]) -> None:
     parent = os.path.dirname(path)
     os.makedirs(parent, exist_ok=True)
-    fd, temporary_path = tempfile.mkstemp(
-        dir=parent, prefix=f".{os.path.basename(path)}.", suffix=".tmp")
+    fd, temporary_path = tempfile.mkstemp(dir=parent, prefix=f".{os.path.basename(path)}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, sort_keys=True)
@@ -115,8 +152,12 @@ def _write_json_atomic(path: str, payload: dict[str, Any]) -> None:
 
 
 def load_or_create_streaming_manifest(
-        dataset_root: str, manifest_path: str,
-        columns: tuple[str, ...]) -> dict[str, Any]:
+    dataset_root: str, manifest_path: str, columns: tuple[str, ...]
+) -> dict[str, Any]:
+    if os.name != "posix":
+        raise RuntimeError("The streaming Parquet loader currently requires POSIX file locks")
+    import fcntl
+
     dataset_root = _real(dataset_root)
     manifest_path = _real(manifest_path)
     _assert_user_owned_manifest(dataset_root, manifest_path)
@@ -129,24 +170,22 @@ def load_or_create_streaming_manifest(
         if os.path.exists(manifest_path):
             with open(manifest_path, encoding="utf-8") as handle:
                 candidate = json.load(handle)
-            if (candidate.get("version") == _MANIFEST_VERSION
-                    and candidate.get("dataset_root") == dataset_root
-                    and candidate.get("columns") == list(columns)
-                    and candidate.get("fingerprint") ==
-                    _manifest_fingerprint(candidate.get("row_groups", []))):
+            if (
+                candidate.get("version") == _MANIFEST_VERSION
+                and candidate.get("dataset_root") == dataset_root
+                and candidate.get("columns") == list(columns)
+                and _manifest_matches_source(dataset_root, candidate)
+            ):
                 manifest = candidate
         if manifest is None:
-            logger.info("Building safe JSON Parquet manifest at %s",
-                        manifest_path)
+            logger.info("Building safe JSON Parquet manifest at %s", manifest_path)
             manifest = _scan_manifest(dataset_root, columns)
             _write_json_atomic(manifest_path, manifest)
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
     return manifest
 
 
-def _contiguous_row_group_shards(
-        row_groups: list[dict[str, Any]], num_shards: int
-) -> list[list[dict[str, Any]]]:
+def _contiguous_row_group_shards(row_groups: list[dict[str, Any]], num_shards: int) -> list[list[dict[str, Any]]]:
     """Split ordered row groups into row-balanced contiguous shards."""
     if num_shards < 1:
         raise ValueError("num_shards must be positive")
@@ -161,8 +200,7 @@ def _contiguous_row_group_shards(
             item = row_groups[cursor]
             item_rows = int(item["rows"])
             items_left = len(row_groups) - cursor
-            if (shard_rows and shard_rows + item_rows > target
-                    and items_left >= shards_left - 1):
+            if shard_rows and shard_rows + item_rows > target and items_left >= shards_left - 1:
                 break
             shards[shard_index].append(item)
             shard_rows += item_rows
@@ -205,8 +243,8 @@ class LatentsParquetStreamingDataset(IterableDataset):
             raise ValueError("batch_size and read_batch_size must be positive")
         if not manifest_path:
             raise ValueError(
-                "streaming_manifest_path is required; place it in user-owned "
-                "storage, never inside the shared dataset")
+                "streaming_manifest_path is required; place it in user-owned storage, never inside the shared dataset"
+            )
 
         self.path = _real(path)
         self.batch_size = int(batch_size)
@@ -236,8 +274,7 @@ class LatentsParquetStreamingDataset(IterableDataset):
         self.sp_group_index = self.global_rank // self.sp_world_size
 
         if self.global_rank == 0:
-            load_or_create_streaming_manifest(
-                self.path, self.manifest_path, self.columns)
+            load_or_create_streaming_manifest(self.path, self.manifest_path, self.columns)
         _barrier()
         with open(self.manifest_path, encoding="utf-8") as handle:
             self.manifest = json.load(handle)
@@ -248,14 +285,11 @@ class LatentsParquetStreamingDataset(IterableDataset):
         self.manifest_fingerprint = str(self.manifest["fingerprint"])
 
         num_shards = self.num_sp_groups * self.num_workers
-        self.shards = _contiguous_row_group_shards(
-            self.manifest["row_groups"], num_shards)
-        shard_rows = [sum(int(item["rows"]) for item in shard)
-                      for shard in self.shards]
+        self.shards = _contiguous_row_group_shards(self.manifest["row_groups"], num_shards)
+        shard_rows = [sum(int(item["rows"]) for item in shard) for shard in self.shards]
         self.samples_per_worker = min(shard_rows) // self.batch_size * self.batch_size
         if self.samples_per_worker == 0:
-            raise ValueError(
-                "Dataset is too small for the requested DP/SP/worker layout")
+            raise ValueError("Dataset is too small for the requested DP/SP/worker layout")
 
         self._epoch = 0
         self._row_group_position = 0
@@ -264,8 +298,10 @@ class LatentsParquetStreamingDataset(IterableDataset):
         self._loaded_state: dict[str, Any] | None = None
         logger.info(
             "Streaming parquet: %d rows, %d row groups, %d samples per worker",
-            int(self.manifest["total_rows"]), len(self.manifest["row_groups"]),
-            self.samples_per_worker)
+            int(self.manifest["total_rows"]),
+            len(self.manifest["row_groups"]),
+            self.samples_per_worker,
+        )
 
     def _worker_id(self) -> int:
         info = get_worker_info()
@@ -285,14 +321,12 @@ class LatentsParquetStreamingDataset(IterableDataset):
         if self._loaded_state is not None:
             saved_worker = int(self._loaded_state.get("worker_id", worker_id))
             if saved_worker != worker_id:
-                raise ValueError(
-                    f"Dataloader state belongs to worker {saved_worker}, not {worker_id}")
+                raise ValueError(f"Dataloader state belongs to worker {saved_worker}, not {worker_id}")
             self._loaded_state = None
 
         shard = self._worker_shard(worker_id)
         rows: list[dict[str, Any]] = []
-        while (self._yielded_samples < self.samples_per_worker
-               and self._row_group_position < len(shard)):
+        while self._yielded_samples < self.samples_per_worker and self._row_group_position < len(shard):
             item = shard[self._row_group_position]
             file_path = os.path.join(self.path, item["file"])
             parquet_file = pq.ParquetFile(file_path)
@@ -310,8 +344,7 @@ class LatentsParquetStreamingDataset(IterableDataset):
                     consumed_in_group = record_end
                     continue
                 start = max(self._row_offset - consumed_in_group, 0)
-                for local_index, row in enumerate(
-                        record_batch.slice(start).to_pylist(), start=start):
+                for local_index, row in enumerate(record_batch.slice(start).to_pylist(), start=start):
                     global_offset = consumed_in_group + local_index
                     row["_sample_index"] = int(item["sample_start"]) + global_offset
                     rows.append(row)
@@ -337,8 +370,7 @@ class LatentsParquetStreamingDataset(IterableDataset):
             self._row_offset = 0
 
         if self._yielded_samples != self.samples_per_worker:
-            raise RuntimeError(
-                "Streaming shard ended before producing the balanced sample count")
+            raise RuntimeError("Streaming shard ended before producing the balanced sample count")
         self._epoch += 1
         self._row_group_position = 0
         self._row_offset = 0
@@ -349,8 +381,9 @@ class LatentsParquetStreamingDataset(IterableDataset):
 
     def state_dict(self) -> dict[str, Any]:
         return {
-            "version": 1,
+            "version": _STATE_VERSION,
             "manifest_fingerprint": self.manifest_fingerprint,
+            "topology": self._resume_topology(),
             "worker_id": self._worker_id(),
             "epoch": self._epoch,
             "row_group_position": self._row_group_position,
@@ -359,28 +392,47 @@ class LatentsParquetStreamingDataset(IterableDataset):
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        if int(state_dict.get("version", -1)) != _STATE_VERSION:
+            raise ValueError("Cannot resume: unsupported streaming dataset state")
         if state_dict.get("manifest_fingerprint") != self.manifest_fingerprint:
             raise ValueError("Cannot resume: streaming dataset manifest changed")
+        if state_dict.get("topology") != self._resume_topology():
+            raise ValueError("Cannot resume: streaming loader topology or sampling config changed")
         self._epoch = int(state_dict["epoch"])
         self._row_group_position = int(state_dict["row_group_position"])
         self._row_offset = int(state_dict["row_offset"])
         self._yielded_samples = int(state_dict["yielded_samples"])
         self._loaded_state = dict(state_dict)
 
-    def get_validation_negative_prompt(
-            self) -> tuple[Any, Any, str]:
+    def _resume_topology(self) -> dict[str, Any]:
+        return {
+            "global_rank": self.global_rank,
+            "world_size": self.world_size,
+            "sp_world_size": self.sp_world_size,
+            "sp_group_index": self.sp_group_index,
+            "num_workers": self.num_workers,
+            "batch_size": self.batch_size,
+            "read_batch_size": self.read_batch_size,
+            "seed": self.seed,
+            "shuffle_row_groups": self.shuffle_row_groups,
+            "samples_per_worker": self.samples_per_worker,
+        }
+
+    def get_validation_negative_prompt(self) -> tuple[Any, Any, str]:
         first = self.manifest["row_groups"][0]
         parquet_file = pq.ParquetFile(os.path.join(self.path, first["file"]))
-        first_batch = next(parquet_file.iter_batches(
-            batch_size=1,
-            row_groups=[int(first["row_group"])],
-            columns=list(self.columns),
-            use_threads=False,
-        ))
+        first_batch = next(
+            parquet_file.iter_batches(
+                batch_size=1,
+                row_groups=[int(first["row_group"])],
+                columns=list(self.columns),
+                use_threads=False,
+            )
+        )
         row = first_batch.to_pylist()[0]
         batch = collate_rows_from_parquet_schema(
-            [row], self.parquet_schema, self.text_padding_length, cfg_rate=0.0,
-            seed=self.seed)
+            [row], self.parquet_schema, self.text_padding_length, cfg_rate=0.0, seed=self.seed
+        )
         embedding = batch["text_embedding"]
         mask = batch["text_attention_mask"]
         prompt = batch["info_list"][0]["prompt"]

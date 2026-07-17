@@ -2,17 +2,10 @@
 from torchvision import transforms
 from torchvision.transforms import Lambda
 
-from fastvideo.dataset.parquet_dataset_map_style import (
-    build_parquet_map_style_dataloader)
-from fastvideo.dataset.parquet_dataset_streaming_style import (
-    LatentsParquetStreamingDataset,
-    build_parquet_streaming_style_dataloader,
-)
-from fastvideo.dataset.ltx2_precomputed_dataset import (
-    build_ltx2_precomputed_dataloader, LTX2PrecomputedDataset)
+from fastvideo.dataset.parquet_dataset_map_style import build_parquet_map_style_dataloader
+from fastvideo.dataset.ltx2_precomputed_dataset import build_ltx2_precomputed_dataloader, LTX2PrecomputedDataset
 from fastvideo.dataset.preprocessing_datasets import VideoCaptionMergedDataset, TextDataset
-from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255,
-                                         TemporalRandomCrop)
+from fastvideo.dataset.transform import CenterCropResizeVideo, Normalize255, TemporalRandomCrop
 from fastvideo.dataset.validation_dataset import ValidationDataset
 
 
@@ -25,27 +18,31 @@ def getdataset(args) -> VideoCaptionMergedDataset:
     resize = [
         CenterCropResizeVideo((args.max_height, args.max_width)),
     ]
-    transform = transforms.Compose([
-        # Normalize255(),
-        *resize,
-    ])
-    transform_topcrop = transforms.Compose([
-        Normalize255(),
-        *resize_topcrop,
-        norm_fun,
-    ])
-    return VideoCaptionMergedDataset(data_merge_path=args.data_merge_path,
-                                     args=args,
-                                     transform=transform,
-                                     temporal_sample=temporal_sample,
-                                     transform_topcrop=transform_topcrop,
-                                     seed=args.seed)
-                                    
+    transform = transforms.Compose(
+        [
+            # Normalize255(),
+            *resize,
+        ]
+    )
+    transform_topcrop = transforms.Compose(
+        [
+            Normalize255(),
+            *resize_topcrop,
+            norm_fun,
+        ]
+    )
+    return VideoCaptionMergedDataset(
+        data_merge_path=args.data_merge_path,
+        args=args,
+        transform=transform,
+        temporal_sample=temporal_sample,
+        transform_topcrop=transform_topcrop,
+        seed=args.seed,
+    )
+
 
 def gettextdataset(args) -> TextDataset:
-    return TextDataset(data_merge_path=args.data_merge_path,
-                       args=args,
-                       seed=args.seed)
+    return TextDataset(data_merge_path=args.data_merge_path, args=args, seed=args.seed)
 
 
 __all__ = [
@@ -58,3 +55,14 @@ __all__ = [
     "VideoCaptionMergedDataset",
     "TextDataset",
 ]
+
+
+def __getattr__(name: str):
+    if name in {
+        "LatentsParquetStreamingDataset",
+        "build_parquet_streaming_style_dataloader",
+    }:
+        from fastvideo.dataset import parquet_dataset_streaming_style
+
+        return getattr(parquet_dataset_streaming_style, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

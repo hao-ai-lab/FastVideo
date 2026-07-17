@@ -15,7 +15,8 @@ import time
 
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.dataset.parquet_dataset_streaming_style import (
-    LatentsParquetStreamingDataset, )
+    LatentsParquetStreamingDataset,
+)
 
 
 def main() -> None:
@@ -26,8 +27,7 @@ def main() -> None:
     parser.add_argument("--read-batch-size", type=int, default=4)
     parser.add_argument("--batches", type=int, default=4)
     args = parser.parse_args()
-    manifest_path = args.manifest_path or os.path.join(
-        tempfile.gettempdir(), "fastvideo-streaming-benchmark.json")
+    manifest_path = args.manifest_path or os.path.join(tempfile.gettempdir(), "fastvideo-streaming-benchmark.json")
     dataset = LatentsParquetStreamingDataset(
         args.data_path,
         args.batch_size,
@@ -44,13 +44,15 @@ def main() -> None:
         if index + 1 >= args.batches:
             break
     elapsed = time.perf_counter() - started
-    print({
-        "batches": index + 1,
-        "rows": rows,
-        "seconds": elapsed,
-        "rows_per_second": rows / elapsed,
-        "projected_columns": len(pyarrow_schema_t2v.names),
-    })
+    print(
+        {
+            "batches": index + 1,
+            "rows": rows,
+            "seconds": elapsed,
+            "rows_per_second": rows / elapsed,
+            "projected_columns": len(pyarrow_schema_t2v.names),
+        }
+    )
 
 
 if __name__ == "__main__":
