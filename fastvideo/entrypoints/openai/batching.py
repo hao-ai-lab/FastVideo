@@ -208,7 +208,7 @@ class VideoBatchScheduler:
             try:
                 results = await loop.run_in_executor(
                     None,
-                    lambda job=job: self._generator.generate_video_batch([job.kwargs]),
+                    lambda: self._generator.generate_video_batch([job.kwargs]),
                 )
                 if len(results) != 1:
                     raise RuntimeError(f"Single video request returned {len(results)} results")
