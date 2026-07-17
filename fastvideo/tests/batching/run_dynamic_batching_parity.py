@@ -161,8 +161,8 @@ def _parity_gate(
     max_mean_abs_diff: float,
 ) -> dict[str, Any]:
     # Elementwise maxima are noisy BF16 outliers across equivalent L40S runs.
-    # Keep max_abs_diff in tensor_metrics for diagnosis and gate the stable
-    # aggregate mean, whose original 0.02 bound did not need post-hoc widening.
+    # Keep max_abs_diff in tensor_metrics for diagnosis and gate each request's
+    # stable mean, whose original 0.02 bound did not need post-hoc widening.
     failures = []
     can_apply_tolerance = True
     for item in metrics["per_request"]:
@@ -194,8 +194,12 @@ def _parity_gate(
     if not math.isfinite(max_mean_abs_diff):
         failures.append(f"max_mean_abs_diff must be finite, got {max_mean_abs_diff!r}")
         can_apply_tolerance = False
-    if can_apply_tolerance and metrics["mean_abs_diff"] > max_mean_abs_diff:
-        failures.append(f"mean_abs_diff {metrics['mean_abs_diff']:.6g} exceeds {max_mean_abs_diff:.6g}")
+    if can_apply_tolerance:
+        for item in metrics["per_request"]:
+            if item["mean_abs_diff"] > max_mean_abs_diff:
+                failures.append(
+                    f"request {item['index']} mean_abs_diff {item['mean_abs_diff']:.6g} exceeds "
+                    f"{max_mean_abs_diff:.6g}")
     return {
         "passed": not failures,
         "max_mean_abs_diff": max_mean_abs_diff,

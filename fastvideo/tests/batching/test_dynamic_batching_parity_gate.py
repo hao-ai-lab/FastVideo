@@ -35,7 +35,7 @@ def _valid_metrics(*, mean_abs_diff: float = 0.01) -> dict:
     }
 
 
-def test_parity_gate_uses_stable_aggregate_mean() -> None:
+def test_parity_gate_uses_stable_request_mean() -> None:
     gate = _parity_gate(
         _valid_metrics(),
         max_mean_abs_diff=0.02,
@@ -55,7 +55,33 @@ def test_parity_gate_reports_exceeded_mean_threshold() -> None:
     )
 
     assert gate["passed"] is False
-    assert gate["failures"] == ["mean_abs_diff 0.03 exceeds 0.02"]
+    assert gate["failures"] == ["request 0 mean_abs_diff 0.03 exceeds 0.02"]
+
+
+def test_parity_gate_rejects_request_above_threshold_when_aggregate_passes() -> None:
+    sequential = [
+        {"prompts": "one", "samples": torch.zeros((1, 2))},
+        {"prompts": "two", "samples": torch.zeros((1, 2))},
+    ]
+    dynamic = [
+        {"prompts": "one", "samples": torch.full((1, 2), 0.039)},
+        {"prompts": "two", "samples": torch.zeros((1, 2))},
+    ]
+    metrics = _tensor_metrics(
+        sequential,
+        dynamic,
+        expected_prompts=["one", "two"],
+        expected_shape=[1, 2],
+    )
+
+    gate = _parity_gate(metrics, max_mean_abs_diff=0.02)
+
+    assert metrics["per_request"][0]["mean_abs_diff"] == pytest.approx(0.039)
+    assert metrics["per_request"][1]["mean_abs_diff"] == 0.0
+    assert metrics["mean_abs_diff"] == pytest.approx(0.0195)
+    assert metrics["mean_abs_diff"] < gate["max_mean_abs_diff"]
+    assert gate["passed"] is False
+    assert gate["failures"] == ["request 0 mean_abs_diff 0.039 exceeds 0.02"]
 
 
 @pytest.mark.parametrize(
