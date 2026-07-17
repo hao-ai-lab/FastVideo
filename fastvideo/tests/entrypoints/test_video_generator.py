@@ -1,4 +1,5 @@
 import os
+import stat
 import threading
 import warnings
 from types import SimpleNamespace
@@ -389,6 +390,38 @@ def test_write_video_atomic_removes_partial_temporary_file_on_failure(monkeypatc
 
     assert not os.path.exists(output_path)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_write_video_atomic_applies_umask_to_new_output(monkeypatch, tmp_path):
+    output_path = tmp_path / "new.mp4"
+
+    def write_video(path, frames, *, fps, format):
+        with open(path, "wb") as output_file:
+            output_file.write(b"video")
+
+    monkeypatch.setattr(video_generator_module.imageio, "mimsave", write_video)
+    monkeypatch.setattr(video_generator_module.os, "umask", lambda _mode: 0o027)
+
+    VideoGenerator._write_video_atomic(str(output_path), [torch.zeros((1, 1)).numpy()], 8)
+
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o640
+
+
+def test_write_video_atomic_preserves_existing_output_permissions(monkeypatch, tmp_path):
+    output_path = tmp_path / "existing.mp4"
+    output_path.write_bytes(b"old")
+    output_path.chmod(0o604)
+
+    def write_video(path, frames, *, fps, format):
+        with open(path, "wb") as output_file:
+            output_file.write(b"video")
+
+    monkeypatch.setattr(video_generator_module.imageio, "mimsave", write_video)
+
+    VideoGenerator._write_video_atomic(str(output_path), [torch.zeros((1, 1)).numpy()], 8)
+
+    assert output_path.read_bytes() == b"video"
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o604
 
 
 def test_generate_single_video_audio_only_metadata_returns_audio_without_frames(tmp_path):

@@ -9,6 +9,7 @@ diffusion models.
 import os
 import re
 import shutil
+import stat
 import subprocess
 import threading
 import time
@@ -1443,12 +1444,21 @@ class VideoGenerator:
     def _temporary_output_path(output_path: str) -> str:
         output_dir = os.path.dirname(os.path.abspath(output_path))
         stem, suffix = os.path.splitext(os.path.basename(output_path))
+        try:
+            output_mode = stat.S_IMODE(os.stat(output_path).st_mode)
+        except FileNotFoundError:
+            current_umask = os.umask(0)
+            os.umask(current_umask)
+            output_mode = 0o666 & ~current_umask
         fd, temporary_path = tempfile.mkstemp(
             dir=output_dir,
             prefix=f".{stem}.",
             suffix=suffix,
         )
-        os.close(fd)
+        try:
+            os.fchmod(fd, output_mode)
+        finally:
+            os.close(fd)
         return temporary_path
 
     @classmethod
