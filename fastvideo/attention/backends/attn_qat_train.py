@@ -77,11 +77,11 @@ def attn_qat_train(q_BLHD: torch.Tensor,
 
     use_qat_qkv_backward = True
     smooth_k = False
-    # Triton 3.7's NVWS pass aborts while compiling this kernel on consumer
-    # Blackwell (sm_120). The kernel has a supported non-warp-specialized path,
-    # so use it on that architecture while retaining warp specialization on
-    # datacenter Blackwell and earlier GPUs.
-    warp_specialize = torch.cuda.get_device_capability()[0] != 12
+    # Triton 3.7's NVWS pass aborts while compiling this kernel on Blackwell.
+    # The kernel has a supported non-warp-specialized path, so use it on both
+    # datacenter (sm_100) and consumer (sm_120) Blackwell GPUs.
+    capability_major = torch.cuda.get_device_capability()[0]
+    warp_specialize = capability_major not in (10, 12)
     is_qat = True
     two_level_quant_p_sage3 = False
     fake_quant_p_bwd = True

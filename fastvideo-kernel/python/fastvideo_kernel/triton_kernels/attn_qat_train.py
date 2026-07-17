@@ -850,11 +850,12 @@ class _attention(torch.autograd.Function):
         assert HEAD_DIM_Q == HEAD_DIM_K and HEAD_DIM_K == HEAD_DIM_V
         assert HEAD_DIM_K in {16, 32, 64, 128, 256}
 
-        # Triton 3.7's NVWS pass aborts for this kernel on sm_120. Keep the
+        # Triton 3.7's NVWS pass aborts for this kernel on Blackwell. Keep the
         # architecture guard next to the kernel so direct callers and the
-        # FastVideo backend follow the same supported path.
+        # FastVideo backend follow the same supported path on sm_100/sm_120.
         consumer_blackwell = is_consumer_blackwell()
-        warp_specialize = warp_specialize and not consumer_blackwell
+        blackwell = is_blackwell() or consumer_blackwell
+        warp_specialize = warp_specialize and not blackwell
 
         # Support different sequence lengths for q and k/v (needed for cross attention)
         N_CTX_Q = q.shape[2]  # Query sequence length
