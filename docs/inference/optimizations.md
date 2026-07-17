@@ -3,6 +3,12 @@
 
 This page describes the various options for speeding up generation times in FastVideo.
 
+!!! note "On a DGX Spark (GB10)?"
+    Several options on this page behave differently on the GB10's unified-memory
+    hardware — some give little or nothing there. See
+    [DGX Spark: Performance & Tuning](../getting_started/installation/spark_performance.md)
+    for what actually helps on that platform and why.
+
 ## Table of Contents
 
 - Optimized Attention Backends
