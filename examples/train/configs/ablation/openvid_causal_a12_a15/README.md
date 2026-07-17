@@ -16,10 +16,9 @@ All stages use 4 GPUs, microbatch 2/rank, gradient accumulation 8, hence global
 batch = 2 * 4 * 8 = 64. `dataloader_num_workers=0` limits shared-memory and
 Lustre prefetch pressure.
 
-All four conditions train on the first 30 of the source's 31 latent frames
-(`117` raw frames). This makes chunk-3 TF, CD, and SF use ten identical
-3-latent blocks and removes a known T=31 remainder-partition mismatch. A15 is
-also cropped to T=30 so framewise vs chunk-3 remains a length-matched ablation.
+All four conditions use exactly 21 latent frames / 81 raw frames in TF, CD,
+SF, and validation. Chunk-3 conditions therefore use seven identical
+three-latent blocks. A15 is length-matched and uses framewise blocks.
 
 A15 "framewise" means `num_frames_per_block=1` on every causal role, plus
 `method.chunk_size=1` in TF and SF. Causal CD has no independent-frame timestep

@@ -12,6 +12,9 @@ STREAMING_MANIFEST_PATH = "/mnt/lustre/vlm-k1kong/dataset-index/openvid/streamin
 MODEL_ID = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 TEACHER_ID = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
 REQUIRED_ANCESTOR = "30ada30e4c6b05aa68cd1eb8940a34d149457147"
+TRAIN_NUM_LATENTS = 21
+TRAIN_NUM_FRAMES = 81
+VALIDATION_NUM_FRAMES = 81
 
 CONDITIONS = {
     "A12": {"sink": 1, "local": 6, "rope": "relativistic", "framewise": False},
@@ -40,13 +43,13 @@ def training(stage_dir: str, *, steps: int, keep: int) -> dict:
             "train_batch_size": 2,
             "training_cfg_rate": 0.0,
             "seed": 1000,
-            # The source tensor has T=31.  Crop its tail deterministically so
-            # chunk-3 TF/CD/SF all use exactly ten aligned blocks.  Keeping
-            # T=31 would make TF/CD [3x10,1] but SF [4,3x9].
-            "num_latent_t": 30,
+            # Keep every stage on the intended 21-latent / 81-frame training
+            # distribution.  For chunk-3 conditions this is exactly seven
+            # aligned blocks; A15 is length-matched and uses framewise blocks.
+            "num_latent_t": TRAIN_NUM_LATENTS,
             "num_height": 480,
             "num_width": 832,
-            "num_frames": 117,
+            "num_frames": TRAIN_NUM_FRAMES,
         },
         "optimizer": {
             "learning_rate": 2.0e-6,
@@ -85,7 +88,7 @@ def validation(stage_dir: str, *, distilled: bool, dmd: bool = False) -> dict:
         "every_steps": 200,
         "sampling_steps": [4] if distilled else [40],
         "guidance_scale": 3.0 if distilled else 6.0,
-        "num_frames": 249,
+        "num_frames": VALIDATION_NUM_FRAMES,
         "output_dir": f"{stage_dir}/validation",
         "offload_training_state": True,
         "unload_pipeline_after_validation": True,
@@ -143,7 +146,7 @@ def configs(run_root: str, condition: str, spec: dict, repo: str) -> dict[str, d
         },
         "pipeline": copy.deepcopy(pipeline),
     }
-    tf["training"]["tracker"]["run_name"] = f"{tag}_tf3k_openvid_gbs64"
+    tf["training"]["tracker"]["run_name"] = f"{tag}_tf3k_openvid_81f21l_gbs64"
 
     cd = {
         "models": {
@@ -168,7 +171,7 @@ def configs(run_root: str, condition: str, spec: dict, repo: str) -> dict[str, d
         },
         "pipeline": copy.deepcopy(pipeline),
     }
-    cd["training"]["tracker"]["run_name"] = f"{tag}_cd2k_from_tf3k_openvid_gbs64"
+    cd["training"]["tracker"]["run_name"] = f"{tag}_cd2k_from_tf3k_openvid_81f21l_gbs64"
 
     sf_student = causal_role(trainable=True, override=cd_export, framewise=framewise)
     sf = {
@@ -214,7 +217,7 @@ def configs(run_root: str, condition: str, spec: dict, repo: str) -> dict[str, d
         },
         "pipeline": copy.deepcopy(pipeline),
     }
-    sf["training"]["tracker"]["run_name"] = f"{tag}_sf1k_from_cd2k_openvid_gbs64"
+    sf["training"]["tracker"]["run_name"] = f"{tag}_sf1k_from_cd2k_openvid_81f21l_gbs64"
 
     for config in (tf, cd, sf):
         config["callbacks"]["validation"]["dataset_file"] = config["callbacks"]["validation"]["dataset_file"].replace(
@@ -283,6 +286,8 @@ from __future__ import annotations
 
 import sys
 
+import yaml
+
 from fastvideo.train.utils.config import load_run_config
 
 
@@ -297,6 +302,22 @@ expected = {
     "dataloader_num_workers": 0,
 }
 actual = {name: getattr(data, name) for name in expected}
+with open(config_path, encoding="utf-8") as handle:
+    raw = yaml.safe_load(handle)
+expected.update({
+    "num_latent_t": 21,
+    "num_frames": 81,
+})
+actual.update({
+    "num_latent_t": data.num_latent_t,
+    "num_frames": data.num_frames,
+})
+validation_frames = raw["callbacks"]["validation"]["num_frames"]
+if validation_frames != 81:
+    raise SystemExit(
+        f"OpenVid sequence-length preflight failed for {config_path}: "
+        f"callbacks.validation.num_frames expected 81, got {validation_frames!r}"
+    )
 errors = [
     f"{name}: expected {value!r}, got {actual[name]!r}"
     for name, value in expected.items()
@@ -501,10 +522,9 @@ All stages use 4 GPUs, microbatch 2/rank, gradient accumulation 8, hence global
 batch = 2 * 4 * 8 = 64. `dataloader_num_workers=0` limits shared-memory and
 Lustre prefetch pressure.
 
-All four conditions train on the first 30 of the source's 31 latent frames
-(`117` raw frames). This makes chunk-3 TF, CD, and SF use ten identical
-3-latent blocks and removes a known T=31 remainder-partition mismatch. A15 is
-also cropped to T=30 so framewise vs chunk-3 remains a length-matched ablation.
+All four conditions use exactly 21 latent frames / 81 raw frames in TF, CD,
+SF, and validation. Chunk-3 conditions therefore use seven identical
+three-latent blocks. A15 is length-matched and uses framewise blocks.
 
 A15 "framewise" means `num_frames_per_block=1` on every causal role, plus
 `method.chunk_size=1` in TF and SF. Causal CD has no independent-frame timestep

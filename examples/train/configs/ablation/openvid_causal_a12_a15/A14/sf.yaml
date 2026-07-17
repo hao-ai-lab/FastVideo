@@ -53,10 +53,10 @@ training:
     train_batch_size: 2
     training_cfg_rate: 0.0
     seed: 1000
-    num_latent_t: 30
+    num_latent_t: 21
     num_height: 480
     num_width: 832
-    num_frames: 117
+    num_frames: 81
   optimizer:
     learning_rate: 2.0e-06
     betas:
@@ -76,7 +76,7 @@ training:
     trackers:
     - wandb
     project_name: causal_forcing_openvid_a12_a15
-    run_name: A14_sink1_local6_absolute_chunk3_sf1k_from_cd2k_openvid_gbs64
+    run_name: A14_sink1_local6_absolute_chunk3_sf1k_from_cd2k_openvid_81f21l_gbs64
   model:
     enable_gradient_checkpointing_type: full
 callbacks:
@@ -92,7 +92,7 @@ callbacks:
     sampling_steps:
     - 4
     guidance_scale: 3.0
-    num_frames: 249
+    num_frames: 81
     output_dir: /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/20260717_014659_openvid_a12_a15/A14/sf/validation
     offload_training_state: true
     unload_pipeline_after_validation: true

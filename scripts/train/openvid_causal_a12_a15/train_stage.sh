@@ -58,6 +58,8 @@ from __future__ import annotations
 
 import sys
 
+import yaml
+
 from fastvideo.train.utils.config import load_run_config
 
 
@@ -72,6 +74,22 @@ expected = {
     "dataloader_num_workers": 0,
 }
 actual = {name: getattr(data, name) for name in expected}
+with open(config_path, encoding="utf-8") as handle:
+    raw = yaml.safe_load(handle)
+expected.update({
+    "num_latent_t": 21,
+    "num_frames": 81,
+})
+actual.update({
+    "num_latent_t": data.num_latent_t,
+    "num_frames": data.num_frames,
+})
+validation_frames = raw["callbacks"]["validation"]["num_frames"]
+if validation_frames != 81:
+    raise SystemExit(
+        f"OpenVid sequence-length preflight failed for {config_path}: "
+        f"callbacks.validation.num_frames expected 81, got {validation_frames!r}"
+    )
 errors = [
     f"{name}: expected {value!r}, got {actual[name]!r}"
     for name, value in expected.items()

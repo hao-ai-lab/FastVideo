@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import os
 import py_compile
 import re
@@ -32,6 +33,27 @@ BASH = shutil.which("bash")
 
 
 pytestmark = pytest.mark.skipif(BASH is None, reason="bash is required")
+
+
+def test_all_stages_are_locked_to_21_latents_and_81_frames() -> None:
+    spec = importlib.util.spec_from_file_location("openvid_prepare", PREPARE)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    for condition, condition_spec in module.CONDITIONS.items():
+        generated = module.configs(
+            f"/tmp/{condition}", condition, condition_spec, "/repo"
+        )
+        assert set(generated) == {"tf", "cd", "sf"}
+        for stage, config in generated.items():
+            data = config["training"]["data"]
+            assert data["num_latent_t"] == 21, (condition, stage)
+            assert data["num_frames"] == 81, (condition, stage)
+            assert config["callbacks"]["validation"]["num_frames"] == 81, (
+                condition,
+                stage,
+            )
 
 
 def _bash_path(path: Path) -> str:
