@@ -138,6 +138,7 @@ class InputConfig:
 class SamplingConfig:
     num_videos_per_prompt: int = 1
     seed: int = 1024
+    max_sequence_length: int | None = None
     num_frames: int = 125
     height: int = 720
     width: int = 1280
@@ -148,6 +149,8 @@ class SamplingConfig:
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
     guidance_scale_2: float | None = None
+    cfg_normalization: bool = False
+    cfg_truncation: float | None = 1.0
     guidance_rescale: float = 0.0
     true_cfg_scale: float | None = None
     use_embedded_guidance: bool | None = None

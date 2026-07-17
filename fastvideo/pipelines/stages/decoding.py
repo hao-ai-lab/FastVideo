@@ -73,25 +73,36 @@ class DecodingStage(PipelineStage):
 
         cfg = getattr(self.vae, "config", None)
 
-        # Matrix-Game 2.0-style: z = z * std + mean
-        if (cfg is not None and hasattr(cfg, "latents_mean") and hasattr(cfg, "latents_std")):
-            latents_mean = torch.tensor(cfg.latents_mean, device=latents.device,
+        # Matrix-Game 2.0-style: z = z * std + mean. Some configs declare these
+        # fields as None, so test the values rather than mere attribute presence
+        # -- otherwise torch.tensor(None) raises instead of falling through.
+        latents_mean_value = getattr(cfg, "latents_mean", None) if cfg is not None else None
+        latents_std_value = getattr(cfg, "latents_std", None) if cfg is not None else None
+        if latents_mean_value is not None and latents_std_value is not None:
+            latents_mean = torch.tensor(latents_mean_value, device=latents.device,
                                         dtype=latents.dtype).view(1, -1, 1, 1, 1)
-            latents_std = torch.tensor(cfg.latents_std, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            latents_std = torch.tensor(latents_std_value, device=latents.device,
+                                       dtype=latents.dtype).view(1, -1, 1, 1, 1)
             return latents * latents_std + latents_mean
 
-        # Diffusers-style: scaling_factor (+ optional shift_factor)
-        if hasattr(self.vae, "scaling_factor"):
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(latents.device, latents.dtype)
+        # Diffusers-style: scaling_factor (+ optional shift_factor), read from
+        # the module only. Nearly every VAE *config* also carries a
+        # scaling_factor whose decode() already accounts for it, so sourcing it
+        # from cfg here would newly divide latents for VAEs that have always
+        # passed through untouched (flux2, hunyuanvideo, hunyuanvideo15, ltx2).
+        scaling_factor = getattr(self.vae, "scaling_factor", None)
+        if scaling_factor is not None:
+            if isinstance(scaling_factor, torch.Tensor):
+                latents = latents / scaling_factor.to(latents.device, latents.dtype)
             else:
-                latents = latents / self.vae.scaling_factor
+                latents = latents / scaling_factor
 
-            if hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None:
-                if isinstance(self.vae.shift_factor, torch.Tensor):
-                    latents = latents + self.vae.shift_factor.to(latents.device, latents.dtype)
+            shift_factor = getattr(self.vae, "shift_factor", None)
+            if shift_factor is not None:
+                if isinstance(shift_factor, torch.Tensor):
+                    latents = latents + shift_factor.to(latents.device, latents.dtype)
                 else:
-                    latents = latents + self.vae.shift_factor
+                    latents = latents + shift_factor
 
         return latents
 

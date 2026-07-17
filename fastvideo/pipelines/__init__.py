@@ -35,7 +35,7 @@ def build_pipeline(fastvideo_args: FastVideoArgs,
     """
     # Get pipeline type
     model_path = fastvideo_args.model_path
-    model_path = maybe_download_model(model_path)
+    model_path = maybe_download_model(model_path, revision=fastvideo_args.revision)
     # fastvideo_args.downloaded_model_path = model_path
     logger.info("Model path: %s", model_path)
 
