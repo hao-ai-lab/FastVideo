@@ -168,7 +168,7 @@ class CausalWanSelfAttention(nn.Module):
                 key=padded_roped_key.transpose(2, 1),
                 value=padded_v.transpose(2, 1),
                 block_mask=block_mask
-            )[:, :, :-padded_length].transpose(2, 1)
+            )[:, :, :q.shape[1]].transpose(2, 1)
         else:
             current_end = current_start + q.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
@@ -797,11 +797,16 @@ class CausalWanTransformer3DModel(BaseDiT):
                      freqs_sin) if freqs_cos is not None else None
 
         hidden_states = self.patch_embedding(hidden_states)
-        grid_sizes = torch.stack(
-            [torch.tensor(hidden_states[0].shape[1:], dtype=torch.long)])
+        grid_sizes = torch.tensor(
+            hidden_states.shape[2:], dtype=torch.long).unsqueeze(0).repeat(
+                batch_size, 1)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
-        encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states.new_zeros(1, self.text_len - encoder_hidden_states.size(1), encoder_hidden_states.size(2))], dim=1)
+        encoder_hidden_states_padding = encoder_hidden_states.new_zeros(
+            batch_size, self.text_len - encoder_hidden_states.size(1),
+            encoder_hidden_states.size(2))
+        encoder_hidden_states = torch.cat(
+            [encoder_hidden_states, encoder_hidden_states_padding], dim=1)
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
                         timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)
@@ -909,11 +914,16 @@ class CausalWanTransformer3DModel(BaseDiT):
         )
 
         hidden_states = self.patch_embedding(hidden_states)
-        grid_sizes = torch.stack(
-            [torch.tensor(hidden_states[0].shape[1:], dtype=torch.long)])
+        grid_sizes = torch.tensor(
+            hidden_states.shape[2:], dtype=torch.long).unsqueeze(0).repeat(
+                batch_size, 1)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
-        encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states.new_zeros(1, self.text_len - encoder_hidden_states.size(1), encoder_hidden_states.size(2))], dim=1)
+        encoder_hidden_states_padding = encoder_hidden_states.new_zeros(
+            batch_size, self.text_len - encoder_hidden_states.size(1),
+            encoder_hidden_states.size(2))
+        encoder_hidden_states = torch.cat(
+            [encoder_hidden_states, encoder_hidden_states_padding], dim=1)
         encoder_hidden_states_text = encoder_hidden_states
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(

@@ -20,6 +20,8 @@ from pathlib import Path
 import pytest
 import torch
 
+from fastvideo.models.dits.causal_wanvideo import (
+    CausalWanSelfAttention, CausalWanTransformer3DModel)
 from fastvideo.train.methods.fine_tuning.tfsft import (
     TeacherForcingSFTMethod, )
 from fastvideo.train.models.wan import WanCausalModel
@@ -29,6 +31,116 @@ from fastvideo.train.utils.config import load_run_config
 _FIXTURE = str(
     Path(__file__).resolve().parent.parent / "fixtures"
     / "wan_causal_t2v_tfsft_min.yaml")
+
+
+class _BatchShapeConditionEmbedder(torch.nn.Module):
+
+    def __init__(self, hidden_size: int) -> None:
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.encoder_batch_sizes: list[int] = []
+
+    def forward(self, timestep, encoder_hidden_states,
+                encoder_hidden_states_image):
+        del encoder_hidden_states_image
+        self.encoder_batch_sizes.append(int(encoder_hidden_states.shape[0]))
+        count = int(timestep.numel())
+        temb = timestep.new_zeros((count, self.hidden_size),
+                                  dtype=torch.float32)
+        timestep_proj = timestep.new_zeros(
+            (count, 6 * self.hidden_size), dtype=torch.float32)
+        return temb, timestep_proj, encoder_hidden_states, None
+
+
+class _IdentityNormOut(torch.nn.Module):
+
+    def forward(self, hidden_states, shift, scale):
+        del shift, scale
+        return hidden_states
+
+
+@pytest.mark.parametrize("forward_name", ["_forward_train", "_forward_inference"])
+def test_causal_wan_forward_preserves_batch_dimension(
+        monkeypatch: pytest.MonkeyPatch, forward_name: str) -> None:
+    """Both causal forward paths must pad and unpatchify every sample."""
+    batch_size = 2
+    hidden_size = 6
+    model = CausalWanTransformer3DModel.__new__(
+        CausalWanTransformer3DModel)
+    torch.nn.Module.__init__(model)
+    model.patch_size = (1, 1, 1)
+    model.hidden_size = hidden_size
+    model.num_attention_heads = 1
+    model.rope_cache_policy = "absolute"
+    model.text_len = 5
+    model.patch_embedding = torch.nn.Identity()
+    model.condition_embedder = _BatchShapeConditionEmbedder(hidden_size)
+    model.blocks = torch.nn.ModuleList()
+    model.gradient_checkpointing = False
+    model.scale_shift_table = torch.nn.Parameter(
+        torch.zeros(1, 2, hidden_size), requires_grad=False)
+    model.norm_out = _IdentityNormOut()
+    model.proj_out = torch.nn.Identity()
+    monkeypatch.setattr(model, "_get_train_attention_spec",
+                        lambda **_kwargs: None)
+    monkeypatch.setattr(
+        "fastvideo.models.dits.causal_wanvideo.get_sp_world_size",
+        lambda: 1,
+    )
+
+    seen_grid_sizes: list[torch.Tensor] = []
+
+    def _unpatchify(tokens: torch.Tensor,
+                    grid_sizes: torch.Tensor) -> list[torch.Tensor]:
+        seen_grid_sizes.append(grid_sizes.detach().clone())
+        return [tokens[i] for i in range(grid_sizes.shape[0])]
+
+    monkeypatch.setattr(model, "unpatchify", _unpatchify)
+
+    hidden_states = torch.randn(batch_size, hidden_size, 2, 2, 2)
+    encoder_hidden_states = torch.randn(batch_size, 3, 4)
+    timestep = torch.ones(batch_size, 2)
+
+    output = getattr(model, forward_name)(
+        hidden_states=hidden_states,
+        encoder_hidden_states=encoder_hidden_states,
+        timestep=timestep,
+    )
+
+    assert model.condition_embedder.encoder_batch_sizes == [batch_size]
+    assert len(seen_grid_sizes) == 1
+    assert tuple(seen_grid_sizes[0].shape) == (batch_size, 3)
+    assert output.shape[0] == batch_size
+
+
+@pytest.mark.parametrize("sequence_length", [127, 128])
+def test_causal_wan_flex_attention_preserves_unpadded_length(
+        monkeypatch: pytest.MonkeyPatch, sequence_length: int) -> None:
+    """FlexAttention must preserve lengths with zero or nonzero padding."""
+    attention = CausalWanSelfAttention.__new__(CausalWanSelfAttention)
+    torch.nn.Module.__init__(attention)
+    attention.rope_cache_policy = "absolute"
+
+    monkeypatch.setattr(
+        "fastvideo.models.dits.causal_wanvideo._apply_rotary_emb",
+        lambda tensor, *_args, **_kwargs: tensor,
+    )
+    monkeypatch.setattr(
+        "fastvideo.models.dits.causal_wanvideo.flex_attention",
+        lambda query, key, value, block_mask: query,
+    )
+
+    query = torch.randn(2, sequence_length, 1, 4)
+    output = attention(
+        q=query,
+        k=query,
+        v=query,
+        freqs_cis=(torch.empty(0), torch.empty(0)),
+        block_mask=object(),
+    )
+
+    assert output.shape == query.shape
+    torch.testing.assert_close(output, query)
 
 
 def _build_synthetic_batch(
