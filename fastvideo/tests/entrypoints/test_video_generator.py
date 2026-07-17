@@ -394,16 +394,25 @@ def test_write_video_atomic_removes_partial_temporary_file_on_failure(monkeypatc
 
 def test_write_video_atomic_applies_umask_to_new_output(monkeypatch, tmp_path):
     output_path = tmp_path / "new.mp4"
+    temporary_modes = []
 
     def write_video(path, frames, *, fps, format):
+        temporary_modes.append(stat.S_IMODE(os.stat(path).st_mode))
         with open(path, "wb") as output_file:
             output_file.write(b"video")
 
     monkeypatch.setattr(video_generator_module.imageio, "mimsave", write_video)
-    monkeypatch.setattr(video_generator_module.os, "umask", lambda _mode: 0o027)
+    real_umask = os.umask
+    previous_umask = real_umask(0o027)
+    umask_calls = []
+    monkeypatch.setattr(video_generator_module.os, "umask", lambda mode: umask_calls.append(mode))
+    try:
+        VideoGenerator._write_video_atomic(str(output_path), [torch.zeros((1, 1)).numpy()], 8)
+    finally:
+        real_umask(previous_umask)
 
-    VideoGenerator._write_video_atomic(str(output_path), [torch.zeros((1, 1)).numpy()], 8)
-
+    assert umask_calls == []
+    assert temporary_modes == [0o600]
     assert stat.S_IMODE(output_path.stat().st_mode) == 0o640
 
 
@@ -411,8 +420,10 @@ def test_write_video_atomic_preserves_existing_output_permissions(monkeypatch, t
     output_path = tmp_path / "existing.mp4"
     output_path.write_bytes(b"old")
     output_path.chmod(0o604)
+    temporary_modes = []
 
     def write_video(path, frames, *, fps, format):
+        temporary_modes.append(stat.S_IMODE(os.stat(path).st_mode))
         with open(path, "wb") as output_file:
             output_file.write(b"video")
 
@@ -421,6 +432,7 @@ def test_write_video_atomic_preserves_existing_output_permissions(monkeypatch, t
     VideoGenerator._write_video_atomic(str(output_path), [torch.zeros((1, 1)).numpy()], 8)
 
     assert output_path.read_bytes() == b"video"
+    assert temporary_modes == [0o600]
     assert stat.S_IMODE(output_path.stat().st_mode) == 0o604
 
 

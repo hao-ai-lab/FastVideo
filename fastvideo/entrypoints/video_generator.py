@@ -68,7 +68,6 @@ except ImportError:
 
 logger = init_logger(__name__)
 _FFMPEG_ENCODER_OPTION_CACHE: dict[tuple[str, str, str], bool] = {}
-_UMASK_LOCK = threading.Lock()
 
 _BATCH_EXTRA_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "ltx2_audio_latents",
@@ -1445,32 +1444,51 @@ class VideoGenerator:
     def _temporary_output_path(output_path: str) -> str:
         output_dir = os.path.dirname(os.path.abspath(output_path))
         stem, suffix = os.path.splitext(os.path.basename(output_path))
-        try:
-            output_mode = stat.S_IMODE(os.stat(output_path).st_mode)
-        except FileNotFoundError:
-            with _UMASK_LOCK:
-                current_umask = os.umask(0)
-                try:
-                    output_mode = 0o666 & ~current_umask
-                finally:
-                    os.umask(current_umask)
         fd, temporary_path = tempfile.mkstemp(
             dir=output_dir,
             prefix=f".{stem}.",
             suffix=suffix,
         )
         try:
-            os.fchmod(fd, output_mode)
+            os.fchmod(fd, 0o600)
         finally:
             os.close(fd)
         return temporary_path
+
+    @staticmethod
+    def _new_output_mode(temporary_path: str) -> int:
+        # There is no side-effect-free umask getter. Let the kernel apply it to
+        # an atomically created empty probe rather than changing process state.
+        probe_path = f"{temporary_path}.mode"
+        fd = os.open(probe_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        try:
+            return stat.S_IMODE(os.fstat(fd).st_mode)
+        finally:
+            os.close(fd)
+            with suppress(FileNotFoundError):
+                os.remove(probe_path)
+
+    @classmethod
+    def _replace_output_atomic(cls, temporary_path: str, output_path: str) -> None:
+        try:
+            output_mode = stat.S_IMODE(os.stat(output_path).st_mode)
+        except FileNotFoundError:
+            output_mode = cls._new_output_mode(temporary_path)
+
+        os.chmod(temporary_path, output_mode)
+        try:
+            os.replace(temporary_path, output_path)
+        except BaseException:
+            with suppress(OSError):
+                os.chmod(temporary_path, 0o600)
+            raise
 
     @classmethod
     def _write_image_atomic(cls, output_path: str, frame: np.ndarray) -> None:
         temporary_path = cls._temporary_output_path(output_path)
         try:
             imageio.imwrite(temporary_path, frame)
-            os.replace(temporary_path, output_path)
+            cls._replace_output_atomic(temporary_path, output_path)
         finally:
             with suppress(FileNotFoundError):
                 os.remove(temporary_path)
@@ -1480,7 +1498,7 @@ class VideoGenerator:
         temporary_path = cls._temporary_output_path(output_path)
         try:
             imageio.mimsave(temporary_path, frames, fps=fps, format="mp4")
-            os.replace(temporary_path, output_path)
+            cls._replace_output_atomic(temporary_path, output_path)
         finally:
             with suppress(FileNotFoundError):
                 os.remove(temporary_path)
@@ -1502,7 +1520,7 @@ class VideoGenerator:
                 f.setsampwidth(2)
                 f.setframerate(sample_rate)
                 f.writeframes(audio_int16.tobytes())
-            os.replace(temporary_path, wav_path)
+            cls._replace_output_atomic(temporary_path, wav_path)
         finally:
             with suppress(FileNotFoundError):
                 os.remove(temporary_path)
@@ -1568,7 +1586,7 @@ class VideoGenerator:
                 output.mux(packet)
 
             output.close()
-            os.replace(temporary_path, output_path)
+            cls._replace_output_atomic(temporary_path, output_path)
             return True
         except Exception as e:
             logger.warning("Single-pass video+audio save failed: %s", e)
@@ -1710,7 +1728,7 @@ class VideoGenerator:
                     if rc != 0:
                         logger.warning("ffmpeg pipe save failed with return code %d", rc)
                         return False
-                    os.replace(temporary_path, output_path)
+                    cls._replace_output_atomic(temporary_path, output_path)
                     return True
                 except Exception:
                     proc.kill()
@@ -1738,9 +1756,9 @@ class VideoGenerator:
                            "Install with: uv pip install av")
             return False
 
+        temporary_path = cls._temporary_output_path(video_path)
         try:
             with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(video_path))) as tmpdir:
-                out_path = os.path.join(tmpdir, "muxed.mp4")
                 wav_path = os.path.join(tmpdir, "audio.wav")
 
                 num_channels = cls._write_pcm_wav(wav_path, audio, sample_rate)
@@ -1751,7 +1769,7 @@ class VideoGenerator:
                 input_audio = av.open(wav_path)
 
                 # Create output with both streams
-                output = av.open(out_path, mode="w")
+                output = av.open(temporary_path, mode="w")
 
                 # Add video stream (copy codec from input)
                 in_video_stream = input_video.streams.video[0]
@@ -1785,11 +1803,14 @@ class VideoGenerator:
                 input_video.close()
                 input_audio.close()
                 output.close()
-                os.replace(out_path, video_path)
+                cls._replace_output_atomic(temporary_path, video_path)
             return True
         except Exception as e:
             logger.warning("Audio mux failed: %s", e)
             return False
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
 
     def set_lora_adapter(self,
                          lora_nickname: str,

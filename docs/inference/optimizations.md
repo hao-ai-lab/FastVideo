@@ -394,7 +394,8 @@ baseline-vs-compile A/B with the warmup correctly excluded.
 Dynamic request batching combines adjacent compatible text-to-video requests
 into one pipeline forward. It is opt-in and is currently supported only by
 pipeline configurations that explicitly enable dynamic batching, including the
-standard Wan denoising path. DMD, causal denoising, and requests with different
+standard Wan denoising path. DMD and causal-denoising pipeline configurations
+cannot enable dynamic mode. Within a supported pipeline, requests with different
 generation shapes or conditioning inputs run separately.
 
 ```python
