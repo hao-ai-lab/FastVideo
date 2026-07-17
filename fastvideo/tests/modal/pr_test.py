@@ -384,7 +384,7 @@ def run_dynamic_batching_parity():
     run_test(
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
         "python ./fastvideo/tests/batching/run_dynamic_batching_parity.py --mode parity "
-        "--output-json /tmp/dynamic_batching_parity.json")
+        "--output-type pixel --output-json /tmp/dynamic_batching_parity.json")
 
 
 # TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?

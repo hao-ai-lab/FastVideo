@@ -5,6 +5,8 @@ PR 6.
 """
 from __future__ import annotations
 
+import pytest
+
 from fastvideo.api.compat import (
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
@@ -218,6 +220,28 @@ class TestBatchingTranslation:
         assert args.kwargs["batching_delay_ms"] == 10.0
         assert args.kwargs["batching_config"] == "/tmp/batching.json"
         assert args.kwargs["enable_batching_metrics"] is True
+
+    @pytest.mark.parametrize(
+        "delay_ms",
+        [float("nan"), float("inf"), float("-inf")],
+        ids=("nan", "positive-infinity", "negative-infinity"),
+    )
+    def test_typed_batching_rejects_non_finite_delay(self, delay_ms: float, monkeypatch) -> None:
+        from fastvideo.configs.pipelines.base import PipelineConfig
+        monkeypatch.setattr(
+            PipelineConfig, "from_kwargs", classmethod(lambda cls, kwargs: cls()))
+
+        config = GeneratorConfig(
+            model_path="/models/wan",
+            engine=_engine_with_batching(BatchingConfig(
+                mode="dynamic",
+                max_size=2,
+                delay_ms=delay_ms,
+            )),
+        )
+
+        with pytest.raises(ValueError, match="batching_delay_ms must be finite and >= 0"):
+            generator_config_to_fastvideo_args(config)
 
 
 # -------------------------------------------------------------------

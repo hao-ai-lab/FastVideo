@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -28,7 +29,7 @@ def _build_init_kwargs(args: argparse.Namespace, *, dynamic: bool) -> dict[str, 
         "dit_layerwise_offload": False,
         "flow_shift": args.flow_shift,
         "text_encoder_precisions": ("fp32",),
-        "output_type": "latent",
+        "output_type": "latent" if args.output_type == "latent" else "pil",
         "batching_mode": "dynamic" if dynamic else "disabled",
         "batching_max_size": args.batch_size if dynamic else 1,
         "batching_delay_ms": 0.0,
@@ -97,19 +98,50 @@ def _run_dynamic(generator: VideoGenerator, args: argparse.Namespace) -> tuple[l
     return results, elapsed
 
 
-def _tensor_metrics(sequential: list[dict[str, Any]], dynamic: list[dict[str, Any]]) -> dict[str, Any]:
+def _tensor_metrics(
+    sequential: list[dict[str, Any]],
+    dynamic: list[dict[str, Any]],
+    *,
+    expected_prompts: list[str] | None = None,
+    expected_shape: list[int] | None = None,
+) -> dict[str, Any]:
     per_request = []
     for index, (seq_result, dyn_result) in enumerate(zip(sequential, dynamic, strict=True)):
         seq = seq_result["samples"].detach().cpu().to(torch.float32)
         dyn = dyn_result["samples"].detach().cpu().to(torch.float32)
-        diff = (seq - dyn).abs()
+        seq_shape = list(seq.shape)
+        dyn_shape = list(dyn.shape)
+        same_shape = seq_shape == dyn_shape
+        if same_shape:
+            diff = (seq - dyn).abs()
+            max_abs_diff = float(diff.max().item())
+            mean_abs_diff = float(diff.mean().item())
+            allclose_atol_1e_5 = bool(torch.allclose(seq, dyn, atol=1e-5, rtol=1e-5))
+            allclose_atol_1e_4 = bool(torch.allclose(seq, dyn, atol=1e-4, rtol=1e-4))
+        else:
+            max_abs_diff = math.nan
+            mean_abs_diff = math.nan
+            allclose_atol_1e_5 = False
+            allclose_atol_1e_4 = False
+        seq_prompt = seq_result.get("prompts")
+        dyn_prompt = dyn_result.get("prompts")
+        expected_prompt = expected_prompts[index] if expected_prompts is not None else seq_prompt
         per_request.append({
             "index": index,
-            "shape": list(seq.shape),
-            "max_abs_diff": float(diff.max().item()),
-            "mean_abs_diff": float(diff.mean().item()),
-            "allclose_atol_1e_5": bool(torch.allclose(seq, dyn, atol=1e-5, rtol=1e-5)),
-            "allclose_atol_1e_4": bool(torch.allclose(seq, dyn, atol=1e-4, rtol=1e-4)),
+            "expected_prompt": expected_prompt,
+            "sequential_prompt": seq_prompt,
+            "dynamic_prompt": dyn_prompt,
+            "prompt_mapping_matches": seq_prompt == expected_prompt and dyn_prompt == expected_prompt,
+            "expected_shape": expected_shape,
+            "sequential_shape": seq_shape,
+            "dynamic_shape": dyn_shape,
+            "shape_matches": same_shape and (expected_shape is None or seq_shape == expected_shape),
+            "sequential_finite": bool(torch.isfinite(seq).all().item()),
+            "dynamic_finite": bool(torch.isfinite(dyn).all().item()),
+            "max_abs_diff": max_abs_diff,
+            "mean_abs_diff": mean_abs_diff,
+            "allclose_atol_1e_5": allclose_atol_1e_5,
+            "allclose_atol_1e_4": allclose_atol_1e_4,
         })
     return {
         "per_request": per_request,
@@ -129,7 +161,37 @@ def _parity_gate(
     # Keep max_abs_diff in tensor_metrics for diagnosis and gate the stable
     # aggregate mean, whose original 0.02 bound did not need post-hoc widening.
     failures = []
-    if metrics["mean_abs_diff"] > max_mean_abs_diff:
+    can_apply_tolerance = True
+    for item in metrics["per_request"]:
+        index = item["index"]
+        if not item["prompt_mapping_matches"]:
+            failures.append(
+                f"request {index} prompt mapping mismatch: expected={item['expected_prompt']!r} "
+                f"sequential={item['sequential_prompt']!r} dynamic={item['dynamic_prompt']!r}")
+        if not item["shape_matches"]:
+            failures.append(
+                f"request {index} output shape mismatch: expected={item['expected_shape']} "
+                f"sequential={item['sequential_shape']} dynamic={item['dynamic_shape']}")
+        if not item["sequential_finite"]:
+            failures.append(f"request {index} sequential output contains non-finite values")
+            can_apply_tolerance = False
+        if not item["dynamic_finite"]:
+            failures.append(f"request {index} dynamic output contains non-finite values")
+            can_apply_tolerance = False
+        for metric_name in ("max_abs_diff", "mean_abs_diff"):
+            metric_value = item[metric_name]
+            if not math.isfinite(metric_value):
+                failures.append(f"request {index} {metric_name} is non-finite: {metric_value!r}")
+                can_apply_tolerance = False
+    for metric_name in ("max_abs_diff", "mean_abs_diff"):
+        metric_value = metrics[metric_name]
+        if not math.isfinite(metric_value):
+            failures.append(f"aggregate {metric_name} is non-finite: {metric_value!r}")
+            can_apply_tolerance = False
+    if not math.isfinite(max_mean_abs_diff):
+        failures.append(f"max_mean_abs_diff must be finite, got {max_mean_abs_diff!r}")
+        can_apply_tolerance = False
+    if can_apply_tolerance and metrics["mean_abs_diff"] > max_mean_abs_diff:
         failures.append(f"mean_abs_diff {metrics['mean_abs_diff']:.6g} exceeds {max_mean_abs_diff:.6g}")
     return {
         "passed": not failures,
@@ -143,11 +205,26 @@ def run_parity(args: argparse.Namespace) -> dict[str, Any]:
     try:
         sequential, sequential_s = _run_sequential(generator, args)
         dynamic, dynamic_s = _run_dynamic(generator, args)
-        metrics = _tensor_metrics(sequential, dynamic)
+        expected_shape = None
+        if args.output_type == "pixel":
+            expected_shape = [
+                1,
+                3,
+                args.num_frames,
+                args.height,
+                args.width,
+            ]
+        metrics = _tensor_metrics(
+            sequential,
+            dynamic,
+            expected_prompts=args.prompts[:args.batch_size],
+            expected_shape=expected_shape,
+        )
     finally:
         generator.shutdown()
     return {
         "mode": "parity",
+        "output_type": args.output_type,
         "model_path": args.model_path,
         "num_gpus": args.num_gpus,
         "shape": {
@@ -197,6 +274,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("parity", "sequential", "dynamic"), required=True)
     parser.add_argument("--model-path", default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    parser.add_argument("--output-type", choices=("latent", "pixel"), default="latent")
     parser.add_argument("--num-gpus", type=int, default=1)
     parser.add_argument("--sp-size", type=int, default=1)
     parser.add_argument("--tp-size", type=int, default=1)

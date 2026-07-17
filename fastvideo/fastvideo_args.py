@@ -4,6 +4,7 @@
 import argparse
 import dataclasses
 import json
+import math
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
@@ -796,8 +797,8 @@ class FastVideoArgs:
             raise ValueError(f"batching_mode must be 'disabled' or 'dynamic', got {self.batching_mode!r}")
         if self.batching_max_size < 1:
             raise ValueError("batching_max_size must be >= 1")
-        if self.batching_delay_ms < 0:
-            raise ValueError("batching_delay_ms must be >= 0")
+        if not math.isfinite(self.batching_delay_ms) or self.batching_delay_ms < 0:
+            raise ValueError("batching_delay_ms must be finite and >= 0")
 
         if self.mode in [ExecutionMode.DISTILLATION, ExecutionMode.FINETUNING] and self.inference_mode:
             logger.warning("Mode is 'training' but inference_mode is True. Setting inference_mode to False.")
