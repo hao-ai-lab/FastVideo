@@ -43,9 +43,16 @@ class _Method:
         self,
         transformer: torch.nn.Module | None,
         tracker: Any | None = None,
+        ema_update_iterations: set[int] | None = None,
     ) -> None:
         self.student = _Student(transformer)
         self.tracker = tracker
+        self.ema_update_iterations = ema_update_iterations
+
+    def should_update_ema(self, iteration: int) -> bool:
+        if self.ema_update_iterations is None:
+            return True
+        return iteration in self.ema_update_iterations
 
 
 def _tiny_transformer(*, fill: float = 0.0) -> torch.nn.Module:
@@ -155,6 +162,35 @@ class TestOnTrainingStepEnd:
         cb.on_training_step_end(method, loss_dict={}, iteration=0)
 
         assert any(payload.get("ema/decay") == 0.99 and step == 0 for payload, step in tracker.entries)
+
+    def test_skips_steps_without_student_optimizer_update(self) -> None:
+        transformer = _tiny_transformer(fill=1.0)
+        method = _Method(
+            transformer,
+            ema_update_iterations={1, 5},
+        )
+        cb = EMACallback(decay=0.5, start_iter=0)
+        cb.on_train_start(method, iteration=0)
+
+        # First generator update initializes the active EMA at 1.0.
+        cb.on_training_step_end(method, loss_dict={}, iteration=1)
+        with torch.no_grad():
+            transformer.weight.fill_(9.0)
+
+        # Critic-only outer steps must not repeatedly decay EMA toward the
+        # unchanged generator weights.
+        for iteration in (2, 3, 4):
+            cb.on_training_step_end(method, loss_dict={}, iteration=iteration)
+        assert torch.allclose(
+            cb.student_ema.shadow["weight"],
+            torch.full((2, 4), 1.0),
+        )
+
+        cb.on_training_step_end(method, loss_dict={}, iteration=5)
+        assert torch.allclose(
+            cb.student_ema.shadow["weight"],
+            torch.full((2, 4), 5.0),
+        )
 
 
 # ---------------------------------------------------------------------------

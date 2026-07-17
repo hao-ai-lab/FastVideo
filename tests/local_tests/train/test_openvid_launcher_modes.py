@@ -456,4 +456,9 @@ def test_prepare_templates_match_standalone_scripts_and_all_parse(tmp_path: Path
         )
         assert syntax.returncode == 0, syntax.stderr
 
+    condition_script = RUN_CONDITION.read_text(encoding="utf-8")
+    assert 'export_stage tf 3000 student' in condition_script
+    assert 'export_stage cd 2000 ema' in condition_script
+    assert 'export_stage sf 1000 student_ema' in condition_script
+
     py_compile.compile(str(PREPARE), cfile=str(tmp_path / "prepare.pyc"), doraise=True)

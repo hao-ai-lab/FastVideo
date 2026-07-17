@@ -42,6 +42,9 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         if self._discrete_cd_n < 2:
             raise ValueError("method.discrete_cd_N must be >= 2")
         self._ema_decay = float(self.method_config.get("ema_decay", 0.99))
+        # Kept in the parsed method state for reference-config provenance.
+        # It is an EMA checkpoint-selection threshold in the official code,
+        # not an online-target update gate.
         self._ema_start_step = int(self.method_config.get("ema_start_step", 200))
         shift = getattr(self.training_config.pipeline_config, "flow_shift", None)
         self._flow_shift = float(shift) if shift else 5.0
@@ -186,8 +189,11 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
 
     def optimizers_schedulers_step(self, iteration: int) -> None:
         super().optimizers_schedulers_step(iteration)
-        if iteration >= self._ema_start_step:
-            self._update_ema()
+        # The reference Causal-CD trainer updates its target EMA after every
+        # student optimizer step. ``ema_start_step`` controls which weights
+        # are selected for checkpoint/export there; it does not freeze the
+        # online consistency target during the first iterations.
+        self._update_ema()
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -385,6 +385,10 @@ class DMD2Method(TrainingMethod):
             return True
         return iteration % interval == 0
 
+    def should_update_ema(self, iteration: int) -> bool:
+        """Keep EMA cadence aligned with generator optimizer updates."""
+        return self._should_update_student(iteration)
+
     def _get_denoising_step_list(
         self,
         device: torch.device,

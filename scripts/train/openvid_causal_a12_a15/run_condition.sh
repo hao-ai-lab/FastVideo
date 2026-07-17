@@ -92,7 +92,7 @@ trap on_exit EXIT
 
 printf 'running\n' > "$RUN_ROOT/state/status"; date -Is > "$RUN_ROOT/state/started_at"
 run_stage tf 3000 "$((BASE_PORT + 1))"; export_stage tf 3000 student
-run_stage cd 2000 "$((BASE_PORT + 2))"; export_stage cd 2000 student
+run_stage cd 2000 "$((BASE_PORT + 2))"; export_stage cd 2000 ema
 run_stage sf 1000 "$((BASE_PORT + 3))"; export_stage sf 1000 student_ema
 ema_hash="$(sha256sum "$RUN_ROOT/sf/checkpoints/checkpoint-1000/ema/student.safetensors" | awk '{print $1}')"
 export_hash="$(sha256sum "$RUN_ROOT/export/sf/transformer/model.safetensors" | awk '{print $1}')"

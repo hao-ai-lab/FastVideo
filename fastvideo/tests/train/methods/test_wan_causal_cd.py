@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from fastvideo.train.methods.base import TrainingMethod
 from fastvideo.train.methods.consistency_model.causal_cd import (
     CausalConsistencyDistillationMethod, )
 from fastvideo.train.models.wan import WanCausalModel
@@ -30,6 +31,34 @@ from fastvideo.train.utils.config import load_run_config
 _FIXTURE = str(
     Path(__file__).resolve().parent.parent / "fixtures"
     / "wan_causal_t2v_causal_cd_min.yaml")
+
+
+def test_causal_cd_updates_ema_from_first_optimizer_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``ema_start_step`` must not freeze the online CD target."""
+    method = object.__new__(CausalConsistencyDistillationMethod)
+    updates: list[int] = []
+    current_iteration = -1
+
+    def fake_super_step(_self: object, iteration: int) -> None:
+        nonlocal current_iteration
+        current_iteration = iteration
+
+    def fake_update_ema() -> None:
+        updates.append(current_iteration)
+
+    monkeypatch.setattr(
+        TrainingMethod,
+        "optimizers_schedulers_step",
+        fake_super_step,
+    )
+    object.__setattr__(method, "_update_ema", fake_update_ema)
+
+    for iteration in (1, 199, 200):
+        method.optimizers_schedulers_step(iteration)
+
+    assert updates == [1, 199, 200]
 
 
 def _build_synthetic_batch(

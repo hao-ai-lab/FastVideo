@@ -249,6 +249,16 @@ class TrainingMethod(torch.nn.Module, ABC):
         """
         return {"student": self.student.transformer}
 
+    def should_update_ema(self, iteration: int) -> bool:
+        """Whether the student optimizer updated on this outer step.
+
+        EMA callbacks use this hook to follow the optimizer cadence instead
+        of the trainer's outer-loop cadence. Methods that update the student
+        conditionally (for example DMD2) should override it.
+        """
+        del iteration
+        return True
+
     def on_train_start(self) -> None:
         from fastvideo.distributed import (
             get_world_group, )
