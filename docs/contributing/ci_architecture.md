@@ -84,6 +84,7 @@ status.
 | VAE Tests | `vae` | `fastvideo/models/vaes/**`, `fastvideo/models/loader/**`, `fastvideo/tests/vaes/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile` |
 | Kernel Tests | `kernel_tests` | `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile` |
+| Dynamic Batching Parity | `dynamic_batching_parity` | Batching, pipeline config, API config carriers, generator/OpenAI entrypoints, batch-aware stages, and batching tests |
 | Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile` |
 | DreamVerse App Tests | `dreamverse_app` | `apps/dreamverse/**`, `pyproject.toml` |
 
@@ -109,6 +110,7 @@ it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 | Buildkite label | `TEST_TYPE` | Main watched paths |
 |---|---|---|
 | SSIM Tests | `ssim` | `fastvideo/**/*.py`, `pyproject.toml`, `docker/Dockerfile` |
+| Dynamic Batching Parity | `dynamic_batching_parity` | Batching, pipeline config, API config carriers, generator/OpenAI entrypoints, batch-aware stages, and batching tests |
 | LoRA Inference Tests | `inference_lora` | LoRA tests, loader, transformer tests, pipelines, LoRA layers |
 | LoRA Extraction Tests | `lora_extraction` | LoRA extraction scripts/tests, loader, training utilities, LoRA layers |
 | Training Tests | `training` | `fastvideo/**`, `pyproject.toml`, `docker/Dockerfile` |
@@ -121,6 +123,10 @@ it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 | API Server Tests | `api_server` | OpenAI entrypoints, serve CLI, OpenAI API integration test |
 | Train Framework Tests | `train_framework` | `fastvideo/train/**`, train model/method tests, model loader, DiTs |
 | Eval Metrics Tests | `eval` | `fastvideo/eval/**`, `fastvideo/tests/eval/**`, `pyproject.toml`, `docker/Dockerfile` |
+
+Dynamic Batching Parity runs the same L40S latent comparison as a path-filtered
+Fastcheck job, a path-filtered Full Suite job, and the direct
+`/test dynamic-batching-parity` command.
 
 See [Performance Benchmarks](performance_benchmarks.md) for the performance
 lane's thresholds, rolling baseline, artifacts, and reseeding process.
@@ -149,6 +155,7 @@ Valid direct test names:
 | `/test unit` | `unit_test` |
 | `/test dreamverse` | `dreamverse_app` |
 | `/test ssim` | `ssim` |
+| `/test dynamic-batching-parity` | `dynamic_batching_parity` |
 | `/test training` | `training` |
 | `/test lora-inference` | `inference_lora` |
 | `/test lora-training` | `training_lora` |

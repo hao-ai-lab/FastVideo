@@ -231,12 +231,19 @@ class VideoBatchScheduler:
             logger.warning_once("Dynamic batch compatibility probe failed; treating requests as "
                                 f"incompatible (batching disabled for these requests): {exc!r}")
             return False
-        return can_dynamic_batch(
+        compatibility = can_dynamic_batch(
             base_sampling,
             candidate_sampling,
             base_extra=base_extra,
             candidate_extra=candidate_extra,
-        ).can_batch
+        )
+        if self._fastvideo_args.enable_batching_metrics and not compatibility.can_batch:
+            logger.info(
+                "Dynamic batch candidate rejected: request_id=%s reason=%s",
+                candidate.request_id,
+                compatibility.reason or "incompatible",
+            )
+        return compatibility.can_batch
 
     def _sampling_param_from_kwargs(self, kwargs: dict[str, Any]) -> tuple[SamplingParam, dict[str, Any]]:
         sampling_param = SamplingParam.from_pretrained(self._fastvideo_args.model_path)

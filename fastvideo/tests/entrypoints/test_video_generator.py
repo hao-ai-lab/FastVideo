@@ -54,6 +54,7 @@ def _batching_fastvideo_args(**overrides):
         batching_mode="dynamic",
         batching_max_size=4,
         batching_config=None,
+        enable_batching_metrics=False,
         dit_cpu_offload=False,
         dit_layerwise_offload=False,
         output_type="latent",
@@ -1241,4 +1242,98 @@ def test_generate_batched_request_rejects_mismatched_media_inputs(monkeypatch):
             GenerationRequest(
                 prompt=["first prompt", "second prompt"],
                 inputs=InputConfig(image_path=["first.png"]),
-            ))
+            )
+        )
+
+
+def test_split_output_batch_isolates_logging_info_per_result():
+    generator = _new_video_generator()
+    output_batch = ForwardBatch(
+        data_type="video",
+        output=torch.zeros((2, 4, 1, 1, 1)),
+    )
+    output_batch.logging_info.add_stage_execution_time("DenoisingStage", 1.0)
+
+    first = generator._split_output_batch(output_batch, index=0, batch_size=2)
+    second = generator._split_output_batch(output_batch, index=1, batch_size=2)
+    first.logging_info.add_stage_execution_time("PostDecodeFrameProcessStage", 2.0)
+    second.logging_info.add_stage_execution_time("PostDecodeFrameProcessStage", 3.0)
+
+    assert first.logging_info is not second.logging_info
+    assert first.logging_info is not output_batch.logging_info
+    assert first.logging_info.get_stage_info("PostDecodeFrameProcessStage")["execution_time"] == 2.0
+    assert second.logging_info.get_stage_info("PostDecodeFrameProcessStage")["execution_time"] == 3.0
+    assert output_batch.logging_info.get_stage_info("PostDecodeFrameProcessStage") == {}
+
+
+def test_run_forward_batch_metrics_report_actual_group_utilization(monkeypatch):
+    generator = _new_video_generator()
+    output = torch.zeros((2, 4, 1, 1, 1))
+    generator.executor = SimpleNamespace(
+        execute_forward=lambda batch, fastvideo_args: ForwardBatch(
+            data_type=batch.data_type,
+            output=output,
+        ))
+    info_logs = []
+    monkeypatch.setattr(
+        video_generator_module.logger,
+        "info",
+        lambda message, *args: info_logs.append((message, args)),
+    )
+    batch = ForwardBatch(
+        data_type="video",
+        prompt=["one", "two"],
+        save_video=False,
+        return_frames=True,
+    )
+
+    generator._run_forward_batch(
+        batch,
+        _batching_fastvideo_args(
+            enable_batching_metrics=True,
+            batching_max_size=4,
+        ),
+    )
+
+    assert (
+        "Executing dynamic video forward batch: size=%d max_size=%d utilization=%.2f",
+        (2, 4, 0.5),
+    ) in info_logs
+
+
+def test_generate_prepared_work_items_metrics_report_rejection_reason(monkeypatch, tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = _batching_fastvideo_args(enable_batching_metrics=True)
+    info_logs = []
+    monkeypatch.setattr(
+        video_generator_module.logger,
+        "info",
+        lambda message, *args: info_logs.append((message, args)),
+    )
+
+    def fake_run_forward(batch, fastvideo_args):
+        return ForwardBatch(
+            data_type=batch.data_type,
+            output=torch.zeros((1, 4, 1, 1, 1)),
+        ), 0.5, 10.0
+
+    monkeypatch.setattr(generator, "_run_forward_batch", fake_run_forward)
+    params = [
+        SamplingParam(prompt="one", height=8, width=8, num_frames=1, guidance_scale=1.0, save_video=False),
+        SamplingParam(prompt="two", height=8, width=8, num_frames=1, guidance_scale=3.0, save_video=False),
+    ]
+    work_items = [
+        generator._prepare_generation_work_item(
+            param.prompt,
+            param,
+            generator.fastvideo_args,
+            output_path=str(tmp_path / f"{param.prompt}.mp4"),
+        ) for param in params
+    ]
+
+    generator._generate_prepared_work_items(work_items)
+
+    assert (
+        "Dynamic batch candidate rejected: reason=%s current_size=%d max_size=%d",
+        ("sampling_params.guidance_scale", 1, 4),
+    ) in info_logs

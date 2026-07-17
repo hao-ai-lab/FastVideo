@@ -934,6 +934,17 @@ class VideoGenerator:
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> tuple[ForwardBatch, float, float]:
+        if (getattr(fastvideo_args, "enable_batching_metrics", False)
+                and self._dynamic_batching_enabled(fastvideo_args)):
+            batch_size = _infer_latent_batch_size(batch)
+            max_batch_size = max(1, int(fastvideo_args.batching_max_size))
+            logger.info(
+                "Executing dynamic video forward batch: size=%d max_size=%d utilization=%.2f",
+                batch_size,
+                max_batch_size,
+                batch_size / max_batch_size,
+            )
+
         start_time = time.perf_counter()
         result_container = {"output_batch": ForwardBatch(data_type=batch.data_type)}
         thread_error: dict[str, BaseException | None] = {"error": None}
@@ -1187,7 +1198,7 @@ class VideoGenerator:
         result = ForwardBatch(
             data_type=output_batch.data_type,
             output=(output_batch.output[index:index + 1] if output_batch.output is not None else None),
-            logging_info=output_batch.logging_info,
+            logging_info=deepcopy(output_batch.logging_info),
             extra=extra,
         )
         if output_batch.trajectory_latents is not None:
@@ -1219,15 +1230,15 @@ class VideoGenerator:
         merged.batch.return_frames = any(item.batch.return_frames for item in work_items)
         return merged
 
-    def _can_merge_work_items(
+    def _work_item_merge_rejection_reason(
         self,
         base: _GenerationWorkItem,
         candidate: _GenerationWorkItem,
         admission: BatchAdmissionController,
         current_group: list[_GenerationWorkItem],
-    ) -> bool:
+    ) -> str | None:
         if candidate.fastvideo_args is not base.fastvideo_args:
-            return False
+            return "fastvideo_args"
         compatibility = can_dynamic_batch(
             base.sampling_param,
             candidate.sampling_param,
@@ -1235,9 +1246,9 @@ class VideoGenerator:
             candidate_extra=candidate.batch.extra,
         )
         if not compatibility.can_batch:
-            return False
+            return compatibility.reason or "incompatible"
         current_requests = [item.sampling_param for item in current_group]
-        return admission.reject_reason_for_candidate(current_requests, candidate.sampling_param) is None
+        return admission.reject_reason_for_candidate(current_requests, candidate.sampling_param)
 
     def _run_work_item_group(self, group: list[_GenerationWorkItem]) -> list[dict[str, Any]]:
         if len(group) == 1:
@@ -1318,7 +1329,16 @@ class VideoGenerator:
             index += 1
             while index < len(work_items) and len(group) < fastvideo_args.batching_max_size:
                 candidate = work_items[index]
-                if not self._can_merge_work_items(group[0], candidate, admission, group):
+                rejection_reason = self._work_item_merge_rejection_reason(
+                    group[0],
+                    candidate,
+                    admission,
+                    group,
+                )
+                if rejection_reason is not None:
+                    if getattr(fastvideo_args, "enable_batching_metrics", False):
+                        logger.info("Dynamic batch candidate rejected: reason=%s current_size=%d max_size=%d",
+                                    rejection_reason, len(group), fastvideo_args.batching_max_size)
                     break
                 group.append(candidate)
                 index += 1

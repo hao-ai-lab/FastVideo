@@ -325,6 +325,9 @@ steps:
             - path:
                 - "fastvideo/batching/**"
                 - "fastvideo/configs/pipelines/**"
+                - "fastvideo/api/schema.py"
+                - "fastvideo/api/compat.py"
+                - "fastvideo/fastvideo_args.py"
                 - "fastvideo/entrypoints/video_generator.py"
                 - "fastvideo/entrypoints/openai/**"
                 - "fastvideo/pipelines/stages/input_validation.py"
@@ -406,6 +409,9 @@ steps:
             - path:
                 - "fastvideo/batching/**"
                 - "fastvideo/configs/pipelines/**"
+                - "fastvideo/api/schema.py"
+                - "fastvideo/api/compat.py"
+                - "fastvideo/fastvideo_args.py"
                 - "fastvideo/entrypoints/video_generator.py"
                 - "fastvideo/entrypoints/openai/**"
                 - "fastvideo/pipelines/stages/input_validation.py"

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
@@ -308,3 +309,35 @@ def test_dynamic_batching_capability_gate_defaults():
     # even though they inherit the Wan opt-in flag.
     assert FastWan2_1_T2V_480P_Config().dynamic_batching_supported() is False
     assert SelfForcingWanT2V480PConfig().dynamic_batching_supported() is False
+
+
+def test_scheduler_metrics_report_compatibility_rejection_reason(monkeypatch, tmp_path):
+    scheduler = VideoBatchScheduler(
+        _FakeBatchGenerator(),
+        _batch_scheduler_args(enable_batching_metrics=True),
+    )
+    info_logs = []
+
+    def fake_sampling_param(kwargs):
+        return SamplingParam(
+            prompt=kwargs["prompt"],
+            guidance_scale=kwargs["guidance_scale"],
+        ), {}
+
+    monkeypatch.setattr(scheduler, "_sampling_param_from_kwargs", fake_sampling_param)
+    monkeypatch.setattr(
+        "fastvideo.entrypoints.openai.batching.logger.info",
+        lambda message, *args: info_logs.append((message, args)),
+    )
+    base_kwargs = _job_kwargs(tmp_path, 1)
+    base_kwargs["guidance_scale"] = 1.0
+    candidate_kwargs = _job_kwargs(tmp_path, 2)
+    candidate_kwargs["guidance_scale"] = 3.0
+    base = SimpleNamespace(request_id="req-1", kwargs=base_kwargs)
+    candidate = SimpleNamespace(request_id="req-2", kwargs=candidate_kwargs)
+
+    assert scheduler._jobs_are_compatible(base, candidate) is False
+    assert info_logs == [(
+        "Dynamic batch candidate rejected: request_id=%s reason=%s",
+        ("req-2", "sampling_params.guidance_scale"),
+    )]
