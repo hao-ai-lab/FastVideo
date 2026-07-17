@@ -17,6 +17,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../../.." && pwd)"
 export PYTHONPATH="${REPO_ROOT}/fastvideo-kernel/python${PYTHONPATH:+:${PYTHONPATH}}"
 export FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN   # <-- enables Attn-QAT training
+export QAT_ATTN_FWD_EXACT_M=${QAT_ATTN_FWD_EXACT_M:-0}
 export WANDB_MODE=${WANDB_MODE:-online}
 export TOKENIZERS_PARALLELISM=false
 

@@ -32,20 +32,20 @@ training:
     num_frames: 77
 
   optimizer:
-    learning_rate: 5.0e-5
+    learning_rate: 1.0e-6
     betas: [0.9, 0.999]
-    weight_decay: 1.0e-4
+    weight_decay: 0.01
     lr_scheduler: constant
     lr_warmup_steps: 0
 
   loop:
-    max_train_steps: 2000
+    max_train_steps: 4000
     gradient_accumulation_steps: 1
 
   checkpoint:
     output_dir: checkpoints/wan_t2v_qat_finetune
     training_state_checkpointing_steps: 500
-    checkpoints_total_limit: 3
+    checkpoints_total_limit: 0
 
   tracker:
     project_name: wan_t2v_qat_finetune
@@ -64,9 +64,9 @@ callbacks:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
     pipeline_target: fastvideo.pipelines.basic.wan.wan_pipeline.WanPipeline
     dataset_file: examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json
-    every_steps: 200
+    every_steps: 50
     sampling_steps: [50]
-    guidance_scale: 3.0
+    guidance_scale: 5.0
 
 pipeline:
-  flow_shift: 3
+  flow_shift: 1

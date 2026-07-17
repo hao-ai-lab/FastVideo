@@ -31,7 +31,7 @@ selecting another implementation.
 The migrated two-stage configs live under
 `examples/train/scenario/qad_wan2_1_mixkit/`:
 
-- `stage1_attn_qat_finetune.yaml`: 2,000-step supervised Attn-QAT finetune.
+- `stage1_attn_qat_finetune.yaml`: 4,000-step supervised Attn-QAT finetune.
 - `stage2_attn_qat_dmd.yaml`: DMD2 distillation to timesteps
   `[1000, 757, 522]` with student-only Attn-QAT.
 
@@ -47,7 +47,7 @@ NUM_GPUS=4 bash examples/train/scenario/qad_wan2_1_mixkit/run_stage1.sh
 
 # Export the stage-1 DCP checkpoint to a Diffusers model directory.
 bash examples/train/scenario/qad_wan2_1_mixkit/export_stage1.sh \
-    checkpoints/wan_t2v_qat_finetune/checkpoint-2000 \
+    checkpoints/wan_t2v_qat_finetune/checkpoint-4000 \
     checkpoints/wan_t2v_qat_finetune/diffusers
 
 # Stage 2: three-step Attn-QAT DMD2 distillation.
@@ -77,3 +77,35 @@ The migration preserves these training semantics:
 The attention training kernel is required when the QAT transformer is built.
 `ATTN_QAT_TRAIN` refuses to silently fall back when that kernel is unavailable,
 because doing so would turn the run into non-QAT training.
+
+## Optimized kernel auto-discovery
+
+The `ATTN_QAT_TRAIN` backend patches FastVideo's Triton attention automatically
+with the optimized `qat_attn` forward and backward. No manual `PYTHONPATH` or
+Python patch call is needed. FastVideo resolves the package in this order:
+
+1. the source checkout named by `QAT_ATTN_REPO`;
+2. an installed/importable `qat_attn` package in the active Python environment;
+   and
+3. a sibling checkout at `../nvfp4_qat_attn`.
+
+With the standard sibling layout, stage 1 is therefore a single command:
+
+```bash
+cd /path/to/FastVideo
+NUM_GPUS=4 bash examples/train/scenario/qad_wan2_1_mixkit/run_stage1.sh
+```
+
+For another layout, point at the repository root in the same command:
+
+```bash
+QAT_ATTN_REPO=/path/to/nvfp4_qat_attn NUM_GPUS=4 \
+  bash examples/train/scenario/qad_wan2_1_mixkit/run_stage1.sh
+```
+
+The optimized production defaults are `QAT_ATTN_FWD_MODE=fast`, exact forward
+softmax statistics (`QAT_ATTN_FWD_EXACT_M=1`), and the faster nondeterministic
+backward (`QAT_ATTN_DETERMINISTIC=0`). Set `QAT_ATTN_FWD_EXACT_M=0` only when
+maximum forward throughput is more important than bitwise `dV` parity with the
+reference kernel. The first backward invocation JIT-compiles and caches the
+standalone CUDA extension and kernel; later runs reuse those caches.
