@@ -38,3 +38,16 @@ To run all four sequentially on one 4-GPU node:
 
     export WANDB_API_KEY=...
     bash /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/20260717_014659_openvid_a12_a15/scripts/run_all_sequential.sh /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/20260717_014659_openvid_a12_a15
+
+Online W&B is the default. For an intentionally offline launch, omit the key
+and set `WANDB_MODE=offline`. Training checkpoints still resume from `latest`,
+but W&B does not merge separate offline process restarts into one run; sync the
+resulting offline runs individually later.
+
+To validate all three configs for one condition without starting training,
+creating W&B state, or requiring a key:
+
+    PREFLIGHT_ONLY=1 bash /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/20260717_014659_openvid_a12_a15/scripts/run_condition.sh A12 /mnt/lustre/vlm-k1kong/experiments/openvid_causal_a12_a15/20260717_014659_openvid_a12_a15/A12 29820
+
+`PREFLIGHT_ONLY=1` is also supported by `run_all_sequential.sh`; it validates
+all twelve configs and exits before queue state or checkpoint checks.

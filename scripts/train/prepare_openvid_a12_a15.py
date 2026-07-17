@@ -225,9 +225,33 @@ def configs(run_root: str, condition: str, spec: dict, repo: str) -> dict[str, d
 
 TRAIN_STAGE = r"""#!/usr/bin/env bash
 set -euo pipefail
-: "${RUN_ROOT:?}" "${STAGE:?}" "${MASTER_PORT:?}" "${WANDB_API_KEY:?}"
+: "${RUN_ROOT:?}" "${STAGE:?}" "${MASTER_PORT:?}"
 REPO="${REPO:-__REPO__}"
 ENV_DIR="${ENV_DIR:-/mnt/nfs/vlm-k1kong/envs/fastvideo}"
+WANDB_MODE="${WANDB_MODE:-online}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+case "$WANDB_MODE" in
+  online)
+    if [[ "$PREFLIGHT_ONLY" == 0 && -z "${WANDB_API_KEY:-}" ]]; then
+      echo "WANDB_MODE=online requires WANDB_API_KEY at runtime." >&2
+      exit 2
+    fi
+    ;;
+  offline)
+    unset WANDB_API_KEY
+    ;;
+  *)
+    echo "Unsupported WANDB_MODE=$WANDB_MODE; expected online or offline." >&2
+    exit 2
+    ;;
+esac
+case "$PREFLIGHT_ONLY" in
+  0|1) ;;
+  *)
+    echo "PREFLIGHT_ONLY must be 0 or 1, got: $PREFLIGHT_ONLY" >&2
+    exit 2
+    ;;
+esac
 REQUIRED_ANCESTOR="__COMMIT__"
 STAGE_DIR="$RUN_ROOT/$STAGE"
 CONFIG="$STAGE_DIR/config/run.yaml"
@@ -247,8 +271,8 @@ export CUDA_CACHE_PATH=/mnt/lustre/vlm-k1kong/cuda-cache
 export TRITON_CACHE_DIR="/mnt/lustre/vlm-k1kong/triton-cache/openvid-a12-a15/${HOSTNAME}/${CONDITION}/${STAGE}"
 export TORCHINDUCTOR_CACHE_DIR="/mnt/lustre/vlm-k1kong/torchinductor-cache/openvid-a12-a15/${HOSTNAME}/${CONDITION}/${STAGE}"
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
-export WANDB_MODE=online WANDB_ENTITY=kaiqin_kong_ucsd
-export WANDB_PROJECT=causal_forcing_openvid_a12_a15 WANDB_RESUME=allow
+export WANDB_MODE WANDB_ENTITY=kaiqin_kong_ucsd
+export WANDB_PROJECT=causal_forcing_openvid_a12_a15
 export TOKENIZERS_PARALLELISM=false FASTVIDEO_DIST_TIMEOUT_MINUTES=120
 export TORCH_NCCL_BLOCKING_WAIT=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONUNBUFFERED=1 VIRTUAL_ENV="$ENV_DIR" PATH="$ENV_DIR/bin:$PATH" PYTHONPATH="$REPO"
@@ -286,11 +310,21 @@ if errors:
 print(f"OpenVid streaming config preflight passed: {config_path}")
 PY
 
-if [[ -s "$STATE/wandb_run_id" ]]; then
-  export WANDB_RUN_ID="$(<"$STATE/wandb_run_id")"
+if [[ "$PREFLIGHT_ONLY" == 1 ]]; then
+  echo "Launcher preflight passed without starting training: WANDB_MODE=$WANDB_MODE config=$CONFIG"
+  exit 0
+fi
+
+if [[ "$WANDB_MODE" == online ]]; then
+  export WANDB_RESUME=allow
+  if [[ -s "$STATE/wandb_run_id" ]]; then
+    export WANDB_RUN_ID="$(<"$STATE/wandb_run_id")"
+  else
+    export WANDB_RUN_ID="$($ENV_DIR/bin/python -c 'import wandb; print(wandb.util.generate_id())')"
+    printf '%s\n' "$WANDB_RUN_ID" > "$STATE/wandb_run_id"
+  fi
 else
-  export WANDB_RUN_ID="$($ENV_DIR/bin/python -c 'import wandb; print(wandb.util.generate_id())')"
-  printf '%s\n' "$WANDB_RUN_ID" > "$STATE/wandb_run_id"
+  unset WANDB_RESUME WANDB_RUN_ID
 fi
 resume=()
 if find "$STAGE_DIR/checkpoints" -mindepth 2 -maxdepth 2 -type d -name dcp -print -quit | grep -q .; then
@@ -314,11 +348,38 @@ RUN_ROOT="${2:?prepared condition run root}"
 BASE_PORT="${3:-29800}"
 REPO="${REPO:-__REPO__}"
 ENV_DIR="${ENV_DIR:-/mnt/nfs/vlm-k1kong/envs/fastvideo}"
-: "${WANDB_API_KEY:?export WANDB_API_KEY at launch time}"
-export REPO ENV_DIR CONDITION RUN_ROOT
+WANDB_MODE="${WANDB_MODE:-online}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+case "$PREFLIGHT_ONLY" in
+  0|1) ;;
+  *)
+    echo "PREFLIGHT_ONLY must be 0 or 1, got: $PREFLIGHT_ONLY" >&2
+    exit 2
+    ;;
+esac
+case "$WANDB_MODE" in
+  online)
+    if [[ "$PREFLIGHT_ONLY" == 0 && -z "${WANDB_API_KEY:-}" ]]; then
+      echo "WANDB_MODE=online requires WANDB_API_KEY at runtime." >&2
+      exit 2
+    fi
+    ;;
+  offline)
+    unset WANDB_API_KEY
+    ;;
+  *)
+    echo "Unsupported WANDB_MODE=$WANDB_MODE; expected online or offline." >&2
+    exit 2
+    ;;
+esac
+export REPO ENV_DIR CONDITION RUN_ROOT WANDB_MODE PREFLIGHT_ONLY
 
 run_stage() {
   local stage="$1" final="$2" port="$3"
+  if [[ "$PREFLIGHT_ONLY" == 1 ]]; then
+    STAGE="$stage" MASTER_PORT="$port" bash "$RUN_ROOT/scripts/train_stage.sh"
+    return
+  fi
   if [[ -d "$RUN_ROOT/$stage/checkpoints/checkpoint-$final/dcp" ]] &&
      [[ "$(cat "$RUN_ROOT/$stage/state/exit_code" 2>/dev/null || true)" == 0 ]]; then
     echo "$CONDITION $stage checkpoint-$final already complete; skipping"
@@ -349,6 +410,14 @@ export_stage() {
     2>&1 | tee "$RUN_ROOT/$stage/logs/export.log"
   printf '%s\n' "$current" > "$marker"
 }
+
+if [[ "$PREFLIGHT_ONLY" == 1 ]]; then
+  run_stage tf 3000 "$((BASE_PORT + 1))"
+  run_stage cd 2000 "$((BASE_PORT + 2))"
+  run_stage sf 1000 "$((BASE_PORT + 3))"
+  echo "$CONDITION launcher preflight passed for tf, cd, and sf; no training was started."
+  exit 0
+fi
 
 mkdir -p "$RUN_ROOT/state"
 on_exit() {
@@ -383,7 +452,31 @@ printf 'completed\n' > "$RUN_ROOT/state/status"; date -Is > "$RUN_ROOT/state/fin
 SEQUENCE = r"""#!/usr/bin/env bash
 set -euo pipefail
 ROOT="${1:?prepared experiment root}"
-: "${WANDB_API_KEY:?export WANDB_API_KEY at launch time}"
+WANDB_MODE="${WANDB_MODE:-online}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+case "$PREFLIGHT_ONLY" in
+  0|1) ;;
+  *)
+    echo "PREFLIGHT_ONLY must be 0 or 1, got: $PREFLIGHT_ONLY" >&2
+    exit 2
+    ;;
+esac
+case "$WANDB_MODE" in
+  online)
+    if [[ "$PREFLIGHT_ONLY" == 0 && -z "${WANDB_API_KEY:-}" ]]; then
+      echo "WANDB_MODE=online requires WANDB_API_KEY at runtime." >&2
+      exit 2
+    fi
+    ;;
+  offline)
+    unset WANDB_API_KEY
+    ;;
+  *)
+    echo "Unsupported WANDB_MODE=$WANDB_MODE; expected online or offline." >&2
+    exit 2
+    ;;
+esac
+export WANDB_MODE PREFLIGHT_ONLY
 for condition in A12 A13 A14 A15; do
   bash "$ROOT/scripts/run_condition.sh" "$condition" "$ROOT/$condition" "$((29800 + 10#${condition#A} * 10))"
 done
@@ -430,6 +523,19 @@ To run all four sequentially on one 4-GPU node:
 
     export WANDB_API_KEY=...
     bash {root}/scripts/run_all_sequential.sh {root}
+
+Online W&B is the default. For an intentionally offline launch, omit the key
+and set `WANDB_MODE=offline`. Training checkpoints still resume from `latest`,
+but W&B does not merge separate offline process restarts into one run; sync the
+resulting offline runs individually later.
+
+To validate all three configs for one condition without starting training,
+creating W&B state, or requiring a key:
+
+    PREFLIGHT_ONLY=1 bash {root}/scripts/run_condition.sh A12 {root}/A12 29820
+
+`PREFLIGHT_ONLY=1` is also supported by `run_all_sequential.sh`; it validates
+all twelve configs and exits before queue state or checkpoint checks.
 """
 
 

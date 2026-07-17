@@ -1,8 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
-: "${RUN_ROOT:?}" "${STAGE:?}" "${MASTER_PORT:?}" "${WANDB_API_KEY:?}"
+: "${RUN_ROOT:?}" "${STAGE:?}" "${MASTER_PORT:?}"
 REPO="${REPO:-/mnt/nfs/vlm-k1kong/FastVideo-openvid-a12-a15-final-20260717}"
 ENV_DIR="${ENV_DIR:-/mnt/nfs/vlm-k1kong/envs/fastvideo}"
+WANDB_MODE="${WANDB_MODE:-online}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+case "$WANDB_MODE" in
+  online)
+    if [[ "$PREFLIGHT_ONLY" == 0 && -z "${WANDB_API_KEY:-}" ]]; then
+      echo "WANDB_MODE=online requires WANDB_API_KEY at runtime." >&2
+      exit 2
+    fi
+    ;;
+  offline)
+    unset WANDB_API_KEY
+    ;;
+  *)
+    echo "Unsupported WANDB_MODE=$WANDB_MODE; expected online or offline." >&2
+    exit 2
+    ;;
+esac
+case "$PREFLIGHT_ONLY" in
+  0|1) ;;
+  *)
+    echo "PREFLIGHT_ONLY must be 0 or 1, got: $PREFLIGHT_ONLY" >&2
+    exit 2
+    ;;
+esac
 REQUIRED_ANCESTOR="30ada30e4c6b05aa68cd1eb8940a34d149457147"
 STAGE_DIR="$RUN_ROOT/$STAGE"
 CONFIG="$STAGE_DIR/config/run.yaml"
@@ -22,8 +46,8 @@ export CUDA_CACHE_PATH=/mnt/lustre/vlm-k1kong/cuda-cache
 export TRITON_CACHE_DIR="/mnt/lustre/vlm-k1kong/triton-cache/openvid-a12-a15/${HOSTNAME}/${CONDITION}/${STAGE}"
 export TORCHINDUCTOR_CACHE_DIR="/mnt/lustre/vlm-k1kong/torchinductor-cache/openvid-a12-a15/${HOSTNAME}/${CONDITION}/${STAGE}"
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
-export WANDB_MODE=online WANDB_ENTITY=kaiqin_kong_ucsd
-export WANDB_PROJECT=causal_forcing_openvid_a12_a15 WANDB_RESUME=allow
+export WANDB_MODE WANDB_ENTITY=kaiqin_kong_ucsd
+export WANDB_PROJECT=causal_forcing_openvid_a12_a15
 export TOKENIZERS_PARALLELISM=false FASTVIDEO_DIST_TIMEOUT_MINUTES=120
 export TORCH_NCCL_BLOCKING_WAIT=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONUNBUFFERED=1 VIRTUAL_ENV="$ENV_DIR" PATH="$ENV_DIR/bin:$PATH" PYTHONPATH="$REPO"
@@ -61,11 +85,21 @@ if errors:
 print(f"OpenVid streaming config preflight passed: {config_path}")
 PY
 
-if [[ -s "$STATE/wandb_run_id" ]]; then
-  export WANDB_RUN_ID="$(<"$STATE/wandb_run_id")"
+if [[ "$PREFLIGHT_ONLY" == 1 ]]; then
+  echo "Launcher preflight passed without starting training: WANDB_MODE=$WANDB_MODE config=$CONFIG"
+  exit 0
+fi
+
+if [[ "$WANDB_MODE" == online ]]; then
+  export WANDB_RESUME=allow
+  if [[ -s "$STATE/wandb_run_id" ]]; then
+    export WANDB_RUN_ID="$(<"$STATE/wandb_run_id")"
+  else
+    export WANDB_RUN_ID="$($ENV_DIR/bin/python -c 'import wandb; print(wandb.util.generate_id())')"
+    printf '%s\n' "$WANDB_RUN_ID" > "$STATE/wandb_run_id"
+  fi
 else
-  export WANDB_RUN_ID="$($ENV_DIR/bin/python -c 'import wandb; print(wandb.util.generate_id())')"
-  printf '%s\n' "$WANDB_RUN_ID" > "$STATE/wandb_run_id"
+  unset WANDB_RESUME WANDB_RUN_ID
 fi
 resume=()
 if find "$STAGE_DIR/checkpoints" -mindepth 2 -maxdepth 2 -type d -name dcp -print -quit | grep -q .; then

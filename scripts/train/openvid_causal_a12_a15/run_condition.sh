@@ -5,11 +5,38 @@ RUN_ROOT="${2:?prepared condition run root}"
 BASE_PORT="${3:-29800}"
 REPO="${REPO:-/mnt/nfs/vlm-k1kong/FastVideo-openvid-a12-a15-final-20260717}"
 ENV_DIR="${ENV_DIR:-/mnt/nfs/vlm-k1kong/envs/fastvideo}"
-: "${WANDB_API_KEY:?export WANDB_API_KEY at launch time}"
-export REPO ENV_DIR CONDITION RUN_ROOT
+WANDB_MODE="${WANDB_MODE:-online}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+case "$PREFLIGHT_ONLY" in
+  0|1) ;;
+  *)
+    echo "PREFLIGHT_ONLY must be 0 or 1, got: $PREFLIGHT_ONLY" >&2
+    exit 2
+    ;;
+esac
+case "$WANDB_MODE" in
+  online)
+    if [[ "$PREFLIGHT_ONLY" == 0 && -z "${WANDB_API_KEY:-}" ]]; then
+      echo "WANDB_MODE=online requires WANDB_API_KEY at runtime." >&2
+      exit 2
+    fi
+    ;;
+  offline)
+    unset WANDB_API_KEY
+    ;;
+  *)
+    echo "Unsupported WANDB_MODE=$WANDB_MODE; expected online or offline." >&2
+    exit 2
+    ;;
+esac
+export REPO ENV_DIR CONDITION RUN_ROOT WANDB_MODE PREFLIGHT_ONLY
 
 run_stage() {
   local stage="$1" final="$2" port="$3"
+  if [[ "$PREFLIGHT_ONLY" == 1 ]]; then
+    STAGE="$stage" MASTER_PORT="$port" bash "$RUN_ROOT/scripts/train_stage.sh"
+    return
+  fi
   if [[ -d "$RUN_ROOT/$stage/checkpoints/checkpoint-$final/dcp" ]] &&
      [[ "$(cat "$RUN_ROOT/$stage/state/exit_code" 2>/dev/null || true)" == 0 ]]; then
     echo "$CONDITION $stage checkpoint-$final already complete; skipping"
@@ -40,6 +67,14 @@ export_stage() {
     2>&1 | tee "$RUN_ROOT/$stage/logs/export.log"
   printf '%s\n' "$current" > "$marker"
 }
+
+if [[ "$PREFLIGHT_ONLY" == 1 ]]; then
+  run_stage tf 3000 "$((BASE_PORT + 1))"
+  run_stage cd 2000 "$((BASE_PORT + 2))"
+  run_stage sf 1000 "$((BASE_PORT + 3))"
+  echo "$CONDITION launcher preflight passed for tf, cd, and sf; no training was started."
+  exit 0
+fi
 
 mkdir -p "$RUN_ROOT/state"
 on_exit() {
