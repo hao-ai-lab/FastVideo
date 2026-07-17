@@ -104,7 +104,5 @@ def test_admission_controller_applies_user_and_config_caps(tmp_path, monkeypatch
     controller = BatchAdmissionController(args)
 
     assert controller.enabled is True
-    assert controller.max_admissible_batch_size(request) == 3
-    assert controller.batch_is_full([request, request, request]) is True
     assert controller.reject_reason_for_candidate([request, request, request], request) == "config_cap:3"
     assert controller.reject_reason_for_candidate([request, request], request) is None

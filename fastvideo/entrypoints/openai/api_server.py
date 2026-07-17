@@ -61,23 +61,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Model loaded successfully.")
 
     video_batch_scheduler: VideoBatchScheduler | None = None
-    if args.batching_mode == "dynamic" and args.batching_max_size > 1:
-        video_batch_scheduler = VideoBatchScheduler(generator, args)
-        await video_batch_scheduler.start()
-        logger.info(
-            "Started dynamic video batch scheduler: max_size=%d delay_ms=%.2f",
-            args.batching_max_size,
-            args.batching_delay_ms,
-        )
-
-    set_state(
-        generator,
-        args,
-        output_dir,
-        default_request=default_request,
-        video_batch_scheduler=video_batch_scheduler,
-    )
     try:
+        if args.batching_mode == "dynamic" and args.batching_max_size > 1:
+            video_batch_scheduler = VideoBatchScheduler(generator, args)
+            await video_batch_scheduler.start()
+            logger.info(
+                "Started dynamic video batch scheduler: max_size=%d delay_ms=%.2f",
+                args.batching_max_size,
+                args.batching_delay_ms,
+            )
+
+        set_state(
+            generator,
+            args,
+            output_dir,
+            default_request=default_request,
+            video_batch_scheduler=video_batch_scheduler,
+        )
         yield  # server is running
     finally:
         logger.info("Shutting down — releasing model resources ...")

@@ -491,6 +491,42 @@ def test_generate_prepared_work_items_merges_compatible_latent_requests(monkeypa
     assert results[1]["samples"].flatten().tolist() == [4.0, 5.0, 6.0, 7.0]
 
 
+@pytest.mark.parametrize(
+    ("return_frame_values", "save_video_values"),
+    [
+        ((False, True), (False, False)),
+        ((True, False), (False, False)),
+        ((False, False), (False, True)),
+        ((False, False), (True, False)),
+    ],
+)
+def test_merge_work_items_aggregates_output_requirements_in_both_orders(
+    tmp_path,
+    return_frame_values,
+    save_video_values,
+):
+    vg = _new_video_generator()
+    vg.fastvideo_args = _batching_fastvideo_args()
+    prompts = ("one", "two")
+    params = [
+        _small_sampling_param(save_video=save_video, return_frames=return_frames)
+        for return_frames, save_video in zip(return_frame_values, save_video_values, strict=True)
+    ]
+    work_items = [
+        vg._prepare_generation_work_item(
+            prompt,
+            param,
+            vg.fastvideo_args,
+            output_path=str(tmp_path / f"{prompt}.mp4"),
+        ) for prompt, param in zip(prompts, params, strict=True)
+    ]
+
+    merged = vg._merge_work_items(work_items)
+
+    assert merged.batch.return_frames is any(return_frame_values)
+    assert merged.batch.save_video is any(save_video_values)
+
+
 def test_generate_prepared_work_items_falls_back_for_incompatible_requests(monkeypatch, tmp_path):
     vg = _new_video_generator()
     vg.fastvideo_args = _batching_fastvideo_args()

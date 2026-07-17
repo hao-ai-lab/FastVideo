@@ -1177,8 +1177,8 @@ class VideoGenerator:
             _extra_overrides=first.batch.extra,
         )
         merged.batch.seeds = [int(item.sampling_param.seed) for item in work_items]
-        merged.batch.extra["dynamic_batch_size"] = len(work_items)
-        merged.batch.extra["dynamic_batch_output_paths"] = [item.output_path for item in work_items]
+        merged.batch.save_video = any(item.batch.save_video for item in work_items)
+        merged.batch.return_frames = any(item.batch.return_frames for item in work_items)
         return merged
 
     def _can_merge_work_items(

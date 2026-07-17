@@ -40,11 +40,6 @@ class AdmissionLimit:
             return f"cost_budget:{batch_cost:.0f}>{self.max_cost:.0f}"
         return None
 
-    def stop_reason_for_next_cost(self, next_batch_cost: float) -> str | None:
-        if self.max_cost is not None and next_batch_cost > self.max_cost:
-            return f"cost_budget_next:{next_batch_cost:.0f}>{self.max_cost:.0f}"
-        return None
-
 
 @dataclass(frozen=True)
 class BatchingRule:
@@ -152,31 +147,6 @@ class BatchAdmissionController:
             batch_size=len(proposed),
             batch_cost=self.estimate_batch_cost(proposed),
         )
-
-    def batch_is_full(self, requests: list[Any]) -> bool:
-        if not self.enabled or not requests:
-            return len(requests) >= self._user_max_batch_size
-
-        limit = self.limit_for(requests[0])
-        if len(requests) >= limit.max_batch_size:
-            return True
-
-        next_cost = self.estimate_batch_cost(requests + [requests[0]])
-        return limit.max_cost is not None and next_cost > limit.max_cost
-
-    def limit_reason_for_batch(self, requests: list[Any]) -> str | None:
-        if not self.enabled or not requests:
-            return None
-
-        limit = self.limit_for(requests[0])
-        if len(requests) >= limit.max_batch_size:
-            return limit.cap_reason or f"config_cap:{limit.max_batch_size}"
-
-        next_cost = self.estimate_batch_cost(requests + [requests[0]])
-        return limit.stop_reason_for_next_cost(next_cost)
-
-    def max_admissible_batch_size(self, request: Any) -> int:
-        return self.limit_for(request).max_batch_size
 
     def limit_for(self, request: Any) -> AdmissionLimit:
         rules = self._matching_rules(request)

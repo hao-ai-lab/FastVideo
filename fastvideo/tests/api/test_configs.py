@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from fastvideo.api import (
+    BatchingConfig,
     GenerationRequest,
     GeneratorConfig,
     RunConfig,
@@ -7,6 +8,10 @@ from fastvideo.api import (
     ServeConfig,
     config_to_dict,
 )
+
+
+def test_batching_config_is_available_from_public_api() -> None:
+    assert BatchingConfig().mode == "disabled"
 
 
 def test_run_config_roundtrip_preserves_nested_defaults() -> None:

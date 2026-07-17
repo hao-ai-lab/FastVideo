@@ -241,6 +241,51 @@ def test_lifespan_releases_generator_and_state_when_scheduler_stop_fails(monkeyp
     ]
 
 
+def test_lifespan_releases_generator_when_scheduler_start_fails(monkeypatch):
+    calls = []
+
+    class _Generator:
+
+        def shutdown(self):
+            calls.append("generator.shutdown")
+
+    class _Scheduler:
+
+        async def start(self):
+            calls.append("scheduler.start")
+            raise RuntimeError("unsupported pipeline")
+
+        async def stop(self):
+            calls.append("scheduler.stop")
+
+    generator = _Generator()
+    scheduler = _Scheduler()
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            fastvideo_args=_batch_scheduler_args(),
+            output_dir="outputs",
+            default_request=None,
+        ))
+    monkeypatch.setattr(api_server.VideoGenerator, "from_fastvideo_args", lambda _args: generator)
+    monkeypatch.setattr(api_server, "VideoBatchScheduler", lambda _generator, _args: scheduler)
+    monkeypatch.setattr(api_server, "set_state", lambda *args, **kwargs: calls.append("set_state"))
+    monkeypatch.setattr(api_server, "clear_state", lambda: calls.append("clear_state"))
+
+    async def run():
+        with pytest.raises(RuntimeError, match="unsupported pipeline"):
+            async with api_server.lifespan(app):
+                pytest.fail("lifespan yielded after scheduler startup failed")
+
+    asyncio.run(run())
+
+    assert calls == [
+        "scheduler.start",
+        "scheduler.stop",
+        "generator.shutdown",
+        "clear_state",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # parse_size
 # ---------------------------------------------------------------------------
