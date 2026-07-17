@@ -26,6 +26,10 @@ class DataConfig:
     preprocessed_data_type: str = "t2v"
     train_batch_size: int = 1
     dataloader_num_workers: int = 0
+    dataloader_type: str = "map"
+    streaming_manifest_path: str = ""
+    streaming_read_batch_size: int = 8
+    streaming_shuffle_row_groups: bool = True
     training_cfg_rate: float = 0.0
     seed: int = 0
     num_height: int = 0

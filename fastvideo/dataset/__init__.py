@@ -4,6 +4,10 @@ from torchvision.transforms import Lambda
 
 from fastvideo.dataset.parquet_dataset_map_style import (
     build_parquet_map_style_dataloader)
+from fastvideo.dataset.parquet_dataset_streaming_style import (
+    LatentsParquetStreamingDataset,
+    build_parquet_streaming_style_dataloader,
+)
 from fastvideo.dataset.ltx2_precomputed_dataset import (
     build_ltx2_precomputed_dataloader, LTX2PrecomputedDataset)
 from fastvideo.dataset.preprocessing_datasets import VideoCaptionMergedDataset, TextDataset
@@ -46,6 +50,8 @@ def gettextdataset(args) -> TextDataset:
 
 __all__ = [
     "build_parquet_map_style_dataloader",
+    "build_parquet_streaming_style_dataloader",
+    "LatentsParquetStreamingDataset",
     "build_ltx2_precomputed_dataloader",
     "LTX2PrecomputedDataset",
     "ValidationDataset",
