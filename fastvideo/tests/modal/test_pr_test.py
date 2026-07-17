@@ -293,6 +293,8 @@ def test_run_test_command_uses_nonshared_kernel_install_before_tests(monkeypatch
     monkeypatch.setenv("BUILDKITE_REPO", "https://example.com/FastVideo.git")
     monkeypatch.setenv("BUILDKITE_COMMIT", "0123456789abcdef")
     monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "false")
+    monkeypatch.setattr(module, "_checkout_repository",
+                        lambda *_args: None)
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     module.run_test_command("pytest fastvideo/tests/api -q", build_kernel=True)
