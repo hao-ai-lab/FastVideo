@@ -87,7 +87,7 @@ def test_group_data_fills_legacy_cohort_columns():
     assert all("legacy / legacy" not in fig.layout.title.text for fig in figs)
 
 
-def test_group_data_treats_present_blank_identity_as_invalid_v2():
+def test_group_data_treats_present_blank_or_schema_only_identity_as_invalid_v2():
     legacy_record = {
         "model_id": "wan-t2v-1.3b-2gpu",
         "gpu_type": "NVIDIA L40S",
@@ -104,12 +104,18 @@ def test_group_data_treats_present_blank_identity_as_invalid_v2():
             "commit_sha": "b" * 40,
             "workload_id": "",
         },
+        {
+            **legacy_record,
+            "timestamp": "2026-01-03T00:00:00+00:00",
+            "commit_sha": "c" * 40,
+            "result_schema_version": 2,
+        },
     ])
 
     groups = list(dashboard.group_data(df))
 
     assert len(groups) == 2
-    assert {key[0] for key, _group in groups} == {"legacy_v1", "invalid_v2"}
+    assert {(key[0], len(group)) for key, group in groups} == {("legacy_v1", 1), ("invalid_v2", 2)}
 
 
 def test_group_data_keeps_partial_v2_identity_scoped_by_display_metadata():

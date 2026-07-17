@@ -83,7 +83,8 @@ def _dataframe_value_is_missing(value: object) -> bool:
 
 
 def _dataframe_uses_v2_identity(record: object) -> bool:
-    if _cohort_value(record.get("result_schema_version")) == "2":
+    schema_version = record.get("result_schema_version")
+    if schema_version == 2 or schema_version == "2":
         return True
     return any(key in record and not _dataframe_value_is_missing(record.get(key))
                for key in COMPARISON_COHORT_KEYS)
