@@ -2,7 +2,8 @@
 # launch-dreamverse.sh — launch dreamverse-server on a compute node.
 #
 # Usage (from repo root):
-#   CUDA_VISIBLE_DEVICES=0 bash apps/dreamverse/scripts/launch-dreamverse.sh
+#   bash apps/dreamverse/scripts/launch-dreamverse.sh                          # GPUs 0-3, SP_SIZE=4
+#   CUDA_VISIBLE_DEVICES=0 bash apps/dreamverse/scripts/launch-dreamverse.sh   # single GPU, SP_SIZE=1
 
 set -euo pipefail
 
@@ -18,7 +19,9 @@ export DREAMVERSE_MAX_AUTOTUNE=true
 export LTX2_USE_DISTILLED_SIGMAS=0
 export LTX2_VIDEO_CONDITIONING_NUM_FRAMES=1
 export AUDIO_CONDITIONING_NUM_FRAMES=41
-export DREAMVERSE_SESSION_TIMEOUT_SECONDS=1800
+export DREAMVERSE_SESSION_TIMEOUT_SECONDS="${DREAMVERSE_SESSION_TIMEOUT_SECONDS:-1800}"
+# GB200 max-autotune warmup compiles can run for hours; keep the watchdog generous here
+export FASTVIDEO_STARTUP_WARMUP_TIMEOUT_SECONDS="${FASTVIDEO_STARTUP_WARMUP_TIMEOUT_SECONDS:-24000}"
 export CEREBRAS_API_KEY="${CEREBRAS_API_KEY:-}"  # set this in your env or ~/.env
 export FASTVIDEO_PROMPT_CEREBRAS_MODEL="gpt-oss-120b"
 export TORCHINDUCTOR_CACHE_DIR="$HOME/.cache/torchinductor"
@@ -40,7 +43,19 @@ export LD_LIBRARY_PATH="$CUDA_RT_DIR"
 
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
 export FASTVIDEO_GPU_COUNT="${FASTVIDEO_GPU_COUNT:-all}"
-export DREAMVERSE_SP_SIZE="${DREAMVERSE_SP_SIZE:-4}"
+# Default SP size to the usable GPU count so single-GPU invocations work.
+# A numeric FASTVIDEO_GPU_COUNT caps the pool below the visible count, and an
+# SP size above the pool size fails GPUPool startup with "Not enough GPUs".
+IFS=',' read -ra _VISIBLE_GPUS <<< "$CUDA_VISIBLE_DEVICES"
+# Count only non-empty tokens, matching gpu_pool.get_available_gpus (e.g. ",0,1" is 2 GPUs).
+_USABLE_GPU_COUNT=0
+for _gpu in "${_VISIBLE_GPUS[@]}"; do
+    [[ -n "${_gpu//[[:space:]]/}" ]] && _USABLE_GPU_COUNT=$((_USABLE_GPU_COUNT + 1))
+done
+if [[ "$FASTVIDEO_GPU_COUNT" =~ ^[0-9]+$ ]] && (( FASTVIDEO_GPU_COUNT < _USABLE_GPU_COUNT )); then
+    _USABLE_GPU_COUNT="$FASTVIDEO_GPU_COUNT"
+fi
+export DREAMVERSE_SP_SIZE="${DREAMVERSE_SP_SIZE:-$_USABLE_GPU_COUNT}"
 PORT="${DREAMVERSE_PORT:-8009}"
 
 FFMPEG_ENV="$(dirname "$0")/ffmpeg-env.sh"

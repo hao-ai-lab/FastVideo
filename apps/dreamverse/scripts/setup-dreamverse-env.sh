@@ -101,5 +101,5 @@ UV_CACHE_DIR="$LOCAL_DIR/cache" "$CONDA_PREFIX/bin/uv" pip install \
     https://github.com/flashinfer-ai/flashinfer/releases/download/v0.6.11.post3/flashinfer_python-0.6.11.post3-py3-none-any.whl
 
 echo ""
-echo "Done. On a compute node run:"
-echo "  CUDA_VISIBLE_DEVICES=0 bash apps/dreamverse/scripts/launch-dreamverse.sh"
+echo "Done. On a compute node run (GPUs 0-3 by default; set CUDA_VISIBLE_DEVICES to restrict):"
+echo "  bash apps/dreamverse/scripts/launch-dreamverse.sh"

@@ -265,7 +265,6 @@ class VideoGenerationWorker:
             EngineConfig,
             GeneratorConfig,
             OffloadConfig,
-            ParallelismConfig,
             PipelineSelection,
             QuantizationConfig,
         )

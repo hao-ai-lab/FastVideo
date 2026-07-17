@@ -76,9 +76,6 @@ if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
 # Active model configuration
 MODEL_CONFIG = MODEL_REGISTRY[ACTIVE_MODEL_ID]
 
-# Generation limits
-SESSION_TIMEOUT_SECONDS = 1800
-
 # Frame settings
 NUM_FRAMES = 121
 FRAME_HEIGHT = 1088
@@ -167,6 +164,9 @@ def _optional_env(*names: str) -> str | None:
             return normalized
     return None
 
+
+# Generation limits
+SESSION_TIMEOUT_SECONDS = _env_int("DREAMVERSE_SESSION_TIMEOUT_SECONDS", 300)
 
 DEVTOOLS_ENABLED = _env_bool("FASTVIDEO_ENABLE_DEVTOOLS", False)
 PROMPT_SAFETY_ENABLED = _env_bool("FASTVIDEO_ENABLE_PROMPT_SAFETY", False)
@@ -376,4 +376,4 @@ STARTUP_WARMUP_PROMPT = os.getenv(
     ("A cinematic drone shot over coastal cliffs at sunrise, "
      "golden light, gentle ocean waves, ultra detailed"),
 ).strip()
-STARTUP_WARMUP_TIMEOUT_SECONDS = max(1, _env_int("FASTVIDEO_STARTUP_WARMUP_TIMEOUT_SECONDS", 24000))
+STARTUP_WARMUP_TIMEOUT_SECONDS = max(1, _env_int("FASTVIDEO_STARTUP_WARMUP_TIMEOUT_SECONDS", 2400))

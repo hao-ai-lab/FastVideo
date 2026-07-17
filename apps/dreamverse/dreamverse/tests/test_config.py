@@ -150,10 +150,20 @@ def test_config_enables_prompt_safety_when_requested(monkeypatch):
 
 def test_config_uses_five_minute_session_timeout(monkeypatch):
     _set_required_prompt_keys(monkeypatch)
+    monkeypatch.delenv("DREAMVERSE_SESSION_TIMEOUT_SECONDS", raising=False)
 
     module = _load_config_module()
 
     assert module.SESSION_TIMEOUT_SECONDS == 300
+
+
+def test_config_session_timeout_env_override(monkeypatch):
+    _set_required_prompt_keys(monkeypatch)
+    monkeypatch.setenv("DREAMVERSE_SESSION_TIMEOUT_SECONDS", "1800")
+
+    module = _load_config_module()
+
+    assert module.SESSION_TIMEOUT_SECONDS == 1800
 
 
 def test_config_rejects_invalid_prompt_provider(monkeypatch):

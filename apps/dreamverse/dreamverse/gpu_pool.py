@@ -1023,7 +1023,11 @@ def get_available_gpus() -> list[int]:
     """Get list of available GPU IDs from environment or auto-detect."""
     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     if cuda_visible:
-        visible_gpu_ids = [int(x.strip()) for x in cuda_visible.split(",") if x.strip()]
+        try:
+            visible_gpu_ids = [int(x.strip()) for x in cuda_visible.split(",") if x.strip()]
+        except ValueError as exc:
+            raise RuntimeError("CUDA_VISIBLE_DEVICES must be a comma-separated list of integer GPU "
+                               f"indices (got {cuda_visible!r}); GPU UUIDs are not supported.") from exc
         return _limit_gpu_ids(visible_gpu_ids)
 
     # Auto-detect available GPUs

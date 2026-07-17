@@ -110,7 +110,7 @@ default_request:
     fps: 24                  # internal: gpu_pool.py:85 TARGET_FPS
 
 streaming:
-  # internal: config.py:33 SESSION_TIMEOUT_SECONDS = 300
+  # internal: config.py SESSION_TIMEOUT_SECONDS (env DREAMVERSE_SESSION_TIMEOUT_SECONDS, default 300)
   session_timeout_seconds: 300
   # internal: config.py:282-284 GENERATION_SEGMENT_CAP default 6
   generation_segment_cap: 6
