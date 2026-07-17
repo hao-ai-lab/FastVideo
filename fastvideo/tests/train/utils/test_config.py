@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU-only unit tests for :func:`load_run_config`."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,8 +28,7 @@ def _minimal_yaml() -> dict[str, Any]:
             },
         },
         "method": {
-            "_target_":
-            "fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod",
+            "_target_": "fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod",
         },
         "training": {},
     }
@@ -44,8 +44,7 @@ def test_minimal_yaml_loads_happy_path(tmp_path: Path) -> None:
 
     assert isinstance(cfg, RunConfig)
     assert isinstance(cfg.training, TrainingConfig)
-    assert cfg.method["_target_"] == (
-        "fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod")
+    assert cfg.method["_target_"] == ("fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod")
     assert "student" in cfg.models
     assert cfg.callbacks == {}
     # raw retains the original YAML dict for downstream logging.
@@ -64,6 +63,10 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
 
     assert t.data.train_batch_size == 1
     assert t.data.dataloader_num_workers == 0
+    assert t.data.dataloader_type == "map"
+    assert t.data.streaming_manifest_path == ""
+    assert t.data.streaming_read_batch_size == 8
+    assert t.data.streaming_shuffle_row_groups is True
     assert t.data.training_cfg_rate == 0.0
     assert t.data.seed == 0
 
@@ -107,6 +110,10 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "data_path": "/some/path",
             "train_batch_size": 2,
             "dataloader_num_workers": 4,
+            "dataloader_type": "streaming",
+            "streaming_manifest_path": "/owned/index/manifest.json",
+            "streaming_read_batch_size": 2,
+            "streaming_shuffle_row_groups": False,
             "training_cfg_rate": 0.1,
             "seed": 42,
             "num_height": 256,
@@ -136,9 +143,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "project_name": "myproj",
             "run_name": "myrun",
         },
-        "vsa": {
-            "sparsity": 0.5
-        },
+        "vsa": {"sparsity": 0.5},
         "model": {
             "weighting_scheme": "logit_normal",
             "logit_mean": 0.5,
@@ -156,6 +161,10 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
 
     assert t.data.train_batch_size == 2
     assert t.data.data_path == "/some/path"
+    assert t.data.dataloader_type == "streaming"
+    assert t.data.streaming_manifest_path == "/owned/index/manifest.json"
+    assert t.data.streaming_read_batch_size == 2
+    assert t.data.streaming_shuffle_row_groups is False
     assert t.data.num_frames == 33
     assert t.data.seed == 42
 
@@ -230,10 +239,13 @@ def test_missing_config_file_raises(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("betas_value, expected", [
-    ([0.8, 0.9], (0.8, 0.9)),
-    ("0.9,0.999", (0.9, 0.999)),
-])
+@pytest.mark.parametrize(
+    "betas_value, expected",
+    [
+        ([0.8, 0.9], (0.8, 0.9)),
+        ("0.9,0.999", (0.9, 0.999)),
+    ],
+)
 def test_betas_parses_list_and_string_forms(
     tmp_path: Path,
     betas_value: Any,
@@ -347,8 +359,7 @@ def test_callbacks_passed_through_when_present(tmp_path: Path) -> None:
     data = _minimal_yaml()
     data["callbacks"] = {
         "grad_clip": {
-            "_target_":
-            "fastvideo.train.callbacks.grad_clip.GradNormClipCallback",
+            "_target_": "fastvideo.train.callbacks.grad_clip.GradNormClipCallback",
             "max_grad_norm": 1.0,
         },
     }
