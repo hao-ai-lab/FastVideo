@@ -72,6 +72,27 @@ Decode is output-only, so lowering its precision is safe. (Encode seeds the
 denoising trajectory for I2V/causal models, so that stays at the pipeline's
 default — don't lower `vae_precision` blindly for those.)
 
+## Memory: one unified 128 GB pool
+
+The GB10 has **no separate VRAM** — CPU and GPU share one 128 GB LPDDR5X pool
+(~118 GB usable). Two practical consequences:
+
+- **`nvidia-smi` reports memory as `[N/A]`** on the GB10. For a model's real
+  GPU-side footprint use torch's allocator high-water mark
+  (`torch.cuda.max_memory_reserved()`); the system "used" figure conflates
+  CPU + GPU + cache and is only a soft upper bound. `spark_benchmark.py` prints
+  the torch figure for you.
+- **The 128 GB is a *working-set* ceiling, not storage** — the model cache lives
+  on the NVMe (3.7 TB, ample). What has to fit in 128 GB is weights + activations
+  + KV, and — critically — the **VAE decode buffers**, which is why tiling matters
+  (an untiled high-res decode can spike the pool into swap and lock the box).
+
+The recommended few-step models are comfortable here: their weights are small
+(1.3–2 B) and few-step generation keeps activations modest. The pressure comes
+from **decode resolution/frames**, not the model — a 1080p×121-frame untiled
+decode is what pushes the pool toward its ceiling. Run `spark_benchmark.py` to see
+the peak figure for your exact config.
+
 ## What helps vs. what doesn't on the GB10
 
 The honest summary — most "obvious" GPU optimizations don't move the needle on
@@ -132,6 +153,22 @@ is power-cycled. To avoid it:
   bare foreground high-parallelism build.
 - Leave `*_cpu_offload` at the example defaults — "CPU" offload is the *same*
   unified RAM on the GB10, so the win is tiling + sane resolution, not offloading.
+
+## Gotchas specific to the GB10
+
+A few things that surprise people on this box (beyond the memory notes above):
+
+- **Don't force `TORCH_SDPA` on a VSA checkpoint** (FastWan, LTX2.3-distilled).
+  The SDPA path builds a model without the gate weights the checkpoint carries and
+  fails to load. Run the model natively — VSA auto-routes to its Triton kernel on
+  `sm_121`.
+- **Few-step timings are noisy run-to-run** (~±30%) — one-time startup dominates a
+  3-step run. Compare in-process / as medians, never two separate single runs (the
+  benchmark script does this).
+- **`nvidia-smi` shows `[N/A]` for memory** — see [Memory](#memory-one-unified-128-gb-pool).
+- **Cosmos-2.5** uses a Qwen2.5-VL text encoder; make sure you're on a FastVideo
+  build recent enough to include its `transformers`-compatibility handling before
+  running it.
 
 ## Reproduce these numbers
 
