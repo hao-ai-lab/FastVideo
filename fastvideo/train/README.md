@@ -31,4 +31,4 @@ See `examples/train/` for configs and launch scripts.
 
 ## Guides
 
-- [Attn-QAT on the modular trainer](attn_qat/README.md)
+- [Attn-QAT on the modular trainer](../../docs/training/attn_qat.md)

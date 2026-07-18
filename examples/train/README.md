@@ -91,3 +91,7 @@ examples/train/
 ```
 
 See `configs/README.md` and `scenario/README.md` for details.
+
+The featured QAD Wan2.1 MixKit scenario runs Attn-QAT supervised fine-tuning,
+checkpoint export, and three-step DMD2. See the
+[Attn-QAT training guide](https://haoailab.com/FastVideo/training/attn_qat/).

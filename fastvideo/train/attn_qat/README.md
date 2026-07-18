@@ -1,5 +1,8 @@
 # Attn-QAT on the modular trainer
 
+The canonical, website-visible guide is
+[`docs/training/attn_qat.md`](../../../docs/training/attn_qat.md).
+
 Attn-QAT is integrated as a per-role model execution option in
 `fastvideo/train`. It is not a separate training method: `FineTuneMethod` and
 `DMD2Method` keep ownership of their losses and optimizer cadence, while each
@@ -82,13 +85,17 @@ because doing so would turn the run into non-QAT training.
 
 The `ATTN_QAT_TRAIN` forward and backward kernels live in
 `fastvideo-kernel/python/fastvideo_kernel/triton_kernels/attn_qat_train.py` and
-need no runtime patching. FastVideo selects the implementation at each call:
+need no runtime patching. They support different query and key/value sequence
+lengths for cross-attention. FastVideo selects the implementation at each call:
 
 - SM100 (`compute capability 10.0`) uses the optimized Triton forward and the
   split 64x64 Triton backward for the production non-causal, head-dimension-128
   QAT configuration when the KV sequence length is a multiple of 16.
-- SM120 (including RTX 5090) and every unsupported configuration continue to
-  use the previous Triton implementation.
+- SM120 (including RTX 5090) keeps the previous forward tiling, joins the
+  quantized and STE P@V operations, and uses a shallower backward pipeline for
+  long sequences.
+- Unsupported configurations continue to use the previous Triton
+  implementation.
 
 Stage 1 is therefore a single command:
 
@@ -97,14 +104,16 @@ cd /path/to/FastVideo
 NUM_GPUS=4 bash examples/train/scenario/qad_wan2_1_mixkit/run_stage1.sh
 ```
 
-The SM100 controls are:
+The architecture controls are:
 
 - `FASTVIDEO_ATTN_QAT_FWD_MODE=fast|balanced|reference` (default: `fast`);
 - `FASTVIDEO_ATTN_QAT_FWD_EXACT_M=0` (default) maximizes throughput; set it to
   `1` to recompute the reference-order statistic and keep `dV` bitwise
   compatible; and
 - `FASTVIDEO_ATTN_QAT_SM100_OPTIMIZED=0`, a debugging switch that forces the
-  previous forward and backward.
+  previous forward and backward; and
+- `FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV=0`, a comparison switch that restores
+  the split P@V path on SM120.
 
 Triton JIT-compiles a configuration on its first invocation and reuses the
 cache afterward.
