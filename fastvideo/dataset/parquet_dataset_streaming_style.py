@@ -211,6 +211,107 @@ def _contiguous_row_group_shards(row_groups: list[dict[str, Any]], num_shards: i
     return shards
 
 
+def reconstruct_streaming_dataset_state(
+    manifest: dict[str, Any],
+    *,
+    global_rank: int,
+    world_size: int,
+    sp_world_size: int,
+    num_workers: int,
+    batch_size: int,
+    read_batch_size: int,
+    seed: int,
+    shuffle_row_groups: bool,
+    yielded_samples: int,
+    worker_id: int = 0,
+) -> dict[str, Any]:
+    """Reconstruct an epoch-zero streaming cursor without reading Parquet.
+
+    This is intentionally strict and is meant for audited migration of legacy
+    checkpoints whose rank-local dataloader state was incorrectly stored in a
+    shared DCP key.  It refuses epoch rollover because the exact wrapper state
+    at that boundary depends on whether the iterator has observed StopIteration.
+    """
+    world_size = int(world_size)
+    sp_world_size = int(sp_world_size)
+    global_rank = int(global_rank)
+    num_workers = max(int(num_workers), 1)
+    batch_size = int(batch_size)
+    read_batch_size = int(read_batch_size)
+    yielded_samples = int(yielded_samples)
+    worker_id = int(worker_id)
+    if world_size < 1 or sp_world_size < 1 or world_size % sp_world_size:
+        raise ValueError("world_size must be positive and divisible by sp_world_size")
+    if not 0 <= global_rank < world_size:
+        raise ValueError("global_rank is outside the requested world")
+    if not 0 <= worker_id < num_workers:
+        raise ValueError("worker_id is outside the requested worker layout")
+    if batch_size < 1 or read_batch_size < 1:
+        raise ValueError("batch_size and read_batch_size must be positive")
+    if yielded_samples < 0 or yielded_samples % batch_size:
+        raise ValueError("yielded_samples must be a non-negative batch multiple")
+
+    row_groups = manifest.get("row_groups")
+    if not isinstance(row_groups, list) or not row_groups:
+        raise ValueError("Streaming manifest has no row groups")
+    num_sp_groups = world_size // sp_world_size
+    shards = _contiguous_row_group_shards(
+        row_groups,
+        num_sp_groups * num_workers,
+    )
+    shard_rows = [sum(int(item["rows"]) for item in shard) for shard in shards]
+    samples_per_worker = min(shard_rows) // batch_size * batch_size
+    if samples_per_worker == 0:
+        raise ValueError("Dataset is too small for the requested topology")
+    if yielded_samples >= samples_per_worker:
+        raise ValueError(
+            "Legacy cursor reconstruction only supports the first epoch and "
+            "requires yielded_samples < samples_per_worker"
+        )
+
+    sp_group_index = global_rank // sp_world_size
+    shard_index = sp_group_index * num_workers + worker_id
+    shard = list(shards[shard_index])
+    if shuffle_row_groups:
+        random.Random(int(seed)).shuffle(shard)
+
+    row_group_position = 0
+    row_offset = 0
+    remaining = yielded_samples
+    if remaining:
+        for position, item in enumerate(shard):
+            rows = int(item["rows"])
+            if remaining <= rows:
+                row_group_position = position
+                row_offset = remaining
+                break
+            remaining -= rows
+        else:
+            raise ValueError("yielded_samples exceeds the selected streaming shard")
+
+    return {
+        "version": _STATE_VERSION,
+        "manifest_fingerprint": str(manifest["fingerprint"]),
+        "topology": {
+            "global_rank": global_rank,
+            "world_size": world_size,
+            "sp_world_size": sp_world_size,
+            "sp_group_index": sp_group_index,
+            "num_workers": num_workers,
+            "batch_size": batch_size,
+            "read_batch_size": read_batch_size,
+            "seed": int(seed),
+            "shuffle_row_groups": bool(shuffle_row_groups),
+            "samples_per_worker": samples_per_worker,
+        },
+        "worker_id": worker_id,
+        "epoch": 0,
+        "row_group_position": row_group_position,
+        "row_offset": row_offset,
+        "yielded_samples": yielded_samples,
+    }
+
+
 class LatentsParquetStreamingDataset(IterableDataset):
     """Sequential row-group loader with deterministic DP/SP sharding.
 

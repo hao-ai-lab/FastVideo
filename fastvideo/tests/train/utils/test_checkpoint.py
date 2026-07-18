@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import torch
+import torch.distributed.checkpoint as dcp
+
+import fastvideo.train.utils.checkpoint as checkpoint_module
 
 from fastvideo.train.utils.checkpoint import (
     CheckpointConfig,
@@ -86,6 +90,44 @@ class _MissingLoad:
         return {}
 
 
+class _Method:
+
+    def checkpoint_state(self) -> dict[str, Any]:
+        return {"method": _Full()}
+
+
+class _RecordingStateful:
+
+    def __init__(self, state: dict[str, Any] | None = None) -> None:
+        self.state = dict(state or {})
+        self.loaded: dict[str, Any] | None = None
+
+    def state_dict(self) -> dict[str, Any]:
+        return dict(self.state)
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        self.loaded = dict(state)
+
+
+class _LoaderWithDataset(_RecordingStateful):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.dataset = _RecordingStateful()
+
+
+class _TensorStateful:
+
+    def __init__(self, value: int) -> None:
+        self.value = torch.tensor([value], dtype=torch.int64)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"value": self.value}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        self.value = state["value"]
+
+
 def test_is_stateful_true_for_full_object() -> None:
     assert _is_stateful(_Full()) is True
 
@@ -96,6 +138,150 @@ def test_is_stateful_false_when_missing_state_dict() -> None:
 
 def test_is_stateful_false_when_missing_load_state_dict() -> None:
     assert _is_stateful(_MissingLoad()) is False
+
+
+def test_dataloader_is_not_part_of_shared_dcp_state(tmp_path: Path) -> None:
+    manager = CheckpointManager(
+        method=_Method(),
+        dataloader=_RecordingStateful({"cursor": 7}),
+        output_dir=str(tmp_path),
+        config=CheckpointConfig(save_steps=1, keep_last=0),
+    )
+    assert set(manager._build_states()) == {"method"}
+
+
+def test_dcp_partial_load_ignores_legacy_dataloader_key(tmp_path: Path) -> None:
+    checkpoint_dir = tmp_path / "dcp"
+    dcp.save(
+        {
+            "method": _TensorStateful(7),
+            "dataloader": _TensorStateful(99),
+        },
+        checkpoint_id=str(checkpoint_dir),
+    )
+    restored = _TensorStateful(-1)
+    dcp.load({"method": restored}, checkpoint_id=str(checkpoint_dir))
+    assert restored.value.item() == 7
+
+
+def test_legacy_single_rank_dataloader_dcp_fallback(tmp_path: Path) -> None:
+    checkpoint_dir = _make_checkpoint_dir(tmp_path, 10)
+    dcp.save(
+        {"dataloader": _TensorStateful(42)},
+        checkpoint_id=str(checkpoint_dir / "dcp"),
+    )
+    restored = _TensorStateful(-1)
+    manager = CheckpointManager(
+        method=_Method(),
+        dataloader=restored,
+        output_dir=str(tmp_path),
+        config=CheckpointConfig(save_steps=1, keep_last=0),
+    )
+    manager._load_dataloader_snapshot(checkpoint_dir, 10)
+    assert restored.value.item() == 42
+
+
+def test_rank_local_dataloader_sidecar_roundtrip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(checkpoint_module, "_rank", lambda: 3)
+    monkeypatch.setattr(checkpoint_module, "_world_size", lambda: 8)
+    checkpoint_dir = _make_checkpoint_dir(tmp_path, 20)
+    original = _RecordingStateful({"cursor": 11})
+    manager = CheckpointManager(
+        method=_Method(),
+        dataloader=original,
+        output_dir=str(tmp_path),
+        config=CheckpointConfig(save_steps=1, keep_last=0),
+    )
+    manager._save_dataloader_snapshot(checkpoint_dir, 20)
+    path = checkpoint_dir / "dataloader_state_rank3.pt"
+    assert path.is_file()
+    assert not list(checkpoint_dir.glob(".*.tmp"))
+
+    restored = _RecordingStateful()
+    restored_manager = CheckpointManager(
+        method=_Method(),
+        dataloader=restored,
+        output_dir=str(tmp_path),
+        config=CheckpointConfig(save_steps=1, keep_last=0),
+    )
+    restored_manager._load_dataloader_snapshot(checkpoint_dir, 20)
+    assert restored.loaded == {"cursor": 11}
+
+
+def test_dataset_only_migration_sidecar_uses_loader_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(checkpoint_module, "_rank", lambda: 1)
+    monkeypatch.setattr(checkpoint_module, "_world_size", lambda: 4)
+    checkpoint_dir = _make_checkpoint_dir(tmp_path, 10)
+    migration_dir = tmp_path / "migration"
+    migration_dir.mkdir()
+    torch.save(
+        {
+            "version": 1,
+            "rank": 1,
+            "world_size": 4,
+            "step": 10,
+            "state_kind": "dataset",
+            "state": {"cursor": 99},
+        },
+        migration_dir / "dataloader_state_rank1.pt",
+    )
+    monkeypatch.setenv("FASTVIDEO_DATALOADER_STATE_DIR", str(migration_dir))
+    loader = _LoaderWithDataset()
+    manager = CheckpointManager(
+        method=_Method(),
+        dataloader=loader,
+        output_dir=str(tmp_path),
+        config=CheckpointConfig(save_steps=1, keep_last=0),
+    )
+    manager._load_dataloader_snapshot(checkpoint_dir, 10)
+    assert loader.loaded is None
+    assert loader.dataset.loaded == {"cursor": 99}
+
+
+def test_dataloader_sidecar_metadata_mismatch_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(checkpoint_module, "_rank", lambda: 0)
+    monkeypatch.setattr(checkpoint_module, "_world_size", lambda: 2)
+    checkpoint_dir = _make_checkpoint_dir(tmp_path, 10)
+    torch.save(
+        {
+            "version": 1,
+            "rank": 1,
+            "world_size": 2,
+            "step": 10,
+            "state_kind": "dataloader",
+            "state": {},
+        },
+        checkpoint_dir / "dataloader_state_rank0.pt",
+    )
+    manager = CheckpointManager(
+        method=_Method(),
+        dataloader=_RecordingStateful(),
+        output_dir=str(tmp_path),
+        config=CheckpointConfig(save_steps=1, keep_last=0),
+    )
+    with pytest.raises(ValueError, match="rank mismatch"):
+        manager._load_dataloader_snapshot(checkpoint_dir, 10)
+
+
+def test_missing_rank_local_dataloader_sidecar_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(checkpoint_module, "_world_size", lambda: 2)
+    checkpoint_dir = _make_checkpoint_dir(tmp_path, 10)
+    manager = CheckpointManager(
+        method=_Method(),
+        dataloader=_RecordingStateful(),
+        output_dir=str(tmp_path),
+        config=CheckpointConfig(save_steps=1, keep_last=0),
+    )
+    with pytest.raises(RuntimeError, match="Legacy multi-rank DCP dataloader state is unsafe"):
+        manager._load_dataloader_snapshot(checkpoint_dir, 10)
 
 
 # ---------------------------------------------------------------------------

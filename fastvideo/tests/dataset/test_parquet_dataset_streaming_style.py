@@ -112,6 +112,57 @@ def test_state_dict_resumes_at_exact_next_batch(
     assert [item["id"] for item in actual] == [item["id"] for item in expected]
 
 
+def test_reconstructed_state_matches_continuous_cursor(
+    parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_dist(monkeypatch)
+    continuous = _dataset(parquet_root, tmp_path / "owned-cache")
+    iterator = iter(continuous)
+    for _ in range(3):
+        next(iterator)
+    expected_state = continuous.state_dict()
+    expected_next = next(iterator)["info_list"]
+
+    reconstructed_state = streaming.reconstruct_streaming_dataset_state(
+        continuous.manifest,
+        global_rank=0,
+        world_size=1,
+        sp_world_size=1,
+        num_workers=0,
+        batch_size=2,
+        read_batch_size=2,
+        seed=42,
+        shuffle_row_groups=False,
+        yielded_samples=6,
+    )
+    assert reconstructed_state == expected_state
+
+    resumed = _dataset(parquet_root, tmp_path / "owned-cache")
+    resumed.load_state_dict(reconstructed_state)
+    actual_next = next(iter(resumed))["info_list"]
+    assert [item["id"] for item in actual_next] == [item["id"] for item in expected_next]
+
+
+def test_reconstructed_state_refuses_epoch_boundary(
+    parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_dist(monkeypatch)
+    dataset = _dataset(parquet_root, tmp_path / "owned-cache")
+    with pytest.raises(ValueError, match="first epoch"):
+        streaming.reconstruct_streaming_dataset_state(
+            dataset.manifest,
+            global_rank=0,
+            world_size=1,
+            sp_world_size=1,
+            num_workers=0,
+            batch_size=2,
+            read_batch_size=2,
+            seed=42,
+            shuffle_row_groups=False,
+            yielded_samples=dataset.samples_per_worker,
+        )
+
+
 def test_odd_row_group_tails_are_carried_into_next_group(
     parquet_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

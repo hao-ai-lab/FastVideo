@@ -7,6 +7,7 @@ import os
 import random
 import re
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 _CHECKPOINT_DIR_RE = re.compile(r"^checkpoint-(\d+)$")
+_DATALOADER_STATE_VERSION = 1
+_DATALOADER_STATE_OVERRIDE_ENV = "FASTVIDEO_DATALOADER_STATE_DIR"
 
 
 def _is_stateful(obj: Any) -> bool:
@@ -39,9 +42,34 @@ def _rank() -> int:
     return 0
 
 
+def _world_size() -> int:
+    if dist.is_available() and dist.is_initialized():
+        return int(dist.get_world_size())
+    return 1
+
+
 def _barrier() -> None:
     if dist.is_available() and dist.is_initialized():
         dist.barrier()
+
+
+def _atomic_torch_save(payload: Any, path: Path) -> None:
+    """Atomically publish a rank-local torch payload."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_path = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            torch.save(payload, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
 
 
 def _parse_step_from_dir(checkpoint_dir: Path) -> int:
@@ -214,10 +242,6 @@ class CheckpointManager:
     def _build_states(self) -> dict[str, Any]:
         states: dict[str, Any] = self.method.checkpoint_state()
 
-        # Dataloader (optional but recommended for exact resume).
-        if _is_stateful(self.dataloader):
-            states["dataloader"] = self.dataloader
-
         # Callback state (e.g. EMA shadow weights, validation RNG).
         if self._callbacks is not None and _is_stateful(self._callbacks):
             states["callbacks"] = _CallbackStateWrapper(self._callbacks, )
@@ -261,6 +285,12 @@ class CheckpointManager:
             )
             self._write_metadata(checkpoint_dir, step)
         dcp.save(states, checkpoint_id=str(dcp_dir))
+        _barrier()
+
+        # Dataloader state is rank-local.  Saving it under one shared DCP key
+        # lets DCP deduplicate fields from different ranks into an invalid
+        # chimera.  Keep one atomic sidecar per rank instead.
+        self._save_dataloader_snapshot(checkpoint_dir, step)
         _barrier()
 
         if self._callbacks is not None:
@@ -325,6 +355,115 @@ class CheckpointManager:
             checkpoint_dir / f"rng_state_rank{rank}.pt",
         )
 
+    def _save_dataloader_snapshot(
+        self,
+        checkpoint_dir: Path,
+        step: int,
+    ) -> None:
+        if not _is_stateful(self.dataloader):
+            return
+        rank = _rank()
+        payload = {
+            "version": _DATALOADER_STATE_VERSION,
+            "rank": rank,
+            "world_size": _world_size(),
+            "step": int(step),
+            "state_kind": "dataloader",
+            "state": self.dataloader.state_dict(),
+        }
+        path = checkpoint_dir / f"dataloader_state_rank{rank}.pt"
+        _atomic_torch_save(payload, path)
+        logger.info("Saved rank-local dataloader state to %s", path)
+
+    def _resolve_dataloader_snapshot(
+        self,
+        checkpoint_dir: Path,
+    ) -> Path | None:
+        rank = _rank()
+        default_path = checkpoint_dir / f"dataloader_state_rank{rank}.pt"
+        if default_path.is_file():
+            return default_path
+
+        override_dir = os.environ.get(_DATALOADER_STATE_OVERRIDE_ENV, "").strip()
+        if override_dir:
+            override_path = (Path(os.path.expanduser(override_dir)).resolve() /
+                             f"dataloader_state_rank{rank}.pt")
+            if override_path.is_file():
+                return override_path
+            raise FileNotFoundError(
+                f"{_DATALOADER_STATE_OVERRIDE_ENV} is set, but rank {rank} "
+                f"state is missing: {override_path}"
+            )
+
+        # A single-rank legacy DCP cannot mix state from different ranks, so
+        # loading its original dataloader key remains safe and preserves
+        # backwards compatibility.
+        if _world_size() == 1:
+            return None
+
+        raise RuntimeError(
+            "Checkpoint has no rank-local dataloader state sidecar. Legacy "
+            "multi-rank DCP dataloader state is unsafe because identically "
+            "named rank-local fields can be deduplicated across ranks. "
+            f"Create audited migration sidecars and set {_DATALOADER_STATE_OVERRIDE_ENV}."
+        )
+
+    def _load_dataloader_snapshot(
+        self,
+        checkpoint_dir: Path,
+        step: int,
+    ) -> None:
+        if not _is_stateful(self.dataloader):
+            return
+        path = self._resolve_dataloader_snapshot(checkpoint_dir)
+        if path is None:
+            logger.warning(
+                "Loading legacy single-rank dataloader state from DCP at %s",
+                checkpoint_dir,
+            )
+            dcp.load(
+                {"dataloader": self.dataloader},
+                checkpoint_id=str(checkpoint_dir / "dcp"),
+            )
+            return
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+        if not isinstance(payload, dict):
+            raise ValueError(f"Invalid dataloader state payload: {path}")
+
+        expected = {
+            "version": _DATALOADER_STATE_VERSION,
+            "rank": _rank(),
+            "world_size": _world_size(),
+            "step": int(step),
+        }
+        for field, expected_value in expected.items():
+            actual = payload.get(field)
+            if actual != expected_value:
+                raise ValueError(
+                    f"Dataloader state {field} mismatch in {path}: "
+                    f"expected {expected_value!r}, got {actual!r}"
+                )
+
+        state_kind = payload.get("state_kind")
+        state = payload.get("state")
+        if not isinstance(state, dict):
+            raise ValueError(f"Dataloader state is not a dictionary: {path}")
+        if state_kind == "dataloader":
+            self.dataloader.load_state_dict(state)
+        elif state_kind == "dataset":
+            dataset = getattr(self.dataloader, "dataset", None)
+            if not _is_stateful(dataset):
+                raise ValueError(
+                    "Dataset-only migration state requires a stateful "
+                    f"dataloader.dataset: {path}"
+                )
+            dataset.load_state_dict(state)
+        else:
+            raise ValueError(
+                f"Unsupported dataloader state_kind {state_kind!r} in {path}"
+            )
+        logger.info("Restored rank-local dataloader state from %s", path)
+
     def load_rng_snapshot(
         self,
         checkpoint_path: str,
@@ -388,6 +527,7 @@ class CheckpointManager:
         states = self._build_states()
         logger.info("Loading Phase 2 checkpoint from %s", resolved)
         dcp.load(states, checkpoint_id=str(resolved / "dcp"))
+        self._load_dataloader_snapshot(resolved, step)
         if self._callbacks is not None:
             self._callbacks.on_checkpoint_load(
                 self.method,
