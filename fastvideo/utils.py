@@ -493,7 +493,12 @@ def import_pynvml():
     return pynvml
 
 
-def maybe_download_model(model_name_or_path: str, local_dir: str | None = None, download: bool = True) -> str:
+def maybe_download_model(
+    model_name_or_path: str,
+    local_dir: str | None = None,
+    download: bool = True,
+    revision: str | None = None,
+) -> str:
     """
     Check if the model path is a Hugging Face Hub model ID and download it if needed.
 
@@ -510,6 +515,7 @@ def maybe_download_model(model_name_or_path: str, local_dir: str | None = None, 
             ``org/repo/subfolder`` umbrella-repo reference.
         local_dir: Local directory to save the model
         download: Whether to download the model from Hugging Face Hub
+        revision: Optional immutable Hub revision.
 
     Returns:
         Local path to the model (or to the subfolder inside the snapshot).
@@ -550,6 +556,7 @@ def maybe_download_model(model_name_or_path: str, local_dir: str | None = None, 
                     repo_id=repo_id,
                     allow_patterns=[f"{subfolder}/**"],
                     local_dir=local_dir,
+                    revision=revision,
                 )
             # Defense-in-depth: ensure the resolved subfolder path stays
             # inside the snapshot root and that snapshot_download actually
@@ -569,7 +576,8 @@ def maybe_download_model(model_name_or_path: str, local_dir: str | None = None, 
         with get_lock(model_name_or_path):
             local_path = snapshot_download(repo_id=model_name_or_path,
                                            ignore_patterns=["*.onnx", "*.msgpack"],
-                                           local_dir=local_dir)
+                                           local_dir=local_dir,
+                                           revision=revision)
         logger.info("Downloaded model to %s", local_path)
         return str(local_path)
     except Exception as e:

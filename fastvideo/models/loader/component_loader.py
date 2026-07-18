@@ -391,18 +391,22 @@ class TextEncoderLoader(ComponentLoader):
             model_config.quant_config = quant_cls()
 
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
-            with target_device:
-                architectures = getattr(model_config, "architectures", [])
-                model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
-                if getattr(model_cls, "supports_hf_from_pretrained", False):
-                    model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
-                        model_path,
-                        model_config,  # type: ignore[arg-type]
-                        dtype=PRECISION_TO_TYPE[dtype],
-                        device=target_device,
-                    )
-                    return model.eval()
+            architectures = getattr(model_config, "architectures", [])
+            model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
+            if getattr(model_cls, "supports_hf_from_pretrained", False):
+                model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
+                    model_path,
+                    model_config,  # type: ignore[arg-type]
+                    dtype=PRECISION_TO_TYPE[dtype],
+                    device=target_device,
+                )
+                # HF passthrough encoders return before FastVideo's FSDP
+                # wrapping path, so the text stage needs their placement to
+                # put token tensors on the same device.
+                model._fastvideo_input_device = target_device
+                return model.eval()
 
+            with target_device:
                 model = model_cls(model_config)  # type: ignore
 
             weights_to_load = {name for name, _ in model.named_parameters()}
@@ -818,6 +822,24 @@ class VAELoader(ComponentLoader):
                     )
                 sd = safetensors_load_file(weight_path)
                 vae.load_state_dict(sd, strict=False)
+                return vae.eval()
+
+            if class_name == "LingBotWorld2WanVAE":
+                dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+                config.pop("_class_name", None)
+                vae_config = fastvideo_args.pipeline_config.vae_config
+                vae_config.update_model_arch(config)
+                vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+                weight_path = os.path.join(model_path, "Wan2.1_VAE.pth")
+                if not os.path.exists(weight_path):
+                    raise FileNotFoundError(
+                        f"Missing LingBot World 2 VAE weights: {weight_path}"
+                    )
+                vae = vae_cls(
+                    vae_config,
+                    checkpoint_path=weight_path,
+                    dtype=dtype,
+                ).to(target_device)
                 return vae.eval()
 
             # LTX-2 uses CausalVideoAutoencoder with nested "vae" config

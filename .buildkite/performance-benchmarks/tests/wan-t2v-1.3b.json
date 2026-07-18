@@ -3,7 +3,7 @@
   "config_schema_version": 2,
   "workload_id": "wan-t2v",
   "variant_id": "1.3b-sp2",
-  "benchmark_version": 2,
+  "benchmark_version": 3,
   "description": "Wan2.1 T2V 1.3B inference performance",
   "model": {
     "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",

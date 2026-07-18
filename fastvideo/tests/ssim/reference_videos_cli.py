@@ -18,7 +18,7 @@ VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
 # pixel-space models (e.g. LTX-2 distilled). Keeping them in the same upload
 # flow means seeding a new test only requires one HF round-trip.
 LATENT_EXTENSIONS = (".pt",)
-REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + LATENT_EXTENSIONS
+REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + LATENT_EXTENSIONS + (".png",)
 HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
 HF_REPO_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO"
 HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE"
@@ -51,10 +51,10 @@ def _default_repo_type() -> str:
 
 
 def _iter_reference_files(root: Path) -> Iterable[Path]:
-    """Yield video and latent (.pt) references under `root`.
+    """Yield supported references under `root`.
 
     Used by copy-local and the "has local references" marker probe so that
-    latent-only tests (no mp4) still satisfy readiness checks.
+    image- and latent-only tests (no mp4) still satisfy readiness checks.
     """
     for path in root.rglob("*"):
         if path.is_file() and path.suffix.lower() in REFERENCE_EXTENSIONS:

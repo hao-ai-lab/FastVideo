@@ -1,6 +1,8 @@
 env:
   IMAGE_VERSION: "py3.12-latest"
   BUILDKITE_CLEAN_CHECKOUT: true
+  # Buildkite only launches Modal; remote jobs initialize their own submodules.
+  BUILDKITE_GIT_SUBMODULES: false
 
 notify:
   - github_commit_status:

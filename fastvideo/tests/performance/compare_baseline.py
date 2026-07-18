@@ -23,7 +23,7 @@ from typing import Any
 
 try:
     from fastvideo.performance.hf_store import (
-        load_records_for_model,
+        load_records_for_identity,
         safe_float,
         sanitize,
         sync_from_hf,
@@ -40,7 +40,7 @@ except ImportError:
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
     from fastvideo.performance.hf_store import (
-        load_records_for_model,
+        load_records_for_identity,
         safe_float,
         sanitize,
         sync_from_hf,
@@ -89,6 +89,20 @@ COMPARISON_IDENTITY_KEYS = (
     "hardware_profile_id",
     "software_profile_id",
 )
+STATUS_PASS = "PASS"
+STATUS_REGRESSION = "REGRESSION"
+STATUS_CALIBRATION_NEEDED = "CALIBRATION_NEEDED"
+STATUS_RECIPE_MISMATCH = "RECIPE_MISMATCH"
+STATUS_INFRA_ERROR = "INFRA_ERROR"
+# Reserved for the promoted-baseline workflow; never emitted here.
+STATUS_QUALITY_BLOCKED = "QUALITY_BLOCKED"
+STATIC_THRESHOLD_FIELDS = (
+    ("avg_generation_time_s", "max_generation_time_s"),
+    ("max_peak_memory_mb", "max_peak_memory_mb"),
+    ("text_encoder_time_s", "max_text_encoder_time_s"),
+    ("dit_time_s", "max_dit_time_s"),
+    ("vae_decode_time_s", "max_vae_decode_time_s"),
+)
 
 
 def _should_persist_tracking() -> bool:
@@ -122,7 +136,13 @@ def _detect_run_source() -> str:
     return "unknown"
 
 
-def _is_baseline_eligible(run_source: str, success: bool) -> bool:
+def _is_baseline_eligible(
+    run_source: str,
+    success: bool,
+    comparison_status: str | None = None,
+) -> bool:
+    if comparison_status is not None and comparison_status != STATUS_PASS:
+        return False
     return run_source == "scheduled_main" and success
 
 
@@ -135,7 +155,7 @@ def _upload_allowed(record: dict[str, Any]) -> bool:
     return False
 
 
-def _result_failed_static_thresholds() -> bool:
+def _performance_pytest_failed() -> bool:
     value = os.environ.get("PERF_PYTEST_RC", "")
     if not value:
         return False
@@ -193,16 +213,50 @@ def _comparison_identity_filters(record: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _record_uses_v2_identity(record: dict[str, Any]) -> bool:
+    schema_version = record.get("result_schema_version")
+    return str(schema_version) == "2" or any(key in record for key in COMPARISON_IDENTITY_KEYS)
+
+
+def _recipe_cohort_filters(record: dict[str, Any]) -> dict[str, str]:
+    identity = _comparison_identity_filters(record)
+    return {
+        key: identity[key]
+        for key in ("workload_id", "variant_id", "benchmark_version")
+    }
+
+
 def _comparison_identity_filters_or_none(record: dict[str, Any]) -> dict[str, str] | None:
     try:
         return _comparison_identity_filters(record)
     except ValueError as exc:
-        print("Skipping rolling baseline comparison for "
-              f"{record.get('model_id', 'unknown')} on "
-              f"{record.get('gpu_type', 'unknown')}: {exc}. "
-              "The normalized artifact will still be written, but this record "
-              "will not be baseline eligible.")
+        if _record_uses_v2_identity(record):
+            print(f"Invalid v2 comparison identity for {record.get('model_id', 'unknown')}: {exc}")
+        else:
+            print("Skipping rolling baseline comparison for "
+                  f"{record.get('model_id', 'unknown')} on "
+                  f"{record.get('gpu_type', 'unknown')}: {exc}. "
+                  "The normalized artifact will still be written, but this record "
+                  "will not be baseline eligible.")
         return None
+
+
+def _recipe_mismatch_records(
+    record: dict[str, Any],
+    cohort_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    current_recipe = str(record.get("recipe_fingerprint"))
+    return [
+        item for item in cohort_records
+        if _record_can_authorize_recipe_mismatch(item)
+        and item.get("recipe_fingerprint") is not None
+        and str(item.get("recipe_fingerprint")).strip()
+        and str(item.get("recipe_fingerprint")) != current_recipe
+    ]
+
+
+def _record_can_authorize_recipe_mismatch(record: dict[str, Any]) -> bool:
+    return record.get("run_source") == "scheduled_main" or record.get("baseline_eligible") is True
 
 
 def _format_identity_filters(filters: dict[str, str]) -> str:
@@ -343,10 +397,97 @@ def _check_regressions(
     return failures
 
 
+def _fixed_threshold_failures(raw_result: dict[str, Any]) -> list[str]:
+    thresholds = raw_result.get("thresholds")
+    if not isinstance(thresholds, dict):
+        return []
+
+    failures = []
+    for result_key, threshold_key in STATIC_THRESHOLD_FIELDS:
+        current = safe_float(raw_result.get(result_key))
+        threshold = safe_float(thresholds.get(threshold_key))
+        if current is None or threshold is None or current <= threshold:
+            continue
+        failures.append(
+            f"{raw_result.get('benchmark_id', 'unknown')} {result_key} exceeded fixed threshold "
+            f"(current={current:.3f}, threshold={threshold:.3f})"
+        )
+    return failures
+
+
+def _pytest_infra_failure(record: dict[str, Any]) -> str:
+    return (f"{record['model_id']} performance pytest failed without an "
+            "attributable static-threshold regression "
+            f"(PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')})")
+
+
+def _recipe_mismatch_failure(
+    record: dict[str, Any],
+    recipe_mismatch_records: list[dict[str, Any]],
+) -> str:
+    seen = sorted({
+        str(item.get("recipe_fingerprint"))
+        for item in recipe_mismatch_records
+        if item.get("recipe_fingerprint") is not None
+    })
+    suffix = f"; existing recipe_fingerprint values: {', '.join(seen)}" if seen else ""
+    return (f"{record['model_id']} recipe_fingerprint={record.get('recipe_fingerprint')} "
+            "does not match baseline records for the same workload, variant, "
+            "and benchmark version across hardware and software profiles"
+            f"{suffix}")
+
+
+def _evaluate_record_comparison(
+    record: dict[str, Any],
+    baseline_records: list[dict[str, Any]],
+    recipe_mismatch_records: list[dict[str, Any]],
+    metric_policies: tuple[MetricPolicy, ...],
+    static_threshold_failures: list[str],
+    unattributed_pytest_failure: bool,
+) -> tuple[list[str], str, str]:
+    identity_filters = None
+    if _record_uses_v2_identity(record):
+        try:
+            identity_filters = _comparison_identity_filters(record)
+        except ValueError as exc:
+            failure = f"{record['model_id']} cannot compare v2 record: {exc}"
+            return [failure], STATUS_INFRA_ERROR, failure
+        if not baseline_records and recipe_mismatch_records:
+            failure = _recipe_mismatch_failure(record, recipe_mismatch_records)
+            return [failure], STATUS_RECIPE_MISMATCH, failure
+
+    if static_threshold_failures:
+        return static_threshold_failures, STATUS_REGRESSION, "; ".join(static_threshold_failures)
+
+    if unattributed_pytest_failure:
+        failure = _pytest_infra_failure(record)
+        return [failure], STATUS_INFRA_ERROR, failure
+
+    if not baseline_records:
+        if identity_filters is not None:
+            return [], STATUS_CALIBRATION_NEEDED, (
+                "No baseline found for exact comparable identity"
+                f"{_format_identity_filters(identity_filters)}"
+            )
+
+        return [], STATUS_PASS, f"No legacy baseline for {record['model_id']} on {record['gpu_type']}"
+
+    failures = _check_regressions(record, baseline_records, metric_policies)
+    if failures:
+        return failures, STATUS_REGRESSION, "; ".join(failures)
+
+    return [], STATUS_PASS, "Comparable baseline found with no gated regressions"
+
+
 def _compact_value(value: float | None, precision: int = 3) -> str:
     if value is None:
         return "n/a"
     return f"{value:.{precision}f}"
+
+
+def _markdown_cell(value: Any) -> str:
+    text = str(value) if value is not None else ""
+    return text.replace("\n", " ").replace("|", "/")
 
 
 def _build_summary_row(
@@ -400,6 +541,8 @@ def _build_summary_row(
         "threshold_exceeded_metrics": threshold_exceeded_metrics,
         "failing_metrics": failing_metrics,
         "failed": has_failed,
+        "status": record.get("comparison_status", STATUS_REGRESSION if has_failed else STATUS_PASS),
+        "status_reason": record.get("comparison_status_reason", ""),
     }
 
 
@@ -417,8 +560,8 @@ def _build_markdown_summary(
          "Throughput (curr/base) | Memory (curr/base) | "
          "Text Enc (curr/base) | DiT (curr/base) | "
          "VAE Decode (curr/base) | Worst Regression | Exceeded Metrics | "
-         "Failing Metrics | Status |"),
-        "|---|---|---:|---|---|---|---|---|---|---:|---|---|---|",
+         "Failing Metrics | Status | Status Detail |"),
+        "|---|---|---:|---|---|---|---|---|---|---:|---|---|---|---|",
     ]
 
     for row in summary_rows:
@@ -435,12 +578,14 @@ def _build_markdown_summary(
             else "none"
         )
         failing_metrics = ", ".join(row["failing_metrics"]) if row["failing_metrics"] else "none"
-        status = "FAIL" if row["failed"] else "PASS"
+        status = row["status"]
+        status_detail = row["status_reason"]
 
         lines.append(f"| {row['model_id']} | {row['gpu_type']} | "
                      f"{row['baseline_n']} | "
                      f"{' | '.join(metric_cells)} | "
-                     f"{worst_reg} | {exceeded_metrics} | {failing_metrics} | {status} |")
+                     f"{worst_reg} | {exceeded_metrics} | {failing_metrics} | "
+                     f"{_markdown_cell(status)} | {_markdown_cell(status_detail)} |")
 
     return "\n".join(lines) + "\n"
 
@@ -470,7 +615,7 @@ def _emit_markdown_summary(markdown: str, commit_sha: str) -> None:
 def main() -> int:
     persist_tracking = _should_persist_tracking()
     upload_policy = _normalized_upload_policy()
-    static_threshold_failed = _result_failed_static_thresholds()
+    performance_pytest_failed = _performance_pytest_failed()
 
     # Strict on upload-enabled runs: silent sync failure would make comparison
     # and upload state ambiguous.
@@ -481,6 +626,9 @@ def main() -> int:
         print(f"No performance result files found in {RESULTS_DIR}")
         return 0
 
+    static_threshold_failures = [_fixed_threshold_failures(raw) for raw in current_results]
+    unattributed_pytest_failure = performance_pytest_failed and not any(static_threshold_failures)
+
     all_failures: list[str] = []
     summary_rows: list[dict[str, Any]] = []
 
@@ -489,60 +637,74 @@ def main() -> int:
     else:
         print("Tracking persistence disabled: PERF_UPLOAD_POLICY=never")
 
-    if static_threshold_failed:
-        print(f"Static-threshold phase failed: PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')}")
+    if performance_pytest_failed:
+        if unattributed_pytest_failure:
+            print("Performance pytest failed without a measured static-threshold regression: "
+                  f"PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')}")
+        else:
+            print("Performance pytest failure attributed to per-record static thresholds: "
+                  f"PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')}")
 
-    for raw in current_results:
+    for raw, fixed_threshold_failures in zip(current_results, static_threshold_failures, strict=True):
         record = _normalize_record(raw)
         metric_policies = resolve_metric_policies(record.get("regression_thresholds"))
         identity_filters = _comparison_identity_filters_or_none(record)
 
         baseline_records: list[dict[str, Any]] = []
-        if identity_filters is None:
-            # Records without the full v2 identity block skip rolling-baseline
-            # comparison entirely: only the static thresholds gate them and
-            # they never become baseline eligible.
-            record["baseline_status"] = "skipped_missing_identity"
-            failures: list[str] = []
-        else:
-            baseline_records = load_records_for_model(
-                TRACKING_ROOT,
-                record["model_id"],
-                record["gpu_type"],
-                **identity_filters,
-                last_n=5,
-                successful_only=True,
-                baseline_eligible_only=True,
-            )
-
-            if not baseline_records:
-                # A brand-new cohort has NO regression gating until history
-                # accumulates — make that loud and machine-readable instead of
-                # an indistinguishable pass, so a cohort shift (intended or
-                # accidental, e.g. an identity-field change) never silently
-                # blinds the comparison.
-                record["baseline_status"] = "initialized_new_cohort"
-                print("=" * 72)
-                print(f"WARNING: NO BASELINE — initializing a NEW cohort for "
-                      f"{record['model_id']} on {record['gpu_type']}"
-                      f"{_format_identity_filters(identity_filters)}")
-                print("Regression gating is INACTIVE for this cohort until "
-                      "baseline history accumulates. If this cohort shift is "
-                      "unexpected, check the identity fields above.")
-                print("=" * 72)
-                failures = []
+        recipe_mismatch_records: list[dict[str, Any]] = []
+        try:
+            if identity_filters is None:
+                record["baseline_status"] = (
+                    "invalid_identity" if _record_uses_v2_identity(record) else "skipped_missing_identity"
+                )
             else:
-                record["baseline_status"] = "compared"
-                failures = _check_regressions(record, baseline_records, metric_policies)
-        if static_threshold_failed:
-            failures.append(f"{record['model_id']} fixed-threshold phase failed "
-                            f"(PERF_PYTEST_RC={os.environ.get('PERF_PYTEST_RC')})")
+                baseline_records = load_records_for_identity(
+                    TRACKING_ROOT,
+                    identity_filters,
+                    last_n=5,
+                    successful_only=True,
+                    baseline_eligible_only=True,
+                )
+                if baseline_records:
+                    record["baseline_status"] = "compared"
+                else:
+                    recipe_cohort_records = load_records_for_identity(
+                        TRACKING_ROOT,
+                        _recipe_cohort_filters(record),
+                        successful_only=True,
+                    )
+                    recipe_mismatch_records = _recipe_mismatch_records(record, recipe_cohort_records)
+                    record["baseline_status"] = (
+                        "recipe_mismatch" if recipe_mismatch_records else "initialized_new_cohort"
+                    )
+
+            failures, comparison_status, comparison_status_reason = _evaluate_record_comparison(
+                record,
+                baseline_records,
+                recipe_mismatch_records,
+                metric_policies,
+                fixed_threshold_failures,
+                unattributed_pytest_failure,
+            )
+        except Exception as exc:
+            comparison_status = STATUS_INFRA_ERROR
+            comparison_status_reason = f"{record['model_id']} baseline comparison hit an infra error: {exc}"
+            failures = [comparison_status_reason]
+            baseline_records = []
+            record["baseline_status"] = "infra_error"
+
+        record["comparison_status"] = comparison_status
+        record["comparison_status_reason"] = comparison_status_reason
 
         record["success"] = not failures
         record["baseline_eligible"] = (
-            identity_filters is not None and _is_baseline_eligible(record["run_source"], record["success"])
+            identity_filters is not None
+            and _is_baseline_eligible(record["run_source"], record["success"], comparison_status)
         )
         all_failures.extend(failures)
+
+        print(f"{record['model_id']} comparison status: "
+              f"{comparison_status} - {comparison_status_reason}")
 
         _write_normalized_artifact(record)
 

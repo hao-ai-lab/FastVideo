@@ -104,6 +104,11 @@ and does not override stored status.
 - `GET /api/performance/trends?days=90&run_source=scheduled_main`
 - `GET /api/performance/records?days=90&run_source=local`
 
-The current v1 grouping key is `(model_id, gpu_type)`. Baselines are computed
-from the latest five previous successful records in each group for dashboard
-context. CI gating uses only records marked `baseline_eligible=true`.
+V2 records use the same comparison cohort as CI: `workload_id`, `variant_id`,
+`benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and
+`software_profile_id`. `model_id` and `gpu_type` remain display/filter
+metadata, so renaming either does not split history. Legacy records still group
+by `(model_id, gpu_type)`. Dashboard baselines use the latest five previous
+successful, baseline-eligible records in each group. Summary and trend filters
+match the latest display metadata after grouping, while the raw records endpoint
+continues to filter individual records.
