@@ -18,11 +18,12 @@ need a reference audio, ``audio.wer`` needs a ground-truth transcript.
 Install: ``uv pip install -e .[eval-audio]`` covers both metrics here
 (and the rest of the audio suite).
 """
+from pathlib import Path
+
 import torch
 
 from fastvideo import VideoGenerator
 from fastvideo.eval import create_evaluator
-from pathlib import Path
 
 PROMPT = (
     "A warm sunny backyard. The camera starts in a tight cinematic close-up "
@@ -70,33 +71,14 @@ def main() -> None:
 
     print("\n=== Audio scores ===")
     for name in METRICS:
-        r = None
-
-        # per-sample metric
-        if hasattr(results, "__contains__") and name in results:
-            r = results[name]
-
-        # corpus-level metric (e.g. audio.frechet_distance)
-        elif hasattr(results, "corpus") and name in results.corpus:
-            r = results.corpus[name]
-
-        if r is None:
-            print(f"  {name}: MISSING")
-            continue
-
+        r = results[name]
         if r.score is None:
-            skipped = (
-                r.details.get("skipped", "no score")
-                if isinstance(r.details, dict)
-                else "no score"
-            )
-            print(f"  {name}: SKIPPED ({skipped})")
+            print(f"  {name}: SKIPPED ({r.details.get('skipped', 'no score')})")
         else:
             print(f"  {name}: {r.score:.4f}")
-
-        if r.details:
-            for k, v in r.details.items():
-                print(f"      {k}: {v}")
+            if r.details:
+                for k, v in r.details.items():
+                    print(f"      {k}: {v}")
 
 
 if __name__ == "__main__":

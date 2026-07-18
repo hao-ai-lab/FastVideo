@@ -25,12 +25,13 @@ will OOM — its memory autoscale reads ``total_memory`` rather than
 required scale-down. Drop ``motion_smoothness`` from ``METRICS`` if
 sharing, or run on a smaller-resolution generation.
 """
+from pathlib import Path
+
 import torch
 
 from fastvideo import VideoGenerator
 from fastvideo.eval import Evaluator
 from fastvideo.eval.io import build_eval_kwargs
-from pathlib import Path
 
 PROMPT = (
     "A warm sunny backyard. The camera starts in a tight cinematic close-up "
@@ -68,7 +69,7 @@ def main() -> None:
     output_file = Path(output_path)
 
     # ----- generation (matches examples/inference/basic/basic_ltx2.py) -----
-    if output_file.exists() and output_file.suffix.lower() == ".mp4":
+    if output_file.exists():
         print(f"[eval] found existing video: {output_file}")
         print("[eval] skipping generation")
     else:
