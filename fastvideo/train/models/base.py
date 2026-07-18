@@ -7,8 +7,10 @@ from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
+from fastvideo.attention.selector import coerce_attn_backend
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.platforms import AttentionBackendEnum
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
@@ -36,12 +38,21 @@ class ModelBase(ABC):
         *,
         trainable: bool = True,
         lora: LoraConfig | dict[str, Any] | None = None,
+        attention_backend: AttentionBackendEnum | str | None = None,
     ) -> None:
         from fastvideo.train.utils.lora import LoraConfig
 
         self._trainable = bool(trainable)
         self._lora_config: LoraConfig | None = LoraConfig.coerce(lora)
         self._num_lora_layers = 0
+        self.attention_backend = coerce_attn_backend(attention_backend)
+
+    @property
+    def attention_backend_name(self) -> str | None:
+        """Explicit per-role backend name, or ``None`` for global/default."""
+        if self.attention_backend is None:
+            return None
+        return self.attention_backend.name
 
     @property
     def device(self) -> torch.device:

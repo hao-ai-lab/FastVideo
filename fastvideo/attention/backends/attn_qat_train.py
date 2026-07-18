@@ -18,14 +18,14 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 _project_root = Path(__file__).resolve().parent.parent.parent.parent
-_kernel_root = _project_root / "fastvideo-kernel"
-_kernel_python_root = _kernel_root / "python"
+_kernel_python_root = _project_root / "fastvideo-kernel" / "python"
 _attn_qat_train_attention: Callable[..., torch.Tensor] | None = None
 _attn_qat_train_import_attempted = False
+_attn_qat_train_import_error: ImportError | None = None
 
 
 def _ensure_kernel_paths() -> None:
-    for path in (_project_root, _kernel_root, _kernel_python_root):
+    for path in (_project_root, _kernel_python_root):
         path_str = str(path)
         if path_str not in sys.path:
             sys.path.insert(0, path_str)
@@ -34,6 +34,7 @@ def _ensure_kernel_paths() -> None:
 def _get_attn_qat_train_attention() -> Callable[..., torch.Tensor] | None:
     global _attn_qat_train_attention
     global _attn_qat_train_import_attempted
+    global _attn_qat_train_import_error
 
     if _attn_qat_train_import_attempted:
         return _attn_qat_train_attention
@@ -42,8 +43,11 @@ def _get_attn_qat_train_attention() -> Callable[..., torch.Tensor] | None:
     _ensure_kernel_paths()
 
     try:
-        _attn_qat_train_attention = importlib.import_module("fastvideo_kernel.triton_kernels.attn_qat_train").attention
-    except ImportError:
+        triton_qat = importlib.import_module("fastvideo_kernel.triton_kernels.attn_qat_train")
+        _attn_qat_train_attention = triton_qat.attention
+        logger.info("ATTN_QAT_TRAIN loaded FastVideo's architecture-optimized Triton kernel")
+    except ImportError as exc:
+        _attn_qat_train_import_error = exc
         _attn_qat_train_attention = None
 
     return _attn_qat_train_attention
@@ -60,8 +64,9 @@ def attn_qat_train(q_BLHD: torch.Tensor,
                    sm_scale: float | None = None) -> torch.Tensor:
     attention = _get_attn_qat_train_attention()
     if attention is None:
-        raise ImportError("fastvideo_kernel.triton_kernels.attn_qat_train is not available. "
-                          "Please ensure the FastVideo kernel package is installed.")
+        detail = f" Original import error: {_attn_qat_train_import_error}" if _attn_qat_train_import_error else ""
+        raise ImportError("ATTN_QAT_TRAIN requires FastVideo's fastvideo-kernel package. Install it or make "
+                          f"fastvideo-kernel/python importable.{detail}")
 
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -69,7 +74,11 @@ def attn_qat_train(q_BLHD: torch.Tensor,
 
     use_qat_qkv_backward = True
     smooth_k = False
-    warp_specialize = True
+    # Triton 3.7's NVWS pass aborts while compiling this kernel on Blackwell.
+    # The kernel has a supported non-warp-specialized path, so use it on both
+    # datacenter (sm_100) and consumer (sm_120) Blackwell GPUs.
+    capability_major = torch.cuda.get_device_capability()[0]
+    warp_specialize = capability_major not in (10, 12)
     is_qat = True
     two_level_quant_p_sage3 = False
     fake_quant_p_bwd = True
@@ -106,7 +115,7 @@ class AttnQatTrainBackend(AttentionBackend):
 
     @staticmethod
     def get_supported_head_sizes() -> list[int]:
-        return [64, 96, 128, 160, 192, 224, 256]
+        return [128]
 
     @staticmethod
     def get_name() -> str:

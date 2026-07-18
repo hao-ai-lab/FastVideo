@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from typing import Any, TYPE_CHECKING
 
 import torch
 
+from fastvideo.attention.selector import (
+    coerce_attn_backend,
+    global_force_attn_backend_context_manager,
+)
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.fastvideo_args import ExecutionMode, TrainingArgs
 from fastvideo.models.loader.component_loader import (
@@ -15,6 +20,7 @@ from fastvideo.utils import (
     maybe_download_model,
     verify_model_config_and_directory,
 )
+from fastvideo.platforms import AttentionBackendEnum
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
@@ -85,6 +91,7 @@ def load_module_from_path(
     disable_custom_init_weights: bool = False,
     override_transformer_cls_name: str | None = None,
     transformer_override_safetensor: str | None = None,
+    attention_backend: AttentionBackendEnum | str | None = None,
 ) -> torch.nn.Module:
     """Load a single pipeline component module.
 
@@ -120,15 +127,26 @@ def load_module_from_path(
     if transformer_override_safetensor:
         fastvideo_args.init_weights_from_safetensors = str(transformer_override_safetensor)
 
+    if attention_backend is not None and module_type != "transformer":
+        raise ValueError("attention_backend can only be set when loading "
+                         f"a transformer, got module_type={module_type!r}")
+    resolved_attention_backend = coerce_attn_backend(attention_backend)
+    attention_context = (nullcontext() if resolved_attention_backend is None else
+                         global_force_attn_backend_context_manager(resolved_attention_backend))
+
     if disable_custom_init_weights:
         fastvideo_args._loading_teacher_critic_model = True
     try:
-        module = PipelineComponentLoader.load_module(
-            module_name=module_type,
-            component_model_path=component_path,
-            transformers_or_diffusers=(transformers_or_diffusers),
-            fastvideo_args=fastvideo_args,
-        )
+        # Attention implementations are bound while transformer layers are
+        # constructed. Scope the override to this one role so student,
+        # teacher, and critic can use independent backends in one process.
+        with attention_context:
+            module = PipelineComponentLoader.load_module(
+                module_name=module_type,
+                component_model_path=component_path,
+                transformers_or_diffusers=(transformers_or_diffusers),
+                fastvideo_args=fastvideo_args,
+            )
     finally:
         if disable_custom_init_weights and hasattr(fastvideo_args, "_loading_teacher_critic_model"):
             del fastvideo_args._loading_teacher_critic_model

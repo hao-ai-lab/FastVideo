@@ -5,7 +5,8 @@ all configs, scripts, and data needed to run a complete workflow.
 
 ```
 scenario/
-└── ode_init_self_forcing_wan_causal/   # KD → export → Self-Forcing
+├── ode_init_self_forcing_wan_causal/   # KD → export → Self-Forcing
+└── qad_wan2_1_mixkit/                  # Attn-QAT SFT → export → DMD2
 ```
 
 See the `usage.md` inside each scenario for step-by-step instructions.

@@ -78,7 +78,8 @@ If forcing a backend fails, verify optional dependencies are installed:
 - `SAGE_ATTN_THREE`: upstream `sageattn3` package
 - `ATTN_QAT_INFER`: `fastvideo-kernel` checkout/source install that exposes
   `attn_qat_infer`
-- `ATTN_QAT_TRAIN`: `fastvideo-kernel` install exposing `fastvideo_kernel`
+- `ATTN_QAT_TRAIN`: `fastvideo-kernel`; its runtime-JIT Triton implementation
+  selects an optimized path on SM100 and retains the previous path elsewhere
 
 As a fallback, use:
 
