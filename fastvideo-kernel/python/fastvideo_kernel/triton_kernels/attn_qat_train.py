@@ -44,6 +44,11 @@ def _sm100_exact_m_enabled():
     return os.environ.get("FASTVIDEO_ATTN_QAT_FWD_EXACT_M", "0") != "0"
 
 
+def _consumer_blackwell_join_qat_pv_enabled():
+    """Return whether SM120 uses the joined quantized/STE P@V path."""
+    return os.environ.get("FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV", "1") != "0"
+
+
 def _use_sm100_optimized_qat(
     device,
     head_dim: int,
@@ -1137,7 +1142,7 @@ class _attention(torch.autograd.Function):
             fake_quant_P=fake_quant_P,
             two_level_quant_P=two_level_quant_P,
             use_global_sf_P=use_global_sf_P,
-            JOIN_QAT_PV=consumer_blackwell,
+            JOIN_QAT_PV=(consumer_blackwell and _consumer_blackwell_join_qat_pv_enabled()),
             num_warps=fwd_num_warps,
             num_stages=fwd_num_stages,
             **extra_kern_args
