@@ -45,7 +45,7 @@ pytest tests/ -v                                  # Top-level repo tests (differ
 modal run fastvideo/tests/modal/ssim_test.py      # Orchestrated CI-style SSIM run
 ```
 
-`tests/local_tests/` (top-level) holds component checks that need a local
+`tests/local_tests/` (top-level) holds component and behavior checks that need a local
 working tree but are not part of the package suite.
 
 ## Conventions
