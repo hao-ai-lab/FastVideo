@@ -22,7 +22,7 @@ Subclasses WanModel but replaces the pieces where LTX-2 differs:
     it to the data fps or validation (which uses the preset fps)
     would see different temporal frequencies than training
   - the ~5.8B audio / cross-modal (a2v, v2a, av_ca) parameters are
-    frozen by default: video-only forwards never give them
+    frozen: video-only forwards never give them
     gradients, and freezing keeps them out of DCP checkpoints and
     optimizer state
 """
@@ -97,6 +97,11 @@ class LTX2Model(WanModel):
         train_audio: bool = False,
         timestep_uniform_prob: float = 0.1,
     ) -> None:
+        if train_audio:
+            raise NotImplementedError("LTX2Model only supports video-only training; "
+                                      "train_audio=True requires audio batch, forward, "
+                                      "and loss plumbing.")
+
         cfg_rate = float(getattr(training_config.data, "training_cfg_rate", 0.0) or 0.0)
         if cfg_rate > 0.0:
             raise NotImplementedError("LTX2Model only supports training_cfg_rate=0. CFG dropout "
@@ -106,7 +111,6 @@ class LTX2Model(WanModel):
                                       "training.data.training_cfg_rate: 0.0.")
 
         self._timestep_uniform_prob = float(timestep_uniform_prob)
-        self._train_audio = bool(train_audio)
         self._rope_fps: float = _DEFAULT_ROPE_FPS
         self._rope_forward_batch: ForwardBatch | None = None
 
@@ -124,7 +128,7 @@ class LTX2Model(WanModel):
             lora=lora,
         )
 
-        if trainable and not self._train_audio:
+        if trainable:
             self._freeze_audio_parameters()
 
         # No negative-prompt cache: cfg_rate is forced to 0 above and
