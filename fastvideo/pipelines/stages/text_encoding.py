@@ -73,6 +73,7 @@ class TextEncodingStage(PipelineStage):
             fastvideo_args,
             encoder_index=all_indices,
             return_attention_mask=True,
+            max_length=batch.max_sequence_length,
         )
         if self._last_audio_embeds is not None:
             batch.extra["ltx2_audio_prompt_embeds"] = self._last_audio_embeds
@@ -91,6 +92,7 @@ class TextEncodingStage(PipelineStage):
                 fastvideo_args,
                 encoder_index=all_indices,
                 return_attention_mask=True,
+                max_length=batch.max_sequence_length,
             )
             if self._last_audio_embeds is not None:
                 batch.extra["ltx2_audio_negative_embeds"] = self._last_audio_embeds
@@ -221,6 +223,20 @@ class TextEncodingStage(PipelineStage):
                 encoder_device = torch.device(target_device)
                 moved_for_forward = True
 
+            # An explicit `device=` wins. Otherwise follow the encoder's real
+            # param device. Once it has been moved for the forward that is the
+            # target device, and an HF-passthrough encoder's
+            # _fastvideo_input_device (stamped at load, e.g. "cpu" under
+            # text_encoder_cpu_offload) is stale -- honouring it would feed cpu
+            # token ids to cuda weights. The marker only speaks when nothing
+            # moved and the module has no parameters to speak for it.
+            if device is not None:
+                input_device = torch.device(target_device)
+            elif moved_for_forward:
+                input_device = encoder_device
+            else:
+                input_device = getattr(text_encoder, "_fastvideo_input_device", encoder_device)
+
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
                 tok_kwargs["max_length"] = max_length
@@ -264,7 +280,7 @@ class TextEncodingStage(PipelineStage):
                     # pre-format prompts into message lists upstream and rely on
                     # the inner tokenizer + full tokenizer_kwargs (which include
                     # add_generation_prompt). Preserve that original path exactly.
-                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(encoder_device)
+                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(input_device)
                 else:
                     # Two-step approach matching Diffusers: format with chat
                     # template first, then tokenize the resulting strings.
@@ -275,12 +291,12 @@ class TextEncodingStage(PipelineStage):
                             messages,
                             tokenize=False,
                             add_generation_prompt=True,
-                            enable_thinking=False,
+                            enable_thinking=encoder_config.chat_template_enable_thinking,
                         )
                         formatted_texts.append(formatted)
-                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(encoder_device)
+                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(input_device)
             else:
-                text_inputs = tok(processed_texts, **tok_kwargs).to(encoder_device)
+                text_inputs = tok(processed_texts, **tok_kwargs).to(input_device)
 
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]

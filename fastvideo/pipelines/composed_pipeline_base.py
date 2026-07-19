@@ -303,7 +303,8 @@ class ComposedPipelineBase(ABC):
         self.modules[module_name] = module
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
-        model_path = maybe_download_model(self.model_path)
+        revision = getattr(self.fastvideo_args, "revision", None)
+        model_path = maybe_download_model(self.model_path, revision=revision)
         self.model_path = model_path
         # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)

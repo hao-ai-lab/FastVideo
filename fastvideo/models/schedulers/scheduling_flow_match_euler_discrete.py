@@ -96,6 +96,14 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             The minimum sigma value for the noise schedule.
         sigma_data (`float`, *optional*):
             The sigma data value for scaling.
+        use_reference_discrete_timesteps (`bool`, defaults to False):
+            Some reference schedulers (e.g. Z-Image) construct the timestep
+            schedule by linspacing `num_inference_steps + 1` points from
+            `t_max` to `t_min` and dropping the terminal point. Default
+            (`False`) preserves the original `np.linspace(t_max, t_min,
+            num_inference_steps)` (float64) behaviour used by every existing
+            model. Enable this flag only when matching a reference scheduler
+            that expects the +1 + drop-terminal construction.
     """
 
     _compatibles: list[Any] = []
@@ -122,6 +130,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         sigma_max: float | None = None,
         sigma_min: float | None = None,
         sigma_data: float | None = None,
+        use_reference_discrete_timesteps: bool = False,
     ):
         if sum([
                 self.config.use_beta_sigmas, self.config.use_exponential_sigmas,
@@ -155,7 +164,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
 
         self.sigmas = sigmas.to(
             "cpu")  # to avoid too much CPU/GPU communication
-        self.sigma_min = self.sigmas[-1].item()
+        self.sigma_min = sigma_min if sigma_min is not None else self.sigmas[-1].item()
         self.sigma_max = self.sigmas[0].item()
 
         BaseScheduler.__init__(self)
@@ -350,7 +359,19 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             if timesteps_array is None:
                 t_max = self._sigma_to_t(self.sigma_max)
                 t_min = self._sigma_to_t(self.sigma_min)
-                timesteps_array = np.linspace(t_max, t_min, num_inference_steps)
+                if self.config.use_reference_discrete_timesteps:
+                    # Some reference schedulers (for example Z-Image) build a
+                    # float64 num_steps+1 linspace and drop the terminal point.
+                    timesteps_array = np.linspace(
+                        t_max,
+                        t_min,
+                        num_inference_steps + 1,
+                    )[:-1]
+                else:
+                    # Preserve the original numpy default (float64) here —
+                    # casting to float32 silently shifts rounded timestep
+                    # values for every existing model that uses this branch.
+                    timesteps_array = np.linspace(t_max, t_min, num_inference_steps)
             sigmas_array = timesteps_array / self.config.num_train_timesteps
         else:
             sigmas_array = np.array(sigmas).astype(np.float32)

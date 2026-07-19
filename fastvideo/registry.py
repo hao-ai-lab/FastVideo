@@ -30,6 +30,7 @@ from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyu
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5I2VConfig, Kandinsky5T2VConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
+from fastvideo.configs.pipelines.lingbotworld2 import LingBotWorld2CausalFastI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 from fastvideo.configs.pipelines.flux_2 import (
@@ -62,6 +63,7 @@ from fastvideo.configs.pipelines.glm_image import GlmImageConfig
 from fastvideo.configs.pipelines.flux import FluxPipelineConfig
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
+from fastvideo.configs.pipelines.zimage import ZImagePipelineConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
@@ -488,6 +490,22 @@ def _register_configs() -> None:
         model_family="gamecraft",
         default_preset="gamecraft_i2v",
     )
+    # LingBotWorld2 causal-fast
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LingBotWorld2CausalFastI2V480PConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "robbyant/lingbot-world-v2-14b-causal-fast",
+        ],
+        model_detectors=[
+            lambda path:
+            ("lingbot-world-v2-14b-causal-fast" in path.lower() or "lingbotworld2causalfastpipeline" in path.lower())
+        ],
+        model_family="lingbotworld2",
+        default_preset="lingbotworld2_causal_fast_i2v",
+    )
+
     # LingBotWorld
     register_configs(
         sampling_param_cls=None,
@@ -496,7 +514,10 @@ def _register_configs() -> None:
         hf_model_paths=[
             "FastVideo/LingBot-World-Base-Cam-Diffusers",
         ],
-        model_detectors=[lambda path: ("lingbotworld" in path.lower() or "lingbot-world" in path.lower())],
+        model_detectors=[
+            lambda path: (("lingbotworld" in path.lower() or "lingbot-world" in path.lower()) and "causal-fast" not in
+                          path.lower() and "causalfast" not in path.lower())
+        ],
         model_family="lingbotworld",
         default_preset="lingbotworld_i2v",
     )
@@ -1104,6 +1125,19 @@ def _register_configs() -> None:
         ],
     )
 
+    # Z-Image-Turbo
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=ZImagePipelineConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=["Tongyi-MAI/Z-Image-Turbo"],
+        model_detectors=[
+            lambda path: "zimagepipeline" in path or "z-image" in path or "z_image" in path,
+        ],
+        model_family="zimage",
+        default_preset="zimage_turbo",
+    )
+
 
 # --- Part 3: Main Resolver ---
 
@@ -1210,6 +1244,8 @@ def _register_presets() -> None:
         ALL_PRESETS as KANDINSKY5_PRESETS, )
     from fastvideo.pipelines.basic.lingbotworld.presets import (
         ALL_PRESETS as LINGBOTWORLD_PRESETS, )
+    from fastvideo.pipelines.basic.lingbotworld2.presets import (
+        ALL_PRESETS as LINGBOTWORLD2_PRESETS, )
     from fastvideo.pipelines.basic.longcat.presets import (
         ALL_PRESETS as LONGCAT_PRESETS, )
     from fastvideo.pipelines.basic.ltx2.presets import (
@@ -1226,6 +1262,8 @@ def _register_presets() -> None:
         ALL_PRESETS as TURBODIFFUSION_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
         ALL_PRESETS as WAN_PRESETS, )
+    from fastvideo.pipelines.basic.zimage.presets import (
+        ALL_PRESETS as ZIMAGE_PRESETS, )
     from fastvideo.pipelines.basic.flux_2.presets import (
         ALL_PRESETS as FLUX2_PRESETS, )
 
@@ -1240,6 +1278,7 @@ def _register_presets() -> None:
         HYWORLD_PRESETS,
         KANDINSKY5_PRESETS,
         LINGBOTWORLD_PRESETS,
+        LINGBOTWORLD2_PRESETS,
         LONGCAT_PRESETS,
         LTX2_PRESETS,
         MATRIXGAME2_PRESETS,
@@ -1248,6 +1287,7 @@ def _register_presets() -> None:
         STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,
         WAN_PRESETS,
+        ZIMAGE_PRESETS,
     )
     for group in all_preset_groups:
         for preset in group:

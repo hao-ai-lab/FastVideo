@@ -6,6 +6,7 @@ results/
 wandb/
 *.ipynb
 *.jpg
+!examples/dataset/lingbotworld2/image.jpg
 *.safetensors
 *.mp4
 *.png
@@ -34,6 +35,7 @@ env
 *.log
 weights/
 logs/
+/Z-Image/
 official_weights/
 converted_weights/
 

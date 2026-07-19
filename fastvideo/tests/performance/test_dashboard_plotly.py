@@ -38,24 +38,69 @@ def test_group_data_uses_full_comparison_cohort():
     groups = list(dashboard.group_data(df))
 
     assert len(groups) == 2
-    assert {key[5] for key, _group in groups} == {"recipe-a", "recipe-b"}
-    assert {key[7] for key, _group in groups} == {"sw-a", "sw-b"}
+    assert {key[6] for key, _group in groups} == {"recipe-a", "recipe-b"}
+    assert {key[8] for key, _group in groups} == {"sw-a", "sw-b"}
+
+
+def test_group_data_ignores_v2_display_name_changes():
+    df = pd.DataFrame([
+        _record(model_id="old-display", gpu_type="NVIDIA L40S old label"),
+        _record(
+            model_id="new-display",
+            gpu_type="NVIDIA L40S",
+            timestamp="2026-01-02T00:00:00+00:00",
+        ),
+    ])
+
+    groups = list(dashboard.group_data(df))
+    figs, _skipped_metrics = dashboard.build_plots(df)
+
+    assert len(groups) == 1
+    assert all("new-display | NVIDIA L40S" in fig.layout.title.text for fig in figs)
 
 
 def test_group_data_fills_legacy_cohort_columns():
-    df = pd.DataFrame([{
-        "model_id": "legacy-wan",
-        "gpu_type": "NVIDIA L40S",
-        "timestamp": "2026-01-01T00:00:00+00:00",
-        "commit_sha": "a" * 40,
-        "config_id": "aaaaaaa",
-        "latency": 10.0,
-    }])
+    df = pd.DataFrame([
+        {
+            "model_id": model_id,
+            "gpu_type": "NVIDIA L40S",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "commit_sha": "a" * 40,
+            "config_id": "aaaaaaa",
+            "latency": 10.0,
+        }
+        for model_id in ("legacy-wan", "legacy-ltx")
+    ])
 
     groups = list(dashboard.group_data(df))
 
-    assert len(groups) == 1
-    assert groups[0][0][2:] == ("", "", "", "", "", "")
+    assert len(groups) == 2
+    assert {key[1] for key, _group in groups} == {"legacy-wan", "legacy-ltx"}
+    assert all(key[3:] == ("", "", "", "", "", "") for key, _group in groups)
+
+
+def test_group_data_keeps_partial_v2_identity_scoped_by_display_metadata():
+    partial_identity = {
+        "result_schema_version": 2,
+        "workload_id": "wan-t2v",
+        "variant_id": "1.3b-sp2",
+        "benchmark_version": 2,
+        "recipe_fingerprint": "",
+        "hardware_profile_id": "",
+        "software_profile_id": "",
+    }
+    df = pd.DataFrame([
+        _record(model_id="wan", gpu_type="NVIDIA L40S", **partial_identity),
+        _record(model_id="ltx", gpu_type="NVIDIA H100", **partial_identity),
+    ])
+
+    groups = list(dashboard.group_data(df))
+
+    assert len(groups) == 2
+    assert {(key[1], key[2]) for key, _group in groups} == {
+        ("wan", "NVIDIA L40S"),
+        ("ltx", "NVIDIA H100"),
+    }
 
 
 def test_build_plots_labels_distinct_cohorts():
