@@ -112,10 +112,14 @@ WRITE_REFERENCE_ENV = "KANDINSKY5_E2E_WRITE_REFERENCE"
 GENERATION_PROMPT = ("A curious raccoon peers through a vibrant field of yellow sunflowers, "
                      "soft natural light filtering through the petals, mid-shot")
 GENERATION_SEED = 42
-# Floor calibrated conservatively (matches the Wan e2e test's 0.5 bar, but
-# on the mean rather than the max). Tighten upward once a few recorded
-# nightly runs establish the actual cross-run variance.
-MIN_MEAN_MS_SSIM = 0.5
+# Calibration (2026-07-18, single H-class GPU, torch 2.x + deterministic
+# cudnn): a fully independent retrain-from-scratch + regeneration scored
+# mean/min/max MS-SSIM 1.0000 against the committed reference -- the chain
+# is deterministic on fixed hardware. 0.90 leaves headroom for GPU-class /
+# cuDNN / library drift while still failing loudly on any real regression
+# (a wrong weight remap or re-noise schedule produces a completely
+# different video, nowhere near 0.90).
+MIN_MEAN_MS_SSIM = 0.90
 
 
 def _clean_previous_artifacts() -> None:
