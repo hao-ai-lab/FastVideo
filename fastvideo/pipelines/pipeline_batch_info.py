@@ -178,6 +178,7 @@ class ForwardBatch:
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
+    batch_cfg: bool = False
     guidance_scale_2: float | None = None
     cfg_normalization: bool = False
     cfg_truncation: float | None = 1.0

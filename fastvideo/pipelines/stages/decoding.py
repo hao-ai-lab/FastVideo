@@ -65,7 +65,11 @@ class DecodingStage(PipelineStage):
         ch_dim = 1 if latents.ndim >= 4 else -1
         return latents.shape[ch_dim] == packed_ch
 
-    def _denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
+    def _denormalize_latents(
+        self,
+        latents: torch.Tensor,
+        fastvideo_args: FastVideoArgs,
+    ) -> torch.Tensor:
         """Convert normalized latents into the VAE's expected latent space."""
         # Some VAEs handle latent (de)normalization internally.
         if bool(getattr(self.vae, "handles_latent_denorm", False)):
@@ -79,6 +83,15 @@ class DecodingStage(PipelineStage):
         latents_mean_value = getattr(cfg, "latents_mean", None) if cfg is not None else None
         latents_std_value = getattr(cfg, "latents_std", None) if cfg is not None else None
         if latents_mean_value is not None and latents_std_value is not None:
+            # Preserve the released LingBot reciprocal arithmetic and its float32 rounding for numeric alignment
+            if type(fastvideo_args.pipeline_config).__name__.startswith("LingBotVideo"):
+                latents_mean = torch.tensor(latents_mean_value, device=latents.device,
+                                            dtype=torch.float32).view(1, -1, 1, 1, 1)
+                latents_std_inv = 1.0 / torch.tensor(latents_std_value, device=latents.device,
+                                                     dtype=torch.float32).view(1, -1, 1, 1, 1)
+                # See Lingbot: https://github.com/Robbyant/lingbot-video/blob/a638721cf2271804d02738b69f2ad788c4a559fc/lingbot_video/pipeline_lingbot_video.py#L282
+                return latents.float() / latents_std_inv + latents_mean
+
             latents_mean = torch.tensor(latents_mean_value, device=latents.device,
                                         dtype=latents.dtype).view(1, -1, 1, 1, 1)
             latents_std = torch.tensor(latents_std_value, device=latents.device,
@@ -156,7 +169,12 @@ class DecodingStage(PipelineStage):
 
         # Flux2: skip denormalize on packed latents; BN denorm runs below instead
         if not (latents.ndim == 5 and self._is_flux2_packed(latents)):
-            latents = self._denormalize_latents(latents)
+            latents = self._denormalize_latents(latents, fastvideo_args)
+
+        # The released LingBot decoder enters Wan VAE in channels-last-3d
+        # layout; matching that boundary avoids selecting a different Conv3d path.
+        if (type(fastvideo_args.pipeline_config).__name__.startswith("LingBotVideo") and latents.ndim == 5):
+            latents = latents.contiguous(memory_format=torch.channels_last_3d)
 
         # Decode latents
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
@@ -221,7 +239,7 @@ class DecodingStage(PipelineStage):
         vae_dtype = PRECISION_TO_TYPE[decode_precision]
         vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        latents = self._denormalize_latents(latents)
+        latents = self._denormalize_latents(latents, fastvideo_args)
 
         # Initialize cache if needed
         if cache is None:

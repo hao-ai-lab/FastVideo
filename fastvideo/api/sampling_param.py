@@ -90,6 +90,7 @@ class SamplingParam:
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
+    batch_cfg: bool = False
     guidance_scale_2: float | None = None
     # Z-Image CFG controls. ``cfg_normalization=True`` caps the guided
     # prediction norm at the positive-prediction norm; ``cfg_truncation``
@@ -340,6 +341,12 @@ class SamplingParam:
             type=float,
             default=SamplingParam.cfg_truncation,
             help="Disable Z-Image CFG above this normalized-noise threshold",
+        )
+        parser.add_argument(
+            "--batch-cfg",
+            action=StoreBoolean,
+            default=SamplingParam.batch_cfg,
+            help="Evaluate conditional and unconditional CFG branches in one batch",
         )
         parser.add_argument(
             "--guidance-rescale",

@@ -470,6 +470,7 @@ surfaces:
       num_inference_steps: request.sampling.num_inference_steps
       num_inference_steps_sr: request.sampling.num_inference_steps_sr
       guidance_scale: request.sampling.guidance_scale
+      batch_cfg: request.sampling.batch_cfg
       guidance_scale_2: request.sampling.guidance_scale_2
       cfg_normalization: request.sampling.cfg_normalization
       cfg_truncation: request.sampling.cfg_truncation
