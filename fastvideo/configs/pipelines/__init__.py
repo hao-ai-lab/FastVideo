@@ -22,6 +22,5 @@ __all__ = [
     "SelfForcingWanT2V480PConfig", "LucyEditDevConfig", "CosmosConfig", "Cosmos25Config", "LTX2T2VConfig",
     "DreamXWorld5BCamPipelineConfig", "DreamXWorld5BARPipelineConfig", "HYWorldConfig", "Kandinsky5T2VConfig",
     "Kandinsky5I2VConfig", "LingBotWorld2CausalFastI2V480PConfig", "LingBotVideoT2VConfig", "MatrixGame2I2V480PConfig",
-    "MatrixGame3I2V720PConfig",
-    "get_pipeline_config_cls_from_name"
+    "MatrixGame3I2V720PConfig", "get_pipeline_config_cls_from_name"
 ]

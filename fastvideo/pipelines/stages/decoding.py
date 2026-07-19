@@ -87,9 +87,8 @@ class DecodingStage(PipelineStage):
             if type(fastvideo_args.pipeline_config).__name__.startswith("LingBotVideo"):
                 latents_mean = torch.tensor(latents_mean_value, device=latents.device,
                                             dtype=torch.float32).view(1, -1, 1, 1, 1)
-                latents_std_inv = 1.0 / torch.tensor(
-                    latents_std_value, device=latents.device, dtype=torch.float32
-                ).view(1, -1, 1, 1, 1)
+                latents_std_inv = 1.0 / torch.tensor(latents_std_value, device=latents.device,
+                                                     dtype=torch.float32).view(1, -1, 1, 1, 1)
                 # See Lingbot: https://github.com/Robbyant/lingbot-video/blob/a638721cf2271804d02738b69f2ad788c4a559fc/lingbot_video/pipeline_lingbot_video.py#L282
                 return latents.float() / latents_std_inv + latents_mean
 
