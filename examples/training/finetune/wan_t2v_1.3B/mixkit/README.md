@@ -64,9 +64,15 @@ NUM_GPUS=4 bash .../mixkit/finetune_qat.sh data/HD-Mixkit-Finetune-Wan/combined_
 forward and backward (straight-through estimator). Both kernels ship in
 `fastvideo-kernel`: SM100 automatically uses the optimized Triton path for the
 production non-causal, head-dimension-128 configuration, while SM120 GPUs such
-as RTX 5090 keep using the previous Triton path. The script defaults
+as RTX 5090 join the quantized and STE P@V operations and use a shallower
+backward pipeline for long sequences. Set
+`FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV=0` to compare against the split P@V path.
+The script defaults
 `FASTVIDEO_ATTN_QAT_FWD_EXACT_M=0` for throughput; set it to `1` to reproduce
 the previous forward softmax statistic and bitwise-compatible `dV`.
+
+For the website-visible modular SFT-to-DMD2 workflow, see the
+[Attn-QAT training guide](https://haoailab.com/FastVideo/training/attn_qat/).
 
 ## Train stage 2 (QAT DMD distillation to 3 steps)
 

@@ -2,6 +2,12 @@
 
 We introduce a new finetuning strategy - **Sparse-distill**, which jointly integrates **[DMD](https://arxiv.org/abs/2405.14867)** and **[VSA](https://arxiv.org/abs/2505.13389)** in a single training process. This approach combines the benefits of both distillation to shorten diffusion steps and sparse attention to reduce attention computation, enabling much faster video generation.
 
+!!! tip "Attn-QAT DMD2 workflow"
+    The modular trainer also provides a Wan2.1 MixKit recipe that first
+    fine-tunes with fake-quantized attention, then distills the student to
+    timesteps `[1000, 757, 522]` while teacher and critic remain on Flash
+    Attention. See [Attn-QAT Training](../training/attn_qat.md).
+
 ## 📊 Model Overview
 
 We provide two distilled models:

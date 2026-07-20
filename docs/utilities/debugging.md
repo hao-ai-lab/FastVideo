@@ -79,7 +79,9 @@ If forcing a backend fails, verify optional dependencies are installed:
 - `ATTN_QAT_INFER`: `fastvideo-kernel` checkout/source install that exposes
   `attn_qat_infer`
 - `ATTN_QAT_TRAIN`: `fastvideo-kernel`; its runtime-JIT Triton implementation
-  selects an optimized path on SM100 and retains the previous path elsewhere
+  selects an optimized route on SM100, joins the quantized and STE P@V paths on
+  SM120, and retains the previous route for unsupported configurations. See
+  [Attn-QAT Training](../training/attn_qat.md) for architecture controls.
 
 As a fallback, use:
 

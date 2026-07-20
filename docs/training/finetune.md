@@ -62,6 +62,18 @@ bash examples/training/finetune/wan_t2v_1.3B/crush_smol/finetune_t2v.sh
 - Gradient checkpointing: `--enable_gradient_checkpointing_type "full"`
 - Memory scaling: Increase `--sp_size` or reduce `--num_latent_t` to fit in memory
 
+## Attention Quantization-Aware Training
+
+Attn-QAT fine-tunes a model while simulating low-bit attention in the forward
+and backward passes. The modular trainer can select the backend per model role,
+so a later DMD2 stage can keep fake quantization on the student while the
+teacher and critic use Flash Attention.
+
+The ready-to-run Wan2.1 MixKit workflow includes supervised fine-tuning,
+checkpoint export, and three-step DMD2 distillation:
+
+**→ [Follow the Attn-QAT training guide](attn_qat.md)**
+
 ## LoRA Finetuning
 
 LoRA (Low-Rank Adaptation) trains lightweight adapters while keeping the base model frozen. This significantly reduces memory usage and training time.
@@ -166,6 +178,7 @@ Ready-to-run training scripts are available for multiple models:
 | Wan2.1 I2V 14B | I2V | `examples/training/finetune/wan_i2v_14B_480p/crush_smol/` |
 | Wan2.1-Fun 1.3B InP | I2V | `examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/` |
 | Wan2.1 VSA | T2V/I2V | `examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/` |
+| Wan2.1 T2V 1.3B Attn-QAT | QAT SFT + DMD2 | `examples/train/scenario/qad_wan2_1_mixkit/` |
 
 Each example includes:
 

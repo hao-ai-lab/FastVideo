@@ -9,6 +9,8 @@ scenario/
 └── qad_wan2_1_mixkit/                  # Attn-QAT SFT → export → DMD2
 ```
 
-See the `usage.md` inside each scenario for step-by-step instructions.
+See the `usage.md` inside each scenario for step-by-step instructions. The QAD
+workflow is also documented in the website-visible
+[Attn-QAT training guide](https://haoailab.com/FastVideo/training/attn_qat/).
 
 For single-step configs, see `examples/train/configs/`.
