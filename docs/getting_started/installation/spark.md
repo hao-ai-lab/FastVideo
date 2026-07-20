@@ -1,13 +1,22 @@
 # NVIDIA DGX Spark (GB10)
 
-Instructions to install FastVideo on an **NVIDIA DGX Spark** — the GB10
+Instructions to install FastVideo on an **NVIDIA DGX Spark**: the GB10
 Grace-Blackwell platform.
 
-The Spark is **ARM64 (`aarch64`) with CUDA 13**, which the standard
-[NVIDIA GPU guide](gpu.md) does not cover: there is no prebuilt `aarch64` wheel
-for `fastvideo-kernel`, so it is **compiled from source** as part of the
-install, and the system Python typically lacks the development headers that
-build needs. The steps below handle both, **without requiring `sudo`**.
+Use this guide instead of the standard [NVIDIA GPU guide](gpu.md) when your
+machine is a Spark / GB10 system. Spark combines Linux **ARM64 (`aarch64`)**,
+CUDA 13, and a GB10 GPU (`sm_121`), so the regular install path needs a few
+changes:
+
+- PyPI does not provide a matching `aarch64` `fastvideo-kernel` wheel for GB10,
+  so FastVideo builds the in-tree kernel from source during installation.
+- The build must target CUDA 13 / PyTorch `cu130`.
+- The kernel build needs Python development headers; the system Python on Spark
+  may not include them.
+- FlashAttention, if needed, should use a matching Linux ARM64 wheel instead of
+  the usual x86_64 install path.
+
+The steps below handle those differences without requiring `sudo`.
 
 ## Requirements
 
@@ -24,7 +33,7 @@ build needs. The steps below handle both, **without requiring `sudo`**.
     python -c "import torch; print(torch.cuda.get_device_capability(0))"  # GB10 -> (12, 1)
     ```
 
-## Install
+## Install from source
 
 Run from the repository root:
 
@@ -34,8 +43,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 
-# 1. Create a venv on a uv-managed CPython 3.12 (bundles the dev headers the
-#    kernel build needs; the Spark's system python3.12 lacks them).
+# 1. Create a venv on a uv-managed CPython 3.12. This bundles the development
+#    headers needed by the kernel build; the Spark's system Python may not.
 uv venv .venv --python 3.12 --python-preference only-managed --seed
 source .venv/bin/activate
 
@@ -43,7 +52,8 @@ source .venv/bin/activate
 git submodule update --init --recursive \
   fastvideo-kernel/include/cutlass fastvideo-kernel/include/tk
 
-# 3. Install FastVideo (editable; compiles the in-tree kernel for the GB10).
+# 3. Install FastVideo in editable mode. On aarch64, this compiles the in-tree
+#    fastvideo-kernel source for GB10 instead of using a PyPI kernel wheel.
 UV_TORCH_BACKEND=cu130 uv pip install -e .
 ```
 
@@ -54,8 +64,8 @@ Then jump to [Verify the install](#verify-the-install).
 
 ## Building without a visible GPU (CI / Docker)
 
-With no GPU visible the kernel build can't probe the arch and `auto` can't detect
-the driver — name both explicitly:
+With no GPU visible, the kernel build cannot probe the architecture and `uv`
+cannot infer the CUDA backend from the host driver. Name both explicitly:
 
 ```bash
 UV_TORCH_BACKEND=cu130 TORCH_CUDA_ARCH_LIST=12.1 uv pip install -e .
@@ -74,8 +84,13 @@ PY
 fastvideo --help
 ```
 
-Expected: a `+cu130` torch, `device: NVIDIA GB10`, and the CLI listing
-`generate / serve / router-serve / bench / eval`.
+Expected:
+
+- `torch` reports a `+cu130` build.
+- `torch.cuda.is_available()` is `True`.
+- `device` is `NVIDIA GB10`.
+- `fastvideo --help` lists commands such as `generate`, `serve`,
+  `router-serve`, `bench`, and `eval`.
 
 To confirm the **compiled** CUDA kernel actually runs on the GB10 (importing
 alone doesn't execute the `.so`):
@@ -131,6 +146,13 @@ uv pip install "https://github.com/mjun0812/flash-attention-prebuild-wheels/rele
 | `fastvideo-kernel: could not determine the target CUDA architecture` | The build couldn't see a GPU and no arch was given. Build on the Spark itself, or pass `TORCH_CUDA_ARCH_LIST=12.1` (see [Building without a visible GPU](#building-without-a-visible-gpu-ci--docker)). |
 | `nvcc fatal: Unsupported gpu architecture 'compute_121'` | `nvcc` older than CUDA 12.9/13. Confirm `nvcc --version` is 13.x and `CUDACXX=/usr/local/cuda/bin/nvcc`. |
 | `ninja: command not found` (manual build only) | `uv pip install scikit-build-core cmake ninja setuptools wheel`. |
+
+## What this guide does not verify
+
+The commands above are intended for a real DGX Spark / GB10 machine. On another
+machine you can review the docs and build logic, but you cannot fully validate
+the GB10 kernel compile, kernel execution, or FlashAttention ARM64 wheel without
+Spark hardware.
 
 If you hit other issues, please open an issue on our
 [GitHub repository](https://github.com/hao-ai-lab/FastVideo). You can also join
