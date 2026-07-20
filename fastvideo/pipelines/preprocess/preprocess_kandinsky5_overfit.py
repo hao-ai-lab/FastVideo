@@ -23,6 +23,12 @@ pooled row is automatically counted as valid.
 
 Usage:
     CUDA_VISIBLE_DEVICES=0 python -m fastvideo.pipelines.preprocess.preprocess_kandinsky5_overfit
+
+Input/output roots default to ``data/kandinsky5_overfit`` /
+``data/kandinsky5_overfit_preprocessed`` and can be overridden with the
+``KANDINSKY5_OVERFIT_DATA_DIR`` / ``KANDINSKY5_OVERFIT_OUTPUT_DIR`` env
+vars (used by the nightly e2e test to keep its disposable roots separate
+from a user's real dataset at the defaults).
 """
 
 import json
@@ -64,8 +70,11 @@ MAX_WIDTH = 768
 TRAIN_FPS = 24.0
 
 MODEL_PATH = "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers"
-DATA_DIR = "data/kandinsky5_overfit"
-OUTPUT_DIR = "data/kandinsky5_overfit_preprocessed"
+# Overridable so automation (e.g. the nightly e2e test) can point at its own
+# test-owned directories instead of clobbering the documented default paths
+# a user may have populated with their real dataset.
+DATA_DIR = os.environ.get("KANDINSKY5_OVERFIT_DATA_DIR", "data/kandinsky5_overfit")
+OUTPUT_DIR = os.environ.get("KANDINSKY5_OVERFIT_OUTPUT_DIR", "data/kandinsky5_overfit_preprocessed")
 
 
 def load_video(path: str, num_frames: int, height: int, width: int) -> torch.Tensor:

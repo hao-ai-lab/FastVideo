@@ -25,9 +25,9 @@ Build a small Parquet dataset from raw videos + captions
 layout) with:
 
 ```bash
-# from the repo root; edit DATA_DIR/OUTPUT_DIR at the top of the script,
-# or point KANDINSKY5_OVERFIT_DATA_DIR-equivalent env vars if you've added
-# CLI plumbing for your own dataset
+# from the repo root; reads data/kandinsky5_overfit and writes
+# data/kandinsky5_overfit_preprocessed by default -- override with
+# KANDINSKY5_OVERFIT_DATA_DIR / KANDINSKY5_OVERFIT_OUTPUT_DIR env vars
 python -m fastvideo.pipelines.preprocess.preprocess_kandinsky5_overfit
 ```
 
