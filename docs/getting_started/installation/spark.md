@@ -92,22 +92,30 @@ Expected:
 - `fastvideo --help` lists commands such as `generate`, `serve`,
   `router-serve`, `bench`, and `eval`.
 
-To confirm the **compiled** CUDA kernel actually runs on the GB10 (importing
-alone doesn't execute the `.so`):
+To confirm one of the **compiled** CUDA kernels actually runs on the GB10
+(importing alone doesn't execute the `.so`):
 
 ```bash
 python - <<'PY'
 import torch
-from fastvideo_kernel import Int8Linear
-lin  = torch.nn.Linear(512, 256, bias=False).cuda().to(torch.bfloat16)
-# .cuda() is required: from_linear() leaves the int8 buffers on the CPU
-qlin = Int8Linear.from_linear(lin, quantize=True).cuda()  # compiled quant_cuda
-x    = torch.randn(128, 512, device="cuda", dtype=torch.bfloat16)
-y, ref = qlin(x), lin(x)                                  # compiled gemm_cuda
-rel = (y.float() - ref.float()).norm() / ref.float().norm()
-print(f"int8 GEMM rel err vs fp32: {rel.item():.4f}  (~0.01 is correct; int8 is lossy)")
+from fastvideo_kernel import turbodiffusion_ops
+
+x = torch.randn((2, 16, 128), dtype=torch.bfloat16, device="cuda")
+w = torch.randn(128, dtype=torch.bfloat16, device="cuda")
+y = turbodiffusion_ops.rmsnorm(x, w, 1e-5)
+if isinstance(y, tuple):
+    y = y[0]
+torch.cuda.synchronize()
+print("rmsnorm ok", y.shape, y.dtype)
 PY
 ```
+
+!!! note "INT8 TurboDiffusion kernels"
+    The Spark build includes the TurboDiffusion extension symbols, including
+    `quant_cuda` and `gemm_cuda`, but the install smoke test above intentionally
+    uses `rms_norm_cuda`. Treat INT8 quantization or GEMM failures on GB10 as a
+    kernel compatibility issue to debug separately, not as a failed FastVideo
+    Python installation.
 
 ## Manual build (advanced / fallback)
 
@@ -145,6 +153,7 @@ uv pip install "https://github.com/mjun0812/flash-attention-prebuild-wheels/rele
 | kernel build can't find cutlass headers | Submodules not initialised — run the `git submodule update` step. |
 | `fastvideo-kernel: could not determine the target CUDA architecture` | The build couldn't see a GPU and no arch was given. Build on the Spark itself, or pass `TORCH_CUDA_ARCH_LIST=12.1` (see [Building without a visible GPU](#building-without-a-visible-gpu-ci--docker)). |
 | `nvcc fatal: Unsupported gpu architecture 'compute_121'` | `nvcc` older than CUDA 12.9/13. Confirm `nvcc --version` is 13.x and `CUDACXX=/usr/local/cuda/bin/nvcc`. |
+| `Segmentation fault` when running `Int8Linear` or `int8_quant` | The Python package and compiled extension may be installed correctly, but the TurboDiffusion INT8 quantization/GEMM path is not validated by this guide on GB10. Use the `rmsnorm ok` smoke test above for install verification and debug INT8 kernel support separately. |
 | `ninja: command not found` (manual build only) | `uv pip install scikit-build-core cmake ninja setuptools wheel`. |
 
 ## What this guide does not verify
