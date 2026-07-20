@@ -80,7 +80,12 @@ def test_mmaudio_synchformer_numerical_parity() -> None:
     official, fastvideo = _build_models(device, dtype)
     state = torch.load(OFFICIAL_WEIGHTS, map_location="cpu", weights_only=True)
     official.load_state_dict(state, strict=True)
-    fastvideo.load_state_dict(state, strict=True)
+    visual_state = {
+        name: tensor
+        for name, tensor in state.items()
+        if name.startswith("vfeat_extractor.")
+    }
+    fastvideo.load_state_dict(visual_state, strict=True)
     official.eval()
     fastvideo.eval()
 
@@ -94,4 +99,48 @@ def test_mmaudio_synchformer_numerical_parity() -> None:
     difference = (actual.float() - expected.float()).abs()
     print("max_abs", difference.max().item())
     print("mean_abs", difference.mean().item())
+    torch.testing.assert_close(actual, expected, atol=1e-3, rtol=1e-3)
+
+
+def test_mmaudio_synchformer_feature_contract_parity() -> None:
+    """Cover official windowing, batching, flatten order, and model forward."""
+    if not torch.cuda.is_available():
+        pytest.skip("MMAudio Synchformer feature parity requires CUDA")
+    if not OFFICIAL_WEIGHTS.is_file():
+        pytest.skip("Official MMAudio Synchformer weights are absent")
+
+    from mmaudio.model.utils.features_utils import FeaturesUtils
+
+    device = torch.device("cuda:0")
+    dtype = torch.bfloat16
+    official, fastvideo = _build_models(device, dtype)
+    state = torch.load(OFFICIAL_WEIGHTS, map_location="cpu", weights_only=True)
+    official.load_state_dict(state, strict=True)
+    fastvideo.load_state_dict(
+        {
+            name: tensor
+            for name, tensor in state.items()
+            if name.startswith("vfeat_extractor.")
+        },
+        strict=True,
+    )
+    official.eval()
+    fastvideo.eval()
+
+    feature_utils = FeaturesUtils(enable_conditions=False,
+                                  mode="44k",
+                                  need_vae_encoder=False)
+    feature_utils.synchformer = official
+    video = torch.randn(
+        (2, 24, 3, 224, 224),
+        generator=torch.Generator(device=device).manual_seed(5678),
+        device=device,
+        dtype=dtype,
+    ).clamp_(-1, 1)
+
+    with torch.inference_mode(), torch.autocast("cuda", dtype=dtype):
+        expected = feature_utils.encode_video_with_sync(video, batch_size=2)
+        actual = fastvideo(video).last_hidden_state
+
+    assert expected.shape == actual.shape == (2, 16, 768)
     torch.testing.assert_close(actual, expected, atol=1e-3, rtol=1e-3)

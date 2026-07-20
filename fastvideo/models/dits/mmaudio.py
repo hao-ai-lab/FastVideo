@@ -21,7 +21,6 @@ from torch import nn
 
 from fastvideo.configs.models.dits.mmaudio import MMAudioTransformerConfig
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.loader.utils import get_param_names_mapping
 
 
 def compute_rope_rotations(
@@ -277,7 +276,10 @@ class MMAudioTransformer(BaseDiT):
     _fsdp_shard_conditions = _DEFAULT_CONFIG.arch_config._fsdp_shard_conditions
     _compile_conditions = _DEFAULT_CONFIG.arch_config._compile_conditions
     _supported_attention_backends = _DEFAULT_CONFIG.arch_config._supported_attention_backends
-    param_names_mapping = get_param_names_mapping(_DEFAULT_CONFIG.arch_config.param_names_mapping)
+    # The shared FSDP loader converts this mapping dictionary into its callable
+    # form. Keeping the class attribute as a dict matches every other native
+    # FastVideo DiT and also supports identity-mapped converted checkpoints.
+    param_names_mapping = _DEFAULT_CONFIG.arch_config.param_names_mapping
     reverse_param_names_mapping = _DEFAULT_CONFIG.arch_config.reverse_param_names_mapping
 
     def __init__(self, config: MMAudioTransformerConfig, hf_config: dict[str, Any], **kwargs) -> None:
@@ -384,6 +386,36 @@ class MMAudioTransformer(BaseDiT):
         )
         self.register_buffer("latent_rot", latent_rotations, persistent=False)
         self.register_buffer("clip_rot", clip_rotations, persistent=False)
+
+    def materialize_non_persistent_buffers(
+        self,
+        device: torch.device,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        """Rebuild derived buffers after meta-device production loading."""
+        if self.t_embed.freqs.is_meta:
+            frequency_dim = self.t_embed.mlp[0].in_features
+            freqs = 1.0 / (
+                10000
+                ** (
+                    torch.arange(0, frequency_dim, 2, dtype=torch.float32, device=device)
+                    / frequency_dim
+                )
+            )
+            freqs = (10000 / self.t_embed.max_period) * freqs
+            self.t_embed._buffers["freqs"] = freqs.to(dtype=dtype or torch.float32)
+        if self.latent_rot.is_meta or self.clip_rot.is_meta:
+            head_dim = self.hidden_dim // self.num_heads
+            self._buffers["latent_rot"] = compute_rope_rotations(
+                self._latent_seq_len, head_dim, 10000, device=device
+            )
+            self._buffers["clip_rot"] = compute_rope_rotations(
+                self._clip_seq_len,
+                head_dim,
+                10000,
+                freq_scaling=self._latent_seq_len / self._clip_seq_len,
+                device=device,
+            )
 
     def update_seq_lengths(self, latent_seq_len: int, clip_seq_len: int, sync_seq_len: int) -> None:
         self._latent_seq_len = latent_seq_len

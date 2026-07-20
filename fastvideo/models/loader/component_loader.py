@@ -961,8 +961,14 @@ class AudioDecoderLoader(ComponentLoader):
         precision = getattr(
             fastvideo_args.pipeline_config, "audio_decoder_precision", "bf16"
         )
-        with set_default_torch_dtype(PRECISION_TO_TYPE[precision]):
-            audio_decoder = model_cls(config).to(target_device)
+        # MMAudio normalizes its magnitude-preserving convolution weights in
+        # fp32 and only then casts the whole feature utility module to bf16.
+        # Constructing/loading directly in bf16 quantizes the unnormalized
+        # checkpoint first and changes the decoded mel trajectory.
+        construction_precision = "fp32" if class_name == "MMAudioVAE" else precision
+        construction_device = torch.device("cpu") if class_name == "MMAudioVAE" else target_device
+        with set_default_torch_dtype(PRECISION_TO_TYPE[construction_precision]):
+            audio_decoder = model_cls(config).to(construction_device)
 
         safetensors_list = glob.glob(
             os.path.join(str(model_path), "*.safetensors")
@@ -974,7 +980,7 @@ class AudioDecoderLoader(ComponentLoader):
         if class_name == "MMAudioVAE":
             audio_decoder.load_state_dict(loaded, strict=True)
             audio_decoder.remove_weight_norm()
-            return audio_decoder.eval()
+            return audio_decoder.to(device=target_device, dtype=PRECISION_TO_TYPE[precision]).eval()
 
         decoder_state = {}
         for name, tensor in loaded.items():
@@ -1001,8 +1007,12 @@ class VocoderLoader(ComponentLoader):
         precision = getattr(
             fastvideo_args.pipeline_config, "vocoder_precision", "bf16"
         )
-        with set_default_torch_dtype(PRECISION_TO_TYPE[precision]):
-            vocoder = model_cls(config).to(target_device)
+        # Canonical BigVGAN likewise removes parametrized weight norm in fp32
+        # before the official MMAudio feature module is cast to bf16.
+        construction_precision = "fp32" if class_name == "BigVGANV2" else precision
+        construction_device = torch.device("cpu") if class_name == "BigVGANV2" else target_device
+        with set_default_torch_dtype(PRECISION_TO_TYPE[construction_precision]):
+            vocoder = model_cls(config).to(construction_device)
 
         safetensors_list = glob.glob(
             os.path.join(str(model_path), "*.safetensors")
@@ -1014,7 +1024,7 @@ class VocoderLoader(ComponentLoader):
         if class_name == "BigVGANV2":
             vocoder.load_state_dict(loaded, strict=True)
             vocoder.remove_weight_norm()
-            return vocoder.eval()
+            return vocoder.to(device=target_device, dtype=PRECISION_TO_TYPE[precision]).eval()
 
         target_module = getattr(vocoder, "model", vocoder)
         target_module.load_state_dict(loaded, strict=False)

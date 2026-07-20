@@ -148,9 +148,78 @@ def test_mmaudio_dfn5b_real_weight_parity() -> None:
     if not torch.cuda.is_available():
         pytest.skip("DFN5B parity requires CUDA")
 
-    # The converter writes split FastVideo text/vision component directories.
-    # End-to-end real-weight assertions are filled in once those artifacts can
-    # be generated from the approved local snapshot.
-    converted_root = REPO_ROOT / "converted_weights/mmaudio"
-    if not (converted_root / "text_encoder").is_dir() or not (converted_root / "image_encoder").is_dir():
-        pytest.skip("Converted DFN5B split components are not available yet")
+    import open_clip
+
+    from fastvideo.configs.models.encoders.mmaudio_clip import (
+        MMAudioDFNCLIPTextConfig,
+        MMAudioDFNCLIPVisionConfig,
+    )
+    from fastvideo.distributed import (
+        cleanup_dist_env_and_memory,
+        maybe_init_distributed_environment_and_model_parallel,
+    )
+    from fastvideo.forward_context import set_forward_context
+    from fastvideo.models.encoders.mmaudio_clip import (
+        MMAudioDFNCLIPTextEncoder,
+        MMAudioDFNCLIPVisionEncoder,
+    )
+
+    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+    os.environ.setdefault("MASTER_PORT", "29592")
+    maybe_init_distributed_environment_and_model_parallel(1, 1)
+    try:
+        official = open_clip.create_model_from_pretrained(
+            f"local-dir:{DFN5B_DIR}", return_transform=False)
+        state = official.state_dict()
+        text_encoder = MMAudioDFNCLIPTextEncoder(
+            MMAudioDFNCLIPTextConfig())
+        vision_encoder = MMAudioDFNCLIPVisionEncoder(
+            MMAudioDFNCLIPVisionConfig())
+        text_encoder.load_state_dict(_map_open_clip_text(state), strict=True)
+        vision_encoder.load_state_dict(_map_open_clip_vision(state),
+                                       strict=True)
+
+        device = torch.device("cuda:0")
+        official.to(device).eval()
+        text_encoder.to(device).eval()
+        vision_encoder.to(device).eval()
+        tokens = open_clip.get_tokenizer("ViT-H-14-378-quickgelu")(
+            ["A dog runs past a red car!"]).to(device)
+        frames = torch.rand(
+            (1, 3, 384, 384),
+            generator=torch.Generator(device=device).manual_seed(9012),
+            device=device,
+        )
+        mean = torch.tensor([0.48145466, 0.4578275, 0.40821073],
+                            device=device).view(1, 3, 1, 1)
+        std = torch.tensor([0.26862954, 0.26130258, 0.27577711],
+                           device=device).view(1, 3, 1, 1)
+        frames = (frames - mean) / std
+
+        with torch.inference_mode():
+            expected_text = official.token_embedding(tokens)
+            expected_text = expected_text + official.positional_embedding
+            expected_text = official.transformer(
+                expected_text, attn_mask=official.attn_mask)
+            expected_text = F.normalize(official.ln_final(expected_text),
+                                        dim=-1)
+            expected_image = official.encode_image(frames, normalize=True)
+            with set_forward_context(current_timestep=0,
+                                     attn_metadata=None):
+                actual_text = text_encoder(tokens).last_hidden_state
+                actual_image = vision_encoder(frames).last_hidden_state
+
+        text_error = (actual_text.float() - expected_text.float()).abs()
+        image_error = (actual_image.float() - expected_image.float()).abs()
+        print("text_max_abs", text_error.max().item())
+        print("image_max_abs", image_error.max().item())
+        torch.testing.assert_close(actual_text,
+                                   expected_text,
+                                   atol=2e-5,
+                                   rtol=2e-5)
+        torch.testing.assert_close(actual_image,
+                                   expected_image,
+                                   atol=2e-5,
+                                   rtol=2e-5)
+    finally:
+        cleanup_dist_env_and_memory()

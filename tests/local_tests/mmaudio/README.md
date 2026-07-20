@@ -18,23 +18,25 @@ Port progress, open questions, issues, and handoff notes live in
 | Official commit/version | `974010a026c731054592d8f777218bd9d85a6c24` |
 | HF weights | `hkchengrex/MMAudio` plus canonical DFN5B CLIP and BigVGAN component repos |
 | HF revision | default; pin immutable revisions before publishing converted artifacts |
-| Local weights dir | `official_weights/mmaudio` (not downloaded) |
+| Local weights dir | `official_weights/mmaudio` (downloaded locally and gitignored) |
 | Source layout | mixed raw official checkpoints and external pretrained components |
 | Needs conversion | yes |
 
-No supported Hugging Face token environment variable was set during prep.
-Never write token values in this file; only use `HF_TOKEN`,
-`HUGGINGFACE_HUB_TOKEN`, or `HF_API_KEY` in the shell.
+The public reference assets have been downloaded locally. Never write token
+values in this file; use `HF_TOKEN`, `HUGGINGFACE_HUB_TOKEN`, or `HF_API_KEY`
+only in the shell when a future gated asset requires one.
 
 ## First Implementation Scope
 
 - Inference parity target: `large_44k_v2`, 44.1 kHz, V2A and T2A.
 - Training parity target: a v1 44.1 kHz checkpoint because the official
   repository states that `_v2` training is unsupported.
-- Inputs: optional video plus optional text prompt; at least one must be
-  provided.
-- Output: mono waveform and sample rate, with optional mux into the source
-  video.
+- Inputs: video plus optional text for V2A, or text-only for T2A.
+- Output: mono waveform and sample rate through FastVideo's audio-only result
+  contract. Source-video muxing is deferred.
+- Duration: 8 seconds is the published training/default duration, but inference
+  uses dynamic sequence lengths and accepts shorter or longer clips. As in the
+  official demo, quality can fall when moving far away from 8 seconds.
 - Deferred until the base parity gate passes: 16 kHz, small/medium variants,
   sequence/tensor parallel optimization, and quality-reference publication.
 
@@ -68,15 +70,23 @@ uv pip install cython "gitpython>=3.1" "hydra-core>=1.3.2" \
 dependency_changes: installed no-deps editable plus missing official dependencies in current env
 official_env_status: imports_ok
 private_dep_stubs: none planned
-blocked_on: none for imports; official weights are still absent
+blocked_on: none
+```
+
+Run the FastVideo demo with an explicit duration:
+
+```bash
+MMAUDIO_MODEL_PATH=converted_weights/mmaudio/large_44k_v2 \
+python examples/inference/basic/basic_mmaudio.py \
+  --video-path /path/to/video.mp4 \
+  --duration-seconds 10 \
+  --output-path outputs_audio/mmaudio_10s.wav
 ```
 
 ## Weight Setup
 
-No weights have been downloaded. The recommended parity scope requires the
-official `mmaudio_large_44k_v2.pth`, `v1-44.pth`, Synchformer checkpoint,
-DFN5B CLIP assets, and the canonical 44.1 kHz BigVGAN checkpoint. Downloading
-these is a multi-gigabyte external action and requires explicit approval.
+The approved reference set is present: `mmaudio_large_44k_v2.pth`,
+`v1-44.pth`, Synchformer, DFN5B CLIP, and canonical 44.1 kHz BigVGAN-v2.
 
 Converted artifacts will remain untracked under:
 
@@ -99,20 +109,20 @@ fastvideo_key_dumps:
 conversion_script: scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py
 conversion_source_layout: mixed
 converted_weights_dir: converted_weights/mmaudio
-strict_load_status: not_run
+strict_load_status: pass for all production components
 ```
 
 ## Expected Parity Tests
 
 | Component | Official files / args | Test | Concerns | Status |
 |---|---|---|---|---|
-| Transformer | `mmaudio/model/networks.py`; `large_44k_v2()` | `tests/local_tests/mmaudio/test_mmaudio_transformer_parity.py` | RoPE scaling, `nearest-exact`, official final-layer `global_c` behavior | implementation parity passed; real weights pending |
-| DFN5B conditioner | `mmaudio/model/utils/features_utils.py`; `apple/DFN5B-CLIP-ViT-H-14-384` | `tests/local_tests/mmaudio/test_mmaudio_clip_parity.py` | patched tokenwise text output and normalized vision projection | native small-model parity and tokenizer parity passed; real weights pending |
-| Synchformer | `mmaudio/ext/synchformer/`; 16-frame windows with stride 8 | `tests/local_tests/mmaudio/test_mmaudio_synchformer_parity.py` | shared backbone must stay outside eval-only namespace | exact state structure passed; real weights pending |
-| Audio VAE | `mmaudio/ext/autoencoder/`; `v1-44.pth` | `tests/local_tests/mmaudio/test_mmaudio_audio_vae_parity.py` | latent transpose and normalization statistics | implementation parity passed; real weights pending |
-| BigVGAN | canonical `nvidia/bigvgan_v2_44khz_128band_512x` instantiation used by `AutoEncoderModule` | `tests/local_tests/mmaudio/test_mmaudio_vocoder_parity.py` | exact resampling and weight-norm behavior | implementation parity passed; real weights pending |
+| Transformer | `mmaudio/model/networks.py`; `large_44k_v2()` | `tests/local_tests/mmaudio/test_mmaudio_transformer_parity.py` | RoPE scaling, `nearest-exact`, official final-layer `global_c` behavior | exact real-weight parity |
+| DFN5B conditioner | `mmaudio/model/utils/features_utils.py`; `apple/DFN5B-CLIP-ViT-H-14-384` | `tests/local_tests/mmaudio/test_mmaudio_clip_parity.py` | patched tokenwise text output and normalized vision projection | exact real-weight parity |
+| Synchformer | `mmaudio/ext/synchformer/`; 16-frame windows with stride 8 | `tests/local_tests/mmaudio/test_mmaudio_synchformer_parity.py` | shared backbone must stay outside eval-only namespace | exact real-weight model and usage parity |
+| Audio VAE | `mmaudio/ext/autoencoder/`; `v1-44.pth` | `tests/local_tests/mmaudio/test_mmaudio_audio_vae_parity.py` | latent transpose and normalization statistics | exact real-weight parity |
+| BigVGAN | canonical `nvidia/bigvgan_v2_44khz_128band_512x` instantiation used by `AutoEncoderModule` | `tests/local_tests/mmaudio/test_mmaudio_vocoder_parity.py` | exact resampling and weight-norm behavior | exact real-weight parity |
 | Scheduler | `mmaudio/model/flow_matching.py::FlowMatching` | `tests/local_tests/mmaudio/test_mmaudio_scheduler_parity.py` | forward-time Euler convention | existing FastVideo scheduler parity passed |
-| Pipeline | `mmaudio/eval_utils.py::generate` and `demo.py` | `tests/local_tests/mmaudio/test_mmaudio_pipeline_parity.py` | dual-FPS frame sampling, CFG order, Euler integration, waveform output | gated on real-weight component parity |
+| Pipeline | `mmaudio/eval_utils.py::generate` and `demo.py` | `tests/local_tests/mmaudio/test_mmaudio_pipeline_parity.py` | dual-FPS frame sampling, CFG order, Euler integration, waveform output | exact real-weight parity passed |
 
 Planned commands:
 
