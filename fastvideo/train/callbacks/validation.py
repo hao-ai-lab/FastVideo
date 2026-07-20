@@ -133,6 +133,7 @@ class ValidationCallback(Callback):
         keyboard_value_scale: float = 1.0,
         offload_training_state: bool = False,
         unload_pipeline_after_validation: bool = False,
+        nvfp4_fa4: bool = False,
         **pipeline_kwargs: Any,
     ) -> None:
         self.pipeline_target = str(pipeline_target)
@@ -150,6 +151,7 @@ class ValidationCallback(Callback):
         self.metrics_config = self._parse_metrics_config(metrics_config)
         self.offload_training_state = self._coerce_bool(offload_training_state)
         self.unload_pipeline_after_validation = self._coerce_bool(unload_pipeline_after_validation)
+        self.nvfp4_fa4 = self._coerce_bool(nvfp4_fa4)
         self.pipeline_kwargs = dict(pipeline_kwargs)
 
         # Set after on_train_start.
@@ -273,7 +275,7 @@ class ValidationCallback(Callback):
                 # EMA weights during validation.
                 ema_cb = self._find_ema_callback()
                 ctx = ema_cb.ema_context(transformer) if ema_cb is not None else contextlib.nullcontext(transformer)
-                with ctx as t:
+                with ctx as t, self._nvfp4_fa4_context(t):
                     self._run_validation_inner(
                         method,
                         step,
@@ -282,6 +284,33 @@ class ValidationCallback(Callback):
         finally:
             if self.unload_pipeline_after_validation:
                 self._clear_pipeline_cache()
+
+    @contextlib.contextmanager
+    def _nvfp4_fa4_context(self, transformer: torch.nn.Module):
+        if not self.nvfp4_fa4:
+            yield
+            return
+
+        from fastvideo.attention.backends.flash_attn import (
+            FlashAttentionImpl, )
+
+        implementations = [
+            impl for module in transformer.modules()
+            if isinstance((impl := getattr(module, "attn_impl", None)), FlashAttentionImpl) and impl.head_size >= 128
+        ]
+        if not implementations:
+            raise RuntimeError("nvfp4_fa4 validation requested, but the transformer has no eligible "
+                               "FlashAttentionImpl layers with head_size >= 128")
+
+        previous = [impl.nvfp4_fa4 for impl in implementations]
+        try:
+            for impl in implementations:
+                impl.set_nvfp4_fa4(True)
+            logger.info("Enabled PR #1221 NVFP4 Q/K FA4 for %d validation attention layers.", len(implementations))
+            yield
+        finally:
+            for impl, enabled in zip(implementations, previous, strict=True):
+                impl.set_nvfp4_fa4(enabled)
 
     @contextlib.contextmanager
     def _validation_memory_context(

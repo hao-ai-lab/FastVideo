@@ -6,8 +6,9 @@
 # real NVFP4 GEMMs (flashinfer cutlass) with a straight-through-estimator
 # backward into the dense fp32 master weights. No extra parameters or
 # buffers are added, so FSDP sharding, checkpointing, and export are
-# identical to dense training. Attention stays dense (LTX-2 NVFP4
-# deployment does not quantize attention math).
+# identical to dense training. Training attention stays dense; validation
+# uses PR #1221's inference-only NVFP4 Q/K FlashAttention-4 kernel while V,
+# head-dim-64 audio attention, and masked text cross-attention remain BF16.
 #
 # Requires flashinfer with FP4 support and an sm_100-class GPU
 # (developed on GB200).
@@ -16,7 +17,8 @@
 #   CUDA_VISIBLE_DEVICES=0 python fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py
 #
 # Run:
-#   NUM_GPUS=4 bash examples/train/run.sh examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml
+#   CUTE_DSL_ENABLE_TVM_FFI=1 NUM_GPUS=4 \
+#     bash examples/train/run.sh examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml
 
 models:
   student:
@@ -91,6 +93,10 @@ callbacks:
     sampling_steps: [8]
     guidance_scale: 1.0
     num_frames: 81
+    # Validation reuses the live transformer, so the callback temporarily
+    # enables the sm100/sm103 NVFP4 Q/K FA4 implementation from PR #1221
+    # and restores dense attention before the next training step.
+    nvfp4_fa4: true
 
 # quant_config selects NVFP4 QAT for the same curated linear prefixes as
 # LTX-2 NVFP4 deployment. They fake-quantize through real FP4 GEMMs with
