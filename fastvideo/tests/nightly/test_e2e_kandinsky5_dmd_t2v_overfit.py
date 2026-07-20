@@ -125,26 +125,31 @@ GENERATION_PROMPT = ("A curious raccoon peers through a vibrant field of yellow 
                      "soft natural light filtering through the petals, mid-shot")
 GENERATION_SEED = 42
 # Media-oracle calibration, measured against the committed reference
-# (2026-07-19; regression-tested in
-# fastvideo/tests/workflow/test_kandinsky5_e2e_media_oracle.py):
+# (2026-07-20, from the generator_update_interval=1 / 2-GPU-sharded
+# bootstrap run; regression-tested in
+# fastvideo/tests/workflow/test_kandinsky5_e2e_media_oracle.py, which
+# recomputes these known-bad clips from whatever reference is currently
+# committed -- so it stays valid across reference swaps even though the
+# numbers below are a point-in-time snapshot):
 #
 #   clip                          spatial-std  temporal-diff  mean MS-SSIM
-#   good reference                  >= 11.37      >= 1.15        1.0000
-#   solid @ reference mean RGB       0.0           0.0           0.9189
-#   frozen (reference frame x121)   12.07          0.0001        0.8597
+#   good reference                  >= 11.42      >= 1.12        1.0000
+#   solid @ reference mean RGB       0.0           0.0           0.9162
+#   frozen (reference frame x121)   12.12          0.0           0.8534
 #
 # Two consequences drive the design below:
 #  - MS-SSIM alone CANNOT separate collapsed clips from good ones with
-#    safe margin (a solid clip scores 0.9189!), so the structural checks
+#    safe margin (a solid clip scores ~0.92!), so the structural checks
 #    in _assert_video_not_degenerate are the primary defense against
 #    solid/frozen/truncated output; the SSIM floor's job is catching a
 #    *different structured video* (wrong remap / re-noise schedule).
 #  - The floors are set >= 5x below the good reference's observed values
 #    and >= 10x above every known-bad clip's.
-# An independent retrain-from-scratch validation run (2026-07-18) scored
-# mean MS-SSIM 1.0000 -- the chain is deterministic on fixed hardware, so
-# 0.95 still leaves drift headroom while sitting above the 0.9189 solid
-# clip.
+# An independent retrain-from-scratch validation run against this exact
+# reference is the last open verification step (see the module
+# docstring's bootstrap procedure) -- 0.95 is chosen to sit comfortably
+# above the ~0.92 solid-clip ceiling while leaving headroom for ordinary
+# run-to-run drift once that number is in.
 EXPECTED_FRAME_COUNT = 121
 EXPECTED_FRAME_HEIGHT = 512
 EXPECTED_FRAME_WIDTH = 768
@@ -397,13 +402,13 @@ def _assert_video_not_degenerate(video_path: Path) -> None:
     spatial_std = luma.reshape(len(luma), -1).std(axis=1)
     assert float(spatial_std.min()) >= MIN_FRAME_SPATIAL_STD, (
         f"generated video {video_path} has a frame with luma spatial std "
-        f"{spatial_std.min():.3f} < {MIN_FRAME_SPATIAL_STD} (reference min: 11.37) -- "
+        f"{spatial_std.min():.3f} < {MIN_FRAME_SPATIAL_STD} (reference min: ~11.4) -- "
         "solid/near-solid output from a NaN or collapsed run")
 
     temporal_diff = np.abs(np.diff(luma, axis=0)).mean(axis=(1, 2))
     assert float(temporal_diff.min()) >= MIN_FRAME_TEMPORAL_DIFF, (
         f"generated video {video_path} has consecutive frames with mean |luma diff| "
-        f"{temporal_diff.min():.4f} < {MIN_FRAME_TEMPORAL_DIFF} (reference min: 1.15) -- "
+        f"{temporal_diff.min():.4f} < {MIN_FRAME_TEMPORAL_DIFF} (reference min: ~1.1) -- "
         "frozen output")
 
 
