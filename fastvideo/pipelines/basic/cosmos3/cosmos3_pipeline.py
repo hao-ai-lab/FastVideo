@@ -405,7 +405,7 @@ def cosmos3_get_cfg_velocity(
                 pred = pred.squeeze(0) if pred.dim() == 5 else pred  # [C, T, H, W]
                 keep = (1.0 - cond_mask).to(dtype=pred.dtype, device=pred.device)  # [T,1,1]
                 items.append(pred * keep if keep.sum() > 0 else torch.zeros_like(pred))
-            vision_vel = torch.cat([v.reshape(-1) for v in items]).to(flat_latent.dtype)
+            vision_vel = torch.cat([v.reshape(-1) for v in items])
 
         parts = [vision_vel]
 

@@ -80,8 +80,8 @@ def test_sequential_cfg_calls_cond_then_uncond_each_step(make_cosmos3_pipeline) 
     assert tokens == [_COND_TOKEN, _UNCOND_TOKEN, _COND_TOKEN, _UNCOND_TOKEN]
 
 
-def test_cfg_velocity_combination_formula(make_cosmos3_pipeline) -> None:
-    """The per-step velocity equals ``uncond + g*(cond - uncond)``.
+def test_cfg_velocity_preserves_prediction_dtype_and_formula(make_cosmos3_pipeline) -> None:
+    """CFG keeps the model prediction dtype and official arithmetic order.
 
     The stub returns ``scale(token) * tanh(latent)`` on noisy frames, so the
     expected velocity is a closed form we can check exactly.
@@ -93,6 +93,10 @@ def test_cfg_velocity_combination_formula(make_cosmos3_pipeline) -> None:
 
     pipeline = make_cosmos3_pipeline()
     transformer = pipeline.modules["transformer"]
+    base_forward = transformer.forward
+    transformer.forward = lambda **kwargs: {
+        "preds_vision": [pred.to(torch.bfloat16) for pred in base_forward(**kwargs)["preds_vision"]]
+    }
     shape = (_LATENT_CHANNEL, 2, 2, 2)
     flat = torch.randn(int(torch.tensor(shape).prod()))
     guidance = 6.0
@@ -117,10 +121,11 @@ def test_cfg_velocity_combination_formula(make_cosmos3_pipeline) -> None:
     lat = flat.reshape(shape)
     scale_cond = 0.01 * (1.0 + (_COND_TOKEN % 7))
     scale_uncond = 0.01 * (1.0 + (_UNCOND_TOKEN % 7))
-    cond_v = (scale_cond * torch.tanh(lat)).reshape(-1)
-    uncond_v = (scale_uncond * torch.tanh(lat)).reshape(-1)
+    cond_v = (scale_cond * torch.tanh(lat)).to(torch.bfloat16).reshape(-1)
+    uncond_v = (scale_uncond * torch.tanh(lat)).to(torch.bfloat16).reshape(-1)
     expected = uncond_v + guidance * (cond_v - uncond_v)
-    torch.testing.assert_close(v, expected, atol=1e-6, rtol=1e-5)
+    assert v.dtype == torch.bfloat16
+    torch.testing.assert_close(v, expected, atol=0, rtol=0)
 
 
 def test_i2v_keeps_condition_frame_clean(make_cosmos3_pipeline) -> None:
