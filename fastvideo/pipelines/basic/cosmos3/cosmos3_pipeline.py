@@ -591,7 +591,7 @@ class Cosmos3OmniDiffusersPipeline(ComposedPipelineBase):
     _required_config_modules = ["text_tokenizer", "vae", "transformer", "scheduler"]
 
     # Engine-init flow_shift (T2V/I2V); T2I overrides to 3.0 per request.
-    _engine_init_flow_shift: float = 1.0
+    _engine_init_flow_shift: float = 10.0
     # Class-attribute defaults so ``__new__``-based unit tests can read these
     # before ``initialize_pipeline`` runs.
     scheduler: Any = None

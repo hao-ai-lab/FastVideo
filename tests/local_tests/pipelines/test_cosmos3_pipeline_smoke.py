@@ -45,7 +45,8 @@ def test_cosmos3_production_loader_video_latent(tmp_path: Path, workload: str) -
         output_type="latent",
     )
     try:
-        height, width, num_frames = 256, 448, 25
+        # Official ``resolution=256, aspect_ratio=16,9`` geometry.
+        height, width, num_frames = 192, 320, 25
         initial_noise = torch.zeros(1, 48, 7, height // 16, width // 16)
         conditioning = Image.new("RGB", (width, height), color=(64, 128, 192)) if workload == "i2v" else None
         result = generator.generate_video(

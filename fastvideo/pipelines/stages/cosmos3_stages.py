@@ -162,25 +162,15 @@ class Cosmos3DenoisingStage(PipelineStage):
         return (int(num_frames) - 1) // int(temporal_factor) + 1
 
     @staticmethod
-    def _flow_shift_for_resolution(height: int, width: int) -> float:
-        """UniPC ``flow_shift`` for a given pixel resolution.
+    def _flow_shift_for_mode(*, is_video: bool) -> float:
+        """Return the official per-modality UniPC shift.
 
-        Mirrors the framework's ``_RESOLUTION_SHIFT_DEFAULTS`` (8B VLM backbone,
-        which Cosmos3-Nano uses): the shift is keyed by the named resolution
-        bucket the (H, W) belongs to, regardless of task (T2V/I2V/T2I):
-
-            "256" -> 3.0,  "480" -> 5.0,  "704"/"720"/"768" -> 10.0
-
-        We invert the framework's ``{IMAGE,VIDEO}_RES_SIZE_INFO`` tables by the
-        longest side: <=320 is the 256 bucket, 640-832 the 480 bucket, and
-        960-1360 the 704/720/768 buckets.
+        The current ``text2video`` and ``image2video`` defaults explicitly set
+        shift 10.0, while ``text2image`` explicitly sets shift 3.0. Because the
+        value is already configured, the framework's resolution-based fallback
+        is not consulted for these modes.
         """
-        long_side = max(int(height), int(width))
-        if long_side <= 480:
-            return 3.0
-        if long_side <= 896:
-            return 5.0
-        return 10.0
+        return 10.0 if is_video else 3.0
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         pipeline_config = fastvideo_args.pipeline_config
@@ -198,12 +188,11 @@ class Cosmos3DenoisingStage(PipelineStage):
         is_i2v = (batch.preprocessed_image is not None or batch.pil_image is not None) and not is_t2i
         is_video = not is_t2i
 
-        # Resolution-based flow_shift, set on the owning pipeline (rebuilds the
-        # scheduler). The framework picks the UniPC shift purely from the named
-        # resolution bucket (``_RESOLUTION_SHIFT_DEFAULTS``), NOT from the task,
-        # so T2V/I2V/T2I at the same resolution share a shift.
+        # Per-modality flow_shift, set on the owning pipeline (rebuilds the
+        # scheduler). The official defaults explicitly use 10.0 for T2V/I2V
+        # and 3.0 for T2I.
         pipe = self.pipeline() if self.pipeline is not None else None
-        flow_shift = self._flow_shift_for_resolution(height, width)
+        flow_shift = self._flow_shift_for_mode(is_video=is_video)
         if pipe is not None and hasattr(pipe, "_set_flow_shift"):
             pipe._set_flow_shift(flow_shift)
             scheduler = pipe.scheduler
