@@ -2,7 +2,7 @@
 """Numerical-parity test: FastVideo's UniPC scheduler vs the framework's.
 
 The Cosmos3 video sampler is the framework's flow-matching UniPC
-(``cosmos_framework.model.vfm.diffusion.samplers.fm_solvers_unipc.FlowUniPCMultistepScheduler``),
+(``cosmos_framework.model.generator.diffusion.samplers.fm_solvers_unipc.FlowUniPCMultistepScheduler``),
 driven by ``UniPCSampler`` with config ``num_train_timesteps=1000``,
 ``use_dynamic_shifting=False`` and a per-mode ``shift`` (10.0 for T2V/I2V,
 3.0 for T2I).  FastVideo reuses its vendored
@@ -34,7 +34,7 @@ import torch
 
 # The official framework provides the parity oracle.
 fm_unipc = pytest.importorskip(
-    "cosmos_framework.model.vfm.diffusion.samplers.fm_solvers_unipc",
+    "cosmos_framework.model.generator.diffusion.samplers.fm_solvers_unipc",
     reason="cosmos_framework not installed; run in fv-cosmos3 env.",
 )
 FlowUniPCMultistepScheduler = fm_unipc.FlowUniPCMultistepScheduler

@@ -12,7 +12,7 @@ Under unified 3D mRoPE there is NO additive latent position embedding
 (``latent_pos_embed is None``); all positional information rides on the
 per-token 3D (T, H, W) rotary embedding. The packed-sequence ``position_ids``
 are therefore shape ``[3, seq_len]``, built exactly like the framework data
-packer (``cosmos_framework.data.vfm.sequence_packing``):
+packer (``cosmos_framework.data.generator.sequence_packing``):
 
   * text tokens broadcast one monotone id across all three axes
     (``get_3d_mrope_ids_text_tokens``),
@@ -89,15 +89,15 @@ def _build_tiny_cosmos3_mrope(seed: int = 42, num_layers: int = 2, sound_gen: bo
     ``sound_gen=True`` additionally builds the sound MoT heads (``sound2llm`` /
     ``llm2sound`` / ``sound_modality_embed``) for the t2vs parity test.
     """
-    from cosmos_framework.model.vfm.mot.cosmos3_vfm_network import (
+    from cosmos_framework.model.generator.mot.cosmos3_vfm_network import (
         Cosmos3VFMNetwork,
         Cosmos3VFMNetworkConfig,
     )
-    from cosmos_framework.model.vfm.mot.unified_mot import (
+    from cosmos_framework.model.generator.mot.unified_mot import (
         Qwen3MoTConfig,
         Qwen3VLTextForCausalLM,
     )
-    from cosmos_framework.model.vfm.vlm.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
+    from cosmos_framework.model.generator.reasoner.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
 
     tiny_text_dict = dict(
         model_type="qwen3_vl_text",
@@ -212,7 +212,7 @@ def _build_mrope_position_ids(n_text: int, grid_t: int, patch_h: int, patch_w: i
     sample: monotone text ids on all axes, ``+temporal_modality_margin`` at the
     text->vision boundary, then a reset-spatial (T, H, W) vision grid.
     """
-    from cosmos_framework.data.vfm.sequence_packing import (
+    from cosmos_framework.data.generator.sequence_packing.mrope import (
         get_3d_mrope_ids_text_tokens,
         get_3d_mrope_ids_vae_tokens,
     )
@@ -246,7 +246,7 @@ def _build_tiny_packed_seq_mrope(
     Vision latent ``[C, grid_t, latent_h, latent_w]`` patchifies (patch=2) to a
     ``(grid_t, latent_h/2, latent_w/2)`` token grid; all frames are noisy.
     """
-    from cosmos_framework.data.vfm.sequence_packing import ModalityData, PackedSequence
+    from cosmos_framework.data.generator.sequence_packing import ModalityData, PackedSequence
 
     patch_h = latent_h // _LATENT_PATCH_SIZE
     patch_w = latent_w // _LATENT_PATCH_SIZE

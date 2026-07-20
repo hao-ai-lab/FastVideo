@@ -117,8 +117,8 @@ def _apply_sdpa_patches():
     """Monkey-patch every attention reference in cosmos_framework to use SDPA."""
     import cosmos_framework.model.attention as attn_pkg
     import cosmos_framework.model.attention.frontend as attn_frontend
-    import cosmos_framework.model.vfm.mot.attention as vfm_attn
-    import cosmos_framework.model.vfm.mot.unified_mot as mot_module
+    import cosmos_framework.model.generator.mot.attention as vfm_attn
+    import cosmos_framework.model.generator.mot.unified_mot as mot_module
 
     attn_frontend.attention = _sdpa_attention
     attn_pkg.attention = _sdpa_attention
@@ -148,12 +148,12 @@ def _build_tiny_cosmos3(seed: int = 42):
         vocab_size=64, latent_channel_size=16, latent_patch_size=2,
         max_latent_{h,w,t}=8,8,4
     """
-    from cosmos_framework.model.vfm.mot.cosmos3_vfm_network import (
+    from cosmos_framework.model.generator.mot.cosmos3_vfm_network import (
         Cosmos3VFMNetwork,
         Cosmos3VFMNetworkConfig,
     )
-    from cosmos_framework.model.vfm.mot.unified_mot import Qwen3MoTConfig, Qwen3VLTextForCausalLM
-    from cosmos_framework.model.vfm.vlm.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
+    from cosmos_framework.model.generator.mot.unified_mot import Qwen3MoTConfig, Qwen3VLTextForCausalLM
+    from cosmos_framework.model.generator.reasoner.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
 
     TINY_TEXT_DICT = dict(
         model_type="qwen3_vl_text",
@@ -199,7 +199,7 @@ def _build_tiny_packed_seq(*, n_text: int = 4, seed: int = 7):
     Vision: C=16, T=1, H=2, W=2 → after patch_size=2: 1*1*1 = 1 patch.
     All vision frames are noisy (timestep=500).
     """
-    from cosmos_framework.data.vfm.sequence_packing import ModalityData, PackedSequence
+    from cosmos_framework.data.generator.sequence_packing import ModalityData, PackedSequence
 
     torch.manual_seed(seed)
     vision_tensor = torch.randn(16, 1, 2, 2)  # [C=16, T=1, H=2, W=2]
@@ -239,7 +239,7 @@ class TestCosmos3ReferenceConfig:
     """Step 1: verify config construction and field enumeration."""
 
     def test_qwen3vl_text_config_fields(self):
-        from cosmos_framework.model.vfm.vlm.qwen3_vl.configuration_qwen3_vl import Qwen3VLTextConfig
+        from cosmos_framework.model.generator.reasoner.qwen3_vl.configuration_qwen3_vl import Qwen3VLTextConfig
 
         cfg = Qwen3VLTextConfig(
             vocab_size=64,
@@ -257,8 +257,8 @@ class TestCosmos3ReferenceConfig:
         assert cfg.head_dim == 8
 
     def test_cosmos3_vfm_network_config(self):
-        from cosmos_framework.model.vfm.mot.cosmos3_vfm_network import Cosmos3VFMNetworkConfig
-        from cosmos_framework.model.vfm.vlm.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
+        from cosmos_framework.model.generator.mot.cosmos3_vfm_network import Cosmos3VFMNetworkConfig
+        from cosmos_framework.model.generator.reasoner.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
 
         tiny_vlm = Qwen3VLConfig(text_config=dict(vocab_size=64, hidden_size=16))
         cfg = Cosmos3VFMNetworkConfig(

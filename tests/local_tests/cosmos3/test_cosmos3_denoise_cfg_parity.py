@@ -75,11 +75,11 @@ _FLOW_SHIFT = 10.0
 # Framework-oracle CFG velocity (replicates pipeline.get_cfg_velocity math).
 # ---------------------------------------------------------------------------
 def _framework_pack(*, text_ids, vision_latent, cond_frames, timestep):
-    from cosmos_framework.data.vfm.sequence_packing import (
-        GenerationDataClean,
+    from cosmos_framework.data.generator.sequence_packing import (
         SequencePlan,
         pack_input_sequence,
     )
+    from cosmos_framework.model.generator.utils.data_and_condition import GenerationDataClean
 
     # vision_latent is [1, C, T, H, W]; temporal dim is axis 2.
     gen_data_clean = GenerationDataClean(
@@ -98,7 +98,6 @@ def _framework_pack(*, text_ids, vision_latent, cond_frames, timestep):
         special_tokens=_SPECIAL_TOKENS,
         latent_patch_size=_LATENT_PATCH_SIZE,
         include_end_of_generation_token=False,
-        position_embedding_type="unified_3d_mrope",
         unified_3d_mrope_reset_spatial_ids=_RESET_SPATIAL_IDS,
         unified_3d_mrope_temporal_modality_margin=_TEMPORAL_MODALITY_MARGIN,
         enable_fps_modulation=False,

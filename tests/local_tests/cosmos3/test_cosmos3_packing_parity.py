@@ -6,7 +6,7 @@ FastVideo's native packer
 builds the packed-sequence inputs the ``Cosmos3VFMTransformer`` consumes. This
 test asserts, for the SAME logical inputs (prompt token ids, vision latents,
 condition-frame indices, diffusion timestep, fps), that FastVideo's packing
-matches the official ``cosmos_framework.data.vfm.sequence_packing.pack_input_sequence``
+matches the official ``cosmos_framework.data.generator.sequence_packing.pack_input_sequence``
 oracle field-by-field:
 
   * ``position_ids`` (exact, ``[3, seq]``),
@@ -91,11 +91,11 @@ def _framework_pack(
     timesteps: list[float],
     is_image_batch: bool,
 ):
-    from cosmos_framework.data.vfm.sequence_packing import (
-        GenerationDataClean,
+    from cosmos_framework.data.generator.sequence_packing import (
         SequencePlan,
         pack_input_sequence,
     )
+    from cosmos_framework.model.generator.utils.data_and_condition import GenerationDataClean
 
     gen_data_clean = GenerationDataClean(
         batch_size=len(visions),
@@ -116,7 +116,6 @@ def _framework_pack(
         special_tokens=_SPECIAL_TOKENS,
         latent_patch_size=_LATENT_PATCH_SIZE,
         include_end_of_generation_token=False,
-        position_embedding_type="unified_3d_mrope",
         unified_3d_mrope_reset_spatial_ids=_RESET_SPATIAL_IDS,
         unified_3d_mrope_temporal_modality_margin=_TEMPORAL_MODALITY_MARGIN,
         enable_fps_modulation=False,

@@ -7,7 +7,7 @@ The Cosmos3 checkpoint VAE is literally ``Wan-AI/Wan2.2-TI2V-5B-Diffusers``
 in ``Cosmos3VAEConfig`` (``fastvideo/configs/models/vaes/cosmos3vae.py``).
 
 Parity oracle: the OFFICIAL framework VAE
-``cosmos_framework.model.vfm.tokenizers.wan2pt2_vae_4x16x16.WanVAE_``
+``cosmos_framework.model.generator.tokenizers.wan2pt2_vae_4x16x16.WanVAE_``
 (CausalConv3d / ResidualBlock / Encoder3d / Decoder3d), which is the same
 architecture loaded by ``Cosmos3-Nano.yaml`` via ``Wan2pt2VAEInterface``.
 
@@ -74,7 +74,7 @@ def _import_framework_vae():
                 RuntimeError("easy_io is stubbed for the CPU parity test")))
         sys.modules["cosmos_framework.utils.easy_io.easy_io"] = eio
     try:
-        import cosmos_framework.model.vfm.tokenizers.wan2pt2_vae_4x16x16 as fw_vae
+        import cosmos_framework.model.generator.tokenizers.wan2pt2_vae_4x16x16 as fw_vae
     except Exception as exc:  # pragma: no cover - env-dependent
         pytest.skip(f"framework wan2pt2 VAE not importable: {exc!r}")
     return fw_vae
