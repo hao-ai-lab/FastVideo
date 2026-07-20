@@ -20,12 +20,15 @@ This mirrors the framework ``Cosmos3OmniDiffusersPipeline.__call__``.
 """
 from __future__ import annotations
 
+import json
 import os
 import weakref
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
-from diffusers.utils.torch_utils import randn_tensor
 from tqdm import tqdm
 
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -46,6 +49,77 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 
 logger = init_logger(__name__)
+
+_VIDEO_DURATION_TEMPLATE = "The video is {duration:.1f} seconds long and is of {fps:.0f} FPS."
+_VIDEO_RESOLUTION_TEMPLATE = "This video is of {height}x{width} resolution."
+
+
+def _format_plain_video_prompt(prompt: str, *, fps: float, num_frames: int, height: int, width: int) -> str:
+    """Append the metadata used by the official Cosmos3 video pipeline."""
+    prompt = prompt.strip()
+    duration = num_frames / fps
+    prompt = prompt.rstrip(".") + ". " + _VIDEO_DURATION_TEMPLATE.format(duration=duration, fps=fps)
+    prompt = prompt.strip().rstrip(".") + ". " + _VIDEO_RESOLUTION_TEMPLATE.format(height=height, width=width)
+    return prompt
+
+
+def cosmos3_format_video_prompt(
+    prompt: str,
+    *,
+    fps: float,
+    num_frames: int,
+    height: int,
+    width: int,
+    aspect_ratio: str = "16,9",
+) -> str:
+    """Resolve a plain or structured Cosmos3 prompt exactly as upstream does."""
+    try:
+        prompt_obj = json.loads(prompt)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        prompt_obj = None
+
+    if not isinstance(prompt_obj, dict):
+        return _format_plain_video_prompt(prompt, fps=fps, num_frames=num_frames, height=height, width=width)
+
+    prompt_obj.update({
+        "duration": f"{int(num_frames / fps) if fps > 0 else 0}s",
+        "fps": float(fps),
+        "resolution": {
+            "H": int(height),
+            "W": int(width),
+        },
+        "aspect_ratio": aspect_ratio,
+    })
+    return json.dumps(prompt_obj)
+
+
+def cosmos3_format_video_negative_prompt(
+    prompt: str,
+    *,
+    fps: float,
+    num_frames: int,
+    height: int,
+    width: int,
+) -> str:
+    """Apply upstream's ``negative_prompt_keep_metadata=true`` behavior."""
+    return _format_plain_video_prompt(
+        prompt,
+        fps=fps,
+        num_frames=num_frames,
+        height=height,
+        width=width,
+    ).lstrip(".").strip()
+
+
+def cosmos3_arch_invariant_rand(shape: tuple[int, ...], *, seed: int, device: torch.device) -> torch.Tensor:
+    """Generate upstream's NumPy-seeded fp32 noise independent of GPU architecture."""
+    array = np.random.RandomState(seed).standard_normal(shape).astype(np.float32)
+    return torch.from_numpy(array).to(device=device)
+
+
+@lru_cache(maxsize=4)
+def _load_structured_negative_prompt(path: str) -> str:
+    return json.dumps(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
 class Cosmos3DenoisingStage(PipelineStage):
@@ -100,6 +174,7 @@ class Cosmos3DenoisingStage(PipelineStage):
 
         is_t2i = num_frames == 1 and batch.preprocessed_image is None and batch.pil_image is None
         is_i2v = (batch.preprocessed_image is not None or batch.pil_image is not None) and not is_t2i
+        is_video = not is_t2i
 
         # Resolution-based flow_shift, set on the owning pipeline (rebuilds the
         # scheduler). The framework picks the UniPC shift purely from the named
@@ -121,8 +196,33 @@ class Cosmos3DenoisingStage(PipelineStage):
         if isinstance(negative_prompt, list):
             negative_prompt = negative_prompt[0] if negative_prompt else ""
 
+        if is_video:
+            # The released checkpoint bundles the structured negative prompt
+            # consumed by the official pipeline. Keep the legacy text as a
+            # fallback for local converted checkpoints that omit ``assets``.
+            if negative_prompt == COSMOS3_VIDEO_NEGATIVE_PROMPT and pipe is not None:
+                negative_path = Path(pipe.model_path) / "assets" / "negative_prompt.json"
+                if negative_path.is_file():
+                    negative_prompt = _load_structured_negative_prompt(str(negative_path))
+                else:
+                    logger.warning("Cosmos3 structured negative prompt not found at %s; using legacy fallback",
+                                   negative_path)
+            prompt = cosmos3_format_video_prompt(
+                prompt,
+                fps=fps,
+                num_frames=num_frames,
+                height=height,
+                width=width,
+            )
+            negative_prompt = cosmos3_format_video_negative_prompt(
+                negative_prompt,
+                fps=fps,
+                num_frames=num_frames,
+                height=height,
+                width=width,
+            )
+
         special_tokens = cosmos3_special_tokens(self.tokenizer)
-        is_video = not is_t2i
         cond_ids = cosmos3_tokenize_caption(self.tokenizer, prompt, is_video=is_video, use_system_prompt=False)
         uncond_ids = cosmos3_tokenize_caption(self.tokenizer,
                                               negative_prompt,
@@ -153,7 +253,24 @@ class Cosmos3DenoisingStage(PipelineStage):
             condition_frame_indexes = [0]
 
         # ---- Initial noise (clean condition frames + pure noise elsewhere) ----
-        pure_noise = randn_tensor(latent_shape, generator=generator, device=device, dtype=dtype).float()
+        if batch.latents is not None:
+            pure_noise = batch.latents
+            if pure_noise.dim() == 5:
+                if pure_noise.shape[0] != 1:
+                    raise ValueError(
+                        f"Cosmos3 currently supports one supplied latent sample, got {pure_noise.shape[0]}")
+                pure_noise = pure_noise.squeeze(0)
+            if tuple(pure_noise.shape) != latent_shape:
+                raise ValueError(
+                    f"Cosmos3 supplied latent shape {tuple(pure_noise.shape)} does not match {latent_shape}")
+            pure_noise = pure_noise.to(device=device, dtype=torch.float32)
+        else:
+            seed = batch.seed
+            if seed is None and generator is not None:
+                seed = int(generator.initial_seed())
+            if seed is None:
+                raise ValueError("Cosmos3 requires an integer seed when initial latents are not supplied")
+            pure_noise = cosmos3_arch_invariant_rand(latent_shape, seed=int(seed), device=device)
         if clean_latent is not None:
             cond_mask = torch.zeros((latent_t, 1, 1), device=device, dtype=pure_noise.dtype)
             for idx in condition_frame_indexes:
@@ -205,8 +322,12 @@ class Cosmos3DenoisingStage(PipelineStage):
             num_audio_samples = int(num_frames / fps * sound_vae.sample_rate)
             sound_latent_t = max(1, sound_vae.get_latent_num_samples(num_audio_samples))
             sound_shape = (sound_dim, sound_latent_t)
-            sound_noise = randn_tensor((sound_dim, sound_latent_t), generator=generator, device=device,
-                                       dtype=dtype).float()
+            seed = batch.seed
+            if seed is None and generator is not None:
+                seed = int(generator.initial_seed())
+            if seed is None:
+                raise ValueError("Cosmos3 sound generation requires an integer seed")
+            sound_noise = cosmos3_arch_invariant_rand((sound_dim, sound_latent_t), seed=int(seed), device=device)
             flat_latent = torch.cat([flat_latent, sound_noise.reshape(-1)])
             sound_specs = [Cosmos3SoundSpec(shape=sound_shape, condition_frame_indexes=[], fps=sound_latent_fps)]
             sound_fps_per_item = [sound_latent_fps] if bool(arch.enable_fps_modulation) else None
@@ -226,11 +347,15 @@ class Cosmos3DenoisingStage(PipelineStage):
 
         # ---- Decode vision: [C, T, H, W] -> pixels [B, 3, T, H, W] in [0, 1] ----
         vision_flat = final_flat[:spec.numel]
-        result_latent = vision_flat.reshape(latent_shape).unsqueeze(0).to(device=device, dtype=dtype)
-        decoded = cosmos3_vae_decode(self.vae, result_latent, norm)  # [B, 3, T, H, W] in [-1, 1]
+        result_latent = vision_flat.reshape(latent_shape).unsqueeze(0).to(device=device, dtype=torch.float32)
+        batch.latents = result_latent
+        if fastvideo_args.output_type == "latent":
+            batch.output = result_latent
+            return batch
+
+        decoded = cosmos3_vae_decode(self.vae, result_latent.to(dtype=dtype), norm)  # [B, 3, T, H, W] in [-1, 1]
         video = ((1.0 + decoded) / 2.0).clamp(0.0, 1.0)
 
-        batch.latents = result_latent
         batch.output = video
 
         # ---- Decode sound: AVAE latent [C, T] -> waveform [C, N] in [-1, 1] ----

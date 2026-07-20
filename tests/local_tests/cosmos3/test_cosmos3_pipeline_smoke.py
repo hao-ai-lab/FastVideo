@@ -231,7 +231,7 @@ class TestCosmos3PipelineSmoke:
         pipe._engine_init_flow_shift = 10.0
         return pipe
 
-    def _make_args(self):
+    def _make_args(self, *, output_type="pil"):
         from fastvideo.configs.pipelines.cosmos3 import Cosmos3Config
 
         cfg = Cosmos3Config()
@@ -241,7 +241,7 @@ class TestCosmos3PipelineSmoke:
         arch.latent_patch_size = _LATENT_PATCH_SIZE
         arch.temporal_compression_factor = _TEMPORAL_FACTOR
         arch.enable_fps_modulation = False
-        return SimpleNamespace(pipeline_config=cfg)
+        return SimpleNamespace(pipeline_config=cfg, output_type=output_type)
 
     def _make_batch(self, *, num_frames, height, width, image=None):
         from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -300,6 +300,31 @@ class TestCosmos3PipelineSmoke:
         out = stage.forward(batch, args)
         assert out.output is not None
         assert out.output.dim() == 5 and out.output.shape[1] == 3
+        assert torch.isfinite(out.output).all()
+
+    def test_stage_honors_supplied_latents_and_latent_output(self):
+        """Parity callers can reuse exact upstream noise without invoking the VAE decoder."""
+        from fastvideo.pipelines.stages.cosmos3_stages import Cosmos3DenoisingStage
+
+        pipe = self._make_pipeline()
+        args = self._make_args(output_type="latent")
+
+        def fail_decode(_latents):
+            raise AssertionError("latent output must bypass VAE decode")
+
+        pipe.modules["vae"].decode = fail_decode
+        stage = Cosmos3DenoisingStage(
+            transformer=pipe.modules["transformer"],
+            scheduler=pipe.modules["scheduler"],
+            vae=pipe.modules["vae"],
+            tokenizer=pipe.modules["text_tokenizer"],
+            pipeline=pipe,
+        )
+        batch = self._make_batch(num_frames=5, height=16, width=16)
+        batch.latents = torch.zeros(1, _LATENT_CHANNEL, 2, 2, 2)
+        out = stage.forward(batch, args)
+        assert out.output is out.latents
+        assert out.output.shape == batch.latents.shape
         assert torch.isfinite(out.output).all()
 
     def test_tokenize_caption_special_tokens(self):

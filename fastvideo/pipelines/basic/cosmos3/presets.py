@@ -4,8 +4,8 @@
 Defaults track the official ``cosmos-framework`` ``sample_args`` for the video
 paths (``text2video`` / ``image2video``: guidance=6.0, num_steps=35, shift=10.0,
 fps=24, num_frames=189) and ``text2image`` (guidance=4.0, num_steps=50,
-shift=3.0). The default resolution is 16:9 at a VAE-aligned 704x1280 (spatial
-compression 16 -> 44x80 latent grid).
+shift=3.0). The official video resolution is 720x1280 (spatial compression 16
+-> 45x80 latent grid; the DiT pads the odd latent height when patchifying).
 """
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
@@ -36,10 +36,11 @@ COSMOS3_NANO = InferencePreset(
     workload_type="t2v",
     stage_schemas=(_DENOISE_STAGE, ),
     defaults={
-        "height": 704,
+        "height": 720,
         "width": 1280,
         "num_frames": 189,
         "fps": 24,
+        "seed": 0,
         "guidance_scale": 6.0,
         "num_inference_steps": 35,
         "negative_prompt": COSMOS3_VIDEO_NEGATIVE_PROMPT,
@@ -54,10 +55,11 @@ COSMOS3_NANO_I2V = InferencePreset(
     workload_type="i2v",
     stage_schemas=(_DENOISE_STAGE, ),
     defaults={
-        "height": 704,
+        "height": 720,
         "width": 1280,
         "num_frames": 189,
         "fps": 24,
+        "seed": 0,
         "guidance_scale": 6.0,
         "num_inference_steps": 35,
         "negative_prompt": COSMOS3_VIDEO_NEGATIVE_PROMPT,

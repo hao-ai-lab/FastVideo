@@ -8,6 +8,7 @@ from fastvideo.api import (
     GeneratorConfig,
     OffloadConfig,
     OutputConfig,
+    PipelineSelection,
     SamplingConfig,
 )
 
@@ -16,6 +17,7 @@ from fastvideo.api import (
 # Point COSMOS3_MODEL_PATH at a local diffusers checkpoint (e.g.
 # ``official_weights/cosmos3``) to skip the Hugging Face download.
 OUTPUT_PATH = "video_samples_cosmos3"
+DEFAULT_REVISION = "411f42a8fdfb8c5b2583cb8786e0938f49796eaa"
 
 
 def main():
@@ -23,6 +25,8 @@ def main():
 
     generator_config = GeneratorConfig(
         model_path=model_name,
+        revision=os.environ.get("COSMOS3_REVISION", DEFAULT_REVISION),
+        pipeline=PipelineSelection(workload_type="t2v"),
         engine=EngineConfig(
             num_gpus=1,
             use_fsdp_inference=False,
@@ -47,15 +51,15 @@ def main():
     request = GenerationRequest(
         prompt=prompt,
         sampling=SamplingConfig(
-            # cosmos3_nano native defaults are 704x1280, 189 frames, 35 steps;
+            # cosmos3_nano native defaults are 720x1280, 189 frames, 35 steps;
             # overridable via env for quick smoke runs.
             num_frames=int(os.environ.get("COSMOS3_NUM_FRAMES", "189")),
-            height=int(os.environ.get("COSMOS3_HEIGHT", "704")),
+            height=int(os.environ.get("COSMOS3_HEIGHT", "720")),
             width=int(os.environ.get("COSMOS3_WIDTH", "1280")),
             num_inference_steps=int(os.environ.get("COSMOS3_STEPS", "35")),
             guidance_scale=6.0,
             fps=24,
-            seed=1024,
+            seed=0,
         ),
         output=OutputConfig(
             output_path=OUTPUT_PATH,

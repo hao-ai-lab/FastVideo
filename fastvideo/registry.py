@@ -822,7 +822,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=Cosmos3Config,
-        workload_types=(WorkloadType.T2V, ),
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
         hf_model_paths=[
             "nvidia/Cosmos3-Nano",
         ],
