@@ -47,6 +47,7 @@ from fastvideo.pipelines.basic.cosmos3.presets import (
     COSMOS3_VIDEO_NEGATIVE_PROMPT, )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.stages.input_validation import InputValidationStage
 
 logger = init_logger(__name__)
 
@@ -120,6 +121,27 @@ def cosmos3_arch_invariant_rand(shape: tuple[int, ...], *, seed: int, device: to
 @lru_cache(maxsize=4)
 def _load_structured_negative_prompt(path: str) -> str:
     return json.dumps(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def _resolve_default_negative_prompt(model_path: str) -> str:
+    negative_path = Path(model_path) / "assets" / "negative_prompt.json"
+    if negative_path.is_file():
+        return _load_structured_negative_prompt(str(negative_path))
+    logger.warning("Cosmos3 structured negative prompt not found at %s; using legacy fallback", negative_path)
+    return COSMOS3_VIDEO_NEGATIVE_PROMPT
+
+
+class Cosmos3InputValidationStage(InputValidationStage):
+    """Resolve Cosmos3's checkpoint default before shared CFG validation."""
+
+    def __init__(self, model_path: str) -> None:
+        self.model_path = model_path
+
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if batch.negative_prompt is None or batch.negative_prompt == COSMOS3_VIDEO_NEGATIVE_PROMPT:
+            batch.negative_prompt = (_resolve_default_negative_prompt(self.model_path)
+                                     if int(batch.num_frames or 1) > 1 else "")
+        return super().forward(batch, fastvideo_args)
 
 
 class Cosmos3DenoisingStage(PipelineStage):
@@ -201,12 +223,7 @@ class Cosmos3DenoisingStage(PipelineStage):
             # consumed by the official pipeline. Keep the legacy text as a
             # fallback for local converted checkpoints that omit ``assets``.
             if negative_prompt == COSMOS3_VIDEO_NEGATIVE_PROMPT and pipe is not None:
-                negative_path = Path(pipe.model_path) / "assets" / "negative_prompt.json"
-                if negative_path.is_file():
-                    negative_prompt = _load_structured_negative_prompt(str(negative_path))
-                else:
-                    logger.warning("Cosmos3 structured negative prompt not found at %s; using legacy fallback",
-                                   negative_path)
+                negative_prompt = _resolve_default_negative_prompt(pipe.model_path)
             prompt = cosmos3_format_video_prompt(
                 prompt,
                 fps=fps,

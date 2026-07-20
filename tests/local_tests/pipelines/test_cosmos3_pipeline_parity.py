@@ -112,7 +112,7 @@ def test_cosmos3_video_negative_metadata_matches_pinned_official() -> None:
     assert actual == expected
 
 
-@pytest.mark.parametrize("shape", [(16, 2, 4, 6), (16, 48, 45, 80)])
+@pytest.mark.parametrize("shape", [(16, 2, 4, 6), (48, 48, 45, 80)])
 @pytest.mark.parametrize("seed", [0, 1024])
 def test_cosmos3_noise_matches_pinned_official(shape: tuple[int, ...], seed: int) -> None:
     _import_reference_inference()

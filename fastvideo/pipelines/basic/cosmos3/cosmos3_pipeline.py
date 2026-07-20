@@ -646,12 +646,15 @@ class Cosmos3OmniDiffusersPipeline(ComposedPipelineBase):
 
         The whole text->latent->denoise->decode flow is custom (sequential CFG
         with per-pass repacking), so a single :class:`Cosmos3DenoisingStage`
-        owns it. ``InputValidationStage`` runs first for the standard checks.
+        owns it. ``Cosmos3InputValidationStage`` runs first so the checkpoint's
+        structured negative prompt is resolved before the standard checks.
         """
-        from fastvideo.pipelines.stages import InputValidationStage
-        from fastvideo.pipelines.stages.cosmos3_stages import Cosmos3DenoisingStage
+        from fastvideo.pipelines.stages.cosmos3_stages import (
+            Cosmos3DenoisingStage,
+            Cosmos3InputValidationStage,
+        )
 
-        self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
+        self.add_stage(stage_name="input_validation_stage", stage=Cosmos3InputValidationStage(self.model_path))
         self.add_stage(
             stage_name="denoising_stage",
             stage=Cosmos3DenoisingStage(

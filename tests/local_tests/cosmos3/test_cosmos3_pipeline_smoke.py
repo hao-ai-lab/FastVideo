@@ -30,6 +30,7 @@ Run:
 """
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -326,6 +327,23 @@ class TestCosmos3PipelineSmoke:
         assert out.output is out.latents
         assert out.output.shape == batch.latents.shape
         assert torch.isfinite(out.output).all()
+
+    def test_input_validation_resolves_checkpoint_negative_prompt(self, tmp_path):
+        """The official default is loaded before shared CFG validation runs."""
+        from fastvideo.pipelines.stages.cosmos3_stages import Cosmos3InputValidationStage
+
+        assets = tmp_path / "assets"
+        assets.mkdir()
+        negative = {"description": "low quality motion"}
+        (assets / "negative_prompt.json").write_text(json.dumps(negative), encoding="utf-8")
+
+        batch = self._make_batch(num_frames=5, height=16, width=16)
+        batch.seed = 0
+        batch.negative_prompt = None
+        batch.do_classifier_free_guidance = True
+        out = Cosmos3InputValidationStage(str(tmp_path)).forward(batch, self._make_args())
+        assert out.negative_prompt == json.dumps(negative)
+        assert out.seeds == [0]
 
     def test_tokenize_caption_special_tokens(self):
         """Pipeline.tokenize_caption uses the Qwen2 chat template + ids."""

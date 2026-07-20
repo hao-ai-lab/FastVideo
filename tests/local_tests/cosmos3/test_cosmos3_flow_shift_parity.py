@@ -28,7 +28,7 @@ import pytest
 # can't be imported here: it transitively requires ``multistorageclient``. The
 # small shift table is mirrored verbatim below with its source location.)
 _utils = pytest.importorskip(
-    "cosmos_framework.data.vfm.utils",
+    "cosmos_framework.data.generator.utils",
     reason="cosmos_framework not installed; run in fv-cosmos3 env.",
 )
 

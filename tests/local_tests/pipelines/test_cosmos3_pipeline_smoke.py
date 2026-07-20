@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import pytest
 import torch
+from PIL import Image
 
 MODEL_DIR = Path(os.getenv("COSMOS3_WEIGHTS_DIR", ""))
 
@@ -23,14 +24,15 @@ def _require_t2v_gpu_assets() -> Path:
     return MODEL_DIR
 
 
-def test_cosmos3_production_loader_t2v_latent(tmp_path: Path) -> None:
-    """Materialize the real components and run one reduced T2V denoising step."""
+@pytest.mark.parametrize("workload", ["t2v", "i2v"])
+def test_cosmos3_production_loader_video_latent(tmp_path: Path, workload: str) -> None:
+    """Materialize the real components and run one reduced video denoising step."""
     model_dir = _require_t2v_gpu_assets()
     from fastvideo import VideoGenerator
 
     generator = VideoGenerator.from_pretrained(
         str(model_dir),
-        workload_type="t2v",
+        workload_type=workload,
         num_gpus=1,
         tp_size=1,
         sp_size=1,
@@ -44,9 +46,11 @@ def test_cosmos3_production_loader_t2v_latent(tmp_path: Path) -> None:
     )
     try:
         height, width, num_frames = 256, 448, 25
-        initial_noise = torch.zeros(1, 16, 7, height // 16, width // 16)
+        initial_noise = torch.zeros(1, 48, 7, height // 16, width // 16)
+        conditioning = Image.new("RGB", (width, height), color=(64, 128, 192)) if workload == "i2v" else None
         result = generator.generate_video(
             prompt="A red panda walks through a bamboo forest.",
+            pil_image=conditioning,
             output_path=str(tmp_path),
             save_video=False,
             return_frames=True,
