@@ -25,12 +25,15 @@ The full validated chain, each arrow a hard assertion:
     -> deterministic (fixed-seed) 4-step generation
     -> degeneracy checks + MS-SSIM against the committed reference video.
 
-Every input AND output root (raw clip, parquet, both stage output dirs,
-both diffusers exports, generated video dir) is deleted up front, and
-``training.checkpoint.resume_from_checkpoint`` is explicitly disabled for
-both stages: the stage-1 YAML defaults to ``resume_from_checkpoint:
-latest``, so a rerun over a dirty ``data/`` dir could otherwise no-op from
-an old checkpoint and go green on stale artifacts.
+Every artifact (raw clip, parquet, both stage output dirs, both diffusers
+exports, generated video dir) lives under the single test-owned
+``data/kandinsky5_e2e/`` root, which is deleted up front -- the
+documented user dataset paths (``data/kandinsky5_overfit{,_preprocessed}``)
+are never read, written, or removed. ``training.checkpoint.
+resume_from_checkpoint`` is explicitly disabled for both stages: the
+stage-1 YAML defaults to ``resume_from_checkpoint: latest``, so a rerun
+over a dirty ``data/`` dir could otherwise no-op from an old checkpoint
+and go green on stale artifacts.
 
 Reference bootstrap: the committed reference
 (``reference_video_kandinsky5_dmd_v0.mp4`` next to this file) is produced
@@ -74,11 +77,20 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 THIS_FILE = Path(__file__).resolve()
 
 NUM_GPUS = os.environ.get("KANDINSKY5_E2E_NUM_GPUS", "1")
-DATA_DIR = Path("data")
-KANDINSKY5_OVERFIT_DATA_DIR = DATA_DIR / "kandinsky5_overfit"
-PREPROCESSED_DIR = DATA_DIR / "kandinsky5_overfit_preprocessed"
-STAGE1_OUTPUT_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage1"
-STAGE2_OUTPUT_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage2"
+# Every artifact this test reads or writes lives under this single
+# test-owned root. It must NEVER point at (or contain) the documented
+# default dataset paths -- data/kandinsky5_overfit and
+# data/kandinsky5_overfit_preprocessed -- which a user may have populated
+# with their real videos/captions for the actual recipe:
+# _clean_previous_artifacts() deletes this root wholesale on every run,
+# and the preprocess subprocess is pointed here via the
+# KANDINSKY5_OVERFIT_DATA_DIR / KANDINSKY5_OVERFIT_OUTPUT_DIR env
+# overrides instead of the script's user-facing defaults.
+E2E_ROOT = Path("data") / "kandinsky5_e2e"
+RAW_DATA_DIR = E2E_ROOT / "raw"
+PREPROCESSED_DIR = E2E_ROOT / "preprocessed"
+STAGE1_OUTPUT_DIR = E2E_ROOT / "stage1"
+STAGE2_OUTPUT_DIR = E2E_ROOT / "stage2"
 # Kept out of STAGE{1,2}_OUTPUT_DIR: those directories are scanned with
 # glob("checkpoint-*") below to find the latest raw DCP checkpoint, and a
 # "checkpoint-<N>-diffusers" export dir sitting alongside "checkpoint-<N>"
@@ -86,9 +98,9 @@ STAGE2_OUTPUT_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage2"
 # clean data/ dir, it would sort after "checkpoint-<N>" and get picked as
 # the checkpoint instead, feeding an already-exported diffusers directory
 # back into dcp_to_diffusers as if it were a DCP checkpoint.
-STAGE1_DIFFUSERS_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage1_diffusers"
-STAGE2_DIFFUSERS_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_stage2_diffusers"
-GENERATED_VIDEO_DIR = DATA_DIR / "outputs" / "kandinsky5_e2e_generated"
+STAGE1_DIFFUSERS_DIR = E2E_ROOT / "stage1_diffusers"
+STAGE2_DIFFUSERS_DIR = E2E_ROOT / "stage2_diffusers"
+GENERATED_VIDEO_DIR = E2E_ROOT / "generated"
 
 STAGE1_CONFIG = (REPO_ROOT / "examples" / "train" / "configs" / "fine_tuning" / "kandinsky5" /
                  "t2v_480p_qat.yaml")
@@ -112,35 +124,51 @@ WRITE_REFERENCE_ENV = "KANDINSKY5_E2E_WRITE_REFERENCE"
 GENERATION_PROMPT = ("A curious raccoon peers through a vibrant field of yellow sunflowers, "
                      "soft natural light filtering through the petals, mid-shot")
 GENERATION_SEED = 42
-# Calibration (2026-07-18, single H-class GPU, torch 2.x + deterministic
-# cudnn): a fully independent retrain-from-scratch + regeneration scored
-# mean/min/max MS-SSIM 1.0000 against the committed reference -- the chain
-# is deterministic on fixed hardware. 0.90 leaves headroom for GPU-class /
-# cuDNN / library drift while still failing loudly on any real regression
-# (a wrong weight remap or re-noise schedule produces a completely
-# different video, nowhere near 0.90).
-MIN_MEAN_MS_SSIM = 0.90
+# Media-oracle calibration, measured against the committed reference
+# (2026-07-19; regression-tested in
+# fastvideo/tests/workflow/test_kandinsky5_e2e_media_oracle.py):
+#
+#   clip                          spatial-std  temporal-diff  mean MS-SSIM
+#   good reference                  >= 11.37      >= 1.15        1.0000
+#   solid @ reference mean RGB       0.0           0.0           0.9189
+#   frozen (reference frame x121)   12.07          0.0001        0.8597
+#
+# Two consequences drive the design below:
+#  - MS-SSIM alone CANNOT separate collapsed clips from good ones with
+#    safe margin (a solid clip scores 0.9189!), so the structural checks
+#    in _assert_video_not_degenerate are the primary defense against
+#    solid/frozen/truncated output; the SSIM floor's job is catching a
+#    *different structured video* (wrong remap / re-noise schedule).
+#  - The floors are set >= 5x below the good reference's observed values
+#    and >= 10x above every known-bad clip's.
+# An independent retrain-from-scratch validation run (2026-07-18) scored
+# mean MS-SSIM 1.0000 -- the chain is deterministic on fixed hardware, so
+# 0.95 still leaves drift headroom while sitting above the 0.9189 solid
+# clip.
+EXPECTED_FRAME_COUNT = 121
+EXPECTED_FRAME_HEIGHT = 512
+EXPECTED_FRAME_WIDTH = 768
+MIN_FRAME_SPATIAL_STD = 2.0
+MIN_FRAME_TEMPORAL_DIFF = 0.2
+MIN_MEAN_MS_SSIM = 0.95
 
 
 def _clean_previous_artifacts() -> None:
-    """Delete every input and output root a previous run could have left.
+    """Delete the single test-owned root a previous run could have left.
 
     Outputs matter as much as inputs: stage 1's YAML defaults to
     ``resume_from_checkpoint: latest``, and the final assertions glob for
     checkpoints/videos -- stale files from an earlier run could satisfy
     them without this run doing any work.
+
+    Scoped strictly to ``E2E_ROOT``: an earlier version of this cleanup
+    also removed ``data/kandinsky5_overfit{,_preprocessed}``, the
+    documented default dataset paths of the real recipe -- silently and
+    irreversibly deleting whatever real videos/captions a user had
+    prepared there. Nothing outside the test-owned root may be touched.
     """
-    for stale_dir in (
-            KANDINSKY5_OVERFIT_DATA_DIR,
-            PREPROCESSED_DIR,
-            STAGE1_OUTPUT_DIR,
-            STAGE2_OUTPUT_DIR,
-            STAGE1_DIFFUSERS_DIR,
-            STAGE2_DIFFUSERS_DIR,
-            GENERATED_VIDEO_DIR,
-    ):
-        if stale_dir.exists():
-            shutil.rmtree(stale_dir)
+    if E2E_ROOT.exists():
+        shutil.rmtree(E2E_ROOT)
 
 
 def _synthesize_single_sample() -> None:
@@ -150,7 +178,7 @@ def _synthesize_single_sample() -> None:
     Matches KANDINSKY5_T2V_LITE_5S's native preset (512x768, 121 frames,
     24fps -- see preprocess_kandinsky5_overfit.py's own constants).
     """
-    videos_dir = KANDINSKY5_OVERFIT_DATA_DIR / "videos"
+    videos_dir = RAW_DATA_DIR / "videos"
     videos_dir.mkdir(parents=True, exist_ok=True)
 
     video_path = videos_dir / "sample_0.mp4"
@@ -170,7 +198,7 @@ def _synthesize_single_sample() -> None:
         writer.write(frame)
     writer.release()
 
-    with open(KANDINSKY5_OVERFIT_DATA_DIR / "videos2caption.json", "w") as f:
+    with open(RAW_DATA_DIR / "videos2caption.json", "w") as f:
         json.dump([{
             "path": "sample_0.mp4",
             "cap": [GENERATION_PROMPT],
@@ -178,14 +206,18 @@ def _synthesize_single_sample() -> None:
 
 
 def _run_preprocessing() -> None:
-    # preprocess_kandinsky5_overfit.py hardcodes DATA_DIR="data/kandinsky5_overfit"
-    # and OUTPUT_DIR="data/kandinsky5_overfit_preprocessed" -- KANDINSKY5_OVERFIT_DATA_DIR
-    # / PREPROCESSED_DIR above are set to match, so no env/CLI override is needed.
+    # Point the preprocessor at the test-owned roots. Without these env
+    # overrides it would read/write its user-facing defaults
+    # (data/kandinsky5_overfit{,_preprocessed}) -- the very directories a
+    # user populates for the real recipe, which this test must never touch.
+    env = dict(os.environ)
+    env["KANDINSKY5_OVERFIT_DATA_DIR"] = str(RAW_DATA_DIR)
+    env["KANDINSKY5_OVERFIT_OUTPUT_DIR"] = str(PREPROCESSED_DIR)
     cmd = [
         sys.executable, "-m",
         "fastvideo.pipelines.preprocess.preprocess_kandinsky5_overfit",
     ]
-    subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
+    subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=True)
 
 
 def _export_dcp_to_diffusers(checkpoint_dir: Path, output_dir: Path) -> None:
@@ -306,10 +338,7 @@ def _generate_main(export_dir: str, output_dir: str) -> None:
     )
 
 
-def _assert_video_not_degenerate(video_path: Path) -> None:
-    """Cheap referee that needs no reference: a NaN training run or a
-    broken decode path produces an unreadable, empty, or constant
-    (all-black) clip."""
+def _decode_video(video_path: Path) -> np.ndarray:
     cap = cv2.VideoCapture(str(video_path))
     frames = []
     while True:
@@ -318,11 +347,47 @@ def _assert_video_not_degenerate(video_path: Path) -> None:
             break
         frames.append(frame)
     cap.release()
-    assert frames, f"generated video {video_path} decoded to zero frames"
-    stacked = np.stack(frames)
-    assert stacked.std() > 1.0, (
-        f"generated video {video_path} is (near-)constant -- "
-        "degenerate output from a NaN/collapsed run")
+    assert frames, f"video {video_path} decoded to zero frames"
+    return np.stack(frames)
+
+
+def _assert_video_not_degenerate(video_path: Path) -> None:
+    """Structural referee that needs no reference: rejects the collapsed
+    outputs (solid, frozen, truncated, unreadable) a NaN run or broken
+    export/decode path produces.
+
+    This is the primary defense against collapsed clips -- the MS-SSIM
+    floor cannot be (see the calibration table above: a solid clip at the
+    reference's mean color scores 0.9189 against it). Every check here is
+    designed against a measured false-green:
+    - exact frame count/geometry: compute_video_ssim_torchvision
+      truncates both clips to the shorter length, so a 1-frame video
+      could otherwise sail through the comparison;
+    - per-frame *luma* spatial std: the previous global RGB std counted
+      differences between channel means as "variance", scoring a solid
+      [106, 98, 70] clip at 15.4;
+    - consecutive-frame temporal diff: a frozen (single repeated frame)
+      clip has real spatial content and passes the spatial check.
+    """
+    frames = _decode_video(video_path).astype(np.float64)
+    expected_shape = (EXPECTED_FRAME_COUNT, EXPECTED_FRAME_HEIGHT, EXPECTED_FRAME_WIDTH, 3)
+    assert frames.shape == expected_shape, (
+        f"generated video {video_path} has shape {frames.shape}, expected {expected_shape} -- "
+        "wrong frame count or geometry (and the SSIM helper would silently truncate to the "
+        "shorter clip)")
+
+    luma = frames.mean(axis=-1)
+    spatial_std = luma.reshape(len(luma), -1).std(axis=1)
+    assert float(spatial_std.min()) >= MIN_FRAME_SPATIAL_STD, (
+        f"generated video {video_path} has a frame with luma spatial std "
+        f"{spatial_std.min():.3f} < {MIN_FRAME_SPATIAL_STD} (reference min: 11.37) -- "
+        "solid/near-solid output from a NaN or collapsed run")
+
+    temporal_diff = np.abs(np.diff(luma, axis=0)).mean(axis=(1, 2))
+    assert float(temporal_diff.min()) >= MIN_FRAME_TEMPORAL_DIFF, (
+        f"generated video {video_path} has consecutive frames with mean |luma diff| "
+        f"{temporal_diff.min():.4f} < {MIN_FRAME_TEMPORAL_DIFF} (reference min: 1.15) -- "
+        "frozen output")
 
 
 def _assert_matches_reference(video_path: Path) -> None:
@@ -401,6 +466,14 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
             "--models.student.init_from", str(stage1_diffusers_dir),
             "--models.teacher.init_from", str(stage1_diffusers_dir),
             "--models.critic.init_from", str(stage1_diffusers_dir),
+            # The recipe's generator_update_interval of 5 would mean ZERO
+            # student updates in a 3-step run (the trainer iterates 1..3
+            # and DMD2Method updates the generator only when
+            # iteration % interval == 0) -- the exported "stage-2 student"
+            # would just be the stage-1 weights, and this test could not
+            # catch a broken student backward/optimizer path. Update the
+            # generator every step instead.
+            "--method.generator_update_interval", "1",
         ],
         env_overrides={"FASTVIDEO_ATTENTION_BACKEND": "ATTN_QAT_TRAIN"},
     )
