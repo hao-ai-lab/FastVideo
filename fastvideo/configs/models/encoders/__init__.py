@@ -1,6 +1,10 @@
-from fastvideo.configs.models.encoders.base import (BaseEncoderOutput, EncoderConfig, ImageEncoderConfig,
-                                                    TextEncoderConfig)
-from fastvideo.configs.models.encoders.clip import (CLIPTextConfig, CLIPVisionConfig, WAN2_1ControlCLIPVisionConfig)
+from fastvideo.configs.models.encoders.base import (
+    BaseEncoderOutput,
+    EncoderConfig,
+    ImageEncoderConfig,
+    TextEncoderConfig,
+)
+from fastvideo.configs.models.encoders.clip import CLIPTextConfig, CLIPVisionConfig, WAN2_1ControlCLIPVisionConfig
 from fastvideo.configs.models.encoders.llama import LlamaConfig
 from fastvideo.configs.models.encoders.lingbotworld2_t5 import LingBotWorld2UMT5ArchConfig, LingBotWorld2UMT5Config
 from fastvideo.configs.models.encoders.t5 import T5Config, T5LargeConfig
@@ -11,14 +15,47 @@ from fastvideo.configs.models.encoders.gemma import LTX2GemmaConfig
 from fastvideo.configs.models.encoders.mistral3 import Mistral3TextConfig
 from fastvideo.configs.models.encoders.qwen3 import Qwen3TextConfig
 from fastvideo.configs.models.encoders.lingbot_video import LingBotVideoQwen3VLTextConfig
-from fastvideo.configs.models.encoders.stable_audio_conditioner import (StableAudioConditionerArchConfig,
-                                                                        StableAudioConditionerConfig)
+from fastvideo.configs.models.encoders.stable_audio_conditioner import (
+    StableAudioConditionerArchConfig,
+    StableAudioConditionerConfig,
+)
 from fastvideo.configs.models.encoders.t5gemma import T5GemmaEncoderConfig
+from fastvideo.configs.models.encoders.mmaudio_synchformer import MMAudioSynchformerArchConfig, MMAudioSynchformerConfig
+from fastvideo.configs.models.encoders.mmaudio_clip import (
+    MMAudioDFNCLIPTextArchConfig,
+    MMAudioDFNCLIPTextConfig,
+    MMAudioDFNCLIPVisionArchConfig,
+    MMAudioDFNCLIPVisionConfig,
+)
 
 __all__ = [
-    "EncoderConfig", "TextEncoderConfig", "ImageEncoderConfig", "BaseEncoderOutput", "CLIPTextConfig",
-    "CLIPVisionConfig", "WAN2_1ControlCLIPVisionConfig", "LlamaConfig", "T5Config", "T5LargeConfig", "Qwen2_5_VLConfig",
-    "Reason1ArchConfig", "Reason1Config", "LTX2GemmaConfig", "SiglipVisionConfig", "StableAudioConditionerArchConfig",
-    "StableAudioConditionerConfig", "T5GemmaEncoderConfig", "Qwen3TextConfig", "Mistral3TextConfig",
-    "LingBotWorld2UMT5ArchConfig", "LingBotWorld2UMT5Config", "LingBotVideoQwen3VLTextConfig"
+    "EncoderConfig",
+    "TextEncoderConfig",
+    "ImageEncoderConfig",
+    "BaseEncoderOutput",
+    "CLIPTextConfig",
+    "CLIPVisionConfig",
+    "WAN2_1ControlCLIPVisionConfig",
+    "LlamaConfig",
+    "T5Config",
+    "T5LargeConfig",
+    "Qwen2_5_VLConfig",
+    "Reason1ArchConfig",
+    "Reason1Config",
+    "LTX2GemmaConfig",
+    "SiglipVisionConfig",
+    "StableAudioConditionerArchConfig",
+    "StableAudioConditionerConfig",
+    "T5GemmaEncoderConfig",
+    "Qwen3TextConfig",
+    "Mistral3TextConfig",
+    "LingBotWorld2UMT5ArchConfig",
+    "LingBotWorld2UMT5Config",
+    "LingBotVideoQwen3VLTextConfig",
+    "MMAudioSynchformerArchConfig",
+    "MMAudioSynchformerConfig",
+    "MMAudioDFNCLIPTextArchConfig",
+    "MMAudioDFNCLIPTextConfig",
+    "MMAudioDFNCLIPVisionArchConfig",
+    "MMAudioDFNCLIPVisionConfig",
 ]

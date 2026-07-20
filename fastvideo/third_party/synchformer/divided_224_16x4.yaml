@@ -1,3 +1,4 @@
+# Shared MotionFormer configuration used by Synchformer.
 TRAIN:
   ENABLE: True
   DATASET: Ssv2
