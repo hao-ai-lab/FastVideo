@@ -1,0 +1,51 @@
+# Minimum config to run a single training step of FineTuneMethod on
+# LTX2Model with an LTX-2.3 checkpoint (gated attention, cross-attn
+# AdaLN, 4096-d post-connector text embeddings, no in-DiT caption
+# projection) for the per-method smoke test. 18.9B params, ~38GB in
+# bf16 — the test skips below 60GB GPU memory. Same constraints as
+# LTX-2.0: training_cfg_rate=0 and precondition_outputs=false.
+
+models:
+  student:
+    _target_: fastvideo.train.models.ltx2.LTX2Model
+    init_from: FastVideo/LTX-2.3-Distilled-Diffusers
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  dit_precision: bf16
+
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+
+  data:
+    seed: 42
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    num_latent_t: 3
+    num_height: 256
+    num_width: 256
+    num_frames: 17
+
+  optimizer:
+    learning_rate: 1.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1
+    gradient_accumulation_steps: 1
+
+  model:
+    precondition_outputs: false
+
+# Required so the LTX2T2VConfig pipeline config is resolved from
+# init_from (without a `pipeline:` key the loader falls back to a
+# generic PipelineConfig and the LTX-2 DiT cannot be constructed).
+pipeline: {}
