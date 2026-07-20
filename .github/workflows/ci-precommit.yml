@@ -27,14 +27,25 @@ jobs:
         ref: ${{ inputs.ref || '' }}
     # For PR events, lint the PR head — but keep the hook definitions from
     # the base branch so an untrusted PR cannot alter what gets executed.
-    - name: Save trusted hook config
+    # The gate scripts are saved too: the self-test step below executes them,
+    # so it must run the base-branch copies, not the PR head's.
+    - name: Save trusted hook config and gate scripts
       if: github.event_name == 'pull_request_target'
-      run: cp .pre-commit-config.yaml "$RUNNER_TEMP/trusted-pre-commit-config.yaml"
-    - uses: actions/checkout@v4
+      run: |
+        cp .pre-commit-config.yaml "$RUNNER_TEMP/trusted-pre-commit-config.yaml"
+        cp -a .github/scripts "$RUNNER_TEMP/trusted-scripts"
+        echo "GATE_SCRIPTS_DIR=$RUNNER_TEMP/trusted-scripts" >> "$GITHUB_ENV"
+    # allow-unsafe-pr-checkout acknowledges checkout's pull_request_target
+    # guard: the head is data for the trusted hooks to lint; nothing from it
+    # is executed (config and gate scripts are pinned to the base branch
+    # above) and credentials are not persisted. SHA-pinned to v4.4.0 because
+    # actionlint's action schema does not know the new input yet.
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       if: github.event_name == 'pull_request_target'
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         persist-credentials: false
+        allow-unsafe-pr-checkout: true
     - name: Restore trusted hook config
       if: github.event_name == 'pull_request_target'
       run: cp "$RUNNER_TEMP/trusted-pre-commit-config.yaml" .pre-commit-config.yaml
@@ -48,5 +59,7 @@ jobs:
       with:
         extra_args: --all-files --hook-stage manual
     # After pre-commit so a self-test failure cannot mask lint failures.
+    # GATE_SCRIPTS_DIR points at the base-branch copy on fork PRs (set above);
+    # push / workflow_call runs use the checked-out tree directly.
     - name: Full-suite gate self-test
-      run: bash .github/scripts/test_gate_full_suite.sh
+      run: bash "${GATE_SCRIPTS_DIR:-.github/scripts}/test_gate_full_suite.sh"
