@@ -64,6 +64,32 @@ def _is_ltx2_refine_stage() -> bool:
     return forward_batch.extra.get("ltx2_fp4_stage_profile") == "refine"
 
 
+def _functional_rms_norm(
+    x: torch.Tensor,
+    eps: float,
+    weight: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Out-of-place RMSNorm equivalent to ``torch.nn.functional.rms_norm``.
+
+    ``F.rms_norm`` / ``nn.RMSNorm`` decompose under AOTAutograd into an
+    in-place ``variance.add_(eps)`` (an ``aten.copy_`` into the computed
+    ``mean``). AOTAutograd's ``assert_functional_graph`` requires every
+    ``copy_`` destination to be a graph input, so this trips when the DiT is
+    compiled through the ``torch.compile(backend="torch_tensorrt")`` path
+    (Dynamo -> AOTAutograd functionalization -> torch-tensorrt), breaking
+    TensorRT + sequence-parallel (Ulysses) export. Computing ``variance + eps``
+    out-of-place keeps the graph functional. Numerically matches
+    ``F.rms_norm`` (fp32 accumulation, dtype restored to the input)."""
+    input_dtype = x.dtype
+    hidden = x.to(torch.float32)
+    variance = hidden.pow(2).mean(-1, keepdim=True)
+    hidden = hidden * torch.rsqrt(variance + eps)
+    out = hidden.to(input_dtype)
+    if weight is not None:
+        out = out * weight
+    return out
+
+
 def _rms_norm_dispatch(
     x: torch.Tensor,
     eps: float,
@@ -77,8 +103,7 @@ def _rms_norm_dispatch(
     # rms_norm to autocast's float32 cast policy, which under our
     # autocast(bfloat16) forward returns float32 instead. Restore the input
     # dtype to match the official numerics (and torch <= 2.11 behavior).
-    return torch.nn.functional.rms_norm(
-        x, (x.shape[-1], ), weight=weight, eps=eps).to(x.dtype)
+    return _functional_rms_norm(x, eps, weight)
 
 
 class StageAwareRMSNorm(nn.RMSNorm):
@@ -103,7 +128,7 @@ class StageAwareRMSNorm(nn.RMSNorm):
         # norm now returns float32 where torch <= 2.11 returned bfloat16.
         # Restore the input dtype so autocast-blind consumers downstream
         # (e.g. the flash-attention custom op) don't receive upcast q/k.
-        return super().forward(x).to(x.dtype)
+        return _functional_rms_norm(x, self.eps, self.weight)
 
 
 def _supports_prequantized_input(linear: ReplicatedLinear) -> bool:
