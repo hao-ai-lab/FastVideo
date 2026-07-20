@@ -113,11 +113,13 @@ Install the FP4 flash attention kernel (without upgrading your existing torch):
 # branch fix/cutlass-dsl-4.5 carries the cutlass-dsl 4.5 fix (cute.core.ThrMma
 # -> cute.ThrMma); switch back to @fp4 once hao-ai-lab/flash-attention-fp4#2 merges.
 pip install --no-deps "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fix/cutlass-dsl-4.5#subdirectory=flash_attn/cute"
-pip install "nvidia-cutlass-dsl>=4.5.2" apache-tvm-ffi flashinfer-python quack-kernels torch-c-dlpack-ext
+pip install "nvidia-cutlass-dsl[cu13]==4.5.2" "quack-kernels==0.5.0" apache-tvm-ffi flashinfer-python torch-c-dlpack-ext
 ```
 
 The `--no-deps` flag prevents upgrading torch/torchvision. Use the supported
-PyTorch 2.12.0 and CUDA 13 environment for this kernel.
+PyTorch 2.12.0 and CUDA 13 environment for this kernel. Keep the CUTLASS and
+Quack pins together: Quack 0.5.1 and newer use CUTLASS 4.6, whose API is not
+compatible with the pinned FP4 kernel branch.
 
 #### Usage
 
@@ -145,6 +147,11 @@ gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
 - `use_fsdp_inference=True` is incompatible with the FP4 path (FSDP shards invalidate tensor pointers)
 - Per-call cosine similarity vs BF16: ~0.99 (slight quantization error accumulates over denoising steps)
 - Only supports `headdim >= 128`
+
+This path and `ATTN_QAT_INFER` are deliberately separate settings. The FA4
+kernel quantizes Q/K on sm100/sm103, while `ATTN_QAT_INFER` quantizes Q/K/V/P
+on sm120. Selecting between them automatically by GPU would therefore change
+the model's attention arithmetic, not just its device-specific implementation.
 
 ### NVFP4 + Attn-QAT (modified SageAttention3, Blackwell sm_120)
 
