@@ -881,8 +881,9 @@ def _register_configs() -> None:
             "nvidia/Cosmos-Predict2-2B-Video2World",
         ],
         model_detectors=[
-            lambda path: "cosmos" in path.lower() and ("2.5" not in path.lower() and "2_5" not in path.lower() and "25"
-                                                       not in path.lower() and "gen3c" not in path.lower()),
+            lambda path: "cosmos" in path.lower() and
+            ("2.5" not in path.lower() and "2_5" not in path.lower() and "25" not in path.lower() and "gen3c" not in
+             path.lower() and "cosmos3" not in path.lower() and "cosmos-3" not in path.lower()),
         ],
         model_family="cosmos",
         default_preset="cosmos_predict2_2b",

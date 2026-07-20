@@ -128,3 +128,20 @@ def test_cosmos3_registry_exposes_both_video_workloads() -> None:
     for workload in ("t2v", "i2v"):
         registered = get_registered_models_with_workloads(workload)
         assert any(model["id"] == "nvidia/Cosmos3-Nano" for model in registered)
+
+
+def test_cosmos3_local_snapshot_registry_is_unambiguous(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    from fastvideo.registry import get_preset_selection
+
+    model_dir = tmp_path / "snapshot"
+    (model_dir / "transformer").mkdir(parents=True)
+    (model_dir / "model_index.json").write_text(
+        json.dumps({
+            "_class_name": "Cosmos3OmniDiffusersPipeline",
+            "_diffusers_version": "0.39.0",
+        }),
+        encoding="utf-8",
+    )
+
+    assert get_preset_selection(str(model_dir)) == ("cosmos3_nano", "cosmos3")
+    assert "Multiple models matched" not in caplog.text
