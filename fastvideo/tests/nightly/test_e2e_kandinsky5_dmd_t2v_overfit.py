@@ -198,11 +198,20 @@ def _synthesize_single_sample() -> None:
         writer.write(frame)
     writer.release()
 
+    # One physical clip, but max(2, NUM_GPUS) manifest rows all pointing at
+    # it: DP_SP_BatchSampler (fastvideo/dataset/parquet_dataset_map_style.py)
+    # floor-divides the number of batches by the number of data-parallel
+    # groups with drop_last=True, so a dataset with fewer rows than GPUs
+    # yields an EMPTY dataloader on every rank. Duplicate rows keep the
+    # single-sample-overfit semantics (identical latents/caption) while
+    # making KANDINSKY5_E2E_NUM_GPUS=2+ a working escape hatch when one GPU
+    # doesn't have the memory headroom for stage 2 (see _run_stage).
+    num_rows = max(2, int(NUM_GPUS))
     with open(RAW_DATA_DIR / "videos2caption.json", "w") as f:
         json.dump([{
             "path": "sample_0.mp4",
             "cap": [GENERATION_PROMPT],
-        }], f)
+        }] * num_rows, f)
 
 
 def _run_preprocessing() -> None:
@@ -275,6 +284,14 @@ def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_ov
         *extra_overrides,
     ]
     env = dict(os.environ)
+    # Stage 2 holds three 2B-param models plus TWO full Adam states (the
+    # student's only exists because generator_update_interval is overridden
+    # to 1 above -- a recorded run peaked at ~76 GiB and died allocating
+    # the last MiBs on an 80 GiB device with ~1.9 GiB lost to
+    # fragmentation). Expandable segments reclaims that headroom; if a
+    # single device still can't fit, shard with KANDINSKY5_E2E_NUM_GPUS=2+
+    # (the synthesized manifest guarantees >= one row per rank).
+    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     env.update(env_overrides)
     subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=True)
 
