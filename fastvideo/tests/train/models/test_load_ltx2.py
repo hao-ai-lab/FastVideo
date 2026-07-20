@@ -121,7 +121,7 @@ def test_ltx2_forwards_role_attention_backend_to_loader(
         return transformer
 
     monkeypatch.setattr(
-        "fastvideo.train.models.ltx2.load_module_from_path",
+        "fastvideo.train.models.ltx2.ltx2.load_module_from_path",
         fake_load_module_from_path,
     )
     model = LTX2Model(
