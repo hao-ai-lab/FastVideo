@@ -72,6 +72,8 @@ def load_video(path: str, num_frames: int, target_fps: float, height: int,
     Also returns the uint8 RGB frames [T, H, W, C] for reference-video export.
     """
     with av.open(path) as container:
+        if not container.streams.video:
+            raise RuntimeError(f"No video stream found in {path}")
         stream = container.streams.video[0]
         native_fps = float(stream.average_rate or target_fps)
         decoded = [torch.from_numpy(frame.to_ndarray(format="rgb24")) for frame in container.decode(video=0)]
