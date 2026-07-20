@@ -359,7 +359,7 @@ class Cosmos3DenoisingStage(PipelineStage):
             batch.output = result_latent
             return batch
 
-        decoded = cosmos3_vae_decode(self.vae, result_latent.to(dtype=dtype), norm)  # [B, 3, T, H, W] in [-1, 1]
+        decoded = cosmos3_vae_decode(self.vae, result_latent.to(dtype=dtype), norm).to(result_latent.dtype)
         video = ((1.0 + decoded) / 2.0).clamp(0.0, 1.0)
 
         batch.output = video

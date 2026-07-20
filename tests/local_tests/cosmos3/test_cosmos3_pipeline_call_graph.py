@@ -176,6 +176,20 @@ def test_stage_mode_dispatch_t2v(make_cosmos3_pipeline, make_cosmos3_stage) -> N
     assert tuple(out.latents.shape) == (1, _LATENT_CHANNEL, 2, 2, 2)
 
 
+def test_stage_decode_uses_sampler_dtype_for_pixel_postprocess(make_cosmos3_pipeline, make_cosmos3_stage) -> None:
+    """The official VAE restores fp32 before mapping decoded pixels to [0, 1]."""
+    pipeline = make_cosmos3_pipeline()
+    pipeline.modules["transformer"].to(dtype=torch.bfloat16)
+    stage = make_cosmos3_stage(pipeline)
+    args = make_fastvideo_args()
+    batch = make_forward_batch(num_frames=5, height=16, width=16)
+
+    out = stage.forward(batch, args)
+
+    assert out.latents.dtype == torch.float32
+    assert out.output.dtype == out.latents.dtype
+
+
 def test_stage_mode_dispatch_t2i(make_cosmos3_pipeline, make_cosmos3_stage) -> None:
     """T2I (num_frames==1): single-frame latent and shift 3."""
     pipeline = make_cosmos3_pipeline()
