@@ -40,7 +40,7 @@ export FASTVIDEO_PROMPT_AUTO_SLEEP_MS="${FASTVIDEO_PROMPT_AUTO_SLEEP_MS:-120}"
 export FASTVIDEO_PROMPT_AUTO_TIMEOUT_MS="${FASTVIDEO_PROMPT_AUTO_TIMEOUT_MS:-1800}"
 
 # Persistent torch.compile cache so warmup pays the full autotune/codegen cost only on the first launch.
-# This allows later launches on the same box reload the Inductor FX-graph + AOTAutograd + Triton artifacts from disk
+# Later launches on the same box reload the Inductor FX-graph + AOTAutograd + Triton artifacts from disk.
 export DREAMVERSE_TORCH_COMPILE_CACHE_ROOT="${DREAMVERSE_TORCH_COMPILE_CACHE_ROOT:-${HOME}/.cache/dreamverse/torch_compile}"
 export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-${DREAMVERSE_TORCH_COMPILE_CACHE_ROOT}/inductor}"
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${DREAMVERSE_TORCH_COMPILE_CACHE_ROOT}/triton}"

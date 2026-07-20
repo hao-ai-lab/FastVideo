@@ -51,7 +51,7 @@ def _check_dropout(dropout_p: float) -> None:
 
 
 def _sm90_or_newer() -> bool:
-    # compiled callers only read a boolean nstead of tracing through a memoized platform query.
+    # Compiled callers only read a boolean instead of tracing through a memoized platform query.
     return _IS_SM90_OR_NEWER
 
 

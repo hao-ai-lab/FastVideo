@@ -767,12 +767,13 @@ def _apply_ltx_split_rotary_emb(
     return output
 
 
-def generate_ltx_freq_grid_np(
+def generate_ltx_freq_grid_float64(
     positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
 ) -> torch.Tensor:
     """Generate LTX-2 rotary frequencies with float64 precision.
 
-    Implemented in pure torch and free of Python memoization so it is suitable for callers that may be captured and reused by torch.compile.
+    Implemented in pure torch and free of Python memoization so it is safe
+    for callers that may be captured and reused by torch.compile.
     """
     theta = positional_embedding_theta
     start = 1
@@ -1010,7 +1011,7 @@ class TransformerArgsPreprocessor:
         x_dtype: torch.dtype,
     ) -> torch.Tensor:
         if self.double_precision_rope:
-            freq_grid_generator = generate_ltx_freq_grid_np
+            freq_grid_generator = generate_ltx_freq_grid_float64
         else:
             freq_grid_generator = generate_ltx_freq_grid_pytorch
         return precompute_ltx_freqs_cis(
@@ -2056,7 +2057,9 @@ class BasicAVTransformerBlock(torch.nn.Module):
             """STG keep-mask for self-attention.
 
             Returns a per-sample multiplier (1 keep, 0 perturb) broadcastable
-            over ``values``. Only the configured ``stg_block_idx`` is perturbed.
+            over ``values``. Applied unconditionally: the eager caller
+            (``_process_transformer_blocks``) enforces that only the
+            configured ``stg_block_idx`` block receives a truthy flag.
             Supports both the LTX-2.0 bool flag and an LTX-2.3 per-sample
             tensor ``[B]`` (1/True == perturb). When skip_flag is False/0 the
             multiplier is all ones, reproducing the un-skipped LTX-2.0 path.
@@ -2281,6 +2284,9 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 1 + ascale_mlp) + ashift_mlp
             ax = ax + self.audio_ff(ax_scaled) * agate_mlp
 
+        # Debug-only: reading ``self.idx`` (and .item() syncs) here means
+        # enabling this env var re-specializes the compiled graph per block,
+        # defeating the shared-graph regional compilation.
         if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
             video_sum = vx.float().sum().item() if vx is not None else 0.0
             audio_sum = ax.float().sum().item() if ax is not None else 0.0

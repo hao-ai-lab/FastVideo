@@ -180,7 +180,8 @@ class FlashAttentionImpl(AttentionImpl):
         # SP). Cast through bf16 and restore, matching TORCH_SDPA's tolerance.
         orig_dtype = query.dtype
         if orig_dtype not in (torch.float16, torch.bfloat16):
-            # we keep logging and its Python lru_cache out of compiled traces so that the AOTAutograd cache can serialize.
+            # Keep logging (and its Python lru_cache) out of compiled traces
+            # so that the AOTAutograd cache can serialize.
             if not torch.compiler.is_compiling():
                 logger.warning_once(f"FLASH_ATTN received {orig_dtype} inputs; casting to "
                                     f"bfloat16 for the kernel and restoring on output.")
