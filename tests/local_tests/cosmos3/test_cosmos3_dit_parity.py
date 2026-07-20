@@ -254,3 +254,25 @@ class TestCosmos3DiTParity:
         """Re-running with a different random init still matches (not a fluke)."""
         fw_out, fv_out = self._run_both(seed_model=99, seed_data=13)
         torch.testing.assert_close(fv_out["preds_vision"][0], fw_out["preds_vision"][0], atol=1e-4, rtol=1e-3)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Cosmos3 timestep precision parity requires CUDA autocast")
+def test_timestep_embedder_bf16_matches_official_fp32_policy() -> None:
+    from cosmos_framework.model.generator.mot.modeling_utils import TimestepEmbedder
+
+    from fastvideo.models.dits.cosmos3 import Cosmos3TimestepEmbedder
+
+    official = TimestepEmbedder(hidden_size=32).cuda().bfloat16().eval()
+    fastvideo = Cosmos3TimestepEmbedder(hidden_size=32).cuda().bfloat16().eval()
+    with torch.no_grad():
+        fastvideo.linear_1.weight.copy_(official.mlp[0].weight)
+        fastvideo.linear_1.bias.copy_(official.mlp[0].bias)
+        fastvideo.linear_2.weight.copy_(official.mlp[2].weight)
+        fastvideo.linear_2.bias.copy_(official.mlp[2].bias)
+
+        timesteps = torch.linspace(0, 1, 7, device="cuda", dtype=torch.float32)
+        with torch.autocast("cuda", enabled=True, dtype=torch.float32):
+            expected = official(timesteps)
+        actual = fastvideo(timesteps)
+
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)

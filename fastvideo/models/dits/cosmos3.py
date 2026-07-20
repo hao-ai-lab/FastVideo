@@ -322,13 +322,15 @@ class Cosmos3TimestepEmbedder(nn.Module):
         self.linear_2 = ReplicatedLinear(hidden_size, hidden_size, bias=True)
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:
-        t_freq = timestep_embedding(t, self.frequency_embedding_size)
-        # Sinusoidal runs in fp32 (timestep_scale makes inputs tiny); cast to the
-        # MLP weight dtype (bf16 at inference; no-op in the fp32 parity tests).
-        t_freq = t_freq.to(self.linear_1.weight.dtype)
-        h, _ = self.linear_1(t_freq)
-        h = self.act(h)
-        out, _ = self.linear_2(h)
+        # The official Cosmos3 pipeline keeps the timestep MLP in fp32 even
+        # when the rest of the transformer runs in bf16.
+        with torch.autocast("cuda", enabled=t.is_cuda, dtype=torch.float32):
+            t_freq = timestep_embedding(t, self.frequency_embedding_size)
+            if not t.is_cuda:
+                t_freq = t_freq.to(self.linear_1.weight.dtype)
+            h, _ = self.linear_1(t_freq)
+            h = self.act(h)
+            out, _ = self.linear_2(h)
         return out
 
 
