@@ -18,6 +18,10 @@ from fastvideo.layers.quantization.nvfp4_config import (
     NVFP4Config,
     NVFP4QuantizeMethod,
 )
+from fastvideo.layers.quantization.nvfp4_qat_train_config import (
+    NVFP4QATTrainConfig,
+    NVFP4QATTrainQuantizeMethod,
+)
 from fastvideo.models.dits.ltx2 import (
     BasicAVTransformerBlock,
     FeedForward,
@@ -183,3 +187,46 @@ def test_basic_av_block_propagates_quant_config_to_all_children() -> None:
     for linear in unquantized_projections:
         assert isinstance(linear, ReplicatedLinear)
         assert isinstance(linear.quant_method, UnquantizedLinearMethod)
+
+
+def test_qat_train_uses_the_ltx2_deployment_target_profile() -> None:
+    kwargs = {
+        "idx": 3,
+        "video": TransformerConfig(dim=64, heads=2, d_head=32, context_dim=128),
+        "audio": TransformerConfig(dim=64, heads=2, d_head=32, context_dim=128),
+        "rope_type": LTXRopeType.INTERLEAVED,
+        "norm_eps": 1e-6,
+        "use_distributed_attention": False,
+        "prefix": "ltx2",
+    }
+    deployed = BasicAVTransformerBlock(
+        **kwargs,
+        quant_config=NVFP4Config(),
+    )
+    qat = BasicAVTransformerBlock(
+        **kwargs,
+        quant_config=NVFP4QATTrainConfig(),
+    )
+
+    deployed_names = {
+        name for name, module in deployed.named_modules()
+        if isinstance(getattr(module, "quant_method", None),
+                      NVFP4QuantizeMethod)
+    }
+    qat_names = {
+        name for name, module in qat.named_modules()
+        if isinstance(getattr(module, "quant_method", None),
+                      NVFP4QATTrainQuantizeMethod)
+    }
+    assert qat_names == deployed_names
+    assert len(qat_names) == 12
+
+
+def test_qat_train_preserves_wan_style_targeting() -> None:
+    linear = ReplicatedLinear(
+        16,
+        16,
+        quant_config=NVFP4QATTrainConfig(),
+        prefix="blocks.0.attn1.to_k",
+    )
+    assert isinstance(linear.quant_method, NVFP4QATTrainQuantizeMethod)
