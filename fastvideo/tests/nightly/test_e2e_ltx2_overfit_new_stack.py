@@ -1,17 +1,18 @@
 """E2E overfit tests for LTX-2 fine-tuning on the modular trainer (fastvideo/train).
 
-Parametrized over LTX-2.0 and LTX-2.3 distilled checkpoints. Each case
-downloads the single-sample cats dataset, preprocesses it with the
-matching LTX-2 VAE + Gemma text encoder into the t2v parquet format,
-trains LTX2Model with FineTuneMethod for 300 steps on 4 GPUs, and
-checks that the final validation video reproduces the training clip
-(MS-SSIM against the preprocessed ground-truth clip) better than the
-step-0 baseline.
+Parametrized over dense LTX-2.0 and LTX-2.3 distilled checkpoints plus
+an LTX-2.0 NVFP4 linear-QAT case. Each case downloads the single-sample
+cats dataset, preprocesses it with the matching LTX-2 VAE + Gemma text
+encoder into the t2v parquet format, trains LTX2Model with FineTuneMethod
+for 300 steps on 4 GPUs, and checks that the final validation video
+reproduces the training clip (MS-SSIM against the preprocessed ground-truth
+clip) better than the step-0 baseline.
 
 GPU assumptions: 4 x large-memory GPUs (developed on 4x GB200 192GB;
 the 18.9B-param DiT trains FSDP-sharded with fp32 master weights).
 Requires the FastVideo LTX-2 distilled checkpoints (set HF_HOME to a
 cache that contains them, or allow ~60GB of downloads per version).
+The NVFP4-QAT case additionally requires FlashInfer FP4 support and SM100+.
 
 Guarded by FASTVIDEO_NIGHTLY=1 so the default test suite stays fast.
 """
@@ -25,6 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import torch
 
 from huggingface_hub import snapshot_download
 
@@ -60,6 +62,7 @@ _CASES = {
         "config": "examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml",
         "prep_dir": Path(DATA_DIR) / "ltx2_overfit_preprocessed",
         "out_dir": Path(DATA_DIR) / "outputs_ltx2_nvfp4_qat_overfit",
+        "requires_nvfp4": True,
     },
 }
 
@@ -123,6 +126,18 @@ def _validation_videos_by_step(out_dir: Path) -> dict[int, str]:
 @pytest.mark.parametrize("case_id", _CASES.keys())
 def test_e2e_ltx2_overfit_new_stack(case_id: str):
     case = _CASES[case_id]
+    if case.get("requires_nvfp4"):
+        if (not torch.cuda.is_available() or
+                torch.cuda.get_device_capability(0) < (10, 0)):
+            pytest.skip("NVFP4 QAT requires an SM100+ GPU")
+        try:
+            from flashinfer import (  # noqa: F401
+                SfLayout,
+                mm_fp4,
+                nvfp4_quantize,
+            )
+        except ImportError:
+            pytest.skip("NVFP4 QAT requires flashinfer with FP4 kernels")
     download_data()
     run_preprocessing(case)
     run_training(case)

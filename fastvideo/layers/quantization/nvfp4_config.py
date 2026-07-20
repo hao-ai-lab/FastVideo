@@ -58,6 +58,29 @@ _LTX2_REFINE_ONLY_SUFFIXES = (
     ".video_to_audio_attn.to_v",
 )
 
+_LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES = (
+    "attn1.to_q",
+    "attn1.to_k",
+    "attn1.to_v",
+    "attn1.to_out",
+    "attn2.to_q",
+    "attn2.to_out",
+    "audio_to_video_attn.to_q",
+    "audio_to_video_attn.to_out",
+    "video_to_audio_attn.to_k",
+    "video_to_audio_attn.to_v",
+    "ffn.fc_in",
+    "ffn.fc_out",
+)
+_LTX2_NVFP4_LINEAR_PREFIXES = frozenset(f"ltx2.blocks.{block_idx}.{suffix}" for block_idx in range(48)
+                                        for suffix in _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES) | frozenset(
+                                            ("ltx2.adaln_single.linear", ))
+
+
+def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
+    """Return whether *prefix* belongs to the LTX-2 NVFP4 deployment set."""
+    return prefix in _LTX2_NVFP4_LINEAR_PREFIXES
+
 
 def _is_ltx2_refine_only_prefix(prefix: str) -> bool:
     return any(prefix.endswith(suffix) for suffix in _LTX2_REFINE_ONLY_SUFFIXES)
@@ -422,24 +445,7 @@ class NVFP4Config(QuantizationConfig):
 
         # Use the superset at build/load time, then switch active subset
         # dynamically in NVFP4QuantizeMethod.apply based on stage profile.
-        fp4_layers = [[
-            f"ltx2.blocks.{i}.attn1.to_q",
-            f"ltx2.blocks.{i}.attn1.to_k",
-            f"ltx2.blocks.{i}.attn1.to_v",
-            f"ltx2.blocks.{i}.attn1.to_out",
-            f"ltx2.blocks.{i}.attn2.to_q",
-            f"ltx2.blocks.{i}.attn2.to_out",
-            f"ltx2.blocks.{i}.audio_to_video_attn.to_q",
-            f"ltx2.blocks.{i}.audio_to_video_attn.to_out",
-            f"ltx2.blocks.{i}.video_to_audio_attn.to_k",
-            f"ltx2.blocks.{i}.video_to_audio_attn.to_v",
-            f"ltx2.blocks.{i}.ffn.fc_in",
-            f"ltx2.blocks.{i}.ffn.fc_out",
-        ] for i in range(48)]
-        fp4_layers.append([
-            "ltx2.adaln_single.linear",
-        ])
-        if isinstance(layer, LinearBase) and any(prefix in layer_names for layer_names in fp4_layers):
+        if isinstance(layer, LinearBase) and is_ltx2_nvfp4_linear_prefix(prefix):
             return NVFP4QuantizeMethod(layer_prefix=prefix)
         return None
 
@@ -485,4 +491,5 @@ __all__ = [
     "NVFP4Config",
     "NVFP4QuantizeMethod",
     "convert_model_to_nvfp4",
+    "is_ltx2_nvfp4_linear_prefix",
 ]

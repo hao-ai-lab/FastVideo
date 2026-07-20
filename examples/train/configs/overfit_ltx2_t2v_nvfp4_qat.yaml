@@ -1,12 +1,13 @@
 # LTX-2 T2V overfitting test config with NVFP4 quantization-aware
 # training (QAT).
 #
-# Same recipe as overfit_ltx2_t2v.yaml, but attention/FFN linears run
-# their forward through real NVFP4 GEMMs (flashinfer cutlass) with a
-# straight-through-estimator backward into the dense fp32 master
-# weights. No extra parameters or buffers are added, so FSDP sharding,
-# checkpointing, and export are identical to dense training. Attention
-# stays dense (LTX-2 NVFP4 deployment does not quantize attention math).
+# Same recipe as overfit_ltx2_t2v.yaml, but the curated attention/FFN
+# linear set used by LTX-2 NVFP4 deployment runs its forward through
+# real NVFP4 GEMMs (flashinfer cutlass) with a straight-through-estimator
+# backward into the dense fp32 master weights. No extra parameters or
+# buffers are added, so FSDP sharding, checkpointing, and export are
+# identical to dense training. Attention stays dense (LTX-2 NVFP4
+# deployment does not quantize attention math).
 #
 # Requires flashinfer with FP4 support and an sm_100-class GPU
 # (developed on GB200).
@@ -91,9 +92,9 @@ callbacks:
     guidance_scale: 1.0
     num_frames: 81
 
-# quant_config selects NVFP4 QAT: attention/FFN linears (to_q/k/v/out,
-# ffn.fc_in/fc_out) fake-quantize through real FP4 GEMMs with an STE
-# backward. The string resolves to NVFP4QATTrainConfig at config parse.
+# quant_config selects NVFP4 QAT for the same curated linear prefixes as
+# LTX-2 NVFP4 deployment. They fake-quantize through real FP4 GEMMs with
+# an STE backward. The string resolves to NVFP4QATTrainConfig at parse.
 pipeline:
   dit_config:
     quant_config: nvfp4_qat_train

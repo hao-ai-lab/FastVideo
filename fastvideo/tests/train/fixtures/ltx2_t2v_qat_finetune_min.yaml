@@ -1,8 +1,8 @@
 # Minimum config to run a single NVFP4-QAT training step of
 # FineTuneMethod on LTX2Model for the per-method smoke test. Identical
 # to ltx2_t2v_finetune_min.yaml except pipeline.dit_config.quant_config
-# selects the NVFP4 QAT-train quantization (STE through real FP4
-# GEMMs). Requires flashinfer FP4 kernels (sm_100-class GPU); the test
+# selects the LTX-2 deployment-matched NVFP4 QAT-train profile (STE
+# through real FP4 GEMMs). Requires flashinfer FP4 kernels (sm_100-class GPU); the test
 # additionally skips below 60GB GPU memory.
 
 models:

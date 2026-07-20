@@ -212,6 +212,22 @@ pipeline:
   flow_shift: 8
 ```
 
+Registered transformer linear-quantization configs can also be selected by
+name. For example, the LTX-2 NVFP4-QAT recipe keeps attention computation dense
+while its deployment-targeted attention/FFN projections use real FP4 forward
+GEMMs with a straight-through-estimator backward:
+
+```yaml
+pipeline:
+  dit_config:
+    quant_config: nvfp4_qat_train
+```
+
+This is distinct from `models.<role>.attention_backend: ATTN_QAT_TRAIN`, which
+selects quantized attention math for one Wan model role. The LTX-2 recipe is in
+`examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml` and requires
+FlashInfer FP4 support on SM100 or newer hardware.
+
 ---
 
 ## Training Methods
