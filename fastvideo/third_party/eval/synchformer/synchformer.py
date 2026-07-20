@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from fastvideo.third_party.eval.synchformer.ast import AST
-from fastvideo.third_party.eval.synchformer.motionformer import MotionFormer
+from fastvideo.third_party.synchformer.motionformer import MotionFormer
 from fastvideo.third_party.eval.synchformer.transformer import GlobalTransformer
 
 
