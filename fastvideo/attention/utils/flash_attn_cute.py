@@ -42,7 +42,8 @@ except ImportError:
     _flash_attn_2_func = None
     _flash_attn_2_varlen_func = None
 
-_IS_SM90_OR_NEWER = current_platform.has_device_capability(90)
+# Dynamo unwraps functools caches, so keep this cache inside the opaque helper.
+_SM90_OR_NEWER_BY_DEVICE: dict[int, bool] = {}
 
 
 def _check_dropout(dropout_p: float) -> None:
@@ -50,13 +51,17 @@ def _check_dropout(dropout_p: float) -> None:
         raise NotImplementedError(f"flash_attn.cute does not support dropout (got dropout_p={dropout_p})")
 
 
-def _sm90_or_newer() -> bool:
-    # Compiled callers only read a boolean instead of tracing through a memoized platform query.
-    return _IS_SM90_OR_NEWER
+@torch.compiler.assume_constant_result
+def _sm90_or_newer(device_id: int) -> bool:
+    if device_id not in _SM90_OR_NEWER_BY_DEVICE:
+        _SM90_OR_NEWER_BY_DEVICE[device_id] = (current_platform.has_device_capability(90, device_id))
+    return _SM90_OR_NEWER_BY_DEVICE[device_id]
 
 
 def _use_fa2(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> bool:
-    if _sm90_or_newer():
+    device_id = q.device.index
+    assert device_id is not None
+    if _sm90_or_newer(device_id):
         return False
     # Pre-sm90 FA4 cute limitations, both served by FA2 (deterministic
     # capability gate, not a runtime fallback):

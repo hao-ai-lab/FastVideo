@@ -5,6 +5,7 @@ LTX-2 transformer implementation
 
 from dataclasses import dataclass, replace
 from enum import Enum
+import functools
 import math
 import os
 from pathlib import Path
@@ -767,14 +768,9 @@ def _apply_ltx_split_rotary_emb(
     return output
 
 
-def generate_ltx_freq_grid_float64(
+def _generate_ltx_freq_grid_float64(
     positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
 ) -> torch.Tensor:
-    """Generate LTX-2 rotary frequencies with float64 precision.
-
-    Implemented in pure torch and free of Python memoization so it is safe
-    for callers that may be captured and reused by torch.compile.
-    """
     theta = positional_embedding_theta
     start = 1
     end = theta
@@ -791,10 +787,24 @@ def generate_ltx_freq_grid_float64(
     return (pow_indices * math.pi / 2).to(dtype=torch.float32)
 
 
-def generate_ltx_freq_grid_pytorch(
+_cached_generate_ltx_freq_grid_float64 = functools.lru_cache(maxsize=5)(
+    _generate_ltx_freq_grid_float64)
+
+
+def generate_ltx_freq_grid_float64(
     positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
 ) -> torch.Tensor:
-    """Generate LTX-2 rotary frequencies in torch for speed."""
+    """Generate an eager-cached, compile-safe float64 LTX-2 rotary grid."""
+    if torch.compiler.is_compiling():
+        return _generate_ltx_freq_grid_float64(
+            positional_embedding_theta, positional_embedding_max_pos_count, inner_dim)
+    return _cached_generate_ltx_freq_grid_float64(
+        positional_embedding_theta, positional_embedding_max_pos_count, inner_dim)
+
+
+def _generate_ltx_freq_grid_pytorch(
+    positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
+) -> torch.Tensor:
     theta = positional_embedding_theta
     start = 1
     end = theta
@@ -809,6 +819,21 @@ def generate_ltx_freq_grid_pytorch(
     )
     indices = indices.to(dtype=torch.float32)
     return indices * math.pi / 2
+
+
+_cached_generate_ltx_freq_grid_pytorch = functools.lru_cache(maxsize=5)(
+    _generate_ltx_freq_grid_pytorch)
+
+
+def generate_ltx_freq_grid_pytorch(
+    positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
+) -> torch.Tensor:
+    """Generate an eager-cached, compile-safe float32 LTX-2 rotary grid."""
+    if torch.compiler.is_compiling():
+        return _generate_ltx_freq_grid_pytorch(
+            positional_embedding_theta, positional_embedding_max_pos_count, inner_dim)
+    return _cached_generate_ltx_freq_grid_pytorch(
+        positional_embedding_theta, positional_embedding_max_pos_count, inner_dim)
 
 
 def _ltx_get_fractional_positions(indices_grid: torch.Tensor, max_pos: list[int]) -> torch.Tensor:
