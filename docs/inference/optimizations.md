@@ -113,7 +113,7 @@ Install the FP4 flash attention kernel (without upgrading your existing torch):
 # branch fix/cutlass-dsl-4.5 carries the cutlass-dsl 4.5 fix (cute.core.ThrMma
 # -> cute.ThrMma); switch back to @fp4 once hao-ai-lab/flash-attention-fp4#2 merges.
 pip install --no-deps "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fix/cutlass-dsl-4.5#subdirectory=flash_attn/cute"
-pip install "nvidia-cutlass-dsl>=4.5.2" apache-tvm-ffi flashinfer-python
+pip install "nvidia-cutlass-dsl>=4.5.2" apache-tvm-ffi flashinfer-python quack-kernels torch-c-dlpack-ext
 ```
 
 The `--no-deps` flag prevents upgrading torch/torchvision. Use the supported
