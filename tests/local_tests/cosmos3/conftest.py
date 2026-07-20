@@ -202,7 +202,7 @@ def make_forward_batch(*, num_frames: int, height: int, width: int, image: Any =
 
 
 def make_fastvideo_args():
-    """Build minimal ``fastvideo_args`` (only ``pipeline_config`` is read)."""
+    """Build the minimal ``fastvideo_args`` read by the Cosmos3 stage."""
     from fastvideo.configs.pipelines.cosmos3 import Cosmos3Config
 
     cfg = Cosmos3Config()
@@ -211,4 +211,4 @@ def make_fastvideo_args():
     arch.latent_patch_size = _LATENT_PATCH_SIZE
     arch.temporal_compression_factor = _TEMPORAL_FACTOR
     arch.enable_fps_modulation = False
-    return SimpleNamespace(pipeline_config=cfg)
+    return SimpleNamespace(pipeline_config=cfg, output_type="pil")
