@@ -27,11 +27,19 @@ class MMAudioDFNCLIPTextArchConfig(CLIPTextArchConfig):
     pad_token_id: int = 0
     bos_token_id: int = 49406
     eos_token_id: int = 49407
+    # MMAudio moves this encoder as one unit between CPU and GPU. Keeping it a
+    # plain module avoids nesting FSDP CPU-offload semantics inside the custom
+    # OpenCLIP causal-mask forward used by this pipeline.
+    _fsdp_shard_conditions: list = field(default_factory=list)
 
 
 @dataclass
 class MMAudioDFNCLIPTextConfig(CLIPTextConfig):
     arch_config: CLIPTextArchConfig = field(default_factory=MMAudioDFNCLIPTextArchConfig)
+    # OpenCLIP supplies an explicit additive triangular mask to
+    # nn.MultiheadAttention. The MMAudio adapter reproduces that path instead
+    # of using SDPA's is_causal shortcut, which rounds differently in bf16.
+    is_causal: bool = False
     prefix: str = "mmaudio_dfn_clip_text"
 
 

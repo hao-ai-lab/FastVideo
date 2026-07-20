@@ -94,6 +94,14 @@ def test_mmaudio_large_44k_v2_transformer_parity() -> None:
         official = large_44k_v2()
         fastvideo = MMAudioTransformer(MMAudioTransformerConfig(), hf_config={})
     official.load_weights(dict(state))
+    # The released checkpoint contains a stale derived buffer which the
+    # official ``load_weights`` explicitly discards. Validate it before
+    # applying the same canonicalization used by the converter.
+    checkpoint_freqs = state.pop("t_embed.freqs")
+    torch.testing.assert_close(checkpoint_freqs,
+                               fastvideo.t_embed.freqs.cpu(),
+                               atol=1e-6,
+                               rtol=1e-6)
     missing, unexpected = fastvideo.load_state_dict(state, strict=True)
     assert missing == []
     assert unexpected == []

@@ -23,6 +23,7 @@ Miniconda3-latest-Linux-x86_64.sh
 *validation/
 data/
 outputs/
+outputs_audio/
 outputs_video
 checkpoints/
 sbatch.sh

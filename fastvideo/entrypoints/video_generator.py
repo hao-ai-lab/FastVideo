@@ -50,7 +50,7 @@ from fastvideo.api.schema import (
     SamplingConfig,
 )
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import align_to, shallow_asdict
@@ -600,7 +600,13 @@ class VideoGenerator:
 
         # Single prompt generation (original behavior)
         if prompt is None:
-            raise ValueError("Either prompt or prompt_txt must be provided")
+            if fastvideo_args.workload_type is WorkloadType.V2A:
+                # Video semantics are sufficient conditioning for V2A models;
+                # model-specific text stages interpret the empty string using
+                # their native tokenizer/empty-prompt contract.
+                prompt = ""
+            else:
+                raise ValueError("Either prompt or prompt_txt must be provided")
         output_path = self._prepare_output_path(sampling_param.output_path, prompt)
         kwargs["output_path"] = output_path
         if prompt_embeds is not None:
@@ -618,6 +624,13 @@ class VideoGenerator:
         if args is None:
             return False
         return args.workload_type.value.endswith("2i")
+
+    def _is_audio_workload(self) -> bool:
+        """Return True when the workload produces standalone audio."""
+        args = getattr(self, "fastvideo_args", None)
+        if args is None:
+            return False
+        return args.workload_type.value.endswith("2a")
 
     def _prepare_output_path(
         self,
@@ -638,7 +651,12 @@ class VideoGenerator:
           warning is logged.
         - If the target path already exists, a numeric suffix is appended.
         """
-        target_ext = ".png" if self._is_image_workload() else ".mp4"
+        if self._is_image_workload():
+            target_ext = ".png"
+        elif self._is_audio_workload():
+            target_ext = ".wav"
+        else:
+            target_ext = ".mp4"
 
         def _sanitize_filename_component(name: str) -> str:
             # Remove characters invalid on common filesystems, strip spaces/dots
