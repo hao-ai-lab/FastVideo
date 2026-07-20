@@ -253,7 +253,8 @@ def _load_dfn5b_state(directory: Path) -> dict[str, torch.Tensor]:
         raise FileNotFoundError(directory)
     from open_clip import create_model_from_pretrained
 
-    model = create_model_from_pretrained(str(directory), return_transform=False)
+    model = create_model_from_pretrained(f"local-dir:{directory}",
+                                         return_transform=False)
     state = {key: tensor.detach().cpu() for key, tensor in model.state_dict().items()}
     del model
     return state
@@ -264,6 +265,11 @@ def convert(args: argparse.Namespace) -> None:
     output.mkdir(parents=True, exist_ok=True)
 
     transformer_state = _load_torch_state(args.transformer_checkpoint)
+    # Official ``MMAudio.load_weights`` discards this derived buffer. Keeping
+    # it would make a standard strict FastVideo component load fail.
+    transformer_state.pop("t_embed.freqs", None)
+    transformer_state.pop("latent_rot", None)
+    transformer_state.pop("clip_rot", None)
     _write_component(output, "transformer", transformer_state, TRANSFORMER_CONFIG)
 
     vae_state = _load_torch_state(args.audio_vae_checkpoint)
@@ -282,7 +288,16 @@ def convert(args: argparse.Namespace) -> None:
     )
 
     synchformer_state = _load_torch_state(args.synchformer_checkpoint)
-    _write_component(output, "image_encoder_2", synchformer_state, SYNCHFORMER_CONFIG)
+    synchformer_visual_state = {
+        name: tensor
+        for name, tensor in synchformer_state.items()
+        if name.startswith("vfeat_extractor.")
+    }
+    if not synchformer_visual_state:
+        raise ValueError(
+            "Synchformer checkpoint did not contain vfeat_extractor weights")
+    _write_component(output, "image_encoder_2", synchformer_visual_state,
+                     SYNCHFORMER_CONFIG)
 
     dfn_state = _load_dfn5b_state(args.dfn5b_dir)
     _write_component(output, "text_encoder", map_open_clip_text_state(dfn_state), TEXT_ENCODER_CONFIG)
@@ -300,7 +315,7 @@ def convert(args: argparse.Namespace) -> None:
     _write_component(output, "vocoder", bigvgan_state, bigvgan_config)
 
     _write_json(
-        output / "scheduler/config.json",
+        output / "scheduler/scheduler_config.json",
         {
             "_class_name": "FlowMatchEulerDiscreteScheduler",
             "num_train_timesteps": 1000,

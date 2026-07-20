@@ -152,7 +152,8 @@ class Snake(nn.Module):
         alpha = self.alpha.unsqueeze(0).unsqueeze(-1)
         if self.alpha_logscale:
             alpha = torch.exp(alpha)
-        return x + torch.sin(x * alpha).pow(2) / (alpha + self.no_div_by_zero)
+        return x + (1.0 / (alpha + self.no_div_by_zero)) * torch.pow(
+            torch.sin(x * alpha), 2)
 
 
 class SnakeBeta(nn.Module):
@@ -173,7 +174,8 @@ class SnakeBeta(nn.Module):
         if self.alpha_logscale:
             alpha = torch.exp(alpha)
             beta = torch.exp(beta)
-        return x + torch.sin(x * alpha).pow(2) / (beta + self.no_div_by_zero)
+        return x + (1.0 / (beta + self.no_div_by_zero)) * torch.pow(
+            torch.sin(x * alpha), 2)
 
 
 def _activation(name: str, channels: int, logscale: bool) -> Activation1d:
@@ -339,8 +341,19 @@ class BigVGANV2(nn.Module):
         for index in range(self.num_upsamples):
             for upsampler in self.ups[index]:
                 hidden = upsampler(hidden)
-            outputs = [self.resblocks[index * self.num_kernels + kernel](hidden) for kernel in range(self.num_kernels)]
-            hidden = torch.stack(outputs).mean(dim=0)
+            accumulated = None
+            for kernel in range(self.num_kernels):
+                block_output = self.resblocks[
+                    index * self.num_kernels + kernel](hidden)
+                if accumulated is None:
+                    accumulated = block_output
+                else:
+                    # Preserve BigVGAN's published sequential accumulation
+                    # order. Tree reduction drifts through later nonlinear
+                    # upsampling stages with the full checkpoint.
+                    accumulated += block_output
+            assert accumulated is not None
+            hidden = accumulated / self.num_kernels
         hidden = self.conv_post(self.activation_post(hidden))
         if self.use_tanh_at_final:
             return torch.tanh(hidden)
