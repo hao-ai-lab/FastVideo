@@ -9,6 +9,9 @@
   "test_ltx2_finetune": {
     "GB200": 0.3127
   },
+  "test_ltx2_nvfp4_qat_finetune": {
+    "GB200": 0.3661
+  },
   "test_matrixgame2_finetune": {
     "H200": 4.8247
   },
