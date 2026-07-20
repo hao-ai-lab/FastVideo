@@ -38,6 +38,7 @@ third-party, both explicitly allowed.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -106,7 +107,9 @@ def cosmos3_tokenize_caption(
         add_generation_prompt=True,
         add_vision_id=False,
     )
-    return list(token_ids)
+    if isinstance(token_ids, Mapping):
+        token_ids = token_ids["input_ids"]
+    return [int(token_id) for token_id in token_ids]
 
 
 # ===========================================================================

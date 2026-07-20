@@ -54,6 +54,20 @@ def test_native_tokenize_caption_uses_chat_template() -> None:
     assert isinstance(ids_image, list) and ids_image
 
 
+def test_native_tokenize_caption_accepts_batch_encoding() -> None:
+    """Transformers 5 returns a mapping from ``apply_chat_template``."""
+    from fastvideo.pipelines.basic.cosmos3.cosmos3_pipeline import cosmos3_tokenize_caption
+
+    class BatchEncodingTokenizer(StubQwen2Tokenizer):
+
+        def apply_chat_template(self, *args, **kwargs):
+            ids = super().apply_chat_template(*args, **kwargs)
+            return {"input_ids": ids, "attention_mask": [1] * len(ids)}
+
+    ids = cosmos3_tokenize_caption(BatchEncodingTokenizer(), "a robot dances", is_video=True)
+    assert ids and all(isinstance(token_id, int) for token_id in ids)
+
+
 def test_cosmos3_special_token_ids_real_weights() -> None:
     """Byte-for-byte Qwen2 special-token ids (needs the real text_tokenizer).
 
