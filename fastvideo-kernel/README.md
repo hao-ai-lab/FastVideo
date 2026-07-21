@@ -81,7 +81,7 @@ have an incompatible `_flash_attn_fwd` signature.
 
 ```bash
 pip install torchvision
-pip install "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@82d6441eec5d4dfec120153db2c0145ae855a083#subdirectory=flash_attn/cute"
+pip install "flash-attn-4[cu13] @ git+https://github.com/Dao-AILab/flash-attention.git@82d6441eec5d4dfec120153db2c0145ae855a083#subdirectory=flash_attn/cute"
 ```
 
 The CuTe kernel JIT-compiles on first use. Verified on Blackwell (sm_100) against

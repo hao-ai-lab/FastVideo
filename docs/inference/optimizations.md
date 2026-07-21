@@ -78,8 +78,8 @@ python setup.py install
 
 FastVideo never auto-selects FlashAttention-4 (`flash_attn.cute`) just because it
 is installed: its CuTeDSL kernels JIT-compile per shape family and can fail at
-runtime on some GPU/shape combinations. To use FA4, install the pinned
-`flash-attn-4` build (see the `flash-attn-4` source in `pyproject.toml`) and set:
+runtime on some GPU/shape combinations. To use FA4 on CUDA 13, install the pinned
+`flash-attn-4[cu13]` build (see the `flash-attn-4` source in `pyproject.toml`) and set:
 
 ```bash
 export FASTVIDEO_FA4=1

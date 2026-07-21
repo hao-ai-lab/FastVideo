@@ -30,3 +30,21 @@ def test_fa4_dependency_pins_match() -> None:
     }
 
     assert len(set(pins.values())) == 1, f"FA4 dependency pins disagree: {pins}"
+
+
+def test_fa4_blackwell_installs_select_cuda13_runtime() -> None:
+    root_pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    dreamverse_pyproject = (REPO_ROOT / "apps/dreamverse/pyproject.toml").read_text(encoding="utf-8")
+    dockerfile = (REPO_ROOT / "docker/Dockerfile").read_text(encoding="utf-8")
+    dreamverse_dockerfile = (REPO_ROOT / "apps/dreamverse/docker/Dockerfile").read_text(encoding="utf-8")
+    kernel_readme = (REPO_ROOT / "fastvideo-kernel/README.md").read_text(encoding="utf-8")
+
+    assert '"flash-attn-4",' in root_pyproject
+    assert '"flash-attn-4 @ git+' in dreamverse_pyproject
+    assert 'if [ "${UV_TORCH_BACKEND}" = "cu130" ]' in dockerfile
+    assert 'FA4_PACKAGE="flash-attn-4[cu13]"' in dockerfile
+    assert 'FA4_PACKAGE="flash-attn-4"' in dockerfile
+    assert 'elif [ "${TARGETARCH}" = "arm64" ]' in dockerfile
+    assert '"${UV_TORCH_BACKEND}" == "cu130"' in dreamverse_dockerfile
+    assert '"nvidia-cutlass-dsl[cu13]"' in dreamverse_dockerfile
+    assert "flash-attn-4[cu13]" in kernel_readme

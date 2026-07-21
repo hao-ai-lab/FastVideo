@@ -114,7 +114,7 @@ fastvideo-kernel = [
 # uv reads UV_TORCH_BACKEND / --torch-backend (not a pyproject setting). The
 # supported backends (cu126, cu130) both provide torch 2.12.0.
 imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
-# FA4 cute, pinned to a CuTe DSL 4.6-compatible revision. torch.compile support
+# FA4 cute, pinned to the CuTe DSL 4.6.0.dev0-compatible revision. torch.compile support
 # comes from FastVideo's own custom_op wrappers.
 flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "82d6441eec5d4dfec120153db2c0145ae855a083", subdirectory = "flash_attn/cute" }
 
