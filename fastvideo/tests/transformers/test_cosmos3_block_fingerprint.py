@@ -2,7 +2,7 @@
 """Exact one-layer Cosmos3 omni-forward fingerprint on the pinned L40S stack.
 
 Routine CI loads one real decoder layer plus only the top-level weights needed
-by fixed T2V, T2VS, action2world, and deepstack-reasoning forwards from the
+by fixed T2V, I2V, T2VS, action2world, and deepstack-reasoning forwards from the
 pinned public checkpoint.  Set
 ``FASTVIDEO_SEED_COSMOS3_FINGERPRINT=1`` to print replacement hashes.  When
 ``COSMOS3_OFFICIAL_REPO`` points at the pinned NVIDIA ``cosmos-framework``
@@ -62,10 +62,11 @@ INPUT_SEED = 20260721
 # Golden values seeded on the exact Modal L40S image asserted below.
 EXPECTED_ENVIRONMENT_SHA256 = "ad3d22373224999f0a0520c96eb406335ad5b58bdf4fd2f3e4ec29de2f6e1dda"
 EXPECTED_CONTRACT_SHA256 = "5043ad8a281ddfd2595317c45943c2c06d71cf8012525db7efed1db7af7e31e3"
-EXPECTED_INPUT_SHA256 = "4c2f1879c1847f65372fbb08df981bbb00e2e4b7ad6176c22db5515e69b2846f"
+EXPECTED_INPUT_SHA256 = "TO_BE_SEEDED"
 EXPECTED_WEIGHTS_SHA256 = "480b5a497bb0c9ef71edabeee62c057b2c54fce753362e8938d073d6bf7cfa62"
 EXPECTED_OUTPUT_SHA256 = {
     "action2world": "4cf042b91e1a0c4131efbb454e23d679b73542abda9b36af18cd81bb694b1b34",
+    "i2v": "TO_BE_SEEDED",
     "reason": "112b9ecd765b0e1afc7d21d169b4f3e941901d975c27f59df6062dedef60bc35",
     "t2v": "2b15c03d936bace07acea7aba55fe850dd3cadc344b361dce8da68acd94f9cb7",
     "t2vs": "1bffb714b7f316665e0176ddfe2b930df70d6dae1f75b3f761e92b5b9d8c26dd",
@@ -74,6 +75,10 @@ EXPECTED_OUTPUT_SHAPES = {
     "action2world": {
         "last_hidden_state": (17, 4096),
         "preds_action.0": (2, 64),
+        "preds_vision.0": (1, 48, 2, 4, 4),
+    },
+    "i2v": {
+        "last_hidden_state": (15, 4096),
         "preds_vision.0": (1, 48, 2, 4, 4),
     },
     "reason": {
@@ -310,8 +315,11 @@ def _video_case(case: str) -> dict[str, Any]:
     text_ids = torch.tensor([1, 3, 7, 15, 31, 47, 63], dtype=torch.long)
     text_indexes = torch.arange(NUM_TEXT_TOKENS, dtype=torch.long)
     vision_indexes = torch.arange(NUM_TEXT_TOKENS, NUM_TEXT_TOKENS + num_vision_tokens, dtype=torch.long)
-    vision_timesteps = torch.full((num_vision_tokens,), 500.0, dtype=torch.float32)
-    noisy_frames = torch.arange(grid_t, dtype=torch.long)
+    # I2V keeps frame 0 in attention as clean conditioning while only frame 1
+    # receives a timestep embedding and prediction target.
+    noisy_frames = torch.tensor([1], dtype=torch.long) if case == "i2v" else torch.arange(grid_t, dtype=torch.long)
+    vision_mse_loss_indexes = vision_indexes.reshape(grid_t, grid_h * grid_w)[noisy_frames].flatten()
+    vision_timesteps = torch.full((vision_mse_loss_indexes.numel(),), 500.0, dtype=torch.float32)
     kwargs: dict[str, Any] = {
         "text_ids": text_ids,
         "text_indexes": text_indexes,
@@ -321,7 +329,7 @@ def _video_case(case: str) -> dict[str, Any]:
         "vision_token_shapes": [VISION_GRID],
         "vision_sequence_indexes": vision_indexes,
         "vision_timesteps": vision_timesteps,
-        "vision_mse_loss_indexes": vision_indexes,
+        "vision_mse_loss_indexes": vision_mse_loss_indexes,
         "vision_noisy_frame_indexes": [noisy_frames],
         "fps_vision": torch.tensor([24.0], dtype=torch.float32),
     }
@@ -390,7 +398,7 @@ def _video_case(case: str) -> dict[str, Any]:
             action_domain_id=[torch.tensor([ACTION_DOMAIN_ID], dtype=torch.long)],
         )
         kwargs["split_lens"][1] += action_t
-    elif case != "t2v":
+    elif case not in {"t2v", "i2v"}:
         raise ValueError(f"Unknown Cosmos3 fingerprint case: {case}")
 
     kwargs["position_ids"] = torch.cat(position_blocks, dim=1)
@@ -443,7 +451,7 @@ def _to_device(value: Any, device: torch.device) -> Any:
 
 
 def _inputs(device: torch.device) -> tuple[dict[str, dict[str, Any]], dict[str, Any], str]:
-    cpu_cases = {case: _video_case(case) for case in ("t2v", "t2vs", "action2world")}
+    cpu_cases = {case: _video_case(case) for case in ("t2v", "i2v", "t2vs", "action2world")}
     cpu_reason = _reason_inputs()
     tensors: dict[str, torch.Tensor] = {}
     _collect_tensors("cases", cpu_cases, tensors)
@@ -691,6 +699,10 @@ def test_cosmos3_one_layer_omni_forward_fingerprint() -> None:
             shapes = {name: tuple(tensor.shape) for name, tensor in first_tensors.items()}
             assert shapes == EXPECTED_OUTPUT_SHAPES[case]
             assert all(tensor.dtype == torch.bfloat16 for tensor in first_tensors.values())
+            if case == "i2v":
+                vision = first_tensors["preds_vision.0"]
+                assert torch.count_nonzero(vision[:, :, 0]) == 0
+                assert torch.count_nonzero(vision[:, :, 1]) > 0
             output_hashes[case] = _tensor_hashes(first_tensors)
             output_summaries[case] = {
                 "sha256": output_hashes[case],
