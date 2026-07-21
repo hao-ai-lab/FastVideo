@@ -79,6 +79,7 @@ class ModelTrainingConfig:
     precondition_outputs: bool = False
     moba_config: dict = field(default_factory=dict)
     enable_gradient_checkpointing_type: str | None = None
+    enable_torch_compile: bool = False
 
 
 @dataclass(slots=True)

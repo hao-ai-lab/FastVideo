@@ -26,6 +26,34 @@ from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 logger = init_logger(__name__)
 
 
+def _compile_matched_submodule_forwards(
+    model: nn.Module,
+    torch_compile_kwargs: dict[str, Any] | None = None,
+) -> int:
+    """Compile only forwards selected by ``model._compile_conditions``."""
+    compile_conditions = getattr(model, "_compile_conditions", None)
+    if not compile_conditions:
+        raise ValueError("Regional torch.compile requires model._compile_conditions; "
+                         "refusing to compile the whole FSDP model.")
+
+    compile_kwargs = dict(torch_compile_kwargs or {})
+    if compile_kwargs.get("fullgraph") is True:
+        raise ValueError("Regional FSDP training compile requires "
+                         "fullgraph=False so runtime-only hooks can remain graph breaks.")
+    compile_kwargs["fullgraph"] = False
+
+    compiled_count = 0
+    for name, submodule in model.named_modules():
+        if name and any(condition(name, submodule) for condition in compile_conditions):
+            submodule.forward = torch.compile(submodule.forward, **compile_kwargs)
+            compiled_count += 1
+
+    if compiled_count == 0:
+        raise ValueError("model._compile_conditions matched no submodules; "
+                         "refusing to compile the whole FSDP model.")
+    return compiled_count
+
+
 def _maybe_quantize_model(model: nn.Module) -> None:
     """Quantize NVFP4- or FP8-tagged linear layers in-place after weights are loaded.
 
@@ -151,6 +179,10 @@ def maybe_load_fsdp_model(
         use_fsdp = False
         logger.info("Disabling FSDP for MPS platform as it's not compatible")
 
+    if enable_torch_compile and training_mode:
+        compiled_count = _compile_matched_submodule_forwards(model, torch_compile_kwargs)
+        logger.info("Enabled regional torch.compile for %d training submodules before FSDP sharding", compiled_count)
+
     if use_fsdp:
         pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
         world_size = hsdp_replicate_dim * hsdp_shard_dim
@@ -209,12 +241,6 @@ def maybe_load_fsdp_model(
     # are present (lazy imports inside the helper).
     _maybe_quantize_model(model)
 
-    compile_in_loader = enable_torch_compile and training_mode
-    if compile_in_loader:
-        compile_kwargs = torch_compile_kwargs or {}
-        logger.info("Enabling torch.compile for FSDP training module with kwargs=%s", compile_kwargs)
-        model = torch.compile(model, **compile_kwargs)
-        logger.info("torch.compile enabled for %s", type(model).__name__)
     return model
 
 

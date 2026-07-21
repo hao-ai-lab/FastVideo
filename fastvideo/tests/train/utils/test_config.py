@@ -88,6 +88,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.model.weighting_scheme == "uniform"
     assert t.model.precondition_outputs is False
     assert t.model.moba_config == {}
+    assert t.model.enable_torch_compile is False
 
     assert t.dit_precision == "fp32"
     assert t.vsa_sparsity == 0.0
@@ -148,6 +149,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "logit_mean": 0.5,
             "logit_std": 1.5,
             "precondition_outputs": True,
+            "enable_torch_compile": True,
         },
         "dit_precision": "bf16",
     }
@@ -183,6 +185,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.vsa_sparsity == pytest.approx(0.5)
     assert t.model.weighting_scheme == "logit_normal"
     assert t.model.precondition_outputs is True
+    assert t.model.enable_torch_compile is True
     assert t.dit_precision == "bf16"
 
 
@@ -301,6 +304,7 @@ def test_dotted_overrides_apply_with_type_coercion(tmp_path: Path) -> None:
         "--training.optimizer.fused=true",
         "--training.distributed.pin_cpu_memory=true",
         "--training.distributed.reshard_after_forward=false",
+        "--training.model.enable_torch_compile=true",
         "--training.tracker.project_name=overridden",
     ]
     cfg = load_run_config(path, overrides=overrides)
@@ -310,6 +314,7 @@ def test_dotted_overrides_apply_with_type_coercion(tmp_path: Path) -> None:
     assert cfg.training.optimizer.fused is True
     assert cfg.training.distributed.pin_cpu_memory is True
     assert cfg.training.distributed.reshard_after_forward is False
+    assert cfg.training.model.enable_torch_compile is True
     assert cfg.training.tracker.project_name == "overridden"
 
 
@@ -342,6 +347,14 @@ def test_reshard_after_forward_rejects_non_bool(tmp_path: Path) -> None:
             ValueError,
             match="training.distributed.reshard_after_forward must be a bool",
     ):
+        load_run_config(_write_yaml(tmp_path, data))
+
+
+def test_model_torch_compile_rejects_non_bool(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {"model": {"enable_torch_compile": "true"}}
+
+    with pytest.raises(ValueError, match="training.model.enable_torch_compile must be a bool"):
         load_run_config(_write_yaml(tmp_path, data))
 
 

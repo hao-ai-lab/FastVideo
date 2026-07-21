@@ -150,6 +150,7 @@ training:
     precondition_outputs: false       # default: false
     moba_config: {}                   # default: {}
     enable_gradient_checkpointing_type: full  # default: null ("full" or null)
+    enable_torch_compile: false       # default: false; regionally compile matched DiT blocks before FSDP
 
   # --- training top-level [TYPED] ---
   dit_precision: fp32                 # default: "fp32" (master weight precision)

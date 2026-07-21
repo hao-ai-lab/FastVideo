@@ -56,6 +56,14 @@ def _extract_out(x):
     return x
 
 
+def _strided_input_pair(shape: tuple[int, ...], *, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
+    source = torch.randn(*shape, 2, device="cuda", dtype=dtype)
+    return (
+        source[..., 0].detach().requires_grad_(True),
+        source.clone()[..., 0].detach().requires_grad_(True),
+    )
+
+
 def test_capability_gate_is_lazy_and_device_keyed(monkeypatch) -> None:
     if not torch.cuda.is_available():
         pytest.skip("CUDA is required to import flash_attn.cute")
@@ -185,6 +193,37 @@ def test_flash_attn_func_parity_forward_backward(
     _assert_close(dv_test, dv_ref, dtype=dtype, is_grad=True)
 
 
+def test_flash_attn_func_torch_compile_forward_backward_parity(flash_attn_impls):
+    custom_flash_attn_func, _, _, _ = flash_attn_impls
+    dtype = torch.float16
+    shape = (1, 32, 2, 64)
+    torch.manual_seed(2)
+    q_eager, q_compiled = _strided_input_pair(shape, dtype=dtype)
+    k_eager, k_compiled = _strided_input_pair(shape, dtype=dtype)
+    v_eager, v_compiled = _strided_input_pair(shape, dtype=dtype)
+
+    def attention(q, k, v):
+        return custom_flash_attn_func(
+            q,
+            k,
+            v,
+            dropout_p=0.0,
+            softmax_scale=None,
+            causal=False,
+            deterministic=False,
+        )
+
+    out_eager = attention(q_eager, k_eager, v_eager)
+    out_compiled = torch.compile(attention, fullgraph=True)(q_compiled, k_compiled, v_compiled)
+    _assert_close(out_compiled, out_eager, dtype=dtype)
+
+    dout = torch.randn_like(out_eager)
+    eager_grads = torch.autograd.grad((out_eager * dout).sum(), (q_eager, k_eager, v_eager))
+    compiled_grads = torch.autograd.grad((out_compiled * dout).sum(), (q_compiled, k_compiled, v_compiled))
+    for compiled_grad, eager_grad in zip(compiled_grads, eager_grads):
+        _assert_close(compiled_grad, eager_grad, dtype=dtype, is_grad=True)
+
+
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("causal", [False, True])
 def test_flash_attn_varlen_func_parity_forward_backward(
@@ -260,3 +299,42 @@ def test_flash_attn_varlen_func_parity_forward_backward(
     _assert_close(dq_test, dq_ref, dtype=dtype, is_grad=True)
     _assert_close(dk_test, dk_ref, dtype=dtype, is_grad=True)
     _assert_close(dv_test, dv_ref, dtype=dtype, is_grad=True)
+
+
+def test_flash_attn_varlen_func_torch_compile_forward_backward_parity(flash_attn_impls):
+    _, custom_flash_attn_varlen_func, _, _ = flash_attn_impls
+    dtype = torch.float16
+    seqlens = (16, 8)
+    total = sum(seqlens)
+    max_seqlen = max(seqlens)
+    cu_seqlens = torch.tensor((0, seqlens[0], total), device="cuda", dtype=torch.int32)
+    shape = (total, 2, 64)
+    torch.manual_seed(3)
+    q_eager, q_compiled = _strided_input_pair(shape, dtype=dtype)
+    k_eager, k_compiled = _strided_input_pair(shape, dtype=dtype)
+    v_eager, v_compiled = _strided_input_pair(shape, dtype=dtype)
+
+    def attention(q, k, v, cu):
+        return custom_flash_attn_varlen_func(
+            q,
+            k,
+            v,
+            cu,
+            cu,
+            max_seqlen,
+            max_seqlen,
+            dropout_p=0.0,
+            softmax_scale=None,
+            causal=False,
+            deterministic=False,
+        )
+
+    out_eager = attention(q_eager, k_eager, v_eager, cu_seqlens)
+    out_compiled = torch.compile(attention, fullgraph=True)(q_compiled, k_compiled, v_compiled, cu_seqlens)
+    _assert_close(out_compiled, out_eager, dtype=dtype)
+
+    dout = torch.randn_like(out_eager)
+    eager_grads = torch.autograd.grad((out_eager * dout).sum(), (q_eager, k_eager, v_eager))
+    compiled_grads = torch.autograd.grad((out_compiled * dout).sum(), (q_compiled, k_compiled, v_compiled))
+    for compiled_grad, eager_grad in zip(compiled_grads, eager_grads):
+        _assert_close(compiled_grad, eager_grad, dtype=dtype, is_grad=True)

@@ -60,7 +60,7 @@ def _make_training_args(
         text_encoder_cpu_offload=False,
         image_encoder_cpu_offload=False,
         use_fsdp_inference=False,
-        enable_torch_compile=False,
+        enable_torch_compile=tc.model.enable_torch_compile,
     )
 
 

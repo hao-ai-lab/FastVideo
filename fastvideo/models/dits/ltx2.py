@@ -1955,6 +1955,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
 
         self.norm_eps = norm_eps
 
+    @torch.compiler.disable
     def _register_fsdp_backward_hooks_on_output(self, vx, ax):
         """Register backward hooks on output tensors to trigger FSDP2 unshard.
         
