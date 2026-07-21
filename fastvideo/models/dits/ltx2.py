@@ -86,8 +86,10 @@ def _functional_rms_norm(
     hidden = hidden * torch.rsqrt(variance + eps)
     out = hidden.to(input_dtype)
     if weight is not None:
+        # A weight dtype differing from x (e.g. fp32 params under autocast)
+        # would promote the output; keep the input-dtype guarantee.
         out = out * weight
-    return out
+    return out.to(input_dtype)
 
 
 def _rms_norm_dispatch(
