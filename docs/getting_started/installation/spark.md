@@ -75,6 +75,7 @@ Use the CUDA 13 image on DGX Spark:
 
 ```bash
 docker run --gpus all -it \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
   ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-cuda13.0.0-latest
 ```
 
@@ -168,7 +169,7 @@ fastvideo generate --config scripts/inference/inference_wan.yaml \
   --request.sampling.width 256 \
   --request.sampling.num_inference_steps 4 \
   --request.sampling.guidance_scale 6.0 \
-  --request.output.output_path outputs_video/spark_smoke
+  --request.output.output_path outputs_video/spark_smoke/
 ```
 
 Check the generated files with:
