@@ -61,6 +61,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.distributed.sp_size == 1
     assert t.distributed.hsdp_replicate_dim == 1
     assert t.distributed.pin_cpu_memory is False
+    assert t.distributed.reshard_after_forward is True
 
     assert t.data.train_batch_size == 1
     assert t.data.dataloader_num_workers == 0
@@ -103,6 +104,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "hsdp_replicate_dim": 2,
             "hsdp_shard_dim": 2,
             "pin_cpu_memory": True,
+            "reshard_after_forward": False,
         },
         "data": {
             "data_path": "/some/path",
@@ -155,6 +157,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.distributed.num_gpus == 4
     assert t.distributed.tp_size == 2
     assert t.distributed.pin_cpu_memory is True
+    assert t.distributed.reshard_after_forward is False
 
     assert t.data.train_batch_size == 2
     assert t.data.data_path == "/some/path"
@@ -297,6 +300,7 @@ def test_dotted_overrides_apply_with_type_coercion(tmp_path: Path) -> None:
         "--training.optimizer.learning_rate=1e-3",
         "--training.optimizer.fused=true",
         "--training.distributed.pin_cpu_memory=true",
+        "--training.distributed.reshard_after_forward=false",
         "--training.tracker.project_name=overridden",
     ]
     cfg = load_run_config(path, overrides=overrides)
@@ -305,6 +309,7 @@ def test_dotted_overrides_apply_with_type_coercion(tmp_path: Path) -> None:
     assert cfg.training.optimizer.learning_rate == pytest.approx(1e-3)
     assert cfg.training.optimizer.fused is True
     assert cfg.training.distributed.pin_cpu_memory is True
+    assert cfg.training.distributed.reshard_after_forward is False
     assert cfg.training.tracker.project_name == "overridden"
 
 
@@ -322,6 +327,21 @@ def test_optimizer_fused_rejects_non_bool(tmp_path: Path) -> None:
     data["training"] = {"optimizer": {"fused": "true"}}
 
     with pytest.raises(ValueError, match="training.optimizer.fused must be a bool"):
+        load_run_config(_write_yaml(tmp_path, data))
+
+
+def test_reshard_after_forward_rejects_non_bool(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {
+        "distributed": {
+            "reshard_after_forward": "false"
+        }
+    }
+
+    with pytest.raises(
+            ValueError,
+            match="training.distributed.reshard_after_forward must be a bool",
+    ):
         load_run_config(_write_yaml(tmp_path, data))
 
 

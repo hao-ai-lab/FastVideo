@@ -369,6 +369,12 @@ def _build_training_config(
             hsdp_replicate_dim=int(d.get("hsdp_replicate_dim", 1) or 1),
             hsdp_shard_dim=int(d.get("hsdp_shard_dim", num_gpus) or num_gpus),
             pin_cpu_memory=bool(d.get("pin_cpu_memory", False)),
+            reshard_after_forward=require_bool(
+                d,
+                "reshard_after_forward",
+                default=True,
+                where="training.distributed.reshard_after_forward",
+            ),
         ),
         data=DataConfig(
             data_path=data_path,

@@ -18,6 +18,7 @@ class DistributedConfig:
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     pin_cpu_memory: bool = False
+    reshard_after_forward: bool = True
 
 
 @dataclass(slots=True)

@@ -86,6 +86,7 @@ training:
     hsdp_replicate_dim: 1             # default: 1
     hsdp_shard_dim: 8                 # default: -1 (defaults to num_gpus in loader)
     pin_cpu_memory: false             # default: false
+    reshard_after_forward: true       # default: true; false trades memory for fewer FSDP all-gathers
 
   # --- training.data [TYPED] -> DataConfig ---
   data:

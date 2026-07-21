@@ -163,4 +163,19 @@ def load_module_from_path(
     if not isinstance(module, torch.nn.Module):
         raise TypeError(f"Loaded {module_type!r} is not a "
                         f"torch.nn.Module: {type(module)}")
+    if module_type == "transformer":
+        reshard_after_forward = training_config.distributed.reshard_after_forward
+        set_reshard_after_forward = getattr(
+            module,
+            "set_reshard_after_forward",
+            None,
+        )
+        if callable(set_reshard_after_forward):
+            set_reshard_after_forward(
+                reshard_after_forward,
+                recurse=True,
+            )
+        elif not reshard_after_forward:
+            raise RuntimeError("training.distributed.reshard_after_forward=false requires "
+                               "an FSDP-wrapped transformer")
     return module
