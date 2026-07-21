@@ -213,9 +213,9 @@ pipeline:
 ```
 
 Registered transformer linear-quantization configs can also be selected by
-name. For example, the LTX-2 NVFP4-QAT recipe keeps training attention dense
-while its deployment-targeted attention/FFN projections use real FP4 forward
-GEMMs with a straight-through-estimator backward:
+name. For example, the LTX-2 NVFP4-QAT recipe applies real FP4 forward GEMMs
+with a straight-through-estimator backward to its deployment-targeted
+attention/FFN projections:
 
 ```yaml
 pipeline:
@@ -223,13 +223,11 @@ pipeline:
     quant_config: nvfp4_qat_train
 ```
 
-This is distinct from `models.<role>.attention_backend: ATTN_QAT_TRAIN`, which
-selects quantized attention math for one Wan model role. The LTX-2 recipe is in
-`examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml` and requires
-FlashInfer FP4 support on SM100 or newer hardware. Its validation callback also
-sets `nvfp4_fa4: true` to temporarily exercise PR #1221's inference-only NVFP4
-Q/K FlashAttention-4 path without enabling that forward-only kernel during
-training.
+The LTX-2 recipe in
+`examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml` combines that linear
+configuration with `models.student.attention_backend: ATTN_QAT_TRAIN` for
+video-attention forward/backward. On sm120, its validation callback temporarily
+switches those layers to `ATTN_QAT_INFER`.
 
 ---
 

@@ -10,6 +10,7 @@ models:
     _target_: fastvideo.train.models.ltx2.LTX2Model
     init_from: FastVideo/LTX2-Distilled-Diffusers
     trainable: true
+    attention_backend: ATTN_QAT_TRAIN
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
