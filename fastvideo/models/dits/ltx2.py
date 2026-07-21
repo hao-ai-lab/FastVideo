@@ -2750,13 +2750,16 @@ class LTXModel(torch.nn.Module):
                 self-attention is skipped (STG perturbed pass).
         """
         if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
-            _debug_block_log_line(
+            weight_log = (
                 "fastvideo:patchify_proj"
                 f":video_w_sum={self.patchify_proj.weight.float().sum().item():.6f} "
-                f"video_b_sum={self.patchify_proj.bias.float().sum().item():.6f} "
-                f"audio_w_sum={self.audio_patchify_proj.weight.float().sum().item():.6f} "
-                f"audio_b_sum={self.audio_patchify_proj.bias.float().sum().item():.6f}"
-            )
+                f"video_b_sum={self.patchify_proj.bias.float().sum().item():.6f}")
+            if self.model_type.is_audio_enabled():
+                weight_log += (
+                    f" audio_w_sum={self.audio_patchify_proj.weight.float().sum().item():.6f} "
+                    f"audio_b_sum={self.audio_patchify_proj.bias.float().sum().item():.6f}"
+                )
+            _debug_block_log_line(weight_log)
         if not self.model_type.is_video_enabled() and video is not None:
             raise ValueError("Video is not enabled for this model")
         if not self.model_type.is_audio_enabled() and audio is not None:
@@ -2807,11 +2810,13 @@ class LTX2Transformer3DModel(BaseDiT):
     lora_param_names_mapping = LTX2VideoConfig().lora_param_names_mapping
     _fsdp_shard_conditions = LTX2VideoConfig()._fsdp_shard_conditions
     _compile_conditions = LTX2VideoConfig()._compile_conditions
+    _model_type = LTXModelType.AudioVideo
 
     def __init__(self, config: LTX2VideoConfig, hf_config: dict[str, Any]):
         super().__init__(config=config, hf_config=hf_config)
 
         arch = config.arch_config
+        model_type = self._model_type
 
         # Get SP world size for distributed attention
         sp_world_size = get_sp_world_size()
@@ -2821,11 +2826,13 @@ class LTX2Transformer3DModel(BaseDiT):
 
         # Validate that attention heads are divisible by SP world size
         if sp_world_size > 1:
-            assert arch.num_attention_heads % sp_world_size == 0, (
+            assert (not model_type.is_video_enabled()
+                    or arch.num_attention_heads % sp_world_size == 0), (
                 f"The number of video attention heads ({arch.num_attention_heads}) "
                 f"must be divisible by the sequence parallel size ({sp_world_size})"
             )
-            assert arch.audio_num_attention_heads % sp_world_size == 0, (
+            assert (not model_type.is_audio_enabled()
+                    or arch.audio_num_attention_heads % sp_world_size == 0), (
                 f"The number of audio attention heads ({arch.audio_num_attention_heads}) "
                 f"must be divisible by the sequence parallel size ({sp_world_size})"
             )
@@ -2837,7 +2844,6 @@ class LTX2Transformer3DModel(BaseDiT):
                 "LTX2 VSA enabled with SP world size 1; using distributed "
                 "attention path for VSA compatibility")
 
-        model_type = LTXModelType.AudioVideo
         self.model = LTXModel(
             model_type=model_type,
             num_attention_heads=arch.num_attention_heads,
@@ -3139,5 +3145,53 @@ class LTX2Transformer3DModel(BaseDiT):
             audio_out, output_shape=audio_shape)
         return video_out, audio_out
 
+
+class LTX2VideoOnlyTransformer3DModel(LTX2Transformer3DModel):
+    """LTX-2 video branch used by the modular video-only trainer."""
+
+    _model_type = LTXModelType.VideoOnly
+    _audio_root_modules = frozenset({
+        "audio_adaln_single",
+        "audio_caption_projection",
+        "audio_patchify_proj",
+        "audio_proj_out",
+        "audio_prompt_adaln_single",
+        "av_ca_a2v_gate_adaln_single",
+        "av_ca_audio_scale_shift_adaln_single",
+        "av_ca_v2a_gate_adaln_single",
+        "av_ca_video_scale_shift_adaln_single",
+    })
+    _audio_root_parameters = frozenset({"audio_scale_shift_table"})
+    _audio_block_modules = frozenset({
+        "audio_attn1",
+        "audio_attn2",
+        "audio_ff",
+        "audio_to_video_attn",
+        "video_to_audio_attn",
+    })
+    _audio_block_parameters = frozenset({
+        "audio_prompt_scale_shift_table",
+        "audio_scale_shift_table",
+        "scale_shift_table_a2v_ca_audio",
+        "scale_shift_table_a2v_ca_video",
+    })
+
+    @classmethod
+    def _is_ignored_checkpoint_key(cls, key: str) -> bool:
+        """Return whether an AV checkpoint key belongs to the omitted branch."""
+        parts = key.split(".")
+        if len(parts) < 2 or parts[0] != "model":
+            return False
+        if len(parts) == 2:
+            return parts[1] in cls._audio_root_parameters
+        if parts[1] in cls._audio_root_modules:
+            return True
+        if (len(parts) < 4 or parts[1] != "transformer_blocks"
+                or not parts[2].isdigit()):
+            return False
+        if len(parts) == 4:
+            return parts[3] in cls._audio_block_parameters
+        return parts[3] in cls._audio_block_modules
+
 # Entry point for model registry
-EntryClass = LTX2Transformer3DModel
+EntryClass = [LTX2Transformer3DModel, LTX2VideoOnlyTransformer3DModel]

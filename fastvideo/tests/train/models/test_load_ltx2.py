@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """GPU loading + forward smoke test for ``LTX2Model``.
 
-Loads the real LTX-2.0 / LTX-2.3 distilled checkpoints (18.9B at bf16,
-~38GB — skips on GPUs with less than 60GB memory) via
+Loads the real LTX-2.0 / LTX-2.3 distilled checkpoints into the 13B
+video-only training transformer (skips on GPUs with less than 60GB memory) via
 ``LTX2Model.__init__`` and runs one transformer forward pass on
 synthetic inputs. Catches loader or forward-signature regressions in
 ``fastvideo.train.models.ltx2.LTX2Model`` and the underlying
-``LTX2Transformer3DModel``.
+``LTX2VideoOnlyTransformer3DModel``.
 
 LTX-2's transformer takes per-token sigma timesteps in [0, 1] shaped
 [B, tokens] and a post-connector Gemma text embedding (3840-d for 2.0;
@@ -33,8 +33,11 @@ from fastvideo.forward_context import (
     get_forward_context,
     set_forward_context,
 )
-from fastvideo.pipelines import ForwardBatch
+from fastvideo.models.dits.ltx2 import LTXModelType
+from fastvideo.pipelines import ForwardBatch, TrainingBatch
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.models.ltx2 import LTX2Model
+from fastvideo.train.models.ltx2 import ltx2 as ltx2_module
 from fastvideo.train.utils.config import load_run_config
 
 _FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures"
@@ -56,10 +59,6 @@ class _TinyLTX2Transformer(torch.nn.Module):
     def __init__(self, *, is_ltx2_3: bool) -> None:
         super().__init__()
         self.video_weight = torch.nn.Parameter(torch.tensor(1.0))
-        self.audio_weight = torch.nn.Parameter(torch.tensor(1.0))
-        self.a2v_weight = torch.nn.Parameter(torch.tensor(1.0))
-        self.v2a_weight = torch.nn.Parameter(torch.tensor(1.0))
-        self.av_ca_weight = torch.nn.Parameter(torch.tensor(1.0))
         self.config = type("Config", (), {
             "arch_config": type("Arch", (), {
                 "caption_proj_before_connector": is_ltx2_3,
@@ -109,6 +108,39 @@ def test_ltx2_rejects_audio_training_before_loading(
         )
 
 
+def test_ltx2_selects_video_only_transformer_and_forwards_backend(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = load_run_config(str(_FIXTURE_DIR / _CASES["ltx2"][0]))
+    transformer = _TinyLTX2Transformer(is_ltx2_3=False)
+    captured: dict[str, object] = {}
+
+    def fake_load_module_from_path(**kwargs):
+        captured.update(kwargs)
+        return transformer
+
+    monkeypatch.setattr(ltx2_module, "load_module_from_path",
+                        fake_load_module_from_path)
+    model = LTX2Model(
+        init_from=cfg.models["student"]["init_from"],
+        training_config=cfg.training,
+        trainable=False,
+        attention_backend="TORCH_SDPA",
+    )
+
+    assert model.transformer is transformer
+    assert captured["override_transformer_cls_name"] == (
+        "LTX2VideoOnlyTransformer3DModel")
+    assert captured["attention_backend"] is AttentionBackendEnum.TORCH_SDPA
+
+
+def test_ltx2_rejects_role_local_sparse_attention_backend() -> None:
+    model = object.__new__(LTX2Model)
+    model.attention_backend = AttentionBackendEnum.VIDEO_SPARSE_ATTN
+
+    with pytest.raises(NotImplementedError, match="does not support VSA/VMOBA"):
+        model._build_attention_metadata(TrainingBatch())
+
+
 @pytest.mark.parametrize("case", _CASES.keys())
 def test_ltx2_wrapper_contract_runs_on_cpu(
         case: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,9 +165,6 @@ def test_ltx2_wrapper_contract_runs_on_cpu(
     )
 
     assert transformer.video_weight.requires_grad
-    for name, param in transformer.named_parameters():
-        if any(pattern in name for pattern in ("audio", "a2v", "v2a", "av_ca")):
-            assert not param.requires_grad, f"{name} was not frozen"
 
     model._check_text_embedding_dim(torch.empty(1, 1, text_dim))
     with pytest.raises(ValueError, match="text_embedding width"):
@@ -212,7 +241,7 @@ def test_ltx2_wrapper_contract_runs_on_cpu(
 def test_ltx2_model_loads_and_forwards(case: str):
     if _gpu_too_small():
         pytest.skip(f"requires a CUDA GPU with >= {_MIN_GPU_MEMORY_GB}GB "
-                    "memory (LTX-2 DiT is 18.9B params)")
+                    "memory (LTX-2 video DiT is 13B params)")
 
     fixture_name, text_dim = _CASES[case]
     cfg = load_run_config(str(_FIXTURE_DIR / fixture_name))
@@ -225,6 +254,8 @@ def test_ltx2_model_loads_and_forwards(case: str):
     transformer = model.transformer
     assert isinstance(transformer, torch.nn.Module)
     assert sum(p.numel() for p in transformer.parameters()) > 0
+    assert transformer.model.model_type is LTXModelType.VideoOnly
+    assert not hasattr(transformer.model, "audio_patchify_proj")
 
     device = torch.device("cuda:0")
     dtype = torch.bfloat16
@@ -233,7 +264,7 @@ def test_ltx2_model_loads_and_forwards(case: str):
     # LTX-2 transformer takes [B, 128, T, H, W] latents, a post-connector
     # Gemma embedding, and PER-TOKEN sigmas in [0, 1] ([B, T*H*W] with
     # patch size 1x1x1). Small spatial + few frames so this fits next to
-    # the 18.9B model.
+    # the 13B model.
     b, c, t, h, w = 1, 128, 3, 8, 8
     tokens = t * h * w
     hidden_states = torch.randn(b, c, t, h, w, device=device, dtype=dtype)

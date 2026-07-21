@@ -394,8 +394,29 @@ def load_model_from_full_model_state_dict(
     named_parameters = dict(model.named_parameters())
     named_buffers = dict(model.named_buffers())
     sharded_sd = {}
+
+    ignore_checkpoint_key = getattr(model, "_is_ignored_checkpoint_key", None)
+    ignored_checkpoint_keys = 0
+    if callable(ignore_checkpoint_key):
+        unfiltered_sd_iterator = full_sd_iterator
+
+        def _filtered_sd_iterator():
+            nonlocal ignored_checkpoint_keys
+            for source_param_name, full_tensor in unfiltered_sd_iterator:
+                target_param_name, _, _ = param_names_mapping(  # type: ignore[misc]
+                    source_param_name)
+                if (target_param_name not in meta_sd
+                        and ignore_checkpoint_key(target_param_name)):
+                    ignored_checkpoint_keys += 1
+                    continue
+                yield source_param_name, full_tensor
+
+        full_sd_iterator = _filtered_sd_iterator()
+
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
                                                                            param_names_mapping)  # type: ignore
+    if ignored_checkpoint_keys:
+        logger.info("Ignored %d model-declared checkpoint keys", ignored_checkpoint_keys)
     for target_param_name, full_tensor in custom_param_sd.items():
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:
