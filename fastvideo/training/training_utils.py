@@ -936,6 +936,11 @@ def _clip_grads_with_norm_(
     max_norm = float(max_norm)
     if len(grads) == 0:
         return
+    # FSDP2 exposes sharded gradients as DTensors. Foreach only recognizes
+    # ordinary tensors, but mutating a DTensor's local shard updates the
+    # gradient in place. Localize before grouping so one foreach kernel can
+    # replace a Python loop and one scalar kernel per parameter.
+    grads = [g.to_local() if isinstance(g, torch.distributed.tensor.DTensor) else g for g in grads]
     grouped_grads: dict[tuple[torch.device, torch.dtype],
                         tuple[list[list[torch.Tensor]],
                               list[int]]] = (_group_tensors_by_device_and_dtype([grads]))  # type: ignore[assignment]
