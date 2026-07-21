@@ -15,9 +15,15 @@
 # Preprocess data first (same data as the bf16 overfit):
 #   CUDA_VISIBLE_DEVICES=0 python fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py
 #
-# Run:
+# Run on multi-GPU sm_120 hardware:
 #   NUM_GPUS=4 \
 #     bash examples/train/run.sh examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml
+#
+# GB200 can train and validate with ATTN_QAT_TRAIN, but cannot load the
+# sm_120-only inference kernel. Disable only the validation-time swap:
+#   NUM_GPUS=4 \
+#     bash examples/train/run.sh examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml \
+#       --callbacks.validation.attn_qat_infer false
 
 models:
   student:
