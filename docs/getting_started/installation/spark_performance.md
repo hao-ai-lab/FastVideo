@@ -7,7 +7,7 @@ tuning knobs that can't move on this hardware.
 
 !!! tip "TL;DR"
     - **Use distilled few-step models** (e.g. `FastVideo/FastWan2.1-T2V-1.3B-Diffusers`).
-      They run in ~30 s/video. Full-step models are 12–47 min on the GB10.
+      They run in ~40 s/video. Full-step models are 12–47 min on the GB10.
     - On few-step models, **VAE decode is the bottleneck**, not attention — it's
       bandwidth-bound on the Spark's unified memory.
     - **bf16 VAE decode** is the real, lossless lever (FastVideo already turns it
@@ -30,11 +30,11 @@ datacenter GPU's HBM**. Two consequences drive every tuning decision:
 ## Use distilled few-step models
 
 The single biggest lever on the GB10 is **model choice**. A 3-step distilled
-model is ~22× faster than the full-step version of the same architecture:
+model is ~18× faster than the full-step version of the same architecture:
 
 | Model | Steps | Time / video | Bottleneck |
 |---|---|---|---|
-| FastWan2.1-T2V-1.3B (distilled) | 3 | **~30 s** | VAE decode |
+| FastWan2.1-T2V-1.3B (distilled) | 3 | **~40 s** | VAE decode |
 | Wan2.1-T2V-1.3B (full-step) | 50 | ~12 min | denoise |
 | Cosmos-Predict2.5-2B (full-step) | 51 | ~47 min | denoise |
 | LTX2.3-distilled (+audio) | 8 | ~6 min | mixed |
@@ -53,8 +53,8 @@ you're paying mostly for VAE decode; above it, mostly for the denoising loop.
 
 Because few-step generation is decode-bound, VAE decode precision is where the
 time is. Decoding in **bf16 instead of fp32 is essentially lossless** (MS-SSIM
-~0.9999 vs fp32 on the identical latent) and ~1.2–1.3× faster — worth roughly
-5–10% end-to-end on a decode-bound few-step model.
+~0.9999 vs fp32 on the identical latent) and ~1.14× faster — worth roughly
+5–7% end-to-end on a decode-bound few-step model.
 
 **FastVideo already defaults Wan's decode to bf16** (`vae_decode_precision="bf16"`,
 with encode kept at fp32), so for the recommended Wan/FastWan models there's
@@ -77,21 +77,23 @@ default — don't lower `vae_precision` blindly for those.)
 The GB10 has **no separate VRAM** — CPU and GPU share one 128 GB LPDDR5X pool
 (~118 GB usable). Two practical consequences:
 
-- **`nvidia-smi` reports memory as `[N/A]`** on the GB10. For a model's real
-  GPU-side footprint use torch's allocator high-water mark
-  (`torch.cuda.max_memory_reserved()`); the system "used" figure conflates
-  CPU + GPU + cache and is only a soft upper bound. `spark_benchmark.py` prints
-  the torch figure for you.
+- **`nvidia-smi` reports memory as `[N/A]`** on the GB10, and the system "used"
+  figure conflates CPU + GPU + cache, so it's only a soft upper bound — treat the
+  whole 128 GB as one shared budget. For a per-run figure, use FastVideo's own
+  `peak_memory_mb` (reported on the generation result and by the performance
+  benchmark), which is measured inside the worker that runs the model.
 - **The 128 GB is a *working-set* ceiling, not storage** — the model cache lives
   on the NVMe (3.7 TB, ample). What has to fit in 128 GB is weights + activations
   + KV, and — critically — the **VAE decode buffers**, which is why tiling matters
   (an untiled high-res decode can spike the pool into swap and lock the box).
 
 The recommended few-step models are comfortable here: their weights are small
-(1.3–2 B) and few-step generation keeps activations modest. The pressure comes
-from **decode resolution/frames**, not the model — a 1080p×121-frame untiled
-decode is what pushes the pool toward its ceiling. Run `spark_benchmark.py` to see
-the peak figure for your exact config.
+(1.3–2 B) and few-step generation keeps activations modest — a Wan2.1-1.3B
+few-step generation peaks at **~8.4 GB** (measured), a small fraction of the pool.
+The pressure comes from **decode resolution/frames**, not the model — a
+1080p×121-frame untiled decode is what pushes the pool toward its ceiling, which
+is why VAE tiling stays
+on by default.
 
 ## What helps vs. what doesn't on the GB10
 
@@ -100,8 +102,8 @@ this hardware, for reasons specific to it:
 
 | Lever | Effect on the GB10 | Use it? |
 |---|---|---|
-| Distilled few-step model | ~22× vs full-step | ✅ **the primary lever** |
-| bf16 VAE decode | ~1.2–1.3×, lossless; ~5–10% e2e on few-step | ✅ default for Wan |
+| Distilled few-step model | ~18× vs full-step | ✅ **the primary lever** |
+| bf16 VAE decode | ~1.14×, lossless; ~5–7% e2e on few-step | ✅ default for Wan |
 | VSA (video sparse attention) | works out of the box (Triton kernel auto-selects on `sm_121`) | ✅ automatic |
 | Building FlashAttention | **no speedup** — Torch SDPA already hits an efficient flash kernel on `sm_121`, and FA2 ties it | ❌ not worth building |
 | `torch.compile` of the VAE decode | recompile storm (per-frame varying shapes) → ~1.1× | ❌ dead end |
