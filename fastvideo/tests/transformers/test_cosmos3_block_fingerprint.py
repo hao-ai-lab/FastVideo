@@ -6,7 +6,7 @@ weights from the pinned public checkpoint.  Set
 ``FASTVIDEO_SEED_COSMOS3_FINGERPRINT=1`` to print replacement hashes.  When
 ``COSMOS3_OFFICIAL_REPO`` points at the pinned NVIDIA ``cosmos-framework``
 checkout, seed mode also proves the captured decoder-layer inputs and outputs
-match NVIDIA's diffusers shim bit-for-bit.
+match NVIDIA's framework MoT layer bit-for-bit.
 """
 from __future__ import annotations
 
@@ -298,17 +298,19 @@ def _official_layer_parity(
         raise RuntimeError(
             f"Official Cosmos3 checkout must be {OFFICIAL_REVISION}, got {revision}"
         )
-    package = repo / "packages" / "diffusers-cosmos3"
-    if not package.is_dir():
-        raise RuntimeError(f"Missing official diffusers-cosmos3 package under {repo}")
-    sys.path.insert(0, str(package))
+    if not (repo / "cosmos_framework").is_dir():
+        raise RuntimeError(f"Missing official cosmos_framework package under {repo}")
+    sys.path.insert(0, str(repo))
     try:
-        import diffusers_cosmos3.transformer as official_transformer
-        from diffusers_cosmos3.sequence_packing import (
-            factored_from_joint_sequence,
+        from cosmos_framework.data.generator.sequence_packing.runtime import (
             from_und_gen_splits,
             get_gen_seq,
             get_und_seq,
+            sequence_pack_from_packed_sequence,
+        )
+        from cosmos_framework.model.generator.mot.unified_mot import (
+            LayerTypes,
+            MoTDecoderLayer,
         )
     finally:
         sys.path.pop(0)
@@ -324,15 +326,39 @@ def _official_layer_parity(
         attention_dropout=0.0,
         rms_norm_eps=arch.rms_norm_eps,
         hidden_act=arch.hidden_act,
-        freeze_und=False,
     )
     with set_default_dtype(torch.bfloat16), torch.device("meta"):
-        block = official_transformer.Cosmos3VLTextMoTDecoderLayer(
-            config,
+        block = MoTDecoderLayer(
+            config=config,
             layer_idx=0,
-            layer_types=official_transformer.LayerTypes(is_moe=False),
+            layer_types=LayerTypes("qwen3_vl_dense"),
+            qk_norm_for_text=True,
+            qk_norm_for_diffusion=True,
         )
-    block.load_state_dict(layer_state, strict=True, assign=True)
+
+    native_to_official = {
+        "self_attn.to_q.": "self_attn.q_proj.",
+        "self_attn.to_k.": "self_attn.k_proj.",
+        "self_attn.to_v.": "self_attn.v_proj.",
+        "self_attn.to_out.": "self_attn.o_proj.",
+        "self_attn.norm_q.": "self_attn.q_norm.",
+        "self_attn.norm_k.": "self_attn.k_norm.",
+        "self_attn.add_q_proj.": "self_attn.q_proj_moe_gen.",
+        "self_attn.add_k_proj.": "self_attn.k_proj_moe_gen.",
+        "self_attn.add_v_proj.": "self_attn.v_proj_moe_gen.",
+        "self_attn.to_add_out.": "self_attn.o_proj_moe_gen.",
+        "self_attn.norm_added_q.": "self_attn.q_norm_moe_gen.",
+        "self_attn.norm_added_k.": "self_attn.k_norm_moe_gen.",
+    }
+
+    def remap(name: str) -> str:
+        for source, target in native_to_official.items():
+            if name.startswith(source):
+                return target + name.removeprefix(source)
+        return name
+
+    official_state = {remap(name): tensor for name, tensor in layer_state.items()}
+    block.load_state_dict(official_state, strict=True, assign=True)
     block = block.to(device).eval()
 
     def attend(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, *, is_causal: bool) -> torch.Tensor:
@@ -352,7 +378,7 @@ def _official_layer_parity(
         )
         return output.squeeze(0).permute(1, 0, 2).flatten(1)
 
-    def exact_dispatch(query_pack, key_pack, value_pack):
+    def exact_dispatch(query_pack, key_pack, value_pack, _attention_mask, **_kwargs):
         query_und = get_und_seq(query_pack)
         key_und = get_und_seq(key_pack)
         value_und = get_und_seq(value_pack)
@@ -373,7 +399,7 @@ def _official_layer_parity(
         value.to(device) for value in captured["inputs"]
     )
     packed = torch.cat([und, gen], dim=0)
-    pack = factored_from_joint_sequence(
+    pack = sequence_pack_from_packed_sequence(
         packed_sequence=packed,
         attn_modes=["causal", "full"],
         split_lens=[und.shape[0], gen.shape[0]],
@@ -386,7 +412,9 @@ def _official_layer_parity(
         from_und_gen_splits(sin_und, sin_gen, pack),
     )
     with torch.inference_mode():
-        official_output = block(pack, None, rope)
+        official_output, lbl_metadata, kv_to_store = block(pack, None, rope)
+    assert not lbl_metadata
+    assert kv_to_store is None
     expected_und, expected_gen = captured["outputs"]
     torch.testing.assert_close(get_und_seq(official_output).cpu(), expected_und, atol=0, rtol=0)
     torch.testing.assert_close(get_gen_seq(official_output).cpu(), expected_gen, atol=0, rtol=0)
