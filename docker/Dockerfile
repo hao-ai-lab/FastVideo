@@ -65,8 +65,8 @@ ARG FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuil
 ARG FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22
 
 # The prebuilt flash-attn wheel ships an FA4 `flash_attn.cute` built against the
-# cutlass-4.4 `cute.core.ThrMma` API, which crashes on the cutlass-dsl 4.5 that
-# flashinfer/quack pull in. After the wheel install we overlay this cutlass-4.5-safe
+# cutlass-4.4 `cute.core.ThrMma` API, which crashes on the CuTe DSL 4.6 that
+# flashinfer/quack pull in. After the wheel install we overlay this 4.6-compatible
 # upstream cute (flash-attn-4) so the image runs FA4 instead of the FA2 fallback.
 ARG FA4_CUTE_REF=82d6441eec5d4dfec120153db2c0145ae855a083
 
