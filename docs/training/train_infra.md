@@ -228,6 +228,8 @@ The LTX-2 recipe in
 configuration with `models.student.attention_backend: ATTN_QAT_TRAIN` for
 video-attention forward/backward. On sm120, its validation callback temporarily
 switches those layers to `ATTN_QAT_INFER`.
+On GB200, set `callbacks.validation.attn_qat_infer: false` to keep validation on
+the train-time QAT backend; the inference kernel is sm120-only.
 
 ---
 
