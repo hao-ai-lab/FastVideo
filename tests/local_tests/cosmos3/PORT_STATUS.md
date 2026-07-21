@@ -40,8 +40,8 @@ generated-media/audio regression remain follow-ups.
 |---|---|---|
 | Local framework component suite | `150 passed, 0 skipped` | Recorded on 2026-06-07 before the final aggregate rebase; this is not a fresh run against the fingerprint's newer official pin |
 | Real-weight B200 inference | T2V, I2V, T2I, T2VS, text reasoning | Recorded on 2026-06-07; outputs were inspected and described as coherent/prompt-matching |
-| Transformer fingerprint seed | `2 passed` | Modal L40S, 2026-07-21; T2V/T2VS/action decoder-layer outputs matched the pinned official framework layer bit-exact; config contract passed |
-| Transformer fingerprint normal mode | `2 passed` | Modal L40S, 2026-07-21; T2V/T2VS/action/reasoning committed hashes passed without loading the official framework |
+| Transformer fingerprint seed | `2 passed` | Modal L40S, 2026-07-21; T2V/I2V/T2VS/action decoder-layer outputs matched the pinned official framework layer bit-exact; config contract passed |
+| Transformer fingerprint normal mode | `2 passed` | Modal L40S, 2026-07-21; T2V/I2V/T2VS/action/reasoning committed hashes passed without loading the official framework |
 | Modal checkout unit tests | `12 passed` | Exact immutable Buildkite commit checkout and bounded retries |
 
 Run the normal transformer fingerprint with:
@@ -69,11 +69,13 @@ for `nvidia/Cosmos3-Nano`.
 - Config/structural contract SHA-256:
   `5043ad8a281ddfd2595317c45943c2c06d71cf8012525db7efed1db7af7e31e3`
 - Input SHA-256:
-  `4c2f1879c1847f65372fbb08df981bbb00e2e4b7ad6176c22db5515e69b2846f`
+  `60ed6cb71913c98bcdfe4b7e921097592d1b3715f411adce57f93c75ab913aeb`
 - Selected weights SHA-256:
   `480b5a497bb0c9ef71edabeee62c057b2c54fce753362e8938d073d6bf7cfa62`
 - T2V outputs SHA-256:
   `2b15c03d936bace07acea7aba55fe850dd3cadc344b361dce8da68acd94f9cb7`
+- I2V outputs SHA-256:
+  `4b7c8bec2e3a3a710b7c022ff74ba83579c02881e29d5db3bad5fb78eff2ba40`
 - T2VS outputs SHA-256:
   `1bffb714b7f316665e0176ddfe2b930df70d6dae1f75b3f761e92b5b9d8c26dd`
 - Action2world outputs SHA-256:
@@ -81,8 +83,9 @@ for `nvidia/Cosmos3-Nano`.
 - Reasoning outputs SHA-256:
   `112b9ecd765b0e1afc7d21d169b4f3e941901d975c27f59df6062dedef60bc35`
 
-Normal CI runs separate depth-one T2V, T2VS, action2world, and deepstack-reason
-forwards twice and checks exact output identity plus the committed hashes.
+Normal CI runs separate depth-one T2V, I2V, T2VS, action2world, and
+deepstack-reason forwards twice and checks exact output identity plus the
+committed hashes. The I2V case keeps frame 0 clean and predicts only frame 1.
 Seed/reseed mode additionally imports the pinned NVIDIA framework and compares
 the captured generation decoder layer bit-for-bit. No extracted fixture or
 separate HF upload is needed.

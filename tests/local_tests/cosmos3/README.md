@@ -65,15 +65,15 @@ a separate metric because SSIM cannot cover it.
 
 ## Transformer CI fingerprint
 
-The routine transformer gate runs separate depth-one FastVideo T2V, T2VS,
-action2world, and deepstack-reasoning forwards with production hidden, head,
-MLP, latent, sound, and action dimensions. It reads 44 tensors or slices
+The routine transformer gate runs separate depth-one FastVideo T2V, I2V,
+T2VS, action2world, and deepstack-reasoning forwards with production hidden,
+head, MLP, latent, sound, and action dimensions. It reads 44 tensors or slices
 (408,486,912 parameters, about 779.13 MiB in BF16) from the pinned
 `nvidia/Cosmos3-Nano` checkpoint cache. It hashes the production/fingerprint
 config contract, fixed inputs, selected weights, and every named output.
 
 The golden was seeded and verified on Modal L40S using the pinned CI image. Seed
-mode also proved the captured FastVideo decoder-layer outputs for all three
+mode also proved the captured FastVideo decoder-layer outputs for all four
 generation cases bit-exact against the pinned NVIDIA framework layer. Normal
 mode reran every case twice from the committed hashes and passed. No extracted
 fixture or separate weights repository is required; SSIM remains the
