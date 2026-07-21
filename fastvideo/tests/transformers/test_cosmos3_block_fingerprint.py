@@ -392,7 +392,7 @@ def _official_layer_parity(
             torch.cat([value_und, value_gen], dim=0),
             is_causal=False,
         )
-        return from_und_gen_splits(und_output, gen_output, query_pack)
+        return from_und_gen_splits(und_output, gen_output, query_pack), None
 
     block.self_attn.dispatch_attention_fn = exact_dispatch
     und, gen, cos_und, sin_und, cos_gen, sin_gen = (
