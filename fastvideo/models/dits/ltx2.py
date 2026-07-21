@@ -1544,6 +1544,7 @@ class LTXSelfAttention(nn.Module):
             softmax_scale=None,
             causal=False,
             supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA,),
+            default_backend=AttentionBackendEnum.TORCH_SDPA,
         )
 
     def forward(
@@ -1826,12 +1827,15 @@ class BasicAVTransformerBlock(torch.nn.Module):
         # Text cross-attention uses LocalAttention (text embeddings are replicated)
         SelfAttnCls = LTXDistributedSelfAttention if use_distributed_attention else LTXSelfAttention
         CrossAttnCls = LTXSelfAttention  # Text cross-attention is always local
-        video_self_attn_backends = (
+        video_attn_backends = (
             AttentionBackendEnum.FLASH_ATTN,
             AttentionBackendEnum.TORCH_SDPA,
-            AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+            AttentionBackendEnum.ATTN_QAT_INFER,
+            AttentionBackendEnum.ATTN_QAT_TRAIN,
         )
-        dense_attn_backends = (
+        video_self_attn_backends = video_attn_backends + (
+            AttentionBackendEnum.VIDEO_SPARSE_ATTN, )
+        audio_attn_backends = (
             AttentionBackendEnum.FLASH_ATTN,
             AttentionBackendEnum.TORCH_SDPA,
         )
@@ -1858,7 +1862,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=video.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                supported_attention_backends=video_attn_backends,
                 apply_gated_attention=video.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.attn2",
@@ -1884,7 +1888,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                supported_attention_backends=audio_attn_backends,
                 apply_gated_attention=audio.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio_attn1",
@@ -1897,7 +1901,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                supported_attention_backends=audio_attn_backends,
                 apply_gated_attention=audio.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio_attn2",
@@ -1922,7 +1926,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                supported_attention_backends=audio_attn_backends,
                 apply_gated_attention=video.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio_to_video_attn",
@@ -1936,7 +1940,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                supported_attention_backends=audio_attn_backends,
                 apply_gated_attention=audio.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.video_to_audio_attn",

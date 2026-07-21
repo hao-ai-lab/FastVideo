@@ -160,24 +160,13 @@ class FlashAttentionImpl(AttentionImpl):
     ) -> None:
         self.causal = causal
         self.softmax_scale = softmax_scale
-        self.head_size = head_size
-        self.nvfp4_fa4 = False
-        nvfp4_fa4 = (extra_impl_args.get("nvfp4_fa4", False) or os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1")
-        self.set_nvfp4_fa4(nvfp4_fa4)
-        if nvfp4_fa4:
-            logger.info("NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk only)")
-
-    def set_nvfp4_fa4(self, enabled: bool) -> None:
-        if enabled:
+        self.nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4", False) or os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
+        if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
-            if cap not in ((10, 0), (10, 3)):
-                raise RuntimeError(f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
-            if self.head_size < 128:
-                raise RuntimeError(f"NVFP4 FA4 requires head_size >= 128, got {self.head_size}")
-            if not _FA4_FP4_AVAILABLE:
-                raise RuntimeError("NVFP4 FA4 requires flash-attention-fp4 (flash_attn.cute). "
-                                   "Install it via docs/inference/optimizations.md")
-        self.nvfp4_fa4 = enabled
+            assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
+            assert _FA4_FP4_AVAILABLE, ("NVFP4 FA4 requires flash-attention-fp4 (flash_attn.cute). "
+                                        "Install via instructions in docs/inference/optimizations.md")
+            logger.info("NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk only)")
 
     def forward(
         self,

@@ -137,6 +137,7 @@ def test_ltx2_finetune_single_train_step(
         init_from=cfg.models["student"]["init_from"],
         training_config=cfg.training,
         trainable=True,
+        attention_backend=cfg.models["student"].get("attention_backend"),
     )
     model.transformer = model.transformer.to(device=device, dtype=dtype)
 
@@ -150,6 +151,15 @@ def test_ltx2_finetune_single_train_step(
         assert quantized == expected_qat_linears, (
             f"expected {expected_qat_linears} deployment-matched NVFP4-QAT "
             f"linears on the LTX-2 DiT, found {quantized}")
+
+        from fastvideo.attention.backends.attn_qat_train import (
+            AttnQatTrainImpl, )
+        qat_attention = sum(
+            isinstance(getattr(module, "attn_impl", None), AttnQatTrainImpl)
+            for module in model.transformer.modules())
+        assert qat_attention == 96, (
+            "expected ATTN_QAT_TRAIN on attn1 and attn2 in all 48 LTX-2 "
+            f"blocks, found {qat_attention} implementations")
 
     method = FineTuneMethod(
         cfg=cfg,

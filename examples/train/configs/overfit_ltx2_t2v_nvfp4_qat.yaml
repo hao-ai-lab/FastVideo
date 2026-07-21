@@ -6,18 +6,17 @@
 # real NVFP4 GEMMs (flashinfer cutlass) with a straight-through-estimator
 # backward into the dense fp32 master weights. No extra parameters or
 # buffers are added, so FSDP sharding, checkpointing, and export are
-# identical to dense training. Training attention stays dense; validation
-# uses PR #1221's inference-only NVFP4 Q/K FlashAttention-4 kernel while V,
-# head-dim-64 audio attention, and masked text cross-attention remain BF16.
+# identical to dense training. Video attention uses ATTN_QAT_TRAIN for its
+# quantized forward and STE backward, then ATTN_QAT_INFER during validation.
+# Head-dim-64 audio attention and masked text attention remain dense.
 #
-# Requires flashinfer with FP4 support and an sm_100-class GPU
-# (developed on GB200).
+# Validation requires an sm_120 GPU with the attn_qat_infer extension.
 #
 # Preprocess data first (same data as the bf16 overfit):
 #   CUDA_VISIBLE_DEVICES=0 python fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py
 #
 # Run:
-#   CUTE_DSL_ENABLE_TVM_FFI=1 NUM_GPUS=4 \
+#   NUM_GPUS=4 \
 #     bash examples/train/run.sh examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml
 
 models:
@@ -26,6 +25,7 @@ models:
     init_from: FastVideo/LTX2-Distilled-Diffusers
     trainable: true
     enable_gradient_checkpointing_type: full
+    attention_backend: ATTN_QAT_TRAIN
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
@@ -63,7 +63,7 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/ltx2_overfit_nvfp4_qat
+    output_dir: outputs/ltx2_overfit_nvfp4_attn_qat
     # A full training-state checkpoint is ~150GB for the 13B trainable
     # video branch; disable saves for the overfit smoke run.
     training_state_checkpointing_steps: 0
@@ -72,7 +72,7 @@ training:
   tracker:
     trackers: [wandb]
     project_name: fastvideo_ltx2
-    run_name: ltx2_overfit_nvfp4_qat
+    run_name: ltx2_overfit_nvfp4_attn_qat
 
   model:
     # LTX2Model.predict_noise converts the DiT's x0 output to velocity,
@@ -93,10 +93,9 @@ callbacks:
     sampling_steps: [8]
     guidance_scale: 1.0
     num_frames: 81
-    # Validation reuses the live transformer, so the callback temporarily
-    # enables the sm100/sm103 NVFP4 Q/K FA4 implementation from PR #1221
-    # and restores dense attention before the next training step.
-    nvfp4_fa4: true
+    # Validation reuses the live transformer and temporarily replaces its
+    # ATTN_QAT_TRAIN implementations with the sm120 inference kernel.
+    attn_qat_infer: true
 
 # quant_config selects NVFP4 QAT for the same curated linear prefixes as
 # LTX-2 NVFP4 deployment. They fake-quantize through real FP4 GEMMs with
