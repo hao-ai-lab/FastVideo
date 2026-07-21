@@ -9,6 +9,7 @@ from typing import Any
 import torch
 
 from fastvideo.train.callbacks.validation import ValidationCallback
+from fastvideo.train.methods import base as method_base
 from fastvideo.train.trainer import Trainer
 from fastvideo.train.utils.training_config import TrainingConfig
 
@@ -45,6 +46,7 @@ class _DummyMethod:
         self.zero_grad_steps: list[int] = []
         self.optimizer_steps: list[int] = []
         self.backward_calls = 0
+        self.gradient_sync_calls: list[bool] = []
         self.tracker = None
 
     def set_tracker(self, tracker: Any) -> None:
@@ -75,6 +77,9 @@ class _DummyMethod:
         del outputs
         self.backward_calls += 1
         (loss_map["total_loss"] / grad_accum_rounds).backward()
+
+    def set_requires_gradient_sync(self, requires_gradient_sync: bool) -> None:
+        self.gradient_sync_calls.append(requires_gradient_sync)
 
     def optimizers_schedulers_step(self, iteration: int) -> None:
         self.optimizer_steps.append(iteration)
@@ -133,7 +138,70 @@ def test_trainer_runs_validation_callback_during_training(
     assert validation.run_calls == [0, 2]
     assert method.train_start_calls == 1
     assert method.backward_calls == 3
+    assert method.gradient_sync_calls == []
     assert method.zero_grad_steps == [0, 1, 2, 3]
     assert method.optimizer_steps == [1, 2, 3]
     assert [step for _, step in tracker.logs] == [1, 2, 3]
     assert tracker.finished is True
+
+
+def test_trainer_syncs_fsdp_gradients_only_on_final_accumulation(
+    monkeypatch,
+) -> None:
+    tracker = _DummyTracker()
+    group = SimpleNamespace(rank=0, local_rank=0, rank_in_group=0, world_size=1)
+
+    monkeypatch.setattr("fastvideo.train.trainer.get_world_group", lambda: group)
+    monkeypatch.setattr("fastvideo.train.trainer.get_sp_group", lambda: group)
+    monkeypatch.setattr(
+        "fastvideo.train.trainer.build_tracker",
+        lambda *args, **kwargs: tracker,
+    )
+
+    cfg = TrainingConfig()
+    cfg.tracker.project_name = ""
+    cfg.loop.gradient_accumulation_steps = 3
+    trainer = Trainer(cfg)
+    method = _DummyMethod()
+
+    trainer.run(
+        method,
+        dataloader=[{"sample": "x"}],
+        max_steps=1,
+    )
+
+    assert method.backward_calls == 3
+    assert method.gradient_sync_calls == [False, False, True]
+    assert method.optimizer_steps == [1]
+
+
+def test_training_method_forwards_gradient_sync_to_trainable_fsdp_roots(
+    monkeypatch,
+) -> None:
+
+    class _FakeFSDP(torch.nn.Module):
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls: list[tuple[str, bool, bool | None]] = []
+
+        def set_requires_gradient_sync(self, enabled: bool, *, recurse: bool) -> None:
+            self.calls.append(("sync", enabled, recurse))
+
+        def set_is_last_backward(self, enabled: bool) -> None:
+            self.calls.append(("last", enabled, None))
+
+    monkeypatch.setattr(method_base, "FSDPModule", _FakeFSDP)
+    trainable = _FakeFSDP()
+    frozen = _FakeFSDP()
+    owner = SimpleNamespace(
+        _role_models={
+            "student": SimpleNamespace(transformer=trainable, _trainable=True),
+            "teacher": SimpleNamespace(transformer=frozen, _trainable=False),
+        }
+    )
+
+    method_base.TrainingMethod.set_requires_gradient_sync(owner, False)
+
+    assert trainable.calls == [("sync", False, True), ("last", False, None)]
+    assert frozen.calls == []

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Any, Literal, TypeAlias
 
 import torch
+from torch.distributed.fsdp import FSDPModule
 
 from fastvideo import envs
 from fastvideo.logger import init_logger
@@ -154,6 +155,14 @@ class TrainingMethod(torch.nn.Module, ABC):
         del outputs
         grad_accum_rounds = max(1, int(grad_accum_rounds))
         (loss_map["total_loss"] / grad_accum_rounds).backward()
+
+    def set_requires_gradient_sync(self, requires_gradient_sync: bool) -> None:
+        """Skip FSDP communication on non-final accumulation backwards."""
+        for model in self._role_models.values():
+            transformer = getattr(model, "transformer", None)
+            if getattr(model, "_trainable", False) and isinstance(transformer, FSDPModule):
+                transformer.set_requires_gradient_sync(requires_gradient_sync, recurse=True)
+                transformer.set_is_last_backward(requires_gradient_sync)
 
     def optimizers_schedulers_step(
         self,
