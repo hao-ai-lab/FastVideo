@@ -93,30 +93,31 @@ def bench_generation(args) -> None:
                                           save_video=True,
                                           sampling_param=sampling_param)
         torch.cuda.synchronize()
-        return getattr(video, "generation_time", time.perf_counter() - t0)
+        dt = getattr(video, "generation_time", time.perf_counter() - t0)
+        # Peak memory is measured *inside the worker process* that runs the
+        # pipeline and surfaced on the result; reading torch's allocator in this
+        # (main) process would report ~0 because the allocations aren't here.
+        return dt, getattr(video, "peak_memory_mb", None)
 
     for _ in range(args.warmup):
         _gen()
 
-    # Peak GPU memory: report torch's own allocator high-water mark, not
-    # nvidia-smi. On the GB10's unified pool nvidia-smi reads [N/A] and the
-    # system "used" figure conflates CPU+GPU+cache; torch.cuda.max_memory_reserved
-    # is the model's actual GPU-side footprint.
-    torch.cuda.reset_peak_memory_stats()
-
-    times = []
+    times, peaks = [], []
     for i in range(args.runs):
-        dt = _gen()
+        dt, peak = _gen()
         times.append(dt)
+        if peak:
+            peaks.append(peak)
         _p(f"gen run {i + 1}/{args.runs}: {dt:.2f}s")
 
     med = statistics.median(times)
-    peak_gb = torch.cuda.max_memory_reserved() / 1e9
-    free_b, total_b = torch.cuda.mem_get_info()
     _p(f"median generation time over {args.runs} runs "
        f"({args.warmup} warmup, {args.steps} steps): {med:.2f}s")
-    _p(f"peak GPU memory (torch reserved): {peak_gb:.1f} GB   "
-       f"| unified pool free/total: {free_b / 1e9:.1f}/{total_b / 1e9:.1f} GB")
+    if peaks:
+        _p(f"peak GPU memory (worker, reported by pipeline): {max(peaks):.0f} MB "
+           f"= {max(peaks) / 1024:.1f} GB")
+    else:
+        _p("peak GPU memory: not reported by this pipeline build")
     _p("set FASTVIDEO_STAGE_LOGGING=1 to see the denoise / decode / text split "
        "(few-step generation is VAE-decode-bound on the GB10).")
     generator.shutdown()
