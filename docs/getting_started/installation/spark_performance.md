@@ -83,8 +83,9 @@ The GB10 has **no separate VRAM** — CPU and GPU share one 128 GB LPDDR5X pool
   `peak_memory_mb` (reported on the generation result and by the performance
   benchmark), which is measured inside the worker that runs the model.
 - **The 128 GB is a *working-set* ceiling, not storage** — the model cache lives
-  on the NVMe (3.7 TB, ample). What has to fit in 128 GB is weights + activations
-  + KV, and — critically — the **VAE decode buffers**, which is why tiling matters
+  on the NVMe (3.7 TB, ample). What has to fit in 128 GB is the weights,
+  activations, and KV cache — and, critically, the **VAE decode buffers**, which
+  is why tiling matters
   (an untiled high-res decode can spike the pool into swap and lock the box).
 
 The recommended few-step models are comfortable here: their weights are small
@@ -148,9 +149,11 @@ is power-cycled. To avoid it:
 
 - **Inference:** keep **VAE tiling on** (the default), use sane resolution/frames,
   and run under `nice -n 19`:
+
   ```bash
   nice -n 19 nohup python your_script.py > run.log 2>&1 &
   ```
+
 - **Builds** (flash-attn, kernel): `nice -n 19`, `MAX_JOBS=2`, `nohup`. Never a
   bare foreground high-parallelism build.
 - Leave `*_cpu_offload` at the example defaults — "CPU" offload is the *same*
