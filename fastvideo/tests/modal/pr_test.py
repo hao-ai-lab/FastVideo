@@ -134,6 +134,10 @@ def _checkout_repository(git_repo: str,
     if not git_repo or git_repo.startswith("-"):
         raise RuntimeError("BUILDKITE_REPO must be a non-empty repository URL.")
 
+    if re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})",
+                    git_commit) is None:
+        raise RuntimeError(f"Invalid BUILDKITE_COMMIT value: {git_commit}")
+
     if pr_number and pr_number != "false":
         try:
             pr_id = int(pr_number)
@@ -143,15 +147,9 @@ def _checkout_repository(git_repo: str,
         if pr_id <= 0:
             raise RuntimeError(
                 f"Invalid BUILDKITE_PULL_REQUEST value: {pr_number}")
-        target = f"refs/pull/{pr_id}/head"
-        print(f"Using PR ref for checkout: {target}")
-    else:
-        if not git_commit or re.fullmatch(r"[0-9a-fA-F]{7,64}",
-                                          git_commit) is None:
-            raise RuntimeError(
-                f"Invalid BUILDKITE_COMMIT value: {git_commit}")
-        target = git_commit
-        print(f"Using direct commit checkout: {target}")
+
+    target = git_commit
+    print(f"Using exact Buildkite commit checkout: {target}")
 
     clone_command = [
         "git",
@@ -270,13 +268,13 @@ def run_vae_tests():
 
 @app.function(gpu="L40S:1",
               image=image,
-              timeout=900,
+              timeout=1200,
               secrets=[hf_secret, ci_env_secret],
               volumes={"/root/data": model_vol})
 def run_transformer_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
-        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/transformers -vs"
+        "CUBLAS_WORKSPACE_CONFIG=:4096:8 FASTVIDEO_FA4=0 pytest ./fastvideo/tests/transformers -vs"
     )
 
 

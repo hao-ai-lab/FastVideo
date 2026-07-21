@@ -286,15 +286,21 @@ steps:
                 agents:
                   queue: "default"
             - path:
+                - "fastvideo/configs/models/dits/**"
                 - "fastvideo/models/dits/**"
                 - "fastvideo/models/loader/**"
                 - "fastvideo/tests/transformers/**"
                 - "fastvideo/layers/**"
                 - "fastvideo/attention/**"
+                - "fastvideo/distributed/**"
+                - "fastvideo/platforms/**"
+                - "fastvideo/forward_context.py"
+                - "fastvideo/envs.py"
+                - "scripts/checkpoint_conversion/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 25m .buildkite/scripts/pr_test.sh"
                 label: ":microscope: Transformer Tests"
                 env:
                   - TEST_TYPE=transformer
@@ -358,6 +364,11 @@ steps:
                 - "fastvideo/**/*.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile"
+              # The exact one-layer Cosmos3 fingerprint gates these two files.
+              # Its unskipped test file makes an expected-hash update run SSIM.
+              skip_path:
+                - "fastvideo/models/dits/cosmos3.py"
+                - "fastvideo/configs/models/dits/cosmos3.py"
               config:
                 command: "timeout 90m .buildkite/scripts/pr_test.sh"
                 label: ":bar_chart: SSIM Tests"
