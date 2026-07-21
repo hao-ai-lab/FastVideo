@@ -19,6 +19,7 @@ class DistributedConfig:
     hsdp_shard_dim: int = -1
     pin_cpu_memory: bool = False
     reshard_after_forward: bool = True
+    fsdp_symmetric_memory: bool = False
     reduce_dtype: str = "fp32"
 
 

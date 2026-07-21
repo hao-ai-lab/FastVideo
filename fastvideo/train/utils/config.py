@@ -381,6 +381,12 @@ def _build_training_config(
                 default=True,
                 where="training.distributed.reshard_after_forward",
             ),
+            fsdp_symmetric_memory=require_bool(
+                d,
+                "fsdp_symmetric_memory",
+                default=False,
+                where="training.distributed.fsdp_symmetric_memory",
+            ),
             reduce_dtype=reduce_dtype,
         ),
         data=DataConfig(
