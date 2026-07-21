@@ -361,6 +361,12 @@ def _build_training_config(
                          "{'t2v', 'text_only'}, got "
                          f"{preprocessed_data_type!r}")
 
+    reduce_dtype = str(d.get("reduce_dtype", "fp32") or "fp32").strip().lower()
+    if reduce_dtype not in {"fp32", "bf16"}:
+        raise ValueError("training.distributed.reduce_dtype must be one of "
+                         "{'fp32', 'bf16'}, got "
+                         f"{reduce_dtype!r}")
+
     return TrainingConfig(
         distributed=DistributedConfig(
             num_gpus=num_gpus,
@@ -375,6 +381,7 @@ def _build_training_config(
                 default=True,
                 where="training.distributed.reshard_after_forward",
             ),
+            reduce_dtype=reduce_dtype,
         ),
         data=DataConfig(
             data_path=data_path,

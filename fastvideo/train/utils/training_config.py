@@ -19,6 +19,7 @@ class DistributedConfig:
     hsdp_shard_dim: int = -1
     pin_cpu_memory: bool = False
     reshard_after_forward: bool = True
+    reduce_dtype: str = "fp32"
 
 
 @dataclass(slots=True)

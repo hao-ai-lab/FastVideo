@@ -1104,10 +1104,11 @@ class TransformerLoader(ComponentLoader):
             cpu_offload=fastvideo_args.dit_cpu_offload,
             pin_cpu_memory=fastvideo_args.pin_cpu_memory,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
-            # TODO(will): make these configurable
+            # FSDP parameters stay BF16; reduction precision is an explicit
+            # modular-training policy with a conservative FP32 default.
             default_dtype=default_dtype,
             param_dtype=torch.bfloat16,
-            reduce_dtype=torch.float32,
+            reduce_dtype=PRECISION_TO_TYPE[getattr(fastvideo_args, "fsdp_reduce_dtype", "fp32")],
             output_dtype=None,
             training_mode=fastvideo_args.training_mode,
             enable_torch_compile=fastvideo_args.enable_torch_compile,

@@ -87,6 +87,7 @@ training:
     hsdp_shard_dim: 8                 # default: -1 (defaults to num_gpus in loader)
     pin_cpu_memory: false             # default: false
     reshard_after_forward: true       # default: true; false trades memory for fewer FSDP all-gathers
+    reduce_dtype: fp32                # default: "fp32"; "bf16" reduces FSDP communication and memory
 
   # --- training.data [TYPED] -> DataConfig ---
   data:
