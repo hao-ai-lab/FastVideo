@@ -18,6 +18,13 @@ changes:
 
 The steps below handle those differences without requiring `sudo`.
 
+!!! note "Container alternative"
+    If you prefer Docker, use the explicit CUDA 13 Spark image tag:
+    `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-cuda13.0.0-latest`.
+    Do not use `py3.12-latest` on DGX Spark; that tag currently points to the
+    CUDA 12.6 ARM64 image, which targets GH200-class hardware rather than
+    GB10.
+
 ## Requirements
 
 - **OS: Linux (`aarch64`)**
@@ -61,6 +68,28 @@ Contributors who want the lint/test tooling:
 `UV_TORCH_BACKEND=cu130 uv pip install -e ".[dev]"`.
 
 Then jump to [Verify the install](#verify-the-install).
+
+## Docker image
+
+Use the CUDA 13 image on DGX Spark:
+
+```bash
+docker run --gpus all -it \
+  ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-cuda13.0.0-latest
+```
+
+The published FastVideo Docker tags are multi-platform, but the default
+`latest` / `py3.12-latest` tags select the CUDA 12.6 image. On ARM64, that
+CUDA 12.6 image is built for GH200-class hardware, not GB10. Spark users should
+therefore select the explicit CUDA 13 tag above.
+
+If you build the image locally on a Spark host, target `sm_121` explicitly:
+
+```bash
+docker build --platform linux/arm64 -f docker/Dockerfile \
+  --build-arg TORCH_CUDA_ARCH_LIST=12.1 \
+  -t fastvideo-dev:spark .
+```
 
 ## Building without a visible GPU (CI / Docker)
 
@@ -117,6 +146,51 @@ PY
     kernel compatibility issue to debug separately, not as a failed FastVideo
     Python installation.
 
+## Optional: generate a smoke-test video
+
+After installation is verified, you can run a tiny text-to-video generation to
+exercise model download, model loading, denoising, and video export. This is a
+functional smoke test, not a quality benchmark:
+
+```bash
+export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
+export HF_HOME=$HOME/.cache/huggingface
+
+fastvideo generate --config scripts/inference/inference_wan.yaml \
+  --generator.engine.num_gpus 1 \
+  --generator.engine.parallelism.tp_size 1 \
+  --generator.engine.parallelism.sp_size 1 \
+  --generator.engine.offload.dit true \
+  --generator.engine.offload.vae true \
+  --generator.engine.offload.text_encoder true \
+  --request.sampling.num_frames 17 \
+  --request.sampling.height 256 \
+  --request.sampling.width 256 \
+  --request.sampling.num_inference_steps 4 \
+  --request.sampling.guidance_scale 6.0 \
+  --request.output.output_path outputs_video/spark_smoke
+```
+
+Check the generated files with:
+
+```bash
+find outputs_video/spark_smoke -type f
+```
+
+For better visual quality, increase resolution, frames, and denoising steps
+from the smoke-test values above. The default `inference_wan.yaml` settings are
+closer to a real quality run but take much longer.
+
+If Hugging Face returns `401` or `404` while downloading the model, authenticate
+with a token that has access to the referenced model:
+
+```bash
+huggingface-cli login
+```
+
+Avoid setting both `request.prompt` and `request.inputs.prompt_path` in the same
+run; the CLI rejects ambiguous prompt sources.
+
 ## Manual build (advanced / fallback)
 
 The one-liner above is the supported path. Build the kernel yourself only if you
@@ -154,6 +228,7 @@ uv pip install "https://github.com/mjun0812/flash-attention-prebuild-wheels/rele
 | `fastvideo-kernel: could not determine the target CUDA architecture` | The build couldn't see a GPU and no arch was given. Build on the Spark itself, or pass `TORCH_CUDA_ARCH_LIST=12.1` (see [Building without a visible GPU](#building-without-a-visible-gpu-ci--docker)). |
 | `nvcc fatal: Unsupported gpu architecture 'compute_121'` | `nvcc` older than CUDA 12.9/13. Confirm `nvcc --version` is 13.x and `CUDACXX=/usr/local/cuda/bin/nvcc`. |
 | `Segmentation fault` when running `Int8Linear` or `int8_quant` | The Python package and compiled extension may be installed correctly, but the TurboDiffusion INT8 quantization/GEMM path is not validated by this guide on GB10. Use the `rmsnorm ok` smoke test above for install verification and debug INT8 kernel support separately. |
+| Hugging Face returns `401` or `404` during generation | The model is private/gated, the repo id is wrong, or the Spark machine is not authenticated. Run `huggingface-cli login` and verify the model id in the config. |
 | `ninja: command not found` (manual build only) | `uv pip install scikit-build-core cmake ninja setuptools wheel`. |
 
 ## What this guide does not verify
