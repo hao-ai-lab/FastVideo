@@ -5,35 +5,31 @@
 This workspace tracks the FastVideo Cosmos3 port. Live port state, component matrix,
 decisions, and blockers live in `PORT_STATUS.md`.
 
-- **Reference (2026-06-06): official NVIDIA `cosmos-framework` diffusers backend** —
-  `Cosmos3OmniDiffusersPipeline` from the `diffusers-cosmos3` shim — loading the
-  now-public `nvidia/Cosmos3-Nano` checkpoint.
-- **Scope: full omni** — T2V / I2V / T2I, audio (sound generation), VLM reasoning,
-  and action-conditioning.
+- **Reference: official NVIDIA `cosmos-framework`** — the framework is the parity
+  oracle for every modality; the public `nvidia/Cosmos3-Nano` repository supplies
+  the diffusers-layout checkpoint only.
+- **Public scope:** registered T2V/I2V, plus a T2I path/preset and opt-in T2VS.
+  Action and reasoning are native component-parity surfaces, not first-class
+  public pipeline workloads.
 - The original Tier-A scaffold was written against vllm-omni PR #3454 before official
-  weights were public; it is being repointed to the diffusers reference (see I001/I002
-  in `PORT_STATUS.md`).
+  weights were public; it was superseded by framework-based parity coverage.
 
 ## Reference code
 
 Primary (official):
 
-- Local: `cosmos-framework/` (symlink -> `/home/william5lin/FastVideo/cosmos-framework`,
-  commit `003d66d4`); GitHub <https://github.com/NVIDIA/cosmos-framework>
-- diffusers shim `cosmos-framework/packages/diffusers-cosmos3/diffusers_cosmos3/`:
-  - `pipeline.py` — `Cosmos3OmniDiffusersPipeline`
-  - `transformer.py` — `Cosmos3OmniTransformer`
-  - `sequence_packing.py`
+- GitHub: <https://github.com/NVIDIA/cosmos-framework>
+- The transformer fingerprint seed pins framework revision
+  `ed8287fd7477113f8ac4f6b84290514d55cf0cdc`.
 - framework model code: `cosmos_framework/model/vfm/mot/cosmos3_vfm_network.py`,
   `cosmos_framework/model/vfm/omni_mot_model.py`
-- Installed editable in shared `fv-main`: `diffusers-cosmos3`, `cosmos-framework`
-  (both `--no-deps`).
 
 Original Tier-A reference (superseded, kept for diffing during repoint):
 
 - vllm-omni PR #3454 <https://github.com/vllm-project/vllm-omni/pull/3454>, pinned
   `8536f5b1`, checkout `/home/william5lin/cosmos3-reference`.
-- The current `conftest.py` + tests still mirror this suite line-by-line.
+- The remaining reference-specific helpers are retained only for local parity
+  tests; production code does not import that project.
 
 ## Weight status
 
@@ -55,17 +51,30 @@ Components (from `model_index.json`): `transformer` (`Cosmos3OmniTransformer`),
 ## Running the Tier-A scaffold
 
 ```bash
-PYTHONPATH=/home/william5lin/FastVideo_cosmos3_port \
-  python -m pytest tests/local_tests/cosmos3/ -q
+python -m pytest tests/local_tests/cosmos3/ -q
 ```
 
-NOTE: as of 2026-06-06 these report `15 skipped` because the shared `fv-main` env's
-editable `fastvideo` resolves to the MAIN worktree (a PEP660 finder overrides
-`PYTHONPATH`), so the worktree's cosmos3 modules are not importable. Tracked as E001
-in `PORT_STATUS.md`.
+The recorded component-parity suite result is `150 passed, 0 skipped`; see
+`PORT_STATUS.md` for the date, scope, and limitations of that evidence.
 
 ## SSIM placeholder
 
-No SSIM references seeded yet. Add SSIM coverage only after a FastVideo inference path
-can load the Cosmos3 weights and generate stable T2V/I2V/T2I outputs. Audio quality
-uses a separate metric (not SSIM); see `PORT_STATUS.md` Q003.
+No Cosmos3 SSIM references are seeded yet. Select and seed public T2V/I2V/T2I
+cases before treating generated-media quality as CI-covered. Audio quality needs
+a separate metric because SSIM cannot cover it.
+
+## Transformer CI fingerprint
+
+The routine transformer gate runs separate depth-one FastVideo T2V, T2VS,
+action2world, and deepstack-reasoning forwards with production hidden, head,
+MLP, latent, sound, and action dimensions. It reads 44 tensors or slices
+(408,486,912 parameters, about 779.13 MiB in BF16) from the pinned
+`nvidia/Cosmos3-Nano` checkpoint cache. It hashes the production/fingerprint
+config contract, fixed inputs, selected weights, and every named output.
+
+The golden was seeded and verified on Modal L40S using the pinned CI image. Seed
+mode also proved the captured FastVideo decoder-layer outputs for all three
+generation cases bit-exact against the pinned NVIDIA framework layer. Normal
+mode reran every case twice from the committed hashes and passed. No extracted
+fixture or separate weights repository is required; SSIM remains the
+end-to-end media gate for uncovered surfaces.

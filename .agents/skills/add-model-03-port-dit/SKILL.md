@@ -110,5 +110,10 @@ choosing between incompatible official transformer definitions.
 
 ## Handoff
 
+After real official parity passes, add the production-shaped one-layer CI
+fingerprint described in `../add-model-02-parity/SKILL.md` when the pinned GPU
+lane is repeatably bit-exact. This is the cheap regression gate; it does not
+replace the official parity evidence used to seed it.
+
 Return `../add-model/contracts/component_skill_handoff.md` following the common
 handoff rules in `../add-model/shared/component_skill_common.md`.

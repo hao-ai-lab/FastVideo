@@ -158,6 +158,39 @@ Before `/add-model` handoff, each scaffolded test must be activated:
 [ ] Tolerance is justified for the component scope and kernel alignment.
 ```
 
+## Transformer CI Fingerprint Gate
+
+Official-vs-FastVideo parity establishes a transformer port. After that parity
+passes, use a production-shaped one-layer forward as the normal package-level
+CI regression gate when it is repeatably bit-exact on a pinned runner.
+
+- Instantiate the smallest native surface that covers every implementation and
+  config file exempted from media regression. Prefer a depth-one transformer
+  when top-level embedding, rotary, packing, normalization, and output code
+  must be covered; an isolated block is enough only when those paths are not
+  exempted.
+- Materialize only the real checkpoint tensors used by that forward. Read the
+  checkpoint index and reuse an approved cache or fetch the minimum required
+  shards. A separate extracted fixture is optional, not a default requirement.
+- Use fixed input tensor bytes and record their SHA-256. Do not rely only on a
+  random seed.
+- Pin and assert the GPU model, PyTorch/CUDA build, dtype, attention backend,
+  TF32 policy, and deterministic-algorithm policy before comparing output.
+- Hash the complete contiguous output bytes and hard-code the expected SHA-256
+  together with shape and dtype. A mean, sum, or sampled element is not a
+  sufficient fingerprint.
+- During initial seeding or an intentional reseed, run the corresponding
+  official and FastVideo layer on the same captured inputs and require exact
+  equality first. Normal CI then runs only FastVideo against the golden digest.
+- Treat any golden change as a reviewed baseline update with fresh official
+  parity evidence; never update the digest merely to make CI green.
+
+This gate proves the selected one-layer forward is unchanged inside its pinned
+execution envelope. Keep strict checkpoint loading and pipeline/media
+regression gates for surfaces the forward does not exercise, such as registry
+dispatch, external preprocessing, schedulers, CFG, VAE decode, and user-visible
+output.
+
 ## Component Parity Details
 
 Reference imports:
