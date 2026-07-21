@@ -111,6 +111,7 @@ training:
     lr_num_cycles: 0                  # default: 0
     lr_power: 0.0                     # default: 0.0
     min_lr_ratio: 0.5                 # default: 0.5
+    fused: null                       # null=PyTorch default; true=CUDA fused AdamW
 
   # --- training.loop [TYPED] -> TrainingLoopConfig ---
   loop:

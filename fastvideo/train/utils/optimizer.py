@@ -42,6 +42,7 @@ def build_optimizer_and_scheduler(
         betas=betas,
         weight_decay=float(optimizer_config.weight_decay),
         eps=1e-8,
+        fused=optimizer_config.fused,
     )
 
     scheduler = get_scheduler(

@@ -184,13 +184,18 @@ class TrainingMethod(torch.nn.Module, ABC):
         """
         for opt in self.get_optimizers(0):
             for group in opt.param_groups:
+                fused = bool(group.get("fused"))
+                capturable = bool(group.get("capturable"))
                 for p in group["params"]:
                     if not p.requires_grad:
                         continue
                     if len(opt.state.get(p, {})) > 0:
                         continue
+                    step_device = p.device if fused or capturable else torch.device("cpu")
+                    step_dtype = (torch.float64
+                                  if not fused and torch.get_default_dtype() == torch.float64 else torch.float32)
                     opt.state[p] = {
-                        "step": torch.tensor(0.0),
+                        "step": torch.zeros((), dtype=step_dtype, device=step_device),
                         "exp_avg": torch.zeros_like(p),
                         "exp_avg_sq": torch.zeros_like(p),
                     }

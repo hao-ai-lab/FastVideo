@@ -334,6 +334,9 @@ def _build_training_config(
 
     betas_raw = o.get("betas", "0.9,0.999")
     betas = parse_betas(betas_raw, where="training.optimizer.betas")
+    fused = o.get("fused")
+    if fused is not None:
+        fused = require_bool(o, "fused", where="training.optimizer.fused")
 
     model_path = str(t.get("model_path", "") or "")
     if not model_path:
@@ -388,6 +391,7 @@ def _build_training_config(
             lr_num_cycles=int(o.get("lr_num_cycles", 0) or 0),
             lr_power=float(o.get("lr_power", 0.0) or 0.0),
             min_lr_ratio=float(o.get("min_lr_ratio", 0.5) or 0.5),
+            fused=fused,
         ),
         loop=TrainingLoopConfig(
             max_train_steps=int(lo.get("max_train_steps", 0) or 0),

@@ -72,6 +72,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.optimizer.weight_decay == 0.0
     assert t.optimizer.lr_scheduler == "constant"
     assert t.optimizer.min_lr_ratio == 0.5
+    assert t.optimizer.fused is None
 
     assert t.loop.max_train_steps == 0
     assert t.loop.gradient_accumulation_steps == 1
@@ -121,6 +122,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "lr_scheduler": "cosine",
             "lr_warmup_steps": 100,
             "min_lr_ratio": 0.1,
+            "fused": True,
         },
         "loop": {
             "max_train_steps": 1000,
@@ -164,6 +166,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.optimizer.lr_scheduler == "cosine"
     assert t.optimizer.lr_warmup_steps == 100
     assert t.optimizer.min_lr_ratio == pytest.approx(0.1)
+    assert t.optimizer.fused is True
 
     assert t.loop.max_train_steps == 1000
     assert t.loop.gradient_accumulation_steps == 4
@@ -292,6 +295,7 @@ def test_dotted_overrides_apply_with_type_coercion(tmp_path: Path) -> None:
     overrides = [
         "--training.distributed.num_gpus=4",
         "--training.optimizer.learning_rate=1e-3",
+        "--training.optimizer.fused=true",
         "--training.distributed.pin_cpu_memory=true",
         "--training.tracker.project_name=overridden",
     ]
@@ -299,6 +303,7 @@ def test_dotted_overrides_apply_with_type_coercion(tmp_path: Path) -> None:
 
     assert cfg.training.distributed.num_gpus == 4
     assert cfg.training.optimizer.learning_rate == pytest.approx(1e-3)
+    assert cfg.training.optimizer.fused is True
     assert cfg.training.distributed.pin_cpu_memory is True
     assert cfg.training.tracker.project_name == "overridden"
 
@@ -310,6 +315,14 @@ def test_dotted_overrides_accept_separate_value_token(tmp_path: Path) -> None:
         overrides=["--training.distributed.num_gpus", "8"],
     )
     assert cfg.training.distributed.num_gpus == 8
+
+
+def test_optimizer_fused_rejects_non_bool(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {"optimizer": {"fused": "true"}}
+
+    with pytest.raises(ValueError, match="training.optimizer.fused must be a bool"):
+        load_run_config(_write_yaml(tmp_path, data))
 
 
 def test_overrides_create_intermediate_keys(tmp_path: Path) -> None:

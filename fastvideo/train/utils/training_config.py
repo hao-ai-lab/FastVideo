@@ -44,6 +44,7 @@ class OptimizerConfig:
     lr_num_cycles: int = 0
     lr_power: float = 0.0
     min_lr_ratio: float = 0.5
+    fused: bool | None = None
 
 
 @dataclass(slots=True)
