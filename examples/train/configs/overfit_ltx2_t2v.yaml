@@ -90,4 +90,8 @@ callbacks:
 # Required so the LTX2T2VConfig pipeline config is resolved from
 # init_from (without a `pipeline:` key the loader falls back to a
 # generic PipelineConfig and the LTX-2 DiT cannot be constructed).
-pipeline: {}
+pipeline:
+  dit_config:
+    # Persistently pack video self-attention QKV and text cross-attention KV
+    # projections. Checkpoints are still loaded and exported with split keys.
+    pack_attention_projections: true
