@@ -1,0 +1,56 @@
+{
+  "capture": {
+    "ckpt_dir": "/home/willlin/.cache/huggingface/hub/models--Wan-AI--Wan2.1-T2V-1.3B/snapshots/37ec512624d61f7aa208f7ea8140a131f93afc9a",
+    "commit": "9737cba9c1c3c4d04b33fcad41c111989865d315",
+    "config_defaults": {
+      "num_train_timesteps": 1000,
+      "param_dtype": "torch.bfloat16",
+      "sample_neg_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+    },
+    "cuda": "13.0",
+    "env_policy": "fastvideo-env",
+    "flash_attn": "2.8.3",
+    "gpu": "NVIDIA GB200",
+    "machine": "aarch64",
+    "negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+    "prompt": "A red panda eating bamboo in a sunlit forest, cinematic.",
+    "python": "3.12.13",
+    "repo": "https://github.com/Wan-Video/Wan2.1",
+    "torch": "2.12.0+cu130"
+  },
+  "dit": {
+    "note": "official WanModel.forward under bf16 autocast; context stored in the canonical zero-padded [512,4096] form",
+    "seq_len": 7800
+  },
+  "e2e": {
+    "e2e_official": {
+      "brightness": 85.52623219785401,
+      "dynamics": 5.8241682052612305,
+      "frame_num": 81,
+      "guide_scale": 6.0,
+      "sampling_steps": 50,
+      "seed": 1234,
+      "shift": 8.0,
+      "solver": "unipc"
+    },
+    "e2e_probe": {
+      "brightness": 81.22948246606335,
+      "dynamics": 10.55370044708252,
+      "frame_num": 17,
+      "guide_scale": 5.0,
+      "sampling_steps": 8,
+      "seed": 1234,
+      "shift": 3.0,
+      "solver": "unipc"
+    }
+  },
+  "schedule": {
+    "note": "official FlowUniPC sigma/timestep grids per (steps, shift)"
+  },
+  "text_encoder": {
+    "note": "official wan.modules.t5 UMT5 wrapper, bf16, outputs saved fp32 unpadded"
+  },
+  "vae": {
+    "note": "official WanVAE wrapper decode of a NORMALIZED latent (wrapper owns denorm); ports must reproduce the full denorm+decode behavior"
+  }
+}
