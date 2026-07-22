@@ -77,6 +77,7 @@ def _save_role_pretrained(
         get_model_state_dict,
     )
 
+    from fastvideo.models.loader.utils import custom_to_hf_state_dict
     from fastvideo.utils import maybe_download_model
 
     def _rank() -> int:
@@ -166,18 +167,12 @@ def _save_role_pretrained(
                     raise TypeError(f"Expected tensor in state_dict "
                                     f"for {module_name}.{key}, "
                                     f"got {type(value).__name__}")
-                if key in reverse_mapping:
-                    hf_key, merge_index, _ = reverse_mapping[key]
-                    if merge_index is not None:
-                        logger.warning(
-                            "Skipping reverse-mapping for merged param %s "
-                            "(merge_index=%s); saving under internal key.",
-                            key,
-                            merge_index,
-                        )
-                        hf_key = key
-                    key = hf_key
                 tensor_state[key] = value.detach().cpu()
+            if reverse_mapping:
+                tensor_state = custom_to_hf_state_dict(
+                    tensor_state,
+                    reverse_mapping,
+                )
 
             from safetensors.torch import save_file
 

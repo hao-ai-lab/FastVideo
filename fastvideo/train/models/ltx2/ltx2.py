@@ -141,6 +141,10 @@ class LTX2Model(WanModel):
         transformer_override_safetensor: str | None = None,
         attention_backend: AttentionBackendEnum | str | None = None,
     ) -> torch.nn.Module:
+        arch_config = training_config.pipeline_config.dit_config.arch_config
+        if (getattr(arch_config, "pack_attention_projections", False) and self._lora_config is not None
+                and self._lora_config.enable):
+            raise ValueError("LTX-2 packed attention projections do not yet support LoRA training")
         transformer = load_module_from_path(
             model_path=init_from,
             module_type="transformer",

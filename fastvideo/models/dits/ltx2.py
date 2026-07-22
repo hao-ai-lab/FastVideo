@@ -1447,6 +1447,103 @@ class LTXLocalAttention(LocalAttention):
         return output
 
 
+def _init_attention_projections(
+    module: Any,
+    *,
+    query_dim: int,
+    context_dim: int | None,
+    inner_dim: int,
+    quant_config: QuantizationConfig | None,
+    prefix: str,
+    pack_attention_projections: bool,
+) -> None:
+    """Create split projections or persistent self-QKV/cross-KV packs."""
+    is_self_attention = context_dim is None
+    context_dim = query_dim if context_dim is None else context_dim
+    if pack_attention_projections and quant_config is not None:
+        raise ValueError(
+            "LTX-2 packed attention projections do not yet support linear quantization"
+        )
+    if pack_attention_projections and is_self_attention:
+        module.to_qkv = ReplicatedLinear(
+            query_dim,
+            3 * inner_dim,
+            bias=True,
+            prefix=f"{prefix}.to_qkv",
+        )
+        return
+    module.to_q = ReplicatedLinear(
+        query_dim,
+        inner_dim,
+        bias=True,
+        quant_config=quant_config,
+        prefix=f"{prefix}.to_q",
+    )
+    if pack_attention_projections:
+        module.to_kv = ReplicatedLinear(
+            context_dim,
+            2 * inner_dim,
+            bias=True,
+            prefix=f"{prefix}.to_kv",
+        )
+        return
+    module.to_k = ReplicatedLinear(
+        context_dim,
+        inner_dim,
+        bias=True,
+        quant_config=quant_config,
+        prefix=f"{prefix}.to_k",
+    )
+    module.to_v = ReplicatedLinear(
+        context_dim,
+        inner_dim,
+        bias=True,
+        quant_config=quant_config,
+        prefix=f"{prefix}.to_v",
+    )
+
+
+def _project_attention_inputs(
+    module: Any,
+    x: torch.Tensor,
+    context: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Project Q/K/V while preserving the existing quantized split path."""
+    to_qkv = getattr(module, "to_qkv", None)
+    if to_qkv is not None:
+        if context is not x:
+            raise ValueError(
+                "Packed self-attention QKV requires query and context to be the same tensor"
+            )
+        return to_qkv(x)[0].chunk(3, dim=-1)
+
+    to_kv = getattr(module, "to_kv", None)
+    if to_kv is not None:
+        q = module.to_q(x)[0]
+        k, v = to_kv(context)[0].chunk(2, dim=-1)
+        return q, k, v
+
+    q_pre_quantized = (
+        module.to_q.quant_method.quantize_input(x)  # type: ignore[union-attr]
+        if _supports_prequantized_input(module.to_q) else None)
+    kv_pre_quantized = None
+    if (_supports_prequantized_input(module.to_k)
+            and _supports_prequantized_input(module.to_v)):
+        if context is x and q_pre_quantized is not None:
+            kv_pre_quantized = q_pre_quantized
+        else:
+            kv_pre_quantized = module.to_k.quant_method.quantize_input(  # type: ignore[union-attr]
+                context)
+
+    q = _linear_project_with_optional_prequant(module.to_q, x,
+                                               q_pre_quantized)
+    k = _linear_project_with_optional_prequant(module.to_k, context,
+                                               kv_pre_quantized)
+    v = _linear_project_with_optional_prequant(module.to_v, context,
+                                               kv_pre_quantized)
+    return q, k, v
+
+
 class LTXSelfAttention(nn.Module):
     """LTX-2 attention block with RMSNorm + FastVideo LocalAttention."""
     def __init__(
@@ -1460,10 +1557,12 @@ class LTXSelfAttention(nn.Module):
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
         apply_gated_attention: bool = False,
         quant_config: QuantizationConfig | None = None,
+        pack_attention_projections: bool = False,
         prefix: str = "",
     ) -> None:
         super().__init__()
         inner_dim = dim_head * heads
+        is_self_attention = context_dim is None
         context_dim = query_dim if context_dim is None else context_dim
 
         self.heads = heads
@@ -1474,26 +1573,14 @@ class LTXSelfAttention(nn.Module):
         # LTX-2.3 refine stage, so default-off behavior matches LTX-2.0.
         self.q_norm = StageAwareRMSNorm(inner_dim, eps=norm_eps)
         self.k_norm = StageAwareRMSNorm(inner_dim, eps=norm_eps)
-        self.to_q = ReplicatedLinear(
-            query_dim,
-            inner_dim,
-            bias=True,
+        _init_attention_projections(
+            self,
+            query_dim=query_dim,
+            context_dim=None if is_self_attention else context_dim,
+            inner_dim=inner_dim,
             quant_config=quant_config,
-            prefix=f"{prefix}.to_q",
-        )
-        self.to_k = ReplicatedLinear(
-            context_dim,
-            inner_dim,
-            bias=True,
-            quant_config=quant_config,
-            prefix=f"{prefix}.to_k",
-        )
-        self.to_v = ReplicatedLinear(
-            context_dim,
-            inner_dim,
-            bias=True,
-            quant_config=quant_config,
-            prefix=f"{prefix}.to_v",
+            prefix=prefix,
+            pack_attention_projections=pack_attention_projections,
         )
         # LTX-2.3 gated attention. DISTINCT from the VSA-QAT to_gate_compress
         # gate below: this gate multiplies the *self-attention output* by
@@ -1556,21 +1643,7 @@ class LTXSelfAttention(nn.Module):
     ) -> torch.Tensor:
         context = x if context is None else context
 
-        q_pre_quantized = (
-            self.to_q.quant_method.quantize_input(x)  # type: ignore[union-attr]
-            if _supports_prequantized_input(self.to_q) else None)
-        kv_pre_quantized = None
-        if (_supports_prequantized_input(self.to_k)
-                and _supports_prequantized_input(self.to_v)):
-            if context is x and q_pre_quantized is not None:
-                kv_pre_quantized = q_pre_quantized
-            else:
-                kv_pre_quantized = self.to_k.quant_method.quantize_input(  # type: ignore[union-attr]
-                    context)
-
-        q = _linear_project_with_optional_prequant(self.to_q, x, q_pre_quantized)
-        k = _linear_project_with_optional_prequant(self.to_k, context, kv_pre_quantized)
-        v = _linear_project_with_optional_prequant(self.to_v, context, kv_pre_quantized)
+        q, k, v = _project_attention_inputs(self, x, context)
         gate_logits = (self.to_gate_logits(x)[0]
                        if self.to_gate_logits is not None else None)
         gate_compress = (self.to_gate_compress(context)[0]
@@ -1647,10 +1720,12 @@ class LTXDistributedSelfAttention(nn.Module):
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
         apply_gated_attention: bool = False,
         quant_config: QuantizationConfig | None = None,
+        pack_attention_projections: bool = False,
         prefix: str = "",
     ) -> None:
         super().__init__()
         inner_dim = dim_head * heads
+        is_self_attention = context_dim is None
         context_dim = query_dim if context_dim is None else context_dim
 
         self.heads = heads
@@ -1661,26 +1736,14 @@ class LTXDistributedSelfAttention(nn.Module):
         # stage, preserving LTX-2.0 numerics by default.
         self.q_norm = StageAwareRMSNorm(inner_dim, eps=norm_eps)
         self.k_norm = StageAwareRMSNorm(inner_dim, eps=norm_eps)
-        self.to_q = ReplicatedLinear(
-            query_dim,
-            inner_dim,
-            bias=True,
+        _init_attention_projections(
+            self,
+            query_dim=query_dim,
+            context_dim=None if is_self_attention else context_dim,
+            inner_dim=inner_dim,
             quant_config=quant_config,
-            prefix=f"{prefix}.to_q",
-        )
-        self.to_k = ReplicatedLinear(
-            context_dim,
-            inner_dim,
-            bias=True,
-            quant_config=quant_config,
-            prefix=f"{prefix}.to_k",
-        )
-        self.to_v = ReplicatedLinear(
-            context_dim,
-            inner_dim,
-            bias=True,
-            quant_config=quant_config,
-            prefix=f"{prefix}.to_v",
+            prefix=prefix,
+            pack_attention_projections=pack_attention_projections,
         )
         # LTX-2.3 gated attention (distinct from VSA-QAT to_gate_compress).
         self.to_gate_logits: ReplicatedLinear | None = None
@@ -1741,21 +1804,7 @@ class LTXDistributedSelfAttention(nn.Module):
         """
         context = x if context is None else context
 
-        q_pre_quantized = (
-            self.to_q.quant_method.quantize_input(x)  # type: ignore[union-attr]
-            if _supports_prequantized_input(self.to_q) else None)
-        kv_pre_quantized = None
-        if (_supports_prequantized_input(self.to_k)
-                and _supports_prequantized_input(self.to_v)):
-            if context is x and q_pre_quantized is not None:
-                kv_pre_quantized = q_pre_quantized
-            else:
-                kv_pre_quantized = self.to_k.quant_method.quantize_input(  # type: ignore[union-attr]
-                    context)
-
-        q = _linear_project_with_optional_prequant(self.to_q, x, q_pre_quantized)
-        k = _linear_project_with_optional_prequant(self.to_k, context, kv_pre_quantized)
-        v = _linear_project_with_optional_prequant(self.to_v, context, kv_pre_quantized)
+        q, k, v = _project_attention_inputs(self, x, context)
         gate_logits = (self.to_gate_logits(x)[0]
                        if self.to_gate_logits is not None else None)
         gate_compress = (self.to_gate_compress(context)[0]
@@ -1812,6 +1861,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
         cross_attention_adaln: bool = False,
         stg_block_idx: int = 29,
         quant_config: QuantizationConfig | None = None,
+        pack_attention_projections: bool = False,
         prefix: str = "",
     ):
         super().__init__()
@@ -1848,6 +1898,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 supported_attention_backends=video_self_attn_backends,
                 apply_gated_attention=video.apply_gated_attention,
                 quant_config=quant_config,
+                pack_attention_projections=pack_attention_projections,
                 prefix=f"{prefix}.blocks.{idx}.attn1",
             )
             # Text cross-attention - always local (text is replicated)
@@ -1861,6 +1912,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 supported_attention_backends=dense_attn_backends,
                 apply_gated_attention=video.apply_gated_attention,
                 quant_config=quant_config,
+                pack_attention_projections=pack_attention_projections,
                 prefix=f"{prefix}.blocks.{idx}.attn2",
             )
             self.ff = FeedForward(
@@ -2411,6 +2463,7 @@ class LTXModel(torch.nn.Module):
         stg_block_idx: int = 29,
         use_distributed_attention: bool = False,
         quant_config: QuantizationConfig | None = None,
+        pack_attention_projections: bool = False,
         prefix: str = "",
     ):
         super().__init__()
@@ -2472,6 +2525,7 @@ class LTXModel(torch.nn.Module):
             norm_eps=norm_eps,
             use_distributed_attention=use_distributed_attention,
             quant_config=quant_config,
+            pack_attention_projections=pack_attention_projections,
             prefix=prefix,
         )
 
@@ -2632,6 +2686,7 @@ class LTXModel(torch.nn.Module):
         norm_eps: float,
         use_distributed_attention: bool = False,
         quant_config: QuantizationConfig | None = None,
+        pack_attention_projections: bool = False,
         prefix: str = "",
     ) -> None:
         video_config = (
@@ -2671,6 +2726,7 @@ class LTXModel(torch.nn.Module):
                     cross_attention_adaln=self.cross_attention_adaln,
                     stg_block_idx=self.stg_block_idx,
                     quant_config=quant_config,
+                    pack_attention_projections=pack_attention_projections,
                     prefix=prefix,
                 )
                 for idx in range(num_layers)
@@ -2817,6 +2873,12 @@ class LTX2Transformer3DModel(BaseDiT):
 
         arch = config.arch_config
         model_type = self._model_type
+        self.param_names_mapping = dict(arch.param_names_mapping)
+        if arch.pack_attention_projections and config.quant_config is not None:
+            raise ValueError(
+                "LTX-2 packed attention projections do not yet support "
+                "linear quantization"
+            )
 
         # Get SP world size for distributed attention
         sp_world_size = get_sp_world_size()
@@ -2873,6 +2935,7 @@ class LTX2Transformer3DModel(BaseDiT):
             stg_block_idx=arch.stg_block_idx,
             use_distributed_attention=use_distributed_attention,
             quant_config=config.quant_config,
+            pack_attention_projections=arch.pack_attention_projections,
             prefix=config.prefix,
         )
 

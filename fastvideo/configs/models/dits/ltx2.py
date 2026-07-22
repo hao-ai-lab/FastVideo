@@ -3,11 +3,30 @@
 LTX-2 Transformer configuration for native FastVideo integration.
 """
 
+import re
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
-import re
+_PACKED_PROJECTION_MAPPING: dict[str, str | tuple[str, int, int]] = {
+    r"^(?:model\.diffusion_model\.|diffusion_model\.|model\.)?(transformer_blocks\.\d+\.attn1)\.to_q\.(weight|bias)$":
+    (r"model.\1.to_qkv.\2", 0, 3),
+    r"^(?:model\.diffusion_model\.|diffusion_model\.|model\.)?(transformer_blocks\.\d+\.attn1)\.to_k\.(weight|bias)$":
+    (r"model.\1.to_qkv.\2", 1, 3),
+    r"^(?:model\.diffusion_model\.|diffusion_model\.|model\.)?(transformer_blocks\.\d+\.attn1)\.to_v\.(weight|bias)$":
+    (r"model.\1.to_qkv.\2", 2, 3),
+    r"^(?:model\.diffusion_model\.|diffusion_model\.|model\.)?(transformer_blocks\.\d+\.attn2)\.to_k\.(weight|bias)$":
+    (r"model.\1.to_kv.\2", 0, 2),
+    r"^(?:model\.diffusion_model\.|diffusion_model\.|model\.)?(transformer_blocks\.\d+\.attn2)\.to_v\.(weight|bias)$":
+    (r"model.\1.to_kv.\2", 1, 2),
+}
+
+_GATED_ATTENTION_MAPPING: dict[str, str] = {
+    r"^model\.diffusion_model\.(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
+    r"^diffusion_model\.(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
+    r"^model\.(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
+    r"^(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
+}
 
 
 def is_ltx2_blocks(name: str, _module) -> bool:
@@ -52,6 +71,9 @@ class LTX2VideoArchConfig(DiTArchConfig):
     attention_type: str = "default"
     rope_type: str = "split"
     double_precision_rope: bool = True
+    # Opt-in persistent packing for video self-attention QKV and text
+    # cross-attention KV projections. The checkpoint remains split externally.
+    pack_attention_projections: bool = False
     # LTX-2.3 gated extensions. All default OFF == LTX-2.0 behavior.
     cross_attention_adaln: bool = False
     caption_proj_before_connector: bool = False
@@ -116,17 +138,16 @@ class LTX2VideoArchConfig(DiTArchConfig):
         # an unconditional rename would silently retarget them.  Inserted at
         # the front so first-match-wins matching fires the rename before the
         # generic prefix-strip rules.
-        if self.apply_gated_attention:
-            gate_rules = {
-                r"^model\.diffusion_model\.(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
-                r"^diffusion_model\.(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
-                r"^model\.(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
-                r"^(.*)\.to_gate_compress\.(.*)$": r"model.\1.to_gate_logits.\2",
-            }
-            self.param_names_mapping = {
-                **gate_rules,
-                **self.param_names_mapping,
-            }
+        dynamic_patterns = set(_PACKED_PROJECTION_MAPPING) | set(_GATED_ATTENTION_MAPPING)
+        base_mapping = {
+            pattern: replacement
+            for pattern, replacement in self.param_names_mapping.items() if pattern not in dynamic_patterns
+        }
+        self.param_names_mapping = {
+            **(_PACKED_PROJECTION_MAPPING if self.pack_attention_projections else {}),
+            **(_GATED_ATTENTION_MAPPING if self.apply_gated_attention else {}),
+            **base_mapping,
+        }
 
 
 @dataclass

@@ -24,7 +24,11 @@ from fastvideo.train.utils.training_config import (
 
 logger = init_logger(__name__)
 
-_TRAINING_DIT_ARCH_OVERRIDE_KEYS = ("local_attn_size", "sink_size")
+_TRAINING_DIT_ARCH_OVERRIDE_KEYS = (
+    "local_attn_size",
+    "sink_size",
+    "pack_attention_projections",
+)
 
 
 @dataclass(slots=True)

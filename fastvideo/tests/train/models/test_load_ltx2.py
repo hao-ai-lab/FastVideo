@@ -134,6 +134,29 @@ def test_ltx2_selects_video_only_transformer_and_forwards_backend(
     assert captured["attention_backend"] is AttentionBackendEnum.TORCH_SDPA
 
 
+def test_ltx2_projection_packing_config_rejects_lora_before_loading(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = load_run_config(
+        str(_FIXTURE_DIR / _CASES["ltx2"][0]),
+        overrides=[
+            "--pipeline.dit_config.pack_attention_projections",
+            "true",
+        ],
+    )
+    assert cfg.training.pipeline_config.dit_config.arch_config.pack_attention_projections
+
+    def fail_if_loaded(**_kwargs):
+        raise AssertionError("transformer loading must not start")
+
+    monkeypatch.setattr(ltx2_module, "load_module_from_path", fail_if_loaded)
+    with pytest.raises(ValueError, match="do not yet support LoRA training"):
+        LTX2Model(
+            init_from=cfg.models["student"]["init_from"],
+            training_config=cfg.training,
+            lora={"enable": True, "rank": 4},
+        )
+
+
 def test_ltx2_rejects_role_local_sparse_attention_backend() -> None:
     model = object.__new__(LTX2Model)
     model.attention_backend = AttentionBackendEnum.VIDEO_SPARSE_ATTN
