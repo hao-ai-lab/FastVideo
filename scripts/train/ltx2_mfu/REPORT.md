@@ -419,7 +419,14 @@ Supporting microgates, all committed: `probes/benchmark_ltx2_video_attention_bac
 
 Batch capacity at 4x is rejected decisively. `harness/benchmark_fastvideo_train_blockskip.py` forces `block_skip` checkpointing with a stride (the LTX-2 wrapper does not plumb `n_layer`, so plain `block_skip` degenerates to full). B3 with every-6th-block checkpointing fits memory (160.9/179.9 GiB allocated/reserved) and passes all embedded proofs, but on the same tray whose B2 re-gate measured 0.7212 s / 40.06%, it ran 1.511623 s / 28.666% with the native allocator and 5.261937 s / 8.235% with `expandable_segments:True` — an allocator-pathology collapse at the reservation ceiling, not recompute cost (which models at about +2%). Do not pursue 4x/B3 or near-ceiling batch capacity without first freeing tens of GiB of real activation memory.
 
-The first 8x confirmation attempt failed on infrastructure, recorded here for the next allocation: two-tray pair `1631584` (gb-nvl-057-compute01/08) drew a 1,965 MHz max-clock bin with heterogeneous NIC counts (4 vs 8), `/etc/hosts` mapping each host's own name to `127.0.1.1` (which poisons Gloo's advertised address; fix is `GLOO_SOCKET_IFNAME=enP5p9s0`, matching this report's historical interface note), and cross-tray TCP blocked on ephemeral ports (torchrun rendezvous on the master port succeeded while Gloo full-mesh was refused and NCCL bootstrap hung silently). The allocation was cancelled; the accepted env stack still needs one healthy-pair 8x/B3 A/X/B before entering `run_current.sh` and the stopping-point table.
+The 8x confirmation is blocked by rack `gb-nvl-057` infrastructure, diagnosed to root cause across two allocation pairs and recorded for the next attempt. Pair `1631584` (compute01/08, heterogeneous 4-vs-8 NIC trays) and pair `1631863` (compute01/04) both draw the rack's 1,965 MHz max-clock bin (baseline-ineligible against the 2,062 MHz rows even when working). Findings, in dependency order:
+
+1. `/etc/hosts` on these hosts maps each host's own name to `127.0.1.1`, so Gloo full-mesh advertises loopback and peers get connection-refused. Fix: `GLOO_SOCKET_IFNAME=enP5p9s0`. Real, but not the main blocker.
+2. Cross-tray TCP is healthy: torchrun static rendezvous, arbitrary fixed ports, ten sequential connections, and the c10d TCPStore phase (server on node0, both clients connected) all pass.
+3. The actual hang: a `faulthandler` dump shows every rank blocked in its first `all_reduce` inside lazy NCCL comm creation, with zero NCCL output even at `NCCL_DEBUG=INFO` — a silent driver-level wait in the MNNVL/IMEX registration path. `nvidia-smi` reports fabric state Completed/Success but with sentinel `CliqueId 32766 (0x7ffe)` on both trays; NCCL's own detection line reads `MNNVL ... cliqueId 0x7ffe state 3 healthMask 0x11a9`.
+4. Discriminator: `NCCL_MNNVL_ENABLE=0` makes the identical cross-tray all-reduce complete immediately over `Using network Socket`. Socket transport is diagnosis-only — a B3 step would be comm-bound and meaningless as an MFU row — so rack-057 pairs are unusable for the confirmation until IMEX is repaired.
+
+Working preamble for the next healthy pair: `GLOO_SOCKET_IFNAME=enP5p9s0 NCCL_SOCKET_IFNAME=enP5p9s0`, a fresh `MASTER_PORT`, and `MASTER_ADDR` resolved to a raw IP (rank0's own `enP5p9s0` address on node 0; DNS resolution of the master hostname elsewhere) to stay immune to the hosts-file mapping. The accepted env stack still needs one healthy-pair 8x/B3 A/X/B before entering `run_current.sh` and the stopping-point table.
 
 ## Decision boundary
 
@@ -663,6 +670,14 @@ b973790131bf7a6f04799c482ad919b03094489ef8ac56478f271febf93fbbc0  /mnt/pr1630_ge
 47cd9bf4c7a7833ad3dfcf4e86e0eb10627499748992da89e15831bf6634d56e  [committed probes/bench_ltx2_tunableop_gemm.py] /mnt/bench_ltx2_tunableop_gemm.py
 4ed684c2858008e4e02ca70943974b21856172dd730d18cd8ea8d84334b9eaf0  /mnt/pr1630_b3skip6_smoke.log
 8a8ea4c8eabd20188f75d2f5aee98f0b4f6065d7e09f70df4f6fe052c2d8f87b  /mnt/pr1630_b3skip6_expandable.log
+fc2c97a86e1d0ae082b6d8bb3340e554063919943eda52f6fce1864f19d88f2e  /mnt/pr1630_8x_health_1631863_node0.log
+1f75874659db76179a0e3e79e7e95259999ed2989035b6f88cbe8efc00bcb205  /mnt/pr1630_8x_health_1631863_node1.log
+13b309424061d50611a5e9da5ffc6f0cf7c7d10ab73f40ba655f9fd76235c6ac  /mnt/pr1630_8x_stack_node0.log
+f0e16c6bb91d9889d450ff072673c65076d2d0d826b6e8ea8ebeb4c07b4984fd  /mnt/pr1630_8x_stack_node1.log
+9e824e8988f3a63d0d53a27ce76da6f99d1eefa6aafa3dd0fefc3954e6198ca2  /mnt/pr1630_8x_nomnnvl_node0.log
+0a0093e71b52f804963710606f1f77ece99d37d90b6924b7ce1c82c59c948541  /mnt/pr1630_8x_nomnnvl_node1.log
+69787402d008711ea68f3b3289aa2dd05e7ee12034d4e7337d8a792e051f29f8  /mnt/pr1630_8x_crossdebug_node0.log
+f3203e22560a7cc1e041b36d406eee1faef580ea5d402470dffae8a1726c259c  /mnt/pr1630_8x_crossdebug_node1.log
 ```
 
 PR #1630's optimization stack was review-clean through measured head `20c36acef`; validation fixes followed at `0e60a0e9c` and `3f3f06541`. No dependency was added or installed. The operational GB200 launcher now forwards allocated IMEX character devices into multi-node containers so the existing MNNVL fabric is reachable.
