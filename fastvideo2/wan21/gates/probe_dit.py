@@ -18,7 +18,7 @@ the candidate causes, each with its own experiment:
          the attention-backend share of the delta.
 
 Run like capture_official.py (same env policy):
-    PYTHONPATH=<wan-repo>:<extras>:<repo> python -m fastvideo2.wan21.probe_dit \\
+    PYTHONPATH=<wan-repo>:<extras>:<repo> python -m fastvideo2.wan21.gates.probe_dit \\
         --wan-repo ... --ckpt-dir <official ckpt> --diffusers-root <diffusers ckpt> \\
         --goldens <repo>/fastvideo2/evidence/goldens/wan21-official
 """
@@ -42,7 +42,7 @@ def main() -> None:
     import numpy as np
     import torch
 
-    from fastvideo2.wan21 import goldens as G
+    from fastvideo2.wan21.gates import goldens as G
 
     dev = args.device
     dit_g = G.load_golden(args.goldens, "dit")

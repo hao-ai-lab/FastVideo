@@ -1,8 +1,8 @@
 """T0: golden probe determinism, IO round-trip, and comparison math (numpy only)."""
 import numpy as np
 
-from fastvideo2.wan21 import goldens as G
-from fastvideo2.wan21.anchor import report_markdown
+from fastvideo2.wan21.gates import goldens as G
+from fastvideo2.wan21.gates.anchor import report_markdown
 
 
 def test_probe_inputs_are_deterministic():

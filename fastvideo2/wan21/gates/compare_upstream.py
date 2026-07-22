@@ -8,7 +8,7 @@ records. Implementations:
   fastvideo_main  fastvideo main-branch native components (requires the main
                   environment, e.g. /mnt/FastVideo/.venv on the cluster)
 
-    python -m fastvideo2.wan21.compare_upstream \\
+    python -m fastvideo2.wan21.gates.compare_upstream \\
         --impls fastvideo2,fastvideo_main --root <diffusers ckpt dir> \\
         --report fastvideo2/evidence/wan21_numerics_report.md
 """
@@ -29,8 +29,8 @@ def main() -> None:
 
     from fastvideo2.loading import resolve_weights
     from fastvideo2.verify import GateResult, append_ledger, env_fingerprint
-    from fastvideo2.wan21 import anchor as A
-    from fastvideo2.wan21 import goldens as G
+    from fastvideo2.wan21.gates import anchor as A
+    from fastvideo2.wan21.gates import goldens as G
     from fastvideo2.wan21.card import WAN21_T2V_1_3B as CARD
 
     gdir = G.golden_dir(args.goldens_set) if args.goldens_set else G.golden_dir()

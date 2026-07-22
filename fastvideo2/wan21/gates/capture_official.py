@@ -18,7 +18,7 @@ to a pip ``--target`` dir, leaving the shared venv untouched:
     git clone https://github.com/Wan-Video/Wan2.1 /mnt/wan-official
     <fastvideo-venv>/bin/pip install --target /mnt/wan-extra easydict ftfy
     PYTHONPATH=/mnt/wan-official:/mnt/wan-extra:<this repo> \\
-        <fastvideo-venv>/bin/python -m fastvideo2.wan21.capture_official \\
+        <fastvideo-venv>/bin/python -m fastvideo2.wan21.gates.capture_official \\
         --wan-repo /mnt/wan-official --ckpt-dir <Wan-AI/Wan2.1-T2V-1.3B> \\
         --out <repo>/fastvideo2/evidence/goldens/wan21-official
 
@@ -79,7 +79,7 @@ def main() -> None:
     import torch
     from wan.configs import WAN_CONFIGS
 
-    from fastvideo2.wan21 import goldens as G
+    from fastvideo2.wan21.gates import goldens as G
 
     cfg = WAN_CONFIGS["t2v-1.3B"]
     device = torch.device(args.device)

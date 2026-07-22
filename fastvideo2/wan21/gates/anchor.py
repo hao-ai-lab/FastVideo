@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from fastvideo2.wan21 import goldens as G
+from fastvideo2.wan21.gates import goldens as G
 
 # Certification thresholds (relative L2). Two DiT rows make two claims:
 # ``dit`` (bf16) certifies the deployment numerics band — measured decomposition

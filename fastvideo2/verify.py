@@ -275,8 +275,8 @@ def gate_anchor(instance: Any) -> list[GateResult]:
     reference > production: diffusers-backed components are a *port* whose
     fidelity these records certify, never assume. Fails closed if no goldens
     have been captured."""
-    from fastvideo2.wan21 import anchor as A
-    from fastvideo2.wan21 import goldens as G
+    from fastvideo2.wan21.gates import anchor as A
+    from fastvideo2.wan21.gates import goldens as G
     card = instance.card
     gdir = G.golden_dir()
     if not os.path.exists(os.path.join(gdir, "manifest.json")):

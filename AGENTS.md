@@ -15,7 +15,8 @@ surfaces. Read `README.md` first.
 | `fastvideo2/engine.py` | One-shot runner: request → outputs + identity-chained trace |
 | `fastvideo2/verify.py` | Gates T0–T3 + evidence ledger |
 | `fastvideo2/registry.py` | The only catalog: name → (card, pipeline builder) |
-| `fastvideo2/wan21/` | The model family: card constant, loop, pipeline, `reference.py` |
+| `fastvideo2/wan21/` | The family's logic: card constant, loop, pipeline, vendored `model.py`, `reference.py` (the executable spec) |
+| `fastvideo2/wan21/gates/` | The family's measurement side: goldens, anchor adapters, official capture shim, comparison CLI, diagnostics — never imported by logic code |
 | `fastvideo2/evidence/` | Append-only ledger + blessed baselines (see its README) |
 | `fastvideo2/tests/` | T0 contract tests — CPU, no torch, no weights |
 
