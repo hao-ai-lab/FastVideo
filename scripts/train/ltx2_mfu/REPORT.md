@@ -379,6 +379,26 @@ Tracker head `52f1114dd` (validation compile isolation `0e60a0e9c`, video-only v
 
 The candidate is within +0.184% of the control midpoint with byte-identical peak memory to control B (140.874/166.588 GiB allocated/reserved; control A measured 140.865/166.564 GiB on its cold-compile run) and no training-path mechanism: both post-measurement commits touch only validation code, and this harness removes the validation callback before training. All three runs passed the full embedded proofs — 927 FP32 DTensor parameters / 13,041,520,768 elements with FP32 Adam moments and exact optimizer coverage, finite AdaLN gradient probes and losses on every rank, and 4,290 semantic tokens with singleton model timesteps on all 30 steps. Load clocks/power were healthy (about 1.4-1.8 GHz SM, 0.91-1.17 kW against the 1.2 kW cap, no throttle reasons). Decision: current head inherits the stopping-point table as timing-neutral. The allocation-local absolute result (about 40.0-40.1% MFU at B2) is consistent with a healthy 4x tray and is not compared across allocations.
 
+### MFU formula audit
+
+A head-of-branch audit reverse-engineered and empirically verified the published MFU chain. The harness formula `MFU% = 14.444115 * local_batch * grad_accum / median_slowest_rank_step_sec` reproduces every published row from its recorded medians, and the README's `353.8808175 TFLOP/sample` is exactly `14.444115 * 24.5`: the harness constant is the primary value, rounded at the sixth decimal from the exact count below (relative rounding error 4e-9).
+
+The numerator is the strict no-recompute model-FLOP count of the 48 transformer blocks at 4,290 video tokens, 1,024 text tokens, and hidden width 4,096:
+
+| Component | Exact FLOPs/sample |
+|---|---:|
+| video-token block linears, `6*4290*234,881,024*48` | 290,200,202,772,480 |
+| text KV projections, `6*1024*33,554,432*48` | 9,895,604,649,984 |
+| self-attention, `12*4290^2*4096*48` | 43,420,719,513,600 |
+| cross-attention, `12*4290*1024*4096*48` | 10,364,292,956,160 |
+| total (353.880820 TFLOP) | 353,880,819,892,224 |
+
+The first two rows sum to 300,095,807,422,464, the projection-gate figure above. The convention charges attention backward at twice forward (no flash recompute) and excludes the caption projection, patchifier, output head, and AdaLN MLP.
+
+`probes/audit_train_flops_per_sample.py` then measured executed FLOPs with `FlopCounterMode` on allocation `1627918` at head `52f1114dd`, running the production recipe eagerly (TORCH_SDPA, compile off — compiled regions and the FA4 custom op bypass dispatch-mode counting; collectives are uncounted either way). At B1 it recorded 118,036,079,050,752 forward + 244,999,614,103,552 backward = 363,035,693,154,304 FLOPs/sample, identical on all four ranks and on both counted steps, and reconciled with the numerator integer-exactly in forward and backward separately: the counter additionally charges the flash-attention backward QK recompute, `(2*4290^2 + 2*4290*1024)*4096*48 = 8,964,168,744,960`, plus the excluded non-block layers, `190,704,517,120` (caption MLP 3840->4096->4096 and AdaLN/patchifier/output head, with no-grad inputs skipping first-layer dgrads). The numerator is therefore confirmed and is 0.054% conservative. A B2 executed-FLOP repeat was capacity-blocked: eager mode allocated 177.80 GiB and OOMed (the first attempt also exposed a transient `NCCLSymmetricMemory.cu:455` init failure), but batch linearity is structural — every counted operator's FLOPs are linear in the batch dimension — and the B2 timing gates already verify per-sample token semantics.
+
+The denominator is a house convention. The device reports 152 SMs (SM100) with a 2,062 MHz max SM clock at a 1,200 W limit; NVIDIA's GB200 NVL72 materials give 360 PFLOPS sparse FP16/BF16 across 72 GPUs, i.e. 2,500 TFLOP/s dense per GPU, and no vendor source quotes 2,450. Published MFU values are therefore 1.020408x their vendor-peak equivalents: 43.623053% reads 42.750592%, 40.810314% reads 39.994108%, and the head re-gate 39.982318% reads 39.182672% against 2,500 TFLOP/s. `nsys-ai`'s 2,250 TFLOP/s default matches the 1,000 W HGX B200 part, not these 1,200 W GB200s. Keep 2,450 for continuity with every published row — multiply reported MFU by 0.98 for the vendor-peak value — and relabel the baseline per the README rule if the convention is ever changed.
+
 ## Decision boundary
 
 1. Do not write a whole-transformer mega-kernel or integrate the current QuACK wrapper.
@@ -596,6 +616,10 @@ ae32a4fb16cb4c735ba055c6ef6556ed71560d77cfb0770ea3559c78fb2b0d3b  /mnt/pr1630_fu
 9b3f76ba4b0b6e79e04e461638d660f08c9a63880d4e433848d9af9932583384  /mnt/pr1630_regate_52f1114/health_after.log
 c21dc0fff404a7b7950610a854bb14316b23899a120eca3068f9960a804f1a1c  [committed runners/run_current.sh as staged for the re-gate] /mnt/pr1630_tracker_52f1114/runners/run_current.sh
 ec4cd5092a691de0f0c630b5ed349f98e7d94d5795dfd11de9e242765bdcb790  [committed harness/benchmark_fastvideo_train_pack_d016.py as staged for the re-gate] /mnt/pr1630_tracker_52f1114/harness/benchmark_fastvideo_train_pack_d016.py
+f39045adab530f07cbd080abc08e1b3b45bb8b80aa1ce16f605366625f492d32  /mnt/pr1630_flop_audit/b1.log
+9a353a98d3697ed84b3b485cb20d52fad8acfabcb6d11cc808db88e20a48afec  [failed base-patch first attempt, then NCCL symmetric-memory init failure at B2] /mnt/pr1630_flop_audit/b2.log
+3b8537b9dbe4d2a707a16bef65165b2fbba1645d67ca2628a36b45b0c96a7241  [eager B2 OOM, capacity-blocked] /mnt/pr1630_flop_audit/b2_nosymm.log
+64feb60e3deb87bb76564a30326922470c2113bd729b2ce85fdacf40743ddd25  [committed probes/audit_train_flops_per_sample.py] /mnt/audit_train_flops_per_sample.py
 ```
 
 PR #1630's optimization stack was review-clean through measured head `20c36acef`; validation fixes followed at `0e60a0e9c` and `3f3f06541`. No dependency was added or installed. The operational GB200 launcher now forwards allocated IMEX character devices into multi-node containers so the existing MNNVL fabric is reachable.

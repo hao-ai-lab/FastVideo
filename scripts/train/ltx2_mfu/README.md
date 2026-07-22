@@ -8,7 +8,7 @@ Start with this file, then read [`REPORT.md`](REPORT.md). The production recipe 
 
 The accepted measurement contract is full-parameter LTX-2 training with FP32 registered/master parameters and FP32 Adam moments, BF16 working compute and reductions, 81x480x832 video, dense FA4 attention, regional compile, no activation checkpointing, slowest-rank inclusive step time, 10 warmup steps, and the median of 20 measured steps. Do not compare a run that changes this contract as if it were the same baseline.
 
-The harness numerator is `14.444115 percentage-seconds/sample`, derived from `353.8808175 TFLOP/sample / 2,450 TFLOP/s * 100`. A different model, resolution, frame count, or FLOP convention requires a new numerator before its MFU is reportable.
+The harness numerator is `14.444115 percentage-seconds/sample`, derived from `353.8808175 TFLOP/sample / 2,450 TFLOP/s * 100`. Both constants are audited (see the REPORT's MFU formula audit): the FLOP figure is the exact strict no-recompute, blocks-only model-FLOP count `353,880,819,892,224` at 4,290 video/1,024 text tokens, reconciled integer-exactly against a `FlopCounterMode` measurement by `probes/audit_train_flops_per_sample.py`; the denominator is a house convention 2% below the 2,500 TFLOP/s GB200 vendor dense-BF16 peak, so reported MFU times 0.98 gives vendor-peak MFU. A different model, resolution, frame count, or FLOP convention requires a new numerator before its MFU is reportable.
 
 | Topology | Local/global batch | Median step | Throughput | MFU | Status |
 |---|---:|---:|---:|---:|---|
