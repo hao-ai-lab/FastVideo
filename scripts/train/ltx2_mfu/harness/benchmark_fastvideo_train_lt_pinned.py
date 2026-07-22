@@ -223,29 +223,40 @@ def _(grad_out, saved_input, case_id):
     return grad_out.new_empty((grad_out.shape[1], saved_input.shape[1]))
 
 
-class _LtPinnedLinear(torch.autograd.Function):
+@torch.library.custom_op("fastvideo::lt_pinned_linear", mutates_args=())
+def lt_pinned_linear(x2d: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None,
+                     rows: int, dgrad_id: int, wgrad_id: int) -> torch.Tensor:
+    return F.linear(x2d, weight, bias)
 
-    @staticmethod
-    def forward(ctx, x2d, weight, bias, rows, dgrad_id, wgrad_id):
-        ctx.save_for_backward(x2d, weight)
-        ctx.meta = (rows, dgrad_id, wgrad_id, bias is not None)
-        return F.linear(x2d, weight, bias)
 
-    @staticmethod
-    def backward(ctx, grad_out):
-        x2d, weight = ctx.saved_tensors
-        rows, dgrad_id, wgrad_id, has_bias = ctx.meta
-        grad_out = grad_out.contiguous()
-        if grad_out.shape[0] == rows and dgrad_id >= 0:
-            grad_input = lt_pinned_dgrad(grad_out, weight, dgrad_id)
-        else:
-            grad_input = grad_out @ weight
-        if grad_out.shape[0] == rows and wgrad_id >= 0:
-            grad_weight = lt_pinned_wgrad(grad_out, x2d, wgrad_id)
-        else:
-            grad_weight = grad_out.t() @ x2d
-        grad_bias = grad_out.sum(0) if has_bias else None
-        return grad_input, grad_weight, grad_bias, None, None, None
+@lt_pinned_linear.register_fake
+def _(x2d, weight, bias, rows, dgrad_id, wgrad_id):
+    return x2d.new_empty((x2d.shape[0], weight.shape[0]))
+
+
+def _lt_linear_setup(ctx, inputs, output):
+    x2d, weight, bias, rows, dgrad_id, wgrad_id = inputs
+    ctx.save_for_backward(x2d, weight)
+    ctx.meta = (rows, dgrad_id, wgrad_id, bias is not None)
+
+
+def _lt_linear_backward(ctx, grad_out):
+    x2d, weight = ctx.saved_tensors
+    rows, dgrad_id, wgrad_id, has_bias = ctx.meta
+    grad_out = grad_out.contiguous()
+    if grad_out.shape[0] == rows and dgrad_id >= 0:
+        grad_input = torch.ops.fastvideo.lt_pinned_dgrad(grad_out, weight, dgrad_id)
+    else:
+        grad_input = grad_out @ weight
+    if grad_out.shape[0] == rows and wgrad_id >= 0:
+        grad_weight = torch.ops.fastvideo.lt_pinned_wgrad(grad_out, x2d, wgrad_id)
+    else:
+        grad_weight = grad_out.t() @ x2d
+    grad_bias = grad_out.sum(0) if has_bias else None
+    return grad_input, grad_weight, grad_bias, None, None, None
+
+
+lt_pinned_linear.register_autograd(_lt_linear_backward, setup_context=_lt_linear_setup)
 
 
 def _patched_forward(module, rows, dgrad_id, wgrad_id):
@@ -254,7 +265,7 @@ def _patched_forward(module, rows, dgrad_id, wgrad_id):
         bias = module.bias if not module.skip_bias_add else None
         shape = x.shape
         x2d = x.reshape(-1, shape[-1])
-        out = _LtPinnedLinear.apply(x2d, module.weight, bias, rows, dgrad_id, wgrad_id)
+        out = torch.ops.fastvideo.lt_pinned_linear(x2d, module.weight, bias, rows, dgrad_id, wgrad_id)
         out = out.reshape(*shape[:-1], out.shape[-1])
         output_bias = module.bias if module.skip_bias_add else None
         return out, output_bias
