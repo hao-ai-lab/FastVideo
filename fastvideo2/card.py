@@ -1,27 +1,17 @@
 """Model cards — the contract surface.
 
-A card is a frozen, pure-data description of one servable artifact: which
-components it is made of, which loops its weights assume, and the sampling
-defaults that are part of the trained artifact. Cards contain **no callables**:
-components and loops are declared as ``"module:attr"`` reference strings and
-loop params must be plain JSON values (validated), which buys two properties:
+A card is a frozen, pure-data description of one servable artifact: its
+components, the loops its weights assume, and the sampling defaults that are
+part of the trained artifact. Components and loops are declared as
+``"module:attr"`` reference strings and loop params must be plain JSON values
+— no callables — so a card is:
 
-* **JSON round-trip** — ``ModelCard.from_dict(json.loads(card.to_json()))``
-  reproduces an equal card with an equal digest (the T0 gate checks this).
-  The card can therefore leave the process losslessly: written as
-  ``card.json`` beside a checkpoint, printed by ``describe`` for discovery,
-  pinned in a deploy config or an RL environment manifest. Nothing about the
-  contract lives outside the text (deploy-local paths are deliberately not
-  card fields for exactly this reason).
-* **Stable content digest** — sha256 of the canonical JSON (sorted keys,
-  compact separators), so the same content hashes identically however the
-  card was constructed, and any semantic change changes the hash. The digest
-  is the card's *name* wherever mismatches must be refused mechanically:
-  evidence-ledger records, T1 fingerprint baselines, environment manifests.
-  It identifies the contract only — weight bytes (T1's job), the environment
-  (``verify.env_fingerprint``), and the code behind reference strings (T2's
-  job, plus the loop ``semantics`` id for intentional changes) are separate
-  axes, recorded alongside the digest in evidence records.
+* **serializable** — ``to_json``/``from_dict`` are lossless (T0-gated), so a
+  card ships as ``card.json`` beside a checkpoint or inside a deploy config;
+* **content-addressed** — ``digest()`` hashes the canonical JSON (think git
+  object id) and is the card's identity in evidence records, T1 baselines,
+  and environment manifests. It names the declaration only; weights, code,
+  and environment drift are checked separately (T1, T2, env fingerprint).
 
 Variants are expressed as diffs against a base card via :func:`derive` — never
 as builder functions with keyword arguments. Derivation is additive: a variant
