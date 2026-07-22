@@ -22,6 +22,9 @@
     "note": "official WanModel.forward under bf16 autocast; context stored in the canonical zero-padded [512,4096] form",
     "seq_len": 7800
   },
+  "dit_fp32": {
+    "note": "official WanModel fp32 forward, no autocast, SDPA attention (true fp32 end to end) — the exact-math golden"
+  },
   "e2e": {
     "e2e_official": {
       "brightness": 85.52623219785401,

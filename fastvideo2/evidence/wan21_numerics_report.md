@@ -9,4 +9,5 @@ Cells are relative L2 vs the official output (lower is closer; `FAIL` = over tol
 | text_encoder.negative | 0.00e+00 | **FAIL** 4.19e-01 |
 | dit.t750 | 1.59e-02 | 1.68e-02 |
 | dit.t250 | 1.99e-02 | 2.12e-02 |
+| dit.fp32 | 2.62e-03 | **FAIL** TypeError: cannot pickle 'Stream' object |
 | vae.decode | 2.99e-04 | 2.99e-04 |
