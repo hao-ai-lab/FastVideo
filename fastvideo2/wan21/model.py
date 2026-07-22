@@ -1,10 +1,13 @@
-# Vendored VERBATIM from the official Wan2.1 implementation:
+# Vendored from the official Wan2.1 implementation:
 #   https://github.com/Wan-Video/Wan2.1 @ 9737cba9c1c3c4d04b33fcad41c111989865d315
 #   (wan/modules/model.py, Apache-2.0, Copyright The Alibaba Wan Team)
 # This IS fastvideo2's production Wan DiT: per the authority rule, alignment
 # with official is achieved by running the authors' modeling code, not a port.
-# Local modifications (only these):
-#   * absolute import of the vendored attention module;
+# Local modifications (each proven behavior-preserving by the anchor gate —
+# the DiT rows stay bitwise 0.0 against the official goldens):
+#   * shared layers extracted to fastvideo2/layers (norms, MLP, rotary,
+#     sinusoidal embedding, attention), alias-imported so this body stays
+#     diffable against upstream; checkpoint keys unchanged;
 # Re-vendor deliberately (like re-capturing goldens) when bumping the pinned
 # commit; the anchor gate detects drift either way.
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
@@ -16,99 +19,17 @@ import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 
-from fastvideo2.wan21.attention import flash_attention
+from fastvideo2.layers.attention import flash_attention
+from fastvideo2.layers.embeddings import sinusoidal_embedding_1d
+from fastvideo2.layers.mlp import MLP
+from fastvideo2.layers.norms import FP32LayerNorm as WanLayerNorm
+from fastvideo2.layers.norms import RMSNorm as WanRMSNorm
+from fastvideo2.layers.rotary import rope_apply, rope_params
 
 __all__ = ['WanModel']
 
 T5_CONTEXT_TOKEN_NUMBER = 512
 FIRST_LAST_FRAME_CONTEXT_TOKEN_NUMBER = 257 * 2
-
-
-def sinusoidal_embedding_1d(dim, position):
-    # preprocess
-    assert dim % 2 == 0
-    half = dim // 2
-    position = position.type(torch.float64)
-
-    # calculation
-    sinusoid = torch.outer(
-        position, torch.pow(10000, -torch.arange(half).to(position).div(half)))
-    x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
-    return x
-
-
-@amp.autocast(enabled=False)
-def rope_params(max_seq_len, dim, theta=10000):
-    assert dim % 2 == 0
-    freqs = torch.outer(
-        torch.arange(max_seq_len),
-        1.0 / torch.pow(theta,
-                        torch.arange(0, dim, 2).to(torch.float64).div(dim)))
-    freqs = torch.polar(torch.ones_like(freqs), freqs)
-    return freqs
-
-
-@amp.autocast(enabled=False)
-def rope_apply(x, grid_sizes, freqs):
-    n, c = x.size(2), x.size(3) // 2
-
-    # split freqs
-    freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
-
-    # loop over samples
-    output = []
-    for i, (f, h, w) in enumerate(grid_sizes.tolist()):
-        seq_len = f * h * w
-
-        # precompute multipliers
-        x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
-            seq_len, n, -1, 2))
-        freqs_i = torch.cat([
-            freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
-            freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
-            freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
-        ],
-                            dim=-1).reshape(seq_len, 1, -1)
-
-        # apply rotary embedding
-        x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
-        x_i = torch.cat([x_i, x[i, seq_len:]])
-
-        # append to collection
-        output.append(x_i)
-    return torch.stack(output).float()
-
-
-class WanRMSNorm(nn.Module):
-
-    def __init__(self, dim, eps=1e-5):
-        super().__init__()
-        self.dim = dim
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(dim))
-
-    def forward(self, x):
-        r"""
-        Args:
-            x(Tensor): Shape [B, L, C]
-        """
-        return self._norm(x.float()).type_as(x) * self.weight
-
-    def _norm(self, x):
-        return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
-
-
-class WanLayerNorm(nn.LayerNorm):
-
-    def __init__(self, dim, eps=1e-6, elementwise_affine=False):
-        super().__init__(dim, elementwise_affine=elementwise_affine, eps=eps)
-
-    def forward(self, x):
-        r"""
-        Args:
-            x(Tensor): Shape [B, L, C]
-        """
-        return super().forward(x.float()).type_as(x)
 
 
 class WanSelfAttention(nn.Module):
@@ -277,9 +198,7 @@ class WanAttentionBlock(nn.Module):
                                                                       qk_norm,
                                                                       eps)
         self.norm2 = WanLayerNorm(dim, eps)
-        self.ffn = nn.Sequential(
-            nn.Linear(dim, ffn_dim), nn.GELU(approximate='tanh'),
-            nn.Linear(ffn_dim, dim))
+        self.ffn = MLP(dim, ffn_dim, dim, act='gelu_tanh')
 
         # modulation
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
@@ -464,12 +383,9 @@ class WanModel(ModelMixin, ConfigMixin):
         # embeddings
         self.patch_embedding = nn.Conv3d(
             in_dim, dim, kernel_size=patch_size, stride=patch_size)
-        self.text_embedding = nn.Sequential(
-            nn.Linear(text_dim, dim), nn.GELU(approximate='tanh'),
-            nn.Linear(dim, dim))
+        self.text_embedding = MLP(text_dim, dim, dim, act='gelu_tanh')
 
-        self.time_embedding = nn.Sequential(
-            nn.Linear(freq_dim, dim), nn.SiLU(), nn.Linear(dim, dim))
+        self.time_embedding = MLP(freq_dim, dim, dim, act='silu')
         self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(dim, dim * 6))
 
         # blocks

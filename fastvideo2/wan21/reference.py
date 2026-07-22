@@ -6,7 +6,8 @@ classifier-free-guided flow-match Euler steps on the OFFICIAL WanModel (the
 vendored authors' modeling code in ``fastvideo2/wan21/model.py`` — the only
 fastvideo2 import here, itself a standalone file), decode with the Wan VAE
 (diffusers — anchored to 3e-4). No runtime, no policies — copy this file plus
-``model.py``/``attention.py`` out of the repo and they still run.
+``wan21/model.py`` and ``fastvideo2/layers/`` out of the repo and they still
+run (all torch-only, no runtime imports).
 
 It serves three roles:
   * the textbook: what Wan2.1 T2V *is*, in execution order;

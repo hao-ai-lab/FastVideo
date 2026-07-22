@@ -11,6 +11,7 @@ surfaces. Read `README.md` first.
 | `fastvideo2/loop.py` | Driven-loop protocol + `LoopRunner` (stdlib; NVTX lazily) |
 | `fastvideo2/pipeline.py` | Stage list with enforced `reads`/`writes` (stdlib-only) |
 | `fastvideo2/loading.py` | Checkpoint → modules, standalone; component fingerprints |
+| `fastvideo2/layers/` | Shared model layers (norms, MLP, rotary, attention) — torch-only, checkpoint-key compatible, cast semantics preserved (anchor-proven) |
 | `fastvideo2/engine.py` | One-shot runner: request → outputs + identity-chained trace |
 | `fastvideo2/verify.py` | Gates T0–T3 + evidence ledger |
 | `fastvideo2/registry.py` | The only catalog: name → (card, pipeline builder) |
@@ -38,13 +39,15 @@ surfaces. Read `README.md` first.
    model lists.
 7. **Official implementations are the numerics authority.** Where fidelity is
    the requirement, run the authors' modeling code: the Wan DiT is vendored
-   VERBATIM from the pinned official commit (`wan21/model.py`, provenance in
-   its header; re-vendor deliberately, like re-capturing goldens). Ports
-   (diffusers, etc.) may serve components only with anchor certification
-   (`verify --anchor`), never on trust. The official repo never becomes a
-   package dependency or submodule, and the anchor always compares against
-   captured goldens + hashes, not live upstream code. When conventions
-   conflict, official wins.
+   from the pinned official commit (`wan21/model.py`, provenance in its
+   header). Restructuring vendored code (e.g. extracting `layers/`) is
+   allowed ONLY when the anchor stays bitwise 0.0 — the gate, not "verbatim",
+   is the equivalence guarantee. Two invariants for any extraction:
+   checkpoint keys unchanged (Sequential indices preserved) and cast/dtype
+   semantics unchanged (fp32 islands, promotion order, fp64 RoPE). Ports
+   (diffusers, etc.) may serve components only with anchor certification,
+   never on trust; the official repo never becomes a dependency or submodule;
+   when conventions conflict, official wins.
 8. **One environment for goldens and gates.** The supported env is python 3.12
    + torch 2.12 (the fastvideo cluster venv). Goldens are captured with that
    same env — official code rides `PYTHONPATH`, its extra deps go to a pip
