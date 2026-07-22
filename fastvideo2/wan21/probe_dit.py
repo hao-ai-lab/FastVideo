@@ -144,8 +144,10 @@ def main() -> None:
 
     import copy
     dif32 = copy.deepcopy(dif).float()
+    # padded-512 context: the pad rows are attended, trained-in semantics
+    # (see the [PAD]/[port] rows) — the fp32 math test must use them too.
     d_f32 = dif_forward(dif32, torch.from_numpy(x_np).to(dev, torch.float32),
-                        torch.from_numpy(ctx_unpad).to(dev, torch.float32)[None])
+                        torch.from_numpy(ctx_pad).to(dev, torch.float32)[None])
     print(f"[MATH]   diffusers fp32 vs official fp32        : {rel(d_f32, out_f32):.3e}")
 
 

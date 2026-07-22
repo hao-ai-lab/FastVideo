@@ -24,12 +24,14 @@ import numpy as np
 
 from fastvideo2.wan21 import goldens as G
 
-# Initial tolerances (relative L2, fp32-accumulated outputs of bf16 forwards).
-# These are certification thresholds, set deliberately tight enough to catch a
-# convention drift (wrong padding, wrong normalization ~ O(1) rel) while
-# allowing kernel-level noise between implementations. The measured numbers
-# are always recorded; tighten after the first capture establishes the floor.
-TOLS = {"text_encoder": 2e-2, "dit": 5e-2, "vae": 5e-2}
+# Certification thresholds (relative L2). Two DiT rows make two claims:
+# ``dit`` (bf16) certifies the deployment numerics band — measured decomposition
+# (probe_dit): ~5.6e-3 attention backend (flash vs SDPA) + fp32-island
+# placement + kernel accumulation ≈ 1.6-2.1e-2 total. ``dit_fp32`` certifies
+# exact math identity (same ops, same conversion) with a far tighter bound.
+# A convention drift (e.g. truncating the load-bearing 512 zero-pad context:
+# rel 0.21) fails both. Measured numbers are always recorded.
+TOLS = {"text_encoder": 2e-2, "dit": 5e-2, "dit_fp32": 1e-3, "vae": 5e-2}
 
 
 def _vae_stats(root: str) -> tuple[np.ndarray, np.ndarray]:
@@ -76,7 +78,21 @@ def fastvideo2_adapter(root: str, device: str) -> dict[str, Callable]:
             video = vae.decode(zt, return_dict=False)[0]
         return video[0].to(torch.float32).cpu().numpy()        # [3, T, H, W] in [-1, 1]
 
-    return {"text_encode": text_encode, "dit_forward": dit_forward, "vae_decode": vae_decode}
+    def dit_forward_fp32(x: np.ndarray, t: float, context: np.ndarray) -> np.ndarray:
+        import copy
+        from fastvideo2.wan21.loop import WanForwardInputs
+        dit32 = copy.deepcopy(inst.component("transformer")).float()
+        out = WanForwardInputs(torch.from_numpy(x).to(device, torch.float32),
+                               torch.tensor([t], device=device, dtype=torch.float32),
+                               torch.from_numpy(context).to(device, torch.float32)[None])
+        with torch.no_grad():
+            res = out.forward(dit32).to(torch.float32).cpu().numpy()
+        del dit32
+        torch.cuda.empty_cache()
+        return res
+
+    return {"text_encode": text_encode, "dit_forward": dit_forward, "vae_decode": vae_decode,
+            "dit_forward_fp32": dit_forward_fp32}
 
 
 # --------------------------------------------------------------------------- #
@@ -169,7 +185,23 @@ def fastvideo_main_adapter(root: str, device: str) -> dict[str, Callable]:
             out = out[0]
         return out.to(torch.float32).cpu().numpy()
 
-    return {"text_encode": text_encode, "dit_forward": dit_forward, "vae_decode": vae_decode}
+    def dit_forward_fp32(x: np.ndarray, t: float, context: np.ndarray) -> np.ndarray:
+        import copy
+        dit32 = copy.deepcopy(_dit()).float()
+        xt = torch.from_numpy(x).to(device, torch.float32)
+        ct = torch.from_numpy(context).to(device, torch.float32)[None]
+        tt = torch.tensor([t], device=device, dtype=torch.float32)
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None,
+                                                  forward_batch=ForwardBatch(data_type="dummy")):
+            out = dit32(hidden_states=xt, encoder_hidden_states=ct, timestep=tt)
+        out = out[0] if isinstance(out, (tuple, list)) else out
+        res = out.to(torch.float32).cpu().numpy()
+        del dit32
+        torch.cuda.empty_cache()
+        return res
+
+    return {"text_encode": text_encode, "dit_forward": dit_forward, "vae_decode": vae_decode,
+            "dit_forward_fp32": dit_forward_fp32}
 
 
 # --------------------------------------------------------------------------- #
@@ -194,6 +226,15 @@ def run_anchor(adapter: dict[str, Callable], goldens_dir: str) -> list[dict]:
     for t in dit["timesteps"].tolist():
         ours = adapter["dit_forward"](dit["x"], float(t), context)
         records.append(G.compare(f"dit.t{int(t)}", ours, dit[f"out_t{int(t)}"], TOLS["dit"]))
+
+    if "dit_forward_fp32" in adapter:
+        try:
+            f32 = G.load_golden(goldens_dir, "dit_fp32")
+        except FileNotFoundError:
+            f32 = None
+        if f32 is not None:
+            ours = adapter["dit_forward_fp32"](f32["x"], float(f32["timestep"]), f32["context"])
+            records.append(G.compare("dit.fp32", ours, f32["out"], TOLS["dit_fp32"]))
 
     vae = G.load_golden(goldens_dir, "vae")
     ours = adapter["vae_decode"](vae["z"])

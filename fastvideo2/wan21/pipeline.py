@@ -45,6 +45,10 @@ def _encode_one(tokenizer: Any, encoder: Any, text: str) -> Any:
         embeds = encoder(ids, mask).last_hidden_state  # [1, 512, 4096]
     seq_len = int(mask[0].sum())
     embeds[:, seq_len:] = 0
+    # The zero-padded 512 rows are LOAD-BEARING: Wan attends over them unmasked
+    # (trained-in behavior — official is bitwise-invariant to how the padding
+    # is supplied, but truncating it diverges by rel L2 0.21; see probe_dit).
+    # Never "optimize" the context to variable length.
     return embeds
 
 
