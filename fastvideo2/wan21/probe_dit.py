@@ -114,13 +114,26 @@ def main() -> None:
     print(f"[ATTN]   official sdpa vs flash                 : {rel(e_attn, base):.3e}")
 
     # ---- MATH: fp32, no autocast ------------------------------------------- #
+    # Official's flash_attention helper force-casts to bf16 even for fp32
+    # inputs, so a clean math golden needs the SDPA patch (which honors the
+    # input dtype). Record both: flash-path fp32 (bf16 attention inside) for
+    # reference, SDPA-path fp32 as the exact-math golden.
     off_f32 = off.float()
     up32 = torch.from_numpy(ctx_unpad).to(dev, torch.float32)
+    out_f32_flash = off_forward(off_f32, x32, [up32], autocast=False)
+    watt.flash_attention = sdpa_attention
+    if hasattr(wmodel, "flash_attention"):
+        wmodel.flash_attention = sdpa_attention
     out_f32 = off_forward(off_f32, x32, [up32], autocast=False)
+    watt.flash_attention = orig_fa
+    if hasattr(wmodel, "flash_attention"):
+        wmodel.flash_attention = orig_fa
+    print(f"[MATH]   official fp32: flash-path vs sdpa-path : {rel(out_f32_flash, out_f32):.3e}")
     G.save_golden(args.goldens, "dit_fp32", {"x": x_np, "context": ctx_pad,
                                              "context_len": np.int64(plen),
                                              "timestep": np.float32(t750), "out": out_f32},
-                  {"note": "official WanModel fp32 forward, no autocast — exact-math golden"})
+                  {"note": "official WanModel fp32 forward, no autocast, SDPA attention "
+                           "(true fp32 end to end) — the exact-math golden"})
     print(f"[MATH]   saved dit_fp32 golden (std {out_f32.std():.4f})")
     del off, off_f32
     torch.cuda.empty_cache()

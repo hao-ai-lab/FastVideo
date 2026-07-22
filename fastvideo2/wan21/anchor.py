@@ -208,24 +208,35 @@ def fastvideo_main_adapter(root: str, device: str) -> dict[str, Callable]:
 # The generic anchor run                                                       #
 # --------------------------------------------------------------------------- #
 def run_anchor(adapter: dict[str, Callable], goldens_dir: str) -> list[dict]:
-    """Drive one implementation over the goldens; return comparison records."""
+    """Drive one implementation over the goldens; return comparison records.
+    Each probe is isolated: a crash becomes a fail record, not a lost run."""
     records: list[dict] = []
+
+    def probe(name: str, fn: Callable[[], dict]) -> None:
+        try:
+            records.append(fn())
+        except Exception as e:
+            records.append({"name": name, "status": "fail",
+                            "detail": f"{type(e).__name__}: {e}"})
 
     t5 = G.load_golden(goldens_dir, "text_encoder")
     for key, text in (("prompt", G.PROMPT), ("negative", G.NEGATIVE)):
-        ours = adapter["text_encode"](text)                     # [512, 4096] zero-padded
-        length = int(t5[f"{key}_len"])
-        rec = G.compare(f"text_encoder.{key}", ours[:length], t5[f"{key}_embeds"][:length],
-                        TOLS["text_encoder"])
-        pad = float(np.abs(ours[length:]).max()) if length < ours.shape[0] else 0.0
-        rec["pad_max_abs"] = pad                                # padding convention check
-        records.append(rec)
+        def _t5(key=key, text=text) -> dict:
+            ours = adapter["text_encode"](text)                 # [512, 4096] zero-padded
+            length = int(t5[f"{key}_len"])
+            rec = G.compare(f"text_encoder.{key}", ours[:length], t5[f"{key}_embeds"][:length],
+                            TOLS["text_encoder"])
+            rec["pad_max_abs"] = (float(np.abs(ours[length:]).max())
+                                  if length < ours.shape[0] else 0.0)
+            return rec
+        probe(f"text_encoder.{key}", _t5)
 
     dit = G.load_golden(goldens_dir, "dit")
     context = dit["context"]                                    # [512, 4096], canonical padded form
     for t in dit["timesteps"].tolist():
-        ours = adapter["dit_forward"](dit["x"], float(t), context)
-        records.append(G.compare(f"dit.t{int(t)}", ours, dit[f"out_t{int(t)}"], TOLS["dit"]))
+        probe(f"dit.t{int(t)}", lambda t=t: G.compare(
+            f"dit.t{int(t)}", adapter["dit_forward"](dit["x"], float(t), context),
+            dit[f"out_t{int(t)}"], TOLS["dit"]))
 
     if "dit_forward_fp32" in adapter:
         try:
@@ -233,12 +244,15 @@ def run_anchor(adapter: dict[str, Callable], goldens_dir: str) -> list[dict]:
         except FileNotFoundError:
             f32 = None
         if f32 is not None:
-            ours = adapter["dit_forward_fp32"](f32["x"], float(f32["timestep"]), f32["context"])
-            records.append(G.compare("dit.fp32", ours, f32["out"], TOLS["dit_fp32"]))
+            probe("dit.fp32", lambda: G.compare(
+                "dit.fp32",
+                adapter["dit_forward_fp32"](f32["x"], float(f32["timestep"]), f32["context"]),
+                f32["out"], TOLS["dit_fp32"]))
 
     vae = G.load_golden(goldens_dir, "vae")
-    ours = adapter["vae_decode"](vae["z"])
-    records.append(G.compare("vae.decode", ours, vae["video"].astype(np.float32), TOLS["vae"]))
+    probe("vae.decode", lambda: G.compare(
+        "vae.decode", adapter["vae_decode"](vae["z"]),
+        vae["video"].astype(np.float32), TOLS["vae"]))
 
     return records
 
@@ -264,7 +278,12 @@ def report_markdown(all_records: dict[str, list[dict]], manifest: dict) -> str:
     """One table: rows = probes, columns = implementations, cells = rel L2 vs
     the official goldens."""
     impls = list(all_records)
-    names = [r["name"] for r in all_records[impls[0]]]
+    by_name = {impl: {r["name"]: r for r in recs} for impl, recs in all_records.items()}
+    names: list[str] = []
+    for recs in all_records.values():                 # union, first-seen order
+        for r in recs:
+            if r["name"] not in names:
+                names.append(r["name"])
     lines = ["# Wan2.1 numerics vs official implementation",
              "",
              f"Goldens: `{manifest.get('capture', {}).get('repo', '?')}` @ "
@@ -273,12 +292,15 @@ def report_markdown(all_records: dict[str, list[dict]], manifest: dict) -> str:
              "",
              "| probe | " + " | ".join(impls) + " |",
              "|---|" + "---|" * len(impls)]
-    for i, name in enumerate(names):
+    for name in names:
         cells = []
         for impl in impls:
-            r = all_records[impl][i]
+            r = by_name[impl].get(name)
+            if r is None:
+                cells.append("—")
+                continue
             v = r.get("rel_l2")
-            cell = "n/a" if v is None else f"{v:.2e}"
+            cell = f"{v:.2e}" if v is not None else (r.get("detail", "n/a")[:40] or "n/a")
             if r["status"] == "fail":
                 cell = f"**FAIL** {cell}"
             cells.append(cell)
