@@ -29,8 +29,11 @@ training:
     hsdp_shard_dim: 4
 
   data:
-    data_path: data/ltx2_overfit_preprocessed
-    dataloader_num_workers: 0
+    # Repeat paths virtually so the four-row fixture spans the full run
+    # without rebuilding the iterator or duplicating data on disk.
+    data_path:
+      data/ltx2_overfit_preprocessed: 300
+    dataloader_num_workers: 1
     train_batch_size: 1
     # LTX2Model requires 0.0: CFG dropout would zero post-connector
     # embeddings, which is not the model's unconditional input.
