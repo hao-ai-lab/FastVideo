@@ -71,6 +71,10 @@ class WanDenoiseLoop:
         st.scratch["guidance"] = float(request.guidance_scale)
         st.scratch["capture"] = bool(request.capture_trajectory)
         st.scratch["instance"] = instance
+        # Compute dtype comes from the card, never from parameter introspection
+        # (the DiT is legitimately mixed-dtype: fp32 islands inside bf16).
+        from fastvideo2.loading import declared_torch_dtype
+        st.scratch["dit_dtype"] = declared_torch_dtype(instance.card.components["transformer"])
         return st
 
     def next(self, st: LoopState) -> "WorkPlan | Done":
@@ -82,12 +86,13 @@ class WanDenoiseLoop:
         guidance = st.scratch["guidance"]
         instance = st.scratch["instance"]
 
+        dit_dtype = st.scratch["dit_dtype"]
+
         def run() -> dict:
             import torch
             dit = instance.component("transformer")
-            dtype = next(dit.parameters()).dtype
             t = torch.tensor([sigma * 1000.0], device=x.device, dtype=torch.float32)
-            x_in = x.to(dtype)
+            x_in = x.to(dit_dtype)
             with torch.no_grad():
                 v_cond = WanForwardInputs(x_in, t, text).forward(dit).to(torch.float32)
                 if guidance == 1.0:

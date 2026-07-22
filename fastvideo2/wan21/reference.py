@@ -50,14 +50,14 @@ def load_models(root: str | None = None, device: str = "cuda"):
         from huggingface_hub import snapshot_download
         root = snapshot_download(WEIGHTS)
     tokenizer = AutoTokenizer.from_pretrained(root, subfolder="tokenizer")
-    # .to(dtype=...) explicitly: upstream renamed torch_dtype -> dtype, and the
-    # declared dtype must win regardless of loader version.
+    # torch_dtype (not a post-hoc .to()) so the loader's kept-in-fp32 islands
+    # (Wan's time_embedder and norms inside the bf16 DiT) survive as intended.
     text_encoder = UMT5EncoderModel.from_pretrained(
-        root, subfolder="text_encoder").to(device, torch.bfloat16).eval()
+        root, subfolder="text_encoder", torch_dtype=torch.bfloat16).to(device).eval()
     dit = WanTransformer3DModel.from_pretrained(
-        root, subfolder="transformer").to(device, torch.bfloat16).eval()
+        root, subfolder="transformer", torch_dtype=torch.bfloat16).to(device).eval()
     vae = AutoencoderKLWan.from_pretrained(
-        root, subfolder="vae").to(device, torch.float32).eval()
+        root, subfolder="vae", torch_dtype=torch.float32).to(device).eval()
     return tokenizer, text_encoder, dit, vae
 
 
@@ -137,8 +137,7 @@ def generate(prompt: str,
     std = torch.tensor(vae.config.latents_std, device=device,
                        dtype=torch.float32).view(1, -1, 1, 1, 1)
     with torch.no_grad():
-        z = (x * std + mean).to(next(vae.parameters()).dtype)
-        video = vae.decode(z, return_dict=False)[0]
+        video = vae.decode((x * std + mean).to(torch.float32), return_dict=False)[0]
     video = (video / 2 + 0.5).clamp(0, 1)
     frames = (video[0].permute(1, 2, 3, 0) * 255).round().to(torch.uint8).cpu().numpy()
 

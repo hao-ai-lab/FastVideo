@@ -52,8 +52,10 @@ def _vae_decode(instance: Any, inputs: Mapping[str, Any], request: Any) -> dict:
     std = torch.tensor(vae.config.latents_std, device=z.device,
                        dtype=z.dtype).view(1, -1, 1, 1, 1)
     z = z * std + mean
+    from fastvideo2.loading import declared_torch_dtype
+    vae_dtype = declared_torch_dtype(instance.card.components["vae"])
     with torch.no_grad():
-        video = vae.decode(z.to(next(vae.parameters()).dtype), return_dict=False)[0]
+        video = vae.decode(z.to(vae_dtype), return_dict=False)[0]
     video = (video / 2 + 0.5).clamp(0, 1)             # [1, 3, T, H, W] in [0, 1]
     frames = (video[0].permute(1, 2, 3, 0) * 255).round().to(torch.uint8)
     return {"video": frames.cpu().numpy()}

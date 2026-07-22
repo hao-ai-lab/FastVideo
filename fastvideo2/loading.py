@@ -49,11 +49,22 @@ def load_component(spec: ComponentSpec, root: str, device: str = "cpu") -> Any:
     import torch
     dtype = getattr(torch, _DTYPES[spec.dtype])
     module = cls.from_pretrained(root, subfolder=spec.subfolder, torch_dtype=dtype)
-    # torch_dtype was renamed to `dtype` upstream and newer releases may ignore
-    # the old kwarg — force the card-declared dtype so the contract, not the
-    # loader's default, decides. (T1 fingerprints hash fp32-normalized values,
-    # so only a forward would have caught this otherwise.)
-    return module.to(device=device, dtype=dtype).requires_grad_(False).eval()
+    # NOTE: no blanket .to(dtype) here. Loaders keep selected submodules fp32
+    # inside a bf16 model on purpose (Wan: time_embedder, norms), so a loaded
+    # module is legitimately mixed-dtype. Consumers must not infer a compute
+    # dtype from parameters — use declared_torch_dtype(spec) (the card is the
+    # contract). Cast only if the loader ignored the request outright.
+    if not any(p.dtype == dtype for p in module.parameters()):
+        module = module.to(dtype)
+    return module.to(device).requires_grad_(False).eval()
+
+
+def declared_torch_dtype(spec: ComponentSpec) -> Any:
+    """The card-declared compute dtype for a component, as a torch dtype.
+    This — not parameter introspection — is how loops and stages decide what
+    to cast inputs to (mixed-dtype modules make introspection wrong)."""
+    import torch
+    return getattr(torch, _DTYPES[spec.dtype])
 
 
 def component_fingerprint(component: Any, spec: ComponentSpec, slices: int = 8) -> dict:
