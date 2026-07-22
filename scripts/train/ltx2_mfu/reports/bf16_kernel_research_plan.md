@@ -52,9 +52,14 @@ pinning.
   selection (would confirm nvjet is already near-optimal and close this line).
 - STATUS 2026-07-22: sweep ran (`probes/bench_ltx2_cublaslt_algo_sweep.py`);
   kill criterion NOT met — weighted band -7.98% at B2 and B3, -9.4% best-of,
-  bit-exact parity on all winners. Integration (pinned-algo custom op + trainer
-  A/X/B) is the highest-priority next action; expected +1.9 to +2.2 MFU points
-  at 4x/B2. See the REPORT campaign section for the full table and caveats.
+  bit-exact parity on all winners. A scratch end-to-end gate
+  (`probes/lt_pinned_ops.cpp` + `harness/benchmark_fastvideo_train_lt_pinned.py`,
+  336 projections, dgrad/wgrad only) already banks **-0.786% step / +0.234 MFU
+  points** at 4x/B2 through the wrapper's own overheads (eager dbias, graph
+  breaks, contiguity copies). Remaining upside sits in a fused integration:
+  an Inductor-level mm lowering or ReplicatedLinear quant-method hook that
+  pins algos inside compiled backward and keeps dbias fused; expected total
+  +1.9 to +2.2 MFU points at 4x/B2. Then re-gate on a healthy allocation.
 
 ## 3. Whole-step wall-minus-union gap (days; expected +0.5-1.0 pp)
 
