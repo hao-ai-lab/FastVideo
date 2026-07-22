@@ -89,6 +89,8 @@ callbacks:
     sampling_steps: [8]
     guidance_scale: 1.0
     num_frames: 81
+    # Release validation-only VAE/text/audio modules before training resumes.
+    unload_pipeline_after_validation: true
 
 # Required so the LTX2T2VConfig pipeline config is resolved from
 # init_from (without a `pipeline:` key the loader falls back to a
