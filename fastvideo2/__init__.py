@@ -11,21 +11,21 @@ Four surfaces (see README.md at the repo root):
 load lazily, only when weights are actually touched.
 """
 from fastvideo2.card import ModelCard, derive
-from fastvideo2.engine import Instance, Output, Request, load, run
+from fastvideo2.engine import Instance, Output, Request, run
 from fastvideo2.registry import resolve
+from fastvideo2.sdk import Model, Result, load
 
 __version__ = "0.1.0"
-__all__ = ["ModelCard", "derive", "Instance", "Output", "Request", "load", "run",
-           "resolve", "generate", "__version__"]
+__all__ = ["ModelCard", "derive", "Model", "Result", "load", "resolve",
+           "Instance", "Output", "Request", "run", "generate", "__version__"]
 
 
 def generate(model: str, prompt: str, *, root: str | None = None,
-             device: str | None = None, **request_kwargs) -> Output:
-    """One-call convenience: resolve, load, run.
+             device: str | None = None, **request_kwargs) -> Result:
+    """One-call convenience over the SDK: load then generate (loads per call —
+    hold a :class:`Model` via :func:`load` to amortize residency).
 
-    >>> out = fastvideo2.generate("wan2.1-t2v-1.3b", "a cat surfing", seed=7)
-    >>> out.outputs["video"].shape   # [T, H, W, C] uint8
+    >>> result = fastvideo2.generate("wan2.1-t2v-1.3b", "a cat surfing", seed=7)
+    >>> result.video.shape   # [T, H, W, C] uint8
     """
-    card, build_pipeline = resolve(model)
-    instance = load(card, root=root, device=device)
-    return run(instance, build_pipeline(), Request(prompt=prompt, **request_kwargs))
+    return load(model, root=root, device=device).generate(prompt, **request_kwargs)

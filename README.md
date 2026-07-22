@@ -32,8 +32,12 @@ pytest                                        # the same contracts, as tests
 python -m fastvideo2 verify wan2.1-t2v-1.3b --tier 1 --bless
 python -m fastvideo2 verify wan2.1-t2v-1.3b --tier 3
 
-# generate
+# generate — CLI or the SDK (the handle is the loaded card, modality-neutral)
 python -m fastvideo2 generate wan2.1-t2v-1.3b --prompt "a cat surfing a wave" --out cat.mp4
+python -c '
+import fastvideo2 as fv2
+model = fv2.load("wan2.1-t2v-1.3b")          # -> Model (capabilities from the card)
+model.generate("a cat surfing a wave", seed=7).save("cat.mp4")'
 
 # the oracle, standalone (this file works copied out of the repo)
 python -m fastvideo2.wan21.reference --prompt "a cat surfing a wave" --out ref.mp4

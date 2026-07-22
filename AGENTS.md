@@ -65,8 +65,14 @@ python -m fastvideo2 generate <model> --prompt ... # one request
 
 GPU work runs on dlcluster via the `run-fastvideo-dlcluster` skill from the
 main FastVideo checkout (sync this branch with `git push origin HEAD`, then
-run inside a git worktree on the cluster — do not disturb `/mnt/FastVideo`'s
-checkout).
+run inside the branch clone at `/mnt/fv21` — do not disturb `/mnt/FastVideo`'s
+checkout). Cluster runs append to `fastvideo2/evidence/` and those files get
+fetched and committed locally, so before every cluster `git pull`, reset that
+tree or the pull conflicts:
+
+```bash
+git checkout -- fastvideo2/evidence; git clean -qfd fastvideo2/evidence; git pull
+```
 
 ## Commit style
 

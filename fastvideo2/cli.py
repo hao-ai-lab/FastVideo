@@ -28,14 +28,12 @@ def _generate(args) -> int:
     kwargs = {k: getattr(args, k) for k in
               ("seed", "num_steps", "guidance_scale", "height", "width", "num_frames", "shift")
               if getattr(args, k) is not None}
-    out = fastvideo2.generate(args.model, args.prompt, root=args.root, device=args.device,
-                              **kwargs)
-    video = out.outputs["video"]
-    import imageio.v2 as imageio
-    imageio.mimsave(args.out, list(video), fps=args.fps, format="mp4")
-    steps = [t for t in out.trace if "/denoise." in t["label"]]
-    print(f"video {video.shape} -> {args.out}")
-    print(f"total {out.seconds:.1f}s; denoise steps {len(steps)}, "
+    model = fastvideo2.load(args.model, root=args.root, device=args.device)
+    result = model.generate(args.prompt, **kwargs)
+    result.save(args.out, fps=args.fps)
+    steps = [t for t in result.trace if "/denoise." in t["label"]]
+    print(f"video {result.video.shape} -> {args.out}")
+    print(f"total {result.seconds:.1f}s; denoise steps {len(steps)}, "
           f"mean {sum(t['seconds'] for t in steps) / max(len(steps), 1):.2f}s/step")
     return 0
 
