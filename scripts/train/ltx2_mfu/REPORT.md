@@ -428,6 +428,20 @@ The 8x confirmation is blocked by rack `gb-nvl-057` infrastructure, diagnosed to
 
 Working preamble for two-tray pairs: `GLOO_SOCKET_IFNAME=enP5p9s0 NCCL_SOCKET_IFNAME=enP5p9s0`, a fresh `MASTER_PORT`, and `MASTER_ADDR` resolved to a raw IP (rank0's own `enP5p9s0` address on node 0; DNS resolution of the master hostname elsewhere) to stay immune to the hosts-file mapping.
 
+A follow-up FA4 forward `num_splits` sweep on the video self-attention shape (same committed probe, extended with the text gate's split wrapper; run on a 1,965 MHz rack-059 tray) rejects split tuning: `num_splits=1` reproduces the current wrapper within its noisy 3-8% control drift, `2` is neutral-to-worse, and `4`/`8` regress 6.2-12.7% monotonically at both B2 and B3. The FA4 default schedule stands.
+
+### 50% feasibility budget
+
+Today's measurements make the 50% gap quantitative at 4x/B2 (2,450 TFLOP/s convention). Executed kernel work per step is 600.192 TFLOP of GEMMs (389.300 ms, 1,542 TF/s, 62.9% of peak) plus 125.498 TFLOP of FA4 including its backward recompute (133.329 ms, 941 TF/s, 38.4%), i.e. 725.690 TFLOP in 522.629 ms — 56.7% combined. The remaining step is about 166 ms of other compute (pointwise, norms, optimizer band, boundary sums) plus about 32 ms of non-busy wall. The 50% target step is 577.765 ms, so:
+
+| Systems assumption for the non-kernel band | Kernel budget | Required combined kernel throughput | vs today |
+|---|---:|---:|---:|
+| today (198 ms) | 379.9 ms | 1,910 TF/s (78.0%) | x1.376 |
+| realistic best systems (120 ms) | 457.8 ms | 1,585 TF/s (64.7%) | x1.142 |
+| theoretical-max systems (75 ms) | 502.8 ms | 1,443 TF/s (58.9%) | x1.040 |
+
+Equivalently, with today's kernels a perfect 75 ms systems endgame caps at **48.34% MFU**: 50% is strictly unreachable in BF16 by systems work alone. The admissible next steps are kernel research — raise the nvjet-bound GEMM band from 62.9% toward 70%+ and/or FA4 from 38.4% toward 50% on SM100 — or the separately-gated NVFP4 projection track. Library-level levers (cuBLAS heuristics/workspace, TorchInductor CUTLASS, TunableOp, attention backends and FA4 split schedules, batch capacity) are all measured and closed above.
+
 A third allocation roll drew rack-059 pair `1632122` (gb-nvl-059-compute05/06), which passed the native health gate with that preamble: all-rank scalar correctness and 458.914 GB/s slowest-rank sustained all-reduce bus bandwidth, matching the healthy 463 GB/s reference, so the MNNVL failure is rack-057-specific. The pair is nevertheless the 1,965 MHz clock bin and its absolute B3 result sits in the degraded-allocation class alongside the `1629519` row: the exact-head A/X/B measured 1.442031/1.443601/1.444706 s for control A / env stack / control B — a 1.443369 s / 30.021699% MFU control midpoint with 0.185% drift, and an env-stack delta of **+0.232 ms / +0.016%, i.e. neutral** (memory unchanged, 161.38 GiB peak allocated in all rows). On a degraded pair the pointwise-tuning win measured at 4x is inside noise, so the environment stack remains accepted for 4x work, is harmless on 8x, and stays **out of `run_current.sh`** until a healthy-class (about 43% baseline) 8x pair re-gates it. This row is baseline-ineligible and does not supersede the stopping-point table.
 
 ## Decision boundary
@@ -688,6 +702,9 @@ f6bdae8f1e6aef72285ddcb15a0639a28549e67d12e0c2b9db18536255efa8a9  /mnt/pr1630_8x
 4704d335a688c2eab66ad6eb4e033c12b709938689abac82398e52326105cca6  /mnt/pr1630_8x_envstack_envstack_node1.log
 10eebf0d0eb9c71e5aca4eee51c66e68454767b0838af61516cce0d4e3a231f4  /mnt/pr1630_8x_envstack_control_b_node0.log
 f681ac1b60beb31aa3dd868e9005684810e05ddb26966bd78885141acd7864bb  /mnt/pr1630_8x_envstack_control_b_node1.log
+7994f41c82ece7a3ab8c324dc3543f99cf4437c4dce3db4d0dbf36bd43b12b74  /mnt/pr1630_video_attn_splits_b2.log
+bd33740e9159d6ea5a4f02e06e5fc15721fb10d8a3dadd91e20d1608175602f7  /mnt/pr1630_video_attn_splits_b3.log
+647c2ffb55613bf3ded4f464fc1db1cfbe1ca5bfc50df7ab30c1aeecee3909d6  [committed probes/benchmark_ltx2_video_attention_backends.py with split sweep] /mnt/benchmark_ltx2_video_attention_backends.py
 ```
 
 PR #1630's optimization stack was review-clean through measured head `20c36acef`; validation fixes followed at `0e60a0e9c` and `3f3f06541`. No dependency was added or installed. The operational GB200 launcher now forwards allocated IMEX character devices into multi-node containers so the existing MNNVL fabric is reachable.

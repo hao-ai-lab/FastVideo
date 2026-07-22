@@ -110,16 +110,60 @@ def main() -> None:
     grad_out = torch.randn(shape, device=device, dtype=dtype)
 
     from flash_attn import flash_attn_func as fa2_func
+    from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
     from fastvideo.attention.utils.flash_attn_cute import flash_attn_func as current_fa4
 
     def fa2(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
         return fa2_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=False, deterministic=False)
+
+    def make_fa4_split(num_splits: int) -> TensorFn:
+
+        class _FA4Split(torch.autograd.Function):
+
+            @staticmethod
+            def forward(ctx, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+                out, lse = _flash_attn_fwd(
+                    q,
+                    k,
+                    v,
+                    softmax_scale=None,
+                    causal=False,
+                    window_size_left=None,
+                    window_size_right=None,
+                    softcap=0.0,
+                    num_splits=num_splits,
+                    pack_gqa=None,
+                    return_lse=True,
+                )[:2]
+                ctx.save_for_backward(q, k, v, out, lse)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad_out: torch.Tensor):
+                q, k, v, out, lse = ctx.saved_tensors
+                return _flash_attn_bwd(
+                    q,
+                    k,
+                    v,
+                    out,
+                    grad_out,
+                    lse,
+                    softmax_scale=None,
+                    causal=False,
+                    softcap=0.0,
+                    window_size_left=None,
+                    window_size_right=None,
+                    deterministic=False,
+                )
+
+        return _FA4Split.apply
 
     functions: dict[str, TensorFn] = {
         "fa4_current": current_fa4,
         "fa2": fa2,
         "sdpa_flash": make_sdpa(SDPBackend.FLASH_ATTENTION),
         "sdpa_cudnn": make_sdpa(SDPBackend.CUDNN_ATTENTION),
+        **{f"fa4_splits{splits}": make_fa4_split(splits) for splits in (1, 2, 4, 8)},
     }
 
     header = {
@@ -156,7 +200,7 @@ def main() -> None:
               flush=True)
 
     timing: dict[str, object] = {}
-    for candidate in ("fa2", "sdpa_flash", "sdpa_cudnn"):
+    for candidate in ("fa2", "sdpa_flash", "sdpa_cudnn", "fa4_splits1", "fa4_splits2", "fa4_splits4", "fa4_splits8"):
         if "error" in parity.get(candidate, {}):
             continue
         try:
