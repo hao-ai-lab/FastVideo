@@ -66,8 +66,13 @@ def flash_attention(
     deterministic:  bool. If True, slightly slower and uses more memory.
     dtype:          torch.dtype. Apply when dtype of q/k/v is not float16/bfloat16.
     """
+    # Fall back to SDPA only when flash is unavailable, off-CUDA, or we are in
+    # TRUE fp32 mode (autocast off — the exact-math anchor path). Under bf16
+    # autocast, q/k legitimately arrive fp32-promoted (RMSNorm weight multiply)
+    # and official casts them to bf16 and runs flash — so must we.
     if (not (FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE)
-            or q.dtype == torch.float32 or q.device.type != 'cuda'):
+            or q.device.type != 'cuda'
+            or (q.dtype == torch.float32 and not torch.is_autocast_enabled('cuda'))):
         return _sdpa_attention(q, k, v, q_lens=q_lens, k_lens=k_lens,
                                softmax_scale=softmax_scale, causal=causal)
     half_dtypes = (torch.float16, torch.bfloat16)
