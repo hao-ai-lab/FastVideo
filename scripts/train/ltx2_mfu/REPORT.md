@@ -366,6 +366,19 @@ The constrained trainer gate also rejects the apparent opportunity. At B2, the c
 
 A final direct B2-shape A/X/B microgate set TorchInductor's profiling swizzles to the singleton `[4]`, removed the optional epilogue suffix, and covered all 15 forward/dgrad/wgrad cases. It was clean: all parity checks passed and the candidate log contained zero illegal-access, failed-choice, traceback, RuntimeError, or CUDA-error strings. It was also decisively slower. Controls measured 393.934851 and 389.372927 ms, a 391.653889 ms midpoint; the candidate measured **422.406662 ms**, regressing **30.752773 ms / 7.852028%**. Only the small text projections won; the dominant video/FFN cases lost. Comparison/candidate log SHA-256 values are `7424fe05b7978d341c39e3f5a18f06a6c93f6a572a221f6b7479426cb66e7daf` and `23dae03bd6ae6405b40c3b55e07497ab355f1b464682ecf730fb616dc9f993b0`. This closes TorchInductor CUTLASS for B2; no source/config staging remains.
 
+### Post-measurement validation-fix re-gate
+
+Tracker head `52f1114dd` (validation compile isolation `0e60a0e9c`, video-only validation memory safety `3f3f06541`, and the tracker snapshot itself) was re-gated against measured head `20c36acef` with a 4x/B2 A/X/B sandwich on fresh allocation `1627918` (gb-nvl-118-compute02, 4x GB200, 1200 W power limit, 2062 MHz max SM clock, torch 2.12.0+cu130, CUDA 13.0, flash-attn-4 `4.0.0b20.dev2+g82d6441`). All three runs used the committed `runners/run_current.sh` and `harness/benchmark_fastvideo_train_pack_d016.py` from one container session with shared FA4/Inductor caches; only the `/mnt/FastVideo` source SHA changed between runs.
+
+| 4x/B2 run | True-wall slowest-rank median | MFU | Matched result |
+|---|---:|---:|---:|
+| control A `20c36acef` | 0.721040 s | 40.064684% | control |
+| candidate `52f1114dd` | 0.722525 s | 39.982318% | +1.326267 ms / +0.183898% vs midpoint |
+| control B `20c36acef` | 0.721358 s | 40.047009% | control |
+| control midpoint | 0.721199 s | 40.055847% | 0.044125% drift |
+
+The candidate is within +0.184% of the control midpoint with byte-identical peak memory to control B (140.874/166.588 GiB allocated/reserved; control A measured 140.865/166.564 GiB on its cold-compile run) and no training-path mechanism: both post-measurement commits touch only validation code, and this harness removes the validation callback before training. All three runs passed the full embedded proofs — 927 FP32 DTensor parameters / 13,041,520,768 elements with FP32 Adam moments and exact optimizer coverage, finite AdaLN gradient probes and losses on every rank, and 4,290 semantic tokens with singleton model timesteps on all 30 steps. Load clocks/power were healthy (about 1.4-1.8 GHz SM, 0.91-1.17 kW against the 1.2 kW cap, no throttle reasons). Decision: current head inherits the stopping-point table as timing-neutral. The allocation-local absolute result (about 40.0-40.1% MFU at B2) is consistent with a healthy 4x tray and is not compared across allocations.
+
 ## Decision boundary
 
 1. Do not write a whole-transformer mega-kernel or integrate the current QuACK wrapper.
@@ -575,6 +588,14 @@ ae32a4fb16cb4c735ba055c6ef6556ed71560d77cfb0770ea3559c78fb2b0d3b  /mnt/pr1630_fu
 17ac709ec74445a4ad3bb440e3bab6c77f0fca80783545644dc0f71fa94ab5a5  /mnt/pr1630_fused_dense_gelu_h2.log
 17ac709ec74445a4ad3bb440e3bab6c77f0fca80783545644dc0f71fa94ab5a5  /mnt/pr1630_fused_dense_gelu_h3.log
 17ac709ec74445a4ad3bb440e3bab6c77f0fca80783545644dc0f71fa94ab5a5  /mnt/pr1630_fused_dense_gelu_h4.log
+1edd404b1fb886ca92439761a255861a9119878becef74f2e7e3455ccbf1b34e  /mnt/pr1630_regate_52f1114/control_a.log
+0e2bb3834933ab1b0aabbe65b3905e8615fc3f8d7a8ae76ac1b07f448cbff296  /mnt/pr1630_regate_52f1114/candidate.log
+98e17c84a4dda1c43e5726b827bfc34e91a3721460ca999fe01d1ebb5abe1deb  /mnt/pr1630_regate_52f1114/control_b.log
+098b29f24cc1858ae4237f3a9dce5830ac1484f6c77c23615b9d428bfb966a41  /mnt/pr1630_regate_52f1114/health_before.log
+7154bfe19e0b8b1971fae454f85b76fe4228b04b8a8a3eb34e955b4edc0488e5  /mnt/pr1630_regate_52f1114/health_during.csv
+9b3f76ba4b0b6e79e04e461638d660f08c9a63880d4e433848d9af9932583384  /mnt/pr1630_regate_52f1114/health_after.log
+c21dc0fff404a7b7950610a854bb14316b23899a120eca3068f9960a804f1a1c  [committed runners/run_current.sh as staged for the re-gate] /mnt/pr1630_tracker_52f1114/runners/run_current.sh
+ec4cd5092a691de0f0c630b5ed349f98e7d94d5795dfd11de9e242765bdcb790  [committed harness/benchmark_fastvideo_train_pack_d016.py as staged for the re-gate] /mnt/pr1630_tracker_52f1114/harness/benchmark_fastvideo_train_pack_d016.py
 ```
 
 PR #1630's optimization stack was review-clean through measured head `20c36acef`; validation fixes followed at `0e60a0e9c` and `3f3f06541`. No dependency was added or installed. The operational GB200 launcher now forwards allocated IMEX character devices into multi-node containers so the existing MNNVL fabric is reachable.
