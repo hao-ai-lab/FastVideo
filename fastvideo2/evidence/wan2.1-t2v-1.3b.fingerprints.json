@@ -1,7 +1,7 @@
 {
-  "card_digest": "cbebe476ca8fda10",
+  "card_digest": "7171d8729ae72ae4",
   "env": {
-    "commit": "89a55be",
+    "commit": "a37198a",
     "cuda": "13.0",
     "diffusers": "0.39.0",
     "gpu": "NVIDIA GB200",
@@ -33,14 +33,14 @@
       "kind": "dit",
       "param_count": 1418996800,
       "slices": {
-        "condition_embedder.time_embedder.linear_1.bias": "6eb95a73e169af6d",
-        "condition_embedder.time_embedder.linear_1.weight": "c6bc23bf1137c37a",
-        "condition_embedder.time_embedder.linear_2.bias": "8cf1b4fd9b129503",
-        "condition_embedder.time_embedder.linear_2.weight": "9e2e83306c9902c7",
-        "condition_embedder.time_proj.weight": "59e11c8b9f498d1a",
-        "patch_embedding.bias": "c2d3dfefaa9c304f",
-        "patch_embedding.weight": "50d1d43d78ef8a18",
-        "scale_shift_table": "3b4f7d1ead4e61d1"
+        "patch_embedding.bias": "ef5d1563497e71c6",
+        "patch_embedding.weight": "6d8d025befcb511d",
+        "text_embedding.0.bias": "ea63759e7f2ce037",
+        "text_embedding.0.weight": "1623671914496f69",
+        "text_embedding.2.bias": "5cee97aa4ac7ae9d",
+        "text_embedding.2.weight": "84ca3c9bb10c16af",
+        "time_embedding.0.bias": "6eb95a73e169af6d",
+        "time_embedding.0.weight": "c6bc23bf1137c37a"
       }
     },
     "vae": {
