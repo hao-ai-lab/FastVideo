@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastvideo2"
+version = "0.1.0"
+description = "Post-training-to-serving substrate for video generation models (v2.1 MVP: Wan2.1)"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "numpy",
+    "torch>=2.4",
+    "diffusers>=0.33",
+    "transformers>=4.46",
+    "huggingface_hub",
+    "imageio",
+    "imageio-ffmpeg",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["fastvideo2*"]
+
+[tool.pytest.ini_options]
+testpaths = ["fastvideo2/tests"]
+addopts = "-q"

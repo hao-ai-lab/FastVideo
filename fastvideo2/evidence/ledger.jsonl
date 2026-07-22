@@ -1,0 +1,1 @@
+{"ts": "2026-07-22T14:23:04Z", "gate": "T0.contract", "status": "pass", "model_id": "wan2.1-t2v-1.3b", "card_digest": "cbebe476ca8fda10", "metrics": {"digest": "cbebe476ca8fda10", "stages": 3}, "tolerances": {}, "env": {"python": "3.13.12", "machine": "arm64", "commit": "9fb74b973", "diffusers": "0.38.0"}, "detail": ""}
