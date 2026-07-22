@@ -24,8 +24,9 @@ surfaces. Read `README.md` first.
    paths. If it can't round-trip through JSON, it doesn't belong on a card.
 2. **Import direction is one-way:** `card` → `loop`/`pipeline` → `engine` →
    `verify`. Family packages depend on core, never the reverse.
-   `wan21/reference.py` imports **nothing** from fastvideo2 and nothing from
-   fastvideo2 outside `verify.py` may import it.
+   `wan21/reference.py` imports only the vendored official model file
+   (`wan21/model.py`, itself standalone) — never core/runtime modules — and
+   nothing outside `verify.py` may import the reference.
 3. **Loop modules import torch-free** (torch inside methods) so contracts
    validate anywhere; `import fastvideo2` must work without torch installed.
 4. **Model-specific inputs are typed** (`WanForwardInputs`); never add an
@@ -35,12 +36,15 @@ surfaces. Read `README.md` first.
    `reference.py` to make a failing gate pass — say so instead.
 6. **One catalog.** New servable ⇒ card constant + registry entry. No parallel
    model lists.
-7. **Official implementations are the numerics authority.** diffusers (or any
-   port) is a backend whose fidelity is certified against captured official
-   goldens (`verify --anchor`), never assumed. The official repo enters this
-   codebase only as a commit hash in a goldens manifest — never as a
-   dependency, submodule, or vendored code. When conventions conflict,
-   official wins; goldens are re-captured deliberately, like re-blessing.
+7. **Official implementations are the numerics authority.** Where fidelity is
+   the requirement, run the authors' modeling code: the Wan DiT is vendored
+   VERBATIM from the pinned official commit (`wan21/model.py`, provenance in
+   its header; re-vendor deliberately, like re-capturing goldens). Ports
+   (diffusers, etc.) may serve components only with anchor certification
+   (`verify --anchor`), never on trust. The official repo never becomes a
+   package dependency or submodule, and the anchor always compares against
+   captured goldens + hashes, not live upstream code. When conventions
+   conflict, official wins.
 8. **One environment for goldens and gates.** The supported env is python 3.12
    + torch 2.12 (the fastvideo cluster venv). Goldens are captured with that
    same env — official code rides `PYTHONPATH`, its extra deps go to a pip

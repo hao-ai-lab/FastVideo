@@ -68,10 +68,11 @@ def fastvideo2_adapter(root: str, device: str) -> dict[str, Callable]:
     def dit_forward(x: np.ndarray, t: float, context: np.ndarray) -> np.ndarray:
         from fastvideo2.wan21.loop import WanForwardInputs
         dit = inst.component("transformer")
-        xt = torch.from_numpy(x).to(device, torch.bfloat16)
-        ct = torch.from_numpy(context).to(device, torch.bfloat16)[None]
+        xt = torch.from_numpy(x).to(device, torch.float32)
+        ct = torch.from_numpy(context).to(device, torch.float32)[None]
         tt = torch.tensor([t], device=device, dtype=torch.float32)
-        with torch.no_grad():
+        # official precision regime, same as the production loop
+        with torch.no_grad(), torch.amp.autocast("cuda", dtype=torch.bfloat16):
             out = WanForwardInputs(xt, tt, ct).forward(dit)
         return out.to(torch.float32).cpu().numpy()
 

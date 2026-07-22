@@ -48,9 +48,10 @@ class ComponentSpec:
     """One weight-bearing (or processing) component of the artifact."""
     component_id: str
     kind: str        # dit | vae | text_encoder | tokenizer
-    module: str      # loader reference, e.g. "diffusers:WanTransformer3DModel"
-    subfolder: str   # subfolder in the diffusers checkpoint layout
+    module: str      # loader reference, e.g. "fastvideo2.wan21.model:WanModel"
+    subfolder: str   # subfolder in the checkpoint layout ("" = repo root)
     dtype: str = "bf16"  # bf16 | fp32 | "" (dtype-less, e.g. tokenizer)
+    source: str = ""     # weights repo override; "" = the card-level `weights`
 
 
 @dataclass(frozen=True)

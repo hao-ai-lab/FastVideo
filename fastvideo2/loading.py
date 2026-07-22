@@ -43,12 +43,13 @@ def load_component(spec: ComponentSpec, root: str, device: str = "cpu") -> Any:
         raise CardError(f"component {spec.component_id!r}: bad module ref {spec.module!r}")
     cls = getattr(importlib.import_module(lib), clsname)
 
+    sub = {"subfolder": spec.subfolder} if spec.subfolder else {}
     if spec.kind == "tokenizer":
-        return cls.from_pretrained(root, subfolder=spec.subfolder)
+        return cls.from_pretrained(root, **sub)
 
     import torch
     dtype = getattr(torch, _DTYPES[spec.dtype])
-    module = cls.from_pretrained(root, subfolder=spec.subfolder, torch_dtype=dtype)
+    module = cls.from_pretrained(root, torch_dtype=dtype, **sub)
     # NOTE: no blanket .to(dtype) here. Loaders keep selected submodules fp32
     # inside a bf16 model on purpose (Wan: time_embedder, norms), so a loaded
     # module is legitimately mixed-dtype. Consumers must not infer a compute

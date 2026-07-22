@@ -25,9 +25,12 @@ WAN21_T2V_1_3B = ModelCard(
         "text_encoder": ComponentSpec("text_encoder", kind="text_encoder",
                                       module="transformers:UMT5EncoderModel",
                                       subfolder="text_encoder", dtype="bf16"),
+        # The DiT is the OFFICIAL modeling code (vendored verbatim) running the
+        # official-layout weights — alignment by construction, not by porting.
         "transformer": ComponentSpec("transformer", kind="dit",
-                                     module="diffusers:WanTransformer3DModel",
-                                     subfolder="transformer", dtype="bf16"),
+                                     module="fastvideo2.wan21.model:WanModel",
+                                     subfolder="", dtype="bf16",
+                                     source="Wan-AI/Wan2.1-T2V-1.3B"),
         # Wan VAE runs fp32 (bf16 decode visibly degrades output).
         "vae": ComponentSpec("vae", kind="vae",
                              module="diffusers:AutoencoderKLWan",

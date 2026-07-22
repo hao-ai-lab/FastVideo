@@ -1,10 +1,12 @@
 """Wan2.1 T2V reference — the oracle, in one readable file.
 
-This is the complete generation path in plain eager PyTorch on stock
-diffusers/transformers components: encode the prompt with UMT5, run N
-classifier-free-guided flow-match Euler steps on the DiT, decode with the Wan
-VAE. No fastvideo2 imports, no runtime, no policies — copy this file out of
-the repo and it still runs.
+This is the complete generation path in plain eager PyTorch: encode the
+prompt with UMT5 (HF transformers — anchored bit-identical to official), run N
+classifier-free-guided flow-match Euler steps on the OFFICIAL WanModel (the
+vendored authors' modeling code in ``fastvideo2/wan21/model.py`` — the only
+fastvideo2 import here, itself a standalone file), decode with the Wan VAE
+(diffusers — anchored to 3e-4). No runtime, no policies — copy this file plus
+``model.py``/``attention.py`` out of the repo and they still run.
 
 It serves three roles:
   * the textbook: what Wan2.1 T2V *is*, in execution order;
@@ -34,7 +36,8 @@ import argparse
 from dataclasses import dataclass, field
 from typing import Any
 
-WEIGHTS = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+WEIGHTS = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"      # text encoder / tokenizer / VAE
+DIT_WEIGHTS = "Wan-AI/Wan2.1-T2V-1.3B"            # the official transformer artifact
 NEGATIVE = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，"
             "低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，"
             "毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
@@ -47,22 +50,24 @@ class ReferenceResult:
     trajectory: list = field(default_factory=list)  # per-step fp32 latents (cpu), when captured
 
 
-def load_models(root: str | None = None, device: str = "cuda"):
-    """Load the four components exactly as declared on the card: DiT and UMT5
-    in bf16, VAE in fp32."""
+def load_models(root: str | None = None, device: str = "cuda", dit_root: str | None = None):
+    """Load the four components exactly as declared on the card: the official
+    WanModel (bf16, official-layout weights), UMT5 bf16, VAE fp32."""
     import torch
-    from diffusers import AutoencoderKLWan, WanTransformer3DModel
+    from diffusers import AutoencoderKLWan
     from transformers import AutoTokenizer, UMT5EncoderModel
+
+    from fastvideo2.wan21.model import WanModel  # the vendored official DiT
     if root is None:
         from huggingface_hub import snapshot_download
         root = snapshot_download(WEIGHTS)
+    if dit_root is None:
+        from huggingface_hub import snapshot_download
+        dit_root = snapshot_download(DIT_WEIGHTS)
     tokenizer = AutoTokenizer.from_pretrained(root, subfolder="tokenizer")
-    # torch_dtype (not a post-hoc .to()) so the loader's kept-in-fp32 islands
-    # (Wan's time_embedder and norms inside the bf16 DiT) survive as intended.
     text_encoder = UMT5EncoderModel.from_pretrained(
         root, subfolder="text_encoder", torch_dtype=torch.bfloat16).to(device).eval()
-    dit = WanTransformer3DModel.from_pretrained(
-        root, subfolder="transformer", torch_dtype=torch.bfloat16).to(device).eval()
+    dit = WanModel.from_pretrained(dit_root, torch_dtype=torch.bfloat16).to(device).eval()
     vae = AutoencoderKLWan.from_pretrained(
         root, subfolder="vae", torch_dtype=torch.float32).to(device).eval()
     return tokenizer, text_encoder, dit, vae
@@ -133,20 +138,20 @@ def generate(prompt: str,
     x = torch.randn(shape, generator=gen, device=device, dtype=torch.float32)
 
     # 3) CFG flow-match Euler: v = v_neg + g*(v_cond - v_neg); x += dsigma * v.
+    #    The DiT runs the official convention: fp32 latents under autocast
+    #    bf16, list-based call, seq_len from the (1,2,2) patch grid.
     sigmas = flow_sigmas(num_steps, shift)
+    seq_len = x.shape[2] * (x.shape[3] // 2) * (x.shape[4] // 2)
     trajectory: list = []
     for i in range(num_steps):
         sigma, sigma_next = sigmas[i], sigmas[i + 1]
         t = torch.tensor([sigma * 1000.0], device=device, dtype=torch.float32)
-        x_in = x.to(torch.bfloat16)
-        with torch.no_grad():
-            v_cond = dit(hidden_states=x_in, timestep=t, encoder_hidden_states=text,
-                         return_dict=False)[0].to(torch.float32)
+        with torch.no_grad(), torch.amp.autocast("cuda", dtype=torch.bfloat16):
+            v_cond = dit([x[0]], t=t, context=[text[0]], seq_len=seq_len)[0][None].to(torch.float32)
             if guidance_scale == 1.0:
                 v = v_cond
             else:
-                v_neg = dit(hidden_states=x_in, timestep=t, encoder_hidden_states=neg,
-                            return_dict=False)[0].to(torch.float32)
+                v_neg = dit([x[0]], t=t, context=[neg[0]], seq_len=seq_len)[0][None].to(torch.float32)
                 v = v_neg + guidance_scale * (v_cond - v_neg)
         x = x + (sigma_next - sigma) * v
         if capture_trajectory:

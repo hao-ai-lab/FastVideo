@@ -32,14 +32,21 @@ class WanForwardInputs:
     """Everything one Wan DiT forward consumes — typed, so a new conditioning
     channel is a new field the adapter must handle, never a silently-dropped
     kwarg."""
-    latent: Any    # [1, C, T, h, w], transformer dtype
+    latent: Any    # [1, C, T, h, w], fp32 (official convention: cast under autocast)
     timestep: Any  # [1] float tensor, 0..1000 scale (sigma * 1000)
-    text: Any      # [1, 512, 4096] UMT5 embeddings
+    text: Any      # [1, 512, 4096] UMT5 embeddings (the zero-pad is load-bearing)
 
     def forward(self, transformer: Any) -> Any:
-        """The one place the diffusers calling convention lives."""
-        return transformer(hidden_states=self.latent, timestep=self.timestep,
-                           encoder_hidden_states=self.text, return_dict=False)[0]
+        """The one place the official calling convention lives: list-based,
+        unbatched, with the max sequence length derived from the patch grid.
+        Callers provide official's precision regime (autocast bf16 on CUDA;
+        plain fp32 for the exact-math path)."""
+        pt, ph, pw = transformer.patch_size
+        _, _, f, h, w = self.latent.shape
+        seq_len = (f // pt) * (h // ph) * (w // pw)
+        out = transformer([self.latent[0]], t=self.timestep,
+                          context=[self.text[0]], seq_len=seq_len)[0]
+        return out[None]
 
 
 class WanDenoiseLoop:
@@ -92,13 +99,17 @@ class WanDenoiseLoop:
             import torch
             dit = instance.component("transformer")
             t = torch.tensor([sigma * 1000.0], device=x.device, dtype=torch.float32)
-            x_in = x.to(dit_dtype)
-            with torch.no_grad():
-                v_cond = WanForwardInputs(x_in, t, text).forward(dit).to(torch.float32)
+            # Official precision regime: fp32 latents under autocast in the
+            # card-declared compute dtype (the model's own fp32 islands —
+            # rope, time embedding, modulation — are autocast-disabled inside).
+            autocast = torch.amp.autocast("cuda", dtype=dit_dtype,
+                                          enabled=x.is_cuda and dit_dtype != torch.float32)
+            with torch.no_grad(), autocast:
+                v_cond = WanForwardInputs(x, t, text).forward(dit).to(torch.float32)
                 if guidance == 1.0:
                     v = v_cond
                 else:
-                    v_neg = WanForwardInputs(x_in, t, neg).forward(dit).to(torch.float32)
+                    v_neg = WanForwardInputs(x, t, neg).forward(dit).to(torch.float32)
                     v = v_neg + guidance * (v_cond - v_neg)
             # Euler step in fp32: x' = x + (sigma_next - sigma) * v
             return {"latents": x + (sigma_next - sigma) * v}

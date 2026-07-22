@@ -74,6 +74,7 @@ class Instance:
         self.device = device
         self.root = resolve_weights(card, root)
         self._components: dict[str, Any] = {}
+        self._source_roots: dict[str, str] = {}
         self._loops: dict[str, Any] = {}
 
     def component(self, component_id: str) -> Any:
@@ -81,8 +82,17 @@ class Instance:
             spec = self.card.components.get(component_id)
             if spec is None:
                 raise KeyError(f"component {component_id!r} not declared on card {self.card.model_id!r}")
-            self._components[component_id] = load_component(spec, self.root, self.device)
+            root = self._source_root(spec.source) if spec.source else self.root
+            self._components[component_id] = load_component(spec, root, self.device)
         return self._components[component_id]
+
+    def _source_root(self, source: str) -> str:
+        """Resolve a per-component weights source (e.g. the official-layout
+        transformer repo) through the same snapshot cache as card weights."""
+        if source not in self._source_roots:
+            from huggingface_hub import snapshot_download
+            self._source_roots[source] = snapshot_download(source)
+        return self._source_roots[source]
 
     def loop(self, loop_id: str) -> Any:
         if loop_id not in self._loops:
