@@ -188,6 +188,9 @@ def test_training_method_forwards_gradient_sync_to_trainable_fsdp_roots(
         def set_requires_gradient_sync(self, enabled: bool, *, recurse: bool) -> None:
             self.calls.append(("sync", enabled, recurse))
 
+        def set_reshard_after_backward(self, enabled: bool, *, recurse: bool) -> None:
+            self.calls.append(("reshard", enabled, recurse))
+
         def set_is_last_backward(self, enabled: bool) -> None:
             self.calls.append(("last", enabled, None))
 
@@ -195,6 +198,7 @@ def test_training_method_forwards_gradient_sync_to_trainable_fsdp_roots(
     trainable = _FakeFSDP()
     frozen = _FakeFSDP()
     owner = SimpleNamespace(
+        training_config=SimpleNamespace(distributed=SimpleNamespace(reshard_after_forward=False)),
         _role_models={
             "student": SimpleNamespace(transformer=trainable, _trainable=True),
             "teacher": SimpleNamespace(transformer=frozen, _trainable=False),
@@ -202,6 +206,27 @@ def test_training_method_forwards_gradient_sync_to_trainable_fsdp_roots(
     )
 
     method_base.TrainingMethod.set_requires_gradient_sync(owner, False)
+    method_base.TrainingMethod.set_requires_gradient_sync(owner, True)
 
-    assert trainable.calls == [("sync", False, True), ("last", False, None)]
+    assert trainable.calls == [
+        ("sync", False, True),
+        ("reshard", False, True),
+        ("last", False, None),
+        ("sync", True, True),
+        ("reshard", True, True),
+        ("last", True, None),
+    ]
+    assert frozen.calls == []
+
+    trainable.calls.clear()
+    owner.training_config.distributed.reshard_after_forward = True
+    method_base.TrainingMethod.set_requires_gradient_sync(owner, False)
+    method_base.TrainingMethod.set_requires_gradient_sync(owner, True)
+
+    assert trainable.calls == [
+        ("sync", False, True),
+        ("last", False, None),
+        ("sync", True, True),
+        ("last", True, None),
+    ]
     assert frozen.calls == []
