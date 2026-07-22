@@ -426,7 +426,9 @@ The 8x confirmation is blocked by rack `gb-nvl-057` infrastructure, diagnosed to
 3. The actual hang: a `faulthandler` dump shows every rank blocked in its first `all_reduce` inside lazy NCCL comm creation, with zero NCCL output even at `NCCL_DEBUG=INFO` — a silent driver-level wait in the MNNVL/IMEX registration path. `nvidia-smi` reports fabric state Completed/Success but with sentinel `CliqueId 32766 (0x7ffe)` on both trays; NCCL's own detection line reads `MNNVL ... cliqueId 0x7ffe state 3 healthMask 0x11a9`.
 4. Discriminator: `NCCL_MNNVL_ENABLE=0` makes the identical cross-tray all-reduce complete immediately over `Using network Socket`. Socket transport is diagnosis-only — a B3 step would be comm-bound and meaningless as an MFU row — so rack-057 pairs are unusable for the confirmation until IMEX is repaired.
 
-Working preamble for the next healthy pair: `GLOO_SOCKET_IFNAME=enP5p9s0 NCCL_SOCKET_IFNAME=enP5p9s0`, a fresh `MASTER_PORT`, and `MASTER_ADDR` resolved to a raw IP (rank0's own `enP5p9s0` address on node 0; DNS resolution of the master hostname elsewhere) to stay immune to the hosts-file mapping. The accepted env stack still needs one healthy-pair 8x/B3 A/X/B before entering `run_current.sh` and the stopping-point table.
+Working preamble for two-tray pairs: `GLOO_SOCKET_IFNAME=enP5p9s0 NCCL_SOCKET_IFNAME=enP5p9s0`, a fresh `MASTER_PORT`, and `MASTER_ADDR` resolved to a raw IP (rank0's own `enP5p9s0` address on node 0; DNS resolution of the master hostname elsewhere) to stay immune to the hosts-file mapping.
+
+A third allocation roll drew rack-059 pair `1632122` (gb-nvl-059-compute05/06), which passed the native health gate with that preamble: all-rank scalar correctness and 458.914 GB/s slowest-rank sustained all-reduce bus bandwidth, matching the healthy 463 GB/s reference, so the MNNVL failure is rack-057-specific. The pair is nevertheless the 1,965 MHz clock bin and its absolute B3 result sits in the degraded-allocation class alongside the `1629519` row: the exact-head A/X/B measured 1.442031/1.443601/1.444706 s for control A / env stack / control B — a 1.443369 s / 30.021699% MFU control midpoint with 0.185% drift, and an env-stack delta of **+0.232 ms / +0.016%, i.e. neutral** (memory unchanged, 161.38 GiB peak allocated in all rows). On a degraded pair the pointwise-tuning win measured at 4x is inside noise, so the environment stack remains accepted for 4x work, is harmless on 8x, and stays **out of `run_current.sh`** until a healthy-class (about 43% baseline) 8x pair re-gates it. This row is baseline-ineligible and does not supersede the stopping-point table.
 
 ## Decision boundary
 
@@ -678,6 +680,14 @@ f0e16c6bb91d9889d450ff072673c65076d2d0d826b6e8ea8ebeb4c07b4984fd  /mnt/pr1630_8x
 0a0093e71b52f804963710606f1f77ece99d37d90b6924b7ce1c82c59c948541  /mnt/pr1630_8x_nomnnvl_node1.log
 69787402d008711ea68f3b3289aa2dd05e7ee12034d4e7337d8a792e051f29f8  /mnt/pr1630_8x_crossdebug_node0.log
 f3203e22560a7cc1e041b36d406eee1faef580ea5d402470dffae8a1726c259c  /mnt/pr1630_8x_crossdebug_node1.log
+f6bdae8f1e6aef72285ddcb15a0639a28549e67d12e0c2b9db18536255efa8a9  /mnt/pr1630_8x_health_1632122_node0.log
+7ef78badee4d7077955e129d9df3ff29bc95353ca2f28dab74d08ebf6616b6d0  /mnt/pr1630_8x_health_1632122_node1.log
+77f6911fa369b850477a6026e86b026a10236d990bc38b8942aa948f85f99a18  /mnt/pr1630_8x_envstack_control_a_node0.log
+6df94ec852ef76334d8f45e991b8cde5bd2e38dc85fb9f3a342d8b5d1f16c16f  /mnt/pr1630_8x_envstack_control_a_node1.log
+15a99f49f50925df8e53c8ce628328c1cfee819bd14fa4276b630c775ef5bd67  /mnt/pr1630_8x_envstack_envstack_node0.log
+4704d335a688c2eab66ad6eb4e033c12b709938689abac82398e52326105cca6  /mnt/pr1630_8x_envstack_envstack_node1.log
+10eebf0d0eb9c71e5aca4eee51c66e68454767b0838af61516cce0d4e3a231f4  /mnt/pr1630_8x_envstack_control_b_node0.log
+f681ac1b60beb31aa3dd868e9005684810e05ddb26966bd78885141acd7864bb  /mnt/pr1630_8x_envstack_control_b_node1.log
 ```
 
 PR #1630's optimization stack was review-clean through measured head `20c36acef`; validation fixes followed at `0e60a0e9c` and `3f3f06541`. No dependency was added or installed. The operational GB200 launcher now forwards allocated IMEX character devices into multi-node containers so the existing MNNVL fabric is reachable.
