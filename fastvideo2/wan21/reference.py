@@ -67,7 +67,9 @@ def load_models(root: str | None = None, device: str = "cuda", dit_root: str | N
     tokenizer = AutoTokenizer.from_pretrained(root, subfolder="tokenizer")
     text_encoder = UMT5EncoderModel.from_pretrained(
         root, subfolder="text_encoder", torch_dtype=torch.bfloat16).to(device).eval()
-    dit = WanModel.from_pretrained(dit_root, torch_dtype=torch.bfloat16).to(device).eval()
+    # No torch_dtype: official stores/loads the DiT fp32 and computes under
+    # bf16 autocast — loading bf16 storage rounds the weights themselves.
+    dit = WanModel.from_pretrained(dit_root).to(device).eval()
     vae = AutoencoderKLWan.from_pretrained(
         root, subfolder="vae", torch_dtype=torch.float32).to(device).eval()
     return tokenizer, text_encoder, dit, vae

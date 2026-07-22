@@ -27,9 +27,12 @@ WAN21_T2V_1_3B = ModelCard(
                                       subfolder="text_encoder", dtype="bf16"),
         # The DiT is the OFFICIAL modeling code (vendored verbatim) running the
         # official-layout weights — alignment by construction, not by porting.
+        # dtype is STORAGE precision: official's pipeline loads fp32 storage
+        # and computes under bf16 autocast (provenance.precision); loading the
+        # weights as bf16 rounds them and shows up in the fp32 anchor row.
         "transformer": ComponentSpec("transformer", kind="dit",
                                      module="fastvideo2.wan21.model:WanModel",
-                                     subfolder="", dtype="bf16",
+                                     subfolder="", dtype="fp32",
                                      source="Wan-AI/Wan2.1-T2V-1.3B"),
         # Wan VAE runs fp32 (bf16 decode visibly degrades output).
         "vae": ComponentSpec("vae", kind="vae",

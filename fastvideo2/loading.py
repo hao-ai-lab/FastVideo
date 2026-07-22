@@ -61,11 +61,18 @@ def load_component(spec: ComponentSpec, root: str, device: str = "cpu") -> Any:
 
 
 def declared_torch_dtype(spec: ComponentSpec) -> Any:
-    """The card-declared compute dtype for a component, as a torch dtype.
-    This — not parameter introspection — is how loops and stages decide what
-    to cast inputs to (mixed-dtype modules make introspection wrong)."""
+    """The card-declared STORAGE dtype for a component, as a torch dtype.
+    This — not parameter introspection — is how stages decide what to cast
+    inputs to (mixed-dtype modules make introspection wrong)."""
     import torch
     return getattr(torch, _DTYPES[spec.dtype])
+
+
+def torch_dtype(name: str) -> Any:
+    """A card dtype string ("bf16"/"fp32") as a torch dtype — e.g. the
+    compute/autocast dtype declared by ``provenance.precision``."""
+    import torch
+    return getattr(torch, _DTYPES[name])
 
 
 def component_fingerprint(component: Any, spec: ComponentSpec, slices: int = 8) -> dict:

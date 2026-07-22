@@ -78,10 +78,12 @@ class WanDenoiseLoop:
         st.scratch["guidance"] = float(request.guidance_scale)
         st.scratch["capture"] = bool(request.capture_trajectory)
         st.scratch["instance"] = instance
-        # Compute dtype comes from the card, never from parameter introspection
-        # (the DiT is legitimately mixed-dtype: fp32 islands inside bf16).
-        from fastvideo2.loading import declared_torch_dtype
-        st.scratch["dit_dtype"] = declared_torch_dtype(instance.card.components["transformer"])
+        # Compute (autocast) dtype comes from the card's provenance — the
+        # precision the artifact assumes — never from parameter introspection.
+        # Storage dtype (ComponentSpec.dtype) is a separate axis: official
+        # stores the DiT fp32 and computes bf16 under autocast.
+        from fastvideo2.loading import torch_dtype
+        st.scratch["dit_dtype"] = torch_dtype(instance.card.provenance.precision)
         return st
 
     def next(self, st: LoopState) -> "WorkPlan | Done":
