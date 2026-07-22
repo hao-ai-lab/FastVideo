@@ -399,6 +399,28 @@ The first two rows sum to 300,095,807,422,464, the projection-gate figure above.
 
 The denominator is a house convention. The device reports 152 SMs (SM100) with a 2,062 MHz max SM clock at a 1,200 W limit; NVIDIA's GB200 NVL72 materials give 360 PFLOPS sparse FP16/BF16 across 72 GPUs, i.e. 2,500 TFLOP/s dense per GPU, and no vendor source quotes 2,450. Published MFU values are therefore 1.020408x their vendor-peak equivalents: 43.623053% reads 42.750592%, 40.810314% reads 39.994108%, and the head re-gate 39.982318% reads 39.182672% against 2,500 TFLOP/s. `nsys-ai`'s 2,250 TFLOP/s default matches the 1,000 W HGX B200 part, not these 1,200 W GB200s. Keep 2,450 for continuity with every published row — multiply reported MFU by 0.98 for the vendor-peak value — and relabel the baseline per the README rule if the convention is ever changed.
 
+## BF16 systems campaign toward 50% (2026-07-22)
+
+Scope: standard training conventions only (FP32 registered masters and Adam moments, BF16 working compute and reductions); quantization deferred. All 4x gates ran the committed packed harness at B2 on allocation `1631376` (gb-nvl-118-compute04, healthy class, 2,062 MHz max SM clock). Four interleaved controls measured 0.732045/0.732073/0.731982/0.729492 s (39.462/39.461/39.466/39.600% allocation-local MFU); each candidate below is judged against its bracketing control midpoint.
+
+A fresh Kineto category rollup (`harness/profile_fastvideo_train_pack_head.py`, B2, rank 0) decomposed the step: about 391 ms of nvjet GEMMs (band efficiency about 62% of the 2,450 convention), 133 ms FA4, 100.5 ms compiled pointwise/reduction kernels, 33.4 ms optimizer band (14.2 fused AdamW, 8.3 `_foreach_copy_`, 4.1 clip `_foreach_mul_`, 2.2 `_foreach_norm`), 4.6 ms of 203 eager `aten::sum` calls at compile-region boundaries (broadcast AdaLN/timestep gradient reductions), and mostly-overlapped FSDP staging (17.1 chunk_cat + 7.9 split_with_sizes + 25.8 PtoP). Eliminating the entire non-GEMM/attention main-stream band would land near the 50% target, which framed the gates below.
+
+| 4x/B2 gate | Candidate median | vs bracket midpoint | Verdict |
+|---|---:|---:|---|
+| `TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1` | 0.727078 s / 39.732% | -4.981 ms / -0.680%; +0.270 pp (0.0039% drift) | **accept** |
+| `CUBLASLT_WORKSPACE_SIZE=76800` alone | 0.732398 s / 39.443% | +0.370 ms / +0.051% | neutral alone |
+| workspace + coordinate descent | 0.724103 s / 39.895% | -7.925 ms / -1.083%; +0.432 pp | **best stack; carry both envs** |
+| cuDNN video self-attention (scratch swap) | 0.730204 s / 39.562% | -0.533 ms / -0.073% (0.341% drift) | neutral; reject source change |
+| cuDNN + workspace + coordinate descent | 0.724667 s / 39.864% | -6.070 ms / -0.831% | no additive value over env stack |
+
+The coordinate-descent candidate re-tunes Inductor pointwise/reduction configs only; the previously rejected `max-autotune-no-cudagraphs` gate additionally autotuned GEMMs into SM100 register-pressure fallbacks, so the two results do not conflict. The 2.98 ms spread between the two accepted-stack rows is within compile-lottery variance across coordinate-descent searches. Memory was unchanged in all rows.
+
+Supporting microgates, all committed: `probes/benchmark_ltx2_video_attention_backends.py` measured cuDNN SDPA at the exact (B, 4290, 32, 128) fwd+bwd shape 2.31-3.45% faster per call than FA4 (about -3.2 ms/step projected) with FA2 and SDPA-flash 2-3x slower, but the trainer gate above shows the per-call win does not survive end to end; reject without source change. `probes/bench_ltx2_tunableop_gemm.py` reproduced the GEMM band at 416.5 ms single-GPU (validating the profile) and found `PYTORCH_TUNABLEOP` non-functional on this CUDA 13 build (tune pass writes no CSV; replay delta inside noise): reject. The same probe measured the 75 MB cuBLASLt workspace at -3.2% band in isolation, which motivated the workspace rows above; the trainer shows it is only additive under coordinate descent.
+
+Batch capacity at 4x is rejected decisively. `harness/benchmark_fastvideo_train_blockskip.py` forces `block_skip` checkpointing with a stride (the LTX-2 wrapper does not plumb `n_layer`, so plain `block_skip` degenerates to full). B3 with every-6th-block checkpointing fits memory (160.9/179.9 GiB allocated/reserved) and passes all embedded proofs, but on the same tray whose B2 re-gate measured 0.7212 s / 40.06%, it ran 1.511623 s / 28.666% with the native allocator and 5.261937 s / 8.235% with `expandable_segments:True` — an allocator-pathology collapse at the reservation ceiling, not recompute cost (which models at about +2%). Do not pursue 4x/B3 or near-ceiling batch capacity without first freeing tens of GiB of real activation memory.
+
+The first 8x confirmation attempt failed on infrastructure, recorded here for the next allocation: two-tray pair `1631584` (gb-nvl-057-compute01/08) drew a 1,965 MHz max-clock bin with heterogeneous NIC counts (4 vs 8), `/etc/hosts` mapping each host's own name to `127.0.1.1` (which poisons Gloo's advertised address; fix is `GLOO_SOCKET_IFNAME=enP5p9s0`, matching this report's historical interface note), and cross-tray TCP blocked on ephemeral ports (torchrun rendezvous on the master port succeeded while Gloo full-mesh was refused and NCCL bootstrap hung silently). The allocation was cancelled; the accepted env stack still needs one healthy-pair 8x/B3 A/X/B before entering `run_current.sh` and the stopping-point table.
+
 ## Decision boundary
 
 1. Do not write a whole-transformer mega-kernel or integrate the current QuACK wrapper.
@@ -620,6 +642,27 @@ f39045adab530f07cbd080abc08e1b3b45bb8b80aa1ce16f605366625f492d32  /mnt/pr1630_fl
 9a353a98d3697ed84b3b485cb20d52fad8acfabcb6d11cc808db88e20a48afec  [failed base-patch first attempt, then NCCL symmetric-memory init failure at B2] /mnt/pr1630_flop_audit/b2.log
 3b8537b9dbe4d2a707a16bef65165b2fbba1645d67ca2628a36b45b0c96a7241  [eager B2 OOM, capacity-blocked] /mnt/pr1630_flop_audit/b2_nosymm.log
 64feb60e3deb87bb76564a30326922470c2113bd729b2ce85fdacf40743ddd25  [committed probes/audit_train_flops_per_sample.py] /mnt/audit_train_flops_per_sample.py
+1a2d98385c77b491aed2009f9bf23e004459c97c0b6f8dcf3ab17dbc245eba52  /mnt/pr1630_head_profile_b2.log
+89826925326da5da851a5766eff4b7e98fc66139851d470bd6a5e58f264cf75d  /mnt/pr1630_head_profile_b2.summary.json
+50cc112f6bc88990154db11880b0788933467655c4aa4ac6829e2385c87e1147  /mnt/pr1630_cdt_gate/control_a.log
+b031e3152d022816eabf450f0f619a15496291aadad92207e88579e19df6c3b5  /mnt/pr1630_cdt_gate/candidate.log
+2b268a684fc265810703898480799e12c88d21807543104cff6e37d899dc6c8e  /mnt/pr1630_cdt_gate/control_b.log
+1accd7c721551ab800ddbfe82e1a99723d99aaa14899fe7e065a2238ec3f5d16  /mnt/pr1630_ws_gate/ws75.log
+00e998a4498652c4416c19b35b9b68db046b1e24256bb0491f4a3e2a0667ba79  /mnt/pr1630_ws_gate/ws75_cdt.log
+132b7939e026cec3d7194ac2d10c19f56ed37b30d7bbca22b3fe28622dcf1db5  /mnt/pr1630_ws_gate/control_c.log
+d5ee5c7e85c4f31583676c8af795b5882dc637f7d11bd32256642b95f75ad888  /mnt/pr1630_cudnn_gate/cudnn_alone.log
+c6cbdd0e447afa14f0eb5ed37183151ce2f4705fbcffe812ca1182e2897a60e7  /mnt/pr1630_cudnn_gate/cudnn_cdt_ws.log
+cf116038960d0edbe2a94982d42d5a18feb34629fb85cfdd260d889985304ed5  /mnt/pr1630_cudnn_gate/control_d.log
+35a882dbb4972476e3dfb0207970a6140c1dad31e8f8a864ebfb5da0a273ee0f  /mnt/pr1630_video_attn_gate_b2.log
+0cc840410699cb6b28840134007eff8f28d2a2a45f9385863124aa3277e90793  /mnt/pr1630_video_attn_gate_b3.log
+6fc72a3d3c1af53712662575c012df386cbbb77d4cec0a573ebe6df1901587eb  [committed probes/benchmark_ltx2_video_attention_backends.py] /mnt/benchmark_ltx2_video_attention_backends.py
+286afc02d989a72567c573532a45db61782c90c6b9f8b9bb8ba85d12ed26c718  /mnt/pr1630_gemm_band_default.log
+653824bad44bb39142ed74c228cc338a4ef9f990e5c5338224ed6f5cb34dfee1  /mnt/pr1630_gemm_band_ws75.log
+37f5c465f534b1c32a0080c0585ab7c5c705214ad8f33dea912ce63179e256cc  /mnt/pr1630_gemm_band_tune.log
+b973790131bf7a6f04799c482ad919b03094489ef8ac56478f271febf93fbbc0  /mnt/pr1630_gemm_band_replay.log
+47cd9bf4c7a7833ad3dfcf4e86e0eb10627499748992da89e15831bf6634d56e  [committed probes/bench_ltx2_tunableop_gemm.py] /mnt/bench_ltx2_tunableop_gemm.py
+4ed684c2858008e4e02ca70943974b21856172dd730d18cd8ea8d84334b9eaf0  /mnt/pr1630_b3skip6_smoke.log
+8a8ea4c8eabd20188f75d2f5aee98f0b4f6065d7e09f70df4f6fe052c2d8f87b  /mnt/pr1630_b3skip6_expandable.log
 ```
 
 PR #1630's optimization stack was review-clean through measured head `20c36acef`; validation fixes followed at `0e60a0e9c` and `3f3f06541`. No dependency was added or installed. The operational GB200 launcher now forwards allocated IMEX character devices into multi-node containers so the existing MNNVL fabric is reachable.
