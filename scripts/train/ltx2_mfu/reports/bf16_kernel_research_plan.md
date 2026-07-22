@@ -30,6 +30,14 @@ cluster shape mismatch on the 152-SM part.
   <5 ms/step at B2 (below one MFU tenth after drift).
 - Ceiling if forward reaches backward's 46.2%: 41.9 -> 31.7 ms/step; combined
   kernel band 56.7% -> 57.9%. Meaningful only stacked with experiment 2.
+- STATUS 2026-07-22: tail-tile sub-line KILLED by `probes/bench_fa4_tail_tile.py`
+  — ragged S=4,290 matches clean 4,224/4,352 per-FLOP (-0.24% at B2, +2.56% at
+  B3, noise), so padding/seqused buys nothing. The probe also reproduces the
+  fwd<bwd inversion standalone (fwd 686-718 vs bwd 869-955 TF/s on a bare GPU,
+  no FSDP/compile): the anomaly is intrinsic to the FA4 CuTe forward schedule
+  at B*H=64-96, S~4.3k, D=128 non-causal. Remaining path is upstream FA4
+  forward schedule/occupancy work (or CuTe tile/cluster config sweeps), not
+  input-shape tricks.
 
 ## 2. cuBLASLt algo enumeration for the two worst GEMM bands (days; expected +0.5-1.5 pp)
 
