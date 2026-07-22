@@ -8,11 +8,11 @@ synthetic inputs. Catches loader or forward-signature regressions in
 ``fastvideo.train.models.ltx2.LTX2Model`` and the underlying
 ``LTX2VideoOnlyTransformer3DModel``.
 
-LTX-2's transformer takes per-token sigma timesteps in [0, 1] shaped
-[B, tokens] and a post-connector Gemma text embedding (3840-d for 2.0;
-4096-d for 2.3, which has no in-DiT caption projection); it returns
-the denoised x0 prediction. This mirrors the kwargs in
-``LTX2Model._build_distill_input_kwargs``.
+LTX-2's transformer takes sigma timesteps in [0, 1]; uniform T2V sigmas use
+[B, 1] at SP=1 and expand to [B, tokens] for sequence sharding. It also takes
+a post-connector Gemma text embedding (3840-d for 2.0; 4096-d for 2.3, which
+has no in-DiT caption projection) and returns the denoised x0 prediction. This
+mirrors the kwargs in ``LTX2Model._build_distill_input_kwargs``.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29519")
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -211,7 +212,7 @@ def test_ltx2_wrapper_contract_runs_on_cpu(
     assert transformer.forward_fps == 12.0
     assert transformer.forward_text_dim == text_dim
     assert transformer.forward_timestep is not None
-    assert transformer.forward_timestep.shape == (1, 8)
+    assert transformer.forward_timestep.shape == (1, 1)
     assert torch.allclose(
         transformer.forward_timestep[:, 0],
         batch.timesteps / 1000.0,
@@ -234,6 +235,32 @@ def test_ltx2_wrapper_contract_runs_on_cpu(
         assert get_forward_context().forward_batch is outer_batch
     assert backward_fps == [12.0]
     assert transformer.video_weight.grad.item() == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(("sp_size", "expected_tokens"), [(1, 1), (2, 8)])
+def test_ltx2_uniform_timestep_shape_follows_sequence_parallelism(
+    sp_size: int,
+    expected_tokens: int,
+) -> None:
+    model = object.__new__(LTX2Model)
+    model.training_config = SimpleNamespace(
+        distributed=SimpleNamespace(sp_size=sp_size),
+    )
+    model._token_count = 8
+    timesteps = torch.tensor([250.0, 750.0])
+
+    kwargs = model._build_distill_input_kwargs(
+        torch.empty(2, 128, 2, 2, 2),
+        timesteps,
+        {"encoder_hidden_states": torch.empty(2, 4, 3840)},
+    )
+
+    assert kwargs["timestep"].shape == (2, expected_tokens)
+    assert torch.equal(
+        kwargs["timestep"],
+        torch.tensor([[0.25], [0.75]]).expand(2, expected_tokens),
+    )
+    assert kwargs["timestep"].is_contiguous()
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -262,18 +289,16 @@ def test_ltx2_model_loads_and_forwards(case: str):
     transformer = transformer.to(device=device, dtype=dtype).eval()
 
     # LTX-2 transformer takes [B, 128, T, H, W] latents, a post-connector
-    # Gemma embedding, and PER-TOKEN sigmas in [0, 1] ([B, T*H*W] with
-    # patch size 1x1x1). Small spatial + few frames so this fits next to
-    # the 13B model.
+    # Gemma embedding, and a uniform per-sample T2V sigma in [0, 1]. Small
+    # spatial + few frames keep the activation footprint below the 13B model.
     b, c, t, h, w = 1, 128, 3, 8, 8
-    tokens = t * h * w
     hidden_states = torch.randn(b, c, t, h, w, device=device, dtype=dtype)
     encoder_hidden_states = torch.randn(b,
                                         _LTX2_TEXT_LEN,
                                         text_dim,
                                         device=device,
                                         dtype=dtype)
-    timestep = torch.full((b, tokens), 0.5, device=device, dtype=torch.float32)
+    timestep = torch.full((b, 1), 0.5, device=device, dtype=torch.float32)
 
     with torch.no_grad(), torch.autocast(device.type, dtype=dtype), \
             set_forward_context(

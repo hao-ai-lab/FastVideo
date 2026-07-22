@@ -12,9 +12,9 @@ Subclasses WanModel but replaces the pieces where LTX-2 differs:
     shifted-logit-normal with a token-count-dependent shift
     (0.95 @ 1024 tokens -> 2.05 @ 4096 tokens) and a 10% uniform
     mixture, instead of scheduler-index sampling
-  - the DiT consumes PER-TOKEN sigmas in [0, 1] shaped [B, tokens]
-    (not integer 0-1000 timesteps) and returns the DENOISED x0
-    prediction; ``predict_noise`` converts it back to the
+  - the DiT consumes sigmas in [0, 1] (one per sample for uniform T2V,
+    expanded per token when sequence parallelism needs to shard them)
+    and returns the DENOISED x0 prediction; ``predict_noise`` converts it back to the
     framework's velocity convention v = (x_t - x0) / sigma so the
     default FineTune target ``noise - clean`` applies unchanged
   - temporal RoPE coordinates are divided by fps read from
@@ -525,12 +525,13 @@ class LTX2Model(WanModel):
         if token_count is None:
             token_count = int(noise_input.shape[2] * noise_input.shape[3] * noise_input.shape[4])
 
-        # The DiT wants per-token sigmas in [0, 1] shaped [B, tokens]
-        # (i2v-style conditioning would zero conditioned tokens; plain
-        # T2V uses the same sigma everywhere). ``timestep`` follows the
-        # framework's sigma*1000 convention.
+        # Plain T2V uses one sigma per sample. At SP=1 the AdaLN output
+        # broadcasts over tokens, so embedding that sigma once avoids a large
+        # redundant activation. SP sharding still requires an explicit token
+        # dimension so each rank receives its local timestep slice.
         sigma = (timestep.to(torch.float32) / 1000.0).view(batch_size, 1)
-        per_token_timestep = sigma.expand(batch_size, token_count).contiguous()
+        if int(self.training_config.distributed.sp_size or 1) > 1:
+            sigma = sigma.expand(batch_size, token_count).contiguous()
 
         return {
             "hidden_states": noise_input,
@@ -538,6 +539,6 @@ class LTX2Model(WanModel):
             # Post-connector embeddings are all-valid; the connector
             # replaced pad positions with learnable registers.
             "encoder_attention_mask": None,
-            "timestep": per_token_timestep,
+            "timestep": sigma,
             "return_dict": False,
         }
