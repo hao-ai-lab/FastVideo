@@ -49,7 +49,11 @@ def load_component(spec: ComponentSpec, root: str, device: str = "cpu") -> Any:
     import torch
     dtype = getattr(torch, _DTYPES[spec.dtype])
     module = cls.from_pretrained(root, subfolder=spec.subfolder, torch_dtype=dtype)
-    return module.to(device).requires_grad_(False).eval()
+    # torch_dtype was renamed to `dtype` upstream and newer releases may ignore
+    # the old kwarg — force the card-declared dtype so the contract, not the
+    # loader's default, decides. (T1 fingerprints hash fp32-normalized values,
+    # so only a forward would have caught this otherwise.)
+    return module.to(device=device, dtype=dtype).requires_grad_(False).eval()
 
 
 def component_fingerprint(component: Any, spec: ComponentSpec, slices: int = 8) -> dict:
