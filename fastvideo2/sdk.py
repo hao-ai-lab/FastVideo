@@ -117,8 +117,9 @@ class Model:
                 f"digest={self.card.digest()})")
 
 
-def load(model: str, *, root: str | None = None, device: str | None = None) -> Model:
-    """Resolve a model id or HF repo id, load it resident, return the handle."""
+def load(model_id: str, *, root: str | None = None, device: str | None = None) -> Model:
+    """Resolve a model id from the catalog, load it resident, return the
+    handle. HF repo strings are card ingredients, not load keys."""
     from fastvideo2.registry import resolve
-    card, build_pipeline = resolve(model)
+    card, build_pipeline = resolve(model_id)
     return Model(card, build_pipeline(), _load_instance(card, root=root, device=device))
