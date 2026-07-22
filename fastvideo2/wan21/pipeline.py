@@ -14,12 +14,28 @@ from fastvideo2.pipeline import ComponentStage, LoopStage, Pipeline
 _TEXT_MAX_LEN = 512
 
 
+def official_text_clean(text: str) -> str:
+    """The official Wan text preprocessing (Wan-Video/Wan2.1
+    wan/modules/tokenizers.py, clean='whitespace'): ftfy.fix_text + double
+    html-unescape, then whitespace collapse. Not cosmetic — ftfy's default
+    width fixing folds full-width punctuation (，→ ,), which *retokenizes*
+    CJK prompts. Skipping this diverged the negative-prompt embeddings from
+    official by rel L2 0.42 (see the anchor ledger records)."""
+    import html
+    import re
+
+    import ftfy
+    text = ftfy.fix_text(text)
+    text = html.unescape(html.unescape(text))
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _encode_one(tokenizer: Any, encoder: Any, text: str) -> Any:
-    """UMT5 encoding with the Wan convention: pad to 512, then zero every
-    position past the true sequence length (padding positions carry encoder
-    outputs otherwise)."""
+    """UMT5 encoding with the Wan convention: official text cleaning, pad to
+    512, then zero every position past the true sequence length (padding
+    positions carry encoder outputs otherwise)."""
     import torch
-    batch = tokenizer([text], padding="max_length", max_length=_TEXT_MAX_LEN,
+    batch = tokenizer([official_text_clean(text)], padding="max_length", max_length=_TEXT_MAX_LEN,
                       truncation=True, add_special_tokens=True,
                       return_attention_mask=True, return_tensors="pt")
     device = next(encoder.parameters()).device

@@ -68,11 +68,25 @@ def load_models(root: str | None = None, device: str = "cuda"):
     return tokenizer, text_encoder, dit, vae
 
 
+def clean_text(text: str) -> str:
+    """Official Wan text preprocessing (wan/modules/tokenizers.py,
+    clean='whitespace'): ftfy + double html-unescape + whitespace collapse.
+    ftfy's width fixing folds full-width punctuation (，→ ,), which changes
+    CJK tokenization — skipping it diverges from official embeddings."""
+    import html
+    import re
+
+    import ftfy
+    text = ftfy.fix_text(text)
+    text = html.unescape(html.unescape(text))
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def encode_prompt(tokenizer, text_encoder, text: str):
     """UMT5 encode, padded to 512 with encoder outputs past the true sequence
     length zeroed (the Wan convention)."""
     import torch
-    batch = tokenizer([text], padding="max_length", max_length=512, truncation=True,
+    batch = tokenizer([clean_text(text)], padding="max_length", max_length=512, truncation=True,
                       add_special_tokens=True, return_attention_mask=True,
                       return_tensors="pt")
     device = next(text_encoder.parameters()).device

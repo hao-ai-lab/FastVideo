@@ -14,6 +14,7 @@ dependencies = [
     "diffusers>=0.33",
     "transformers>=4.46",
     "huggingface_hub",
+    "ftfy",
     "imageio",
     "imageio-ffmpeg",
 ]

@@ -43,7 +43,13 @@ def main() -> None:
     ledger: list[GateResult] = []
     for impl in [s.strip() for s in args.impls.split(",") if s.strip()]:
         print(f"== {impl} ==")
-        records = A.run_anchor(adapters[impl](root, args.device), gdir)
+        try:
+            records = A.run_anchor(adapters[impl](root, args.device), gdir)
+        except Exception as e:  # one broken impl must not sink the others' report
+            import traceback
+            traceback.print_exc()
+            records = [{"name": "adapter", "status": "fail",
+                        "detail": f"{type(e).__name__}: {e}"}]
         all_records[impl] = records
         for rec in records:
             r = dict(rec)

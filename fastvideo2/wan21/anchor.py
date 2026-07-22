@@ -129,7 +129,9 @@ def fastvideo_main_adapter(root: str, device: str) -> dict[str, Callable]:
             path = os.path.join(root, "vae")
             args = FastVideoArgs(model_path=path, pipeline_config=WanT2V480PConfig())
             args.device = torch.device(device)
-            cache["vae"] = VAELoader().load(path, args).to(torch.float32).eval()
+            # their loader can leave the module on CPU regardless of args.device
+            cache["vae"] = VAELoader().load(path, args).to(torch.device(device),
+                                                           torch.float32).eval()
         return cache["vae"]
 
     def text_encode(text: str) -> np.ndarray:
