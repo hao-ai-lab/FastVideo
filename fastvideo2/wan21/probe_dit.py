@@ -96,7 +96,7 @@ def main() -> None:
         if k_lens is not None:
             L = kh.shape[2]
             idx = torch.arange(L, device=kh.device)[None]
-            mask = (idx < k_lens[:, None])[:, None, None]         # [B,1,1,L]
+            mask = (idx < k_lens.to(kh.device)[:, None])[:, None, None]   # [B,1,1,L]
         out = torch.nn.functional.scaled_dot_product_attention(
             qh, kh, vh, attn_mask=mask, dropout_p=0.0, is_causal=causal, scale=softmax_scale)
         return out.transpose(1, 2)
