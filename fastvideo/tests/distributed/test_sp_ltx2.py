@@ -41,7 +41,10 @@ def _seed_everything(seed: int) -> None:
     torch.backends.cudnn.allow_tf32 = False
 
 
-def _build_tiny_ltx2_config() -> LTX2VideoConfig:
+def _build_tiny_ltx2_config(
+    *,
+    pack_attention_projections: bool = False,
+) -> LTX2VideoConfig:
     arch_config = LTX2VideoArchConfig(
         num_attention_heads=4,
         attention_head_dim=8,
@@ -69,6 +72,7 @@ def _build_tiny_ltx2_config() -> LTX2VideoConfig:
         audio_cross_attention_dim=16,
         audio_positional_embedding_max_pos=[8],
         av_ca_timestep_scale_multiplier=1,
+        pack_attention_projections=pack_attention_projections,
     )
     return LTX2VideoConfig(arch_config=arch_config)
 
@@ -150,7 +154,12 @@ def _assert_finite(name: str, tensor: torch.Tensor) -> None:
     )
 
 
-def _run_worker(mode: str, output_path: Path) -> None:
+def _run_worker(
+    mode: str,
+    output_path: Path,
+    *,
+    pack_attention_projections: bool,
+) -> None:
     if mode not in {"single", "sp"}:
         raise ValueError(f"Unsupported mode: {mode}")
 
@@ -165,7 +174,9 @@ def _run_worker(mode: str, output_path: Path) -> None:
     try:
         maybe_init_distributed_environment_and_model_parallel(1, sp_size)
 
-        config = _build_tiny_ltx2_config()
+        config = _build_tiny_ltx2_config(
+            pack_attention_projections=pack_attention_projections,
+        )
         model = LTX2Transformer3DModel(config=config, hf_config={})
         model = model.to(device=device, dtype=torch.float32)
         _initialize_model_parameters(model)
@@ -215,6 +226,8 @@ def _run_torchrun(
     mode: str,
     nproc_per_node: int,
     output_path: Path,
+    *,
+    pack_attention_projections: bool,
 ) -> None:
     cmd = [
         "torchrun",
@@ -231,6 +244,8 @@ def _run_torchrun(
         "--output",
         str(output_path),
     ]
+    if pack_attention_projections:
+        cmd.append("--pack-attention-projections")
     env = os.environ.copy()
     env["FASTVIDEO_ATTENTION_BACKEND"] = "TORCH_SDPA"
     process = subprocess.run(cmd, capture_output=True, text=True, env=env)
@@ -242,7 +257,11 @@ def _run_torchrun(
         )
 
 
-def test_sp_gradient_matches_single_rank(tmp_path: Path) -> None:
+@pytest.mark.parametrize("pack_attention_projections", [False, True])
+def test_sp_gradient_matches_single_rank(
+    tmp_path: Path,
+    pack_attention_projections: bool,
+) -> None:
     if not torch.cuda.is_available():
         pytest.skip("This test requires CUDA.")
     if torch.cuda.device_count() < SP_WORLD_SIZE:
@@ -251,20 +270,23 @@ def test_sp_gradient_matches_single_rank(tmp_path: Path) -> None:
         )
 
     script_path = Path(__file__).resolve()
-    single_path = tmp_path / "single_rank_grads.pt"
-    sp_path = tmp_path / f"sp{SP_WORLD_SIZE}_grads.pt"
+    layout = "packed" if pack_attention_projections else "split"
+    single_path = tmp_path / f"single_rank_{layout}_grads.pt"
+    sp_path = tmp_path / f"sp{SP_WORLD_SIZE}_{layout}_grads.pt"
 
     _run_torchrun(
         script_path=script_path,
         mode="single",
         nproc_per_node=1,
         output_path=single_path,
+        pack_attention_projections=pack_attention_projections,
     )
     _run_torchrun(
         script_path=script_path,
         mode="sp",
         nproc_per_node=SP_WORLD_SIZE,
         output_path=sp_path,
+        pack_attention_projections=pack_attention_projections,
     )
 
     single_grads: dict[str, torch.Tensor] = torch.load(
@@ -311,6 +333,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--sp-grad-worker", action="store_true")
     parser.add_argument("--mode", choices=["single", "sp"], default=None)
     parser.add_argument("--output", type=str, default=None)
+    parser.add_argument("--pack-attention-projections", action="store_true")
     return parser.parse_args()
 
 
@@ -321,4 +344,8 @@ if __name__ == "__main__":
         raise SystemExit("This module is intended to be run by pytest.")
     if args.mode is None or args.output is None:
         raise SystemExit("--mode and --output are required in worker mode.")
-    _run_worker(mode=args.mode, output_path=Path(args.output))
+    _run_worker(
+        mode=args.mode,
+        output_path=Path(args.output),
+        pack_attention_projections=args.pack_attention_projections,
+    )
