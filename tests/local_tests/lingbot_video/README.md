@@ -11,8 +11,8 @@ FastVideo. The current port covers text-to-video (T2V) and text-and-image-to-vid
 These are local tests, which means they are run manually in this worktree and are
 not part of FastVideo's default CI suite. For TI2V, the input image is used by
 Qwen3-VL for prompt conditioning and by the VAE as the clean first-frame latent.
-Prompt rewriting, automatic negative-prompt generation, T2I, and video-reference
-conditioning are outside the current port.
+Prompt rewriting, automatic negative-prompt generation, and T2I are outside the
+current port.
 
 ## Current Testing Status
 
@@ -58,8 +58,8 @@ denoising steps, guidance 3, and seed 42. Both implementations run the positive
 and negative classifier-free-guidance branches as separate passes so their
 operation order is identical. The test compares conditioning, the clean-frame
 condition latent, initial noise, every denoising step, the final latent, decoded
-float pixels, and uint8 frames. Dense and MoE both match exactly. Their retained
-official and FastVideo MP4 files are byte-identical as an additional observation.
+float pixels. Dense and MoE both match exactly. MP4 encoding is outside this
+strict comparison.
 
 FastVideo's released presets use batched CFG for speed. That production setting
 is covered by a smoke test, not by the exact base comparison.
@@ -339,6 +339,7 @@ LINGBOT_VIDEO_PARITY_DETERMINISTIC=1 \
 | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `tests/local_tests/encoders/test_lingbot_video_ti2v_text_encoder_parity.py`         | Exact text-only and image-conditioned Qwen3-VL hidden states           |
 | `tests/local_tests/vaes/test_lingbot_video_ti2v_vae_encoder_parity.py`              | Exact clean-frame VAE posterior parameters and seeded sample           |
+| `tests/local_tests/pipelines/test_lingbot_video_ti2v_pipeline_parity.py`            | Dense/MoE exact one-step, 40-step, and decoded-pixel parity            |
 | `tests/local_tests/vaes/test_lingbot_video_ti2v_refiner_vae_parity.py`              | Exact refiner VAE, clean-frame, noise, and initial latent from one MP4 |
 | `tests/local_tests/pipelines/test_lingbot_video_ti2v_refiner_pipeline_smoke.py`     | Production MoE TI2V, batched CFG, in-memory refinement, and decode     |
 | `tests/local_tests/pipelines/test_lingbot_video_pipeline_smoke.py`                  | TI2V routing, processor loading, image-latent contract, and T2V smoke  |
@@ -354,6 +355,32 @@ LINGBOT_VIDEO_RUN_GPU_TESTS=1 $PY -m pytest -v -s \
 LINGBOT_VIDEO_RUN_GPU_TESTS=1 $PY -m pytest -v -s \
   tests/local_tests/vaes/test_lingbot_video_ti2v_vae_encoder_parity.py
 ```
+
+The exact base-pipeline test first records the official output, then compares
+FastVideo with it. Run one variant at a time and set `VARIANT` to `dense` or
+`moe`:
+
+```bash
+export CASE_DIR="$FV_HUB/lingbot-video-reference/assets/cases/ti2v/example_4"
+export PARITY_ROOT="$FV_HUB/fastvideo-port-lingbot-video/outputs/lingbot-video/validation/ti2v_exact_parity"
+export LINGBOT_QWEN_ATTN_IMPLEMENTATION=sdpa
+export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
+VARIANT=dense
+
+$PY tests/local_tests/lingbot_video/generate_ti2v_reference_baseline.py \
+  "$VARIANT" "$CASE_DIR" "$PARITY_ROOT/reference/$VARIANT"
+
+LINGBOT_VIDEO_RUN_GPU_TESTS=1 \
+LINGBOT_VIDEO_TI2V_VARIANT="$VARIANT" \
+LINGBOT_VIDEO_TI2V_BASELINE_DIR="$PARITY_ROOT/reference/$VARIANT" \
+LINGBOT_VIDEO_TI2V_CASE_DIR="$CASE_DIR" \
+LINGBOT_VIDEO_TI2V_RESULT_DIR="$PARITY_ROOT/fastvideo/$VARIANT" \
+  $PY -m pytest -v -s \
+  tests/local_tests/pipelines/test_lingbot_video_ti2v_pipeline_parity.py
+```
+
+The SDPA settings keep the Qwen3-VL attention backend the same in both
+implementations. This removes kernel-rounding differences from the exact test.
 
 The refiner VAE parity test requires one shared 121-frame base MP4. Both VAE
 implementations reload that same file, so MP4 compression is held constant:

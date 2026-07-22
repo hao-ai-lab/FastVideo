@@ -359,7 +359,8 @@ def request_to_sampling_param(
     if request.plan is not None:
         raise NotImplementedError("GenerationRequest.plan is not wired into VideoGenerator yet")
 
-    sampling_param = SamplingParam.from_pretrained(model_path, workload_type)
+    sampling_param = (SamplingParam.from_pretrained(model_path)
+                      if workload_type is None else SamplingParam.from_pretrained(model_path, workload_type))
     if request.state is not None:
         _validate_continuation_state(request.state)
         sampling_param.continuation_state = request.state

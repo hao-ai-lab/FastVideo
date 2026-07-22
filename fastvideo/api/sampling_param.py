@@ -187,7 +187,7 @@ class SamplingParam:
     def __post_init__(self) -> None:
         self.data_type = "video" if self.num_frames > 1 else "image"
 
-    def check_sampling_param(self):
+    def check_sampling_param(self) -> None:
         if self.prompt_path and not self.prompt_path.endswith(".txt"):
             raise ValueError("prompt_path must be a txt file")
 

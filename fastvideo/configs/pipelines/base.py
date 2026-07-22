@@ -31,7 +31,7 @@ class PipelineConfig:
     pipeline_config_path: str | None = None
 
     # Video generation parameters
-    embedded_cfg_scale: float = 6.0
+    embedded_cfg_scale: float | None = 6.0
     flow_shift: float | None = None
     flow_shift_sr: float | None = None
     disable_autocast: bool = False
