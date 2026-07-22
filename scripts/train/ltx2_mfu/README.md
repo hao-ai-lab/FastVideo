@@ -52,6 +52,7 @@ Historical runners may reference `/mnt/FastVideo`, `/mnt/fv-pr1630-*`, `/mnt/fa4
 | raw velocity, max-autotune, attention compile flag, RMSNorm autocast removal, prefetch, 1-D mesh | rejected or timing-neutral | do not repeat without a new mechanism |
 | CUTLASS/cuBLASLt fused GELU, QuACK/NVFP4 complete projection, current TP layouts | rejected by speed, safety, or quality gates | focused reports and exact-shape probes |
 | fixed-arena ZeRO-2-style runtime and whole-step CUDA graphs | research only; not lifecycle-complete | fixed-arena and graph reports/probes |
+| BF16 kernel research toward 50% (FA4 fwd anomaly, cuBLASLt algo pinning, launch-gap graphs, CuTe ffn GEMMs) | planned; systems ceiling is 48.34% with today's kernels | [`reports/bf16_kernel_research_plan.md`](reports/bf16_kernel_research_plan.md) |
 | 1x standard full-parameter training | capacity blocked | add an explicit optimizer/parameter offload mode or use a clearly labeled nonstandard state precision |
 
 ## Artifact and credential policy
