@@ -83,6 +83,8 @@ def env_fingerprint() -> dict:
             env[mod] = __import__(mod).__version__
         except ImportError:
             pass
+    from fastvideo2.layers.attention import available_backends, backend_policy
+    env["attention"] = {"policy": backend_policy(), "available": available_backends()}
     return env
 
 
