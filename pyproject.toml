@@ -6,11 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "fastvideo2"
 version = "0.1.0"
 description = "Post-training-to-serving substrate for video generation models (v2.1 MVP: Wan2.1)"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { file = "LICENSE" }
 dependencies = [
     "numpy",
-    "torch>=2.4",
+    "torch>=2.12",
     "diffusers>=0.33",
     "transformers>=4.46",
     "huggingface_hub",

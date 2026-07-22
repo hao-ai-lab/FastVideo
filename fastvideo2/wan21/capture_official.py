@@ -7,12 +7,19 @@ deliberately — at oracle bring-up, on a reference change, on an environment
 bump — and never imported by anything in fastvideo2. The official repo enters
 this codebase only as the commit hash recorded in the goldens manifest.
 
-    git clone https://github.com/Wan-Video/Wan2.1 /tmp/wan-official
-    python -m venv --system-site-packages /tmp/wan-env
-    /tmp/wan-env/bin/pip install easydict ftfy
-    PYTHONPATH=/tmp/wan-official:<this repo> /tmp/wan-env/bin/python \\
-        -m fastvideo2.wan21.capture_official \\
-        --wan-repo /tmp/wan-official --ckpt-dir <Wan-AI/Wan2.1-T2V-1.3B> \\
+Environment policy: capture runs in the SAME python/torch environment that
+fastvideo2 targets (python 3.12, torch 2.12 — the fastvideo cluster venv),
+even though the official repo pins older versions. Goldens captured under a
+different torch would conflate implementation divergence with kernel/version
+divergence; one shared environment isolates the implementation variable. The
+official repo is never installed — it rides PYTHONPATH; its missing deps go
+to a pip ``--target`` dir, leaving the shared venv untouched:
+
+    git clone https://github.com/Wan-Video/Wan2.1 /mnt/wan-official
+    <fastvideo-venv>/bin/pip install --target /mnt/wan-extra easydict ftfy
+    PYTHONPATH=/mnt/wan-official:/mnt/wan-extra:<this repo> \\
+        <fastvideo-venv>/bin/python -m fastvideo2.wan21.capture_official \\
+        --wan-repo /mnt/wan-official --ckpt-dir <Wan-AI/Wan2.1-T2V-1.3B> \\
         --out <repo>/fastvideo2/evidence/goldens/wan21-official
 
 Captured goldens (all inputs generated from pinned seeds and stored in-file):
@@ -46,6 +53,9 @@ def _env(wan_repo: str) -> dict:
     env["repo"] = "https://github.com/Wan-Video/Wan2.1"
     env["commit"] = subprocess.run(["git", "-C", wan_repo, "rev-parse", "HEAD"],
                                    capture_output=True, text=True).stdout.strip()
+    # Deliberate: official code runs on fastvideo2's env, not its own pins,
+    # so anchor deltas measure implementations, not torch versions.
+    env["env_policy"] = "fastvideo-env"
     return env
 
 

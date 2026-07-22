@@ -41,6 +41,11 @@ surfaces. Read `README.md` first.
    codebase only as a commit hash in a goldens manifest — never as a
    dependency, submodule, or vendored code. When conventions conflict,
    official wins; goldens are re-captured deliberately, like re-blessing.
+8. **One environment for goldens and gates.** The supported env is python 3.12
+   + torch 2.12 (the fastvideo cluster venv). Goldens are captured with that
+   same env — official code rides `PYTHONPATH`, its extra deps go to a pip
+   `--target` dir — so anchor deltas measure implementation differences, never
+   torch/kernel version differences.
 
 ## Commands
 
