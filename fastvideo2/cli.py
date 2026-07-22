@@ -43,7 +43,7 @@ def _generate(args) -> int:
 def _verify(args) -> int:
     from fastvideo2.verify import LEDGER, verify
     results = verify(args.model, tier=args.tier, root=args.root, device=args.device,
-                     bless=args.bless)
+                     bless=args.bless, anchor=args.anchor)
     for r in results:
         mark = {"pass": "PASS ", "blessed": "BLESS", "fail": "FAIL "}[r.status]
         print(f"  {mark} {r.gate:14s} {r.detail or json.dumps(r.metrics)[:120]}")
@@ -82,6 +82,8 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--device", default=None)
     v.add_argument("--bless", action="store_true",
                    help="write the T1 fingerprint baseline for this environment")
+    v.add_argument("--anchor", action="store_true",
+                   help="also certify components against the official Wan2.1 goldens")
     v.set_defaults(fn=_verify)
 
     args = p.parse_args(argv)

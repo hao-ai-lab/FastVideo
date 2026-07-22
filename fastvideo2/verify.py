@@ -265,10 +265,39 @@ def gate_t3_decode(card: Any, prod_out: Any, ref_res: Any) -> GateResult:
 
 
 # --------------------------------------------------------------------------- #
+# Anchor — certification against OFFICIAL goldens                              #
+# --------------------------------------------------------------------------- #
+def gate_anchor(instance: Any) -> list[GateResult]:
+    """Compare this implementation's components against goldens captured from
+    the official Wan-Video/Wan2.1 repo. The authority ordering is official >
+    reference > production: diffusers-backed components are a *port* whose
+    fidelity these records certify, never assume. Fails closed if no goldens
+    have been captured."""
+    from fastvideo2.wan21 import anchor as A
+    from fastvideo2.wan21 import goldens as G
+    card = instance.card
+    gdir = G.golden_dir()
+    if not os.path.exists(os.path.join(gdir, "manifest.json")):
+        return [GateResult("anchor", "fail", card.model_id, card.digest(),
+                           detail=f"no goldens at {gdir} — run capture_official.py first")]
+    adapter = A.fastvideo2_adapter(instance.root, instance.device)
+    out: list[GateResult] = []
+    for rec in A.run_anchor(adapter, gdir) + A.schedule_records(gdir):
+        name = rec.pop("name")
+        status = rec.pop("status")
+        detail = rec.pop("detail", "")
+        out.append(GateResult(f"anchor.{name}", "pass" if status == "info" else status,
+                              card.model_id, card.digest(), metrics=rec,
+                              tolerances={"rel_l2": rec.get("tol_rel")}, detail=detail))
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # Orchestration                                                                #
 # --------------------------------------------------------------------------- #
 def verify(model_id: str, *, tier: int = 3, root: str | None = None,
-           device: str | None = None, bless: bool = False) -> list[GateResult]:
+           device: str | None = None, bless: bool = False,
+           anchor: bool = False) -> list[GateResult]:
     from fastvideo2.registry import resolve
     card, build_pipeline = resolve(model_id)
     pipeline = build_pipeline()
@@ -278,7 +307,9 @@ def verify(model_id: str, *, tier: int = 3, root: str | None = None,
         from fastvideo2.engine import load
         instance = load(card, root=root, device=device)
         results.append(gate_t1_components(instance, bless=bless))
-        if tier >= 2 and results[-1].ok:
+        if anchor and results[-1].ok:
+            results.extend(gate_anchor(instance))
+        if tier >= 2 and all(r.ok for r in results):
             t2, prod_out, ref_res = gate_t2_trajectory(instance, pipeline)
             results.append(t2)
             if tier >= 3 and t2.ok:

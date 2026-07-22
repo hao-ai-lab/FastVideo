@@ -35,6 +35,12 @@ surfaces. Read `README.md` first.
    `reference.py` to make a failing gate pass — say so instead.
 6. **One catalog.** New servable ⇒ card constant + registry entry. No parallel
    model lists.
+7. **Official implementations are the numerics authority.** diffusers (or any
+   port) is a backend whose fidelity is certified against captured official
+   goldens (`verify --anchor`), never assumed. The official repo enters this
+   codebase only as a commit hash in a goldens manifest — never as a
+   dependency, submodule, or vendored code. When conventions conflict,
+   official wins; goldens are re-captured deliberately, like re-blessing.
 
 ## Commands
 

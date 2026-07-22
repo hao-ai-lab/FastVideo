@@ -18,6 +18,13 @@ same solver the production loop uses), not the multistep UniPC that upstream
 Wan defaults to. The reference defines what the production path must match;
 it does not chase upstream sampler variants.
 
+Authority ordering: the OFFICIAL implementation (Wan-Video/Wan2.1) is the
+numerics ground truth. This file currently runs on diffusers components as a
+convenience backend — that fidelity is *certified* against captured official
+goldens (``verify --anchor``, see ``capture_official.py``), never assumed;
+ports like diffusers are known to drift from official implementations in ways
+that surface later as training skew. When a convention conflicts, official wins.
+
 Usage:
     python -m fastvideo2.wan21.reference --prompt "a cat surfing" --out cat.mp4
 """
