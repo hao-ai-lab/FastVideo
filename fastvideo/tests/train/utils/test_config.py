@@ -63,6 +63,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.distributed.pin_cpu_memory is False
     assert t.distributed.reshard_after_forward is True
     assert t.distributed.fsdp_symmetric_memory is False
+    assert t.distributed.fsdp_modules_per_group == 1
     assert t.distributed.reduce_dtype == "fp32"
 
     assert t.data.train_batch_size == 1
@@ -109,6 +110,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "pin_cpu_memory": True,
             "reshard_after_forward": False,
             "fsdp_symmetric_memory": True,
+            "fsdp_modules_per_group": 2,
             "reduce_dtype": "bf16",
         },
         "data": {
@@ -165,6 +167,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.distributed.pin_cpu_memory is True
     assert t.distributed.reshard_after_forward is False
     assert t.distributed.fsdp_symmetric_memory is True
+    assert t.distributed.fsdp_modules_per_group == 2
     assert t.distributed.reduce_dtype == "bf16"
 
     assert t.data.train_batch_size == 2
@@ -311,6 +314,7 @@ def test_dotted_overrides_apply_with_type_coercion(tmp_path: Path) -> None:
         "--training.distributed.pin_cpu_memory=true",
         "--training.distributed.reshard_after_forward=false",
         "--training.distributed.fsdp_symmetric_memory=true",
+        "--training.distributed.fsdp_modules_per_group=2",
         "--training.distributed.reduce_dtype=bf16",
         "--training.model.enable_torch_compile=true",
         "--training.tracker.project_name=overridden",
@@ -323,6 +327,7 @@ def test_dotted_overrides_apply_with_type_coercion(tmp_path: Path) -> None:
     assert cfg.training.distributed.pin_cpu_memory is True
     assert cfg.training.distributed.reshard_after_forward is False
     assert cfg.training.distributed.fsdp_symmetric_memory is True
+    assert cfg.training.distributed.fsdp_modules_per_group == 2
     assert cfg.training.distributed.reduce_dtype == "bf16"
     assert cfg.training.model.enable_torch_compile is True
     assert cfg.training.tracker.project_name == "overridden"
@@ -372,6 +377,15 @@ def test_fsdp_symmetric_memory_rejects_non_bool(tmp_path: Path) -> None:
             ValueError,
             match="training.distributed.fsdp_symmetric_memory must be a bool",
     ):
+        load_run_config(_write_yaml(tmp_path, data))
+
+
+@pytest.mark.parametrize("value", [0, -1, True])
+def test_fsdp_modules_per_group_rejects_non_positive_int(tmp_path: Path, value: object) -> None:
+    data = _minimal_yaml()
+    data["training"] = {"distributed": {"fsdp_modules_per_group": value}}
+
+    with pytest.raises(ValueError, match="training.distributed.fsdp_modules_per_group"):
         load_run_config(_write_yaml(tmp_path, data))
 
 

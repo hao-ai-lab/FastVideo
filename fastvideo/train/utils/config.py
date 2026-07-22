@@ -391,6 +391,12 @@ def _build_training_config(
                 default=False,
                 where="training.distributed.fsdp_symmetric_memory",
             ),
+            fsdp_modules_per_group=require_positive_int(
+                d,
+                "fsdp_modules_per_group",
+                default=1,
+                where="training.distributed.fsdp_modules_per_group",
+            ),
             reduce_dtype=reduce_dtype,
         ),
         data=DataConfig(

@@ -27,6 +27,9 @@ training:
     tp_size: 1
     hsdp_replicate_dim: 1
     hsdp_shard_dim: 4
+    # Grouping two adjacent LTX blocks with public FSDP2 was the best
+    # latency/memory tradeoff measured on one four-GPU GB200 tray.
+    fsdp_modules_per_group: 2
 
   data:
     # Repeat paths virtually so the four-row fixture spans the full run

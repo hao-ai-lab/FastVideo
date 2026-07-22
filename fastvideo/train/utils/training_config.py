@@ -20,6 +20,7 @@ class DistributedConfig:
     pin_cpu_memory: bool = False
     reshard_after_forward: bool = True
     fsdp_symmetric_memory: bool = False
+    fsdp_modules_per_group: int = 1
     reduce_dtype: str = "fp32"
 
 

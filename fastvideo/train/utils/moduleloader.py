@@ -66,6 +66,7 @@ def _make_training_args(
         use_fsdp_inference=False,
         enable_torch_compile=tc.model.enable_torch_compile,
         fsdp_reduce_dtype=tc.distributed.reduce_dtype,
+        fsdp_modules_per_group=tc.distributed.fsdp_modules_per_group,
     )
 
 

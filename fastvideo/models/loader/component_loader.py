@@ -1109,6 +1109,7 @@ class TransformerLoader(ComponentLoader):
             default_dtype=default_dtype,
             param_dtype=torch.bfloat16,
             reduce_dtype=PRECISION_TO_TYPE[getattr(fastvideo_args, "fsdp_reduce_dtype", "fp32")],
+            fsdp_modules_per_group=getattr(fastvideo_args, "fsdp_modules_per_group", 1),
             output_dtype=None,
             training_mode=fastvideo_args.training_mode,
             enable_torch_compile=fastvideo_args.enable_torch_compile,

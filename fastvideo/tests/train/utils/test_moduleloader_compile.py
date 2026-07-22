@@ -27,7 +27,11 @@ class _RepeatedModel(torch.nn.Module):
 
 def test_make_training_args_propagates_training_fsdp_options() -> None:
     config = TrainingConfig(
-        distributed=DistributedConfig(hsdp_shard_dim=1, reduce_dtype="bf16"),
+        distributed=DistributedConfig(
+            hsdp_shard_dim=1,
+            reduce_dtype="bf16",
+            fsdp_modules_per_group=2,
+        ),
         model=ModelTrainingConfig(enable_torch_compile=True),
     )
 
@@ -35,6 +39,7 @@ def test_make_training_args_propagates_training_fsdp_options() -> None:
 
     assert args.enable_torch_compile is True
     assert args.fsdp_reduce_dtype == "bf16"
+    assert args.fsdp_modules_per_group == 2
 
 
 def test_compile_matched_submodule_forwards_is_regional_and_allows_graph_breaks(monkeypatch) -> None:

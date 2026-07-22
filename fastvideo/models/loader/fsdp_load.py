@@ -144,6 +144,7 @@ def maybe_load_fsdp_model(
     pin_cpu_memory: bool = True,
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
+    fsdp_modules_per_group: int = 1,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -211,7 +212,8 @@ def maybe_load_fsdp_model(
                     mp_policy=mp_policy,
                     mesh=device_mesh,
                     fsdp_shard_conditions=model._fsdp_shard_conditions,
-                    pin_cpu_memory=pin_cpu_memory)
+                    pin_cpu_memory=pin_cpu_memory,
+                    fsdp_modules_per_group=fsdp_modules_per_group)
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
@@ -253,6 +255,7 @@ def shard_model(
     mesh: DeviceMesh | None = None,
     fsdp_shard_conditions: list[Callable[[str, nn.Module], bool]] = [],  # noqa
     pin_cpu_memory: bool = True,
+    fsdp_modules_per_group: int = 1,
 ) -> None:
     """
     Utility to shard a model with FSDP using the PyTorch Distributed fully_shard API.
@@ -276,12 +279,20 @@ def shard_model(
         fsdp_shard_conditions (List[Callable[[str, nn.Module], bool]]): A list of functions to determine
             which modules to shard with FSDP.
         pin_cpu_memory (bool): If set to True, FSDP will pin the CPU memory of the offloaded parameters.
+        fsdp_modules_per_group (int): Number of consecutive matching modules to place in one FSDP
+            communication group. The default of 1 preserves per-module sharding.
 
     Raises:
-        ValueError: If no layer modules were sharded, indicating that no shard_condition was triggered.
+        ValueError: If the grouping is invalid or no layer modules were sharded, indicating that no
+            shard_condition was triggered.
     """
+    if fsdp_modules_per_group < 1:
+        raise ValueError("fsdp_modules_per_group must be at least 1")
+
     # Check if we should use size-based filtering
     use_size_filtering = os.environ.get("FASTVIDEO_FSDP2_AUTOWRAP", "0") == "1"
+    if use_size_filtering and fsdp_modules_per_group != 1:
+        raise ValueError("fsdp_modules_per_group > 1 is incompatible with FASTVIDEO_FSDP2_AUTOWRAP=1")
 
     if not fsdp_shard_conditions:
         logger.warning("No FSDP shard conditions provided; nothing will be sharded.")
@@ -338,7 +349,7 @@ def shard_model(
                     module_kwargs = {**fsdp_kwargs, "ignored_params": local_ignored_params}
                 fully_shard(m, **module_kwargs)
                 num_layers_sharded += 1
-    else:
+    elif fsdp_modules_per_group == 1:
         # Shard all modules matching conditions
         for n, m in reversed(named_modules):
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
@@ -351,6 +362,33 @@ def shard_model(
 
         if num_layers_sharded == 0:
             raise ValueError("No layer modules were sharded. Please check if shard conditions are working as expected.")
+    else:
+        matched_modules = [
+            module for name, module in named_modules
+            if any(shard_condition(name, module) for shard_condition in fsdp_shard_conditions)
+        ]
+        if not matched_modules:
+            raise ValueError("No layer modules were sharded. Please check if shard conditions are working as expected.")
+
+        seen_module_params: set[nn.Parameter] = set()
+        for module in matched_modules:
+            module_params = set(module.parameters()) - ignored_params
+            if seen_module_params.intersection(module_params):
+                raise ValueError("Matched FSDP modules must not have overlapping parameter sets")
+            seen_module_params.update(module_params)
+
+        module_groups = [
+            matched_modules[start:start + fsdp_modules_per_group]
+            for start in range(0, len(matched_modules), fsdp_modules_per_group)
+        ]
+
+        for group in module_groups:
+            module_kwargs = fsdp_kwargs
+            local_ignored_params = set().union(*(ignored_params_by_module[id(module)] for module in group))
+            if local_ignored_params:
+                module_kwargs = {**fsdp_kwargs, "ignored_params": local_ignored_params}
+            fully_shard(group, **module_kwargs)
+            num_layers_sharded += len(group)
 
     # Finally shard the entire model to account for any stragglers
     root_kwargs = fsdp_kwargs

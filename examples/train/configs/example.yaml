@@ -88,6 +88,7 @@ training:
     pin_cpu_memory: false             # default: false
     reshard_after_forward: true       # default: true; false trades memory for fewer FSDP all-gathers
     fsdp_symmetric_memory: false      # default: false; native NCCL symmetric-memory FSDP collectives
+    fsdp_modules_per_group: 1         # default: 1; consecutive selected modules per FSDP communication group
     reduce_dtype: fp32                # default: "fp32"; "bf16" reduces FSDP communication and memory
 
   # --- training.data [TYPED] -> DataConfig ---
