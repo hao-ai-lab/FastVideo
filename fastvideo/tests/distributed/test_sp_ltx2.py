@@ -247,6 +247,13 @@ def _run_torchrun(
     if pack_attention_projections:
         cmd.append("--pack-attention-projections")
     env = os.environ.copy()
+    repo_root = str(script_path.parents[3])
+    inherited_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        repo_root
+        if not inherited_pythonpath
+        else os.pathsep.join((repo_root, inherited_pythonpath))
+    )
     env["FASTVIDEO_ATTENTION_BACKEND"] = "TORCH_SDPA"
     process = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if process.returncode != 0:
