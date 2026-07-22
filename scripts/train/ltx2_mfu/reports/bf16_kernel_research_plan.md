@@ -50,6 +50,11 @@ pinning.
   shapes, behind an opt-in config; trainer A/X/B afterward.
 - Kill criteria: heuristic sweep's best is within 2% of nvjet's current
   selection (would confirm nvjet is already near-optimal and close this line).
+- STATUS 2026-07-22: sweep ran (`probes/bench_ltx2_cublaslt_algo_sweep.py`);
+  kill criterion NOT met — weighted band -7.98% at B2 and B3, -9.4% best-of,
+  bit-exact parity on all winners. Integration (pinned-algo custom op + trainer
+  A/X/B) is the highest-priority next action; expected +1.9 to +2.2 MFU points
+  at 4x/B2. See the REPORT campaign section for the full table and caveats.
 
 ## 3. Whole-step wall-minus-union gap (days; expected +0.5-1.0 pp)
 
