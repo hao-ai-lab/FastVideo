@@ -136,6 +136,7 @@ test = [
     "av",
     "pytorch-msssim>=1.0.0",
     "pytest",
+    "pytest-rerunfailures>=16.3",
     "pandas",
     "plotly",
 ]
