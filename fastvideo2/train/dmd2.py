@@ -67,16 +67,22 @@ class DMD2Step:
                  denoising_steps: tuple[int, ...] = (1000, 757, 522),
                  shift: float = 8.0, guidance: float = 3.5,
                  lr: float = 2e-6, fake_lr: float = 2e-6,
-                 min_t_ratio: float = 0.02, max_t_ratio: float = 0.98):
+                 min_t_ratio: float = 0.02, max_t_ratio: float = 0.98,
+                 table: Any = None):
+        """``table``: (timesteps, sigmas) override — self-forcing uses the
+        SelfForcingFlowMatchScheduler table instead of the FlowMatch fork's."""
         import torch
 
         from fastvideo2.wan21.loop import dmd_inference_table
         self.student = _MasterOpt(student_fp32, lr)
         self.critic = _MasterOpt(critic_fp32, fake_lr)
         self.teacher = teacher_fp32.to(torch.bfloat16).eval().requires_grad_(False)
-        tt, ss = dmd_inference_table(shift)
-        self.table_t = torch.tensor(tt)
-        self.table_s = torch.tensor(ss)
+        if table is None:
+            tt, ss = dmd_inference_table(shift)
+            self.table_t = torch.tensor(tt)
+            self.table_s = torch.tensor(ss)
+        else:
+            self.table_t, self.table_s = table[0].clone(), table[1].clone()
         self.denoising_steps = tuple(int(t) for t in denoising_steps)
         self.guidance = float(guidance)
         self.min_t, self.max_t = min_t_ratio * 1000, max_t_ratio * 1000

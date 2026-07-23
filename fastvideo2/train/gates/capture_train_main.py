@@ -33,7 +33,10 @@ import sys
 
 MODE = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "finetune"
 VSA = MODE in ("vsa", "vsa_dmd2")
-DMD2 = MODE in ("dmd2", "vsa_dmd2", "qad")
+DMD2 = MODE in ("dmd2", "vsa_dmd2", "qad", "self_forcing")
+SF = MODE == "self_forcing"
+if SF:
+    os.environ["FASTVIDEO_FSDP2_AUTOWRAP"] = "0"
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ("VIDEO_SPARSE_ATTN" if VSA else
                                              "ATTN_QAT_TRAIN" if MODE in ("qat", "qad") else "FLASH_ATTN")
 os.environ.setdefault("WANDB_MODE", "offline")
@@ -122,6 +125,18 @@ def main() -> None:
         argv[argv.index("5e-5")] = "2e-6"  # learning_rate per the shipped recipe
     if MODE == "vsa_dmd2":
         argv += ["--VSA_sparsity", "0.8"]
+    if SF:
+        argv[argv.index("--pretrained_model_name_or_path") + 1] = \
+            "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
+        argv[argv.index("--model_path") + 1] = "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
+        argv[argv.index("--num_latent_t") + 1] = "21"
+        argv[argv.index("480")] = "240"
+        argv[argv.index("832")] = "416"
+        argv[argv.index("--dmd_denoising_steps") + 1] = "1000,750,500,250"
+        argv[argv.index("--real_score_guidance_scale") + 1] = "3.0"
+        argv[argv.index("--flow_shift") + 1] = "5.0"
+        argv += ["--warp_denoising_step", "--num_frame_per_block", "3",
+                 "--context_noise", "0", "--dfake_gen_update_ratio", "2"]
     sys.argv = argv
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
@@ -188,7 +203,12 @@ def main() -> None:
 
     if DMD2:
         import fastvideo.training.distillation_pipeline as DP
-        from fastvideo.training.wan_distillation_pipeline import WanDistillationPipeline
+        if SF:
+            import fastvideo.training.self_forcing_distillation_pipeline as SFP
+            from fastvideo.training.wan_self_forcing_distillation_pipeline import (
+                WanSelfForcingDistillationPipeline as WanDistillationPipeline)
+        else:
+            from fastvideo.training.wan_distillation_pipeline import WanDistillationPipeline
 
         dmd_steps: list[dict] = []
 
@@ -197,12 +217,41 @@ def main() -> None:
                 dmd_steps.append({"rollouts": []})
             return dmd_steps[-1]
 
-        orig_roll = DP.DistillationPipeline._generator_multi_step_simulation_forward
+        orig_roll = (SFP.SelfForcingDistillationPipeline._generator_multi_step_simulation_forward
+                     if SF else DP.DistillationPipeline._generator_multi_step_simulation_forward)
         orig_dmd = DP.DistillationPipeline._dmd_forward
         orig_fake = DP.DistillationPipeline.faker_score_forward
         orig_dstep = DP.DistillationPipeline.train_one_step
 
-        def rec_roll(self, tb):
+        def rec_roll(self, tb, *rest, **kw):
+            if SF:
+                seq: list = []
+                oi, on, onl = torch.randint, torch.randn, torch.randn_like
+
+                def randint(*a, **k):
+                    out = oi(*a, **k)
+                    for v in out.flatten().tolist():
+                        seq.append(("randint", int(v)))
+                    return out
+
+                def randn(*a, **k):
+                    out = on(*a, **k)
+                    seq.append(("randn", _np(out)))
+                    return out
+
+                def randn_like(*a, **k):
+                    out = onl(*a, **k)
+                    seq.append(("randn", _np(out)))
+                    return out
+
+                torch.randint, torch.randn, torch.randn_like = randint, randn, randn_like
+                try:
+                    res = orig_roll(self, tb, *rest, **kw)
+                finally:
+                    torch.randint, torch.randn, torch.randn_like = oi, on, onl
+                _cur()["rollouts"].append({"seq": seq})
+                _cur().setdefault("x0_student_hash", _hash(res))
+                return res
             draws = {"step_noises": []}
             orig_randint, orig_randn = torch.randint, torch.randn
 
@@ -295,7 +344,10 @@ def main() -> None:
             rec["closed"] = True
             return tb
 
-        DP.DistillationPipeline._generator_multi_step_simulation_forward = rec_roll
+        if SF:
+            SFP.SelfForcingDistillationPipeline._generator_multi_step_simulation_forward = rec_roll
+        else:
+            DP.DistillationPipeline._generator_multi_step_simulation_forward = rec_roll
         DP.DistillationPipeline._dmd_forward = rec_dmd
         DP.DistillationPipeline.faker_score_forward = rec_fake
         DP.DistillationPipeline.train_one_step = rec_dstep
@@ -362,15 +414,23 @@ def main() -> None:
             if "x0_student" in rec:
                 arrs["x0_student"] = rec["x0_student"]
             for j, ro in enumerate(rec["rollouts"]):
-                arrs[f"ro{j}_init"] = ro["init_noise"]
-                for k, sn in enumerate(ro["step_noises"]):
-                    arrs[f"ro{j}_n{k}"] = sn
+                if "seq" in ro:  # self-forcing: sequential draw list
+                    for k, (kind, val) in enumerate(ro["seq"]):
+                        if kind == "randn":
+                            arrs[f"ro{j}_seq{k}"] = val
+                else:
+                    arrs[f"ro{j}_init"] = ro["init_noise"]
+                    for k, sn in enumerate(ro["step_noises"]):
+                        arrs[f"ro{j}_n{k}"] = sn
             if "dmd" in rec:
                 arrs["dmd_noise"] = rec["dmd"]["noise"]
             arrs["critic_noise"] = rec["critic"]["noise"]
             np.savez(os.path.join(out, f"step{i}.npz"), **arrs)
             meta_steps.append({
                 "targets": [ro.get("target_idx") for ro in rec["rollouts"]],
+                "seqs": [[(kind, val if kind == "randint" else k)
+                          for k, (kind, val) in enumerate(ro["seq"])]
+                         for ro in rec["rollouts"] if "seq" in ro],
                 "dmd_t": rec.get("dmd", {}).get("t_final"),
                 "vsa_sparsity": rec.get("vsa_sparsity", 0.0),
                 "critic_t": rec["critic"]["t_final"],
@@ -384,8 +444,16 @@ def main() -> None:
         src = os.path.dirname(os.path.dirname(os.path.abspath(fastvideo.__file__)))
         commit = subprocess.run(["git", "-C", src, "rev-parse", "HEAD"],
                                 capture_output=True, text=True).stdout.strip()
+        extra_sf = {}
+        if SF:
+            dsl = pipeline.denoising_step_list
+            extra_sf = {"denoising_step_list": [float(v) for v in dsl.tolist()],
+                        "latent_hw": [30, 52], "num_latent_t": 21,
+                        "guidance": 3.0, "context_noise": 0,
+                        "student": "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"}
         with open(os.path.join(out, "manifest.json"), "w") as f:
             json.dump({"fastvideo_commit": commit, "mode": MODE, "seed": SEED,
+                       **extra_sf,
                        "gen_losses": [r["gen_loss"] for r in dmd_steps],
                        "fake_losses": [r["fake_loss"] for r in dmd_steps],
                        "torch": torch.__version__,

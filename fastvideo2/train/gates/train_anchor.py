@@ -285,7 +285,135 @@ def run_dmd2(mode: str = "dmd2") -> int:
     return 1 if failed else 0
 
 
+def run_self_forcing() -> int:
+    """Self-forcing anchor: causal-student rollout replay (DrawCursor over
+    the recorded sequential draws) + DMD/critic losses on the SF table."""
+    import hashlib
+
+    import torch
+
+    from fastvideo2.loading import resolve_weights
+    from fastvideo2.train.dmd2 import DMD2Step
+    from fastvideo2.train.self_forcing import DrawCursor, sf_rollout
+    from fastvideo2.wan21.card import SFWAN_T2V_1_3B, WAN21_T2V_1_3B
+    from fastvideo2.wan21.loop import self_forcing_table
+    from fastvideo2.wan21.model_fv import WanModelFV, WanModelFVCausal
+
+    gold = _gold_dir("self_forcing")
+    with open(os.path.join(gold, "manifest.json")) as f:
+        manifest = json.load(f)
+    with open(os.path.join(gold, "steps.json")) as f:
+        steps = json.load(f)
+    device = "cuda"
+
+    base_root = resolve_weights(WAN21_T2V_1_3B)
+    student = WanModelFVCausal.from_pretrained(resolve_weights(SFWAN_T2V_1_3B),
+                                               torch_dtype=torch.float32,
+                                               subfolder="transformer").to(device)
+
+    def load_dense():
+        return WanModelFV.from_pretrained(base_root, torch_dtype=torch.float32,
+                                          subfolder="transformer").to(device)
+
+    table = self_forcing_table(5.0)
+    step_ctx = DMD2Step(student, load_dense(), load_dense(),
+                        guidance=manifest.get("guidance", 3.0), table=table)
+    dsl = tuple(manifest["denoising_step_list"])
+    hw = tuple(manifest["latent_hw"])
+    pz = np.load(os.path.join(gold, "params.npz"))
+    uncond = torch.from_numpy(pz["neg_embeds"]).to(device, torch.bfloat16)
+
+    def _hash(t):
+        return hashlib.sha256(t.detach().to(torch.float32).cpu().numpy().tobytes()
+                              ).hexdigest()[:16]
+
+    rows: list[tuple[str, float]] = []
+    for i, rec in enumerate(steps):
+        z = np.load(os.path.join(gold, f"step{i}.npz"))
+        cond = torch.from_numpy(z["embeds"]).to(device, torch.bfloat16)
+
+        def cursor(j):
+            draws = [("randint", v) if kind == "randint"
+                     else ("randn", z[f"ro{j}_seq{k}"])
+                     for kind, v_or_k in rec["seqs"][j]
+                     for k, v in [(v_or_k, v_or_k)]
+                     for kind2 in [kind]]
+            # rebuild precisely: (kind, val) with randn arrays by index
+            draws = []
+            for kind, v_or_k in rec["seqs"][j]:
+                if kind == "randint":
+                    draws.append(("randint", v_or_k))
+                else:
+                    draws.append(("randn", z[f"ro{j}_seq{v_or_k}"]))
+            return DrawCursor(draws, device)
+
+        def rollout(j):
+            return sf_rollout(step_ctx.student.model, cursor(j), cond,
+                              num_frames=manifest["num_latent_t"],
+                              denoising_steps=dsl, table=table, latent_hw=hw,
+                              context_noise=manifest.get("context_noise", 0))
+
+        student_step = rec["gen_loss"] != 0.0
+        if student_step:
+            x0 = rollout(0)
+            if rec.get("x0_student_hash"):
+                rows.append((f"x0.step{i}",
+                             0.0 if _hash(x0) == rec["x0_student_hash"] else 1.0))
+            dmd = step_ctx.dmd_loss(
+                x0, {"dmd_timestep": torch.tensor([rec["dmd_t"]], device=device),
+                     "dmd_noise": torch.from_numpy(z["dmd_noise"]).to(device, torch.bfloat16)},
+                cond, uncond)
+            dmd.backward()
+            step_ctx.student.apply_grads_and_step()
+            rows.append((f"gen.step{i}", abs(float(dmd.detach().item()) - rec["gen_loss"])))
+        j = len(rec["seqs"]) - 1
+        with torch.no_grad():
+            x0c = rollout(j)
+        if not student_step and rec.get("x0_student_hash"):
+            rows.append((f"x0.step{i}",
+                         0.0 if _hash(x0c) == rec["x0_student_hash"] else 1.0))
+        closs = step_ctx.critic_loss(
+            x0c, {"critic_timestep": torch.tensor([rec["critic_t"]], device=device),
+                  "critic_noise": torch.from_numpy(z["critic_noise"]).to(device, torch.bfloat16)},
+            cond)
+        closs.backward()
+        step_ctx.critic.apply_grads_and_step()
+        rows.append((f"fake.step{i}", abs(float(closs.detach().item()) - rec["fake_loss"])))
+        print(f"  step{i}: gen {'-' if not student_step else round(float(dmd.detach().item()), 6)}"
+              f"/{rec['gen_loss']:.6f} fake {float(closs.detach().item()):.6f}/{rec['fake_loss']:.6f}",
+              flush=True)
+
+    BAND = 1.5 * max(manifest.get("self_noise_max", 2.15e-3), 1e-4)
+    first_update = next((i for i, r in enumerate(steps) if r["gen_loss"] != 0.0), 99)
+    print(f"\nSelfForcing anchor vs {manifest['fastvideo_commit'][:9]} (band {BAND:.2e})")
+    failed = []
+    for n, v in rows:
+        if n.startswith("x0.step"):
+            idx = int(n.split("step")[1])
+            ok, why = (v == 0.0, "exact") if idx <= first_update else (True, "info")
+        elif n.startswith(("gen.", "fake.")):
+            ok, why = v <= BAND, "band"
+        else:
+            ok, why = True, "info"
+        if not ok:
+            failed.append(n)
+        print(f"  {n:18s} {v:.6e}  {'OK' if ok else 'FAIL'} ({why})")
+
+    from fastvideo2.verify import GateResult, append_ledger, env_fingerprint
+    append_ledger([GateResult(gate="anchor.train-self_forcing-main",
+                              status="pass" if not failed else "fail",
+                              model_id=SFWAN_T2V_1_3B.model_id,
+                              card_digest=SFWAN_T2V_1_3B.digest(),
+                              metrics={n: v for n, v in rows},
+                              tolerances={"x0-pre-update": 0.0, "later": "band"},
+                              env=env_fingerprint(),
+                              detail=f"goldens {manifest['fastvideo_commit'][:9]}")])
+    return 1 if failed else 0
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     mode = args[0] if args else "finetune"
-    sys.exit(run_dmd2(mode) if mode in ("dmd2", "vsa_dmd2", "qad") else run(mode=mode))
+    sys.exit(run_self_forcing() if mode == "self_forcing"
+             else run_dmd2(mode) if mode in ("dmd2", "vsa_dmd2", "qad")
+             else run(mode=mode))
