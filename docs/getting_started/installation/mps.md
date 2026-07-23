@@ -1,103 +1,85 @@
-# MPS (Apple Silicon)
+# Apple Silicon FastWan
 
-Instructions to install FastVideo for Apple Silicon.
+FastWan-QAD-INT8-1.3B is the Apple-native, text-to-video release candidate.
+Its DiT denoising loop runs in MLX; prompt encoding and TAEHV decode use
+PyTorch MPS. It does not provide image-to-video support.
 
-## Requirements
+## Validated configuration
 
-- **OS: macOS 14 or newer**
-- **Python: 3.12.4**
+The recorded release result is from an Apple M4 Max with 36 GB-class unified
+memory (MLX reports 38.65 GB), macOS 14+, Python 3.12, and MLX 0.31.2:
+480x832, 81 frames, three-step DMD, INT8 DiT + TAEHV decode in 123.7 seconds
+end to end (117.6 seconds denoise; 5.63 GiB MLX peak).
 
-## Set up using Python
+This is the only launch-supported hardware configuration. Allocator-cap tests
+are useful engineering evidence, not a claim that a physical 16 GB Mac works.
 
-### Create a new Python environment
-
-#### uv
-Recommended default: use [uv](https://docs.astral.sh/uv/) for faster and more stable environment setup.
-
-Please follow the [documentation](https://docs.astral.sh/uv/#getting-started) to install `uv`. After installing `uv`, create a new environment using:
+## Install from source
 
 ```console
-# (Recommended) Create a new uv environment. Use `--seed` to install `pip` and `setuptools`.
+brew install ffmpeg
+git clone https://github.com/hao-ai-lab/FastVideo.git
+cd FastVideo
 uv venv --python 3.12 --seed
 source .venv/bin/activate
+uv pip install -e '.[mlx]'
 ```
 
-#### Conda (alternative)
+The `mlx` extra is pinned to the MLX 0.31.2 compatibility range and only
+resolves on Apple Silicon.
 
-You can also create a Python environment using [Conda](https://docs.conda.io/projects/conda/en/stable/user-guide/getting-started.html).
+## Generate a video
 
-##### 1. Install Miniconda (if not already installed)
+After publication, download the release model and run the one supported
+source-tree entrypoint. The script's defaults are the release configuration
+(480x832, 81 frames, 3-step DMD, INT8 DiT, compiled forward, bf16 prompt
+encode, TAEHV decode), so the minimal command is:
 
-```bash
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-arm64.sh
-bash Miniconda3-latest-MacOSX-arm64.sh
-source ~/.zshrc
+```console
+huggingface-cli download FastVideo/FastWan-QAD-INT8-1.3B-Diffusers \
+  --local-dir ~/models/FastWan-QAD-INT8-1.3B
+
+python examples/inference/basic/mlx_wan_prompt_to_video.py \
+  --model-root ~/models/FastWan-QAD-INT8-1.3B \
+  --mlx-checkpoint ~/models/FastWan-QAD-INT8-1.3B/mlx_dit \
+  --prompt "A fox runs through a misty pine forest, leaves kicking up behind it." \
+  --output-path video_samples/fox.mp4
 ```
 
-##### 2. Create and activate a Conda environment for FastVideo
+The release repository must include the hybrid Diffusers components and the
+verified `mlx_dit/` directory. TAEHV's checkpoint is SHA-256 verified before
+use; its vendored source is MIT-licensed, while FastVideo is Apache-2.0.
 
-```bash
-conda create -n fastvideo python=3.12.4 -y
-conda activate fastvideo
+### Faster repeat runs
+
+- `--mlx-checkpoint` (above) loads pre-quantized INT8 weights and skips
+  requantization: warm reloads take well under a second. Without the release
+  `mlx_dit/` directory you can create one locally once with
+  `--save-mlx-checkpoint ~/models/fastwan_mlx_int8`.
+- `--prompt-embeds-cache <path>.npy` reuses the UMT5 encode for a repeated
+  prompt, skipping the text-encoder load entirely.
+- The DiT forward is compiled with `mx.compile` by default (bit-identical to
+  eager, ~1.4x faster denoise in the A/B). Pass `--no-mlx-compile` to force
+  eager execution when debugging.
+
+### Quality mode
+
+TAEHV is a tiny distilled decoder: it is the right default for speed and
+memory, but the full Wan VAE preserves more fine texture. On Macs with 32 GB+
+of unified memory you can trade decode time for fidelity:
+
+```console
+  --decode-backend wan-vae   # bf16 decode; add --vae-decode-dtype fp16 on
+                             # macOS/torch builds without bf16 MPS support
 ```
-
-### Dependencies
-
-```
-brew install ffmpeg
-```
-
-### Installation
-
-#### With uv (recommended)
-
-```bash
-uv pip install fastvideo
-```
-
-#### With Conda environment (alternative)
-
-`uv` works inside an active conda env too, so prefer `uv pip` for the actual install:
-
-```bash
-uv pip install fastvideo
-```
-
-### Installation from Source
-
-#### 1. Clone the FastVideo repository
-
-```bash
-git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
-```
-
-#### 2. Install FastVideo
-
-Basic installation:
-
-```bash
-uv pip install -e .
-```
-
-Alternative with Conda environment:
-
-```bash
-uv pip install -e .
-```
-
-## Development Environment Setup
-
-If you're planning to contribute to FastVideo please see the following page:
-[Contributor Guide](../../contributing/overview.md)
-
-## Hardware Requirements
-
-### For Basic Inference
-
-- Mac M1, M2, M3, or M4 (at least 32 GB RAM is preferable for high quality video generation)
 
 ## Troubleshooting
 
-If you encounter any issues during installation, please open an issue on our [GitHub repository](https://github.com/hao-ai-lab/FastVideo).
-
-You can also join our [Slack community](https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ) for additional support.
+- VSA is unsupported on MPS: unset `FASTVIDEO_ATTENTION_BACKEND` or set it
+  to `TORCH_SDPA`.
+- If your macOS/torch build rejects bf16 on MPS, pass
+  `--text-encoder-dtype fp16` (and `--vae-decode-dtype fp16` with the
+  `wan-vae` backend).
+- Do not infer physical-16-GB support from allocator-cap experiments.
+- Keep `mlx_dit/` beside the model's `transformer/`, `text_encoder/`,
+  `tokenizer/`, VAE, and scheduler files.

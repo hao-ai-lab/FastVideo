@@ -62,6 +62,11 @@ UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 Use `UV_TORCH_BACKEND=cu130` on CUDA 13. Apple silicon users should follow the
 [MPS installation guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
 
+> **On an Apple Silicon Mac?** FastVideo runs FastWan text-to-video natively
+> through an MLX runtime — a 5-second 480p clip generated locally, no cloud,
+> no discrete GPU. Install with `uv pip install -e '.[mlx]'` and follow the
+> [Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
+
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.
 
 > **On an NVIDIA DGX Spark (GB10 / ARM64 + CUDA 13)?** There's no prebuilt ARM wheel for the FastVideo CUDA kernel, so it's an editable from-source install (`UV_TORCH_BACKEND=cu130 uv pip install -e .`, which compiles that kernel for you) rather than `UV_TORCH_BACKEND=cu130 uv pip install fastvideo`. A compatible prebuilt ARM64 FlashAttention wheel is available separately. Follow the [DGX Spark install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/spark/).

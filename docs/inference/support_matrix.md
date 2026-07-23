@@ -79,6 +79,17 @@ pipeline initialization and sampling.
 | Matrix Game 3.0 Base Distilled | `FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers` | 720x1280 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | GEN3C Cosmos 7B | `FastVideo/GEN3C-Cosmos-7B-Diffusers` | 704px1280p | ❌ | ❌ | ❌ | ⭕ | ⭕ |
 
+## Apple Silicon native runtime
+
+| Release path | Model | Mode | Validated hardware | Status |
+| --- | --- | --- | --- | --- |
+| MLX FastWan T2V | FastWan-QAD-INT8-1.3B `[release model ID pending]` | 480x832, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode | Apple M4 Max, 36 GB unified-memory class, MLX 0.31.2 | Release candidate; requires release-owner visual sign-off |
+
+This is a text-to-video-only source-install release. It is validated on the
+hardware listed above; MLX allocator caps are not evidence of support for a
+physical 16 GB Mac. See [Apple Silicon FastWan](../getting_started/installation/mps.md)
+for the supported command and release gates.
+
 **Note**: Wan2.2 TI2V 5B has some quality issues when performing I2V generation. We are working on fixing this issue.
 
 ***Lucy Edit Dev uses a non-commercial model license. FastVideo support is

@@ -1,0 +1,126 @@
+name: macOS MLX Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/ci-macos-mlx.yml"
+      - "fastvideo/mlx_runtime/**"
+      - "fastvideo/tests/mlx/**"
+      - "fastvideo/platforms/mps.py"
+      - "fastvideo/platforms/__init__.py"
+      - "fastvideo/__init__.py"
+      - "examples/inference/basic/mlx_*.py"
+      - "fastvideo/benchmarks/mlx_*.py"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-mlx-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mlx-smoke:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft != true
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      FASTVIDEO_ATTENTION_BACKEND: TORCH_SDPA
+      TOKENIZERS_PARALLELISM: "false"
+      MASTER_ADDR: localhost
+      MASTER_PORT: "29513"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install lightweight MLX smoke dependencies
+        run: |
+          uv pip install --system \
+            --index-url https://download.pytorch.org/whl/cpu \
+            torch==2.11.0 torchvision torchaudio
+          uv pip install --system \
+            pytest numpy scipy pillow imageio einops cloudpickle filelock \
+            PyYAML diffusers huggingface_hub remote-pdb safetensors loguru mlx
+
+      - name: Show Apple runtime
+        run: |
+          python - <<'PY'
+          import platform
+          import mlx.core as mx
+          import torch
+
+          print("machine:", platform.machine())
+          print("processor:", platform.processor())
+          print("mlx default device:", mx.default_device())
+          memory_size = mx.metal.device_info().get("memory_size") if mx.metal.is_available() else "metal unavailable"
+          print("mlx memory_size:", memory_size)
+          print("torch:", torch.__version__)
+          print("torch mps available:", torch.backends.mps.is_available())
+          PY
+
+      - name: Run MLX smoke tests
+        run: |
+          python -m pytest \
+            fastvideo/tests/mlx/test_dmd_sampling.py \
+            fastvideo/tests/mlx/test_memory_limits.py \
+            fastvideo/tests/mlx/test_quant_capability.py \
+            fastvideo/tests/mlx/test_mlx_dit_parity.py \
+            fastvideo/tests/mlx/test_mlx_compile_parity.py \
+            fastvideo/tests/mlx/test_mlx_checkpoint.py \
+            fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
+            fastvideo/tests/mlx/test_taehv_decode.py \
+            -q
+
+  # Same tests on MLX's CPU backend. Hosted macOS runners are scarce and
+  # slower to schedule; this Linux job gives fast PR signal on the identical
+  # graph (the parity tests were designed to be backend-agnostic), while the
+  # macOS job above stays the source of truth for Metal behavior.
+  mlx-smoke-linux-cpu:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FASTVIDEO_ATTENTION_BACKEND: TORCH_SDPA
+      TOKENIZERS_PARALLELISM: "false"
+      MASTER_ADDR: localhost
+      MASTER_PORT: "29513"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install lightweight MLX smoke dependencies (CPU backend)
+        run: |
+          uv pip install --system \
+            --index-url https://download.pytorch.org/whl/cpu \
+            torch==2.11.0 torchvision torchaudio
+          uv pip install --system \
+            pytest numpy scipy pillow imageio einops cloudpickle filelock \
+            PyYAML diffusers huggingface_hub remote-pdb safetensors loguru "mlx[cpu]"
+
+      - name: Run MLX smoke tests (CPU backend)
+        run: |
+          python -m pytest \
+            fastvideo/tests/mlx/test_dmd_sampling.py \
+            fastvideo/tests/mlx/test_memory_limits.py \
+            fastvideo/tests/mlx/test_quant_capability.py \
+            fastvideo/tests/mlx/test_mlx_dit_parity.py \
+            fastvideo/tests/mlx/test_mlx_compile_parity.py \
+            fastvideo/tests/mlx/test_mlx_checkpoint.py \
+            fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
+            fastvideo/tests/mlx/test_taehv_decode.py \
+            -q

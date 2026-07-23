@@ -48,7 +48,10 @@ class MpsPlatform(Platform):
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
                              dtype: torch.dtype) -> str:
-        # MPS supports SDPA (Scaled Dot-Product Attention) which is the most compatible
+        if selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+            raise NotImplementedError("VIDEO_SPARSE_ATTN is not supported on MPS. Unset "
+                                      "FASTVIDEO_ATTENTION_BACKEND or set it to TORCH_SDPA.")
+        # MPS supports SDPA (Scaled Dot-Product Attention) which is the most compatible.
         logger.info("Using Torch SDPA backend for MPS.")
         return "fastvideo.attention.backends.sdpa.SDPABackend"
 

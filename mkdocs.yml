@@ -151,6 +151,7 @@ nav:
   - Home: index.md
   - Getting Started:
     - Installation: getting_started/installation.md
+    - Apple Silicon FastWan: getting_started/installation/mps.md
     - Quick Start: getting_started/quick_start.md
     - V1 API: getting_started/v1_api.md
   - Inference:

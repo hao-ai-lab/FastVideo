@@ -125,6 +125,8 @@ imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "
 # FA4 cute, pinned to a cutlass-4.5-compatible revision. torch.compile support
 # comes from FastVideo's own custom_op wrappers.
 flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "82d6441eec5d4dfec120153db2c0145ae855a083", subdirectory = "flash_attn/cute" }
+# RIFE fast-mode frame interpolation (Apple-Silicon-native, torch-free).
+rife-mlx = { git = "https://github.com/xocialize/rife-mlx.git" }
 
 [project.optional-dependencies]
 
@@ -199,6 +201,14 @@ dreamverse = [
 
 rocm = [
     "amdsmi",
+]
+
+# Apple Silicon FastWan release runtime. The range is intentionally pinned to
+# the MLX version used for the checked-in parity and checkpoint tests.
+mlx = [
+    "mlx>=0.31.2,<0.32; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    # RIFE fast-mode (--fast): Apple-Silicon-native frame interpolation.
+    "rife-mlx; platform_system == 'Darwin' and platform_machine == 'arm64'",
 ]
 
 [project.scripts]
