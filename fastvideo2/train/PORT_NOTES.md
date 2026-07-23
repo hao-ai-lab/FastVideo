@@ -144,3 +144,46 @@ same fixtures at the matching topology.
 - Gate plan (phase B first): capture wrappers on DiffusionNFTMethod
   (_sample_epoch outputs, rewards, advantages, per-inner-step losses +
   recorded noise draws); our NFTStep replays through 3x WanModelFV.
+
+## DiffusionNFT RL — measured facts (capture v3, cluster GB200, tfv 5.13)
+
+- Roles load **fp32** (`probe.param_dtype = torch.float32`); optimizer is a
+  plain `AdamW(transformer.parameters(), eps=1e-8)` — NO fp32-master split
+  (unlike the legacy stack). Forwards autocast bf16 (`predict_noise`),
+  BTCHW→BCTHW permutes at the boundary, mask passed but unused by the DiT.
+- Effective grad accum = `gradient_accumulation_steps × num_train_timesteps`
+  (gate config: 2×4=8) = exactly the inner calls per outer step ⇒ the
+  optimizer fires ONCE at epoch end ⇒ all step-0 losses are pre-update and
+  **bitwise repeatable** across identical-seed capture runs (proven 3×).
+  Step-1 spread (one AdamW step from atomics-noisy backward): 2.76e-2 max.
+- Inner loop shuffles samples AND per-sample timestep order via
+  `cuda_generator` perms — capture records the DIRECT loss inputs instead
+  (row_idx byte-matched against pre-shuffle items, timestep column, adv,
+  xt-noise), so the anchor replays without RNG replication.
+- `_return_decay` is a `@staticmethod(step, decay_type)` — a plain-function
+  monkeypatch rebinds as an instance method and shifts the args.
+- UPSTREAM FINDING (transformers 5.13): `CLIPModel.get_*_features` returns
+  a ModelOutput whose `.pooler_output` holds the PROJECTED features —
+  main's `PickScoreScorer` crashes (`.norm` on ModelOutput). Unwrap on the
+  PickScore instance only: `CLIPModel.forward` internally consumes the new
+  contract, so a class-level patch breaks `ClipScoreScorer`. Validation
+  also fires at iteration 0 (`0 % every_steps == 0`).
+- VideoAlign runtime needs `accelerate>=1.1` at import (transformers
+  Trainer device setup) — pip-installed into the cluster venv.
+- v2.1 pieces: `train/diffusion_nft.py` (NFTStep: plain AdamW, autocast
+  _fwd, live-param EMA `update_old`, verbatim loss; `compute_advantages`,
+  `return_decay`), anchor mode `train_anchor rl` (loss/embeds dtype
+  detected from bf16-representability of the recorded fp32 arrays),
+  `train/videoalign.py` + `rl_rewards/VideoAlign/` (byte-identical vendor,
+  sha256-gated) + `gates/videoalign_anchor.py`.
+
+## Dataloader order (#17 tail) — anchor.train-data-main PASS
+
+- `train/data.py` reproduces main's map-style loader at world 1:
+  `os.walk(realpath(root))` + realpath each file (HF snapshots: the sort
+  key is the resolved BLOB path) + one global path sort; sampler =
+  `randperm(total, manual_seed(seed))` truncated to a batch multiple and
+  chunked; rows decode `np.frombuffer(fp32)` (main ignores the `_dtype`
+  column); text embeds pad/crop to 512 with a 1/0 mask.
+- Gate: first-5 batches vs the finetune capture — caption + latents hash
+  (post num_latent_t slice, bf16-cast) + embeds hash, all exact.
