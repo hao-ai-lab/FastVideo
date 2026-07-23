@@ -34,6 +34,7 @@ fastvideo/
 ├── training/        # LEGACY monolithic *_training/distillation_pipeline.py
 ├── worker/          # Multi-process / Ray executors
 ├── workflow/        # Preprocessing workflow base class
+├── workflows/       # Reusable multi-step generation workflows (planner→generate→critic loops); orchestration only, no forward-path logic
 ├── registry.py      # Pipeline-config + model-class lookup (canonical)
 ├── envs.py          # Env-var declarations
 ├── fastvideo_args.py# Runtime arg dataclass passed through pipelines
