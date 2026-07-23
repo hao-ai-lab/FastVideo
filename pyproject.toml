@@ -209,6 +209,14 @@ dreamverse = ["prompts/*.md"]
 exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]
 
 [tool.pytest.ini_options]
+# The repo root has its own __init__.py (for ComfyUI node discovery, see
+# #663), so pytest resolves tests/ and tests/local_tests/<family>/ as
+# subpackages of a package rooted at the repo root and prepends the repo
+# root's *parent* to sys.path, not the repo root itself. That breaks
+# repo-root-relative imports like `scripts.checkpoint_conversion.*` (used by
+# tests/local_tests/dreamx_world/). pythonpath explicitly prepends rootdir
+# (".") to sys.path for the whole session regardless of that packaging.
+pythonpath = ["."]
 markers = [
     "gpu: requires real GPU + model weights; skip in CI",
 ]
