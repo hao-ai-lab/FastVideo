@@ -51,8 +51,9 @@ def run(mode: str = "finetune") -> int:
     # main trains its own WanTransformer3DModel port; our bitwise-equal
     # vendor loads the same weights fp32 (VSA gate: the FastWan checkpoint,
     # which carries deterministic to_gate_compress weights)
+    from fastvideo2.wan21.model_fv import WanModelFVQAT
     card = FASTWAN_T2V_1_3B if mode == "vsa" else WAN21_T2V_1_3B
-    cls = WanModelFVVSA if mode == "vsa" else WanModelFV
+    cls = {"vsa": WanModelFVVSA, "qat": WanModelFVQAT}.get(mode, WanModelFV)
     root = resolve_weights(card)
     model = cls.from_pretrained(root, torch_dtype=torch.float32,
                                 subfolder="transformer").to(device)

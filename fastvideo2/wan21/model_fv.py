@@ -42,7 +42,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ["WanModelFV", "WanModelFVCausal", "WanModelFVFP8", "WanModelFVVSA"]
+__all__ = ["WanModelFV", "WanModelFVCausal", "WanModelFVFP8", "WanModelFVQAT", "WanModelFVVSA"]
 
 
 # --------------------------------------------------------------------------- #
@@ -427,6 +427,28 @@ class WanBlockFVCausal(nn.Module):
         return hidden_states
 
 
+class WanBlockFVQAT(WanBlockFV):
+    """Attn-QAT training block: self-attention through the fake-quantized
+    Triton kernel (main's ATTN_QAT_TRAIN backend); everything else identical.
+    Cross-attention stays dense (main quantizes attn1 only via the backend's
+    LocalAttention... the backend replaces the DistributedAttention impl,
+    i.e. SELF-attention; attn2 keeps flash)."""
+
+    def _self_attention(self, norm_hidden_states, freqs_cis, vsa):
+        assert vsa is None
+        from fastvideo2.layers.attn_qat import attn_qat_train
+        a = self.attn1
+        query = a.norm_q(a.to_q(norm_hidden_states)).unflatten(2, (self.num_heads, -1))
+        key = a.norm_k(a.to_k(norm_hidden_states)).unflatten(2, (self.num_heads, -1))
+        value = a.to_v(norm_hidden_states).unflatten(2, (self.num_heads, -1))
+        cos, sin = freqs_cis
+        query = _apply_rotary(query, cos, sin)
+        key = _apply_rotary(key, cos, sin)
+        attn_output = attn_qat_train(query, key, value,
+                                     sm_scale=self.head_dim ** -0.5)
+        return a.to_out(attn_output.flatten(2))
+
+
 class WanModelFV(nn.Module):
     """main's WanTransformer3DModel at sp=1/tp=1, T2V, diffusers-native keys."""
 
@@ -527,6 +549,12 @@ class WanModelFVVSA(WanModelFV):
     (strict load) or if the kernel is missing (first forward raises)."""
 
     block_cls = WanBlockFVVSA
+
+
+class WanModelFVQAT(WanModelFV):
+    """Attn-QAT training/serving variant (fake-quantized self-attention)."""
+
+    block_cls = WanBlockFVQAT
 
 
 class WanModelFVCausal(WanModelFV):

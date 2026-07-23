@@ -34,7 +34,8 @@ import sys
 MODE = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "finetune"
 VSA = MODE in ("vsa", "vsa_dmd2")
 DMD2 = MODE in ("dmd2", "vsa_dmd2")
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN" if VSA else "FLASH_ATTN"
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ("VIDEO_SPARSE_ATTN" if VSA else
+                                             "ATTN_QAT_TRAIN" if MODE == "qat" else "FLASH_ATTN")
 os.environ.setdefault("WANDB_MODE", "offline")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
