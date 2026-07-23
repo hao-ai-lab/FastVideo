@@ -418,6 +418,15 @@ def main() -> None:
             torch.cuda.empty_cache()
         student = pipeline.get_module("transformer")
         critic = pipeline.fake_score_transformer
+        if SF:
+            def sf_hook(module, args_in, kwargs_in, output):
+                o = output[0] if isinstance(output, (tuple, list)) else output
+                t = kwargs_in.get("timestep",
+                                  args_in[2] if len(args_in) > 2 else None)
+                x = args_in[0] if args_in else kwargs_in["hidden_states"]
+                fwd_seq.append({"x": _hash(x), "o": _hash(o),
+                                "t": [float(v) for v in t.flatten().tolist()][:2]})
+            student.register_forward_hook(sf_hook, with_kwargs=True)
         w0 = {"student": _slice(student.proj_out.weight),
               "critic": _slice(critic.proj_out.weight)}
         pipeline.train()
