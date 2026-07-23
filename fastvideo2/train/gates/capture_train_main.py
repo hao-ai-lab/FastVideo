@@ -33,13 +33,14 @@ import sys
 
 MODE = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "finetune"
 VSA = MODE == "vsa"
+DMD2 = MODE == "dmd2"
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN" if VSA else "FLASH_ATTN"
 os.environ.setdefault("WANDB_MODE", "offline")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 SEED = 42
 STEPS = 5
-NUM_LATENT_T = 8
+NUM_LATENT_T = 8  # dmd2 uses 4 (three models on one GPU; math is length-free)
 DATASET = "wlsaidhi/crush-smol_processed_t2v"
 # vsa gate trains the FastWan checkpoint (has to_gate_compress weights) so
 # all parameters are deterministic; base-checkpoint VSA finetune random-
@@ -102,6 +103,17 @@ def main() -> None:
     if VSA:
         argv += ["--VSA_sparsity", "0.8", "--VSA_decay_rate", "0.2",
                  "--VSA_decay_interval_steps", "1"]
+    if DMD2:
+        base = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+        argv[argv.index(str(NUM_LATENT_T))] = "4"
+        argv += ["--real_score_model_path", base, "--fake_score_model_path", base,
+                 "--dmd_denoising_steps", "1000,757,522",
+                 "--simulate_generator_forward",
+                 "--generator_update_interval", "2",
+                 "--real_score_guidance_scale", "3.5",
+                 "--min_timestep_ratio", "0.02", "--max_timestep_ratio", "0.98",
+                 "--flow_shift", "8.0"]
+        argv[argv.index("5e-5")] = "2e-6"  # learning_rate per the shipped recipe
     sys.argv = argv
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
@@ -161,6 +173,174 @@ def main() -> None:
     def _slice(w):
         w = w.full_tensor() if hasattr(w, "full_tensor") else w  # FSDP2 DTensor
         return w.detach()[:8, :8].to(torch.float32).cpu().numpy().copy()
+
+    def _np(t):
+        return t.detach().to(torch.float32).cpu().numpy()
+
+    if DMD2:
+        import fastvideo.training.distillation_pipeline as DP
+        from fastvideo.training.wan_distillation_pipeline import WanDistillationPipeline
+
+        dmd_steps: list[dict] = []
+
+        def _cur() -> dict:
+            if not dmd_steps or dmd_steps[-1].get("closed"):
+                dmd_steps.append({"rollouts": []})
+            return dmd_steps[-1]
+
+        orig_roll = DP.DistillationPipeline._generator_multi_step_simulation_forward
+        orig_dmd = DP.DistillationPipeline._dmd_forward
+        orig_fake = DP.DistillationPipeline.faker_score_forward
+        orig_dstep = DP.DistillationPipeline.train_one_step
+
+        def rec_roll(self, tb):
+            draws = {"step_noises": []}
+            orig_randint, orig_randn = torch.randint, torch.randn
+
+            def randint(*a, **k):
+                out = orig_randint(*a, **k)
+                draws.setdefault("target_idx", int(out.item()))
+                return out
+
+            def randn(*a, **k):
+                out = orig_randn(*a, **k)
+                if "init_noise" not in draws:
+                    draws["init_noise"] = _np(out)
+                else:
+                    draws["step_noises"].append(_np(out))
+                return out
+
+            torch.randint, torch.randn = randint, randn
+            try:
+                res = orig_roll(self, tb)
+            finally:
+                torch.randint, torch.randn = orig_randint, orig_randn
+            _cur()["rollouts"].append(draws)
+            _cur().setdefault("x0_student_hash", _hash(res))
+            return res
+
+        def rec_dmd(self, gpv, tb):
+            rec = _cur()
+            orig_randint, orig_randn = torch.randint, torch.randn
+            raw = {}
+
+            def randint(*a, **k):
+                out = orig_randint(*a, **k)
+                raw["t_raw"] = int(out.item())
+                return out
+
+            def randn(*a, **k):
+                out = orig_randn(*a, **k)
+                raw["noise"] = _np(out)
+                return out
+
+            torch.randint, torch.randn = randint, randn
+            try:
+                loss = orig_dmd(self, gpv, tb)
+            finally:
+                torch.randint, torch.randn = orig_randint, orig_randn
+            rec["dmd"] = {"t_final": float(tb.dmd_latent_vis_dict["dmd_timestep"].item()),
+                          "noise": raw["noise"]}
+            rec["x0_student"] = _np(gpv)
+            return loss
+
+        def rec_fake(self, tb):
+            rec = _cur()
+            orig_randint, orig_randn = torch.randint, torch.randn
+            raw = {"noises": []}
+
+            def randint(*a, **k):
+                out = orig_randint(*a, **k)
+                raw.setdefault("ints", []).append(int(out.item()))
+                return out
+
+            def randn(*a, **k):
+                out = orig_randn(*a, **k)
+                raw["noises"].append(_np(out))
+                return out
+
+            torch.randint, torch.randn = randint, randn
+            try:
+                tb, loss = orig_fake(self, tb)
+            finally:
+                torch.randint, torch.randn = orig_randint, orig_randn
+            # last randn is the critic noise; earlier ones belong to the
+            # rollout wrapper (already recorded); timestep from vis dict
+            rec["critic"] = {"t_final": float(tb.fake_score_latent_vis_dict[
+                                "fake_score_timestep"].item()),
+                             "noise": raw["noises"][-1]}
+            rec["fake_loss"] = float(loss.detach().item())
+            rec["critic_x0_hash"] = _hash(tb.fake_score_latent_vis_dict[
+                "generator_pred_video"])
+            return tb, loss
+
+        def rec_dstep(self, tb):
+            tb = orig_dstep(self, tb)
+            rec = _cur()
+            rec["gen_loss"] = float(tb.generator_loss)
+            rec["embeds"] = _np(tb.encoder_hidden_states) if tb.encoder_hidden_states is not None else None
+            rec["closed"] = True
+            return tb
+
+        DP.DistillationPipeline._generator_multi_step_simulation_forward = rec_roll
+        DP.DistillationPipeline._dmd_forward = rec_dmd
+        DP.DistillationPipeline.faker_score_forward = rec_fake
+        DP.DistillationPipeline.train_one_step = rec_dstep
+
+        pipeline = WanDistillationPipeline.from_pretrained(
+            args.pretrained_model_name_or_path, args=args)
+        student = pipeline.get_module("transformer")
+        critic = pipeline.fake_score_transformer
+        w0 = {"student": _slice(student.proj_out.weight),
+              "critic": _slice(critic.proj_out.weight)}
+        neg = pipeline.negative_prompt_embeds
+        pipeline.train()
+        w5 = {"student": _slice(student.proj_out.weight),
+              "critic": _slice(critic.proj_out.weight)}
+
+        np.savez(os.path.join(out, "params.npz"),
+                 w0_student=w0["student"], w5_student=w5["student"],
+                 w0_critic=w0["critic"], w5_critic=w5["critic"],
+                 neg_embeds=_np(neg))
+        meta_steps = []
+        for i, rec in enumerate(dmd_steps):
+            arrs = {"embeds": rec["embeds"]}
+            if "x0_student" in rec:
+                arrs["x0_student"] = rec["x0_student"]
+            for j, ro in enumerate(rec["rollouts"]):
+                arrs[f"ro{j}_init"] = ro["init_noise"]
+                for k, sn in enumerate(ro["step_noises"]):
+                    arrs[f"ro{j}_n{k}"] = sn
+            if "dmd" in rec:
+                arrs["dmd_noise"] = rec["dmd"]["noise"]
+            arrs["critic_noise"] = rec["critic"]["noise"]
+            np.savez(os.path.join(out, f"step{i}.npz"), **arrs)
+            meta_steps.append({
+                "targets": [ro.get("target_idx") for ro in rec["rollouts"]],
+                "dmd_t": rec.get("dmd", {}).get("t_final"),
+                "critic_t": rec["critic"]["t_final"],
+                "gen_loss": rec["gen_loss"], "fake_loss": rec["fake_loss"],
+                "x0_student_hash": rec.get("x0_student_hash"),
+            })
+        with open(os.path.join(out, "steps.json"), "w") as f:
+            json.dump(meta_steps, f, indent=1)
+        import subprocess
+        import fastvideo
+        src = os.path.dirname(os.path.dirname(os.path.abspath(fastvideo.__file__)))
+        commit = subprocess.run(["git", "-C", src, "rev-parse", "HEAD"],
+                                capture_output=True, text=True).stdout.strip()
+        with open(os.path.join(out, "manifest.json"), "w") as f:
+            json.dump({"fastvideo_commit": commit, "mode": MODE, "seed": SEED,
+                       "gen_losses": [r["gen_loss"] for r in dmd_steps],
+                       "fake_losses": [r["fake_loss"] for r in dmd_steps],
+                       "torch": torch.__version__,
+                       "gpu": torch.cuda.get_device_name(0),
+                       "config": "dmd2 legacy: interval2 gw3.5 lr2e-6 shift8 "
+                                 "steps[1000,757,522] simulate nlt4 1gpu"}, f, indent=2)
+        print("gen:", [round(r["gen_loss"], 6) for r in dmd_steps], flush=True)
+        print("fake:", [round(r["fake_loss"], 6) for r in dmd_steps], flush=True)
+        print("capture complete ->", out, flush=True)
+        return
 
     from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
     pipeline = WanTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path,
