@@ -297,20 +297,41 @@ def main() -> None:
         # through THEIR TextEncodingStage exactly like distillation_pipeline
         # :1090 does, and pin it before train()
         if getattr(pipeline, "negative_prompt_embeds", None) is None:
+            # distillation loads no text encoder (pre-encoded data); load one
+            # like the inference capture does and encode the canonical Wan
+            # negative prompt (zero-padded to 512 — the pattern proven bitwise
+            # against main's own stage by the fastwan text anchors)
+            from fastvideo.configs.pipelines import WanT2V480PConfig
+            from fastvideo.forward_context import set_forward_context
+            from fastvideo.models.loader.component_loader import TextEncoderLoader
             from fastvideo.pipelines.pipeline_batch_info import ForwardBatch as FB
-            from fastvideo.pipelines.stages import TextEncodingStage
+            from huggingface_hub import snapshot_download
+            from transformers import AutoTokenizer
             NEG = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，"
                    "低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，"
                    "毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
-            enc_stage = TextEncodingStage(
-                text_encoders=[pipeline.get_module("text_encoder")],
-                tokenizers=[pipeline.get_module("tokenizer")])
-            nb = FB(data_type="video", prompt=NEG, prompt_embeds=[],
-                    prompt_attention_mask=[])
-            nb = enc_stage(nb, pipeline.training_args)
-            pipeline.negative_prompt_embeds = nb.prompt_embeds[0]
-            pipeline.negative_prompt_attention_mask = (
-                nb.prompt_attention_mask[0] if nb.prompt_attention_mask else None)
+            base_root = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers", token=False)
+            te_args = FastVideoArgs(model_path=os.path.join(base_root, "text_encoder"),
+                                    pipeline_config=WanT2V480PConfig(),
+                                    use_fsdp_inference=False,
+                                    text_encoder_cpu_offload=False, pin_cpu_memory=False)
+            te_args.device = torch.device("cuda")
+            t5 = TextEncoderLoader().load(os.path.join(base_root, "text_encoder"),
+                                          te_args).eval()
+            t5_dev = next(t5.parameters()).device
+            tok = AutoTokenizer.from_pretrained(os.path.join(base_root, "tokenizer"))
+            b = tok([NEG], padding="max_length", max_length=512, truncation=True,
+                    add_special_tokens=True, return_attention_mask=True,
+                    return_tensors="pt")
+            with torch.no_grad(), set_forward_context(current_timestep=0,
+                                                      attn_metadata=None):
+                emb = t5(input_ids=b.input_ids.to(t5_dev),
+                         attention_mask=b.attention_mask.to(t5_dev)).last_hidden_state
+            emb[:, int(b.attention_mask[0].sum()):] = 0
+            pipeline.negative_prompt_embeds = emb.to("cuda", torch.bfloat16)
+            pipeline.negative_prompt_attention_mask = b.attention_mask.to("cuda")
+            del t5
+            torch.cuda.empty_cache()
         student = pipeline.get_module("transformer")
         critic = pipeline.fake_score_transformer
         w0 = {"student": _slice(student.proj_out.weight),
