@@ -100,3 +100,17 @@ param slices ~1e-4 (info).
 Deferred (documented): the shipped recipe random-initializes student gate
 projections from the BASE checkpoint — an init-RNG parity gate for later,
 same caveat as the VSA finetune gate.
+
+## Attn-QAT training — added 2026-07-23
+
+Gate `anchor.train-qat-main`: PASS. Finetune config with
+`FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN` (main's fake-quantized
+SageAttention-style Triton kernel from fastvideo_kernel, head_dim 128,
+warp-specialize disabled on Blackwell). Port: `layers/attn_qat.py` (vendored
+wrapper, verbatim flag set, fail-closed) + `WanModelFVQAT`.
+
+step0 noisy/pred/loss **bitwise 0.0** — the fake-quant forward is exact.
+Later losses within the measured band: main's own quantized-backward reruns
+drift to 8.3e-2 by step 4 (vs flash's 3.7e-3) — ours mostly below main's own
+drift. Cross-attention stays dense (main's backend replaces self-attention
+only).
