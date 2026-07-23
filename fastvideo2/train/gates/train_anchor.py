@@ -161,15 +161,22 @@ def run_dmd2(mode: str = "dmd2") -> int:
         steps = json.load(f)
     device = "cuda"
     is_vsa = mode == "vsa_dmd2"
+    # student: VSA blocks + FastWan weights; teacher/critic: DENSE blocks +
+    # base weights (main's scorers are dense-built and score via plain flash)
     card = FASTWAN_T2V_1_3B if is_vsa else WAN21_T2V_1_3B
-    cls = WanModelFVVSA if is_vsa else WanModelFV
-    root = resolve_weights(card)
+    base_root = resolve_weights(WAN21_T2V_1_3B)
 
-    def load():
-        return cls.from_pretrained(root, torch_dtype=torch.float32,
-                                   subfolder="transformer").to(device)
+    def load_dense():
+        return WanModelFV.from_pretrained(base_root, torch_dtype=torch.float32,
+                                          subfolder="transformer").to(device)
 
-    step_ctx = DMD2Step(load(), load(), load())
+    if is_vsa:
+        student = WanModelFVVSA.from_pretrained(resolve_weights(card),
+                                                torch_dtype=torch.float32,
+                                                subfolder="transformer").to(device)
+    else:
+        student = load_dense()
+    step_ctx = DMD2Step(student, load_dense(), load_dense())
     pz = np.load(os.path.join(gold, "params.npz"))
     uncond = torch.from_numpy(pz["neg_embeds"]).to(device, torch.bfloat16)
 
@@ -191,7 +198,7 @@ def run_dmd2(mode: str = "dmd2") -> int:
             _, tl, _, hl, wl = z["ro0_init"].shape  # BTCHW draws
             grid = (tl, hl // 2, wl // 2)
             vsa_student = build_vsa_meta(grid, rec.get("vsa_sparsity", 0.0), device)
-            vsa_dense = build_vsa_meta(grid, 0.0, device)
+            vsa_dense = None  # dense scorers = flash, metadata ignored
 
         def roll_draws(j):
             return {"target_idx": rec["targets"][j],

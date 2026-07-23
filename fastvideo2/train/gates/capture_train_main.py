@@ -106,7 +106,10 @@ def main() -> None:
         argv += ["--VSA_sparsity", "0.8", "--VSA_decay_rate", "0.2",
                  "--VSA_decay_interval_steps", "1"]
     if DMD2:
-        base = MODEL if MODE == "vsa_dmd2" else "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+        # scorers are DENSE-built in main's distillation loader (a FastWan
+        # checkpoint's gate keys are rejected as extra) -> base ckpt for both;
+        # only the student is VSA-built and takes the FastWan weights
+        base = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
         argv[argv.index(str(NUM_LATENT_T))] = "4"
         argv += ["--real_score_model_path", base, "--fake_score_model_path", base,
                  "--dmd_denoising_steps", "1000,757,522",
