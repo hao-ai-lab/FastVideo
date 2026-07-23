@@ -33,3 +33,12 @@ def test_app_surfaces():
     assert c.get("/v1/models").json()["data"][0]["model_id"] == "fake"
     assert c.get("/v1/videos/nope").status_code == 404
     assert c.get("/v1/videos/nope/content").status_code == 404
+
+
+def test_create_video_validates_and_queues():
+    from fastvideo2.serve import build_app
+    app = build_app(_FakeModel())
+    c = TestClient(app)
+    assert c.post("/v1/videos", json={"seed": 1}).status_code == 422  # no prompt
+    r = c.post("/v1/videos", json={"prompt": "x", "seed": 1234})
+    assert r.status_code == 200 and r.json()["status"] == "queued"

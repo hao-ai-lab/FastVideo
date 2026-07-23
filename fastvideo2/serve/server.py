@@ -30,28 +30,23 @@ from typing import Any
 def build_app(model: Any) -> Any:
     """FastAPI app over a loaded :class:`fastvideo2.sdk.Model`. The model is
     shared; generations serialize on a lock in worker threads."""
-    from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-    from pydantic import BaseModel
+    from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
     from fastvideo2.engine import Request
 
-    class VideoRequest(BaseModel):
-        prompt: str
-        seed: int = 0
-        num_steps: int | None = None
-        guidance_scale: float | None = None
-        height: int | None = None
-        width: int | None = None
-        num_frames: int | None = None
-        shift: float | None = None
-        negative_prompt: str | None = None
+    # the engine Request IS the schema; a plain whitelist mapping avoids any
+    # pydantic v1/v2 model-detection hazards across environments
+    _FIELDS = ("seed", "num_steps", "guidance_scale", "height", "width",
+               "num_frames", "shift", "negative_prompt")
 
-        def to_request(self, request_id: str) -> Request:
-            return Request(prompt=self.prompt, request_id=request_id,
-                           seed=self.seed, num_steps=self.num_steps,
-                           guidance_scale=self.guidance_scale, height=self.height,
-                           width=self.width, num_frames=self.num_frames,
-                           shift=self.shift, negative_prompt=self.negative_prompt)
+    def _to_request(payload: dict, request_id: str) -> Request:
+        if not isinstance(payload.get("prompt"), str) or not payload["prompt"]:
+            raise HTTPException(422, "prompt (non-empty string) is required")
+        kwargs = {k: payload[k] for k in _FIELDS if payload.get(k) is not None}
+        try:
+            return Request(prompt=payload["prompt"], request_id=request_id, **kwargs)
+        except TypeError as e:
+            raise HTTPException(422, str(e)) from e
 
     app = FastAPI(title="fastvideo2", version="0.1")
     jobs: dict[str, dict] = {}
@@ -91,12 +86,11 @@ def build_app(model: Any) -> Any:
         return {"data": [model.describe()]}
 
     @app.post("/v1/videos")
-    async def create_video(body: VideoRequest) -> dict:
+    async def create_video(payload: dict = Body(...)) -> dict:
         job_id = uuid.uuid4().hex[:12]
-        jobs[job_id] = {"id": job_id, "status": "queued",
-                        "request": body.model_dump()}
-        threading.Thread(target=_run_job,
-                         args=(job_id, body.to_request(job_id)),
+        req = _to_request(payload, job_id)
+        jobs[job_id] = {"id": job_id, "status": "queued", "request": payload}
+        threading.Thread(target=_run_job, args=(job_id, req),
                          daemon=True).start()
         return {"id": job_id, "status": "queued"}
 
@@ -121,11 +115,16 @@ def build_app(model: Any) -> Any:
         and an MP4 download URL."""
         await ws.accept()
         try:
-            body = VideoRequest(**await ws.receive_json())
+            payload = await ws.receive_json()
         except WebSocketDisconnect:
             return
         job_id = uuid.uuid4().hex[:12]
-        req = body.to_request(job_id)
+        try:
+            req = _to_request(payload, job_id)
+        except Exception as e:
+            await ws.send_json({"type": "error", "error": str(e)})
+            await ws.close()
+            return
         loop = asyncio.get_running_loop()
         q: asyncio.Queue = asyncio.Queue()
 
