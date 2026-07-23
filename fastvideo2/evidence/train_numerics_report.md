@@ -82,3 +82,21 @@ loop's `dmd_inference_table` — training reuses inference definitions).
 Capture pins uncond embeds by encoding the canonical Wan negative prompt
 through main's own text stack (the recipe normally gets them via the
 validation path).
+
+## VSA+DMD2 sparse distillation — added 2026-07-23
+
+Gate `anchor.train-vsa_dmd2-main`: PASS. The FastWan recipe composition:
+VSA-built student on FastWan weights (deterministic gate projections),
+DENSE-built scorers on the base checkpoint — discovered from main's own
+loader rejecting gate keys for scorer roles: teacher/critic score via plain
+flash, NOT sparsity-0 VSA (the train loop's "dense copy" metadata is ignored
+by the flash impl). Student rollout runs sparsity 0.8.
+
+x0 rollout bitwise through the first student update; all gen/fake losses
+within the measured band (main-vs-main drifts to 4.8e-2 at step3 under
+sparse-student updates — an order noisier than dense DMD2's 7.2e-4);
+param slices ~1e-4 (info).
+
+Deferred (documented): the shipped recipe random-initializes student gate
+projections from the BASE checkpoint — an init-RNG parity gate for later,
+same caveat as the VSA finetune gate.

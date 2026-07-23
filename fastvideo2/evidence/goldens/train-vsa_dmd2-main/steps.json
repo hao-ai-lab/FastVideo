@@ -1,0 +1,59 @@
+[
+ {
+  "targets": [
+   2
+  ],
+  "dmd_t": null,
+  "vsa_sparsity": 0.8,
+  "critic_t": 737.588623046875,
+  "gen_loss": 0.0,
+  "fake_loss": 0.1656690537929535,
+  "x0_student_hash": "49474e4e6201fcb6"
+ },
+ {
+  "targets": [
+   1,
+   0
+  ],
+  "dmd_t": 386.4990234375,
+  "vsa_sparsity": 0.8,
+  "critic_t": 716.4179077148438,
+  "gen_loss": 0.07294216752052307,
+  "fake_loss": 0.12868499755859375,
+  "x0_student_hash": "afb6654472fdc388"
+ },
+ {
+  "targets": [
+   2
+  ],
+  "dmd_t": null,
+  "vsa_sparsity": 0.8,
+  "critic_t": 967.0870971679688,
+  "gen_loss": 0.0,
+  "fake_loss": 0.49331870675086975,
+  "x0_student_hash": "3e19f627f7a67079"
+ },
+ {
+  "targets": [
+   0,
+   1
+  ],
+  "dmd_t": 662.4631958007812,
+  "vsa_sparsity": 0.8,
+  "critic_t": 980.0,
+  "gen_loss": 0.19375097751617432,
+  "fake_loss": 0.9273568987846375,
+  "x0_student_hash": "a5e00f1532646e2a"
+ },
+ {
+  "targets": [
+   2
+  ],
+  "dmd_t": null,
+  "vsa_sparsity": 0.8,
+  "critic_t": 456.45648193359375,
+  "gen_loss": 0.0,
+  "fake_loss": 0.1123386099934578,
+  "x0_student_hash": "9dc08f8928d30b94"
+ }
+]
