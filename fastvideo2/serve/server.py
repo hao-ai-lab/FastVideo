@@ -109,7 +109,7 @@ def build_app(model: Any) -> Any:
         return FileResponse(job["video_path"], media_type="video/mp4")
 
     @app.websocket("/v1/stream")
-    async def stream(ws: WebSocket) -> None:
+    async def stream(ws: WebSocket):
         """One request per connection: send a VideoRequest JSON, receive
         per-step progress events, then the terminal result with latents_sha
         and an MP4 download URL."""
