@@ -7,7 +7,7 @@ it (``derive(WAN21_T2V_1_3B, model_id=..., ...)``); nothing here is callable.
 """
 from __future__ import annotations
 
-from fastvideo2.card import ComponentSpec, LoopSpec, ModelCard, Provenance, SamplingDefaults
+from fastvideo2.card import ComponentSpec, LoopSpec, ModelCard, Provenance, SamplingDefaults, derive
 
 # The canonical Wan2.1 negative prompt (shipped with the model release).
 WAN_NEG = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，"
@@ -49,3 +49,42 @@ WAN21_T2V_1_3B = ModelCard(
                                        num_frames=81, fps=16, shift=3.0, negative_prompt=WAN_NEG),
     determinism="tolerance",
 ).validate()
+
+
+# --------------------------------------------------------------------------- #
+# FastWan-QAD-FP8 — fastvideo-main-trained DMD student served with dynamic FP8.
+# Authority: fastvideo-main (see model_fv.py header for the pinned commit);
+# alignment target is bit-exactness vs main's own serving path (flash attn,
+# fp8 per-tensor, no compile), gated by gates/capture_fastvideo_main goldens.
+# --------------------------------------------------------------------------- #
+FASTWAN_QAD_FP8_1_3B = derive(
+    WAN21_T2V_1_3B,
+    model_id="fastwan-qad-fp8-1.3b",
+    weights="FastVideo/FastWan-QAD-FP8-1.3B",
+    components={
+        # main-vendored forward + post-load per-tensor FP8 on the block
+        # linears; dtype is the LOAD cast (fp32 checkpoint -> bf16 -> fp8
+        # codes; that chain is part of the artifact).
+        "transformer": ComponentSpec("transformer", kind="dit",
+                                     module="fastvideo2.wan21.model_fv:WanModelFVFP8",
+                                     subfolder="transformer", dtype="bf16"),
+        # main runs the UMT5 in fp32 (official runs bf16); the fp32 embeds
+        # also set the initial-latent dtype in main's DMD stage.
+        "text_encoder": ComponentSpec("text_encoder", kind="text_encoder",
+                                      module="transformers:UMT5EncoderModel",
+                                      subfolder="text_encoder", dtype="fp32"),
+    },
+    loops={
+        "denoise": LoopSpec("denoise", loop="fastvideo2.wan21.loop:WanDMDLoop",
+                            params={"timesteps": [1000, 757, 522], "shift": 8.0,
+                                    "latent_channels": 16, "spatial_ratio": 8,
+                                    "temporal_ratio": 4}),
+    },
+    provenance={"method": "dmd-qad-fp8", "parents": ("wan2.1-t2v-1.3b",),
+                "assumes_loop": "wan.dmd.fvmain/v1", "precision": "bf16",
+                "substitution": "quality-changing"},
+    # 3 fixed DMD timesteps, CFG-free; negative prompt is not part of this
+    # artifact.
+    sampling_defaults={"num_steps": 3, "guidance_scale": 1.0, "shift": 8.0,
+                       "negative_prompt": ""},
+)

@@ -69,22 +69,23 @@ def test_build_loop_from_spec():
     assert isinstance(loop, FakeLoop) and loop.n == 2 and loop.loop_id == "fake"
 
 
-def test_dmd_sigma_table_lookup_matches_timesteps():
-    # fastvideo's scheduler indexes warped sigmas by their own x1000 values,
-    # so looking up t=757 returns sigma ~= 0.757 (nearest table entry),
-    # nearly independent of shift.
-    from fastvideo2.wan21.loop import dmd_sigma_for, dmd_sigma_table
-    for shift in (3.0, 8.0):
-        table = dmd_sigma_table(shift)
-        assert len(table) == 1000
-        for t in (1000.0, 757.0, 522.0):
-            sigma = dmd_sigma_for(t, table)
-            assert abs(sigma - t / 1000.0) < 2e-3, (shift, t, sigma)
-    # endpoints: sigma_max == 1.0 at t=1000
-    assert dmd_sigma_for(1000.0, dmd_sigma_table(8.0)) == 1.0
+def test_dmd_inference_table_matches_fastvideo_main_runtime():
+    # CANARY: main's DmdDenoisingStage hardcodes an internal
+    # FlowMatchEulerDiscreteScheduler(shift=8.0) — the pipeline scheduler that
+    # TimestepPreparationStage ran set_timesteps() on is NEVER consulted. So
+    # sigma lookups hit the 1000-entry warped INIT table, whose timesteps are
+    # the warped sigmas x1000: sigma(757) ~= 0.757 nearly independent of
+    # shift, and 757/522 resolve to DISTINCT sigmas. Wiring these lookups to
+    # a set_timesteps(n) table instead breaks bit-parity with fastvideo-main.
+    from fastvideo2.wan21.loop import dmd_inference_table, dmd_sigma_for
+    ts, sg = dmd_inference_table(8.0)
+    assert len(ts) == 1000 and sg[0] == 1.0 and ts[0] == 1000.0
+    for t in (1000, 757, 522):
+        assert abs(dmd_sigma_for(t, ts, sg) - t / 1000.0) < 2e-3
+    assert dmd_sigma_for(757, ts, sg) != dmd_sigma_for(522, ts, sg)
 
 
 def test_dmd_loop_semantics_id_is_distinct():
     from fastvideo2.wan21.loop import WanDenoiseLoop, WanDMDLoop
-    assert WanDMDLoop.semantics == "wan.dmd.x0renoise/v1"
+    assert WanDMDLoop.semantics == "wan.dmd.fvmain/v1"
     assert WanDMDLoop.semantics != WanDenoiseLoop.semantics  # the card teeth
