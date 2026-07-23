@@ -290,17 +290,25 @@ def convert(args: argparse.Namespace) -> None:
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
 
-    transformer_state = _load_torch_state(args.transformer_checkpoint)
-    # Official ``MMAudio.load_weights`` discards this derived buffer. Keeping
-    # it would make a standard strict FastVideo component load fail.
-    transformer_state.pop("t_embed.freqs", None)
-    transformer_state.pop("latent_rot", None)
-    transformer_state.pop("clip_rot", None)
-    transformer_config = {
-        **BASE_TRANSFORMER_CONFIG,
-        **TRANSFORMER_VARIANTS[args.variant],
-    }
-    _write_component(output, "transformer", transformer_state, transformer_config)
+    if args.transformer_only and args.preprocessor_only:
+        raise ValueError(
+            "--transformer-only and --preprocessor-only are mutually exclusive")
+
+    if not args.preprocessor_only:
+        if args.transformer_checkpoint is None:
+            raise ValueError(
+                "--transformer-checkpoint is required unless --preprocessor-only is used")
+        transformer_state = _load_torch_state(args.transformer_checkpoint)
+        # Official ``MMAudio.load_weights`` discards these derived buffers.
+        transformer_state.pop("t_embed.freqs", None)
+        transformer_state.pop("latent_rot", None)
+        transformer_state.pop("clip_rot", None)
+        transformer_config = {
+            **BASE_TRANSFORMER_CONFIG,
+            **TRANSFORMER_VARIANTS[args.variant],
+        }
+        _write_component(output, "transformer", transformer_state,
+                         transformer_config)
 
     if args.transformer_only:
         transformer_model_index = {
@@ -316,8 +324,9 @@ def convert(args: argparse.Namespace) -> None:
         "--audio-vae-checkpoint": args.audio_vae_checkpoint,
         "--synchformer-checkpoint": args.synchformer_checkpoint,
         "--dfn5b-dir": args.dfn5b_dir,
-        "--bigvgan-dir": args.bigvgan_dir,
     }
+    if not args.preprocessor_only:
+        required_assets["--bigvgan-dir"] = args.bigvgan_dir
     missing_assets = [name for name, path in required_assets.items() if path is None]
     if missing_assets:
         raise ValueError(
@@ -327,21 +336,35 @@ def convert(args: argparse.Namespace) -> None:
     assert args.audio_vae_checkpoint is not None
     assert args.synchformer_checkpoint is not None
     assert args.dfn5b_dir is not None
-    assert args.bigvgan_dir is not None
+    if not args.preprocessor_only:
+        assert args.bigvgan_dir is not None
 
     vae_state = _load_torch_state(args.audio_vae_checkpoint)
-    decoder_state = {
-        key: tensor
-        for key, tensor in vae_state.items()
-        if key.startswith("decoder.") or key in {"data_mean", "data_std"}
-    }
-    if not decoder_state:
-        raise ValueError("Audio VAE checkpoint did not contain decoder weights")
+    if args.preprocessor_only:
+        audio_vae_state = vae_state
+        need_encoder = True
+        if not any(key.startswith("encoder.") for key in audio_vae_state):
+            raise ValueError(
+                "Audio VAE checkpoint did not contain encoder weights")
+    else:
+        audio_vae_state = {
+            key: tensor
+            for key, tensor in vae_state.items()
+            if key.startswith("decoder.") or key in {"data_mean", "data_std"}
+        }
+        need_encoder = False
+        if not audio_vae_state:
+            raise ValueError(
+                "Audio VAE checkpoint did not contain decoder weights")
     _write_component(
         output,
         "audio_vae",
-        decoder_state,
-        {"_class_name": "MMAudioVAE", "mode": "44k", "need_encoder": False},
+        audio_vae_state,
+        {
+            "_class_name": "MMAudioVAE",
+            "mode": "44k",
+            "need_encoder": need_encoder
+        },
     )
 
     synchformer_state = _load_torch_state(args.synchformer_checkpoint)
@@ -361,6 +384,24 @@ def convert(args: argparse.Namespace) -> None:
     _write_component(output, "image_encoder", map_open_clip_vision_state(dfn_state), IMAGE_ENCODER_CONFIG)
     write_open_clip_tokenizer(output)
 
+    if args.preprocessor_only:
+        preprocess_components = {
+            key: value
+            for key, value in MODEL_INDEX.items()
+            if key.startswith("_") or key in {
+                "audio_vae",
+                "text_encoder",
+                "tokenizer",
+                "image_encoder",
+                "image_encoder_2",
+            }
+        }
+        preprocess_components["_fastvideo_preprocessor_only"] = True
+        _write_json(output / "model_index.json", preprocess_components)
+        print(f"Converted MMAudio 44k preprocessing components to {output}")
+        return
+
+    assert args.bigvgan_dir is not None
     bigvgan_config_path = args.bigvgan_dir / "config.json"
     if not bigvgan_config_path.is_file():
         raise FileNotFoundError(bigvgan_config_path)
@@ -394,7 +435,7 @@ def parse_args() -> argparse.Namespace:
         default="large_44k_v2",
         help="Transformer architecture. v1 variants are required for training.",
     )
-    parser.add_argument("--transformer-checkpoint", type=Path, required=True)
+    parser.add_argument("--transformer-checkpoint", type=Path)
     parser.add_argument("--audio-vae-checkpoint", type=Path)
     parser.add_argument("--synchformer-checkpoint", type=Path)
     parser.add_argument("--dfn5b-dir", type=Path)
@@ -403,6 +444,14 @@ def parse_args() -> argparse.Namespace:
         "--transformer-only",
         action="store_true",
         help="Write only the transformer component needed by training.",
+    )
+    parser.add_argument(
+        "--preprocessor-only",
+        action="store_true",
+        help=(
+            "Write only the VAE encoder, DFN5B text/vision encoders, "
+            "Synchformer, and tokenizer needed for offline feature extraction."
+        ),
     )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()

@@ -8,6 +8,8 @@ from fastvideo.dataset.ltx2_precomputed_dataset import (
     build_ltx2_precomputed_dataloader, LTX2PrecomputedDataset)
 from fastvideo.dataset.mmaudio_feature_dataset import (
     MMAudioFeatureDataset, build_mmaudio_feature_dataloader)
+from fastvideo.dataset.v2a_feature_cache import V2AFeatureShardWriter
+from fastvideo.dataset.vggsound import VGGSoundDataset
 from fastvideo.dataset.preprocessing_datasets import VideoCaptionMergedDataset, TextDataset
 from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255,
                                          TemporalRandomCrop)
@@ -52,6 +54,8 @@ __all__ = [
     "LTX2PrecomputedDataset",
     "MMAudioFeatureDataset",
     "build_mmaudio_feature_dataloader",
+    "V2AFeatureShardWriter",
+    "VGGSoundDataset",
     "ValidationDataset",
     "VideoCaptionMergedDataset",
     "TextDataset",

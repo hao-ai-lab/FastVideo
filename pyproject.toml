@@ -127,6 +127,7 @@ swanlab = [
 ]
 
 mmaudio-train = [
+    "librosa>=0.10.0",
     "tensordict>=0.6.1",
 ]
 

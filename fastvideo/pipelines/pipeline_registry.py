@@ -19,6 +19,7 @@ logger = init_logger(__name__)
 _PREPROCESS_WORKLOAD_TYPE_TO_PIPELINE_NAME: dict[WorkloadType, str] = {
     WorkloadType.I2V: "PreprocessPipelineI2V",
     WorkloadType.T2V: "PreprocessPipelineT2V",
+    WorkloadType.V2A: "PreprocessPipelineV2A",
 }
 
 
@@ -57,9 +58,27 @@ class _PipelineRegistry:
         """Get supported pipelines for the given pipeline type."""
         return set(self.pipelines.get(pipeline_type.value, {}).keys())
 
-    def _load_preprocess_pipeline_cls(self, workload_type: WorkloadType) -> type[ComposedPipelineBase] | None:
-        pipeline_name = _PREPROCESS_WORKLOAD_TYPE_TO_PIPELINE_NAME[workload_type]
-        return self.pipelines.get(PipelineType.PREPROCESS.value, {}).get(pipeline_name)
+    def _load_preprocess_pipeline_cls(
+        self,
+        pipeline_name_in_config: str,
+        workload_type: WorkloadType,
+    ) -> type[ComposedPipelineBase] | None:
+        pipelines = self.pipelines.get(PipelineType.PREPROCESS.value, {})
+
+        # Existing T2V/I2V integrations retain their exact workload-level
+        # lookup. New V2A families may define different feature contracts and
+        # therefore use a family-specific preprocessing class.
+        if (workload_type is WorkloadType.V2A
+                and pipeline_name_in_config.endswith("Pipeline")):
+            family_pipeline_name = (
+                pipeline_name_in_config.removesuffix("Pipeline")
+                + "PreprocessPipeline")
+            family_pipeline = pipelines.get(family_pipeline_name)
+            if family_pipeline is not None:
+                return family_pipeline
+
+        generic_name = _PREPROCESS_WORKLOAD_TYPE_TO_PIPELINE_NAME[workload_type]
+        return pipelines.get(generic_name)
 
     def _try_load_pipeline_cls(self, pipeline_name_in_config: str, pipeline_type: PipelineType,
                                workload_type: WorkloadType) -> type[ComposedPipelineBase] | type[LoRAPipeline] | None:
@@ -68,7 +87,10 @@ class _PipelineRegistry:
             return None
 
         if pipeline_type == PipelineType.PREPROCESS:
-            return self._load_preprocess_pipeline_cls(workload_type)
+            return self._load_preprocess_pipeline_cls(
+                pipeline_name_in_config,
+                workload_type,
+            )
         elif pipeline_type == PipelineType.BASIC or pipeline_type == PipelineType.TRAINING:
             return self.pipelines[pipeline_type.value].get(pipeline_name_in_config)
         else:

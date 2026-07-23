@@ -38,6 +38,18 @@ def test_mmaudio_44k_audio_vae_state_structure() -> None:
     }
 
 
+def test_mmaudio_44k_mel_converter_parity() -> None:
+    from mmaudio.ext.mel_converter import get_mel_converter
+
+    from fastvideo.models.audio.mmaudio_processing import build_mmaudio_mel_converter
+
+    waveform = torch.randn((2, 353_280), generator=torch.Generator().manual_seed(1234))
+    expected = get_mel_converter("44k")(waveform)
+    actual = build_mmaudio_mel_converter("44k")(waveform)
+
+    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+
 def test_mmaudio_44k_audio_vae_decoder_implementation_parity() -> None:
     if not torch.cuda.is_available():
         pytest.skip("MMAudio audio VAE implementation parity requires CUDA")

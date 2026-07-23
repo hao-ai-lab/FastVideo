@@ -43,6 +43,10 @@ class MMAudioV2AConfig(PipelineConfig):
 
     audio_decoder_config: ModelConfig = field(default_factory=MMAudioVAEConfig)
     audio_decoder_precision: str = "bf16"
+    # Offline training preprocessing uses the VAE encoder in fp32, matching
+    # the published MMAudio feature extraction recipe. Inference remains
+    # decoder-only bf16 through ``audio_decoder_precision`` above.
+    audio_encoder_precision: str = "fp32"
     vocoder_config: ModelConfig = field(default_factory=BigVGANV2Config)
     vocoder_precision: str = "bf16"
 

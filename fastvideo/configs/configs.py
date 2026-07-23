@@ -15,6 +15,7 @@ class DatasetType(str, Enum):
     """
     HF = "hf"
     MERGED = "merged"
+    VGGSOUND = "vggsound"
 
     @classmethod
     def from_string(cls, value: str) -> "DatasetType":
@@ -60,6 +61,8 @@ class PreprocessConfig:
     # Model and dataset configuration
     model_path: str = ""
     dataset_path: str = ""
+    dataset_metadata_path: str = ""
+    dataset_split: str = "train"
     dataset_type: DatasetType = DatasetType.HF
     dataset_output_dir: str = "./output"
 
@@ -104,6 +107,14 @@ class PreprocessConfig:
                                      type=str,
                                      default=PreprocessConfig.dataset_path,
                                      help="Path to the dataset directory for preprocessing")
+        preprocess_args.add_argument(f"--{prefix_with_dot}dataset-metadata-path",
+                                     type=str,
+                                     default=PreprocessConfig.dataset_metadata_path,
+                                     help="Optional path to the dataset metadata or caption manifest")
+        preprocess_args.add_argument(f"--{prefix_with_dot}dataset-split",
+                                     type=str,
+                                     default=PreprocessConfig.dataset_split,
+                                     help="Dataset split to preprocess (for example train, val, or test)")
         preprocess_args.add_argument(f"--{prefix_with_dot}dataset-type",
                                      type=str,
                                      choices=DatasetType.choices(),
@@ -207,6 +218,8 @@ class PreprocessConfig:
     def check_preprocess_config(self) -> None:
         if self.dataset_path == "":
             raise ValueError("dataset_path must be set for preprocess mode")
+        if not self.dataset_split.strip():
+            raise ValueError("dataset_split must not be empty")
         if self.samples_per_file <= 0:
             raise ValueError("samples_per_file must be greater than 0")
         if self.flush_frequency <= 0:

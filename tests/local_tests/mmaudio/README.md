@@ -147,3 +147,20 @@ pytest tests/local_tests/mmaudio/test_mmaudio_pipeline_parity.py -v -s
   presented as runnable.
 - MMAudio checkpoints are documented upstream as CC-BY-NC 4.0; converted model
   publishing must preserve the applicable license and attribution.
+
+## Native VGGSound Feature Extraction
+
+FastVideo consumes the same `id<TAB>label` split manifests as the reference
+`mmaudio.data.extraction.vgg_sound.VGGSound` adapter. `label` is a full caption,
+not the original VGGSound category. The reference checkout is used only for
+local parity review and is not imported by production preprocessing.
+
+```bash
+DATASET_PATH=/path/to/VGGSound SPLIT=train GPU_NUM=4 \
+  bash examples/training/finetune/mmaudio/preprocess_vggsound.sh
+```
+
+The launcher supports `train`, `val`, and `test` through the same FastVideo
+pipeline. The corresponding default manifests are
+`sets/filtered_caption/vgg-{split}-filtered-caption.tsv`, and caches are written
+under `mmaudio_features/{split}`.

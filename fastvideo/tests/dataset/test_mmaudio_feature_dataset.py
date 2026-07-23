@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 import torch
 
-from fastvideo.dataset.mmaudio_feature_dataset import MMAudioFeatureDataset
+from fastvideo.dataset.mmaudio_feature_dataset import (
+    MMAudioFeatureDataset,
+    _expand_cache_root,
+)
 
 tensordict = pytest.importorskip("tensordict")
 
@@ -79,3 +82,12 @@ def test_mmaudio_feature_cache_rejects_wrong_shape(tmp_path: Path) -> None:
             text_seq_len=5,
             text_dim=7,
         )
+
+
+def test_mmaudio_feature_cache_discovers_nested_shards(tmp_path: Path) -> None:
+    first = tmp_path / "worker_00000" / "shard_000000"
+    second = tmp_path / "worker_00001" / "shard_000000"
+    _write_cache(first, with_video=True)
+    _write_cache(second, with_video=True)
+
+    assert _expand_cache_root(tmp_path) == [first, second]

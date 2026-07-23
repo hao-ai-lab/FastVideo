@@ -197,11 +197,89 @@ python scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py \
 Replace `small_44k` with `medium_44k` or `large_44k` in both arguments to train
 a larger v1 model.
 
+### Preprocess VGGSound with FastVideo
+
+Feature extraction is a native FastVideo preprocessing workflow. The upstream
+MMAudio repository is useful as a numerical reference, but is not imported by
+the preprocessing or training command.
+
+The reference training loader imports the now-removed
+`torio.io.StreamingMediaDecoder`. Current FastVideo uses `torchaudio.load` for
+audio and PyAV timestamp sampling for the two video frame rates, while retaining
+the reference normalization, resampling, transforms, mel, and encoder contracts.
+
+First create a preprocessing-only component tree. It contains the 44.1 kHz
+VAE encoder, DFN5B CLIP text/vision encoders, Synchformer, and tokenizer; it
+does not duplicate the trainable DiT or inference vocoder:
+
+```bash
+python scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py \
+  --preprocessor-only \
+  --audio-vae-checkpoint official_weights/mmaudio/raw/ext_weights/v1-44.pth \
+  --synchformer-checkpoint official_weights/mmaudio/raw/ext_weights/synchformer_state_dict.pth \
+  --dfn5b-dir official_weights/mmaudio/DFN5B-CLIP-ViT-H-14-384 \
+  --output converted_weights/mmaudio/preprocess_44k
+```
+
+For the `Loie/VGGSound` release, extract the gzip shards once for random-access
+decoding. The archives contain a seven-component directory prefix:
+
+```bash
+mkdir -p /path/to/VGGSound/videos
+for shard in /path/to/VGGSound/vggsound_*.tar.gz; do
+  tar -xzf "$shard" -C /path/to/VGGSound/videos --strip-components=7
+done
+```
+
+Run the shared FastVideo preprocessing entrypoint. Each rank gets disjoint
+samples and writes resumable TensorDict shards. Existing sample IDs are skipped
+when the same output directory is resumed. A filtered caption manifest must
+have the same `id<TAB>label` schema used by MMAudio; `label` is the full text
+description encoded by DFN5B, not the original VGGSound class label.
+
+```bash
+torchrun --standalone --nproc_per_node=4 \
+  -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
+  --model-path converted_weights/mmaudio/preprocess_44k \
+  --mode preprocess \
+  --workload-type v2a \
+  --preprocess.dataset-type vggsound \
+  --preprocess.dataset-path /path/to/VGGSound \
+  --preprocess.dataset-metadata-path /path/to/VGGSound/sets/filtered_caption/vgg-train-filtered-caption.tsv \
+  --preprocess.dataset-split train \
+  --preprocess.dataset-output-dir /path/to/VGGSound/mmaudio_features/train \
+  --preprocess.preprocess-video-batch-size 1 \
+  --preprocess.dataloader-num-workers 2 \
+  --preprocess.samples-per-file 256
+```
+
+The configurable launcher defaults to four GPUs and derives the manifest from
+`SPLIT`:
+
+```bash
+DATASET_PATH=/path/to/VGGSound SPLIT=train \
+  bash examples/training/finetune/mmaudio/preprocess_vggsound.sh
+```
+
+Use the same pipeline for every split by changing only `SPLIT`; write each one
+to its own cache directory:
+
+```bash
+for split in train val test; do
+  DATASET_PATH=/path/to/VGGSound SPLIT="$split" GPU_NUM=4 \
+    bash examples/training/finetune/mmaudio/preprocess_vggsound.sh
+done
+```
+
+MMAudio's split contract peak-normalizes train audio to 0.95 and leaves val/test
+audio amplitudes unchanged. Corrupt, silent, or short train inputs and invalid
+val/test inputs are skipped and recorded in `failures_rank_*.jsonl`.
+
 ### Precomputed feature contract
 
 The online training step deliberately does not run the audio VAE, DFN5B, or
-Synchformer. Point `training.data.data_path` at a TensorDict memory-mapped
-directory with the same tensors produced by upstream MMAudio preprocessing:
+Synchformer. Point `training.data.data_path` at either one TensorDict
+memory-mapped directory or the parent directory of FastVideo's feature shards:
 
 ```text
 video + audio cache
@@ -219,8 +297,9 @@ audio-only cache
 
 Video and audio-only caches can be mixed by using a mapping of cache paths to
 repeat counts in YAML. Missing video conditions are replaced by MMAudio's
-learned null-video tokens. The cache loader has no runtime import dependency on
-the upstream `mmaudio` package.
+learned null-video tokens. The `text_features` values are normalized per-token
+DFN5B CLIP hidden states computed from the dataset captions. The cache loader
+has no runtime import dependency on the upstream `mmaudio` package.
 
 The example config intentionally contains an empty data path until a dataset is
 prepared:
@@ -234,7 +313,7 @@ Start a single-GPU run while supplying the cache path on the command line:
 ```bash
 NUM_GPUS=1 bash examples/train/run.sh \
   examples/train/configs/fine_tuning/mmaudio/small_44k.yaml \
-  --training.data.data_path /path/to/mmaudio-feature-cache
+  --training.data.data_path /path/to/VGGSound/mmaudio_features/train
 ```
 
 Leaving the path empty produces an explicit error instead of silently starting

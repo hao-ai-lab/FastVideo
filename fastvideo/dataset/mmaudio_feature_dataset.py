@@ -140,6 +140,20 @@ def _data_specs(data_path: str | Sequence[str] | dict[str, int]) -> list[tuple[s
     return [(part.strip(), 1) for part in str(data_path).split(",") if part.strip()]
 
 
+def _expand_cache_root(root: str | Path) -> list[Path]:
+    """Resolve one direct TensorDict cache or a directory of cache shards."""
+    path = Path(root).expanduser().resolve()
+    if not path.is_dir():
+        raise FileNotFoundError(f"MMAudio feature cache does not exist: {path}")
+    if (path / "meta.json").is_file():
+        return [path]
+    shards = sorted(metadata.parent for metadata in path.rglob("meta.json"))
+    if not shards:
+        raise FileNotFoundError(
+            f"No TensorDict cache shards (meta.json) were found under {path}")
+    return shards
+
+
 def build_mmaudio_feature_dataloader(
     data_path: str | Sequence[str] | dict[str, int],
     *,
@@ -159,8 +173,9 @@ def build_mmaudio_feature_dataloader(
 
     datasets: list[Dataset] = []
     for root, repeat in specs:
-        dataset = MMAudioFeatureDataset(root, **feature_shapes)
-        datasets.extend([dataset] * repeat)
+        for shard_root in _expand_cache_root(root):
+            dataset = MMAudioFeatureDataset(shard_root, **feature_shapes)
+            datasets.extend([dataset] * repeat)
     combined: Dataset = datasets[0] if len(datasets) == 1 else ConcatDataset(datasets)
 
     sp_world_size = get_sp_world_size()

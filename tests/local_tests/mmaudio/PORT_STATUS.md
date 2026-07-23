@@ -6,9 +6,9 @@
 - workload_types: `V2A`, `T2A`
 - official_ref: `../MMAudio` at `974010a026c731054592d8f777218bd9d85a6c24`
 - first_variant: `large_44k_v2`
-- phase: `native_inference_and_v1_training_pipeline_complete`
-- status: `inference_parity_and_small_44k_training_smoke_pass`
-- last_updated: `2026-07-20`
+- phase: `native_inference_v1_training_and_preprocessing_complete`
+- status: `inference_training_and_vggsound_manifest_parity_pass`
+- last_updated: `2026-07-23`
 
 ## Native Components
 
@@ -70,6 +70,23 @@ The v1 training smoke additionally uses a transformer-only component tree at
   optimizer/dataloader/RNG restore, and resumed step passed
 - Production code imports no `mmaudio.*` modules.
 
+## Native VGGSound Preprocessing
+
+- Shared orchestration: `fastvideo/workflow/preprocess/preprocess_workflow_v2a.py`
+- Dataset adapter: `fastvideo/dataset/vggsound.py`
+- MMAudio feature stage: `fastvideo/pipelines/preprocess/mmaudio/stages.py`
+- Sharded resumable cache: `fastvideo/dataset/v2a_feature_cache.py`
+- Input manifests use the official `id<TAB>label` contract; `label` is passed as
+  the full caption to the DFN5B text encoder.
+- `dataset_metadata_path` explicitly selects one manifest and `dataset_split`
+  preserves the official train-only peak normalization behavior.
+- Train, val, and test use one pipeline class and separate output roots.
+- Production preprocessing imports no modules from the reference checkout.
+- The reference training loader uses the removed
+  `torio.io.StreamingMediaDecoder`. FastVideo 2.11 uses `torchaudio.load` for
+  audio and PyAV timestamp sampling for video; downstream transforms, resampling,
+  mel conversion, and encoder outputs retain the reference contracts.
+
 ## Parity Evidence
 
 | Scope | Result |
@@ -83,8 +100,10 @@ The v1 training smoke additionally uses a transformer-only component tree at
 | Real `small_44k` v1 transformer forward | exact BF16 parity |
 | Real `small_44k` v1 FastVideo train step | pass (forward/backward/AdamW/grad clip) |
 | Real DCP checkpoint and resume to next step | pass |
-| Local inference suite | `20 passed, 1 skipped` (the skipped test is the opt-in full gate) |
-| New training/config/dataset unit tests | `26 passed` |
+| Local MMAudio parity suite | `21 passed, 1 skipped` (the skipped test is the opt-in full gate) |
+| Combined parity/dataset/training regression | `33 passed, 1 skipped` |
+| Real filtered-caption manifests | exact ID/order/caption/count parity: train 180,062; val 2,047; test 15,221 |
+| Filtered-caption tokenizer lengths | 0/197,330 exceed the 77-token contract; maximum 74 |
 
 Commands:
 
@@ -117,7 +136,6 @@ official `large_44k_v2`, DFN5B, Synchformer, VAE, and BigVGAN assets.
 - 16 kHz inference/training and small/medium v1 inference presets.
 - Sequence/tensor-parallel optimization.
 - Multi-GPU data-parallel training validation.
-- FastVideo-native offline feature extraction; the first training version
-  consumes upstream-compatible precomputed TensorDict caches.
-- Real-dataset loss/quality convergence validation once dataset paths are
-  available. The config intentionally keeps `data_path` empty until then.
+- Full-dataset 4-GPU feature extraction and loss/quality convergence validation.
+- The training config intentionally keeps `data_path` empty until the train
+  feature cache has been produced.
