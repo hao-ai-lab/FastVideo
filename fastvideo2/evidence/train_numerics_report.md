@@ -157,3 +157,16 @@ forward pass. A checkpointing-aware generator-step gate is deferred; the DMD
 loss math itself is already parity-proven by the dmd2/qad gates. Config:
 240x416 (resolution-agnostic math), 21 latent frames (pins the block-count
 draw and avoids the >21-frame VAE re-encode branch).
+
+## Serving identity — added 2026-07-23
+
+Gate `anchor.serve-identity`: PASS. `fastvideo2.serve` (async-job REST +
+WebSocket) over the engine: a served fastwan-qad request produced latents
+BITWISE identical to the offline SDK for the same request/seed
+(sha 41c4817d3d0f666b both sides), and the WebSocket delivered one LIVE
+progress event per denoise step (3/3) via the engine's new `on_step` hook —
+true per-step streaming, which main's servers list as a TODO.
+
+Environment note (in code): this venv's FastAPI websocket dependency
+injection closes connections without invoking endpoints; the stream route
+is registered at the starlette level.
