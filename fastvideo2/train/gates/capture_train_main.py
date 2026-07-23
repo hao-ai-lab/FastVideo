@@ -107,6 +107,8 @@ def main() -> None:
     orig_prepare = TP.TrainingPipeline._prepare_dit_inputs
     orig_step = TP.TrainingPipeline.train_one_step
 
+    batches: list[dict] = []
+
     def get_batch(self, tb):
         tb = orig_batch(self, tb)
         rec = {"caption": str(tb.infos[0].get("caption", tb.infos[0]) if
@@ -114,10 +116,12 @@ def main() -> None:
                "latents_hash": _hash(tb.latents),
                "embeds_hash": _hash(tb.encoder_hidden_states)}
         records.append(rec)
-        if len(records) == 1:
-            step0.update(latents=tb.latents.detach().to(torch.float32).cpu().numpy(),
-                         embeds=tb.encoder_hidden_states.detach().to(torch.float32).cpu().numpy(),
-                         mask=tb.encoder_attention_mask.detach().to(torch.float32).cpu().numpy())
+        # full batch tensors every step (bf16 stored as exact fp32) so the
+        # math gate replays without the dataloader port; the dataloader gets
+        # its own hash-based gate later
+        batches.append(dict(latents=tb.latents.detach().to(torch.float32).cpu().numpy(),
+                            embeds=tb.encoder_hidden_states.detach().to(torch.float32).cpu().numpy(),
+                            mask=tb.encoder_attention_mask.detach().to(torch.float32).cpu().numpy()))
         return tb
 
     def prepare(self, tb):
@@ -127,8 +131,7 @@ def main() -> None:
                    noisy_hash=_hash(tb.noisy_model_input),
                    timesteps=[float(v) for v in tb.timesteps.flatten().tolist()],
                    sigmas=[float(v) for v in tb.sigmas.flatten().tolist()])
-        if len(records) == 1:
-            step0.update(noise=tb.noise.detach().to(torch.float32).cpu().numpy())
+        batches[-1]["noise"] = tb.noise.detach().to(torch.float32).cpu().numpy()
         return tb
 
     def one_step(self, tb):
@@ -150,7 +153,8 @@ def main() -> None:
     pipeline.train()
     w5 = tf.proj_out.weight.detach()[:8, :8].to(torch.float32).cpu().numpy().copy()
 
-    np.savez(os.path.join(out, "step0.npz"), **step0)
+    for i, b in enumerate(batches):
+        np.savez(os.path.join(out, f"step{i}.npz"), **b)
     np.savez(os.path.join(out, "params.npz"), w0=w0, w5=w5)
     with open(os.path.join(out, "steps.json"), "w") as f:
         json.dump(records, f, indent=1)
