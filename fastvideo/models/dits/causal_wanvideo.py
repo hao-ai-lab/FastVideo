@@ -20,7 +20,10 @@ import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention,
                                  LocalAttention)
 from fastvideo.configs.models.dits import WanVideoConfig
-from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.communication_op import (
+    sequence_model_parallel_all_gather)
+from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
+                                                  get_sp_world_size)
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
                                         RMSNorm, ScaleResidual,
@@ -103,6 +106,29 @@ class CausalWanSelfAttention(nn.Module):
             roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
             roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
 
+        # Ulysses sequence-parallel (SP): the causal pipeline replicates the full
+        # (unsharded) token sequence on every rank, so RoPE, the block mask and
+        # the KV cache are all full-length here. We parallelize the attention
+        # across the head dimension (à la Ulysses): each rank computes attention
+        # for its own slice of heads over the full sequence, then all-gathers the
+        # per-head outputs to reconstruct all heads. This is numerically identical
+        # to single-GPU attention (heads are independent) and avoids a sequence
+        # all-to-all that would be incompatible with the causal KV-cache windowing
+        # (expressed in global token coordinates). Applied uniformly to all three
+        # attention paths below (flex, relativistic window, and the standard
+        # KV-cache path).
+        sp_world_size = get_sp_world_size()
+        sp_rank = get_sp_parallel_rank()
+        if sp_world_size > 1:
+            assert self.num_heads % sp_world_size == 0, (
+                f"num_heads ({self.num_heads}) must be divisible by sequence "
+                f"parallel size ({sp_world_size})")
+            heads_per_rank = self.num_heads // sp_world_size
+            head_slice = slice(sp_rank * heads_per_rank,
+                               (sp_rank + 1) * heads_per_rank)
+        else:
+            head_slice = slice(None)
+
         if kv_cache is None:
             # Padding for flex attention
             padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
@@ -126,11 +152,14 @@ class CausalWanSelfAttention(nn.Module):
             )
 
             x = flex_attention(
-                query=padded_roped_query.transpose(2, 1),
-                key=padded_roped_key.transpose(2, 1),
-                value=padded_v.transpose(2, 1),
+                query=padded_roped_query[:, :, head_slice].transpose(2, 1),
+                key=padded_roped_key[:, :, head_slice].transpose(2, 1),
+                value=padded_v[:, :, head_slice].transpose(2, 1),
                 block_mask=block_mask
             )[:, :, :-padded_length].transpose(2, 1)
+            if sp_world_size > 1:
+                # Gather per-rank head outputs back to the full head dimension.
+                x = sequence_model_parallel_all_gather(x.contiguous(), dim=2)
         else:
             current_end = current_start + q.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
@@ -196,7 +225,12 @@ class CausalWanSelfAttention(nn.Module):
                 key_window = _apply_rotary_emb(
                     key_window, cos[:window_len], sin[:window_len],
                     is_neox_style=False).type_as(v)
-            x = self.attn(roped_query, key_window, value_window)
+            x = self.attn(roped_query[:, :, head_slice],
+                          key_window[:, :, head_slice],
+                          value_window[:, :, head_slice])
+            if sp_world_size > 1:
+                # Gather per-rank head outputs back to the full head dimension.
+                x = sequence_model_parallel_all_gather(x.contiguous(), dim=2)
             if isinstance(kv_cache["global_end_index"], torch.Tensor):
                 kv_cache["global_end_index"].fill_(current_end)
             else:
@@ -608,10 +642,16 @@ class CausalWanTransformer3DModel(BaseDiT):
             max_attention_frames = (
                 GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES
                 if self.local_attn_size == -1 else self.local_attn_size)
-            rope_num_frames = max_attention_frames * get_sp_world_size()
+            # No multiplication by the sequence-parallel world size: the causal
+            # pipeline replicates the full (unsharded) sequence on every rank, so
+            # RoPE must cover the full local sequence length. Multiplying by the
+            # SP world size produced a 2x-too-long RoPE and crashed
+            # _apply_rotary_emb under SP. Attention is parallelized across heads
+            # instead (see CausalWanSelfAttention.forward).
+            rope_num_frames = max_attention_frames
             rope_start_frame = 0
         else:
-            rope_num_frames = post_patch_num_frames * get_sp_world_size()
+            rope_num_frames = post_patch_num_frames
             rope_start_frame = start_frame  # 0 when kv_cache is None
         freqs_cos, freqs_sin = get_rotary_pos_embed(
             (rope_num_frames, post_patch_height, post_patch_width),
@@ -718,7 +758,12 @@ class CausalWanTransformer3DModel(BaseDiT):
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sp_world_size(), post_patch_height,
+            # No multiplication by the sequence-parallel world size: the causal
+            # pipeline replicates the full (unsharded) sequence on every rank, so
+            # RoPE must cover the full local sequence length. Attention is
+            # parallelized across heads instead (see
+            # CausalWanSelfAttention.forward).
+            (post_patch_num_frames, post_patch_height,
              post_patch_width),
             self.hidden_size,
             self.num_attention_heads,
