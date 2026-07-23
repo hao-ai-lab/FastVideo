@@ -119,6 +119,7 @@ training:
     tp_size: 1            # tensor parallelism
     hsdp_replicate_dim: 1 # HSDP replication dimension
     hsdp_shard_dim: 8     # HSDP sharding dimension
+    fsdp_modules_per_group: 1 # consecutive selected modules per FSDP communication group
 
   data:
     data_path: data/my_dataset
@@ -510,11 +511,18 @@ training:
     tp_size: 1            # tensor parallelism group size
     hsdp_replicate_dim: 1 # number of HSDP replicas
     hsdp_shard_dim: 8     # number of HSDP shards
+    fsdp_modules_per_group: 1 # default: one selected module per communication group
 ```
 
 **HSDP** shards model parameters across `hsdp_shard_dim` GPUs and replicates
 across `hsdp_replicate_dim` groups. The product
 `hsdp_replicate_dim * hsdp_shard_dim` should equal `num_gpus`.
+
+`fsdp_modules_per_group` groups consecutive FSDP modules, in model traversal
+order, into each communication group. Values above the default of `1` reduce
+collective launches, but use larger communication buffers and can reduce
+communication/compute overlap. Benchmark the target model, batch size, and GPU
+topology rather than assuming a speedup.
 
 **Sequence parallelism** splits the sequence (video frames) across `sp_size`
 GPUs within each data-parallel group. Useful for long videos that don't fit on a

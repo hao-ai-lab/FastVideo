@@ -1,0 +1,9 @@
+__pycache__/
+*.log
+*.sqlite
+*.trace.json*
+*.pt
+*.safetensors
+*.mp4
+wandb/
+outputs/

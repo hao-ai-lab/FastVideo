@@ -21,12 +21,26 @@ from fastvideo.configs.models.dits.ltx2 import LTX2VideoArchConfig
 from fastvideo.models.loader.utils import get_param_names_mapping
 
 
-def _map(name: str, *, apply_gated_attention: bool) -> str:
+def _map_with_metadata(
+    name: str,
+    *,
+    apply_gated_attention: bool = False,
+    pack_attention_projections: bool = False,
+) -> tuple[str, int | None, int | None]:
     """Run ``name`` through a fresh config's mapping function."""
-    cfg = LTX2VideoArchConfig(apply_gated_attention=apply_gated_attention)
+    cfg = LTX2VideoArchConfig(
+        apply_gated_attention=apply_gated_attention,
+        pack_attention_projections=pack_attention_projections,
+    )
     mapper = get_param_names_mapping(cfg.param_names_mapping)
-    target, _, _ = mapper(name)
-    return target
+    return mapper(name)
+
+
+def _map(name: str, *, apply_gated_attention: bool) -> str:
+    return _map_with_metadata(
+        name,
+        apply_gated_attention=apply_gated_attention,
+    )[0]
 
 
 class TestLTX20ParamMappingDefault:
@@ -93,6 +107,111 @@ class TestLTX23ParamMappingGated:
         assert (_map("diffusion_model.transformer_blocks.0.attn1.to_q.weight",
                      apply_gated_attention=True) ==
                 "model.transformer_blocks.0.attn1.to_q.weight")
+
+
+class TestPackedAttentionProjectionMapping:
+
+    @pytest.mark.parametrize("prefix", [
+        "",
+        "model.",
+        "diffusion_model.",
+        "model.diffusion_model.",
+    ])
+    @pytest.mark.parametrize("suffix", ["weight", "bias"])
+    @pytest.mark.parametrize(
+        "attention,projection,packed,index,total",
+        [
+            ("attn1", "to_q", "to_qkv", 0, 3),
+            ("attn1", "to_k", "to_qkv", 1, 3),
+            ("attn1", "to_v", "to_qkv", 2, 3),
+            ("attn2", "to_k", "to_kv", 0, 2),
+            ("attn2", "to_v", "to_kv", 1, 2),
+        ],
+    )
+    def test_opt_in_maps_split_checkpoint_projections_to_packed_parameters(
+        self,
+        prefix,
+        suffix,
+        attention,
+        projection,
+        packed,
+        index,
+        total,
+    ):
+        source = f"{prefix}transformer_blocks.7.{attention}.{projection}.{suffix}"
+
+        assert _map_with_metadata(
+            source,
+            pack_attention_projections=True,
+        ) == (
+            f"model.transformer_blocks.7.{attention}.{packed}.{suffix}",
+            index,
+            total,
+        )
+
+    @pytest.mark.parametrize("suffix", ["weight", "bias"])
+    @pytest.mark.parametrize(
+        "attention,projection",
+        [
+            ("attn1", "to_q"),
+            ("attn1", "to_k"),
+            ("attn1", "to_v"),
+            ("attn2", "to_k"),
+            ("attn2", "to_v"),
+        ],
+    )
+    def test_default_keeps_checkpoint_projections_split(
+        self,
+        suffix,
+        attention,
+        projection,
+    ):
+        source = f"transformer_blocks.7.{attention}.{projection}.{suffix}"
+
+        assert _map_with_metadata(source) == (
+            f"model.{source}",
+            None,
+            None,
+        )
+
+    @pytest.mark.parametrize("prefix", [
+        "",
+        "model.",
+        "diffusion_model.",
+        "model.diffusion_model.",
+    ])
+    def test_cross_attention_query_stays_separate(self, prefix):
+        assert _map_with_metadata(
+            f"{prefix}transformer_blocks.3.attn2.to_q.weight",
+            pack_attention_projections=True,
+        ) == (
+            "model.transformer_blocks.3.attn2.to_q.weight",
+            None,
+            None,
+        )
+
+    def test_post_init_is_idempotent_and_removes_disabled_pack_rules(self):
+        cfg = LTX2VideoArchConfig(pack_attention_projections=True)
+        initial_mapping = tuple(cfg.param_names_mapping.items())
+        packed_patterns = {
+            pattern
+            for pattern, replacement in initial_mapping
+            if isinstance(replacement, tuple)
+        }
+
+        cfg.__post_init__()
+        assert tuple(cfg.param_names_mapping.items()) == initial_mapping
+
+        cfg.pack_attention_projections = False
+        cfg.__post_init__()
+        assert packed_patterns.isdisjoint(cfg.param_names_mapping)
+        assert get_param_names_mapping(cfg.param_names_mapping)(
+            "transformer_blocks.0.attn1.to_q.weight"
+        ) == (
+            "model.transformer_blocks.0.attn1.to_q.weight",
+            None,
+            None,
+        )
 
 
 class TestParamMappingRuleOrdering:

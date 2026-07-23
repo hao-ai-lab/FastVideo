@@ -69,6 +69,12 @@ def run_training_from_config(
             "SLA_ATTN",
         )
 
+    if tc.distributed.fsdp_symmetric_memory:
+        nccl_cta_policy = os.environ.setdefault("NCCL_CTA_POLICY", "2")
+        if nccl_cta_policy != "2":
+            raise ValueError("training.distributed.fsdp_symmetric_memory requires "
+                             "NCCL_CTA_POLICY=2 before distributed initialization")
+
     maybe_init_distributed_environment_and_model_parallel(
         tc.distributed.tp_size,
         tc.distributed.sp_size,

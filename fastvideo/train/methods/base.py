@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Any, Literal, TypeAlias
 
 import torch
+from torch.distributed.fsdp import FSDPModule
 
 from fastvideo import envs
 from fastvideo.logger import init_logger
@@ -155,6 +156,17 @@ class TrainingMethod(torch.nn.Module, ABC):
         grad_accum_rounds = max(1, int(grad_accum_rounds))
         (loss_map["total_loss"] / grad_accum_rounds).backward()
 
+    def set_requires_gradient_sync(self, requires_gradient_sync: bool) -> None:
+        """Control FSDP communication between accumulation microbatches."""
+        retain_parameters = not self.training_config.distributed.reshard_after_forward
+        for model in self._role_models.values():
+            transformer = getattr(model, "transformer", None)
+            if getattr(model, "_trainable", False) and isinstance(transformer, FSDPModule):
+                transformer.set_requires_gradient_sync(requires_gradient_sync, recurse=True)
+                if retain_parameters:
+                    transformer.set_reshard_after_backward(requires_gradient_sync, recurse=True)
+                transformer.set_is_last_backward(requires_gradient_sync)
+
     def optimizers_schedulers_step(
         self,
         iteration: int,
@@ -184,13 +196,18 @@ class TrainingMethod(torch.nn.Module, ABC):
         """
         for opt in self.get_optimizers(0):
             for group in opt.param_groups:
+                fused = bool(group.get("fused"))
+                capturable = bool(group.get("capturable"))
                 for p in group["params"]:
                     if not p.requires_grad:
                         continue
                     if len(opt.state.get(p, {})) > 0:
                         continue
+                    step_device = p.device if fused or capturable else torch.device("cpu")
+                    step_dtype = (torch.float64
+                                  if not fused and torch.get_default_dtype() == torch.float64 else torch.float32)
                     opt.state[p] = {
-                        "step": torch.tensor(0.0),
+                        "step": torch.zeros((), dtype=step_dtype, device=step_device),
                         "exp_avg": torch.zeros_like(p),
                         "exp_avg_sq": torch.zeros_like(p),
                     }

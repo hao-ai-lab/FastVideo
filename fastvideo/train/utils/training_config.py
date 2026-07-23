@@ -18,6 +18,10 @@ class DistributedConfig:
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     pin_cpu_memory: bool = False
+    reshard_after_forward: bool = True
+    fsdp_symmetric_memory: bool = False
+    fsdp_modules_per_group: int = 1
+    reduce_dtype: str = "fp32"
 
 
 @dataclass(slots=True)
@@ -44,6 +48,7 @@ class OptimizerConfig:
     lr_num_cycles: int = 0
     lr_power: float = 0.0
     min_lr_ratio: float = 0.5
+    fused: bool | None = None
 
 
 @dataclass(slots=True)
@@ -77,6 +82,7 @@ class ModelTrainingConfig:
     precondition_outputs: bool = False
     moba_config: dict = field(default_factory=dict)
     enable_gradient_checkpointing_type: str | None = None
+    enable_torch_compile: bool = False
 
 
 @dataclass(slots=True)

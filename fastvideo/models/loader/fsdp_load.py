@@ -26,6 +26,34 @@ from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 logger = init_logger(__name__)
 
 
+def _compile_matched_submodule_forwards(
+    model: nn.Module,
+    torch_compile_kwargs: dict[str, Any] | None = None,
+) -> int:
+    """Compile only forwards selected by ``model._compile_conditions``."""
+    compile_conditions = getattr(model, "_compile_conditions", None)
+    if not compile_conditions:
+        raise ValueError("Regional torch.compile requires model._compile_conditions; "
+                         "refusing to compile the whole FSDP model.")
+
+    compile_kwargs = dict(torch_compile_kwargs or {})
+    if compile_kwargs.get("fullgraph") is True:
+        raise ValueError("Regional FSDP training compile requires "
+                         "fullgraph=False so runtime-only hooks can remain graph breaks.")
+    compile_kwargs["fullgraph"] = False
+
+    compiled_count = 0
+    for name, submodule in model.named_modules():
+        if name and any(condition(name, submodule) for condition in compile_conditions):
+            submodule.forward = torch.compile(submodule.forward, **compile_kwargs)
+            compiled_count += 1
+
+    if compiled_count == 0:
+        raise ValueError("model._compile_conditions matched no submodules; "
+                         "refusing to compile the whole FSDP model.")
+    return compiled_count
+
+
 def _maybe_quantize_model(model: nn.Module) -> None:
     """Quantize NVFP4- or FP8-tagged linear layers in-place after weights are loaded.
 
@@ -116,6 +144,7 @@ def maybe_load_fsdp_model(
     pin_cpu_memory: bool = True,
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
+    fsdp_modules_per_group: int = 1,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -151,6 +180,10 @@ def maybe_load_fsdp_model(
         use_fsdp = False
         logger.info("Disabling FSDP for MPS platform as it's not compatible")
 
+    if enable_torch_compile and training_mode:
+        compiled_count = _compile_matched_submodule_forwards(model, torch_compile_kwargs)
+        logger.info("Enabled regional torch.compile for %d training submodules before FSDP sharding", compiled_count)
+
     if use_fsdp:
         pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
         world_size = hsdp_replicate_dim * hsdp_shard_dim
@@ -179,7 +212,8 @@ def maybe_load_fsdp_model(
                     mp_policy=mp_policy,
                     mesh=device_mesh,
                     fsdp_shard_conditions=model._fsdp_shard_conditions,
-                    pin_cpu_memory=pin_cpu_memory)
+                    pin_cpu_memory=pin_cpu_memory,
+                    fsdp_modules_per_group=fsdp_modules_per_group)
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
@@ -209,12 +243,6 @@ def maybe_load_fsdp_model(
     # are present (lazy imports inside the helper).
     _maybe_quantize_model(model)
 
-    compile_in_loader = enable_torch_compile and training_mode
-    if compile_in_loader:
-        compile_kwargs = torch_compile_kwargs or {}
-        logger.info("Enabling torch.compile for FSDP training module with kwargs=%s", compile_kwargs)
-        model = torch.compile(model, **compile_kwargs)
-        logger.info("torch.compile enabled for %s", type(model).__name__)
     return model
 
 
@@ -227,6 +255,7 @@ def shard_model(
     mesh: DeviceMesh | None = None,
     fsdp_shard_conditions: list[Callable[[str, nn.Module], bool]] = [],  # noqa
     pin_cpu_memory: bool = True,
+    fsdp_modules_per_group: int = 1,
 ) -> None:
     """
     Utility to shard a model with FSDP using the PyTorch Distributed fully_shard API.
@@ -250,12 +279,20 @@ def shard_model(
         fsdp_shard_conditions (List[Callable[[str, nn.Module], bool]]): A list of functions to determine
             which modules to shard with FSDP.
         pin_cpu_memory (bool): If set to True, FSDP will pin the CPU memory of the offloaded parameters.
+        fsdp_modules_per_group (int): Number of consecutive matching modules to place in one FSDP
+            communication group. The default of 1 preserves per-module sharding.
 
     Raises:
-        ValueError: If no layer modules were sharded, indicating that no shard_condition was triggered.
+        ValueError: If the grouping is invalid or no layer modules were sharded, indicating that no
+            shard_condition was triggered.
     """
+    if fsdp_modules_per_group < 1:
+        raise ValueError("fsdp_modules_per_group must be at least 1")
+
     # Check if we should use size-based filtering
     use_size_filtering = os.environ.get("FASTVIDEO_FSDP2_AUTOWRAP", "0") == "1"
+    if use_size_filtering and fsdp_modules_per_group != 1:
+        raise ValueError("fsdp_modules_per_group > 1 is incompatible with FASTVIDEO_FSDP2_AUTOWRAP=1")
 
     if not fsdp_shard_conditions:
         logger.warning("No FSDP shard conditions provided; nothing will be sharded.")
@@ -312,7 +349,7 @@ def shard_model(
                     module_kwargs = {**fsdp_kwargs, "ignored_params": local_ignored_params}
                 fully_shard(m, **module_kwargs)
                 num_layers_sharded += 1
-    else:
+    elif fsdp_modules_per_group == 1:
         # Shard all modules matching conditions
         for n, m in reversed(named_modules):
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
@@ -325,6 +362,33 @@ def shard_model(
 
         if num_layers_sharded == 0:
             raise ValueError("No layer modules were sharded. Please check if shard conditions are working as expected.")
+    else:
+        matched_modules = [
+            module for name, module in named_modules
+            if any(shard_condition(name, module) for shard_condition in fsdp_shard_conditions)
+        ]
+        if not matched_modules:
+            raise ValueError("No layer modules were sharded. Please check if shard conditions are working as expected.")
+
+        seen_module_params: set[nn.Parameter] = set()
+        for module in matched_modules:
+            module_params = set(module.parameters()) - ignored_params
+            if seen_module_params.intersection(module_params):
+                raise ValueError("Matched FSDP modules must not have overlapping parameter sets")
+            seen_module_params.update(module_params)
+
+        module_groups = [
+            matched_modules[start:start + fsdp_modules_per_group]
+            for start in range(0, len(matched_modules), fsdp_modules_per_group)
+        ]
+
+        for group in module_groups:
+            module_kwargs = fsdp_kwargs
+            local_ignored_params = set().union(*(ignored_params_by_module[id(module)] for module in group))
+            if local_ignored_params:
+                module_kwargs = {**fsdp_kwargs, "ignored_params": local_ignored_params}
+            fully_shard(group, **module_kwargs)
+            num_layers_sharded += len(group)
 
     # Finally shard the entire model to account for any stragglers
     root_kwargs = fsdp_kwargs
@@ -368,8 +432,29 @@ def load_model_from_full_model_state_dict(
     named_parameters = dict(model.named_parameters())
     named_buffers = dict(model.named_buffers())
     sharded_sd = {}
+
+    ignore_checkpoint_key = getattr(model, "_is_ignored_checkpoint_key", None)
+    ignored_checkpoint_keys = 0
+    if callable(ignore_checkpoint_key):
+        unfiltered_sd_iterator = full_sd_iterator
+
+        def _filtered_sd_iterator():
+            nonlocal ignored_checkpoint_keys
+            for source_param_name, full_tensor in unfiltered_sd_iterator:
+                target_param_name, _, _ = param_names_mapping(  # type: ignore[misc]
+                    source_param_name)
+                if (target_param_name not in meta_sd
+                        and ignore_checkpoint_key(target_param_name)):
+                    ignored_checkpoint_keys += 1
+                    continue
+                yield source_param_name, full_tensor
+
+        full_sd_iterator = _filtered_sd_iterator()
+
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
                                                                            param_names_mapping)  # type: ignore
+    if ignored_checkpoint_keys:
+        logger.info("Ignored %d model-declared checkpoint keys", ignored_checkpoint_keys)
     for target_param_name, full_tensor in custom_param_sd.items():
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:

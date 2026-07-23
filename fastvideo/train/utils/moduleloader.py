@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch.distributed.fsdp import FSDPModule
 
 from fastvideo.attention.selector import (
     coerce_attn_backend,
@@ -14,6 +15,7 @@ from fastvideo.attention.selector import (
 )
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.fastvideo_args import ExecutionMode, TrainingArgs
+from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import (
     PipelineComponentLoader, )
 from fastvideo.utils import (
@@ -25,6 +27,8 @@ from fastvideo.platforms import AttentionBackendEnum
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+
+logger = init_logger(__name__)
 
 # ------------------------------------------------------------------
 # TrainingArgs builders (only place that creates FastVideoArgs)
@@ -60,7 +64,9 @@ def _make_training_args(
         text_encoder_cpu_offload=False,
         image_encoder_cpu_offload=False,
         use_fsdp_inference=False,
-        enable_torch_compile=False,
+        enable_torch_compile=tc.model.enable_torch_compile,
+        fsdp_reduce_dtype=tc.distributed.reduce_dtype,
+        fsdp_modules_per_group=tc.distributed.fsdp_modules_per_group,
     )
 
 
@@ -163,4 +169,29 @@ def load_module_from_path(
     if not isinstance(module, torch.nn.Module):
         raise TypeError(f"Loaded {module_type!r} is not a "
                         f"torch.nn.Module: {type(module)}")
+    if module_type == "transformer":
+        reshard_after_forward = training_config.distributed.reshard_after_forward
+        set_reshard_after_forward = getattr(
+            module,
+            "set_reshard_after_forward",
+            None,
+        )
+        if callable(set_reshard_after_forward):
+            set_reshard_after_forward(
+                reshard_after_forward,
+                recurse=True,
+            )
+        elif not reshard_after_forward:
+            raise RuntimeError("training.distributed.reshard_after_forward=false requires "
+                               "an FSDP-wrapped transformer")
+
+        if training_config.distributed.fsdp_symmetric_memory:
+            fsdp_modules = [submodule for submodule in module.modules() if isinstance(submodule, FSDPModule)]
+            if not fsdp_modules:
+                raise RuntimeError("training.distributed.fsdp_symmetric_memory=true requires "
+                                   "an FSDP-wrapped transformer")
+            for fsdp_module in fsdp_modules:
+                fsdp_module.set_force_sum_reduction_for_comms(True)
+                fsdp_module.set_symm_mem_for_comm("NCCL")
+            logger.info("Enabled FSDP symmetric-memory communication on %d modules", len(fsdp_modules))
     return module

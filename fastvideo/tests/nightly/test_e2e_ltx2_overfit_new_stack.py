@@ -89,7 +89,6 @@ def run_training(case: dict):
         "-m", "fastvideo.train.entrypoint.train",
         "--config", case["config"],
         "--training.checkpoint.output_dir", str(case["out_dir"]),
-        "--training.data.data_path", str(case["prep_dir"]),
         "--callbacks.validation.dataset_file",
         str(case["prep_dir"] / "validation_prompts.json"),
     ]
