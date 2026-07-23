@@ -48,6 +48,7 @@ from fastvideo.configs.pipelines.turbodiffusion import (
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
     FastWan2_2_TI2V_5B_Config,
+    FastWan2_2_TI2V_5B_FullAttn_Config,
     LucyEditDevConfig,
     SelfForcingWan2_2_T2V480PConfig,
     SelfForcingWanT2V480PConfig,
@@ -234,6 +235,57 @@ def _get_config_info(
     if raise_on_missing:
         raise RuntimeError(f"No model info found for model path: {model_path}")
     return None
+
+
+def _check_config_info_workload_support(
+    model_path: str,
+    config_info: ConfigInfo,
+    workload_type: WorkloadType,
+) -> None:
+    if not config_info.workload_types:
+        return
+    if workload_type in config_info.workload_types:
+        return
+
+    supported_workload_values = ", ".join(workload.value for workload in config_info.workload_types)
+    raise ValueError(f"Model path '{model_path}' does not support workload type '{workload_type.value}'. "
+                     f"Supported workload type(s): {supported_workload_values}.")
+
+
+def _get_registered_config_info(model_path: str) -> ConfigInfo | None:
+    if model_path in _MODEL_HF_PATH_TO_NAME:
+        model_id = _MODEL_HF_PATH_TO_NAME[model_path]
+        return _CONFIG_REGISTRY.get(model_id)
+
+    model_name = get_model_short_name(model_path.lower())
+    all_model_hf_paths = sorted(_MODEL_HF_PATH_TO_NAME.keys(), key=len, reverse=True)
+    for registered_model_hf_id in all_model_hf_paths:
+        registered_model_name = get_model_short_name(registered_model_hf_id.lower())
+        if registered_model_name == model_name:
+            model_id = _MODEL_HF_PATH_TO_NAME[registered_model_hf_id]
+            return _CONFIG_REGISTRY.get(model_id)
+
+    for model_id, detector in _MODEL_NAME_DETECTORS:
+        if detector(model_path.lower()):
+            return _CONFIG_REGISTRY.get(model_id)
+
+    return None
+
+
+def validate_model_workload_support(model_path: str, workload_type: WorkloadType) -> None:
+    """Reject model/workload pairs that the registry already advertises."""
+    config_info = _get_registered_config_info(model_path)
+    if config_info is None:
+        return
+    _check_config_info_workload_support(model_path, config_info, workload_type)
+
+
+def get_model_workload_types(model_path: str) -> tuple[WorkloadType, ...]:
+    """Return registered workload types for a model path without downloading."""
+    config_info = _get_registered_config_info(model_path)
+    if config_info is None:
+        return ()
+    return config_info.workload_types
 
 
 def _register_configs() -> None:
@@ -1029,8 +1081,17 @@ def _register_configs() -> None:
         pipeline_config_cls=FastWan2_2_TI2V_5B_Config,
         workload_types=(WorkloadType.T2V, WorkloadType.I2V),
         hf_model_paths=[
-            "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
             "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
+        ],
+        model_family="wan",
+        default_preset="fast_wan_2_2_ti2v_5b",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=FastWan2_2_TI2V_5B_FullAttn_Config,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
         ],
         model_family="wan",
         default_preset="fast_wan_2_2_ti2v_5b",
@@ -1191,6 +1252,7 @@ def get_model_info(
 
     config_info = _get_config_info(model_path, raise_on_missing=True)
     assert config_info is not None, "config_info must be resolved"
+    _check_config_info_workload_support(model_path, config_info, workload_type)
 
     if override_pipeline_cls_name:
         # Explicit override: skip config resolution entirely so checkpoints
@@ -1399,4 +1461,5 @@ __all__ = [
     "get_registered_models_with_workloads",
     "get_sampling_param_cls_for_name",
     "get_pipeline_config_classes",
+    "validate_model_workload_support",
 ]

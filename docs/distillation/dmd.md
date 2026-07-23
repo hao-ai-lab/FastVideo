@@ -1,6 +1,11 @@
 # 🎯 Distillation
 
-We introduce a new finetuning strategy - **Sparse-distill**, which jointly integrates **[DMD](https://arxiv.org/abs/2405.14867)** and **[VSA](https://arxiv.org/abs/2505.13389)** in a single training process. This approach combines the benefits of both distillation to shorten diffusion steps and sparse attention to reduce attention computation, enabling much faster video generation.
+We provide DMD-distilled Wan checkpoints in two attention families. The Wan2.1
+Sparse-distill models jointly integrate **[DMD](https://arxiv.org/abs/2405.14867)**
+and **[VSA](https://arxiv.org/abs/2505.13389)** in a single training process,
+combining short diffusion schedules with sparse attention. The FastWan2.2
+FullAttn checkpoint is a dense DMD-distilled, T2V-only checkpoint and should run
+with a dense attention backend.
 
 !!! tip "Attn-QAT DMD2 workflow"
     The modular trainer also provides a Wan2.1 MixKit recipe that first
@@ -10,20 +15,35 @@ We introduce a new finetuning strategy - **Sparse-distill**, which jointly integ
 
 ## 📊 Model Overview
 
-We provide two distilled models:
+We provide two Wan2.1 VSA Sparse-distill models:
 
 - **[FastWan2.1-T2V-1.3B-Diffusers](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers)**: 3-step inference, up to **16 FPS** on H100 GPU
 - **[FastWan2.1-T2V-14B-480P-Diffusers](https://huggingface.co/FastVideo/FastWan2.1-T2V-14B-480P-Diffusers)**: 3-step inference, up to **60x speed up** at 480P, **90x speed up** at 720P for denoising loop
+
+These VSA models are trained on **61×448×832** resolution but support generating videos with **any resolution** (the 1.3B model mainly supports 480P, and the 14B model supports 480P and 720P; quality may degrade for different resolutions).
+
+We also provide a dense FullAttn DMD checkpoint:
+
 - **[FastWan2.2-TI2V-5B-FullAttn-Diffusers](https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers)**: 3-step inference, up to **50x speed up** at 720P for denoising loop
 
-Both models are trained on **61×448×832** resolution but support generating videos with **any resolution** (1.3B  model mainly support 480P, 14B model support 480P and 720P, quality may degrade for different resolutions).
+The FastWan2.2 FullAttn checkpoint is dense-only and does not support
+`FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`.
 
 ## ⚙️ Inference
-First install [VSA](../attention/vsa/index.md). Set `MODEL_BASE` to your own model path and run:
+
+For VSA-distilled Wan2.1 models, first install [VSA](../attention/vsa/index.md). Run a VSA DMD config with
+the sparse attention backend:
 
 ```bash
 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN \
   fastvideo generate --config scripts/inference/inference_wan_VSA_DMD_1_3B.yaml
+```
+
+For the FastWan2.2 FullAttn checkpoint, use dense attention:
+
+```bash
+FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN \
+  fastvideo generate --config scripts/inference/inference_wan_FullAttn_DMD_5B_720P.yaml
 ```
 
 ## 🗂️ Dataset
@@ -76,7 +96,7 @@ sbatch examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P/distill_dmd_VSA_t2v_14B.slu
 - Training steps: 3000 (~52 hours)
 - HSDP shard dim: 8
 
-### Wan2.2 5B Model Sparse-Distill
+### Wan2.2 5B Model DMD Distillation
 
 For the 5B model, we use **8 nodes with 64 H200 GPUs** (8 GPUs per node):
 

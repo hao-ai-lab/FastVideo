@@ -105,6 +105,19 @@ def get_global_forced_attn_backend() -> AttentionBackendEnum | None:
     return forced_attn_backend
 
 
+def get_effective_attn_backend_override() -> AttentionBackendEnum | None:
+    """Return the active user-forced attention backend, if any."""
+    backend_by_global_setting = get_global_forced_attn_backend()
+    if backend_by_global_setting is not None:
+        return backend_by_global_setting
+
+    backend_by_env_var: str | None = envs.FASTVIDEO_ATTENTION_BACKEND
+    if backend_by_env_var is not None:
+        return backend_name_to_enum(backend_by_env_var)
+
+    return None
+
+
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
@@ -112,7 +125,13 @@ def get_attn_backend(
     | None = None,
     default_backend: AttentionBackendEnum | None = None,
 ) -> type[AttentionBackend]:
-    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends, default_backend)
+    return _cached_get_attn_backend(
+        head_size,
+        dtype,
+        supported_attention_backends,
+        default_backend,
+        get_effective_attn_backend_override(),
+    )
 
 
 @cache
@@ -122,6 +141,7 @@ def _cached_get_attn_backend(
     supported_attention_backends: tuple[AttentionBackendEnum, ...]
     | None = None,
     default_backend: AttentionBackendEnum | None = None,
+    selected_backend: AttentionBackendEnum | None = None,
 ) -> type[AttentionBackend]:
     # Check whether a particular choice of backend was
     # previously forced.
@@ -130,15 +150,6 @@ def _cached_get_attn_backend(
     # ENVIRONMENT VARIABLE.
     if not supported_attention_backends:
         raise ValueError("supported_attention_backends is empty")
-    selected_backend = None
-    backend_by_global_setting: AttentionBackendEnum | None = (get_global_forced_attn_backend())
-    if backend_by_global_setting is not None:
-        selected_backend = backend_by_global_setting
-    else:
-        # Check the environment variable and override if specified
-        backend_by_env_var: str | None = envs.FASTVIDEO_ATTENTION_BACKEND
-        if backend_by_env_var is not None:
-            selected_backend = backend_name_to_enum(backend_by_env_var)
 
     # Layer-level default (e.g. a checkpoint that requires a specific sparse
     # backend). Lower precedence than the global force and the env var, so
