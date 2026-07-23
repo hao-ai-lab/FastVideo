@@ -27,7 +27,7 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
-- Attn-QAT inference (modified SageAttention3 FP4, sm_120/RTX 5090): `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
+- Attn-QAT inference (modified SageAttention3 FP4, sm_120a/sm_121a — RTX 5090 / DGX Spark): `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
@@ -146,39 +146,45 @@ gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
 - Per-call cosine similarity vs BF16: ~0.99 (slight quantization error accumulates over denoising steps)
 - Only supports `headdim >= 128`
 
-### NVFP4 + Attn-QAT (modified SageAttention3, Blackwell sm_120)
+### NVFP4 Attn-QAT attention (modified SageAttention3, Blackwell sm_120a/sm_121a)
 
-**`ATTN_QAT_INFER`** with **`transformer_quant=nvfp4_qat`**
+**`ATTN_QAT_INFER`**
 
-Runs the DiT fully in 4-bit: NVFP4 linear layers (activations quantized on the
-fly) plus the modified SageAttention3 FP4 attention backend. This is the
-inference half of the Quantization-Aware Distillation (QAD) recipe and the path
-used for the RTX 5090 release.
+Quantizes Q/K/V inside the modified SageAttention3 FP4 attention backend. On
+DGX Spark, keep the transformer linear layers in BF16: the separate
+`transformer_quant=nvfp4_qat` linear path is not supported on sm_121 yet.
 
-The `attn_qat_infer` kernel hard-gates on **sm_120 (consumer Blackwell / RTX
-5090)**; on other GPUs the backend logs a notice and falls back to Flash
-Attention. See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040).
+The `attn_qat_infer` kernel targets consumer/workstation Blackwell — **sm_120a
+(RTX 5090 / PRO 6000)** and **sm_121a (DGX Spark GB10)**; the block-scaled FP4
+MMA is numerically correct on both (GB10-verified: cos ~0.98 vs bf16 SDPA).
+sm_121a support needs a CUDA 13 build (`TORCH_CUDA_ARCH_LIST=12.1a`). A runtime
+capability gate falls back to Flash Attention on other GPUs.
 
-Enable both halves — attention via the env var, linear via `transformer_quant`:
+> **Quality note (stock weights):** on stock Wan-2.1 the FP4-attention output is
+> below bf16 — QAD expects a QAT-distilled checkpoint the model was *trained* to
+> tolerate FP4 attention with. Post-hoc on non-QAT weights, expect a quality
+> cost; use the QAT checkpoint for release-grade output.
+
+See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040).
+
+Enable FP4 attention with BF16 transformer linears on DGX Spark:
 
 ```python
 import os
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
 
 from fastvideo import VideoGenerator
-from fastvideo.layers.quantization import get_quantization_config
 gen = VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     num_gpus=1,
-    # Wan-2.1 uses the nvfp4_qat config (NVFP4 is LTX2-specific). Pass an
-    # instance — the bare string is not resolved on the from_pretrained path.
-    transformer_quant=get_quantization_config("nvfp4_qat")(),
-    use_fsdp_inference=False,     # FSDP shards invalidate the FP4 tensor pointers
+    use_fsdp_inference=False,
 )
 gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
 ```
 
-Or run the example script:
+The full QAD configuration, pairing this attention backend with
+`transformer_quant=nvfp4_qat`, is currently limited to sm_120. Its RTX 5090
+example is:
 
 ```bash
 python examples/inference/optimizations/nvfp4_qat_wan2_1_1_3b.py
