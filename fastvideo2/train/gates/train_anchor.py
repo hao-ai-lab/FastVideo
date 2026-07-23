@@ -162,8 +162,9 @@ def run_dmd2(mode: str = "dmd2") -> int:
         steps = json.load(f)
     device = "cuda"
     is_vsa = mode == "vsa_dmd2"
-    # student: VSA blocks + FastWan weights; teacher/critic: DENSE blocks +
-    # base weights (main's scorers are dense-built and score via plain flash)
+    is_qad = mode == "qad"
+    # student: VSA/QAT blocks per recipe; teacher/critic: DENSE blocks + base
+    # weights (main's scorers are dense-built / loader-gated back to flash)
     card = FASTWAN_T2V_1_3B if is_vsa else WAN21_T2V_1_3B
     base_root = resolve_weights(WAN21_T2V_1_3B)
 
@@ -175,9 +176,14 @@ def run_dmd2(mode: str = "dmd2") -> int:
         student = WanModelFVVSA.from_pretrained(resolve_weights(card),
                                                 torch_dtype=torch.float32,
                                                 subfolder="transformer").to(device)
+    elif is_qad:
+        from fastvideo2.wan21.model_fv import WanModelFVQAT
+        student = WanModelFVQAT.from_pretrained(base_root, torch_dtype=torch.float32,
+                                                subfolder="transformer").to(device)
     else:
         student = load_dense()
-    step_ctx = DMD2Step(student, load_dense(), load_dense())
+    step_ctx = DMD2Step(student, load_dense(), load_dense(),
+                        guidance=2.0 if is_qad else 3.5)
     pz = np.load(os.path.join(gold, "params.npz"))
     uncond = torch.from_numpy(pz["neg_embeds"]).to(device, torch.bfloat16)
 
@@ -282,4 +288,4 @@ def run_dmd2(mode: str = "dmd2") -> int:
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     mode = args[0] if args else "finetune"
-    sys.exit(run_dmd2(mode) if mode in ("dmd2", "vsa_dmd2") else run(mode=mode))
+    sys.exit(run_dmd2(mode) if mode in ("dmd2", "vsa_dmd2", "qad") else run(mode=mode))

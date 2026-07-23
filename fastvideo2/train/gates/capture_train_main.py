@@ -33,9 +33,9 @@ import sys
 
 MODE = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "finetune"
 VSA = MODE in ("vsa", "vsa_dmd2")
-DMD2 = MODE in ("dmd2", "vsa_dmd2")
+DMD2 = MODE in ("dmd2", "vsa_dmd2", "qad")
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ("VIDEO_SPARSE_ATTN" if VSA else
-                                             "ATTN_QAT_TRAIN" if MODE == "qat" else "FLASH_ATTN")
+                                             "ATTN_QAT_TRAIN" if MODE in ("qat", "qad") else "FLASH_ATTN")
 os.environ.setdefault("WANDB_MODE", "offline")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -116,7 +116,7 @@ def main() -> None:
                  "--dmd_denoising_steps", "1000,757,522",
                  "--simulate_generator_forward",
                  "--generator_update_interval", "2",
-                 "--real_score_guidance_scale", "3.5",
+                 "--real_score_guidance_scale", "2.0" if MODE == "qad" else "3.5",
                  "--min_timestep_ratio", "0.02", "--max_timestep_ratio", "0.98",
                  "--flow_shift", "8.0"]
         argv[argv.index("5e-5")] = "2e-6"  # learning_rate per the shipped recipe
