@@ -285,7 +285,8 @@ def main() -> None:
 
             def randint(*a, **k):
                 out = orig_randint(*a, **k)
-                raw["t_raw"] = int(out.item())
+                if out.numel() == 1:  # nested rollout draws pass through
+                    raw["t_raw"] = int(out.item())
                 return out
 
             def randn(*a, **k):
@@ -311,7 +312,8 @@ def main() -> None:
 
             def randint(*a, **k):
                 out = orig_randint(*a, **k)
-                raw.setdefault("ints", []).append(int(out.item()))
+                if out.numel() == 1:  # nested rollout draws pass through
+                    raw.setdefault("ints", []).append(int(out.item()))
                 return out
 
             def randn(*a, **k):
@@ -346,6 +348,18 @@ def main() -> None:
 
         if SF:
             SFP.SelfForcingDistillationPipeline._generator_multi_step_simulation_forward = rec_roll
+            orig_dstep_sf = SFP.SelfForcingDistillationPipeline.train_one_step
+
+            def rec_dstep_sf(self, tb):
+                tb = orig_dstep_sf(self, tb)
+                rec = _cur()
+                rec["gen_loss"] = float(tb.generator_loss)
+                rec["closed"] = True
+                if tb.encoder_hidden_states is not None:
+                    rec["embeds"] = _np(tb.encoder_hidden_states)
+                return tb
+
+            SFP.SelfForcingDistillationPipeline.train_one_step = rec_dstep_sf
         else:
             DP.DistillationPipeline._generator_multi_step_simulation_forward = rec_roll
         DP.DistillationPipeline._dmd_forward = rec_dmd
