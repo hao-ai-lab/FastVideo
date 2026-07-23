@@ -287,3 +287,171 @@ class WanDMDLoop(WanDenoiseLoop):
         # hand back the engine's BCTHW convention (main permutes at stage end)
         latents = st.latents.permute(0, 2, 1, 3, 4)
         return {"latents": latents, "trajectory": st.trajectory, "steps": st.step_idx}
+
+
+def self_forcing_table(shift: float = 5.0, num_train_timesteps: int = 1000) -> tuple[Any, Any]:
+    """main's SelfForcingFlowMatchScheduler table at the SFWan checkpoint
+    config (sigma_min=0, extra_one_step=True, n=1000): torch fp32
+    linspace(1, 0, 1001)[:-1], shift-warped; timesteps are sigmas*1000.
+    Built with torch (not numpy) because torch.linspace's fp32 rounding is
+    part of the contract — sigmas feed the fp64 x0 math. Returns fp32 CPU
+    tensors (timesteps, sigmas)."""
+    import torch
+    sigmas = torch.linspace(1.0, 0.0, num_train_timesteps + 1)[:-1]
+    sigmas = shift * sigmas / (1 + (shift - 1) * sigmas)
+    return sigmas * num_train_timesteps, sigmas
+
+
+class WanCausalDMDLoop:
+    """SFWan chunk rollout, bit-faithful to main's CausalDMDDenosingStage
+    (T2V path: no MoE boundary, no image conditioning).
+
+    Structure per chunk of ``num_frames_per_block`` latent frames:
+    len(timesteps) DMD denoise steps (forward with KV/cross caches -> fp64
+    x0 -> renoise with fresh CPU-generator noise in the CHUNK's BTCHW shape),
+    then one CONTEXT pass re-encoding the clean chunk at t=context_noise to
+    overwrite the chunk's KV with clean context. Warp semantics: the model
+    sees table[1000 - t] (fp32 warped values, e.g. 937.5), and sigma lookups
+    self-index the same table.
+
+    The full-video latents state is [B, C, T, H, W] fp32 (main's causal
+    latent prep uses the default BCTHW layout — unlike the bidirectional DMD
+    pipeline's BTCHW). Each planned step is one WorkPlan so the trace shows
+    chunk{i}.t{j} / chunk{i}.ctx; self-forcing TRAINING drives this same loop
+    for rollout (nothing here assumes no_grad).
+    """
+
+    semantics = "wan.causal_dmd.chunked/v1"
+
+    def __init__(self, *, loop_id: str, timesteps: tuple[int, ...] = (1000, 750, 500, 250),
+                 shift: float = 5.0, num_frames_per_block: int = 3,
+                 context_noise: int = 0, latent_channels: int = 16,
+                 spatial_ratio: int = 8, temporal_ratio: int = 4):
+        self.loop_id = loop_id
+        self.timesteps = tuple(int(t) for t in timesteps)
+        self.shift = float(shift)
+        self.num_frames_per_block = int(num_frames_per_block)
+        self.context_noise = int(context_noise)
+        self.latent_channels = latent_channels
+        self.spatial_ratio = spatial_ratio
+        self.temporal_ratio = temporal_ratio
+
+    # ------------------------------------------------------------------ #
+    def init(self, request: Any, instance: Any, inputs: Mapping[str, Any]) -> LoopState:
+        import torch
+        st = LoopState(loop_id=self.loop_id, request_id=request.request_id)
+        t_lat = (request.num_frames - 1) // self.temporal_ratio + 1
+        if t_lat % self.num_frames_per_block != 0:
+            raise ValueError(f"latent frames {t_lat} not divisible by "
+                             f"num_frames_per_block {self.num_frames_per_block}")
+        h_lat = request.height // self.spatial_ratio
+        w_lat = request.width // self.spatial_ratio
+        gen = torch.Generator("cpu").manual_seed(request.seed)
+        # main's causal latent prep: default BCTHW layout, fp32
+        st.latents = torch.randn((1, self.latent_channels, t_lat, h_lat, w_lat),
+                                 generator=gen, dtype=torch.float32).to(instance.device)
+        table_t, table_s = self_forcing_table(self.shift)
+        warped = table_t[[1000 - t for t in self.timesteps]]  # fp32 row values
+        st.scratch.update(
+            gen=gen, instance=instance,
+            text=inputs["text_embeds"],
+            table_t=table_t, table_s=table_s,
+            warped_ts=[float(t) for t in warped],
+            num_blocks=t_lat // self.num_frames_per_block,
+            frame_seqlen=(h_lat // 2) * (w_lat // 2),
+            capture=bool(request.capture_trajectory),
+            caches=None,  # allocated lazily on device at first plan run
+        )
+        st.cond["text"] = inputs["text_embeds"]
+        from fastvideo2.loading import torch_dtype
+        st.scratch["dit_dtype"] = torch_dtype(instance.card.provenance.precision)
+        return st
+
+    # one linear step index over (chunk, phase) where phase in
+    # [0..len(timesteps)-1] = denoise, phase == len(timesteps) = context pass
+    def _phase(self, step_idx: int) -> tuple[int, int]:
+        per_chunk = len(self.timesteps) + 1
+        return step_idx // per_chunk, step_idx % per_chunk
+
+    def next(self, st: LoopState) -> "WorkPlan | Done":
+        import torch
+        chunk, phase = self._phase(st.step_idx)
+        if chunk >= st.scratch["num_blocks"]:
+            return Done()
+        nf = self.num_frames_per_block
+        s0 = chunk * nf
+        instance = st.scratch["instance"]
+        dit_dtype = st.scratch["dit_dtype"]
+        gen = st.scratch["gen"]
+        text = st.scratch["text"]
+        frame_seqlen = st.scratch["frame_seqlen"]
+        denoise = phase < len(self.timesteps)
+        label = (f"{self.loop_id}.chunk{chunk}.t{self.timesteps[phase]}"
+                 if denoise else f"{self.loop_id}.chunk{chunk}.ctx")
+
+        def run() -> dict:
+            dit = instance.component("transformer")
+            device = st.latents.device
+            if st.scratch["caches"] is None:
+                n_heads, head_dim = dit.num_attention_heads, dit.head_dim
+                cache_tokens = 21 * frame_seqlen
+                st.scratch["caches"] = (
+                    type(dit).make_kv_cache(len(dit.blocks), 1, cache_tokens,
+                                            n_heads, head_dim, dit_dtype, device),
+                    type(dit).make_crossattn_cache(len(dit.blocks)))
+            kv_cache, xattn_cache = st.scratch["caches"]
+            autocast = torch.amp.autocast("cuda", dtype=dit_dtype,
+                                          enabled=st.latents.is_cuda and dit_dtype != torch.float32)
+            chunk_latents = st.latents[:, :, s0:s0 + nf]
+
+            if denoise:
+                t_warped = st.scratch["warped_ts"][phase]
+                # main: t_cur (fp32) * ones([B,1], long) -> promotes to fp32
+                t_in = torch.tensor(t_warped, dtype=torch.float32, device=device
+                                    ) * torch.ones((1, 1), dtype=torch.long, device=device)
+                noise_btchw = chunk_latents.permute(0, 2, 1, 3, 4).clone()
+                with torch.no_grad(), autocast:
+                    pred = dit(chunk_latents.to(dit_dtype), text, t_in,
+                               kv_cache=kv_cache, crossattn_cache=xattn_cache,
+                               current_start=s0 * frame_seqlen, start_frame=s0)
+                pred_btchw = pred.permute(0, 2, 1, 3, 4)
+                # pred_noise_to_pred_video: fp64, sigma via table argmin
+                tt = st.scratch["table_t"].double()
+                ss = st.scratch["table_s"].double()
+                sigma = ss[(tt - t_warped).abs().argmin()]
+                x0 = (noise_btchw.double() - sigma * pred_btchw.double()).to(pred_btchw.dtype)
+                if phase < len(self.timesteps) - 1:
+                    t_next = st.scratch["warped_ts"][phase + 1]
+                    noise = torch.randn(noise_btchw.shape, dtype=x0.dtype,
+                                        generator=gen).to(device)
+                    s_next = st.scratch["table_s"][
+                        (st.scratch["table_t"] - t_next).abs().argmin()].to(device
+                                                                            ).view(1, 1, 1, 1)
+                    nxt = ((1 - s_next) * x0 + s_next * noise).type_as(noise)
+                else:
+                    nxt = x0
+                st.latents[:, :, s0:s0 + nf] = nxt.permute(0, 2, 1, 3, 4)
+                return {"latents": st.latents}
+
+            # context pass: re-encode the clean chunk at t=context_noise (long)
+            t_ctx = (torch.ones((1,), device=device, dtype=torch.long)
+                     * self.context_noise).unsqueeze(1)
+            with torch.no_grad(), autocast:
+                dit(chunk_latents.to(dit_dtype), text, t_ctx,
+                    kv_cache=kv_cache, crossattn_cache=xattn_cache,
+                    current_start=s0 * frame_seqlen, start_frame=s0)
+            return {"latents": st.latents}
+
+        return WorkPlan(label=label, step=st.step_idx, run=run,
+                        meta={"chunk": chunk, "phase": phase})
+
+    def advance(self, st: LoopState, result: dict) -> LoopState:
+        st.latents = result["latents"]
+        chunk, phase = self._phase(st.step_idx)
+        if st.scratch["capture"] and phase == len(self.timesteps):
+            st.trajectory.append(st.latents.detach().to("cpu", copy=True))
+        st.step_idx += 1
+        return st
+
+    def finalize(self, st: LoopState) -> dict:
+        return {"latents": st.latents, "trajectory": st.trajectory, "steps": st.step_idx}

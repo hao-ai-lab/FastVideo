@@ -19,18 +19,20 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from fastvideo2.card import ModelCard
-from fastvideo2.wan21 import FASTWAN_QAD_FP8_1_3B, FASTWAN_T2V_1_3B, WAN21_T2V_1_3B, build_wan_t2v_pipeline
+from fastvideo2.wan21 import FASTWAN_QAD_FP8_1_3B, FASTWAN_T2V_1_3B, SFWAN_T2V_1_3B, WAN21_T2V_1_3B, build_wan_t2v_pipeline
 
 CARDS: dict[str, ModelCard] = {
     WAN21_T2V_1_3B.model_id: WAN21_T2V_1_3B,
     FASTWAN_QAD_FP8_1_3B.model_id: FASTWAN_QAD_FP8_1_3B,
     FASTWAN_T2V_1_3B.model_id: FASTWAN_T2V_1_3B,
+    SFWAN_T2V_1_3B.model_id: SFWAN_T2V_1_3B,
 }
 
 PIPELINES: dict[str, Callable[[], Any]] = {
     WAN21_T2V_1_3B.model_id: build_wan_t2v_pipeline,
     FASTWAN_QAD_FP8_1_3B.model_id: build_wan_t2v_pipeline,
     FASTWAN_T2V_1_3B.model_id: build_wan_t2v_pipeline,
+    SFWAN_T2V_1_3B.model_id: build_wan_t2v_pipeline,
 }
 
 

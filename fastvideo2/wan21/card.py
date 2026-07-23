@@ -120,3 +120,36 @@ FASTWAN_T2V_1_3B = derive(
     sampling_defaults={"num_steps": 3, "guidance_scale": 1.0, "shift": 8.0,
                        "negative_prompt": ""},
 )
+
+
+# --------------------------------------------------------------------------- #
+# SFWan (self-forcing causal) — chunked realtime rollout, 4-step DMD per
+# 3-frame block over a KV cache. Authority: fastvideo-main (their released
+# checkpoint + CausalDMDDenosingStage); warp semantics and the
+# SelfForcingFlowMatchScheduler table are vendored in the loop.
+# --------------------------------------------------------------------------- #
+SFWAN_T2V_1_3B = derive(
+    WAN21_T2V_1_3B,
+    model_id="sfwan-t2v-1.3b",
+    weights="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
+    components={
+        "transformer": ComponentSpec("transformer", kind="dit",
+                                     module="fastvideo2.wan21.model_fv:WanModelFVCausal",
+                                     subfolder="transformer", dtype="bf16"),
+        "text_encoder": ComponentSpec("text_encoder", kind="text_encoder",
+                                      module="transformers:UMT5EncoderModel",
+                                      subfolder="text_encoder", dtype="fp32"),
+    },
+    loops={
+        "denoise": LoopSpec("denoise", loop="fastvideo2.wan21.loop:WanCausalDMDLoop",
+                            params={"timesteps": [1000, 750, 500, 250], "shift": 5.0,
+                                    "num_frames_per_block": 3, "context_noise": 0,
+                                    "latent_channels": 16, "spatial_ratio": 8,
+                                    "temporal_ratio": 4}),
+    },
+    provenance={"method": "self-forcing-dmd", "parents": ("wan2.1-t2v-1.3b",),
+                "assumes_loop": "wan.causal_dmd.chunked/v1", "precision": "bf16",
+                "substitution": "quality-changing"},
+    sampling_defaults={"num_steps": 4, "guidance_scale": 1.0, "shift": 5.0,
+                       "negative_prompt": ""},
+)

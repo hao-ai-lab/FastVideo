@@ -42,7 +42,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ["WanModelFV", "WanModelFVFP8", "WanModelFVVSA"]
+__all__ = ["WanModelFV", "WanModelFVCausal", "WanModelFVFP8", "WanModelFVVSA"]
 
 
 # --------------------------------------------------------------------------- #
@@ -51,16 +51,19 @@ __all__ = ["WanModelFV", "WanModelFVFP8", "WanModelFVVSA"]
 _ROPE_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
 
 
-def _rope_cos_sin(grid: tuple[int, int, int], head_dim: int, theta: float = 10000.0):
+def _rope_cos_sin(grid: tuple[int, int, int], head_dim: int, theta: float = 10000.0,
+                  start_frame: int = 0):
     """cos/sin [S, head_dim] in fp64 (CPU, cached). Axis split mirrors main:
-    [d - 4*(d//6), 2*(d//6), 2*(d//6)] over (f, h, w), f-major token order."""
-    key = (grid, head_dim, theta)
+    [d - 4*(d//6), 2*(d//6), 2*(d//6)] over (f, h, w), f-major token order.
+    ``start_frame`` offsets the temporal axis (causal chunk rollout uses
+    absolute positions)."""
+    key = (grid, head_dim, theta, start_frame)
     if key not in _ROPE_CACHE:
         d6 = head_dim // 6
         dim_list = [head_dim - 4 * d6, 2 * d6, 2 * d6]
         f, h, w = grid
         axes = [
-            torch.arange(f, dtype=torch.float64).view(f, 1, 1).expand(f, h, w),
+            (torch.arange(f, dtype=torch.float64) + start_frame).view(f, 1, 1).expand(f, h, w),
             torch.arange(h, dtype=torch.float64).view(1, h, 1).expand(f, h, w),
             torch.arange(w, dtype=torch.float64).view(1, 1, w).expand(f, h, w),
         ]
@@ -175,11 +178,20 @@ class AttentionFV(nn.Module):
         self.norm_q = RMSNormFV(dim, eps=eps)
         self.norm_k = RMSNormFV(dim, eps=eps)
 
-    def forward(self, x: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, context: torch.Tensor,
+                cache: dict | None = None) -> torch.Tensor:
         b, n, d = x.size(0), self.num_heads, self.head_dim
         q = self.norm_q(self.to_q(x)).view(b, -1, n, d)
-        k = self.norm_k(self.to_k(context)).view(b, -1, n, d)
-        v = self.to_v(context).view(b, -1, n, d)
+        if cache is not None:
+            # main's crossattn_cache: text k/v computed once per request
+            if not cache["is_init"]:
+                cache["is_init"] = True
+                cache["k"] = self.norm_k(self.to_k(context)).view(b, -1, n, d)
+                cache["v"] = self.to_v(context).view(b, -1, n, d)
+            k, v = cache["k"], cache["v"]
+        else:
+            k = self.norm_k(self.to_k(context)).view(b, -1, n, d)
+            v = self.to_v(context).view(b, -1, n, d)
         out = _attention(q, k, v, scale=d ** -0.5)
         return self.to_out(out.flatten(2))
 
@@ -302,6 +314,119 @@ class WanBlockFVVSA(WanBlockFV):
         return a.to_out(attn_output.flatten(2))
 
 
+GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES = 21  # main's causal KV window at local_attn_size=-1
+
+
+class WanBlockFVCausal(nn.Module):
+    """main's CausalWanTransformerBlock (SFWan / self-forcing family).
+
+    Differs from the bidirectional block in THREE numerics-relevant ways, all
+    vendored faithfully: (1) per-frame modulation — temb is [B, T_temb, 6, dim]
+    and scale/shift/gate apply per latent frame; (2) the whole modulation and
+    fused-residual chain runs in the LOAD dtype (bf16) — no fp32 promotion
+    anywhere (norm1/norm2/norm3 are plain LayerNorms, e is never .float()ed);
+    (3) self-attention is block-causal over a rolling KV cache with fp64 RoPE
+    multipliers at absolute positions.
+
+    The cache write keeps main's ``.detach()`` and nothing here assumes
+    no_grad: self-forcing TRAINING rolls out through THIS SAME module — reuse
+    this definition, never fork a training copy.
+    """
+
+    def __init__(self, dim: int, ffn_dim: int, num_heads: int, eps: float = 1e-6,
+                 local_attn_size: int = -1, sink_size: int = 0):
+        super().__init__()
+        if local_attn_size != -1 or sink_size != 0:
+            raise NotImplementedError(
+                "only the global-window causal path (local_attn_size=-1, sink_size=0) "
+                "is ported; add the rolling-eviction branch when a card needs it")
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.norm1 = nn.LayerNorm(dim, eps=eps, elementwise_affine=False)
+        self.attn1 = AttentionFV(dim, num_heads, eps=eps)
+        self.norm2 = nn.LayerNorm(dim, eps=eps, elementwise_affine=True)
+        self.attn2 = AttentionFV(dim, num_heads, eps=eps)
+        self.norm3 = nn.LayerNorm(dim, eps=eps, elementwise_affine=False)
+        self.ffn = FeedForwardFV(dim, ffn_dim)
+        self.scale_shift_table = nn.Parameter(torch.zeros(1, 6, dim))
+
+    def _causal_attention(self, q, k, v, freqs_cis, kv_cache, current_start, frame_seqlen):
+        cos, sin = freqs_cis  # fp64 [S_chunk, D] at absolute positions (main keeps fp64 here)
+        roped_q = _apply_rotary(q, cos, sin)
+        roped_k = _apply_rotary(k, cos, sin)
+        if kv_cache is None:
+            raise NotImplementedError(
+                "cache-free causal forward (flex_attention prefill / teacher forcing) "
+                "lands with the self-forcing training port")
+        current_end = current_start + q.shape[1]
+        max_attention_size = GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES * frame_seqlen
+        if current_end > max_attention_size:
+            raise ValueError(
+                f"causal rollout past the {GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES}-frame "
+                f"compat window (current_end={current_end}, frame_seqlen={frame_seqlen})")
+        global_end = int(kv_cache["global_end_index"].item())
+        local_end_prev = int(kv_cache["local_end_index"].item())
+        local_end = local_end_prev + current_end - global_end
+        local_start = local_end - q.shape[1]
+        # detach: identical result at inference; REQUIRED for training rollout
+        kv_cache["k"] = kv_cache["k"].detach()
+        kv_cache["v"] = kv_cache["v"].detach()
+        kv_cache["k"][:, local_start:local_end] = roped_k
+        kv_cache["v"][:, local_start:local_end] = v
+        key_window = kv_cache["k"][:, max(0, local_end - max_attention_size):local_end]
+        value_window = kv_cache["v"][:, max(0, local_end - max_attention_size):local_end]
+        x = _attention(roped_q, key_window, value_window, scale=self.head_dim ** -0.5)
+        kv_cache["global_end_index"].fill_(current_end)
+        kv_cache["local_end_index"].fill_(local_end)
+        return x
+
+    def forward(self, hidden_states, encoder_hidden_states, temb, freqs_cis,
+                kv_cache=None, crossattn_cache=None, current_start=0,
+                frame_seqlen=None):
+        # temb: [B, T_temb, 6, dim]; per-frame modulation, all in load dtype
+        temb_seq_len = temb.shape[1]
+        tokens_per_temb = hidden_states.shape[1] // temb_seq_len
+        if frame_seqlen is None:
+            frame_seqlen = tokens_per_temb
+        orig_dtype = hidden_states.dtype
+        e = self.scale_shift_table + temb  # NO .float() — main's causal block is bf16 here
+        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(6, dim=2)
+
+        def _mod(x, scale, shift):
+            return (x.unflatten(1, (temb_seq_len, tokens_per_temb)) * (1 + scale)
+                    + shift).flatten(1, 2)
+
+        def _gated(x, gate):
+            return (x.unflatten(1, (temb_seq_len, tokens_per_temb)) * gate).flatten(1, 2)
+
+        # 1. self-attention (block-causal, cached)
+        norm_hidden_states = _mod(self.norm1(hidden_states), scale_msa, shift_msa)
+        a = self.attn1
+        query = a.norm_q(a.to_q(norm_hidden_states)).unflatten(2, (self.num_heads, -1))
+        key = a.norm_k(a.to_k(norm_hidden_states)).unflatten(2, (self.num_heads, -1))
+        value = a.to_v(norm_hidden_states).unflatten(2, (self.num_heads, -1))
+        attn_output = self._causal_attention(query, key, value, freqs_cis, kv_cache,
+                                             current_start, int(frame_seqlen))
+        attn_output = a.to_out(attn_output.flatten(2))
+
+        # fused residual+norm chain, plain bf16 LNs (null shift/scale are no-ops)
+        residual = hidden_states + _gated(attn_output, gate_msa)
+        norm_hidden_states, hidden_states = (self.norm2(residual).to(orig_dtype),
+                                             residual.to(orig_dtype))
+
+        # 2. cross-attention (cached text k/v)
+        attn_output = self.attn2(norm_hidden_states, encoder_hidden_states,
+                                 cache=crossattn_cache)
+        residual = hidden_states + attn_output
+        norm_hidden_states = _mod(self.norm3(residual), c_scale_msa, c_shift_msa)
+        hidden_states = residual
+
+        # 3. feed-forward
+        ff_output = self.ffn(norm_hidden_states)
+        hidden_states = hidden_states + _gated(ff_output, c_gate_msa)
+        return hidden_states
+
+
 class WanModelFV(nn.Module):
     """main's WanTransformer3DModel at sp=1/tp=1, T2V, diffusers-native keys."""
 
@@ -401,6 +526,101 @@ class WanModelFVVSA(WanModelFV):
     (strict load) or if the kernel is missing (first forward raises)."""
 
     block_cls = WanBlockFVVSA
+
+
+class WanModelFVCausal(WanModelFV):
+    """main's CausalWanTransformer3DModel (SFWan), chunk-rollout inference
+    path: per-frame timesteps ([B, T_temb]), block-causal KV-cached
+    self-attention at absolute rope positions (fp64 multipliers), cached text
+    cross-attention, all-bf16 modulation, plain-LN output head. Checkpoint
+    keys are identical to the bidirectional Wan layout (same weights — the
+    causal machinery is stateless), so ``from_pretrained`` is inherited.
+
+    Training rollout drives THIS forward (caches detach; no no_grad
+    assumptions); the cache-free teacher-forcing/prefill path lands with the
+    self-forcing training port.
+    """
+
+    block_cls = WanBlockFVCausal
+
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+        # causal head: plain bf16 LayerNorm, not the fp32-compute one
+        self.norm_out = nn.LayerNorm(self.dim, eps=1e-6, elementwise_affine=False)
+
+    def forward(self, hidden_states: torch.Tensor,
+                encoder_hidden_states: torch.Tensor | list[torch.Tensor],
+                timestep: torch.Tensor, *, kv_cache: list[dict],
+                crossattn_cache: list[dict] | None = None,
+                current_start: int = 0, start_frame: int = 0,
+                **_ignored: Any) -> torch.Tensor:
+        orig_dtype = hidden_states.dtype
+        if not isinstance(encoder_hidden_states, torch.Tensor):
+            encoder_hidden_states = encoder_hidden_states[0]
+        assert timestep.dim() == 2, "causal forward takes per-frame timesteps [B, T_temb]"
+
+        batch_size, _, num_frames, height, width = hidden_states.shape
+        p_t, p_h, p_w = self.patch_size
+        grid = (num_frames // p_t, height // p_h, width // p_w)
+        frame_seqlen = grid[1] * grid[2]
+
+        # fp64 multipliers at ABSOLUTE positions — main's causal path never
+        # casts these to fp32 (unlike the bidirectional forward)
+        cos64, sin64 = _rope_cos_sin(grid, self.head_dim, start_frame=start_frame)
+        freqs_cis = (cos64.to(hidden_states.device), sin64.to(hidden_states.device))
+
+        hidden_states = self.patch_embedding(hidden_states)
+        hidden_states = hidden_states.flatten(2).transpose(1, 2)
+
+        if encoder_hidden_states.shape[1] < 512:  # main pads inside the forward
+            encoder_hidden_states = torch.cat(
+                [encoder_hidden_states,
+                 encoder_hidden_states.new_zeros(
+                     encoder_hidden_states.shape[0], 512 - encoder_hidden_states.shape[1],
+                     encoder_hidden_states.shape[2])], dim=1)
+
+        temb, timestep_proj, encoder_hidden_states = self.condition_embedder(
+            timestep.flatten(), encoder_hidden_states)
+        timestep_proj = timestep_proj.unflatten(1, (6, self.dim)).unflatten(0, timestep.shape)
+        assert encoder_hidden_states.dtype == orig_dtype
+
+        for i, block in enumerate(self.blocks):
+            hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj,
+                                  freqs_cis, kv_cache=kv_cache[i],
+                                  crossattn_cache=(crossattn_cache[i]
+                                                   if crossattn_cache is not None else None),
+                                  current_start=current_start, frame_seqlen=frame_seqlen)
+
+        # head: per-frame modulation, all in load dtype (no fp32 promotion)
+        temb = temb.unflatten(0, timestep.shape).unsqueeze(2)      # [B, T_temb, 1, dim]
+        shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2, dim=2)
+        temb_seq_len = timestep.shape[1]
+        tokens_per_temb = hidden_states.shape[1] // temb_seq_len
+        normalized = self.norm_out(hidden_states)
+        hidden_states = (normalized.unflatten(1, (temb_seq_len, tokens_per_temb))
+                         * (1 + scale) + shift).flatten(1, 2)
+        hidden_states = self.proj_out(hidden_states)
+
+        hidden_states = hidden_states.reshape(batch_size, *grid, p_t, p_h, p_w, -1)
+        hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
+        return hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
+
+    @staticmethod
+    def make_kv_cache(num_blocks: int, batch_size: int, cache_tokens: int,
+                      num_heads: int, head_dim: int, dtype: Any, device: Any) -> list[dict]:
+        """main's per-block KV cache layout (CausalDMDDenosingStage)."""
+        return [{
+            "k": torch.zeros([batch_size, cache_tokens, num_heads, head_dim],
+                             dtype=dtype, device=device),
+            "v": torch.zeros([batch_size, cache_tokens, num_heads, head_dim],
+                             dtype=dtype, device=device),
+            "global_end_index": torch.tensor([0], dtype=torch.long, device=device),
+            "local_end_index": torch.tensor([0], dtype=torch.long, device=device),
+        } for _ in range(num_blocks)]
+
+    @staticmethod
+    def make_crossattn_cache(num_blocks: int) -> list[dict]:
+        return [{"k": None, "v": None, "is_init": False} for _ in range(num_blocks)]
 
 
 class WanModelFVFP8(WanModelFV):

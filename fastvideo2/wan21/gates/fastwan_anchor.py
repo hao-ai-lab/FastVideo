@@ -42,6 +42,93 @@ def _gold_dir(variant: str) -> str:
                                          f"fastwan-{variant}-main"))
 
 
+def _run_sfwan() -> int:
+    """SFWan anchor: hook OUR causal transformer exactly like the capture
+    hooked main's, replay the full 7-chunk rollout through the engine, and
+    compare per-forward hash sequences + first-chunk tensors + final latents."""
+    import hashlib
+    import torch
+
+    from fastvideo2.engine import Instance, Request
+    from fastvideo2.engine import run as engine_run
+    from fastvideo2.registry import resolve
+    from fastvideo2.wan21.card import SFWAN_T2V_1_3B
+
+    gold_dir = _gold_dir("sfwan")
+    with open(os.path.join(gold_dir, "manifest.json")) as f:
+        manifest = json.load(f)
+    with open(os.path.join(gold_dir, "forward_hashes.json")) as f:
+        gold_hashes = json.load(f)
+    device = "cuda"
+    rows: list[tuple[str, float]] = []
+
+    def _hash(t: Any) -> str:
+        return hashlib.sha256(t.detach().to(torch.float32).cpu().numpy().tobytes()
+                              ).hexdigest()[:16]
+
+    instance = Instance(SFWAN_T2V_1_3B, device=device)
+    from fastvideo2.wan21.pipeline import _encode_one
+    gold_text = np.load(os.path.join(gold_dir, "text_encoder.npz"))
+    emb = _encode_one(instance.component("tokenizer"), instance.component("text_encoder"),
+                      manifest["e2e_prompt"])
+    rows.append(("text.e2e", rel_l2(emb[0].to(torch.float32).cpu().numpy(),
+                                    gold_text["e2e"])))
+
+    records: list[dict] = []
+
+    def hook(module, args_in, kwargs_in, output):
+        rec = {"x_hash": _hash(args_in[0]), "out_hash": _hash(output),
+               "t": [float(v) for v in args_in[2].flatten().tolist()]}
+        if len(records) < 10:
+            rec["x"] = args_in[0].detach().to(torch.float32).cpu().numpy()
+            rec["out"] = output.detach().to(torch.float32).cpu().numpy()
+        records.append(rec)
+
+    dit = instance.component("transformer")
+    h = dit.register_forward_hook(hook, with_kwargs=True)
+    _, builder = resolve(SFWAN_T2V_1_3B.model_id)
+    req = Request(prompt=manifest["e2e_prompt"], seed=manifest["seed"],
+                  num_frames=81, height=480, width=832)
+    out = engine_run(instance, builder(), req)
+    h.remove()
+
+    final = out.outputs["latents"]["latents"].to(torch.float32).cpu().numpy()
+    gold_final = np.load(os.path.join(gold_dir, "e2e_final_latents.npz"))["latents"]
+    rows.append(("e2e.final", rel_l2(final, gold_final)))
+
+    n_match = 0
+    for i, (g, r) in enumerate(zip(gold_hashes, records)):
+        if g["x_hash"] == r["x_hash"] and g["out_hash"] == r["out_hash"]:
+            n_match += 1
+        elif n_match == i:  # first divergence — full-tensor triage if available
+            fwd = os.path.join(gold_dir, f"fwd{i:02d}.npz")
+            if os.path.exists(fwd) and "x" in r:
+                gz = np.load(fwd)
+                rows.append((f"fwd{i:02d}.x", rel_l2(r["x"], gz["x"])))
+                rows.append((f"fwd{i:02d}.out", rel_l2(r["out"], gz["out"])))
+    rows.append(("fwd.hash_matches", float(len(gold_hashes) - n_match)
+                 + float(abs(len(gold_hashes) - len(records)))))
+
+    print(f"\nSFWan anchor vs {manifest['fastvideo_commit'][:9]} "
+          f"({len(records)}/{len(gold_hashes)} forwards, {n_match} bitwise)")
+    failed = []
+    for name, val in rows:
+        ok = val == 0.0
+        if not ok:
+            failed.append(name)
+        print(f"  {name:18s} {val:.6e}  {'OK (bitwise)' if ok else 'DIFF'}")
+
+    from fastvideo2.verify import GateResult, append_ledger, env_fingerprint
+    append_ledger([GateResult(gate="anchor.sfwan-main",
+                              status="pass" if not failed else "fail",
+                              model_id=SFWAN_T2V_1_3B.model_id,
+                              card_digest=SFWAN_T2V_1_3B.digest(),
+                              metrics={n: v for n, v in rows},
+                              tolerances={"all": 0.0}, env=env_fingerprint(),
+                              detail=f"goldens {manifest['fastvideo_commit'][:9]}")])
+    return 1 if failed else 0
+
+
 def run(variant: str = "qad", skip_e2e: bool = False) -> int:
     import torch
 
@@ -50,6 +137,9 @@ def run(variant: str = "qad", skip_e2e: bool = False) -> int:
     from fastvideo2.registry import resolve
     from fastvideo2.wan21.card import FASTWAN_QAD_FP8_1_3B, FASTWAN_T2V_1_3B
     from fastvideo2.wan21.model_fv import WanModelFV, WanModelFVFP8, WanModelFVVSA
+
+    if variant == "sfwan":
+        return _run_sfwan()
 
     card = {"qad": FASTWAN_QAD_FP8_1_3B, "vsa": FASTWAN_T2V_1_3B}[variant]
     gold_dir = _gold_dir(variant)

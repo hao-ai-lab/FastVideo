@@ -35,12 +35,16 @@ from types import SimpleNamespace
 
 # one process per model: the attention backend is chosen from this env var at
 # model construction and cached — do not switch it within a process
-VSA = len(sys.argv) > 1 and sys.argv[1] == "vsa"
+MODE = sys.argv[1] if len(sys.argv) > 1 else "qad"
+VSA = MODE == "vsa"
+SFWAN = MODE == "sfwan"
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN" if VSA else "FLASH_ATTN"
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29513")
 
-REPO = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers" if VSA else "FastVideo/FastWan-QAD-FP8-1.3B"
+REPO = {"qad": "FastVideo/FastWan-QAD-FP8-1.3B",
+        "vsa": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+        "sfwan": "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"}[MODE]
 VSA_SPARSITY = 0.8  # the released FastWan recipe (basic_dmd example)
 SEED = 1234
 E2E_PROMPT = ("A curious raccoon peers through a vibrant field of yellow "
@@ -53,9 +57,114 @@ PROBE_LATENT = (1, 16, 5, 60, 104)      # BCFHW probe geometry (17f 480x832)
 E2E_BTCHW = (1, 21, 16, 60, 104)        # 81f 480x832 in main's DMD state layout
 
 
+def _tensor_hash(t) -> str:
+    import hashlib
+    import torch
+    return hashlib.sha256(t.detach().to(torch.float32).cpu().numpy().tobytes()).hexdigest()[:16]
+
+
+def _capture_sfwan(root: str, out: str, e2e_embeds, device: str) -> None:
+    """SFWan e2e: main's CausalDMDDenosingStage over 7×3-frame chunks.
+    Every transformer forward is hooked: (x, t, out) hashes for all, full
+    tensors for the first two chunks (10 forwards)."""
+    import contextlib
+    import json as _json
+    from types import SimpleNamespace
+
+    import numpy as np
+    import torch
+
+    from fastvideo.configs.pipelines.wan import SelfForcingWanT2V480PConfig
+    from fastvideo.fastvideo_args import FastVideoArgs
+    from fastvideo.models.loader.component_loader import TransformerLoader
+    from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
+        SelfForcingFlowMatchScheduler)
+    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+    from fastvideo.pipelines.stages.causal_denoising import CausalDMDDenosingStage
+
+    _NO = dict(use_fsdp_inference=False, dit_cpu_offload=False,
+               text_encoder_cpu_offload=False, vae_cpu_offload=False, pin_cpu_memory=False)
+    dit_path = os.path.join(root, "transformer")
+    args = FastVideoArgs(model_path=dit_path, pipeline_config=SelfForcingWanT2V480PConfig(),
+                         **_NO)
+    args.device = torch.device(device)
+    dit = TransformerLoader().load(dit_path, args).to(dtype=torch.bfloat16).eval()
+
+    with open(os.path.join(root, "scheduler", "scheduler_config.json")) as f:
+        scfg = _json.load(f)
+    sched = SelfForcingFlowMatchScheduler(
+        num_inference_steps=scfg["num_inference_steps"], shift=scfg["shift"],
+        sigma_min=scfg["sigma_min"], extra_one_step=scfg["extra_one_step"],
+        training=scfg.get("training", False))
+
+    stage = CausalDMDDenosingStage(transformer=dit, scheduler=sched)
+    stage.progress_bar = lambda total=None: contextlib.nullcontext(
+        SimpleNamespace(update=lambda: None))
+
+    records: list[dict] = []
+
+    def hook(module, args_in, kwargs_in, output):
+        x = args_in[0]
+        t = kwargs_in.get("timestep", args_in[2] if len(args_in) > 2 else None)
+        rec = {"x_hash": _tensor_hash(x), "out_hash": _tensor_hash(output),
+               "t": [float(v) for v in t.flatten().tolist()],
+               "start": int(kwargs_in.get("current_start", -1))}
+        if len(records) < 10:
+            rec["x"] = x.detach().to(torch.float32).cpu().numpy()
+            rec["out"] = output.detach().to(torch.float32).cpu().numpy()
+        records.append(rec)
+
+    h = dit.register_forward_hook(hook, with_kwargs=True)
+    gen = torch.Generator("cpu").manual_seed(SEED)
+    latents = torch.randn((1, 16, 21, 60, 104), generator=gen,
+                          dtype=torch.float32).to(device)  # BCTHW (causal latent prep layout)
+    batch = ForwardBatch(data_type="video", latents=latents,
+                         prompt_embeds=[e2e_embeds], generator=[gen],
+                         num_inference_steps=4, guidance_scale=1.0, eta=0.0,
+                         do_classifier_free_guidance=False)
+    fargs = FastVideoArgs(model_path=dit_path, pipeline_config=SelfForcingWanT2V480PConfig(),
+                          **_NO)
+    fargs.device = torch.device(device)
+    batch = stage(batch, fargs)
+    h.remove()
+
+    np.savez(os.path.join(out, "e2e_final_latents.npz"),
+             latents=batch.latents.detach().to(torch.float32).cpu().numpy())
+    for i, r in enumerate(records):
+        if "x" in r:
+            np.savez(os.path.join(out, f"fwd{i:02d}.npz"), x=r["x"], out=r["out"],
+                     t=np.array(r["t"]), start=r["start"])
+    with open(os.path.join(out, "forward_hashes.json"), "w") as f:
+        json.dump([{k: r[k] for k in ("x_hash", "out_hash", "t", "start")}
+                   for r in records], f, indent=1)
+    print(f"sfwan e2e: {len(records)} forwards, final {tuple(batch.latents.shape)}", flush=True)
+
+
+def _write_manifest(out: str, root: str, extra: dict) -> None:
+    import fastvideo
+    import torch
+    src = os.path.dirname(os.path.dirname(os.path.abspath(fastvideo.__file__)))
+    try:
+        commit = subprocess.run(["git", "-C", src, "rev-parse", "HEAD"],
+                                capture_output=True, text=True).stdout.strip()
+    except Exception:
+        commit = "unknown"
+    manifest = {"repo": REPO, "snapshot": os.path.basename(root),
+                "fastvideo_commit": commit, "torch": torch.__version__,
+                "python": sys.version.split()[0],
+                "gpu": torch.cuda.get_device_name(0),
+                "attention_backend": os.environ["FASTVIDEO_ATTENTION_BACKEND"],
+                "seed": SEED, "e2e_prompt": E2E_PROMPT, "probe_prompt": PROBE_PROMPT,
+                **extra}
+    with open(os.path.join(out, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    print("capture complete ->", out, flush=True)
+
+
 def _out_dir() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
-    name = "fastwan-vsa-main" if VSA else "fastwan-qad-main"
+    name = {"qad": "fastwan-qad-main", "vsa": "fastwan-vsa-main",
+            "sfwan": "sfwan-main"}[MODE]
     d = os.path.join(here, "..", "..", "evidence", "goldens", name)
     os.makedirs(d, exist_ok=True)
     return os.path.normpath(d)
@@ -114,6 +223,17 @@ def main() -> None:
     np.savez(os.path.join(out, "text_encoder.npz"),
              e2e=e2e_embeds[0].cpu().numpy(), probe=encode(PROBE_PROMPT)[0].cpu().numpy())
     print("text embeds:", e2e_embeds.shape, e2e_embeds.dtype, flush=True)
+
+    if SFWAN:
+        _capture_sfwan(root, out, e2e_embeds, device)
+        _write_manifest(out, root, extra={
+            "dmd_denoising_steps": [1000, 750, 500, 250], "warp_denoising_step": True,
+            "scheduler": "SelfForcingFlowMatchScheduler(shift=5, extra_one_step, sigma_min=0)",
+            "num_frames_per_block": 3, "context_noise": 0,
+            "notes": "causal chunk rollout via main's CausalDMDDenosingStage; "
+                     "per-forward hashes for all 35 forwards, full tensors for "
+                     "the first two chunks; no compile/fsdp; FLASH_ATTN"})
+        return
 
     # --------------------------------------------------- dit probe inputs --- #
     gen = torch.Generator("cpu").manual_seed(SEED)

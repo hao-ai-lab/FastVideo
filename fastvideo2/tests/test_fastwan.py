@@ -89,3 +89,29 @@ def test_vsa_meta_math_matches_main():
     # topk never exceeds block count and never hits 0
     m3 = build_vsa_meta((8, 8, 8), 0.0, "cpu")
     assert m3.topk == m3.block_sizes.numel()
+
+
+def test_sfwan_card_and_table():
+    card, _ = resolve("sfwan-t2v-1.3b")
+    assert card.components["transformer"].module.endswith(":WanModelFVCausal")
+    assert card.provenance.assumes_loop == "wan.causal_dmd.chunked/v1"
+    assert card.loops["denoise"].params["num_frames_per_block"] == 3
+    torch = pytest.importorskip("torch")
+    from fastvideo2.wan21.loop import self_forcing_table
+    ts, sg = self_forcing_table(5.0)
+    assert len(ts) == 1000 and float(sg[0]) == 1.0
+    # warp rows main feeds the model: table[1000 - t]
+    warped = [float(ts[1000 - t]) for t in (1000, 750, 500, 250)]
+    assert warped[0] == 1000.0
+    assert abs(warped[1] - 937.5) < 1e-3
+    assert abs(warped[2] - 833.3333) < 1e-3
+    assert abs(warped[3] - 625.0) < 1e-3
+
+
+def test_causal_loop_plans_denoise_then_context_per_chunk():
+    from fastvideo2.wan21.loop import WanCausalDMDLoop
+    loop = WanCausalDMDLoop(loop_id="d")
+    assert loop._phase(0) == (0, 0)      # chunk0 first denoise step
+    assert loop._phase(4) == (0, 4)      # chunk0 context pass (4 timesteps)
+    assert loop._phase(5) == (1, 0)      # chunk1 begins
+    assert loop._phase(34) == (6, 4)     # last chunk's context pass
