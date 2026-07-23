@@ -2,9 +2,8 @@
 # QAD recipe -- quantization-aware finetune of Kandinsky5 T2V (480p) with
 # fake-quant (Attn-QAT) attention.
 #
-# The fake-quantized attention path is selected purely by env var
-# (config-driven, no monkey-patching): FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN
-# routes Kandinsky5's dense/local attention through the fake-quantized
+# The YAML's role-local ATTN_QAT_TRAIN backend routes Kandinsky5's dense/local
+# attention through the fake-quantized
 # straight-through-estimator kernel, so the DiT learns to absorb the
 # quantization error instead of fighting it. No weight quantization happens
 # during this stage; that's applied post-hoc at inference time (see the
@@ -22,8 +21,6 @@
 # it with fastvideo.train.entrypoint.dcp_to_diffusers (--verify) and feeds
 # the export to all three models.*.init_from overrides automatically.
 set -euo pipefail
-
-export FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN   # <-- enables Attn-QAT training
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../../.." && pwd)"

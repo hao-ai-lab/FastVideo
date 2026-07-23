@@ -52,11 +52,9 @@ bash examples/train/configs/fine_tuning/kandinsky5/finetune_qat.sh \
     --training.data.data_path data/kandinsky5_overfit_preprocessed
 ```
 
-`FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN` (set by the script) routes
-Kandinsky5's dense/local attention through the fake-quantized
-straight-through-estimator Triton kernel, so the DiT learns to absorb
-quantization error instead of fighting it. This is purely env-var driven,
-model-agnostic, and does not touch weights during training -- weight-level
+The YAML assigns `ATTN_QAT_TRAIN` to the student role, routing Kandinsky5's
+dense/local attention through the fake-quantized straight-through-estimator
+Triton kernel so the DiT learns to absorb quantization error. Weight-level
 FP4/FP8 quantization is applied post-hoc at inference time (see below), not
 during either training stage.
 
@@ -88,20 +86,16 @@ then launches `dmd2_t2v_480p_qat.yaml` with
 (Passing an already-exported diffusers directory to the launcher skips the
 conversion and uses it directly.)
 
-`--role student` exports the trained transformer weights (the only role
-that matters here: student/teacher/critic in stage 2 all load from the same
-checkpoint, and `_loading_teacher_critic_model` handles the full-precision
-masking for teacher/critic at load time, not at export time). `--verify`
-strictly reloads the exported transformer immediately, so a key-mapping bug
-fails here instead of deep inside the stage-2 launch.
+`--role student` exports the trained transformer weights; student, teacher,
+and critic in stage 2 all load from the same checkpoint. `--verify` strictly
+reloads the exported transformer immediately, so a key-mapping bug fails here
+instead of deep inside the stage-2 launch.
 
 Only the student is quantized (Attn-QAT); the teacher and critic stay full
-precision / dense attention. This is enforced in the loader
-(`fastvideo/models/loader/component_loader.py`, via the
-`_loading_teacher_critic_model` flag), which masks `quant_config` and clears
-`FASTVIDEO_ATTENTION_BACKEND` for teacher/critic -- the same global env var
-reaches only the student, with no per-model flags or Kandinsky5-specific
-handling. Validation runs the distilled student through
+precision / dense attention. The YAML assigns `ATTN_QAT_TRAIN` to the student
+and `FLASH_ATTN` to teacher/critic. Their `disable_custom_init_weights: true`
+setting also activates the loader's family-agnostic quant-config mask, so
+teacher/critic weights remain full precision. Validation runs the distilled student through
 `Kandinsky5DMDPipeline` at the step counts configured in
 `callbacks.validation.sampling_steps`.
 
@@ -130,35 +124,22 @@ their default layer lists (`fastvideo/layers/quantization/nvfp4_qat_config.py`,
 `fastvideo/layers/quantization/fp8_config.py`), so no `target_layers`
 override is needed:
 
-`dcp_to_diffusers` copies the base T2V checkpoint's `model_index.json`
-unchanged into every export (see "Train stage 2" above), so `_class_name`
-still says the base T2V pipeline and the registry
-(`fastvideo/registry.py`) has no way to auto-detect that a given directory
-is actually a DMD (four-step re-noise sampler) export -- it will resolve to
-`Kandinsky5T2VPipeline` and run the full-length sampler on DMD-distilled
-weights. Pass `override_pipeline_cls_name` and a `Kandinsky5DMDConfig`
-explicitly to select the right pipeline/sampler and get
-`dmd_denoising_steps` set (`Kandinsky5T2VConfig`'s default of `None` makes
-`Kandinsky5DmdDenoisingStage` raise immediately):
+`dcp_to_diffusers` records the configured validation pipeline in the exported
+`model_index.json`. Stage-2 exports therefore resolve automatically to
+`Kandinsky5DMDPipeline` and its four-step `Kandinsky5DMDConfig`:
 
 ```python
 from fastvideo import VideoGenerator
-from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5DMDConfig
 from fastvideo.layers.quantization import get_quantization_config
 
 gen = VideoGenerator.from_pretrained(
     "path/to/kandinsky5_dmd_checkpoint", num_gpus=1,
-    override_pipeline_cls_name="Kandinsky5DMDPipeline",
-    pipeline_config=Kandinsky5DMDConfig(),
     transformer_quant=get_quantization_config("nvfp4_qat")(),
     use_fsdp_inference=False,
 )
 # Kandinsky5DmdDenoisingStage ignores request.sampling.num_inference_steps
 # and guidance_scale -- it's a fixed 4-step, no-CFG sampler driven entirely
-# by pipeline_config.dmd_denoising_steps (set above). Adjust
-# Kandinsky5DMDConfig(dmd_denoising_steps=[...]) instead if the checkpoint
-# was distilled/validated with a different schedule than the default
-# [1000, 750, 500, 250].
+# by the exported pipeline config's default [1000, 750, 500, 250] schedule.
 gen.generate(request={"prompt": "...", "output": {"save_video": True}})
 ```
 
@@ -175,17 +156,16 @@ to a supported dense backend while the FP4 linear layers still run.
   confirms `ATTN_QAT_TRAIN` actually engages (not a silent SDPA fallback)
   and that gradients flow through a forward+backward pass.
 - `fastvideo/tests/api/test_kandinsky5_dmd_pipeline_resolution.py` --
-  confirms an unmodified export resolves to `Kandinsky5T2VPipeline` (the bug)
-  and that `override_pipeline_cls_name="Kandinsky5DMDPipeline"` fixes it (the
-  documented workaround above), plus `Kandinsky5DMDConfig`'s
-  `dmd_denoising_steps` default.
+  confirms a stage-2 export resolves directly to `Kandinsky5DMDPipeline` plus
+  `Kandinsky5DMDConfig`, and that rewriting a hard-linked `model_index.json`
+  does not mutate the base checkpoint.
 - `fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py` -- a few
   steps of both training stages on a single synthetic sample, exercising the
   whole recipe end to end: the `dcp_to_diffusers --verify` conversion
   between the stages AND of the final stage-2 student, then reloading that
-  export through the documented `Kandinsky5DMDPipeline` /
-  `Kandinsky5DMDConfig` override, generating deterministically (fixed
-  seed), and comparing MS-SSIM against a committed reference video. The
+  export through ordinary `VideoGenerator.from_pretrained`, generating
+  deterministically (fixed seed), and comparing MS-SSIM against a committed
+  reference video. The
   test fails (does not skip) if the reference is missing; record it once on
   a sanctioned GPU box with `KANDINSKY5_E2E_WRITE_REFERENCE=1`, review the
   written video, and commit it (see the test's module docstring). Nightly

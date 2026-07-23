@@ -24,13 +24,52 @@ from pathlib import Path
 import pytest
 import torch
 
+import fastvideo.train.models.kandinsky5.kandinsky5 as kandinsky5_module
 from fastvideo.forward_context import set_forward_context
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.models.kandinsky5 import Kandinsky5Model
 from fastvideo.train.utils.config import load_run_config
 
 _FIXTURE = str(
     Path(__file__).resolve().parent.parent / "fixtures" /
     "kandinsky5_t2v_min.yaml")
+
+
+@pytest.mark.parametrize(
+    ("attention_backend", "disable_custom_init_weights"),
+    [
+        ("ATTN_QAT_TRAIN", False),
+        ("FLASH_ATTN", True),
+    ],
+)
+def test_kandinsky5_routes_role_local_attention_backend(
+    monkeypatch,
+    attention_backend,
+    disable_custom_init_weights,
+):
+    cfg = load_run_config(_FIXTURE)
+    captured = {}
+
+    def _fake_load_module_from_path(**kwargs):
+        captured.update(kwargs)
+        return torch.nn.Linear(1, 1)
+
+    monkeypatch.setattr(
+        kandinsky5_module,
+        "load_module_from_path",
+        _fake_load_module_from_path,
+    )
+
+    Kandinsky5Model(
+        init_from=cfg.models["student"]["init_from"],
+        training_config=cfg.training,
+        trainable=not disable_custom_init_weights,
+        disable_custom_init_weights=disable_custom_init_weights,
+        attention_backend=attention_backend,
+    )
+
+    assert captured["attention_backend"] is AttentionBackendEnum[attention_backend]
+    assert captured["disable_custom_init_weights"] is disable_custom_init_weights
 
 
 @pytest.mark.usefixtures("distributed_setup")

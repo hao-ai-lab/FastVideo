@@ -50,9 +50,9 @@ def _get_attn_qat_infer() -> Callable[..., torch.Tensor] | None:
     return _attn_qat_infer
 
 
-# Consumer-Blackwell compute capabilities the modified SageAttention3 FP4
-# kernel is compiled for (sm_120a / sm_121a -- see fastvideo-kernel/README.md).
-_SUPPORTED_DEVICE_CAPABILITIES = frozenset({(12, 0), (12, 1)})
+# Consumer-Blackwell compute capability the modified SageAttention3 FP4
+# kernel is compiled for (sm_120a -- see fastvideo-kernel/CMakeLists.txt).
+_SUPPORTED_DEVICE_CAPABILITIES = frozenset({(12, 0)})
 
 
 def _device_capability_supported() -> bool:
@@ -66,15 +66,15 @@ def _device_capability_supported() -> bool:
 
 def is_attn_qat_infer_available() -> bool:
     """True only when the extension imports AND the active device is a
-    consumer-Blackwell (sm_120/sm_121) GPU the kernel is compiled for.
+    consumer-Blackwell sm_120 GPU the kernel is compiled for.
 
     The import check alone is not sufficient: CUDA 13 wheel builds can
-    carry the sm_120/sm_121 extension on any host (e.g. H100, GB200),
+    carry the sm_120 extension on any host (e.g. H100, GB200, or sm_121),
     where the import succeeds, backend selection picks this backend, and
     the first kernel call then fails with an unsupported-capability error
     instead of ever reaching the documented FlashAttention fallback in
     fastvideo.platforms.cuda. Gating on the active device's capability
-    keeps that fallback working on every non-sm_120/121 GPU.
+    keeps that fallback working on every non-sm_120 GPU.
     """
     return _device_capability_supported() and _get_attn_qat_infer() is not None
 

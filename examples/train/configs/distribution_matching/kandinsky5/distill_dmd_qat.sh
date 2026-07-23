@@ -17,15 +17,9 @@
 #     used as-is with no conversion.
 #
 # The export is passed to all three models.*.init_from overrides: student,
-# teacher, and critic all load the same weights. Teacher/critic are
-# automatically masked back to dense attention and full-precision weights
-# by the _loading_teacher_critic_model gate in
-# fastvideo/models/loader/component_loader.py (family-agnostic, no
-# Kandinsky5-specific handling needed) -- NOT by pointing them at a
-# different export.
-#
-# FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN keeps the student's dense/local
-# attention fake-quantized during distillation.
+# teacher, and critic all load the same weights. The YAML assigns
+# ATTN_QAT_TRAIN to the student and FLASH_ATTN to teacher/critic; the loader's
+# _loading_teacher_critic_model gate also keeps their weights full precision.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,10 +37,7 @@ if [[ -f "${CHECKPOINT}/model_index.json" ]]; then
     # Already a diffusers export -- use as-is.
     INIT_FROM="${CHECKPOINT}"
 else
-    # Convert the raw DCP checkpoint. Runs BEFORE ATTN_QAT_TRAIN is
-    # exported below: backend selection for that env var refuses to start
-    # (ImportError) when the training kernel isn't built, and the
-    # conversion itself must not depend on it. --overwrite keeps relaunches
+    # Convert the raw DCP checkpoint before launching training. --overwrite keeps relaunches
     # from silently reusing a stale export for a newer checkpoint;
     # --verify strictly reloads the exported transformer so a key-mapping
     # bug fails here, not deep inside the training launch below.
@@ -59,8 +50,6 @@ else
         --overwrite \
         --verify
 fi
-
-export FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN
 
 bash "${REPO_ROOT}/examples/train/run.sh" \
     "${SCRIPT_DIR}/dmd2_t2v_480p_qat.yaml" \

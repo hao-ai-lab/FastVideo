@@ -9,18 +9,14 @@
 # with the export -- the placeholder paths below only apply when launching
 # the YAML directly.
 #
-# - Teacher: frozen, full-precision Kandinsky5 (loaded from the stage-1 QAT
-#   checkpoint's base weights, or the original pretrained checkpoint --
-#   the _loading_teacher_critic_model gate in component_loader.py masks
-#   quant_config and FASTVIDEO_ATTENTION_BACKEND for teacher/critic
-#   regardless, so they always run full precision / dense attention).
+# - Teacher: frozen, full-precision Kandinsky5 with FLASH_ATTN.
 # - Student: trainable, initialized from the stage-1 QAT finetune checkpoint.
-# - Critic:  trainable, initialized from the same checkpoint as the student.
+# - Critic:  trainable, initialized from the same checkpoint as the student,
+#   with FLASH_ATTN.
 # - Validation: 4-step sampling via Kandinsky5DMDPipeline.
 #
-# Launch with FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN set (student only;
-# teacher/critic are masked to dense automatically) so the student continues
-# learning to absorb fake-quantized attention error during distillation.
+# Role-local backends keep fake-quantized attention on the student and dense
+# attention on teacher/critic without a process-global backend override.
 #
 # Scope: T2V, 480p only, dense/local attention only.
 
@@ -29,16 +25,19 @@ models:
     _target_: fastvideo.train.models.kandinsky5.Kandinsky5Model
     init_from: outputs/kandinsky5_t2v_qat_finetune/checkpoint-1000-diffusers
     trainable: true
+    attention_backend: ATTN_QAT_TRAIN
   teacher:
     _target_: fastvideo.train.models.kandinsky5.Kandinsky5Model
     init_from: outputs/kandinsky5_t2v_qat_finetune/checkpoint-1000-diffusers
     trainable: false
     disable_custom_init_weights: true
+    attention_backend: FLASH_ATTN
   critic:
     _target_: fastvideo.train.models.kandinsky5.Kandinsky5Model
     init_from: outputs/kandinsky5_t2v_qat_finetune/checkpoint-1000-diffusers
     trainable: true
     disable_custom_init_weights: true
+    attention_backend: FLASH_ATTN
 
 method:
   _target_: fastvideo.train.methods.distribution_matching.dmd2.DMD2Method
