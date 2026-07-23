@@ -38,8 +38,8 @@ def rel_l2(a: np.ndarray, b: np.ndarray) -> float:
 
 def _gold_dir(variant: str) -> str:
     here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(os.path.join(here, "..", "..", "evidence", "goldens",
-                                         f"fastwan-{variant}-main"))
+    name = "sfwan-main" if variant == "sfwan" else f"fastwan-{variant}-main"
+    return os.path.normpath(os.path.join(here, "..", "..", "evidence", "goldens", name))
 
 
 def _run_sfwan() -> int:
