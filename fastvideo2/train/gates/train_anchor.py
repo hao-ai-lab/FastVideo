@@ -321,7 +321,8 @@ def run_self_forcing() -> int:
     dsl = tuple(manifest["denoising_step_list"])
     hw = tuple(manifest["latent_hw"])
     pz = np.load(os.path.join(gold, "params.npz"))
-    uncond = torch.from_numpy(pz["neg_embeds"]).to(device, torch.bfloat16)
+    uncond = (torch.from_numpy(pz["neg_embeds"]).to(device, torch.bfloat16)
+              if "neg_embeds" in pz.files else None)  # generator-phase only
 
     def _hash(t):
         return hashlib.sha256(t.detach().to(torch.float32).cpu().numpy().tobytes()
