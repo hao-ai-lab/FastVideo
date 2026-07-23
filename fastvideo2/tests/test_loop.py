@@ -67,3 +67,24 @@ def test_build_loop_from_spec():
     loop = build_loop(LoopSpec("fake", loop="fastvideo2.tests.test_loop:FakeLoop",
                                params={"n": 2}))
     assert isinstance(loop, FakeLoop) and loop.n == 2 and loop.loop_id == "fake"
+
+
+def test_dmd_sigma_table_lookup_matches_timesteps():
+    # fastvideo's scheduler indexes warped sigmas by their own x1000 values,
+    # so looking up t=757 returns sigma ~= 0.757 (nearest table entry),
+    # nearly independent of shift.
+    from fastvideo2.wan21.loop import dmd_sigma_for, dmd_sigma_table
+    for shift in (3.0, 8.0):
+        table = dmd_sigma_table(shift)
+        assert len(table) == 1000
+        for t in (1000.0, 757.0, 522.0):
+            sigma = dmd_sigma_for(t, table)
+            assert abs(sigma - t / 1000.0) < 2e-3, (shift, t, sigma)
+    # endpoints: sigma_max == 1.0 at t=1000
+    assert dmd_sigma_for(1000.0, dmd_sigma_table(8.0)) == 1.0
+
+
+def test_dmd_loop_semantics_id_is_distinct():
+    from fastvideo2.wan21.loop import WanDenoiseLoop, WanDMDLoop
+    assert WanDMDLoop.semantics == "wan.dmd.x0renoise/v1"
+    assert WanDMDLoop.semantics != WanDenoiseLoop.semantics  # the card teeth

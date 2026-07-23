@@ -27,6 +27,26 @@ def flow_sigmas(num_steps: int, shift: float) -> list[float]:
     return out
 
 
+def dmd_sigma_table(shift: float, num_train_timesteps: int = 1000) -> list[tuple[float, float]]:
+    """fastvideo's FlowMatchEulerDiscreteScheduler training table: (timestep,
+    sigma) pairs where sigma is the shift-warped linspace and timestep is
+    sigma*1000. Because timesteps ARE warped sigmas x1000, looking a DMD step
+    like 757 up in this table returns sigma ~= 0.757 (nearest entry) almost
+    independently of shift — shift only sets table density. We reproduce the
+    lookup, not an approximation, for bit-faithfulness to the authority."""
+    out = []
+    for i in range(num_train_timesteps):
+        s = (num_train_timesteps - i) / num_train_timesteps
+        sigma = shift * s / (1.0 + (shift - 1.0) * s)
+        out.append((sigma * num_train_timesteps, sigma))
+    return out
+
+
+def dmd_sigma_for(t: float, table: list[tuple[float, float]]) -> float:
+    """argmin |table_timestep - t| — fastvideo's scheduler lookup, verbatim."""
+    return min(table, key=lambda row: abs(row[0] - t))[1]
+
+
 @dataclass(frozen=True)
 class WanForwardInputs:
     """Everything one Wan DiT forward consumes — typed, so a new conditioning
@@ -129,3 +149,73 @@ class WanDenoiseLoop:
     def finalize(self, st: LoopState) -> dict:
         return {"latents": st.latents, "trajectory": st.trajectory,
                 "steps": st.step_idx}
+
+
+class WanDMDLoop(WanDenoiseLoop):
+    """Few-step DMD student sampler (FastWan family): at each declared
+    timestep, one CFG-free forward predicts velocity, the clean latent is
+    recovered as x0 = x - sigma*v (in fp64 — fastvideo's DmdDenoisingStage
+    convention), then re-noised to the next timestep with FRESH per-request
+    noise: x = (1-sigma_next)*x0 + sigma_next*eps. The last step emits x0.
+
+    The step count and timesteps are properties of the distilled weights —
+    hence a distinct semantics id: a card whose provenance assumes this loop
+    cannot validate against the base Euler sampler, and vice versa. Authority
+    for these artifacts is fastvideo main (their training stack), so sigma
+    lookup reproduces main's scheduler table exactly.
+    """
+
+    semantics = "wan.dmd.x0renoise/v1"
+
+    def __init__(self, *, loop_id: str, timesteps: tuple[float, ...] = (1000.0, 757.0, 522.0),
+                 shift: float = 8.0, **geometry: Any):
+        super().__init__(loop_id=loop_id, **geometry)
+        self.timesteps = tuple(float(t) for t in timesteps)
+        self.shift = float(shift)
+
+    def init(self, request: Any, instance: Any, inputs: Mapping[str, Any]) -> LoopState:
+        import torch
+        st = super().init(request, instance, inputs)
+        table = dmd_sigma_table(self.shift)
+        st.sigmas = [dmd_sigma_for(t, table) for t in self.timesteps]
+        st.scratch["timesteps"] = list(self.timesteps)
+        # Re-seed the initial latent for the DMD schedule (sigma_0 ~= 1.0 ->
+        # plain randn); the SAME generator stream then supplies the re-noising
+        # draws, mirroring main's per-request batch.generator usage.
+        gen = torch.Generator(instance.device).manual_seed(request.seed)
+        st.latents = torch.randn(st.latents.shape, generator=gen,
+                                 device=instance.device, dtype=torch.float32)
+        st.scratch["gen"] = gen
+        return st
+
+    def next(self, st: LoopState) -> "WorkPlan | Done":
+        i = st.step_idx
+        if i >= len(st.sigmas):
+            return Done()
+        sigma = st.sigmas[i]
+        t_model = st.scratch["timesteps"][i]
+        sigma_next = st.sigmas[i + 1] if i + 1 < len(st.sigmas) else None
+        x, text = st.latents, st.cond["text"]
+        instance = st.scratch["instance"]
+        dit_dtype = st.scratch["dit_dtype"]
+        gen = st.scratch["gen"]
+
+        def run() -> dict:
+            import torch
+            dit = instance.component("transformer")
+            t = torch.tensor([t_model], device=x.device, dtype=torch.float32)
+            autocast = torch.amp.autocast("cuda", dtype=dit_dtype,
+                                          enabled=x.is_cuda and dit_dtype != torch.float32)
+            with torch.no_grad(), autocast:
+                v = WanForwardInputs(x, t, text).forward(dit)
+            # x0 in fp64, exactly like fastvideo's pred_noise_to_pred_video
+            x0 = (x.double() - sigma * v.double())
+            if sigma_next is None:
+                return {"latents": x0.to(torch.float32)}
+            noise = torch.randn(x.shape, generator=gen, device=x.device,
+                                dtype=torch.float32)
+            nxt = (1.0 - sigma_next) * x0 + sigma_next * noise.double()
+            return {"latents": nxt.to(torch.float32)}
+
+        return WorkPlan(label=f"{self.loop_id}.{i}", step=i, run=run,
+                        meta={"sigma": sigma, "timestep": t_model})
