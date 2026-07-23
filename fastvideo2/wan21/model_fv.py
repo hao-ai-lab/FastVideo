@@ -431,6 +431,7 @@ class WanModelFV(nn.Module):
     """main's WanTransformer3DModel at sp=1/tp=1, T2V, diffusers-native keys."""
 
     block_cls: type = WanBlockFV
+    _accepted_class_names: tuple[str, ...] = ("WanTransformer3DModel",)
 
     def __init__(self, *, num_attention_heads: int = 12, attention_head_dim: int = 128,
                  in_channels: int = 16, out_channels: int = 16, ffn_dim: int = 8960,
@@ -500,7 +501,7 @@ class WanModelFV(nn.Module):
         folder = os.path.join(root, subfolder) if subfolder else root
         with open(os.path.join(folder, "config.json")) as f:
             cfg = json.load(f)
-        assert cfg.get("_class_name") == "WanTransformer3DModel", cfg.get("_class_name")
+        assert cfg.get("_class_name") in cls._accepted_class_names, cfg.get("_class_name")
         model = cls(num_attention_heads=cfg["num_attention_heads"],
                     attention_head_dim=cfg["attention_head_dim"],
                     in_channels=cfg["in_channels"], out_channels=cfg["out_channels"],
@@ -542,6 +543,7 @@ class WanModelFVCausal(WanModelFV):
     """
 
     block_cls = WanBlockFVCausal
+    _accepted_class_names = ("CausalWanTransformer3DModel",)
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
