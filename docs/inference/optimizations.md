@@ -78,8 +78,8 @@ python setup.py install
 
 FastVideo never auto-selects FlashAttention-4 (`flash_attn.cute`) just because it
 is installed: its CuTeDSL kernels JIT-compile per shape family and can fail at
-runtime on some GPU/shape combinations. To use FA4, install the pinned
-`flash-attn-4` build (see the `flash-attn-4` source in `pyproject.toml`) and set:
+runtime on some GPU/shape combinations. To use FA4 on CUDA 13, install the pinned
+`flash-attn-4[cu13]` build (see the `flash-attn-4` source in `pyproject.toml`) and set:
 
 ```bash
 export FASTVIDEO_FA4=1
@@ -110,14 +110,18 @@ See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040) and [flash-attention-
 Install the FP4 flash attention kernel (without upgrading your existing torch):
 
 ```bash
-# branch fix/cutlass-dsl-4.5 carries the cutlass-dsl 4.5 fix (cute.core.ThrMma
-# -> cute.ThrMma); switch back to @fp4 once hao-ai-lab/flash-attention-fp4#2 merges.
-pip install --no-deps "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fix/cutlass-dsl-4.5#subdirectory=flash_attn/cute"
-pip install "nvidia-cutlass-dsl>=4.5.2" apache-tvm-ffi flashinfer-python
+# Commit 940bf7e5 carries the CuTe DSL 4.5 fix (cute.core.ThrMma -> cute.ThrMma).
+pip install --no-deps "git+https://github.com/hao-ai-lab/flash-attention-fp4.git@940bf7e511375ec160bc2d7188bef35915ded1e3#subdirectory=flash_attn/cute"
+pip install "nvidia-cutlass-dsl[cu13]==4.5.2" "quack-kernels==0.5.0" apache-tvm-ffi flashinfer-python torch-c-dlpack-ext
 ```
 
 The `--no-deps` flag prevents upgrading torch/torchvision. Use the supported
-PyTorch 2.12.0 and CUDA 13 environment for this kernel.
+PyTorch 2.12.0 and CUDA 13 environment for this kernel. Keep this private FP4
+overlay in a separate inference environment from FastVideo's upstream dense FA4
+dependency: the two distributions provide the same `flash_attn.cute` package but
+require different CuTe DSL versions. Keep the CUTLASS and Quack pins together;
+Quack 0.5.1 and newer use CuTe DSL 4.6, whose API is incompatible with this FP4
+kernel revision.
 
 #### Usage
 

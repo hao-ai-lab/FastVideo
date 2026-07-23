@@ -47,7 +47,11 @@ COPY . /opt/FastVideo
 
 RUN --mount=type=cache,target=/opt/uv/cache \
     source /opt/venv/bin/activate \
-    && uv pip install "/opt/FastVideo[dreamverse]"
+    && if [[ "${UV_TORCH_BACKEND}" == "cu130" ]]; then \
+        uv pip install "/opt/FastVideo[dreamverse]" "nvidia-cutlass-dsl[cu13]"; \
+    else \
+        uv pip install "/opt/FastVideo[dreamverse]"; \
+    fi
 
 # Standard docker build does not expose GPUs, while fastvideo-kernel/build.sh
 # detects the CUDA architecture with torch at build time. The FastVideo package
