@@ -1,0 +1,59 @@
+[
+ {
+  "targets": [
+   2
+  ],
+  "dmd_t": null,
+  "vsa_sparsity": 0.0,
+  "critic_t": 737.588623046875,
+  "gen_loss": 0.0,
+  "fake_loss": 0.0031898675952106714,
+  "x0_student_hash": "05ad3d4cce7a992d"
+ },
+ {
+  "targets": [
+   1,
+   0
+  ],
+  "dmd_t": 386.4990234375,
+  "vsa_sparsity": 0.0,
+  "critic_t": 716.4179077148438,
+  "gen_loss": 0.1784808486700058,
+  "fake_loss": 0.005877670831978321,
+  "x0_student_hash": "feb165dfeaca91ce"
+ },
+ {
+  "targets": [
+   2
+  ],
+  "dmd_t": null,
+  "vsa_sparsity": 0.0,
+  "critic_t": 967.0870971679688,
+  "gen_loss": 0.0,
+  "fake_loss": 0.015015869401395321,
+  "x0_student_hash": "1a5560999a041b53"
+ },
+ {
+  "targets": [
+   0,
+   1
+  ],
+  "dmd_t": 662.4631958007812,
+  "vsa_sparsity": 0.0,
+  "critic_t": 980.0,
+  "gen_loss": 0.17068849503993988,
+  "fake_loss": 0.023572081699967384,
+  "x0_student_hash": "5fe5e7af4ce877e8"
+ },
+ {
+  "targets": [
+   2
+  ],
+  "dmd_t": null,
+  "vsa_sparsity": 0.0,
+  "critic_t": 456.45648193359375,
+  "gen_loss": 0.0,
+  "fake_loss": 0.0025676116347312927,
+  "x0_student_hash": "ee50d2a3ca8dad58"
+ }
+]

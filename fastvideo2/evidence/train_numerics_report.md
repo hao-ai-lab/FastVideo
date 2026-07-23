@@ -114,3 +114,20 @@ Later losses within the measured band: main's own quantized-backward reruns
 drift to 8.3e-2 by step 4 (vs flash's 3.7e-3) — ours mostly below main's own
 drift. Cross-attention stays dense (main's backend replaces self-attention
 only).
+
+## QAD (attn-QAT + DMD2) — added 2026-07-23
+
+Gate `anchor.train-qad-main`: PASS on the first run, under the strict dense
+band (no widening needed). Legacy loader-gated recipe: env ATTN_QAT_TRAIN
+applies to the GENERATOR only (main's component loader restores flash for
+teacher/critic), guidance 2.0, steps [1000,757,522]. Our side: WanModelFVQAT
+student + dense WanModelFV scorers through the same DMD2Step.
+
+x0 rollout (fake-quant attention) bitwise through the first student update;
+gen losses ≤5.9e-4, critic ≤1.2e-4, param slices ~5e-6. The serving half of
+QAD (fastwan-qad-fp8 card) was already bitwise — post-training -> serving is
+now parity-gated END TO END for the QAD pipeline.
+
+NOTE: a modular-stack QAD gate (role-local backend yaml, STANDARD CFG,
+guidance 3.0) is deferred — the two stacks differ in CFG parameterization;
+this gate pins the legacy convention.
