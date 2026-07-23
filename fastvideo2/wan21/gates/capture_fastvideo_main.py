@@ -141,12 +141,16 @@ def main() -> None:
                              pipeline_config=PipelineConfig(dit_config=cfg, dit_precision="bf16"),
                              **_NO_WRAP)
         args.device = torch.device(device)
-        dit = TransformerLoader().load(dit_path, args).to(dtype=torch.bfloat16).eval()
+        dit = TransformerLoader().load(dit_path, args).eval()
         if quant:
             first = dit.blocks[0].to_q
             if not hasattr(first, "_fp8_weight"):
                 convert_model_to_fp8(dit)
             assert hasattr(dit.blocks[0].to_q, "_fp8_weight"), "fp8 conversion did not run"
+            # no dtype cast here — a blanket .to(bf16) would destroy the fp8
+            # buffers (and their fp32 scales) the loader just created
+        else:
+            dit = dit.to(dtype=torch.bfloat16)
         return dit
 
     dit = load_dit(quant=False)
