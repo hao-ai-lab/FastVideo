@@ -1,0 +1,20 @@
+{
+  "fastvideo_commit": "c459a1897899ffcec3be7765534d81000b9bb9c1",
+  "steps": 2,
+  "config": "diffusion_nft single-frame: 2 outer x 2 batches x 4 timesteps, pickscore+clipscore, crush-smol prompts, beta .1 kl 1e-4 lr 3e-5",
+  "probe": {
+    "param_dtype": "torch.float32",
+    "decay_type": 1,
+    "ntt": 1000,
+    "nft_beta": 0.1,
+    "kl_beta": 0.0001,
+    "adv_clip_max": 5.0,
+    "adv_mode": "all",
+    "max_grad_norm": 1.0
+  },
+  "gate_yaml": "method:\n  _target_: fastvideo.train.methods.rl.diffusion_nft.DiffusionNFTMethod\n  adv_clip_max: 5\n  adv_mode: all\n  beta: 0.1\n  decay_type: 1\n  ema:\n    decay: 0.9\n    enabled: false\n    update_after_step: 0\n    validation: true\n  kl_beta: 0.0001\n  max_grad_norm: 1.0\n  num_batches_per_epoch: 2\n  num_inner_epochs: 1\n  num_video_per_prompt: 2\n  reward_fn:\n    clipscore: 1.0\n    pickscore: 1.0\n  sample_train_batch_size: 2\n  sampling:\n    flow_shift: inherit\n    num_steps: 4\n    scheduler: flow_match_euler\n    trajectory: ode\n  terminal_progress: false\n  timestep_fraction: 1.0\n  train_batch_size: 2\n  validation:\n    batch_size: 16\n    data_path: null\n    every_steps: 1000000\n    log_samples: true\n    num_prompts: 16\n    num_steps: 40\n    seed: 42\nmodels:\n  old:\n    _target_: fastvideo.train.models.wan.WanModel\n    disable_custom_init_weights: true\n    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers\n    trainable: false\n  reference:\n    _target_: fastvideo.train.models.wan.WanModel\n    disable_custom_init_weights: true\n    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers\n    trainable: false\n  student:\n    _target_: fastvideo.train.models.wan.WanModel\n    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers\n    trainable: true\npipeline:\n  flow_shift: 8\ntraining:\n  checkpoint:\n    checkpoints_total_limit: 3\n    output_dir: /tmp/fv2_rl_capture\n    training_state_checkpointing_steps: 1000000\n  data:\n    data_path: /home/willlin/.cache/huggingface/hub/datasets--wlsaidhi--crush-smol_processed_t2v/snapshots/67dd07f2163ad2b3397f8b3d8125b67ca452dc85/combined_parquet_dataset\n    dataloader_num_workers: 0\n    num_frames: 1\n    num_height: 448\n    num_latent_t: 1\n    num_width: 832\n    preprocessed_data_type: t2v\n    seed: 42\n    train_batch_size: 1\n    training_cfg_rate: 0.0\n  distributed:\n    hsdp_replicate_dim: 1\n    hsdp_shard_dim: 1\n    num_gpus: 1\n    sp_size: 1\n    tp_size: 1\n  loop:\n    gradient_accumulation_steps: 2\n    max_train_steps: 2\n  model:\n    enable_gradient_checkpointing_type: null\n  optimizer:\n    betas:\n    - 0.9\n    - 0.999\n    learning_rate: 3.0e-05\n    lr_scheduler: constant\n    lr_warmup_steps: 0\n    weight_decay: 0.0001\n  tracker:\n    project_name: diffusion_nft_wan\n    run_name: wan2.1_diffusion_nft_pick_clip\n",
+  "torch": "2.12.0+cu130",
+  "gpu": "NVIDIA GB200",
+  "self_noise_max": 0.04484055485020377,
+  "self_noise_note": "max |total_loss| spread over 3 identical-seed capture runs (all steps)"
+}

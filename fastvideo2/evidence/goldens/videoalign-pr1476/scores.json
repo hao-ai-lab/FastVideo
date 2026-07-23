@@ -1,0 +1,23 @@
+{
+  "scores": {
+    "MQ": [
+      0.497402,
+      0.457805,
+      -0.017359
+    ],
+    "VQ": [
+      -1.186994,
+      -1.075764,
+      0.408458
+    ],
+    "TA": [
+      -2.897675,
+      -2.61778,
+      -1.07544
+    ]
+  },
+  "checkpoint": "/home/willlin/.cache/huggingface/hub/models--KwaiVGI--VideoReward/snapshots/4f26600130683e6f1de9f5d463887f28e8ef995c",
+  "authority": "PR #1476 maint/pr1476-runtime-compat @518aeab0b (vendored byte-identical, see test_videoalign.py)",
+  "torch": "2.12.0+cu130",
+  "gpu": "NVIDIA GB200"
+}

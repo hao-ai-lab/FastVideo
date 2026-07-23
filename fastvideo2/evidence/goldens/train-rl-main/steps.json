@@ -1,0 +1,408 @@
+[
+ {
+  "items": [
+   {
+    "prompts": [
+     "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table.",
+     "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table."
+    ]
+   },
+   {
+    "prompts": [
+     "A pizza is being crushed by a hydraulic press, causing the toppings to spread out and the crust to crumble.",
+     "A pizza is being crushed by a hydraulic press, causing the toppings to spread out and the crust to crumble."
+    ]
+   }
+  ],
+  "inner": [
+   {
+    "timestep_idx": 0,
+    "row_idx": [
+     1,
+     3
+    ],
+    "timestep": [
+     803.7713623046875,
+     60.20697021484375
+    ],
+    "losses": {
+     "total_loss": 5.342502646625078,
+     "policy_loss": 5.342502646625078,
+     "unweighted_policy_loss": 1.0685005293250156,
+     "kl_div_loss": 0.0,
+     "old_deviate": 0.0,
+     "old_kl_div": 0.0,
+     "x0_norm": 0.1357421875
+    }
+   },
+   {
+    "timestep_idx": 1,
+    "row_idx": [
+     1,
+     3
+    ],
+    "timestep": [
+     941.8340454101562,
+     1000.0
+    ],
+    "losses": {
+     "total_loss": 13.446108607202637,
+     "policy_loss": 13.446108607202637,
+     "unweighted_policy_loss": 2.6892217214405276,
+     "kl_div_loss": 0.0,
+     "old_deviate": 0.0,
+     "old_kl_div": 0.0,
+     "x0_norm": 0.1357421875
+    }
+   },
+   {
+    "timestep_idx": 2,
+    "row_idx": [
+     1,
+     3
+    ],
+    "timestep": [
+     60.20697021484375,
+     803.7713623046875
+    ],
+    "losses": {
+     "total_loss": 4.515896192359375,
+     "policy_loss": 4.515896192359375,
+     "unweighted_policy_loss": 0.9031792384718751,
+     "kl_div_loss": 0.0,
+     "old_deviate": 0.0,
+     "old_kl_div": 0.0,
+     "x0_norm": 0.1357421875
+    }
+   },
+   {
+    "timestep_idx": 3,
+    "row_idx": [
+     1,
+     3
+    ],
+    "timestep": [
+     1000.0,
+     941.8340454101562
+    ],
+    "losses": {
+     "total_loss": 14.399518803001467,
+     "policy_loss": 14.399518803001467,
+     "unweighted_policy_loss": 2.8799037606002935,
+     "kl_div_loss": 0.0,
+     "old_deviate": 0.0,
+     "old_kl_div": 0.0,
+     "x0_norm": 0.1357421875
+    }
+   },
+   {
+    "timestep_idx": 0,
+    "row_idx": [
+     2,
+     0
+    ],
+    "timestep": [
+     941.8340454101562,
+     941.8340454101562
+    ],
+    "losses": {
+     "total_loss": 13.118073008759543,
+     "policy_loss": 13.118073008759543,
+     "unweighted_policy_loss": 2.6236146017519086,
+     "kl_div_loss": 0.0,
+     "old_deviate": 0.0,
+     "old_kl_div": 0.0,
+     "x0_norm": 0.1845703125
+    }
+   },
+   {
+    "timestep_idx": 1,
+    "row_idx": [
+     2,
+     0
+    ],
+    "timestep": [
+     1000.0,
+     1000.0
+    ],
+    "losses": {
+     "total_loss": 18.29075873703107,
+     "policy_loss": 18.29075873703107,
+     "unweighted_policy_loss": 3.6581517474062135,
+     "kl_div_loss": 0.0,
+     "old_deviate": 0.0,
+     "old_kl_div": 0.0,
+     "x0_norm": 0.1845703125
+    }
+   },
+   {
+    "timestep_idx": 2,
+    "row_idx": [
+     2,
+     0
+    ],
+    "timestep": [
+     60.20697021484375,
+     60.20697021484375
+    ],
+    "losses": {
+     "total_loss": 1.6802980970623111,
+     "policy_loss": 1.6802980970623111,
+     "unweighted_policy_loss": 0.33605961941246226,
+     "kl_div_loss": 0.0,
+     "old_deviate": 0.0,
+     "old_kl_div": 0.0,
+     "x0_norm": 0.1845703125
+    }
+   },
+   {
+    "timestep_idx": 3,
+    "row_idx": [
+     2,
+     0
+    ],
+    "timestep": [
+     803.7713623046875,
+     803.7713623046875
+    ],
+    "losses": {
+     "total_loss": 7.296204002432377,
+     "policy_loss": 7.296204002432377,
+     "unweighted_policy_loss": 1.4592408004864756,
+     "kl_div_loss": 0.0,
+     "old_deviate": 0.0,
+     "old_kl_div": 0.0,
+     "x0_norm": 0.1845703125
+    }
+   }
+  ],
+  "rewards": {
+   "clipscore": [
+    0.13153909146785736,
+    0.20024922490119934,
+    0.14863893389701843,
+    0.2340940237045288
+   ],
+   "pickscore": [
+    0.6811658143997192,
+    0.7108843326568604,
+    0.7316142916679382,
+    0.7339301109313965
+   ],
+   "avg": [
+    0.8127049207687378,
+    0.9111335277557373,
+    0.8802531957626343,
+    0.9680241346359253
+   ]
+  },
+  "old_decay": 0.001,
+  "advantages_shape": [
+   4,
+   4
+  ]
+ },
+ {
+  "items": [
+   {
+    "prompts": [
+     "The video shows a stack of caramelized sugar cubes being flattened as if they were under a hydraulic press, resulting in a messy pile of broken sugar on the table.",
+     "The video shows a stack of caramelized sugar cubes being flattened as if they were under a hydraulic press, resulting in a messy pile of broken sugar on the table."
+    ]
+   },
+   {
+    "prompts": [
+     "The video shows a hydraulic press flattening objects as if they were under a hydraulic press. The press is shown in action, compressing two colorful objects that resemble sandwiches. The press is yellow and black striped, and the objects being flattened are placed on a metal plate. The background is green, and the press is moving down, compressing the objects.",
+     "The video shows a hydraulic press flattening objects as if they were under a hydraulic press. The press is shown in action, compressing two colorful objects that resemble sandwiches. The press is yellow and black striped, and the objects being flattened are placed on a metal plate. The background is green, and the press is moving down, compressing the objects."
+    ]
+   }
+  ],
+  "inner": [
+   {
+    "timestep_idx": 0,
+    "row_idx": [
+     1,
+     2
+    ],
+    "timestep": [
+     941.8340454101562,
+     1000.0
+    ],
+    "losses": {
+     "total_loss": 12.398794127316185,
+     "policy_loss": 12.398782623619743,
+     "unweighted_policy_loss": 2.479756524723949,
+     "kl_div_loss": 0.11474609375,
+     "old_deviate": 2.8848648071289062e-05,
+     "old_kl_div": 0.11474609375,
+     "x0_norm": 0.232421875
+    }
+   },
+   {
+    "timestep_idx": 1,
+    "row_idx": [
+     1,
+     2
+    ],
+    "timestep": [
+     60.20697021484375,
+     941.8340454101562
+    ],
+    "losses": {
+     "total_loss": 5.758004918792544,
+     "policy_loss": 5.758003212609587,
+     "unweighted_policy_loss": 1.1516006425219176,
+     "kl_div_loss": 0.01708984375,
+     "old_deviate": 0.00015544891357421875,
+     "old_kl_div": 0.0169677734375,
+     "x0_norm": 0.232421875
+    }
+   },
+   {
+    "timestep_idx": 2,
+    "row_idx": [
+     1,
+     2
+    ],
+    "timestep": [
+     1000.0,
+     803.7713623046875
+    ],
+    "losses": {
+     "total_loss": 10.294339807390942,
+     "policy_loss": 10.29431918418385,
+     "unweighted_policy_loss": 2.05886383683677,
+     "kl_div_loss": 0.2060546875,
+     "old_deviate": 3.147125244140625e-05,
+     "old_kl_div": 0.205078125,
+     "x0_norm": 0.232421875
+    }
+   },
+   {
+    "timestep_idx": 3,
+    "row_idx": [
+     1,
+     2
+    ],
+    "timestep": [
+     803.7713623046875,
+     60.20697021484375
+    ],
+    "losses": {
+     "total_loss": 3.6922912036167417,
+     "policy_loss": 3.69229043248165,
+     "unweighted_policy_loss": 0.7384580864963299,
+     "kl_div_loss": 0.007720947265625,
+     "old_deviate": 0.00016689300537109375,
+     "old_kl_div": 0.00775146484375,
+     "x0_norm": 0.232421875
+    }
+   },
+   {
+    "timestep_idx": 0,
+    "row_idx": [
+     0,
+     3
+    ],
+    "timestep": [
+     941.8340454101562,
+     1000.0
+    ],
+    "losses": {
+     "total_loss": 10.91259682812316,
+     "policy_loss": 10.91258747019393,
+     "unweighted_policy_loss": 2.1825174940387857,
+     "kl_div_loss": 0.09375,
+     "old_deviate": 2.9206275939941406e-05,
+     "old_kl_div": 0.09326171875,
+     "x0_norm": 0.296875
+    }
+   },
+   {
+    "timestep_idx": 1,
+    "row_idx": [
+     0,
+     3
+    ],
+    "timestep": [
+     60.20697021484375,
+     803.7713623046875
+    ],
+    "losses": {
+     "total_loss": 3.5539959718750014,
+     "policy_loss": 3.5539953236744894,
+     "unweighted_policy_loss": 0.7107990647348978,
+     "kl_div_loss": 0.0064697265625,
+     "old_deviate": 0.00017261505126953125,
+     "old_kl_div": 0.006439208984375,
+     "x0_norm": 0.296875
+    }
+   },
+   {
+    "timestep_idx": 2,
+    "row_idx": [
+     0,
+     3
+    ],
+    "timestep": [
+     1000.0,
+     941.8340454101562
+    ],
+    "losses": {
+     "total_loss": 10.252210426698156,
+     "policy_loss": 10.252192783723302,
+     "unweighted_policy_loss": 2.050438556744661,
+     "kl_div_loss": 0.1767578125,
+     "old_deviate": 2.9325485229492188e-05,
+     "old_kl_div": 0.1767578125,
+     "x0_norm": 0.296875
+    }
+   },
+   {
+    "timestep_idx": 3,
+    "row_idx": [
+     0,
+     3
+    ],
+    "timestep": [
+     803.7713623046875,
+     60.20697021484375
+    ],
+    "losses": {
+     "total_loss": 4.397589007283385,
+     "policy_loss": 4.397588385159906,
+     "unweighted_policy_loss": 0.8795176770319812,
+     "kl_div_loss": 0.0062255859375,
+     "old_deviate": 0.00019168853759765625,
+     "old_kl_div": 0.0062255859375,
+     "x0_norm": 0.296875
+    }
+   }
+  ],
+  "rewards": {
+   "clipscore": [
+    0.20155902206897736,
+    0.1521805226802826,
+    0.18642529845237732,
+    0.19080127775669098
+   ],
+   "pickscore": [
+    0.7295283079147339,
+    0.7310761213302612,
+    0.7291601896286011,
+    0.7219043374061584
+   ],
+   "avg": [
+    0.93108731508255,
+    0.8832566738128662,
+    0.9155855178833008,
+    0.9127056002616882
+   ]
+  },
+  "old_decay": 0.002,
+  "advantages_shape": [
+   4,
+   4
+  ]
+ }
+]

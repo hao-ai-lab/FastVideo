@@ -186,3 +186,74 @@ Gate transcript: 3 live steps, 32 fMP4 chunks (ISO-BMFF ftyp verified),
 Scope note: the original app is LTX2-specific (audio, refine, continuation
 state, LoRA stacks) — this port re-bases Dreamverse's ARCHITECTURE onto the
 wan family; their Next.js client's message schema maps onto these events.
+
+## Dataloader order — added 2026-07-23
+
+Gate `anchor.train-data-main`: PASS. `fastvideo2/train/data.py` reproduces
+main's map-style parquet loader at world size 1: file discovery is
+`os.walk(realpath(root))` with each file realpath'd (on an HF snapshot the
+sort key is therefore the resolved BLOB path) and one global path sort;
+the sampler is `torch.randperm(total, generator=manual_seed(seed))`
+truncated to a batch multiple and chunked sequentially; rows decode
+`np.frombuffer(..., np.float32)` (main ignores the `_dtype` column); text
+embeddings pad/crop to 512 with a 1/0 mask. Checked against the finetune
+capture's recorded stream: first 5 batches match on caption, latents hash
+(post `num_latent_t` slice, bf16-cast) and embeds hash — all exact.
+
+## DiffusionNFT RL — added 2026-07-23
+
+Gate `anchor.train-rl-main`: PASS. Goldens from main's MERGED modular
+trainer (`train/methods/rl/diffusion_nft.py`) at a shrunk single-frame
+config (2 outer steps x 2 sample batches x 2 videos/prompt, 4 sampling
+steps, timestep_fraction 1.0, pickscore+clipscore rewards, crush-smol
+prompts, Wan2.1-T2V-1.3B for student/old/reference).
+
+Capture records the DIRECT inputs of every `_training_timestep_loss` call
+(pre-shuffle row indices by byte-match, timestep column, advantages, the
+xt noise draw) — the inner loop's cuda_generator sample/timestep
+permutations never need replaying. At this config the effective grad accum
+(2 x 4 timesteps = 8) equals the calls per outer step, so the optimizer
+fires once per outer step and ALL step-0 losses are pre-update:
+
+    advantages          exact (0.0) both outer steps (group-by-prompt,
+                        (r-mean)/(std_unbiased=False+1e-4), rewards["avg"])
+    loss.s0k0..k7       BITWISE 0.0 (8/8) at pre-update weights
+    loss.s1k0..k7       max diff 1.17e-2, within the measured band
+                        (main self-noise 4.48e-2 over 3 identical-seed
+                        capture runs; band = 1.5x). Step-0 losses are
+                        exactly repeatable on main across runs.
+
+Root cause worth keeping (cost one bisection): the modular stack loads
+every role through `maybe_load_fsdp_model` with
+`MixedPrecisionPolicy(param_dtype=bf16, reduce_dtype=fp32)` over fp32
+storage. Probing `p.dtype` shows only the fp32 STORAGE dtype; the FORWARD
+runs on bf16-cast params (RMSNorm weights and scale_shift_table included —
+confirmed by per-module hash probes: inputs bitwise, `to_q` diverging,
+main's `norm_q` emitting bf16). AdamW (eps 1e-8) and the old-policy EMA
+operate on the fp32 storage — at world 1 exactly the fp32-master /
+bf16-compute chain (`_MasterOpt`) the finetune/DMD2 gates proved. An
+NFTStep variant with plain AdamW over fp32 live params + autocast produced
+2e-5..2e-2 step-0 errors; the restored master-chain NFTStep is bitwise.
+
+Upstream findings (transformers 5.13, filed in PORT_NOTES): main's
+PickScoreScorer crashes (`get_*_features` now returns a ModelOutput whose
+`.pooler_output` holds the projected features; unwrap must be scoped to the
+PickScore instance — `CLIPModel.forward` consumes the new contract);
+RL validation fires at iteration 0 (`0 % every_steps == 0`); `_return_decay`
+is a staticmethod (plain-function monkeypatches shift its args); the
+VideoAlign runtime needs `accelerate>=1.1` and headless opencv on ARM.
+
+## VideoAlign rewards — added 2026-07-23
+
+Gate `anchor.videoalign-pr1476`: PASS. The reward runtime under
+`fastvideo2/rl_rewards/VideoAlign/` is vendored BYTE-IDENTICAL from
+PR #1476 (`maint/pr1476-runtime-compat` @518aeab0b) — sha256 of all 8 files
+is asserted in `tests/test_videoalign.py`, and pre-commit excludes the
+directory so formatters cannot drift it. The wrapper
+(`fastvideo2/train/videoalign.py`) differs from the PR's
+`rewards/videoalign.py` only by the vendored-root path and the inlined
+(verbatim) `media_to_uint8_array`. Code identity => behavior identity; the
+cluster gate then proves the stack end-to-end on the real
+KwaiVGI/VideoReward checkpoint: MQ/VQ/TA on 3 fixed synthetic media,
+scored twice — deterministic (exact), finite, goldens recorded
+(`videoalign-pr1476/scores.json`).
