@@ -213,6 +213,7 @@ def _sample_block(
     motion_guidance_scale: float,
     motion_cfg: bool,
 ) -> tuple[torch.Tensor, tuple[_Branch, ...]]:
+    latent_dtype = latents.dtype
     scheduler.set_timesteps(int(num_inference_steps), device=latents.device)
     branches: tuple[_Branch, ...] = ("full", )
     for current_timestep in scheduler.timesteps:
@@ -238,7 +239,7 @@ def _sample_block(
             current_timestep,
             latents.float(),
             return_dict=False,
-        )[0]
+        )[0].to(dtype=latent_dtype)
     return latents, branches
 
 
