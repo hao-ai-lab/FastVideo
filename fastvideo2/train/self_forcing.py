@@ -86,7 +86,10 @@ def sf_rollout(model: Any, cursor: "DrawCursor", embeds: Any, *,
 
     def fwd(x_btchw, t_2d, grad: bool):
         ctx = torch.enable_grad() if grad else torch.no_grad()
-        with ctx:
+        # main's SF phases run under autocast(bf16); the causal blocks use
+        # PLAIN LayerNorms, which autocast promotes to fp32 compute — this is
+        # numerics-relevant (unlike the dense model's explicit FP32 norms)
+        with ctx, torch.amp.autocast("cuda", dtype=torch.bfloat16):
             out = model(x_btchw.permute(0, 2, 1, 3, 4), embeds, t_2d,
                         kv_cache=kv_cache, crossattn_cache=xattn_cache,
                         current_start=start * frame_seqlen, start_frame=start)
