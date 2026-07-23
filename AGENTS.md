@@ -67,7 +67,15 @@ python -m fastvideo2 generate <model> --prompt ... # one request
 GPU work runs on dlcluster via the `run-fastvideo-dlcluster` skill from the
 main FastVideo checkout (sync this branch with `git push origin HEAD`, then
 run inside the branch clone at `/mnt/fv21` — do not disturb `/mnt/FastVideo`'s
-checkout). Cluster runs append to `fastvideo2/evidence/` and those files get
+checkout). One-time per environment, install the package editable with no
+dependency changes (torch etc. already live in the venv) — after this,
+scripts and `fastvideo2 <cmd>` work from any directory, no PYTHONPATH:
+
+```bash
+/mnt/FastVideo/.venv/bin/pip install -e /mnt/fv21 --no-deps -q
+```
+
+Cluster runs append to `fastvideo2/evidence/` and those files get
 fetched and committed locally, so before every cluster `git pull`, reset that
 tree or the pull conflicts:
 

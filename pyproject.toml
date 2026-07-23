@@ -22,8 +22,16 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest"]
 
+[project.scripts]
+fastvideo2 = "fastvideo2.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["fastvideo2*"]
+
+[tool.setuptools.package-data]
+# evidence (ledger, baselines, goldens) is part of the product — the verify
+# ladder and --anchor read it relative to the package.
+fastvideo2 = ["evidence/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["fastvideo2/tests"]
