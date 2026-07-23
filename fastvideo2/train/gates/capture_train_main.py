@@ -153,8 +153,19 @@ def main() -> None:
     pipeline = WanTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path,
                                                    args=args)
     tf = pipeline.get_module("transformer")
+
+    def fwd_hook(module, args_in, kwargs_in, output):
+        o = output[0] if isinstance(output, (tuple, list)) else output
+        i = len([r for r in records if "pred_hash" in r])
+        if i < len(records):
+            records[i]["pred_hash"] = _hash(o)
+            if i == 0:
+                batches[0]["pred"] = o.detach().to(torch.float32).cpu().numpy()
+
+    hh = tf.register_forward_hook(fwd_hook, with_kwargs=True)
     w0 = _slice(tf.proj_out.weight)
     pipeline.train()
+    hh.remove()
     w5 = _slice(tf.proj_out.weight)
 
     for i, b in enumerate(batches):

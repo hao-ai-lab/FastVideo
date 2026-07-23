@@ -56,6 +56,12 @@ def run() -> int:
     trainer = FinetuneStep(model)
     w0 = trainer.master["proj_out.weight"][:8, :8].cpu().numpy().copy()
 
+    import hashlib
+
+    def _hash(t):
+        return hashlib.sha256(t.detach().to(torch.float32).cpu().numpy().tobytes()
+                              ).hexdigest()[:16]
+
     rows: list[tuple[str, float]] = []
     for i, rec in enumerate(steps):
         z = np.load(os.path.join(gold, f"step{i}.npz"))
@@ -65,6 +71,18 @@ def run() -> int:
         timesteps = torch.tensor(rec["timesteps"], device=device)
         sigmas = torch.tensor(rec["sigmas"], device=device,
                               dtype=torch.bfloat16).view(-1, 1, 1, 1)
+        if i == 0:  # input-construction triage: does OUR noisy match theirs?
+            noisy = (1.0 - sigmas) * latents + sigmas * noise
+            rows.append(("noisy.step0", 0.0 if _hash(noisy) == rec["noisy_hash"] else 1.0))
+            print(f"  step0 shapes: latents {tuple(latents.shape)} embeds "
+                  f"{tuple(embeds.shape)} t={rec['timesteps']} σ={rec['sigmas']}",
+                  flush=True)
+            if "pred" in z.files:
+                with torch.no_grad():
+                    p = trainer.model(noisy, embeds,
+                                      timesteps.to(torch.bfloat16))
+                rows.append(("pred.step0", rel(p.detach().to(torch.float32).cpu().numpy(),
+                                               z["pred"])))
         loss, gnorm = trainer.step(latents, embeds, noise, timesteps, sigmas)
         rows.append((f"loss.step{i}", abs(loss - rec["loss"])))
         rows.append((f"gnorm.step{i}", abs(gnorm - rec["grad_norm"])))
