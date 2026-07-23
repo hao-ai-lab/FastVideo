@@ -82,3 +82,36 @@ inference anchors.
 
 Multi-GPU (sp/FSDP) lands after single-GPU parity per method, gated by the
 same fixtures at the matching topology.
+
+## DMD2 build facts (read from distillation_pipeline.py, for #19)
+
+- train_one_step (:807): collect grad_accum batches (fetch->normalize->
+  prepare->attn metadata; metadata_vsa deepcopy, dense copy gets
+  VSA_sparsity=0). Student phase only when
+  `current_trainstep % generator_update_interval == 0`: rollout -> _dmd_forward
+  -> backward -> clip(student) -> student AdamW -> EMA update. Critic phase
+  EVERY step: faker_score_forward -> backward -> clip(critic) -> critic AdamW
+  (+ its LR scheduler).
+- Rollout `_generator_multi_step_simulation_forward` (:525): random target
+  idx over denoising_step_list [1000,757,522]; from pure randn, no_grad
+  x0/renoise chain through steps < max idx (SAME math as WanDMDLoop:
+  pred_noise_to_pred_video + scheduler.add_noise on the shift-8 FlowMatch
+  table); grad only on the final forward at the target step.
+- `_dmd_forward` (:591): under no_grad — t = shift_timestep(randint(0,1000))
+  clamp(min,max = ratios 0.02/0.98 x 1000); noise randn; noisy =
+  add_noise(x0_student); critic pred -> x0_fake; teacher cond + uncond ->
+  x0 CFG in DMD2 parameterization `cond + w*(cond-uncond)` (w=3.5 in the
+  1.3B script); grad = (x0_fake - x0_real)/|x0_student - x0_real|.mean(),
+  nan_to_num; dmd_loss = 0.5*MSE(x0.float(), (x0-grad).float().detach()).
+- `faker_score_forward` (:671): rollout under no_grad; fresh t/noise draws;
+  critic pred; loss = mean((pred_noise - (noise - x0_student))**2) in BF16
+  (no .float() — unlike finetune loss!).
+- `_build_distill_input_kwargs` (:486): hidden = noisy BTCHW->BCTHW permute,
+  timestep passed LONG (not bf16); text dict = cond (batch embeds+mask) or
+  uncond (negative_prompt_embeds encoded once at init ~:1092).
+- ALL RNG here is GLOBAL torch RNG (randint/randn without generators),
+  seeded set_random_seed(seed+rank) — capture must record draws in call
+  order and the anchor replays them (monkeypatch torch.randn/randint during
+  capture).
+- Timesteps recorded as fp32 warped values via shift_timestep
+  (training_utils.py:1136: t*shift/(1+(shift-1)t) scaled x1000).
