@@ -166,9 +166,10 @@ def main() -> None:
                            vsa_sparsity=float(getattr(tb, "current_vsa_sparsity", 0.0) or 0.0))
         return tb
 
-    TP.TrainingPipeline._get_next_batch = get_batch
-    TP.TrainingPipeline._prepare_dit_inputs = prepare
-    TP.TrainingPipeline.train_one_step = one_step
+    if not DMD2:  # dmd2 has its own method recorders below
+        TP.TrainingPipeline._get_next_batch = get_batch
+        TP.TrainingPipeline._prepare_dit_inputs = prepare
+        TP.TrainingPipeline.train_one_step = one_step
 
     def _slice(w):
         w = w.full_tensor() if hasattr(w, "full_tensor") else w  # FSDP2 DTensor
