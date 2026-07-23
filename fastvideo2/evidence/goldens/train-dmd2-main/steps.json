@@ -1,0 +1,54 @@
+[
+ {
+  "targets": [
+   2
+  ],
+  "dmd_t": null,
+  "critic_t": 737.588623046875,
+  "gen_loss": 0.0,
+  "fake_loss": 0.003410761244595051,
+  "x0_student_hash": "96f01be58584097b"
+ },
+ {
+  "targets": [
+   1,
+   0
+  ],
+  "dmd_t": 386.4990234375,
+  "critic_t": 716.4179077148438,
+  "gen_loss": 0.33539342880249023,
+  "fake_loss": 0.00596819119527936,
+  "x0_student_hash": "34f51407f1b630e5"
+ },
+ {
+  "targets": [
+   2
+  ],
+  "dmd_t": null,
+  "critic_t": 967.0870971679688,
+  "gen_loss": 0.0,
+  "fake_loss": 0.013151273131370544,
+  "x0_student_hash": "2d65be80d333fd5d"
+ },
+ {
+  "targets": [
+   0,
+   1
+  ],
+  "dmd_t": 662.4631958007812,
+  "critic_t": 980.0,
+  "gen_loss": 0.31753748655319214,
+  "fake_loss": 0.022480690851807594,
+  "x0_student_hash": "822e22773ec52d1e"
+ },
+ {
+  "targets": [
+   2
+  ],
+  "dmd_t": null,
+  "critic_t": 456.45648193359375,
+  "gen_loss": 0.0,
+  "fake_loss": 0.0037461533211171627,
+  "x0_student_hash": "472a8020d513b4ea"
+ }
+]

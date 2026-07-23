@@ -51,3 +51,34 @@ measured self-noise: the block-sparse backward at 0.8 sparsity drifts main
 itself by 0.171 in per-step loss across reruns (vs flash's 3.7e-3); our
 worst diff is 0.080 — about half of main's own run-to-run spread.
 Band = 1.5x measured, from the goldens manifest.
+
+## DMD2 distillation — added 2026-07-23
+
+Gate `anchor.train-dmd2-main`: PASS. Legacy `distillation_pipeline.py`
+convention (the shipped-FastWan authority): student/teacher/critic all from
+the Wan2.1 base, simulate rollout, interval-2 student updates, teacher CFG in
+the DMD2 parameterization (w=3.5), critic flow-match loss in bf16, separate
+AdamWs, num_latent_t 4, 5 steps.
+
+| row | result |
+|---|---|
+| x0 rollout (steps 0–1, pre-first-update) | **bitwise 0.0** |
+| generator losses (steps 1,3) | 4.5e-6 / 7.6e-4 — in 3-run band |
+| critic losses (all 5) | ≤2.9e-5 |
+| params.w5 student/critic | 8.8e-5 / 4.3e-6 (info) |
+
+Band = 1.5x main-vs-main across THREE capture runs (7.2e-4 max; main's own
+gen.step3 spans 0.3169–0.3176 — ours 0.3178, at the distribution's edge).
+x0 hashes are gated exact only until the first student optimizer update;
+after it, backward noise makes bitwise impossible by definition and losses
+carry the signal.
+
+Replay machinery: main draws ALL DMD randomness from the global torch RNG —
+the capture wraps `_generator_multi_step_simulation_forward`/`_dmd_forward`/
+`faker_score_forward` and records draws in call order (target idx, rollout
+noises, dmd/critic timesteps+noises); the anchor replays them through
+`fastvideo2/train/dmd2.py::DMD2Step` (the sigma machinery is the inference
+loop's `dmd_inference_table` — training reuses inference definitions).
+Capture pins uncond embeds by encoding the canonical Wan negative prompt
+through main's own text stack (the recipe normally gets them via the
+validation path).
