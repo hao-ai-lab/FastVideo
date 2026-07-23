@@ -110,15 +110,30 @@ def main() -> None:
 
         def hook(name):
             def fn(mod, args, out):
-                o = out[0] if isinstance(out, tuple) else out
-                if torch.is_tensor(o):
-                    rec["hooks"][name] = [_hash(o), str(o.dtype)]
+                outs = out if isinstance(out, tuple) else (out,)
+                rec["hooks"][name] = [[_hash(o), str(o.dtype)]
+                                      for o in outs if torch.is_tensor(o)]
             return fn
 
+        seq: list = []
+
+        def seq_hook(name):
+            def fn(mod, args, out):
+                o = out[0] if isinstance(out, tuple) else out
+                if torch.is_tensor(o):
+                    seq.append([name, type(mod).__name__, _hash(o),
+                                str(o.dtype), list(o.shape)])
+            return fn
+
+        rec["block0_seq"] = seq
         for name, mod in tr.named_children():
             if name == "blocks":
                 for i, b in enumerate(mod):
                     handles.append(b.register_forward_hook(hook(f"block{i}")))
+                for name2, mod2 in mod[0].named_modules():
+                    if name2:
+                        handles.append(
+                            mod2.register_forward_hook(seq_hook(name2)))
             else:
                 handles.append(mod.register_forward_hook(hook(name)))
 

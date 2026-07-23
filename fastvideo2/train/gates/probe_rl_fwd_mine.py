@@ -67,15 +67,29 @@ def main() -> None:
 
     def hook(name):
         def fn(mod, args, out):
-            o = out[0] if isinstance(out, tuple) else out
-            if torch.is_tensor(o):
-                rec["hooks"][name] = [_hash(o), str(o.dtype)]
+            outs = out if isinstance(out, tuple) else (out,)
+            rec["hooks"][name] = [[_hash(o), str(o.dtype)]
+                                  for o in outs if torch.is_tensor(o)]
         return fn
 
+    seq: list = []
+
+    def seq_hook(name):
+        def fn(mod, args, out):
+            o = out[0] if isinstance(out, tuple) else out
+            if torch.is_tensor(o):
+                seq.append([name, type(mod).__name__, _hash(o),
+                            str(o.dtype), list(o.shape)])
+        return fn
+
+    rec["block0_seq"] = seq
     for name, mod in model.named_children():
         if name == "blocks":
             for i, b in enumerate(mod):
                 handles.append(b.register_forward_hook(hook(f"block{i}")))
+            for name2, mod2 in mod[0].named_modules():
+                if name2:
+                    handles.append(mod2.register_forward_hook(seq_hook(name2)))
         else:
             handles.append(mod.register_forward_hook(hook(name)))
 
@@ -96,29 +110,27 @@ def main() -> None:
         with open(MAIN) as f:
             ref = json.load(f)
         print("== input parity ==")
-        for k in ("x0", "noise", "xt", "embeds", "timestep", "pred",
-                  "param_dtypes", "x0_dtype"):
+        for k in ("x0", "noise", "xt", "embeds", "timestep", "pred"):
             same = rec.get(k) == ref.get(k)
-            print(f"  {k:12s} {'SAME' if same else 'DIFF'}   mine={rec.get(k)}"
-                  f"  main={ref.get(k)}")
-        print("== module bisection (main hook names may differ; blocks align "
-              "by index) ==")
-        mh, rh = rec["hooks"], ref["hooks"]
-        blocks = sorted((k for k in rh if k.startswith("block")),
-                        key=lambda s: int(s[5:]))
-        first_diff = None
-        for k in blocks:
-            same = mh.get(k) == rh.get(k)
-            if not same and first_diff is None:
-                first_diff = k
-            print(f"  {k:10s} {'SAME' if same else 'DIFF'} "
-                  f"mine={mh.get(k)} main={rh.get(k)}")
-        others = [k for k in rh if not k.startswith("block")]
-        for k in others:
-            print(f"  [main-only] {k}: {rh[k]}  | mine has: "
-                  f"{ {n: v for n, v in mh.items() if not n.startswith('block')} }")
-            break
-        print("first divergent block:", first_diff)
+            print(f"  {k:12s} {'SAME' if same else 'DIFF'}")
+        print("== condition_embedder ALL outputs ==")
+        print("  main:", ref["hooks"].get("condition_embedder"))
+        print("  mine:", rec["hooks"].get("condition_embedder"))
+        print("== block0 internal call sequence (execution order) ==")
+        ms, rs = rec["block0_seq"], ref["block0_seq"]
+        n = max(len(ms), len(rs))
+        shown_diff = 0
+        for i in range(n):
+            a = rs[i] if i < len(rs) else None
+            b = ms[i] if i < len(ms) else None
+            same = a is not None and b is not None and a[2] == b[2]
+            if not same:
+                shown_diff += 1
+            print(f"  [{i:02d}] {'SAME' if same else 'DIFF'} "
+                  f"main={a}  mine={b}")
+            if shown_diff >= 8:
+                print("  ... (stopping after 8 diffs)")
+                break
 
 
 if __name__ == "__main__":
