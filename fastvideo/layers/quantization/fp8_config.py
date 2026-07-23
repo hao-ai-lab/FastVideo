@@ -26,6 +26,9 @@ FP8_DTYPE = torch.float8_e4m3fn
 FP8_MAX = float(torch.finfo(FP8_DTYPE).max)  # 448.0
 FP8_MIN_SCALE = 1.0 / (FP8_MAX * 512.0)
 
+# Wan's "to_q"/"to_k"/"to_v" also substring-match Kandinsky5's "to_query"/
+# "to_key"/"to_value", so only Kandinsky5's out-projection and FFN names need
+# to be listed explicitly below.
 _FP8_SUFFIXES = (
     "ffn.fc_in",
     "ffn.fc_out",
@@ -33,6 +36,11 @@ _FP8_SUFFIXES = (
     "to_k",
     "to_v",
     "to_out",
+    # Kandinsky5
+    "self_attention.out_layer",
+    "cross_attention.out_layer",
+    "feed_forward.mlp.fc_in",
+    "feed_forward.mlp.fc_out",
 )
 
 

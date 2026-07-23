@@ -10,12 +10,18 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 from tqdm.auto import tqdm
 
+import fastvideo.envs as envs
+from fastvideo.attention import LocalAttention
 from fastvideo.attention.backends.nabla import NablaAttentionMetadataBuilder
+from fastvideo.attention.selector import backend_name_to_enum
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader, VAELoader
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
+    FlowMatchEulerDiscreteScheduler, )
+from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.models.vision_utils import normalize, numpy_to_pt, pil_to_numpy, resize
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -24,7 +30,8 @@ from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-from fastvideo.utils import PRECISION_TO_TYPE
+from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.utils import PRECISION_TO_TYPE, get_mixed_precision_state
 
 logger = init_logger(__name__)
 
@@ -166,6 +173,115 @@ class Kandinsky5DenoisingStage(PipelineStage):
         seq_len = int(mask.sum(1).max().item())
         return torch.arange(seq_len, device=device)
 
+    # Backends whose selection is all-or-nothing: fastvideo.platforms.cuda
+    # raises ImportError immediately if the ATTN_QAT_TRAIN kernel isn't
+    # available (training must never silently de-quantize), rather than the
+    # generic "requested backend unsupported by this layer, falling back to
+    # automatic selection" path _cached_get_attn_backend takes for most
+    # other backend names (see fastvideo/attention/selector.py).
+    # ATTN_QAT_TRAIN is also always in Kandinsky5ArchConfig's
+    # _supported_attention_backends, so that generic fallback never applies
+    # to it here. That combination makes an exact backend match a safe,
+    # false-positive-free signal *only* for ATTN_QAT_TRAIN.
+    # ATTN_QAT_INFER must NOT be in this set: fastvideo.platforms.cuda
+    # deliberately resolves it to FlashAttention when the sm_120 kernel
+    # isn't built, and the QAD recipe README documents that fallback ("on
+    # other GPUs the attention falls back to a supported dense backend
+    # while the FP4 linear layers still run") -- asserting an exact match
+    # would abort inference on every non-sm_120 machine relying on it.
+    # Any other FASTVIDEO_ATTENTION_BACKEND value (e.g. a backend meant for
+    # a different model family sharing the same process/env var) can
+    # likewise legitimately resolve to something other than what was
+    # requested.
+    _STRICT_BACKENDS = frozenset({
+        AttentionBackendEnum.ATTN_QAT_TRAIN,
+    })
+
+    def _assert_local_attention_backend_engaged(self) -> None:
+        """Guard against ``LocalAttention`` silently falling back to SDPA.
+
+        ``Kandinsky5Attention.forward`` catches the ``AssertionError``
+        ``LocalAttention`` raises when no pipeline forward context is set and
+        falls back to plain ``F.scaled_dot_product_attention`` -- silently
+        skipping whichever kernel ``FASTVIDEO_ATTENTION_BACKEND`` requested
+        (the fake-quantized ``ATTN_QAT_TRAIN`` kernel).
+        ``LocalAttention.backend`` is resolved once at module construction,
+        independent of whether a forward context is later set, so this only
+        catches a backend that failed to resolve to what the env var
+        requested -- it does not prove forward context was present for a
+        given forward call. Pair it with always wrapping the actual
+        transformer call in ``set_forward_context`` (see the denoising loops
+        below), which is what prevents the runtime fallback.
+
+        Scoped to ``_STRICT_BACKENDS``: other backend names -- including
+        ``ATTN_QAT_INFER``, whose FlashAttention fallback on non-sm_120
+        GPUs is documented, intentional behavior -- can legitimately differ
+        from what ``LocalAttention.backend`` resolved to (see
+        ``_STRICT_BACKENDS``'s comment), so asserting on those would flag
+        expected behavior as a bug.
+        """
+        backend_env = envs.FASTVIDEO_ATTENTION_BACKEND
+        if not backend_env:
+            return
+        expected = backend_name_to_enum(backend_env)
+        if expected is None or expected not in self._STRICT_BACKENDS:
+            return
+        for module in self.transformer.modules():
+            if isinstance(module, LocalAttention):
+                assert module.backend == expected, (
+                    f"Kandinsky5 local attention resolved to backend {module.backend}, expected "
+                    f"{expected} from FASTVIDEO_ATTENTION_BACKEND={backend_env}. This likely means "
+                    "LocalAttention's missing-forward-context guard silently fell back to SDPA.")
+                return
+
+    def _resolve_target_dtype(self, fastvideo_args: FastVideoArgs) -> torch.dtype:
+        """Resolve the transformer's actual compute dtype.
+
+        Trust ``pipeline_config.dit_precision`` directly for a normal,
+        non-FSDP load -- ``TransformerLoader.load()`` asserts every
+        parameter matches it exactly (``fastvideo/models/loader/
+        component_loader.py``), so this holds for standalone T2V/I2V
+        inference regardless of which precision (including fp32) was
+        requested.
+
+        FSDP2-wrapped modules are the one case where that assertion doesn't
+        carry forward: ``maybe_load_fsdp_model`` hardcodes its
+        ``MixedPrecisionPolicy`` to ``param_dtype=torch.bfloat16`` (with
+        ``cast_forward_inputs=False``) for every FSDP-wrapped load,
+        independent of ``dit_precision`` -- this covers both the live
+        transformer ``ValidationCallback`` reuses from training (whose
+        ``pipeline_config.dit_precision`` reflects the fp32 master-weight
+        load dtype, not the actual bf16 compute dtype) and multi-GPU
+        ``use_fsdp_inference=True`` runs.
+
+        For that FSDP case, read the policy itself
+        (``set_mixed_precision_policy`` records it right before
+        ``maybe_load_fsdp_model`` shards -- every FSDP wrap in this repo
+        goes through that path), NOT the parameter storage dtypes:
+        FSDP2 computes in the policy's ``param_dtype`` regardless of what
+        dtype the parameters are stored/loaded in, so e.g. an fp16-loaded
+        FSDP model still runs its forward in bf16 -- scanning parameters
+        would resolve fp16 and, with ``cast_forward_inputs=False`` and
+        autocast keyed off the wrong dtype, hand bf16-computing modules
+        fp16 inputs.
+        """
+        declared_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
+        try:
+            from torch.distributed.fsdp import FSDPModule
+        except Exception:  # pragma: no cover - FSDP not always available
+            return declared_dtype
+
+        if not isinstance(self.transformer, FSDPModule):
+            return declared_dtype
+
+        try:
+            policy_dtype = get_mixed_precision_state().param_dtype
+        except ValueError:
+            policy_dtype = None
+        # bf16 mirrors maybe_load_fsdp_model's hardcoded param_dtype if the
+        # (thread-local) policy state is somehow unset here.
+        return policy_dtype if policy_dtype is not None else torch.bfloat16
+
     @staticmethod
     def fast_sta_nabla(
         T: int,
@@ -267,9 +383,10 @@ class Kandinsky5DenoisingStage(PipelineStage):
             loader = TransformerLoader()
             self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
             fastvideo_args.model_loaded["transformer"] = True
+        self._assert_local_attention_backend_engaged()
 
         device = get_local_torch_device()
-        target_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
+        target_dtype = self._resolve_target_dtype(fastvideo_args)
         autocast_enabled = target_dtype != torch.float32 and not fastvideo_args.disable_autocast
         latents = batch.latents
         num_channels = getattr(
@@ -389,6 +506,156 @@ class Kandinsky5DenoisingStage(PipelineStage):
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.min_list_length(2))
         return result
+
+
+class Kandinsky5DmdDenoisingStage(Kandinsky5DenoisingStage):
+    """DMD (few fixed steps, no CFG) variant of Kandinsky5DenoisingStage.
+
+    Reuses the parent's RoPE/scale_factor/sparse-params helpers; only the
+    denoising loop differs: a fixed short timestep schedule
+    (``pipeline_config.dmd_denoising_steps``) with a single forward pass per
+    step and no classifier-free-guidance branch, matching DMD's distilled
+    few-step generator.
+
+    ``dmd_denoising_steps`` values (e.g. ``[1000, 750, 500, 250]``) are
+    literal *final* target timesteps -- that's how ``DMD2Method`` on the
+    training side resolves them: nearest-sigma lookup against a scheduler
+    that has never had ``set_timesteps`` called on it, so e.g. "750" maps to
+    sigma 0.75. This stage therefore keeps a private
+    ``FlowMatchEulerDiscreteScheduler`` (same ``shift`` as the pipeline
+    scheduler) and drives it directly via predict-x0 + re-noise, exactly
+    mirroring ``DMD2Method._student_rollout``'s "simulate" branch and Wan's
+    own ``DmdDenoisingStage``. It must NOT reuse the pipeline's shared
+    ``scheduler`` object through ``scheduler.step()``: by the time this
+    stage runs, ``TimestepPreparationStage`` has already called
+    ``scheduler.set_timesteps(timesteps=dmd_denoising_steps)`` on it, which
+    re-applies the flow-match ``shift`` warp on top of values that are
+    already final (e.g. sigma 0.75 -> 0.9375 at shift=5) -- a double shift
+    that leaves every step far noisier than the student was trained for, so
+    the sampled video is still mostly noise after the last step instead of
+    converged.
+    """
+
+    def __init__(self, transformer, scheduler) -> None:
+        super().__init__(transformer, scheduler)
+        self._sample_scheduler = FlowMatchEulerDiscreteScheduler(shift=scheduler.shift)
+
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if batch.latents is None:
+            raise ValueError("latents must be prepared before Kandinsky5 DMD denoising.")
+        if not fastvideo_args.model_loaded["transformer"]:
+            loader = TransformerLoader()
+            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
+            fastvideo_args.model_loaded["transformer"] = True
+        self._assert_local_attention_backend_engaged()
+
+        device = get_local_torch_device()
+        target_dtype = self._resolve_target_dtype(fastvideo_args)
+        autocast_enabled = target_dtype != torch.float32 and not fastvideo_args.disable_autocast
+        latents = batch.latents
+        num_channels = getattr(
+            self.transformer,
+            "in_visual_dim",
+            fastvideo_args.pipeline_config.dit_config.arch_config.in_visual_dim,
+        )
+
+        prompt_embeds = batch.prompt_embeds[0].to(device=device, dtype=target_dtype)
+        pooled = batch.prompt_embeds[1].to(device=device, dtype=target_dtype)
+        if batch.prompt_attention_mask is None or not batch.prompt_attention_mask:
+            raise ValueError("Kandinsky5 DMD requires Qwen prompt attention masks.")
+        text_rope_pos = self._text_rope_pos(batch.prompt_attention_mask[0].to(device), device)
+
+        height = int(batch.height)
+        width = int(batch.width)
+        temporal_ratio = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        spatial_ratio = fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio
+        num_latent_frames = (int(batch.num_frames) - 1) // temporal_ratio + 1
+        visual_rope_pos = [
+            torch.arange(num_latent_frames, device=device),
+            torch.arange(height // spatial_ratio // 2, device=device),
+            torch.arange(width // spatial_ratio // 2, device=device),
+        ]
+        scale_factor = self._scale_factor(height, width)
+        sparse_params = self.get_sparse_params(latents, device)
+
+        dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
+        if not dmd_steps:
+            raise ValueError("Kandinsky5 DMD denoising requires "
+                             "pipeline_config.dmd_denoising_steps to be set.")
+        timesteps = torch.tensor(dmd_steps, dtype=torch.long, device=device)
+
+        # I2V keeps the first (conditioning) frame fixed during denoising.
+        # Key off the actual image conditioning, not transformer.visual_cond:
+        # official T2V checkpoints also ship visual_cond=True, and skipping
+        # frame 0 for them leaves it as undenoised noise (see the same fix
+        # in Kandinsky5DenoisingStage.forward() above).
+        cond_frames = 1 if batch.image_latent is not None else 0
+
+        with tqdm(total=len(timesteps), desc="Kandinsky5 DMD Denoising") as progress_bar:
+            for i, timestep in enumerate(timesteps):
+                if hasattr(self, "interrupt") and self.interrupt:
+                    continue
+
+                t_expand = timestep.unsqueeze(0).repeat(latents.shape[0]).to(device=device, dtype=target_dtype)
+                attn_metadata = None
+                if sparse_params is not None:
+                    attn_metadata = NablaAttentionMetadataBuilder().build(
+                        current_timestep=i,
+                        sta_mask=sparse_params["sta_mask"],
+                        P=sparse_params["P"],
+                        visual_shape=sparse_params["visual_shape"],
+                    )
+                autocast_ctx = (torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled)
+                                if device.type == "cuda" else contextlib.nullcontext())
+                with set_forward_context(current_timestep=i, attn_metadata=attn_metadata,
+                                         forward_batch=batch), autocast_ctx:
+                    pred_velocity = self.transformer(
+                        hidden_states=latents.to(dtype=target_dtype),
+                        encoder_hidden_states=prompt_embeds,
+                        pooled_projections=pooled,
+                        timestep=t_expand,
+                        visual_rope_pos=visual_rope_pos,
+                        text_rope_pos=text_rope_pos,
+                        scale_factor=scale_factor,
+                        sparse_params=sparse_params,
+                        return_dict=True,
+                    ).sample
+
+                # Channel-last [B, T', H, W, C] -> channel-first [B, T', C, H, W]
+                # to match pred_noise_to_pred_video/add_noise's expected layout
+                # (same convention as Kandinsky5Model.add_noise/predict_x0).
+                sample_cf = latents[:, cond_frames:, :, :, :num_channels].permute(0, 1, 4, 2, 3)
+                velocity_cf = pred_velocity[:, cond_frames:].permute(0, 1, 4, 2, 3)
+                b, t = sample_cf.shape[:2]
+                step_timestep = timestep.reshape(1).to(device=device)
+                pred_x0_cf = pred_noise_to_pred_video(
+                    pred_noise=velocity_cf.flatten(0, 1),
+                    noise_input_latent=sample_cf.flatten(0, 1),
+                    timestep=step_timestep,
+                    scheduler=self._sample_scheduler,
+                ).unflatten(0, (b, t))
+
+                if i < len(timesteps) - 1:
+                    next_timestep = timesteps[i + 1].reshape(1).to(device=device)
+                    noise = randn_tensor(
+                        sample_cf.shape,
+                        generator=batch.generator,
+                        device=device,
+                        dtype=pred_x0_cf.dtype,
+                    )
+                    next_cf = self._sample_scheduler.add_noise(
+                        pred_x0_cf.flatten(0, 1),
+                        noise.flatten(0, 1),
+                        next_timestep,
+                    ).unflatten(0, (b, t))
+                else:
+                    next_cf = pred_x0_cf
+
+                latents[:, cond_frames:, :, :, :num_channels] = next_cf.permute(0, 1, 3, 4, 2).to(latents.dtype)
+                progress_bar.update()
+
+        batch.latents = latents[:, :, :, :, :num_channels]
+        return batch
 
 
 class Kandinsky5DecodingStage(DecodingStage):

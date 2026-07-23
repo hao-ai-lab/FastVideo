@@ -15,6 +15,7 @@ from fastvideo.configs.models.dits import Kandinsky5VideoConfig
 from fastvideo.layers.layernorm import LayerNormScaleShift
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
+from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
@@ -285,6 +286,7 @@ class Kandinsky5Attention(nn.Module):
         supported_attention_backends: tuple[AttentionBackendEnum, ...] | None,
         prefix: str = "",
         use_nabla: bool = False,
+        quant_config: QuantizationConfig | None = None,
     ):
         super().__init__()
         assert num_channels % head_dim == 0
@@ -293,20 +295,24 @@ class Kandinsky5Attention(nn.Module):
         self.to_query = ReplicatedLinear(num_channels,
                                          num_channels,
                                          bias=True,
+                                         quant_config=quant_config,
                                          prefix=f"{prefix}.to_query")
         self.to_key = ReplicatedLinear(num_channels,
                                        num_channels,
                                        bias=True,
+                                       quant_config=quant_config,
                                        prefix=f"{prefix}.to_key")
         self.to_value = ReplicatedLinear(num_channels,
                                          num_channels,
                                          bias=True,
+                                         quant_config=quant_config,
                                          prefix=f"{prefix}.to_value")
         self.query_norm = nn.RMSNorm(head_dim)
         self.key_norm = nn.RMSNorm(head_dim)
         self.out_layer = ReplicatedLinear(num_channels,
                                           num_channels,
                                           bias=True,
+                                          quant_config=quant_config,
                                           prefix=f"{prefix}.out_layer")
         self.local_attention = LocalAttention(
             num_heads=self.num_heads,
@@ -413,9 +419,11 @@ class Kandinsky5Attention(nn.Module):
 
 class Kandinsky5FeedForward(nn.Module):
 
-    def __init__(self, dim: int, ff_dim: int):
+    def __init__(self, dim: int, ff_dim: int, prefix: str = "",
+                 quant_config: QuantizationConfig | None = None):
         super().__init__()
-        self.mlp = MLP(dim, ff_dim, bias=False, act_type="gelu")
+        self.mlp = MLP(dim, ff_dim, bias=False, act_type="gelu",
+                      quant_config=quant_config, prefix=f"{prefix}.mlp")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.mlp(x)
@@ -467,7 +475,8 @@ class Kandinsky5TransformerEncoderBlock(nn.Module):
                  head_dim: int,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
-                 prefix: str = ""):
+                 prefix: str = "",
+                 quant_config: QuantizationConfig | None = None):
         super().__init__()
         self.text_modulation = Kandinsky5Modulation(time_dim, model_dim, 6)
 
@@ -482,7 +491,8 @@ class Kandinsky5TransformerEncoderBlock(nn.Module):
             model_dim,
             head_dim,
             supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.self_attention")
+            prefix=f"{prefix}.self_attention",
+            quant_config=quant_config)
 
         self.feed_forward_norm = LayerNormScaleShift(
             model_dim,
@@ -491,7 +501,9 @@ class Kandinsky5TransformerEncoderBlock(nn.Module):
             elementwise_affine=False,
             dtype=torch.float32,
             compute_dtype=torch.float32)
-        self.feed_forward = Kandinsky5FeedForward(model_dim, ff_dim)
+        self.feed_forward = Kandinsky5FeedForward(
+            model_dim, ff_dim, prefix=f"{prefix}.feed_forward",
+            quant_config=quant_config)
 
     def forward(self, x: torch.Tensor, time_embed: torch.Tensor,
                 rope: torch.Tensor) -> torch.Tensor:
@@ -523,7 +535,8 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
                  prefix: str = "",
-                 use_nabla: bool = False):
+                 use_nabla: bool = False,
+                 quant_config: QuantizationConfig | None = None):
         super().__init__()
         self.visual_modulation = Kandinsky5Modulation(time_dim, model_dim, 9)
 
@@ -539,7 +552,8 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
             head_dim,
             supported_attention_backends=supported_attention_backends,
             prefix=f"{prefix}.self_attention",
-            use_nabla=use_nabla)
+            use_nabla=use_nabla,
+            quant_config=quant_config)
 
         self.cross_attention_norm = LayerNormScaleShift(
             model_dim,
@@ -552,7 +566,8 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
             model_dim,
             head_dim,
             supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.cross_attention")
+            prefix=f"{prefix}.cross_attention",
+            quant_config=quant_config)
 
         self.feed_forward_norm = LayerNormScaleShift(
             model_dim,
@@ -561,7 +576,9 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
             elementwise_affine=False,
             dtype=torch.float32,
             compute_dtype=torch.float32)
-        self.feed_forward = Kandinsky5FeedForward(model_dim, ff_dim)
+        self.feed_forward = Kandinsky5FeedForward(
+            model_dim, ff_dim, prefix=f"{prefix}.feed_forward",
+            quant_config=quant_config)
 
     def forward(self, visual_embed: torch.Tensor, text_embed: torch.Tensor,
                 time_embed: torch.Tensor, rope: torch.Tensor,
@@ -636,6 +653,8 @@ class Kandinsky5Transformer3DModel(BaseDiT):
                  hf_config: dict[str, Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
         arch = config.arch_config
+        quant_config = config.quant_config
+        self.quant_config = quant_config
 
         head_dim = sum(arch.axes_dims)
         self.in_visual_dim = arch.in_visual_dim
@@ -664,7 +683,8 @@ class Kandinsky5Transformer3DModel(BaseDiT):
                                               arch.ff_dim,
                                               head_dim,
                                               self._supported_attention_backends,
-                                              prefix=f"{config.prefix}.text_transformer_blocks.{i}")
+                                              prefix=f"{config.prefix}.text_transformer_blocks.{i}",
+                                              quant_config=quant_config)
             for i in range(arch.num_text_blocks)
         ])
         self.visual_transformer_blocks = nn.ModuleList([
@@ -673,7 +693,8 @@ class Kandinsky5Transformer3DModel(BaseDiT):
                                               head_dim,
                                               self._supported_attention_backends,
                                               prefix=f"{config.prefix}.visual_transformer_blocks.{i}",
-                                              use_nabla=arch.attention_type == "nabla")
+                                              use_nabla=arch.attention_type == "nabla",
+                                              quant_config=quant_config)
             for i in range(arch.num_visual_blocks)
         ])
 
