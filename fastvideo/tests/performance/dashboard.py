@@ -37,7 +37,13 @@ COMPARISON_COHORT_KEYS = (
     "hardware_profile_id",
     "software_profile_id",
 )
-GROUP_KEYS = ("_cohort_schema", "_cohort_model_id", "_cohort_gpu_type", *COMPARISON_COHORT_KEYS)
+DASHBOARD_METADATA_KEYS = (
+    "result_schema_version",
+    "baseline_status",
+    "comparison_status",
+    "comparison_status_reason",
+)
+GROUP_KEYS = ("cohort_kind", "_cohort_model_id", "_cohort_gpu_type", *COMPARISON_COHORT_KEYS)
 
 
 def _cohort_value(value: object) -> str:
@@ -52,25 +58,71 @@ def _cohort_value(value: object) -> str:
 
 
 def _display_value(value: object) -> str:
-    return _cohort_value(value) or "legacy"
+    return _cohort_value(value) or "missing"
 
 
 def _short_value(value: object) -> str:
     text = _display_value(value)
-    if text == "legacy" or len(text) <= 14:
-        return text
-    return text[:12]
+    return text if len(text) <= 14 else text[:12]
+
+
+def _has_complete_v2_identity(record: object) -> bool:
+    return all(_cohort_value(record.get(key)) for key in COMPARISON_COHORT_KEYS)
+
+
+def _uses_v2_identity(record: object) -> bool:
+    return _cohort_value(record.get("result_schema_version")) == "2" or any(
+        key in record for key in COMPARISON_COHORT_KEYS)
+
+
+def _dataframe_value_is_missing(value: object) -> bool:
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _dataframe_uses_v2_identity(record: object) -> bool:
+    schema_version = record.get("result_schema_version")
+    if schema_version == 2 or schema_version == "2":
+        return True
+    return any(key in record and not _dataframe_value_is_missing(record.get(key))
+               for key in COMPARISON_COHORT_KEYS)
+
+
+def _dataframe_cohort_kind(record: object) -> str:
+    if _has_complete_v2_identity(record):
+        return "v2"
+    if _dataframe_uses_v2_identity(record):
+        return "invalid_v2"
+    return "legacy_v1"
+
+
+def _cohort_kind(record: object) -> str:
+    if _has_complete_v2_identity(record):
+        return "v2"
+    if _uses_v2_identity(record):
+        return "invalid_v2"
+    return "legacy_v1"
 
 
 def _cohort_title(record: object) -> str:
+    kind = _cohort_value(record.get("cohort_kind")) or _cohort_kind(record)
+    if kind == "legacy_v1":
+        return "Legacy v1"
+
     workload = _display_value(record.get("workload_id"))
     variant = _display_value(record.get("variant_id"))
     version = _display_value(record.get("benchmark_version"))
-    version_label = version if version == "legacy" else f"v{version}"
-    return f"{workload} / {variant} / {version_label}"
+    version_label = version if version == "missing" else f"v{version}"
+    identity = f"{workload} / {variant} / {version_label}"
+    return f"Invalid v2: {identity}" if kind == "invalid_v2" else identity
 
 
 def _cohort_detail(record: object) -> str:
+    kind = _cohort_value(record.get("cohort_kind")) or _cohort_kind(record)
+    if kind == "legacy_v1":
+        return ""
     return " | ".join((
         f"recipe {_short_value(record.get('recipe_fingerprint'))}",
         _short_value(record.get("hardware_profile_id")),
@@ -80,23 +132,22 @@ def _cohort_detail(record: object) -> str:
 
 def _group_record(record: object) -> dict[str, str]:
     return {
-        key: _cohort_value(record.get(key))
-        for key in ("model_id", "gpu_type", *COMPARISON_COHORT_KEYS)
+        "cohort_kind": _cohort_value(record.get("cohort_kind")) or _cohort_kind(record),
+        **{
+            key: _cohort_value(record.get(key))
+            for key in ("model_id", "gpu_type", *COMPARISON_COHORT_KEYS)
+        },
     }
-
-
-def _has_complete_v2_identity(record: object) -> bool:
-    return all(_cohort_value(record.get(key)) for key in COMPARISON_COHORT_KEYS)
 
 
 def _dashboard_frame(df: pd.DataFrame) -> pd.DataFrame:
     dashboard_df = df.copy()
-    for key in ("model_id", "gpu_type", *COMPARISON_COHORT_KEYS):
+    dashboard_df["cohort_kind"] = dashboard_df.apply(_dataframe_cohort_kind, axis=1)
+    for key in ("model_id", "gpu_type", *COMPARISON_COHORT_KEYS, *DASHBOARD_METADATA_KEYS):
         if key not in dashboard_df.columns:
             dashboard_df[key] = ""
         dashboard_df[key] = dashboard_df[key].map(_cohort_value)
-    uses_v2_identity = dashboard_df.apply(_has_complete_v2_identity, axis=1)
-    dashboard_df["_cohort_schema"] = uses_v2_identity.map({True: "v2", False: "legacy"})
+    uses_v2_identity = dashboard_df["cohort_kind"] == "v2"
     dashboard_df["_cohort_model_id"] = dashboard_df["model_id"].where(~uses_v2_identity, "")
     dashboard_df["_cohort_gpu_type"] = dashboard_df["gpu_type"].where(~uses_v2_identity, "")
     return dashboard_df
@@ -123,6 +174,9 @@ def build_plots(df: pd.DataFrame) -> tuple[list, list[dict[str, object]]]:
         group_record = _group_record(display_record)
         cohort_title = _cohort_title(display_record)
         cohort_detail = _cohort_detail(display_record)
+        title_parts = [model_id, gpu_type, cohort_title]
+        if cohort_detail:
+            title_parts.append(cohort_detail)
 
         # One chart per metric so the y-axes aren't on wildly different scales
         for metric in METRICS:
@@ -156,8 +210,16 @@ def build_plots(df: pd.DataFrame) -> tuple[list, list[dict[str, object]]]:
                 x="timestamp",
                 y=metric,
                 markers=True,
-                hover_data=["model_id", "gpu_type", "config_id", "commit_sha", *COMPARISON_COHORT_KEYS],
-                title=f"{model_id} | {gpu_type} | {cohort_title} | {cohort_detail} | {metric}",
+                hover_data=[
+                    "model_id",
+                    "gpu_type",
+                    "config_id",
+                    "commit_sha",
+                    "cohort_kind",
+                    *DASHBOARD_METADATA_KEYS,
+                    *COMPARISON_COHORT_KEYS,
+                ],
+                title=" | ".join((*title_parts, metric)),
                 labels={"timestamp": "Time", metric: metric},
             )
             figs.append(fig)

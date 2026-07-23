@@ -106,11 +106,34 @@ def _record_has_complete_v2_identity(record: Record) -> bool:
     return all(_cohort_metadata_value(record.get(key)) != "" for key in COMPARISON_COHORT_KEYS)
 
 
-def comparison_cohort_key(record: Record) -> CohortKey:
+def _record_uses_v2_identity(record: Record) -> bool:
+    return str(record.get("result_schema_version") or "") == "2" or any(key in record for key in COMPARISON_COHORT_KEYS)
+
+
+def comparison_cohort_kind(record: Record) -> str:
     if _record_has_complete_v2_identity(record):
+        return "v2"
+    if _record_uses_v2_identity(record):
+        return "invalid_v2"
+    return "legacy_v1"
+
+
+def record_dashboard_metadata(record: Record) -> Record:
+    return {
+        "cohort_kind": comparison_cohort_kind(record),
+        "result_schema_version": _cohort_metadata_value(record.get("result_schema_version")),
+        "baseline_status": str(record.get("baseline_status") or ""),
+        "comparison_status": str(record.get("comparison_status") or ""),
+        "comparison_status_reason": str(record.get("comparison_status_reason") or ""),
+    }
+
+
+def comparison_cohort_key(record: Record) -> CohortKey:
+    cohort_kind = comparison_cohort_kind(record)
+    if cohort_kind == "v2":
         return ("v2", *(_cohort_key_value(record.get(key)) for key in COMPARISON_COHORT_KEYS))
     return (
-        "legacy",
+        cohort_kind,
         str(record.get("model_id") or "unknown"),
         str(record.get("gpu_type") or "unknown"),
         *(_cohort_key_value(record.get(key)) for key in COMPARISON_COHORT_KEYS),
@@ -210,6 +233,7 @@ def build_latest_summary(records: list[Record],
             "commit_sha": latest.get("commit_sha"),
             **record_metadata(latest),
             **record_comparison_metadata(latest),
+            **record_dashboard_metadata(latest),
             "success": success,
             "baseline_n": len(baseline_records),
             "worst_regression_pct": worst_regression,
@@ -237,6 +261,7 @@ def build_trends(records: list[Record]) -> list[Record]:
                 "commit_sha": record.get("commit_sha"),
                 **record_metadata(record),
                 **record_comparison_metadata(record),
+                **record_dashboard_metadata(record),
                 "success": bool(record.get("success", True)),
                 "metrics": {
                     policy.key: safe_float(record.get(policy.key))
@@ -248,6 +273,7 @@ def build_trends(records: list[Record]) -> list[Record]:
             "model_id": model_id,
             "gpu_type": gpu_type,
             **record_comparison_metadata(latest),
+            **record_dashboard_metadata(latest),
             "points": points,
         })
     return sorted(trends, key=comparison_sort_key)

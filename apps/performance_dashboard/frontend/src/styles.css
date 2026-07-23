@@ -191,7 +191,7 @@ h3 {
 
 table {
   width: 100%;
-  min-width: 1260px;
+  min-width: 1500px;
   border-collapse: collapse;
 }
 
@@ -233,6 +233,19 @@ td {
   font-size: 0.72rem;
 }
 
+.status-cell {
+  display: grid;
+  gap: 4px;
+  max-width: 280px;
+}
+
+.status-reason {
+  color: #607080;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  white-space: normal;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -243,16 +256,41 @@ td {
   font-size: 0.75rem;
   font-weight: 800;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.badge.pass {
+.badge.pass,
+.badge.comparison-pass {
   color: #166534;
   background: #dcfce7;
 }
 
-.badge.fail {
+.badge.fail,
+.badge.comparison-regression,
+.badge.comparison-infra-error {
   color: #991b1b;
   background: #fee2e2;
+}
+
+.badge.comparison-calibration-needed {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.badge.comparison-recipe-mismatch {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.badge.comparison-quality-blocked {
+  color: #6b3e00;
+  background: #ffedd5;
+}
+
+.badge.comparison-historical,
+.badge.comparison-unknown {
+  color: #475569;
+  background: #e2e8f0;
 }
 
 .badge.muted {
@@ -401,6 +439,10 @@ td {
   grid-column: 1 / -1;
   color: #132232;
   font-size: 0.9rem;
+}
+
+.point-tooltip .tooltip-wide {
+  grid-column: 1 / -1;
 }
 
 .point-tooltip a {
