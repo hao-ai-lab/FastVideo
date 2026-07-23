@@ -113,7 +113,9 @@ def build_app(model: Any) -> Any:
         """One request per connection: send a request JSON, receive per-step
         progress events, then the terminal result with latents_sha and an
         MP4 download URL."""
+        print("STREAM ENTER", flush=True)
         await ws.accept()
+        print("STREAM ACCEPTED", flush=True)
         try:
             payload = await ws.receive_json()
             job_id = uuid.uuid4().hex[:12]
