@@ -271,8 +271,12 @@ class WanDMDLoop(WanDenoiseLoop):
                 return {"latents": x0}
             # renoise draw: CPU generator, BTCHW, in x0's (bf16) dtype
             noise = torch.randn(x.shape, dtype=x0.dtype, generator=gen).to(device)
-            # add_noise: fp32 sigma TENSOR (promotes), result cast to noise dtype
-            s_next = torch.tensor(sigma_next, dtype=torch.float32, device=device)
+            # add_noise: fp32 sigma tensor shaped NON-0-dim — 0-dim tensors
+            # act as scalars in type promotion and would keep this arithmetic
+            # in bf16; main's [B,1,1,1] fp32 sigma promotes it to fp32 with a
+            # single bf16 cast at the end (one rounding, not two).
+            s_next = torch.tensor(sigma_next, dtype=torch.float32,
+                                  device=device).view(1, 1, 1, 1)
             nxt = ((1 - s_next) * x0 + s_next * noise).type_as(noise)
             return {"latents": nxt}
 
