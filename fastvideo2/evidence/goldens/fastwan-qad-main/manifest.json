@@ -1,0 +1,51 @@
+{
+  "repo": "FastVideo/FastWan-QAD-FP8-1.3B",
+  "snapshot": "3de0eec0e2562923d38a87344127a86a35a3c11d",
+  "fastvideo_commit": "c459a1897899ffcec3be7765534d81000b9bb9c1",
+  "fastvideo_src": "/mnt/FastVideo",
+  "torch": "2.12.0+cu130",
+  "flash_attn": "2.8.3",
+  "python": "3.12.13",
+  "gpu": "NVIDIA GB200",
+  "attention_backend": "FLASH_ATTN",
+  "quant": "FP8 per-tensor (dynamic act, post-load weight quant from bf16)",
+  "vsa_sparsity": null,
+  "seed": 1234,
+  "e2e_prompt": "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest. The playful yet serene atmosphere is complemented by soft natural light filtering through the petals. Mid-shot, warm and cheerful tones.",
+  "probe_prompt": "A cat and a dog baking a cake together in a kitchen.",
+  "probe_timesteps": [
+    1000,
+    757,
+    522
+  ],
+  "probe_latent_bcfhw": [
+    1,
+    16,
+    5,
+    60,
+    104
+  ],
+  "e2e_latent_btchw": [
+    1,
+    21,
+    16,
+    60,
+    104
+  ],
+  "dmd_denoising_steps": [
+    1000,
+    757,
+    522
+  ],
+  "scheduler": {
+    "class": "FlowMatchEulerDiscreteScheduler",
+    "shift": 8.0,
+    "table_len": 1000,
+    "sigma_lookup": {
+      "1000": 1.0,
+      "757": 0.7567567229270935,
+      "522": 0.52173912525177
+    }
+  },
+  "notes": "no compile, no fsdp, single GPU; DmdDenoisingStage's INTERNAL scheduler (hardcoded shift 8.0) is the sigma authority; committed goldens trimmed: e2e_step0 dropped (input is the seeded draw, reproducible) and per-step outputs dropped (triage-only) \u2014 full set regenerable via capture_fastvideo_main.py"
+}
