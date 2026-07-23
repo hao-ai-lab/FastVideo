@@ -195,6 +195,10 @@ callbacks:
 # ------------------------------------------------------------------------------
 pipeline:
   flow_shift: 3                       # default: null (model-specific)
+  # LTX-2 linear QAT (SM100+ with FlashInfer); distinct from the role-local
+  # attention_backend option above, which selects attention math for Wan.
+  # dit_config:
+  #   quant_config: nvfp4_qat_train
   # flow_shift_sr: null               # default: null (super-resolution shift)
   # embedded_cfg_scale: 6.0           # default: 6.0
   # is_causal: false                  # default: false

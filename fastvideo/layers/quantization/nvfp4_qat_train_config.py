@@ -9,10 +9,11 @@ straight-through estimator), so the model learns to absorb FP4 linear error.
 
 That STE already exists in ``fastvideo.layers.fp4linear._LinearFWD4BWD16Fn``
 (FP4 forward, full-precision backward) but is otherwise unwired. This method
-bridges it into the standard ``quant_config`` path, so it activates via
-``transformer_quant="nvfp4_qat_train"`` on the same Wan-2.1 layers as nvfp4_qat
-(to_q/k/v/out + ffn). No ``convert_model_to_fp4`` is needed: the weight is kept
-in full precision and quantized on the fly each step.
+bridges it into the standard ``quant_config`` path. Wan-style prefixes retain
+the broad attention/FFN projection profile used by ``nvfp4_qat``; LTX-2
+prefixes use the exact curated target set from its ``NVFP4`` deployment config.
+No ``convert_model_to_fp4`` is needed: the weight is kept in full precision and
+quantized on the fly each step.
 """
 import logging
 from typing import Any
@@ -21,6 +22,8 @@ import torch
 from torch.nn.parameter import Parameter
 
 from fastvideo.layers.quantization.base_config import QuantizationConfig, QuantizeMethodBase
+from fastvideo.layers.quantization.nvfp4_config import is_ltx2_nvfp4_linear_prefix
+from fastvideo.layers.quantization.nvfp4_qat_config import DEFAULT_FP4_LAYERS
 from fastvideo.models.utils import set_weight_attrs
 
 logger = logging.getLogger(__name__)
@@ -72,7 +75,10 @@ class NVFP4QATTrainConfig(QuantizationConfig):
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
-        fp4_layers = ["ffn.fc_in", "ffn.fc_out", "to_q", "to_k", "to_v", "to_out"]
-        if isinstance(layer, LinearBase) and any(layer_name in prefix for layer_name in fp4_layers):
+        if not isinstance(layer, LinearBase):
+            return None
+        matches = (is_ltx2_nvfp4_linear_prefix(prefix) if prefix.startswith("ltx2.") else any(
+            layer_name in prefix for layer_name in DEFAULT_FP4_LAYERS))
+        if matches:
             return NVFP4QATTrainQuantizeMethod()
         return None

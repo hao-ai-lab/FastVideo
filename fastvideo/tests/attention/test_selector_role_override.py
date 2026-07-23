@@ -54,6 +54,24 @@ def test_role_override_invalidates_cached_backend(monkeypatch) -> None:
         selector.global_force_attn_backend(None)
 
 
+def test_unsupported_role_override_honors_layer_default(monkeypatch) -> None:
+    monkeypatch.setattr(platforms, "_current_platform", _FakePlatform())
+    monkeypatch.setattr(selector, "resolve_obj_by_qualname", lambda name: name)
+    selector.global_force_attn_backend(None)
+
+    try:
+        with selector.global_force_attn_backend_context_manager(
+                AttentionBackendEnum.ATTN_QAT_TRAIN):
+            assert selector.get_attn_backend(
+                head_size=128,
+                dtype=torch.bfloat16,
+                supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
+                default_backend=AttentionBackendEnum.TORCH_SDPA,
+            ) == "TORCH_SDPA"
+    finally:
+        selector.global_force_attn_backend(None)
+
+
 def test_explicit_backend_config_rejects_typos() -> None:
     try:
         selector.coerce_attn_backend("attn_qat_typo")

@@ -34,6 +34,7 @@ from fastvideo.forward_context import (
     set_forward_context,
 )
 from fastvideo.pipelines import ForwardBatch
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.models.ltx2 import LTX2Model
 from fastvideo.train.utils.config import load_run_config
 
@@ -107,6 +108,31 @@ def test_ltx2_rejects_audio_training_before_loading(
             training_config=cfg.training,
             train_audio=True,
         )
+
+
+def test_ltx2_forwards_role_attention_backend_to_loader(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = load_run_config(str(_FIXTURE_DIR / _CASES["ltx2"][0]))
+    transformer = _TinyLTX2Transformer(is_ltx2_3=False)
+    captured: list[AttentionBackendEnum | None] = []
+
+    def fake_load_module_from_path(**kwargs):
+        captured.append(kwargs.get("attention_backend"))
+        return transformer
+
+    monkeypatch.setattr(
+        "fastvideo.train.models.ltx2.ltx2.load_module_from_path",
+        fake_load_module_from_path,
+    )
+    model = LTX2Model(
+        init_from=cfg.models["student"]["init_from"],
+        training_config=cfg.training,
+        trainable=False,
+        attention_backend="TORCH_SDPA",
+    )
+
+    assert model.attention_backend is AttentionBackendEnum.TORCH_SDPA
+    assert captured == [AttentionBackendEnum.TORCH_SDPA]
 
 
 @pytest.mark.parametrize("case", _CASES.keys())

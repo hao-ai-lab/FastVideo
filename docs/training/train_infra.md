@@ -212,6 +212,25 @@ pipeline:
   flow_shift: 8
 ```
 
+Registered transformer linear-quantization configs can also be selected by
+name. For example, the LTX-2 NVFP4-QAT recipe applies real FP4 forward GEMMs
+with a straight-through-estimator backward to its deployment-targeted
+attention/FFN projections:
+
+```yaml
+pipeline:
+  dit_config:
+    quant_config: nvfp4_qat_train
+```
+
+The LTX-2 recipe in
+`examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml` combines that linear
+configuration with `models.student.attention_backend: ATTN_QAT_TRAIN` for
+video-attention forward/backward. On sm120, its validation callback temporarily
+switches those layers to `ATTN_QAT_INFER`.
+On GB200, set `callbacks.validation.attn_qat_infer: false` to keep validation on
+the train-time QAT backend; the inference kernel is sm120-only.
+
 ---
 
 ## Training Methods
