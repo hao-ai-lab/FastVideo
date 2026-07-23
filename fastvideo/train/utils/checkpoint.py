@@ -526,7 +526,25 @@ class CheckpointManager:
 
         states = self._build_states()
         logger.info("Loading Phase 2 checkpoint from %s", resolved)
-        dcp.load(states, checkpoint_id=str(resolved / "dcp"))
+        checkpoint_id = str(resolved / "dcp")
+        optimizer_states = {
+            name: state
+            for name, state in states.items()
+            if name.startswith("optimizers.")
+        }
+        strict_states = {
+            name: state
+            for name, state in states.items()
+            if name not in optimizer_states
+        }
+        if strict_states:
+            dcp.load(strict_states, checkpoint_id=checkpoint_id)
+        if optimizer_states:
+            dcp.load(
+                optimizer_states,
+                checkpoint_id=checkpoint_id,
+                planner=dcp.DefaultLoadPlanner(allow_partial_load=True),
+            )
         self._load_dataloader_snapshot(resolved, step)
         if self._callbacks is not None:
             self._callbacks.on_checkpoint_load(
