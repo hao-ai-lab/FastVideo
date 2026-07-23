@@ -116,12 +116,7 @@ def main() -> None:
                "latents_hash": _hash(tb.latents),
                "embeds_hash": _hash(tb.encoder_hidden_states)}
         records.append(rec)
-        # full batch tensors every step (bf16 stored as exact fp32) so the
-        # math gate replays without the dataloader port; the dataloader gets
-        # its own hash-based gate later
-        batches.append(dict(latents=tb.latents.detach().to(torch.float32).cpu().numpy(),
-                            embeds=tb.encoder_hidden_states.detach().to(torch.float32).cpu().numpy(),
-                            mask=tb.encoder_attention_mask.detach().to(torch.float32).cpu().numpy()))
+        batches.append({})
         return tb
 
     def prepare(self, tb):
@@ -131,7 +126,14 @@ def main() -> None:
                    noisy_hash=_hash(tb.noisy_model_input),
                    timesteps=[float(v) for v in tb.timesteps.flatten().tolist()],
                    sigmas=[float(v) for v in tb.sigmas.flatten().tolist()])
-        batches[-1]["noise"] = tb.noise.detach().to(torch.float32).cpu().numpy()
+        # record here, NOT in _get_next_batch: train_one_step runs
+        # _normalize_dit_input (VAE scaling) between fetch and prepare, and
+        # the loss consumes the NORMALIZED latents
+        batches[-1].update(
+            latents=tb.latents.detach().to(torch.float32).cpu().numpy(),
+            embeds=tb.encoder_hidden_states.detach().to(torch.float32).cpu().numpy(),
+            mask=tb.encoder_attention_mask.detach().to(torch.float32).cpu().numpy(),
+            noise=tb.noise.detach().to(torch.float32).cpu().numpy())
         return tb
 
     def one_step(self, tb):
