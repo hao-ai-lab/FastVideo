@@ -297,7 +297,7 @@ class TrackValidationCallback(Callback):
 
             if self._is_main and artifacts:
                 self.tracker.log_artifacts(
-                    {"track_validation/generated": artifacts},
+                    {"track_validation": artifacts},
                     iteration,
                 )
         finally:
