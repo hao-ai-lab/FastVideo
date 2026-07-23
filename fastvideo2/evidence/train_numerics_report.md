@@ -170,3 +170,19 @@ true per-step streaming, which main's servers list as a TODO.
 Environment note (in code): this venv's FastAPI websocket dependency
 injection closes connections without invoking endpoints; the stream route
 is registered at the starlette level.
+
+## Dreamverse runtime — added 2026-07-23
+
+Gate `anchor.dreamverse-runtime`: PASS (first run). `fastvideo2.dreamverse`
+speaks the upstream session protocol (session_init_v2 -> segment prompts ->
+fMP4 fragments over one WebSocket; ffmpeg flags vendored verbatim from
+apps/dreamverse's encoder) with the FastWan-QAD 3-step backend and live
+per-step `step_complete` events (the original emits one terminal event per
+segment). Boots with dummy Cerebras/Groq keys (enhancement off — the same
+GB200 bring-up shortcut); enhancement activates when real keys are present.
+Gate transcript: 3 live steps, 32 fMP4 chunks (ISO-BMFF ftyp verified),
+81 frames, latents sha recorded, clean leave/stream_complete.
+
+Scope note: the original app is LTX2-specific (audio, refine, continuation
+state, LoRA stacks) — this port re-bases Dreamverse's ARCHITECTURE onto the
+wan family; their Next.js client's message schema maps onto these events.
