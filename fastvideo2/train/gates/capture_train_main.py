@@ -152,6 +152,7 @@ def main() -> None:
     args.dit_cpu_offload = False
 
     import fastvideo.training.training_pipeline as TP
+    fwd_seq: list = []
     records: list[dict] = []
     step0: dict = {}
 
@@ -493,8 +494,6 @@ def main() -> None:
     pipeline = WanTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path,
                                                    args=args)
     tf = pipeline.get_module("transformer")
-
-    fwd_seq: list = []
 
     def fwd_hook(module, args_in, kwargs_in, output):
         o = output[0] if isinstance(output, (tuple, list)) else output
