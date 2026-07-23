@@ -145,13 +145,17 @@ def main() -> None:
     TP.TrainingPipeline._prepare_dit_inputs = prepare
     TP.TrainingPipeline.train_one_step = one_step
 
+    def _slice(w):
+        w = w.full_tensor() if hasattr(w, "full_tensor") else w  # FSDP2 DTensor
+        return w.detach()[:8, :8].to(torch.float32).cpu().numpy().copy()
+
     from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
     pipeline = WanTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path,
                                                    args=args)
     tf = pipeline.get_module("transformer")
-    w0 = tf.proj_out.weight.detach()[:8, :8].to(torch.float32).cpu().numpy().copy()
+    w0 = _slice(tf.proj_out.weight)
     pipeline.train()
-    w5 = tf.proj_out.weight.detach()[:8, :8].to(torch.float32).cpu().numpy().copy()
+    w5 = _slice(tf.proj_out.weight)
 
     for i, b in enumerate(batches):
         np.savez(os.path.join(out, f"step{i}.npz"), **b)
