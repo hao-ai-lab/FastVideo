@@ -209,6 +209,10 @@ def run_test_command(test_command: str,
     lane would then test stale kernels. Pass install_command="" for commands
     that manage their own installs.
     """
+    import os
+    import subprocess
+    import sys
+
     git_repo = os.environ.get("BUILDKITE_REPO", "")
     git_commit = os.environ.get("BUILDKITE_COMMIT", "")
     pr_number = os.environ.get("BUILDKITE_PULL_REQUEST")
@@ -219,23 +223,32 @@ def run_test_command(test_command: str,
         print(f"PR number: {pr_number}")
     _checkout_repository(git_repo, git_commit, pr_number)
 
-    build_kernel_command = """
-    cd fastvideo-kernel &&
-    ./build.sh &&
-    cd .. &&
-    """ if build_kernel else ""
+    setup_steps = [
+        "source $HOME/.local/bin/env",
+        "source /opt/venv/bin/activate",
+        "cd /FastVideo",
+    ]
+    if install_command:
+        setup_steps.append(install_command)
+    if build_kernel:
+        setup_steps.append("python fastvideo/tests/modal/kernel_build_cache.py install")
+    setup_command = " &&\n    ".join(setup_steps)
 
-    install_clause = f"{install_command} &&" if install_command else ""
+    setup_result = subprocess.run(["/bin/bash", "-c", setup_command],
+                                  stdout=sys.stdout,
+                                  stderr=sys.stderr,
+                                  check=False)
+    if setup_result.returncode != 0:
+        raise RuntimeError(
+            f"Setup command failed with exit code {setup_result.returncode}")
 
-    command = f"""
-    source $HOME/.local/bin/env &&
-    source /opt/venv/bin/activate &&
-    cd /FastVideo &&
-    {install_clause}
-    {build_kernel_command}
-    {test_command}
-    """
 
+    command = " &&\n    ".join([
+        "source $HOME/.local/bin/env",
+        "source /opt/venv/bin/activate",
+        "cd /FastVideo",
+        test_command,
+    ])
     result = subprocess.run(["/bin/bash", "-c", command],
                             stdout=sys.stdout,
                             stderr=sys.stderr,
@@ -369,7 +382,9 @@ def run_unit_test():
         "./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ "
         "./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/worker/ "
         "./fastvideo/tests/training/test_trackers.py "
-        "./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py ./fastvideo/tests/modal/test_pr_test.py "
+        "./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py "
+        "./fastvideo/tests/modal/test_kernel_build_cache.py ./fastvideo/tests/modal/test_pr_test.py "
+        "./fastvideo/tests/modal/test_ssim_test.py "
         "--ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py "
         "--ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs"
     )
