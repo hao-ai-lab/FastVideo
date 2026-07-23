@@ -2,16 +2,27 @@
 ``train/methods/rl/diffusion_nft.py`` (student / old-policy / reference on
 the SAME card DiT the serving path uses).
 
-Loss (`_training_timestep_loss`, ported verbatim): xt = (1-t)x0 + t·ε;
-old/reference predictions no-grad; positive = β·fwd + (1-β)·old, implicit
-negative = (1+β)·old − β·fwd; per-sample fp64-weighted x0 MSEs (weight =
-|x̂0−x0|.mean per sample, clip 1e-5); r = clipped-normalized advantages;
-policy = (r·pos + (1−r)·neg)/β · adv_clip_max, mean; + kl_β·MSE(fwd, ref).
+Authority facts (all verified against main at the gate commit):
 
-Advantages (`_compute_advantages`): group rewards by PROMPT,
-(r − mean)/(std_unbiased=False + 1e-4).
-
-Old-policy update: EMA old ← decay·old + (1−decay)·student.
+  * models: three ``WanModel`` roles from the same base checkpoint; the
+    OPTIMIZER is a plain ``torch.optim.AdamW(transformer.parameters(),
+    eps=1e-8)`` over the live params — the modular stack keeps NO fp32
+    masters (unlike the legacy stack's FSDP mixed precision);
+  * forwards (``predict_noise``): BTCHW→BCTHW permute in/out, model input
+    cast bf16, run under ``torch.autocast(bf16)``;
+  * loss (``_training_timestep_loss``, ported verbatim): xt = (1-t)x0 + t·ε
+    in x0's dtype; old/reference predictions no-grad; positive =
+    β·fwd + (1-β)·old, implicit negative = (1+β)·old − β·fwd; per-sample
+    fp64-weighted x0 MSEs (weight = |x̂0−x0|.mean per sample, clip 1e-5);
+    r = clipped-normalized advantages; policy = mean((r·pos + (1−r)·neg)/β ·
+    adv_clip_max); + kl_β·MSE(fwd, ref);
+  * inner loop: effective grad accum = grad_accum × num_train_timesteps —
+    ``backward(loss / accum)`` per call, clip → AdamW → zero once per round;
+  * advantages (``_compute_advantages``): group rewards["avg"] by PROMPT,
+    (r − mean)/(std_unbiased=False + 1e-4), repeat per timestep;
+  * old-policy update (``_update_old_model``): old ← old·decay +
+    student·(1−decay) over the LIVE parameters; decay =
+    ``_return_decay(step, decay_type)`` (pure).
 
 Randomness (the xt noise) is replayed from capture recordings.
 """
@@ -37,34 +48,54 @@ def compute_advantages(rewards: Any, prompts: list[str], *,
     return out.unsqueeze(1).repeat(1, num_train_timesteps)
 
 
+def return_decay(step: int, decay_type: int) -> float:
+    """Verbatim ``DiffusionNFTMethod._return_decay``."""
+    if decay_type == 0:
+        flat, uprate, uphold = 0, 0.0, 0.0
+    elif decay_type == 1:
+        flat, uprate, uphold = 0, 0.001, 0.5
+    elif decay_type == 2:
+        flat, uprate, uphold = 75, 0.0075, 0.999
+    else:
+        raise ValueError(f"Unsupported decay_type: {decay_type}")
+    if step < flat:
+        return 0.0
+    return min((step - flat) * uprate, uphold)
+
+
 class NFTStep:
-    def __init__(self, student_fp32: Any, old_fp32: Any, ref_fp32: Any, *,
+    def __init__(self, student: Any, old: Any, ref: Any, *,
                  lr: float = 3e-5, beta: float = 0.1, kl_beta: float = 1e-4,
                  adv_clip_max: float = 5.0, adv_mode: str = "all",
                  num_train_timesteps: int = 1000, max_grad_norm: float = 1.0,
                  weight_decay: float = 1e-4, betas=(0.9, 0.999)):
         import torch
-
-        from fastvideo2.train.dmd2 import _MasterOpt
-        self.student = _MasterOpt(student_fp32, lr, betas=betas,
-                                  weight_decay=weight_decay,
-                                  max_grad_norm=max_grad_norm)
-        self.old = old_fp32.to(torch.bfloat16).eval().requires_grad_(False)
-        self.ref = ref_fp32.to(torch.bfloat16).eval().requires_grad_(False)
+        self.student = student
+        self.old = old.eval().requires_grad_(False)
+        self.ref = ref.eval().requires_grad_(False)
+        self.opt = torch.optim.AdamW(
+            [p for p in student.parameters() if p.requires_grad],
+            lr=lr, betas=betas, weight_decay=weight_decay, eps=1e-8)
         self.beta = float(beta)
         self.kl_beta = float(kl_beta)
         self.adv_clip_max = float(adv_clip_max)
         self.adv_mode = adv_mode
         self.ntt = int(num_train_timesteps)
+        self.max_grad_norm = float(max_grad_norm)
 
     def _fwd(self, model: Any, x_btchw: Any, t: Any, embeds: Any) -> Any:
-        out = model(x_btchw.permute(0, 2, 1, 3, 4), embeds, t)
+        import torch
+        x = x_btchw.permute(0, 2, 1, 3, 4)
+        if x.is_floating_point():
+            x = x.to(torch.bfloat16)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            out = model(x, embeds, t)
         return out.permute(0, 2, 1, 3, 4)
 
     def timestep_loss(self, x0: Any, embeds: Any, timestep: Any, noise: Any,
                       advantages: Any) -> dict:
         """One inner NFT step given recorded (x0, timestep, noise, adv).
-        All tensors BTCHW bf16 except timestep [B] and advantages [B]."""
+        x0/noise BTCHW in main's loss dtype; timestep/advantages [B]."""
         import torch
         t = timestep.float() / float(self.ntt)
         t_exp = t.view(-1, *([1] * (x0.ndim - 1)))
@@ -73,7 +104,7 @@ class NFTStep:
         with torch.no_grad():
             old_pred = self._fwd(self.old, xt, timestep, embeds).detach()
             ref_pred = self._fwd(self.ref, xt, timestep, embeds).detach()
-        fwd_pred = self._fwd(self.student.model, xt, timestep, embeds)
+        fwd_pred = self._fwd(self.student, xt, timestep, embeds)
 
         adv = torch.clamp(advantages, -self.adv_clip_max, self.adv_clip_max)
         if self.adv_mode == "positive_only":
@@ -108,12 +139,23 @@ class NFTStep:
         total = policy + self.kl_beta * kl
         return {"total_loss": total, "policy_loss": policy, "kl_div_loss": kl}
 
+    def optimizer_step(self) -> None:
+        """clip → AdamW → zero (main fires this once per accumulation round;
+        the LR scheduler is constant/0-warmup at the gate config — no-op)."""
+        import torch
+        if self.max_grad_norm > 0:
+            torch.nn.utils.clip_grad_norm_(
+                [p for p in self.student.parameters() if p.requires_grad],
+                self.max_grad_norm)
+        self.opt.step()
+        self.opt.zero_grad(set_to_none=True)
+
     def update_old(self, decay: float) -> None:
-        """old <- decay*old + (1-decay)*student (main's `_update_old_model`);
-        student values come from the fp32 masters (the source of truth)."""
+        """old ← old·decay + student·(1−decay) over LIVE params (verbatim
+        ``_update_old_model``)."""
         import torch
         with torch.no_grad():
-            named = dict(self.old.named_parameters())
-            for n, m in self.student.master.items():
-                p = named[n]
-                p.data.mul_(decay).add_(m.to(p.dtype), alpha=1.0 - decay)
+            for src, tgt in zip(self.student.parameters(),
+                                self.old.parameters(), strict=True):
+                tgt.data.copy_(tgt.detach().data * decay
+                               + src.detach().data * (1.0 - decay))

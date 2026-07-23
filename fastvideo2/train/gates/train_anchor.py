@@ -509,10 +509,139 @@ def run_data() -> int:
     return 1 if failed else 0
 
 
+def run_rl() -> int:
+    """DiffusionNFT math anchor — replays main's recorded RL inner steps
+    (rows, timesteps, xt-noise, advantages) through OUR NFTStep on three
+    WanModelFV roles from the same base checkpoint, and compares:
+
+      advantages.step{i}   recomputed from recorded rewards["avg"] (exact)
+      loss.s{i}k{k}        per inner-call total_loss — outer step 0 runs at
+                           pre-update weights (optimizer fires once per
+                           outer step at this config: accum = 2×4 = calls);
+                           outer step 1 inherits one AdamW step + old-EMA,
+                           gated by measured main self-noise when present.
+    """
+    import torch
+
+    from fastvideo2.loading import resolve_weights
+    from fastvideo2.train.diffusion_nft import NFTStep, compute_advantages
+    from fastvideo2.wan21.card import WAN21_T2V_1_3B as card
+    from fastvideo2.wan21.model_fv import WanModelFV
+
+    gold = _gold_dir("rl")
+    with open(os.path.join(gold, "manifest.json")) as f:
+        manifest = json.load(f)
+    with open(os.path.join(gold, "steps.json")) as f:
+        steps = json.load(f)
+    probe = manifest["probe"]
+    device = "cuda"
+
+    dt = (torch.float32 if probe["param_dtype"] == "torch.float32"
+          else torch.bfloat16)
+    root = resolve_weights(card)
+
+    def build():
+        return WanModelFV.from_pretrained(
+            root, torch_dtype=dt, subfolder="transformer").to(device)
+
+    trainer = NFTStep(build(), build(), build(),
+                      lr=3e-5, beta=probe["nft_beta"],
+                      kl_beta=probe["kl_beta"],
+                      adv_clip_max=probe["adv_clip_max"],
+                      adv_mode=probe["adv_mode"],
+                      num_train_timesteps=probe["ntt"],
+                      max_grad_norm=probe["max_grad_norm"])
+
+    band = 1.5 * float(manifest.get("self_noise_max", 0.0))
+    rows: list[tuple[str, float]] = []
+    failed: list[str] = []
+
+    def check(name: str, mine: float, ref: float, exact: bool) -> None:
+        # step0 losses are pure forward math at pre-update weights → bitwise;
+        # step1 inherits one AdamW step built from nondeterministic backward
+        # atomics → measured main self-noise band
+        d = abs(mine - ref)
+        ok = (d == 0.0) if exact else (d <= band)
+        rows.append((name, d))
+        if not ok:
+            failed.append(name)
+        print(f"  {name:16s} mine={mine:.6f} main={ref:.6f} "
+              f"diff={d:.3e} {'OK' if ok else 'FAIL'}")
+
+    for i, rec in enumerate(steps):
+        z = np.load(os.path.join(gold, f"samples{i}.npz"))
+        nitems = len(rec["items"])
+        lat = np.concatenate(
+            [z[f"it{j}_latents_clean"] for j in range(nitems)], 0)
+        emb = np.concatenate([z[f"it{j}_embeds"] for j in range(nitems)], 0)
+        inner = np.load(os.path.join(gold, f"inner{i}.npz"))
+
+        # advantages: pure recompute from recorded rewards (exact)
+        prompts = [p for it in rec["items"] for p in it["prompts"]]
+        adv_ref = inner["advantages"]
+        adv_mine = compute_advantages(
+            torch.tensor(rec["rewards"]["avg"]), prompts,
+            num_train_timesteps=adv_ref.shape[1]).numpy()
+        d_adv = rel(adv_mine, adv_ref)
+        rows.append((f"advantages.step{i}", d_adv))
+        ok = d_adv == 0.0
+        if not ok:
+            failed.append(f"advantages.step{i}")
+        print(f"  advantages.step{i}  rel={d_adv:.3e} {'OK' if ok else 'FAIL'}")
+
+        # loss-math dtype: recorded fp32 arrays that round-trip bf16 exactly
+        # WERE bf16 on main (fp32 sampler outputs would not)
+        t_lat = torch.from_numpy(lat)
+        loss_dtype = (torch.bfloat16
+                      if bool((t_lat.bfloat16().float() == t_lat).all())
+                      else torch.float32)
+        t_emb = torch.from_numpy(emb)
+        emb_dtype = (torch.bfloat16
+                     if bool((t_emb.bfloat16().float() == t_emb).all())
+                     else torch.float32)
+        if i == 0:
+            print(f"  [detected] loss dtype {loss_dtype}, embeds {emb_dtype}, "
+                  f"params {dt}")
+
+        accum = len(rec["inner"])
+        for k, ir in enumerate(rec["inner"]):
+            ridx = ir["row_idx"]
+            x0 = torch.from_numpy(lat[ridx]).to(device, loss_dtype)
+            embeds = torch.from_numpy(emb[ridx]).to(device, emb_dtype)
+            tstep = torch.tensor(ir["timestep"], device=device)
+            noise = torch.from_numpy(inner[f"noise{k}"]).to(device, loss_dtype)
+            adv = torch.from_numpy(inner[f"adv{k}"]).to(device)
+            losses = trainer.timestep_loss(x0, embeds, tstep, noise, adv)
+            (losses["total_loss"] / accum).backward()
+            check(f"loss.s{i}k{k}",
+                  float(losses["total_loss"].detach().item()),
+                  float(ir["losses"]["total_loss"]),
+                  exact=(i == 0))
+        trainer.optimizer_step()
+        trainer.update_old(float(rec["old_decay"]))
+
+    verdict = "PASS" if not failed else f"FAIL ({', '.join(failed[:6])})"
+    print(f"anchor.train-rl-main: {verdict}")
+    from fastvideo2.verify import GateResult, append_ledger, env_fingerprint
+    append_ledger([GateResult(gate="anchor.train-rl-main",
+                              status="pass" if not failed else "fail",
+                              model_id=card.model_id,
+                              card_digest=card.digest(),
+                              metrics={n: v for n, v in rows},
+                              tolerances={"advantages": 0.0,
+                                          "step0": "exact-or-band",
+                                          "step1": "main self-noise band"},
+                              env=env_fingerprint(),
+                              detail=f"goldens {manifest['fastvideo_commit'][:9]}"
+                                     f", band={band:.3e}")])
+    return 1 if failed else 0
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     mode = args[0] if args else "finetune"
     sys.exit(run_self_forcing() if mode == "self_forcing"
              else run_dmd2(mode) if mode in ("dmd2", "vsa_dmd2", "qad")
              else run_data() if mode == "data"
+             else run_rl() if mode == "rl"
              else run(mode=mode))
