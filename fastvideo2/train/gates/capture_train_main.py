@@ -31,7 +31,9 @@ import json
 import os
 import sys
 
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
+MODE = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "finetune"
+VSA = MODE == "vsa"
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN" if VSA else "FLASH_ATTN"
 os.environ.setdefault("WANDB_MODE", "offline")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -39,6 +41,11 @@ SEED = 42
 STEPS = 5
 NUM_LATENT_T = 8
 DATASET = "wlsaidhi/crush-smol_processed_t2v"
+# vsa gate trains the FastWan checkpoint (has to_gate_compress weights) so
+# all parameters are deterministic; base-checkpoint VSA finetune random-
+# initializes the gate projections — an init-RNG parity gate for later
+MODEL = ("FastVideo/FastWan2.1-T2V-1.3B-Diffusers" if VSA
+         else "Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 
 
 def _hash(t) -> str:
@@ -54,7 +61,7 @@ def main() -> None:
 
     here = os.path.dirname(os.path.abspath(__file__))
     out = os.path.normpath(os.path.join(here, "..", "..", "evidence", "goldens",
-                                        "train-finetune-main"))
+                                        f"train-{MODE}-main"))
     os.makedirs(out, exist_ok=True)
 
     data_root = snapshot_download(DATASET, repo_type="dataset", token=False)
@@ -70,8 +77,8 @@ def main() -> None:
 
     argv = [
         "capture",
-        "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        "--model_path", MODEL,
+        "--pretrained_model_name_or_path", MODEL,
         "--data_path", data_path,
         "--dataloader_num_workers", "1",
         "--num_gpus", "1", "--sp_size", "1", "--tp_size", "1",
@@ -92,6 +99,9 @@ def main() -> None:
         "--weight_only_checkpointing_steps", "100000",
         "--training_state_checkpointing_steps", "100000",
     ]
+    if VSA:
+        argv += ["--VSA_sparsity", "0.8", "--VSA_decay_rate", "0.2",
+                 "--VSA_decay_interval_steps", "1"]
     sys.argv = argv
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
@@ -140,7 +150,8 @@ def main() -> None:
         tb = orig_step(self, tb)
         records[-1].update(loss=float(tb.total_loss.item() if torch.is_tensor(tb.total_loss)
                                       else tb.total_loss),
-                           grad_norm=float(tb.grad_norm))
+                           grad_norm=float(tb.grad_norm),
+                           vsa_sparsity=float(getattr(tb, "current_vsa_sparsity", 0.0) or 0.0))
         return tb
 
     TP.TrainingPipeline._get_next_batch = get_batch
@@ -182,7 +193,8 @@ def main() -> None:
     commit = subprocess.run(["git", "-C", src, "rev-parse", "HEAD"],
                             capture_output=True, text=True).stdout.strip()
     with open(os.path.join(out, "manifest.json"), "w") as f:
-        json.dump({"fastvideo_commit": commit, "dataset": DATASET,
+        json.dump({"fastvideo_commit": commit, "dataset": DATASET, "mode": MODE,
+                   "model": MODEL,
                    "seed": SEED, "steps": STEPS, "num_latent_t": NUM_LATENT_T,
                    "config": "1gpu bs1 accum1 lr5e-5 wd1e-4 betas(0.9,0.999) "
                              "clip1.0 uniform-t cfg_rate0 dit_fp32 mixed_bf16 "

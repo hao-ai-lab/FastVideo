@@ -20,10 +20,10 @@ import sys
 import numpy as np
 
 
-def _gold_dir() -> str:
+def _gold_dir(mode: str) -> str:
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.normpath(os.path.join(here, "..", "..", "evidence", "goldens",
-                                         "train-finetune-main"))
+                                         f"train-{mode}-main"))
 
 
 def rel(a: np.ndarray, b: np.ndarray) -> float:
@@ -33,26 +33,29 @@ def rel(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.linalg.norm(a - b)) / (d if d else 1.0)
 
 
-def run() -> int:
+def run(mode: str = "finetune") -> int:
     import torch
 
     from fastvideo2.loading import resolve_weights
     from fastvideo2.train.finetune import FinetuneStep
-    from fastvideo2.wan21.card import WAN21_T2V_1_3B
-    from fastvideo2.wan21.model_fv import WanModelFV
+    from fastvideo2.wan21.card import FASTWAN_T2V_1_3B, WAN21_T2V_1_3B
+    from fastvideo2.wan21.model_fv import WanModelFV, WanModelFVVSA
 
-    gold = _gold_dir()
+    gold = _gold_dir(mode)
     with open(os.path.join(gold, "manifest.json")) as f:
         manifest = json.load(f)
     with open(os.path.join(gold, "steps.json")) as f:
         steps = json.load(f)
     device = "cuda"
 
-    # main trains its own WanTransformer3DModel port from the Diffusers repo;
-    # our bitwise-equal vendor of it loads the same weights fp32
-    root = resolve_weights(WAN21_T2V_1_3B)  # Wan-AI/Wan2.1-T2V-1.3B-Diffusers
-    model = WanModelFV.from_pretrained(root, torch_dtype=torch.float32,
-                                       subfolder="transformer").to(device)
+    # main trains its own WanTransformer3DModel port; our bitwise-equal
+    # vendor loads the same weights fp32 (VSA gate: the FastWan checkpoint,
+    # which carries deterministic to_gate_compress weights)
+    card = FASTWAN_T2V_1_3B if mode == "vsa" else WAN21_T2V_1_3B
+    cls = WanModelFVVSA if mode == "vsa" else WanModelFV
+    root = resolve_weights(card)
+    model = cls.from_pretrained(root, torch_dtype=torch.float32,
+                                subfolder="transformer").to(device)
     trainer = FinetuneStep(model)
     w0 = trainer.master["proj_out.weight"][:8, :8].cpu().numpy().copy()
 
@@ -71,6 +74,12 @@ def run() -> int:
         timesteps = torch.tensor(rec["timesteps"], device=device)
         sigmas = torch.tensor(rec["sigmas"], device=device,
                               dtype=torch.bfloat16).view(-1, 1, 1, 1)
+        vsa_meta = None
+        if mode == "vsa":
+            from fastvideo2.layers.vsa import build_vsa_meta
+            _, _, tl, hl, wl = z["latents"].shape
+            vsa_meta = build_vsa_meta((tl, hl // 2, wl // 2),
+                                      rec["vsa_sparsity"], device)
         if i == 0:  # input-construction triage: does OUR noisy match theirs?
             noisy = (1.0 - sigmas) * latents + sigmas * noise
             rows.append(("noisy.step0", 0.0 if _hash(noisy) == rec["noisy_hash"] else 1.0))
@@ -80,10 +89,11 @@ def run() -> int:
             if "pred" in z.files:
                 with torch.no_grad():
                     p = trainer.model(noisy, embeds,
-                                      timesteps.to(torch.bfloat16))
+                                      timesteps.to(torch.bfloat16), vsa=vsa_meta)
                 rows.append(("pred.step0", rel(p.detach().to(torch.float32).cpu().numpy(),
                                                z["pred"])))
-        loss, gnorm = trainer.step(latents, embeds, noise, timesteps, sigmas)
+        loss, gnorm = trainer.step(latents, embeds, noise, timesteps, sigmas,
+                                   vsa=vsa_meta)
         rows.append((f"loss.step{i}", abs(loss - rec["loss"])))
         rows.append((f"gnorm.step{i}", abs(gnorm - rec["grad_norm"])))
         print(f"  step{i}: ours loss={loss:.8f} main={rec['loss']:.8f} "
@@ -115,10 +125,10 @@ def run() -> int:
         print(f"  {n:14s} {v:.6e}  {'OK' if ok else 'FAIL'} ({why})")
 
     from fastvideo2.verify import GateResult, append_ledger, env_fingerprint
-    append_ledger([GateResult(gate="anchor.train-finetune-main",
+    append_ledger([GateResult(gate=f"anchor.train-{mode}-main",
                               status="pass" if not failed else "fail",
-                              model_id=WAN21_T2V_1_3B.model_id,
-                              card_digest=WAN21_T2V_1_3B.digest(),
+                              model_id=card.model_id,
+                              card_digest=card.digest(),
                               metrics={n: v for n, v in rows},
                               tolerances={"step0": 0.0,
                                           "later": "main self-noise band (see manifest)"},
@@ -128,4 +138,5 @@ def run() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(run())
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    sys.exit(run(mode=args[0] if args else "finetune"))

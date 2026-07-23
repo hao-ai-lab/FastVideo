@@ -49,12 +49,14 @@ class FinetuneStep:
             p.requires_grad_(True)
 
     def step(self, latents: Any, embeds: Any, noise: Any, timesteps: Any,
-             sigmas: Any) -> tuple[float, float]:
-        """All tensor args bf16 on device (sigmas broadcastable). Returns
-        (loss, grad_norm) exactly as main logs them."""
+             sigmas: Any, vsa: Any = None) -> tuple[float, float]:
+        """All tensor args bf16 on device (sigmas broadcastable). ``vsa`` is
+        the per-step VSAMeta for VSA training (main ramps sparsity per step,
+        so metadata is rebuilt each step). Returns (loss, grad_norm) exactly
+        as main logs them."""
         import torch
         noisy = (1.0 - sigmas) * latents + sigmas * noise
-        pred = self.model(noisy, embeds, timesteps.to(torch.bfloat16))
+        pred = self.model(noisy, embeds, timesteps.to(torch.bfloat16), vsa=vsa)
         target = noise - latents
         loss = torch.mean((pred.float() - target.float()) ** 2) / self.grad_accum
         loss.backward()
