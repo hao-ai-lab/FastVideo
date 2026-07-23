@@ -95,6 +95,13 @@ surfaces:
       moba_config: "Derived runtime config loaded from moba_config_path."
       model_paths: "Runtime bookkeeping."
       model_loaded: "Runtime bookkeeping."
+      use_cachedit: "Opt-in cache-dit step-caching toggle (Wan DiT); runtime plumbing, not part of the typed API yet."
+      cachedit_fn_compute_blocks: "cache-dit leading-block count; runtime plumbing for use_cachedit."
+      cachedit_bn_compute_blocks: "cache-dit trailing-block count; runtime plumbing for use_cachedit."
+      cachedit_residual_threshold: "cache-dit residual-diff skip threshold; runtime plumbing for use_cachedit."
+      cachedit_max_warmup_steps: "cache-dit warmup-step count; runtime plumbing for use_cachedit."
+      cachedit_taylorseer: "cache-dit TaylorSeer calibrator toggle; runtime plumbing for use_cachedit."
+      cachedit_taylorseer_order: "cache-dit TaylorSeer expansion order; runtime plumbing for use_cachedit."
 
   pipeline_config_base:
     moved:
