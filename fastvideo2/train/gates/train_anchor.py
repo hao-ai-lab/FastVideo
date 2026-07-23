@@ -137,10 +137,6 @@ def run(mode: str = "finetune") -> int:
     return 1 if failed else 0
 
 
-if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if not a.startswith("-")]
-    mode = args[0] if args else "finetune"
-    sys.exit(run_dmd2() if mode == "dmd2" else run(mode=mode))
 
 
 def run_dmd2() -> int:
@@ -257,3 +253,9 @@ def run_dmd2() -> int:
                               env=env_fingerprint(),
                               detail=f"goldens {manifest['fastvideo_commit'][:9]}")])
     return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    mode = args[0] if args else "finetune"
+    sys.exit(run_dmd2() if mode == "dmd2" else run(mode=mode))
