@@ -307,7 +307,7 @@ def main() -> None:
                 tokenizers=[pipeline.get_module("tokenizer")])
             nb = FB(data_type="video", prompt=NEG, prompt_embeds=[],
                     prompt_attention_mask=[])
-            nb = enc_stage(nb, args)
+            nb = enc_stage(nb, pipeline.training_args)
             pipeline.negative_prompt_embeds = nb.prompt_embeds[0]
             pipeline.negative_prompt_attention_mask = (
                 nb.prompt_attention_mask[0] if nb.prompt_attention_mask else None)
