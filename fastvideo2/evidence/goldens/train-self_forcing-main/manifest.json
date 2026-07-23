@@ -1,0 +1,36 @@
+{
+  "fastvideo_commit": "c459a1897899ffcec3be7765534d81000b9bb9c1",
+  "mode": "self_forcing",
+  "seed": 42,
+  "denoising_step_list": [
+    1000.0,
+    937.5,
+    833.3333129882812,
+    625.0
+  ],
+  "latent_hw": [
+    30,
+    52
+  ],
+  "num_latent_t": 21,
+  "guidance": 3.0,
+  "context_noise": 0,
+  "student": "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
+  "gen_losses": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "fake_losses": [
+    0.28876835107803345,
+    0.21135775744915009,
+    0.4261355996131897,
+    0.22973282635211945,
+    0.18186300992965698
+  ],
+  "torch": "2.12.0+cu130",
+  "gpu": "NVIDIA GB200",
+  "config": "dmd2 legacy: interval2 gw3.5 lr2e-6 shift8 steps[1000,757,522] simulate nlt4 1gpu"
+}

@@ -131,3 +131,29 @@ now parity-gated END TO END for the QAD pipeline.
 NOTE: a modular-stack QAD gate (role-local backend yaml, STANDARD CFG,
 guidance 3.0) is deferred — the two stacks differ in CFG parameterization;
 this gate pins the legacy convention.
+
+## Self-forcing training — added 2026-07-23
+
+Gate `anchor.train-self_forcing-main`: PASS — **121/121 rollout forwards
+bitwise**, all five per-step rollout outputs (x0) hash-exact, critic losses
+within band. The training rollout drives the SAME `WanModelFVCausal` +
+KV/cross caches the SFWan serving path uses (`train/self_forcing.py::
+sf_rollout` replaying recorded draws through a validating `DrawCursor`);
+DMD/critic losses via DMD2Step on the SelfForcingFlowMatchScheduler table.
+
+Root cause found (cost one cycle): main's SF phases run under
+autocast(bf16), and the CAUSAL blocks use PLAIN LayerNorms — which autocast
+promotes to fp32 compute (the dense model's explicit FP32 norms are
+autocast-insensitive, which is why every earlier gate passed without it).
+One missing autocast flipped all 121 forwards from DIFF to bitwise.
+
+Gate scope (v1, documented): critic-side + rollout parity with no generator
+update in-window (`dfake_gen_update_ratio` > steps). UPSTREAM FINDING: the
+generator backward through the KV-cache rollout raises an autograd in-place
+error unless gradient checkpointing is enabled (the recipe sets
+`--enable_gradient_checkpointing_type full`), and checkpointed recompute
+reads MUTATED caches — the recomputed attention windows differ from the
+forward pass. A checkpointing-aware generator-step gate is deferred; the DMD
+loss math itself is already parity-proven by the dmd2/qad gates. Config:
+240x416 (resolution-agnostic math), 21 latent frames (pins the block-count
+draw and avoids the >21-frame VAE re-encode branch).
