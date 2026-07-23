@@ -1,3 +1,6 @@
+# fastvideo2/rl_rewards is vendored byte-identical from upstream (gated by
+# sha256 in tests) — formatters must not touch it
+exclude: ^fastvideo2/rl_rewards/
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
