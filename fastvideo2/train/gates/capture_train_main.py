@@ -32,8 +32,8 @@ import os
 import sys
 
 MODE = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "finetune"
-VSA = MODE == "vsa"
-DMD2 = MODE == "dmd2"
+VSA = MODE in ("vsa", "vsa_dmd2")
+DMD2 = MODE in ("dmd2", "vsa_dmd2")
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN" if VSA else "FLASH_ATTN"
 os.environ.setdefault("WANDB_MODE", "offline")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -47,6 +47,8 @@ DATASET = "wlsaidhi/crush-smol_processed_t2v"
 # initializes the gate projections — an init-RNG parity gate for later
 MODEL = ("FastVideo/FastWan2.1-T2V-1.3B-Diffusers" if VSA
          else "Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+# vsa_dmd2: teacher/critic ALSO FastWan (deterministic gate weights); the
+# shipped recipe uses the base model + random-init gates — init-RNG gate later
 
 
 def _hash(t) -> str:
@@ -104,7 +106,7 @@ def main() -> None:
         argv += ["--VSA_sparsity", "0.8", "--VSA_decay_rate", "0.2",
                  "--VSA_decay_interval_steps", "1"]
     if DMD2:
-        base = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+        base = MODEL if MODE == "vsa_dmd2" else "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
         argv[argv.index(str(NUM_LATENT_T))] = "4"
         argv += ["--real_score_model_path", base, "--fake_score_model_path", base,
                  "--dmd_denoising_steps", "1000,757,522",
@@ -114,6 +116,8 @@ def main() -> None:
                  "--min_timestep_ratio", "0.02", "--max_timestep_ratio", "0.98",
                  "--flow_shift", "8.0"]
         argv[argv.index("5e-5")] = "2e-6"  # learning_rate per the shipped recipe
+    if MODE == "vsa_dmd2":
+        argv += ["--VSA_sparsity", "0.8"]
     sys.argv = argv
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
@@ -281,6 +285,8 @@ def main() -> None:
             tb = orig_dstep(self, tb)
             rec = _cur()
             rec["gen_loss"] = float(tb.generator_loss)
+            md = getattr(tb, "attn_metadata_vsa", None)
+            rec["vsa_sparsity"] = float(getattr(md, "VSA_sparsity", 0.0) or 0.0) if md is not None else 0.0
             rec["embeds"] = _np(tb.encoder_hidden_states) if tb.encoder_hidden_states is not None else None
             rec["closed"] = True
             return tb
@@ -362,6 +368,7 @@ def main() -> None:
             meta_steps.append({
                 "targets": [ro.get("target_idx") for ro in rec["rollouts"]],
                 "dmd_t": rec.get("dmd", {}).get("t_final"),
+                "vsa_sparsity": rec.get("vsa_sparsity", 0.0),
                 "critic_t": rec["critic"]["t_final"],
                 "gen_loss": rec["gen_loss"], "fake_loss": rec["fake_loss"],
                 "x0_student_hash": rec.get("x0_student_hash"),

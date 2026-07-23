@@ -139,7 +139,7 @@ def run(mode: str = "finetune") -> int:
 
 
 
-def run_dmd2() -> int:
+def run_dmd2(mode: str = "dmd2") -> int:
     """DMD2 anchor: replay main's recorded per-phase draws through DMD2Step.
     Order per step mirrors train_one_step: student phase (rollout -> dmd loss
     -> student AdamW) only on interval steps, then critic phase (its OWN
@@ -151,20 +151,23 @@ def run_dmd2() -> int:
 
     from fastvideo2.loading import resolve_weights
     from fastvideo2.train.dmd2 import DMD2Step
-    from fastvideo2.wan21.card import WAN21_T2V_1_3B
-    from fastvideo2.wan21.model_fv import WanModelFV
+    from fastvideo2.wan21.card import FASTWAN_T2V_1_3B, WAN21_T2V_1_3B
+    from fastvideo2.wan21.model_fv import WanModelFV, WanModelFVVSA
 
-    gold = _gold_dir("dmd2")
+    gold = _gold_dir(mode)
     with open(os.path.join(gold, "manifest.json")) as f:
         manifest = json.load(f)
     with open(os.path.join(gold, "steps.json")) as f:
         steps = json.load(f)
     device = "cuda"
-    root = resolve_weights(WAN21_T2V_1_3B)
+    is_vsa = mode == "vsa_dmd2"
+    card = FASTWAN_T2V_1_3B if is_vsa else WAN21_T2V_1_3B
+    cls = WanModelFVVSA if is_vsa else WanModelFV
+    root = resolve_weights(card)
 
     def load():
-        return WanModelFV.from_pretrained(root, torch_dtype=torch.float32,
-                                          subfolder="transformer").to(device)
+        return cls.from_pretrained(root, torch_dtype=torch.float32,
+                                   subfolder="transformer").to(device)
 
     step_ctx = DMD2Step(load(), load(), load())
     pz = np.load(os.path.join(gold, "params.npz"))
@@ -182,6 +185,13 @@ def run_dmd2() -> int:
         z = np.load(os.path.join(gold, f"step{i}.npz"))
         cond = tt(z["embeds"])
         n_roll = len(rec["targets"])
+        vsa_student = vsa_dense = None
+        if is_vsa:
+            from fastvideo2.layers.vsa import build_vsa_meta
+            _, tl, _, hl, wl = z["ro0_init"].shape  # BTCHW draws
+            grid = (tl, hl // 2, wl // 2)
+            vsa_student = build_vsa_meta(grid, rec.get("vsa_sparsity", 0.0), device)
+            vsa_dense = build_vsa_meta(grid, 0.0, device)
 
         def roll_draws(j):
             return {"target_idx": rec["targets"][j],
@@ -191,7 +201,7 @@ def run_dmd2() -> int:
 
         student_step = rec["gen_loss"] != 0.0
         if student_step:
-            x0 = step_ctx.student_rollout(roll_draws(0), cond)
+            x0 = step_ctx.student_rollout(roll_draws(0), cond, vsa=vsa_student)
             if i == 0 or rows == []:
                 pass
             if rec.get("x0_student_hash"):
@@ -199,7 +209,8 @@ def run_dmd2() -> int:
                              0.0 if _hash(x0) == rec["x0_student_hash"] else 1.0))
             dmd = step_ctx.dmd_loss(
                 x0, {"dmd_timestep": torch.tensor([rec["dmd_t"]], device=device),
-                     "dmd_noise": tt(z["dmd_noise"])}, cond, uncond)
+                     "dmd_noise": tt(z["dmd_noise"])}, cond, uncond,
+                vsa_dense=vsa_dense)
             dmd.backward()
             step_ctx.student.apply_grads_and_step()
             rows.append((f"gen.step{i}", abs(float(dmd.detach().item()) - rec["gen_loss"])))
@@ -209,13 +220,13 @@ def run_dmd2() -> int:
 
         j = n_roll - 1  # critic-phase rollout is the last one recorded
         with torch.no_grad():
-            x0c = step_ctx.student_rollout(roll_draws(j), cond)
+            x0c = step_ctx.student_rollout(roll_draws(j), cond, vsa=vsa_student)
         if not student_step and rec.get("x0_student_hash"):
             rows.append((f"x0.step{i}",
                          0.0 if _hash(x0c) == rec["x0_student_hash"] else 1.0))
         closs = step_ctx.critic_loss(
             x0c, {"critic_timestep": torch.tensor([rec["critic_t"]], device=device),
-                  "critic_noise": tt(z["critic_noise"])}, cond)
+                  "critic_noise": tt(z["critic_noise"])}, cond, vsa_dense=vsa_dense)
         closs.backward()
         step_ctx.critic.apply_grads_and_step()
         rows.append((f"fake.step{i}", abs(float(closs.detach().item()) - rec["fake_loss"])))
@@ -249,10 +260,10 @@ def run_dmd2() -> int:
         print(f"  {n:18s} {v:.6e}  {'OK' if ok else 'FAIL'} ({why})")
 
     from fastvideo2.verify import GateResult, append_ledger, env_fingerprint
-    append_ledger([GateResult(gate="anchor.train-dmd2-main",
+    append_ledger([GateResult(gate=f"anchor.train-{mode}-main",
                               status="pass" if not failed else "fail",
-                              model_id=WAN21_T2V_1_3B.model_id,
-                              card_digest=WAN21_T2V_1_3B.digest(),
+                              model_id=card.model_id,
+                              card_digest=card.digest(),
                               metrics={n: v for n, v in rows},
                               tolerances={"x0.step0": 0.0, "later": "band"},
                               env=env_fingerprint(),
@@ -263,4 +274,4 @@ def run_dmd2() -> int:
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     mode = args[0] if args else "finetune"
-    sys.exit(run_dmd2() if mode == "dmd2" else run(mode=mode))
+    sys.exit(run_dmd2(mode) if mode in ("dmd2", "vsa_dmd2") else run(mode=mode))

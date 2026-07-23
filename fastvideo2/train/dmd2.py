@@ -102,11 +102,12 @@ class DMD2Step:
                                                     ).unflatten(0, pred_noise.shape[:2])
 
     # --- forwards (BTCHW state, BCTHW model calls — main's convention) ----- #
-    def _fwd(self, model: Any, noisy_btchw: Any, t: Any, embeds: Any) -> Any:
-        out = model(noisy_btchw.permute(0, 2, 1, 3, 4), embeds, t)
+    def _fwd(self, model: Any, noisy_btchw: Any, t: Any, embeds: Any,
+             vsa: Any = None) -> Any:
+        out = model(noisy_btchw.permute(0, 2, 1, 3, 4), embeds, t, vsa=vsa)
         return out.permute(0, 2, 1, 3, 4)
 
-    def student_rollout(self, draws: dict, embeds: Any) -> Any:
+    def student_rollout(self, draws: dict, embeds: Any, vsa: Any = None) -> Any:
         """main's `_generator_multi_step_simulation_forward`, replaying the
         recorded draws: target_idx (int), init_noise, step_noises (list)."""
         import torch
@@ -118,7 +119,7 @@ class DMD2Step:
             for k in range(len(self.denoising_steps) - 1):
                 t_k = torch.tensor([self.denoising_steps[k]], device=x.device,
                                    dtype=torch.long)
-                pred = self._fwd(self.student.model, x, t_k, embeds)
+                pred = self._fwd(self.student.model, x, t_k, embeds, vsa=vsa)
                 clean = self.pred_video(pred, x, t_k)
                 t_next = torch.tensor([self.denoising_steps[k + 1]], device=x.device,
                                       dtype=torch.long)
@@ -127,32 +128,36 @@ class DMD2Step:
         noisy_input = noise_latents[target_idx - 1] if target_idx > 0 else x_copy
         t_tgt = torch.tensor([self.denoising_steps[target_idx]], device=x.device,
                              dtype=torch.long)
-        pred = self._fwd(self.student.model, noisy_input, t_tgt, embeds)
+        pred = self._fwd(self.student.model, noisy_input, t_tgt, embeds, vsa=vsa)
         return self.pred_video(pred, noisy_input, t_tgt)
 
-    def dmd_loss(self, x0_student: Any, draws: dict, cond: Any, uncond: Any) -> Any:
+    def dmd_loss(self, x0_student: Any, draws: dict, cond: Any, uncond: Any,
+                 vsa_dense: Any = None) -> Any:
+        """``vsa_dense``: for VSA+DMD2, main scores with sparsity-0.0 VSA
+        metadata (same kernel, all blocks, gate mixing active) — NOT flash."""
         import torch
         import torch.nn.functional as F
         with torch.no_grad():
             t = draws["dmd_timestep"].to(x0_student.device)  # warped+clamped, long
             noisy = self.add_noise(x0_student, draws["dmd_noise"], t)
-            fake = self.pred_video(self._fwd(self.critic.model, noisy, t, cond),
-                                   noisy, t)
-            real_c = self.pred_video(self._fwd(self.teacher, noisy, t, cond),
-                                     noisy, t)
-            real_u = self.pred_video(self._fwd(self.teacher, noisy, t, uncond),
-                                     noisy, t)
+            fake = self.pred_video(self._fwd(self.critic.model, noisy, t, cond,
+                                             vsa=vsa_dense), noisy, t)
+            real_c = self.pred_video(self._fwd(self.teacher, noisy, t, cond,
+                                               vsa=vsa_dense), noisy, t)
+            real_u = self.pred_video(self._fwd(self.teacher, noisy, t, uncond,
+                                               vsa=vsa_dense), noisy, t)
             real = real_c + (real_c - real_u) * self.guidance  # DMD2 CFG
             grad = (fake - real) / torch.abs(x0_student - real).mean()
             grad = torch.nan_to_num(grad)
         return 0.5 * F.mse_loss(x0_student.float(),
                                 (x0_student.float() - grad.float()).detach())
 
-    def critic_loss(self, x0_student: Any, draws: dict, cond: Any) -> Any:
+    def critic_loss(self, x0_student: Any, draws: dict, cond: Any,
+                    vsa_dense: Any = None) -> Any:
         import torch
         t = draws["critic_timestep"].to(x0_student.device)
         noise = draws["critic_noise"]
         noisy = self.add_noise(x0_student, noise, t)
-        pred = self._fwd(self.critic.model, noisy, t, cond)
+        pred = self._fwd(self.critic.model, noisy, t, cond, vsa=vsa_dense)
         target = noise - x0_student
         return torch.mean((pred - target) ** 2)  # bf16, no .float() (legacy)
