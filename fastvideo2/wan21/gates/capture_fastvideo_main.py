@@ -33,11 +33,15 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
+# one process per model: the attention backend is chosen from this env var at
+# model construction and cached — do not switch it within a process
+VSA = len(sys.argv) > 1 and sys.argv[1] == "vsa"
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN" if VSA else "FLASH_ATTN"
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29513")
 
-REPO = "FastVideo/FastWan-QAD-FP8-1.3B"
+REPO = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers" if VSA else "FastVideo/FastWan-QAD-FP8-1.3B"
+VSA_SPARSITY = 0.8  # the released FastWan recipe (basic_dmd example)
 SEED = 1234
 E2E_PROMPT = ("A curious raccoon peers through a vibrant field of yellow "
               "sunflowers, its eyes wide with interest. The playful yet serene "
@@ -51,7 +55,8 @@ E2E_BTCHW = (1, 21, 16, 60, 104)        # 81f 480x832 in main's DMD state layout
 
 def _out_dir() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
-    d = os.path.join(here, "..", "..", "evidence", "goldens", "fastwan-qad-main")
+    name = "fastwan-vsa-main" if VSA else "fastwan-qad-main"
+    d = os.path.join(here, "..", "..", "evidence", "goldens", name)
     os.makedirs(d, exist_ok=True)
     return os.path.normpath(d)
 
@@ -117,13 +122,26 @@ def main() -> None:
     np.savez(os.path.join(out, "probe_inputs.npz"),
              latent=probe_x.numpy(), context=probe_ctx.numpy())
 
+    def probe_meta():
+        """VSA probes/e2e need attention metadata in the forward context —
+        built with THEIR builder, exactly like the DMD stage does."""
+        if not VSA:
+            return None
+        from fastvideo.attention.backends.video_sparse_attn import (
+            VideoSparseAttentionMetadataBuilder)
+        return VideoSparseAttentionMetadataBuilder().build(
+            current_timestep=0, raw_latent_shape=PROBE_LATENT[2:],
+            patch_size=(1, 2, 2), VSA_sparsity=VSA_SPARSITY,
+            device=torch.device(device))
+
     def probe(dit, tag: str) -> None:
+        meta = probe_meta()
         for t in PROBE_TS:
             xt = probe_x.to(device, torch.bfloat16)
             ct = probe_ctx.to(device)          # fp32, like the real embeds
             tt = torch.tensor([t], dtype=torch.int64, device=device)
             with torch.no_grad(), torch.amp.autocast("cuda", dtype=torch.bfloat16), \
-                    set_forward_context(current_timestep=0, attn_metadata=None,
+                    set_forward_context(current_timestep=0, attn_metadata=meta,
                                         forward_batch=ForwardBatch(data_type="dummy")):
                 o = dit(hidden_states=xt, encoder_hidden_states=ct, timestep=tt)
             o = o[0] if isinstance(o, (tuple, list)) else o
@@ -153,13 +171,16 @@ def main() -> None:
             dit = dit.to(dtype=torch.bfloat16)
         return dit
 
-    dit = load_dit(quant=False)
-    probe(dit, "bf16")
-    del dit
-    torch.cuda.empty_cache()
-
-    dit_q = load_dit(quant=True)
-    probe(dit_q, "fp8")
+    if VSA:
+        dit_q = load_dit(quant=False)  # the VSA artifact serves bf16, no fp8
+        probe(dit_q, "vsa")
+    else:
+        dit = load_dit(quant=False)
+        probe(dit, "bf16")
+        del dit
+        torch.cuda.empty_cache()
+        dit_q = load_dit(quant=True)
+        probe(dit_q, "fp8")
 
     # ------------------------------------------------ e2e: THEIR DMD loop --- #
     stage = DmdDenoisingStage(transformer=dit_q,
@@ -187,11 +208,22 @@ def main() -> None:
 
     h = dit_q.register_forward_hook(hook, with_kwargs=True)
 
-    fargs = FastVideoArgs(model_path=dit_path, pipeline_config=FastWan2_1_T2V_480P_Config())
+    fargs = FastVideoArgs(model_path=dit_path, pipeline_config=FastWan2_1_T2V_480P_Config(),
+                          **_NO_WRAP)
     fargs.device = torch.device(device)
+    if VSA:
+        fargs.VSA_sparsity = VSA_SPARSITY
+    # timesteps/guidance/eta satisfy verify_input; the stage's loop actually
+    # runs the config's dmd_denoising_steps with its own internal scheduler.
     batch = ForwardBatch(data_type="video", latents=latents,
                          prompt_embeds=[e2e_embeds], generator=[gen_e2e],
-                         num_inference_steps=3)
+                         num_inference_steps=3,
+                         timesteps=torch.tensor([1000, 757, 522], device=device),
+                         guidance_scale=1.0, eta=0.0,
+                         do_classifier_free_guidance=False,
+                         # BCTHW dims; the VSA branch reads [2:5] -> (T, H, W)
+                         raw_latent_shape=torch.Size(
+                             (1, 16, E2E_BTCHW[1], E2E_BTCHW[3], E2E_BTCHW[4])))
     batch = stage(batch, fargs)
     h.remove()
 
@@ -242,7 +274,9 @@ def main() -> None:
         "python": sys.version.split()[0],
         "gpu": torch.cuda.get_device_name(0),
         "attention_backend": os.environ["FASTVIDEO_ATTENTION_BACKEND"],
-        "quant": "FP8 per-tensor (dynamic act, post-load weight quant from bf16)",
+        "quant": ("none (bf16, VSA sparsity %.2f)" % VSA_SPARSITY) if VSA else
+                 "FP8 per-tensor (dynamic act, post-load weight quant from bf16)",
+        "vsa_sparsity": VSA_SPARSITY if VSA else None,
         "seed": SEED, "e2e_prompt": E2E_PROMPT, "probe_prompt": PROBE_PROMPT,
         "probe_timesteps": list(PROBE_TS), "probe_latent_bcfhw": list(PROBE_LATENT),
         "e2e_latent_btchw": list(E2E_BTCHW),

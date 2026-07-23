@@ -177,12 +177,13 @@ class WanFVForwardInputs:
     latent_btchw: Any   # [1, T, C, h, w] — main's DMD state layout
     timestep: Any       # [1] int64 tensor (main feeds the raw 1000/757/522)
     text: Any           # [1, 512, 4096] UMT5 embeddings, fp32
+    vsa: Any = None     # VSAMeta for VSA-distilled variants, else None
 
     def forward(self, transformer: Any) -> Any:
         """Returns velocity in BTCHW. Caller provides main's precision regime
         (autocast bf16, input pre-cast to the compute dtype)."""
         out = transformer(self.latent_btchw.permute(0, 2, 1, 3, 4),
-                          self.text, self.timestep)
+                          self.text, self.timestep, vsa=self.vsa)
         return out.permute(0, 2, 1, 3, 4)
 
 
@@ -200,12 +201,14 @@ class WanDMDLoop(WanDenoiseLoop):
     semantics = "wan.dmd.fvmain/v1"
 
     def __init__(self, *, loop_id: str, timesteps: tuple[int, ...] = (1000, 757, 522),
-                 shift: float = 8.0, **geometry: Any):
+                 shift: float = 8.0, vsa_sparsity: float | None = None, **geometry: Any):
         super().__init__(loop_id=loop_id, **geometry)
         self.timesteps = tuple(int(t) for t in timesteps)
         # NOTE: main hardcodes the DMD stage's internal scheduler at shift 8.0
         # regardless of config flow_shift; cards declare it explicitly.
         self.shift = float(shift)
+        # part of the released recipe for VSA-distilled variants (0.8)
+        self.vsa_sparsity = vsa_sparsity
 
     def init(self, request: Any, instance: Any, inputs: Mapping[str, Any]) -> LoopState:
         import torch
@@ -229,6 +232,14 @@ class WanDMDLoop(WanDenoiseLoop):
         st.scratch["instance"] = instance
         from fastvideo2.loading import torch_dtype
         st.scratch["dit_dtype"] = torch_dtype(instance.card.provenance.precision)
+        st.scratch["vsa"] = None
+        if self.vsa_sparsity is not None:
+            # metadata is geometry+sparsity-derived and step-invariant; the
+            # post-patch grid for Wan's (1,2,2) patch is (T, h/2, w/2)
+            from fastvideo2.layers.vsa import build_vsa_meta
+            _, t_lat, _, h_lat, w_lat = shape
+            st.scratch["vsa"] = build_vsa_meta((t_lat, h_lat // 2, w_lat // 2),
+                                               self.vsa_sparsity, instance.device)
         return st
 
     def next(self, st: LoopState) -> "WorkPlan | Done":
@@ -242,6 +253,7 @@ class WanDMDLoop(WanDenoiseLoop):
         instance = st.scratch["instance"]
         dit_dtype = st.scratch["dit_dtype"]
         gen = st.scratch["gen"]
+        vsa = st.scratch["vsa"]
 
         def run() -> dict:
             import torch
@@ -251,7 +263,7 @@ class WanDMDLoop(WanDenoiseLoop):
             autocast = torch.amp.autocast("cuda", dtype=dit_dtype,
                                           enabled=x.is_cuda and dit_dtype != torch.float32)
             with torch.no_grad(), autocast:
-                v = WanFVForwardInputs(x.to(dit_dtype), t, text).forward(dit)
+                v = WanFVForwardInputs(x.to(dit_dtype), t, text, vsa=vsa).forward(dit)
             # pred_noise_to_pred_video: fp64 math, cast back to the PRED dtype
             sigma_t = torch.tensor(sigma, dtype=torch.float32, device=device).double()
             x0 = (x.double() - sigma_t * v.double()).to(v.dtype)

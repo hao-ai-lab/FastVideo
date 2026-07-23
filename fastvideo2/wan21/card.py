@@ -88,3 +88,35 @@ FASTWAN_QAD_FP8_1_3B = derive(
     sampling_defaults={"num_steps": 3, "guidance_scale": 1.0, "shift": 8.0,
                        "negative_prompt": ""},
 )
+
+
+# --------------------------------------------------------------------------- #
+# FastWan (VSA-distilled) — sparse-attention DMD student, bf16 serving.
+# Same authority and gates as QAD; the kernel and 0.8 sparsity are part of
+# the released recipe. VSA fails closed when fastvideo_kernel is absent.
+# --------------------------------------------------------------------------- #
+FASTWAN_T2V_1_3B = derive(
+    WAN21_T2V_1_3B,
+    model_id="fastwan-t2v-1.3b",
+    weights="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+    components={
+        "transformer": ComponentSpec("transformer", kind="dit",
+                                     module="fastvideo2.wan21.model_fv:WanModelFVVSA",
+                                     subfolder="transformer", dtype="bf16"),
+        "text_encoder": ComponentSpec("text_encoder", kind="text_encoder",
+                                      module="transformers:UMT5EncoderModel",
+                                      subfolder="text_encoder", dtype="fp32"),
+    },
+    loops={
+        "denoise": LoopSpec("denoise", loop="fastvideo2.wan21.loop:WanDMDLoop",
+                            params={"timesteps": [1000, 757, 522], "shift": 8.0,
+                                    "vsa_sparsity": 0.8,
+                                    "latent_channels": 16, "spatial_ratio": 8,
+                                    "temporal_ratio": 4}),
+    },
+    provenance={"method": "dmd-vsa", "parents": ("wan2.1-t2v-1.3b",),
+                "assumes_loop": "wan.dmd.fvmain/v1", "precision": "bf16",
+                "substitution": "quality-changing"},
+    sampling_defaults={"num_steps": 3, "guidance_scale": 1.0, "shift": 8.0,
+                       "negative_prompt": ""},
+)

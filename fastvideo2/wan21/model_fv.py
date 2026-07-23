@@ -42,7 +42,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ["WanModelFV", "WanModelFVFP8"]
+__all__ = ["WanModelFV", "WanModelFVFP8", "WanModelFVVSA"]
 
 
 # --------------------------------------------------------------------------- #
@@ -201,14 +201,8 @@ class WanBlockFV(nn.Module):
         self.ffn = FeedForwardFV(dim, ffn_dim)
         self.scale_shift_table = nn.Parameter(torch.zeros(1, 6, dim))
 
-    def forward(self, hidden_states, encoder_hidden_states, temb, freqs_cis):
-        orig_dtype = hidden_states.dtype
-        # modulation in fp32 (blocks only — the final norm stays bf16)
-        e = self.scale_shift_table + temb.float()
-        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(6, dim=1)
-
-        # 1. self-attention (block-level projections, main's order)
-        norm_hidden_states = (self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa).to(orig_dtype)
+    def _self_attention(self, norm_hidden_states, freqs_cis, vsa):
+        assert vsa is None, "dense block got VSA metadata — wrong block class for this card"
         a = self.attn1
         query = a.norm_q(a.to_q(norm_hidden_states)).unflatten(2, (self.num_heads, -1))
         key = a.norm_k(a.to_k(norm_hidden_states)).unflatten(2, (self.num_heads, -1))
@@ -217,7 +211,17 @@ class WanBlockFV(nn.Module):
         query = _apply_rotary(query, cos, sin)
         key = _apply_rotary(key, cos, sin)
         attn_output = _attention(query, key, value, scale=self.head_dim ** -0.5)
-        attn_output = a.to_out(attn_output.flatten(2))
+        return a.to_out(attn_output.flatten(2))
+
+    def forward(self, hidden_states, encoder_hidden_states, temb, freqs_cis, vsa=None):
+        orig_dtype = hidden_states.dtype
+        # modulation in fp32 (blocks only — the final norm stays bf16)
+        e = self.scale_shift_table + temb.float()
+        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(6, dim=1)
+
+        # 1. self-attention (block-level projections, main's order)
+        norm_hidden_states = (self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa).to(orig_dtype)
+        attn_output = self._self_attention(norm_hidden_states, freqs_cis, vsa)
 
         # main's self_attn_residual_norm: residual promotes to fp32 via the
         # fp32 gate; affine LN (norm2); null shift/scale are exact no-ops.
@@ -266,8 +270,42 @@ class _ConditionEmbedderFV(nn.Module):
         return temb, timestep_proj, encoder_hidden_states
 
 
+class WanBlockFVVSA(WanBlockFV):
+    """main's WanTransformerBlock_VSA: identical modulation/residual chain,
+    with a gate_compress projection (BLOCK-level checkpoint key — FastVideo
+    publishes the VSA checkpoints with ``blocks.N.to_gate_compress``, main's
+    own name, inside an otherwise diffusers-keyed layout) and the block-sparse
+    kernel in place of dense attention. RoPE applies to q,k only; the gate is
+    tiled alongside q/k/v and consumed by the kernel."""
+
+    def __init__(self, dim: int, ffn_dim: int, num_heads: int, eps: float = 1e-6):
+        super().__init__(dim, ffn_dim, num_heads, eps=eps)
+        self.to_gate_compress = nn.Linear(dim, dim)
+
+    def _self_attention(self, norm_hidden_states, freqs_cis, vsa):
+        assert vsa is not None, "VSA block requires metadata (card declares vsa_sparsity)"
+        import torch as _torch
+        from fastvideo2.layers.vsa import vsa_attention
+        a = self.attn1
+        query = a.norm_q(a.to_q(norm_hidden_states))
+        key = a.norm_k(a.to_k(norm_hidden_states))
+        value = a.to_v(norm_hidden_states)
+        gate_compress = self.to_gate_compress(norm_hidden_states)
+        h = self.num_heads
+        query, key, value, gate_compress = (t.unflatten(2, (h, -1))
+                                            for t in (query, key, value, gate_compress))
+        cos, sin = freqs_cis
+        batch = query.shape[0]
+        qkvg = _torch.cat([query, key, value, gate_compress], dim=0)
+        qkvg[:batch * 2] = _apply_rotary(qkvg[:batch * 2], cos, sin)
+        attn_output = vsa_attention(qkvg, vsa)
+        return a.to_out(attn_output.flatten(2))
+
+
 class WanModelFV(nn.Module):
     """main's WanTransformer3DModel at sp=1/tp=1, T2V, diffusers-native keys."""
+
+    block_cls: type = WanBlockFV
 
     def __init__(self, *, num_attention_heads: int = 12, attention_head_dim: int = 128,
                  in_channels: int = 16, out_channels: int = 16, ffn_dim: int = 8960,
@@ -285,14 +323,15 @@ class WanModelFV(nn.Module):
                                          stride=self.patch_size)
         self.condition_embedder = _ConditionEmbedderFV(dim, freq_dim, text_dim)
         self.blocks = nn.ModuleList(
-            [WanBlockFV(dim, ffn_dim, num_attention_heads, eps=eps) for _ in range(num_layers)])
+            [type(self).block_cls(dim, ffn_dim, num_attention_heads, eps=eps)
+             for _ in range(num_layers)])
         self.norm_out = FP32LayerNormFV(dim, eps=eps, elementwise_affine=False)
         self.proj_out = nn.Linear(dim, out_channels * math.prod(self.patch_size))
         self.scale_shift_table = nn.Parameter(torch.zeros(1, 2, dim))
 
     def forward(self, hidden_states: torch.Tensor,
                 encoder_hidden_states: torch.Tensor | list[torch.Tensor],
-                timestep: torch.Tensor, **_ignored: Any) -> torch.Tensor:
+                timestep: torch.Tensor, vsa: Any = None, **_ignored: Any) -> torch.Tensor:
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
@@ -315,7 +354,8 @@ class WanModelFV(nn.Module):
         assert encoder_hidden_states.dtype == orig_dtype
 
         for block in self.blocks:
-            hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj, freqs_cis)
+            hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj,
+                                  freqs_cis, vsa)
 
         # final modulation in bf16 (no .float() here — main's asymmetry),
         # norm output promoted to fp32 for the modulate, cast back.
@@ -353,6 +393,14 @@ class WanModelFV(nn.Module):
             # params — no fp32 islands in main's load, unlike official's).
             model = model.to(torch_dtype)
         return model.eval()
+
+
+class WanModelFVVSA(WanModelFV):
+    """FastWan (VSA-distilled) serving variant: bf16, block-sparse attention.
+    Loading fails closed if the checkpoint lacks ``to_gate_compress`` keys
+    (strict load) or if the kernel is missing (first forward raises)."""
+
+    block_cls = WanBlockFVVSA
 
 
 class WanModelFVFP8(WanModelFV):

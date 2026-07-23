@@ -57,3 +57,33 @@ def test_fp8_linear_cpu_dequant_path():
     model = torch.nn.Sequential(torch.nn.Linear(4, 4).to(torch.bfloat16))
     quantize_fp8_(model, ["0"])
     assert type(model[0]).__name__ == "FP8Linear"
+
+
+def test_vsa_card_resolves_and_fails_closed_by_construction():
+    card, _ = resolve("fastwan-t2v-1.3b")
+    assert card.components["transformer"].module.endswith(":WanModelFVVSA")
+    assert card.loops["denoise"].params["vsa_sparsity"] == 0.8
+    assert card.provenance.assumes_loop == "wan.dmd.fvmain/v1"
+    assert card.digest() != FASTWAN_QAD_FP8_1_3B.digest()
+
+
+def test_vsa_meta_math_matches_main():
+    torch = pytest.importorskip("torch")
+    from fastvideo2.layers.vsa import VSA_TILE_SIZE, build_vsa_meta
+    assert VSA_TILE_SIZE == (4, 4, 4)
+    # grid smaller than one tile: single block of S voxels, identity-ish maps
+    m = build_vsa_meta((2, 3, 3), 0.8, "cpu")
+    S = 2 * 3 * 3
+    assert m.block_sizes.tolist() == [S] and m.topk == 1
+    assert sorted(m.tile_index.tolist()) == list(range(S))
+    x = torch.arange(S).view(1, S, 1, 1)
+    buf = torch.zeros(1, m.padded_len, 1, 1, dtype=x.dtype)
+    buf[:, m.non_pad_index] = x[:, m.tile_index]
+    assert torch.equal(buf[:, m.untile_index][0, :, 0, 0], torch.arange(S))  # round trip
+    # partial tiles along T: (5,4,4) -> T tile sizes [4,1] -> blocks [64,16]
+    m2 = build_vsa_meta((5, 4, 4), 0.9, "cpu")
+    assert m2.block_sizes.tolist() == [64, 16]
+    assert m2.topk == 1  # ceil(0.1*2)=1
+    # topk never exceeds block count and never hits 0
+    m3 = build_vsa_meta((8, 8, 8), 0.0, "cpu")
+    assert m3.topk == m3.block_sizes.numel()
