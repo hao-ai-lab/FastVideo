@@ -298,9 +298,16 @@ def sample_wantrack(
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
     num_frames = int(latents.shape[1])
-    if num_frames % chunk_size != 0:
+    if num_frames % chunk_size == 0:
+        block_sizes = [chunk_size] * (num_frames // chunk_size)
+    elif (num_frames - 1) % chunk_size == 0:
+        # Wan I2V clips have one leading latent frame followed by regular
+        # causal blocks (for example, 31 = 1 + 10 * 3).
+        block_sizes = [1] + [chunk_size] * ((num_frames - 1) // chunk_size)
+    else:
         raise ValueError("Causal WanTrack inference requires latent frames "
-                         f"divisible by chunk_size; got {num_frames} and "
+                         "to form complete blocks, optionally after one "
+                         f"leading I2V frame; got {num_frames} and "
                          f"{chunk_size}")
 
     for branch in ("full", "no_text", "no_motion"):
@@ -308,8 +315,9 @@ def sample_wantrack(
 
     sampled_blocks: list[torch.Tensor] = []
     try:
-        for start_frame in range(0, num_frames, chunk_size):
-            block = latents[:, start_frame:start_frame + chunk_size]
+        start_frame = 0
+        for block_size in block_sizes:
+            block = latents[:, start_frame:start_frame + block_size]
             block, branches = _sample_block(
                 model,
                 block,
@@ -329,6 +337,7 @@ def sample_wantrack(
                 start_frame=start_frame,
                 branches=branches,
             )
+            start_frame += block_size
     finally:
         for branch in ("full", "no_text", "no_motion"):
             model.clear_caches(cache_tag=f"wantrack_{branch}")
