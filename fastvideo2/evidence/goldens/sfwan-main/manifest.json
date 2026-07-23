@@ -1,0 +1,23 @@
+{
+  "repo": "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
+  "snapshot": "4b44356635ae5e927ca552a220f768022be76004",
+  "fastvideo_commit": "c459a1897899ffcec3be7765534d81000b9bb9c1",
+  "torch": "2.12.0+cu130",
+  "python": "3.12.13",
+  "gpu": "NVIDIA GB200",
+  "attention_backend": "FLASH_ATTN",
+  "seed": 1234,
+  "e2e_prompt": "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest. The playful yet serene atmosphere is complemented by soft natural light filtering through the petals. Mid-shot, warm and cheerful tones.",
+  "probe_prompt": "A cat and a dog baking a cake together in a kitchen.",
+  "dmd_denoising_steps": [
+    1000,
+    750,
+    500,
+    250
+  ],
+  "warp_denoising_step": true,
+  "scheduler": "SelfForcingFlowMatchScheduler(shift=5, extra_one_step, sigma_min=0)",
+  "num_frames_per_block": 3,
+  "context_noise": 0,
+  "notes": "causal chunk rollout via main's CausalDMDDenosingStage; per-forward hashes for all 35 forwards, full tensors for the first two chunks; no compile/fsdp; FLASH_ATTN"
+}

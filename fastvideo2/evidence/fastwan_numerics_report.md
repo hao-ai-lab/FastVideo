@@ -64,3 +64,19 @@ session evidence).
 - Committed goldens are trimmed (per-step model outputs and the reproducible
   step-0 input dropped); the full set regenerates via
   `gates/capture_fastvideo_main.py {qad,vsa}` — one command, pinned config.
+
+## SFWan (self-forcing causal) — added 2026-07-23
+
+`sfwan-t2v-1.3b` (wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers) anchored bitwise on
+the FIRST complete run: all **35/35 chunk-rollout forwards** (7 blocks x
+4 warped DMD steps + context pass) hash-match main's CausalDMDDenosingStage
+exactly, text 0.0, e2e final latents 0.0 (`anchor.sfwan-main` pass).
+
+Causal-specific semantics vendored (each different from BOTH other Wan
+forwards): per-frame temb `[B, T_temb, 6, dim]`; ALL-bf16 modulation (no
+fp32 promotion anywhere); plain bf16 LayerNorms; fp64 RoPE multipliers at
+absolute positions (start_frame offsets); block-causal KV cache
+(21-frame global window, `.detach()` on writes — training rollout reuses
+this same module); cached text cross-attention; warp table =
+SelfForcingFlowMatchScheduler(shift 5, extra_one_step) rows
+`[1000, 937.5, 833.33, 625]` self-indexing their own sigmas.
