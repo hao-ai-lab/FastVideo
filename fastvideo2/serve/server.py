@@ -110,19 +110,20 @@ def build_app(model: Any) -> Any:
 
     @app.websocket("/v1/stream")
     async def stream(ws: WebSocket):
-        """One request per connection: send a VideoRequest JSON, receive
-        per-step progress events, then the terminal result with latents_sha
-        and an MP4 download URL."""
+        """One request per connection: send a request JSON, receive per-step
+        progress events, then the terminal result with latents_sha and an
+        MP4 download URL."""
         await ws.accept()
         try:
             payload = await ws.receive_json()
+            job_id = uuid.uuid4().hex[:12]
+            req = _to_request(payload, job_id)
         except WebSocketDisconnect:
             return
-        job_id = uuid.uuid4().hex[:12]
-        try:
-            req = _to_request(payload, job_id)
         except Exception as e:
-            await ws.send_json({"type": "error", "error": str(e)})
+            import traceback
+            await ws.send_json({"type": "error",
+                                "error": traceback.format_exc()[-600:] or str(e)})
             await ws.close()
             return
         loop = asyncio.get_running_loop()
