@@ -262,7 +262,9 @@ def run_dmd2(mode: str = "dmd2") -> int:
         # x0 hashes are bitwise until the FIRST student optimizer update
         # (whose backward noise makes later hashes unmatchable by definition);
         # after that the losses carry the parity signal
-        if n.startswith("x0.step"):
+        if n == "fwd.matches":
+            ok, why = True, "info"
+        elif n.startswith("x0.step"):
             idx = int(n.split("step")[1])
             ok, why = (v == 0.0, "exact") if idx <= first_update else (True, "info")
         elif n.startswith(("gen.", "fake.")):
@@ -328,6 +330,19 @@ def run_self_forcing() -> int:
         return hashlib.sha256(t.detach().to(torch.float32).cpu().numpy().tobytes()
                               ).hexdigest()[:16]
 
+    gold_fwd = []
+    fh = os.path.join(gold, "forward_hashes.json")
+    if os.path.exists(fh):
+        with open(fh) as f:
+            gold_fwd = json.load(f)
+    our_fwd: list = []
+
+    def fwd_hook(module, args_in, kwargs_in, output):
+        our_fwd.append({"x": _hash(args_in[0]), "o": _hash(output),
+                        "t": [float(v) for v in args_in[2].flatten().tolist()][:2]})
+
+    hook_handle = step_ctx.student.model.register_forward_hook(fwd_hook, with_kwargs=True)
+
     rows: list[tuple[str, float]] = []
     for i, rec in enumerate(steps):
         z = np.load(os.path.join(gold, f"step{i}.npz"))
@@ -384,12 +399,28 @@ def run_self_forcing() -> int:
               f"/{rec['gen_loss']:.6f} fake {float(closs.detach().item()):.6f}/{rec['fake_loss']:.6f}",
               flush=True)
 
+    hook_handle.remove()
+    n_match = 0
+    first_div = None
+    for k, (g, r) in enumerate(zip(gold_fwd, our_fwd)):
+        if g["x"] == r["x"] and g["o"] == r["o"]:
+            n_match += 1
+        elif first_div is None:
+            first_div = k
+            print(f"  FIRST FWD DIVERGENCE @ {k}: gold t={g['t']} x={g['x'][:8]} "
+                  f"o={g['o'][:8]} | ours t={r['t']} x={r['x'][:8]} o={r['o'][:8]}",
+                  flush=True)
+    rows.append(("fwd.matches", float(len(gold_fwd) - n_match)))
+
     BAND = 1.5 * max(manifest.get("self_noise_max", 2.15e-3), 1e-4)
     first_update = next((i for i, r in enumerate(steps) if r["gen_loss"] != 0.0), 99)
-    print(f"\nSelfForcing anchor vs {manifest['fastvideo_commit'][:9]} (band {BAND:.2e})")
+    print(f"\nSelfForcing anchor vs {manifest['fastvideo_commit'][:9]} (band {BAND:.2e}, "
+          f"{n_match}/{len(gold_fwd)} fwd bitwise)")
     failed = []
     for n, v in rows:
-        if n.startswith("x0.step"):
+        if n == "fwd.matches":
+            ok, why = True, "info"
+        elif n.startswith("x0.step"):
             idx = int(n.split("step")[1])
             ok, why = (v == 0.0, "exact") if idx <= first_update else (True, "info")
         elif n.startswith(("gen.", "fake.")):

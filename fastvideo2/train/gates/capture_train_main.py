@@ -460,6 +460,9 @@ def main() -> None:
             })
         with open(os.path.join(out, "steps.json"), "w") as f:
             json.dump(meta_steps, f, indent=1)
+        if SF:
+            with open(os.path.join(out, "forward_hashes.json"), "w") as f:
+                json.dump(fwd_seq, f, indent=1)
         import subprocess
         import fastvideo
         src = os.path.dirname(os.path.dirname(os.path.abspath(fastvideo.__file__)))
@@ -491,8 +494,17 @@ def main() -> None:
                                                    args=args)
     tf = pipeline.get_module("transformer")
 
+    fwd_seq: list = []
+
     def fwd_hook(module, args_in, kwargs_in, output):
         o = output[0] if isinstance(output, (tuple, list)) else output
+        if SF:
+            t = kwargs_in.get("timestep", args_in[2] if len(args_in) > 2 else None)
+            fwd_seq.append({"x": _hash(args_in[0] if args_in else
+                                       kwargs_in["hidden_states"]),
+                            "o": _hash(o),
+                            "t": [float(v) for v in t.flatten().tolist()][:2]})
+            return
         i = len([r for r in records if "pred_hash" in r])
         if i < len(records):
             records[i]["pred_hash"] = _hash(o)
