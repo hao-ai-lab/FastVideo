@@ -95,12 +95,13 @@ class PreprocessWorkflow(WorkflowBase):
         dataset_output_dir = self.fastvideo_args.preprocess_config.dataset_output_dir
         os.makedirs(dataset_output_dir, exist_ok=True)
 
-        validation_dataset_output_dir = os.path.join(dataset_output_dir, "validation_dataset",
+        validation_dataset_output_dir = os.path.join(dataset_output_dir, "validation_parquet_dataset",
                                                      f"worker_{get_world_rank()}")
         os.makedirs(validation_dataset_output_dir, exist_ok=True)
         self.validation_dataset_output_dir = validation_dataset_output_dir
 
-        training_dataset_output_dir = os.path.join(dataset_output_dir, "training_dataset", f"worker_{get_world_rank()}")
+        training_dataset_output_dir = os.path.join(dataset_output_dir, "combined_parquet_dataset",
+                                                   f"worker_{get_world_rank()}")
         os.makedirs(training_dataset_output_dir, exist_ok=True)
         self.training_dataset_output_dir = training_dataset_output_dir
 

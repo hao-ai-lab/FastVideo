@@ -79,6 +79,17 @@ steps:
             limit: 2
       agents:
         queue: "default"
+    - label: ":microscope: Preprocessing Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "preprocessing"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
     - label: ":microscope: DreamVerse App Tests"
       if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "dreamverse_app"
       command: "timeout 90m .buildkite/scripts/pr_test.sh"
@@ -322,6 +333,29 @@ steps:
                 label: ":microscope: Unit Tests"
                 env:
                   - TEST_TYPE=unit_test
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/pipelines/preprocess/**"
+                - "fastvideo/workflow/preprocess/**"
+                - "fastvideo/dataset/dataloader/parquet_io.py"
+                - "fastvideo/dataset/dataloader/record_schema.py"
+                - "fastvideo/dataset/dataloader/schema.py"
+                - "fastvideo/configs/configs.py"
+                - "fastvideo/fastvideo_args.py"
+                - "fastvideo/tests/workflow/test_t2v_preprocessing_e2e.py"
+                - "fastvideo/tests/nightly/reference_video_1_sample_v0.mp4"
+                - "fastvideo/tests/modal/pr_test.py"
+                - ".buildkite/pipeline.yml"
+                - ".buildkite/scripts/pr_test.sh"
+                - ".github/workflows/ci-slash-commands.yml"
+                - "pyproject.toml"
+                - "docker/Dockerfile"
+              config:
+                command: "timeout 20m .buildkite/scripts/pr_test.sh"
+                label: ":microscope: Preprocessing Tests"
+                env:
+                  - TEST_TYPE=preprocessing
                 agents:
                   queue: "default"
             - path:

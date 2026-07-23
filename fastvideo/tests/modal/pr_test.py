@@ -375,6 +375,21 @@ def run_unit_test():
     )
 
 
+@app.function(gpu="L40S:1",
+              image=image,
+              timeout=1200,
+              secrets=[hf_secret, ci_env_secret],
+              volumes={"/root/data": model_vol})
+def run_preprocessing_tests():
+    run_test_command(
+        "export HF_HOME='/root/data/.cache' && "
+        "hf auth login --token $HF_API_KEY && "
+        "FASTVIDEO_PREPROCESSING_E2E=1 FASTVIDEO_FA4=0 "
+        "pytest ./fastvideo/tests/workflow/test_t2v_preprocessing_e2e.py -vs",
+        build_kernel=False,
+    )
+
+
 # TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?
 @app.function(gpu="L40S:1",
               image=dreamverse_image,
