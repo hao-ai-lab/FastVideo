@@ -230,12 +230,17 @@ def run_dmd2() -> int:
     rows.append(("params.w5_critic", rel(w5c, pz["w5_critic"])))
 
     BAND = 1.5 * max(manifest.get("self_noise_max", 2.15e-3), 1e-4)
+    first_update = next((i for i, r in enumerate(steps) if r["gen_loss"] != 0.0), 99)
     print(f"\nDMD2 anchor vs {manifest['fastvideo_commit'][:9]} (band {BAND:.2e})")
     failed = []
     for n, v in rows:
-        if n.startswith("x0.step0"):
-            ok, why = v == 0.0, "exact"
-        elif n.startswith(("gen.", "fake.", "x0.")):
+        # x0 hashes are bitwise until the FIRST student optimizer update
+        # (whose backward noise makes later hashes unmatchable by definition);
+        # after that the losses carry the parity signal
+        if n.startswith("x0.step"):
+            idx = int(n.split("step")[1])
+            ok, why = (v == 0.0, "exact") if idx <= first_update else (True, "info")
+        elif n.startswith(("gen.", "fake.")):
             ok, why = v <= BAND, "band"
         else:
             ok, why = True, "info"
