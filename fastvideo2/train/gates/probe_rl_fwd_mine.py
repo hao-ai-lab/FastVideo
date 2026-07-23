@@ -82,6 +82,24 @@ def main() -> None:
                             str(o.dtype), list(o.shape)])
         return fn
 
+    b0 = model.blocks[0]
+    rec["weights"] = {}
+    for wn, wm in (("to_q", b0.attn1.to_q), ("norm_q", b0.attn1.norm_q),
+                   ("to_k", b0.attn1.to_k)):
+        w = wm.weight
+        rec["weights"][wn] = [_hash(w), str(w.dtype), list(w.shape),
+                              str(getattr(wm, "bias", None) is not None)]
+
+    def pre(name):
+        def fn(mod, args):
+            if args and torch.is_tensor(args[0]):
+                rec["weights"][f"{name}.in"] = [_hash(args[0]),
+                                                str(args[0].dtype)]
+        return fn
+
+    handles.append(b0.attn1.to_q.register_forward_pre_hook(pre("to_q")))
+    handles.append(b0.attn1.norm_q.register_forward_pre_hook(pre("norm_q")))
+
     rec["block0_seq"] = seq
     for name, mod in model.named_children():
         if name == "blocks":
@@ -116,6 +134,10 @@ def main() -> None:
         print("== condition_embedder ALL outputs ==")
         print("  main:", ref["hooks"].get("condition_embedder"))
         print("  mine:", rec["hooks"].get("condition_embedder"))
+        print("== block0 weights + op inputs ==")
+        for k in sorted(set(ref.get("weights", {})) | set(rec["weights"])):
+            a, b = ref.get("weights", {}).get(k), rec["weights"].get(k)
+            print(f"  {k:10s} {'SAME' if a == b else 'DIFF'} main={a} mine={b}")
         print("== block0 internal call sequence (execution order) ==")
         ms, rs = rec["block0_seq"], ref["block0_seq"]
         n = max(len(ms), len(rs))

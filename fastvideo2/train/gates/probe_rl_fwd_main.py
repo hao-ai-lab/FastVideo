@@ -125,6 +125,24 @@ def main() -> None:
                                 str(o.dtype), list(o.shape)])
             return fn
 
+        b0 = tr.blocks[0]
+        rec["weights"] = {}
+        for wn, wm in (("to_q", b0.to_q), ("norm_q", b0.norm_q),
+                       ("to_k", b0.to_k)):
+            w = wm.weight
+            rec["weights"][wn] = [_hash(w), str(w.dtype), list(w.shape),
+                                  str(getattr(wm, "bias", None) is not None)]
+
+        def pre(name):
+            def fn(mod, args):
+                if args and torch.is_tensor(args[0]):
+                    rec["weights"][f"{name}.in"] = [_hash(args[0]),
+                                                    str(args[0].dtype)]
+            return fn
+
+        handles.append(b0.to_q.register_forward_pre_hook(pre("to_q")))
+        handles.append(b0.norm_q.register_forward_pre_hook(pre("norm_q")))
+
         rec["block0_seq"] = seq
         for name, mod in tr.named_children():
             if name == "blocks":
