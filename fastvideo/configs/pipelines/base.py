@@ -31,7 +31,7 @@ class PipelineConfig:
     pipeline_config_path: str | None = None
 
     # Video generation parameters
-    embedded_cfg_scale: float = 6.0
+    embedded_cfg_scale: float | None = 6.0
     flow_shift: float | None = None
     flow_shift_sr: float | None = None
     disable_autocast: bool = False
@@ -233,7 +233,7 @@ class PipelineConfig:
             raise ValueError("model_path is required in kwargs")
 
         # 1. Get the pipeline config class from the registry
-        pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
+        pipeline_config_cls = get_pipeline_config_cls_from_name(model_path, kwargs.get("workload_type"))
 
         # 2. Instantiate PipelineConfig
         if pipeline_config_cls is None:

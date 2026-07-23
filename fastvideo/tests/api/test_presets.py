@@ -557,16 +557,18 @@ class TestLingBotVideoPresets:
         assert "Multiple models matched" not in caplog.text
 
     def test_lingbot_video_presets_registered(self) -> None:
-        """Register both released LingBot-Video inference layouts."""
+        """Register T2V and TI2V presets for both released model layouts."""
         import fastvideo.registry  # noqa: F401
+        from fastvideo.api.sampling_param import SamplingParam
         from fastvideo.registry import get_preset_selection
 
         presets = get_presets_for_family("lingbot_video")
-        assert {preset.name
-                for preset in presets} == {
-                    "lingbot_video_dense_t2v",
-                    "lingbot_video_moe_refiner_t2v",
-                }
+        assert {preset.name for preset in presets} == {
+            "lingbot_video_dense_t2v",
+            "lingbot_video_dense_ti2v",
+            "lingbot_video_moe_refiner_t2v",
+            "lingbot_video_moe_refiner_ti2v",
+        }
         assert get_preset_selection("FastVideo/LingBot-Video-Dense-1.3B-Diffusers") == (
             "lingbot_video_dense_t2v",
             "lingbot_video",
@@ -575,6 +577,21 @@ class TestLingBotVideoPresets:
             "lingbot_video_moe_refiner_t2v",
             "lingbot_video",
         )
+        assert get_preset_selection(
+            "FastVideo/LingBot-Video-Dense-1.3B-Diffusers",
+            "i2v",
+        ) == ("lingbot_video_dense_ti2v", "lingbot_video")
+        assert get_preset_selection(
+            "FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers",
+            "i2v",
+        ) == ("lingbot_video_moe_refiner_ti2v", "lingbot_video")
+        ti2v_sampling = SamplingParam.from_pretrained(
+            "FastVideo/LingBot-Video-Dense-1.3B-Diffusers",
+            "i2v",
+        )
+        assert ti2v_sampling.height == 480
+        assert ti2v_sampling.width == 832
+        assert ti2v_sampling.batch_cfg is True
 
     def test_moe_refiner_defaults(self) -> None:
         """Expose the official base and 1080p refiner sampling defaults."""

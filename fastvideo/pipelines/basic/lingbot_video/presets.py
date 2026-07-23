@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Official LingBot-Video T2V inference presets."""
+"""Official LingBot-Video T2V and TI2V inference presets."""
 
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
@@ -89,4 +89,63 @@ LINGBOT_VIDEO_MOE_REFINER_T2V = InferencePreset(
     },
 )
 
-ALL_PRESETS = (LINGBOT_VIDEO_DENSE_T2V, LINGBOT_VIDEO_MOE_REFINER_T2V)
+LINGBOT_VIDEO_DENSE_TI2V = InferencePreset(
+    name="lingbot_video_dense_ti2v",
+    version=1,
+    model_family="lingbot_video",
+    description="LingBot-Video Dense 1.3B text-and-image-to-video at 480p",
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "height": 480,
+        "width": 832,
+        "num_frames": 121,
+        "fps": 24,
+        "num_inference_steps": 40,
+        "guidance_scale": 3.0,
+        "batch_cfg": True,
+        "seed": 42,
+        "negative_prompt": DEFAULT_NEGATIVE_PROMPT,
+    },
+)
+
+LINGBOT_VIDEO_MOE_REFINER_TI2V = InferencePreset(
+    name="lingbot_video_moe_refiner_ti2v",
+    version=1,
+    model_family="lingbot_video",
+    description="LingBot-Video MoE 30B-A3B TI2V with clean-frame 1080p refinement",
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, _REFINE_STAGE),
+    defaults={
+        "height": 480,
+        "width": 832,
+        "height_sr": 1088,
+        "width_sr": 1920,
+        "num_frames": 121,
+        "fps": 24,
+        "num_inference_steps": 40,
+        "num_inference_steps_sr": 8,
+        "guidance_scale": 3.0,
+        "guidance_scale_2": 3.0,
+        "batch_cfg": True,
+        "t_thresh": 0.85,
+        "seed": 42,
+        "negative_prompt": DEFAULT_NEGATIVE_PROMPT,
+    },
+    stage_defaults={
+        "refine": {
+            "height_sr": 1088,
+            "width_sr": 1920,
+            "num_inference_steps_sr": 8,
+            "guidance_scale_2": 3.0,
+            "t_thresh": 0.85,
+        },
+    },
+)
+
+ALL_PRESETS = (
+    LINGBOT_VIDEO_DENSE_T2V,
+    LINGBOT_VIDEO_MOE_REFINER_T2V,
+    LINGBOT_VIDEO_DENSE_TI2V,
+    LINGBOT_VIDEO_MOE_REFINER_TI2V,
+)

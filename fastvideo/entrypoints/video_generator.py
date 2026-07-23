@@ -130,13 +130,17 @@ def _resolve_output_size(
     return fallback
 
 
-def _validate_request_stage_overrides(model_path: str, request: GenerationRequest) -> None:
+def _validate_request_stage_overrides(
+    model_path: str,
+    request: GenerationRequest,
+    workload_type: Any | None = None,
+) -> None:
     """Validate typed stage overrides against the model's registered preset."""
     if not request.stage_overrides:
         return
     from fastvideo.api.presets import validate_preset_selection
     from fastvideo.registry import get_preset_selection
-    preset_name, model_family = get_preset_selection(model_path)
+    preset_name, model_family = get_preset_selection(model_path, workload_type)
     if preset_name is None or model_family is None:
         raise ValueError(f"Model {model_path!r} has no preset for stage override validation")
     validate_preset_selection(
@@ -462,6 +466,7 @@ class VideoGenerator:
             resolved_sampling_param = request_to_sampling_param(
                 request,
                 model_path=self.fastvideo_args.model_path,
+                workload_type=self.fastvideo_args.workload_type,
             )
             return self._generate_video_impl(
                 prompt=request.prompt,
@@ -477,7 +482,11 @@ class VideoGenerator:
         self,
         request: GenerationRequest,
     ) -> GenerationResult | list[GenerationResult]:
-        _validate_request_stage_overrides(self.fastvideo_args.model_path, request)
+        _validate_request_stage_overrides(
+            self.fastvideo_args.model_path,
+            request,
+            self.fastvideo_args.workload_type,
+        )
         if isinstance(request.prompt, list):
             if request.inputs.prompt_path is not None:
                 raise ValueError("request.prompt list cannot be combined with request.inputs.prompt_path")
@@ -512,6 +521,7 @@ class VideoGenerator:
         sampling_param = request_to_sampling_param(
             request,
             model_path=self.fastvideo_args.model_path,
+            workload_type=self.fastvideo_args.workload_type,
         )
         result = self._generate_video_impl(
             prompt=request.prompt,
@@ -537,7 +547,10 @@ class VideoGenerator:
 
         # Handle batch processing from text file
         if sampling_param is None:
-            sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
+            sampling_param = SamplingParam.from_pretrained(
+                fastvideo_args.model_path,
+                fastvideo_args.workload_type,
+            )
 
         # Add action control inputs to kwargs if provided
         if mouse_cond is not None:

@@ -187,7 +187,7 @@ class SamplingParam:
     def __post_init__(self) -> None:
         self.data_type = "video" if self.num_frames > 1 else "image"
 
-    def check_sampling_param(self):
+    def check_sampling_param(self) -> None:
         if self.prompt_path and not self.prompt_path.endswith(".txt"):
             raise ValueError("prompt_path must be a txt file")
 
@@ -206,8 +206,9 @@ class SamplingParam:
         self.__post_init__()
 
     @classmethod
-    def from_pretrained(cls, model_path: str) -> SamplingParam:
-        sampling_param = cls._from_preset(model_path)
+    def from_pretrained(cls, model_path: str, workload_type: Any | None = None) -> SamplingParam:
+        """Build model/workload preset defaults, or fall back to generic defaults."""
+        sampling_param = cls._from_preset(model_path, workload_type)
         if sampling_param is not None:
             return sampling_param
 
@@ -222,6 +223,7 @@ class SamplingParam:
     def _from_preset(
         cls,
         model_path: str,
+        workload_type: Any | None = None,
     ) -> SamplingParam | None:
         """Build a SamplingParam from preset defaults.
 
@@ -232,7 +234,10 @@ class SamplingParam:
         from fastvideo.registry import get_preset_selection
 
         try:
-            preset_name, model_family = get_preset_selection(model_path)
+            if workload_type is None:
+                preset_name, model_family = get_preset_selection(model_path)
+            else:
+                preset_name, model_family = get_preset_selection(model_path, workload_type)
         except (ValueError, RuntimeError):
             return None
         if preset_name is None or model_family is None:

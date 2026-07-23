@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Dense LingBot-Video T2V pipeline configuration."""
+"""LingBot-Video T2V and TI2V pipeline configurations."""
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -9,7 +9,7 @@ import torch
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits.lingbot_video import LingBotVideoConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput
-from fastvideo.configs.models.encoders.lingbot_video import LingBotVideoQwen3VLTextConfig
+from fastvideo.configs.models.encoders.lingbot_video import LingBotVideoQwen3VLConfig
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
@@ -54,7 +54,7 @@ class LingBotVideoT2VConfig(PipelineConfig):
 
     dit_config: DiTConfig = field(default_factory=LingBotVideoConfig)
     vae_config: VAEConfig = field(default_factory=WanVAEConfig)
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (LingBotVideoQwen3VLTextConfig(), ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (LingBotVideoQwen3VLConfig(), ))
     preprocess_text_funcs: tuple[Callable, ...] = field(default_factory=lambda: (preprocess_lingbot_video_prompt, ))
     postprocess_text_funcs: tuple[Callable, ...] = field(default_factory=lambda: (postprocess_lingbot_video_text, ))
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
@@ -70,4 +70,14 @@ class LingBotVideoT2VConfig(PipelineConfig):
     def __post_init__(self) -> None:
         """Load only the VAE decoder for the T2V workload."""
         self.vae_config.load_encoder = False
+        self.vae_config.load_decoder = True
+
+
+@dataclass
+class LingBotVideoTI2VConfig(LingBotVideoT2VConfig):
+    """TI2V wiring with the compound Qwen3-VL model and VAE encoder."""
+
+    def __post_init__(self) -> None:
+        """Load both VAE directions while custom stages preserve LingBot geometry."""
+        self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
