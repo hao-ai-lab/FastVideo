@@ -1117,7 +1117,7 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--max-grad-norm", type=float, help="Maximum gradient norm")
         parser.add_argument("--enable-gradient-checkpointing-type",
                             type=str,
-                            choices=["full", "ops", "block_skip"],
+                            choices=["full", "ops", "block_skip", "attn_only"],
                             default=None,
                             help="Gradient checkpointing type")
         parser.add_argument("--selective-checkpointing", type=float, help="Selective checkpointing threshold")
