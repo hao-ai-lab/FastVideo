@@ -149,10 +149,26 @@ def main() -> None:
             losses, extra = orig_loss(self, sample, advantages, timestep_idx)
         finally:
             torch.randn = orig_randn
+        # the inner loop shuffles samples AND per-sample timestep order via
+        # cuda_generator perms; record the DIRECT loss inputs instead of the
+        # perms: which pre-shuffle rows this call used (byte-match against
+        # the recorded items), the timestep column, adv and the xt noise
+        rows = np.concatenate(
+            [it["latents_clean"] for it in outer[-1]["items"]], axis=0)
+        x0 = _np(sample["latents_clean"])
+        row_idx = []
+        for b in range(x0.shape[0]):
+            m = [k for k in range(rows.shape[0])
+                 if rows[k].shape == x0[b].shape
+                 and bool((rows[k] == x0[b]).all())]
+            assert len(m) == 1, f"ambiguous row match {m}"
+            row_idx.append(int(m[0]))
         outer[-1]["inner"].append({
             "timestep_idx": int(timestep_idx),
+            "row_idx": row_idx,
+            "timestep": [float(v) for v in
+                         sample["timesteps"][:, timestep_idx].float().tolist()],
             "noise": raw.get("noise"),
-            "sample_hash": None,
             "adv": _np(advantages),
             "losses": {k: float(v.detach().item()) for k, v in losses.items()
                        if torch.is_tensor(v)}})
@@ -160,8 +176,14 @@ def main() -> None:
 
     def rec_old(self, iteration):
         res = orig_old(self, iteration)
-        outer[-1]["old_decay"] = float(getattr(self, "_last_old_decay", -1.0))
+        outer[-1]["old_decay"] = float(
+            orig_decay(iteration, self._decay_type))
         return res
+
+    # _return_decay is a @staticmethod(step, decay_type) — pure; call it
+    # directly in rec_old rather than wrapping (a plain-function replacement
+    # would rebind as an instance method and shift the args)
+    orig_decay = DN.DiffusionNFTMethod._return_decay
 
     DN.DiffusionNFTMethod._sample_epoch = rec_sample
     DN.DiffusionNFTMethod._score_samples = rec_score
@@ -169,16 +191,22 @@ def main() -> None:
     DN.DiffusionNFTMethod._training_timestep_loss = rec_loss
     DN.DiffusionNFTMethod._update_old_model = rec_old
 
-    # decay bookkeeping: wrap the decay fn if present
-    if hasattr(DN.DiffusionNFTMethod, "_return_decay"):
-        orig_decay = DN.DiffusionNFTMethod._return_decay
+    probe: dict = {}
+    orig_start = DN.DiffusionNFTMethod.on_train_start
 
-        def rec_decay(self, *a, **k):
-            d = orig_decay(self, *a, **k)
-            self._last_old_decay = float(d)
-            return d
+    def rec_start(self):
+        orig_start(self)
+        p = next(self.student.transformer.parameters())
+        probe.update(param_dtype=str(p.dtype),
+                     decay_type=int(self._decay_type),
+                     ntt=int(self.student.num_train_timesteps),
+                     nft_beta=float(self._nft_beta),
+                     kl_beta=float(self._kl_beta),
+                     adv_clip_max=float(self._adv_clip_max),
+                     adv_mode=str(self._adv_mode),
+                     max_grad_norm=float(self._max_grad_norm))
 
-        DN.DiffusionNFTMethod._return_decay = rec_decay
+    DN.DiffusionNFTMethod.on_train_start = rec_start
 
     from fastvideo.train.entrypoint.train import run_training_from_config
     run_training_from_config(gate_yaml)
@@ -192,7 +220,8 @@ def main() -> None:
         np.savez(os.path.join(out, f"inner{i}.npz"),
                  advantages=rec["advantages"],
                  **{f"noise{k}": r["noise"] for k, r in enumerate(rec["inner"])
-                    if r["noise"] is not None})
+                    if r["noise"] is not None},
+                 **{f"adv{k}": r["adv"] for k, r in enumerate(rec["inner"])})
         rec["items"] = [{"prompts": it["prompts"]} for it in rec["items"]]
         for r in rec["inner"]:
             r.pop("noise", None)
@@ -210,6 +239,7 @@ def main() -> None:
                    "config": "diffusion_nft single-frame: 2 outer x 2 batches "
                              "x 4 timesteps, pickscore+clipscore, crush-smol "
                              "prompts, beta .1 kl 1e-4 lr 3e-5",
+                   "probe": probe,
                    "gate_yaml": yaml.safe_dump(cfg),
                    "torch": torch.__version__,
                    "gpu": torch.cuda.get_device_name(0)}, f, indent=2)
