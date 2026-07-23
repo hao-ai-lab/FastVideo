@@ -9,10 +9,10 @@
 #include "norm/layernorm.hpp"
 
 auto layer_norm(
-  at::Tensor const Input, 
+  at::Tensor const Input,
   float eps,
-  std::optional<at::Tensor const> W,
-  std::optional<at::Tensor const> const B,
+  std::optional<at::Tensor> W,
+  std::optional<at::Tensor> const B,
   std::optional<at::Tensor> Output
 ) {
   int64_t const m = Input.size(0);
@@ -93,7 +93,8 @@ auto layer_norm(
   return Output;
 }
 
+#ifndef FASTVIDEO_KERNEL_DISABLE_PYBIND_REGISTRATION
 void register_layer_norm(pybind11::module_ &m) {
     m.def("layer_norm_cuda", &layer_norm);
 }
-
+#endif
