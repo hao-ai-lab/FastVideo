@@ -135,8 +135,15 @@ def main() -> None:
         argv[argv.index("--dmd_denoising_steps") + 1] = "1000,750,500,250"
         argv[argv.index("--real_score_guidance_scale") + 1] = "3.0"
         argv[argv.index("--flow_shift") + 1] = "5.0"
+        # dfake_gen_update_ratio 6 > STEPS: no generator update in the gate.
+        # Main's generator backward through the KV-cache rollout hits an
+        # autograd in-place error unless gradient checkpointing is on (the
+        # recipe sets --enable_gradient_checkpointing_type full), and the
+        # checkpointed recompute reads MUTATED caches (upstream quirk).
+        # Gate v1 pins rollout+critic parity; the generator step gets a
+        # checkpointing-aware gate later.
         argv += ["--warp_denoising_step", "--num_frame_per_block", "3",
-                 "--context_noise", "0", "--dfake_gen_update_ratio", "2"]
+                 "--context_noise", "0", "--dfake_gen_update_ratio", "6"]
     sys.argv = argv
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
