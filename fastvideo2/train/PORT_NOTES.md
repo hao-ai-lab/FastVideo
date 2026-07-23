@@ -147,9 +147,15 @@ same fixtures at the matching topology.
 
 ## DiffusionNFT RL — measured facts (capture v3, cluster GB200, tfv 5.13)
 
-- Roles load **fp32** (`probe.param_dtype = torch.float32`); optimizer is a
-  plain `AdamW(transformer.parameters(), eps=1e-8)` — NO fp32-master split
-  (unlike the legacy stack). Forwards autocast bf16 (`predict_noise`),
+- Roles load through `maybe_load_fsdp_model` with
+  `MixedPrecisionPolicy(param_dtype=bf16, reduce_dtype=fp32)` over **fp32
+  storage**: forwards run on bf16-CAST params (RMSNorm weights and
+  scale_shift_table included — measured by the block0 bisection probes;
+  `p.dtype` probing only shows the fp32 STORAGE dtype, and FSDP2 params are
+  DTensors that crash naive `.numpy()` hashing). AdamW (`eps=1e-8`) and the
+  old-policy EMA operate on the fp32 storage — at world 1 exactly the
+  `_MasterOpt` fp32-master/bf16-compute chain proven by the finetune/DMD2
+  gates. Forwards autocast bf16 (`predict_noise`, a no-op on bf16 compute),
   BTCHW→BCTHW permutes at the boundary, mask passed but unused by the DiT.
 - Effective grad accum = `gradient_accumulation_steps × num_train_timesteps`
   (gate config: 2×4=8) = exactly the inner calls per outer step ⇒ the
