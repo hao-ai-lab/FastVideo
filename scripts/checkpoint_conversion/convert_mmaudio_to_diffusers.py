@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Convert MMAudio ``large_44k_v2`` assets into a FastVideo component tree.
+"""Convert MMAudio 44 kHz assets into a FastVideo component tree.
 
 The converter is deliberately offline: every large source asset must already
 exist locally. It splits the shared DFN5B OpenCLIP checkpoint into native
@@ -30,22 +30,48 @@ import torch
 from safetensors.torch import save_file
 
 
-TRANSFORMER_CONFIG = {
+BASE_TRANSFORMER_CONFIG = {
     "_class_name": "MMAudioTransformer",
     "latent_dim": 40,
     "clip_dim": 1024,
     "sync_dim": 768,
     "text_dim": 1024,
-    "hidden_dim": 896,
-    "depth": 21,
-    "fused_depth": 14,
-    "num_heads": 14,
     "mlp_ratio": 4.0,
     "latent_seq_len": 345,
     "clip_seq_len": 64,
     "sync_seq_len": 192,
     "text_seq_len": 77,
-    "v2": True,
+}
+
+TRANSFORMER_VARIANTS = {
+    "small_44k": {
+        "hidden_dim": 448,
+        "depth": 12,
+        "fused_depth": 8,
+        "num_heads": 7,
+        "v2": False,
+    },
+    "medium_44k": {
+        "hidden_dim": 896,
+        "depth": 12,
+        "fused_depth": 8,
+        "num_heads": 14,
+        "v2": False,
+    },
+    "large_44k": {
+        "hidden_dim": 896,
+        "depth": 21,
+        "fused_depth": 14,
+        "num_heads": 14,
+        "v2": False,
+    },
+    "large_44k_v2": {
+        "hidden_dim": 896,
+        "depth": 21,
+        "fused_depth": 14,
+        "num_heads": 14,
+        "v2": True,
+    },
 }
 
 TEXT_ENCODER_CONFIG = {
@@ -270,7 +296,38 @@ def convert(args: argparse.Namespace) -> None:
     transformer_state.pop("t_embed.freqs", None)
     transformer_state.pop("latent_rot", None)
     transformer_state.pop("clip_rot", None)
-    _write_component(output, "transformer", transformer_state, TRANSFORMER_CONFIG)
+    transformer_config = {
+        **BASE_TRANSFORMER_CONFIG,
+        **TRANSFORMER_VARIANTS[args.variant],
+    }
+    _write_component(output, "transformer", transformer_state, transformer_config)
+
+    if args.transformer_only:
+        transformer_model_index = {
+            key: value
+            for key, value in MODEL_INDEX.items()
+            if key.startswith("_") or key == "transformer"
+        }
+        _write_json(output / "model_index.json", transformer_model_index)
+        print(f"Converted MMAudio {args.variant} transformer to {output}")
+        return
+
+    required_assets = {
+        "--audio-vae-checkpoint": args.audio_vae_checkpoint,
+        "--synchformer-checkpoint": args.synchformer_checkpoint,
+        "--dfn5b-dir": args.dfn5b_dir,
+        "--bigvgan-dir": args.bigvgan_dir,
+    }
+    missing_assets = [name for name, path in required_assets.items() if path is None]
+    if missing_assets:
+        raise ValueError(
+            "Full pipeline conversion requires " + ", ".join(missing_assets)
+        )
+
+    assert args.audio_vae_checkpoint is not None
+    assert args.synchformer_checkpoint is not None
+    assert args.dfn5b_dir is not None
+    assert args.bigvgan_dir is not None
 
     vae_state = _load_torch_state(args.audio_vae_checkpoint)
     decoder_state = {
@@ -326,16 +383,27 @@ def convert(args: argparse.Namespace) -> None:
         },
     )
     _write_json(output / "model_index.json", MODEL_INDEX)
-    print(f"Converted MMAudio large_44k_v2 components to {output}")
+    print(f"Converted MMAudio {args.variant} components to {output}")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument(
+        "--variant",
+        choices=tuple(TRANSFORMER_VARIANTS),
+        default="large_44k_v2",
+        help="Transformer architecture. v1 variants are required for training.",
+    )
     parser.add_argument("--transformer-checkpoint", type=Path, required=True)
-    parser.add_argument("--audio-vae-checkpoint", type=Path, required=True)
-    parser.add_argument("--synchformer-checkpoint", type=Path, required=True)
-    parser.add_argument("--dfn5b-dir", type=Path, required=True)
-    parser.add_argument("--bigvgan-dir", type=Path, required=True)
+    parser.add_argument("--audio-vae-checkpoint", type=Path)
+    parser.add_argument("--synchformer-checkpoint", type=Path)
+    parser.add_argument("--dfn5b-dir", type=Path)
+    parser.add_argument("--bigvgan-dir", type=Path)
+    parser.add_argument(
+        "--transformer-only",
+        action="store_true",
+        help="Write only the transformer component needed by training.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 

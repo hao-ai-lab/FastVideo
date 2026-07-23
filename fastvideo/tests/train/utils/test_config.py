@@ -69,6 +69,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
 
     assert t.optimizer.learning_rate == 0.0
     assert t.optimizer.betas == (0.9, 0.999)
+    assert t.optimizer.eps == pytest.approx(1e-8)
     assert t.optimizer.weight_decay == 0.0
     assert t.optimizer.lr_scheduler == "constant"
     assert t.optimizer.min_lr_ratio == 0.5
@@ -105,6 +106,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
         },
         "data": {
             "data_path": "/some/path",
+            "preprocessed_data_type": "mmaudio_features",
             "train_batch_size": 2,
             "dataloader_num_workers": 4,
             "training_cfg_rate": 0.1,
@@ -117,6 +119,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
         "optimizer": {
             "learning_rate": 1e-4,
             "betas": [0.9, 0.95],
+            "eps": 1e-6,
             "weight_decay": 0.01,
             "lr_scheduler": "cosine",
             "lr_warmup_steps": 100,
@@ -156,11 +159,13 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
 
     assert t.data.train_batch_size == 2
     assert t.data.data_path == "/some/path"
+    assert t.data.preprocessed_data_type == "mmaudio_features"
     assert t.data.num_frames == 33
     assert t.data.seed == 42
 
     assert t.optimizer.learning_rate == pytest.approx(1e-4)
     assert t.optimizer.betas == (0.9, 0.95)
+    assert t.optimizer.eps == pytest.approx(1e-6)
     assert t.optimizer.lr_scheduler == "cosine"
     assert t.optimizer.lr_warmup_steps == 100
     assert t.optimizer.min_lr_ratio == pytest.approx(0.1)

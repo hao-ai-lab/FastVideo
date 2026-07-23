@@ -353,9 +353,9 @@ def _build_training_config(
         data_path = str(raw_data_path)
 
     preprocessed_data_type = str(da.get("preprocessed_data_type", "t2v") or "t2v").strip().lower()
-    if preprocessed_data_type not in {"t2v", "text_only"}:
+    if preprocessed_data_type not in {"t2v", "text_only", "mmaudio_features"}:
         raise ValueError("training.data.preprocessed_data_type must be one of "
-                         "{'t2v', 'text_only'}, got "
+                         "{'t2v', 'text_only', 'mmaudio_features'}, got "
                          f"{preprocessed_data_type!r}")
 
     return TrainingConfig(
@@ -382,6 +382,7 @@ def _build_training_config(
         optimizer=OptimizerConfig(
             learning_rate=float(o.get("learning_rate", 0.0) or 0.0),
             betas=betas,
+            eps=float(o.get("eps", 1e-8) or 1e-8),
             weight_decay=float(o.get("weight_decay", 0.0) or 0.0),
             lr_scheduler=str(o.get("lr_scheduler", "constant") or "constant"),
             lr_warmup_steps=int(o.get("lr_warmup_steps", 0) or 0),

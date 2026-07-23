@@ -1,4 +1,4 @@
-# MMAudio Video-to-Audio Inference
+# MMAudio Video-to-Audio
 
 This directory contains FastVideo's native `MMAudioPipeline` implementation for
 video-to-audio (V2A) and text-to-audio (T2A) generation. The first supported
@@ -18,8 +18,12 @@ directory.
 - Default inference duration: 8 seconds
 - Variable-duration inference: supported
 - Single-GPU inference with FastVideo's default offloading: supported
+- `small_44k`, `medium_44k`, and `large_44k` v1 training: supported through
+  FastVideo's modular trainer and official-compatible precomputed features
 - Source-video/audio muxing: not yet part of the pipeline output
-- Training and small/medium/16 kHz variants: not included in this port
+- `large_44k_v2` training: intentionally rejected because the upstream recipe
+  does not support training the v2 checkpoint
+- 16 kHz training/inference: not included in this port
 
 The native pipeline has passed exact official-vs-FastVideo real-weight parity
 for a 25-step two-second waveform and a real ten-second V2A inference smoke
@@ -47,6 +51,12 @@ cd FastVideo
 uv venv --python 3.12 --seed
 source .venv/bin/activate
 UV_TORCH_BACKEND=cu126 uv pip install -e .
+```
+
+Training additionally needs TensorDict for the memory-mapped feature cache:
+
+```bash
+UV_TORCH_BACKEND=cu126 uv pip install -e '.[mmaudio-train]'
 ```
 
 Use `UV_TORCH_BACKEND=cu130` instead on CUDA 13. Conda is not required.
@@ -148,6 +158,95 @@ python scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py \
 ```
 
 The converted checkpoint is approximately 9 GB.
+
+## Train MMAudio v1
+
+Training uses the native `fastvideo/train/` stack. FastVideo owns the training
+loop, HSDP/FSDP wrapping, optimizer and LR scheduler, gradient accumulation,
+gradient clipping, tracking, and distributed checkpoints. The reusable
+`FlowMatchingFineTuneMethod` implements shape-agnostic velocity supervision;
+`MMAudioModel` supplies MMAudio's audio posterior sampling, latent
+normalization, independent video/text CFG dropout, and multimodal forward.
+
+The first smoke-test target should be `small_44k`. The upstream documentation
+does not support training checkpoints ending in `_v2`, so the inference
+checkpoint `large_44k_v2` must not be used here.
+
+### Convert a trainable v1 transformer
+
+Download the official v1 checkpoint:
+
+```bash
+mkdir -p official_weights/mmaudio/raw/weights
+curl -L --continue-at - \
+  https://huggingface.co/hkchengrex/MMAudio/resolve/main/weights/mmaudio_small_44k.pth \
+  -o official_weights/mmaudio/raw/weights/mmaudio_small_44k.pth
+```
+
+Training only loads the transformer, so it does not need another copy of the
+VAE, DFN5B, Synchformer, or vocoder components:
+
+```bash
+python scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py \
+  --variant small_44k \
+  --transformer-only \
+  --transformer-checkpoint official_weights/mmaudio/raw/weights/mmaudio_small_44k.pth \
+  --output converted_weights/mmaudio/small_44k
+```
+
+Replace `small_44k` with `medium_44k` or `large_44k` in both arguments to train
+a larger v1 model.
+
+### Precomputed feature contract
+
+The online training step deliberately does not run the audio VAE, DFN5B, or
+Synchformer. Point `training.data.data_path` at a TensorDict memory-mapped
+directory with the same tensors produced by upstream MMAudio preprocessing:
+
+```text
+video + audio cache
+├── mean             [N, 345, 40]
+├── std              [N, 345, 40]
+├── clip_features    [N,  64, 1024]
+├── sync_features    [N, 192, 768]
+└── text_features    [N,  77, 1024]
+
+audio-only cache
+├── mean             [N, 345, 40]
+├── std              [N, 345, 40]
+└── text_features    [N,  77, 1024]
+```
+
+Video and audio-only caches can be mixed by using a mapping of cache paths to
+repeat counts in YAML. Missing video conditions are replaced by MMAudio's
+learned null-video tokens. The cache loader has no runtime import dependency on
+the upstream `mmaudio` package.
+
+The example config intentionally contains an empty data path until a dataset is
+prepared:
+
+```text
+examples/train/configs/fine_tuning/mmaudio/small_44k.yaml
+```
+
+Start a single-GPU run while supplying the cache path on the command line:
+
+```bash
+NUM_GPUS=1 bash examples/train/run.sh \
+  examples/train/configs/fine_tuning/mmaudio/small_44k.yaml \
+  --training.data.data_path /path/to/mmaudio-feature-cache
+```
+
+Leaving the path empty produces an explicit error instead of silently starting
+with the wrong data. The single-GPU FSDP-wrapped path and distributed
+checkpoint/resume have been validated with the real `small_44k` weights.
+Multi-GPU data parallel remains to be validated; sequence and tensor
+parallelism are not implemented, so keep `sp_size: 1` and `tp_size: 1`. The
+example preserves the official learning rate, AdamW betas/epsilon, weight
+decay, 1,000-step warmup, CFG dropout, logit-normal timestep sampling, and
+300,000-step duration. Its per-GPU batch size is intentionally one for initial
+smoke testing and should be scaled with gradient accumulation or additional
+data-parallel GPUs.
 
 ## Run V2A Inference
 

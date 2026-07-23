@@ -102,6 +102,15 @@ class ModelBase(ABC):
     def on_train_start(self) -> None:  # noqa: B027
         """Called once before the training loop begins."""
 
+    def eager_optimizer_state_parameters(self, ) -> tuple[torch.nn.Parameter, ...]:
+        """Parameters whose optimizer state must exist before their first grad.
+
+        Most models return an empty tuple. Models with intermittently used
+        trainable parameters can override this so strict distributed
+        checkpoints retain a stable optimizer-state schema across steps.
+        """
+        return ()
+
     def decode_latents(
         self,
         latents_b_t_c_h_w: torch.Tensor,

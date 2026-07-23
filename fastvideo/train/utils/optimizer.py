@@ -41,7 +41,7 @@ def build_optimizer_and_scheduler(
         lr=float(learning_rate),
         betas=betas,
         weight_decay=float(optimizer_config.weight_decay),
-        eps=1e-8,
+        eps=float(optimizer_config.eps),
     )
 
     scheduler = get_scheduler(

@@ -126,6 +126,10 @@ swanlab = [
     "swanlab>=0.6.7",
 ]
 
+mmaudio-train = [
+    "tensordict>=0.6.1",
+]
+
 lint = [
     "pre-commit==4.0.1",
     "types-aiofiles",

@@ -6,8 +6,8 @@
 - workload_types: `V2A`, `T2A`
 - official_ref: `../MMAudio` at `974010a026c731054592d8f777218bd9d85a6c24`
 - first_variant: `large_44k_v2`
-- phase: `native_pipeline_complete`
-- status: `real_weight_parity_pass`
+- phase: `native_inference_and_v1_training_pipeline_complete`
+- status: `inference_parity_and_small_44k_training_smoke_pass`
 - last_updated: `2026-07-20`
 
 ## Native Components
@@ -50,6 +50,26 @@ The V2A preprocessing contract is identical to official MMAudio:
 - Total local artifact size: about 9.1 GB
 - Converted weights and official assets remain ignored/untracked.
 
+The v1 training smoke additionally uses a transformer-only component tree at
+`converted_weights/mmaudio/small_44k` (about 601 MB). The converter supports
+`small_44k`, `medium_44k`, `large_44k`, and the inference-default
+`large_44k_v2`; `--transformer-only` avoids duplicating inference-only assets.
+
+## Training Integration
+
+- Model adapter: `fastvideo/train/models/mmaudio/MMAudioModel`
+- Shared method: shape-agnostic
+  `fastvideo/train/methods/fine_tuning/flow_matching.py`
+- Data: official-compatible TensorDict memmaps through
+  `fastvideo/dataset/mmaudio_feature_dataset.py`
+- Config: `examples/train/configs/fine_tuning/mmaudio/small_44k.yaml`
+- Numerical recipe: posterior sampling, latent normalization, logit-normal
+  time, linear flow interpolation, independent video/text CFG dropout, and
+  velocity MSE match upstream `Runner.train_fn`
+- Distributed contract: real single-GPU FSDP-wrapped step passed; DCP save,
+  optimizer/dataloader/RNG restore, and resumed step passed
+- Production code imports no `mmaudio.*` modules.
+
 ## Parity Evidence
 
 | Scope | Result |
@@ -60,7 +80,11 @@ The V2A preprocessing contract is identical to official MMAudio:
 | Final 2-second V2A waveform (89,088 samples) | exact (`atol=0`, `rtol=0`) |
 | Real 10-second variable-duration V2A | pass (441,344 samples, 10.0078 s) |
 | Default FastVideo offload path | real one-step smoke pass |
-| Local suite | `18 passed, 1 skipped` (the skipped test is the opt-in full gate) |
+| Real `small_44k` v1 transformer forward | exact BF16 parity |
+| Real `small_44k` v1 FastVideo train step | pass (forward/backward/AdamW/grad clip) |
+| Real DCP checkpoint and resume to next step | pass |
+| Local inference suite | `20 passed, 1 skipped` (the skipped test is the opt-in full gate) |
+| New training/config/dataset unit tests | `26 passed` |
 
 Commands:
 
@@ -90,7 +114,10 @@ official `large_44k_v2`, DFN5B, Synchformer, VAE, and BigVGAN assets.
 
 - Publishing the converted checkpoint and immutable source revisions.
 - Optional source-video mux/re-encode helper; the current V2A result is WAV/audio.
-- 16 kHz and small/medium variants.
+- 16 kHz inference/training and small/medium v1 inference presets.
 - Sequence/tensor-parallel optimization.
-- Training integration. The official repository does not support training the
-  `_v2` variant; any training port should start from a v1 44.1 kHz checkpoint.
+- Multi-GPU data-parallel training validation.
+- FastVideo-native offline feature extraction; the first training version
+  consumes upstream-compatible precomputed TensorDict caches.
+- Real-dataset loss/quality convergence validation once dataset paths are
+  available. The config intentionally keeps `data_path` empty until then.
