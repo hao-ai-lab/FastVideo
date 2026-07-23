@@ -41,6 +41,7 @@ class PreprocessBatch:
     sample_frame_index: list[int] | None = None
     sample_num_frames: int | None = None
     action_path: str | None = None
+    points_path: str | None = None
 
     # Processed data
     pixel_values: torch.Tensor | None = None
@@ -471,6 +472,8 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
             item["path"] = opj(folder, item["path"])
             if "action_path" in item and item["action_path"]:
                 item["action_path"] = opj(folder, item["action_path"])
+            if "points_path" in item and item["points_path"]:
+                item["points_path"] = opj(folder, item["points_path"])
 
         return data_items
 
@@ -492,7 +495,8 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
                                     resolution=item.get("resolution"),
                                     fps=item.get("fps"),
                                     duration=item.get("duration"),
-                                    action_path=item.get("action_path"))
+                                    action_path=item.get("action_path"),
+                                    points_path=item.get("points_path"))
 
             # Apply filtering stages
             if not self._apply_filter_stages(batch, filter_counts):
@@ -570,6 +574,16 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Add action_path
         if batch.action_path:
             result["action_path"] = batch.action_path
+        if batch.points_path:
+            result["points_path"] = batch.points_path
+        if batch.sample_frame_index is not None:
+            result["sample_frame_index"] = torch.tensor(batch.sample_frame_index,
+                                                        dtype=torch.long)
+        if batch.resolution is not None:
+            if "width" in batch.resolution:
+                result["source_width"] = int(batch.resolution["width"])
+            if "height" in batch.resolution:
+                result["source_height"] = int(batch.resolution["height"])
 
         return result
 

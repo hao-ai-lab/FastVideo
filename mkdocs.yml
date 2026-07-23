@@ -172,6 +172,7 @@ nav:
     - Experiment Tracking: training/trackers.md
     - Data Preprocessing: training/data_preprocess.md
     - Fine-tuning: training/finetune.md
+    - WanTrack Training: training/wantrack.md
     - Attn-QAT Training: training/attn_qat.md
     - Examples:
       - Training Index: training/examples/examples_training_index.md

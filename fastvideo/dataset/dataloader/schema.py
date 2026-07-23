@@ -50,6 +50,46 @@ pyarrow_schema_i2v = pa.schema([
     pa.field("fps", pa.float64()),
 ])
 
+pyarrow_schema_i2v_track = pa.schema([
+    pa.field("id", pa.string()),
+    pa.field("vae_latent_bytes", pa.binary()),
+    pa.field("vae_latent_shape", pa.list_(pa.int64())),
+    pa.field("vae_latent_dtype", pa.string()),
+    pa.field("text_embedding_bytes", pa.binary()),
+    pa.field("text_embedding_shape", pa.list_(pa.int64())),
+    pa.field("text_embedding_dtype", pa.string()),
+    pa.field("first_frame_latent_bytes", pa.binary()),
+    pa.field("first_frame_latent_shape", pa.list_(pa.int64())),
+    pa.field("first_frame_latent_dtype", pa.string()),
+    pa.field("clip_feature_bytes", pa.binary()),
+    pa.field("clip_feature_shape", pa.list_(pa.int64())),
+    pa.field("clip_feature_dtype", pa.string()),
+    # MotionStream point tracks, normalized to [0, 1].
+    pa.field("track_points_bytes", pa.binary()),
+    pa.field("track_points_shape", pa.list_(pa.int64())),  # [T, N, 2]
+    pa.field("track_points_dtype", pa.string()),
+    pa.field("track_visibility_bytes", pa.binary()),
+    pa.field("track_visibility_shape", pa.list_(pa.int64())),  # [T, N]
+    pa.field("track_visibility_dtype", pa.string()),
+    # Optional preprocessing signals used by object-covering track sampling.
+    # New preprocessing writes dense fallback values when segmentation or
+    # informativeness weights are unavailable.
+    pa.field("object_ids_bytes", pa.binary()),
+    pa.field("object_ids_shape", pa.list_(pa.int64())),  # [N]
+    pa.field("object_ids_dtype", pa.string()),
+    pa.field("track_weights_bytes", pa.binary()),
+    pa.field("track_weights_shape", pa.list_(pa.int64())),  # [N]
+    pa.field("track_weights_dtype", pa.string()),
+    pa.field("file_name", pa.string()),
+    pa.field("caption", pa.string()),
+    pa.field("media_type", pa.string()),
+    pa.field("width", pa.int64()),
+    pa.field("height", pa.int64()),
+    pa.field("num_frames", pa.int64()),
+    pa.field("duration_sec", pa.float64()),
+    pa.field("fps", pa.float64()),
+])
+
 
 pyarrow_schema_t2v = pa.schema([
     pa.field("id", pa.string()),

@@ -11,6 +11,7 @@ from fastvideo.configs.models.dits.longcat import LongCatVideoConfig
 from fastvideo.configs.models.dits.ltx2 import LTX2VideoConfig
 from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
 from fastvideo.configs.models.dits.stable_audio import StableAudioConfig
+from fastvideo.configs.models.dits.trackwan import CausalTrackWanVideoConfig, TrackWanVideoConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
 from fastvideo.configs.models.dits.zimage import ZImageDiTConfig
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
@@ -23,5 +24,5 @@ __all__ = [
     "DreamXWorldARConfig", "CosmosVideoConfig", "Cosmos25VideoConfig", "FluxDiTConfig", "Flux2Config",
     "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "MagiHumanVideoConfig",
     "StableAudioConfig", "GlmImageDiTConfig", "LingBotWorld2CausalFastVideoConfig", "LingBotVideoConfig",
-    "ZImageDiTConfig"
+    "ZImageDiTConfig", "TrackWanVideoConfig", "CausalTrackWanVideoConfig"
 ]

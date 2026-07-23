@@ -32,9 +32,13 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "HYWorldTransformer3DModel":
     ("dits", "hyworld", "HYWorldTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
+    "TrackWanTransformer3DModel":
+    ("dits", "trackwan", "TrackWanTransformer3DModel"),
     "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
     "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
+    "CausalTrackWanTransformer3DModel":
+    ("dits", "trackwan", "CausalTrackWanTransformer3DModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
     "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
     "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
@@ -55,9 +59,13 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
 _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
+    "TrackWanTransformer3DModel":
+    ("dits", "trackwan", "TrackWanTransformer3DModel"),
     "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
     "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
+    "CausalTrackWanTransformer3DModel":
+    ("dits", "trackwan", "CausalTrackWanTransformer3DModel"),
     "LingBotWorld2CausalFastTransformer3DModel": (
         "dits",
         "lingbotworld2",

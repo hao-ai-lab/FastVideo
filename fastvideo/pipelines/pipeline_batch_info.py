@@ -301,6 +301,11 @@ class TrainingBatch:
     image_latents: torch.Tensor | None = None
     infos: list[dict[str, Any]] | None = None
     mask_lat_size: torch.Tensor | None = None
+    # WanTrack point trajectories. IDs are sampled once per batch/session
+    # and reused by all denoising steps and causal chunks.
+    track_points: torch.Tensor | None = None
+    track_visibility: torch.Tensor | None = None
+    track_ids: torch.Tensor | None = None
 
     # ODE trajectory supervision
     trajectory_latents: torch.Tensor | None = None

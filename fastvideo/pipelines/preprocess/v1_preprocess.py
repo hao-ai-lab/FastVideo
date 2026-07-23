@@ -8,6 +8,7 @@ from fastvideo.distributed import (get_world_size, maybe_init_distributed_enviro
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (PreprocessPipeline_I2V)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v_track import (PreprocessPipeline_I2V_Track)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (PreprocessPipeline_ODE_Trajectory)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (PreprocessPipeline_T2V)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (PreprocessPipeline_Text)
@@ -52,6 +53,8 @@ def main(args) -> None:
         PreprocessPipeline = PreprocessPipeline_T2V
     elif args.preprocess_task == "i2v":
         PreprocessPipeline = PreprocessPipeline_I2V
+    elif args.preprocess_task == "i2v_track":
+        PreprocessPipeline = PreprocessPipeline_I2V_Track
     elif args.preprocess_task == "text_only":
         PreprocessPipeline = PreprocessPipeline_Text
     elif args.preprocess_task == "ode_trajectory":
@@ -72,7 +75,8 @@ def main(args) -> None:
         PreprocessPipeline = PreprocessPipeline_MatrixGame2_ODE_Trajectory
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
-                         f"Valid options: t2v, i2v, ode_trajectory, text_only, matrixgame2, matrixgame2_ode_trajectory")
+                         f"Valid options: t2v, i2v, i2v_track, ode_trajectory, text_only, "
+                         f"matrixgame2, matrixgame2_ode_trajectory")
 
     logger.info("Preprocess task: %s using %s", args.preprocess_task, PreprocessPipeline.__name__)
 
@@ -115,6 +119,7 @@ if __name__ == "__main__":
         choices=[
             "t2v",
             "i2v",
+            "i2v_track",
             "text_only",
             "ode_trajectory",
             "matrixgame2",

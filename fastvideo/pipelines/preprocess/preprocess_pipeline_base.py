@@ -286,6 +286,14 @@ class BasePreprocessPipeline(ComposedPipelineBase):
 
                 if "action_path" in data:
                     valid_data["action_path"] = [data["action_path"][i] for i in valid_indices]
+                if "points_path" in data:
+                    valid_data["points_path"] = [data["points_path"][i] for i in valid_indices]
+                if "sample_frame_index" in data:
+                    valid_data["sample_frame_index"] = [data["sample_frame_index"][i] for i in valid_indices]
+                if "source_width" in data:
+                    valid_data["source_width"] = [data["source_width"][i] for i in valid_indices]
+                if "source_height" in data:
+                    valid_data["source_height"] = [data["source_height"][i] for i in valid_indices]
 
                 # VAE
                 with torch.autocast("cuda", dtype=torch.float32):

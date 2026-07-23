@@ -172,6 +172,7 @@ class WanCausalModel(WanModel, CausalModelBase):
                 noisy_latents,
                 timestep_full,
                 text_dict,
+                start_frame=cur_start_frame,
             ))
             input_kwargs["timestep"] = (timestep_full.to(
                 device=self.device,

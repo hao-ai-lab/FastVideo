@@ -54,8 +54,7 @@ class RunConfig:
             if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
                 return {
                     f.name: _safe_asdict(getattr(obj, f.name))
-                    for f in dataclasses.fields(obj)
-                    if not callable(getattr(obj, f.name))
+                    for f in dataclasses.fields(obj) if not callable(getattr(obj, f.name))
                 }
             if isinstance(obj, dict):
                 return {k: _safe_asdict(v) for k, v in obj.items()}
@@ -349,12 +348,10 @@ def _build_training_config(
         data_path = str(raw_data_path)
 
     preprocessed_data_type = str(da.get("preprocessed_data_type", "t2v") or "t2v").strip().lower()
-    if preprocessed_data_type not in {"t2v", "text_only"}:
-        raise ValueError(
-            "training.data.preprocessed_data_type must be one of "
-            "{'t2v', 'text_only'}, got "
-            f"{preprocessed_data_type!r}"
-        )
+    if preprocessed_data_type not in {"t2v", "i2v_track", "text_only"}:
+        raise ValueError("training.data.preprocessed_data_type must be one of "
+                         "{'t2v', 'i2v_track', 'text_only'}, got "
+                         f"{preprocessed_data_type!r}")
 
     return TrainingConfig(
         distributed=DistributedConfig(
@@ -424,9 +421,7 @@ def _build_training_config(
     )
 
 
-def _parse_cli_overrides(
-    overrides: list[str],
-) -> dict[str, Any]:
+def _parse_cli_overrides(overrides: list[str], ) -> dict[str, Any]:
     """Parse ``--dotted.key value`` CLI overrides.
 
     Returns a flat dict mapping dotted keys to parsed

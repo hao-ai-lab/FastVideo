@@ -40,7 +40,7 @@ from fastvideo.models.dits._causal_train_attention import (
 )
 from fastvideo.models.dits._relative_rope import relativistic_window_offsets
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.dits.wanvideo import WanT2VCrossAttention, WanTimeTextImageEmbedding
+from fastvideo.models.dits.wanvideo import WanI2VCrossAttention, WanT2VCrossAttention, WanTimeTextImageEmbedding
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 logger = init_logger(__name__)
@@ -311,12 +311,25 @@ class CausalWanTransformerBlock(nn.Module):
             elementwise_affine=True,
             dtype=torch.float32)
 
-        # 2. Cross-attention
-        # Only T2V for now
-        self.attn2 = WanT2VCrossAttention(dim,
-                                            num_heads,
-                                            qk_norm=qk_norm,
-                                            eps=eps)
+        # 2. Cross-attention. I2V checkpoints prepend CLIP image tokens and
+        # carry a second pair of projections, which must be preserved during
+        # causal rollouts.
+        if added_kv_proj_dim is not None:
+            self.attn2 = WanI2VCrossAttention(
+                dim,
+                num_heads,
+                qk_norm=qk_norm,
+                eps=eps,
+                prefix=f"{prefix}.attn2",
+            )
+        else:
+            self.attn2 = WanT2VCrossAttention(
+                dim,
+                num_heads,
+                qk_norm=qk_norm,
+                eps=eps,
+                prefix=f"{prefix}.attn2",
+            )
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -757,11 +770,10 @@ class CausalWanTransformer3DModel(BaseDiT):
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if isinstance(encoder_hidden_states_image,
-                      list) and len(encoder_hidden_states_image) > 0:
-            encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
-            encoder_hidden_states_image = None
+        if isinstance(encoder_hidden_states_image, list):
+            encoder_hidden_states_image = (
+                encoder_hidden_states_image[0]
+                if encoder_hidden_states_image else None)
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
@@ -876,11 +888,10 @@ class CausalWanTransformer3DModel(BaseDiT):
         teacher_forcing = clean_x is not None
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if isinstance(encoder_hidden_states_image,
-                      list) and len(encoder_hidden_states_image) > 0:
-            encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
-            encoder_hidden_states_image = None
+        if isinstance(encoder_hidden_states_image, list):
+            encoder_hidden_states_image = (
+                encoder_hidden_states_image[0]
+                if encoder_hidden_states_image else None)
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size

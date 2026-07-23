@@ -592,7 +592,9 @@ class WanModel(ModelBase):
         text_dict: dict[str, torch.Tensor] | None,
         clean_x: torch.Tensor | None = None,
         aug_t: torch.Tensor | None = None,
+        start_frame: int = 0,
     ) -> dict[str, Any]:
+        del start_frame
         if text_dict is None:
             raise ValueError("text_dict cannot be None for "
                              "Wan distillation")

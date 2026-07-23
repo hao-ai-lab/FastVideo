@@ -258,7 +258,7 @@ class WanI2VCrossAttention(WanSelfAttention):
         self.norm_added_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_added_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
-    def forward(self, x, context, context_lens):
+    def forward(self, x, context, context_lens, crossattn_cache=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
@@ -269,13 +269,29 @@ class WanI2VCrossAttention(WanSelfAttention):
         context = context[:, 257:]
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
-        # compute query, key, value
+        # Query depends on the current latent tokens. Text/image keys and
+        # values only depend on conditioning and can be reused by causal
+        # streaming rollouts.
         q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
-        k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
-        v = self.to_v(context)[0].view(b, -1, n, d)
-        k_img = self.norm_added_k(self.add_k_proj(context_img)[0]).view(
-            b, -1, n, d)
-        v_img = self.add_v_proj(context_img)[0].view(b, -1, n, d)
+        if crossattn_cache is not None and crossattn_cache.get("is_init", False):
+            k = crossattn_cache["k"]
+            v = crossattn_cache["v"]
+            k_img = crossattn_cache["k_img"]
+            v_img = crossattn_cache["v_img"]
+        else:
+            k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
+            v = self.to_v(context)[0].view(b, -1, n, d)
+            k_img = self.norm_added_k(self.add_k_proj(context_img)[0]).view(
+                b, -1, n, d)
+            v_img = self.add_v_proj(context_img)[0].view(b, -1, n, d)
+            if crossattn_cache is not None:
+                crossattn_cache.update({
+                    "is_init": True,
+                    "k": k,
+                    "v": v,
+                    "k_img": k_img,
+                    "v_img": v_img,
+                })
         img_x = self.attn(q, k_img, v_img)
         # compute attention
         x = self.attn(q, k, v) if k.size(1) > 0 else torch.zeros_like(q)
@@ -694,11 +710,10 @@ class WanTransformer3DModel(BaseDiT):
         orig_dtype = hidden_states.dtype
         if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if isinstance(encoder_hidden_states_image,
-                      list) and len(encoder_hidden_states_image) > 0:
-            encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
-            encoder_hidden_states_image = None
+        if isinstance(encoder_hidden_states_image, list):
+            encoder_hidden_states_image = (
+                encoder_hidden_states_image[0]
+                if encoder_hidden_states_image else None)
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
