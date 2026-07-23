@@ -239,6 +239,10 @@ machine you can review the docs and build logic, but you cannot fully validate
 the GB10 kernel compile, kernel execution, or FlashAttention ARM64 wheel without
 Spark hardware.
 
+The generation smoke test verifies a small inference path only. Training,
+distillation, and model-specific optimized kernels should be validated per
+workload before treating them as supported on Spark.
+
 If you hit other issues, please open an issue on our
 [GitHub repository](https://github.com/hao-ai-lab/FastVideo). You can also join
 our [Slack community](https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ)
