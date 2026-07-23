@@ -1,8 +1,8 @@
 # Kandinsky5 T2V 480p stage-1 QAT finetune config.
 #
-# QAT here means attention-only fake-quant during training: launch with
-# FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN set (see finetune_qat.sh), which
-# routes Kandinsky5's dense/local attention through the fake-quantized
+# QAT here means attention-only fake-quant during training. The student's
+# role-local ATTN_QAT_TRAIN backend below routes Kandinsky5's dense/local
+# attention through the fake-quantized
 # straight-through-estimator kernel. No weight quantization happens during
 # training; that's applied post-hoc at inference time via the nvfp4_qat/FP8
 # quant configs (see the stage-2 config and README for that step).
@@ -19,6 +19,7 @@ models:
     _target_: fastvideo.train.models.kandinsky5.Kandinsky5Model
     init_from: kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers
     trainable: true
+    attention_backend: ATTN_QAT_TRAIN
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod

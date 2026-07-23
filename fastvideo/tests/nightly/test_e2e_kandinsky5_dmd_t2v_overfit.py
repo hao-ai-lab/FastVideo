@@ -19,9 +19,7 @@ The full validated chain, each arrow a hard assertion:
     -> dcp_to_diffusers --verify (strict reload)
     -> stage-2 train (student/teacher/critic init_from that export)
     -> stage-2 student DCP -> dcp_to_diffusers --verify (strict reload)
-    -> VideoGenerator.from_pretrained(export,
-           override_pipeline_cls_name="Kandinsky5DMDPipeline",
-           pipeline_config=Kandinsky5DMDConfig())   # the documented recipe
+    -> VideoGenerator.from_pretrained(export)  # ordinary public API
     -> deterministic (fixed-seed) 4-step generation
     -> degeneracy checks + MS-SSIM against the committed reference video.
 
@@ -333,20 +331,14 @@ def _generate_main(export_dir: str, output_dir: str) -> None:
 
     This is the exact inference recipe the QAD README documents for a
     stage-2 export (minus the optional NVFP4/FP8 weight quantization,
-    which needs flashinfer + sm_120 hardware): the export's
-    model_index.json still names the base T2V pipeline, so
-    override_pipeline_cls_name + Kandinsky5DMDConfig are required to get
-    the 4-step re-noise sampler -- see
-    fastvideo/tests/api/test_kandinsky5_dmd_pipeline_resolution.py.
+    which needs flashinfer + sm_120 hardware). The export identifies its
+    DMD pipeline/config through model_index.json.
     """
     from fastvideo import VideoGenerator
-    from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5DMDConfig
 
     generator = VideoGenerator.from_pretrained(
         export_dir,
         num_gpus=1,
-        override_pipeline_cls_name="Kandinsky5DMDPipeline",
-        pipeline_config=Kandinsky5DMDConfig(),
         use_fsdp_inference=False,
     )
     generator.generate_video(
@@ -471,7 +463,7 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
             # nondeterminism; structured output does not).
             "--training.optimizer.learning_rate", "1e-6",
         ],
-        env_overrides={"FASTVIDEO_ATTENTION_BACKEND": "ATTN_QAT_TRAIN"},
+        env_overrides={},
     )
     stage1_ckpt = _latest_checkpoint(STAGE1_OUTPUT_DIR)
 
@@ -497,19 +489,24 @@ def test_e2e_kandinsky5_dmd_overfit_single_sample():
             # generator every step instead.
             "--method.generator_update_interval", "1",
         ],
-        env_overrides={"FASTVIDEO_ATTENTION_BACKEND": "ATTN_QAT_TRAIN"},
+        env_overrides={},
     )
     assert any(STAGE2_OUTPUT_DIR.glob("*.mp4")), (
         f"no stage-2 validation video produced under {STAGE2_OUTPUT_DIR}")
 
     # The actual deliverable of this recipe is the exported stage-2
     # student: export it, strict-reload it (--verify), then instantiate it
-    # through the documented Kandinsky5DMDPipeline override and generate.
+    # through the ordinary public API and generate.
     stage2_ckpt = _latest_checkpoint(STAGE2_OUTPUT_DIR)
     stage2_diffusers_dir = STAGE2_DIFFUSERS_DIR / stage2_ckpt.name
     _export_dcp_to_diffusers(stage2_ckpt, stage2_diffusers_dir)
-    assert (stage2_diffusers_dir / "model_index.json").exists(), (
+    model_index_path = stage2_diffusers_dir / "model_index.json"
+    assert model_index_path.exists(), (
         f"dcp_to_diffusers export did not produce a diffusers model dir at {stage2_diffusers_dir}")
+    model_index = json.loads(model_index_path.read_text(encoding="utf-8"))
+    assert model_index.get("_class_name") == "Kandinsky5DMDPipeline", (
+        f"stage-2 export selected {model_index.get('_class_name')!r}, expected "
+        "'Kandinsky5DMDPipeline'")
 
     generated_video = _generate_from_export(stage2_diffusers_dir, GENERATED_VIDEO_DIR)
     _assert_video_not_degenerate(generated_video)

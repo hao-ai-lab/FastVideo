@@ -81,7 +81,7 @@ Common model parameters:
 | `disable_custom_init_weights` | `false` | Skip custom weight initialization (use for teacher/critic) |
 | `flow_shift` | `3.0` | Timestep shifting factor |
 | `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"` or `null`) |
-| `attention_backend` | `null` | Optional role-local backend for Wan models (for example `ATTN_QAT_TRAIN`); overrides the process default only while this role's transformer is built |
+| `attention_backend` | `null` | Optional role-local backend for supported model plugins (for example `ATTN_QAT_TRAIN`); overrides the process default only while this role's transformer is built |
 
 Which roles are needed depends on the training method:
 

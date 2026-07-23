@@ -28,7 +28,11 @@ from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyu
                                                    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
                                                    Hunyuan15SR1080PConfig)
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
-from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5I2VConfig, Kandinsky5T2VConfig
+from fastvideo.configs.pipelines.kandinsky5 import (
+    Kandinsky5DMDConfig,
+    Kandinsky5I2VConfig,
+    Kandinsky5T2VConfig,
+)
 from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.lingbotworld2 import LingBotWorld2CausalFastI2V480PConfig
@@ -569,6 +573,17 @@ def _register_configs() -> None:
     _is_kandinsky5_i2v_pro = _kandinsky5_detector(require=("i2v", "pro"), exclude=("t2v", "distilled"))
     _is_kandinsky5_i2v_lite_distilled = _kandinsky5_detector(require=("i2v", "lite", "distilled"), exclude=("t2v", ))
     _is_kandinsky5_i2v_pro_distilled = _kandinsky5_detector(require=("i2v", "pro", "distilled"), exclude=("t2v", ))
+
+    # Register the exported DMD artifact before path-based Kandinsky detectors:
+    # output directories commonly contain "kandinsky5_t2v" too.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Kandinsky5DMDConfig,
+        workload_types=(WorkloadType.T2V, ),
+        model_detectors=[lambda path: "kandinsky5dmdpipeline" in path.lower()],
+        model_family="kandinsky5",
+        pipeline_cls_name="Kandinsky5DMDPipeline",
+    )
 
     # Kandinsky5 Lite T2V
     register_configs(
