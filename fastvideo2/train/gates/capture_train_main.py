@@ -242,6 +242,7 @@ def main() -> None:
             rec["dmd"] = {"t_final": float(tb.dmd_latent_vis_dict["dmd_timestep"].item()),
                           "noise": raw["noise"]}
             rec["x0_student"] = _np(gpv)
+            rec["uncond_embeds"] = _np(tb.unconditional_dict["encoder_hidden_states"])
             return loss
 
         def rec_fake(self, tb):
@@ -293,15 +294,16 @@ def main() -> None:
         critic = pipeline.fake_score_transformer
         w0 = {"student": _slice(student.proj_out.weight),
               "critic": _slice(critic.proj_out.weight)}
-        neg = pipeline.negative_prompt_embeds
         pipeline.train()
         w5 = {"student": _slice(student.proj_out.weight),
               "critic": _slice(critic.proj_out.weight)}
 
+        uncond = next((r["uncond_embeds"] for r in dmd_steps
+                       if "uncond_embeds" in r), None)
         np.savez(os.path.join(out, "params.npz"),
                  w0_student=w0["student"], w5_student=w5["student"],
                  w0_critic=w0["critic"], w5_critic=w5["critic"],
-                 neg_embeds=_np(neg))
+                 **({"neg_embeds": uncond} if uncond is not None else {}))
         meta_steps = []
         for i, rec in enumerate(dmd_steps):
             arrs = {"embeds": rec["embeds"]}
