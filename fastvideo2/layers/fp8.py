@@ -57,12 +57,26 @@ def make_fp8_linear_class() -> type:
         """A quantized replacement for one nn.Linear: fp8 weight + fp32 scale
         buffers, dynamic per-tensor activation quant, ``_scaled_mm`` GEMM.
         Mirrors main's ``FP8QuantizeMethod.apply`` + ``convert_model_to_fp8``.
+
+        Weight quantization is DEFERRED to the first forward so it happens on
+        the serving device: main converts after the model reaches the GPU, and
+        quantizing the same bf16 weights on CPU produces (rarely but really)
+        different fp8 codes than the CUDA cast — enough to break bitwise
+        anchors. Until first use the original weight rides along and moves
+        with ``.to(device)``.
         """
 
         def __init__(self, linear: nn.Linear):
             super().__init__()
+            self.weight = nn.Parameter(linear.weight.detach().clone(), requires_grad=False)
+            if linear.bias is not None:
+                self.bias = nn.Parameter(linear.bias.detach().clone(), requires_grad=False)
+            else:
+                self.bias = None
+
+        def _quantize_now(self) -> None:
             with torch.no_grad():
-                w = linear.weight.detach()
+                w = self.weight.detach()
                 # main quantizes AFTER the checkpoint was cast to the load
                 # dtype (bf16), so the fp8 codes depend on that chain.
                 w_absmax = w.abs().amax().nan_to_num().to(torch.float32)
@@ -70,12 +84,11 @@ def make_fp8_linear_class() -> type:
                 w_fp8 = (w / w_scale.to(w.dtype)).clamp(-FP8_MAX, FP8_MAX).to(torch.float8_e4m3fn)
             self.register_buffer("_fp8_weight", w_fp8.contiguous(), persistent=False)
             self.register_buffer("_fp8_weight_scale", w_scale.to(torch.float32), persistent=False)
-            if linear.bias is not None:
-                self.bias = nn.Parameter(linear.bias.detach().clone(), requires_grad=False)
-            else:
-                self.bias = None
+            del self._parameters["weight"]
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
+            if not hasattr(self, "_fp8_weight"):
+                self._quantize_now()
             out_dim = self._fp8_weight.shape[0]
             original_shape = x.shape
             if not (x.is_cuda and _supports_fp8_compute()):

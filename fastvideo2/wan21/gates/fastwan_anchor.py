@@ -121,15 +121,15 @@ def run(skip_e2e: bool = False) -> int:
             failed.append(name)
         print(f"  {name:16s} rel_l2 {val:.6e}  {'OK (bitwise)' if ok else 'DIFF'}")
 
-    from fastvideo2.verify import append_ledger, env_fingerprint
-    append_ledger({"gate": "anchor.fastwan-qad-main",
-                   "status": "pass" if not failed else "fail",
-                   "model_id": FASTWAN_QAD_FP8_1_3B.model_id,
-                   "card_digest": FASTWAN_QAD_FP8_1_3B.digest(),
-                   "metrics": {n: v for n, v in rows},
-                   "tolerances": {"all": 0.0},
-                   "env": env_fingerprint(),
-                   "detail": f"goldens {manifest['fastvideo_commit'][:9]}"})
+    from fastvideo2.verify import GateResult, append_ledger, env_fingerprint
+    append_ledger([GateResult(gate="anchor.fastwan-qad-main",
+                              status="pass" if not failed else "fail",
+                              model_id=FASTWAN_QAD_FP8_1_3B.model_id,
+                              card_digest=FASTWAN_QAD_FP8_1_3B.digest(),
+                              metrics={n: v for n, v in rows},
+                              tolerances={"all": 0.0},
+                              env=env_fingerprint(),
+                              detail=f"goldens {manifest['fastvideo_commit'][:9]}")])
     return 1 if failed else 0
 
 

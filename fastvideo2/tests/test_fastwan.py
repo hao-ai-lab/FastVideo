@@ -49,10 +49,12 @@ def test_fp8_linear_cpu_dequant_path():
     lin = torch.nn.Linear(8, 4).to(torch.bfloat16)
     q = make_fp8_linear_class()(lin)
     x = torch.randn(2, 8, dtype=torch.bfloat16)
+    out = q(x)  # first forward quantizes (device-time, like main's convert)
+    assert not hasattr(q, "weight")  # original weight dropped after quantization
     # CPU falls back to main's _apply_dequant: F.linear on dequantized bf16
     w = q._fp8_weight.to(x.dtype) * q._fp8_weight_scale.to(x.dtype).unsqueeze(1)
     expected = torch.nn.functional.linear(x, w, q.bias)
-    assert torch.equal(q(x), expected)
+    assert torch.equal(out, expected)
     # swap-in-place targets exact module paths, including Sequential indices
     model = torch.nn.Sequential(torch.nn.Linear(4, 4).to(torch.bfloat16))
     quantize_fp8_(model, ["0"])
