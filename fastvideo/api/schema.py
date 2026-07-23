@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -72,6 +73,19 @@ class QuantizationConfig:
 
 
 @dataclass
+class BatchingConfig:
+    mode: Literal["disabled", "dynamic"] = "disabled"
+    max_size: int = 1
+    delay_ms: float = 0.0
+    config_path: str | None = None
+    enable_metrics: bool = False
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.delay_ms) or self.delay_ms < 0:
+            raise ValueError("batching delay_ms must be finite and >= 0")
+
+
+@dataclass
 class EngineConfig:
     num_gpus: int = 1
     execution_backend: Literal["mp", "ray"] = "mp"
@@ -82,6 +96,7 @@ class EngineConfig:
     use_fsdp_inference: bool = False
     disable_autocast: bool = False
     quantization: QuantizationConfig | None = None
+    batching: BatchingConfig = field(default_factory=BatchingConfig)
 
 
 @dataclass
@@ -286,6 +301,7 @@ class ServeConfig:
 
 
 __all__ = [
+    "BatchingConfig",
     "CompileConfig",
     "ComponentConfig",
     "ContinuationState",

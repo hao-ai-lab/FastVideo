@@ -365,7 +365,7 @@ def run_self_forcing_tests():
 @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_unit_test():
     run_test(
-        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
+        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/batching/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
         "./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ "
         "./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/worker/ "
         "./fastvideo/tests/training/test_trackers.py "
@@ -373,6 +373,19 @@ def run_unit_test():
         "--ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py "
         "--ignore=./fastvideo/tests/train/models --ignore=./fastvideo/tests/train/methods -vs"
     )
+
+
+@app.function(gpu="L40S:2",
+              image=image,
+              timeout=1800,
+              secrets=[hf_secret, ci_env_secret],
+              volumes={"/root/data": model_vol})
+def run_dynamic_batching_parity():
+    run_test(
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
+        "python ./fastvideo/tests/batching/run_dynamic_batching_parity.py --mode parity "
+        "--num-gpus 2 --sp-size 2 --output-type pixel --save-video "
+        "--output-json /tmp/dynamic_batching_parity.json")
 
 
 # TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?

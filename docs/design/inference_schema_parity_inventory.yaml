@@ -41,6 +41,11 @@ surfaces:
       disable_autocast: generator.engine.disable_autocast
       enable_stage_verification: generator.engine.enable_stage_verification
       prompt_txt: request.inputs.prompt_path
+      batching_mode: generator.engine.batching.mode
+      batching_max_size: generator.engine.batching.max_size
+      batching_delay_ms: generator.engine.batching.delay_ms
+      batching_config: generator.engine.batching.config_path
+      enable_batching_metrics: generator.engine.batching.enable_metrics
       override_text_encoder_safetensors: generator.pipeline.components.text_encoder_weights
       override_text_encoder_quant: generator.engine.quantization.text_encoder_quant
       transformer_quant: generator.engine.quantization.transformer_quant
@@ -128,6 +133,7 @@ surfaces:
       preprocess_text_funcs: "Internal text preprocessing hooks."
       postprocess_text_funcs: "Internal text postprocessing hooks."
       scheduler_step_in_fp32: "Runtime scheduler precision toggle; not part of the public typed inference API."
+      supports_dynamic_batching: "Per-pipeline-family capability flag for dynamic batching opt-in; not part of the public typed inference API."
 
   pipeline_config_extensions:
     preset_owned:

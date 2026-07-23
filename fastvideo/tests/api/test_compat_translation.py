@@ -5,13 +5,15 @@ PR 6.
 """
 from __future__ import annotations
 
+import pytest
+
 from fastvideo.api.compat import (
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
     request_to_sampling_param,
 )
 from fastvideo.api.parser import parse_config
-from fastvideo.api.schema import CompileConfig, GenerationRequest, GeneratorConfig
+from fastvideo.api.schema import BatchingConfig, CompileConfig, GenerationRequest, GeneratorConfig
 from fastvideo.api.sampling_param import SamplingParam
 
 
@@ -178,6 +180,71 @@ def test_batch_cfg_typed_request_reaches_sampling_param(monkeypatch) -> None:
     assert sampling_param.batch_cfg is True
 
 
+class TestBatchingTranslation:
+
+    def test_flat_kwargs_promote_to_engine_batching(self) -> None:
+        config = legacy_from_pretrained_to_config(
+            "/models/wan",
+            {
+                "batching_mode": "dynamic",
+                "batching_max_size": 4,
+                "batching_delay_ms": 25.0,
+                "batching_config": "/tmp/batching.json",
+                "enable_batching_metrics": True,
+            },
+        )
+
+        assert config.engine.batching.mode == "dynamic"
+        assert config.engine.batching.max_size == 4
+        assert config.engine.batching.delay_ms == 25.0
+        assert config.engine.batching.config_path == "/tmp/batching.json"
+        assert config.engine.batching.enable_metrics is True
+
+    def test_typed_batching_emits_fastvideo_args_kwargs(self, monkeypatch) -> None:
+        _stub_fastvideo_args_from_kwargs(monkeypatch)
+        config = GeneratorConfig(
+            model_path="/models/wan",
+            engine=_engine_with_batching(BatchingConfig(
+                mode="dynamic",
+                max_size=3,
+                delay_ms=10.0,
+                config_path="/tmp/batching.json",
+                enable_metrics=True,
+            )),
+        )
+
+        args = generator_config_to_fastvideo_args(config)
+
+        assert args.kwargs["batching_mode"] == "dynamic"
+        assert args.kwargs["batching_max_size"] == 3
+        assert args.kwargs["batching_delay_ms"] == 10.0
+        assert args.kwargs["batching_config"] == "/tmp/batching.json"
+        assert args.kwargs["enable_batching_metrics"] is True
+
+    @pytest.mark.parametrize(
+        "delay_ms",
+        [float("nan"), float("inf"), float("-inf")],
+        ids=("nan", "positive-infinity", "negative-infinity"),
+    )
+    def test_typed_batching_rejects_non_finite_delay(self, delay_ms: float, monkeypatch) -> None:
+        from fastvideo.configs.pipelines.base import PipelineConfig
+        monkeypatch.setattr(
+            PipelineConfig, "from_kwargs", classmethod(lambda cls, kwargs: cls()))
+
+        batching = BatchingConfig(
+            mode="dynamic",
+            max_size=2,
+        )
+        batching.delay_ms = delay_ms
+        config = GeneratorConfig(
+            model_path="/models/wan",
+            engine=_engine_with_batching(batching),
+        )
+
+        with pytest.raises(ValueError, match="batching_delay_ms must be finite and >= 0"):
+            generator_config_to_fastvideo_args(config)
+
+
 # -------------------------------------------------------------------
 # Helpers
 # -------------------------------------------------------------------
@@ -188,6 +255,13 @@ def _engine_with_compile(compile_config):
     from fastvideo.api.schema import EngineConfig
     engine = EngineConfig()
     engine.compile = compile_config
+    return engine
+
+
+def _engine_with_batching(batching_config):
+    from fastvideo.api.schema import EngineConfig
+    engine = EngineConfig()
+    engine.batching = batching_config
     return engine
 
 

@@ -9,6 +9,7 @@ diffusion models.
 import os
 import re
 import shutil
+import stat
 import subprocess
 import threading
 import time
@@ -18,6 +19,7 @@ import warnings
 from collections.abc import Mapping
 from contextlib import suppress
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any
 
 import imageio
@@ -26,6 +28,8 @@ import torch
 import torchvision
 from einops import rearrange
 
+from fastvideo.batching.admission import BatchAdmissionController
+from fastvideo.batching.signature import can_dynamic_batch
 from fastvideo.api.compat import (
     expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
@@ -94,6 +98,11 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "pin_cpu_memory",
     "enable_torch_compile",
     "torch_compile_kwargs",
+    "batching_mode",
+    "batching_max_size",
+    "batching_delay_ms",
+    "batching_config",
+    "enable_batching_metrics",
     "output_type",
     "nvfp4_fa4",
 })
@@ -146,6 +155,17 @@ def _validate_request_stage_overrides(model_path: str, request: GenerationReques
     )
 
 
+@dataclass
+class _GenerationWorkItem:
+    prompt: str
+    sampling_param: SamplingParam
+    fastvideo_args: FastVideoArgs
+    batch: ForwardBatch
+    output_path: str
+    target_height: int
+    target_width: int
+
+
 class VideoGenerator:
     """
     A unified class for generating videos using diffusion models.
@@ -173,6 +193,12 @@ class VideoGenerator:
         """
         self.config: GeneratorConfig | None = None
         self.fastvideo_args = fastvideo_args
+        self._batch_admission_controller = BatchAdmissionController(fastvideo_args)
+        if fastvideo_args.batching_mode == "dynamic" and fastvideo_args.batching_max_size <= 1:
+            logger.warning(
+                "Dynamic batching is configured with batching_max_size=%d; requests will run sequentially.",
+                fastvideo_args.batching_max_size,
+            )
         self.executor = executor_class(fastvideo_args, log_queue=log_queue)
 
     @classmethod
@@ -450,14 +476,7 @@ class VideoGenerator:
                 legacy_kwargs=kwargs,
             )
 
-            fastvideo_args = self.fastvideo_args
-            pipeline_overrides = request_to_pipeline_overrides(request)
-            if pipeline_overrides:
-                fastvideo_args = deepcopy(self.fastvideo_args)
-                for key, value in pipeline_overrides.items():
-                    if not hasattr(fastvideo_args.pipeline_config, key):
-                        raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
-                    setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+            fastvideo_args = self._resolve_request_fastvideo_args(request)
 
             resolved_sampling_param = request_to_sampling_param(
                 request,
@@ -473,6 +492,78 @@ class VideoGenerator:
             if log_queue:
                 self.executor.clear_log_queue()
 
+    def generate_video_batch(
+        self,
+        request_kwargs: list[dict[str, Any]],
+        *,
+        _capture_postprocess_errors: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Generate multiple legacy video requests, batching compatible items."""
+        work_items: list[_GenerationWorkItem] = []
+        reserved_output_paths: set[str] = set()
+        fastvideo_args_by_pipeline_override: dict[tuple[tuple[str, str], ...], FastVideoArgs] = {
+            (): self.fastvideo_args
+        }
+        for raw_kwargs in request_kwargs:
+            kwargs = dict(raw_kwargs)
+            prompt = kwargs.pop("prompt", None)
+            if prompt is None:
+                raise ValueError("Each batched generation request must include prompt")
+            if not isinstance(prompt, str):
+                raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
+
+            sampling_param = kwargs.pop("sampling_param", None)
+            if sampling_param is None:
+                sampling_param = SamplingParam.from_pretrained(self.fastvideo_args.model_path)
+            else:
+                sampling_param = deepcopy(sampling_param)
+
+            extra_overrides: dict[str, Any] = {}
+            for _ek in _BATCH_EXTRA_PASSTHROUGH_KEYS:
+                if _ek in kwargs:
+                    extra_overrides[_ek] = kwargs.pop(_ek)
+
+            request = legacy_generate_call_to_request(
+                prompt,
+                sampling_param,
+                legacy_kwargs=kwargs,
+            )
+            if not isinstance(request.prompt, str):
+                raise TypeError(f"`prompt` must be a string, but got {type(request.prompt)}")
+
+            fastvideo_args = self.fastvideo_args
+            pipeline_overrides = request_to_pipeline_overrides(request)
+            if pipeline_overrides:
+                override_key = tuple((key, repr(value)) for key, value in sorted(pipeline_overrides.items()))
+                fastvideo_args = fastvideo_args_by_pipeline_override.get(override_key)
+                if fastvideo_args is None:
+                    fastvideo_args = deepcopy(self.fastvideo_args)
+                    for key, value in pipeline_overrides.items():
+                        if not hasattr(fastvideo_args.pipeline_config, key):
+                            raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
+                        setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+                    fastvideo_args_by_pipeline_override[override_key] = fastvideo_args
+
+            resolved_sampling_param = request_to_sampling_param(
+                request,
+                model_path=self.fastvideo_args.model_path,
+            )
+            output_path = self._prepare_output_path(resolved_sampling_param.output_path, request.prompt,
+                                                    reserved_output_paths)
+            work_items.append(
+                self._prepare_generation_work_item(
+                    prompt=request.prompt,
+                    sampling_param=resolved_sampling_param,
+                    fastvideo_args=fastvideo_args,
+                    output_path=output_path,
+                    _extra_overrides=extra_overrides,
+                ))
+
+        return self._generate_prepared_work_items(
+            work_items,
+            capture_postprocess_errors=_capture_postprocess_errors,
+        )
+
     def _generate_request_impl(
         self,
         request: GenerationRequest,
@@ -481,6 +572,8 @@ class VideoGenerator:
         if isinstance(request.prompt, list):
             if request.inputs.prompt_path is not None:
                 raise ValueError("request.prompt list cannot be combined with request.inputs.prompt_path")
+            if (self._dynamic_batching_enabled(self.fastvideo_args) and self.fastvideo_args.prompt_txt is None):
+                return self._generate_batched_typed_requests(request)
             results: list[GenerationResult] = []
             for index, single_request in enumerate(expand_request_prompt_batch(request)):
                 prompt = single_request.prompt
@@ -496,18 +589,58 @@ class VideoGenerator:
 
         return self._generate_single_request(request)
 
+    def _generate_batched_typed_requests(self, request: GenerationRequest) -> list[GenerationResult]:
+        """Route a typed prompt-list request through the dynamic-batching work-item path.
+
+        Expanded requests share every field except prompt/image_path/video_path
+        (none of which are pipeline overrides), so one resolved FastVideoArgs is
+        shared across items — merge compatibility requires identity.
+        """
+        single_requests = expand_request_prompt_batch(request)
+        fastvideo_args = self._resolve_request_fastvideo_args(request)
+        work_items: list[_GenerationWorkItem] = []
+        reserved_output_paths: set[str] = set()
+        for single_request in single_requests:
+            sampling_param = request_to_sampling_param(
+                single_request,
+                model_path=self.fastvideo_args.model_path,
+            )
+            output_path = self._prepare_output_path(sampling_param.output_path, single_request.prompt,
+                                                    reserved_output_paths)
+            work_items.append(
+                self._prepare_generation_work_item(
+                    prompt=single_request.prompt,
+                    sampling_param=sampling_param,
+                    fastvideo_args=fastvideo_args,
+                    output_path=output_path,
+                ))
+
+        results: list[GenerationResult] = []
+        for index, legacy_result in enumerate(self._generate_prepared_work_items(work_items)):
+            wrapped = GenerationResult.from_legacy_result(legacy_result)
+            wrapped.prompt_index = index
+            if wrapped.prompt is None:
+                wrapped.prompt = single_requests[index].prompt
+            results.append(wrapped)
+        return results
+
+    def _resolve_request_fastvideo_args(self, request: GenerationRequest) -> FastVideoArgs:
+        """Return ``self.fastvideo_args``, deep-copied with the request's pipeline overrides applied (if any)."""
+        pipeline_overrides = request_to_pipeline_overrides(request)
+        if not pipeline_overrides:
+            return self.fastvideo_args
+        fastvideo_args = deepcopy(self.fastvideo_args)
+        for key, value in pipeline_overrides.items():
+            if not hasattr(fastvideo_args.pipeline_config, key):
+                raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
+            setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+        return fastvideo_args
+
     def _generate_single_request(
         self,
         request: GenerationRequest,
     ) -> GenerationResult | list[GenerationResult]:
-        fastvideo_args = self.fastvideo_args
-        pipeline_overrides = request_to_pipeline_overrides(request)
-        if pipeline_overrides:
-            fastvideo_args = deepcopy(self.fastvideo_args)
-            for key, value in pipeline_overrides.items():
-                if not hasattr(fastvideo_args.pipeline_config, key):
-                    raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
-                setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+        fastvideo_args = self._resolve_request_fastvideo_args(request)
 
         sampling_param = request_to_sampling_param(
             request,
@@ -568,7 +701,32 @@ class VideoGenerator:
             if not prompts:
                 raise ValueError(f"No prompts found in file: {prompt_txt_path}")
 
+            sampling_param = deepcopy(sampling_param)
+            sampling_param.prompt_path = None
             logger.info("Found %d prompts in %s", len(prompts), prompt_txt_path)
+
+            if self._dynamic_batching_enabled(fastvideo_args):
+                work_items: list[_GenerationWorkItem] = []
+                reserved_output_paths: set[str] = set()
+                for batch_prompt in prompts:
+                    item_kwargs = dict(kwargs)
+                    item_kwargs["output_path"] = self._prepare_output_path(sampling_param.output_path, batch_prompt,
+                                                                           reserved_output_paths)
+                    work_items.append(
+                        self._prepare_generation_work_item(
+                            prompt=batch_prompt,
+                            sampling_param=sampling_param,
+                            fastvideo_args=fastvideo_args,
+                            **item_kwargs,
+                        ))
+
+                results = self._generate_prepared_work_items(work_items, tolerate_failures=True)
+                for i, (result, batch_prompt) in enumerate(zip(results, prompts, strict=True)):
+                    result["prompt_index"] = i
+                    result["prompt"] = batch_prompt
+                logger.info("Completed batch processing. Generated %d videos successfully.",
+                            sum(1 for result in results if "error" not in result))
+                return results
 
             results = []
             for i, batch_prompt in enumerate(prompts):
@@ -623,6 +781,7 @@ class VideoGenerator:
         self,
         output_path: str,
         prompt: str,
+        reserved_paths: set[str] | None = None,
     ) -> str:
         """Build a unique, sanitized output file path.
 
@@ -637,6 +796,9 @@ class VideoGenerator:
         - Invalid filename characters are removed; if the name changes, a
           warning is logged.
         - If the target path already exists, a numeric suffix is appended.
+        - ``reserved_paths`` lets batch callers resolve every path before any
+          file is written: paths in the set are treated as taken, and the
+          chosen path is added to the set.
         """
         target_ext = ".png" if self._is_image_workload() else ".mp4"
 
@@ -681,53 +843,57 @@ class VideoGenerator:
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
+        def _is_taken(path: str) -> bool:
+            return os.path.exists(path) or (reserved_paths is not None and path in reserved_paths)
+
         new_output_path = os.path.join(output_dir, out_name)
         counter = 1
-        while os.path.exists(new_output_path):
+        while _is_taken(new_output_path):
             name_part, ext_part = os.path.splitext(out_name)
             new_name = f"{name_part}_{counter}{ext_part}"
             new_output_path = os.path.join(output_dir, new_name)
             counter += 1
+        if reserved_paths is not None:
+            reserved_paths.add(new_output_path)
         return new_output_path
 
-    def _generate_single_video(
-        self,
-        prompt: str,
-        sampling_param: SamplingParam | None = None,
-        fastvideo_args: FastVideoArgs | None = None,
-        **kwargs,
-    ) -> dict[str, Any]:
-        """Internal method for single video generation"""
-        if fastvideo_args is None:
-            fastvideo_args = self.fastvideo_args
+    def _dynamic_batching_enabled(self, fastvideo_args: FastVideoArgs) -> bool:
+        batching_mode = getattr(fastvideo_args, "batching_mode", "disabled")
+        batching_max_size = getattr(fastvideo_args, "batching_max_size", 1)
+        return batching_mode == "dynamic" and batching_max_size > 1
 
-        # Validate inputs
-        if not isinstance(prompt, str):
-            raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
-        prompt = prompt.strip()
+    def _prepare_generation_work_item(
+        self,
+        prompt: str | list[str],
+        sampling_param: SamplingParam,
+        fastvideo_args: FastVideoArgs,
+        **kwargs,
+    ) -> _GenerationWorkItem:
+        if isinstance(prompt, str):
+            prompt_for_output = prompt.strip()
+            prompt_value: str | list[str] = prompt_for_output
+        elif isinstance(prompt, list) and all(isinstance(item, str) for item in prompt):
+            prompt_value = [item.strip() for item in prompt]
+            prompt_for_output = prompt_value[0] if prompt_value else ""
+        else:
+            raise TypeError(f"`prompt` must be a string or list of strings, but got {type(prompt)}")
+
         sampling_param = deepcopy(sampling_param)
         output_path = kwargs["output_path"]
-        prompt_embeds = kwargs.get("prompt_embeds")
-        sampling_param.prompt = prompt
-        # Process negative prompt
+        sampling_param.prompt = prompt_value
         if sampling_param.negative_prompt is not None:
             sampling_param.negative_prompt = sampling_param.negative_prompt.strip()
 
-        # Validate dimensions
-        if (sampling_param.height <= 0 or sampling_param.width <= 0 or sampling_param.num_frames <= 0):
+        if sampling_param.height <= 0 or sampling_param.width <= 0 or sampling_param.num_frames <= 0:
             raise ValueError(f"Height, width, and num_frames must be positive integers, got "
                              f"height={sampling_param.height}, width={sampling_param.width}, "
                              f"num_frames={sampling_param.num_frames}")
 
-        # Calculate sizes
         target_height = align_to(sampling_param.height, 16)
         target_width = align_to(sampling_param.width, 16)
-
-        # Calculate latent sizes
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1, sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
-        # Log parameters
         debug_str = f"""
                       height: {target_height}
                        width: {target_width}
@@ -747,7 +913,6 @@ class VideoGenerator:
         """ # type: ignore[attr-defined]
         logger.info(debug_str)
 
-        # Prepare batch
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             eta=0.0,
@@ -755,19 +920,41 @@ class VideoGenerator:
             VSA_sparsity=fastvideo_args.VSA_sparsity,
         )
         # Allow precomputed prompt_embeds (e.g. from diffusers) to skip text encoding
+        prompt_embeds = kwargs.get("prompt_embeds")
         if prompt_embeds is not None:
             batch.prompt_embeds = (list(prompt_embeds) if isinstance(prompt_embeds, list | tuple) else [prompt_embeds])
 
-        extra_overrides = kwargs.pop("_extra_overrides", {})
+        extra_overrides = kwargs.get("_extra_overrides", {})
         for _ek, _ev in extra_overrides.items():
             batch.extra[_ek] = _ev
 
-        # Run inference
-        start_time = time.perf_counter()
+        return _GenerationWorkItem(
+            prompt=prompt_for_output,
+            sampling_param=sampling_param,
+            fastvideo_args=fastvideo_args,
+            batch=batch,
+            output_path=output_path,
+            target_height=target_height,
+            target_width=target_width,
+        )
 
-        # Execute forward pass in a new thread for non-blocking tensor
-        # allocation. Capture thread exceptions so we can surface the true
-        # failure in the main thread instead of later hitting None outputs.
+    def _run_forward_batch(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> tuple[ForwardBatch, float, float]:
+        if (getattr(fastvideo_args, "enable_batching_metrics", False)
+                and self._dynamic_batching_enabled(fastvideo_args)):
+            batch_size = _infer_latent_batch_size(batch)
+            max_batch_size = max(1, int(fastvideo_args.batching_max_size))
+            logger.info(
+                "Executing dynamic video forward batch: size=%d max_size=%d utilization=%.2f",
+                batch_size,
+                max_batch_size,
+                batch_size / max_batch_size,
+            )
+
+        start_time = time.perf_counter()
         result_container = {"output_batch": ForwardBatch(data_type=batch.data_type)}
         thread_error: dict[str, BaseException | None] = {"error": None}
         thread_error_traceback: dict[str, str] = {"traceback": ""}
@@ -780,27 +967,33 @@ class VideoGenerator:
                 thread_error["error"] = error
                 thread_error_traceback["traceback"] = traceback.format_exc()
 
-        thread = threading.Thread(target=execute_forward_thread)
-        thread.start()
-        latent_batch_size = _infer_latent_batch_size(batch)
         is_latent_output = fastvideo_args.output_type == "latent"
-        needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
-        needs_samples_buffer = batch.return_frames or needs_frame_output
-        # When ``output_type == "latent"`` the forward output has latent
-        # shape (e.g. ``[B, C_latent, T_latent, H_latent, W_latent]``)
-        # rather than the pre-allocation's pixel shape. Skip the pinned
-        # ~50 MB buffer entirely. Also skip it for metadata-only calls;
-        # neither the result nor save path will consume the decoded tensor.
-        # ``skip_pixel_prealloc`` also gates the slow-path warning.
-        skip_pixel_prealloc = is_latent_output or not needs_samples_buffer
-        if skip_pixel_prealloc:
-            samples = torch.empty(0, device='cpu')
-        else:
-            samples = torch.empty(
-                (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
-                device='cpu',
-                pin_memory=fastvideo_args.pin_cpu_memory)
-        thread.join()
+        needs_pixel_output = batch.return_frames or (batch.save_video and not is_latent_output)
+        expected_shape: tuple[int, ...] | None = None
+        if needs_pixel_output and not is_latent_output:
+            if not isinstance(batch.height, int) or not isinstance(batch.width, int) or not isinstance(
+                    batch.num_frames, int):
+                raise ValueError("Pixel output dimensions must be scalar integers")
+            expected_shape = (
+                _infer_latent_batch_size(batch),
+                3,
+                batch.num_frames,
+                batch.height,
+                batch.width,
+            )
+
+        thread = threading.Thread(target=execute_forward_thread)
+        samples: torch.Tensor | None = None
+        thread.start()
+        try:
+            if expected_shape is not None:
+                samples = torch.empty(
+                    expected_shape,
+                    device="cpu",
+                    pin_memory=fastvideo_args.pin_cpu_memory,
+                )
+        finally:
+            thread.join()
 
         if thread_error["error"] is not None:
             raise RuntimeError("Forward execution thread failed.\n"
@@ -811,46 +1004,75 @@ class VideoGenerator:
             raise RuntimeError("Forward execution returned no output tensor. "
                                "This usually means the executor/pipeline failed earlier.")
 
-        audio_only = bool(output_batch.extra.get("audio_only"))
-        if not needs_samples_buffer or (audio_only and not batch.return_frames):
-            # Metadata-only/audio-only request: keep the empty placeholder and
-            # avoid the decoded tensor D->H copy.
-            pass
-        elif audio_only:
-            # Audio-only return-frames requests expose the small placeholder
-            # without warning about expected video shape.
-            samples = output_batch.output.cpu()
-        elif output_batch.output.shape == samples.shape:
-            samples.copy_(output_batch.output)
-        else:
-            if not skip_pixel_prealloc:
-                logger.warning("Output shape %s does not match expected shape %s; use slow path",
-                               output_batch.output.shape, samples.shape)
-            samples = output_batch.output.cpu()
-        logging_info = output_batch.logging_info
+        if samples is not None and not output_batch.extra.get("audio_only"):
+            if output_batch.output.shape == samples.shape:
+                samples.copy_(output_batch.output)
+                output_batch.output = samples
+            else:
+                logger.warning(
+                    "Output shape %s does not match expected shape %s; use slow path",
+                    output_batch.output.shape,
+                    samples.shape,
+                )
+                output_batch.output = output_batch.output.cpu()
 
         gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
+        return output_batch, gen_time, start_time
 
-        # Three mutually-exclusive output modes determine whether (a) we
-        # build an RGB frame buffer and (b) what file we write to disk:
-        #
-        #   1. `output_type == "latent"` — VAE is bypassed in DecodingStage
-        #      and `samples` holds raw latents (arbitrary channel count).
-        #      The RGB grid / uint8 / mp4 / png pipeline below cannot
-        #      consume those, so we skip it entirely and let callers work
-        #      with the latent tensor directly via `result["samples"]`.
-        #   2. Audio-only workload — `samples` is a 1×3×1×8×8 placeholder
-        #      no caller will use; skip the grid loop and save a `.wav`.
-        #   3. Pixel video / image — the historical happy path.
-        # `GenerationResult.size` describes the produced media, not only the
-        # base-stage request. Refiner pipelines can change the final pixel
-        # dimensions, so derive this result metadata from the decoded output.
-        output_size = _resolve_output_size(
-            samples,
-            (target_height, target_width, batch.num_frames),
-            pixel_output=not is_latent_output and not audio_only,
+    def _samples_from_output(
+        self,
+        work_item: _GenerationWorkItem,
+        output_batch: ForwardBatch,
+    ) -> torch.Tensor:
+        output = output_batch.output
+        if output is None:
+            raise RuntimeError("Forward execution returned no output tensor.")
+
+        fastvideo_args = work_item.fastvideo_args
+        sampling_param = work_item.sampling_param
+        batch = work_item.batch
+        is_latent_output = fastvideo_args.output_type == "latent"
+        audio_only = bool(output_batch.extra.get("audio_only"))
+        needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
+
+        if not needs_frame_output or (audio_only and not batch.return_frames):
+            return torch.empty(0, device="cpu")
+        if audio_only or is_latent_output:
+            return output.cpu()
+        if output.device.type == "cpu":
+            return output.cpu()
+
+        latent_batch_size = _infer_latent_batch_size(work_item.batch)
+        expected_shape = (
+            latent_batch_size,
+            3,
+            sampling_param.num_frames,
+            sampling_param.height,
+            sampling_param.width,
         )
+        samples = torch.empty(expected_shape, device="cpu", pin_memory=fastvideo_args.pin_cpu_memory)
+        if output.shape == samples.shape:
+            samples.copy_(output)
+            return samples
+        logger.warning("Output shape %s does not match expected shape %s; use slow path", output.shape, samples.shape)
+        return output.cpu()
+
+    def _postprocess_generation_output(
+        self,
+        work_item: _GenerationWorkItem,
+        output_batch: ForwardBatch,
+        gen_time: float,
+        start_time: float,
+    ) -> dict[str, Any]:
+        batch = work_item.batch
+        fastvideo_args = work_item.fastvideo_args
+        output_path = work_item.output_path
+        is_latent_output = fastvideo_args.output_type == "latent"
+        audio_only = bool(output_batch.extra.get("audio_only"))
+        needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
+        samples = self._samples_from_output(work_item, output_batch)
+        logging_info = output_batch.logging_info
 
         postprocess_start = time.perf_counter()
         frames: list[np.ndarray] | None
@@ -876,9 +1098,6 @@ class VideoGenerator:
         audio_mux_time = 0.0
         if save_to_disk:
             if audio_only:
-                # Audio-only workload: write a standalone .wav rather than
-                # muxing the audio into a placeholder mp4 (which forces
-                # ffmpeg to round 8x8 placeholder frames up to 16x16).
                 output_path = self._rewrite_extension(output_path, ".wav")
                 save_start = time.perf_counter()
                 self._write_pcm_wav(
@@ -889,20 +1108,16 @@ class VideoGenerator:
                 save_video_time = time.perf_counter() - save_start
                 logger.info("Saved audio to %s", output_path)
             elif self._is_image_workload():
-                # Image workloads (t2i, i2i, …): save the first frame as PNG.
-                assert frames is not None  # implied by save_to_disk and not audio_only
+                assert frames is not None
                 save_start = time.perf_counter()
-                imageio.imwrite(output_path, frames[0])
+                self._write_image_atomic(output_path, frames[0])
                 save_video_time = time.perf_counter() - save_start
                 logger.info("Saved image to %s", output_path)
             else:
-                assert frames is not None  # implied by save_to_disk and not audio_only
+                assert frames is not None
                 audio = output_batch.extra.get("audio")
                 audio_sample_rate = output_batch.extra.get("audio_sample_rate")
                 if audio is not None and audio_sample_rate is not None:
-                    # Single-pass save path: encode video+audio once, avoiding
-                    # second-pass remux overhead. AudioMuxStage remains 0.0 on
-                    # success because audio is already present in the saved MP4.
                     save_start = time.perf_counter()
                     save_ok = self._save_video_with_audio_ffmpeg_pipe(
                         output_path=output_path,
@@ -926,7 +1141,7 @@ class VideoGenerator:
                     else:
                         logger.warning("Single-pass save failed; falling back to two-step save/mux.")
                         save_start = time.perf_counter()
-                        imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                        self._write_video_atomic(output_path, frames, batch.fps)
                         save_video_time = time.perf_counter() - save_start
                         mux_start = time.perf_counter()
                         mux_ok = self._mux_audio(output_path, audio, int(audio_sample_rate))
@@ -935,7 +1150,7 @@ class VideoGenerator:
                             logger.warning("Audio mux failed; saved video without audio.")
                 else:
                     save_start = time.perf_counter()
-                    imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                    self._write_video_atomic(output_path, frames, batch.fps)
                     save_video_time = time.perf_counter() - save_start
                     audio_mux_time = 0.0
                 logger.info("Saved video to %s", output_path)
@@ -949,14 +1164,16 @@ class VideoGenerator:
 
         e2e_time = time.perf_counter() - start_time
         logger.info("End-to-end latency: %.2f seconds", e2e_time)
+        output_size = _resolve_output_size(
+            samples,
+            (work_item.target_height, work_item.target_width, batch.num_frames),
+            pixel_output=not is_latent_output and not audio_only,
+        )
 
-        result: dict[str, Any] = {
-            "prompts": prompt,
+        return {
+            "prompts": work_item.prompt,
             "samples": samples if batch.return_frames else None,
             "frames": frames if batch.return_frames else None,
-            # Audio is the primary output for audio workloads — return it
-            # whenever the pipeline produced one, regardless of
-            # `return_frames` (which gates the video-shaped buffers).
             "audio": output_batch.extra.get("audio"),
             "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
             "ltx2_audio_latents": output_batch.extra.get("ltx2_audio_latents"),
@@ -971,7 +1188,213 @@ class VideoGenerator:
             "peak_memory_mb": output_batch.extra.get("peak_memory_mb"),
         }
 
+    def _split_output_batch(
+        self,
+        output_batch: ForwardBatch,
+        *,
+        index: int,
+        batch_size: int,
+    ) -> ForwardBatch:
+        extra = {}
+        for key, value in (output_batch.extra or {}).items():
+            if torch.is_tensor(value) and value.ndim > 0 and value.shape[0] == batch_size:
+                extra[key] = value[index:index + 1]
+            elif isinstance(value, list) and len(value) == batch_size:
+                extra[key] = value[index]
+            else:
+                extra[key] = value
+
+        result = ForwardBatch(
+            data_type=output_batch.data_type,
+            output=(output_batch.output[index:index + 1] if output_batch.output is not None else None),
+            logging_info=deepcopy(output_batch.logging_info),
+            extra=extra,
+        )
+        if output_batch.trajectory_latents is not None:
+            result.trajectory_latents = output_batch.trajectory_latents[index:index + 1]
+        result.trajectory_timesteps = output_batch.trajectory_timesteps
+        if output_batch.trajectory_decoded is not None:
+            result.trajectory_decoded = [
+                decoded[index:index + 1] if torch.is_tensor(decoded) and decoded.shape[0] == batch_size else decoded
+                for decoded in output_batch.trajectory_decoded
+            ]
         return result
+
+    def _merge_work_items(self, work_items: list[_GenerationWorkItem]) -> _GenerationWorkItem:
+        first = work_items[0]
+        sampling_param = deepcopy(first.sampling_param)
+        prompts = [item.prompt for item in work_items]
+        sampling_param.prompt = prompts
+        sampling_param.seed = work_items[0].sampling_param.seed
+
+        merged = self._prepare_generation_work_item(
+            prompts,
+            sampling_param,
+            first.fastvideo_args,
+            output_path=first.output_path,
+            _extra_overrides=first.batch.extra,
+        )
+        merged.batch.seeds = [int(item.sampling_param.seed) for item in work_items]
+        merged.batch.save_video = any(item.batch.save_video for item in work_items)
+        merged.batch.return_frames = any(item.batch.return_frames for item in work_items)
+        return merged
+
+    def _work_item_merge_rejection_reason(
+        self,
+        base: _GenerationWorkItem,
+        candidate: _GenerationWorkItem,
+        admission: BatchAdmissionController,
+        current_group: list[_GenerationWorkItem],
+    ) -> str | None:
+        if candidate.fastvideo_args is not base.fastvideo_args:
+            return "fastvideo_args"
+        compatibility = can_dynamic_batch(
+            base.sampling_param,
+            candidate.sampling_param,
+            base_extra=base.batch.extra,
+            candidate_extra=candidate.batch.extra,
+        )
+        if not compatibility.can_batch:
+            return compatibility.reason or "incompatible"
+        current_requests = [item.sampling_param for item in current_group]
+        return admission.reject_reason_for_candidate(current_requests, candidate.sampling_param)
+
+    def _run_work_item_group(
+        self,
+        group: list[_GenerationWorkItem],
+        *,
+        capture_postprocess_errors: bool = False,
+    ) -> list[dict[str, Any]]:
+        if len(group) == 1:
+            return [self._execute_single_work_item(group[0])]
+        merged = self._merge_work_items(group)
+        output_batch, gen_time, start_time = self._run_forward_batch(merged.batch, merged.fastvideo_args)
+        results: list[dict[str, Any]] = []
+        for item_index, item in enumerate(group):
+            try:
+                result = self._postprocess_generation_output(
+                    item,
+                    self._split_output_batch(output_batch, index=item_index, batch_size=len(group)),
+                    gen_time,
+                    start_time,
+                )
+            except Exception as error:
+                if not capture_postprocess_errors:
+                    raise
+                result = {"_postprocess_error": error}
+            results.append(result)
+        return results
+
+    def _generate_prepared_work_items(
+        self,
+        work_items: list[_GenerationWorkItem],
+        tolerate_failures: bool = False,
+        capture_postprocess_errors: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Execute prepared work items, batching compatible neighbors.
+
+        With ``tolerate_failures`` (prompt-file semantics), a failed group
+        yields one ``{"error": ..., "prompt": ...}`` entry per work item so
+        completed results survive and stay aligned with the inputs; otherwise
+        the exception propagates.
+        """
+        if not work_items:
+            return []
+
+        def run_group(group: list[_GenerationWorkItem]) -> list[dict[str, Any]]:
+            if not tolerate_failures:
+                return self._run_work_item_group(
+                    group,
+                    capture_postprocess_errors=capture_postprocess_errors,
+                )
+            try:
+                return self._run_work_item_group(group)
+            except Exception as e:
+                if len(group) == 1:
+                    logger.error("Failed to generate video for prompt %s: %s", group[0].prompt[:100], e)
+                    return [{"error": str(e), "prompt": group[0].prompt}]
+                logger.warning(
+                    "Merged prompt batch failed; retrying %d prompts individually: %s",
+                    len(group),
+                    e,
+                )
+                results = []
+                for item in group:
+                    try:
+                        results.append(self._execute_single_work_item(item))
+                    except Exception as item_error:
+                        logger.error("Failed to generate video for prompt %s: %s", item.prompt[:100], item_error)
+                        results.append({"error": str(item_error), "prompt": item.prompt})
+                return results
+
+        fastvideo_args = work_items[0].fastvideo_args
+        if not self._dynamic_batching_enabled(fastvideo_args):
+            return [result for item in work_items for result in run_group([item])]
+
+        pipeline_config = fastvideo_args.pipeline_config
+        if not pipeline_config.dynamic_batching_supported():
+            raise ValueError(
+                f"Dynamic batching is enabled but pipeline config {type(pipeline_config).__name__} does not "
+                "support merging requests; run with batching_mode='disabled', or use a pipeline that opts in "
+                "via supports_dynamic_batching=True (DMD/causal denoising variants are always excluded)")
+
+        admission = getattr(self, "_batch_admission_controller", None)
+        if admission is None or fastvideo_args is not getattr(self, "fastvideo_args", None):
+            cached_rules = None
+            startup_admission = getattr(self, "_batch_admission_controller", None)
+            if startup_admission is not None:
+                cached_rules = startup_admission.rules
+            # Per-request pipeline overrides need their own cost estimator,
+            # but reuse the configuration parsed at generator startup.
+            admission = BatchAdmissionController(fastvideo_args, rules=cached_rules)
+        results: list[dict[str, Any]] = []
+        index = 0
+        while index < len(work_items):
+            group = [work_items[index]]
+            index += 1
+            while index < len(work_items) and len(group) < fastvideo_args.batching_max_size:
+                candidate = work_items[index]
+                rejection_reason = self._work_item_merge_rejection_reason(
+                    group[0],
+                    candidate,
+                    admission,
+                    group,
+                )
+                if rejection_reason is not None:
+                    if getattr(fastvideo_args, "enable_batching_metrics", False):
+                        logger.info("Dynamic batch candidate rejected: reason=%s current_size=%d max_size=%d",
+                                    rejection_reason, len(group), fastvideo_args.batching_max_size)
+                    break
+                group.append(candidate)
+                index += 1
+            results.extend(run_group(group))
+        return results
+
+    def _execute_single_work_item(self, work_item: _GenerationWorkItem) -> dict[str, Any]:
+        output_batch, gen_time, start_time = self._run_forward_batch(work_item.batch, work_item.fastvideo_args)
+        return self._postprocess_generation_output(work_item, output_batch, gen_time, start_time)
+
+    def _generate_single_video(
+        self,
+        prompt: str,
+        sampling_param: SamplingParam | None = None,
+        fastvideo_args: FastVideoArgs | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """Internal method for single video generation"""
+        if fastvideo_args is None:
+            fastvideo_args = self.fastvideo_args
+
+        if not isinstance(prompt, str):
+            raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
+
+        work_item = self._prepare_generation_work_item(
+            prompt=prompt,
+            sampling_param=sampling_param,
+            fastvideo_args=fastvideo_args,
+            **kwargs,
+        )
+        return self._execute_single_work_item(work_item)
 
     @staticmethod
     def _wrap_legacy_result(
@@ -1017,6 +1440,69 @@ class VideoGenerator:
         audio_int16 = (audio_np * 32767.0).astype(np.int16)
         return audio_int16, audio_int16.shape[1]
 
+    @staticmethod
+    def _temporary_output_path(output_path: str) -> str:
+        output_dir = os.path.dirname(os.path.abspath(output_path))
+        stem, suffix = os.path.splitext(os.path.basename(output_path))
+        fd, temporary_path = tempfile.mkstemp(
+            dir=output_dir,
+            prefix=f".{stem}.",
+            suffix=suffix,
+        )
+        try:
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+        return temporary_path
+
+    @staticmethod
+    def _new_output_mode(temporary_path: str) -> int:
+        # There is no side-effect-free umask getter. Let the kernel apply it to
+        # an atomically created empty probe rather than changing process state.
+        probe_path = f"{temporary_path}.mode"
+        fd = os.open(probe_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        try:
+            return stat.S_IMODE(os.fstat(fd).st_mode)
+        finally:
+            os.close(fd)
+            with suppress(FileNotFoundError):
+                os.remove(probe_path)
+
+    @classmethod
+    def _replace_output_atomic(cls, temporary_path: str, output_path: str) -> None:
+        try:
+            output_mode = stat.S_IMODE(os.stat(output_path).st_mode)
+        except FileNotFoundError:
+            output_mode = cls._new_output_mode(temporary_path)
+
+        os.chmod(temporary_path, output_mode)
+        try:
+            os.replace(temporary_path, output_path)
+        except BaseException:
+            with suppress(OSError):
+                os.chmod(temporary_path, 0o600)
+            raise
+
+    @classmethod
+    def _write_image_atomic(cls, output_path: str, frame: np.ndarray) -> None:
+        temporary_path = cls._temporary_output_path(output_path)
+        try:
+            imageio.imwrite(temporary_path, frame)
+            cls._replace_output_atomic(temporary_path, output_path)
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
+
+    @classmethod
+    def _write_video_atomic(cls, output_path: str, frames: list[np.ndarray], fps: int) -> None:
+        temporary_path = cls._temporary_output_path(output_path)
+        try:
+            imageio.mimsave(temporary_path, frames, fps=fps, format="mp4")
+            cls._replace_output_atomic(temporary_path, output_path)
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
+
     @classmethod
     def _write_pcm_wav(
         cls,
@@ -1027,11 +1513,17 @@ class VideoGenerator:
         """Write 16-bit PCM WAV; returns the channel count."""
         import wave
         audio_int16, num_channels = cls._audio_to_int16(audio)
-        with wave.open(wav_path, "wb") as f:
-            f.setnchannels(num_channels)
-            f.setsampwidth(2)
-            f.setframerate(sample_rate)
-            f.writeframes(audio_int16.tobytes())
+        temporary_path = cls._temporary_output_path(wav_path)
+        try:
+            with wave.open(temporary_path, "wb") as f:
+                f.setnchannels(num_channels)
+                f.setsampwidth(2)
+                f.setframerate(sample_rate)
+                f.writeframes(audio_int16.tobytes())
+            cls._replace_output_atomic(temporary_path, wav_path)
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
         return num_channels
 
     @classmethod
@@ -1053,11 +1545,12 @@ class VideoGenerator:
         if not frames:
             return False
 
+        temporary_path = cls._temporary_output_path(output_path)
         output = None
         try:
             audio_int16, num_channels = cls._audio_to_int16(audio)
             layout = "stereo" if num_channels == 2 else "mono"
-            output = av.open(output_path, mode="w")
+            output = av.open(temporary_path, mode="w")
             video_stream = output.add_stream("libx264", rate=fps)
             video_stream.width = int(frames[0].shape[1])
             video_stream.height = int(frames[0].shape[0])
@@ -1093,6 +1586,7 @@ class VideoGenerator:
                 output.mux(packet)
 
             output.close()
+            cls._replace_output_atomic(temporary_path, output_path)
             return True
         except Exception as e:
             logger.warning("Single-pass video+audio save failed: %s", e)
@@ -1100,6 +1594,9 @@ class VideoGenerator:
                 with suppress(Exception):
                     output.close()
             return False
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
 
     @staticmethod
     def _ffmpeg_encoder_supports_option(ffmpeg_bin: str, codec: str, option_name: str) -> bool:
@@ -1154,6 +1651,7 @@ class VideoGenerator:
         width = int(frames[0].shape[1])
         codec = os.getenv("FASTVIDEO_VIDEO_CODEC", "libx264")
 
+        temporary_path = cls._temporary_output_path(output_path)
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 wav_path = os.path.join(tmpdir, "audio.wav")
@@ -1207,7 +1705,7 @@ class VideoGenerator:
                     "-shortest",
                     "-movflags",
                     "+faststart",
-                    output_path,
+                    temporary_path,
                 ]
 
                 proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -1230,6 +1728,7 @@ class VideoGenerator:
                     if rc != 0:
                         logger.warning("ffmpeg pipe save failed with return code %d", rc)
                         return False
+                    cls._replace_output_atomic(temporary_path, output_path)
                     return True
                 except Exception:
                     proc.kill()
@@ -1238,6 +1737,9 @@ class VideoGenerator:
         except Exception as e:
             logger.warning("ffmpeg pipe save failed: %s", e)
             return False
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
 
     @classmethod
     def _mux_audio(
@@ -1254,9 +1756,9 @@ class VideoGenerator:
                            "Install with: uv pip install av")
             return False
 
+        temporary_path = cls._temporary_output_path(video_path)
         try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                out_path = os.path.join(tmpdir, "muxed.mp4")
+            with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(video_path))) as tmpdir:
                 wav_path = os.path.join(tmpdir, "audio.wav")
 
                 num_channels = cls._write_pcm_wav(wav_path, audio, sample_rate)
@@ -1267,7 +1769,7 @@ class VideoGenerator:
                 input_audio = av.open(wav_path)
 
                 # Create output with both streams
-                output = av.open(out_path, mode="w")
+                output = av.open(temporary_path, mode="w")
 
                 # Add video stream (copy codec from input)
                 in_video_stream = input_video.streams.video[0]
@@ -1301,11 +1803,14 @@ class VideoGenerator:
                 input_video.close()
                 input_audio.close()
                 output.close()
-                shutil.move(out_path, video_path)
+                cls._replace_output_atomic(temporary_path, video_path)
             return True
         except Exception as e:
             logger.warning("Audio mux failed: %s", e)
             return False
+        finally:
+            with suppress(FileNotFoundError):
+                os.remove(temporary_path)
 
     def set_lora_adapter(self,
                          lora_nickname: str,

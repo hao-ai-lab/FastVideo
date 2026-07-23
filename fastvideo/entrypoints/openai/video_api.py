@@ -26,6 +26,7 @@ from fastvideo.entrypoints.openai.state import (
     get_generator,
     get_output_dir,
     get_server_args,
+    get_video_batch_scheduler,
 )
 from fastvideo.entrypoints.openai.protocol import (
     VideoGenerationsRequest,
@@ -151,15 +152,19 @@ async def _run_generation(request_id: str, kwargs: dict[str, Any]) -> None:
     is synchronous) and update the store on completion or failure.
     """
     generator = get_generator()
+    scheduler = get_video_batch_scheduler()
     loop = asyncio.get_running_loop()
 
     try:
         start = time.perf_counter()
 
-        result = await loop.run_in_executor(
-            None,
-            lambda: generator.generate_video(**kwargs),
-        )
+        if scheduler is not None and scheduler.enabled:
+            result = await scheduler.submit(request_id, kwargs)
+        else:
+            result = await loop.run_in_executor(
+                None,
+                lambda: generator.generate_video(**kwargs),
+            )
 
         elapsed = time.perf_counter() - start
         update: dict[str, Any] = {
@@ -176,6 +181,9 @@ async def _run_generation(request_id: str, kwargs: dict[str, Any]) -> None:
             peak_mem = result.get("peak_memory_mb")
             if peak_mem is not None:
                 update["peak_memory_mb"] = peak_mem
+            video_path = result.get("video_path")
+            if video_path is not None:
+                update["file_path"] = video_path
 
         await VIDEO_STORE.update_fields(request_id, update)
         logger.info("Video %s completed in %.2fs", request_id, elapsed)
