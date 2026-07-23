@@ -115,3 +115,32 @@ same fixtures at the matching topology.
   capture).
 - Timesteps recorded as fp32 warped values via shift_timestep
   (training_utils.py:1136: t*shift/(1+(shift-1)t) scaled x1000).
+
+## DiffusionNFT RL build facts (#24, read from train/methods/rl/diffusion_nft.py)
+
+- managed_train_step (:168): sample epoch -> score rewards -> group
+  advantages -> inner train -> `_update_old_model` (EMA old<-student,
+  decay schedule :828). Student optimizer only (method-managed).
+- `_training_timestep_loss` (:661): xt = (1-t)x0 + t*noise (noise from the
+  SEEDED per-SP cuda_generator); old/reference predictions no_grad; student
+  forward with grad; advantage clip/modes -> r in [0,1]; positive = beta*fwd
+  + (1-beta)*old; implicit negative = (1+beta)*old - beta*fwd; per-sample
+  weighted x0 MSEs (fp64 weight factors, clip 1e-5); policy = (r*pos +
+  (1-r)*neg)/beta * adv_clip_max, mean; + kl_beta * MSE(fwd, ref).
+- `_compute_advantages` (:496): group by PROMPT over the all-gathered batch;
+  (r - mean)/(std_unbiased=False + 1e-4); repeated per train timestep.
+- Rewards: build_multi_reward_scorer (pickscore/clipscore on main; the
+  merged config `examples/train/configs/rl/wan/diffusion_nft_pick_clip.yaml`
+  is single-frame RL: num_frames 1, num_latent_t 1, 25 sampling steps,
+  beta .1, kl_beta 1e-4, lr 3e-5).
+- Sampler: methods/rl/common/sampling.py DiffusionSampler (ode = flow Euler
+  == our WanDenoiseLoop math; sde_reflow variant); prompt K-repeat sampler
+  so groups share prompts.
+- VideoAlign (phase A): PR #1476 branch `maint/pr1476-runtime-compat`
+  @518aeab0b ONLY — vendor `train/methods/rl/rewards/videoalign.py` +
+  `third_party/rl_rewards/VideoAlign/` (Qwen2-VL BT reward, MQ/VQ/TA,
+  transformers-5 patches); checkpoint = local clone of KwaiVGI/VideoReward
+  via VIDEOALIGN_CHECKPOINT_PATH. Gate: identical scores on fixed videos.
+- Gate plan (phase B first): capture wrappers on DiffusionNFTMethod
+  (_sample_epoch outputs, rewards, advantages, per-inner-step losses +
+  recorded noise draws); our NFTStep replays through 3x WanModelFV.
