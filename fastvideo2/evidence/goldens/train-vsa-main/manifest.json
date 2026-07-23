@@ -1,0 +1,36 @@
+{
+  "fastvideo_commit": "c459a1897899ffcec3be7765534d81000b9bb9c1",
+  "dataset": "wlsaidhi/crush-smol_processed_t2v",
+  "mode": "vsa",
+  "model": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+  "seed": 42,
+  "steps": 5,
+  "num_latent_t": 8,
+  "config": "1gpu bs1 accum1 lr5e-5 wd1e-4 betas(0.9,0.999) clip1.0 uniform-t cfg_rate0 dit_fp32 mixed_bf16 flow-match target=noise-latents flash_attn",
+  "torch": "2.12.0+cu130",
+  "gpu": "NVIDIA GB200",
+  "losses": [
+    0.2221531718969345,
+    0.7356714606285095,
+    0.10640689730644226,
+    1.1848068237304688,
+    0.3357445001602173
+  ],
+  "self_noise_runs": [
+    [
+      0.2221531718969345,
+      0.735809326171875,
+      0.10631868988275528,
+      1.3559304475784302,
+      0.3470917344093323
+    ],
+    [
+      0.2221531718969345,
+      0.7356714606285095,
+      0.10640689730644226,
+      1.1848068237304688,
+      0.3357445001602173
+    ]
+  ],
+  "self_noise_max": 0.17112362384796143
+}

@@ -1,0 +1,87 @@
+[
+ {
+  "caption": "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table.",
+  "latents_hash": "93ae01bc47c0817b",
+  "embeds_hash": "53f384dfed477e28",
+  "noise_hash": "e1f135db4ff97ff8",
+  "noisy_hash": "6a0cabf3c2e98794",
+  "timesteps": [
+   118.0
+  ],
+  "sigmas": [
+   0.1181640625
+  ],
+  "pred_hash": "49493b9aaad874ad",
+  "loss": 0.2221531718969345,
+  "grad_norm": 1.365469217300415,
+  "vsa_sparsity": 0.2
+ },
+ {
+  "caption": "The video shows a colorful sponge being flattened as if it were under a hydraulic press, with the sponge being compressed and eventually flattened into a thin layer.",
+  "latents_hash": "b9d5abc838e815da",
+  "embeds_hash": "82c3f45fec89f678",
+  "noise_hash": "ea2e0427b4584180",
+  "noisy_hash": "5ff0bac18dd8e80e",
+  "timesteps": [
+   85.0
+  ],
+  "sigmas": [
+   0.0849609375
+  ],
+  "pred_hash": "1a7294ecc5eff0d6",
+  "loss": 0.7356714606285095,
+  "grad_norm": 8.022859573364258,
+  "vsa_sparsity": 0.4
+ },
+ {
+  "caption": "The video shows a hydraulic press in action, flattening objects as if they were under a hydraulic press. The press is composed of a large, cylindrical metal cylinder with yellow and black stripes, and a metal base. The objects being flattened are two cylindrical blocks of cotton candy, one pink and one blue. The press is positioned on a metal table, and the background features a green wall with a yellow and red sign.",
+  "latents_hash": "840ddc5d78da4b7b",
+  "embeds_hash": "ffce0c1bf664fb3d",
+  "noise_hash": "2f512661cebc8a51",
+  "noisy_hash": "05b1746f31f8d83d",
+  "timesteps": [
+   618.0
+  ],
+  "sigmas": [
+   0.6171875
+  ],
+  "pred_hash": "802548648224bc30",
+  "loss": 0.10640689730644226,
+  "grad_norm": 1.5231013298034668,
+  "vsa_sparsity": 0.6000000000000001
+ },
+ {
+  "caption": "A watermelon wearing a helmet is crushed by a hydraulic press, causing it to flatten and burst open.",
+  "latents_hash": "c5d8005785df08ab",
+  "embeds_hash": "88eea058d58c26f7",
+  "noise_hash": "1022b2e68b615e5f",
+  "noisy_hash": "ee1750fb9fdb7094",
+  "timesteps": [
+   41.0
+  ],
+  "sigmas": [
+   0.041015625
+  ],
+  "pred_hash": "e5afd85258757532",
+  "loss": 1.1848068237304688,
+  "grad_norm": 16.469207763671875,
+  "vsa_sparsity": 0.8
+ },
+ {
+  "caption": "The video shows a large, industrial press flattening objects as if they were under a hydraulic press. The press is shown in action, compressing a pile of pink objects into a pile of crumbs. The press is large and metallic, with a yellow and black striped pattern on its side. The background is a green wall with a yellow warning sign.",
+  "latents_hash": "57045eb31ae1e81a",
+  "embeds_hash": "71cee36d5ca3083d",
+  "noise_hash": "cdc1cbc4a1fed9ac",
+  "noisy_hash": "53ada1e537af47ac",
+  "timesteps": [
+   610.0
+  ],
+  "sigmas": [
+   0.609375
+  ],
+  "pred_hash": "880902f3c1b8e159",
+  "loss": 0.3357445001602173,
+  "grad_norm": 8.711103439331055,
+  "vsa_sparsity": 0.8
+ }
+]

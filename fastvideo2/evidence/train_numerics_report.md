@@ -35,3 +35,19 @@ FSDP2-wrapped port via pred.step0).
 Next gates (see fastvideo2/train/PORT_NOTES.md): dataloader order parity,
 VSA training, DMD2 (legacy CFG convention), self-forcing (rollout via
 WanCausalDMDLoop), attn-QAT/QAD, DiffusionNFT+VideoAlign.
+
+## VSA training — added 2026-07-23
+
+Gate `anchor.train-vsa-main`: PASS. Config: FastWan2.1 checkpoint (carries
+deterministic `to_gate_compress` weights — the base-checkpoint variant
+random-inits them and needs an init-RNG gate later), VIDEO_SPARSE_ATTN,
+sparsity ramp 0.2→0.8 over 5 steps (rate 0.2, interval 1), otherwise the
+finetune config.
+
+step0 noisy/pred/loss **bitwise 0.0** — the vendored VSA kernel path
+(tile/untile + `fastvideo_kernel.video_sparse_attn` + per-step ramped
+metadata) is exact under training. Later steps sit WELL inside main's own
+measured self-noise: the block-sparse backward at 0.8 sparsity drifts main
+itself by 0.171 in per-step loss across reruns (vs flash's 3.7e-3); our
+worst diff is 0.080 — about half of main's own run-to-run spread.
+Band = 1.5x measured, from the goldens manifest.
