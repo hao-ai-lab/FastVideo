@@ -30,7 +30,8 @@ from typing import Any
 def build_app(model: Any) -> Any:
     """FastAPI app over a loaded :class:`fastvideo2.sdk.Model`. The model is
     shared; generations serialize on a lock in worker threads."""
-    from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+    from fastapi import Body, FastAPI, HTTPException
+    from starlette.websockets import WebSocketDisconnect
 
     from fastvideo2.engine import Request
 
@@ -108,14 +109,13 @@ def build_app(model: Any) -> Any:
             raise HTTPException(404, "not ready")
         return FileResponse(job["video_path"], media_type="video/mp4")
 
-    @app.websocket("/v1/stream")
-    async def stream(ws: WebSocket):
+    async def stream(ws):
         """One request per connection: send a request JSON, receive per-step
         progress events, then the terminal result with latents_sha and an
-        MP4 download URL."""
-        print("STREAM ENTER", flush=True)
+        MP4 download URL. Registered at the starlette level (below) — this
+        environment's FastAPI websocket DI closes connections without ever
+        invoking the endpoint."""
         await ws.accept()
-        print("STREAM ACCEPTED", flush=True)
         try:
             payload = await ws.receive_json()
             job_id = uuid.uuid4().hex[:12]
@@ -171,6 +171,8 @@ def build_app(model: Any) -> Any:
                 break
         await ws.close()
 
+    from starlette.routing import WebSocketRoute
+    app.router.routes.append(WebSocketRoute("/v1/stream", stream))
     return app
 
 
