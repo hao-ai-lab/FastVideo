@@ -220,7 +220,8 @@ def main() -> None:
             _cur().setdefault("x0_student_hash", _hash(res))
             return res
 
-        def rec_dmd(self, gpv, tb):
+        def rec_dmd(self, generator_pred_video, training_batch):
+            gpv, tb = generator_pred_video, training_batch
             rec = _cur()
             orig_randint, orig_randn = torch.randint, torch.randn
             raw = {}
