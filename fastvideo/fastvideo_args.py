@@ -61,6 +61,8 @@ class WorkloadType(str, Enum):
     T2V = "t2v"  # Text to Video
     T2I = "t2i"  # Text to Image
     I2I = "i2i"  # Image to Image
+    V2A = "v2a"  # Video to Audio
+    T2A = "t2a"  # Text to Audio
 
     @classmethod
     def from_string(cls, value: str) -> "WorkloadType":

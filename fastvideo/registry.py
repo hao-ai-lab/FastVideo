@@ -40,6 +40,7 @@ from fastvideo.configs.pipelines.flux_2 import (
 )
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
+from fastvideo.configs.pipelines.mmaudio import MMAudioV2AConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -237,6 +238,22 @@ def _get_config_info(
 
 
 def _register_configs() -> None:
+    # MMAudio large-44k-v2 (video/text-to-audio). The checkpoint is converted
+    # into standard per-component FastVideo/Diffusers-style directories by
+    # scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MMAudioV2AConfig,
+        workload_types=(WorkloadType.V2A, WorkloadType.T2A),
+        hf_model_paths=["FastVideo/MMAudio-large-44k-v2-Diffusers"],
+        model_detectors=[
+            lambda path: "mmaudio" in path.lower() or "mmaudiopipeline" in path.lower(),
+        ],
+        model_family="mmaudio",
+        default_preset="mmaudio_large_44k_v2",
+        pipeline_cls_name="MMAudioPipeline",
+    )
+
     # LTX-2 (distilled) — registered FIRST so its detector wins over
     # the base detector when both fire. The detector loop in
     # ``get_model_name_for_path`` ORs the path-based check with a
@@ -308,12 +325,12 @@ def _register_configs() -> None:
     # ship `model.safetensors` as a single monolithic checkpoint with
     # no per-component subfolders our standard loader can consume. See
     # `scripts/checkpoint_conversion/stable_audio_to_diffusers.py`.
-    # NOTE: WorkloadType has no T2A variant yet; use T2V as the
-    # compatibility placeholder until the enum is extended.
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=StableAudioT2AConfig,
-        workload_types=(WorkloadType.T2V, ),
+        # Keep T2V as a backward-compatible alias for existing callers while
+        # exposing the semantically correct audio workload to new clients.
+        workload_types=(WorkloadType.T2A, WorkloadType.T2V),
         hf_model_paths=[
             "FastVideo/stable-audio-open-1.0-Diffusers",
         ],
@@ -332,7 +349,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=StableAudioOpenSmallConfig,
-        workload_types=(WorkloadType.T2V, ),
+        workload_types=(WorkloadType.T2A, WorkloadType.T2V),
         hf_model_paths=[
             "FastVideo/stable-audio-open-small-Diffusers",
         ],
@@ -1279,6 +1296,8 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame3.presets import (
         ALL_PRESETS as MATRIXGAME3_PRESETS, )
+    from fastvideo.pipelines.basic.mmaudio.presets import (
+        ALL_PRESETS as MMAUDIO_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -1309,6 +1328,7 @@ def _register_presets() -> None:
         LTX2_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
+        MMAUDIO_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,

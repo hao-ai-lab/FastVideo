@@ -63,6 +63,11 @@ class PipelineConfig:
     # Image encoder configuration
     image_encoder_config: EncoderConfig = field(default_factory=EncoderConfig)
     image_encoder_precision: str = "fp32"
+    # Optional multi-encoder contract. Existing pipelines continue to use the
+    # singular fields above; V2A and other multimodal pipelines can opt into
+    # indexed ``image_encoder``, ``image_encoder_2``, ... components.
+    image_encoder_configs: tuple[EncoderConfig, ...] | None = None
+    image_encoder_precisions: tuple[str, ...] | None = None
 
     # Text encoder configuration
     DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp32", )

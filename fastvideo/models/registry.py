@@ -23,6 +23,7 @@ logger = init_logger(__name__)
 
 # huggingface class name: (component_name, fastvideo module name, fastvideo class name)
 _TEXT_TO_VIDEO_DIT_MODELS = {
+    "MMAudioTransformer": ("dits", "mmaudio", "MMAudioTransformer"),
     "HunyuanVideoTransformer3DModel":
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "HunyuanGameCraftTransformer3DModel":
@@ -78,6 +79,7 @@ _TEXT_TO_IMAGE_DIT_MODELS = {
 }
 
 _TEXT_ENCODER_MODELS = {
+    "MMAudioDFNCLIPTextEncoder": ("encoders", "mmaudio_clip", "MMAudioDFNCLIPTextEncoder"),
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
     "CLIPTextModelWithProjection":
     ("encoders", "clip", "CLIPTextModelWithProjection"),
@@ -100,6 +102,12 @@ _TEXT_ENCODER_MODELS = {
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
+    "MMAudioDFNCLIPVisionEncoder": ("encoders", "mmaudio_clip", "MMAudioDFNCLIPVisionEncoder"),
+    "MMAudioSynchformerVisualEncoder": (
+        "encoders",
+        "mmaudio_synchformer",
+        "MMAudioSynchformerVisualEncoder",
+    ),
     # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
     "CLIPVisionModelWithProjection": ("encoders", "clip", "CLIPVisionModel"),
     "CLIPVisionModel": ("encoders", "clip", "CLIPVisionModel"),
@@ -126,6 +134,8 @@ _VAE_MODELS = {
 }
 
 _AUDIO_MODELS = {
+    "MMAudioVAE": ("audio", "mmaudio_vae", "MMAudioVAE"),
+    "BigVGANV2": ("audio", "bigvgan", "BigVGANV2"),
     "LTX2AudioEncoder": ("audio", "ltx2_audio_vae", "LTX2AudioEncoder"),
     "LTX2AudioDecoder": ("audio", "ltx2_audio_vae", "LTX2AudioDecoder"),
     "LTX2Vocoder": ("audio", "ltx2_audio_vae", "LTX2Vocoder"),
