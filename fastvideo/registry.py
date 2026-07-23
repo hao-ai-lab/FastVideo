@@ -20,6 +20,7 @@ from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
     Cosmos25_14BConfig,
 )
+from fastvideo.configs.pipelines.cosmos3 import Cosmos3Config
 from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BARPipelineConfig, DreamXWorld5BCamPipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
@@ -816,6 +817,22 @@ def _register_configs() -> None:
         default_preset="gen3c_cosmos_7b",
     )
 
+    # Cosmos 3 (must register before Cosmos 2.5 and generic Cosmos detectors
+    # so the cosmos3 path-detection takes precedence)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Cosmos3Config,
+        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
+        hf_model_paths=[
+            "nvidia/Cosmos3-Nano",
+        ],
+        model_detectors=[
+            lambda path: "cosmos3" in path.lower() or "cosmos-3" in path.lower(),
+        ],
+        model_family="cosmos3",
+        default_preset="cosmos3_nano",
+    )
+
     # Cosmos 2.5 (2B)
     register_configs(
         sampling_param_cls=None,
@@ -864,8 +881,9 @@ def _register_configs() -> None:
             "nvidia/Cosmos-Predict2-2B-Video2World",
         ],
         model_detectors=[
-            lambda path: "cosmos" in path.lower() and ("2.5" not in path.lower() and "2_5" not in path.lower() and "25"
-                                                       not in path.lower() and "gen3c" not in path.lower()),
+            lambda path: "cosmos" in path.lower() and
+            ("2.5" not in path.lower() and "2_5" not in path.lower() and "25" not in path.lower() and "gen3c" not in
+             path.lower() and "cosmos3" not in path.lower() and "cosmos-3" not in path.lower()),
         ],
         model_family="cosmos",
         default_preset="cosmos_predict2_2b",
@@ -1251,6 +1269,8 @@ def _register_presets() -> None:
     from fastvideo.api.presets import register_preset
     from fastvideo.pipelines.basic.cosmos.presets import (
         ALL_PRESETS as COSMOS_PRESETS, )
+    from fastvideo.pipelines.basic.cosmos3.presets import (
+        ALL_PRESETS as COSMOS3_PRESETS, )
     from fastvideo.pipelines.basic.dreamx_world.presets import (
         ALL_PRESETS as DREAMX_WORLD_PRESETS, )
     from fastvideo.pipelines.basic.gamecraft.presets import (
@@ -1294,6 +1314,7 @@ def _register_presets() -> None:
 
     all_preset_groups = (
         COSMOS_PRESETS,
+        COSMOS3_PRESETS,
         DREAMX_WORLD_PRESETS,
         FLUX2_PRESETS,
         GAMECRAFT_PRESETS,
