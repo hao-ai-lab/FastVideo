@@ -1,0 +1,92 @@
+# STEP E — MotionStream stage-2 finetune WITH dropping on the combined synth set, Wan2.1-14B.
+#
+# Direct 14B analog of finetune_wantrack_synth_stage2_paperLR.yaml (wandb run
+# synth_stage2_paperLR). Hparams copied EXACTLY from that run — lr 1e-6, global bs 128,
+# 600 steps, 480x832, 121f, 24fps, flow_shift 6, bf16 DiT — the only changes are the ones
+# 14B geometry forces (hsdp dims, grad_accum to keep bs 128 at 32 GPUs).
+#
+# init_from is the step-D stage-1 result (OpenVid 4800-step ckpt, exported to diffusers).
+#
+# Stage 2 is where the stochastic dropping comes in — it is what teaches the model to cope
+# with sparse/partial track conditioning at inference. Set at launch, NOT in this file:
+#   WANTRACK_TRACK_DROP=0.5 WANTRACK_MOTION_DROP=0.3 WANTRACK_PMASK=0.2 WANTRACK_MASK_CHUNK=8
+#   WANTRACK_FREEZE_HEAD=1 TRACKWAN_TRACK_BIAS=1
+# Checkpoints every 50 steps and total_limit 100 so NOTHING rotates away: step-400 is the
+# MotionStream-paper-parity point and must survive to be evaluated alongside step-600.
+# 8 nodes x 4 GPU = 32 GPUs; grad_accum 4 -> 1 * 4 * 32 = 128 global.
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
+    init_from: /mnt/lustre/vlm-s4duan/exports/openvid_14b_merged_bias_ckpt4800
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  model_path: /mnt/lustre/vlm-s4duan/exports/openvid_14b_merged_bias_ckpt4800
+  dit_precision: bf16
+
+  distributed:
+    num_gpus: 32          # overridden by the launcher to nodes*4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 8 # replicate across the 8 nodes
+    hsdp_shard_dim: 4     # shard the 14B within each node over NVLink (8*4 = 32)
+
+  data:
+    data_path: /mnt/lustre/vlm-s4duan/data/combined_synth_parquets
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 480
+    num_width: 832
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 1.0e-6     # MotionStream teacher stage-2
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 600
+    gradient_accumulation_steps: 4   # 1 * 4 * 32 gpus = 128 global
+
+  checkpoint:
+    output_dir: /mnt/lustre/vlm-s4duan/synth_bidir_14b_stage2_paperLR_out
+    training_state_checkpointing_steps: 50    # every 50 steps -> 12 ckpts, so step-400 (paper parity) is preserved
+    checkpoints_total_limit: 100             # keep ALL ckpts
+    resume_from_checkpoint: null
+
+  tracker:
+    trackers: [wandb]
+    project_name: wantrack-bidir
+    run_name: synth-bidir-14b-stage2-paperLR
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  track_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    every_steps: 250
+    num_val_samples: 4
+    val_data_path: /mnt/lustre/vlm-s4duan/val_examples_mixed/combined_parquet_dataset   # 2 openvid + car + dog
+    num_inference_steps: 30
+    guidance_scale: 3.0
+    motion_guidance_scale: 1.5
+    fps: 24
+    grid_stride: 3
+    tail: 12
+    validate_at_start: true
+    seed: 1000
+
+pipeline:
+  flow_shift: 6

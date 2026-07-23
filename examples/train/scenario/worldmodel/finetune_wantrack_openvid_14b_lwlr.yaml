@@ -1,0 +1,100 @@
+# EXPERIMENT 2 (layer-wise LR) — can stage-1 bootstrap a FRESH track pathway on OpenVid,
+# with no overfit->merge stages at all?
+#
+# Same goal as experiment 1, different mechanism: instead of staging, train everything from
+# step 0 but give the track pathway a 100x LR (1e-3 vs 1e-5) so it can catch up with an already
+# pretrained DiT. Adam is scale-invariant per parameter, so this MUST be a real param group with
+# its own lr — scaling the gradient would do nothing. patch_embedding's pretrained channels
+# [:, :36] are grad-masked so the 100x LR only ever touches the track slot.
+#
+# NOTE: an earlier in-repo LWLR attempt reported 'no encoder bootstrap', but it referenced
+# 'patch_embedding.proj.weight' incorrectly and so likely never applied the boosted LR to
+# anything. This re-tests the idea properly; the param-group builder now RAISES if nothing
+# matches, so a silent no-op cannot masquerade as a negative result.
+#
+# Recipe is otherwise IDENTICAL to the 1.3B stage-1 reference: lr 1e-5, global bs 128, 480x832,
+# 121f, 24fps, flow_shift 6, bf16 — only the param-group/warm-up behaviour is new.
+#
+# Init is the ZERO-gate init: patch_embedding[:, 36:] = 0, so the model starts bit-identical to
+# base I2V. (The random-gate init was measured to corrupt the prior from step 0.)
+#
+# Launch env: WANTRACK_TRACK_GROUP=1 (build named track/base param groups),
+#             WANTRACK_TRACK_LR_MULT=100 (track pathway at 1e-3), WANTRACK_FREEZE_HEAD=0
+#             (the encoder MUST train here — this is the opposite of the merged-init stage 1).
+# 4 nodes x 4 GPU = 16 GPUs, grad_accum 8 -> 1 * 8 * 16 = 128 global.
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
+    init_from: /mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_zero_init_bias
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  model_path: /mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_zero_init_bias
+  dit_precision: bf16
+
+  distributed:
+    num_gpus: 16
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 4
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: /mnt/lustre/vlm-s4duan/openvid_1m/combined_parquet_dataset
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 480
+    num_width: 832
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1000            # experiment: the bootstrap signal shows well before this
+    gradient_accumulation_steps: 8   # 1 * 8 * 16 gpus = 128 global
+
+  checkpoint:
+    output_dir: /mnt/lustre/vlm-s4duan/exp_openvid_14b_lwlr_out
+    training_state_checkpointing_steps: 100
+    checkpoints_total_limit: 100     # keep all — early checkpoints are the whole point
+    resume_from_checkpoint: latest
+
+  tracker:
+    trackers: [wandb]
+    project_name: wantrack-bidir
+    run_name: exp-openvid-14b-lwlr-100x
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  track_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    every_steps: 250
+    num_val_samples: 4
+    val_data_path: /mnt/lustre/vlm-s4duan/val_examples_mixed/combined_parquet_dataset
+    num_inference_steps: 30
+    guidance_scale: 3.0
+    motion_guidance_scale: 1.5
+    fps: 24
+    grid_stride: 3
+    tail: 12
+    validate_at_start: true
+    seed: 1000
+
+pipeline:
+  flow_shift: 6

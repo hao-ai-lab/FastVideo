@@ -90,6 +90,8 @@ def main() -> None:
                    help="drop masks smaller than this fraction of the frame (fights over-segmentation)")
     p.add_argument("--max-masks", type=int, default=0, help="keep only the N largest masks (0 = keep all)")
     p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--shard", type=int, default=0, help="this shard index (0-based)")
+    p.add_argument("--num-shards", type=int, default=1, help="total shards for parallel processing")
     args = p.parse_args()
 
     # FastSAM-*.pt -> FastSAM loader; everything else (SAM/SAM2/SAM2.1/MobileSAM) -> SAM loader.
@@ -103,6 +105,9 @@ def main() -> None:
     items = json.loads(manifest_path.read_text()) if manifest_path.exists() else []
     if args.limit:
         items = items[:args.limit]
+    if args.num_shards > 1:
+        items = items[args.shard::args.num_shards]
+        print(f"[seg] shard {args.shard}/{args.num_shards}: processing {len(items)} items", flush=True)
     n_ok = 0
     for k, item in enumerate(items, 1):
         vpath = args.data_dir / args.videos_subdir / item["path"]
