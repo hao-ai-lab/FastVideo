@@ -81,19 +81,26 @@ def main() -> None:
     out = _out_dir()
     maybe_init_distributed_environment_and_model_parallel(1, 1)
 
+    # loader args mirror the released QAD example: no fsdp, no offload
+    _NO_WRAP = dict(use_fsdp_inference=False, dit_cpu_offload=False,
+                    text_encoder_cpu_offload=False, vae_cpu_offload=False,
+                    pin_cpu_memory=False)
+
     # ------------------------------------------------------------- text --- #
     t5_args = FastVideoArgs(model_path=os.path.join(root, "text_encoder"),
-                            pipeline_config=WanT2V480PConfig(), pin_cpu_memory=False)
+                            pipeline_config=WanT2V480PConfig(), **_NO_WRAP)
+    t5_args.device = torch.device(device)
     t5 = TextEncoderLoader().load(os.path.join(root, "text_encoder"), t5_args).eval()
-    t5 = t5.to(device)  # main default precision fp32 — no cast
+    t5_device = next(t5.parameters()).device  # loader-owned placement
     tok = AutoTokenizer.from_pretrained(os.path.join(root, "tokenizer"))
 
     def encode(text: str) -> torch.Tensor:
         b = tok([text], padding="max_length", max_length=512, truncation=True,
                 add_special_tokens=True, return_attention_mask=True, return_tensors="pt")
         with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
-            emb = t5(input_ids=b.input_ids.to(device),
-                     attention_mask=b.attention_mask.to(device)).last_hidden_state
+            emb = t5(input_ids=b.input_ids.to(t5_device),
+                     attention_mask=b.attention_mask.to(t5_device)).last_hidden_state
+        emb = emb.to(device)
         emb = emb.to(torch.float32)
         emb[:, int(b.attention_mask[0].sum()):] = 0
         return emb
@@ -131,7 +138,8 @@ def main() -> None:
         if quant:
             cfg.quant_config = FP8Config(granularity="tensor")
         args = FastVideoArgs(model_path=dit_path,
-                             pipeline_config=PipelineConfig(dit_config=cfg, dit_precision="bf16"))
+                             pipeline_config=PipelineConfig(dit_config=cfg, dit_precision="bf16"),
+                             **_NO_WRAP)
         args.device = torch.device(device)
         dit = TransformerLoader().load(dit_path, args).to(dtype=torch.bfloat16).eval()
         if quant:
@@ -192,7 +200,7 @@ def main() -> None:
 
     # ----------------------------------------------------------- decode --- #
     vae_args = FastVideoArgs(model_path=os.path.join(root, "vae"),
-                             pipeline_config=WanT2V480PConfig())
+                             pipeline_config=WanT2V480PConfig(), **_NO_WRAP)
     vae_args.device = torch.device(device)
     vae = VAELoader().load(os.path.join(root, "vae"), vae_args).to(
         torch.device(device), torch.float32).eval()

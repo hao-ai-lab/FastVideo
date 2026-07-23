@@ -78,7 +78,7 @@ def make_fp8_linear_class() -> type:
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             out_dim = self._fp8_weight.shape[0]
             original_shape = x.shape
-            if not _supports_fp8_compute():
+            if not (x.is_cuda and _supports_fp8_compute()):
                 # main's ``_apply_dequant`` fallback (pre-sm89 / CPU) — also
                 # what CPU tests exercise.
                 w_scale = self._fp8_weight_scale.to(x.dtype)
