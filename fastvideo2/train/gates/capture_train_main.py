@@ -292,6 +292,25 @@ def main() -> None:
 
         pipeline = WanDistillationPipeline.from_pretrained(
             args.pretrained_model_name_or_path, args=args)
+        # the recipe gets negative embeds via the validation path; capture
+        # disables validation, so encode the canonical Wan negative prompt
+        # through THEIR TextEncodingStage exactly like distillation_pipeline
+        # :1090 does, and pin it before train()
+        if getattr(pipeline, "negative_prompt_embeds", None) is None:
+            from fastvideo.pipelines.pipeline_batch_info import ForwardBatch as FB
+            from fastvideo.pipelines.stages import TextEncodingStage
+            NEG = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，"
+                   "低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，"
+                   "毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
+            enc_stage = TextEncodingStage(
+                text_encoders=[pipeline.get_module("text_encoder")],
+                tokenizers=[pipeline.get_module("tokenizer")])
+            nb = FB(data_type="video", prompt=NEG, prompt_embeds=[],
+                    prompt_attention_mask=[])
+            nb = enc_stage(nb, args)
+            pipeline.negative_prompt_embeds = nb.prompt_embeds[0]
+            pipeline.negative_prompt_attention_mask = (
+                nb.prompt_attention_mask[0] if nb.prompt_attention_mask else None)
         student = pipeline.get_module("transformer")
         critic = pipeline.fake_score_transformer
         w0 = {"student": _slice(student.proj_out.weight),
