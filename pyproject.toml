@@ -204,6 +204,9 @@ exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*
 
 [tool.setuptools.package-data]
 dreamverse = ["prompts/*.md"]
+"fastvideo.third_party.rl_rewards.HPSv3" = ["LICENSE"]
+"fastvideo.third_party.rl_rewards.HPSv3.hpsv3" = ["config/*.yaml"]
+"fastvideo.third_party.rl_rewards.VideoAlign" = ["LICENSE", "README.md"]
 
 [tool.wheel]
 exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]
