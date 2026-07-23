@@ -443,9 +443,76 @@ def run_self_forcing() -> int:
     return 1 if failed else 0
 
 
+def run_data() -> int:
+    """Dataloader-order gate — fastvideo2.train.data must reproduce the exact
+    rows main's loader fed the finetune capture: for each recorded step, the
+    caption and the latent/embed hashes (bf16-cast, num_latent_t-sliced, the
+    same bytes main hashed at ``_get_next_batch``). CPU-only: bf16 casting is
+    round-to-nearest-even on both devices."""
+    import hashlib
+
+    import torch
+
+    from fastvideo2.train.data import (batch_indices, load_batch,
+                                       parquet_files_and_lengths)
+
+    gold = _gold_dir("finetune")
+    with open(os.path.join(gold, "manifest.json")) as f:
+        manifest = json.load(f)
+    with open(os.path.join(gold, "steps.json")) as f:
+        steps = json.load(f)
+
+    root = os.environ.get("FV2_DATA_PATH")
+    if not root:
+        from huggingface_hub import snapshot_download
+        root = snapshot_download(manifest["dataset"], repo_type="dataset",
+                                 token=False)
+    p = os.path.join(root, "combined_parquet_dataset")
+    if os.path.isdir(p):
+        root = p
+
+    files, lengths = parquet_files_and_lengths(root)
+    batches = batch_indices(sum(lengths), 1, manifest["seed"])
+    nlt = int(manifest["num_latent_t"])
+
+    def sha(t: torch.Tensor) -> str:
+        return hashlib.sha256(t.to(torch.bfloat16).to(torch.float32)
+                              .numpy().tobytes()).hexdigest()[:16]
+
+    failed = []
+    for i, rec in enumerate(steps):
+        b = load_batch(files, lengths, batches[i])
+        checks = [("caption", b["captions"][0] == rec["caption"]),
+                  ("latents", sha(b["latents"][:, :, :nlt]) == rec["latents_hash"]),
+                  ("embeds", sha(b["embeds"]) == rec["embeds_hash"])]
+        for name, ok in checks:
+            print(f"  step{i} {name:8s} {'OK' if ok else 'MISMATCH'}")
+            if not ok:
+                failed.append(f"step{i}.{name}")
+
+    verdict = "PASS" if not failed else f"FAIL ({', '.join(failed)})"
+    print(f"anchor.train-data-main: {verdict}")
+    from fastvideo2.verify import GateResult, append_ledger, env_fingerprint
+    from fastvideo2.wan21.card import WAN21_T2V_1_3B as card
+    append_ledger([GateResult(gate="anchor.train-data-main",
+                              status="pass" if not failed else "fail",
+                              model_id=card.model_id,
+                              card_digest=card.digest(),
+                              metrics={f"step{i}.row_match": 1.0
+                                       for i in range(len(steps))},
+                              tolerances={"caption/latents/embeds": "exact"},
+                              env=env_fingerprint(),
+                              detail=f"loader order vs goldens "
+                                     f"{manifest['fastvideo_commit'][:9]}: "
+                                     f"{len(steps)} batches, "
+                                     f"files={len(files)}")])
+    return 1 if failed else 0
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     mode = args[0] if args else "finetune"
     sys.exit(run_self_forcing() if mode == "self_forcing"
              else run_dmd2(mode) if mode in ("dmd2", "vsa_dmd2", "qad")
+             else run_data() if mode == "data"
              else run(mode=mode))

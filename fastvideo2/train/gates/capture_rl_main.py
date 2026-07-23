@@ -77,19 +77,26 @@ def main() -> None:
     import fastvideo.train.methods.rl.diffusion_nft as DN
 
     # transformers 5.x drift: CLIPModel.get_*_features returns a ModelOutput
-    # whose .pooler_output holds the PROJECTED features; main's scorers call
-    # .norm on it and crash. Unwrap at the class so PickScore and ClipScore
-    # run upstream's intended math (projected then L2-normalized).
-    from transformers.models.clip import modeling_clip as _mc
+    # whose .pooler_output holds the PROJECTED features; PickScoreScorer calls
+    # .norm on it and crashes. Unwrap on THAT instance only — CLIPModel.forward
+    # internally consumes the new contract (ClipScoreScorer's path), so a
+    # class-level patch breaks it.
+    import fastvideo.train.methods.rl.rewards.frame_rewards as FR
 
-    def _tensor_feats(fn):
-        def g(self, *a, **k):
-            out = fn(self, *a, **k)
+    def _feat_unwrap(bound):
+        def g(*a, **k):
+            out = bound(*a, **k)
             return out if torch.is_tensor(out) else out.pooler_output
         return g
 
-    _mc.CLIPModel.get_text_features = _tensor_feats(_mc.CLIPModel.get_text_features)
-    _mc.CLIPModel.get_image_features = _tensor_feats(_mc.CLIPModel.get_image_features)
+    _ps_init = FR.PickScoreScorer.__init__
+
+    def ps_init(self, *a, **k):
+        _ps_init(self, *a, **k)
+        self.model.get_text_features = _feat_unwrap(self.model.get_text_features)
+        self.model.get_image_features = _feat_unwrap(self.model.get_image_features)
+
+    FR.PickScoreScorer.__init__ = ps_init
 
     # validation fires at iteration 0 (0 % every_steps == 0) and runs a full
     # sampling+scoring pass we don't gate — off for capture.
