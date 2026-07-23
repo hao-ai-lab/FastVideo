@@ -140,8 +140,11 @@ def _nvtx(name: str):
             torch.cuda.nvtx.range_pop()
 
 
-def run(instance: Instance, pipeline: Pipeline, request: Request) -> Output:
-    """Run one request through a pipeline to completion."""
+def run(instance: Instance, pipeline: Pipeline, request: Request,
+        on_step: Any = None) -> Output:
+    """Run one request through a pipeline to completion. ``on_step(label,
+    seconds, meta)``, when given, fires live after every loop step (serving
+    streams progress through it)."""
     import time
     req = request.resolve(instance.card)
     trace: list[dict] = []
@@ -161,6 +164,8 @@ def run(instance: Instance, pipeline: Pipeline, request: Request) -> Output:
 
             def observe(label: str, seconds: float, meta: dict, _chain: str = chain) -> None:
                 trace.append({"label": f"{_chain}/{label}", "seconds": seconds, **meta})
+                if on_step is not None:
+                    on_step(f"{_chain}/{label}", seconds, meta)
 
             inputs = {k: slots[k] for k in stage.reads}
             with _nvtx(chain):

@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+serve = ["fastapi", "uvicorn"]
 
 [project.scripts]
 fastvideo2 = "fastvideo2.cli:main"
