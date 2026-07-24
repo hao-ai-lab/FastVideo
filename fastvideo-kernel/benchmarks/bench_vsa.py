@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 import random
-from typing import Tuple, Callable
+from typing import Callable, Tuple
 
 import numpy as np
 import torch
@@ -39,14 +39,30 @@ def parse_arguments() -> argparse.Namespace:
     p.add_argument("--num_heads", type=int, default=12)
     p.add_argument("--head_dim", type=int, default=128, choices=[64, 128])
     p.add_argument("--topk", type=int, default=None, help="KV blocks per Q block (default: ~90%% sparsity)")
-    p.add_argument("--q_seq_lens", type=int, nargs="+", default=[49152], help="Q sequence lengths (must be /64)")
-    p.add_argument("--kv_seq_lens", type=int, nargs="+", default=None, help="KV sequence lengths (defaults to q_seq_len)")
+    p.add_argument(
+        "--q_seq_lens",
+        type=int,
+        nargs="+",
+        default=[49152],
+        help="Q sequence lengths (must be divisible by --block_size)",
+    )
+    p.add_argument(
+        "--kv_seq_lens",
+        type=int,
+        nargs="+",
+        default=None,
+        help="KV sequence lengths (defaults to q_seq_len)",
+    )
     p.add_argument("--warmup", type=int, default=5)
     p.add_argument("--rep", type=int, default=20)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp16"])
     p.add_argument("--block_size", type=int, default=64, choices=[64, 256])
-    p.add_argument("--force_triton", action="store_true", help="Force wrapper to use Triton path (if supported by shapes).")
+    p.add_argument(
+        "--force_triton",
+        action="store_true",
+        help="Force wrapper to use Triton path (if supported by shapes).",
+    )
     p.add_argument(
         "--use_cute",
         action="store_true",
@@ -55,14 +71,27 @@ def parse_arguments() -> argparse.Namespace:
     return p.parse_args()
 
 
-def create_qkv(batch: int, heads: int, q_len: int, kv_len: int, d: int, dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def create_qkv(
+    batch: int,
+    heads: int,
+    q_len: int,
+    kv_len: int,
+    d: int,
+    dtype: torch.dtype,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     q = torch.randn(batch, heads, q_len, d, dtype=dtype, device="cuda")
     k = torch.randn(batch, heads, kv_len, d, dtype=dtype, device="cuda")
     v = torch.randn(batch, heads, kv_len, d, dtype=dtype, device="cuda")
     return q, k, v
 
 
-def make_block_map(bs: int, h: int, num_q_blocks: int, num_kv_blocks: int, topk: int) -> torch.Tensor:
+def make_block_map(
+    bs: int,
+    h: int,
+    num_q_blocks: int,
+    num_kv_blocks: int,
+    topk: int,
+) -> torch.Tensor:
     # block_map: [bs, h, num_q_blocks, num_kv_blocks] bool
     scores = torch.rand(bs, h, num_q_blocks, num_kv_blocks, device="cuda")
     topk = min(max(1, topk), num_kv_blocks)
@@ -72,7 +101,14 @@ def make_block_map(bs: int, h: int, num_q_blocks: int, num_kv_blocks: int, topk:
     return block_map
 
 
-def flops_sparse_attention(bs: int, h: int, d: int, q_len: int, topk_blocks: int, block_n: int) -> float:
+def flops_sparse_attention(
+    bs: int,
+    h: int,
+    d: int,
+    q_len: int,
+    topk_blocks: int,
+    block_n: int,
+) -> float:
     # Approx: QK^T + PV, each is ~2*bs*h*q_len*(topk_blocks*block_n)*d
     return 4.0 * bs * h * d * q_len * (topk_blocks * block_n)
 
@@ -81,20 +117,27 @@ def bench_ms(fn: Callable[[], object], warmup: int, rep: int) -> float:
     return do_bench(fn, warmup=warmup, rep=rep, quantiles=None)
 
 
+def _configure_backend(args: argparse.Namespace) -> None:
+    if args.use_cute and args.block_size != 256:
+        raise ValueError("--use_cute requires --block_size 256")
+    if args.use_cute and args.force_triton:
+        raise ValueError("--use_cute and --force_triton are mutually exclusive")
+
+    if args.force_triton:
+        os.environ.pop("FASTVIDEO_VSA_CUTEDSL", None)
+        os.environ["FASTVIDEO_KERNEL_VSA_FORCE_TRITON"] = "1"
+    elif args.use_cute:
+        os.environ.pop("FASTVIDEO_VSA_TRITON", None)
+        os.environ.pop("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", None)
+        os.environ["FASTVIDEO_VSA_CUTEDSL"] = "1"
+
+
 def main() -> None:
     args = parse_arguments()
     set_seed(args.seed)
+    _configure_backend(args)
 
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float16
-
-    if args.force_triton:
-        os.environ["FASTVIDEO_KERNEL_VSA_FORCE_TRITON"] = "1"
-    if args.use_cute:
-        if args.block_size != 256:
-            raise ValueError("--use_cute requires --block_size 256")
-        if args.force_triton:
-            raise ValueError("--use_cute and --force_triton are mutually exclusive")
-        os.environ["FASTVIDEO_VSA_CUTEDSL"] = "1"
 
     from fastvideo_kernel.block_sparse_attn import block_sparse_attn
     from fastvideo_kernel.block_sparse_attn_256 import block_sparse_attn_256
@@ -134,7 +177,11 @@ def main() -> None:
         topk = min(topk, num_kv_blocks)
 
         print("\n" + "=" * 80)
-        print(f"q_len={q_len}, kv_len={kv_len}, num_q_blocks={num_q_blocks}, num_kv_blocks={num_kv_blocks}, topk={topk}")
+        print(
+            f"q_len={q_len}, kv_len={kv_len}, "
+            f"num_q_blocks={num_q_blocks}, num_kv_blocks={num_kv_blocks}, "
+            f"topk={topk}"
+        )
 
         q, k, v = create_qkv(bs, h, q_len, kv_len, d, dtype)
         block_map = make_block_map(bs, h, num_q_blocks, num_kv_blocks, topk)
@@ -149,8 +196,8 @@ def main() -> None:
 
         fwd_ms = bench_ms(_fwd, warmup=args.warmup, rep=args.rep)
 
-        # Backward benchmark (wrapper autograd). We build the graph once, then repeatedly run backward
-        # on the retained graph so bwd timing excludes the forward compute.
+        # Build the graph once, then repeatedly run backward on the retained
+        # graph so the backward timing excludes forward compute.
         q_ = q.detach().requires_grad_(True)
         k_ = k.detach().requires_grad_(True)
         v_ = v.detach().requires_grad_(True)
@@ -181,4 +228,3 @@ if __name__ == "__main__":
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for this benchmark.")
     main()
-

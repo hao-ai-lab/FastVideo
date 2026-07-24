@@ -72,13 +72,12 @@ an **optional** dependency: it is imported lazily, and `video_sparse_attn`
 transparently falls back to the Triton backend when it is absent (so the package is
 fully usable without it).
 
-The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`,
-`flash_attn.cute.interface._flash_attn_fwd`, and
-`flash_attn.cute.interface._flash_attn_bwd`) are provided upstream by
+The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`
+and `flash_attn.cute.interface.flash_attn_func`) are provided upstream by
 [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention). Pin to
 commit `940cd9680f3315f2f06b43ab5bea2c2cf2d96806`, the revision FastVideo pins as
 the `flash-attn-4` source in the repo-root `pyproject.toml`; other revisions may
-have an incompatible `_flash_attn_fwd` signature.
+have incompatible block-sparse forward/backward interfaces.
 
 ```bash
 pip install "nvidia-cutlass-dsl>=4.5.0" torchvision
