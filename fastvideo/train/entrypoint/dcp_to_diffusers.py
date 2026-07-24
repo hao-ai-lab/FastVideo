@@ -265,6 +265,7 @@ def convert(
     from fastvideo.train.utils.builder import build_from_config
     from fastvideo.train.utils.checkpoint import (
         CheckpointManager,
+        _FullModelState,
         _resolve_resume_checkpoint,
     )
     from fastvideo.train.utils.config import (
@@ -328,17 +329,29 @@ def convert(
     # -- Build model (loads pretrained weights + FSDP) --
     _, method, _, _ = build_from_config(cfg)
 
-    # -- Load DCP weights into the model --
-    states = method.checkpoint_state()
+    # -- Load only the role being exported --
+    if role not in method._role_models:
+        raise KeyError(f"Role {role!r} is not configured. "
+                       f"Available: {sorted(method._role_models)}")
+    model = method._role_models[role]
+    if model.transformer is None:
+        raise ValueError(f"Role {role!r} does not have a transformer to export")
+
+    # Export is a model-only operation. Building the complete training
+    # checkpoint state also includes optimizers and schedulers, whose lazy
+    # state may not exist until the first optimizer step. Loading just the
+    # requested role avoids coupling stage handoff to unrelated training
+    # runtime state.
+    role_state_key = f"roles.{role}.transformer"
+    states = {role_state_key: _FullModelState(model.transformer)}
     logger.info(
-        "Loading DCP checkpoint from %s",
+        "Loading %s from DCP checkpoint %s",
+        role_state_key,
         resolved,
     )
     dcp.load(states, checkpoint_id=str(dcp_dir))
 
     # -- Export to diffusers format --
-    model = method._role_models[role]
-
     logger.info(
         "Exporting role=%s to %s (base=%s)",
         role,
