@@ -201,18 +201,12 @@ def video_sparse_attn_bshd(
     q_c = q.view(batch, q_num_blocks, block_elements, heads, dim)
     k_c = k.view(batch, kv_num_blocks, block_elements, heads, dim)
     v_c = v.view(batch, kv_num_blocks, block_elements, heads, dim)
-    q_c = (
-        q_c.float().sum(dim=2)
-        / q_variable_block_sizes.view(1, -1, 1, 1)
-    ).to(q.dtype)
-    k_c = (
-        k_c.float().sum(dim=2)
-        / variable_block_sizes.view(1, -1, 1, 1)
-    ).to(k.dtype)
-    v_c = (
-        v_c.float().sum(dim=2)
-        / variable_block_sizes.view(1, -1, 1, 1)
-    ).to(v.dtype)
+    q_c = (q_c.float().sum(dim=2)
+           / q_variable_block_sizes.view(1, -1, 1, 1)).to(q.dtype)
+    k_c = (k_c.float().sum(dim=2)
+           / variable_block_sizes.view(1, -1, 1, 1)).to(k.dtype)
+    v_c = (v_c.float().sum(dim=2)
+           / variable_block_sizes.view(1, -1, 1, 1)).to(v.dtype)
     q_ch = q_c.permute(0, 2, 1, 3).contiguous()
     k_ch = k_c.permute(0, 2, 1, 3).contiguous()
     v_ch = v_c.permute(0, 2, 1, 3).contiguous()
@@ -226,14 +220,13 @@ def video_sparse_attn_bshd(
     mask = fused_topk_mask(scores, topk)
     out_s, _ = block_sparse_attn_256_bshd(q, k, v, mask, variable_block_sizes)
 
-    out_view = out_s.view(batch, q_num_blocks, block_elements, heads, dim)
+    out = out_s
+    out_view = out.view(batch, q_num_blocks, block_elements, heads, dim)
     if compress_attn_weight is not None:
         gate_view = compress_attn_weight.view(
             batch, q_num_blocks, block_elements, heads, dim
         )
-        return (out_view + out_c_blk.unsqueeze(2) * gate_view).view(
-            batch, q_seq_len, heads, dim
-        )
-    return (out_view + out_c_blk.unsqueeze(2)).view(
-        batch, q_seq_len, heads, dim
-    )
+        out = (out_view + out_c_blk.unsqueeze(2) * gate_view).view(batch, q_seq_len, heads, dim)
+    else:
+        out = (out_view + out_c_blk.unsqueeze(2)).view(batch, q_seq_len, heads, dim)
+    return out
