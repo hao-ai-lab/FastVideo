@@ -114,9 +114,17 @@ class TrackValidationCallback(Callback):
         paired_no_track: bool = True,
         motion_guidance_scale: float = 1.0,
         val_sample_indices: list[int] | None = None,
+        heldout_data_path: str | None = None,
+        heldout_sample_indices: list[int] | None = None,
     ) -> None:
         self.every_steps = int(every_steps)
         self.val_sample_indices: list[int] | None = [int(i) for i in val_sample_indices] if val_sample_indices is not None else None
+        # Optional second parquet of HELD-OUT samples (never seen in training):
+        # same Stage-5 schema, rendered alongside the train-set samples with a
+        # "heldout" name prefix so fitting vs generalization read separately.
+        self.heldout_data_path: str | None = str(heldout_data_path) if heldout_data_path else None
+        self.heldout_sample_indices: list[int] | None = [int(i) for i in heldout_sample_indices
+                                                         ] if heldout_sample_indices is not None else None
         self.num_val_samples = len(self.val_sample_indices) if self.val_sample_indices is not None else int(num_val_samples)
         self.num_inference_steps = int(num_inference_steps)
         # ``guidance_scale`` is TEXT CFG (v_uncond + s_text*(v_text - v_uncond)); at 1.0 == disabled.
@@ -176,13 +184,23 @@ class TrackValidationCallback(Callback):
     # Sample loading (deterministic, straight from parquet)
     # ------------------------------------------------------------------
     def _load_validation_samples(self, method: TrainingMethod) -> None:
+        tc = self.training_config
+        self._append_samples(str(tc.data.data_path), self.val_sample_indices, self.num_val_samples, prefix="sample")
+        if self.heldout_data_path:
+            idx = self.heldout_sample_indices
+            n = len(idx) if idx is not None else self.num_val_samples
+            try:
+                self._append_samples(str(self.heldout_data_path), idx, n, prefix="heldout")
+            except Exception as exc:  # noqa: BLE001 - heldout is optional; keep train-set samples
+                logger.warning("TrackValidation: failed to load heldout samples (%s); continuing without them", exc)
+
+    def _append_samples(self, data_path: str, indices: list[int] | None, num: int, prefix: str) -> None:
         import pyarrow.parquet as pq
 
         from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v_track
         from fastvideo.dataset.utils import collate_rows_from_parquet_schema
 
         tc = self.training_config
-        data_path = str(tc.data.data_path)
         files = sorted(glob.glob(os.path.join(data_path, "**", "*.parquet"), recursive=True))
         if not files:
             raise FileNotFoundError(f"no parquet under {data_path}")
@@ -192,10 +210,10 @@ class TrackValidationCallback(Callback):
             tbl = pq.read_table(f)
             all_rows.extend(tbl.to_pylist())
 
-        if self.val_sample_indices is not None:
-            rows = [all_rows[i] for i in self.val_sample_indices]
+        if indices is not None:
+            rows = [all_rows[i] for i in indices]
         else:
-            rows = all_rows[:self.num_val_samples]
+            rows = all_rows[:num]
 
         text_len = int(tc.pipeline_config.text_encoder_configs[0].arch_config.text_len)
         batch = collate_rows_from_parquet_schema(rows,
@@ -217,6 +235,7 @@ class TrackValidationCallback(Callback):
 
         for i in range(n):
             self._samples.append({
+                "name": f"{prefix}{i}",
                 "text_embedding": batch["text_embedding"][i:i + 1].clone(),
                 "text_attention_mask": batch["text_attention_mask"][i:i + 1].clone(),
                 "vae_latent": batch["vae_latent"][i:i + 1].clone(),
@@ -248,6 +267,7 @@ class TrackValidationCallback(Callback):
             adv_logs: list[Any] = []
             ref_logs: list[Any] = []
             for i, s in enumerate(self._samples):
+                name = s.get("name", f"sample{i}")
                 # Apply the SAME training-time sampler so the model sees the sampled subset
                 # (not the full 2500 grid) and the overlay shows those sampled points.
                 tp_s, tv_s = self._sampled_tracks(student, s)
@@ -260,7 +280,7 @@ class TrackValidationCallback(Callback):
                 if self._is_main:
                     gen_px = student.decode_latents(gen_latents.permute(0, 2, 1, 3, 4))[0]  # [3,T,H,W] in [0,1]
                     gen_frames = self._overlay_tracks(gen_px, s, tp_s, tv_s)
-                    fn = os.path.join(out_dir, f"step{step:06d}_sample{i}_gen.mp4")
+                    fn = os.path.join(out_dir, f"step{step:06d}_{name}_gen.mp4")
                     imageio.mimsave(fn, gen_frames, fps=self.fps, macro_block_size=1)
                     art = self.tracker.video(fn, caption=f"[{step}] WITH-track {s['caption'][:110]}")
                     if art is not None:
@@ -274,7 +294,7 @@ class TrackValidationCallback(Callback):
                     if self._is_main:
                         nm_px = student.decode_latents(nm_latents.permute(0, 2, 1, 3, 4))[0]
                         nm_frames = self._overlay_tracks(nm_px, s, tp_s, tv_s)
-                        fn_nm = os.path.join(out_dir, f"step{step:06d}_sample{i}_nomotioncfg.mp4")
+                        fn_nm = os.path.join(out_dir, f"step{step:06d}_{name}_nomotioncfg.mp4")
                         imageio.mimsave(fn_nm, nm_frames, fps=self.fps, macro_block_size=1)
                         art = self.tracker.video(fn_nm,
                                                  caption=f"[{step}] WITH-track NO-motion-CFG {s['caption'][:100]}")
@@ -289,7 +309,7 @@ class TrackValidationCallback(Callback):
                     if self._is_main:
                         nt_px = student.decode_latents(nt_latents.permute(0, 2, 1, 3, 4))[0]
                         nt_frames = self._overlay_tracks(nt_px, s, tp_s, tv_s)
-                        fn_nt = os.path.join(out_dir, f"step{step:06d}_sample{i}_notrack.mp4")
+                        fn_nt = os.path.join(out_dir, f"step{step:06d}_{name}_notrack.mp4")
                         imageio.mimsave(fn_nt, nt_frames, fps=self.fps, macro_block_size=1)
                         art = self.tracker.video(fn_nt, caption=f"[{step}] NO-track {s['caption'][:110]}")
                         if art is not None:
@@ -303,7 +323,7 @@ class TrackValidationCallback(Callback):
                     if self._is_main:
                         adv_px = student.decode_latents(adv_latents.permute(0, 2, 1, 3, 4))[0]
                         adv_frames = self._overlay_tracks(adv_px, s, tp_adv, tv_adv)
-                        fn_adv = os.path.join(out_dir, f"step{step:06d}_sample{i}_adversarial.mp4")
+                        fn_adv = os.path.join(out_dir, f"step{step:06d}_{name}_adversarial.mp4")
                         imageio.mimsave(fn_adv, adv_frames, fps=self.fps, macro_block_size=1)
                         art = self.tracker.video(fn_adv, caption=f"[{step}] ADVERSARIAL-track {s['caption'][:100]}")
                         if art is not None:
@@ -313,7 +333,7 @@ class TrackValidationCallback(Callback):
                 if not self._ref_logged and self._is_main:
                     ref_px = self._decode_reference(student, s)
                     ref_frames = self._overlay_tracks(ref_px, s, tp_s, tv_s)
-                    fn_ref = os.path.join(out_dir, f"reference_sample{i}_gt.mp4")
+                    fn_ref = os.path.join(out_dir, f"reference_{name}_gt.mp4")
                     imageio.mimsave(fn_ref, ref_frames, fps=self.fps, macro_block_size=1)
                     art = self.tracker.video(fn_ref, caption=f"GT {s['caption'][:120]}")
                     if art is not None:

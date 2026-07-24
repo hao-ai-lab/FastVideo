@@ -239,13 +239,21 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         os.makedirs(combined_parquet_dir, exist_ok=True)
         local_rank = int(os.getenv("RANK", 0))
 
-        # Get how many samples have already been processed
-        start_idx = 0
+        # Resume support: collect the ids already written so we can skip them on a re-run.
+        # (Resuming by row COUNT is unsafe -- the validity filter below can drop clips, so a
+        # count-based offset would misalign and cause duplicates/gaps. Skipping by id is
+        # independent of order and drops.) Every schema has an "id" column (== video_name).
+        done_ids: set[str] = set()
         for root, _, files in os.walk(combined_parquet_dir):
             for file in files:
                 if file.endswith('.parquet'):
-                    table = pq.read_table(os.path.join(root, file))
-                    start_idx += table.num_rows
+                    try:
+                        done_ids.update(
+                            pq.read_table(os.path.join(root, file), columns=["id"]).column("id").to_pylist())
+                    except Exception:  # noqa: BLE001 - a truncated file from a kill mid-write; ignore
+                        logger.warning("Skipping unreadable parquet during resume scan: %s", file)
+        if done_ids:
+            logger.info("Resume: %d samples already written; skipping them", len(done_ids))
 
         # Loading dataset
         train_dataset = getdataset(args)
@@ -265,11 +273,18 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 continue
 
             with torch.inference_mode():
-                # Filter out invalid samples (those with all zeros)
+                # Filter out invalid samples (all-zero pixels) and, on resume, any clip whose
+                # id is already written. Skipping here is cheap -- it happens before the VAE/
+                # text/image encoders, so a resumed run only pays decode on skipped clips.
                 valid_indices = []
                 for i, pixel_values in enumerate(data["pixel_values"]):
-                    if not torch.all(pixel_values == 0):  # Check if all values are zero
-                        valid_indices.append(i)
+                    if torch.all(pixel_values == 0):  # failed decode / all zeros
+                        continue
+                    if done_ids:
+                        name = os.path.basename(data["path"][i]).split(".")[0]  # == record "id"
+                        if name in done_ids:
+                            continue
+                    valid_indices.append(i)
                 num_processed_samples += len(valid_indices)
 
                 if not valid_indices:

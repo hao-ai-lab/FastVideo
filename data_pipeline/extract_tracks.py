@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import queue
 import threading
 from pathlib import Path
@@ -321,7 +322,10 @@ def decoded_videos(todo: list[tuple[int, Path, Path]], prefetch: int):
     while (item := q.get()) is not None:
         k, vpath, out_path, payload = item
         if isinstance(payload, Exception):
-            raise RuntimeError(f"decode failed for {vpath}") from payload
+            # One unreadable clip must not take down the worker and everything it has
+            # left to process -- real-world shards contain corrupt/truncated files.
+            print(f"[track] [{k}] {vpath.name}: DECODE FAILED ({payload}), skipping", flush=True)
+            continue
         yield (k, vpath, out_path, *payload)
 
 
@@ -336,7 +340,7 @@ def patch_manifest(manifest_path: Path, stem_to_points: dict[str, Path]) -> int:
         if pts is not None:
             item["points_path"] = str(pts.resolve())
             patched += 1
-    tmp = manifest_path.with_suffix(".json.tmp")
+    tmp = manifest_path.with_suffix(f".json.tmp{os.getpid()}")   # pid-unique: never shared
     tmp.write_text(json.dumps(items, indent=2))
     tmp.replace(manifest_path)
     return patched
@@ -354,7 +358,8 @@ def main() -> None:
         videos = [v for v in videos if v.name in wanted]
     if args.limit is not None:
         videos = videos[:args.limit]
-    if args.world_size > 1:
+    all_videos = videos                      # pre-shard list: only rank 0 patches the manifest,
+    if args.world_size > 1:                  # and it must cover every rank's videos
         videos = videos[args.rank::args.world_size]
     if not videos:
         print(f"[track] no videos found in {videos_dir}", flush=True)
@@ -380,11 +385,12 @@ def main() -> None:
         items = json.loads(mpath.read_text()) if mpath.exists() else []
         stem_to_fps = {Path(it.get("path", "")).stem: it.get("fps", 24) for it in items}
 
-    stem_to_points: dict[str, Path] = {}
+    # points_path is deterministic, so rank 0 can record it for every video without
+    # doing their work -- avoids all ranks rewriting the manifest at once.
+    stem_to_points = {v.stem: out_dir / f"{v.stem}.npz" for v in all_videos}
     todo: list[tuple[int, Path, Path]] = []
     for k, vpath in enumerate(videos, 1):
         out_path = out_dir / f"{vpath.stem}.npz"
-        stem_to_points[vpath.stem] = out_path
         if out_path.exists() and not args.force:
             continue
         todo.append((k, vpath, out_path))
@@ -517,8 +523,13 @@ def main() -> None:
         print(f"[track] [{k}/{len(videos)}] {vpath.name} -> {out_path.name} "
               f"tracks={tracks.shape} vis={vis.shape}", flush=True)
 
-    n = patch_manifest(args.data_dir / args.manifest, stem_to_points)
-    print(f"[track] done; patched points_path into {n} manifest entries", flush=True)
+    # Only rank 0 writes: concurrent read-modify-write from every rank corrupted the
+    # manifest (interleaved writes to a shared temp file -> invalid JSON).
+    if args.rank == 0:
+        n = patch_manifest(args.data_dir / args.manifest, stem_to_points)
+        print(f"[track] done; patched points_path into {n} manifest entries", flush=True)
+    else:
+        print(f"[track] done (rank {args.rank}; manifest patched by rank 0)", flush=True)
 
 
 if __name__ == "__main__":

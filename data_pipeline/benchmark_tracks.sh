@@ -23,6 +23,7 @@ VIZ=${VIZ:-0}    # 0 = lean run (production-like for large-scale), 1 = render ov
 FUSED=${FUSED:-0}  # 1 = single fused pass (extract_tracks --segment); stage 4 not run
 AMP=${AMP:-0}      # 1 = bf16 autocast for CoTracker (--amp)
 COMPILE=${COMPILE:-0}  # 1 = torch.compile the main CoTracker pass (--compile)
+OVERRIDE_EVERY=${OVERRIDE_EVERY:-3}  # --vis-override-every (2 rides the entry-sweep mask cache in fused mode)
 
 cd "$(dirname "$0")/.."
 IFS=',' read -ra GPU_ARR <<< "$GPUS"
@@ -36,7 +37,7 @@ VIZ_ARGS=()
 [[ "$VIZ" == "1" ]] && VIZ_ARGS=(--viz --viz-dir "$OUT_DIR/bench_viz")
 FUSED_ARGS=()
 if [[ "$FUSED" == "1" ]]; then
-    FUSED_ARGS=(--segment --vis-override-every 3)
+    FUSED_ARGS=(--segment --vis-override-every "$OVERRIDE_EVERY")
     [[ "$VIZ" == "1" ]] && FUSED_ARGS+=("${VIZ_ARGS[@]}")
 fi
 SPEED_ARGS=()
@@ -119,7 +120,7 @@ for i in "${!GPU_ARR[@]}"; do
         --videos-subdir bench_videos \
         --manifest "$MANIFEST" \
         --conf 0.75 --iou 0.9 --imgsz 1024 \
-        --vis-override-every 3 \
+        --vis-override-every "$OVERRIDE_EVERY" \
         "${VIZ_ARGS[@]}" \
         --force \
         --rank "$i" --world-size "$WORLD_SIZE" \
@@ -135,7 +136,7 @@ fi
 
 # --- summary ----------------------------------------------------------------------
 {
-    echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') UTC  commit=$COMMIT  gpus=$GPUS  videos=$N_VIDEOS  viz=$VIZ  fused=$FUSED  amp=$AMP  compile=$COMPILE ==="
+    echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') UTC  commit=$COMMIT  gpus=$GPUS  videos=$N_VIDEOS  viz=$VIZ  fused=$FUSED  amp=$AMP  compile=$COMPILE  override=$OVERRIDE_EVERY ==="
     awk -v s3="$S3" -v s4="$S4" -v w="$WORLD_SIZE" -v n="$N_VIDEOS" -v fused="$FUSED" 'BEGIN {
         label = (fused == "1") ? "stage 3+4 (fused):" : "stage 3 (extract):"
         printf "%s %5ds total  %6.1fs/video/worker  %5.1f videos/min\n", label, s3, s3*w/n, 60*n/s3

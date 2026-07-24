@@ -12,6 +12,7 @@ python data_pipeline/generate_videos.py \
   --output-dir /home/hal-kevin/data/motion-stream-test \
   --num-videos 100 \
   --num-gpus 4 \
+  --trim-start-frames 10 \
   --num-inference-steps 40
 ```
 
@@ -55,7 +56,7 @@ Speed knobs: `--sam-batch 16` (frames per batched FastSAM forward, default 16) a
 adopting). Entry events now share one extra CoTracker pass (queries filtered to the new-object
 regions) instead of a full 2500-point pass per mask.
 
-**Fused mode:** `--segment` (with `--vis-override-every 3`) runs Stage 4 inside this pass —
+**Fused mode:** `--segment` (with `--vis-override-every 2`) runs Stage 4 inside this pass —
 object IDs, vis override, and track weights — reusing the decoded video and the entry-detection
 FastSAM masks, so Stage 4 does not need to run at all. Same results as the standalone stage
 (shared implementation). `--viz`/`--viz-dir` render the same overlay mp4s as standalone Stage 4
@@ -99,7 +100,7 @@ python data_pipeline/segment_tracks.py \
   --data-dir /home/hal-kevin/data/motion-stream-test \
   --videos-subdir roundtrip_videos \
   --conf 0.75 --iou 0.9 --imgsz 1024 \
-  --vis-override-every 3 \
+  --vis-override-every 2 \
   --force \
   --viz
 ```

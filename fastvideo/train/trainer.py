@@ -11,9 +11,12 @@ import torch
 from tqdm.auto import tqdm
 
 from fastvideo.distributed import get_sp_group, get_world_group
+from fastvideo.logger import init_logger
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
 from fastvideo.train.utils.tracking import build_tracker
+
+logger = init_logger(__name__)
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
@@ -127,6 +130,23 @@ class Trainer:
             resumed_step = (checkpoint_manager.maybe_resume(resume_from_checkpoint=(resume_from_checkpoint)))
             if resumed_step is not None:
                 start_step = int(resumed_step)
+                # dcp restores optimizer param_groups (incl. lr) and scheduler
+                # base_lrs from the checkpoint, silently overriding the config's
+                # learning rate. The explicit config must win — e.g. resuming a
+                # checkpoint into a lower-LR fine-tune stage.
+                configured_lr = float(tc.optimizer.learning_rate)
+                for opt in method.get_optimizers(start_step):
+                    for group in opt.param_groups:
+                        if group.get("lr") != configured_lr:
+                            logger.info(
+                                "Resume: overriding checkpoint lr %s with configured lr %s",
+                                group.get("lr"),
+                                configured_lr,
+                            )
+                            group["lr"] = configured_lr
+                for sched in method.get_lr_schedulers(start_step):
+                    if getattr(sched, "base_lrs", None) is not None:
+                        sched.base_lrs = [configured_lr] * len(sched.base_lrs)
         self.callbacks.on_validation_begin(
             method,
             iteration=start_step,

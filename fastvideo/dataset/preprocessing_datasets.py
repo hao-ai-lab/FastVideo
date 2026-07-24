@@ -225,6 +225,12 @@ class FrameSamplingStage(DatasetFilterStage):
 
         # Resample frame indices
         frame_interval = batch.fps / self.train_fps
+        if not math.isclose(frame_interval, round(frame_interval), abs_tol=1e-3):
+            logger.warning(
+                "Video %s has fps %.3f but train_fps is %d (frame interval %.3f is not an "
+                "integer): int truncation will duplicate/skip frames unevenly, storing "
+                "distorted motion. Pass --train_fps matching the video fps.", batch.path, batch.fps, self.train_fps,
+                frame_interval)
         start_frame_idx = 0
         frame_indices = np.arange(start_frame_idx, batch.num_frames,
                                   frame_interval).astype(int)
@@ -551,8 +557,19 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
             before_count, after_count)
 
     def __iter__(self):
-        """Iterate through processed data items."""
-        for idx in range(len(self.processed_batches)):
+        """Iterate through processed data items, sharded across DataLoader workers.
+
+        This is an IterableDataset: without worker sharding, num_workers>1 makes EACH
+        worker process iterate the full dataset, so every item is yielded num_workers
+        times (silent duplication in the output). Split the index range by worker id.
+        """
+        worker_info = torch.utils.data.get_worker_info()
+        n = len(self.processed_batches)
+        if worker_info is None:
+            indices = range(n)
+        else:
+            indices = range(worker_info.id, n, worker_info.num_workers)
+        for idx in indices:
             yield self._get_item(idx)
 
     def __len__(self):
@@ -589,6 +606,13 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Add points_path (CoTracker tracks sidecar for WanTrack)
         if batch.points_path:
             result["points_path"] = batch.points_path
+
+        # Release the heavy decoded-frame tensor from the PERSISTENT batch object.
+        # process() stored pixel_values on self.processed_batches[idx], which lives for the
+        # dataset's whole lifetime, so without this every visited clip pins ~1.3GB of frames
+        # -> linear host-RAM growth and OOM after a few hundred clips. `result` keeps its own
+        # reference for the consumer; clearing the persistent one lets it be freed after use.
+        batch.pixel_values = None
 
         return result
 
