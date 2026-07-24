@@ -1,8 +1,9 @@
-"""CuTe-DSL block-sparse attention forward kernel.
+"""Autograd-enabled CuTe-DSL block-sparse attention.
 
-Thin wrapper around `flash_attn.cute.interface._flash_attn_fwd` that adapts
-VSA's `(block_map, variable_block_sizes)` inputs into FA4's
-`BlockSparseTensorsTorch` representation and the per-KV-block validity mask.
+Thin wrapper around `flash_attn.cute.interface._flash_attn_fwd` and
+`_flash_attn_bwd` that adapts VSA's `(block_map, variable_block_sizes)`
+inputs into FA4's forward and backward `BlockSparseTensorsTorch`
+representations and the per-KV-block validity mask.
 
 Both [B, H, S, D] (BHSD) and [B, S, H, D] (BSHD) entrypoints are provided.
 The BSHD variant is preferred from VSA-256 callers to avoid layout
@@ -40,10 +41,10 @@ def _load_fa4_cute():
     """
     try:
         from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
-        from flash_attn.cute.interface import _flash_attn_fwd
+        from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise ImportError(_FA4_IMPORT_HINT) from exc
-    return BlockSparseTensorsTorch, _flash_attn_fwd
+    return BlockSparseTensorsTorch, _flash_attn_fwd, _flash_attn_bwd
 
 
 # Q-side tile size; kv_block_size comes from the caller's VSA logical KV block.
@@ -152,7 +153,7 @@ def _cute_forward(
     kv_block_size: int,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Internal: FA4 CuTe BSA fwd with BSHD inputs."""
-    BlockSparseTensorsTorch, _flash_attn_fwd = _load_fa4_cute()
+    BlockSparseTensorsTorch, _flash_attn_fwd, _ = _load_fa4_cute()
     q_sparse_candidate = _choose_q_sparse_block_size(q_bshd.shape[1])
     q_sparse_block_size = max(
         q_block_size,
@@ -196,6 +197,133 @@ def _cute_forward(
     return out, lse
 
 
+def _cute_backward(
+    grad_out_bshd: torch.Tensor,
+    q_bshd: torch.Tensor,
+    k_bshd: torch.Tensor,
+    v_bshd: torch.Tensor,
+    out_bshd: torch.Tensor,
+    lse: torch.Tensor,
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+    *,
+    q_block_size: int,
+    kv_block_size: int,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Internal: FA4 CuTe BSA bwd with BSHD inputs."""
+    BlockSparseTensorsTorch, _, _flash_attn_bwd = _load_fa4_cute()
+    q_sparse_candidate = _choose_q_sparse_block_size(q_bshd.shape[1])
+    q_sparse_block_size = max(
+        q_block_size,
+        ((q_sparse_candidate + q_block_size - 1) // q_block_size) * q_block_size,
+    )
+    sparse_map = _aggregate_q_block_map(
+        block_map,
+        q_sparse_block_size=q_sparse_block_size,
+        q_block_size=q_block_size,
+    )
+    kv_full = (variable_block_sizes == kv_block_size).view(1, 1, 1, -1)
+    kv_partial = (
+        (variable_block_sizes > 0) & (variable_block_sizes < kv_block_size)
+    ).view(1, 1, 1, -1)
+
+    # FA4 backward is KV-owned: for each physical KV tile, list the sparse
+    # query tiles that selected it. Full and partial KV tiles stay separate
+    # so the token-level validity mask only runs for padded tiles.
+    full_block_idx, full_block_cnt = _map_to_index(
+        (sparse_map & kv_full).transpose(2, 3).contiguous()
+    )
+    mask_block_idx, mask_block_cnt = _map_to_index(
+        (sparse_map & kv_partial).transpose(2, 3).contiguous()
+    )
+    sparse_tensors = BlockSparseTensorsTorch(
+        full_block_cnt=full_block_cnt.to(torch.int32).contiguous(),
+        full_block_idx=full_block_idx.to(torch.int32).contiguous(),
+        mask_block_cnt=mask_block_cnt.to(torch.int32).contiguous(),
+        mask_block_idx=mask_block_idx.to(torch.int32).contiguous(),
+        block_size=(q_sparse_block_size, kv_block_size),
+    )
+
+    return _flash_attn_bwd(
+        q_bshd.contiguous(),
+        k_bshd.contiguous(),
+        v_bshd.contiguous(),
+        out_bshd.contiguous(),
+        grad_out_bshd.contiguous(),
+        lse,
+        softmax_scale=q_bshd.shape[-1] ** -0.5,
+        mask_mod=_build_vbs_mask_mod(kv_block_size),
+        aux_tensors=[variable_block_sizes],
+        block_sparse_tensors=sparse_tensors,
+    )
+
+
+class _CuTeBlockSparseAttention(torch.autograd.Function):
+    """Autograd bridge for FA4's block-sparse BSHD kernels."""
+
+    @staticmethod
+    def forward(
+        ctx,
+        q_bshd: torch.Tensor,
+        k_bshd: torch.Tensor,
+        v_bshd: torch.Tensor,
+        block_map: torch.Tensor,
+        variable_block_sizes: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        q_block_size = q_bshd.shape[1] // block_map.shape[2]
+        kv_block_size = k_bshd.shape[1] // block_map.shape[3]
+        out_bshd, lse = _cute_forward(
+            q_bshd,
+            k_bshd,
+            v_bshd,
+            block_map,
+            variable_block_sizes,
+            q_block_size=q_block_size,
+            kv_block_size=kv_block_size,
+        )
+        ctx.save_for_backward(
+            q_bshd,
+            k_bshd,
+            v_bshd,
+            out_bshd,
+            lse,
+            block_map,
+            variable_block_sizes,
+        )
+        ctx.q_block_size = q_block_size
+        ctx.kv_block_size = kv_block_size
+
+        # Preserve the wrapper's existing public auxiliary layout [B, S, H].
+        lse_bsh = lse.transpose(1, 2).contiguous()
+        ctx.mark_non_differentiable(lse_bsh)
+        return out_bshd, lse_bsh
+
+    @staticmethod
+    def backward(ctx, grad_out_bshd, _grad_lse_bsh):
+        (
+            q_bshd,
+            k_bshd,
+            v_bshd,
+            out_bshd,
+            lse,
+            block_map,
+            variable_block_sizes,
+        ) = ctx.saved_tensors
+        dq, dk, dv = _cute_backward(
+            grad_out_bshd,
+            q_bshd,
+            k_bshd,
+            v_bshd,
+            out_bshd,
+            lse,
+            block_map,
+            variable_block_sizes,
+            q_block_size=ctx.q_block_size,
+            kv_block_size=ctx.kv_block_size,
+        )
+        return dq, dk, dv, None, None
+
+
 def block_sparse_attn_cute_fwd(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -203,34 +331,22 @@ def block_sparse_attn_cute_fwd(
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """CuTe forward-only block-sparse attention with [B, H, S, D] inputs."""
+    """Autograd-enabled CuTe block-sparse attention for [B, H, S, D]."""
     if block_map.dim() == 3:
         block_map = block_map.unsqueeze(0)
-    q_block_size = q.shape[2] // block_map.shape[2]
-    kv_block_size = k.shape[2] // block_map.shape[3]
 
     q_bshd = q.transpose(1, 2).contiguous()
     k_bshd = k.transpose(1, 2).contiguous()
     v_bshd = v.transpose(1, 2).contiguous()
-    out_bshd, lse_bshd = _cute_forward(
+    out_bshd, lse_bsh = _CuTeBlockSparseAttention.apply(
         q_bshd,
         k_bshd,
         v_bshd,
         block_map,
         variable_block_sizes,
-        q_block_size=q_block_size,
-        kv_block_size=kv_block_size,
     )
     out = out_bshd.transpose(1, 2).contiguous()
-    if lse_bshd is None:
-        lse = torch.empty(
-            (q.shape[0], q.shape[1], q.shape[2]),
-            dtype=torch.float32,
-            device=q.device,
-        )
-    else:
-        lse = lse_bshd.transpose(1, 2).contiguous()
-    return out, lse
+    return out, lse_bsh
 
 
 def block_sparse_attn_cute_fwd_bshd(
@@ -240,27 +356,14 @@ def block_sparse_attn_cute_fwd_bshd(
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """CuTe forward-only block-sparse attention with [B, S, H, D] inputs."""
+    """Autograd-enabled CuTe block-sparse attention for [B, S, H, D]."""
     if block_map.dim() == 3:
         block_map = block_map.unsqueeze(0)
-    q_block_size = q.shape[1] // block_map.shape[2]
-    kv_block_size = k.shape[1] // block_map.shape[3]
 
-    out, lse_bshd = _cute_forward(
+    return _CuTeBlockSparseAttention.apply(
         q,
         k,
         v,
         block_map,
         variable_block_sizes,
-        q_block_size=q_block_size,
-        kv_block_size=kv_block_size,
     )
-    if lse_bshd is None:
-        lse = torch.empty(
-            (q.shape[0], q.shape[2], q.shape[1]),
-            dtype=torch.float32,
-            device=q.device,
-        )
-    else:
-        lse = lse_bshd.transpose(1, 2).contiguous()
-    return out, lse

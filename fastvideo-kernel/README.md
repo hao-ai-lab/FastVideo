@@ -17,7 +17,7 @@ Runtime-JIT kernels (no build step, ship in every wheel/image):
 | Kernels | Where | Used when |
 |---|---|---|
 | Triton: STA, VSA block-sparse, SLA, fused compress+topk, FP4 QAT training, quant/norm utils | `python/fastvideo_kernel/triton_kernels/` | automatic fallback when the matching C++ op is absent (`ops.py`, `turbodiffusion_ops.py`) |
-| FA4 CuTe-DSL block-sparse (VSA-256 fastpath on `sm_100`) | `block_sparse_attn_cute_fwd.py` | optional `flash_attn.cute` dependency, see below |
+| FA4 CuTe-DSL block-sparse forward/backward (VSA-256 fastpath on `sm_100`) | `block_sparse_attn_cute_fwd.py` | optional `flash_attn.cute` dependency, see below |
 | VMoBA `moba_attn_varlen` | `vmoba.py` | wraps flash-attn varlen |
 
 ## What gets built where, and when
@@ -73,7 +73,8 @@ transparently falls back to the Triton backend when it is absent (so the package
 fully usable without it).
 
 The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`,
-`flash_attn.cute.interface._flash_attn_fwd`) are provided upstream by
+`flash_attn.cute.interface._flash_attn_fwd`, and
+`flash_attn.cute.interface._flash_attn_bwd`) are provided upstream by
 [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention). Pin to
 commit `940cd9680f3315f2f06b43ab5bea2c2cf2d96806`, the revision FastVideo pins as
 the `flash-attn-4` source in the repo-root `pyproject.toml`; other revisions may
@@ -84,8 +85,8 @@ pip install "nvidia-cutlass-dsl>=4.5.0" torchvision
 pip install "git+https://github.com/Dao-AILab/flash-attention.git@940cd9680f3315f2f06b43ab5bea2c2cf2d96806#subdirectory=flash_attn/cute"
 ```
 
-The CuTe kernel JIT-compiles on first use. Verified on Blackwell (sm_100) against
-`tests/test_vsa256_forward*.py`.
+The CuTe kernels JIT-compile on first use. Forward and backward are verified on
+Blackwell (sm_100) against `tests/test_vsa256_*.py`.
 
 ## Usage
 
@@ -142,6 +143,10 @@ After building/installing `fastvideo-kernel`, run:
 ```bash
 cd fastvideo-kernel
 python benchmarks/bench_vsa.py --batch_size 1 --num_heads 16 --head_dim 128 --q_seq_lens 49152 --topk 64
+
+# VSA-256 FA4 CuTe forward/backward on Blackwell
+python benchmarks/bench_vsa.py --block_size 256 --use_cute \
+  --batch_size 1 --num_heads 12 --head_dim 128 --q_seq_lens 39936 --topk 20
 ```
 
 ### TurboDiffusion Kernels

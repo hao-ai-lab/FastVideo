@@ -195,24 +195,24 @@ def video_sparse_attn_bshd(
             f"got {q_variable_block_sizes.numel()}"
         )
 
-    # Compression branch (BSHD-native: mean over the 256-token axis).
-    token_idx = torch.arange(block_elements, device=q.device, dtype=torch.int32)
-    q_token_valid = (token_idx.view(1, -1) < q_variable_block_sizes.view(-1, 1)).view(
-        1, q_num_blocks, block_elements, 1, 1
-    )
-    kv_token_valid = (token_idx.view(1, -1) < variable_block_sizes.view(-1, 1)).view(
-        1, kv_num_blocks, block_elements, 1, 1
-    )
-
+    # Compression branch (BSHD-native: match fused_block_mean's semantics).
+    # Padding values are expected to be zero; gradients are broadcast across
+    # the full padded block, just like the BHSD fused common path.
     q_c = q.view(batch, q_num_blocks, block_elements, heads, dim)
     k_c = k.view(batch, kv_num_blocks, block_elements, heads, dim)
     v_c = v.view(batch, kv_num_blocks, block_elements, heads, dim)
-    q_c = ((q_c.float() * q_token_valid).sum(dim=2)
-           / q_variable_block_sizes.view(1, -1, 1, 1)).to(q.dtype)
-    k_c = ((k_c.float() * kv_token_valid).sum(dim=2)
-           / variable_block_sizes.view(1, -1, 1, 1)).to(k.dtype)
-    v_c = ((v_c.float() * kv_token_valid).sum(dim=2)
-           / variable_block_sizes.view(1, -1, 1, 1)).to(v.dtype)
+    q_c = (
+        q_c.float().sum(dim=2)
+        / q_variable_block_sizes.view(1, -1, 1, 1)
+    ).to(q.dtype)
+    k_c = (
+        k_c.float().sum(dim=2)
+        / variable_block_sizes.view(1, -1, 1, 1)
+    ).to(k.dtype)
+    v_c = (
+        v_c.float().sum(dim=2)
+        / variable_block_sizes.view(1, -1, 1, 1)
+    ).to(v.dtype)
     q_ch = q_c.permute(0, 2, 1, 3).contiguous()
     k_ch = k_c.permute(0, 2, 1, 3).contiguous()
     v_ch = v_c.permute(0, 2, 1, 3).contiguous()
@@ -226,13 +226,14 @@ def video_sparse_attn_bshd(
     mask = fused_topk_mask(scores, topk)
     out_s, _ = block_sparse_attn_256_bshd(q, k, v, mask, variable_block_sizes)
 
-    out = out_s
-    out_view = out.view(batch, q_num_blocks, block_elements, heads, dim)
+    out_view = out_s.view(batch, q_num_blocks, block_elements, heads, dim)
     if compress_attn_weight is not None:
         gate_view = compress_attn_weight.view(
             batch, q_num_blocks, block_elements, heads, dim
         )
-        out_view.add_(out_c_blk.unsqueeze(2) * gate_view)
-    else:
-        out_view.add_(out_c_blk.unsqueeze(2))
-    return out
+        return (out_view + out_c_blk.unsqueeze(2) * gate_view).view(
+            batch, q_seq_len, heads, dim
+        )
+    return (out_view + out_c_blk.unsqueeze(2)).view(
+        batch, q_seq_len, heads, dim
+    )
