@@ -1,0 +1,95 @@
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.WanTrackCausalModel
+    init_from: /mnt/lustre/vlm-k1kong/models/wantrack-synth-stage2-ckpt600-bias
+    transformer_override_safetensor: /mnt/lustre/vlm-k1kong/experiments/wantrack_causal/20260723_070728/wantrack-ckpt600-block3-local6-sink1-relative-gbs32/export/tf/transformer/model.safetensors
+    trainable: true
+    num_frames_per_block: 3
+    freeze_track_encoder: true
+    track_augmentation:
+      enabled: true
+      sparse_object_sampling: true
+      extra_points: 20
+      extra_point_sampling: random
+      track_dropout_probability: 0.5
+      temporal_mask_probability: 0.2
+      temporal_mask_chunk_size: 8
+      motion_dropout_probability: 0.3
+      text_dropout_probability: 0.0
+  teacher:
+    _target_: fastvideo.train.models.wantrack.WanTrackCausalModel
+    init_from: /mnt/lustre/vlm-k1kong/models/wantrack-synth-stage2-ckpt600-bias
+    transformer_override_safetensor: /mnt/lustre/vlm-k1kong/experiments/wantrack_causal/20260723_070728/wantrack-ckpt600-block3-local6-sink1-relative-gbs32/export/tf/transformer/model.safetensors
+    trainable: false
+    num_frames_per_block: 3
+    freeze_track_encoder: true
+  ema:
+    _target_: fastvideo.train.models.wantrack.WanTrackCausalModel
+    init_from: /mnt/lustre/vlm-k1kong/models/wantrack-synth-stage2-ckpt600-bias
+    transformer_override_safetensor: /mnt/lustre/vlm-k1kong/experiments/wantrack_causal/20260723_070728/wantrack-ckpt600-block3-local6-sink1-relative-gbs32/export/tf/transformer/model.safetensors
+    trainable: false
+    num_frames_per_block: 3
+    freeze_track_encoder: true
+method:
+  _target_: fastvideo.train.methods.consistency_model.causal_cd.CausalConsistencyDistillationMethod
+  discrete_cd_N: 48
+  guidance_scale: 3.0
+  ema_decay: 0.99
+  ema_start_step: 200
+training:
+  distributed:
+    num_gpus: 16
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 4
+    hsdp_shard_dim: 4
+  data:
+    data_path: /mnt/lustre/vlm-s4duan/data/combined_synth_parquets
+    preprocessed_data_type: i2v_track
+    dataloader_num_workers: 4
+    train_batch_size: 2
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 480
+    num_width: 832
+    num_frames: 121
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+  loop:
+    max_train_steps: 2000
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: /mnt/lustre/vlm-k1kong/experiments/wantrack_causal/20260723_070728/wantrack-ckpt600-block3-local6-sink1-relative-gbs32/cd/checkpoints
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 4
+  tracker:
+    trackers: [wandb]
+    entity: kaiqin_kong_ucsd
+    project_name: wantrack_causal_synth_stage2
+    run_name: wantrack_ckpt600_block3_sink1_local6_relative_cd2k_gbs32
+  model:
+    enable_gradient_checkpointing_type: full
+callbacks:
+  grad_clip:
+    max_grad_norm: 1.0
+  wantrack_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    every_steps: 250
+    val_data_path: /mnt/lustre/vlm-s4duan/val_examples_mixed/combined_parquet_dataset
+    num_val_samples: 4
+    num_inference_steps: 4
+    output_dir: /mnt/lustre/vlm-k1kong/experiments/wantrack_causal/20260723_070728/wantrack-ckpt600-block3-local6-sink1-relative-gbs32/cd/validation
+    seed: 1000
+    validate_at_start: false
+pipeline:
+  flow_shift: 6
+  dit_config:
+    local_attn_size: 6
+    sink_size: 1
+    rope_cache_policy: relativistic
+    causal_train_attention: triton
