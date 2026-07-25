@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WanTrack Control</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>WanTrack Control</h1>
+        <p>Drag points to steer the next causal block.</p>
+      </div>
+      <span id="status">Disconnected</span>
+    </header>
+
+    <section class="controls">
+      <label class="file">Image <input id="image" type="file" accept="image/*"></label>
+      <label class="prompt">Prompt <input id="prompt" type="text" placeholder="Optional scene description"></label>
+      <button id="prepare">Prepare</button>
+    </section>
+
+    <section class="workspace">
+      <div class="canvas-panel">
+        <div class="canvas-toolbar">
+          <button id="add" disabled>Add handle</button>
+          <button id="remove" disabled>Delete selected</button>
+          <label><input id="grid" type="checkbox"> Grid</label>
+        </div>
+        <canvas id="canvas" width="832" height="480"></canvas>
+        <label class="radius">Radius <input id="radius" type="range" min="0.03" max="0.45" step="0.01" value="0.15"><output>0.15</output></label>
+      </div>
+      <div class="video-panel">
+        <video id="video" muted autoplay playsinline controls></video>
+        <a id="download" hidden>Download completed MP4</a>
+      </div>
+    </section>
+
+    <section class="sampling">
+      <label>Seed <input id="seed" type="number" value="0" step="1"></label>
+      <label>Steps <input id="steps" type="number" value="30" min="1" max="100"></label>
+      <label>Text guidance <input id="text-guidance" type="number" value="3" min="0" step="0.1"></label>
+      <label>Motion guidance <input id="motion-guidance" type="number" value="1.5" min="0" step="0.1"></label>
+      <button id="start" disabled>Start</button>
+      <button id="stop" disabled>Stop</button>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

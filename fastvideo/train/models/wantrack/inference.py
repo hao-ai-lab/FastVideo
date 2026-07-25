@@ -14,6 +14,11 @@ from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.base import CausalModelBase, ModelBase
 
 _Branch = Literal["full", "no_text", "no_motion"]
+_CACHE_BRANCHES: tuple[_Branch, ...] = (
+    "full",
+    "no_text",
+    "no_motion",
+)
 
 
 def prepare_wantrack_batch(
@@ -243,6 +248,59 @@ def _sample_block(
     return latents, branches
 
 
+def clear_wantrack_caches(model: ModelBase) -> None:
+    """Clear every CFG-tagged causal cache owned by WanTrack sampling."""
+    if not isinstance(model, CausalModelBase):
+        return
+    for branch in _CACHE_BRANCHES:
+        model.clear_caches(cache_tag=f"wantrack_{branch}")
+
+
+@torch.no_grad()
+def sample_wantrack_block(
+    model: CausalModelBase,
+    batch: TrainingBatch,
+    latents: torch.Tensor,
+    *,
+    start_frame: int,
+    num_inference_steps: int = 30,
+    text_guidance_scale: float = 1.0,
+    motion_guidance_scale: float = 1.0,
+    motion_cfg: bool = True,
+    scheduler: FlowMatchEulerDiscreteScheduler | None = None,
+    commit: bool = True,
+) -> torch.Tensor:
+    """Denoise one causal block and optionally commit its context once."""
+    if latents.ndim != 5:
+        raise ValueError("WanTrack block latents must be [B, T, C, H, W]")
+    if start_frame < 0:
+        raise ValueError("start_frame must be non-negative")
+    if num_inference_steps <= 0:
+        raise ValueError("num_inference_steps must be positive")
+    if scheduler is None:
+        scheduler = FlowMatchEulerDiscreteScheduler(shift=float(getattr(model, "timestep_shift", 5.0)), )
+    sampled, branches = _sample_block(
+        model,
+        latents,
+        batch,
+        scheduler=scheduler,
+        num_inference_steps=num_inference_steps,
+        start_frame=start_frame,
+        text_guidance_scale=text_guidance_scale,
+        motion_guidance_scale=motion_guidance_scale,
+        motion_cfg=motion_cfg,
+    )
+    if commit:
+        _store_causal_context(
+            model,
+            sampled,
+            batch,
+            start_frame=start_frame,
+            branches=branches,
+        )
+    return sampled
+
+
 @torch.no_grad()
 def sample_wantrack(
     model: ModelBase,
@@ -311,36 +369,28 @@ def sample_wantrack(
                          f"leading I2V frame; got {num_frames} and "
                          f"{chunk_size}")
 
-    for branch in ("full", "no_text", "no_motion"):
-        model.clear_caches(cache_tag=f"wantrack_{branch}")
+    clear_wantrack_caches(model)
 
     sampled_blocks: list[torch.Tensor] = []
     try:
         start_frame = 0
         for block_size in block_sizes:
             block = latents[:, start_frame:start_frame + block_size]
-            block, branches = _sample_block(
+            block = sample_wantrack_block(
                 model,
-                block,
                 batch,
-                scheduler=scheduler,
-                num_inference_steps=num_inference_steps,
+                block,
                 start_frame=start_frame,
+                num_inference_steps=num_inference_steps,
                 text_guidance_scale=text_guidance_scale,
                 motion_guidance_scale=motion_guidance_scale,
                 motion_cfg=motion_cfg,
+                scheduler=scheduler,
+                commit=True,
             )
             sampled_blocks.append(block)
-            _store_causal_context(
-                model,
-                block,
-                batch,
-                start_frame=start_frame,
-                branches=branches,
-            )
             start_frame += block_size
     finally:
-        for branch in ("full", "no_text", "no_motion"):
-            model.clear_caches(cache_tag=f"wantrack_{branch}")
+        clear_wantrack_caches(model)
 
     return torch.cat(sampled_blocks, dim=1)

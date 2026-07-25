@@ -306,6 +306,9 @@ class TrainingBatch:
     track_points: torch.Tensor | None = None
     track_visibility: torch.Tensor | None = None
     track_ids: torch.Tensor | None = None
+    # Optional latent-aligned result of TrackEncoder. Runtime callers use this
+    # to encode only the causal pixel window required by the current block.
+    track_map: torch.Tensor | None = None
 
     # ODE trajectory supervision
     trajectory_latents: torch.Tensor | None = None

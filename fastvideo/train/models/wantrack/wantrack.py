@@ -434,6 +434,7 @@ class WanTrackModel(WanModel):
             "track_points": training_batch.track_points,
             "track_visibility": training_batch.track_visibility,
             "track_ids": training_batch.track_ids,
+            "track_map": training_batch.track_map,
         }
         training_batch.conditional_dict.update(extras)
         if training_batch.unconditional_dict is None:
@@ -466,6 +467,7 @@ class WanTrackModel(WanModel):
             "track_points": text_dict.get("track_points"),
             "track_visibility": text_dict.get("track_visibility"),
             "track_ids": text_dict.get("track_ids"),
+            "track_map": text_dict.get("track_map"),
             "timestep": timestep,
             "return_dict": False,
         }
@@ -496,6 +498,20 @@ class WanTrackModel(WanModel):
             raise RuntimeError("WanTrack requires image_latents for a 16-channel input")
         start = int(start_frame)
         end = start + hidden_states.shape[2]
+        # Interactive causal inference stores only the leading I2V condition.
+        # Every later condition frame is exactly zero, so materializing an
+        # unbounded all-zero timeline is unnecessary.
+        if image_condition.shape[2] == 1:
+            condition = image_condition.new_zeros(
+                image_condition.shape[0],
+                image_condition.shape[1],
+                hidden_states.shape[2],
+                image_condition.shape[3],
+                image_condition.shape[4],
+            )
+            if start == 0:
+                condition[:, :, :1] = image_condition
+            return torch.cat([hidden_states, condition], dim=1)
         if start < 0 or end > image_condition.shape[2]:
             raise ValueError("I2V condition does not cover the requested latent window "
                              f"[{start}, {end})")
@@ -539,6 +555,7 @@ class WanTrackModel(WanModel):
                 "track_points",
                 "track_visibility",
                 "track_ids",
+                "track_map",
         ):
             result.setdefault(key, conditional.get(key))
 
@@ -549,6 +566,7 @@ class WanTrackModel(WanModel):
             result["track_points"] = None
             result["track_visibility"] = None
             result["track_ids"] = None
+            result["track_map"] = None
         return result
 
     def _build_i2v_condition(

@@ -108,6 +108,91 @@ class TrackEncoder(nn.Module):
         latent_w: int,
         track_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        dense = self._rasterize(
+            coords,
+            visibility,
+            latent_h=latent_h,
+            latent_w=latent_w,
+            track_ids=track_ids,
+        )
+        dense = F.pad(
+            dense,
+            (0, 0, 0, 0, self.vae_temporal_compression - 1, 0),
+        )
+        dense = self.temporal_conv(dense)
+        if dense.shape[2:] != (latent_t, latent_h, latent_w):
+            dense = F.interpolate(
+                dense,
+                size=(latent_t, latent_h, latent_w),
+                mode="nearest",
+            )
+        return self.proj(dense)
+
+    def forward_window(
+        self,
+        coords: torch.Tensor,
+        visibility: torch.Tensor,
+        *,
+        latent_start: int,
+        latent_t: int,
+        latent_h: int,
+        latent_w: int,
+        pixel_start: int = 0,
+        track_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Encode only the pixel window needed for a causal latent block.
+
+        ``coords`` may be a complete sequence or a cropped sequence whose first
+        frame has global pixel index ``pixel_start``. The result is exactly the
+        same as slicing ``forward(full)[..., latent_start:latent_start+latent_t]``.
+        """
+        if latent_start < 0:
+            raise ValueError("latent_start must be non-negative")
+        if pixel_start < 0:
+            raise ValueError("pixel_start must be non-negative")
+        if latent_t <= 0:
+            raise ValueError("latent_t must be positive")
+
+        ratio = self.vae_temporal_compression
+        required_start = max(0, latent_start * ratio - (ratio - 1))
+        required_end = (latent_start + latent_t - 1) * ratio + 1
+        provided_end = pixel_start + coords.shape[1]
+        if pixel_start > required_start or provided_end < required_end:
+            raise ValueError(
+                "track window does not cover required global pixel frames "
+                f"[{required_start}, {required_end}); provided "
+                f"[{pixel_start}, {provided_end})")
+
+        local_start = required_start - pixel_start
+        local_end = required_end - pixel_start
+        dense = self._rasterize(
+            coords[:, local_start:local_end],
+            visibility[:, local_start:local_end],
+            latent_h=latent_h,
+            latent_w=latent_w,
+            track_ids=track_ids,
+        )
+        if required_start == 0:
+            dense = F.pad(
+                dense,
+                (0, 0, 0, 0, ratio - 1, 0),
+            )
+        dense = self.temporal_conv(dense)
+        if dense.shape[2] != latent_t:
+            raise RuntimeError(
+                "TrackEncoder window produced an unexpected latent length: "
+                f"{dense.shape[2]} (expected {latent_t})")
+        return self.proj(dense)
+
+    def _rasterize(
+        self,
+        coords: torch.Tensor,
+        visibility: torch.Tensor,
+        *,
+        latent_h: int,
+        latent_w: int,
+        track_ids: torch.Tensor | None,
+    ) -> torch.Tensor:
         if coords.ndim != 4 or coords.shape[-1] != 2:
             raise ValueError(
                 "track coords must have shape [B, T, N, 2], got "
@@ -116,8 +201,8 @@ class TrackEncoder(nn.Module):
             raise ValueError(
                 "track visibility must have shape [B, T, N] matching "
                 f"coords, got {tuple(visibility.shape)}")
-        if latent_t <= 0 or latent_h <= 0 or latent_w <= 0:
-            raise ValueError("latent dimensions must be positive")
+        if latent_h <= 0 or latent_w <= 0:
+            raise ValueError("latent spatial dimensions must be positive")
 
         batch_size, _, num_tracks, _ = coords.shape
         device = coords.device
@@ -171,16 +256,4 @@ class TrackEncoder(nn.Module):
             latent_w,
             self.id_dim,
         ).permute(0, 4, 1, 2, 3).contiguous()
-        dense = dense.to(dtype=self.temporal_conv.weight.dtype)
-        dense = F.pad(
-            dense,
-            (0, 0, 0, 0, self.vae_temporal_compression - 1, 0),
-        )
-        dense = self.temporal_conv(dense)
-        if dense.shape[2:] != (latent_t, latent_h, latent_w):
-            dense = F.interpolate(
-                dense,
-                size=(latent_t, latent_h, latent_w),
-                mode="nearest",
-            )
-        return self.proj(dense)
+        return dense.to(dtype=self.temporal_conv.weight.dtype)

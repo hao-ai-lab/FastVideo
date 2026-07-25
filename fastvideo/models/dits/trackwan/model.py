@@ -60,6 +60,7 @@ class _TrackConditioningMixin:
         track_points: torch.Tensor | None,
         track_visibility: torch.Tensor | None,
         track_ids: torch.Tensor | None,
+        track_map: torch.Tensor | None,
         start_frame: int,
     ) -> torch.Tensor:
         expected_channels = self.in_channels - self.track_channels
@@ -74,9 +75,29 @@ class _TrackConditioningMixin:
         if (track_points is None) != (track_visibility is None):
             raise ValueError(
                 "track_points and track_visibility must be provided together")
+        if track_map is not None and track_points is not None:
+            raise ValueError(
+                "track_map is mutually exclusive with raw track_points/"
+                "track_visibility")
 
         batch_size, _, latent_t, latent_h, latent_w = hidden_states.shape
-        if track_points is None:
+        if track_map is not None:
+            expected_shape = (
+                batch_size,
+                self.track_channels,
+                latent_t,
+                latent_h,
+                latent_w,
+            )
+            if tuple(track_map.shape) != expected_shape:
+                raise ValueError(
+                    "track_map must be latent-aligned with shape "
+                    f"{expected_shape}, got {tuple(track_map.shape)}")
+            track_map = track_map.to(
+                device=hidden_states.device,
+                dtype=hidden_states.dtype,
+            )
+        elif track_points is None:
             track_map = hidden_states.new_zeros(
                 batch_size,
                 self.track_channels,
@@ -138,6 +159,7 @@ class TrackWanTransformer3DModel(
         track_points: torch.Tensor | None = None,
         track_visibility: torch.Tensor | None = None,
         track_ids: torch.Tensor | None = None,
+        track_map: torch.Tensor | None = None,
         **kwargs: Any,
     ) -> torch.Tensor:
         hidden_states = self._append_track_conditioning(
@@ -145,6 +167,7 @@ class TrackWanTransformer3DModel(
             track_points=track_points,
             track_visibility=track_visibility,
             track_ids=track_ids,
+            track_map=track_map,
             start_frame=0,
         )
         return super().forward(
@@ -183,6 +206,7 @@ class CausalTrackWanTransformer3DModel(
         track_points: torch.Tensor | None = None,
         track_visibility: torch.Tensor | None = None,
         track_ids: torch.Tensor | None = None,
+        track_map: torch.Tensor | None = None,
         **kwargs: Any,
     ) -> torch.Tensor:
         hidden_states = self._append_track_conditioning(
@@ -190,6 +214,7 @@ class CausalTrackWanTransformer3DModel(
             track_points=track_points,
             track_visibility=track_visibility,
             track_ids=track_ids,
+            track_map=track_map,
             start_frame=start_frame,
         )
         if clean_x is not None:
@@ -198,6 +223,7 @@ class CausalTrackWanTransformer3DModel(
                 track_points=track_points,
                 track_visibility=track_visibility,
                 track_ids=track_ids,
+                track_map=track_map,
                 start_frame=start_frame,
             )
         return super().forward(
