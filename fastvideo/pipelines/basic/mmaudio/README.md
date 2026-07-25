@@ -1,8 +1,9 @@
 # MMAudio Video-to-Audio
 
 This directory contains FastVideo's native `MMAudioPipeline` implementation for
-video-to-audio (V2A) and text-to-audio (T2A) generation. The first supported
-checkpoint is `large_44k_v2`, which produces mono audio at 44.1 kHz.
+video-to-audio (V2A) and text-to-audio (T2A) generation. All five published
+MMAudio model architectures are registered independently so their sequence
+length, latent width, sample rate, VAE, and vocoder cannot be mixed silently.
 
 The production pipeline is implemented with FastVideo components and does not
 import the upstream `mmaudio` Python package. It loads the transformer, DFN5B
@@ -10,24 +11,41 @@ CLIP text/vision encoders, Synchformer visual encoder, audio VAE, BigVGAN-v2,
 tokenizer, and scheduler from a standard FastVideo/Diffusers-style checkpoint
 directory.
 
+## Official model variants
+
+| Variant | Audio | Hidden / layers / heads | Inference | Official training recipe |
+| --- | ---: | --- | --- | --- |
+| `small_16k` | 16 kHz | 448 / 12 / 7 | implemented | supported |
+| `small_44k` | 44.1 kHz | 448 / 12 / 7 | implemented | supported |
+| `medium_44k` | 44.1 kHz | 896 / 12 / 14 | implemented | supported |
+| `large_44k` | 44.1 kHz | 896 / 21 / 14 | implemented | supported |
+| `large_44k_v2` | 44.1 kHz | 896 / 21 / 14 | implemented and validated | not supported upstream |
+
+`small_16k` uses latent shape `[250, 20]`, the 16 kHz VAE, and the original
+80-mel BigVGAN. The 44.1 kHz variants use latent shape `[345, 40]`, the 44 kHz
+VAE, and 128-mel BigVGAN-v2. `_v2` changes transformer activations and timestep
+conditioning but not the large model dimensions.
+
 ## Status
 
-- `large_44k_v2` V2A inference: supported
+- Five variant-specific presets, pipeline configs, registry entries, and
+  converter choices: supported
 - T2A pipeline routing: supported; the provided example currently targets V2A
-- Output: mono WAV, 44.1 kHz
+- Output: mono WAV at 16 kHz or 44.1 kHz, according to the checkpoint
 - Default inference duration: 8 seconds
 - Variable-duration inference: supported
 - Single-GPU inference with FastVideo's default offloading: supported
-- `small_44k`, `medium_44k`, and `large_44k` v1 training: supported through
-  FastVideo's modular trainer and official-compatible precomputed features
+- `small_16k`, `small_44k`, `medium_44k`, and `large_44k` from-scratch training:
+  supported through FastVideo's modular trainer and official-compatible features
 - Source-video/audio muxing: not yet part of the pipeline output
 - `large_44k_v2` training: intentionally rejected because the upstream recipe
   does not support training the v2 checkpoint
-- 16 kHz training/inference: not included in this port
 
 The native pipeline has passed exact official-vs-FastVideo real-weight parity
 for a 25-step two-second waveform and a real ten-second V2A inference smoke
-test.
+test with `large_44k_v2`. The other four variants have architecture/config
+coverage; real-weight waveform parity still requires converting their official
+checkpoints.
 
 ## Requirements
 
@@ -195,7 +213,132 @@ python scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py \
 ```
 
 Replace `small_44k` with `medium_44k` or `large_44k` in both arguments to train
-a larger v1 model.
+a larger v1 model. `small_16k` is also supported, but requires 16 kHz features.
+
+### Train the DiT from scratch
+
+From scratch means all trainable MMAudio transformer weights are randomly
+initialized. The VAE, DFN5B CLIP, and Synchformer remain pretrained feature
+extractors, as in the official recipe. The fixed CLIP embedding for an empty
+string is loaded either from upstream `empty_string.pth` or a converted official
+checkpoint, but is not trainable and does not initialize any DiT layer. To avoid
+downloading a DiT checkpoint for a pure scratch run:
+
+```bash
+curl -L --continue-at - \
+  https://github.com/hkchengrex/MMAudio/releases/download/v0.1/empty_string.pth \
+  -o official_weights/mmaudio/raw/ext_weights/empty_string.pth
+```
+
+Four configs mirror the official v1 architectures:
+
+```text
+examples/train/configs/fine_tuning/mmaudio/small_16k_from_scratch.yaml
+examples/train/configs/fine_tuning/mmaudio/small_44k_from_scratch.yaml
+examples/train/configs/fine_tuning/mmaudio/medium_44k_from_scratch.yaml
+examples/train/configs/fine_tuning/mmaudio/large_44k_from_scratch.yaml
+```
+
+They use AdamW (`1e-4`, betas `0.9/0.95`, epsilon `1e-6`, weight decay
+`1e-6`), 1,000 warmup steps, MultiStepLR drops at 240k and 270k, gradient clip
+1.0, and 300k steps. The FSDP-aware `PostHocEMACallback` mirrors upstream
+MMAudio's `nitrous_ema` settings: sigma profiles `[0.05, 0.1]`, an update every
+step, snapshots every 5,000 steps, and final synthesis at sigma `0.05`. It is an
+additional callback; FastVideo's existing conventional EMA remains unchanged
+for other models.
+
+Edit dataset paths, variant, batch size, learning rate, validation intervals,
+output directory, resume path, and tracker at the top of the launcher. No
+shell environment variables or command-line overrides are required. The
+launcher also downloads the official standalone `empty_string.pth` if it is
+missing. Then run the current 44.1 kHz VGGSound cache on four GPUs:
+
+```bash
+bash examples/training/finetune/mmaudio/run_train_vggsound_from_scratch.sh
+```
+
+Set `VARIANT` to `medium_44k` or `large_44k` without changing the feature
+cache. The launcher computes official latent normalization statistics once,
+saves `latent_statistics_44k.pt` inside the feature directory, and reuses it
+across those three variants. `small_16k` needs a separately preprocessed 16 kHz
+cache because its latent shape is `[250, 20]`. `large_44k_v2` is rejected before
+weights or data are loaded because the published training implementation does
+not support v2.
+
+### Validation and training-time inference
+
+`MMAudioValidationCallback` evaluates the cached validation split every 5,000
+steps by default. It follows the official validation loss construction:
+posterior latent sampling, logit-normal flow time, prior noise, and independent
+video/text CFG masks. The validation RNG is reset on every pass so losses are
+comparable between checkpoints. Set `VALIDATION_MAX_BATCHES=0` in the launcher
+to use the full split, or a positive value for a faster subset.
+
+Every 20,000 steps the same callback runs the native FastVideo MMAudio pipeline
+with the live training transformer and cached CLIP, Synchformer, and text
+features. It selects a fixed global set of 16 validation samples (four per rank
+on a four-GPU job), not the complete validation split. The validation seed,
+sampler, and per-sample noise seeds stay fixed across training steps.
+`INFERENCE_MODEL_PATH` supplies only the frozen scheduler, audio VAE, and
+vocoder needed to decode a waveform; its transformer weights and feature
+encoders are not loaded. Samples are written to:
+
+```text
+outputs/mmaudio_<variant>_from_scratch/validation_audio/step_<step>/
+```
+
+Both a standalone WAV and an MP4 containing the original validation video plus
+generated audio are saved. MP4 composition mirrors official MMAudio demo's
+`reencode_with_audio`: decode source frames through the requested endpoint,
+re-encode H.264 at the source's guessed frame rate and 10 Mbps in `yuv420p`,
+then feed the mono generated waveform to the AAC encoder at the model sample
+rate. It uses PyAV and does not import Torio. As in the official 44.1 kHz path,
+the encoded container can be slightly longer than 8 seconds because 353,280
+audio samples and AAC frame padding do not end at exactly 8.0 seconds. If
+composition or source-video loading fails, the WAV is retained and training
+continues.
+
+Post-hoc EMA rank-local profiles and the final synthesized sigma-0.05 shards
+are written under `posthoc_ema/rank_<rank>/`. Periodic validation uses online
+weights by default, matching the official training loop; official MMAudio only
+synthesizes sigma-0.05 EMA weights after training. Set `use_ema: true` in the
+YAML only when intentionally evaluating an available post-hoc snapshot. The
+current callback reports flow-matching validation loss and generates media
+samples; dataset-level FAD/CLAP/synchronization benchmark metrics remain a
+separate evaluation job.
+
+Set `TRACKER="wandb"` near the top of the launcher after `wandb login` to log
+`total_loss`, `flow_matching_loss`, gradient norm, step time, validation loss,
+and the 16 composed validation MP4 files. Set
+`INFERENCE_LOG_TO_TRACKER=false` to keep media local while retaining scalar
+logging.
+
+Each YAML's `training.model_path` names a matching converted component tree.
+Training never reads its DiT weights; the path is retained so FastVideo can
+copy the component configs and replace the transformer when exporting a DCP
+checkpoint:
+
+```bash
+python scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py \
+  --variant small_44k \
+  --transformer-config-only \
+  --output converted_weights/mmaudio/small_44k
+```
+
+This export skeleton contains no weights and is sufficient for transformer-only
+checkpoint export. Then run:
+
+```bash
+python -m fastvideo.train.entrypoint.dcp_to_diffusers \
+  --checkpoint outputs/mmaudio_small_44k_from_scratch/checkpoint-10000 \
+  --output-dir converted_weights/mmaudio/small_44k_trained \
+  --overwrite
+```
+
+For a directly runnable inference export, the template at
+`converted_weights/mmaudio/small_44k` must contain all pipeline components.
+A transformer-only template produces a transformer-only export, which can be
+combined with the shared 44 kHz encoders/VAE/vocoder component tree.
 
 ### Preprocess VGGSound with FastVideo
 
@@ -317,10 +460,9 @@ NUM_GPUS=1 bash examples/train/run.sh \
 ```
 
 Leaving the path empty produces an explicit error instead of silently starting
-with the wrong data. The single-GPU FSDP-wrapped path and distributed
-checkpoint/resume have been validated with the real `small_44k` weights.
-Multi-GPU data parallel remains to be validated; sequence and tensor
-parallelism are not implemented, so keep `sp_size: 1` and `tp_size: 1`. The
+with the wrong data. The pretrained single-GPU FSDP path and
+scratch-initialized four-GPU FSDP path have both been validated. Sequence and
+tensor parallelism are not implemented, so keep `sp_size: 1` and `tp_size: 1`. The
 example preserves the official learning rate, AdamW betas/epsilon, weight
 decay, 1,000-step warmup, CFG dropout, logit-normal timestep sampling, and
 300,000-step duration. Its per-GPU batch size is intentionally one for initial

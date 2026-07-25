@@ -10,6 +10,7 @@ separately verified optimization.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -282,7 +283,15 @@ class MMAudioTransformer(BaseDiT):
     param_names_mapping = _DEFAULT_CONFIG.arch_config.param_names_mapping
     reverse_param_names_mapping = _DEFAULT_CONFIG.arch_config.reverse_param_names_mapping
 
-    def __init__(self, config: MMAudioTransformerConfig, hf_config: dict[str, Any], **kwargs) -> None:
+    def __init__(
+        self,
+        config: MMAudioTransformerConfig,
+        hf_config: dict[str, Any],
+        latent_mean: torch.Tensor | None = None,
+        latent_std: torch.Tensor | None = None,
+        empty_string_feat: torch.Tensor | None = None,
+        **kwargs,
+    ) -> None:
         del kwargs
         super().__init__(config=config, hf_config=hf_config)
         arch = config.arch_config
@@ -348,9 +357,57 @@ class MMAudioTransformer(BaseDiT):
             ]
         )
 
-        self.latent_mean = nn.Parameter(torch.full((1, 1, arch.latent_dim), float("nan")), requires_grad=False)
-        self.latent_std = nn.Parameter(torch.full((1, 1, arch.latent_dim), float("nan")), requires_grad=False)
-        self.empty_string_feat = nn.Parameter(torch.zeros((arch.text_seq_len, arch.text_dim)), requires_grad=False)
+        def fixed_tensor(
+            value: torch.Tensor | None,
+            shape: tuple[int, ...],
+            *,
+            fill_value: float,
+            name: str,
+        ) -> torch.Tensor:
+            if value is None:
+                return torch.full(
+                    shape,
+                    fill_value,
+                    device=self.sync_pos_emb.device,
+                    dtype=self.sync_pos_emb.dtype,
+                )
+            if value.numel() != math.prod(shape):
+                raise ValueError(
+                    f"MMAudio {name} must have {math.prod(shape)} values, "
+                    f"got {value.numel()}."
+                )
+            return value.to(
+                device=self.sync_pos_emb.device,
+                dtype=self.sync_pos_emb.dtype,
+            ).reshape(shape).clone()
+
+        self.latent_mean = nn.Parameter(
+            fixed_tensor(
+                latent_mean,
+                (1, 1, arch.latent_dim),
+                fill_value=float("nan"),
+                name="latent_mean",
+            ),
+            requires_grad=False,
+        )
+        self.latent_std = nn.Parameter(
+            fixed_tensor(
+                latent_std,
+                (1, 1, arch.latent_dim),
+                fill_value=float("nan"),
+                name="latent_std",
+            ),
+            requires_grad=False,
+        )
+        self.empty_string_feat = nn.Parameter(
+            fixed_tensor(
+                empty_string_feat,
+                (arch.text_seq_len, arch.text_dim),
+                fill_value=0.0,
+                name="empty_string_feat",
+            ),
+            requires_grad=False,
+        )
         self.empty_clip_feat = nn.Parameter(torch.zeros(1, arch.clip_dim), requires_grad=True)
         self.empty_sync_feat = nn.Parameter(torch.zeros(1, arch.sync_dim), requires_grad=True)
 

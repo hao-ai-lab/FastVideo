@@ -6,8 +6,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, ModelConfig
-from fastvideo.configs.models.audio import BigVGANV2Config, MMAudioVAEConfig
-from fastvideo.configs.models.dits import MMAudioTransformerConfig
+from fastvideo.configs.models.audio import (BigVGANV2ArchConfig, BigVGANV2Config, MMAudioVAEArchConfig,
+                                            MMAudioVAEConfig)
+from fastvideo.configs.models.dits import MMAudioTransformerConfig, get_mmaudio_transformer_config
 from fastvideo.configs.models.encoders import (
     MMAudioDFNCLIPTextConfig,
     MMAudioDFNCLIPVisionConfig,
@@ -29,16 +30,12 @@ class MMAudioV2AConfig(PipelineConfig):
     dit_config: DiTConfig = field(default_factory=MMAudioTransformerConfig)
     dit_precision: str = "bf16"
 
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (MMAudioDFNCLIPTextConfig(),)
-    )
-    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16",))
-    image_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (
-            MMAudioDFNCLIPVisionConfig(),
-            MMAudioSynchformerConfig(),
-        )
-    )
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (MMAudioDFNCLIPTextConfig(), ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
+    image_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (
+        MMAudioDFNCLIPVisionConfig(),
+        MMAudioSynchformerConfig(),
+    ))
     image_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", "bf16"))
 
     audio_decoder_config: ModelConfig = field(default_factory=MMAudioVAEConfig)
@@ -72,3 +69,51 @@ class MMAudioV2AConfig(PipelineConfig):
     guidance_scale: float = 4.5
     vae_tiling: bool = False
     vae_sp: bool = False
+
+
+@dataclass
+class MMAudioSmall16kV2AConfig(MMAudioV2AConfig):
+    """Official small 16 kHz MMAudio inference configuration."""
+
+    dit_config: DiTConfig = field(default_factory=lambda: get_mmaudio_transformer_config("small_16k"))
+    audio_decoder_config: ModelConfig = field(default_factory=lambda: MMAudioVAEConfig(arch_config=MMAudioVAEArchConfig(
+        mode="16k",
+        data_dim=80,
+        embed_dim=20,
+        hidden_dim=384,
+    )))
+    vocoder_config: ModelConfig = field(default_factory=lambda: BigVGANV2Config(arch_config=BigVGANV2ArchConfig(
+        sample_rate=16000,
+        num_mels=80,
+    )))
+    sampling_rate: int = 16000
+    spectrogram_frame_rate: int = 256
+
+
+@dataclass
+class MMAudioSmall44kV2AConfig(MMAudioV2AConfig):
+    dit_config: DiTConfig = field(default_factory=lambda: get_mmaudio_transformer_config("small_44k"))
+
+
+@dataclass
+class MMAudioMedium44kV2AConfig(MMAudioV2AConfig):
+    dit_config: DiTConfig = field(default_factory=lambda: get_mmaudio_transformer_config("medium_44k"))
+
+
+@dataclass
+class MMAudioLarge44kV2AConfig(MMAudioV2AConfig):
+    dit_config: DiTConfig = field(default_factory=lambda: get_mmaudio_transformer_config("large_44k"))
+
+
+@dataclass
+class MMAudioLarge44kV2PipelineConfig(MMAudioV2AConfig):
+    dit_config: DiTConfig = field(default_factory=lambda: get_mmaudio_transformer_config("large_44k_v2"))
+
+
+MMAUDIO_PIPELINE_CONFIGS = {
+    "small_16k": MMAudioSmall16kV2AConfig,
+    "small_44k": MMAudioSmall44kV2AConfig,
+    "medium_44k": MMAudioMedium44kV2AConfig,
+    "large_44k": MMAudioLarge44kV2AConfig,
+    "large_44k_v2": MMAudioLarge44kV2PipelineConfig,
+}

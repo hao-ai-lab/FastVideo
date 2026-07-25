@@ -38,6 +38,7 @@ class VideoLoaderType(str, Enum):
     """
     TORCHCODEC = "torchcodec"
     TORCHVISION = "torchvision"
+    TORIO = "torio"
 
     @classmethod
     def from_string(cls, value: str) -> "VideoLoaderType":

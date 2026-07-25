@@ -9,10 +9,13 @@ import pytest
 import torch
 from torch import nn
 
+from fastvideo.configs.models.dits import MMAUDIO_VARIANT_ARCHITECTURES
+from fastvideo.configs.pipelines.mmaudio import MMAudioSmall44kV2AConfig
 from fastvideo.train.methods.fine_tuning.flow_matching import (
     FlowMatchingFineTuneMethod,
 )
 from fastvideo.train.models.mmaudio import MMAudioModel
+from fastvideo.train.models.mmaudio.mmaudio import _load_or_compute_latent_stats
 from fastvideo.train.utils.config import RunConfig
 from fastvideo.train.utils.training_config import (
     DataConfig,
@@ -241,4 +244,137 @@ def test_v2_training_is_rejected_by_default() -> None:
             init_from="unused",
             training_config=_training_config(),
             transformer=_TinyMMAudioTransformer(v2=True),
+        )
+
+
+def test_official_mmaudio_variant_architectures() -> None:
+    expected = {
+        "small_16k": (20, 448, 12, 8, 7, 250, False),
+        "small_44k": (40, 448, 12, 8, 7, 345, False),
+        "medium_44k": (40, 896, 12, 8, 14, 345, False),
+        "large_44k": (40, 896, 21, 14, 14, 345, False),
+        "large_44k_v2": (40, 896, 21, 14, 14, 345, True),
+    }
+    actual = {
+        name: (
+            values["latent_dim"],
+            values["hidden_dim"],
+            values["depth"],
+            values["fused_depth"],
+            values["num_heads"],
+            values["latent_seq_len"],
+            values["v2"],
+        )
+        for name, values in MMAUDIO_VARIANT_ARCHITECTURES.items()
+    }
+    assert actual == expected
+
+
+def test_from_scratch_builds_variant_without_loading_dit_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "fastvideo.train.models.mmaudio.mmaudio._load_or_compute_latent_stats",
+        lambda *args, **kwargs: (
+            torch.zeros(1, 1, 40),
+            torch.ones(1, 1, 40),
+        ),
+    )
+    monkeypatch.setattr(
+        "fastvideo.train.models.mmaudio.mmaudio._load_empty_string_features",
+        lambda *args, **kwargs: torch.zeros(77, 1024),
+    )
+
+    def _build(**kwargs):
+        captured.update(kwargs)
+        return _TinyMMAudioTransformer()
+
+    monkeypatch.setattr(
+        "fastvideo.train.models.mmaudio.mmaudio.build_fsdp_model_from_scratch",
+        _build,
+    )
+    model = MMAudioModel(
+        training_config=_training_config(),
+        variant="small_44k",
+        from_scratch=True,
+        empty_string_features_path="unused.safetensors",
+    )
+
+    assert model._init_from == "scratch:small_44k"
+    assert isinstance(model.training_config.pipeline_config, MMAudioSmall44kV2AConfig)
+    assert captured["model_cls"].__name__ == "MMAudioTransformer"
+    assert captured["init_params"]["hf_config"]["v2"] is False
+
+
+def test_from_scratch_rejects_v2_variant_before_loading_assets() -> None:
+    with pytest.raises(ValueError, match="does not train 'large_44k_v2'"):
+        MMAudioModel(
+            training_config=_training_config(),
+            variant="large_44k_v2",
+            from_scratch=True,
+            empty_string_features_path="unused.safetensors",
+        )
+
+
+def test_44k_variants_share_cached_latent_statistics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "variant": "small_44k",
+        "latent_mean": torch.zeros(1, 1, 40),
+        "latent_std": torch.ones(1, 1, 40),
+    }
+
+    class _ReceiverGroup:
+        is_first_rank = False
+
+        @staticmethod
+        def broadcast_object(value, src=0):
+            del value, src
+            return payload
+
+    monkeypatch.setattr(
+        "fastvideo.train.models.mmaudio.mmaudio.get_world_group",
+        lambda: _ReceiverGroup(),
+    )
+    mean, std = _load_or_compute_latent_stats(
+        _training_config(),
+        variant="medium_44k",
+        cache_path=None,
+        chunk_size=1,
+    )
+
+    torch.testing.assert_close(mean, payload["latent_mean"])
+    torch.testing.assert_close(std, payload["latent_std"])
+
+
+def test_16k_rejects_44k_cached_latent_statistics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "variant": "small_44k",
+        "latent_mean": torch.zeros(1, 1, 40),
+        "latent_std": torch.ones(1, 1, 40),
+    }
+
+    class _ReceiverGroup:
+        is_first_rank = False
+
+        @staticmethod
+        def broadcast_object(value, src=0):
+            del value, src
+            return payload
+
+    monkeypatch.setattr(
+        "fastvideo.train.models.mmaudio.mmaudio.get_world_group",
+        lambda: _ReceiverGroup(),
+    )
+    with pytest.raises(ValueError, match="small_44k.*small_16k"):
+        _load_or_compute_latent_stats(
+            _training_config(),
+            variant="small_16k",
+            cache_path=None,
+            chunk_size=1,
         )

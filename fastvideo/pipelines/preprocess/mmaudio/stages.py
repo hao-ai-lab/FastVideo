@@ -10,6 +10,7 @@ from typing import Any, cast
 import torch
 import torchaudio
 
+from fastvideo.configs.configs import VideoLoaderType
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -20,6 +21,8 @@ from fastvideo.pipelines.basic.mmaudio.stages import (
     preprocess_mmaudio_video,
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, PreprocessBatch
+from fastvideo.pipelines.preprocess.mmaudio.torio_media_reader import (PREPROCESSED_MEDIA_KEY, PREPROCESS_ERROR_KEY,
+                                                                       preprocess_mmaudio_media_with_torio)
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
 
@@ -104,6 +107,16 @@ class MMAudioFeatureExtractionStage(PipelineStage):
         preprocess_config = fastvideo_args.preprocess_config
         dataset_split = "train" if preprocess_config is None else preprocess_config.dataset_split.lower()
         normalize_audio = dataset_split == "train"
+        use_torio = (preprocess_config is not None and preprocess_config.video_loader_type == VideoLoaderType.TORIO)
+
+        preprocessed_media = batch.extra.get(PREPROCESSED_MEDIA_KEY)
+        preprocess_errors = batch.extra.get(PREPROCESS_ERROR_KEY)
+        for name, values in (
+            (PREPROCESSED_MEDIA_KEY, preprocessed_media),
+            (PREPROCESS_ERROR_KEY, preprocess_errors),
+        ):
+            if values is not None and (not isinstance(values, list) or len(values) != len(batch.video_loader)):
+                raise ValueError(f"MMAudio {name} must align with the input batch")
 
         valid_ids: list[str] = []
         valid_paths: list[str] = []
@@ -113,30 +126,56 @@ class MMAudioFeatureExtractionStage(PipelineStage):
         sync_batch: list[torch.Tensor] = []
         failures: list[dict[str, str]] = []
 
-        for sample_id, path, caption in zip(
-                batch.video_file_name,
-                batch.video_loader,
-                batch.prompt,
-                strict=True,
-        ):
+        for index, (sample_id, path,
+                    caption) in enumerate(zip(
+                        batch.video_file_name,
+                        batch.video_loader,
+                        batch.prompt,
+                        strict=True,
+                    )):
             try:
                 path_str = str(path)
                 if not Path(path_str).is_file():
                     raise FileNotFoundError(path_str)
-                audio = self._load_audio(
-                    path_str,
-                    target_sample_rate=sample_rate,
-                    target_samples=target_samples,
-                    normalize_audio=normalize_audio,
-                )
-                clip_frames, sync_frames, effective_duration = preprocess_mmaudio_video(
-                    path_str,
-                    duration_s=duration_s,
-                    clip_fps=pc.clip_frame_rate,
-                    sync_fps=pc.sync_frame_rate,
-                    clip_size=pc.clip_image_size,
-                    sync_size=pc.sync_image_size,
-                )
+                preprocess_error = (None if preprocess_errors is None else preprocess_errors[index])
+                if preprocess_error is not None:
+                    raise ValueError(str(preprocess_error))
+                media = (None if preprocessed_media is None else preprocessed_media[index])
+                if media is not None:
+                    if not isinstance(media, dict):
+                        raise ValueError("Preprocessed MMAudio media must be a dictionary")
+                    audio = media["audio"]
+                    clip_frames = media["clip_frames"]
+                    sync_frames = media["sync_frames"]
+                    effective_duration = float(media["effective_duration"])
+                elif use_torio:
+                    audio, clip_frames, sync_frames, effective_duration = (preprocess_mmaudio_media_with_torio(
+                        path_str,
+                        duration_s=duration_s,
+                        target_sample_rate=sample_rate,
+                        target_samples=target_samples,
+                        normalize_audio=normalize_audio,
+                        clip_fps=pc.clip_frame_rate,
+                        sync_fps=pc.sync_frame_rate,
+                        clip_size=pc.clip_image_size,
+                        sync_size=pc.sync_image_size,
+                    ))
+                else:
+                    audio = self._load_audio(
+                        path_str,
+                        target_sample_rate=sample_rate,
+                        target_samples=target_samples,
+                        normalize_audio=normalize_audio,
+                    )
+                    clip_frames, sync_frames, effective_duration = preprocess_mmaudio_video(
+                        path_str,
+                        duration_s=duration_s,
+                        clip_fps=pc.clip_frame_rate,
+                        sync_fps=pc.sync_frame_rate,
+                        clip_size=pc.clip_image_size,
+                        sync_size=pc.sync_image_size,
+                        use_ffmpeg_fps_filter=True,
+                    )
                 if effective_duration < duration_s:
                     raise ValueError(f"Video is too short: need {duration_s}s, got {effective_duration:.3f}s")
                 if clip_frames.shape[0] != expected_clip_frames:

@@ -19,10 +19,11 @@ Optional environment variables:
   GPU_NUM=4                Number of GPUs/ranks
   CUDA_VISIBLE_DEVICES=0,1,2,3
   BATCH_SIZE=16            Per-GPU batch size
-  DATALOADER_NUM_WORKERS=16 Per-GPU DataLoader workers
+  DATALOADER_NUM_WORKERS=16 Per-rank workers (torio: background decode threads)
   DATASET_PATH=...         Extracted VGGSound root
   MODEL_PATH=...           Converted MMAudio preprocessing model
   OUTPUT_ROOT=...          Root for split feature caches
+  VIDEO_LOADER_TYPE=torchcodec Media reader (torchcodec or torio)
   SAMPLES_PER_FILE=256     Samples per TensorDict shard
   MASTER_PORT=29513        First torchrun rendezvous port
 
@@ -57,9 +58,10 @@ DATALOADER_NUM_WORKERS="${DATALOADER_NUM_WORKERS:-16}"
 SAMPLES_PER_FILE="${SAMPLES_PER_FILE:-256}"
 MASTER_PORT="${MASTER_PORT:-29513}"
 SPLITS="${SPLITS:-train val test}"
-DATASET_PATH="${DATASET_PATH:-/mnt/lustre/vlm-kai/datasets/VGGSound}"
+DATASET_PATH="${DATASET_PATH:?Set DATASET_PATH to the extracted VGGSound directory}"
 MODEL_PATH="${MODEL_PATH:-${REPO_ROOT}/converted_weights/mmaudio/preprocess_44k}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${DATASET_PATH}/mmaudio_features}"
+VIDEO_LOADER_TYPE="${VIDEO_LOADER_TYPE:-torchcodec}"
 
 if [[ ! -d "${DATASET_PATH}/videos" ]]; then
   echo "VGGSound video directory does not exist: ${DATASET_PATH}/videos" >&2
@@ -79,6 +81,7 @@ echo "  splits:     ${SPLITS}"
 echo "  GPUs:       ${CUDA_VISIBLE_DEVICES} (${GPU_NUM} ranks)"
 echo "  batch:      ${BATCH_SIZE} per GPU"
 echo "  workers:    ${DATALOADER_NUM_WORKERS} per GPU"
+echo "  reader:     ${VIDEO_LOADER_TYPE}"
 
 cd "${REPO_ROOT}"
 
@@ -105,6 +108,7 @@ for split in ${SPLITS}; do
   CAPTION_PATH="${caption_path}" \
   OUTPUT_DIR="${output_dir}" \
   SPLIT="${split}" \
+  VIDEO_LOADER_TYPE="${VIDEO_LOADER_TYPE}" \
     bash "${SCRIPT_DIR}/preprocess_vggsound.sh"
 
   echo "===== Finished ${split}: ${output_dir} ====="

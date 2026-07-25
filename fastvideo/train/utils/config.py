@@ -389,6 +389,8 @@ def _build_training_config(
             lr_num_cycles=int(o.get("lr_num_cycles", 0) or 0),
             lr_power=float(o.get("lr_power", 0.0) or 0.0),
             min_lr_ratio=float(o.get("min_lr_ratio", 0.5) or 0.5),
+            lr_milestones=tuple(int(step) for step in (o.get("lr_milestones", []) or [])),
+            lr_gamma=float(o.get("lr_gamma", 0.1) or 0.1),
         ),
         loop=TrainingLoopConfig(
             max_train_steps=int(lo.get("max_train_steps", 0) or 0),

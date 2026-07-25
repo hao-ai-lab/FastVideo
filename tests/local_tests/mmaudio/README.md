@@ -37,8 +37,10 @@ only in the shell when a future gated asset requires one.
 - Duration: 8 seconds is the published training/default duration, but inference
   uses dynamic sequence lengths and accepts shorter or longer clips. As in the
   official demo, quality can fall when moving far away from 8 seconds.
-- Deferred until the base parity gate passes: 16 kHz, small/medium variants,
-  sequence/tensor parallel optimization, and quality-reference publication.
+- All five official architecture variants now have FastVideo configs, presets,
+  registry entries, and conversion support. Real-weight parity is complete for
+  `large_44k_v2`; the other four remain local follow-up gates. Sequence/tensor
+  parallel optimization and quality-reference publication are deferred.
 
 ## Shared Environment Setup
 
@@ -155,6 +157,12 @@ FastVideo consumes the same `id<TAB>label` split manifests as the reference
 not the original VGGSound category. The reference checkout is used only for
 local parity review and is not imported by production preprocessing.
 
+Training video frames are resampled with one PyAV-hosted FFmpeg filter graph:
+8 FPS for DFN5B and 25 FPS for Synchformer. This matches the reference
+`StreamingMediaDecoder.add_basic_video_stream(frame_rate=...)` behavior while
+remaining compatible with FastVideo's current PyTorch environment. The
+inference timestamp sampler is a separate default path and is not changed.
+
 ```bash
 DATASET_PATH=/path/to/VGGSound SPLIT=train GPU_NUM=4 \
   bash examples/training/finetune/mmaudio/preprocess_vggsound.sh
@@ -163,4 +171,71 @@ DATASET_PATH=/path/to/VGGSound SPLIT=train GPU_NUM=4 \
 The launcher supports `train`, `val`, and `test` through the same FastVideo
 pipeline. The corresponding default manifests are
 `sets/filtered_caption/vgg-{split}-filtered-caption.tsv`, and caches are written
-under `mmaudio_features/{split}`.
+under `mmaudio_features/{split}`. The cache is resumable: rerunning the command
+skips IDs already written and retries pending/failed IDs. Failure logs are
+append-only, so deduplicate by ID when auditing multiple runs.
+
+Caches produced with the earlier timestamp-based training sampler are valid
+TensorDict data but are not preprocessing-compatible with the FFmpeg sampler.
+Do not resume into such a cache. Rebuild into a new output root instead:
+
+```bash
+OUTPUT_ROOT=/path/to/VGGSound/mmaudio_features_ffmpeg \
+  ./examples/training/finetune/mmaudio/run_preprocess_vggsound.sh
+```
+
+### Optional official-compatible torio reader
+
+For audits that require the original training media reader, FastVideo also
+provides an opt-in backend in
+`fastvideo/pipelines/preprocess/mmaudio/torio_media_reader.py`. It reproduces
+the official `StreamingMediaDecoder` streams, audio normalization/resampling,
+and both torchvision transform chains. The rest of the operation remains the
+native FastVideo preprocessing pipeline: VAE, DFN5B, Synchformer, text encoder,
+distributed workflow, progress bar, resumable writer, and failure logging.
+Production code does not import `mmaudio.*` or execute the reference checkout.
+
+Torio was removed from current PyTorch releases, so keep its PyTorch 2.7 CUDA
+12.8 stack in a sibling environment rather than changing FastVideo's `.venv`:
+
+```text
+/path/to/workspace/FastVideo
+/path/to/workspace/envs/fastvideo-mmaudio-torio
+```
+
+The verified environment uses Python 3.12, PyTorch 2.7.0+cu128,
+torchvision/torchaudio 0.22.0/2.7.0, NumPy 1.26.4, and an editable
+`fastvideo --no-deps` install. Select it only through the dedicated launcher:
+
+```bash
+DATASET_PATH=/path/to/VGGSound \
+TORIO_VENV_PATH=/path/to/workspace/envs/fastvideo-mmaudio-torio \
+CUDA_VISIBLE_DEVICES=0,1,2,3 GPU_NUM=4 BATCH_SIZE=16 \
+DATALOADER_NUM_WORKERS=4 \
+  ./examples/training/finetune/mmaudio/run_preprocess_vggsound_torio.sh
+```
+
+By default this processes `train val test` with their existing split manifests
+and writes a separate cache under `mmaudio_features_torio/{split}`. Override
+`SPLITS`, `OUTPUT_ROOT`, or the usual batching variables exactly as with the
+standard launcher. Never resume a PyAV/FFmpeg cache into the torio output root.
+
+For torio, `DATALOADER_NUM_WORKERS` is the number of background decode threads
+per GPU rank, not DataLoader subprocesses. The default is 4 based on local
+VGGSound measurements. FastVideo keeps two batches queued, so CPU decoding of
+the next batch overlaps GPU feature extraction without sending large tensors
+through `/dev/shm`. IDs already present in the feature cache are filtered before
+decode and are not read again on resume.
+
+Exact real-media parity against the official VGGSound dataset adapter is
+covered by an opt-in local test:
+
+```bash
+PYTHONNOUSERSITE=1 \
+MMAUDIO_TORIO_TEST_VIDEO=/path/to/an-8s-or-longer-video.mp4 \
+/path/to/workspace/envs/fastvideo-mmaudio-torio/bin/pytest -q \
+  tests/local_tests/mmaudio/test_mmaudio_torio_preprocessing.py -s
+```
+
+This test imports the official dataset adapter only on the test side; it is not
+a runtime dependency of FastVideo.

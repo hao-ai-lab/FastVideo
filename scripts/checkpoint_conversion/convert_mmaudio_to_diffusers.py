@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Convert MMAudio 44 kHz assets into a FastVideo component tree.
+"""Convert every official MMAudio variant into a FastVideo component tree.
 
 The converter is deliberately offline: every large source asset must already
 exist locally. It splits the shared DFN5B OpenCLIP checkpoint into native
@@ -16,6 +16,10 @@ Example::
       --dfn5b-dir official_weights/mmaudio/DFN5B-CLIP-ViT-H-14-384 \
       --bigvgan-dir official_weights/mmaudio/bigvgan_v2_44khz_128band_512x \
       --output converted_weights/mmaudio/large_44k_v2
+
+Use ``--variant small_16k`` with ``v1-16.pth`` and ``best_netG.pt`` for
+the 16 kHz model. The four 44.1 kHz variants share ``v1-44.pth`` and the
+NVIDIA BigVGAN-v2 directory.
 """
 
 from __future__ import annotations
@@ -44,6 +48,15 @@ BASE_TRANSFORMER_CONFIG = {
 }
 
 TRANSFORMER_VARIANTS = {
+    "small_16k": {
+        "latent_dim": 20,
+        "hidden_dim": 448,
+        "depth": 12,
+        "fused_depth": 8,
+        "num_heads": 7,
+        "latent_seq_len": 250,
+        "v2": False,
+    },
     "small_44k": {
         "hidden_dim": 448,
         "depth": 12,
@@ -73,6 +86,27 @@ TRANSFORMER_VARIANTS = {
         "v2": True,
     },
 }
+
+BIGVGAN_16K_CONFIG = {
+    "_class_name": "BigVGANV2",
+    "resblock": "1",
+    "num_mels": 80,
+    "upsample_rates": [4, 4, 2, 2, 2, 2],
+    "upsample_kernel_sizes": [8, 8, 4, 4, 4, 4],
+    "upsample_initial_channel": 1536,
+    "resblock_kernel_sizes": [3, 7, 11],
+    "resblock_dilation_sizes": [
+        [1, 3, 5],
+        [1, 3, 5],
+        [1, 3, 5],
+    ],
+    "activation": "snakebeta",
+    "snake_logscale": True,
+    "use_bias_at_final": True,
+    "use_tanh_at_final": True,
+    "weight_norm_removed": False,
+}
+
 
 TEXT_ENCODER_CONFIG = {
     "architectures": ["MMAudioDFNCLIPTextEncoder"],
@@ -289,10 +323,38 @@ def _load_dfn5b_state(directory: Path) -> dict[str, torch.Tensor]:
 def convert(args: argparse.Namespace) -> None:
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    mode = "16k" if args.variant.endswith("16k") else "44k"
+    model_index = dict(MODEL_INDEX)
+    model_index["_fastvideo_mmaudio_variant"] = args.variant
+    model_index["_fastvideo_audio_sample_rate"] = (
+        16000 if mode == "16k" else 44100
+    )
 
+    transformer_config_only = bool(getattr(args, "transformer_config_only", False))
     if args.transformer_only and args.preprocessor_only:
         raise ValueError(
             "--transformer-only and --preprocessor-only are mutually exclusive")
+    if transformer_config_only and (args.transformer_only or args.preprocessor_only):
+        raise ValueError(
+            "--transformer-config-only cannot be combined with other partial conversion flags"
+        )
+
+    transformer_config = {
+        **BASE_TRANSFORMER_CONFIG,
+        **TRANSFORMER_VARIANTS[args.variant],
+    }
+    if transformer_config_only:
+        transformer_dir = output / "transformer"
+        transformer_dir.mkdir(parents=True, exist_ok=True)
+        _write_json(transformer_dir / "config.json", transformer_config)
+        transformer_model_index = {
+            key: value
+            for key, value in model_index.items()
+            if key.startswith("_") or key == "transformer"
+        }
+        _write_json(output / "model_index.json", transformer_model_index)
+        print(f"Wrote MMAudio {args.variant} transformer export skeleton to {output}")
+        return
 
     if not args.preprocessor_only:
         if args.transformer_checkpoint is None:
@@ -303,17 +365,13 @@ def convert(args: argparse.Namespace) -> None:
         transformer_state.pop("t_embed.freqs", None)
         transformer_state.pop("latent_rot", None)
         transformer_state.pop("clip_rot", None)
-        transformer_config = {
-            **BASE_TRANSFORMER_CONFIG,
-            **TRANSFORMER_VARIANTS[args.variant],
-        }
         _write_component(output, "transformer", transformer_state,
                          transformer_config)
 
     if args.transformer_only:
         transformer_model_index = {
             key: value
-            for key, value in MODEL_INDEX.items()
+            for key, value in model_index.items()
             if key.startswith("_") or key == "transformer"
         }
         _write_json(output / "model_index.json", transformer_model_index)
@@ -326,7 +384,10 @@ def convert(args: argparse.Namespace) -> None:
         "--dfn5b-dir": args.dfn5b_dir,
     }
     if not args.preprocessor_only:
-        required_assets["--bigvgan-dir"] = args.bigvgan_dir
+        if mode == "16k":
+            required_assets["--bigvgan-checkpoint"] = args.bigvgan_checkpoint
+        else:
+            required_assets["--bigvgan-dir"] = args.bigvgan_dir
     missing_assets = [name for name, path in required_assets.items() if path is None]
     if missing_assets:
         raise ValueError(
@@ -337,7 +398,10 @@ def convert(args: argparse.Namespace) -> None:
     assert args.synchformer_checkpoint is not None
     assert args.dfn5b_dir is not None
     if not args.preprocessor_only:
-        assert args.bigvgan_dir is not None
+        if mode == "16k":
+            assert args.bigvgan_checkpoint is not None
+        else:
+            assert args.bigvgan_dir is not None
 
     vae_state = _load_torch_state(args.audio_vae_checkpoint)
     if args.preprocessor_only:
@@ -362,7 +426,7 @@ def convert(args: argparse.Namespace) -> None:
         audio_vae_state,
         {
             "_class_name": "MMAudioVAE",
-            "mode": "44k",
+            "mode": mode,
             "need_encoder": need_encoder
         },
     )
@@ -387,7 +451,7 @@ def convert(args: argparse.Namespace) -> None:
     if args.preprocessor_only:
         preprocess_components = {
             key: value
-            for key, value in MODEL_INDEX.items()
+            for key, value in model_index.items()
             if key.startswith("_") or key in {
                 "audio_vae",
                 "text_encoder",
@@ -398,18 +462,24 @@ def convert(args: argparse.Namespace) -> None:
         }
         preprocess_components["_fastvideo_preprocessor_only"] = True
         _write_json(output / "model_index.json", preprocess_components)
-        print(f"Converted MMAudio 44k preprocessing components to {output}")
+        print(f"Converted MMAudio {mode} preprocessing components to {output}")
         return
 
-    assert args.bigvgan_dir is not None
-    bigvgan_config_path = args.bigvgan_dir / "config.json"
-    if not bigvgan_config_path.is_file():
-        raise FileNotFoundError(bigvgan_config_path)
-    with bigvgan_config_path.open(encoding="utf-8") as handle:
-        bigvgan_config = json.load(handle)
-    bigvgan_config["_class_name"] = "BigVGANV2"
-    bigvgan_config["weight_norm_removed"] = False
-    bigvgan_state = _load_torch_state(args.bigvgan_dir / "bigvgan_generator.pt")
+    if mode == "16k":
+        assert args.bigvgan_checkpoint is not None
+        bigvgan_config = dict(BIGVGAN_16K_CONFIG)
+        bigvgan_state = _load_torch_state(args.bigvgan_checkpoint)
+    else:
+        assert args.bigvgan_dir is not None
+        bigvgan_config_path = args.bigvgan_dir / "config.json"
+        if not bigvgan_config_path.is_file():
+            raise FileNotFoundError(bigvgan_config_path)
+        with bigvgan_config_path.open(encoding="utf-8") as handle:
+            bigvgan_config = json.load(handle)
+        bigvgan_config["_class_name"] = "BigVGANV2"
+        bigvgan_config["weight_norm_removed"] = False
+        bigvgan_state = _load_torch_state(
+            args.bigvgan_dir / "bigvgan_generator.pt")
     _write_component(output, "vocoder", bigvgan_state, bigvgan_config)
 
     _write_json(
@@ -423,7 +493,7 @@ def convert(args: argparse.Namespace) -> None:
             "use_reference_discrete_timesteps": True,
         },
     )
-    _write_json(output / "model_index.json", MODEL_INDEX)
+    _write_json(output / "model_index.json", model_index)
     print(f"Converted MMAudio {args.variant} components to {output}")
 
 
@@ -439,11 +509,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--audio-vae-checkpoint", type=Path)
     parser.add_argument("--synchformer-checkpoint", type=Path)
     parser.add_argument("--dfn5b-dir", type=Path)
-    parser.add_argument("--bigvgan-dir", type=Path)
+    parser.add_argument(
+        "--bigvgan-dir",
+        type=Path,
+        help="NVIDIA BigVGAN-v2 directory used by 44.1 kHz variants.",
+    )
+    parser.add_argument(
+        "--bigvgan-checkpoint",
+        type=Path,
+        help="Official best_netG.pt used by the small_16k variant.",
+    )
     parser.add_argument(
         "--transformer-only",
         action="store_true",
         help="Write only the transformer component needed by training.",
+    )
+    parser.add_argument(
+        "--transformer-config-only",
+        action="store_true",
+        help=(
+            "Write a weight-free transformer component tree used as the "
+            "DCP export template for from-scratch training."
+        ),
     )
     parser.add_argument(
         "--preprocessor-only",

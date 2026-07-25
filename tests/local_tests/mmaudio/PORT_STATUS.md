@@ -6,9 +6,9 @@
 - workload_types: `V2A`, `T2A`
 - official_ref: `../MMAudio` at `974010a026c731054592d8f777218bd9d85a6c24`
 - first_variant: `large_44k_v2`
-- phase: `native_inference_v1_training_and_preprocessing_complete`
-- status: `inference_training_and_vggsound_manifest_parity_pass`
-- last_updated: `2026-07-23`
+- phase: `all_official_variants_and_scratch_training_integrated`
+- status: `large_v2_inference_parity_and_4gpu_scratch_training_pass`
+- last_updated: `2026-07-25`
 
 ## Native Components
 
@@ -24,8 +24,9 @@
 ## Pipeline Integration
 
 - Pipeline: `fastvideo/pipelines/basic/mmaudio/MMAudioPipeline`
-- Config: `fastvideo/configs/pipelines/mmaudio.py::MMAudioV2AConfig`
-- Preset: `mmaudio_large_44k_v2`
+- Config: five variant-specific classes in `fastvideo/configs/pipelines/mmaudio.py`
+- Presets: `mmaudio_small_16k`, `mmaudio_small_44k`,
+  `mmaudio_medium_44k`, `mmaudio_large_44k`, `mmaudio_large_44k_v2`
 - Registry: resolves both `WorkloadType.V2A` and `WorkloadType.T2A`
 - Required production components: `transformer`, `scheduler`, `text_encoder`,
   `tokenizer`, `image_encoder`, `image_encoder_2`, `audio_vae`, `vocoder`
@@ -35,7 +36,7 @@
   published training/default duration; longer and shorter inference is accepted
 - Existing T2V/I2V/T2I pipelines are not routed through these stages.
 
-The V2A preprocessing contract is identical to official MMAudio:
+The inference V2A preprocessing contract is identical to official MMAudio:
 
 1. timestamp sampling at 8 FPS for DFN5B and 25 FPS for Synchformer;
 2. DFN path: bicubic resize to `384x384`, float `[0,1]`, CLIP normalization;
@@ -52,7 +53,7 @@ The V2A preprocessing contract is identical to official MMAudio:
 
 The v1 training smoke additionally uses a transformer-only component tree at
 `converted_weights/mmaudio/small_44k` (about 601 MB). The converter supports
-`small_44k`, `medium_44k`, `large_44k`, and the inference-default
+`small_16k`, `small_44k`, `medium_44k`, `large_44k`, and the inference-default
 `large_44k_v2`; `--transformer-only` avoids duplicating inference-only assets.
 
 ## Training Integration
@@ -62,12 +63,16 @@ The v1 training smoke additionally uses a transformer-only component tree at
   `fastvideo/train/methods/fine_tuning/flow_matching.py`
 - Data: official-compatible TensorDict memmaps through
   `fastvideo/dataset/mmaudio_feature_dataset.py`
-- Config: `examples/train/configs/fine_tuning/mmaudio/small_44k.yaml`
+- Config: four `*_from_scratch.yaml` v1 configs plus the pretrained
+  `small_44k.yaml` fine-tuning config
 - Numerical recipe: posterior sampling, latent normalization, logit-normal
   time, linear flow interpolation, independent video/text CFG dropout, and
   velocity MSE match upstream `Runner.train_fn`
-- Distributed contract: real single-GPU FSDP-wrapped step passed; DCP save,
-  optimizer/dataloader/RNG restore, and resumed step passed
+- Distributed contract: real single-GPU pretrained FSDP step and real 4-GPU
+  scratch-initialized FSDP step passed; DCP save/restore passed on the pretrained path
+- Scratch contract: rank-0 latent statistics reduction/cache, fixed CLIP empty
+  string loading, random DiT initialization, flow loss/backward, AdamW,
+  official warmup/MultiStepLR composition, gradient clipping, and EMA are wired
 - Production code imports no `mmaudio.*` modules.
 
 ## Native VGGSound Preprocessing
@@ -83,15 +88,35 @@ The v1 training smoke additionally uses a transformer-only component tree at
 - Train, val, and test use one pipeline class and separate output roots.
 - Production preprocessing imports no modules from the reference checkout.
 - The reference training loader uses the removed
-  `torio.io.StreamingMediaDecoder`. FastVideo 2.11 uses `torchaudio.load` for
-  audio and PyAV timestamp sampling for video; downstream transforms, resampling,
-  mel conversion, and encoder outputs retain the reference contracts.
+  `torio.io.StreamingMediaDecoder`. The default FastVideo backend uses
+  `torchaudio.load` and a PyAV-hosted FFmpeg `fps` graph. An explicit `torio`
+  backend is available in a separate PyTorch 2.7 environment for exact
+  reference-media audits. Both feed the same native FastVideo feature stage;
+  inference keeps its separate timestamp sampler and remains unchanged.
+- The FFmpeg training sampler fixes fractional-FPS boundary clips that decoded
+  as 64 DFN frames but only 199 Synchformer frames with timestamp comparison.
+  Three previously failed VGGSound clips now produce exactly 64/200 frames, and
+  one passed the full FastVideo feature extraction and shard-writing path.
+- The isolated torio backend passed exact audio, CLIP-frame, and sync-frame
+  parity against the official VGGSound adapter plus a full FastVideo shard smoke.
+- Torio preprocessing now decodes with a bounded background thread pool per
+  rank and keeps two batches queued, overlapping CPU media decode with GPU
+  feature extraction without DataLoader shared-memory tensor transfer. Cached
+  IDs are filtered before decode. Four threads per rank were fastest in a
+  16-video decode check; a 4-GPU/16-video end-to-end smoke wrote 4/4 samples on
+  every rank and reduced the feature loop from 19.25 seconds on one GPU to a
+  6.65-second slowest rank on the four-GPU run.
+- Timestamp, FFmpeg, and torio caches must use separate output roots.
 
 ## Parity Evidence
 
 | Scope | Result |
 |---|---|
-| Official/FastVideo video preprocessing | exact (`clip max_abs=0`, `sync max_abs=0`) |
+| Official/FastVideo inference video preprocessing | exact (`clip max_abs=0`, `sync max_abs=0`) |
+| Training FFmpeg fps-filter boundary regression | pass (64 DFN frames, 200 Synchformer frames) |
+| Previously failed real VGGSound clips | 3/3 recovered; end-to-end feature extraction 1/1 |
+| Official/FastVideo torio training media preprocessing | exact audio/CLIP/sync tensors (`atol=0`, `rtol=0`) |
+| Torio native FastVideo feature/shard path | pass; all five feature tensors written with expected shapes |
 | Condition features, random latent, projected conditions | exact |
 | First flow prediction and 25-step final latent | exact |
 | Final 2-second V2A waveform (89,088 samples) | exact (`atol=0`, `rtol=0`) |
@@ -99,6 +124,7 @@ The v1 training smoke additionally uses a transformer-only component tree at
 | Default FastVideo offload path | real one-step smoke pass |
 | Real `small_44k` v1 transformer forward | exact BF16 parity |
 | Real `small_44k` v1 FastVideo train step | pass (forward/backward/AdamW/grad clip) |
+| Real `small_44k` 4-GPU from-scratch train step | pass (5.87 s, one feature shard) |
 | Real DCP checkpoint and resume to next step | pass |
 | Local MMAudio parity suite | `21 passed, 1 skipped` (the skipped test is the opt-in full gate) |
 | Combined parity/dataset/training regression | `33 passed, 1 skipped` |
@@ -133,9 +159,9 @@ official `large_44k_v2`, DFN5B, Synchformer, VAE, and BigVGAN assets.
 
 - Publishing the converted checkpoint and immutable source revisions.
 - Optional source-video mux/re-encode helper; the current V2A result is WAV/audio.
-- 16 kHz inference/training and small/medium v1 inference presets.
+- Real-weight waveform parity for `small_16k`, `small_44k`, `medium_44k`, and
+  `large_44k`; their configs/converter/presets are implemented.
 - Sequence/tensor-parallel optimization.
-- Multi-GPU data-parallel training validation.
-- Full-dataset 4-GPU feature extraction and loss/quality convergence validation.
+- Full-dataset loss/quality convergence validation.
 - The training config intentionally keeps `data_path` empty until the train
   feature cache has been produced.

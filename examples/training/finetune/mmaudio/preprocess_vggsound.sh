@@ -12,11 +12,22 @@ MASTER_PORT="${MASTER_PORT:-29513}"
 BATCH_SIZE="${BATCH_SIZE:-1}"
 DATALOADER_NUM_WORKERS="${DATALOADER_NUM_WORKERS:-2}"
 SAMPLES_PER_FILE="${SAMPLES_PER_FILE:-256}"
+VIDEO_LOADER_TYPE="${VIDEO_LOADER_TYPE:-torchcodec}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 
 if [[ ! -f "${CAPTION_PATH}" ]]; then
   echo "Caption manifest does not exist: ${CAPTION_PATH}" >&2
   exit 1
+fi
+
+MODEL_LOAD_ARGS=()
+if [[ "${VIDEO_LOADER_TYPE}" == "torio" ]]; then
+  # PyTorch 2.7 torio environments can have a broken NCCL tensor broadcast.
+  # Loading on CPU makes every rank read its own local weights, matching the
+  # official MMAudio extractor; the feature stage moves modules to its GPU.
+  MODEL_LOAD_ARGS+=(--image-encoder-cpu-offload true)
+  MODEL_LOAD_ARGS+=(--text-encoder-cpu-offload true)
+  MODEL_LOAD_ARGS+=(--vae-cpu-offload true)
 fi
 
 torchrun --standalone \
@@ -26,11 +37,13 @@ torchrun --standalone \
   --model-path "${MODEL_PATH}" \
   --mode preprocess \
   --workload-type v2a \
+  "${MODEL_LOAD_ARGS[@]}" \
   --preprocess.dataset-type vggsound \
   --preprocess.dataset-path "${DATASET_PATH}" \
   --preprocess.dataset-metadata-path "${CAPTION_PATH}" \
   --preprocess.dataset-split "${SPLIT}" \
   --preprocess.dataset-output-dir "${OUTPUT_DIR}" \
+  --preprocess.video-loader-type "${VIDEO_LOADER_TYPE}" \
   --preprocess.preprocess-video-batch-size "${BATCH_SIZE}" \
   --preprocess.dataloader-num-workers "${DATALOADER_NUM_WORKERS}" \
   --preprocess.samples-per-file "${SAMPLES_PER_FILE}"

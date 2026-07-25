@@ -40,7 +40,14 @@ from fastvideo.configs.pipelines.flux_2 import (
 )
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
-from fastvideo.configs.pipelines.mmaudio import MMAudioV2AConfig
+from fastvideo.configs.pipelines.mmaudio import (
+    MMAudioLarge44kV2PipelineConfig,
+    MMAudioLarge44kV2AConfig,
+    MMAudioMedium44kV2AConfig,
+    MMAudioSmall16kV2AConfig,
+    MMAudioSmall44kV2AConfig,
+    MMAudioV2AConfig,
+)
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -237,18 +244,74 @@ def _get_config_info(
     return None
 
 
+def _mmaudio_variant_detector(expected: str) -> Callable[[str], bool]:
+
+    def detector(path: str) -> bool:
+        normalized = path.lower().replace("-", "_")
+        return expected in normalized and (expected == "large_44k_v2" or "large_44k_v2" not in normalized)
+
+    return detector
+
+
+def _unversioned_mmaudio_detector(*, mode: str) -> Callable[[str], bool]:
+    variants = ("small_16k", "small_44k", "medium_44k", "large_44k")
+
+    def detector(path: str) -> bool:
+        normalized = path.lower().replace("-", "_")
+        # This fallback is path-only. Matching ``mmaudiopipeline`` would also
+        # fire for every variant-specific model_index and create ambiguity.
+        if "mmaudio" not in normalized or "mmaudiopipeline" in normalized:
+            return False
+        if any(variant in normalized for variant in variants):
+            return False
+        return ("16k" in normalized) if mode == "16k" else ("16k" not in normalized)
+
+    return detector
+
+
 def _register_configs() -> None:
-    # MMAudio large-44k-v2 (video/text-to-audio). The checkpoint is converted
-    # into standard per-component FastVideo/Diffusers-style directories by
-    # scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py.
+    # Official MMAudio video/text-to-audio variants. Converted directories keep
+    # the variant in their path, allowing the registry to select the matching
+    # 16 kHz or 44.1 kHz component configuration before any modules are loaded.
+    mmaudio_variants = (
+        ("small_16k", MMAudioSmall16kV2AConfig),
+        ("small_44k", MMAudioSmall44kV2AConfig),
+        ("medium_44k", MMAudioMedium44kV2AConfig),
+        ("large_44k_v2", MMAudioLarge44kV2PipelineConfig),
+        ("large_44k", MMAudioLarge44kV2AConfig),
+    )
+    for variant, pipeline_config_cls in mmaudio_variants:
+        register_configs(
+            sampling_param_cls=None,
+            pipeline_config_cls=pipeline_config_cls,
+            workload_types=(WorkloadType.V2A, WorkloadType.T2A),
+            hf_model_paths=[
+                f"FastVideo/MMAudio-{variant.replace('_', '-')}-Diffusers",
+            ],
+            model_detectors=[_mmaudio_variant_detector(variant)],
+            model_family="mmaudio",
+            default_preset=f"mmaudio_{variant}",
+            pipeline_cls_name="MMAudioPipeline",
+        )
+
+    # Preserve converted preprocessing trees and older local checkpoint names
+    # that predate explicit variant tags. These detectors intentionally do not
+    # inspect ``_class_name=MMAudioPipeline`` so they cannot overlap the five
+    # exact variant entries above.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MMAudioSmall16kV2AConfig,
+        workload_types=(WorkloadType.V2A, WorkloadType.T2A),
+        model_detectors=[_unversioned_mmaudio_detector(mode="16k")],
+        model_family="mmaudio",
+        default_preset="mmaudio_small_16k",
+        pipeline_cls_name="MMAudioPipeline",
+    )
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=MMAudioV2AConfig,
         workload_types=(WorkloadType.V2A, WorkloadType.T2A),
-        hf_model_paths=["FastVideo/MMAudio-large-44k-v2-Diffusers"],
-        model_detectors=[
-            lambda path: "mmaudio" in path.lower() or "mmaudiopipeline" in path.lower(),
-        ],
+        model_detectors=[_unversioned_mmaudio_detector(mode="44k")],
         model_family="mmaudio",
         default_preset="mmaudio_large_44k_v2",
         pipeline_cls_name="MMAudioPipeline",

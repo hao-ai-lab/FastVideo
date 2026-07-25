@@ -73,6 +73,8 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.optimizer.weight_decay == 0.0
     assert t.optimizer.lr_scheduler == "constant"
     assert t.optimizer.min_lr_ratio == 0.5
+    assert t.optimizer.lr_milestones == ()
+    assert t.optimizer.lr_gamma == pytest.approx(0.1)
 
     assert t.loop.max_train_steps == 0
     assert t.loop.gradient_accumulation_steps == 1
@@ -124,6 +126,8 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "lr_scheduler": "cosine",
             "lr_warmup_steps": 100,
             "min_lr_ratio": 0.1,
+            "lr_milestones": [240, 270],
+            "lr_gamma": 0.2,
         },
         "loop": {
             "max_train_steps": 1000,
@@ -169,6 +173,8 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.optimizer.lr_scheduler == "cosine"
     assert t.optimizer.lr_warmup_steps == 100
     assert t.optimizer.min_lr_ratio == pytest.approx(0.1)
+    assert t.optimizer.lr_milestones == (240, 270)
+    assert t.optimizer.lr_gamma == pytest.approx(0.2)
 
     assert t.loop.max_train_steps == 1000
     assert t.loop.gradient_accumulation_steps == 4

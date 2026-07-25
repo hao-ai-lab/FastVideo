@@ -3,12 +3,26 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
-from fastvideo.configs.pipelines.mmaudio import MMAudioV2AConfig
+from fastvideo.configs.models.dits import (
+    MMAUDIO_44K_TRAINING_VARIANTS,
+    MMAUDIO_TRAINING_VARIANTS,
+    MMAUDIO_VARIANT_ARCHITECTURES,
+    get_mmaudio_transformer_config,
+)
+from fastvideo.configs.pipelines.mmaudio import (
+    MMAUDIO_PIPELINE_CONFIGS,
+    MMAudioV2AConfig,
+)
+from fastvideo.distributed import get_local_torch_device, get_world_group
 from fastvideo.forward_context import set_forward_context
+from fastvideo.logger import init_logger
+from fastvideo.models.dits.mmaudio import MMAudioTransformer
+from fastvideo.models.loader.fsdp_load import build_fsdp_model_from_scratch
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import TrainingBatch
@@ -16,10 +30,123 @@ from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.module_state import apply_trainable
 from fastvideo.train.utils.moduleloader import load_module_from_path
+from fastvideo.utils import PRECISION_TO_TYPE
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.lora import LoraConfig
     from fastvideo.train.utils.training_config import TrainingConfig
+
+logger = init_logger(__name__)
+
+
+def _load_empty_string_features(path: str | Path) -> torch.Tensor:
+    """Load only the fixed CLIP empty-string embedding from an official asset."""
+    source = Path(path).expanduser().resolve()
+    if not source.exists():
+        raise FileNotFoundError(f"MMAudio empty-string feature source does not exist: {source}")
+
+    if source.is_dir():
+        preferred = (
+            source / "transformer" / "diffusion_pytorch_model.safetensors",
+            source / "diffusion_pytorch_model.safetensors",
+        )
+        candidates = [candidate for candidate in preferred if candidate.is_file()]
+        if not candidates:
+            candidates = sorted(source.rglob("*.safetensors"))
+        for candidate in candidates:
+            from safetensors import safe_open
+
+            with safe_open(candidate, framework="pt", device="cpu") as handle:
+                if "empty_string_feat" in handle:
+                    return handle.get_tensor("empty_string_feat").float()
+        raise ValueError(f"No 'empty_string_feat' tensor was found in safetensors under {source}")
+
+    if source.suffix == ".safetensors":
+        from safetensors import safe_open
+
+        with safe_open(source, framework="pt", device="cpu") as handle:
+            if "empty_string_feat" not in handle:
+                raise ValueError(f"MMAudio safetensors {source} has no 'empty_string_feat' tensor")
+            return handle.get_tensor("empty_string_feat").float()
+
+    state = torch.load(source, map_location="cpu", weights_only=True)
+    if isinstance(state, torch.Tensor):
+        tensor = state
+    elif isinstance(state, dict):
+        tensor = state.get("empty_string_feat")
+        if tensor is None and isinstance(state.get("state_dict"), dict):
+            tensor = state["state_dict"].get("empty_string_feat")
+        if tensor is None:
+            for key, value in state.items():
+                if str(key).endswith("empty_string_feat") and isinstance(value, torch.Tensor):
+                    tensor = value
+                    break
+    else:
+        tensor = None
+    if not isinstance(tensor, torch.Tensor):
+        raise ValueError(f"MMAudio asset {source} does not contain an empty-string tensor")
+    if tensor.ndim == 3 and tensor.shape[0] == 1:
+        tensor = tensor.squeeze(0)
+    return tensor.float()
+
+
+def _load_or_compute_latent_stats(
+    training_config: TrainingConfig,
+    *,
+    variant: str,
+    cache_path: str | None,
+    chunk_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute/cache official latent statistics once, then share across ranks."""
+    world_group = get_world_group()
+    payload: dict[str, Any] | None = None
+    if world_group.is_first_rank:
+        stats_path = Path(cache_path).expanduser().resolve() if cache_path else None
+        if stats_path is not None and stats_path.is_file():
+            loaded = torch.load(stats_path, map_location="cpu", weights_only=True)
+            if not isinstance(loaded, dict):
+                raise ValueError(f"Invalid MMAudio latent statistics file: {stats_path}")
+            payload = loaded
+            logger.info("Loaded MMAudio latent statistics from %s", stats_path)
+        else:
+            from fastvideo.dataset.mmaudio_feature_dataset import (
+                compute_mmaudio_latent_stats, )
+
+            architecture = MMAUDIO_VARIANT_ARCHITECTURES[variant]
+            logger.info("Computing MMAudio latent statistics from the first feature cache")
+            latent_mean, latent_std = compute_mmaudio_latent_stats(
+                training_config.data.data_path,
+                latent_seq_len=int(architecture["latent_seq_len"]),
+                latent_dim=int(architecture["latent_dim"]),
+                chunk_size=chunk_size,
+            )
+            payload = {
+                "variant": variant,
+                "latent_mean": latent_mean,
+                "latent_std": latent_std,
+            }
+            if stats_path is not None:
+                stats_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(payload, stats_path)
+                logger.info("Saved MMAudio latent statistics to %s", stats_path)
+
+    payload = world_group.broadcast_object(payload, src=0)
+    if not isinstance(payload, dict):
+        raise RuntimeError("Failed to broadcast MMAudio latent statistics")
+    cached_variant = payload.get("variant")
+    same_44k_contract = (cached_variant in MMAUDIO_44K_TRAINING_VARIANTS and variant in MMAUDIO_44K_TRAINING_VARIANTS)
+    if cached_variant is not None and cached_variant != variant and not same_44k_contract:
+        raise ValueError(f"MMAudio latent statistics are for {cached_variant!r}, not {variant!r}")
+    latent_mean = payload.get("latent_mean")
+    latent_std = payload.get("latent_std")
+    if not isinstance(latent_mean, torch.Tensor) or not isinstance(latent_std, torch.Tensor):
+        raise ValueError("MMAudio latent statistics must contain tensor mean/std values")
+    expected_shape = (1, 1, int(MMAUDIO_VARIANT_ARCHITECTURES[variant]["latent_dim"]))
+    if tuple(latent_mean.shape) != expected_shape or tuple(latent_std.shape) != expected_shape:
+        raise ValueError(f"MMAudio latent statistics for {variant!r} must have shape "
+                         f"{expected_shape}, got {tuple(latent_mean.shape)} and "
+                         f"{tuple(latent_std.shape)}")
+    return latent_mean, latent_std
 
 
 class MMAudioModel(ModelBase):
@@ -34,8 +161,13 @@ class MMAudioModel(ModelBase):
     def __init__(
         self,
         *,
-        init_from: str,
+        init_from: str | None = None,
         training_config: TrainingConfig,
+        variant: str | None = None,
+        from_scratch: bool = False,
+        empty_string_features_path: str | None = None,
+        latent_statistics_path: str | None = None,
+        latent_statistics_chunk_size: int = 32,
         trainable: bool = True,
         allow_v2_training: bool = False,
         lora: LoraConfig | dict[str, Any] | None = None,
@@ -52,19 +184,89 @@ class MMAudioModel(ModelBase):
         if int(training_config.distributed.tp_size or 1) != 1:
             raise ValueError("MMAudio training does not yet support tensor parallelism; set tp_size=1")
 
-        self._init_from = str(init_from)
         self.training_config = training_config
-        if self.training_config.pipeline_config is None:
+        if variant is not None:
+            try:
+                pipeline_config_cls = MMAUDIO_PIPELINE_CONFIGS[variant]
+            except KeyError as exc:
+                supported = ", ".join(MMAUDIO_PIPELINE_CONFIGS)
+                raise ValueError(f"Unknown MMAudio variant {variant!r}; expected one of: {supported}") from exc
+            self.training_config.pipeline_config = pipeline_config_cls()
+        elif self.training_config.pipeline_config is None:
             self.training_config.pipeline_config = MMAudioV2AConfig()
 
         if transformer is None:
-            transformer = load_module_from_path(
-                model_path=self._init_from,
-                module_type="transformer",
-                training_config=self.training_config,
-                override_transformer_cls_name=self._transformer_cls_name,
-                attention_backend=self.attention_backend,
-            )
+            if from_scratch:
+                if init_from:
+                    raise ValueError("MMAudio from_scratch=true cannot also set init_from; use "
+                                     "empty_string_features_path for the fixed CLIP embedding")
+                if variant is None:
+                    raise ValueError("MMAudio from-scratch training requires variant")
+                if variant not in MMAUDIO_TRAINING_VARIANTS:
+                    supported = ", ".join(MMAUDIO_TRAINING_VARIANTS)
+                    raise ValueError(f"The official MMAudio recipe does not train {variant!r}; "
+                                     f"supported from-scratch variants: {supported}")
+                if not empty_string_features_path:
+                    raise ValueError("MMAudio from-scratch training requires "
+                                     "empty_string_features_path")
+                latent_mean, latent_std = _load_or_compute_latent_stats(
+                    self.training_config,
+                    variant=variant,
+                    cache_path=latent_statistics_path,
+                    chunk_size=latent_statistics_chunk_size,
+                )
+                empty_string_feat = _load_empty_string_features(empty_string_features_path)
+                architecture = MMAUDIO_VARIANT_ARCHITECTURES[variant]
+                expected_text_shape = (77, 1024)
+                if tuple(empty_string_feat.shape) != expected_text_shape:
+                    raise ValueError("MMAudio empty-string features must have shape "
+                                     f"{expected_text_shape}, got {tuple(empty_string_feat.shape)}")
+                model_config = get_mmaudio_transformer_config(variant)
+                hf_config = {
+                    "_class_name": self._transformer_cls_name,
+                    **architecture,
+                    "clip_dim": 1024,
+                    "clip_seq_len": 64,
+                    "sync_dim": 768,
+                    "sync_seq_len": 192,
+                    "text_dim": 1024,
+                    "text_seq_len": 77,
+                    "mlp_ratio": 4.0,
+                }
+                default_dtype = PRECISION_TO_TYPE[self.training_config.dit_precision]
+                transformer = build_fsdp_model_from_scratch(
+                    model_cls=MMAudioTransformer,
+                    init_params={
+                        "config": model_config,
+                        "hf_config": hf_config,
+                        "latent_mean": latent_mean,
+                        "latent_std": latent_std,
+                        "empty_string_feat": empty_string_feat,
+                    },
+                    device=get_local_torch_device(),
+                    hsdp_replicate_dim=self.training_config.distributed.hsdp_replicate_dim,
+                    hsdp_shard_dim=self.training_config.distributed.hsdp_shard_dim,
+                    default_dtype=default_dtype,
+                    param_dtype=torch.bfloat16,
+                    reduce_dtype=torch.float32,
+                    seed=self.training_config.data.seed,
+                    pin_cpu_memory=self.training_config.distributed.pin_cpu_memory,
+                )
+                self._init_from = f"scratch:{variant}"
+            else:
+                if not init_from:
+                    raise ValueError("MMAudio pretrained training requires init_from, or set "
+                                     "from_scratch=true with a variant")
+                self._init_from = str(init_from)
+                transformer = load_module_from_path(
+                    model_path=self._init_from,
+                    module_type="transformer",
+                    training_config=self.training_config,
+                    override_transformer_cls_name=self._transformer_cls_name,
+                    attention_backend=self.attention_backend,
+                )
+        else:
+            self._init_from = str(init_from or f"provided:{variant or 'unknown'}")
         self.transformer = transformer
         if bool(getattr(self.transformer, "v2", False)) and not allow_v2_training:
             raise ValueError("The official MMAudio training recipe does not support `_v2` "

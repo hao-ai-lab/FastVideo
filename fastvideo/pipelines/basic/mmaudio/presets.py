@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Published MMAudio large-44k-v2 inference defaults."""
+"""Published inference defaults for all official MMAudio variants."""
 
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
@@ -26,18 +26,52 @@ _DEFAULTS = {
     "return_frames": False,
 }
 
-MMAUDIO_LARGE_44K_V2 = InferencePreset(
-    name="mmaudio_large_44k_v2",
-    version=1,
-    model_family="mmaudio",
-    description=(
-        "MMAudio large-44k-v2 video-to-audio generation with DFN5B CLIP, "
-        "Synchformer, a 44.1 kHz audio VAE, and BigVGAN-v2."
-    ),
-    workload_type="v2a",
-    stage_schemas=(_DENOISE_STAGE,),
-    defaults=dict(_DEFAULTS),
+
+def _mmaudio_preset(
+    variant: str,
+    description: str,
+) -> InferencePreset:
+    return InferencePreset(
+        name=f"mmaudio_{variant}",
+        version=1,
+        model_family="mmaudio",
+        description=description,
+        workload_type="v2a",
+        stage_schemas=(_DENOISE_STAGE, ),
+        defaults=dict(_DEFAULTS),
+    )
+
+
+MMAUDIO_SMALL_16K = _mmaudio_preset(
+    "small_16k",
+    ("MMAudio small 16 kHz video-to-audio generation with DFN5B CLIP, "
+     "Synchformer, the 16 kHz audio VAE, and the 16 kHz BigVGAN vocoder."),
+)
+MMAUDIO_SMALL_44K = _mmaudio_preset(
+    "small_44k",
+    ("MMAudio small 44.1 kHz video-to-audio generation with DFN5B CLIP, "
+     "Synchformer, the 44.1 kHz audio VAE, and BigVGAN-v2."),
+)
+MMAUDIO_MEDIUM_44K = _mmaudio_preset(
+    "medium_44k",
+    ("MMAudio medium 44.1 kHz video-to-audio generation with DFN5B CLIP, "
+     "Synchformer, the 44.1 kHz audio VAE, and BigVGAN-v2."),
+)
+MMAUDIO_LARGE_44K = _mmaudio_preset(
+    "large_44k",
+    ("MMAudio large 44.1 kHz video-to-audio generation with DFN5B CLIP, "
+     "Synchformer, the 44.1 kHz audio VAE, and BigVGAN-v2."),
+)
+MMAUDIO_LARGE_44K_V2 = _mmaudio_preset(
+    "large_44k_v2",
+    ("MMAudio large-44k-v2 video-to-audio generation with DFN5B CLIP, "
+     "Synchformer, the 44.1 kHz audio VAE, and BigVGAN-v2."),
 )
 
-ALL_PRESETS = (MMAUDIO_LARGE_44K_V2,)
-
+ALL_PRESETS = (
+    MMAUDIO_SMALL_16K,
+    MMAUDIO_SMALL_44K,
+    MMAUDIO_MEDIUM_44K,
+    MMAUDIO_LARGE_44K,
+    MMAUDIO_LARGE_44K_V2,
+)

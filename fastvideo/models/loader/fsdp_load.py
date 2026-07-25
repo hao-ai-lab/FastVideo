@@ -218,6 +218,77 @@ def maybe_load_fsdp_model(
     return model
 
 
+def build_fsdp_model_from_scratch(
+    model_cls: type[nn.Module],
+    init_params: dict[str, Any],
+    device: torch.device,
+    hsdp_replicate_dim: int,
+    hsdp_shard_dim: int,
+    default_dtype: torch.dtype,
+    param_dtype: torch.dtype,
+    reduce_dtype: torch.dtype,
+    *,
+    seed: int,
+    cpu_offload: bool = False,
+    output_dtype: torch.dtype | None = None,
+    pin_cpu_memory: bool = True,
+) -> torch.nn.Module:
+    """Deterministically initialize and FSDP-shard a model without weights."""
+
+    mp_policy = MixedPrecisionPolicy(
+        param_dtype,
+        reduce_dtype,
+        output_dtype,
+        cast_forward_inputs=False,
+    )
+    set_mixed_precision_policy(
+        param_dtype=param_dtype,
+        reduce_dtype=reduce_dtype,
+        output_dtype=output_dtype,
+        mp_policy=mp_policy,
+    )
+
+    fork_devices: list[int] = []
+    if device.type == "cuda":
+        fork_devices = [
+            device.index if device.index is not None else torch.cuda.current_device()
+        ]
+    with torch.random.fork_rng(devices=fork_devices):
+        torch.manual_seed(int(seed))
+        with set_default_dtype(default_dtype), torch.device(device):
+            model = model_cls(**init_params)
+
+    from fastvideo.platforms import current_platform
+
+    if not current_platform.is_mps():
+        pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
+        if current_platform.is_npu():
+            device_mesh = init_device_mesh(
+                "npu",
+                mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+                mesh_dim_names=("replicate", "shard"),
+            )
+        else:
+            device_mesh = init_device_mesh(
+                "cuda",
+                mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+                mesh_dim_names=("replicate", "shard"),
+            )
+        shard_model(
+            model,
+            cpu_offload=cpu_offload,
+            reshard_after_forward=True,
+            mp_policy=mp_policy,
+            mesh=device_mesh,
+            fsdp_shard_conditions=model._fsdp_shard_conditions,
+            pin_cpu_memory=pin_cpu_memory,
+        )
+
+    for parameter in model.parameters():
+        parameter.requires_grad = False
+    return model
+
+
 def shard_model(
     model,
     *,
