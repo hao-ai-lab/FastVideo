@@ -518,7 +518,7 @@ def run_performance_tests():
         "fi; "
         "(nvidia-smi --query-gpu=index,timestamp,clocks.sm,clocks.max.sm,power.draw,power.limit,temperature.gpu "
         "--format=csv -l 10 > /tmp/gpu_telemetry.csv 2>/dev/null &); "
-        "pytest ./fastvideo/tests/performance -vs; "
+        "pytest ./fastvideo/tests/performance/test_inference_performance.py -vs; "
         "PYTEST_RC=$?; "
         "PERF_RC=0; "
         "if [ $PYTEST_RC -eq 0 ] || [ \"$PERF_UPLOAD_POLICY\" = 'always' ]; then "

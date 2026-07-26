@@ -18,9 +18,11 @@ It serves three audiences:
 ## Quick start (local)
 
 ```bash
-# Run all benchmarks; writes raw perf_*.json under
+# Run all measured benchmarks; writes raw perf_*.json under
 # fastvideo/tests/performance/results/
-pytest fastvideo/tests/performance/ -vs
+pytest fastvideo/tests/performance/test_inference_performance.py -vs
+
+pytest tests/local_tests/performance/ -vs
 
 # Optional: compare against the rolling HF baseline.
 # PERF_REPORTS_DIR defaults to /root/data/perf_reports for Modal/CI, so
@@ -73,6 +75,9 @@ fastvideo/tests/performance/
     │           writes Markdown summary + (optionally) uploads new records
     ├── dashboard.py
     │       └── builds time-series Plotly HTML from HF history
+
+tests/local_tests/performance/
+    └── local-only behavior tests for config, policy, identity, and dashboards
 
 fastvideo/performance/
     ├── hf_store.py               # shared HF I/O + DataFrame helpers

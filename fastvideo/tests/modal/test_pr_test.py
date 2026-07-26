@@ -275,3 +275,16 @@ def test_run_test_command_composes_valid_post_checkout_shell(
     else:
         assert "uv pip install -e" not in shell_command
     real_run(["/bin/bash", "-n"], input=shell_command, text=True, check=True)
+
+
+def test_run_performance_tests_collects_only_benchmark_gate(monkeypatch):
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+    monkeypatch.setattr(module, "run_test", commands.append)
+
+    module.run_performance_tests()
+
+    assert len(commands) == 1
+    command = commands[0]
+    assert "pytest ./fastvideo/tests/performance/test_inference_performance.py -vs;" in command
+    assert "pytest ./fastvideo/tests/performance -vs;" not in command

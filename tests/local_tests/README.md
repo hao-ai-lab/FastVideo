@@ -1,14 +1,14 @@
 # Local Tests
 
-Local-only parity, smoke, and component tests for FastVideo model ports. They
-compare FastVideo against the official reference implementations and are
-**skipped in CI**; run them locally on a single GPU (or CPU where noted).
+Local-only parity, smoke, component, and developer-facing behavior tests for
+FastVideo. They cover model ports and supporting tooling and are **skipped in
+CI**; run them locally on a single GPU (or CPU where noted).
 
 For the CI-backed test suite, see [`fastvideo/tests/`](../../fastvideo/tests/).
 
 ## Layout
 
-Tests are organized by **model family**, one directory per port. Each family
+Most tests are organized by **model family**, one directory per port. Each family
 directory follows the layout produced by the
 [`add-model-prep`](https://github.com/anthropic-skills/add-model-prep) skill:
 
@@ -31,6 +31,12 @@ tests/local_tests/<family>/
 | Stable Diffusion 3.5 | T2I | [`sd35/`](./sd35/) |
 | Stable Audio Open 1.0 | T2A | [`stable_audio/`](./stable_audio/) |
 | Wan2.2 | I2V | [`wan22/`](./wan22/) |
+
+## Other Suites
+
+| Suite | Purpose | Dir |
+|---|---|---|
+| Performance CI behavior | Config, comparison policy, identity, result schema, and dashboard checks | [`performance/`](./performance/) |
 
 ## Running a family
 
