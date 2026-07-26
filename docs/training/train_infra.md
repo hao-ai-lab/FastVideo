@@ -231,6 +231,10 @@ switches those layers to `ATTN_QAT_INFER`.
 On GB200, set `callbacks.validation.attn_qat_infer: false` to keep validation on
 the train-time QAT backend; the inference kernel is sm120-only.
 
+User-adaptable LTX-2 fine-tuning recipes (full, LoRA, and NVFP4 QAT) live in
+`examples/train/configs/fine_tuning/ltx2/`, alongside the other model
+families under `examples/train/configs/fine_tuning/`.
+
 ---
 
 ## Training Methods
