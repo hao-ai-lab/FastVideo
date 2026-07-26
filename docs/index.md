@@ -5,7 +5,7 @@
 </div>
 
 <div style="text-align: center;">
-<strong>FastVideo is a unified inference and post-training framework for accelerated video generation.</strong>
+<strong>FastVideo is a unified post-training and real-time inference framework for accelerated video generation.</strong>
 </div>
 
 <div style="text-align: center;">
@@ -25,14 +25,23 @@ FastVideo is an inference and post-training framework for diffusion models. It f
 
 FastVideo has the following features:
 
+- End-to-end post-training support for bidirectional and autoregressive models
+  - Full finetuning and LoRA [finetuning](training/finetune.md) for state-of-the-art open video DiTs
+  - [Data preprocessing pipeline](training/data_preprocess.md) for video, image, and text data
+  - [Distribution Matching Distillation (DMD2)](distillation/dmd.md) stepwise distillation
+  - Sparse attention with [Video Sparse Attention](attention/vsa/index.md)
+  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) to achieve >50x denoising speedup
+  - [Attn-QAT training](training/attn_qat.md) for quantization-aware post-training
+  - Causal distillation through Self-Forcing
+  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing
+  - See the [training overview](training/overview.md) for the full training workflow
 - State-of-the-art performance optimizations for inference
-  - [Sliding Tile Attention](attention/sta/index.md)
-  - [Sage Attention](https://arxiv.org/abs/2410.02367)
-- E2E post-training support
-  - Data preprocessing pipeline for video data
-  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) for Wan2.1 and Wan2.2 using [Video Sparse Attention](https://arxiv.org/pdf/2505.13389) and [Distribution Matching Distillation](https://tianweiy.github.io/dmd2/)
-  - Support full finetuning and LoRA finetuning for state-of-the-art open video DiTs.
-  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
+  - Sequence parallelism for distributed inference
+  - Multiple state-of-the-art [attention backends](attention/index.md)
+  - User-friendly [CLI](inference/cli.md) and Python API
+  - See the [support matrix](inference/support_matrix.md) for supported models and [optimizations](inference/optimizations.md) for the full list
+- Realtime video generation and editing
+  - [Dreamverse](https://github.com/hao-ai-lab/FastVideo/tree/main/apps/dreamverse): stream and "vibe direct" video in realtime ([live demo](https://dreamverse.fastvideo.org/))
 
 ## Documentation
 
