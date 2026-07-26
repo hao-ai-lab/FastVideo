@@ -82,6 +82,7 @@ class TestConstructor:
         assert cb.overlay_actions is False
         assert cb.offload_training_state is False
         assert cb.unload_pipeline_after_validation is False
+        assert cb.attn_qat_infer is False
         # Lazy fields not yet populated.
         assert cb._pipeline is None
         assert cb._sampling_param is None
@@ -102,6 +103,7 @@ class TestConstructor:
             overlay_actions=1,  # type: ignore[arg-type]
             offload_training_state="1",  # type: ignore[arg-type]
             unload_pipeline_after_validation="false",  # type: ignore[arg-type]
+            attn_qat_infer="true",  # type: ignore[arg-type]
         )
         assert cb.every_steps == 50
         assert cb.sampling_steps == [20, 40]
@@ -111,6 +113,7 @@ class TestConstructor:
         assert cb.overlay_actions is True
         assert cb.offload_training_state is True
         assert cb.unload_pipeline_after_validation is False
+        assert cb.attn_qat_infer is True
 
     def test_pipeline_kwargs_collected(self) -> None:
         cb = ValidationCallback(
@@ -217,6 +220,57 @@ class TestOnValidationBegin:
         cb = _make_recording(every_steps=50)
         cb.on_validation_begin(method=None, iteration=0)
         assert cb.run_calls == [0]
+
+
+class TestAttnQatInferValidation:
+
+    def test_context_swaps_and_restores_qat_attention(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from fastvideo.attention.backends import attn_qat_infer
+        from fastvideo.attention.backends.attn_qat_infer import (
+            AttnQatInferImpl, )
+        from fastvideo.attention.backends.attn_qat_train import (
+            AttnQatTrainImpl, )
+        from fastvideo.platforms import AttentionBackendEnum
+
+        monkeypatch.setattr(attn_qat_infer, "is_attn_qat_infer_available", lambda: True)
+        impl = AttnQatTrainImpl(
+            num_heads=1,
+            head_size=128,
+            causal=False,
+            softmax_scale=128**-0.5,
+        )
+
+        holder = torch.nn.Module()
+        holder.attn_impl = impl
+        holder.num_heads = 1
+        holder.head_size = 128
+        holder.num_kv_heads = 1
+        holder.softmax_scale = 128**-0.5
+        holder.backend = AttentionBackendEnum.ATTN_QAT_TRAIN
+        transformer = torch.nn.Module()
+        transformer.add_module("attention", holder)
+        cb = _make_callback()
+        cb.attn_qat_infer = True
+
+        with pytest.raises(RuntimeError, match="stop"):
+            with cb._attn_qat_infer_context(transformer):
+                assert isinstance(holder.attn_impl, AttnQatInferImpl)
+                assert holder.backend is AttentionBackendEnum.ATTN_QAT_INFER
+                raise RuntimeError("stop")
+
+        assert holder.attn_impl is impl
+        assert holder.backend is AttentionBackendEnum.ATTN_QAT_TRAIN
+
+    def test_context_requires_qat_training_attention(self) -> None:
+        cb = _make_callback()
+        cb.attn_qat_infer = True
+
+        with pytest.raises(RuntimeError, match="no ATTN_QAT_TRAIN layers"):
+            with cb._attn_qat_infer_context(torch.nn.Linear(1, 1)):
+                pass
 
 
 # ---------------------------------------------------------------------------
