@@ -303,7 +303,11 @@ class ValidationCallback(Callback):
         if not layers:
             raise RuntimeError("attn_qat_infer validation requested, but the transformer has no ATTN_QAT_TRAIN layers")
         if not is_attn_qat_infer_available():
-            raise RuntimeError("attn_qat_infer validation requires the sm120 fastvideo-kernel extension")
+            from fastvideo.attention.backends.attn_qat_infer import (
+                attn_qat_infer_receipt, )
+            raise RuntimeError("attn_qat_infer validation requested but no ATTN_QAT_INFER kernel serves "
+                               f"this device ({attn_qat_infer_receipt()}). Set "
+                               "callbacks.validation.attn_qat_infer=false to validate with ATTN_QAT_TRAIN.")
 
         previous = [(layer, layer.attn_impl, layer.backend) for layer in layers]
         try:

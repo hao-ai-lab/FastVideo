@@ -32,8 +32,30 @@ except ImportError:
     flash_attn_fp4_func = None
     _FA4_FP4_AVAILABLE = False
 
+_FA4_QUANT_OPS: tuple | None = None
 
-def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor, ) -> tuple[torch.Tensor, torch.Tensor]:
+
+def _import_fa4_quant_ops() -> tuple:
+    """The slow path: resolves flashinfer's FP4 quantization entry points
+    (imports + JIT-module lookup, which probes the CUDA toolchain via a
+    subprocess on first use). Kept as its own function so tests can pin
+    that it runs at most once per process."""
+    from flashinfer.quantization import SfLayout, nvfp4_quantize
+    return (nvfp4_quantize, SfLayout)
+
+
+def _resolve_fa4_quant_ops() -> tuple:
+    # Lazy (construct-anywhere/fail-at-forward stays intact) but memoized:
+    # re-resolving per forward graph-breaks dynamo every step (making
+    # fullgraph compilation impossible for the NVFP4 path) and keeps eager
+    # dispatch overhead on the hot path.
+    global _FA4_QUANT_OPS
+    if _FA4_QUANT_OPS is None:
+        _FA4_QUANT_OPS = _import_fa4_quant_ops()
+    return _FA4_QUANT_OPS
+
+
+def _nvfp4_quantize_for_fa4_impl(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Quantize a (batch, seqlen, nheads, headdim) BF16 tensor to FP4.
 
     Returns:
@@ -42,7 +64,7 @@ def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor, ) -> tuple[torch.Tensor, to
             Caller should slice [:, :orig_seqlen] before passing to FA4.
         sf_tensor:  torch.uint8, shape (32, 4, rest_m, 4, rest_k, nheads, batch) with stride[3]=1
     """
-    from flashinfer.quantization import nvfp4_quantize, SfLayout
+    nvfp4_quantize, SfLayout = _resolve_fa4_quant_ops()
 
     batch, seqlen, nheads, headdim = tensor_4d.shape
     sf_vec_size = 16
@@ -80,6 +102,43 @@ def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor, ) -> tuple[torch.Tensor, to
     sf_mma = sf_canonical.permute(4, 5, 2, 6, 3, 1, 0)
 
     return fp4_tensor, sf_mma
+
+
+# Dynamo boundary for the FP4 quantize path (same pattern as the masked
+# flash-attention entry points in flash_attn_no_pad.py): tracing a python
+# body that resolves flashinfer's JIT module descends into its toolchain
+# probe (a subprocess) regardless of any runtime memoization -- a cache hit
+# is invisible at trace time. Registering the whole quantize step as a
+# custom op makes it one opaque graph node, unlocking
+# torch.compile(fullgraph=True) for the NVFP4 attention path.
+@torch.library.custom_op(
+    "fastvideo::nvfp4_quantize_fa4",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _nvfp4_quantize_fa4_op(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    return _nvfp4_quantize_for_fa4_impl(tensor_4d)
+
+
+@torch.library.register_fake("fastvideo::nvfp4_quantize_fa4")
+def _nvfp4_quantize_fa4_fake(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    batch, seqlen, nheads, headdim = tensor_4d.shape
+    seqlen_padded = (seqlen + 127) // 128 * 128
+    fp4 = tensor_4d.new_empty((batch, seqlen_padded, nheads, headdim // 2), dtype=torch.float4_e2m1fn_x2)
+    rest_m = seqlen_padded // 128
+    rest_k = (headdim // 16) // 4
+    # Must reproduce the impl's output STRIDES, not just its shape: the real
+    # sf is a permuted view of a contiguous (batch, nheads, rest_m, rest_k,
+    # 32, 4, 4) buffer, and torch.compile bakes the fake's strides into the
+    # generated code (a contiguous fake here asserts at runtime).
+    sf = tensor_4d.new_empty((batch, nheads, rest_m, rest_k, 32, 4, 4), dtype=torch.uint8).permute(4, 5, 2, 6, 3, 1, 0)
+    return fp4, sf
+
+
+def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Quantize (batch, seqlen, nheads, headdim) BF16 to FP4 via the custom
+    op boundary; see _nvfp4_quantize_for_fa4_impl for the layout contract."""
+    return torch.ops.fastvideo.nvfp4_quantize_fa4(tensor_4d)
 
 
 class FlashAttentionBackend(AttentionBackend):
