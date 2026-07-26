@@ -7,9 +7,9 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
                                  LocalAttention)
+from fastvideo.attention.selector import get_effective_attn_backend_override
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
@@ -607,6 +607,18 @@ class WanTransformerBlock_VSA(nn.Module):
         return hidden_states
 
 
+def _select_wan_transformer_block(config: WanVideoConfig) -> type[nn.Module]:
+    attn_backend = get_effective_attn_backend_override()
+    if attn_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+        if AttentionBackendEnum.VIDEO_SPARSE_ATTN not in config._supported_attention_backends:
+            raise ValueError("VIDEO_SPARSE_ATTN requires a Wan VSA checkpoint/config, but this Wan config does not "
+                             "support VIDEO_SPARSE_ATTN. "
+                             "For FastWan2.2-TI2V-5B-FullAttn-Diffusers, unset FASTVIDEO_ATTENTION_BACKEND or use "
+                             "a dense backend such as FLASH_ATTN or TORCH_SDPA.")
+        return WanTransformerBlock_VSA
+    return WanTransformerBlock
+
+
 class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = WanVideoConfig()._compile_conditions
@@ -651,8 +663,7 @@ class WanTransformer3DModel(BaseDiT):
         )
 
         # 3. Transformer blocks
-        attn_backend = envs.FASTVIDEO_ATTENTION_BACKEND
-        transformer_block = WanTransformerBlock_VSA if attn_backend == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
+        transformer_block = _select_wan_transformer_block(config)
         self.blocks = nn.ModuleList([
             transformer_block(inner_dim,
                               config.ffn_dim,
@@ -661,7 +672,7 @@ class WanTransformer3DModel(BaseDiT):
                               config.cross_attn_norm,
                               config.eps,
                               config.added_kv_proj_dim,
-                              self._supported_attention_backends,
+                              config._supported_attention_backends,
                               quant_config=config.quant_config,
                               prefix=f"{config.prefix}.blocks.{i}")
             for i in range(config.num_layers)

@@ -111,8 +111,9 @@ def test_sd35_similarity(
         default_params_map=SD35_MODEL_TO_PARAMS,
         full_quality_params_map=SD35_FULL_QUALITY_MODEL_TO_PARAMS,
         min_acceptable_ssim=0.98,
+        media_extension=".png",
         init_kwargs_override={
-            "workload_type": "t2v",
+            "workload_type": "t2i",
             "use_fsdp_inference": False,
             "text_encoder_cpu_offload": False,
             "vae_cpu_offload": False,

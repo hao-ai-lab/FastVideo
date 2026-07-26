@@ -12,6 +12,7 @@ from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConf
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.models.vaes.wanvae import WanVAEArchConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.platforms import AttentionBackendEnum
 
 
 def t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
@@ -64,7 +65,7 @@ class WanT2V480PConfig(PipelineConfig):
 
     # WanConfig-specific added parameters
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
 
@@ -276,6 +277,33 @@ class LucyEditDevConfig(Wan2_2_TI2V_5B_Config):
 class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
     flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
+
+
+@dataclass
+class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
+    dit_config: DiTConfig = field(
+        default_factory=lambda: WanVideoConfig(arch_config=WanVideoArchConfig(_supported_attention_backends=(
+            AttentionBackendEnum.FLASH_ATTN,
+            AttentionBackendEnum.TORCH_SDPA,
+            AttentionBackendEnum.SAGE_ATTN,
+            AttentionBackendEnum.SAGE_ATTN_THREE,
+            AttentionBackendEnum.ATTN_QAT_INFER,
+        ))))
+    ti2v_task: bool = False
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.vae_config.load_encoder = False
+
+    def check_pipeline_config(self) -> None:
+        super().check_pipeline_config()
+
+        from fastvideo.attention.selector import get_effective_attn_backend_override
+        if get_effective_attn_backend_override() == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+            raise ValueError("FastWan2.2-TI2V-5B-FullAttn-Diffusers is a dense FullAttn T2V-only checkpoint "
+                             "and does not support FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN. "
+                             "Unset FASTVIDEO_ATTENTION_BACKEND or use a dense backend such as FLASH_ATTN or "
+                             "TORCH_SDPA.")
 
 
 @dataclass

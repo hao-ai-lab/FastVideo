@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 import yaml
 
+from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.train.utils.config import RunConfig, load_run_config
 from fastvideo.train.utils.training_config import TrainingConfig
 
@@ -88,6 +89,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.model.moba_config == {}
 
     assert t.dit_precision == "fp32"
+    assert t.workload_type is WorkloadType.T2V
     assert t.vsa_sparsity == 0.0
     assert t.pipeline_config is None
 
@@ -145,6 +147,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "logit_std": 1.5,
             "precondition_outputs": True,
         },
+        "workload_type": "i2v",
         "dit_precision": "bf16",
     }
     cfg = load_run_config(_write_yaml(tmp_path, data))
@@ -177,6 +180,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.vsa_sparsity == pytest.approx(0.5)
     assert t.model.weighting_scheme == "logit_normal"
     assert t.model.precondition_outputs is True
+    assert t.workload_type is WorkloadType.I2V
     assert t.dit_precision == "bf16"
 
 
@@ -336,6 +340,31 @@ def test_hsdp_shard_dim_defaults_to_num_gpus(tmp_path: Path) -> None:
 def test_model_path_derived_from_student_init_from(tmp_path: Path) -> None:
     cfg = load_run_config(_write_yaml(tmp_path, _minimal_yaml()))
     assert cfg.training.model_path == "fake/model"
+
+
+def test_i2v_only_model_path_infers_i2v_workload(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["models"]["student"]["init_from"] = "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers"
+
+    cfg = load_run_config(_write_yaml(tmp_path, data))
+
+    assert cfg.training.model_path == "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers"
+    assert cfg.training.workload_type is WorkloadType.I2V
+
+
+def test_dotted_override_replaces_training_workload_type(tmp_path: Path) -> None:
+    path = _write_yaml(tmp_path, _minimal_yaml())
+    cfg = load_run_config(path, overrides=["--training.workload_type=i2v"])
+
+    assert cfg.training.workload_type is WorkloadType.I2V
+
+
+def test_invalid_training_workload_type_raises(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {"workload_type": "audio"}
+
+    with pytest.raises(ValueError, match="training.workload_type"):
+        load_run_config(_write_yaml(tmp_path, data))
 
 
 def test_callbacks_default_to_empty_when_absent(tmp_path: Path) -> None:

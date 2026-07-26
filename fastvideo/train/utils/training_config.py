@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from fastvideo.fastvideo_args import WorkloadType
+
 if TYPE_CHECKING:
     from fastvideo.configs.pipelines.base import PipelineConfig
 
@@ -97,4 +99,5 @@ class TrainingConfig:
     model: ModelTrainingConfig = field(default_factory=ModelTrainingConfig)
     pipeline_config: PipelineConfig | None = None
     model_path: str = ""
+    workload_type: WorkloadType = WorkloadType.T2V
     dit_precision: str = "fp32"
