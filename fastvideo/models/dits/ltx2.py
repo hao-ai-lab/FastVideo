@@ -11,8 +11,6 @@ import os
 from pathlib import Path
 from typing import Any, Optional, Tuple, Callable
 
-import numpy as np
-
 import torch
 import torch.nn as nn
 from einops import rearrange, repeat
@@ -64,6 +62,34 @@ def _is_ltx2_refine_stage() -> bool:
     return forward_batch.extra.get("ltx2_fp4_stage_profile") == "refine"
 
 
+def _functional_rms_norm(
+    x: torch.Tensor,
+    eps: float,
+    weight: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Out-of-place RMSNorm equivalent to ``torch.nn.functional.rms_norm``.
+
+    ``F.rms_norm`` / ``nn.RMSNorm`` decompose under AOTAutograd into an
+    in-place ``variance.add_(eps)`` (an ``aten.copy_`` into the computed
+    ``mean``). AOTAutograd's ``assert_functional_graph`` requires every
+    ``copy_`` destination to be a graph input, so this trips when the DiT is
+    compiled through the ``torch.compile(backend="torch_tensorrt")`` path
+    (Dynamo -> AOTAutograd functionalization -> torch-tensorrt), breaking
+    TensorRT + sequence-parallel (Ulysses) export. Computing ``variance + eps``
+    out-of-place keeps the graph functional. Numerically matches
+    ``F.rms_norm`` (fp32 accumulation, dtype restored to the input)."""
+    input_dtype = x.dtype
+    hidden = x.to(torch.float32)
+    variance = hidden.pow(2).mean(-1, keepdim=True)
+    hidden = hidden * torch.rsqrt(variance + eps)
+    out = hidden.to(input_dtype)
+    if weight is not None:
+        # A weight dtype differing from x (e.g. fp32 params under autocast)
+        # would promote the output; keep the input-dtype guarantee.
+        out = out * weight
+    return out.to(input_dtype)
+
+
 def _rms_norm_dispatch(
     x: torch.Tensor,
     eps: float,
@@ -77,8 +103,7 @@ def _rms_norm_dispatch(
     # rms_norm to autocast's float32 cast policy, which under our
     # autocast(bfloat16) forward returns float32 instead. Restore the input
     # dtype to match the official numerics (and torch <= 2.11 behavior).
-    return torch.nn.functional.rms_norm(
-        x, (x.shape[-1], ), weight=weight, eps=eps).to(x.dtype)
+    return _functional_rms_norm(x, eps, weight)
 
 
 class StageAwareRMSNorm(nn.RMSNorm):
@@ -103,7 +128,7 @@ class StageAwareRMSNorm(nn.RMSNorm):
         # norm now returns float32 where torch <= 2.11 returned bfloat16.
         # Restore the input dtype so autocast-blind consumers downstream
         # (e.g. the flash-attention custom op) don't receive upcast q/k.
-        return super().forward(x).to(x.dtype)
+        return _functional_rms_norm(x, self.eps, self.weight)
 
 
 def _supports_prequantized_input(linear: ReplicatedLinear) -> bool:
@@ -770,32 +795,43 @@ def _apply_ltx_split_rotary_emb(
     return output
 
 
-@functools.lru_cache(maxsize=5)
-def generate_ltx_freq_grid_np(
+def _generate_ltx_freq_grid_float64(
     positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
 ) -> torch.Tensor:
-    """Generate LTX-2 rotary frequencies with high-precision numpy."""
     theta = positional_embedding_theta
     start = 1
     end = theta
     n_elem = 2 * positional_embedding_max_pos_count
-    pow_indices = np.power(
+    pow_indices = torch.pow(
         theta,
-        np.linspace(
-            np.log(start) / np.log(theta),
-            np.log(end) / np.log(theta),
+        torch.linspace(
+            math.log(start) / math.log(theta),
+            math.log(end) / math.log(theta),
             inner_dim // n_elem,
-            dtype=np.float64,
+            dtype=torch.float64,
         ),
     )
-    return torch.tensor(pow_indices * math.pi / 2, dtype=torch.float32)
+    return (pow_indices * math.pi / 2).to(dtype=torch.float32)
 
 
-@functools.lru_cache(maxsize=5)
-def generate_ltx_freq_grid_pytorch(
+_cached_generate_ltx_freq_grid_float64 = functools.lru_cache(maxsize=5)(
+    _generate_ltx_freq_grid_float64)
+
+
+def generate_ltx_freq_grid_float64(
     positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
 ) -> torch.Tensor:
-    """Generate LTX-2 rotary frequencies in torch for speed."""
+    """Generate an eager-cached, compile-safe float64 LTX-2 rotary grid."""
+    if torch.compiler.is_compiling():
+        return _generate_ltx_freq_grid_float64(
+            positional_embedding_theta, positional_embedding_max_pos_count, inner_dim)
+    return _cached_generate_ltx_freq_grid_float64(
+        positional_embedding_theta, positional_embedding_max_pos_count, inner_dim)
+
+
+def _generate_ltx_freq_grid_pytorch(
+    positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
+) -> torch.Tensor:
     theta = positional_embedding_theta
     start = 1
     end = theta
@@ -810,6 +846,21 @@ def generate_ltx_freq_grid_pytorch(
     )
     indices = indices.to(dtype=torch.float32)
     return indices * math.pi / 2
+
+
+_cached_generate_ltx_freq_grid_pytorch = functools.lru_cache(maxsize=5)(
+    _generate_ltx_freq_grid_pytorch)
+
+
+def generate_ltx_freq_grid_pytorch(
+    positional_embedding_theta: float, positional_embedding_max_pos_count: int, inner_dim: int
+) -> torch.Tensor:
+    """Generate an eager-cached, compile-safe float32 LTX-2 rotary grid."""
+    if torch.compiler.is_compiling():
+        return _generate_ltx_freq_grid_pytorch(
+            positional_embedding_theta, positional_embedding_max_pos_count, inner_dim)
+    return _cached_generate_ltx_freq_grid_pytorch(
+        positional_embedding_theta, positional_embedding_max_pos_count, inner_dim)
 
 
 def _ltx_get_fractional_positions(indices_grid: torch.Tensor, max_pos: list[int]) -> torch.Tensor:
@@ -1012,7 +1063,7 @@ class TransformerArgsPreprocessor:
         x_dtype: torch.dtype,
     ) -> torch.Tensor:
         if self.double_precision_rope:
-            freq_grid_generator = generate_ltx_freq_grid_np
+            freq_grid_generator = generate_ltx_freq_grid_float64
         else:
             freq_grid_generator = generate_ltx_freq_grid_pytorch
         return precompute_ltx_freqs_cis(
@@ -1520,6 +1571,7 @@ class LTXSelfAttention(nn.Module):
             softmax_scale=None,
             causal=False,
             supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA,),
+            default_backend=AttentionBackendEnum.TORCH_SDPA,
         )
 
     def forward(
@@ -1802,12 +1854,15 @@ class BasicAVTransformerBlock(torch.nn.Module):
         # Text cross-attention uses LocalAttention (text embeddings are replicated)
         SelfAttnCls = LTXDistributedSelfAttention if use_distributed_attention else LTXSelfAttention
         CrossAttnCls = LTXSelfAttention  # Text cross-attention is always local
-        video_self_attn_backends = (
+        video_attn_backends = (
             AttentionBackendEnum.FLASH_ATTN,
             AttentionBackendEnum.TORCH_SDPA,
-            AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+            AttentionBackendEnum.ATTN_QAT_INFER,
+            AttentionBackendEnum.ATTN_QAT_TRAIN,
         )
-        dense_attn_backends = (
+        video_self_attn_backends = video_attn_backends + (
+            AttentionBackendEnum.VIDEO_SPARSE_ATTN, )
+        audio_attn_backends = (
             AttentionBackendEnum.FLASH_ATTN,
             AttentionBackendEnum.TORCH_SDPA,
         )
@@ -1834,7 +1889,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=video.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                supported_attention_backends=video_attn_backends,
                 apply_gated_attention=video.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.attn2",
@@ -1860,7 +1915,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                supported_attention_backends=audio_attn_backends,
                 apply_gated_attention=audio.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio_attn1",
@@ -1873,7 +1928,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                supported_attention_backends=audio_attn_backends,
                 apply_gated_attention=audio.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio_attn2",
@@ -1898,7 +1953,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                supported_attention_backends=audio_attn_backends,
                 apply_gated_attention=video.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.audio_to_video_attn",
@@ -1912,7 +1967,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                supported_attention_backends=audio_attn_backends,
                 apply_gated_attention=audio.apply_gated_attention,
                 quant_config=quant_config,
                 prefix=f"{prefix}.blocks.{idx}.video_to_audio_attn",
@@ -2058,27 +2113,35 @@ class BasicAVTransformerBlock(torch.nn.Module):
             """STG keep-mask for self-attention.
 
             Returns a per-sample multiplier (1 keep, 0 perturb) broadcastable
-            over ``values``. Only the configured ``stg_block_idx`` is perturbed.
+            over ``values``. Applied unconditionally: the eager caller
+            (``_process_transformer_blocks``) enforces that only the
+            configured ``stg_block_idx`` block receives a truthy flag.
             Supports both the LTX-2.0 bool flag and an LTX-2.3 per-sample
             tensor ``[B]`` (1/True == perturb). When skip_flag is False/0 the
             multiplier is all ones, reproducing the un-skipped LTX-2.0 path.
             """
             bsz = values.shape[0]
             keep = torch.ones((bsz, ), device=values.device, dtype=values.dtype)
-            if self.idx == self.stg_block_idx:
-                if torch.is_tensor(skip_flag):
-                    if skip_flag.ndim == 0:
-                        perturb = skip_flag.reshape(1).expand(bsz)
-                    else:
-                        if skip_flag.shape[0] != bsz:
-                            raise ValueError(
-                                "Per-sample STG mask batch size mismatch: "
-                                f"got {skip_flag.shape[0]}, expected {bsz}")
-                        perturb = skip_flag.reshape(bsz)
-                    keep = 1.0 - perturb.to(device=values.device,
-                                            dtype=values.dtype)
-                elif bool(skip_flag):
-                    keep.zero_()
+            # The ``idx == stg_block_idx`` gate lives in the eager
+            # ``_process_transformer_blocks`` caller, not here: reading the
+            # per-instance ``self.idx`` inside this compiled forward forces
+            # torch.compile to specialize a distinct graph per block (48x),
+            # blowing the Dynamo recompile limit and defeating regional
+            # compilation. The caller only passes a truthy ``skip_flag`` to the
+            # configured STG block, so applying it unconditionally here is
+            # equivalent while keeping the graph identical across all 48 blocks.
+            if torch.is_tensor(skip_flag):
+                if skip_flag.ndim == 0:
+                    perturb = skip_flag.reshape(1).expand(bsz)
+                else:
+                    if skip_flag.shape[0] != bsz:
+                        raise ValueError(
+                            "Per-sample STG mask batch size mismatch: "
+                            f"got {skip_flag.shape[0]}, expected {bsz}")
+                    perturb = skip_flag.reshape(bsz)
+                keep = 1.0 - perturb.to(device=values.device, dtype=values.dtype)
+            elif bool(skip_flag):
+                keep.zero_()
             return keep.view(bsz, *([1] * (values.ndim - 1)))
 
         if run_vx:
@@ -2277,6 +2340,9 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 1 + ascale_mlp) + ashift_mlp
             ax = ax + self.audio_ff(ax_scaled) * agate_mlp
 
+        # Debug-only: reading ``self.idx`` (and .item() syncs) here means
+        # enabling this env var re-specializes the compiled graph per block,
+        # defeating the shared-graph regional compilation.
         if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
             video_sum = vx.float().sum().item() if vx is not None else 0.0
             audio_sum = ax.float().sum().item() if ax is not None else 0.0
@@ -2656,8 +2722,10 @@ class LTXModel(torch.nn.Module):
         skip_audio_self_attn_block_set = set(skip_audio_self_attn_blocks or [])
 
         for idx, block in enumerate(self.transformer_blocks):
-            skip_v_sa = idx in skip_video_self_attn_block_set
-            skip_a_sa = idx in skip_audio_self_attn_block_set
+            # Preserve the original STG block condition in eager code so it does not introduce a block index guard in the compiled forward
+            is_stg_block = idx == block.stg_block_idx
+            skip_v_sa = is_stg_block and idx in skip_video_self_attn_block_set
+            skip_a_sa = is_stg_block and idx in skip_audio_self_attn_block_set
             video, audio = block(
                 video=video,
                 audio=audio,
@@ -2768,6 +2836,7 @@ class LTX2Transformer3DModel(BaseDiT):
     reverse_param_names_mapping = LTX2VideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = LTX2VideoConfig().lora_param_names_mapping
     _fsdp_shard_conditions = LTX2VideoConfig()._fsdp_shard_conditions
+    _compile_conditions = LTX2VideoConfig()._compile_conditions
 
     def __init__(self, config: LTX2VideoConfig, hf_config: dict[str, Any]):
         super().__init__(config=config, hf_config=hf_config)

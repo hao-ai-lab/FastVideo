@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -53,6 +54,44 @@ def _extract_out(x):
     if isinstance(x, tuple):
         return x[0]
     return x
+
+
+def test_capability_gate_is_lazy_and_device_keyed(monkeypatch) -> None:
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required to import flash_attn.cute")
+    try:
+        mod = _load_local_flash_attn_cute_module()
+    except ImportError as exc:
+        pytest.skip(f"flash_attn.cute is not available: {exc}")
+    calls: list[tuple[int, int]] = []
+
+    def has_device_capability(capability: int, device_id: int) -> bool:
+        calls.append((capability, device_id))
+        return device_id == 1
+
+    def tensor_stub(device_id: int, heads: int):
+        return SimpleNamespace(
+            device=torch.device("cuda", device_id),
+            shape=(1, 1, heads, 64),
+            requires_grad=False,
+        )
+
+    mod._SM90_OR_NEWER_BY_DEVICE.clear()
+    monkeypatch.setattr(
+        mod.current_platform,
+        "has_device_capability",
+        has_device_capability,
+    )
+    try:
+        q0, k0, v0 = tensor_stub(0, 4), tensor_stub(0, 2), tensor_stub(0, 2)
+        assert mod._use_fa2(q0, k0, v0)
+        assert mod._use_fa2(q0, k0, v0)
+
+        q1, k1, v1 = tensor_stub(1, 4), tensor_stub(1, 2), tensor_stub(1, 2)
+        assert not mod._use_fa2(q1, k1, v1)
+        assert calls == [(90, 0), (90, 1)]
+    finally:
+        mod._SM90_OR_NEWER_BY_DEVICE.clear()
 
 
 @pytest.fixture(scope="module")

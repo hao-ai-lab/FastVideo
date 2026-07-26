@@ -43,6 +43,9 @@ Ready-to-run examples with preprocessing scripts, training launchers, and valida
 
 **→ [Browse all training examples](examples/examples_training_index.md)**
 
+For the complete two-stage Wan2.1 MixKit quantization-aware workflow, see
+**[Attn-QAT Training](attn_qat.md)**.
+
 Each example includes:
 
 - `download_dataset.sh` — download sample data
@@ -59,9 +62,11 @@ FastVideo supports several training approaches:
 | **Full finetune** | Adapt entire model to a new domain or style |
 | **LoRA finetune** | Lightweight adaptation with frozen base weights |
 | **VSA finetune** | Finetune with Variable Sparse Attention for efficiency |
+| **Attn-QAT** | Train with fake-quantized attention, optionally followed by DMD2 distillation |
 
 ## Next Steps
 
 1. **Get started**: Pick an example from the [training examples index](examples/examples_training_index.md)
 2. **Prepare data**: Follow [data preprocessing](data_preprocess.md) for your own dataset
-3. **Run inference**: After training, see [inference examples](../inference/examples/examples_inference_index.md)
+3. **Train with quantized attention**: Follow the [Attn-QAT two-stage recipe](attn_qat.md)
+4. **Run inference**: After training, see [inference examples](../inference/examples/examples_inference_index.md)

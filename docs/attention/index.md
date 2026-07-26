@@ -8,13 +8,15 @@ FastVideo provides highly optimized custom attention kernels to accelerate video
 * **[Sliding Tile Attention (STA)](sta/index.md)**: STA kernel support is kept in
   `fastvideo-kernel`; full FastVideo STA pipeline workflow is archived in
   `sta_do_not_delete`.
+* **[Attn-QAT Training](../training/attn_qat.md)**: Runtime-JIT Triton forward
+  and backward kernels for role-local quantization-aware training.
 * **Backend development guide**: See the developer guide at
   [Attention Backend Development](../contributing/attention_backend.md).
 
 ## General Build Instructions
 
 These instructions apply to building the `fastvideo-kernel` package from
-source, which includes both STA and VSA kernels.
+source, which includes STA, VSA, and Attn-QAT kernels.
 
 ### Prerequisites
 

@@ -15,7 +15,7 @@ from fastvideo.models.dits.ltx2 import (
     FeedForward,
     LTXRopeType,
     apply_ltx_rotary_emb,
-    generate_ltx_freq_grid_np,
+    generate_ltx_freq_grid_float64,
     generate_ltx_freq_grid_pytorch,
     precompute_ltx_freqs_cis,
 )
@@ -330,7 +330,7 @@ class Embeddings1DConnector(nn.Module):
         )
         indices_grid = indices_grid[None, None, :]
         freq_grid_generator = (
-            generate_ltx_freq_grid_np
+            generate_ltx_freq_grid_float64
             if self.double_precision_rope
             else generate_ltx_freq_grid_pytorch
         )

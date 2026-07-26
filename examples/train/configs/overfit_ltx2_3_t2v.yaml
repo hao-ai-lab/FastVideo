@@ -1,0 +1,95 @@
+# LTX-2.3 T2V overfitting test config.
+#
+# Overfits on a single short video (480x832, 81 frames @ 24fps) to
+# verify the LTX-2 training plugin works end-to-end on an LTX-2.3
+# checkpoint (gated attention, cross-attention AdaLN, 4096-d
+# post-connector text embeddings, no in-DiT caption projection).
+# Uses the distilled checkpoint (validation is 8 sampling steps).
+#
+# Preprocess data first (writes data/ltx2_3_overfit_preprocessed):
+#   CUDA_VISIBLE_DEVICES=0 \
+#   LTX2_OVERFIT_MODEL=FastVideo/LTX-2.3-Distilled-Diffusers \
+#   LTX2_OVERFIT_OUTPUT_DIR=data/ltx2_3_overfit_preprocessed \
+#   python fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py
+#
+# Run:
+#   NUM_GPUS=4 bash examples/train/run.sh examples/train/configs/overfit_ltx2_3_t2v.yaml
+
+models:
+  student:
+    _target_: fastvideo.train.models.ltx2.LTX2Model
+    init_from: FastVideo/LTX-2.3-Distilled-Diffusers
+    trainable: true
+    enable_gradient_checkpointing_type: full
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: data/ltx2_3_overfit_preprocessed
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    # LTX2Model requires 0.0: CFG dropout would zero post-connector
+    # embeddings, which is not the model's unconditional input.
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 11  # (81 - 1) / 8 + 1
+    num_height: 480
+    num_width: 832
+    num_frames: 81
+
+  optimizer:
+    learning_rate: 5.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 300
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/ltx2_3_overfit
+    # A full training-state checkpoint is ~150GB for the 13B trainable
+    # video branch; disable saves for the overfit smoke run.
+    training_state_checkpointing_steps: 0
+    checkpoints_total_limit: 1
+
+  tracker:
+    trackers: [wandb]
+    project_name: fastvideo_ltx2
+    run_name: ltx2_3_overfit
+
+  model:
+    # LTX2Model.predict_noise converts the DiT's x0 output to velocity,
+    # so the default noise-minus-clean target reproduces the official
+    # unweighted masked-MSE (mask is all-ones for plain T2V).
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.ltx2.ltx2_pipeline.LTX2Pipeline
+    dataset_file: data/ltx2_3_overfit_preprocessed/validation_prompts.json
+    every_steps: 50
+    sampling_steps: [8]
+    guidance_scale: 1.0
+    num_frames: 81
+
+# Required so the LTX2T2VConfig pipeline config is resolved from
+# init_from (without a `pipeline:` key the loader falls back to a
+# generic PipelineConfig and the LTX-2 DiT cannot be constructed).
+pipeline: {}
