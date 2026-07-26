@@ -105,8 +105,24 @@ def run_training(case: dict):
         "--callbacks.validation.dataset_file",
         str(case["prep_dir"] / "validation_prompts.json"),
     ]
+    if (case.get("requires_nvfp4")
+            and torch.cuda.get_device_capability(0) != (12, 0)):
+        cmd.extend(["--callbacks.validation.attn_qat_infer", "false"])
     print(f"Running training: {cmd}")
     subprocess.run(cmd, check=True, env=env)
+
+
+def test_run_training_disables_sm120_only_validation_on_gb200(monkeypatch):
+    commands = []
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda _: (10, 0))
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **_: commands.append(cmd))
+
+    run_training(_CASES["ltx2_nvfp4_qat"])
+
+    assert commands[0][-2:] == [
+        "--callbacks.validation.attn_qat_infer", "false"
+    ]
 
 
 def _validation_videos_by_step(out_dir: Path) -> dict[int, str]:
