@@ -77,7 +77,9 @@ If forcing a backend fails, verify optional dependencies are installed:
 - `SAGE_ATTN`: SageAttention package
 - `SAGE_ATTN_THREE`: upstream `sageattn3` package
 - `ATTN_QAT_INFER`: `fastvideo-kernel` checkout/source install that exposes
-  `attn_qat_infer`
+  `attn_qat_infer`, AND a consumer-Blackwell (sm_120/sm_121) GPU -- on any
+  other device the backend reports unavailable (even if a CUDA 13 wheel
+  bundles the extension) and selection falls back to FlashAttention
 - `ATTN_QAT_TRAIN`: `fastvideo-kernel`; its runtime-JIT Triton implementation
   selects an optimized route on SM100, joins the quantized and STE P@V paths on
   SM120, and retains the previous route for unsupported configurations. See
