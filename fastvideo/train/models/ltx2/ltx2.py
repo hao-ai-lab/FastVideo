@@ -2,7 +2,7 @@
 """LTX-2 model plugin (per-role instance).
 
 Subclasses WanModel but replaces the pieces where LTX-2 differs:
-  - transformer class name: LTX2Transformer3DModel (blocks nested
+  - transformer class name: LTX2VideoOnlyTransformer3DModel (blocks nested
     under ``transformer.model``, so activation checkpointing must
     target the inner module)
   - latents come pre-normalized from the LTX-2 VAE encoder
@@ -12,19 +12,17 @@ Subclasses WanModel but replaces the pieces where LTX-2 differs:
     shifted-logit-normal with a token-count-dependent shift
     (0.95 @ 1024 tokens -> 2.05 @ 4096 tokens) and a 10% uniform
     mixture, instead of scheduler-index sampling
-  - the DiT consumes PER-TOKEN sigmas in [0, 1] shaped [B, tokens]
-    (not integer 0-1000 timesteps) and returns the DENOISED x0
-    prediction; ``predict_noise`` converts it back to the
+  - the DiT consumes sigmas in [0, 1] (one per sample for uniform T2V,
+    expanded per token when sequence parallelism needs to shard them)
+    and returns the DENOISED x0 prediction; ``predict_noise`` converts it back to the
     framework's velocity convention v = (x_t - x0) / sigma so the
     default FineTune target ``noise - clean`` applies unchanged
   - temporal RoPE coordinates are divided by fps read from
     ``get_forward_context().forward_batch.fps``; training must set
     it to the data fps or validation (which uses the preset fps)
     would see different temporal frequencies than training
-  - the ~5.8B audio / cross-modal (a2v, v2a, av_ca) parameters are
-    frozen: video-only forwards never give them
-    gradients, and freezing keeps them out of DCP checkpoints and
-    optimizer state
+  - the ~5.8B audio / cross-modal parameters are omitted entirely; the
+    modular trainer only supports video batches
 """
 
 from __future__ import annotations
@@ -35,9 +33,9 @@ import torch
 
 import fastvideo.envs as envs
 from fastvideo.forward_context import set_forward_context
-from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines import ForwardBatch, TrainingBatch
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing, )
 
@@ -51,13 +49,6 @@ if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
     from fastvideo.train.utils.lora import LoraConfig
-
-logger = init_logger(__name__)
-
-# Parameters whose names match any of these substrings belong to the
-# audio branch or the audio<->video cross-modal machinery. They are
-# unused (no gradients) in video-only forwards.
-_AUDIO_PARAM_PATTERNS = ("audio", "a2v", "v2a", "av_ca")
 
 # Official LTX-2 trainer timestep sampler constants
 # (ltx_trainer/timestep_samplers.py: ShiftedLogitNormalTimestepSampler).
@@ -80,7 +71,7 @@ _DEFAULT_ROPE_FPS = 24.0
 class LTX2Model(WanModel):
     """LTX-2 per-role model for the modular trainer."""
 
-    _transformer_cls_name: str = "LTX2Transformer3DModel"
+    _transformer_cls_name: str = "LTX2VideoOnlyTransformer3DModel"
 
     def __init__(
         self,
@@ -94,6 +85,7 @@ class LTX2Model(WanModel):
         transformer_override_safetensor: str
         | None = None,
         lora: LoraConfig | dict[str, Any] | None = None,
+        attention_backend: AttentionBackendEnum | str | None = None,
         train_audio: bool = False,
         timestep_uniform_prob: float = 0.1,
     ) -> None:
@@ -126,10 +118,8 @@ class LTX2Model(WanModel):
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             transformer_override_safetensor=(transformer_override_safetensor),
             lora=lora,
+            attention_backend=attention_backend,
         )
-
-        if trainable:
-            self._freeze_audio_parameters()
 
         # No negative-prompt cache: cfg_rate is forced to 0 above and
         # loading Gemma (~23GB) on every rank just for an unused
@@ -149,7 +139,12 @@ class LTX2Model(WanModel):
         enable_gradient_checkpointing_type: str | None,
         training_config: TrainingConfig,
         transformer_override_safetensor: str | None = None,
+        attention_backend: AttentionBackendEnum | str | None = None,
     ) -> torch.nn.Module:
+        arch_config = training_config.pipeline_config.dit_config.arch_config
+        if (getattr(arch_config, "pack_attention_projections", False) and self._lora_config is not None
+                and self._lora_config.enable):
+            raise ValueError("LTX-2 packed attention projections do not yet support LoRA training")
         transformer = load_module_from_path(
             model_path=init_from,
             module_type="transformer",
@@ -157,6 +152,7 @@ class LTX2Model(WanModel):
             disable_custom_init_weights=(disable_custom_init_weights),
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
+            attention_backend=attention_backend,
         )
         ckpt_type = (enable_gradient_checkpointing_type or getattr(
             getattr(training_config, "model", None),
@@ -175,18 +171,6 @@ class LTX2Model(WanModel):
             return transformer
         transformer = apply_trainable(transformer, trainable=trainable)
         return transformer
-
-    def _freeze_audio_parameters(self) -> None:
-        frozen_params = 0
-        for name, param in self.transformer.named_parameters():
-            if any(pattern in name for pattern in _AUDIO_PARAM_PATTERNS):
-                param.requires_grad_(False)
-                frozen_params += param.numel()
-        logger.info(
-            "LTX2Model: froze %.2fB audio/cross-modal parameters "
-            "(video-only training)",
-            frozen_params / 1e9,
-        )
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -520,7 +504,8 @@ class LTX2Model(WanModel):
         return training_batch
 
     def _build_attention_metadata(self, training_batch: TrainingBatch) -> TrainingBatch:
-        if envs.FASTVIDEO_ATTENTION_BACKEND in ("VIDEO_SPARSE_ATTN", "VMOBA_ATTN"):
+        attention_backend = (self.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND)
+        if attention_backend in ("VIDEO_SPARSE_ATTN", "VMOBA_ATTN"):
             raise NotImplementedError("LTX2Model does not support VSA/VMOBA attention backends")
         training_batch.attn_metadata = None
         return training_batch
@@ -544,12 +529,13 @@ class LTX2Model(WanModel):
         if token_count is None:
             token_count = int(noise_input.shape[2] * noise_input.shape[3] * noise_input.shape[4])
 
-        # The DiT wants per-token sigmas in [0, 1] shaped [B, tokens]
-        # (i2v-style conditioning would zero conditioned tokens; plain
-        # T2V uses the same sigma everywhere). ``timestep`` follows the
-        # framework's sigma*1000 convention.
+        # Plain T2V uses one sigma per sample. At SP=1 the AdaLN output
+        # broadcasts over tokens, so embedding that sigma once avoids a large
+        # redundant activation. SP sharding still requires an explicit token
+        # dimension so each rank receives its local timestep slice.
         sigma = (timestep.to(torch.float32) / 1000.0).view(batch_size, 1)
-        per_token_timestep = sigma.expand(batch_size, token_count).contiguous()
+        if int(self.training_config.distributed.sp_size or 1) > 1:
+            sigma = sigma.expand(batch_size, token_count).contiguous()
 
         return {
             "hidden_states": noise_input,
@@ -557,6 +543,6 @@ class LTX2Model(WanModel):
             # Post-connector embeddings are all-valid; the connector
             # replaced pad positions with learnable registers.
             "encoder_attention_mask": None,
-            "timestep": per_token_timestep,
+            "timestep": sigma,
             "return_dict": False,
         }

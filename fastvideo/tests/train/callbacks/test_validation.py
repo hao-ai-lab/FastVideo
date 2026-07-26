@@ -14,6 +14,7 @@ distributed init and is exercised by Phase 2/3 tests.
 """
 from __future__ import annotations
 
+import contextlib
 from types import SimpleNamespace
 
 import numpy as np
@@ -28,6 +29,10 @@ from fastvideo.train.callbacks.validation import (
     SYNTHETIC_OPTICAL_FLOW_METRIC,
     ValidationCallback,
     _ValidationMetricStats,
+)
+from fastvideo.train.utils.training_config import (
+    ModelTrainingConfig,
+    TrainingConfig,
 )
 
 
@@ -217,6 +222,51 @@ class TestOnValidationBegin:
         cb = _make_recording(every_steps=50)
         cb.on_validation_begin(method=None, iteration=0)
         assert cb.run_calls == [0]
+
+
+@pytest.mark.parametrize("compile_enabled", [False, True])
+def test_validation_forces_compiled_transformer_eager(
+    monkeypatch: pytest.MonkeyPatch,
+    compile_enabled: bool,
+) -> None:
+    cb = _make_callback()
+    cb.training_config = TrainingConfig(
+        model=ModelTrainingConfig(enable_torch_compile=compile_enabled),
+    )
+    transformer = torch.nn.Linear(1, 1)
+    method = SimpleNamespace(student=SimpleNamespace(transformer=transformer))
+    events: list[tuple[str, object]] = []
+
+    @contextlib.contextmanager
+    def recording_ema(_transformer: torch.nn.Module):
+        events.append(("ema_enter", _transformer))
+        yield _transformer
+        events.append(("ema_exit", _transformer))
+
+    @contextlib.contextmanager
+    def recording_stance(stance: str):
+        events.append(("enter", stance))
+        yield
+        events.append(("exit", stance))
+
+    monkeypatch.setattr(torch.compiler, "set_stance", recording_stance)
+    monkeypatch.setattr(
+        cb,
+        "_find_ema_callback",
+        lambda: SimpleNamespace(ema_context=recording_ema),
+    )
+    monkeypatch.setattr(
+        cb,
+        "_run_validation_inner",
+        lambda _method, _step, model: events.append(("inner", model)),
+    )
+
+    cb._run_validation(method, 0)
+
+    expected = [("ema_enter", transformer), ("inner", transformer), ("ema_exit", transformer)]
+    if compile_enabled:
+        expected = [("enter", "force_eager"), *expected, ("exit", "force_eager")]
+    assert events == expected
 
 
 # ---------------------------------------------------------------------------

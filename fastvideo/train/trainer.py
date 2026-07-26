@@ -183,6 +183,8 @@ class Trainer:
                         step,
                     ))
 
+                    if grad_accum > 1:
+                        method.set_requires_gradient_sync(accum_iter == grad_accum - 1)
                     method.backward(
                         loss_map,
                         outputs,

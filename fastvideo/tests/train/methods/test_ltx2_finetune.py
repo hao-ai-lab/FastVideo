@@ -5,7 +5,7 @@ Mirrors ``test_wan_finetune.py`` for the LTX-2 plugin, parametrized
 over LTX-2.0 and LTX-2.3 checkpoints. LTX2-specific differences: the
 synthetic ``raw_batch`` carries a single post-connector Gemma
 embedding (3840-d for 2.0, 4096-d for 2.3 which has no in-DiT caption
-projection) and 128-channel VAE latents; the DiT is 18.9B params, so
+projection) and 128-channel VAE latents; the video-only DiT is 13B params, so
 the test skips on GPUs with less than 60GB memory (e.g. the L40S CI
 runner).
 """
@@ -24,6 +24,7 @@ import torch
 
 from fastvideo.train.methods.fine_tuning.finetune import (
     FineTuneMethod, )
+from fastvideo.models.dits.ltx2 import LTX2VideoOnlyTransformer3DModel
 from fastvideo.train.models.ltx2 import LTX2Model
 from fastvideo.train.utils.config import load_run_config
 
@@ -144,15 +145,13 @@ def test_ltx2_finetune_single_train_step(
         "all layer-0 grads are exactly zero; backward did not "
         "reach the first transformer block")
 
-    # Audio / cross-modal parameters must be frozen by default.
-    audio_trainable = [
-        name for name, param in model.transformer.named_parameters()
-        if param.requires_grad and any(
-            pattern in name for pattern in ("audio", "a2v", "v2a", "av_ca"))
+    # Audio / cross-modal parameters are not instantiated for training.
+    audio_parameters = [
+        name for name, _ in model.transformer.named_parameters()
+        if LTX2VideoOnlyTransformer3DModel._is_ignored_checkpoint_key(name)
     ]
-    assert not audio_trainable, (
-        f"audio/cross-modal params unexpectedly trainable: "
-        f"{audio_trainable[:5]}")
+    assert not audio_parameters, (
+        f"audio/cross-modal params unexpectedly present: {audio_parameters[:5]}")
 
     # Device-keyed grad-norm regression on top of the same harness.
     # Skips when the current GPU has no seeded reference.

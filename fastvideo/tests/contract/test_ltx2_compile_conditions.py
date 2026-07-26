@@ -36,6 +36,12 @@ def test_is_ltx2_blocks_matches_only_top_level_blocks():
     assert not is_ltx2_blocks("audio_transformer_blocks.0", None)
 
 
+def test_fsdp_output_hook_registration_stays_outside_compiled_graph():
+    register_hooks = ltx2.BasicAVTransformerBlock._register_fsdp_backward_hooks_on_output
+
+    assert getattr(register_hooks, "_torchdynamo_disable", False) is True
+
+
 def test_freq_grid_cache_is_bypassed_while_compiling():
     args = (10000.0, 3, 96)
     for generator, cached_generator in (

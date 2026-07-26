@@ -272,8 +272,11 @@ class ValidationCallback(Callback):
                 # Look for an EMA callback to temporarily swap
                 # EMA weights during validation.
                 ema_cb = self._find_ema_callback()
-                ctx = ema_cb.ema_context(transformer) if ema_cb is not None else contextlib.nullcontext(transformer)
-                with ctx as t:
+                ema_ctx = ema_cb.ema_context(transformer) if ema_cb is not None else contextlib.nullcontext(transformer)
+                # Keep inference-only graphs out of the training transformer's compile cache.
+                compile_ctx = (torch.compiler.set_stance("force_eager")
+                               if self.training_config.model.enable_torch_compile else contextlib.nullcontext())
+                with compile_ctx, ema_ctx as t:
                     self._run_validation_inner(
                         method,
                         step,

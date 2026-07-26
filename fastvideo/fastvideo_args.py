@@ -908,6 +908,8 @@ class TrainingArgs(FastVideoArgs):
     mixed_precision: str = ""
     train_sp_batch_size: int = 0
     fsdp_sharding_startegy: str = ""
+    fsdp_reduce_dtype: str = "fp32"
+    fsdp_modules_per_group: int = 1
 
     weighting_scheme: str = ""
     logit_mean: float = 0.0

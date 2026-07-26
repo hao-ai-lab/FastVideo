@@ -24,7 +24,11 @@ from fastvideo.train.utils.training_config import (
 
 logger = init_logger(__name__)
 
-_TRAINING_DIT_ARCH_OVERRIDE_KEYS = ("local_attn_size", "sink_size")
+_TRAINING_DIT_ARCH_OVERRIDE_KEYS = (
+    "local_attn_size",
+    "sink_size",
+    "pack_attention_projections",
+)
 
 
 @dataclass(slots=True)
@@ -334,6 +338,9 @@ def _build_training_config(
 
     betas_raw = o.get("betas", "0.9,0.999")
     betas = parse_betas(betas_raw, where="training.optimizer.betas")
+    fused = o.get("fused")
+    if fused is not None:
+        fused = require_bool(o, "fused", where="training.optimizer.fused")
 
     model_path = str(t.get("model_path", "") or "")
     if not model_path:
@@ -358,6 +365,12 @@ def _build_training_config(
                          "{'t2v', 'text_only'}, got "
                          f"{preprocessed_data_type!r}")
 
+    reduce_dtype = str(d.get("reduce_dtype", "fp32") or "fp32").strip().lower()
+    if reduce_dtype not in {"fp32", "bf16"}:
+        raise ValueError("training.distributed.reduce_dtype must be one of "
+                         "{'fp32', 'bf16'}, got "
+                         f"{reduce_dtype!r}")
+
     return TrainingConfig(
         distributed=DistributedConfig(
             num_gpus=num_gpus,
@@ -366,6 +379,25 @@ def _build_training_config(
             hsdp_replicate_dim=int(d.get("hsdp_replicate_dim", 1) or 1),
             hsdp_shard_dim=int(d.get("hsdp_shard_dim", num_gpus) or num_gpus),
             pin_cpu_memory=bool(d.get("pin_cpu_memory", False)),
+            reshard_after_forward=require_bool(
+                d,
+                "reshard_after_forward",
+                default=True,
+                where="training.distributed.reshard_after_forward",
+            ),
+            fsdp_symmetric_memory=require_bool(
+                d,
+                "fsdp_symmetric_memory",
+                default=False,
+                where="training.distributed.fsdp_symmetric_memory",
+            ),
+            fsdp_modules_per_group=require_positive_int(
+                d,
+                "fsdp_modules_per_group",
+                default=1,
+                where="training.distributed.fsdp_modules_per_group",
+            ),
+            reduce_dtype=reduce_dtype,
         ),
         data=DataConfig(
             data_path=data_path,
@@ -388,6 +420,7 @@ def _build_training_config(
             lr_num_cycles=int(o.get("lr_num_cycles", 0) or 0),
             lr_power=float(o.get("lr_power", 0.0) or 0.0),
             min_lr_ratio=float(o.get("min_lr_ratio", 0.5) or 0.5),
+            fused=fused,
         ),
         loop=TrainingLoopConfig(
             max_train_steps=int(lo.get("max_train_steps", 0) or 0),
@@ -415,6 +448,12 @@ def _build_training_config(
             precondition_outputs=bool(m.get("precondition_outputs", False)),
             moba_config=dict(m.get("moba_config", {}) or {}),
             enable_gradient_checkpointing_type=(m.get("enable_gradient_checkpointing_type")),
+            enable_torch_compile=require_bool(
+                m,
+                "enable_torch_compile",
+                default=False,
+                where="training.model.enable_torch_compile",
+            ),
         ),
         pipeline_config=pipeline_config,
         model_path=model_path,

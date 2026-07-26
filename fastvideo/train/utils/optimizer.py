@@ -42,6 +42,7 @@ def build_optimizer_and_scheduler(
         betas=betas,
         weight_decay=float(optimizer_config.weight_decay),
         eps=1e-8,
+        fused=optimizer_config.fused,
     )
 
     scheduler = get_scheduler(
@@ -61,12 +62,11 @@ def build_optimizer_and_scheduler(
 def clip_grad_norm_if_needed(
     module: torch.nn.Module,
     max_grad_norm: float,
-) -> float:
+) -> torch.Tensor | None:
     if max_grad_norm <= 0.0:
-        return 0.0
-    grad_norm = (clip_grad_norm_while_handling_failing_dtensor_cases(
+        return None
+    return (clip_grad_norm_while_handling_failing_dtensor_cases(
         [p for p in module.parameters()],
         max_grad_norm,
         foreach=None,
     ))
-    return (float(grad_norm.item()) if grad_norm is not None else 0.0)

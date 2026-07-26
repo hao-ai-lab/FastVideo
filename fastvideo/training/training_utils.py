@@ -3,7 +3,7 @@ import json
 import math
 import os
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from enum import Enum
 from typing import Any
 
@@ -15,6 +15,10 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 
 from fastvideo.logger import init_logger
+from fastvideo.models.loader.utils import (
+    ReverseParamNamesMapping,
+    custom_to_hf_state_dict,
+)
 from fastvideo.training.checkpointing_utils import (ModelWrapper, OptimizerWrapper, RandomStateWrapper,
                                                     SchedulerWrapper)
 
@@ -936,6 +940,11 @@ def _clip_grads_with_norm_(
     max_norm = float(max_norm)
     if len(grads) == 0:
         return
+    # FSDP2 exposes sharded gradients as DTensors. Foreach only recognizes
+    # ordinary tensors, but mutating a DTensor's local shard updates the
+    # gradient in place. Localize before grouping so one foreach kernel can
+    # replace a Python loop and one scalar kernel per parameter.
+    grads = [g.to_local() if isinstance(g, torch.distributed.tensor.DTensor) else g for g in grads]
     grouped_grads: dict[tuple[torch.device, torch.dtype],
                         tuple[list[list[torch.Tensor]],
                               list[int]]] = (_group_tensors_by_device_and_dtype([grads]))  # type: ignore[assignment]
@@ -1016,68 +1025,9 @@ def _has_foreach_support(tensors: list[torch.Tensor], device: torch.device) -> b
     return _device_has_foreach_support(device) and all(t is None or type(t) in [torch.Tensor] for t in tensors)
 
 
-def custom_to_hf_state_dict(state_dict: dict[str, Any] | Iterator[tuple[str, torch.Tensor]],
-                            reverse_param_names_mapping: dict[str, tuple[str, int, int]]) -> dict[str, Any]:
-    """
-    Convert fastvideo's custom model format to diffusers format using reverse_param_names_mapping.
-    
-    Args:
-        state_dict: State dict in fastvideo's custom format
-        reverse_param_names_mapping: Reverse mapping from fastvideo's custom format to diffusers format
-        
-    Returns:
-        State dict in diffusers format
-    """
-    assert len(reverse_param_names_mapping) > 0, "reverse_param_names_mapping is empty"
-    if isinstance(state_dict, Iterator):
-        state_dict = dict(state_dict)
-    new_state_dict = {}
-    # Group parameters that need to be split (merged parameters)
-    merge_groups: dict[str, list[tuple[str, int, int]]] = {}
-
-    # First pass: collect all merge groups
-    for training_key, (diffusers_key, merge_index, num_params_to_merge) in reverse_param_names_mapping.items():
-        if merge_index is not None:
-            # This is a merged parameter that needs to be split
-            if training_key not in merge_groups:
-                merge_groups[training_key] = []
-            merge_groups[training_key].append((diffusers_key, merge_index, num_params_to_merge))
-
-    # Second pass: handle merged parameters by splitting them
-    used_keys = set()
-    for training_key, splits in merge_groups.items():
-        if training_key in state_dict:
-            v = state_dict[training_key]
-            # Sort by merge_index to ensure correct order
-            splits.sort(key=lambda x: x[1])
-            total = splits[0][2]
-            split_size = v.shape[0] // total
-            split_tensors = torch.split(v, split_size, dim=0)
-
-            for diffusers_key, split_index, _ in splits:
-                new_state_dict[diffusers_key] = split_tensors[split_index]
-            used_keys.add(training_key)
-
-    # Third pass: handle regular parameters (direct mappings)
-    for training_key, v in state_dict.items():
-        if training_key in used_keys:
-            continue
-
-        if training_key in reverse_param_names_mapping:
-            diffusers_key, merge_index, _ = reverse_param_names_mapping[training_key]
-            if merge_index is None:
-                # Direct mapping
-                new_state_dict[diffusers_key] = v
-        else:
-            # No mapping found, keep as is
-            new_state_dict[training_key] = v
-
-    return new_state_dict
-
-
 def _save_full_ema_safetensors_from_state(
     state_dict: dict[str, Any],
-    reverse_param_names_mapping: dict[str, tuple[str, int, int]],
+    reverse_param_names_mapping: ReverseParamNamesMapping,
     output_path: str,
 ) -> None:
     """

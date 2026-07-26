@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU-only unit tests for :mod:`fastvideo.train.callbacks.grad_clip`.
 
-Exercises ``GradNormClipCallback.on_before_optimizer_step`` against
+Exercises deferred gradient-norm logging after the optimizer boundary using
 synthetic ``nn.Module`` targets with manually populated gradients.
 """
 from __future__ import annotations
@@ -118,10 +118,10 @@ class TestGradNormClipCallback:
         cb = GradNormClipCallback(
             max_grad_norm=1.0, log_grad_norms=True
         )
-        cb.on_before_optimizer_step(
-            method=_Method(targets={"layer": m}, tracker=tracker),
-            iteration=7,
-        )
+        method = _Method(targets={"layer": m}, tracker=tracker)
+        cb.on_before_optimizer_step(method=method, iteration=7)
+        assert tracker.entries == []
+        cb.on_training_step_end(method=method, loss_dict={}, iteration=7)
         assert len(tracker.entries) == 1
         payload, step = tracker.entries[0]
         assert step == 7
@@ -138,6 +138,11 @@ class TestGradNormClipCallback:
             method=_Method(targets={"m": m}, tracker=tracker),
             iteration=0,
         )
+        cb.on_training_step_end(
+            method=_Method(targets={"m": m}, tracker=tracker),
+            loss_dict={},
+            iteration=0,
+        )
         assert tracker.entries == []
 
     def test_no_tracker_does_not_raise(self) -> None:
@@ -152,7 +157,9 @@ class TestGradNormClipCallback:
             ) -> dict[str, torch.nn.Module]:
                 return {"m": m}
 
-        cb.on_before_optimizer_step(method=_BareMethod(), iteration=0)
+        method = _BareMethod()
+        cb.on_before_optimizer_step(method=method, iteration=0)
+        cb.on_training_step_end(method=method, loss_dict={}, iteration=0)
         # No assertion — must simply not raise.
 
     def test_multiple_targets_each_logged(self) -> None:
@@ -162,9 +169,48 @@ class TestGradNormClipCallback:
         }
         tracker = _RecordingTracker()
         cb = GradNormClipCallback(max_grad_norm=1.0)
-        cb.on_before_optimizer_step(
-            method=_Method(targets=targets, tracker=tracker),
-            iteration=1,
-        )
+        method = _Method(targets=targets, tracker=tracker)
+        cb.on_before_optimizer_step(method=method, iteration=1)
+        assert tracker.entries == []
+        cb.on_training_step_end(method=method, loss_dict={}, iteration=1)
         keys = {next(iter(p)) for p, _ in tracker.entries}
         assert keys == {"grad_norm/head", "grad_norm/tail"}
+
+    def test_norm_materialized_only_after_optimizer_boundary(
+        self, monkeypatch
+    ) -> None:
+        events: list[str] = []
+
+        class _DeferredNorm:
+
+            def item(self) -> float:
+                events.append("item")
+                return 2.0
+
+        class _EventTracker:
+
+            def log(self, payload: dict[str, Any], step: int) -> None:
+                assert payload == {"grad_norm/layer": 2.0}
+                assert step == 3
+                events.append("log")
+
+        def _fake_clip(*_args, **_kwargs):
+            events.append("clip")
+            return _DeferredNorm()
+
+        monkeypatch.setattr(
+            "fastvideo.train.callbacks.grad_clip.clip_grad_norm_if_needed",
+            _fake_clip,
+        )
+        method = _Method(
+            targets={"layer": _make_module(grad_value=1.0)},
+            tracker=_EventTracker(),
+        )
+        cb = GradNormClipCallback(max_grad_norm=1.0)
+
+        cb.on_before_optimizer_step(method=method, iteration=3)
+        events.append("optimizer")
+        events.append("zero_grad")
+        cb.on_training_step_end(method=method, loss_dict={}, iteration=3)
+
+        assert events == ["clip", "optimizer", "zero_grad", "item", "log"]
