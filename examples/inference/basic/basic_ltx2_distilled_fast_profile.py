@@ -191,6 +191,22 @@ def main() -> None:
     print(f"Using refine upsampler: {refine_upsampler_path}")
 
     pipeline_config = PipelineConfig.from_pretrained(model_root)
+    # LTX-2 NVFP4 deploy contract (train==deploy surface):
+    #   * Linears: NVFP4 block-scaled GEMMs (per-16 E2M1 + E4M3 SFs) on every
+    #     arch, via flashinfer.
+    #   * ATTN_QAT_INFER attention differs per arch: sm_120a/sm_121a use the
+    #     fastvideo-kernel CUTLASS (SageAttention3-FP4) scheme that
+    #     ATTN_QAT_TRAIN simulates; sm_100a (GB200) / sm_103a (GB300) use the
+    #     FP4 FA4 kernel (flash-attention-fp4) with per-16 block-scaled NVFP4
+    #     Q/K and BF16 P/V -- a train-sim mismatch that is gated by MS-SSIM
+    #     measurement, not assumed equal. The selection receipt is logged at
+    #     backend resolution ("ATTN_QAT_INFER resolved: ...").
+    # Original-weight retention: the default purges the always-FP4 layers'
+    # bf16 originals after conversion. Refine-only layers (the cross-modal
+    # AV projections) always keep theirs: the base stage profile runs them
+    # dense by deployment contract -- in the two-stage fast profile AND the
+    # distilled single-stage deploy. retain_original_weights=True keeps
+    # everything (debugging).
     pipeline_config.dit_config.quant_config = NVFP4Config()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     torch_compile_kwargs = {

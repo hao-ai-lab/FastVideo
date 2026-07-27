@@ -142,11 +142,13 @@ class CudaPlatformBase(Platform):
                 logger.info("Sage Attention 3 backend is not installed. Fall back to Flash Attention.")
         elif selected_backend == AttentionBackendEnum.ATTN_QAT_INFER:
             from fastvideo.attention.backends.attn_qat_infer import (  # noqa: F401
-                AttnQatInferBackend, is_attn_qat_infer_available)
+                AttnQatInferBackend, attn_qat_infer_receipt, is_attn_qat_infer_available)
             if is_attn_qat_infer_available():
-                logger.info("Using Attn-QAT inference (modified SageAttention3 FP4) backend.")
+                logger.info("Using Attn-QAT inference backend (%s).", attn_qat_infer_receipt())
                 return "fastvideo.attention.backends.attn_qat_infer.AttnQatInferBackend"
-            logger.info("Attn-QAT inference kernel is not built. Fall back to Flash Attention.")
+            # Keep the trailing sentence stable: downstream receipts grep for it.
+            logger.info("Attn-QAT inference kernel is not built (%s). Fall back to Flash Attention.",
+                        attn_qat_infer_receipt())
         elif selected_backend == AttentionBackendEnum.ATTN_QAT_TRAIN:
             from fastvideo.attention.backends.attn_qat_train import (  # noqa: F401
                 AttnQatTrainBackend, is_attn_qat_train_available)

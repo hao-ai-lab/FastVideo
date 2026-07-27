@@ -149,3 +149,57 @@ class TestNVFP4FA4:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available()
+    or torch.cuda.get_device_capability() not in [(10, 0), (10, 3)],
+    reason="Requires Blackwell GPU (sm100a or sm103a)"
+)
+class TestAttnQatInferFA4Route:
+    """ATTN_QAT_INFER resolves to the FP4 FA4 kernel on sm_100/sm_103.
+
+    Hardware-validated on both GB200 (sm_100a) and GB300 (sm_103a): route
+    resolution, SDPA parity, and cross-attention lengths pass on real
+    silicon for each capability in the FA4-FP4 set.
+    """
+
+    def test_resolves_to_fa4(self):
+        from fastvideo.attention.backends.attn_qat_infer import (
+            _resolved_kernel, attn_qat_infer_receipt, is_attn_qat_infer_available)
+        assert is_attn_qat_infer_available()
+        assert _resolved_kernel() == "fa4_fp4"
+        receipt = attn_qat_infer_receipt()
+        assert "qk_mode=nvfp4(per-16-e4m3-sf)" in receipt
+        assert "pv_mode=bf16" in receipt
+
+    def test_forward_parity_vs_sdpa(self):
+        from fastvideo.attention.backends.attn_qat_infer import AttnQatInferImpl
+        torch.manual_seed(0)
+        b, s, h, d = 1, 4096, 12, 128
+        q = torch.randn(b, s, h, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(b, s, h, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(b, s, h, d, device="cuda", dtype=torch.bfloat16)
+
+        impl = AttnQatInferImpl(num_heads=h, head_size=d, causal=False, softmax_scale=d**-0.5)
+        out = impl.forward(q, k, v, attn_metadata=None)
+
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            q.transpose(1, 2).float(), k.transpose(1, 2).float(),
+            v.transpose(1, 2).float()).transpose(1, 2)
+
+        cos = torch.nn.functional.cosine_similarity(out.float().flatten(), ref.flatten(), dim=0).item()
+        # Same bound the sm_120 CUTLASS kernel test uses; FA4 NVFP4 QK
+        # measures cos_sim ~0.99 vs BF16 (kernel repo README precision table).
+        assert cos >= 0.97, f"cos_sim={cos:.4f} < 0.97"
+
+    def test_cross_attention_lengths(self):
+        from fastvideo.attention.backends.attn_qat_infer import AttnQatInferImpl
+        torch.manual_seed(0)
+        b, h, d = 1, 12, 128
+        q = torch.randn(b, 384, h, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(b, 512, h, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(b, 512, h, d, device="cuda", dtype=torch.bfloat16)
+        impl = AttnQatInferImpl(num_heads=h, head_size=d, causal=False, softmax_scale=d**-0.5)
+        out = impl.forward(q, k, v, attn_metadata=None)
+        assert out.shape == (b, 384, h, d)

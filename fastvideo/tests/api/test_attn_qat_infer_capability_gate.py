@@ -44,7 +44,11 @@ FALLBACK_CLASSES = {
 }
 
 
-def _fake_gpu(monkeypatch, *, capability: tuple[int, int], extension_imports: bool) -> None:
+def _fake_gpu(monkeypatch,
+              *,
+              capability: tuple[int, int],
+              extension_imports: bool,
+              fa4_imports: bool = False) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: capability)
     monkeypatch.setattr(
@@ -52,6 +56,10 @@ def _fake_gpu(monkeypatch, *, capability: tuple[int, int], extension_imports: bo
         "_get_attn_qat_infer",
         lambda: (lambda *a, **k: None) if extension_imports else None,
     )
+    # The FP4 FA4 probe (flash-attention-fp4, the sm_100a/sm_103a route) is
+    # a physical fact of the running environment; fake it like the others so
+    # these tests are deterministic on hosts with/without flash_attn.cute.
+    monkeypatch.setattr(attn_qat_infer_module, "_fa4_fp4_available", lambda: fa4_imports)
 
 
 def _resolve() -> str:
@@ -72,10 +80,22 @@ def test_sm90_host_with_bundled_extension_falls_back(monkeypatch):
 
 
 def test_sm100_host_with_bundled_extension_falls_back(monkeypatch):
-    _fake_gpu(monkeypatch, capability=(10, 0), extension_imports=True)
+    """sm_100 with only the (unrunnable) bundled sm_12x extension and no
+    FP4 FA4 kernel still falls back -- the original reviewed failure class."""
+    _fake_gpu(monkeypatch, capability=(10, 0), extension_imports=True, fa4_imports=False)
 
     assert not is_attn_qat_infer_available()
     assert _resolve() in FALLBACK_CLASSES
+
+
+@pytest.mark.parametrize("capability", [(10, 0), (10, 3)])
+def test_datacenter_blackwell_with_fa4_selects_backend(monkeypatch, capability):
+    """sm_100a/sm_103a resolve ATTN_QAT_INFER through the FP4 FA4 route
+    when flash-attention-fp4 is installed (even without the sm_12x ext)."""
+    _fake_gpu(monkeypatch, capability=capability, extension_imports=False, fa4_imports=True)
+
+    assert is_attn_qat_infer_available()
+    assert _resolve() == ATTN_QAT_INFER_CLS
 
 
 @pytest.mark.parametrize("capability", [(12, 0), (12, 1)])
