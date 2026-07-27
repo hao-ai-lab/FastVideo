@@ -157,6 +157,7 @@ class Worker:
         maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size,
                                                               sp_size,
                                                               self.distributed_init_method,
+                                                              ring_size=self.fastvideo_args.ring_size,
                                                               timeout=dist_timeout,
                                                               **group_ranks)
 
