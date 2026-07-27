@@ -327,3 +327,67 @@ def test_encode_text_explicit_device_overrides_hf_passthrough_marker():
 
     assert stage.text_encoders[0].last_input_device == torch.device("meta")
     assert output[0].device.type == "meta"
+
+
+class StaticBufferTextEncoder(torch.nn.Module):
+    """Mimics a text encoder compiled with torch.compile
+    mode="reduce-overhead"/"max-autotune" (CUDAGraphs): every forward returns
+    tensors backed by the same static storage, which the next invocation
+    overwrites in place."""
+
+    def __init__(self, text_len=4, hidden_size=8):
+        super().__init__()
+        self.register_buffer("static_out",
+                             torch.zeros(1, text_len, hidden_size))
+        self.register_buffer("static_audio",
+                             torch.zeros(1, text_len, hidden_size))
+
+    def forward(self, input_ids, attention_mask, output_hidden_states=False):
+        # A CUDAGraph replay rewrites the static output buffers in place.
+        self.static_out += 1.0
+        self.static_audio += 2.0
+        hidden_states = (self.static_audio, ) if output_hidden_states else None
+        return types.SimpleNamespace(last_hidden_state=self.static_out,
+                                     hidden_states=hidden_states)
+
+
+def identity_postprocess(outputs: BaseEncoderOutput) -> torch.Tensor:
+    return outputs.last_hidden_state
+
+
+def test_encode_text_output_does_not_alias_encoder_static_buffers():
+    # Regression: with a CUDAGraph-compiled text encoder, the raw forward
+    # outputs are graph-owned static buffers (for the LTX-2 Gemma encoder the
+    # escaping tensors are produced by the connector's final rms_norm). The
+    # CFG negative-prompt encode replays the graph and overwrites them, so
+    # consuming the positive prompt's embeds at denoising time raised
+    # "accessing tensor output of CUDAGraphs that has been overwritten by a
+    # subsequent run". encode_text must copy every embedding it retains out
+    # of encoder-owned storage.
+    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    fastvideo_args.pipeline_config.dit_config.prefix = "ltx2"
+    fastvideo_args.pipeline_config.postprocess_text_funcs = (identity_postprocess, )
+    cfg = fastvideo_args.pipeline_config.text_encoder_configs[0].arch_config
+    cfg.output_hidden_states = True
+
+    encoder = StaticBufferTextEncoder(text_len=4, hidden_size=hidden)
+    stage = TextEncodingStage(text_encoders=[encoder],
+                              tokenizers=[FakeTokenizer()])
+
+    embeds = stage.encode_text("a cat", fastvideo_args, encoder_index=[0],
+                               device="cpu")
+    prompt_embeds = embeds[0]
+    audio_embeds = stage._last_audio_embeds[0]
+
+    # The retained tensors must not alias the encoder's reused output storage.
+    assert prompt_embeds.data_ptr() != encoder.static_out.data_ptr()
+    assert audio_embeds.data_ptr() != encoder.static_audio.data_ptr()
+
+    # And their values must survive a subsequent encode (the negative prompt)
+    # that overwrites the encoder's static buffers in place.
+    expected_prompt = prompt_embeds.clone()
+    expected_audio = audio_embeds.clone()
+    stage.encode_text("bad quality", fastvideo_args, encoder_index=[0],
+                      device="cpu")
+    torch.testing.assert_close(prompt_embeds, expected_prompt)
+    torch.testing.assert_close(audio_embeds, expected_audio)

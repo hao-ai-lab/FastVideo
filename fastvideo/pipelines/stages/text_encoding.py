@@ -315,14 +315,19 @@ class TextEncodingStage(PipelineStage):
                 prompt_embeds = postprocess_func(outputs)
             except Exception:
                 prompt_embeds, attention_mask = postprocess_func(outputs, attention_mask)
+            # copy=True: when the text encoder is torch.compile'd with
+            # mode="reduce-overhead"/"max-autotune" (CUDAGraphs), its output
+            # tensors are backed by the graph's static buffer pool and are
+            # overwritten by the next encode call (e.g. the negative prompt).
+            # Retaining them past this call (batch.prompt_embeds is consumed
+            # at denoising time) then raises "accessing tensor output of
+            # CUDAGraphs that has been overwritten by a subsequent run", so
+            # copy them out of graph-owned storage here, at the single point
+            # where encoder outputs escape the compiled region.
             if is_ltx2 and getattr(outputs, "hidden_states", None):
-                audio_embed = outputs.hidden_states[0].to(device=target_device)
-                if dtype is not None:
-                    audio_embed = audio_embed.to(dtype=dtype)
+                audio_embed = outputs.hidden_states[0].to(device=target_device, dtype=dtype, copy=True)
                 audio_embeds_list.append(audio_embed)
-            prompt_embeds = prompt_embeds.to(device=target_device)
-            if dtype is not None:
-                prompt_embeds = prompt_embeds.to(dtype=dtype)
+            prompt_embeds = prompt_embeds.to(device=target_device, dtype=dtype, copy=True)
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
                 attn_masks_list.append(attention_mask.to(device=target_device))
