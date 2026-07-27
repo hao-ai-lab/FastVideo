@@ -257,6 +257,59 @@ missing. Then run the current 44.1 kHz VGGSound cache on four GPUs:
 bash examples/training/finetune/mmaudio/run_train_vggsound_from_scratch.sh
 ```
 
+### Optional full-replica DDP for `small_44k`
+
+MMAudio's upstream runner uses native PyTorch DDP with one complete model per
+GPU and `broadcast_buffers=False`. FastVideo exposes that behavior as the
+opt-in `training.distributed.strategy: ddp`; the default remains `fsdp`, so
+existing model configs and the launcher above are unchanged. The initial DDP
+plugin is intentionally limited to MMAudio from-scratch training.
+
+The independent four-GPU config and launcher are:
+
+```text
+examples/train/configs/fine_tuning/mmaudio/small_44k_ddp_from_scratch.yaml
+examples/training/finetune/mmaudio/run_train_vggsound_ddp_from_scratch.sh
+```
+
+Run it only after the current GPU job has finished:
+
+```bash
+bash examples/training/finetune/mmaudio/run_train_vggsound_ddp_from_scratch.sh
+```
+
+The script uses port `29502` and writes to
+`outputs/mmaudio_small_44k_ddp_from_scratch`, so it does not reuse the FSDP
+job's rendezvous or output directory. DDP can be faster for this small model
+when every GPU can hold the full model, optimizer, activations, and rank 0's
+two EMA copies. The DDP config also enables upstream's fused AdamW. It uses
+more per-GPU model memory than FSDP.
+
+The DDP config also enables `training.model.compile_train_fn: true`.
+Following upstream MMAudio, compilation happens after DDP wrapping. For
+PyTorch 2.12 compatibility, FastVideo keeps explicit-Generator posterior,
+flow-time, prior, and CFG-mask sampling in eager code, applies masks with
+broadcasted `torch.where`, and compiles the inner transformer's tensor-only
+forward with `fullgraph: true`. The outer DDP reducer/control flow and the
+lightweight MSE loss remain eager. This preserves the official RNG order while
+making any graph break inside the expensive transformer graph a hard error
+instead of a silent fallback.
+
+Set `COMPILE_TRAIN_FN=false` near the top of the DDP launcher to disable it.
+The typed default is `false`, and the option is currently rejected for FSDP,
+so existing FastVideo pipelines are unaffected. Validation loss reuses the
+compiled transformer forward; periodic generation keeps its separate eager
+`guided_flow` path. Optional `torch.compile` arguments can be placed under
+`training.model.torch_compile_kwargs`.
+
+For parity with upstream MMAudio, rank 0 runs the exact
+`nitrous_ema.PostHocEMA` implementation with sigma profiles `[0.05, 0.1]`,
+updates every optimizer step, and snapshots every 5,000 steps. FastVideo's
+distributed checkpoint interval is 10,000 steps so every resumable training
+checkpoint has a matching EMA snapshot. Periodic validation/inference still
+uses online weights, and the final sigma-0.05 synthesis is saved under
+`posthoc_ema/official_ddp/`.
+
 Set `VARIANT` to `medium_44k` or `large_44k` without changing the feature
 cache. The launcher computes official latent normalization statistics once,
 saves `latent_statistics_44k.pt` inside the feature directory, and reuses it

@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import random
+from collections import Counter
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -21,6 +23,8 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
             k.replace("._checkpoint_wrapped_module.", ".")
             for k, v in self.model.named_parameters() if v.requires_grad
         }
+        if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+            param_requires_grad = {key.removeprefix("module.") for key in param_requires_grad}
 
         filtered_state_dict = {k: v for k, v in state_dict.items() if k in param_requires_grad}
 
@@ -62,10 +66,35 @@ class SchedulerWrapper(torch.distributed.checkpoint.stateful.Stateful):
         self.scheduler = scheduler
 
     def state_dict(self) -> dict[str, Any]:
-        return {"scheduler": self.scheduler.state_dict()}
+        return {"scheduler": _scheduler_state_for_dcp(self.scheduler.state_dict())}
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        self.scheduler.load_state_dict(state_dict["scheduler"])
+        self.scheduler.load_state_dict(_scheduler_state_from_dcp(state_dict["scheduler"]))
+
+
+def _scheduler_state_for_dcp(value: Any, *, name: str = "") -> Any:
+    """Use stable string keys for scheduler mappings flattened by DCP."""
+    if isinstance(value, Mapping):
+        if name == "milestones":
+            return {str(key): item for key, item in value.items()}
+        return {key: _scheduler_state_for_dcp(item, name=str(key)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_scheduler_state_for_dcp(item) for item in value]
+    return value
+
+
+def _scheduler_state_from_dcp(value: Any, *, name: str = "") -> Any:
+    """Restore MultiStepLR milestones after DCP stringifies mapping keys."""
+    if isinstance(value, Mapping):
+        if name == "milestones":
+            milestones: dict[int, Any] = {}
+            for key, item in value.items():
+                milestones[int(key)] = item
+            return Counter(milestones)
+        return {key: _scheduler_state_from_dcp(item, name=str(key)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_scheduler_state_from_dcp(item) for item in value]
+    return value
 
 
 class RandomStateWrapper(torch.distributed.checkpoint.stateful.Stateful):

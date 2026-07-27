@@ -11,7 +11,9 @@ import torch.nn.functional as F
 from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import (
-    build_optimizer_and_scheduler, )
+    build_optimizer_and_scheduler,
+    seed_adamw_parameter_state,
+)
 
 
 class FineTuneMethod(TrainingMethod):
@@ -184,10 +186,7 @@ class FineTuneMethod(TrainingMethod):
             if parameter not in optimizer_parameters:
                 raise ValueError("An eager optimizer-state parameter is not owned by the "
                                  "student optimizer")
-            if self._student_optimizer.state.get(parameter):
-                continue
-            self._student_optimizer.state[parameter] = {
-                "step": torch.tensor(0.0),
-                "exp_avg": torch.zeros_like(parameter),
-                "exp_avg_sq": torch.zeros_like(parameter),
-            }
+            seed_adamw_parameter_state(
+                self._student_optimizer,
+                parameter,
+            )

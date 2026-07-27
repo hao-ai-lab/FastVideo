@@ -23,6 +23,7 @@ Design rules:
   set samples for corpus-shaped metrics (FVD / FAD) without disturbing
   per-sample paired metrics (LPIPS / PSNR / SSIM / gt_optical_flow).
 """
+
 from __future__ import annotations
 
 import json
@@ -199,6 +200,68 @@ def samples_from(
     return samples
 
 
+def samples_from_manifest(
+    manifest: str | Path,
+    *,
+    extract_audio: bool | str | Path = False,
+    extract_workers: int = 4,
+) -> list[dict]:
+    """Load canonical eval samples from a JSON or JSONL manifest.
+
+    Each row may contain ``video``, ``audio``, ``reference``,
+    ``reference_audio``, ``reference_audio_source``, ``text_prompt`` and
+    arbitrary metric metadata. ``reference_audio_source`` is a media file
+    whose audio track is extracted when ``extract_audio`` is enabled. Paths are
+    resolved relative to the manifest directory. Video paths are wrapped as
+    :class:`Video` handles for lazy decoding; all other keys are preserved.
+    This is the recommended interface for benchmark generation, where matching
+    by sample id is safer than independently sorting folders.
+    """
+    path = Path(manifest).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    if path.suffix == ".jsonl":
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    elif path.suffix == ".json":
+        rows = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(rows, list):
+            raise ValueError(f"{path}: expected a top-level JSON list")
+    else:
+        raise ValueError(f"{path}: eval manifest must end in .json or .jsonl")
+
+    samples: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"{path}: row {index + 1} must be an object, got {type(row).__name__}")
+        sample = dict(row)
+        for key in (
+                "video",
+                "reference",
+                "audio",
+                "reference_audio",
+                "reference_audio_source",
+        ):
+            value = sample.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str | Path):
+                raise ValueError(f"{path}: row {index + 1} key {key!r} must be a path")
+            media_path = Path(value).expanduser()
+            if not media_path.is_absolute():
+                media_path = path.parent / media_path
+            media_path = media_path.resolve()
+            sample[key] = as_video(media_path) if key in {"video", "reference"} else str(media_path)
+        if "video" not in sample and "audio" not in sample:
+            raise ValueError(f"{path}: row {index + 1} needs at least video or audio")
+        samples.append(sample)
+
+    if not samples:
+        raise ValueError(f"{path}: eval manifest is empty")
+    if extract_audio:
+        _attach_extracted_audio(samples, extract_audio, extract_workers)
+    return samples
+
+
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
@@ -280,12 +343,18 @@ def _attach_extracted_audio(
     # Build the work list — (sample_idx, dest_audio_key, source_path)
     work: list[tuple[int, str, str]] = []
     for i, s in enumerate(samples):
-        for vkey, akey in (("video", "audio"), ("reference", "reference_audio")):
+        for vkey, akey in (
+            ("video", "audio"),
+            ("reference", "reference_audio"),
+            ("reference_audio_source", "reference_audio"),
+        ):
             if akey in s:
                 continue
             v = s.get(vkey)
             if isinstance(v, Video) and v.source is not None:
                 work.append((i, akey, str(v.source)))
+            elif vkey == "reference_audio_source" and isinstance(v, str | Path):
+                work.append((i, akey, str(v)))
     if not work:
         return
 

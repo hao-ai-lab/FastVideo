@@ -144,6 +144,7 @@ class Trainer:
         progress = tqdm(
             range(start_step + 1, max_steps + 1),
             initial=start_step,
+            total=max_steps,
             desc="Steps",
             disable=self.local_rank > 0,
         )

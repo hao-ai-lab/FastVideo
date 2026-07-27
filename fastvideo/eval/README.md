@@ -384,6 +384,55 @@ translation); rigid whole-frame motion (e.g. pure camera rotation) is harder. To
 sweep several baselines into a table, see
 `examples/inference/eval/eval_third_person_separation.py`.
 
+## Exact V2A corpus evaluation
+
+`fastvideo eval v2a` is a dedicated corpus-level entry point for
+video-to-audio benchmarks. Unlike `fastvideo eval run`, which composes native
+per-sample and set metrics through the registry, the V2A command can launch an
+upstream benchmark as one protocol-preserving unit.
+
+The `av-benchmark` backend calls the official `av_bench.extract` and
+`av_bench.evaluate` functions. Its dependency stack is intentionally not part
+of any standard FastVideo extra. Point the command at a Python interpreter from
+an isolated av-benchmark environment:
+
+```bash
+fastvideo eval v2a \
+  --backend av-benchmark \
+  --audio-dir outputs/v2a/audio \
+  --gt-cache /path/to/official/ground-truth-cache \
+  --prediction-cache outputs/v2a/av_benchmark_cache \
+  --output outputs/v2a/av_benchmark_results.json \
+  --python-executable /path/to/av-benchmark/.venv/bin/python \
+  --audio-length 8 \
+  --batch-size 32 \
+  --num-workers 0
+```
+
+The backend is model-independent: generated filenames only need to match the
+keys in the selected official cache. It can therefore evaluate MMAudio or any
+other V2A model. A complete prediction cache is reused automatically;
+`--recompute` forces extraction again.
+
+Some official dataset caches sanitize filenames. For such a cache,
+`--align-prediction-keys` atomically remaps only prediction keys having a
+unique match after leading underscores are ignored. The source audio is never
+renamed, ambiguous keys remain unmatched, and alignment counts are serialized
+in the result JSON.
+
+The official VGGSound cache reports:
+
+```text
+FD-VGG, FD-PANN, FD-PASST
+KL-PANNS-softmax, KL-PASST-softmax
+ISC-PANNS-mean/std, ISC-PASST-mean/std
+IB-Score, DeSync
+```
+
+This command runs in a subprocess by design. It does not import av-benchmark,
+alter CUDA/PyTorch packages, or register metrics in ordinary FastVideo
+generation and evaluation processes.
+
 ## Out of scope (follow-up PRs)
 
 - **MIND** metrics. Depend on a separate `vipe` upstream submodule.

@@ -11,6 +11,7 @@ from torch import nn
 
 from fastvideo.configs.models.dits import MMAUDIO_VARIANT_ARCHITECTURES
 from fastvideo.configs.pipelines.mmaudio import MMAudioSmall44kV2AConfig
+from fastvideo.models.dits.mmaudio import MMAudioTransformer
 from fastvideo.train.methods.fine_tuning.flow_matching import (
     FlowMatchingFineTuneMethod,
 )
@@ -19,6 +20,8 @@ from fastvideo.train.models.mmaudio.mmaudio import _load_or_compute_latent_stats
 from fastvideo.train.utils.config import RunConfig
 from fastvideo.train.utils.training_config import (
     DataConfig,
+    DistributedConfig,
+    ModelTrainingConfig,
     OptimizerConfig,
     TrainingConfig,
     TrainingLoopConfig,
@@ -185,6 +188,28 @@ def test_prepare_batch_matches_official_rng_and_flow_contract() -> None:
     assert transformer.empty_sync_feat.requires_grad is True
 
 
+def test_sequence_length_update_in_inference_mode_keeps_normal_buffers() -> None:
+    owner = SimpleNamespace()
+    inference_modes: list[bool] = []
+
+    def initialize_rotations() -> None:
+        inference_modes.append(torch.is_inference_mode_enabled())
+        owner.latent_rot = torch.ones(1)
+        owner.clip_rot = torch.ones(1)
+
+    owner.initialize_rotations = initialize_rotations
+
+    with torch.inference_mode():
+        MMAudioTransformer.update_seq_lengths(owner, 4, 6, 9)
+
+    assert owner._latent_seq_len == 4
+    assert owner._clip_seq_len == 6
+    assert owner._sync_seq_len == 9
+    assert inference_modes == [False]
+    assert not torch.is_inference(owner.latent_rot)
+    assert not torch.is_inference(owner.clip_rot)
+
+
 def test_flow_matching_method_runs_loss_and_backward(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -236,6 +261,92 @@ def test_flow_matching_method_runs_loss_and_backward(
     assert torch.count_nonzero(model.transformer.proj.weight.grad) > 0
     assert model.transformer.empty_clip_feat.grad is not None
     assert model.transformer.empty_sync_feat.grad is not None
+
+
+def test_flow_matching_method_compiles_inner_transformer_forward(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _training_config()
+    config.model = ModelTrainingConfig(
+        compile_train_fn=True,
+        torch_compile_kwargs={"backend": "eager"},
+    )
+    monkeypatch.setattr(
+        "fastvideo.dataset.mmaudio_feature_dataset."
+        "build_mmaudio_feature_dataloader",
+        lambda *args, **kwargs: None,
+    )
+    compile_calls: list[tuple[object, dict[str, object]]] = []
+
+    def _compile(fn, **kwargs):
+        compile_calls.append((fn, kwargs))
+        return fn
+
+    monkeypatch.setattr(torch, "compile", _compile)
+    model = MMAudioModel(
+        init_from="unused",
+        training_config=config,
+        transformer=_TinyMMAudioTransformer(),
+    )
+    config.distributed = DistributedConfig(strategy="ddp")
+    cfg = RunConfig(
+        models={},
+        method={
+            "_target_": (
+                "fastvideo.train.methods.fine_tuning.flow_matching."
+                "FlowMatchingFineTuneMethod"
+            )
+        },
+        training=config,
+        callbacks={},
+        raw={},
+    )
+    method = FlowMatchingFineTuneMethod(
+        cfg=cfg,
+        role_models={"student": model},
+    )
+    method.cuda_generator = torch.Generator().manual_seed(19)
+
+    loss_map, _, _ = method.single_train_step(_raw_batch(), 0)
+
+    assert len(compile_calls) == 1
+    assert compile_calls[0][1] == {"backend": "eager", "fullgraph": True}
+    assert torch.isfinite(loss_map["total_loss"])
+
+
+def test_compile_train_fn_rejects_fsdp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _training_config()
+    config.model = ModelTrainingConfig(compile_train_fn=True)
+    monkeypatch.setattr(
+        "fastvideo.dataset.mmaudio_feature_dataset."
+        "build_mmaudio_feature_dataloader",
+        lambda *args, **kwargs: None,
+    )
+    model = MMAudioModel(
+        init_from="unused",
+        training_config=config,
+        transformer=_TinyMMAudioTransformer(),
+    )
+    cfg = RunConfig(
+        models={},
+        method={
+            "_target_": (
+                "fastvideo.train.methods.fine_tuning.flow_matching."
+                "FlowMatchingFineTuneMethod"
+            )
+        },
+        training=config,
+        callbacks={},
+        raw={},
+    )
+
+    with pytest.raises(ValueError, match="strategy=ddp"):
+        FlowMatchingFineTuneMethod(
+            cfg=cfg,
+            role_models={"student": model},
+        )
 
 
 def test_v2_training_is_rejected_by_default() -> None:

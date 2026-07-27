@@ -56,6 +56,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     cfg = load_run_config(_write_yaml(tmp_path, _minimal_yaml()))
     t = cfg.training
 
+    assert t.distributed.strategy == "fsdp"
     assert t.distributed.num_gpus == 1
     assert t.distributed.tp_size == 1
     assert t.distributed.sp_size == 1
@@ -75,6 +76,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.optimizer.min_lr_ratio == 0.5
     assert t.optimizer.lr_milestones == ()
     assert t.optimizer.lr_gamma == pytest.approx(0.1)
+    assert t.optimizer.fused is False
 
     assert t.loop.max_train_steps == 0
     assert t.loop.gradient_accumulation_steps == 1
@@ -89,6 +91,8 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.model.weighting_scheme == "uniform"
     assert t.model.precondition_outputs is False
     assert t.model.moba_config == {}
+    assert t.model.compile_train_fn is False
+    assert t.model.torch_compile_kwargs == {}
 
     assert t.dit_precision == "fp32"
     assert t.vsa_sparsity == 0.0
@@ -151,6 +155,11 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "logit_mean": 0.5,
             "logit_std": 1.5,
             "precondition_outputs": True,
+            "compile_train_fn": True,
+            "torch_compile_kwargs": {
+                "backend": "eager",
+                "dynamic": False,
+            },
         },
         "dit_precision": "bf16",
     }
@@ -188,6 +197,11 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.vsa_sparsity == pytest.approx(0.5)
     assert t.model.weighting_scheme == "logit_normal"
     assert t.model.precondition_outputs is True
+    assert t.model.compile_train_fn is True
+    assert t.model.torch_compile_kwargs == {
+        "backend": "eager",
+        "dynamic": False,
+    }
     assert t.dit_precision == "bf16"
 
 
@@ -254,6 +268,20 @@ def test_betas_parses_list_and_string_forms(
     data["training"] = {"optimizer": {"betas": betas_value}}
     cfg = load_run_config(_write_yaml(tmp_path, data))
     assert cfg.training.optimizer.betas == expected
+
+
+def test_distributed_strategy_parses_ddp(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {"distributed": {"strategy": "DDP"}}
+    cfg = load_run_config(_write_yaml(tmp_path, data))
+    assert cfg.training.distributed.strategy == "ddp"
+
+
+def test_distributed_strategy_rejects_unknown_value(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {"distributed": {"strategy": "zero3"}}
+    with pytest.raises(ValueError, match="strategy must be one of"):
+        load_run_config(_write_yaml(tmp_path, data))
 
 
 def test_data_path_mapping_parses_repeat_counts(tmp_path: Path) -> None:

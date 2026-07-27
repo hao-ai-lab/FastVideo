@@ -28,6 +28,12 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.models.base import ModelBase
+from fastvideo.train.utils.distributed_strategy import (
+    build_replicated_model_from_scratch,
+    is_ddp_strategy,
+    unwrap_ddp_module,
+    wrap_module_ddp,
+)
 from fastvideo.train.utils.module_state import apply_trainable
 from fastvideo.train.utils.moduleloader import load_module_from_path
 from fastvideo.utils import PRECISION_TO_TYPE
@@ -183,6 +189,11 @@ class MMAudioModel(ModelBase):
             raise ValueError("MMAudio training does not yet support sequence parallelism; set sp_size=1")
         if int(training_config.distributed.tp_size or 1) != 1:
             raise ValueError("MMAudio training does not yet support tensor parallelism; set tp_size=1")
+        use_ddp = is_ddp_strategy(training_config)
+        if use_ddp and (int(training_config.distributed.hsdp_replicate_dim) != 1
+                        or int(training_config.distributed.hsdp_shard_dim) not in {-1, 1}):
+            raise ValueError("MMAudio DDP strategy does not use HSDP dimensions; "
+                             "set hsdp_replicate_dim=1 and hsdp_shard_dim=1")
 
         self.training_config = training_config
         if variant is not None:
@@ -234,29 +245,42 @@ class MMAudioModel(ModelBase):
                     "mlp_ratio": 4.0,
                 }
                 default_dtype = PRECISION_TO_TYPE[self.training_config.dit_precision]
-                transformer = build_fsdp_model_from_scratch(
-                    model_cls=MMAudioTransformer,
-                    init_params={
-                        "config": model_config,
-                        "hf_config": hf_config,
-                        "latent_mean": latent_mean,
-                        "latent_std": latent_std,
-                        "empty_string_feat": empty_string_feat,
-                    },
-                    device=get_local_torch_device(),
-                    hsdp_replicate_dim=self.training_config.distributed.hsdp_replicate_dim,
-                    hsdp_shard_dim=self.training_config.distributed.hsdp_shard_dim,
-                    default_dtype=default_dtype,
-                    param_dtype=torch.bfloat16,
-                    reduce_dtype=torch.float32,
-                    seed=self.training_config.data.seed,
-                    pin_cpu_memory=self.training_config.distributed.pin_cpu_memory,
-                )
+                init_params = {
+                    "config": model_config,
+                    "hf_config": hf_config,
+                    "latent_mean": latent_mean,
+                    "latent_std": latent_std,
+                    "empty_string_feat": empty_string_feat,
+                }
+                if use_ddp:
+                    transformer = build_replicated_model_from_scratch(
+                        MMAudioTransformer,
+                        init_params,
+                        device=get_local_torch_device(),
+                        default_dtype=default_dtype,
+                        seed=self.training_config.data.seed,
+                    )
+                else:
+                    transformer = build_fsdp_model_from_scratch(
+                        model_cls=MMAudioTransformer,
+                        init_params=init_params,
+                        device=get_local_torch_device(),
+                        hsdp_replicate_dim=self.training_config.distributed.hsdp_replicate_dim,
+                        hsdp_shard_dim=self.training_config.distributed.hsdp_shard_dim,
+                        default_dtype=default_dtype,
+                        param_dtype=torch.bfloat16,
+                        reduce_dtype=torch.float32,
+                        seed=self.training_config.data.seed,
+                        pin_cpu_memory=self.training_config.distributed.pin_cpu_memory,
+                    )
                 self._init_from = f"scratch:{variant}"
             else:
                 if not init_from:
                     raise ValueError("MMAudio pretrained training requires init_from, or set "
                                      "from_scratch=true with a variant")
+                if use_ddp:
+                    raise NotImplementedError("MMAudio DDP currently supports from_scratch=true only; "
+                                              "pretrained component loading remains on the FSDP path")
                 self._init_from = str(init_from)
                 transformer = load_module_from_path(
                     model_path=self._init_from,
@@ -287,6 +311,16 @@ class MMAudioModel(ModelBase):
                 parameter = getattr(self.transformer, name, None)
                 if isinstance(parameter, torch.nn.Parameter):
                     parameter.requires_grad_(True)
+        if use_ddp:
+            # Official MMAudio wraps the fully initialized FP32 model after
+            # selecting trainable parameters. It disables buffer broadcasts;
+            # the fixed latent statistics and positional buffers are identical
+            # because every rank uses the same initialization seed.
+            self.transformer = wrap_module_ddp(
+                self.transformer,
+                device=get_local_torch_device(),
+                broadcast_buffers=False,
+            )
 
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             shift=1.0,
@@ -420,9 +454,11 @@ class MMAudioModel(ModelBase):
         empty_clip = self.transformer.get_empty_clip_sequence(1).to(dtype=clip_features.dtype)
         empty_sync = self.transformer.get_empty_sync_sequence(1).to(dtype=sync_features.dtype)
         empty_text = self.transformer.get_empty_string_sequence(1).to(dtype=text_features.dtype)
-        clip_features[~video_exists] = empty_clip
-        sync_features[~video_exists] = empty_sync
-        text_features[~text_exists] = empty_text
+        video_exists_expanded = video_exists[:, None, None]
+        text_exists_expanded = text_exists[:, None, None]
+        clip_features = torch.where(video_exists_expanded, clip_features, empty_clip)
+        sync_features = torch.where(video_exists_expanded, sync_features, empty_sync)
+        text_features = torch.where(text_exists_expanded, text_features, empty_text)
 
         if latents_source == "data":
             posterior_noise = torch.empty_like(latent_mean).normal_(generator=generator)
@@ -444,10 +480,12 @@ class MMAudioModel(ModelBase):
         if not 0.0 <= null_probability <= 1.0:
             raise ValueError("training.data.training_cfg_rate must be in [0, 1]")
         null_video = torch.rand(batch_size, device=device, generator=generator) < null_probability
-        clip_features[null_video] = empty_clip
-        sync_features[null_video] = empty_sync
+        null_video_expanded = null_video[:, None, None]
+        clip_features = torch.where(null_video_expanded, empty_clip, clip_features)
+        sync_features = torch.where(null_video_expanded, empty_sync, sync_features)
         null_text = torch.rand(batch_size, device=device, generator=generator) < null_probability
-        text_features[null_text] = empty_text
+        null_text_expanded = null_text[:, None, None]
+        text_features = torch.where(null_text_expanded, empty_text, text_features)
 
         # Keep learned null-video tokens in every step's autograd graph even
         # when this batch samples no null conditions. AdamW then creates a
@@ -482,6 +520,44 @@ class MMAudioModel(ModelBase):
             timestep = timestep.unsqueeze(-1)
         return (1.0 - timestep) * noise + timestep * clean_latents
 
+    def compile_training_forward(
+        self,
+        compile_kwargs: dict[str, Any],
+    ) -> None:
+        """Compile transformer math while leaving DDP control flow eager."""
+        module = unwrap_ddp_module(self.transformer)
+        compiled_forward = torch.compile(module.forward, **compile_kwargs)
+        module.forward = compiled_forward
+        logger.info(
+            "Compiled inner MMAudio transformer forward with kwargs=%s",
+            compile_kwargs,
+        )
+
+    def flow_matching_forward(
+        self,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        clip_features: torch.Tensor,
+        sync_features: torch.Tensor,
+        text_features: torch.Tensor,
+    ) -> torch.Tensor:
+        """Tensor-only adapter around the DDP-wrapped training forward."""
+        device_type = noisy_latents.device.type
+        with torch.autocast(
+                device_type=device_type,
+                dtype=torch.bfloat16,
+                enabled=device_type == "cuda",
+        ):
+            return self.transformer(
+                hidden_states=noisy_latents,
+                encoder_hidden_states={
+                    "clip_features": clip_features,
+                    "sync_features": sync_features,
+                    "text_features": text_features,
+                },
+                timestep=timestep,
+            )
+
     def predict_noise(
         self,
         noisy_latents: torch.Tensor,
@@ -509,16 +585,13 @@ class MMAudioModel(ModelBase):
                 "text_features": self.transformer.get_empty_string_sequence(batch_size),
             }
 
-        device_type = self.device.type
-        with torch.autocast(
-                device_type=device_type,
-                dtype=torch.bfloat16,
-                enabled=device_type == "cuda",
-        ), set_forward_context(current_timestep=timestep, attn_metadata=None):
-            return self.transformer(
-                hidden_states=noisy_latents,
-                encoder_hidden_states=conditions,
-                timestep=timestep,
+        with set_forward_context(current_timestep=timestep, attn_metadata=None):
+            return self.flow_matching_forward(
+                noisy_latents,
+                timestep,
+                conditions["clip_features"],
+                conditions["sync_features"],
+                conditions["text_features"],
             )
 
     def backward(

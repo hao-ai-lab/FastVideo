@@ -36,12 +36,16 @@ def build_optimizer_and_scheduler(
         raise ValueError("No trainable parameters passed to "
                          "build_optimizer_and_scheduler")
 
+    optimizer_kwargs = {}
+    if bool(getattr(optimizer_config, "fused", False)):
+        optimizer_kwargs["fused"] = True
     optimizer = torch.optim.AdamW(
         params,
         lr=float(learning_rate),
         betas=betas,
         weight_decay=float(optimizer_config.weight_decay),
         eps=float(optimizer_config.eps),
+        **optimizer_kwargs,
     )
 
     if str(scheduler_name) == "multistep_with_warmup":
@@ -82,6 +86,28 @@ def build_optimizer_and_scheduler(
         )
 
     return optimizer, scheduler
+
+
+def seed_adamw_parameter_state(
+    optimizer: torch.optim.Optimizer,
+    parameter: torch.nn.Parameter,
+) -> None:
+    """Create AdamW state using PyTorch's fused/capturable device contract."""
+    if optimizer.state.get(parameter):
+        return
+    owner_group = next(
+        (group for group in optimizer.param_groups if any(candidate is parameter for candidate in group["params"])),
+        None,
+    )
+    if owner_group is None:
+        raise ValueError("Cannot seed optimizer state for an unowned parameter")
+    step_on_parameter = bool(owner_group.get("capturable", False) or owner_group.get("fused", False))
+    step_device = parameter.device if step_on_parameter else torch.device("cpu")
+    optimizer.state[parameter] = {
+        "step": torch.zeros((), dtype=torch.float32, device=step_device),
+        "exp_avg": torch.zeros_like(parameter),
+        "exp_avg_sq": torch.zeros_like(parameter),
+    }
 
 
 def clip_grad_norm_if_needed(

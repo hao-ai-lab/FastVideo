@@ -251,22 +251,24 @@ def compute_mmaudio_latent_stats(
     )
 
 
-def build_mmaudio_feature_dataloader(
+def build_mmaudio_feature_dataset(
     data_path: str | Sequence[str] | dict[str, int],
     *,
-    batch_size: int,
-    num_data_workers: int,
-    seed: int,
-    pin_memory: bool,
     feature_shapes: dict[str, int],
     include_metadata: bool = False,
-) -> StatefulDataLoader:
-    """Build a distributed/stateful loader over one or more feature caches."""
+) -> Dataset:
+    """Build one map-style dataset over MMAudio TensorDict cache shards.
+
+    Unlike :func:`build_mmaudio_feature_dataloader`, this helper does not add
+    a distributed sampler. Dataset-scale inference can therefore assign
+    indices explicitly (for example ``range(rank, len(dataset), world_size)``)
+    without ``DistributedSampler`` padding the tail with duplicate samples.
+    """
     specs = _data_specs(data_path)
     if not specs:
         raise ValueError(
-            "training.data.data_path is empty. Set it to one or more "
-            "precomputed MMAudio TensorDict mmap directories."
+            "data_path is empty. Set it to one or more precomputed MMAudio "
+            "TensorDict mmap directories."
         )
 
     datasets: list[Dataset] = []
@@ -278,7 +280,25 @@ def build_mmaudio_feature_dataloader(
                 **feature_shapes,
             )
             datasets.extend([dataset] * repeat)
-    combined: Dataset = datasets[0] if len(datasets) == 1 else ConcatDataset(datasets)
+    return datasets[0] if len(datasets) == 1 else ConcatDataset(datasets)
+
+
+def build_mmaudio_feature_dataloader(
+    data_path: str | Sequence[str] | dict[str, int],
+    *,
+    batch_size: int,
+    num_data_workers: int,
+    seed: int,
+    pin_memory: bool,
+    feature_shapes: dict[str, int],
+    include_metadata: bool = False,
+) -> StatefulDataLoader:
+    """Build a distributed/stateful loader over one or more feature caches."""
+    combined = build_mmaudio_feature_dataset(
+        data_path,
+        feature_shapes=feature_shapes,
+        include_metadata=include_metadata,
+    )
 
     sp_world_size = get_sp_world_size()
     sampler = DP_SP_BatchSampler(
@@ -301,6 +321,7 @@ def build_mmaudio_feature_dataloader(
 
 __all__ = [
     "MMAudioFeatureDataset",
+    "build_mmaudio_feature_dataset",
     "build_mmaudio_feature_dataloader",
     "compute_mmaudio_latent_stats",
 ]

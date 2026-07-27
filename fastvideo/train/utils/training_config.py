@@ -18,6 +18,8 @@ class DistributedConfig:
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     pin_cpu_memory: bool = False
+    # Keep this last so existing positional construction remains compatible.
+    strategy: str = "fsdp"
 
 
 @dataclass(slots=True)
@@ -47,6 +49,9 @@ class OptimizerConfig:
     min_lr_ratio: float = 0.5
     lr_milestones: tuple[int, ...] = ()
     lr_gamma: float = 0.1
+    # ``False`` preserves PyTorch's existing optimizer selection. When true,
+    # FastVideo explicitly requests CUDA fused AdamW.
+    fused: bool = False
 
 
 @dataclass(slots=True)
@@ -80,6 +85,10 @@ class ModelTrainingConfig:
     precondition_outputs: bool = False
     moba_config: dict = field(default_factory=dict)
     enable_gradient_checkpointing_type: str | None = None
+    # Compile the model adapter's tensor-only training forward. This is
+    # separate from loader-level model compilation and defaults off.
+    compile_train_fn: bool = False
+    torch_compile_kwargs: dict = field(default_factory=dict)
 
 
 @dataclass(slots=True)

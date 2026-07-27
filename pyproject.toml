@@ -128,6 +128,7 @@ swanlab = [
 
 mmaudio-train = [
     "librosa>=0.10.0",
+    "nitrous-ema==0.0.1",
     "tensordict>=0.6.1",
 ]
 

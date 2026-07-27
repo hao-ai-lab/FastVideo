@@ -358,8 +358,12 @@ def _build_training_config(
                          "{'t2v', 'text_only', 'mmaudio_features'}, got "
                          f"{preprocessed_data_type!r}")
 
+    from fastvideo.train.utils.distributed_strategy import (
+        normalize_distributed_strategy, )
+
     return TrainingConfig(
         distributed=DistributedConfig(
+            strategy=normalize_distributed_strategy(str(d.get("strategy", "fsdp") or "fsdp")),
             num_gpus=num_gpus,
             tp_size=int(d.get("tp_size", 1) or 1),
             sp_size=int(d.get("sp_size", num_gpus) or num_gpus),
@@ -391,6 +395,7 @@ def _build_training_config(
             min_lr_ratio=float(o.get("min_lr_ratio", 0.5) or 0.5),
             lr_milestones=tuple(int(step) for step in (o.get("lr_milestones", []) or [])),
             lr_gamma=float(o.get("lr_gamma", 0.1) or 0.1),
+            fused=bool(o.get("fused", False)),
         ),
         loop=TrainingLoopConfig(
             max_train_steps=int(lo.get("max_train_steps", 0) or 0),
@@ -418,6 +423,8 @@ def _build_training_config(
             precondition_outputs=bool(m.get("precondition_outputs", False)),
             moba_config=dict(m.get("moba_config", {}) or {}),
             enable_gradient_checkpointing_type=(m.get("enable_gradient_checkpointing_type")),
+            compile_train_fn=bool(m.get("compile_train_fn", False)),
+            torch_compile_kwargs=dict(m.get("torch_compile_kwargs", {}) or {}),
         ),
         pipeline_config=pipeline_config,
         model_path=model_path,

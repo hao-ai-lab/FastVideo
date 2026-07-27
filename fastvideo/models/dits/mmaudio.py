@@ -478,7 +478,12 @@ class MMAudioTransformer(BaseDiT):
         self._latent_seq_len = latent_seq_len
         self._clip_seq_len = clip_seq_len
         self._sync_seq_len = sync_seq_len
-        self.initialize_rotations()
+        # This method is also called by inference pipeline stages. Persistent
+        # buffers created under inference_mode become inference tensors and
+        # cannot later be saved for backward if a live transformer resumes
+        # training. Build the derived buffers as ordinary no-grad tensors.
+        with torch.inference_mode(False), torch.no_grad():
+            self.initialize_rotations()
 
     def initialize_weights(self) -> None:
 
