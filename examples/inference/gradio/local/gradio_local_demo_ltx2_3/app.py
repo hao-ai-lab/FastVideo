@@ -4,10 +4,10 @@ from pathlib import Path
 
 import gradio as gr
 
+from fastvideo import SamplingParam
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.entrypoints.video_generator import VideoGenerator
-from fastvideo.layers.quantization.fp4_config import FP4Config
+from fastvideo.layers.quantization.nvfp4_config import NVFP4Config
 from fastvideo.utils import maybe_download_model
 
 from .config import (
@@ -44,7 +44,7 @@ def main():
         resolved_model_path = Path(model_root)
 
         pipeline_config = PipelineConfig.from_pretrained(str(resolved_model_path))
-        pipeline_config.dit_config.quant_config = FP4Config()
+        pipeline_config.dit_config.quant_config = NVFP4Config()
         refine_upsampler_path = resolve_refine_upsampler_path(resolved_model_path)
         print(f"Using refine upsampler: {refine_upsampler_path}")
 
