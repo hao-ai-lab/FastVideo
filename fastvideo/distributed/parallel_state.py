@@ -786,10 +786,52 @@ def get_dp_group() -> GroupCoordinator:
     return _DP
 
 
+# Ring Attention subgroup size within the sequence-parallel group. The
+# initial pure-Ring implementation requires this to equal the SP world size
+# (see FastVideoArgs._check_ring_attention_args), so no separate process
+# group is created: the Ring group is simply the SP device group.
+_RING_SIZE: int = 1
+
+
+def get_ring_size() -> int:
+    """Return the configured Ring Attention subgroup size (1 == disabled)."""
+    return _RING_SIZE
+
+
+def get_ring_group() -> ProcessGroup | None:
+    """Return the raw ``torch.distributed.ProcessGroup`` used by Ring Attention.
+
+    Returns ``None`` when Ring Attention is disabled (``ring_size == 1``).
+    The initial pure-Ring implementation reuses the full sequence-parallel
+    device group; hybrid Ulysses/Ring subgroup construction is not
+    supported yet.
+    """
+    if _RING_SIZE <= 1:
+        return None
+    return get_sp_group().device_group
+
+
+def get_ring_world_size() -> int:
+    """Return the world size of the Ring Attention process group (1 if disabled)."""
+    group = get_ring_group()
+    if group is None:
+        return 1
+    return torch.distributed.get_world_size(group)
+
+
+def get_ring_rank() -> int:
+    """Return this rank's position within the Ring Attention process group."""
+    group = get_ring_group()
+    if group is None:
+        return 0
+    return torch.distributed.get_rank(group)
+
+
 def initialize_model_parallel(
     tensor_model_parallel_size: int = 1,
     sequence_model_parallel_size: int = 1,
     data_parallel_size: int = 1,
+    ring_size: int = 1,
     backend: str | None = None,
 ) -> None:
     """
@@ -800,6 +842,9 @@ def initialize_model_parallel(
             parallelism (used for language encoder).
         sequence_model_parallel_size: number of GPUs used for sequence model
             parallelism (used for DiT).
+        ring_size: number of ranks within the sequence-parallel group used by
+            pure Ring Attention. ``1`` disables Ring Attention (default
+            Ulysses-only sequence parallelism).
     """
     # Get world size and rank. Ensure some consistencies.
     assert _WORLD is not None, "world group is not initialized, please call init_distributed_environment first"
@@ -834,6 +879,12 @@ def initialize_model_parallel(
         group_ranks.append(ranks)
 
     _SP = init_model_parallel_group(group_ranks, get_world_group().local_rank, backend, group_name="sp")
+
+    assert sequence_model_parallel_size % ring_size == 0, (
+        f"sequence_model_parallel_size ({sequence_model_parallel_size}) must be divisible by "
+        f"ring_size ({ring_size})")
+    global _RING_SIZE
+    _RING_SIZE = ring_size
 
     # Build the data parallel groups.
     num_data_parallel_groups: int = sequence_model_parallel_size
@@ -892,13 +943,16 @@ def get_local_torch_device() -> torch.device:
 
 def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                                                           sp_size: int,
-                                                          distributed_init_method: str = "env://"):
+                                                          distributed_init_method: str = "env://",
+                                                          ring_size: int = 1):
     if _WORLD is not None and model_parallel_is_initialized():
         # make sure the tp and sp sizes are correct
         assert get_tp_world_size(
         ) == tp_size, f"You are trying to initialize model parallel groups with size {tp_size}, but they are already initialized with size {get_tp_world_size()}"
         assert get_sp_world_size(
         ) == sp_size, f"You are trying to initialize model parallel groups with size {sp_size}, but they are already initialized with size {get_sp_world_size()}"
+        assert get_ring_size(
+        ) == ring_size, f"You are trying to initialize Ring Attention with size {ring_size}, but it is already initialized with size {get_ring_size()}"
         return
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -914,7 +968,9 @@ def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                                  local_rank=local_rank,
                                  distributed_init_method=distributed_init_method,
                                  device_id=device)
-    initialize_model_parallel(tensor_model_parallel_size=tp_size, sequence_model_parallel_size=sp_size)
+    initialize_model_parallel(tensor_model_parallel_size=tp_size,
+                              sequence_model_parallel_size=sp_size,
+                              ring_size=ring_size)
 
     # set device if we're on a CUDA/NPU platform
     from fastvideo.platforms import current_platform
