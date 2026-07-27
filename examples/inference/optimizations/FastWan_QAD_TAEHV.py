@@ -46,9 +46,9 @@ OUTPUT_PATH = "video_samples"
 # guidance 1.0). Loaded on top of the base Wan2.1 pipeline; pass
 # ``--distilled_model ''`` to run the base weights instead.
 DEFAULT_DISTILLED_MODEL = "FastVideo/FastWan-QAD-1.3B"
-DISTILLED_WEIGHTS_FILE = (
-    "generator_inference_transformer/diffusion_pytorch_model.safetensors"
-)
+# File layout of FastVideo/FastWan-QAD-1.3B: the distilled transformer lives
+# in the standard diffusers ``transformer/`` subfolder.
+DISTILLED_WEIGHTS_FILE = "transformer/diffusion_pytorch_model.safetensors"
 
 # TAEHV checkpoint for Wan2.1. Clone https://github.com/madebyollin/taehv to get
 # ``taew2_1.pth`` (Wan 2.1 / Wan 2.2-14B / Qwen-Image all use this VAE).
