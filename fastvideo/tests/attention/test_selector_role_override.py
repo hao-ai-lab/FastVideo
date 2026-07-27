@@ -51,7 +51,10 @@ def test_role_override_invalidates_cached_backend(monkeypatch) -> None:
         assert selector.get_attn_backend(**kwargs) == "FLASH_ATTN"
     finally:
         # Do not leave fake-platform resolutions cached for later tests.
+        # global_force_attn_backend no longer flushes the cache (selection
+        # inputs are cache-key members now), so evict explicitly.
         selector.global_force_attn_backend(None)
+        selector._cached_get_attn_backend.cache_clear()
 
 
 def test_unsupported_role_override_honors_layer_default(monkeypatch) -> None:
@@ -70,6 +73,7 @@ def test_unsupported_role_override_honors_layer_default(monkeypatch) -> None:
             ) == "TORCH_SDPA"
     finally:
         selector.global_force_attn_backend(None)
+        selector._cached_get_attn_backend.cache_clear()
 
 
 def test_explicit_backend_config_rejects_typos() -> None:

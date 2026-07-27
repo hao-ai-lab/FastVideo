@@ -7,6 +7,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
+from contextlib import nullcontext
 from copy import deepcopy
 from typing import cast
 
@@ -18,6 +19,12 @@ from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
+from fastvideo.attention.selector import (
+    _active_component_attention_backend_scope,
+    _component_attention_backend_scope,
+    coerce_attn_backend,
+    record_resolved_attention_backend,
+)
 from fastvideo.configs.models import EncoderConfig
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -336,6 +343,7 @@ class TextEncoderLoader(ComponentLoader):
             }
             model_config["architectures"] = ["CLIPTextModel"]
         encoder_config.update_model_arch(model_config)
+        record_resolved_attention_backend(encoder_config)
         if idx < 0 or idx >= len(encoder_precisions):
             raise IndexError(
                 f"text encoder index {idx} out of range for text_encoder_precisions (len={len(encoder_precisions)}), model_path={model_path}"
@@ -508,6 +516,7 @@ class ImageEncoderLoader(TextEncoderLoader):
 
         encoder_config = fastvideo_args.pipeline_config.image_encoder_config
         encoder_config.update_model_arch(model_config)
+        record_resolved_attention_backend(encoder_config)
 
         from fastvideo.platforms import current_platform
 
@@ -1017,16 +1026,14 @@ class TransformerLoader(ComponentLoader):
         # Generator-only QAT for DMD distillation: the teacher (real_score) and
         # critic (fake_score) transformers load with this flag set and must stay
         # full precision. Drop the nvfp4_qat quant from their copied config, and
-        # mask the global ATTN_QAT_TRAIN env so their attention falls back to dense
-        # (the backend is read globally at build time). The generator loads without
-        # the flag and keeps both.
+        # build their attention under a scope that ignores any process-wide
+        # ATTN_QAT_TRAIN request so it falls back to dense. The generator loads
+        # without the flag and keeps both. The scope is exception-safe and
+        # needs no env mutation or selector cache flush (the request is part
+        # of the resolution cache key).
         _qat_generator_only = hasattr(fastvideo_args, "_loading_teacher_critic_model")
-        _qat_prev_attn_env = None
         if _qat_generator_only:
             dit_config.quant_config = None
-            from fastvideo.attention.selector import _cached_get_attn_backend
-            _qat_prev_attn_env = os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
-            _cached_get_attn_backend.cache_clear()
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
@@ -1093,32 +1100,34 @@ class TransformerLoader(ComponentLoader):
             or cls_name == "Cosmos25Transformer3DModel"
             or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25"
         )
-        model = maybe_load_fsdp_model(
-            model_cls=model_cls,
-            init_params={"config": dit_config, "hf_config": hf_config},
-            weight_dir_list=safetensors_list,
-            device=get_local_torch_device(),
-            hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
-            hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,
-            strict=strict_load,
-            cpu_offload=fastvideo_args.dit_cpu_offload,
-            pin_cpu_memory=fastvideo_args.pin_cpu_memory,
-            fsdp_inference=fastvideo_args.use_fsdp_inference,
-            # TODO(will): make these configurable
-            default_dtype=default_dtype,
-            param_dtype=torch.bfloat16,
-            reduce_dtype=torch.float32,
-            output_dtype=None,
-            training_mode=fastvideo_args.training_mode,
-            enable_torch_compile=fastvideo_args.enable_torch_compile,
-            torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
-        )
-
-        if _qat_generator_only:
-            from fastvideo.attention.selector import _cached_get_attn_backend
-            if _qat_prev_attn_env is not None:
-                os.environ["FASTVIDEO_ATTENTION_BACKEND"] = _qat_prev_attn_env
-            _cached_get_attn_backend.cache_clear()
+        attention_context = (_component_attention_backend_scope(None, component="transformer")
+                             if _qat_generator_only else nullcontext())
+        with attention_context:
+            # dit_config is what the model is handed and keeps as `self.config`,
+            # so recording here makes the decision readable from the loaded
+            # transformer — and records the narrowed one for teacher/critic.
+            resolved = record_resolved_attention_backend(dit_config)
+            logger.info("transformer attention backend: %s", resolved.name if resolved else "automatic selection")
+            model = maybe_load_fsdp_model(
+                model_cls=model_cls,
+                init_params={"config": dit_config, "hf_config": hf_config},
+                weight_dir_list=safetensors_list,
+                device=get_local_torch_device(),
+                hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
+                hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,
+                strict=strict_load,
+                cpu_offload=fastvideo_args.dit_cpu_offload,
+                pin_cpu_memory=fastvideo_args.pin_cpu_memory,
+                fsdp_inference=fastvideo_args.use_fsdp_inference,
+                # TODO(will): make these configurable
+                default_dtype=default_dtype,
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32,
+                output_dtype=None,
+                training_mode=fastvideo_args.training_mode,
+                enable_torch_compile=fastvideo_args.enable_torch_compile,
+                torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
+            )
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
@@ -1371,5 +1380,22 @@ class PipelineComponentLoader:
             module_name, transformers_or_diffusers
         )
 
-        # Load the module
-        return loader.load(component_model_path, fastvideo_args)
+        # Resolve this component's attention backend ONCE, here, from the
+        # explicit request and the environment. A per-role request already
+        # resolved upstream (the train stack's moduleloader) wins; otherwise
+        # fastvideo_args.attention_backend is the process-wide default, applied
+        # per component.
+        #
+        # The loaders record the decision on their own config rather than this
+        # function doing it after the fact, because a loader may narrow it for
+        # one component: the DMD teacher/critic transformers build dense inside
+        # a nested scope (see `record_resolved_attention_backend`).
+        if _active_component_attention_backend_scope() is not None:
+            attention_context = nullcontext()
+        else:
+            resolved = coerce_attn_backend(getattr(fastvideo_args, "attention_backend", None))
+            attention_context = (_component_attention_backend_scope(resolved, component=module_name)
+                                 if resolved is not None else nullcontext())
+
+        with attention_context:
+            return loader.load(component_model_path, fastvideo_args)

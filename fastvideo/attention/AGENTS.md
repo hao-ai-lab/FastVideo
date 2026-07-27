@@ -10,7 +10,7 @@ Backend registry + selector wrapping FlashAttn / SageAttn / SageAttn3 / SDPA / V
 attention/
 ├── __init__.py            # Exports DistributedAttention, LocalAttention, get_attn_backend
 ├── layer.py               # DistributedAttention, DistributedAttention_VSA, LocalAttention
-├── selector.py            # get_attn_backend (cached) + env-var override
+├── selector.py            # get_attn_backend (cached) + _component_attention_backend_scope
 ├── backends/
 │   ├── abstract.py        #   AttentionBackend / AttentionMetadata / AttentionMetadataBuilder
 │   ├── flash_attn.py      #   FA2/FA3
@@ -26,17 +26,61 @@ attention/
     └── flash_attn_no_pad.py
 ```
 
+## Where the Decision Is Made
+
+**Resolved once, at load time, and carried on the component.** The environment
+variable is folded into `FastVideoArgs.attention_backend` in `__post_init__`
+(the parse-once adapter); `PipelineComponentLoader.load_module` applies that
+request per component; each loader records what its component resolved onto
+that component's own config as `ModelConfig._resolved_attention_backend`. After
+load, the decision is readable from the component itself:
+
+```python
+transformer.config._resolved_attention_backend
+```
+
+A loader may narrow the request for one component — the DMD teacher/critic
+transformers build dense — and the recorded value is what that component
+actually resolved, not what the run asked for globally.
+
+Nothing switches backends at runtime and nothing should: every request is an
+input to *construction*.
+
 ## Selection Order
 
-`get_attn_backend()` resolves via:
+`get_attn_backend()` reads every selection input, then resolves via, in
+precedence order:
 
-1. Env-var override `FASTVIDEO_ATTENTION_BACKEND` (see `STR_BACKEND_ENV_VAR` in `fastvideo/utils.py`).
-2. Per-platform default from `fastvideo/platforms/`.
-3. Heuristic fallback to SDPA.
+1. `global_force_attn_backend(...)` — deprecated process-global override, still
+   the training stack's mechanism.
+2. The per-component request resolved at load time.
+3. Env-var `FASTVIDEO_ATTENTION_BACKEND` (see `STR_BACKEND_ENV_VAR` in
+   `fastvideo/utils.py`), for layers built outside a loader — the denoising
+   stages, and direct model construction in tests.
+4. The layer-declared `default_backend`.
+5. Per-platform automatic selection from `fastvideo/platforms/`, which probes
+   the *current device's* capability.
 
-The result is `@lru_cache`d. Tests that need a specific backend must use the
-`global_force_attn_backend(...)` context manager from `selector.py`, never set
-the env var mid-process.
+The result is cached on **all** of those inputs (plus component identity and
+device index), so a changed request simply lands on a different cache key —
+no `cache_clear()` is needed and none should be added.
+
+A layer that does not declare support for the requested backend falls back, so
+the component-level decision is the request every layer of that component
+resolves against, not a promise about the kernel any one layer runs.
+
+Never mutate `FASTVIDEO_ATTENTION_BACKEND` mid-process.
+
+### Transitional: how the request reaches layers
+
+The request travels from loader to layers via
+`_component_attention_backend_scope`, a private ContextVar. It is plumbing with
+an end date, not API: layer constructors nested inside a model receive only a
+bare `supported_attention_backends` tuple, threaded through block constructors
+up to four levels deep, so they cannot yet read the decision off their own
+config. Thread the request alongside that tuple, one model family at a time —
+Wan, LTX-2 and Kandinsky5 first, since those carry per-role requests — and the
+scope goes away when the last family lands. Do not build on it.
 
 ## Adding a Backend
 
