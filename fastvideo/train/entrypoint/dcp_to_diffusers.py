@@ -38,6 +38,26 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 
+def _rewrite_model_index_pipeline_class(
+    model_dir: str,
+    pipeline_cls_name: str,
+) -> None:
+    """Set the exported pipeline class without mutating a hard-linked base."""
+    import json
+    from pathlib import Path
+
+    model_index_path = Path(model_dir) / "model_index.json"
+    model_index = json.loads(model_index_path.read_text(encoding="utf-8"))
+    model_index["_class_name"] = pipeline_cls_name
+
+    replacement = model_index_path.with_suffix(".json.tmp")
+    replacement.write_text(
+        json.dumps(model_index, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(replacement, model_index_path)
+
+
 def _ensure_distributed() -> None:
     """Set up a single-process distributed env if needed.
 
@@ -63,6 +83,7 @@ def _save_role_pretrained(
     module_names: list[str] | None = None,
     overwrite: bool = False,
     model: Any,
+    pipeline_cls_name: str | None = None,
 ) -> str:
     """Export a role's modules into a diffusers-style model dir.
 
@@ -127,6 +148,11 @@ def _save_role_pretrained(
             symlinks=False,
             copy_function=_copy_or_link,
         )
+        if pipeline_cls_name is not None:
+            _rewrite_model_index_pipeline_class(
+                str(dst),
+                pipeline_cls_name,
+            )
 
     _barrier()
 
@@ -316,12 +342,16 @@ def convert(
         output_dir,
         base_model_path,
     )
+    pipeline_target = (cfg.callbacks.get("validation", {}).get("pipeline_target") if role == "student" else None)
+    pipeline_cls_name = (pipeline_target.rsplit(".", 1)[-1]
+                         if isinstance(pipeline_target, str) and pipeline_target.strip() else None)
     result = _save_role_pretrained(
         role=role,
         base_model_path=base_model_path,
         output_dir=output_dir,
         overwrite=overwrite,
         model=model,
+        pipeline_cls_name=pipeline_cls_name,
     )
     logger.info("Export complete: %s", result)
 

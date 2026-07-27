@@ -9,19 +9,14 @@ Two silent-fallback traps this guards against:
     ``F.scaled_dot_product_attention`` (a real fallback for standalone
     parity tests, not relevant here since we always set a forward context,
     but worth asserting past explicitly).
-  - ``_cached_get_attn_backend`` is process-wide ``@cache``d on
-    ``(head_size, dtype, supported_attention_backends)`` -- NOT on the env
-    var -- so a stale backend selection from an earlier test in the same
-    process can silently linger. Cleared here before selecting, matching
-    the defensive pattern in
-    ``fastvideo/models/loader/component_loader.py``.
+  - ``_cached_get_attn_backend`` is process-wide ``@cache``d, so a stale
+    backend selection from an earlier test in the same process can silently
+    linger. The role-local model option scopes and clears selection while the
+    transformer is built.
 
 This test itself must not become that stale-selection source for whichever
-model test runs next in the same pytest process: ``FASTVIDEO_ATTENTION_BACKEND``
-is set via ``monkeypatch`` (auto-restored at teardown, including on
-failure) and the cache is cleared again in a ``finally`` block, since
-``monkeypatch`` only restores the env var, not the separate process-wide
-cache keyed on it.
+model test runs next in the same pytest process, so the cache is cleared
+again in a ``finally`` block.
 
 Unlike ``fastvideo.platforms.cuda``'s other backends, ATTN_QAT_TRAIN has no
 silent-fallback path at all if the kernel isn't built -- backend selection
@@ -65,7 +60,7 @@ _FIXTURE = str(
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_kandinsky5_attn_qat_train_engages_and_backprops(monkeypatch):
+def test_kandinsky5_attn_qat_train_engages_and_backprops():
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
 
@@ -74,7 +69,6 @@ def test_kandinsky5_attn_qat_train_engages_and_backprops(monkeypatch):
     if not is_attn_qat_train_available():
         pytest.skip("fastvideo_kernel ATTN_QAT_TRAIN kernel is not built")
 
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "ATTN_QAT_TRAIN")
     _cached_get_attn_backend.cache_clear()
     try:
         from fastvideo.train.models.kandinsky5 import Kandinsky5Model
@@ -85,6 +79,7 @@ def test_kandinsky5_attn_qat_train_engages_and_backprops(monkeypatch):
             init_from=cfg.models["student"]["init_from"],
             training_config=cfg.training,
             trainable=True,
+            attention_backend="ATTN_QAT_TRAIN",
         )
 
         device = torch.device("cuda:0")
@@ -154,9 +149,6 @@ def test_kandinsky5_attn_qat_train_engages_and_backprops(monkeypatch):
                               if hasattr(attn.to_query.weight.grad, "to_local") else
                               attn.to_query.weight.grad).all().item(), "weight grad contains NaN/Inf"
     finally:
-        # monkeypatch restores FASTVIDEO_ATTENTION_BACKEND itself, but the
-        # selector cache is a separate process-wide functools.cache keyed on
-        # (head_size, dtype, supported_backends) -- not on the env var -- so
-        # it must be cleared again here or a later model test in this same
-        # pytest process could reuse this test's ATTN_QAT_TRAIN selection.
+        # Clear the process-wide selector cache so a later model test cannot
+        # reuse this test's ATTN_QAT_TRAIN selection.
         _cached_get_attn_backend.cache_clear()

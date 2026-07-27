@@ -3,8 +3,8 @@
 the real platform resolver.
 
 ``is_attn_qat_infer_available()`` used to test only whether the kernel
-extension imports. CUDA 13 wheel builds can carry the sm_120/sm_121
-extension on any host (e.g. H100 sm_90, GB200 sm_100): the import
+extension imports. CUDA 13 wheel builds can carry the sm_120 extension
+on any host (e.g. H100 sm_90, GB200 sm_100, or DGX Spark sm_121): the import
 succeeds, ``CudaPlatformBase.get_attn_backend_cls`` selects the
 consumer-Blackwell backend, and the first kernel call fails with an
 unsupported-capability error -- instead of the FlashAttention fallback
@@ -78,12 +78,18 @@ def test_sm100_host_with_bundled_extension_falls_back(monkeypatch):
     assert _resolve() in FALLBACK_CLASSES
 
 
-@pytest.mark.parametrize("capability", [(12, 0), (12, 1)])
-def test_consumer_blackwell_with_extension_selects_backend(monkeypatch, capability):
-    _fake_gpu(monkeypatch, capability=capability, extension_imports=True)
+def test_sm120_with_extension_selects_backend(monkeypatch):
+    _fake_gpu(monkeypatch, capability=(12, 0), extension_imports=True)
 
     assert is_attn_qat_infer_available()
     assert _resolve() == ATTN_QAT_INFER_CLS
+
+
+def test_sm121_host_with_sm120_extension_falls_back(monkeypatch):
+    _fake_gpu(monkeypatch, capability=(12, 1), extension_imports=True)
+
+    assert not is_attn_qat_infer_available()
+    assert _resolve() in FALLBACK_CLASSES
 
 
 def test_consumer_blackwell_without_extension_falls_back(monkeypatch):
