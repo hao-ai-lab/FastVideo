@@ -358,6 +358,10 @@ class CausalDMDDenosingStage(DenoisingStage):
     def _initialize_kv_cache(self, batch_size, dtype, device) -> list[dict]:
         """
         Initialize a Per-GPU KV cache aligned with the Wan model assumptions.
+
+        The window offsets are plain Python ints rather than device tensors.
+        The attention block reads them back on every layer to slice the cache,
+        so keeping them on device would force a host sync per layer per step.
         """
         kv_cache1 = []
         num_attention_heads = self.transformer.num_attention_heads
@@ -378,9 +382,9 @@ class CausalDMDDenosingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
                 "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
             })
 
         return kv_cache1

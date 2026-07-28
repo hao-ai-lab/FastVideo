@@ -860,12 +860,15 @@ class VideoGenerator:
             frames = None
         else:
             videos = rearrange(samples, "b c t h w -> t b c h w")
-            frames = []
+            device_frames = []
             for x in videos:
                 x = torchvision.utils.make_grid(x, nrow=6)
                 x = x.permute(1, 2, 0).squeeze(-1)
-                x = (x * 255).to(torch.uint8)
-                frames.append(x.contiguous().cpu().numpy())
+                device_frames.append((x * 255).to(torch.uint8).contiguous())
+            # Transfer the frames in one copy. Reading them back individually
+            # blocks on the device once per frame, which serializes the
+            # remaining frames' device-side work behind each transfer.
+            frames = (list(torch.stack(device_frames).cpu().numpy()) if device_frames else [])
         postprocess_time = time.perf_counter() - postprocess_start
         logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
         if logging_info is not None:
