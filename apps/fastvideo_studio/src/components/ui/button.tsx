@@ -18,11 +18,11 @@ const buttonVariants = cva(
 				destructive: "border-rose-500/60 bg-rose-600/90 text-white hover:bg-rose-500",
 			},
 			size: {
-				default: "h-10 px-4 py-2",
-				sm: "h-9 rounded-lg px-3 !text-xs",
-				lg: "h-11 px-5 !text-sm",
-				icon: "size-10",
-				"icon-sm": "size-8",
+				default: "h-11 px-4 py-2",
+				sm: "h-11 rounded-lg px-3 !text-xs",
+				lg: "h-12 px-5 !text-sm",
+				icon: "size-11",
+				"icon-sm": "size-11",
 			},
 		},
 		defaultVariants: {

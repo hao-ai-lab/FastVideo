@@ -20,7 +20,7 @@ const JOB_ROUTES = [
 ] as const;
 
 const TAB_BASE =
-  'block px-5 py-[0.65rem] text-left text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground';
+  'block min-h-11 px-5 py-[0.65rem] text-left text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground';
 const TAB_ACTIVE = 'bg-accent-blue/10 font-medium text-accent-blue';
 
 export default function PrimarySidebar({
@@ -188,8 +188,7 @@ export default function PrimarySidebar({
           onClick={() => setIsCollapsed((v) => !v)}
           title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           className={cn(
-            'flex items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-            isCollapsed ? 'p-3' : 'p-2',
+            'flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
           )}
         >
           <svg

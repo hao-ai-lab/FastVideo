@@ -101,7 +101,7 @@ const DatasetFileCard = React.memo(function DatasetFileCard({
             <button
               type="button"
               onClick={() => onCaptionRetry(fileName, caption)}
-              className="font-medium underline underline-offset-2"
+              className="inline-flex min-h-11 items-center font-medium underline underline-offset-2"
             >
               Retry
             </button>
@@ -291,7 +291,7 @@ export default function DatasetSidebar({
             onClick={onClose}
             title="Close"
             aria-label="Close"
-            className="flex items-center justify-center rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <X className="h-[18px] w-[18px]" />
           </button>
