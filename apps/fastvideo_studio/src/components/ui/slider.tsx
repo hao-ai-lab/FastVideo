@@ -36,7 +36,7 @@ const Slider = React.forwardRef<
         aria-label={ariaLabel}
         aria-labelledby={ariaLabelledBy}
         aria-describedby={ariaDescribedBy}
-        className="relative block size-11 rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:size-4 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:border-2 after:border-accent-blue after:bg-accent-blue after:shadow after:content-[''] hover:after:border-accent-blue/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40 disabled:pointer-events-none disabled:opacity-50"
+        className="relative block size-11 rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:size-4 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:border-2 after:border-accent-blue after:bg-accent-blue after:shadow after:content-[''] hover:after:border-accent-blue/80 disabled:pointer-events-none disabled:opacity-50"
       />
     </SliderPrimitive.Root>
   ),
