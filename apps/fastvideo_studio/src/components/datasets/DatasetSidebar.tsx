@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { ImageOff, X } from 'lucide-react';
+import { toast } from 'sonner';
 
 import DownloadCaptions from '@/components/datasets/DownloadCaptions';
 import { Textarea } from '@/components/ui/textarea';
@@ -19,6 +20,7 @@ const SIDEBAR_MAX_WIDTH = 900;
 const INITIAL_PAGE_SIZE = 24;
 const PAGE_SIZE = 24;
 const SCROLL_THRESHOLD = 200;
+type CaptionSaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 // Memoized so a caption keystroke re-renders only the edited card, not every
 // visible <video> in the grid (visibleCount grows unbounded with scrolling).
@@ -27,14 +29,18 @@ const DatasetFileCard = React.memo(function DatasetFileCard({
   mediaUrl,
   caption,
   thumbLoaded,
+  saveState,
   onCaptionChange,
+  onCaptionRetry,
   onThumbLoaded,
 }: {
   fileName: string;
   mediaUrl: string;
   caption: string;
   thumbLoaded: boolean;
+  saveState: CaptionSaveState;
   onCaptionChange: (fileName: string, value: string) => void;
+  onCaptionRetry: (fileName: string, value: string) => void;
   onThumbLoaded: (fileName: string) => void;
 }) {
   const [mediaFailed, setMediaFailed] = React.useState(false);
@@ -83,6 +89,25 @@ const DatasetFileCard = React.memo(function DatasetFileCard({
         rows={2}
         className="min-h-[2.5rem] resize-y rounded-none border-0 bg-transparent p-1.5 text-xs shadow-none focus-visible:border-transparent focus-visible:ring-0"
       />
+      <div
+        aria-live="polite"
+        className="flex min-h-6 items-center px-1.5 pb-1 text-[0.7rem] text-muted-foreground"
+      >
+        {saveState === 'saving' && <span>Saving…</span>}
+        {saveState === 'saved' && <span>Saved</span>}
+        {saveState === 'error' && (
+          <span role="alert" className="text-destructive">
+            Not saved.{' '}
+            <button
+              type="button"
+              onClick={() => onCaptionRetry(fileName, caption)}
+              className="font-medium underline underline-offset-2"
+            >
+              Retry
+            </button>
+          </span>
+        )}
+      </div>
     </div>
   );
 });
@@ -107,12 +132,16 @@ export default function DatasetSidebar({
   const [thumbLoaded, setThumbLoaded] = React.useState<
     Record<string, boolean>
   >({});
+  const [captionSaveStates, setCaptionSaveStates] = React.useState<
+    Record<string, CaptionSaveState>
+  >({});
 
   // Pending debounced caption saves, keyed per file so editing one caption
   // can't cancel another file's pending save.
   const pendingSaves = React.useRef(
     new Map<string, { timer: ReturnType<typeof setTimeout>; save: () => void }>(),
   );
+  const captionVersions = React.useRef(new Map<string, number>());
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -129,6 +158,8 @@ export default function DatasetSidebar({
         setCaptions(data.captions);
         setVisibleCount(INITIAL_PAGE_SIZE);
         setThumbLoaded({});
+        setCaptionSaveStates({});
+        captionVersions.current.clear();
       })
       .catch((err) => console.error('Failed to load dataset files:', err))
       .finally(() => {
@@ -161,23 +192,51 @@ export default function DatasetSidebar({
   });
 
   const datasetId = dataset.id;
+  const persistCaption = React.useCallback(
+    (fileName: string, value: string, version: number) => {
+      setCaptionSaveStates((prev) => ({ ...prev, [fileName]: 'saving' }));
+      void updateDatasetCaption(datasetId, fileName, value)
+        .then(() => {
+          if (captionVersions.current.get(fileName) !== version) return;
+          setCaptionSaveStates((prev) => ({ ...prev, [fileName]: 'saved' }));
+        })
+        .catch((error) => {
+          if (captionVersions.current.get(fileName) !== version) return;
+          console.error('Failed to save caption:', error);
+          setCaptionSaveStates((prev) => ({ ...prev, [fileName]: 'error' }));
+          toast.error('Caption was not saved', {
+            description: `${fileName}: check the Studio API, then retry.`,
+          });
+        });
+    },
+    [datasetId],
+  );
+
   const handleCaptionChange = React.useCallback(
     (fileName: string, value: string) => {
       setCaptions((prev) => ({ ...prev, [fileName]: value }));
+      setCaptionSaveStates((prev) => ({ ...prev, [fileName]: 'idle' }));
       const pending = pendingSaves.current.get(fileName);
       if (pending) clearTimeout(pending.timer);
-      const save = () => {
-        updateDatasetCaption(datasetId, fileName, value).catch((err) =>
-          console.error('Failed to save caption:', err),
-        );
-      };
+      const version = (captionVersions.current.get(fileName) ?? 0) + 1;
+      captionVersions.current.set(fileName, version);
+      const save = () => persistCaption(fileName, value, version);
       const timer = setTimeout(() => {
         pendingSaves.current.delete(fileName);
         save();
       }, 500);
       pendingSaves.current.set(fileName, { timer, save });
     },
-    [datasetId],
+    [persistCaption],
+  );
+
+  const handleCaptionRetry = React.useCallback(
+    (fileName: string, value: string) => {
+      const version = (captionVersions.current.get(fileName) ?? 0) + 1;
+      captionVersions.current.set(fileName, version);
+      persistCaption(fileName, value, version);
+    },
+    [persistCaption],
   );
 
   function handleScroll() {
@@ -260,7 +319,9 @@ export default function DatasetSidebar({
                   mediaUrl={getDatasetMediaUrl(dataset.id, fileName)}
                   caption={captions[fileName] ?? ''}
                   thumbLoaded={!!thumbLoaded[fileName]}
+                  saveState={captionSaveStates[fileName] ?? 'idle'}
                   onCaptionChange={handleCaptionChange}
+                  onCaptionRetry={handleCaptionRetry}
                   onThumbLoaded={markThumbLoaded}
                 />
               ))}

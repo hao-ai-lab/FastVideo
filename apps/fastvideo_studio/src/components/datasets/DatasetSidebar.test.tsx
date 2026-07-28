@@ -6,6 +6,9 @@ import * as api from '@/lib/api';
 import type { Dataset } from '@/lib/api';
 
 vi.mock('@/lib/api');
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn() },
+}));
 
 const mockedApi = vi.mocked(api);
 
@@ -124,6 +127,39 @@ describe('DatasetSidebar', () => {
         'a.mp4',
         'two',
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows a failed save and lets the user retry it', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockedApi.updateDatasetCaption
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce(undefined);
+    render(<DatasetSidebar dataset={dataset} onClose={() => {}} />);
+    const textarea = await screen.findByDisplayValue('cap a');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(textarea, { target: { value: 'needs retry' } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(screen.getByText(/Not saved/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(mockedApi.updateDatasetCaption).toHaveBeenCalledTimes(2);
+      expect(mockedApi.updateDatasetCaption).toHaveBeenLastCalledWith(
+        'ds-1',
+        'a.mp4',
+        'needs retry',
+      );
+      expect(screen.getByText('Saved')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
