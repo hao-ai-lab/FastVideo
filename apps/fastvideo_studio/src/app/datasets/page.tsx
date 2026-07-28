@@ -62,7 +62,7 @@ export default function DatasetsPage() {
       <HeaderActions>
         <AddDatasetButton />
       </HeaderActions>
-      <main className="mx-auto flex w-full max-w-[850px] flex-col gap-6 px-4 pb-12">
+      <div className="mx-auto flex w-full max-w-[850px] flex-col gap-6 px-4 pb-12">
         <Card className="p-6">
           <div aria-busy={isInitialLoading}>
             {isInitialLoading ? (
@@ -122,7 +122,7 @@ export default function DatasetsPage() {
             )}
           </div>
         </Card>
-      </main>
+      </div>
       <CreateDatasetModal
         isOpen={open}
         onClose={() => setCreateDatasetModalOpen(false)}

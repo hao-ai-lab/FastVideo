@@ -137,7 +137,7 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
   const multiType = typesToFetch.length > 1;
 
   return (
-    <main className="mx-auto flex w-full max-w-[850px] flex-col gap-6 px-4 pb-12">
+    <div className="mx-auto flex w-full max-w-[850px] flex-col gap-6 px-4 pb-12">
       <section className="p-6">
         <div aria-busy={isInitialLoading}>
           {isInitialLoading ? (
@@ -190,6 +190,6 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
           )}
         </div>
       </section>
-    </main>
+    </div>
   );
 }

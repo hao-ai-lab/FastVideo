@@ -42,6 +42,7 @@ test.describe('app shell', () => {
       await expect(
         page.getByRole('heading', { level: 1, name: section.title }),
       ).toBeVisible();
+      await expect(page.getByRole('main')).toHaveCount(1);
     }
   });
 
