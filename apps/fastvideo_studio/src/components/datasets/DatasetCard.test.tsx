@@ -71,7 +71,7 @@ describe('DatasetCard', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('selects on keyboard activation of the card body but not of the Delete button', () => {
+  it('keeps the selection and delete actions separate', () => {
     const onSelect = vi.fn();
     render(
       <DatasetCard dataset={dataset} onUpdated={() => {}} onSelect={onSelect} />,
@@ -83,8 +83,12 @@ describe('DatasetCard', () => {
     });
     expect(onSelect).not.toHaveBeenCalled();
 
-    // Activating the card body itself does select.
-    fireEvent.keyDown(screen.getByText('My Dataset'), { key: 'Enter' });
+    // Activating the dedicated selection button selects the dataset.
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /My Dataset.*3 files.*2.0 KB/,
+      }),
+    );
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
