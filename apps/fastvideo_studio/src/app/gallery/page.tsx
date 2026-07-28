@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2 } from 'lucide-react';
+import { ImageOff, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { Card } from '@/components/ui/card';
@@ -9,6 +9,54 @@ import type { Job } from '@/lib/types';
 
 function isImage(job: Job): boolean {
   return job.output_path?.toLowerCase().endsWith('.png') ?? false;
+}
+
+function GalleryMedia({ job }: { job: Job }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <div
+        role="status"
+        className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-muted-foreground"
+      >
+        <ImageOff className="size-7" aria-hidden />
+        <span className="text-sm font-medium">Preview unavailable</span>
+        <span className="text-xs">
+          The generated file could not be loaded.
+        </span>
+      </div>
+    );
+  }
+
+  if (isImage(job)) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={getJobVideoUrl(job.id)}
+        alt={job.prompt}
+        className="block h-full w-full object-contain"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <video
+      src={getJobVideoUrl(job.id)}
+      aria-label={
+        job.prompt ? `Generated video: ${job.prompt}` : 'Generated video'
+      }
+      className="block h-full w-full object-contain"
+      controls
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 export default function GalleryPage() {
@@ -77,24 +125,7 @@ export default function GalleryPage() {
                 className="flex flex-col overflow-hidden rounded-lg border border-border bg-background"
               >
                 <div className="relative aspect-video overflow-hidden bg-muted">
-                  {isImage(job) ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={getJobVideoUrl(job.id)}
-                      alt={job.prompt}
-                      className="block h-full w-full object-contain"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <video
-                      src={getJobVideoUrl(job.id)}
-                      className="block h-full w-full object-contain"
-                      muted
-                      loop
-                      playsInline
-                      preload="metadata"
-                    />
-                  )}
+                  <GalleryMedia job={job} />
                 </div>
                 <p
                   className="line-clamp-3 border-t border-border px-4 py-3 text-sm text-muted-foreground"

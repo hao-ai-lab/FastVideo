@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import GalleryPage from './page';
@@ -41,6 +41,22 @@ describe('GalleryPage', () => {
 
     expect(await screen.findByText('a cat surfing a wave')).toBeInTheDocument();
     expect(getJobsList).toHaveBeenCalledWith('inference');
+  });
+
+  it('provides video controls and a visible fallback when media fails', async () => {
+    vi.mocked(getJobsList).mockResolvedValue([makeJob()]);
+    renderGallery();
+
+    const video = await screen.findByLabelText(
+      'Generated video: a cat surfing a wave',
+    );
+    expect(video).toHaveAttribute('controls');
+
+    fireEvent.error(video);
+    expect(screen.getByText('Preview unavailable')).toBeInTheDocument();
+    expect(
+      screen.getByText('The generated file could not be loaded.'),
+    ).toBeInTheDocument();
   });
 
   it('shows the empty state when no completed videos exist', async () => {
