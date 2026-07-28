@@ -160,7 +160,18 @@ def main() -> None:
     p.add_argument("--control-ckpt", required=True,
                    help="alibaba-pai Wan2.1-Fun-1.3B-Control diffusion_pytorch_model.safetensors (VideoX-Fun fmt).")
     p.add_argument("--out", required=True, help="Output WanTrack(Control) init dir.")
+    p.add_argument("--id-dim", type=int, default=None,
+                   help="Override track_encoder id_dim (default TRACK_CONFIG value, currently 128).")
+    p.add_argument("--zero-init-head", action="store_true", default=None,
+                   help="Force zero-init the track_encoder.proj head.")
+    p.add_argument("--no-zero-init-head", action="store_true", default=None,
+                   help="Force NON-zero (random) init the track_encoder.proj head.")
     args = p.parse_args()
+    global ID_DIM
+    if args.id_dim is not None:
+        ID_DIM = int(args.id_dim); TRACK_CONFIG["id_dim"] = ID_DIM
+    if args.no_zero_init_head: TRACK_CONFIG["zero_init_head"] = False
+    elif args.zero_init_head:  TRACK_CONFIG["zero_init_head"] = True
 
     base = Path(args.inp_base)
     out = Path(args.out)

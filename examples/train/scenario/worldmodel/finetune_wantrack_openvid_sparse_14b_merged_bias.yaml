@@ -1,0 +1,91 @@
+# STEP D — MotionStream stage-1 teacher training on the full OpenVid-1M bidir set, Wan2.1-14B.
+#
+# Direct 14B analog of finetune_wantrack_openvid_sparse_1p3b_merged_bias.yaml (wandb run
+# openvid_bidir_1p3b_merged_bias). Hparams are copied EXACTLY from that run — lr 1e-5,
+# global bs 128, 4800 steps, 480x832, 121f, 24fps, flow_shift 6, bf16 DiT — the only changes
+# are the ones 14B geometry forces (hsdp dims, grad_accum to keep bs 128 at 32 GPUs).
+#
+# init_from is the step-C MERGED init: a fresh 14B base whose track_encoder AND
+# patch_embedding.weight[:, 36:] both come from the 14B-native overfit (steps A+B), so the two
+# are co-adapted. This is the whole point of the pipeline: gradient-SNR analysis showed a
+# random 14B init gives per-sample track_encoder.proj grad ~0.011 (the same regime that made
+# 1.3B-random FAIL), while 1.3B-merged sat at ~0.502 and succeeded.
+#
+# Launched with WANTRACK_FREEZE_HEAD=1 (track_encoder frozen) + TRACKWAN_TRACK_BIAS=1.
+# 8 nodes x 4 GPU = 32 GPUs; grad_accum 4 -> 1 * 4 * 32 = 128 global.
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
+    init_from: /mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_merged_from_overfit_bias
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  model_path: /mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_merged_from_overfit_bias
+  dit_precision: bf16
+
+  distributed:
+    num_gpus: 32          # overridden by the launcher to nodes*4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 8 # replicate across the 8 nodes
+    hsdp_shard_dim: 4     # shard the 14B within each node over NVLink (8*4 = 32)
+
+  data:
+    data_path: /mnt/lustre/vlm-s4duan/openvid_1m/combined_parquet_dataset
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 480
+    num_width: 832
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 1.0e-5     # MotionStream teacher stage-1
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 4800
+    gradient_accumulation_steps: 4   # 1 * 4 * 32 gpus = 128 global
+
+  checkpoint:
+    output_dir: /mnt/lustre/vlm-s4duan/openvid_bidir_14b_merged_bias_out
+    training_state_checkpointing_steps: 100   # ~backstop vs the ~80min cordon cycle
+    checkpoints_total_limit: 3
+    resume_from_checkpoint: latest
+
+  tracker:
+    trackers: [wandb]
+    project_name: wantrack-bidir
+    run_name: openvid-bidir-14b-merged-init-bias
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  track_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    every_steps: 250
+    num_val_samples: 4
+    val_data_path: /mnt/lustre/vlm-s4duan/val_examples_mixed/combined_parquet_dataset   # 2 openvid + car + dog
+    num_inference_steps: 30
+    guidance_scale: 3.0
+    motion_guidance_scale: 1.5
+    fps: 24
+    grid_stride: 3
+    tail: 12
+    validate_at_start: true
+    seed: 1000
+
+pipeline:
+  flow_shift: 6

@@ -3,15 +3,19 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Literal
 
 import torch
 import torch.nn.functional as F
 
+from fastvideo.logger import init_logger
 from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import (
     build_optimizer_and_scheduler, )
+
+logger = init_logger(__name__)
 
 
 class FineTuneMethod(TrainingMethod):
@@ -153,6 +157,57 @@ class FineTuneMethod(TrainingMethod):
         del iteration
         return [self._student_lr_scheduler]
 
+    # Names that make up the track pathway. patch_embedding is matched on the CHECKPOINT name
+    # used by the live module ('patch_embedding.proj.weight'); an earlier experiment silently
+    # matched nothing by using 'patch_embedding.weight' (the converter-side name) and so never
+    # actually applied its layer-wise LR.
+    _TRACK_ENCODER_HINT = "track_encoder"
+    _PATCH_EMBED_HINTS = ("patch_embedding.proj.weight", "patch_embedding.weight")
+    _BASE_IN_CHANNELS = 36
+
+    def _build_track_param_groups(self, base_lr: float) -> list[dict]:
+        """Split params into a boosted 'track' group and the normal 'base' group."""
+        mult = float(os.getenv("WANTRACK_TRACK_LR_MULT", "1"))
+        track, base = [], []
+        pe_masked = 0
+        for name, p in self.student.transformer.named_parameters():
+            if not p.requires_grad:
+                continue
+            is_pe = any(name.endswith(h) for h in self._PATCH_EMBED_HINTS)
+            if self._TRACK_ENCODER_HINT in name or is_pe:
+                if is_pe and p.dim() >= 2 and p.shape[1] > self._BASE_IN_CHANNELS:
+                    # Keep the pretrained input channels out of the boosted group entirely.
+                    base_in = self._BASE_IN_CHANNELS
+
+                    def _mask_pretrained(grad, _base_in=base_in):
+                        g = grad.clone()
+                        g[:, :_base_in] = 0
+                        return g
+
+                    p.register_hook(_mask_pretrained)
+                    pe_masked += 1
+                track.append(p)
+            else:
+                base.append(p)
+
+        if not track:
+            raise ValueError(
+                "WANTRACK_TRACK_GROUP=1 but no track params matched "
+                f"({self._TRACK_ENCODER_HINT!r} / {self._PATCH_EMBED_HINTS!r}) — refusing to "
+                "run an experiment that would silently be a plain finetune")
+
+        n_track = sum(p.numel() for p in track)
+        logger.info(
+            "[WANTRACK] track param group: %d tensors (%d params) lr=%.3g (mult %.3g); "
+            "base group: %d tensors lr=%.3g; patch_embedding grad-masked to [:, %d:] on %d tensor(s)",
+            len(track), n_track, base_lr * mult, mult, len(base), base_lr,
+            self._BASE_IN_CHANNELS, pe_masked)
+        # 'name' is what TrackWarmupCallback looks for to zero the base group during warmup.
+        return [
+            {"params": track, "lr": base_lr * mult, "name": "track"},
+            {"params": base, "lr": base_lr, "name": "base"},
+        ]
+
     def _init_optimizers_and_schedulers(self) -> None:
         tc = self.training_config
 
@@ -164,6 +219,20 @@ class FineTuneMethod(TrainingMethod):
         student_betas = tc.optimizer.betas
         student_sched = str(tc.optimizer.lr_scheduler)
         student_params = [p for p in self.student.transformer.parameters() if p.requires_grad]
+
+        # Optional: split the track pathway into its OWN param group so it can be given a
+        # different LR from the pretrained DiT (WANTRACK_TRACK_GROUP=1). Used to test whether a
+        # random-init encoder can be bootstrapped directly on stage-1 data — warming up the
+        # track pathway first, or running it at a higher LR — instead of via the overfit+merge.
+        #
+        # Two things make this non-trivial and are handled here:
+        #  * Adam is scale-invariant per parameter, so scaling GRADIENTS does not emulate a
+        #    higher LR. It has to be a real param group with its own lr.
+        #  * patch_embedding.proj.weight is ONE tensor covering both the pretrained input
+        #    channels [:, :36] and the track slot [:, 36:]. Putting it in a boosted group would
+        #    blast the pretrained channels too, so we mask its gradient to the track slot.
+        if os.getenv("WANTRACK_TRACK_GROUP", "0") not in ("0", "false", "False"):
+            student_params = self._build_track_param_groups(student_lr)
         (
             self._student_optimizer,
             self._student_lr_scheduler,

@@ -1,0 +1,98 @@
+# STEP A — 14B fixed-track overfit on the 20-clip synth toy set.
+#
+# Direct 14B analog of finetune_wantrack_synth_sparse_fixed.yaml (1.3B). Purpose is NOT a good
+# model: it is to CO-ADAPT track_encoder.{proj,temporal_conv} with patch_embedding.weight[:, 36:]
+# for the 14B DiT. Gradient-SNR analysis showed a 14B random init has per-sample
+# track_encoder.proj grad ~0.011 (same as the 1.3B random init that FAILED), while the 1.3B
+# merged-from-overfit init sat at ~0.502 (50x) and succeeded. Steps A+B produce the 14B-native
+# overfit whose encoder + track slot get merged into a fresh init in step C.
+#
+# Launched with WANTRACK_FIXED_SAMPLE=1 (deterministic per-sample track subset).
+#
+# GLOBAL BATCH SIZE 1 — this is exact parity with c0xyfg57 and is NOT negotiable for this stage.
+# The reference ran 1 GPU, bs 1, accum 1 => global bs 1, 2000 steps => 2000 samples seen. An
+# earlier attempt ran this on 16 GPUs at global bs 16 for 1000 steps = 16,000 samples, i.e. 8x
+# the reference's ENTIRE run, and the model came out visibly overbaked by step ~1000. Step count
+# only means something relative to batch size; matching lr + steps while changing batch silently
+# changes exposure by the batch ratio. Large batch also removes gradient noise, so it memorises
+# 20 clips faster than the reference even at equal samples.
+#
+# One node is still needed to hold a 14B: hsdp_shard_dim 4 shards ONE replica across the 4 GPUs
+# and hsdp_replicate_dim 1 makes the data-parallel degree 1, so global bs stays 1.
+# checkpoints_total_limit is deliberately huge: rotation previously destroyed the early
+# checkpoints we wanted to fall back to.
+models:
+  student:
+    _target_: fastvideo.train.models.wantrack.wantrack.WanTrackModel
+    init_from: /mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_zero_init_bias
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  model_path: /mnt/lustre/vlm-s4duan/models/trackwan_14b_i2v_d64_zero_init_bias
+  dit_precision: bf16
+
+  distributed:
+    num_gpus: 4           # overridden by the launcher to nodes*4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1 # data-parallel degree 1 -> global bs = train_batch_size = 1
+    hsdp_shard_dim: 4     # shard ONE 14B replica across the node's 4 GPUs over NVLink
+
+  data:
+    data_path: /mnt/lustre/vlm-s4duan/data/wantrack_synth_toy/preprocessed_i2v_track_varied/combined_parquet_dataset
+    dataloader_num_workers: 2
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 31
+    num_height: 480
+    num_width: 832
+    num_frames: 121
+
+  optimizer:
+    learning_rate: 1.0e-4   # same as the 1.3B overfit (c0xyfg57 lineage)
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 2000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: /mnt/lustre/vlm-s4duan/wantrack_14b_synth_sparse_fixed_out
+    training_state_checkpointing_steps: 100
+    checkpoints_total_limit: 100
+    resume_from_checkpoint: latest
+
+  tracker:
+    trackers: [wandb]
+    project_name: wantrack-bidir
+    run_name: synth-sparse-fixed-14b
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  track_validation:
+    _target_: fastvideo.train.callbacks.track_validation.TrackValidationCallback
+    every_steps: 250
+    num_val_samples: 2      # validates on the train (toy) clips — the point of an overfit
+    num_inference_steps: 30
+    guidance_scale: 3.0
+    motion_guidance_scale: 1.5
+    fps: 24
+    grid_stride: 3
+    tail: 12
+    validate_at_start: true
+    seed: 1000
+
+pipeline:
+  flow_shift: 6

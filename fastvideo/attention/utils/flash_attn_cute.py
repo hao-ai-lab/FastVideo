@@ -26,7 +26,10 @@ def _flash_attn_cute_forward(
     causal: bool,
     deterministic: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    out, lse = _flash_attn_fwd(
+    # NOTE(local): official Dao-AILab flash_attn.cute _flash_attn_fwd returns
+    # (out, lse, *extra) and gates lse behind return_lse; the fork FastVideo
+    # pinned returned just (out, lse). Adapt to the official signature.
+    out, lse, *_ = _flash_attn_fwd(
         q,
         k,
         v,
@@ -37,6 +40,7 @@ def _flash_attn_cute_forward(
         softcap=0.0,
         num_splits=1,
         pack_gqa=None,
+        return_lse=True,
     )
     return out, lse
 
@@ -114,7 +118,8 @@ def _flash_attn_cute_varlen_forward(
     causal: bool,
     deterministic: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    out, lse = _flash_attn_fwd(
+    # NOTE(local): official _flash_attn_fwd returns (out, lse, *extra); adapt unpack.
+    out, lse, *_ = _flash_attn_fwd(
         q,
         k,
         v,
@@ -129,6 +134,7 @@ def _flash_attn_cute_varlen_forward(
         softcap=0.0,
         num_splits=1,
         pack_gqa=None,
+        return_lse=True,
     )
     return out, lse
 
@@ -250,7 +256,8 @@ def _flash_attn_cute_fp4_forward(
     softmax_scale: float | None,
     causal: bool,
 ) -> torch.Tensor:
-    out, _ = _flash_attn_fwd(
+    # NOTE(local): official _flash_attn_fwd returns (out, *extra); adapt unpack.
+    out, *_ = _flash_attn_fwd(
         q,
         k,
         v,
