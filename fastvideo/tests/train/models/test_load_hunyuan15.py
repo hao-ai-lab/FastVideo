@@ -64,8 +64,13 @@ def test_hunyuan15_model_loads_and_forwards():
 
     # HY1.5 takes [B, C, T, H, W] with 32 latent channels. Small spatial
     # + few frames so this fits next to the 8B model.
-    b, c, t, h, w = 1, 32, 4, 16, 16
-    hidden_states = torch.randn(b, c, t, h, w, device=device, dtype=dtype)
+    b, t, h, w = 1, 4, 16, 16
+    latent = torch.randn(b, 32, t, h, w, device=device, dtype=dtype)
+    # 65 = 32 latent + 1 conditioning mask + 32 conditioning latent
+    # (both conditioning blocks stay zero for T2V).
+    cond_mask = torch.zeros(b, 1, t, h, w, device=device, dtype=dtype)
+    hidden_states = torch.cat([latent, cond_mask, torch.zeros_like(latent)], dim=1)
+
     qwen_embeds = torch.randn(b, 20, _QWEN_DIM, device=device, dtype=dtype)
     byt5_embeds = torch.randn(b, 8, _BYT5_DIM, device=device, dtype=dtype)
     timestep = torch.tensor([500], device=device, dtype=torch.long)
@@ -89,9 +94,10 @@ def test_hunyuan15_model_loads_and_forwards():
 
     if isinstance(out, tuple):
         out = out[0]
-    assert out.shape == hidden_states.shape, (
-        f"output shape {tuple(out.shape)} != input shape "
-        f"{tuple(hidden_states.shape)}")
+    # The transformer emits the 32 latent channels, not the 65 it takes in.
+    assert out.shape == latent.shape, (
+        f"output shape {tuple(out.shape)} != latent shape "
+        f"{tuple(latent.shape)}")
     assert torch.isfinite(out).all().item(), "output contains NaN/Inf"
 
 
@@ -112,8 +118,12 @@ def test_hunyuan15_forwards_with_empty_byt5():
     dtype = torch.bfloat16
     transformer = model.transformer.to(device=device, dtype=dtype).eval()
 
-    b, c, t, h, w = 1, 32, 4, 16, 16
-    hidden_states = torch.randn(b, c, t, h, w, device=device, dtype=dtype)
+    b, t, h, w = 1, 4, 16, 16
+    latent = torch.randn(b, 32, t, h, w, device=device, dtype=dtype)
+    # 65 = 32 latent + 1 conditioning mask + 32 conditioning latent
+    # (both conditioning blocks stay zero for T2V).
+    cond_mask = torch.zeros(b, 1, t, h, w, device=device, dtype=dtype)
+    hidden_states = torch.cat([latent, cond_mask, torch.zeros_like(latent)], dim=1)
     qwen_embeds = torch.randn(b, 20, _QWEN_DIM, device=device, dtype=dtype)
     # Zero tokens, not zero values.
     byt5_embeds = torch.zeros(b, 0, _BYT5_DIM, device=device, dtype=dtype)
@@ -137,6 +147,6 @@ def test_hunyuan15_forwards_with_empty_byt5():
 
     if isinstance(out, tuple):
         out = out[0]
-    assert out.shape == hidden_states.shape
+    assert out.shape == latent.shape
     assert torch.isfinite(out).all().item(), (
         "empty ByT5 produced NaN/Inf in the output")
