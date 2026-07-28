@@ -13,10 +13,9 @@ test.describe('create inference job', () => {
   test('creates a T2V job and shows it in the queue', async ({ page }) => {
     await page.goto('/inference');
 
-    // The "Create Job" button reveals a workload menu on hover; wait for the
-    // T2V item to become visible before clicking so the CSS hover transition
-    // can't race the click.
-    await page.getByRole('button', { name: /create job/i }).hover();
+    // The trigger opens a real menu on click, so this path works for touch,
+    // mouse, and keyboard users.
+    await page.getByRole('button', { name: /create job/i }).click();
     const t2vItem = page.getByRole('menuitem', { name: /T2V/i });
     await expect(t2vItem).toBeVisible();
     await t2vItem.click();
