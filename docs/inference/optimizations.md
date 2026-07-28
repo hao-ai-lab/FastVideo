@@ -103,7 +103,7 @@ See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040) and [flash-attention-
 
 - **GPU**: NVIDIA Blackwell (sm100a or sm103a) — B200, B300, GB200, GB300
 - **CUDA**: 13.0+
-- **Python**: 3.10 or 3.11
+- **Python**: 3.10 – 3.12
 
 #### Installation
 
@@ -112,12 +112,19 @@ Install the FP4 flash attention kernel (without upgrading your existing torch):
 ```bash
 # branch fix/cutlass-dsl-4.5 carries the cutlass-dsl 4.5 fix (cute.core.ThrMma
 # -> cute.ThrMma); switch back to @fp4 once hao-ai-lab/flash-attention-fp4#2 merges.
-pip install --no-deps "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fix/cutlass-dsl-4.5#subdirectory=flash_attn/cute"
+pip install --no-deps "git+https://github.com/hao-ai-lab/flash-attention-fp4.git@fix/cutlass-dsl-4.5#subdirectory=flash_attn/cute"
 pip install "nvidia-cutlass-dsl>=4.5.2" apache-tvm-ffi flashinfer-python
 ```
 
 The `--no-deps` flag prevents upgrading torch/torchvision. Use the supported
 PyTorch 2.12.0 and CUDA 13 environment for this kernel.
+
+The `fix/cutlass-dsl-4.5` branch above is the recommended install because it
+works with the pip-available `nvidia-cutlass-dsl>=4.5.2` (it carries the
+`cute.ThrMma` rename fix). The hardware-validated receipt set — the runs
+behind the published GB200/GB300 numbers — used the `fp4` branch with the
+pinned `4.4.2` toolchain listed in the compatibility table below; both
+configurations run the same kernels.
 
 Branch-to-`nvidia-cutlass-dsl` compatibility (the fork tracks the CuTe DSL API
 surface closely):

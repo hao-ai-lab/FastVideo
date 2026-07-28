@@ -15,8 +15,10 @@
 # (fastvideo/layers/quantization/nvfp4_config.py) targets
 # ltx2.blocks.{0..47}.* — LTX-2.3 uses the same LTX-2 transformer class,
 # module naming, and 48-block depth, so the same 576 linears attach.
-# CAVEAT: the set was curated against LTX-2.0 NVFP4 deployment, and
-# LTX-2.3 QAT training has no validated overfit run yet. The 2.3
+# The set was curated against LTX-2.0 NVFP4 deployment; a validated
+# LTX-2.3 QAT overfit run exists (300 steps, MS-SSIM within the bf16
+# reference population — an overfit convergence check, not a
+# generalization claim). The 2.3
 # gated-attention to_gate_logits projections are not in the set and
 # remain dense.
 #
