@@ -27,6 +27,26 @@ beforeEach(() => {
 });
 
 describe('DatasetSidebar', () => {
+  it('fills the mobile viewport without reserving main-content width', async () => {
+    const onWidthChange = vi.fn();
+
+    render(
+      <DatasetSidebar
+        dataset={dataset}
+        isMobile
+        onClose={() => {}}
+        onWidthChange={onWidthChange}
+      />,
+    );
+
+    const drawer = screen.getByRole('dialog', {
+      name: 'My Dataset dataset details',
+    });
+    expect(drawer).toHaveStyle({ width: '100%', maxWidth: 'none' });
+    expect(drawer).toHaveAttribute('aria-modal', 'true');
+    expect(onWidthChange).toHaveBeenCalledWith(0);
+  });
+
   it('lists dataset files after loading', async () => {
     render(<DatasetSidebar dataset={dataset} onClose={() => {}} />);
 

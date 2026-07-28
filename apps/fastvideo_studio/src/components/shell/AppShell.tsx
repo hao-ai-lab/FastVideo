@@ -96,6 +96,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {jobSidebarOpen && activeJob && (
           <JobDetailsSidebar
             job={activeJob}
+            isMobile={isMobile}
             onClose={() => setActiveJobId(null)}
             onWidthChange={setSecondaryWidth}
           />
@@ -103,6 +104,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {datasetSidebarOpen && activeDataset && (
           <DatasetSidebar
             dataset={activeDataset}
+            isMobile={isMobile}
             onClose={() => setActiveDatasetId(null)}
             onWidthChange={setSecondaryWidth}
           />

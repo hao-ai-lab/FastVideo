@@ -68,10 +68,12 @@ const DatasetFileCard = React.memo(function DatasetFileCard({
 
 export default function DatasetSidebar({
   dataset,
+  isMobile = false,
   onClose,
   onWidthChange,
 }: {
   dataset: Dataset;
+  isMobile?: boolean;
   onClose: () => void;
   onWidthChange?: (w: number) => void;
 }) {
@@ -93,8 +95,8 @@ export default function DatasetSidebar({
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    onWidthChange?.(width);
-  }, [width, onWidthChange]);
+    onWidthChange?.(isMobile ? 0 : width);
+  }, [isMobile, width, onWidthChange]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -189,8 +191,14 @@ export default function DatasetSidebar({
 
   return (
     <aside
-      className="fixed bottom-0 right-0 top-[var(--header-height)] z-50 flex max-h-[calc(100vh-var(--header-height))] min-w-[320px] shrink-0 flex-col border-l border-border bg-card"
-      style={{ width, maxWidth: SIDEBAR_MAX_WIDTH }}
+      role="dialog"
+      aria-label={`${dataset.name} dataset details`}
+      aria-modal={isMobile || undefined}
+      className="fixed bottom-0 right-0 top-[var(--header-height)] z-50 flex max-h-[calc(100dvh-var(--header-height))] min-w-0 shrink-0 flex-col border-l border-border bg-card md:min-w-[320px]"
+      style={{
+        width: isMobile ? '100%' : width,
+        maxWidth: isMobile ? 'none' : SIDEBAR_MAX_WIDTH,
+      }}
     >
       <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
         <h2 className="m-0 min-w-0 truncate text-base font-semibold text-foreground">
@@ -240,14 +248,14 @@ export default function DatasetSidebar({
         </div>
       </div>
 
-      <div
+      {!isMobile && <div
         role="presentation"
         onMouseDown={onMouseDown}
         className={cn(
           'absolute bottom-0 left-0 top-0 z-[1] w-1.5 cursor-col-resize hover:bg-accent-blue/25',
           isDragging && 'bg-accent-blue/25',
         )}
-      />
+      />}
     </aside>
   );
 }
