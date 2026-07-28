@@ -111,7 +111,7 @@ class Hunyuan15Model(WanModel):
         # --- dual text embeddings -------------------------------------
         encoder_hidden_states_2 = raw_batch.get("text_embedding_2")
         encoder_attention_mask_2 = raw_batch.get("text_attention_mask_2")
-        if encoder_hidden_states_2 is None:
+        if (encoder_hidden_states_2 is None or encoder_attention_mask_2 is None):
             # Legacy parquet without the ByT5 field: zero-token
             # embedding, matching the inference empty-ByT5 convention.
             encoder_hidden_states_2 = torch.zeros(
