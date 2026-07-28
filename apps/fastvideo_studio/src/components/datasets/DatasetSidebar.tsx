@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { X } from 'lucide-react';
+import { ImageOff, X } from 'lucide-react';
 
 import DownloadCaptions from '@/components/datasets/DownloadCaptions';
 import { Textarea } from '@/components/ui/textarea';
@@ -37,25 +37,46 @@ const DatasetFileCard = React.memo(function DatasetFileCard({
   onCaptionChange: (fileName: string, value: string) => void;
   onThumbLoaded: (fileName: string) => void;
 }) {
+  const [mediaFailed, setMediaFailed] = React.useState(false);
+
+  React.useEffect(() => {
+    setMediaFailed(false);
+  }, [mediaUrl]);
+
   return (
     <div className="relative flex flex-col overflow-hidden rounded-lg border border-border bg-background">
-      {!thumbLoaded && (
+      {!thumbLoaded && !mediaFailed && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-accent-blue" />
         </div>
       )}
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <video
-        src={mediaUrl}
-        className="aspect-video w-full bg-border object-cover"
-        muted
-        autoPlay
-        loop
-        playsInline
-        onLoadedData={() => onThumbLoaded(fileName)}
-        onError={() => onThumbLoaded(fileName)}
-      />
+      {mediaFailed ? (
+        <div
+          role="status"
+          className="flex aspect-video w-full flex-col items-center justify-center gap-1 bg-muted px-2 text-center text-muted-foreground"
+        >
+          <ImageOff className="size-5" aria-hidden />
+          <span className="text-xs">Preview unavailable</span>
+        </div>
+      ) : (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <video
+          src={mediaUrl}
+          aria-label={`Preview of ${fileName}`}
+          className="aspect-video w-full bg-border object-cover"
+          muted
+          autoPlay
+          loop
+          playsInline
+          onLoadedData={() => onThumbLoaded(fileName)}
+          onError={() => {
+            setMediaFailed(true);
+            onThumbLoaded(fileName);
+          }}
+        />
+      )}
       <Textarea
+        aria-label={`Caption for ${fileName}`}
         value={caption}
         onChange={(e) => onCaptionChange(fileName, e.target.value)}
         placeholder="Caption"

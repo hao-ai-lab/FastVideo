@@ -63,6 +63,16 @@ describe('DatasetSidebar', () => {
     expect(mockedApi.getDatasetMediaUrl).toHaveBeenCalledWith('ds-1', 'b.mp4');
   });
 
+  it('shows a fallback when a dataset preview cannot load', async () => {
+    render(<DatasetSidebar dataset={dataset} onClose={() => {}} />);
+
+    const preview = await screen.findByLabelText('Preview of a.mp4');
+    fireEvent.error(preview);
+
+    expect(screen.getByText('Preview unavailable')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Preview of a.mp4')).not.toBeInTheDocument();
+  });
+
   it('debounces caption save by 500ms', async () => {
     render(<DatasetSidebar dataset={dataset} onClose={() => {}} />);
     const textarea = await screen.findByDisplayValue('cap a');
