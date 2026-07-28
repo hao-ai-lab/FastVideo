@@ -44,4 +44,37 @@ test.describe('app shell', () => {
       ).toBeVisible();
     }
   });
+
+  test('keeps navigation and content usable at 320px', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 });
+    await page.goto('/inference');
+
+    const main = page.getByRole('main');
+    await expect(main).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Open navigation' }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: /Create Job/i })).toBeVisible();
+
+    const initialBox = await main.boundingBox();
+    expect(initialBox?.x).toBe(0);
+    expect(initialBox?.width).toBe(320);
+
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    const navigation = page.getByRole('navigation', {
+      name: 'Primary navigation',
+    });
+    await expect(navigation).toBeVisible();
+    await navigation.getByRole('link', { name: 'Datasets' }).click();
+
+    await expect(page).toHaveURL(/\/datasets$/);
+    await expect(
+      page.getByRole('button', { name: 'Open navigation' }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+  });
 });
