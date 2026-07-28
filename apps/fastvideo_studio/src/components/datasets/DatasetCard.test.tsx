@@ -25,6 +25,16 @@ beforeEach(() => {
 });
 
 describe('DatasetCard', () => {
+  it('keeps selection and delete buttons as semantic siblings', () => {
+    render(<DatasetCard dataset={dataset} onUpdated={() => {}} />);
+
+    const selectButton = screen.getByRole('button', { pressed: false });
+    const deleteButton = screen.getByRole('button', { name: 'Delete' });
+
+    expect(selectButton).toHaveTextContent('My Dataset');
+    expect(selectButton).not.toContainElement(deleteButton);
+  });
+
   it('renders the name, file count and human-readable size', () => {
     render(<DatasetCard dataset={dataset} onUpdated={() => {}} />);
     expect(screen.getByText('My Dataset')).toBeInTheDocument();
