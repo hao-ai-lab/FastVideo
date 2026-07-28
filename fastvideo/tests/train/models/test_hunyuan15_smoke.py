@@ -103,7 +103,13 @@ def test_t2v_image_placeholder_is_all_zero():
     assert torch.all(image[0] == 0), "all-zero content selects the T2V branch"
 
 
-def test_hidden_states_reach_the_transformer_unpermuted():
-    """predict_noise owns the (B,T,C,H,W) -> (B,C,T,H,W) permute."""
-    kwargs = _build_kwargs()
-    assert kwargs["hidden_states"].shape == (1, 32, 4, 8, 8)
+def test_hidden_states_are_packed_to_65_channels():
+    """32 latent + 1 conditioning mask + 32 conditioning latent.
+
+    predict_noise owns the (B,T,C,H,W) -> (B,C,T,H,W) permute; this
+    helper only packs the conditioning channels HY1.5's img_in expects.
+    """
+    hidden_states = _build_kwargs()["hidden_states"]
+    assert hidden_states.shape == (1, 65, 4, 8, 8)
+    # T2V leaves both conditioning blocks zero.
+    assert torch.all(hidden_states[:, 32:] == 0)

@@ -226,8 +226,20 @@ class Hunyuan15Model(WanModel):
                              "HunyuanVideo 1.5 forward pass")
 
         batch_size = noise_input.shape[0]
-        # (729, 1152) mirrors the inference-side SigLIP placeholder;
-        # in the T2V branch only the all-zero check reads it.
+        # HY1.5's img_in takes 65 channels: the 32 latent channels plus a
+        # 1-channel conditioning mask and a 32-channel conditioning latent.
+        # T2V leaves both conditioning blocks zero, mirroring
+        # Hy15ImageEncodingStage + DenoisingStage on the inference path.
+        cond_mask = torch.zeros(
+            batch_size,
+            1,
+            *noise_input.shape[2:],
+            device=noise_input.device,
+            dtype=noise_input.dtype,
+        )
+        cond_latent = torch.zeros_like(noise_input)
+        hidden_states = torch.cat([noise_input, cond_mask, cond_latent], dim=1)
+
         zero_image_embeds = torch.zeros(
             batch_size,
             729,
@@ -236,7 +248,7 @@ class Hunyuan15Model(WanModel):
             dtype=noise_input.dtype,
         )
         return {
-            "hidden_states": noise_input,
+            "hidden_states": hidden_states,
             "encoder_hidden_states": [
                 text_dict["encoder_hidden_states"],
                 text_dict["encoder_hidden_states_2"],
