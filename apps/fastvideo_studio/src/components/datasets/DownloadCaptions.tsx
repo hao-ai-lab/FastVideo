@@ -1,12 +1,13 @@
 'use client';
 
 import { ChevronDown } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 import { Button } from '@/components/ui/button';
 import { downloadBlob } from '@/lib/utils';
 
 const MENU_ITEM =
-  'block min-h-11 w-full cursor-pointer px-4 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
+  'block min-h-11 w-full cursor-pointer select-none px-4 py-2 text-left text-sm font-medium text-foreground outline-none transition-colors data-[highlighted]:bg-muted';
 
 export default function DownloadCaptions({
   fileNames,
@@ -62,52 +63,40 @@ export default function DownloadCaptions({
     downloadBlob(new Blob([csv], { type: 'text/csv' }), 'captions.csv');
   }
 
+  // Same click/keyboard-accessible menu idiom as CreateJobButton — hover-only
+  // menus exclude touch and keyboard users.
   return (
-    <div className="group relative inline-block">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={disabled}
-        aria-haspopup="menu"
-        className="gap-1.5"
-      >
-        Download Captions
-        <ChevronDown className="h-3.5 w-3.5 opacity-85" />
-      </Button>
-      {!disabled && (
-        <div
-          role="menu"
-          className="invisible absolute right-0 top-full z-[200] min-w-full -translate-y-1 pt-1 opacity-0 transition-all group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100"
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          className="gap-1.5"
         >
-          <div className="overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-lg">
-            <button
-              type="button"
-              role="menuitem"
-              className={MENU_ITEM}
-              onClick={handleDownloadJson}
-            >
-              JSON
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className={MENU_ITEM}
-              onClick={handleDownloadTxt}
-            >
-              TXT
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className={MENU_ITEM}
-              onClick={handleDownloadCsv}
-            >
-              CSV
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+          Download Captions
+          <ChevronDown className="h-3.5 w-3.5 opacity-85" aria-hidden />
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={4}
+          collisionPadding={8}
+          className="z-[200] min-w-40 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg"
+        >
+          <DropdownMenu.Item className={MENU_ITEM} onSelect={handleDownloadJson}>
+            JSON
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className={MENU_ITEM} onSelect={handleDownloadTxt}>
+            TXT
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className={MENU_ITEM} onSelect={handleDownloadCsv}>
+            CSV
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
