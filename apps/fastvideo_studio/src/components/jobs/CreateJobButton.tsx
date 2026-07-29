@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { ChevronDown } from 'lucide-react';
-import { DropdownMenu } from 'radix-ui';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 import CreateJobModal from '@/components/jobs/CreateJobModal';
 import { Button } from '@/components/ui/button';
